@@ -1,0 +1,25 @@
+[project]
+name = "ainvfx-paintaplate"
+version = "0.1.1"
+description = "Paint on a moving plate to erase, add or relight, with near real-time previews and an export that keeps the plate's own format, layers and untouched pixels."
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+classifiers = [
+    "Operating System :: OS Independent",
+    "Environment :: GPU :: NVIDIA CUDA",
+]
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[project.urls]
+Repository = "https://github.com/AInVFX/ainvfx-paintaplate"
+Documentation = "https://github.com/AInVFX/ainvfx-paintaplate#readme"
+"Bug Tracker" = "https://github.com/AInVFX/ainvfx-paintaplate/issues"
+
+[tool.comfy]
+PublisherId = "ainvfx"
+DisplayName = "AInVFX PaintAPlate"
+Icon = "https://raw.githubusercontent.com/AInVFX/ainvfx-paintaplate/main/web/logo.png"
+requires-comfyui = ">=0.42.5"

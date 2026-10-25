@@ -1,0 +1,148 @@
+{
+ "prompt": {
+  "1": {
+   "class_type": "PaintAPlate_LoadPlate",
+   "inputs": {
+    "path": "",
+    "max_frames": 121,
+    "pad_8n1": true
+   }
+  },
+  "2": {
+   "class_type": "ImageColorSpace",
+   "inputs": {
+    "image": [
+     "1",
+     0
+    ],
+    "source": "sRGB",
+    "destination": "sRGB"
+   }
+  },
+  "3": {
+   "class_type": "ImageScale",
+   "inputs": {
+    "image": [
+     "2",
+     0
+    ],
+    "upscale_method": "area",
+    "width": 960,
+    "height": 544,
+    "crop": "disabled"
+   }
+  },
+  "4": {
+   "class_type": "CheckpointLoaderSimple",
+   "inputs": {
+    "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+   }
+  },
+  "5": {
+   "class_type": "LoadImageMask",
+   "inputs": {
+    "image": "",
+    "channel": "red"
+   }
+  },
+  "6": {
+   "class_type": "SAM3_VideoTrack",
+   "inputs": {
+    "images": [
+     "3",
+     0
+    ],
+    "model": [
+     "4",
+     0
+    ],
+    "initial_mask": [
+     "5",
+     0
+    ],
+    "detection_threshold": 0.5,
+    "max_objects": 4,
+    "detect_interval": 1
+   }
+  },
+  "7": {
+   "class_type": "SAM3_TrackToMask",
+   "inputs": {
+    "track_data": [
+     "6",
+     0
+    ],
+    "object_indices": ""
+   }
+  },
+  "8": {
+   "class_type": "MaskToImage",
+   "inputs": {
+    "mask": [
+     "7",
+     0
+    ]
+   }
+  },
+  "9": {
+   "class_type": "SaveImage",
+   "inputs": {
+    "images": [
+     "8",
+     0
+    ],
+    "filename_prefix": "paintaplate/plate/matte/m"
+   }
+  }
+ },
+ "slots": {
+  "path": [
+   [
+    "1",
+    "path"
+   ]
+  ],
+  "max_frames": [
+   [
+    "1",
+    "max_frames"
+   ]
+  ],
+  "color_space": [
+   [
+    "2",
+    "source"
+   ]
+  ],
+  "width": [
+   [
+    "3",
+    "width"
+   ]
+  ],
+  "height": [
+   [
+    "3",
+    "height"
+   ]
+  ],
+  "sam": [
+   [
+    "4",
+    "ckpt_name"
+   ]
+  ],
+  "mask": [
+   [
+    "5",
+    "image"
+   ]
+  ],
+  "prefix": [
+   [
+    "9",
+    "filename_prefix"
+   ]
+  ]
+ }
+}

@@ -1,0 +1,67 @@
+:root {
+  --surround: #1d1d1d; --panel: #252525; --line: #333; --text: #e8e8e8; --muted: #8b8b8b;
+  --gold: #f5b800; --gold-dark: #c49300;
+  font: 14px/1.45 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--text); background: var(--surround); color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; height: 100vh; display: grid; overflow: hidden;
+  grid-template: "head head head" 48px "tools stage side" 1fr "tools foot side" auto / 56px 1fr 260px;
+}
+button {
+  font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 12px; cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:disabled { opacity: .4; cursor: default; }
+button.primary { background: var(--gold); color: #111; border-color: var(--gold); font-weight: 600; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 0 0 8px; }
+
+header { grid-area: head; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+.logo { height: 16px; }
+.name { font: 600 15px Montserrat, Inter, system-ui, sans-serif; }
+.spec { flex: 1; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.tools { grid-area: tools; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0; border-right: 1px solid var(--line); }
+.tools button { width: 40px; height: 40px; padding: 8px; }
+.tools button.on { border-color: var(--gold); color: var(--gold); }
+.tools svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+#size { writing-mode: vertical-lr; direction: rtl; height: 120px; margin: 8px 0; accent-color: var(--gold); }
+#color { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 6px; background: none; padding: 2px; }
+
+.stage { grid-area: stage; position: relative; display: grid; place-items: center; min-height: 0; padding: 16px; }
+#view, #player { grid-area: 1 / 1; background: #111; touch-action: none; }
+#view { cursor: crosshair; }
+.empty { grid-area: 1 / 1; text-align: center; max-width: 380px; color: var(--muted); }
+.views { position: absolute; top: 12px; right: 12px; display: flex; }
+.views button { border-radius: 0; }
+.views button:first-child { border-radius: 6px 0 0 6px; }
+.views button:last-child { border-radius: 0 6px 6px 0; }
+.views button.on { color: var(--gold); border-color: var(--gold); }
+
+.side { grid-area: side; border-left: 1px solid var(--line); padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; }
+.option { position: relative; display: block; width: 100%; padding: 0; margin-bottom: 10px; aspect-ratio: 16 / 9; overflow: hidden; background: #111; }
+.option img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.option img:not([src]) { visibility: hidden; }
+.option span { position: absolute; left: 6px; top: 4px; font-weight: 600; text-shadow: 0 0 4px #000; }
+.option.ready { border-color: var(--muted); }
+.option.picked { border: 2px solid var(--gold); }
+#reroll { width: 100%; }
+#stack { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+#stack li { display: grid; grid-template-columns: 64px 1fr auto; gap: 8px; align-items: center; }
+#stack img { width: 64px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; }
+#stack small { color: var(--muted); display: block; }
+#stack button { padding: 2px 8px; }
+
+footer { grid-area: foot; padding: 0 16px 12px; }
+#prompt { width: 100%; font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+#status { margin: 8px 0 0; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.45em; }
+
+dialog { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; width: min(460px, 92vw); }
+dialog::backdrop { background: #0009; }
+dialog label { display: block; margin: 12px 0; color: var(--muted); }
+dialog input, dialog select { display: block; width: 100%; margin-top: 6px; font: inherit; color: var(--text); background: var(--surround); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; margin: 16px 0 0; }
+@media (max-width: 760px) { body { grid-template: "head" 48px "tools" auto "stage" 1fr "side" auto "foot" auto / 1fr; } .tools { flex-direction: row; justify-content: center; border: 0; } #size { writing-mode: horizontal-tb; direction: ltr; height: auto; width: 120px; } }
