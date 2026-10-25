@@ -36,7 +36,10 @@ SAM=$(python -c "from huggingface_hub import list_repo_files as l; print(next(f 
 
 log "ComfyUI $COMFY_REF"
 [ -d "$W/ComfyUI" ] || git clone -q https://github.com/comfyanonymous/ComfyUI "$W/ComfyUI"
-cd "$W/ComfyUI" && git fetch -q origin && git checkout -q "$COMFY_REF" && git pull -q --ff-only 2>/dev/null || true
+cd "$W/ComfyUI"
+git fetch -q origin || log "git fetch failed: using the local copy"
+git checkout -q "$COMFY_REF"
+git pull -q --ff-only 2>/dev/null || true  # moves a branch forward; a pinned commit stays as it is
 echo "ComfyUI $(git rev-parse --short HEAD) $(git log -1 --format=%cd)" > "$W/pins.txt"
 uv pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cu130
 uv pip install -q -r requirements.txt
@@ -47,9 +50,14 @@ mkdir -p "$M/diffusion_models" "$M/text_encoders" "$M/vae" "$M/loras" "$M/checkp
 log "ComfyUI-LTXVideo $LTX_REF"
 cd custom_nodes
 [ -d ComfyUI-LTXVideo ] || git clone -q https://github.com/Lightricks/ComfyUI-LTXVideo
-(cd ComfyUI-LTXVideo && git fetch -q origin && git checkout -q "$LTX_REF" && git pull -q --ff-only 2>/dev/null || true
- echo "ComfyUI-LTXVideo $(git rev-parse --short HEAD) $(git log -1 --format=%cd)" >> "$W/pins.txt"
- uv pip install -q -r requirements.txt)
+(
+  cd ComfyUI-LTXVideo
+  git fetch -q origin || log "git fetch failed: using the local copy"
+  git checkout -q "$LTX_REF"
+  git pull -q --ff-only 2>/dev/null || true
+  echo "ComfyUI-LTXVideo $(git rev-parse --short HEAD) $(git log -1 --format=%cd)" >> "$W/pins.txt"
+  uv pip install -q -r requirements.txt
+)
 
 log "PaintAPlate"
 rm -rf ainvfx-paintaplate && cp -r "$W/pack/ainvfx-paintaplate" . && uv pip install -q -r ainvfx-paintaplate/requirements.txt
