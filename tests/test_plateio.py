@@ -1,5 +1,5 @@
 """Round-trip tests for the plate I/O helpers (numpy, PyAV, OpenEXR; no GPU, no ComfyUI)."""
-import os, sys, tempfile
+import os, sys, unittest, tempfile
 from fractions import Fraction
 import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -18,35 +18,6 @@ def make_exr_sequence(folder, n=3, h=36, w=64):
               "A": np.ones((h, w), np.float16), "depth.Z": rng.random((h, w)).astype(np.float32),
               "diffuse.R": rgb[..., 0].copy(), "diffuse.G": rgb[..., 1].copy(), "diffuse.B": rgb[..., 2].copy()}
         OpenEXR.File(header, ch).write(os.path.join(folder, f"shot_v001.{1001 + i:04d}.exr"))
-
-
-def test_exr_layers_survive():
-    with tempfile.TemporaryDirectory() as d:
-        src = os.path.join(d, "plate"); os.makedirs(src); make_exr_sequence(src)
-        spec = plateio.probe_plate(src)
-        assert spec["kind"] == "sequence" and spec["frames"] == 3 and spec["first_frame"] == 1001
-        assert spec["exr"]["extra_channels"] == ["depth.Z", "diffuse.B", "diffuse.G", "diffuse.R"] or \
-            set(spec["exr"]["extra_channels"]) == {"depth.Z", "diffuse.R", "diffuse.G", "diffuse.B"}
-        assert plateio.guess_color_space(spec) == "linear ACEScg"
-        out = os.path.join(d, "out"); os.makedirs(out)
-        new_rgb = np.full((36, 64, 3), 0.25, np.float32)
-        path = plateio.output_frame_name(spec, 1, out)
-        assert os.path.basename(path) == "shot_v001.1002.exr"
-        plateio.write_exr_like(spec["files"][1], new_rgb, None, path)
-        with OpenEXR.File(spec["files"][1], separate_channels=True) as a, OpenEXR.File(path, separate_channels=True) as b:
-            ca, cb = a.channels(), b.channels()
-            assert set(ca) == set(cb)
-            for name in ca:
-                if name in ("R", "G", "B"):
-                    assert cb[name].pixels.dtype == ca[name].pixels.dtype == np.float16
-                    assert np.allclose(cb[name].pixels, 0.25)
-                else:
-                    assert np.array_equal(ca[name].pixels, cb[name].pixels), name  # bit-identical
-            ha, hb = a.header(), b.header()
-            assert hb["owner"] == "test plate"
-            assert str(hb["compression"]) == str(ha["compression"])
-            assert np.allclose(np.array(hb["chromaticities"], float), np.array(ha["chromaticities"], float))
-    print("exr layers: ok")
 
 
 def make_prores(path, n=9, w=160, h=96):
@@ -80,57 +51,85 @@ def decode_float(path):
     return frames
 
 
-def test_video_spec_round_trip():
-    with tempfile.TemporaryDirectory() as d:
-        src = os.path.join(d, "plate.mov"); make_prores(src)
-        spec = plateio.probe_plate(src)
-        assert spec["kind"] == "video" and spec["codec"] == "prores" and spec["pix_fmt"] == "yuv422p10le", spec
-        assert spec["timecode"] == "01:00:00:00" and spec["audio_streams"] == 1 and abs(spec["fps"] - 23.976) < 0.01
-        frames = decode_float(src)
-        assert frames[0].shape == (96, 160, 3)
-        out = os.path.join(d, "out.mov")
-        w = plateio.VideoWriter(spec, out, audio_source=src)
-        for f in frames:
-            w.write(f)
-        w.close()
-        spec2 = plateio.probe_plate(out)
-        for k in ("codec", "pix_fmt", "width", "height", "fps_num", "fps_den", "color_primaries", "color_trc", "colorspace", "timecode", "audio_streams"):
-            assert spec2[k] == spec[k], (k, spec2[k], spec[k])
-        again = decode_float(out)
-        err = max(float(np.abs(a - b).mean()) for a, b in zip(frames, again))
-        assert err < 1.0 / 255.0, err  # untouched pixels survive one ProRes generation
-        print(f"video round trip: ok (mean abs error {err * 255:.3f} / 255, notes={w.notes})")
+class PlateIO(unittest.TestCase):
+    """Reading and writing plates: formats, layers, headers, frame names, padding."""
 
+    def test_exr_layers_survive(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "plate"); os.makedirs(src); make_exr_sequence(src)
+            spec = plateio.probe_plate(src)
+            assert spec["kind"] == "sequence" and spec["frames"] == 3 and spec["first_frame"] == 1001
+            assert spec["exr"]["extra_channels"] == ["depth.Z", "diffuse.B", "diffuse.G", "diffuse.R"] or \
+                set(spec["exr"]["extra_channels"]) == {"depth.Z", "diffuse.R", "diffuse.G", "diffuse.B"}
+            assert plateio.guess_color_space(spec) == "linear ACEScg"
+            out = os.path.join(d, "out"); os.makedirs(out)
+            new_rgb = np.full((36, 64, 3), 0.25, np.float32)
+            path = plateio.output_frame_name(spec, 1, out)
+            assert os.path.basename(path) == "shot_v001.1002.exr"
+            plateio.write_exr_like(spec["files"][1], new_rgb, None, path)
+            with OpenEXR.File(spec["files"][1], separate_channels=True) as a, OpenEXR.File(path, separate_channels=True) as b:
+                ca, cb = a.channels(), b.channels()
+                assert set(ca) == set(cb)
+                for name in ca:
+                    if name in ("R", "G", "B"):
+                        assert cb[name].pixels.dtype == ca[name].pixels.dtype == np.float16
+                        assert np.allclose(cb[name].pixels, 0.25)
+                    else:
+                        assert np.array_equal(ca[name].pixels, cb[name].pixels), name  # bit-identical
+                ha, hb = a.header(), b.header()
+                assert hb["owner"] == "test plate"
+                assert str(hb["compression"]) == str(ha["compression"])
+                assert np.allclose(np.array(hb["chromaticities"], float), np.array(ha["chromaticities"], float))
+        print("exr layers: ok")
 
-def test_stills():
-    rgb = np.random.default_rng(1).random((20, 30, 3)).astype(np.float32)
-    for ext, fmt in ((".png", "rgb48be"), (".tif", "rgb48le"), (".dpx", "gbrp10le"), (".exr", "gbrpf16le")):
-        codec, pix, opts = plateio.still_target({"ext": ext, "pix_fmt": fmt}, False)
-        data = plateio.encode_still(rgb, None, codec, pix, opts)
-        assert len(data) > 100, ext
-        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as t:
-            t.write(data); p = t.name
-        back = decode_float(p)[0]
-        tol = {".png": 5e-4, ".tif": 5e-4, ".dpx": 2e-3, ".exr": 2e-3}[ext]  # swscale float path
-        assert np.abs(back - rgb).max() < tol, (ext, np.abs(back - rgb).max())
-        os.unlink(p)
-    print("stills png/tiff/dpx/exr: ok")
+    def test_video_spec_round_trip(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "plate.mov"); make_prores(src)
+            spec = plateio.probe_plate(src)
+            assert spec["kind"] == "video" and spec["codec"] == "prores" and spec["pix_fmt"] == "yuv422p10le", spec
+            assert spec["timecode"] == "01:00:00:00" and spec["audio_streams"] == 1 and abs(spec["fps"] - 23.976) < 0.01
+            frames = decode_float(src)
+            assert frames[0].shape == (96, 160, 3)
+            out = os.path.join(d, "out.mov")
+            w = plateio.VideoWriter(spec, out, audio_source=src)
+            for f in frames:
+                w.write(f)
+            w.close()
+            spec2 = plateio.probe_plate(out)
+            for k in ("codec", "pix_fmt", "width", "height", "fps_num", "fps_den", "color_primaries", "color_trc", "colorspace", "timecode", "audio_streams"):
+                assert spec2[k] == spec[k], (k, spec2[k], spec[k])
+            again = decode_float(out)
+            err = max(float(np.abs(a - b).mean()) for a, b in zip(frames, again))
+            assert err < 1.0 / 255.0, err  # untouched pixels survive one ProRes generation
+            print(f"video round trip: ok (mean abs error {err * 255:.3f} / 255, notes={w.notes})")
 
+    def test_stills(self):
+        rgb = np.random.default_rng(1).random((20, 30, 3)).astype(np.float32)
+        for ext, fmt in ((".png", "rgb48be"), (".tif", "rgb48le"), (".dpx", "gbrp10le"), (".exr", "gbrpf16le")):
+            codec, pix, opts = plateio.still_target({"ext": ext, "pix_fmt": fmt}, False)
+            data = plateio.encode_still(rgb, None, codec, pix, opts)
+            assert len(data) > 100, ext
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as t:
+                t.write(data); p = t.name
+            back = decode_float(p)[0]
+            tol = {".png": 5e-4, ".tif": 5e-4, ".dpx": 2e-3, ".exr": 2e-3}[ext]  # swscale float path
+            assert np.abs(back - rgb).max() < tol, (ext, np.abs(back - rgb).max())
+            os.unlink(p)
+        print("stills png/tiff/dpx/exr: ok")
 
-def test_core_save_names():
-    with tempfile.TemporaryDirectory() as d:
-        for i in (1, 2, 10):
-            open(os.path.join(d, f"f_{i:05d}_.png"), "wb").close()
-        open(os.path.join(d, "notes.txt"), "w").close()
-        seq = [os.path.basename(p) for p in plateio.find_sequence(d)]
-        assert seq == ["f_00001_.png", "f_00002_.png", "f_00010_.png"], seq
-    print("core Save Image names group into one sequence: ok")
+    def test_core_save_names(self):
+        with tempfile.TemporaryDirectory() as d:
+            for i in (1, 2, 10):
+                open(os.path.join(d, f"f_{i:05d}_.png"), "wb").close()
+            open(os.path.join(d, "notes.txt"), "w").close()
+            seq = [os.path.basename(p) for p in plateio.find_sequence(d)]
+            assert seq == ["f_00001_.png", "f_00002_.png", "f_00010_.png"], seq
+        print("core Save Image names group into one sequence: ok")
 
-
-def test_pad():
-    assert [plateio.pad_count_8n1(n) for n in (1, 2, 9, 10, 97, 100, 121)] == [1, 9, 9, 17, 97, 105, 121]
-    print("8n+1 padding: ok")
+    def test_pad(self):
+        assert [plateio.pad_count_8n1(n) for n in (1, 2, 9, 10, 97, 100, 121)] == [1, 9, 9, 17, 97, 105, 121]
+        print("8n+1 padding: ok")
 
 
 if __name__ == "__main__":
-    test_core_save_names(); test_pad(); test_stills(); test_exr_layers_survive(); test_video_spec_round_trip()
+    unittest.main(verbosity=2)

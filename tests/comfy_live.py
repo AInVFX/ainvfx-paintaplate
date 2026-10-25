@@ -202,10 +202,11 @@ def main():
                      "seed": 1, "steps": 8, "denoise": 1.0, "grow": 16, "feather": 6, "sigma": 3},
             "shot": {"path": plates["exr"][0], "color_space": "linear", "max_frames": N, "hero": "paintaplate/test/base.png", "width": 96, "height": 64,
                      "seed": 1, "prefix": "paintaplate_test/shot/f", "video_prefix": "paintaplate_test/shotpreview"},
+            "snap": {"image": "paintaplate/test/base.png", "points": '[{"x": 40, "y": 30}]'},
             "matte": {"path": plates["exr"][0], "color_space": "linear", "max_frames": N, "mask": "paintaplate/test/mask.png", "width": 96, "height": 64,
                       "prefix": "paintaplate_test/matte/m"},
         }
-        for name in ("edit", "shot", "matte"):  # model workflows: validate, then cancel
+        for name in ("edit", "snap", "shot", "matte"):  # model workflows: validate, then cancel
             res = submit(url, fill(name, values[name])["prompt"])
             ok = "prompt_id" in res
             check(ok, f"{name}: accepted" + ("" if ok else f" -> {json.dumps(res.get('node_errors') or res.get('error'))[:600]}"))

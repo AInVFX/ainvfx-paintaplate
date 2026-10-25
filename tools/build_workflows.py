@@ -10,7 +10,7 @@ graph also opens as a normal workflow in ComfyUI.
 import json
 import os
 
-OUT = os.path.join(os.path.dirname(__file__), "..", "web", "workflows")
+OUT = os.environ.get("PAINTAPLATE_WORKFLOWS_OUT") or os.path.join(os.path.dirname(__file__), "..", "web", "workflows")
 
 KLEIN = "flux3-image-klein-int8-convrot.safetensors"
 LTX = "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
@@ -157,6 +157,16 @@ def matte():
     g.save("matte")
 
 
+def snap():
+    """SAM 3.1 grows an erase stroke to the whole object under one point, on the first frame."""
+    g = Graph()
+    sam = g("CheckpointLoaderSimple", ckpt_name=Slot("sam", "sam3.1_multiplex_fp16.safetensors"))
+    found = g("SAM3_Detect", model=sam, image=g("LoadImage", image=Slot("image", "")), positive_coords=Slot("points", "[]"),
+              threshold=0.5, refine_iterations=2, individual_masks=False)
+    g("PreviewImage", images=g("MaskToImage", mask=found))
+    g.save("snap")
+
+
 def export():
     """Full quality: the shot fitted onto the plate, relight optional, saved in the plate's format."""
     g = Graph()
@@ -167,9 +177,6 @@ def export():
     union = g("MaskComposite", destination=g("ImageToMask", image=erase, channel="red"),
               source=g("ImageToMask", image=add, channel="red"), x=0, y=0, operation="add")
     gen_plate = g("ImageColorSpace", image=gen, source="sRGB", destination=Slot("color_space", "sRGB"))
-    fit = g("PaintAPlate_FitToPlate", plate=load, image=gen_plate, mask=union, align=True, max_shift=8.0,
-            match_color=True, grain=Slot("grain", 1.0), grow=Slot("grow", 8), feather=Slot("feather", 12))
-    g.slots["fit_mask"] = [[fit.nid, "mask"]]  # the page drops this link when there is no matte
     # Relight: light from the regenerated shot, detail from the plate, all in linear light.
     size = g("GetImageSize", image=gen)
     source = g("ImageScale", image=g("ImageColorSpace", image=load, source=Slot("color_space", "sRGB"),
@@ -182,6 +189,10 @@ def export():
               radius=Slot("radius", 16), strength=Slot("strength", 1.0), align=True)
     back = g("ImageColorSpace", image=relit, source="linear", destination=Slot("color_space", "sRGB"))
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=load, on_true=back)
+    # the new pixels are matched to the plate they are composited onto: relit when the light changed
+    fit = g("PaintAPlate_FitToPlate", plate=base, image=gen_plate, mask=union, align=True, max_shift=8.0,
+            match_color=True, grain=Slot("grain", 1.0), grow=Slot("grow", 8), feather=Slot("feather", 12))
+    g.slots["fit_mask"] = [[fit.nid, "mask"]]  # the page drops this link when there is no matte
     final = g("ImageCompositeMasked", destination=base, source=fit[0], x=0, y=0, resize_source=False, mask=fit[1])
     g("PaintAPlate_SavePlate", images=final, plate=load[2], filename_prefix=Slot("prefix", "paintaplate/plate/export"),
       keep_untouched=Slot("keep_untouched", True), changed=fit[1])
@@ -189,6 +200,6 @@ def export():
 
 
 if __name__ == "__main__":
-    for build in (ingest, edit, shot, matte, export):
+    for build in (ingest, edit, snap, shot, matte, export):
         build()
     print("wrote", sorted(os.listdir(OUT)))

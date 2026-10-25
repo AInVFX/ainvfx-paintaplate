@@ -141,12 +141,13 @@ def edit(plate, cs, tool, box, words=""):
         names_w, _ = inputs(hero, tool, box, work, f"{tool}_work")
         start = os.path.join(COMFY, "input", "bench", f"{tool}_{q}_start.png")
         Image.open(pick).resize(tuple(work), Image.LANCZOS).save(start)
-        outs, _, dt = run(fill("edit", {**base, "seed": 1, "steps": 16, "denoise": 0.35, "base": names_w["base"],
+        steps = int(os.environ.get("REFINE_STEPS", "16"))
+        outs, _, dt = run(fill("edit", {**base, "seed": 1, "steps": steps, "denoise": 0.35, "base": names_w["base"],
                                         "reference": names_w["reference"],
                                         "start": f"bench/{tool}_{q}_start.png", "mask": names_w["mask"],
-                                        "grow": work[0] // 48, "feather": 12, "sigma": 6}), f"refine {tool} {q}")
+                                        "grow": work[0] // 48, "feather": 12, "sigma": 6}), f"refine {tool} {q} {steps} steps")
         if outs:
-            Image.open(path_of(outs[0])).save(f"{BENCH}/{tool}_{q}_refined.png")
+            Image.open(path_of(outs[0])).save(f"{BENCH}/{tool}_{q}_refined_{steps}.png")
 
 
 def shot(plate, cs, hero, width, height, mode="replace"):
@@ -159,6 +160,63 @@ def shot(plate, cs, hero, width, height, mode="replace"):
                                     "video_prefix": f"bench/shot_{mode}_{width}"}, prepend if mode == "prepend" else None),
                       f"shot {mode} {width}x{height}")
     return outs
+
+
+def anime(w=1280, h=704, frames=121):
+    """A test plate made with our own models: a FLUX 3 Image Klein frame, animated by LTX 2.5."""
+    sys.path.insert(0, os.path.join(HERE, "..", "tools"))
+    from build_workflows import GEMMA, KLEIN, LTX, NEGATIVE, Graph
+    w, h, frames = int(w), int(h), int(frames)
+    g = Graph()
+    clip = g("CLIPLoader", clip_name="qwen3vl_4b_int8_convrot.safetensors", type="flux3", device="default")
+    vae = g("VAELoader", vae_name="flux2-vae.safetensors")
+    pos = g("CLIPTextEncode", clip=clip, text=(
+        "2D anime film still, hand-painted background art in the style of a feature animation: a quiet Japanese shopping "
+        "street at dusk, wooden shopfronts with cloth banners, a red vending machine on the left, a bicycle leaning on a "
+        "lamp post, overhead power cables, warm orange sky, soft long shadows, clean cel shading, no people, no text"))
+    first = g("VAEDecode", vae=vae, samples=g("KSampler", model=g("UNETLoader", unet_name=KLEIN, weight_dtype="default"),
+              seed=11, steps=16, cfg=1.0, sampler_name="euler", scheduler="simple", positive=pos,
+              negative=g("ConditioningZeroOut", conditioning=pos), denoise=1.0,
+              latent_image=g("EmptyFlux2LatentImage", width=w, height=h, batch_size=1)))
+    g("SaveImage", images=first, filename_prefix="bench/anime_first")
+    model = g("UNETLoader", unet_name=LTX, weight_dtype="default")
+    lclip = g("CLIPLoader", clip_name=GEMMA, type="ltxv", device="default")
+    lvae = g("VAELoader", vae_name="ltx-2.5-video-vae-conv-bf16.safetensors")
+    cond = g("LTXVConditioning", frame_rate=24.0, negative=g("CLIPTextEncode", text=NEGATIVE, clip=lclip),
+             positive=g("CLIPTextEncode", clip=lclip, text=(
+                 "2D anime style. The camera slowly pans right along a quiet shopping street at dusk. Cloth banners sway "
+                 "gently in the wind and the power cables move slightly. Clean cel shading, steady camera, no people.")))
+    latent = g("LTXVImgToVideoInplace", vae=lvae, image=first, strength=1.0, bypass=False,
+               latent=g("EmptyLTXVLatentVideo", width=w, height=h, length=frames, batch_size=1))
+    audio = g("LTXVEmptyLatentAudio", audio_vae=g("VAELoader", vae_name="ltx-2.5-audio-vae-bf16.safetensors"),
+              frames_number=frames, frame_rate=24.0, batch_size=1)
+    sampled = g("SamplerCustomAdvanced", noise=g("RandomNoise", noise_seed=11),
+                guider=g("CFGGuider", model=model, positive=cond[0], negative=cond[1], cfg=1.0),
+                sampler=g("KSamplerSelect", sampler_name="euler_ancestral"),
+                sigmas=g("ManualSigmas", sigmas="1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"),
+                latent_image=g("LTXVConcatAVLatent", video_latent=latent, audio_latent=audio))
+    video = g("LTXVSeparateAVLatent", av_latent=sampled[0])
+    g("SaveImage", images=g("VAEDecode", samples=video[0], vae=lvae), filename_prefix="bench/anime/f")
+    run(g.prompt, "anime plate")
+
+
+def mp4(plate, out_name):
+    """An H.264 copy of an EXR plate (display sRGB), to test the video path."""
+    sys.path.insert(0, os.path.join(HERE, ".."))
+    import plateio
+    import OpenEXR
+    files = plateio.find_sequence(os.path.join(COMFY, "input", plate))
+    first = OpenEXR.File(files[0]).channels()
+    h, w = next(iter(first.values())).pixels.shape[:2]
+    spec = {"codec": "h264", "pix_fmt": "yuv420p", "width": w, "height": h, "fps": 24.0, "fps_num": 24, "fps_den": 1,
+            "colorspace": 1, "color_primaries": 1, "color_trc": 1, "color_range": 1}
+    out = os.path.join(COMFY, "input", "plates", out_name)
+    writer = plateio.VideoWriter(spec, out)
+    for f in files:
+        ch = OpenEXR.File(f).channels(); rgb = ch.get("RGB", ch.get("RGBA")).pixels[..., :3].astype(np.float32)
+        writer.write(np.clip(rgb / (1 + rgb), 0, 1) ** (1 / 2.2))
+    writer.close()
+    print("wrote", out, len(files), "frames", writer.notes)
 
 
 def export(plate, cs, shot, matte_a, matte_b, relight="1"):
@@ -177,3 +235,7 @@ if __name__ == "__main__":
         shot(*args)
     elif step == "export":
         export(*args)
+    elif step == "anime":
+        anime(*args)
+    elif step == "mp4":
+        mp4(*args)

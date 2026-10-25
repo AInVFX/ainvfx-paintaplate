@@ -16,7 +16,9 @@ const PLACEHOLDER = {
   light: "Optional: describe the light. Warm sunset, neon sign, torch",
   restore: "Restore brings back the plate under the brush",
 };
-const S = { plate: null, hero: null, original: null, heroVersion: 0, heroInputs: {}, stack: [], edit: null,
+const Q = new URLSearchParams(location.search);
+const REFINE_STEPS = +Q.get("refine") || 8; // full-size steps after a pick; previews use 8 at preview size
+const S = { plate: null, cursor: null, hero: null, original: null, heroVersion: 0, heroInputs: {}, stack: [], edit: null,
   tool: "paint", size: 48, color: "#f5b800", run: 0, shot: null, shotDirty: false, compare: false };
 
 const view = $("#view"), ctx = view.getContext("2d"), player = $("#player");
@@ -43,7 +45,7 @@ function run(name, values, { kind = name, preview, progress, front = false, edit
   for (const [slot, value] of Object.entries(values))
     for (const [id, input] of wf.slots[slot] ?? []) wf.prompt[id].inputs[input] = value;
   edit?.(wf);
-  const job = { kind, preview, progress, retries: 1 };
+  const job = { kind, preview, progress, retries: 1, key: JSON.stringify(wf.prompt) };
   job.done = new Promise((resolve, reject) => Object.assign(job, { resolve, reject }));
   job.submit = () => post("/prompt", { prompt: wf.prompt, client_id: CLIENT, front }).then((r) => r.json()).then((j) => {
     if (!j.prompt_id) throw new Error(rejection(j));
@@ -74,8 +76,14 @@ async function finish(id, error) {
   live.delete(job);
   if (error) return job.reject(new Error(error));
   const history = await (await fetch(`/history/${id}`)).json();
-  job.resolve(history[id]?.outputs ?? {});
+  let out = history[id]?.outputs ?? {};
+  // A prompt served entirely from ComfyUI's cache reports no outputs: reuse those of the identical prompt before.
+  if (files(out).length || texts(out).length) memo.set(job.key, out);
+  else out = memo.get(job.key) ?? out;
+  if (memo.size > 64) memo.delete(memo.keys().next().value);
+  job.resolve(out);
 }
+const memo = new Map(); // prompt -> outputs
 
 function drop(job) { // interrupt only the prompt that is running; anything queued is simply removed
   if (job.id && job.id === running) post("/interrupt", { prompt_id: job.id });
@@ -108,7 +116,7 @@ function connect() {
       return;
     }
     const { type, data: d } = JSON.parse(data);
-    if (type === "execution_start") running = d.prompt_id;
+    if (type === "execution_start") { running = d.prompt_id; byId.get(d.prompt_id)?.progress?.(0); } // the status moves as soon as a job starts
     else if (type === "progress") byId.get(d.prompt_id)?.progress?.(d.value / d.max);
     else if (type === "execution_success") finish(d.prompt_id);
     else if (type === "execution_error") finish(d.prompt_id, `${d.node_type}: ${d.exception_message}`);
@@ -230,9 +238,17 @@ async function openPlate(list, typed, cs) {
   const kind = spec.kind === "video" ? spec.codec : `${spec.ext.slice(1).toUpperCase()} ${spec.kind}`;
   $("#spec").textContent = `${kind}, ${spec.width} × ${spec.height}, ${Math.round(spec.fps * 1000) / 1000} fps, ${spec.frames} frames, ${cs}`;
   const offered = [...$("#cs").options].some((o) => o.value === spec.color_space_guess);
+  warm();
   status(spec.color_space_guess === cs ? "Paint on the frame"
     : offered ? `The file suggests ${spec.color_space_guess}. Reopen with it if colours look wrong.`
     : `The file suggests ${spec.color_space_guess}, which this ComfyUI does not offer yet: update ComfyUI past v0.42.5.`);
+}
+
+async function warm() { // load the image model while the user looks at the frame, so the first stroke is quick
+  const size = S.plate.prev, base = await heroInput(size);
+  const mask = await upload(await blob(snap(null, size, "#000")), "warm_mask.png");
+  run("edit", { base, reference: base, start: base, mask, caption: "warm up", seed: 0, steps: 1, denoise: 1,
+    grow: 0, feather: 1, sigma: 1 }, { kind: "warm" }).done.catch(() => {});
 }
 
 // ---------- Painting ----------
@@ -251,7 +267,13 @@ view.addEventListener("pointerdown", (e) => {
   S.edit.strokes.push(stroke);
   addPoint(e);
 });
-view.addEventListener("pointermove", (e) => stroke && addPoint(e));
+view.addEventListener("pointermove", (e) => {
+  if (stroke) return addPoint(e);
+  const r = view.getBoundingClientRect();
+  S.cursor = [((e.clientX - r.left) * view.width) / r.width, ((e.clientY - r.top) * view.height) / r.height];
+  requestAnimationFrame(render);
+});
+view.addEventListener("pointerleave", () => { S.cursor = null; requestAnimationFrame(render); });
 view.addEventListener("pointerup", () => { if (stroke) { stroke = null; schedulePreview(); } });
 
 function addPoint(e) {
@@ -300,7 +322,7 @@ function render() {
   if (!S.hero) return;
   ctx.globalAlpha = 1;
   ctx.drawImage(S.compare ? S.original : S.hero, 0, 0);
-  if (!S.edit || S.compare) return;
+  if (!S.edit || S.compare) return drawCursor();
   if (S.edit.tool === "erase") { // show the area to clean in red
     [tint.width, tint.height] = [mask.width, mask.height];
     const t = tint.getContext("2d");
@@ -308,6 +330,14 @@ function render() {
     ctx.globalAlpha = 0.45; ctx.drawImage(tint, 0, 0);
   } else { ctx.globalAlpha = 0.9; ctx.drawImage(paint, 0, 0); }
   ctx.globalAlpha = 1;
+  drawCursor();
+}
+
+function drawCursor() { // the brush outline, at its real size on the frame
+  if (!S.cursor || stroke) return;
+  ctx.lineWidth = Math.max(1.5, view.width / 900);
+  ctx.strokeStyle = S.tool === "restore" ? "#ffffff" : S.color;
+  ctx.beginPath(); ctx.arc(S.cursor[0], S.cursor[1], S.size / 2, 0, 2 * Math.PI); ctx.stroke();
 }
 
 // ---------- Options: two seeds, live ----------
@@ -323,6 +353,11 @@ async function previews() {
   e.options = [null, null]; e.refined = [null, null];
   tiles();
   const size = S.plate.prev, light = e.tool === "light";
+  if (e.tool === "erase" && $("#whole").checked && e.snapped !== e.strokes.length) {
+    e.snapped = e.strokes.length;
+    await snapErase(e, size, gen);
+    if (gen !== e.gen) return;
+  }
   const base = await heroInput(size);
   const reference = await upload(await blob(editImage(e, size)), "reference.png");
   const values = { base, reference, start: light ? base : reference, caption: caption(e), steps: 8,
@@ -339,6 +374,30 @@ async function previews() {
   touch();
 }
 
+async function snapErase(e, size, gen) { // SAM 3.1 grows the latest erase stroke to the whole object under it
+  const pts = e.strokes.at(-1).points, k = size[0] / view.width;
+  const picks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * (pts.length - 1))))]; // up to five points along the stroke
+  const points = picks.map((i) => ({ x: Math.round(pts[i][0] * k), y: Math.round(pts[i][1] * k) }));
+  status("Finding the object under the stroke");
+  const out = await run("snap", { image: await heroInput(size), points: JSON.stringify(points) }, { kind: "snap" }).done;
+  if (gen !== e.gen) return;
+  const pixels = (c) => c.getContext("2d").getImageData(0, 0, size[0], size[1]).data;
+  const sam = snap(await loadImage(url(files(out)[0])), size), s = pixels(sam), m = pixels(maskAt(size));
+  let area = 0, painted = 0, both = 0;
+  for (let i = 0; i < s.length; i += 4) {
+    if (m[i] > 127) painted++;
+    if (s[i] > 127) { area++; if (m[i] > 127) both++; }
+  }
+  // accept one object that holds the stroke: not a whole wall or shopfront grown from a small stroke
+  if (!area || area > 0.12 * size[0] * size[1] || area > 40 * painted || both < 0.5 * painted)
+    return status("Erasing only what you painted: no single object under the stroke.");
+  const d = sam.getContext("2d"), img = d.getImageData(0, 0, size[0], size[1]);
+  for (let i = 0; i < img.data.length; i += 4) { img.data[i + 3] = img.data[i]; img.data[i] = img.data[i + 1] = img.data[i + 2] = 255; }
+  d.putImageData(img, 0, 0);
+  mask.getContext("2d").drawImage(sam, 0, 0, mask.width, mask.height); // the object joins the erase mask, at working size
+  render();
+}
+
 function tiles() { $$(".option").forEach((b) => { b.className = "option"; b.querySelector("img").removeAttribute("src"); }); }
 function tile(i, src, ready) { const b = $$(".option")[i]; b.querySelector("img").src = src; b.classList.toggle("ready", !!ready); }
 
@@ -346,7 +405,7 @@ async function refine(e, i, kind = "refine") { // the picked option at working s
   const size = S.plate.work, light = e.tool === "light";
   const start = await upload(await blob(snap(await loadImage(url(e.options[i])), size)), `start_${i}.png`);
   const base = await heroInput(size);
-  const out = await run("edit", { base, start, caption: caption(e), seed: e.seed + i, steps: 16, denoise: 0.35,
+  const out = await run("edit", { base, start, caption: caption(e), seed: e.seed + i, steps: REFINE_STEPS, denoise: 0.35,
     reference: await upload(await blob(editImage(e, size)), "reference_full.png"),
     mask: await upload(await blob(maskAt(size, light)), "mask_full.png"),
     grow: Math.round(size[0] / 48), feather: 12, sigma: 6 }, { kind }).done;
@@ -419,7 +478,11 @@ async function shot() { // half size to watch soon, then full size for the expor
   const p = S.plate, base = `paintaplate/${p.id}/v${++S.run}`, [width, height] = p.shotSize;
   const common = { path: p.path, color_space: p.cs, max_frames: p.frames, hero: S.stack.at(-1).input, seed: S.stack[0].seed };
   const pct = (label) => (f) => status(`${label}, ${Math.round(f * 100)}%`);
-  const watch = (out) => { player.src = S.shot = url(files(out).find(isVideo)); $("#view-shot").disabled = false; };
+  const watch = (out) => {
+    player.src = S.shot = url(files(out).find(isVideo));
+    $("#view-shot").disabled = false;
+    $("#view-shot").classList.toggle("new", player.hidden);
+  };
   watch(await run("shot", { ...common, width, height, prefix: `${base}/shot/f`, video_prefix: `${base}/preview` },
     { kind: "shot", progress: pct("Rendering the shot preview") }).done);
   let final = `output:${base}/shot`;
@@ -480,9 +543,11 @@ function setTool(t) {
   S.tool = t;
   $$(".tools [data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === t));
   $("#prompt").placeholder = PLACEHOLDER[t];
+  $("#whole-wrap").hidden = t !== "erase";
 }
 
 function showView(v) {
+  if (v === "shot") $("#view-shot").classList.remove("new");
   $("#view-paint").classList.toggle("on", v === "paint");
   $("#view-shot").classList.toggle("on", v === "shot");
   player.hidden = v !== "shot";
@@ -493,7 +558,7 @@ function showView(v) {
 function openDialog() { $("#files").value = ""; $("#open").showModal(); }
 
 async function boot() {
-  for (const name of ["ingest", "edit", "shot", "matte", "export"]) WF[name] = await (await fetch(`workflows/${name}.json`)).json();
+  for (const name of ["ingest", "edit", "snap", "shot", "matte", "export"]) WF[name] = await (await fetch(`workflows/${name}.json`)).json();
   connect();
   const info = async (cls) => (await (await fetch(`/object_info/${cls}`)).json())[cls];
   const src = (await info("ImageColorSpace"))?.input.required.source ?? [["sRGB"]];
@@ -502,7 +567,17 @@ async function boot() {
   const needs = { PaintAPlate_LoadPlate: "this pack", LTXAddVideoICLoRAGuide: "ComfyUI-LTXVideo", SAM3_VideoTrack: "ComfyUI 0.42 or newer", ReferenceMultiLatent: "ComfyUI 0.41 or newer" };
   const missing = [];
   for (const [cls, from] of Object.entries(needs)) if (!(await info(cls))) missing.push(`${cls} (${from})`);
-  status(missing.length ? `Missing nodes: ${missing.join(", ")}. Install them, then reload this page.` : "Ready. Open a plate to start.");
+  if (missing.length) return status(`Missing nodes: ${missing.join(", ")}. Install them, then reload this page.`);
+  const files = new Map(); // every model file the workflows load, by loader and input
+  for (const wf of Object.values(WF)) for (const n of Object.values(wf.prompt))
+    for (const [k, v] of Object.entries(n.inputs)) if (typeof v === "string" && v.endsWith(".safetensors")) files.set(v, [n.class_type, k]);
+  const absent = [];
+  for (const [file, [cls, input]] of files) {
+    const spec = (await info(cls))?.input.required[input];
+    const options = Array.isArray(spec?.[0]) ? spec[0] : spec?.[1]?.options ?? [];
+    if (!options.includes(file)) absent.push(file);
+  }
+  status(absent.length ? `Missing model files: ${absent.join(", ")}. See the README for where to put them.` : "Ready. Open a plate to start.");
 }
 
 $$(".tools [data-tool]").forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
@@ -533,6 +608,7 @@ addEventListener("keydown", (e) => {
   else if (k === "enter") $("#reroll").click();
   else if (k === "escape") discard();
   else if (k === "o") { S.compare = true; render(); }
+  else if (k === "?" || (k === "/" && e.shiftKey)) $("#help").open ? $("#help").close() : $("#help").show();
   else if (k === "z" && (e.ctrlKey || e.metaKey) && S.edit) { S.edit.strokes.pop(); redraw(); render(); S.edit.strokes.length ? schedulePreview() : discard(); }
   else if (k === " " && !player.hidden) player.paused ? player.play() : player.pause();
   else return;

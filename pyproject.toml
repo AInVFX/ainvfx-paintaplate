@@ -1,6 +1,6 @@
 [project]
 name = "ainvfx-paintaplate"
-version = "0.1.2"
+version = "0.1.3"
 description = "Paint on a moving plate to erase, add or relight, with near real-time previews and an export that keeps the plate's own format, layers and untouched pixels."
 license = { file = "LICENSE" }
 requires-python = ">=3.10"

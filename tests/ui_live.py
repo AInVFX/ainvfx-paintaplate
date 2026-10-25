@@ -49,6 +49,11 @@ def stand_ins(out):
     g("SaveImage", images=g("RepeatImageBatch", image=m, amount=size[2]), filename_prefix=Slot("prefix", "x/m"))
     g.save_to(out, "matte")
 
+    g = Graph()  # snap: no object found, the page keeps the painted stroke
+    g("LoadImage", image=Slot("image", "")); g("PrimitiveString", value=Slot("points", "[]"))
+    g("PreviewImage", images=g("MaskToImage", mask=g("SolidMask", value=0.0, width=64, height=64)))
+    g.save_to(out, "snap")
+
 
 def stroke(page, box, pts):
     page.mouse.move(box["x"] + pts[0][0] * box["width"], box["y"] + pts[0][1] * box["height"])
@@ -67,6 +72,8 @@ def main():
     ap.add_argument("--cs", default="linear")
     ap.add_argument("--strokes", default="", help='JSON list of [key, words, [[x, y], ...], pick]')
     ap.add_argument("--timeout", type=int, default=150)
+    ap.add_argument("--out", default=SHOTS, help="folder for screenshots and timings")
+    ap.add_argument("--think", type=float, default=0, help="seconds between opening the plate and the first stroke")
     a = ap.parse_args()
     if a.url:
         return remote(a)
@@ -87,7 +94,7 @@ def main():
     log = open("/tmp/ui_live.log", "w")
     proc = subprocess.Popen([a.python, "main.py", "--cpu", "--listen", "127.0.0.1", "--port", str(a.port),
                              "--disable-auto-launch", "--preview-method", "latent2rgb"], cwd=a.comfy, stdout=log, stderr=subprocess.STDOUT)
-    errors, ok = [], False
+    errors, ok, final = [], False, ""
     try:
         url = f"http://127.0.0.1:{a.port}"
         t0 = time.time()
@@ -112,23 +119,30 @@ def main():
             page.select_option("#cs", "linear")
             page.click("#open-go")
             page.wait_for_function("document.querySelector('#empty').hidden", timeout=90000)
-            print("opened:", status(), "|", page.inner_text("#spec"))
-            box = page.locator("#view").bounding_box()
-            for key, words, pts, pick in (("b", "a fire", [(0.3, 0.6), (0.4, 0.5), (0.45, 0.65)], "1"),
-                                          ("e", "", [(0.7, 0.3), (0.75, 0.4)], "2"),
-                                          ("l", "warm sunset", [(0.1, 0.1), (0.2, 0.15)], "1")):
-                page.keyboard.press(key)
-                page.fill("#prompt", words)
-                stroke(page, box, pts)
-                page.wait_for_function("document.querySelectorAll('.option.ready').length === 2", timeout=60000)
-                page.screenshot(path=f"{SHOTS}/2_{key}_options.png")
-                n = page.locator("#stack li").count()
-                page.keyboard.press(pick)
-                page.wait_for_function(f"document.querySelectorAll('#stack li').length === {n + 1}", timeout=60000)
-                print(f"edit {key}: committed |", status())
-            page.wait_for_function("document.querySelector('#status').textContent.startsWith('Exported')", timeout=150000)
-            page.screenshot(path=f"{SHOTS}/3_exported.png")
-            print("final:", status())
+            try:
+                print("opened:", status(), "|", page.inner_text("#spec"))
+                box = page.locator("#view").bounding_box()
+                for key, words, pts, pick in (("b", "a fire", [(0.3, 0.6), (0.4, 0.5), (0.45, 0.65)], "1"),
+                                              ("e", "", [(0.7, 0.3), (0.75, 0.4)], "2"),
+                                              ("l", "warm sunset", [(0.1, 0.1), (0.2, 0.15)], "1")):
+                    page.keyboard.press(key)
+                    page.fill("#prompt", words)
+                    stroke(page, box, pts)
+                    page.wait_for_function("document.querySelectorAll('.option.ready').length === 2", timeout=60000)
+                    page.screenshot(path=f"{SHOTS}/2_{key}_options.png")
+                    n = page.locator("#stack li").count()
+                    page.keyboard.press(pick)
+                    page.wait_for_function(f"document.querySelectorAll('#stack li').length === {n + 1}", timeout=60000)
+                    print(f"edit {key}: committed |", status())
+                page.wait_for_function("document.querySelector('#status').textContent.startsWith('Exported')", timeout=150000)
+                page.screenshot(path=f"{SHOTS}/3_exported.png")
+                final = status()
+                print("final:", final)
+            except Exception:  # read the page while it is still open
+                print("status:", status())
+                print("tiles:", page.evaluate("[...document.querySelectorAll('.option')].map(b => b.className + ' ' + (b.querySelector('img').getAttribute('src') || '-').slice(0, 40))"))
+                page.screenshot(path=f"{SHOTS}/fail.png")
+                raise
             ok = True
             browser.close()
     except Exception as exc:
@@ -144,7 +158,8 @@ def main():
         os.remove(link)
         if real:
             os.symlink(real, link)
-    exports = glob.glob(os.path.join(a.comfy, "output", "paintaplate", "*", "r*", "export", "*.exr"))
+    folder = final.split(" in ", 1)[1].strip() if " in " in final else ""  # "Exported: 17 file(s) in <folder>"
+    exports = glob.glob(os.path.join(folder, "*.exr")) if folder else []
     print(f"export files: {len(exports)}; console errors: {len(errors)}")
     for e in errors[:10]:
         print("  console:", e[:300])
@@ -155,7 +170,8 @@ def main():
 def remote(a):
     """The real page, workflows and models on a remote ComfyUI: timings for each stage."""
     import json
-    shutil.rmtree(SHOTS, ignore_errors=True); os.makedirs(SHOTS)
+    shots = a.out
+    shutil.rmtree(shots, ignore_errors=True); os.makedirs(shots)
     strokes = json.loads(a.strokes) if a.strokes else [["b", "a small campfire", [[0.45, 0.8], [0.5, 0.75], [0.55, 0.8]], "1"]]
     marks, errors, t0 = [], [], time.time()
     mark = lambda what: (marks.append((round(time.time() - t0, 1), what)), print(f"{marks[-1][0]:7.1f} s  {what}"))  # noqa: E731
@@ -169,20 +185,26 @@ def remote(a):
             page.goto(f"{a.url}/extensions/ainvfx-paintaplate/paintaplate.html")
             page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
             mark("page ready: " + status())
-            page.click("#open-btn"); page.fill("#path", a.path); page.select_option("#cs", a.cs); page.click("#open-go")
+            page.click("#open-btn"); page.fill("#path", a.path)
+            if a.cs:
+                page.select_option("#cs", a.cs)
+            page.click("#open-go")
             page.wait_for_function("document.querySelector('#empty').hidden", timeout=300000)
-            mark("plate open: " + page.inner_text("#spec")); page.screenshot(path=f"{SHOTS}/1_open.png")
+            mark("plate open: " + page.inner_text("#spec")); page.screenshot(path=f"{shots}/1_open.png")
             box = page.locator("#view").bounding_box()
-            for key, words, pts, pick in strokes:
+            page.wait_for_timeout(a.think * 1000)  # a person looks at the frame before painting
+            for key, words, pts, pick, *size in strokes:
                 page.keyboard.press(key); page.fill("#prompt", words)
+                if size:  # brush size in frame pixels, set on the slider
+                    page.eval_on_selector("#size", "(el, v) => { el.value = v; el.dispatchEvent(new Event('input')); }", size[0])
                 stroke(page, box, pts); mark(f"{key} stroke")
                 page.wait_for_function("[...document.querySelectorAll('.option img')].some(i => i.src)", timeout=120000)
                 mark(f"{key} first image in a tile")
                 page.wait_for_function("document.querySelectorAll('.option.ready').length === 2", timeout=180000)
-                mark(f"{key} both options ready"); page.screenshot(path=f"{SHOTS}/2_{key}_options.png")
+                mark(f"{key} both options ready"); page.screenshot(path=f"{shots}/2_{key}_options.png")
                 n = page.locator("#stack li").count(); page.keyboard.press(pick)
                 page.wait_for_function(f"document.querySelectorAll('#stack li').length === {n + 1}", timeout=240000)
-                mark(f"{key} committed"); page.screenshot(path=f"{SHOTS}/3_{key}_committed.png")
+                mark(f"{key} committed"); page.screenshot(path=f"{shots}/3_{key}_committed.png")
             seen = set()
             deadline = time.time() + a.timeout * 6
             while time.time() < deadline:
@@ -193,12 +215,12 @@ def remote(a):
                 if st.startswith("Exported") or "Error" in st or ":" in tag and "Exported" not in st and "ready" not in st and "Missing" in st:
                     break
                 time.sleep(1)
-            page.click("#view-shot"); time.sleep(2); page.screenshot(path=f"{SHOTS}/4_shot.png")
+            page.click("#view-shot"); time.sleep(2); page.screenshot(path=f"{shots}/4_shot.png")
         except Exception as exc:
             mark(f"FAILED: {type(exc).__name__}: {str(exc).splitlines()[0][:160]} | status: {status()}")
-            page.screenshot(path=f"{SHOTS}/fail.png")
+            page.screenshot(path=f"{shots}/fail.png")
         browser.close()
-    json.dump({"marks": marks, "errors": errors}, open(f"{SHOTS}/timings.json", "w"), indent=1)
+    json.dump({"marks": marks, "errors": errors}, open(f"{shots}/timings.json", "w"), indent=1)
     print("console errors:", errors[:5])
     return 0
 

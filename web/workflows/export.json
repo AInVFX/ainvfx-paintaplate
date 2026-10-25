@@ -80,10 +80,127 @@
    }
   },
   "9": {
+   "class_type": "GetImageSize",
+   "inputs": {
+    "image": [
+     "2",
+     0
+    ]
+   }
+  },
+  "10": {
+   "class_type": "ImageColorSpace",
+   "inputs": {
+    "image": [
+     "1",
+     0
+    ],
+    "source": "sRGB",
+    "destination": "sRGB"
+   }
+  },
+  "11": {
+   "class_type": "ImageScale",
+   "inputs": {
+    "image": [
+     "10",
+     0
+    ],
+    "upscale_method": "area",
+    "width": [
+     "9",
+     0
+    ],
+    "height": [
+     "9",
+     1
+    ],
+    "crop": "disabled"
+   }
+  },
+  "12": {
+   "class_type": "ImageColorSpace",
+   "inputs": {
+    "image": [
+     "1",
+     0
+    ],
+    "source": "sRGB",
+    "destination": "linear"
+   }
+  },
+  "13": {
+   "class_type": "ImageColorSpace",
+   "inputs": {
+    "image": [
+     "11",
+     0
+    ],
+    "source": "sRGB",
+    "destination": "linear"
+   }
+  },
+  "14": {
+   "class_type": "ImageColorSpace",
+   "inputs": {
+    "image": [
+     "2",
+     0
+    ],
+    "source": "sRGB",
+    "destination": "linear"
+   }
+  },
+  "15": {
+   "class_type": "PaintAPlate_RelightTransfer",
+   "inputs": {
+    "plate": [
+     "12",
+     0
+    ],
+    "source": [
+     "13",
+     0
+    ],
+    "relit": [
+     "14",
+     0
+    ],
+    "radius": 16,
+    "strength": 1.0,
+    "align": true
+   }
+  },
+  "16": {
+   "class_type": "ImageColorSpace",
+   "inputs": {
+    "image": [
+     "15",
+     0
+    ],
+    "source": "linear",
+    "destination": "sRGB"
+   }
+  },
+  "17": {
+   "class_type": "ComfySwitchNode",
+   "inputs": {
+    "switch": false,
+    "on_false": [
+     "1",
+     0
+    ],
+    "on_true": [
+     "16",
+     0
+    ]
+   }
+  },
+  "18": {
    "class_type": "PaintAPlate_FitToPlate",
    "inputs": {
     "plate": [
-     "1",
+     "17",
      0
     ],
     "image": [
@@ -102,139 +219,22 @@
     "feather": 12
    }
   },
-  "10": {
-   "class_type": "GetImageSize",
-   "inputs": {
-    "image": [
-     "2",
-     0
-    ]
-   }
-  },
-  "11": {
-   "class_type": "ImageColorSpace",
-   "inputs": {
-    "image": [
-     "1",
-     0
-    ],
-    "source": "sRGB",
-    "destination": "sRGB"
-   }
-  },
-  "12": {
-   "class_type": "ImageScale",
-   "inputs": {
-    "image": [
-     "11",
-     0
-    ],
-    "upscale_method": "area",
-    "width": [
-     "10",
-     0
-    ],
-    "height": [
-     "10",
-     1
-    ],
-    "crop": "disabled"
-   }
-  },
-  "13": {
-   "class_type": "ImageColorSpace",
-   "inputs": {
-    "image": [
-     "1",
-     0
-    ],
-    "source": "sRGB",
-    "destination": "linear"
-   }
-  },
-  "14": {
-   "class_type": "ImageColorSpace",
-   "inputs": {
-    "image": [
-     "12",
-     0
-    ],
-    "source": "sRGB",
-    "destination": "linear"
-   }
-  },
-  "15": {
-   "class_type": "ImageColorSpace",
-   "inputs": {
-    "image": [
-     "2",
-     0
-    ],
-    "source": "sRGB",
-    "destination": "linear"
-   }
-  },
-  "16": {
-   "class_type": "PaintAPlate_RelightTransfer",
-   "inputs": {
-    "plate": [
-     "13",
-     0
-    ],
-    "source": [
-     "14",
-     0
-    ],
-    "relit": [
-     "15",
-     0
-    ],
-    "radius": 16,
-    "strength": 1.0,
-    "align": true
-   }
-  },
-  "17": {
-   "class_type": "ImageColorSpace",
-   "inputs": {
-    "image": [
-     "16",
-     0
-    ],
-    "source": "linear",
-    "destination": "sRGB"
-   }
-  },
-  "18": {
-   "class_type": "ComfySwitchNode",
-   "inputs": {
-    "switch": false,
-    "on_false": [
-     "1",
-     0
-    ],
-    "on_true": [
-     "17",
-     0
-    ]
-   }
-  },
   "19": {
    "class_type": "ImageCompositeMasked",
    "inputs": {
     "destination": [
-     "18",
+     "17",
      0
     ],
     "source": [
-     "9",
+     "18",
      0
     ],
     "x": 0,
     "y": 0,
     "resize_source": false,
     "mask": [
-     "9",
+     "18",
      1
     ]
    }
@@ -253,7 +253,7 @@
     "filename_prefix": "paintaplate/plate/export",
     "keep_untouched": true,
     "changed": [
-     "9",
+     "18",
      1
     ]
    }
@@ -296,58 +296,58 @@
     "destination"
    ],
    [
-    "11",
+    "10",
     "source"
    ],
    [
-    "13",
+    "12",
     "source"
    ],
    [
-    "17",
+    "16",
     "destination"
-   ]
-  ],
-  "grain": [
-   [
-    "9",
-    "grain"
-   ]
-  ],
-  "grow": [
-   [
-    "9",
-    "grow"
-   ]
-  ],
-  "feather": [
-   [
-    "9",
-    "feather"
-   ]
-  ],
-  "fit_mask": [
-   [
-    "9",
-    "mask"
    ]
   ],
   "radius": [
    [
-    "16",
+    "15",
     "radius"
    ]
   ],
   "strength": [
    [
-    "16",
+    "15",
     "strength"
    ]
   ],
   "relight": [
    [
-    "18",
+    "17",
     "switch"
+   ]
+  ],
+  "grain": [
+   [
+    "18",
+    "grain"
+   ]
+  ],
+  "grow": [
+   [
+    "18",
+    "grow"
+   ]
+  ],
+  "feather": [
+   [
+    "18",
+    "feather"
+   ]
+  ],
+  "fit_mask": [
+   [
+    "18",
+    "mask"
    ]
   ],
   "prefix": [

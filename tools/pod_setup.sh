@@ -11,6 +11,7 @@ log() { echo "[$(date +%H:%M:%S)] $*"; }
 
 log "python env"
 [ -x "$VENV/bin/python" ] || python3 -m venv "$VENV"
+# shellcheck source=/dev/null
 . "$VENV/bin/activate"
 pip install -q -U pip uv huggingface_hub hf_transfer
 

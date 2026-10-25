@@ -33,13 +33,18 @@ header { grid-area: head; display: flex; align-items: center; gap: 12px; padding
 
 .stage { grid-area: stage; position: relative; display: grid; place-items: center; min-height: 0; padding: 16px; }
 #view, #player { grid-area: 1 / 1; background: #111; touch-action: none; }
-#view { cursor: crosshair; }
+#view { cursor: none; }
 .empty { grid-area: 1 / 1; text-align: center; max-width: 380px; color: var(--muted); }
 .views { position: absolute; top: 12px; right: 12px; display: flex; }
 .views button { border-radius: 0; }
 .views button:first-child { border-radius: 6px 0 0 6px; }
 .views button:last-child { border-radius: 0 6px 6px 0; }
 .views button.on { color: var(--gold); border-color: var(--gold); }
+.views button.new::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--gold); vertical-align: middle; }
+.help { position: fixed; right: 290px; bottom: 90px; margin: 0; left: auto; top: auto; width: 300px; }
+.help dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; }
+.help dt { color: var(--gold); font-variant-numeric: tabular-nums; }
+.help dd { margin: 0; }
 
 .side { grid-area: side; border-left: 1px solid var(--line); padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; }
 .option { position: relative; display: block; width: 100%; padding: 0; margin-bottom: 10px; aspect-ratio: 16 / 9; overflow: hidden; background: #111; }
@@ -65,3 +70,5 @@ dialog label { display: block; margin: 12px 0; color: var(--muted); }
 dialog input, dialog select { display: block; width: 100%; margin-top: 6px; font: inherit; color: var(--text); background: var(--surround); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
 dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; margin: 16px 0 0; }
 @media (max-width: 760px) { body { grid-template: "head" 48px "tools" auto "stage" 1fr "side" auto "foot" auto / 1fr; } .tools { flex-direction: row; justify-content: center; border: 0; } #size { writing-mode: horizontal-tb; direction: ltr; height: auto; width: 120px; } }
+.whole { display: flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--muted, #aaa); font-size: 13px; }
+.whole input { accent-color: var(--gold); }

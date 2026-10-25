@@ -54,14 +54,13 @@ def ring(mask: np.ndarray, width: int) -> np.ndarray:
 
 
 def match_color(img: np.ndarray, plate: np.ndarray, band: np.ndarray) -> np.ndarray:
-    """Match mean and contrast per channel to the plate over the ring `band`."""
+    """Match exposure and white balance to the plate over the ring `band`: one gain per channel, clamped.
+    Contrast is never scaled, so a new object with strong contrast cannot turn into a ghost."""
     if band.sum() < 64:
         return img
+    gain = np.median(plate[band][:, :3].clip(1e-4), 0) / np.median(img[band][:, :3].clip(1e-4), 0)
     out = img.copy()
-    for c in range(3):
-        a, b = img[..., c][band], plate[..., c][band]
-        scale = np.clip(b.std() / max(a.std(), 1e-6), 0.5, 2.0)
-        out[..., c] = (img[..., c] - a.mean()) * scale + b.mean()
+    out[..., :3] *= np.clip(gain, 0.8, 1.25)
     return out
 
 
@@ -120,7 +119,7 @@ def relight(plate: np.ndarray, source: np.ndarray, relit: np.ndarray,
     ratio = (guided_filter(guide, relit[..., :3].clip(0), radius, eps) + 1e-3) / \
             (guided_filter(guide, source[..., :3].clip(0), radius, eps) + 1e-3)
     ratio = ndimage.median_filter(ratio, size=(3, 3, 1))  # isolated specks at sharp edges go
-    ratio = np.clip(ratio, 0.2, 5.0) ** strength
+    ratio = ndimage.gaussian_filter(np.clip(ratio, 0.25, 4.0), (1.0, 1.0, 0)) ** strength
     if ratio.shape[:2] != plate.shape[:2]:
         zoom = (plate.shape[0] / ratio.shape[0], plate.shape[1] / ratio.shape[1], 1)
         ratio = ndimage.zoom(ratio, zoom, order=1)[: plate.shape[0], : plate.shape[1]]

@@ -54,8 +54,24 @@
 
   <footer>
     <input id="prompt" placeholder="What did you paint? A fire, a wooden desk, a splashing wave" autocomplete="off">
+    <label id="whole-wrap" class="whole" hidden title="SAM 3.1 grows the stroke to the object under it"><input id="whole" type="checkbox" checked> Whole object</label>
     <p id="status" role="status">Ready</p>
   </footer>
+
+  <dialog id="help" class="help">
+    <h2>Keys</h2>
+    <dl>
+      <dt>B, E, L, R</dt><dd>Paint, Erase, Light, Restore</dd>
+      <dt>[ and ]</dt><dd>Brush size</dd>
+      <dt>1 and 2</dt><dd>Pick an option</dd>
+      <dt>Enter</dt><dd>Two new options</dd>
+      <dt>Esc</dt><dd>Discard the edit</dd>
+      <dt>Ctrl+Z</dt><dd>Undo a stroke</dd>
+      <dt>Hold O</dt><dd>See the original frame</dd>
+      <dt>Space</dt><dd>Play or pause the shot</dd>
+      <dt>?</dt><dd>Show or hide these keys</dd>
+    </dl>
+  </dialog>
 
   <dialog id="open">
     <form method="dialog">

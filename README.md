@@ -1,22 +1,24 @@
 # AInVFX PaintAPlate
 
+[![tests](https://github.com/AInVFX/ainvfx-paintaplate/actions/workflows/tests.yml/badge.svg)](https://github.com/AInVFX/ainvfx-paintaplate/actions/workflows/tests.yml)
+
 Paint on the first frame of a shot to erase, add or relight. Two options appear while you paint. Pick one, and the whole shot comes back in the plate's own format: same file type, bit depth, frame numbers, colour space, layers, timecode and audio. Pixels you did not touch stay identical to the input.
 
-PaintAPlate runs inside ComfyUI. The app is one page served by ComfyUI itself, and every step is an ordinary workflow you can open, read and change.
+![PaintAPlate on a generated anime plate: an orange cat painted in, lantern light added](docs/screenshot.jpg)
 
-Built for Comfy's Open Source Higgsfield challenge, October 2026.
+PaintAPlate runs inside ComfyUI. The app is one page served by ComfyUI, and every step is an ordinary workflow you can open, read and change. Built for Comfy's Open Source Higgsfield challenge, October 2026.
 
 ## Install
 
-1. ComfyUI **0.42.5 or newer**. ACEScg plates need a ComfyUI build after 0.42.5 (the ACEScg colour space landed on 23 October 2026); older builds offer linear Rec.709 instead.
+1. ComfyUI 0.42.5 or newer. Tested on 0.42.5 and on the main branch of 24 October 2026 (`19ae172b`). ACEScg plates need a build after 0.42.5.
 2. Install this pack from the Registry (ComfyUI-Manager, search "PaintAPlate"), or clone it into `ComfyUI/custom_nodes/` and run `pip install -r requirements.txt`.
 3. Install **ComfyUI-LTXVideo** (Lightricks) for the LTX IC-LoRA guide node.
 4. Download the models below, then restart ComfyUI.
 5. Open the app from **Extensions > Open PaintAPlate**, or at `http://127.0.0.1:8188/extensions/ainvfx-paintaplate/paintaplate.html`.
 
-Start ComfyUI with live previews on: `--preview-method latent2rgb`. On a 96 GB card, add `--highvram` so every model stays loaded between runs.
+Start ComfyUI with `--preview-method latent2rgb` for live previews. On a 96 GB card, add `--highvram` so the models stay loaded. If a model file is missing, the app names it when it opens.
 
-### Models
+## Models
 
 | Folder | File | Source | Licence |
 | --- | --- | --- | --- |
@@ -36,13 +38,36 @@ All models are open weights. The FLUX, LTX and SAM repositories ask you to accep
 | Tool | Key | What it does |
 | --- | --- | --- |
 | Paint | B | Paint a rough shape in a colour, then say what it is: "a fire", "a wooden desk" |
-| Erase | E | Paint over what should go. Erase part of a person and only that part goes |
+| Erase | E | Paint a stroke on what should go. With **Whole object** on (the default), SAM 3.1 grows the stroke to the object under it. Turn it off to erase only what you paint |
 | Light | L | Paint where the light comes from, in its colour. Words are optional |
 | Restore | R | Brings back the plate under the brush |
 
-`[` and `]` change the brush size. `1` and `2` pick an option, `Enter` asks for two new ones, `Esc` discards the edit, `Ctrl+Z` undoes a stroke. Hold `O` to see the original frame. Up to three edits stack on one shot.
+`[` and `]` change the brush size, `1` and `2` pick an option, `Enter` asks for two new ones, `Esc` discards the edit and `Ctrl+Z` undoes a stroke. Hold `O` to see the original frame. `?` shows all keys. Up to three edits stack on one shot.
 
-When you pause, PaintAPlate uses the idle time: it refines both options at full size, then renders the shot, tracks the edited areas and exports at full quality. Any new stroke cancels that work and starts again from the cheapest step it affects.
+When you pause, PaintAPlate works in the background. It renders the shot at half size so you can watch it soon, then at full size, tracks the edited areas and exports at full quality. A new stroke cancels that work and restarts from the cheapest step it affects.
+
+## Speed
+
+Measured on 25 October 2026 on an RTX PRO 6000 (96 GB), with plates of 121 frames at 1920 × 1012 and the models on a network volume:
+
+| Step | Time |
+| --- | --- |
+| Open an EXR sequence / an H.264 video | 20 s / 4.5 s |
+| First option after a stroke / both options | 0.7 s / 1.6 s |
+| Pick an option (full-size refine) | 5 s, or 8 s for an erase that finds the object first |
+| Shot at half size / full size | 37 to 52 s / 140 s |
+| Track the edited areas (SAM 3.1) | 6 to 15 s per area |
+| Export 121 EXR frames / one video | 16 to 52 s |
+
+After a cold start, the first stroke and the first shot also wait for their models: about 16 s for FLUX 3 Image Klein and 80 s for LTX 2.5 from a network volume, less from a local disk.
+
+## What you get back
+
+- Outside the edited areas, EXR, PNG, TIFF and DPX output is identical to the input, bit for bit. A video output is re-encoded, so untouched pixels are as close as the codec allows.
+- A relight changes every pixel by design. Its fine detail still comes from the plate.
+- Shots up to 121 frames (5 s at 24 fps). Edits are painted on the first frame.
+- Erase works best on whole, compact objects. A thin object such as a pole can come back: paint a wider stroke over it. With **Whole object** off, a stroke that covers only part of an object can make the model rebuild it.
+- The Ripple model card says to replace the first frame, which is what this pack does. Its author's example workflow prepends it instead, which shifts the plate by one frame.
 
 ## How it works
 
@@ -65,23 +90,21 @@ Core ComfyUI does the colour conversion, compositing, masks, sampling and step p
 
 The page fills named slots in each workflow and posts it to ComfyUI. Step previews arrive over ComfyUI's WebSocket, so an option starts to appear after the first sampling step.
 
-## Guarantees and limits
+## Tests
 
-- Outside the edited areas, EXR, PNG, TIFF and DPX output is identical to the input, bit for bit. A video output is re-encoded, so untouched pixels are as close as the codec allows.
-- A relight changes every pixel by design. Its fine detail still comes from the plate.
-- The shot renders at half the working size by default, for speed. Add `?shot=full` to the page address to render it at full working size.
-- Shots up to 121 frames (5 s at 24 fps). Edits are painted on the first frame.
-- The Ripple model card says to replace the first frame, which is what this pack does. Its author's example workflow prepends it instead, which shifts the plate by one frame.
+```bash
+pip install -r tests/requirements.txt
+python -m unittest discover -s tests -v                            # no ComfyUI, no models, no GPU
+
+bash tools/ci_comfyui.sh .ci                                       # a CPU ComfyUI at the tested commits, empty model files
+COMFYUI_DIR=$PWD/.ci/ComfyUI python -m unittest discover -s tests -v   # adds a real ComfyUI and a headless browser
+```
+
+The suite checks the plate I/O, the maths, the six workflows against ComfyUI's source, the page, the linters, and a full paint, erase, relight and export through the real page. GitHub Actions runs both levels on every push. [TESTING.md](TESTING.md) covers the GPU tests.
 
 ## Development
 
-```bash
-python tools/build_workflows.py                         # writes web/workflows/*.json
-python tools/check_workflows.py ../../ ../ComfyUI-LTXVideo   # every class and input name against source
-python tests/test_plateio.py && python tests/test_mathops.py
-```
-
-Workflows are generated from `tools/build_workflows.py`, never edited by hand. Releases publish to the Comfy Registry from GitHub when the version in `pyproject.toml` changes.
+Workflows are generated by `tools/build_workflows.py`, never edited by hand; a test fails when `web/workflows` is stale. Releases publish to the Comfy Registry from GitHub when the version in `pyproject.toml` changes.
 
 ## Licence and credits
 
