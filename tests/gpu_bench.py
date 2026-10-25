@@ -1,0 +1,179 @@
+"""GPU checks on a machine with the models, against its local ComfyUI (run it on that machine).
+
+    python tests/gpu_bench.py ingest <plate path> <colour space>
+    python tests/gpu_bench.py edit <plate path> <colour space> <tool> <x0,y0,x1,y1> [words]
+    python tests/gpu_bench.py shot <plate path> <colour space> <hero png in output> <width> <height> [replace|prepend]
+
+Each step fills the pack's own workflows like the app does, times them and writes images and a
+JSON line per run to /workspace/bench, for review.
+"""
+import json, os, sys, time, urllib.request
+import numpy as np
+from PIL import Image, ImageDraw, ImageFilter
+
+URL = "http://127.0.0.1:8188"
+HERE = os.path.dirname(os.path.abspath(__file__))
+WF = os.path.join(HERE, "..", "web", "workflows")
+COMFY = os.environ.get("COMFY", "/workspace/ComfyUI")
+BENCH = "/workspace/bench"
+os.makedirs(BENCH, exist_ok=True)
+
+
+def call(path, body=None):
+    r = urllib.request.Request(URL + path, json.dumps(body).encode() if body is not None else None, {"Content-Type": "application/json"})
+    return json.loads(urllib.request.urlopen(r, timeout=600).read() or b"{}")
+
+
+def fill(name, values, edit=None):
+    wf = json.load(open(os.path.join(WF, f"{name}.json")))
+    for slot, value in values.items():
+        for nid, inp in wf["slots"].get(slot, []):
+            wf["prompt"][nid]["inputs"][inp] = value
+    if edit:
+        edit(wf["prompt"])
+    return wf["prompt"]
+
+
+def run(prompt, label):
+    t0 = time.time()
+    res = call("/prompt", {"prompt": prompt, "client_id": "bench"})
+    if "prompt_id" not in res:
+        raise SystemExit(f"{label}: rejected {json.dumps(res)[:800]}")
+    pid = res["prompt_id"]
+    while True:
+        h = call(f"/history/{pid}")
+        if pid in h and (h[pid]["status"].get("completed") or h[pid]["status"].get("status_str") == "error"):
+            break
+        time.sleep(0.2)
+    dt = time.time() - t0
+    err = next((m[1] for m in h[pid]["status"].get("messages", []) if m[0] == "execution_error"), None)
+    outs = [f for o in h[pid]["outputs"].values() for k in ("images", "gifs", "video") for f in o.get(k, [])]
+    texts = [t for o in h[pid]["outputs"].values() for t in o.get("text", [])]
+    line = {"label": label, "seconds": round(dt, 2), "error": err and f"{err.get('node_type')}: {err.get('exception_message', '')[:300]}",
+            "files": [f"{f['type']}/{f['subfolder']}/{f['filename']}" for f in outs][:4]}
+    print(json.dumps(line)); open(f"{BENCH}/report.jsonl", "a").write(json.dumps(line) + "\n")
+    return outs, texts, dt
+
+
+def path_of(f):
+    return os.path.join(COMFY, f["type"], f["subfolder"], f["filename"])
+
+
+def fit(w, h, long, step):
+    k = long / max(w, h)
+    return [max(step, round(v * k / step) * step) for v in (w, h)]
+
+
+def ingest(plate, cs):
+    outs, texts, _ = run(fill("ingest", {"path": plate, "color_space": cs, "prefix": "bench/hero", "video_prefix": "bench/proxy"}), f"ingest {plate}")
+    spec = json.loads(texts[0])
+    hero = next(path_of(f) for f in outs if f["filename"].endswith(".png"))
+    Image.open(hero).save(f"{BENCH}/hero_{os.path.basename(plate)}.png")
+    print(json.dumps({k: spec.get(k) for k in ("kind", "width", "height", "frames", "fps", "color_space_guess")}))
+    return hero, spec
+
+
+def inputs(hero, tool, box, size, tag):
+    """What the page uploads: base, reference and mask at one size."""
+    w, h = size
+    base = Image.open(hero).convert("RGB").resize((w, h), Image.LANCZOS)
+    x0, y0, x1, y1 = [int(v * s) for v, s in zip(box, (w, h, w, h))]
+    mask = Image.new("L", (w, h), 0); ImageDraw.Draw(mask).ellipse((x0, y0, x1, y1), fill=255)
+    ref = base.copy()
+    if tool == "erase":  # the hole is filled from its surroundings, so the model cannot copy the object back
+        ref = fill_hole(base, mask)
+    if tool == "paint":
+        ImageDraw.Draw(ref).ellipse((x0, y0, x1, y1), fill=(245, 120, 20))
+    elif tool == "light":
+        glow = Image.new("RGB", (w, h), (0, 0, 0)); ImageDraw.Draw(glow).ellipse((x0, y0, x1, y1), fill=(255, 170, 60))
+        ref = Image.fromarray(np.clip(np.asarray(ref, np.float32) + np.asarray(glow.filter(ImageFilter.GaussianBlur(w / 20)), np.float32), 0, 255).astype(np.uint8))
+        mask = Image.new("L", (w, h), 255)
+    sub = os.path.join(COMFY, "input", "bench"); os.makedirs(sub, exist_ok=True)
+    names = {}
+    for key, img in (("base", base), ("reference", ref), ("mask", mask)):
+        img.save(os.path.join(sub, f"{tag}_{key}.png")); names[key] = f"bench/{tag}_{key}.png"
+    return names, (x0, y0, x1, y1)
+
+
+def fill_hole(img, mask):
+    """Push-pull fill: average the known pixels at coarser and coarser scales, then paste them into the hole."""
+    a = np.asarray(img, np.float32) / 255.0
+    known = (np.asarray(mask, np.float32) < 128).astype(np.float32)[..., None]
+    levels, cur, w = [], a * known, known
+    while min(cur.shape[:2]) > 4:
+        levels.append((cur, w))
+        h2, w2 = cur.shape[0] // 2, cur.shape[1] // 2
+        cur = cur[:h2 * 2, :w2 * 2].reshape(h2, 2, w2, 2, 3).sum((1, 3))
+        w = w[:h2 * 2, :w2 * 2].reshape(h2, 2, w2, 2, 1).sum((1, 3))
+    fill = cur / np.maximum(w, 1e-6)
+    for c, wk in reversed(levels):
+        up = np.asarray(Image.fromarray((np.clip(fill, 0, 1) * 255).astype(np.uint8)).resize((c.shape[1], c.shape[0]), Image.BILINEAR), np.float32) / 255
+        fill = np.where(wk > 0, c / np.maximum(wk, 1e-6), up)
+    out = a * known + fill * (1 - known)
+    return Image.fromarray((np.clip(out, 0, 1) * 255).astype(np.uint8))
+
+
+def caption(tool, box, words):
+    bbox = [round(v * 1000) for v in (box[1], box[0], box[3], box[2])]
+    text = {"erase": "Fill the blurred patch inside <obj_1> with the background that continues around it, with matching detail, light and focus. Add no new object. Keep everything else unchanged.",
+            "paint": f"Replace the rough coloured drawing inside <obj_1> with {words}, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.",
+            "light": f"Relight the whole scene with {words} coming from <obj_1>, with physically consistent shadows and reflections. Keep the content, framing and textures unchanged."}[tool]
+    desc = {"erase": "area to clean", "paint": words, "light": "light source"}[tool]
+    return f"{text} {json.dumps([{'id': 'obj_1', 'bbox': bbox, 'desc': desc}])}"
+
+
+def edit(plate, cs, tool, box, words=""):
+    hero, spec = ingest(plate, cs)
+    work = fit(spec["width"], spec["height"], 1920, 64); prev = fit(spec["width"], spec["height"], 768, 16)
+    for klein in os.environ.get("KLEINS", "flux3-image-klein-int8-convrot.safetensors,flux3-image-klein-nvfp4.safetensors").split(","):
+        q = "int8" if "int8" in klein else "nvfp4"
+        names, _ = inputs(hero, tool, box, prev, f"{tool}_prev")
+        light = tool == "light"
+        base = dict(klein=klein, base=names["base"], reference=names["reference"],
+                    start=names["base"] if light else names["reference"], mask=names["mask"],
+                    caption=caption(tool, box, words), steps=8, denoise=0.65 if light else 1.0,
+                    grow=prev[0] // 48, feather=6, sigma=3)
+        for seed in (1, 2, 1):  # the third run is warm and cached text: the interactive case
+            outs, _, dt = run(fill("edit", {**base, "seed": seed}), f"preview {tool} {q} seed {seed}")
+            if outs:
+                Image.open(path_of(outs[0])).save(f"{BENCH}/{tool}_{q}_preview_s{seed}.png")
+        pick = f"{BENCH}/{tool}_{q}_preview_s1.png"
+        names_w, _ = inputs(hero, tool, box, work, f"{tool}_work")
+        start = os.path.join(COMFY, "input", "bench", f"{tool}_{q}_start.png")
+        Image.open(pick).resize(tuple(work), Image.LANCZOS).save(start)
+        outs, _, dt = run(fill("edit", {**base, "seed": 1, "steps": 16, "denoise": 0.35, "base": names_w["base"],
+                                        "reference": names_w["reference"],
+                                        "start": f"bench/{tool}_{q}_start.png", "mask": names_w["mask"],
+                                        "grow": work[0] // 48, "feather": 12, "sigma": 6}), f"refine {tool} {q}")
+        if outs:
+            Image.open(path_of(outs[0])).save(f"{BENCH}/{tool}_{q}_refined.png")
+
+
+def shot(plate, cs, hero, width, height, mode="replace"):
+    def prepend(p):
+        for node in p.values():
+            if node["class_type"] == "ImageFromBatch" and node["inputs"].get("batch_index") == 1:
+                node["inputs"]["batch_index"] = 0  # [hero, f0, f1, ...]; the latent length trims the extra frame
+    outs, _, dt = run(fill("shot", {"path": plate, "color_space": cs, "max_frames": 121, "hero": hero, "width": int(width),
+                                    "height": int(height), "seed": 7, "prefix": f"bench/shot_{mode}_{width}/f",
+                                    "video_prefix": f"bench/shot_{mode}_{width}"}, prepend if mode == "prepend" else None),
+                      f"shot {mode} {width}x{height}")
+    return outs
+
+
+def export(plate, cs, shot, matte_a, matte_b, relight="1"):
+    on = relight == "1"
+    run(fill("export", {"path": plate, "color_space": cs, "max_frames": 121, "shot": shot, "matte_a": matte_a, "matte_b": matte_b,
+                        "relight": on, "keep_untouched": not on, "prefix": f"bench/export_{int(time.time())}"}), f"export relight={on}")
+
+
+if __name__ == "__main__":
+    step, args = sys.argv[1], sys.argv[2:]
+    if step == "ingest":
+        ingest(*args)
+    elif step == "edit":
+        edit(args[0], args[1], args[2], [float(v) for v in args[3].split(",")], " ".join(args[4:]))
+    elif step == "shot":
+        shot(*args)
+    elif step == "export":
+        export(*args)

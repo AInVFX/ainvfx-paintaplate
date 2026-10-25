@@ -5,7 +5,7 @@
    "inputs": {
     "path": "",
     "max_frames": 121,
-    "pad_8n1": false
+    "pad_8n1": true
    }
   },
   "2": {

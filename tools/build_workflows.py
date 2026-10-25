@@ -65,7 +65,7 @@ def plate(g, pad, path="path"):
 def ingest():
     """Hero frame at working size, a playback proxy and the plate spec."""
     g = Graph()
-    load, srgb = plate(g, pad=False)
+    load, srgb = plate(g, pad=True)  # same inputs as every other Load Plate of the plate: decoded once, then cached
     first = g("ImageFromBatch", image=srgb, batch_index=0, length=1)
     hero = g("ImageScaleToMaxDimension", image=first, upscale_method="lanczos", largest_size=1920)
     g("SaveImage", images=hero, filename_prefix=Slot("prefix", "paintaplate/plate/hero"))
@@ -160,7 +160,7 @@ def matte():
 def export():
     """Full quality: the shot fitted onto the plate, relight optional, saved in the plate's format."""
     g = Graph()
-    load = g("PaintAPlate_LoadPlate", path=Slot("path", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
+    load = g("PaintAPlate_LoadPlate", path=Slot("path", ""), max_frames=Slot("max_frames", 121), pad_8n1=True)
     gen = g("PaintAPlate_LoadPlate", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
     erase = g("PaintAPlate_LoadPlate", path=Slot("matte_a", ""), max_frames=1024, pad_8n1=False)
     add = g("PaintAPlate_LoadPlate", path=Slot("matte_b", ""), max_frames=1024, pad_8n1=False)

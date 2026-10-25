@@ -116,10 +116,11 @@ def relight(plate: np.ndarray, source: np.ndarray, relit: np.ndarray,
     texture, grain and values above 1.0 stay its own.
     """
     guide = np.log(luma(source).clip(0) + 1e-3)
-    eps = 1e-3 * max(guide.var(), 1e-6)
-    ratio = (guided_filter(guide, relit[..., :3].clip(0), radius, eps) + 1e-4) / \
-            (guided_filter(guide, source[..., :3].clip(0), radius, eps) + 1e-4)
-    ratio = np.clip(ratio, 0.0, 16.0) ** strength
+    eps = 1e-2 * max(guide.var(), 1e-6)  # smooth enough that fine detail never enters the ratio
+    ratio = (guided_filter(guide, relit[..., :3].clip(0), radius, eps) + 1e-3) / \
+            (guided_filter(guide, source[..., :3].clip(0), radius, eps) + 1e-3)
+    ratio = ndimage.median_filter(ratio, size=(3, 3, 1))  # isolated specks at sharp edges go
+    ratio = np.clip(ratio, 0.2, 5.0) ** strength
     if ratio.shape[:2] != plate.shape[:2]:
         zoom = (plate.shape[0] / ratio.shape[0], plate.shape[1] / ratio.shape[1], 1)
         ratio = ndimage.zoom(ratio, zoom, order=1)[: plate.shape[0], : plate.shape[1]]

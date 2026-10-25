@@ -7,12 +7,14 @@ transfer a new light onto it. The heavy maths lives in mathops and plateio.
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
 import comfy.model_management as mm
+import comfy.utils
 import folder_paths
 from comfy_api.v0_0_2 import InputImpl, io, ui
 
@@ -103,8 +105,9 @@ class LoadPlate(io.ComfyNode):
         spec = plateio.probe_plate(full)
         if spec["kind"] == "video":  # core's decoder, trimmed before decoding
             parts = [InputImpl.VideoFromFile(full, duration=max_frames / spec["fps"]).get_components()]
-        else:
-            parts = [InputImpl.VideoFromFile(f).get_components() for f in spec["files"][:max_frames]]
+        else:  # frames decode in parallel: PyAV releases the GIL while decoding
+            with ThreadPoolExecutor(min(16, os.cpu_count() or 4)) as pool:
+                parts = list(pool.map(lambda f: InputImpl.VideoFromFile(f).get_components(), spec["files"][:max_frames]))
         images = torch.cat([p.images for p in parts])[:max_frames]
         if parts[0].alpha is not None:
             alpha = torch.cat([p.alpha[..., -1] for p in parts])[:max_frames]
@@ -153,14 +156,18 @@ class SavePlate(io.ComfyNode):
         if spec["kind"] == "video":
             writer = plateio.VideoWriter(spec, os.path.join(out_dir, os.path.basename(spec["source"])),
                                          audio_source=spec["source"])
+            bar = comfy.utils.ProgressBar(count)
             for frame in frames_np(images[:count]):
                 writer.write(frame)
+                bar.update(1)
             writer.close()
             written, notes = [writer.path], writer.notes
         else:
             has_alpha = alpha is not None
             codec, pix_fmt, options = plateio.still_target(spec, has_alpha)
+            bar = comfy.utils.ProgressBar(count)
             for i, rgb in enumerate(frames_np(images[:count])):
+                bar.update(1)
                 src = spec["files"][i]
                 out = plateio.output_frame_name(spec, i, out_dir)
                 a = alpha[i].float().cpu().numpy() if has_alpha else None
@@ -217,32 +224,42 @@ class FitToPlate(io.ComfyNode):
         if mask is None:
             mask = torch.zeros((n, h, w))
         mask = resize(mask[:n] if mask.shape[0] >= n else mask[:1].expand(n, -1, -1), h, w).clamp(0, 1)
-        rng = np.random.default_rng(0)
         scale = min(1.0, 512 / max(h, w))  # alignment runs on a small structure map
+        target = np.median([mathops.noise_sigma(f) for f in frames_np(plate[: n : max(1, n // 3)][:3])], 0)  # the plate's grain, once
+        reach = max(8, grow + feather) + 2 * feather
+        bar = comfy.utils.ProgressBar(n)
 
         def small(a):
             return mathops.ndimage.zoom(a, scale, order=1) if scale < 1 else a
 
-        out_img, out_mask = [], []
-        for p, g, m in zip(frames_np(plate[:n]), frames_np(image), frames_np(mask)):
+        def fit(args):
+            i, p, g, m = args
             if align:
                 keep = small(1.0 - m)
-                dy, dx = mathops.phase_shift(small(mathops.structure(p)) * keep,
-                                             small(mathops.structure(g)) * keep, max_shift * scale)
+                dy, dx = mathops.phase_shift(small(mathops.structure(p)) * keep, small(mathops.structure(g)) * keep, max_shift * scale)
                 if dy or dx:
                     g = mathops.ndimage.shift(g, (dy / scale, dx / scale, 0), order=1, mode="nearest")
-            if m.max() > 0:
+            ys, xs = np.nonzero(m > 0)
+            if len(ys):  # colour and grain only where the edit is, plus a margin
+                y0, y1 = max(0, ys.min() - reach), min(h, ys.max() + reach + 1)
+                x0, x1 = max(0, xs.min() - reach), min(w, xs.max() + reach + 1)
+                crop, gc = (slice(y0, y1), slice(x0, x1)), g[y0:y1, x0:x1]
                 if match_color:
-                    g = mathops.match_color(g, p, mathops.ring(m, max(8, grow + feather)))
+                    gc = mathops.match_color(gc, p[crop], mathops.ring(m[crop], max(8, grow + feather)))
                 if grain > 0:
-                    g = mathops.add_grain(g, mathops.noise_sigma(p), rng, grain)
+                    gc = mathops.add_grain(gc, target, np.random.default_rng(i), grain)
+                g = g.copy()
+                g[crop] = gc
             if grow:
                 m = (mathops.ndimage.distance_transform_edt(m < 0.5) <= grow).astype(np.float32)
             if feather:
                 m = mathops.ndimage.gaussian_filter(m, feather / 2.0)
-            out_img.append(g.astype(np.float32))
-            out_mask.append(np.clip(m, 0, 1).astype(np.float32))
-        return io.NodeOutput(to_image(out_img), to_image(out_mask))
+            bar.update(1)
+            return g.astype(np.float32), np.clip(m, 0, 1).astype(np.float32)
+
+        with ThreadPoolExecutor(min(16, os.cpu_count() or 4)) as pool:  # numpy and scipy release the GIL
+            done = list(pool.map(fit, zip(range(n), frames_np(plate[:n]), frames_np(image), frames_np(mask))))
+        return io.NodeOutput(to_image([d[0] for d in done]), to_image([d[1] for d in done]))
 
 
 class RelightTransfer(io.ComfyNode):
@@ -270,13 +287,22 @@ class RelightTransfer(io.ComfyNode):
     @classmethod
     def execute(cls, plate, source, relit, radius, strength, align) -> io.NodeOutput:
         n = min(plate.shape[0], source.shape[0], relit.shape[0])
-        out = []
-        for p, s, r in zip(frames_np(plate[:n]), frames_np(source[:n]), frames_np(relit[:n])):
+        bar = comfy.utils.ProgressBar(n)
+
+        def one(args):
+            p, s, r = args
             if align:
                 dy, dx = mathops.phase_shift(mathops.structure(s), mathops.structure(r), 8.0)
                 if dy or dx:
                     r = mathops.ndimage.shift(r, (dy, dx, 0), order=1, mode="nearest")
-            out.append(mathops.relight(p, s, r, radius, strength).astype(np.float32))
+            half = (0.5, 0.5, 1)  # light is smooth: its ratio is computed at half size, then upsampled
+            out = mathops.relight(p, mathops.ndimage.zoom(s, half, order=1), mathops.ndimage.zoom(r, half, order=1),
+                                  max(1, radius // 2), strength)
+            bar.update(1)
+            return out.astype(np.float32)
+
+        with ThreadPoolExecutor(min(16, os.cpu_count() or 4)) as pool:
+            out = list(pool.map(one, zip(frames_np(plate[:n]), frames_np(source[:n]), frames_np(relit[:n]))))
         return io.NodeOutput(to_image(out))
 
 

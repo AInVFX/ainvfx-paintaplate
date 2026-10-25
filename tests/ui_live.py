@@ -62,7 +62,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--comfy", required=True); ap.add_argument("--python", default=sys.executable)
     ap.add_argument("--port", type=int, default=8190)
+    ap.add_argument("--url", default="", help="a running ComfyUI with the real workflows and models (no stand-ins)")
+    ap.add_argument("--path", default="", help="plate path in that ComfyUI's input folder, typed into the open dialog")
+    ap.add_argument("--cs", default="linear")
+    ap.add_argument("--strokes", default="", help='JSON list of [key, words, [[x, y], ...], pick]')
+    ap.add_argument("--timeout", type=int, default=150)
     a = ap.parse_args()
+    if a.url:
+        return remote(a)
     temp = "/tmp/paintaplate_dry"
     shutil.rmtree(temp, ignore_errors=True)
     shutil.copytree(REPO, temp, ignore=shutil.ignore_patterns("__pycache__", ".git", "tests"))
@@ -143,6 +150,57 @@ def main():
         print("  console:", e[:300])
     print("UI FLOW PASSED" if ok and exports and not errors else "UI FLOW FAILED")
     return 0 if ok and exports and not errors else 1
+
+
+def remote(a):
+    """The real page, workflows and models on a remote ComfyUI: timings for each stage."""
+    import json
+    shutil.rmtree(SHOTS, ignore_errors=True); os.makedirs(SHOTS)
+    strokes = json.loads(a.strokes) if a.strokes else [["b", "a small campfire", [[0.45, 0.8], [0.5, 0.75], [0.55, 0.8]], "1"]]
+    marks, errors, t0 = [], [], time.time()
+    mark = lambda what: (marks.append((round(time.time() - t0, 1), what)), print(f"{marks[-1][0]:7.1f} s  {what}"))  # noqa: E731
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.on("console", lambda m: m.type == "error" and errors.append(m.text))
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        status = lambda: page.inner_text("#status")  # noqa: E731
+        try:
+            page.goto(f"{a.url}/extensions/ainvfx-paintaplate/paintaplate.html")
+            page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
+            mark("page ready: " + status())
+            page.click("#open-btn"); page.fill("#path", a.path); page.select_option("#cs", a.cs); page.click("#open-go")
+            page.wait_for_function("document.querySelector('#empty').hidden", timeout=300000)
+            mark("plate open: " + page.inner_text("#spec")); page.screenshot(path=f"{SHOTS}/1_open.png")
+            box = page.locator("#view").bounding_box()
+            for key, words, pts, pick in strokes:
+                page.keyboard.press(key); page.fill("#prompt", words)
+                stroke(page, box, pts); mark(f"{key} stroke")
+                page.wait_for_function("[...document.querySelectorAll('.option img')].some(i => i.src)", timeout=120000)
+                mark(f"{key} first image in a tile")
+                page.wait_for_function("document.querySelectorAll('.option.ready').length === 2", timeout=180000)
+                mark(f"{key} both options ready"); page.screenshot(path=f"{SHOTS}/2_{key}_options.png")
+                n = page.locator("#stack li").count(); page.keyboard.press(pick)
+                page.wait_for_function(f"document.querySelectorAll('#stack li').length === {n + 1}", timeout=240000)
+                mark(f"{key} committed"); page.screenshot(path=f"{SHOTS}/3_{key}_committed.png")
+            seen = set()
+            deadline = time.time() + a.timeout * 6
+            while time.time() < deadline:
+                st = status()
+                tag = st.split(",")[0]
+                if tag not in seen:
+                    seen.add(tag); mark("status: " + st)
+                if st.startswith("Exported") or "Error" in st or ":" in tag and "Exported" not in st and "ready" not in st and "Missing" in st:
+                    break
+                time.sleep(1)
+            page.click("#view-shot"); time.sleep(2); page.screenshot(path=f"{SHOTS}/4_shot.png")
+        except Exception as exc:
+            mark(f"FAILED: {type(exc).__name__}: {str(exc).splitlines()[0][:160]} | status: {status()}")
+            page.screenshot(path=f"{SHOTS}/fail.png")
+        browser.close()
+    json.dump({"marks": marks, "errors": errors}, open(f"{SHOTS}/timings.json", "w"), indent=1)
+    print("console errors:", errors[:5])
+    return 0
 
 
 if __name__ == "__main__":

@@ -145,6 +145,24 @@ function overlay(size) {
   return c;
 }
 
+function fillHole(size) { // push-pull: the erased area takes coarser and coarser averages of its surroundings
+  let level = snap(S.hero, size);
+  const cut = level.getContext("2d");
+  cut.globalCompositeOperation = "destination-out";
+  cut.drawImage(mask, 0, 0, size[0], size[1]);
+  const pyramid = [level];
+  while (Math.min(level.width, level.height) > 8) pyramid.push(level = snap(level, [Math.ceil(level.width / 2), Math.ceil(level.height / 2)]));
+  pyramid.push(snap(level, [level.width, level.height], "#808080")); // an opaque base under the coarsest level
+  for (let i = pyramid.length - 2; i >= 0; i--) {
+    const x = pyramid[i].getContext("2d");
+    x.globalCompositeOperation = "destination-over";
+    x.drawImage(pyramid[i + 1], 0, 0, pyramid[i].width, pyramid[i].height);
+  }
+  return pyramid[0];
+}
+
+const editImage = (e, size) => (e.tool === "erase" ? fillHole(size) : overlay(size)); // what Klein sees
+
 function heroInput(size) {
   const key = `${S.heroVersion}:${size}`;
   return (S.heroInputs[key] ??= blob(snap(S.hero, size)).then((b) => upload(b, `hero_${key.replace(/\W/g, "_")}.png`)));
@@ -162,6 +180,8 @@ function bounds() { // painted area as FLUX 3 box coordinates: [y_min, x_min, y_
   return x1 < 0 ? [0, 0, 1000, 1000] : [y0 / c.height, x0 / c.width, (y1 + 1) / c.height, (x1 + 1) / c.width].map((v) => Math.round(v * 1000));
 }
 
+const dark = (hex) => [1, 3, 5].reduce((a, i, k) => a + [0.2126, 0.7152, 0.0722][k] * parseInt(hex.slice(i, i + 2), 16), 0) < 60;
+
 function colorName(hex) {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
@@ -173,9 +193,9 @@ function colorName(hex) {
 function caption(e) { // the same text and table FLUX 3 Image Layout Prompt writes, built here per stroke
   const words = e.prompt?.trim();
   const text = {
-    erase: "Remove everything inside <obj_1> and show what is hidden behind it, continuing the surrounding background. Keep everything else unchanged.",
+    erase: "Fill the blurred patch inside <obj_1> with the background that continues around it, with matching detail, light and focus. Add no new object. Keep everything else unchanged.",
     paint: `Replace the rough coloured drawing inside <obj_1> with ${words || "a realistic object of that shape and colour"}, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.`,
-    light: `Relight the whole scene with ${words || `${colorName(e.color)} light`} coming from <obj_1>, with matching shadows and reflections. Keep the content, framing and textures unchanged.`,
+    light: `Relight the whole scene with ${words || `${colorName(e.strokes.find((s) => !dark(s.color))?.color ?? e.color)} light`} coming from <obj_1>, with physically consistent shadows and reflections.${e.strokes.some((s) => dark(s.color)) ? " Dark strokes are hints of where shadows fall: make every shadow agree with the light." : ""} Keep the content, framing and textures unchanged.`,
   }[e.tool];
   const desc = { erase: "area to clean", paint: words || "the drawn object", light: "light source" }[e.tool];
   return `${text} ${JSON.stringify([{ id: "obj_1", bbox: bounds(), desc }])}`;
@@ -248,7 +268,7 @@ function draw(s, from = 0) {
     if (s.tool === "restore") { erase(pc, px, py, x, y, r); erase(mc, px, py, x, y, r); continue; }
     line(mc, px, py, x, y, r, "#fff");
     if (s.tool === "paint") line(pc, px, py, x, y, r, s.color);
-    if (s.tool === "light") glow(pc, x, y, r * 2.5, s.color);
+    if (s.tool === "light") dark(s.color) ? line(pc, px, py, x, y, r, "#000000a0") : glow(pc, x, y, r * 2.5, s.color);
   }
 }
 
@@ -304,7 +324,7 @@ async function previews() {
   tiles();
   const size = S.plate.prev, light = e.tool === "light";
   const base = await heroInput(size);
-  const reference = e.tool === "erase" ? base : await upload(await blob(overlay(size)), "reference.png");
+  const reference = await upload(await blob(editImage(e, size)), "reference.png");
   const values = { base, reference, start: light ? base : reference, caption: caption(e), steps: 8,
     mask: await upload(await blob(maskAt(size, light)), "mask.png"), denoise: light ? 0.65 : 1,
     grow: Math.round(size[0] / 48), feather: 6, sigma: 3 };
@@ -327,7 +347,7 @@ async function refine(e, i, kind = "refine") { // the picked option at working s
   const start = await upload(await blob(snap(await loadImage(url(e.options[i])), size)), `start_${i}.png`);
   const base = await heroInput(size);
   const out = await run("edit", { base, start, caption: caption(e), seed: e.seed + i, steps: 16, denoise: 0.35,
-    reference: e.tool === "erase" ? base : await upload(await blob(overlay(size)), "reference_full.png"),
+    reference: await upload(await blob(editImage(e, size)), "reference_full.png"),
     mask: await upload(await blob(maskAt(size, light)), "mask_full.png"),
     grow: Math.round(size[0] / 48), feather: 12, sigma: 6 }, { kind }).done;
   return files(out)[0];
@@ -393,21 +413,25 @@ function idle() {
   } else if (!e && S.shotDirty && S.stack.length) shot().catch(quiet);
 }
 
-async function shot() {
+async function shot() { // half size to watch soon, then full size for the export, both in idle time
   S.shotDirty = false;
   cancel("shot", "matte", "export");
-  const p = S.plate, base = `paintaplate/${p.id}/r${++S.run}`, [width, height] = p.shotSize;
-  const common = { path: p.path, color_space: p.cs, max_frames: p.frames };
+  const p = S.plate, base = `paintaplate/${p.id}/v${++S.run}`, [width, height] = p.shotSize;
+  const common = { path: p.path, color_space: p.cs, max_frames: p.frames, hero: S.stack.at(-1).input, seed: S.stack[0].seed };
   const pct = (label) => (f) => status(`${label}, ${Math.round(f * 100)}%`);
-  const out = await run("shot", { ...common, width, height, hero: S.stack.at(-1).input, seed: S.stack[0].seed,
-    prefix: `${base}/shot/f`, video_prefix: `${base}/preview` }, { kind: "shot", progress: pct("Rendering the shot") }).done;
-  S.shot = url(files(out).find(isVideo));
-  player.src = S.shot;
-  $("#view-shot").disabled = false;
-  status("Shot preview ready: click Shot to watch it. Tracking and export carry on.");
+  const watch = (out) => { player.src = S.shot = url(files(out).find(isVideo)); $("#view-shot").disabled = false; };
+  watch(await run("shot", { ...common, width, height, prefix: `${base}/shot/f`, video_prefix: `${base}/preview` },
+    { kind: "shot", progress: pct("Rendering the shot preview") }).done);
+  let final = `output:${base}/shot`;
+  if (width !== p.work[0]) {
+    status("Shot preview ready: click Shot to watch it. The full-size shot renders next.");
+    watch(await run("shot", { ...common, width: p.work[0], height: p.work[1], prefix: `${base}/full/f`, video_prefix: `${base}/full` },
+      { kind: "shot", progress: pct("Rendering the shot at full size") }).done);
+    final = `output:${base}/full`;
+  }
   const mattes = {};
   for (const [key, tool, path, cs, label] of [["matte_a", "erase", p.path, p.cs, "Tracking the erased areas"],
-    ["matte_b", "paint", `output:${base}/shot`, "sRGB", "Tracking the new elements"]]) {
+    ["matte_b", "paint", final, "sRGB", "Tracking the new elements"]]) {
     const edits = S.stack.filter((e) => e.tool === tool);
     if (!edits.length) continue;
     const union = canvas(p.shotSize), u = union.getContext("2d");
@@ -419,9 +443,9 @@ async function shot() {
   }
   const relight = S.stack.some((e) => e.tool === "light");
   const a = mattes.matte_a ?? mattes.matte_b, b = mattes.matte_b ?? mattes.matte_a;
-  const done = await run("export", { ...common, shot: `output:${base}/shot`, matte_a: a ?? "", matte_b: b ?? "",
-    relight, keep_untouched: !relight, prefix: `${base}/export` }, { kind: "export", progress: pct("Exporting at full quality"),
-    edit: (wf) => { if (!a) dropMattes(wf); } }).done;
+  const done = await run("export", { path: p.path, color_space: p.cs, max_frames: p.frames, shot: final, matte_a: a ?? "",
+    matte_b: b ?? "", relight, keep_untouched: !relight, prefix: `${base}/export` }, { kind: "export",
+    progress: pct("Exporting at full quality"), edit: (wf) => { if (!a) dropMattes(wf); } }).done;
   S.exported = texts(done)[0] ?? "";
   $("#export-btn").disabled = false;
   status(`Exported: ${S.exported.split("\n")[0]}`);
