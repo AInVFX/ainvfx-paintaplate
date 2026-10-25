@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Standalone setup of a PaintAPlate GPU machine (tested on a Runpod RTX PRO 6000).
-#   HF_TOKEN=... bash pod_setup.sh [comfyui_ref] [ltxvideo_ref]
+#   HF_TOKEN=... bash tools/pod_setup.sh [comfyui_ref] [ltxvideo_ref]
+# The refs default to the tested commits. The pack is the repo this script lives in.
 # Code, models and pins live in $WORKDIR (a network volume survives the pod); the Python env
 # goes on the fast container disk. Accept the Hugging Face licences of FLUX 3 Image Klein,
 # LTX 2.5 and SAM 3.1 first: the downloads use your token.
 set -euo pipefail
 W=${WORKDIR:-/workspace}; VENV=${VENV:-/opt/venv}
-COMFY_REF=${1:-master}; LTX_REF=${2:-master}
+COMFY_REF=${1:-${COMFY_REF:-19ae172b}}; LTX_REF=${2:-${LTX_REF:-220e1d4}}
+PACK=${PACK:-$(cd "$(dirname "$0")/.." && pwd)}
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 
 log "python env"
@@ -23,7 +25,9 @@ get() { # repo, file in repo, target folder
 }
 SAM=$(python -c "from huggingface_hub import list_repo_files as l; print(next(f for f in l('Comfy-Org/sam3.1') if f.endswith('sam3.1_multiplex_fp16.safetensors')))")
 ( get black-forest-labs/flux-3-image-klein-comfy diffusion_models/flux3-image-klein-int8-convrot.safetensors diffusion_models &
-  get black-forest-labs/flux-3-image-klein-comfy diffusion_models/flux3-image-klein-nvfp4.safetensors diffusion_models &
+  if [ "${WITH_NVFP4:-0}" = 1 ]; then  # only tests/gpu_bench.py compares it
+    get black-forest-labs/flux-3-image-klein-comfy diffusion_models/flux3-image-klein-nvfp4.safetensors diffusion_models &
+  fi
   get black-forest-labs/flux-3-image-klein-comfy text_encoders/qwen3vl_4b_int8_convrot.safetensors text_encoders &
   get black-forest-labs/flux-3-image-klein-comfy vae/flux2-vae.safetensors vae &
   get Lightricks/LTX-2.5 diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors diffusion_models &
@@ -60,5 +64,10 @@ cd custom_nodes
 )
 
 log "PaintAPlate"
-rm -rf ainvfx-paintaplate && cp -r "$W/pack/ainvfx-paintaplate" . && uv pip install -q -r ainvfx-paintaplate/requirements.txt
+dst="$W/ComfyUI/custom_nodes/ainvfx-paintaplate"
+if [ "$PACK" != "$dst" ]; then
+  [ -L "$dst" ] || rm -rf "$dst"  # an older copy is replaced by a link to this repo
+  ln -sfn "$PACK" "$dst"
+fi
+uv pip install -q -r "$PACK/requirements.txt"
 cat "$W/pins.txt"; log "setup done"
