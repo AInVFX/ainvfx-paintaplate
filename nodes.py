@@ -1,8 +1,9 @@
-"""The four PaintAPlate nodes. Each one fills a gap in core ComfyUI.
+"""The five PaintAPlate nodes. Each one fills a gap in core ComfyUI.
 
-Colour conversion, compositing, masks, Klein, LTX and SAM 3 stay in core nodes:
-these nodes only load and save plates, fit generated frames to the plate, and
-transfer a new light onto it. The heavy maths lives in mathops and plateio.
+Colour conversion, compositing, masks, Klein, LTX and SAM 3 stay in core nodes: these nodes only
+load and save plates, fit generated frames to the plate, transfer a new light onto it and fill an
+erased object in the frames LTX follows. Each node converts tensors and calls plateio (files) or
+mathops (pixels), which are tested without torch or ComfyUI.
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ from comfy_api.v0_0_2 import InputImpl, io, ui
 from . import mathops, plateio
 
 Plate = io.Custom("PAINTAPLATE_PLATE")
+WORKERS = min(16, os.cpu_count() or 4)  # frames in parallel: numpy, scipy and PyAV release the GIL
 CATEGORY = "AInVFX/PaintAPlate"
 COLOR_SPACES = ["sRGB", "HDR", "HDR ACEScct", "HDR LogC3", "HDR PQ", "linear", "linear ACEScg"]
 
@@ -41,6 +43,15 @@ def resolve(path: str) -> str:
     full = os.path.abspath(os.path.join(root, rel))
     if os.path.commonpath([full, os.path.abspath(root)]) != os.path.abspath(root):
         raise ValueError(f"Plate path leaves the ComfyUI folders: {path}")
+    return full
+
+
+def output_folder(prefix: str) -> str:
+    """A folder under ComfyUI's output folder, never outside it (as core Save Image refuses too)."""
+    root = os.path.abspath(folder_paths.get_output_directory())
+    full = os.path.abspath(os.path.join(root, prefix))
+    if os.path.commonpath([full, root]) != root:
+        raise ValueError(f"Saving outside the output folder is not allowed: {prefix}")
     return full
 
 
@@ -115,7 +126,7 @@ class LoadPlate(io.ComfyNode):
                 part = InputImpl.VideoFromFile(f).get_components()
                 bar.update(1)
                 return part
-            with ThreadPoolExecutor(min(16, os.cpu_count() or 4)) as pool:
+            with ThreadPoolExecutor(WORKERS) as pool:
                 parts = list(pool.map(read, files))
         images = torch.cat([p.images for p in parts])[:max_frames]
         if parts[0].alpha is not None:
@@ -146,7 +157,8 @@ class SavePlate(io.ComfyNode):
             inputs=[
                 io.Image.Input("images", tooltip="Frames in the plate's colour space."),
                 Plate.Input("plate"),
-                io.String.Input("filename_prefix", default="paintaplate/shot"),
+                io.String.Input("filename_prefix", default="paintaplate/shot",
+                                tooltip="Folder under ComfyUI's output folder; the frames keep the plate's names."),
                 io.Boolean.Input("keep_untouched", default=True,
                                  tooltip="Copy the source pixels wherever 'changed' is zero. "
                                          "Turn off when every pixel changed, as after a relight."),
@@ -158,7 +170,7 @@ class SavePlate(io.ComfyNode):
     @classmethod
     def execute(cls, images, plate, filename_prefix, keep_untouched, changed=None, alpha=None) -> io.NodeOutput:
         spec = plate
-        out_dir = os.path.join(folder_paths.get_output_directory(), filename_prefix)
+        out_dir = output_folder(filename_prefix)
         os.makedirs(out_dir, exist_ok=True)
         count = min(images.shape[0], spec["frames"])
         written, notes = [], []
@@ -242,7 +254,7 @@ class FitToPlate(io.ComfyNode):
         images, out = mathops.fit_to_plate(
             n, h, w, lambda i: plate[i].float().cpu().numpy(), lambda i: image[i].float().cpu().numpy(), masks,
             align=align, max_shift=max_shift, match_color=match_color, grain=grain, grow=grow, feather=feather,
-            steady=steady, workers=min(16, os.cpu_count() or 4), progress=lambda: bar.update(1))
+            steady=steady, workers=WORKERS, progress=lambda: bar.update(1))
         return io.NodeOutput(to_image(images), to_image(out))
 
 
@@ -274,18 +286,11 @@ class RelightTransfer(io.ComfyNode):
         bar = comfy.utils.ProgressBar(n)
 
         def one(args):
-            p, s, r = args
-            if align:
-                dy, dx = mathops.phase_shift(mathops.structure(s), mathops.structure(r), 8.0)
-                if dy or dx:
-                    r = mathops.ndimage.shift(r, (dy, dx, 0), order=1, mode="nearest")
-            half = (0.5, 0.5, 1)  # light is smooth: its ratio is computed at half size, then upsampled
-            out = mathops.relight(p, mathops.ndimage.zoom(s, half, order=1), mathops.ndimage.zoom(r, half, order=1),
-                                  max(1, radius // 2), strength)
+            out = mathops.relight_frame(*args, radius, strength, align)
             bar.update(1)
-            return out.astype(np.float32)
+            return out
 
-        with ThreadPoolExecutor(min(16, os.cpu_count() or 4)) as pool:
+        with ThreadPoolExecutor(WORKERS) as pool:
             out = list(pool.map(one, zip(frames_np(plate[:n]), frames_np(source[:n]), frames_np(relit[:n]))))
         return io.NodeOutput(to_image(out))
 
@@ -317,22 +322,13 @@ class FillMatte(io.ComfyNode):
         n, h, w = images.shape[:3]
         masks = resize(mask[:n] if mask.shape[0] >= n else torch.cat([mask, mask[-1:].expand(n - mask.shape[0], -1, -1)]), h, w)
         bar = comfy.utils.ProgressBar(n)
-        r = int(grow)
 
         def one(args):
-            img, m = args
-            if r:
-                m = mathops.ndimage.grey_dilation(m, size=(2 * r + 1, 2 * r + 1))
-            if feather:
-                m = mathops.ndimage.gaussian_filter(m, feather / 2.0)
-            m = np.clip(m, 0.0, 1.0)
-            filled = mathops.push_pull(img[..., :3], (m < 0.02).astype(np.float32))
-            out = img.copy()
-            out[..., :3] = img[..., :3] * (1 - m[..., None]) + filled * m[..., None]
+            out = mathops.fill_hole(*args, grow, feather)
             bar.update(1)
-            return out.astype(np.float32)
+            return out
 
-        with ThreadPoolExecutor(min(16, os.cpu_count() or 4)) as pool:
+        with ThreadPoolExecutor(WORKERS) as pool:
             out = list(pool.map(one, zip(frames_np(images), frames_np(masks))))
         return io.NodeOutput(to_image(out))
 

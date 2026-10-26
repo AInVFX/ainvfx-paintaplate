@@ -356,14 +356,13 @@ async def ws_route(request):
 
 
 def download_routes():
-    """The pack's own routes.py, with ComfyUI's two modules stubbed."""
+    """The pack's own routes.py, with ComfyUI's folder_paths stubbed."""
     fp = types.ModuleType("folder_paths")
     fp.get_output_directory = lambda: folder("output")
-    srv = types.ModuleType("server")
-    srv.PromptServer = types.SimpleNamespace(instance=types.SimpleNamespace(routes=web.RouteTableDef()))
-    sys.modules.update(folder_paths=fp, server=srv)
-    importlib.import_module("routes")  # registers its route on the stub
-    return srv.PromptServer.instance.routes
+    sys.modules["folder_paths"] = fp
+    server = types.SimpleNamespace(routes=web.RouteTableDef())
+    importlib.import_module("routes").setup(server)
+    return server.routes
 
 
 async def start():

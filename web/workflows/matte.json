@@ -92,6 +92,9 @@
    "detection_threshold": 0.5,
    "max_objects": 4,
    "detect_interval": 1
+  },
+  "_meta": {
+   "progress": true
   }
  },
  "7": {

@@ -4,3 +4,4 @@ av
 OpenEXR>=3.3
 pillow
 pyflakes
+aiohttp

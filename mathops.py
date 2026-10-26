@@ -1,17 +1,22 @@
-"""Small numpy helpers that fit generated pixels back onto the plate.
+"""The numpy maths behind the nodes: fitting generated frames to the plate, filling, relighting.
 
-Each function works on one frame, (H, W, C) float arrays, so it is easy to test.
+Frames are (H, W, C) float arrays and masks (H, W); stacks add a first axis. Nothing here imports
+torch or ComfyUI, so every function is tested in plain Python (tests/test_mathops.py).
 """
 from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from scipy import ndimage
 
-REC709 = np.array([0.2126, 0.7152, 0.0722], np.float32)
+MASK_SIDE = 480  # fit_to_plate works on masks and colour fields of about this long side, then enlarges them
+ALIGN_SIDE = 512  # and measures alignment at about this one
 
 
 def luma(img: np.ndarray) -> np.ndarray:
-    return img[..., :3] @ REC709
+    """Rec. 709 luma. A weighted sum, not a matrix product: no BLAS threads inside worker threads."""
+    return 0.2126 * img[..., 0] + 0.7152 * img[..., 1] + 0.0722 * img[..., 2]
 
 
 def structure(img: np.ndarray, sigma: float = 8.0) -> np.ndarray:
@@ -46,24 +51,6 @@ def phase_shift(ref: np.ndarray, img: np.ndarray, max_shift: float) -> tuple[flo
     return float(dy), float(dx)
 
 
-def ring(mask: np.ndarray, width: int) -> np.ndarray:
-    """Pixels just outside a mask: where plate and generated pixels must agree."""
-    inside = mask > 0.5
-    dist = ndimage.distance_transform_edt(~inside)
-    return (dist > 0) & (dist <= width)
-
-
-def match_color(img: np.ndarray, plate: np.ndarray, band: np.ndarray) -> np.ndarray:
-    """Match exposure and white balance to the plate over the ring `band`: one gain per channel, clamped.
-    Contrast is never scaled, so a new object with strong contrast cannot turn into a ghost."""
-    if band.sum() < 64:
-        return img
-    gain = np.median(plate[band][:, :3].clip(1e-4), 0) / np.median(img[band][:, :3].clip(1e-4), 0)
-    out = img.copy()
-    out[..., :3] *= np.clip(gain, 0.8, 1.25)
-    return out
-
-
 def noise_sigma(img: np.ndarray) -> np.ndarray:
     """Per-channel grain level: robust spread of the fine detail in flat areas."""
     sig = np.zeros(3, np.float32)
@@ -74,20 +61,6 @@ def noise_sigma(img: np.ndarray) -> np.ndarray:
         v = detail[keep]
         sig[c] = 1.4826 * np.median(np.abs(v - np.median(v)))
     return sig
-
-
-def add_grain(img: np.ndarray, target: np.ndarray, rng: np.random.Generator,
-              strength: float = 1.0) -> np.ndarray:
-    """Top up the grain of `img` to the `target` per-channel level."""
-    missing = np.sqrt(np.maximum(target**2 - noise_sigma(img) ** 2, 0.0)) * strength
-    if not np.any(missing > 0):
-        return img
-    noise = rng.standard_normal(img.shape[:2] + (3,)).astype(np.float32)
-    noise = ndimage.gaussian_filter(noise, (0.6, 0.6, 0))  # soft grain, not pixel noise
-    # Scale by how the estimator sees this grain, so measured levels match.
-    out = img.copy()
-    out[..., :3] += noise * (missing / np.maximum(noise_sigma(noise), 1e-6))
-    return out
 
 
 def add_grain_level(img: np.ndarray, level: np.ndarray, rng: np.random.Generator) -> np.ndarray:
@@ -165,14 +138,36 @@ def steady_masks(masks: np.ndarray, radius: int, grow: float, feather: float) ->
     span = 2 * radius + 1
     if radius > 0 and len(m) > 1:
         m = ndimage.maximum_filter1d(m, span, axis=0, mode="nearest")
-    if grow > 0:  # two running maxima, along rows then columns: as fast at 50 px as at 5 (the feather rounds the corners)
-        size = 2 * int(np.ceil(grow)) + 1
-        m = ndimage.maximum_filter1d(ndimage.maximum_filter1d(m, size, axis=2, mode="nearest"), size, axis=1, mode="nearest")
+    if grow > 0:
+        m = dilate(m, grow)
     if radius > 0 and len(m) > 1:
         m = ndimage.uniform_filter1d(m, span, axis=0, mode="nearest")
     if feather > 0:
         m = ndimage.gaussian_filter(m, (0, feather / 2.0, feather / 2.0))
     return np.clip(m, 0.0, 1.0)
+
+
+def dilate(m: np.ndarray, grow: float) -> np.ndarray:
+    """Grow a mask (or a stack of masks) by `grow` pixels: two running maxima, along rows then columns.
+
+    As fast at 60 px as at 6; the square corners it leaves are rounded by the feather that follows.
+    """
+    size = 2 * int(np.ceil(grow)) + 1
+    return ndimage.maximum_filter1d(ndimage.maximum_filter1d(m, size, axis=-1, mode="nearest"), size, axis=-2, mode="nearest")
+
+
+def fill_hole(img: np.ndarray, mask: np.ndarray, grow: float, feather: float) -> np.ndarray:
+    """`img` with the masked area, grown and softened, replaced by a smooth fill from the pixels around it."""
+    m = mask.astype(np.float32)
+    if grow > 0:
+        m = dilate(m, grow)
+    if feather > 0:
+        m = ndimage.gaussian_filter(m, feather / 2.0)
+    m = np.clip(m, 0.0, 1.0)
+    out = np.array(img, np.float32, copy=True)
+    filled = push_pull(out[..., :3], (m < 0.02).astype(np.float32))
+    out[..., :3] = out[..., :3] * (1 - m[..., None]) + filled * m[..., None]
+    return out
 
 
 def smooth_track(track: np.ndarray, radius: int) -> np.ndarray:
@@ -213,14 +208,13 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
     `steady` frames on each side, so nothing in the composite changes from one frame to the next unless
     the shot does. Masks and colour fields are computed at about 480 px, alignment at about 512 px.
     """
-    from concurrent.futures import ThreadPoolExecutor
-
     tick = progress or (lambda: None)
-    lo = max(1, round(max(h, w) / 480))
-    al = max(1, round(max(h, w) / 512))
+    lo = max(1, round(max(h, w) / MASK_SIDE))
+    al = max(1, round(max(h, w) / ALIGN_SIDE))
     hl, wl = max(1, h // lo), max(1, w // lo)
-    masks = np.asarray(masks, np.float32)
-    masks = np.repeat(masks[:1], n, 0) if len(masks) < n else masks[:n]
+    masks = np.asarray(masks, np.float32)[:n]
+    if len(masks) < n:  # a shorter matte holds its last frame
+        masks = np.concatenate([masks, np.repeat(masks[-1:], n - len(masks), 0)])
     small = np.stack([resize_to(m, hl, wl) for m in masks])
     small = steady_masks(small, steady, grow / lo, feather / lo)
     band = max(4.0, (grow + feather) / lo)
@@ -314,6 +308,21 @@ def relight(plate: np.ndarray, source: np.ndarray, relit: np.ndarray,
     out = plate.copy()
     out[..., :3] = plate[..., :3] * ratio
     return out
+
+
+def relight_frame(plate: np.ndarray, source: np.ndarray, relit: np.ndarray, radius: int, strength: float = 1.0,
+                  align: bool = True) -> np.ndarray:
+    """One frame of Relight Transfer: `relit` aligned to `source`, then its light moved onto `plate`.
+
+    The ratio of light is smooth, so it is computed at half the size of `source` and enlarged.
+    """
+    if align:
+        dy, dx = phase_shift(structure(source), structure(relit), 8.0)
+        if dy or dx:
+            relit = ndimage.shift(relit, (dy, dx, 0), order=1, mode="nearest")
+    half = (0.5, 0.5, 1)
+    return relight(plate, ndimage.zoom(source, half, order=1), ndimage.zoom(relit, half, order=1),
+                   max(1, radius // 2), strength).astype(np.float32)
 
 
 GRAIN_UNIT = _grain_unit()

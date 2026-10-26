@@ -2,7 +2,8 @@
 
 Each file is a plain ComfyUI workflow in API format, so ComfyUI opens it with Open or by drag
 and drop. The page fills some inputs before it posts a workflow: each node lists them in
-`_meta.slots` as {input name: slot name}, and the outputs the page reads carry `_meta.output`.
+`_meta.slots` as {input name: slot name}, the outputs the page reads carry `_meta.output`, and
+the node whose progress stands for the whole workflow carries `_meta.progress`.
 Every node is a core node, a ComfyUI-LTXVideo node or one of the five PaintAPlate nodes.
 
     python tools/build_workflows.py
@@ -38,7 +39,7 @@ class Graph:
     def __init__(self):
         self.prompt = {}
 
-    def __call__(self, cls, _title=None, _output=None, **inputs):
+    def __call__(self, cls, _title=None, _output=None, _progress=False, **inputs):
         nid = str(len(self.prompt) + 1)
         node = {"class_type": cls, "inputs": {}}
         meta, slots = {}, {}
@@ -54,6 +55,8 @@ class Graph:
             meta["slots"] = slots
         if _output:
             meta["output"] = _output
+        if _progress:
+            meta["progress"] = True
         if meta:
             node["_meta"] = meta
         self.prompt[nid] = node
@@ -79,6 +82,11 @@ def slots_of(prompt):
     return slots
 
 
+def progress_of(prompt):
+    """The ids of the nodes marked `_meta.progress`: the page shows their progress only."""
+    return [nid for nid, node in prompt.items() if node.get("_meta", {}).get("progress")]
+
+
 def outputs_of(prompt):
     """{output name: node id} from `_meta.output`."""
     return {node["_meta"]["output"]: nid for nid, node in prompt.items() if node.get("_meta", {}).get("output")}
@@ -91,23 +99,47 @@ def load(name, folder=None):
     return prompt, slots_of(prompt), outputs_of(prompt)
 
 
+# Optional links: when every source slot is left empty, the link goes, with every node that fed it
+# (no erase: nothing to fill before LTX; a relight alone: no matte to composite with or to save).
+OPTIONAL = {"hole_mask": ("hole",), "fit_mask": ("matte_a", "matte_b")}
+
+
+def drop_link(prompt, slots, link, sources, extra=()):
+    """Remove the input `link` names, the nodes its `sources` slots sit on, and every node fed only by them."""
+    for nid, key in slots.get(link, []):
+        prompt[nid]["inputs"].pop(key, None)
+    gone = {nid for source in sources for nid, _ in slots.get(source, [])} | set(extra)
+    grew = True
+    while grew:
+        grew = False
+        for nid, node in prompt.items():
+            if nid not in gone and any(isinstance(v, list) and str(v[0]) in gone for v in node["inputs"].values()):
+                gone.add(nid)
+                grew = True
+    for nid in gone:
+        prompt.pop(nid, None)
+
+
 def fill(name, values, folder=None):
-    """The prompt of a saved workflow with its slots set, as the page posts it."""
-    prompt, slots, _ = load(name, folder)
+    """The prompt of a saved workflow with its slots set and its unused optional links dropped, as the page posts it."""
+    prompt, slots, outputs = load(name, folder)
     for slot, value in values.items():
         for nid, key in slots.get(slot, []):
             prompt[nid]["inputs"][key] = value
+    for link, sources in OPTIONAL.items():
+        if link in slots and not any(values.get(source) for source in sources):
+            drop_link(prompt, slots, link, sources, [outputs["matte"]] if link == "fit_mask" and "matte" in outputs else [])
     return prompt
 
 
-def plate(g, pad, path="path"):
+def plate(g, pad, path="path", progress=False):
     """The plate as display-referred sRGB frames: Load Plate, then core colour conversion.
 
     Every workflow converts the same whole plate: core tone-maps SDR output with one peak per
     batch, so a different batch could change the exposure of an HDR plate between steps.
     """
-    load = g("PaintAPlate_LoadPlate", _title="Plate", path=Slot(path, ""), max_frames=Slot("max_frames", 121),
-             pad_8n1=pad)
+    load = g("PaintAPlate_LoadPlate", _title="Plate", _progress=progress, path=Slot(path, ""),
+             max_frames=Slot("max_frames", 121), pad_8n1=pad)
     srgb = g("ImageColorSpace", _title="Plate in sRGB", image=load[0], source=Slot("color_space", "sRGB"),
              destination="sRGB")
     return load, srgb
@@ -116,7 +148,7 @@ def plate(g, pad, path="path"):
 def ingest():
     """The first frame at working size, a playback proxy of the real frames, and the plate spec."""
     g = Graph()
-    load, srgb = plate(g, pad=True)  # same inputs as every other Load Plate of the plate: decoded once, then cached
+    load, srgb = plate(g, pad=True, progress=True)  # same inputs as every other Load Plate: decoded once, then cached
     first = g("ImageFromBatch", image=srgb, batch_index=0, length=1)
     hero = g("ImageScaleToMaxDimension", image=first, upscale_method="lanczos", largest_size=1920)
     g("SaveImage", _title="First frame", _output="hero", images=hero,
@@ -146,7 +178,7 @@ def edit():
             resolution="keep resolution", images__image0=reference)
     grown = g("GrowMask", mask=mask, expand=Slot("grow", 16), tapered_corners=True)
     latent = g("SetLatentNoiseMask", samples=g("VAEEncode", pixels=start, vae=vae), mask=grown)
-    sampled = g("KSampler", model=model, seed=Slot("seed", 0), steps=Slot("steps", 8), cfg=1.0,
+    sampled = g("KSampler", _progress=True, model=model, seed=Slot("seed", 0), steps=Slot("steps", 8), cfg=1.0,
                 sampler_name="euler", scheduler="simple", positive=ref[0], negative=ref[1],
                 latent_image=latent, denoise=Slot("denoise", 1.0))
     decoded = g("VAEDecode", samples=sampled, vae=vae)
@@ -200,7 +232,7 @@ def shot():
               image=reference, frame_idx=0, strength=1.0, latent_downscale_factor=1.0, crop="disabled",
               use_tiled_encode=False, tile_size=256, tile_overlap=64, use_streaming=False, tile_frames=97)
     audio = g("LTXVEmptyLatentAudio", audio_vae=audio_vae, frames_number=size[2], frame_rate=load[3], batch_size=1)
-    sampled = g("SamplerCustomAdvanced", noise=g("RandomNoise", noise_seed=Slot("seed", 0)),
+    sampled = g("SamplerCustomAdvanced", _progress=True, noise=g("RandomNoise", noise_seed=Slot("seed", 0)),
                 guider=g("CFGGuider", model=model, positive=guide[0], negative=guide[1], cfg=1.0),
                 sampler=g("KSamplerSelect", sampler_name="euler"),
                 sigmas=g("BasicScheduler", model=model, scheduler="simple", steps=Slot("steps", 8), denoise=1.0),
@@ -223,7 +255,7 @@ def matte():
     frames = g("ImageScale", image=srgb, upscale_method="area", width=Slot("width", 960),
                height=Slot("height", 544), crop="disabled")
     sam = g("CheckpointLoaderSimple", ckpt_name=Slot("sam", "sam3.1_multiplex_fp16.safetensors"))
-    track = g("SAM3_VideoTrack", images=frames, model=sam,
+    track = g("SAM3_VideoTrack", _progress=True, images=frames, model=sam,
               initial_mask=g("LoadImageMask", _title="Area on the first frame", image=Slot("mask", ""),
                              channel="red"),
               detection_threshold=0.5, max_objects=4, detect_interval=1)
@@ -243,7 +275,7 @@ def mattes(g):
 
 def fitted(g, base, gen, union):
     """Fit to Plate, then the composite: the edit over `base`, everything else untouched."""
-    fit = g("PaintAPlate_FitToPlate", plate=base, image=gen, mask=union, align=True, max_shift=8.0,
+    fit = g("PaintAPlate_FitToPlate", _progress=True, plate=base, image=gen, mask=union, align=True, max_shift=8.0,
             match_color=True, grain=Slot("grain", 1.0), grow=Slot("grow", 8), feather=Slot("feather", 12),
             steady=Slot("steady", 2))
     g.link_slot(fit, "mask", "fit_mask")  # the page drops this link when there is no matte

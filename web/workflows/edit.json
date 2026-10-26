@@ -199,7 +199,8 @@
     "seed": "seed",
     "steps": "steps",
     "denoise": "denoise"
-   }
+   },
+   "progress": true
   }
  },
  "15": {

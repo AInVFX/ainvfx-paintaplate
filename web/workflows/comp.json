@@ -236,7 +236,8 @@
     "feather": "feather",
     "steady": "steady",
     "mask": "fit_mask"
-   }
+   },
+   "progress": true
   }
  },
  "16": {

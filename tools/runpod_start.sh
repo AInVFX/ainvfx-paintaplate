@@ -3,6 +3,8 @@
 # In the pod's JupyterLab terminal:
 #   git clone https://github.com/AInVFX/ainvfx-paintaplate /workspace/ainvfx-paintaplate
 #   bash /workspace/ainvfx-paintaplate/tools/runpod_start.sh
+# After updating the code on a pod where ComfyUI already runs, --restart stops it first, so the new
+# nodes load:  cd /workspace/ainvfx-paintaplate && git pull && bash tools/runpod_start.sh --restart
 # When the pod cannot reach GitHub, upload the offline bundle instead (tools/offline_bundle.sh).
 # As a container's start command (process 1), it also starts Runpod's services and keeps the pod running.
 set -uo pipefail
@@ -16,6 +18,10 @@ if [ "$main" = 1 ] && [ -x /start.sh ]; then  # JupyterLab and SSH, as in Runpod
   /start.sh > "$W/runpod_services.log" 2>&1 &
 fi
 [ -n "${HF_TOKEN:-}" ] || log "HF_TOKEN is not set: the FLUX 3 Image Klein and LTX 2.5 downloads need it"
+if [ "${1:-}" = "--restart" ] && pkill -f "^$VENV/bin/python main.py"; then  # the pattern never matches this script
+  log "stopped the running ComfyUI"
+  for _ in $(seq 30); do curl -s -m 1 -o /dev/null http://127.0.0.1:8188/system_stats || break; sleep 1; done
+fi
 
 if curl -s -m 3 -o /dev/null http://127.0.0.1:8188/system_stats; then
   log "ComfyUI is already running: $APP"

@@ -11,7 +11,8 @@
    "slots": {
     "path": "path",
     "max_frames": "max_frames"
-   }
+   },
+   "progress": true
   }
  },
  "2": {

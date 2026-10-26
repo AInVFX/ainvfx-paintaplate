@@ -20,19 +20,35 @@ class MathOps(unittest.TestCase):
         assert abs(dy + 1.6) < 0.25 and abs(dx - 2.3) < 0.25, (dy, dx)
         print(f"phase shift under relight: ok ({dy:+.2f}, {dx:+.2f})")
 
-    def test_color_and_grain(self):
-        mask = np.zeros((H, W), np.float32); mask[40:90, 60:130] = 1
-        band = m.ring(mask, 12)
-        gen = base * np.array([0.9, 1.1, 0.85], np.float32)  # an exposure and white balance drift
-        fixed = m.match_color(gen, base, band)
-        assert np.abs(np.median(fixed[band], 0) - np.median(base[band], 0)).max() < 1e-3
-        wild = m.match_color(base * 3.0, base, band)  # a big mismatch is limited, never amplified
-        assert np.allclose(wild, base * 3.0 * 0.8, atol=1e-5)
+    def test_grain_level_and_seam(self):
         plate = base + rng.normal(0, 0.03, base.shape).astype(np.float32)
         sig = m.noise_sigma(plate)
-        grained = m.add_grain(base.copy(), sig, rng)
+        grained = m.add_grain_level(base.copy(), sig, rng)  # clean frames topped up to the plate's grain
         assert np.allclose(m.noise_sigma(grained), sig, rtol=0.35), (m.noise_sigma(grained), sig)
-        print("ring colour match and grain level: ok")
+        mask = np.zeros((H, W), np.float32); mask[40:90, 60:130] = 1
+        field = m.seam_field(base, base * np.array([0.9, 1.1, 0.85], np.float32), mask, 8.0)
+        gain = np.exp(field[65, 95])  # inside the mask, the field undoes the drift measured around it
+        assert np.abs(gain - [1 / 0.9, 1 / 1.1, 1 / 0.85]).max() < 0.02, gain
+        print("grain level and seam field: ok")
+
+    def test_fill_hole(self):
+        img = np.zeros((64, 96, 3), np.float32); img[..., 1] = np.linspace(0, 1, 96)[None, :]
+        img[20:44, 40:60] = [1, 0, 0]  # an object to fill
+        mask = np.zeros((64, 96), np.float32); mask[20:44, 40:60] = 1
+        out = m.fill_hole(img, mask, grow=3, feather=2)
+        assert out[32, 50, 0] < 0.05 and abs(out[32, 50, 1] - 50 / 95) < 0.08  # the green ramp continues through it
+        assert np.array_equal(out[:, :25], img[:, :25])  # far from the mask nothing moves
+        grown = m.dilate(mask, 4)
+        assert grown[16, 50] == 1 and grown[15, 50] == 0 and grown[32, 63] == 1  # 4 px on every side
+        print("fill hole and dilate: ok")
+
+    def test_relight_frame_aligns_first(self):
+        source = base
+        relit = ndimage.shift(base * 1.5, (1.4, -2.0, 0), order=3, mode="nearest")  # brighter and shifted
+        out = m.relight_frame(base, source, relit, radius=8, strength=1.0, align=True)
+        ratio = out[20:-20, 20:-20] / base[20:-20, 20:-20]
+        assert abs(np.median(ratio) - 1.5) < 0.05, np.median(ratio)
+        print(f"relight frame: ok (median ratio {np.median(ratio):.3f})")
 
     def test_relight_keeps_detail(self):
         plate = base * 3.0  # values above 1.0, like an EXR
@@ -80,6 +96,9 @@ class MathOps(unittest.TestCase):
         masks = np.stack(masks)
         out, mout = m.fit_to_plate(n, h, w, lambda i: plates[i], lambda i: gens[i], masks, grow=4, feather=8, steady=2,
                                    grain=1.0, workers=2)
+        _, short = m.fit_to_plate(n, h, w, lambda i: plates[i], lambda i: gens[i], masks[:3], grow=4, feather=8, steady=0,
+                                  grain=0, workers=2)  # a matte shorter than the plate holds its last frame
+        assert np.allclose(short[-1], short[2])
         comp = [mout[i][..., None] * out[i] + (1 - mout[i][..., None]) * plates[i] for i in range(n)]
         # 1. the matte edge holds still: frame-to-frame change of the mask, now and with the old per-frame mask
         old = [ndimage.gaussian_filter((ndimage.distance_transform_edt(mk < 0.5) <= 4).astype(np.float32), 4) for mk in masks]

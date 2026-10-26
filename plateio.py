@@ -26,8 +26,10 @@ import numpy as np
 
 try:
     import av
+    AVError = av.error.FFmpegError
 except ImportError:  # ComfyUI always ships PyAV; tests may not
     av = None
+    AVError = OSError
 
 try:
     import OpenEXR  # BSD-3-Clause; needed only to keep extra EXR layers
@@ -62,7 +64,7 @@ _PRORES_PROFILES = {"proxy": 0, "lt": 1, "standard": 2, "hq": 3, "4444": 4, "444
 
 
 # --------------------------------------------------------------------------
-# Sequences and spec
+# Sequences
 # --------------------------------------------------------------------------
 
 def frame_number(path: str) -> int | None:
@@ -117,10 +119,13 @@ def sequence_frames(folder: str) -> tuple[list[str], int, list[int]]:
     return files, step, missing
 
 
-def _fps_from_spec(fps) -> Fraction:
-    if isinstance(fps, Fraction):
-        return fps
-    return Fraction(float(fps or 24.0)).limit_denominator(100000)
+# --------------------------------------------------------------------------
+# Spec
+# --------------------------------------------------------------------------
+def _fps_fields(fps_hint) -> dict:
+    """The frame rate of a still plate, as a float and as an exact fraction."""
+    rate = fps_hint if isinstance(fps_hint, Fraction) else Fraction(float(fps_hint or 24.0)).limit_denominator(100000)
+    return {"fps": float(rate), "fps_num": rate.numerator, "fps_den": rate.denominator}
 
 
 def exr_info(path: str) -> dict:
@@ -186,7 +191,7 @@ def probe_still(path: str) -> dict:
                 vs = c.streams.video[0]
                 spec.update(pix_fmt=vs.codec_context.pix_fmt or "", width=vs.codec_context.width,
                             height=vs.codec_context.height, codec=vs.codec_context.name)
-        except Exception:
+        except (AVError, IndexError):  # a still PyAV cannot open keeps the empty fields
             pass
     return spec
 
@@ -198,9 +203,7 @@ def probe_plate(path: str, fps_hint: float = 24.0) -> dict:
         first = files[0]
         ext = os.path.splitext(first)[1].lower()
         spec = {"kind": "sequence", "source": path, "files": files, "ext": ext, "step": step, "missing": missing,
-                "first_frame": frame_number(first) or 0, "fps": float(fps_hint),
-                "fps_num": _fps_from_spec(fps_hint).numerator, "fps_den": _fps_from_spec(fps_hint).denominator,
-                "frames": len(files)}
+                "first_frame": frame_number(first) or 0, "frames": len(files), **_fps_fields(fps_hint)}
         spec.update({k: v for k, v in probe_still(first).items() if k not in spec})
         if ext == ".exr":
             spec["exr"] = exr_info(first)
@@ -212,8 +215,7 @@ def probe_plate(path: str, fps_hint: float = 24.0) -> dict:
         return spec
     if ext in IMAGE_EXTS:
         spec = {"kind": "image", "source": path, "files": [path], "ext": ext, "frames": 1,
-                "first_frame": frame_number(path) or 0, "fps": float(fps_hint),
-                "fps_num": _fps_from_spec(fps_hint).numerator, "fps_den": _fps_from_spec(fps_hint).denominator}
+                "first_frame": frame_number(path) or 0, **_fps_fields(fps_hint)}
         spec.update({k: v for k, v in probe_still(path).items() if k not in spec})
         if ext == ".exr":
             spec["exr"] = exr_info(path)
@@ -407,7 +409,7 @@ class VideoWriter:
         pix = spec.get("pix_fmt") or _DEFAULT_PIX.get(encoder, "yuv420p")
         try:
             self.stream.pix_fmt = pix
-        except Exception:
+        except (ValueError, AVError):
             pix = _DEFAULT_PIX.get(encoder, "yuv420p")
             self.stream.pix_fmt = pix
             self.notes.append(f"Pixel format {spec.get('pix_fmt')} refused by {encoder}: using {pix}.")
@@ -418,7 +420,7 @@ class VideoWriter:
             if value is not None:
                 try:
                     setattr(cc, attr, value)
-                except Exception:
+                except (ValueError, TypeError, AVError):
                     self.notes.append(f"Could not copy {attr}.")
         opts = {}
         if encoder == "prores_ks":
@@ -436,7 +438,7 @@ class VideoWriter:
             try:
                 self.audio_in = av.open(audio_source)
                 self.audio_out = self.out.add_stream_from_template(self.audio_in.streams.audio[0])
-            except Exception as exc:  # audio is a convenience, never a failure
+            except (AVError, OSError, IndexError, ValueError) as exc:  # audio is a convenience, never a failure
                 self.notes.append(f"Audio not copied: {exc}")
                 self.audio_in = None
         self.index = 0
@@ -455,7 +457,7 @@ class VideoWriter:
             kwargs["dst_color_range"] = 1
         try:
             frame = frame.reformat(**kwargs)
-        except Exception:
+        except (ValueError, TypeError, AVError):  # an older PyAV without colour-range arguments
             frame = frame.reformat(format=self.pix_fmt)
         frame.pts = self.index
         self.index += 1

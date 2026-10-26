@@ -1,13 +1,19 @@
-"""The page: every element and workflow the script uses exists, and the scripts parse."""
+"""The page: its modules, elements and workflows fit together, the JavaScript tests pass, and it shares the Python rules."""
+import glob
+import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import unittest
 
 from _env import ROOT
 
 WEB = os.path.join(ROOT, "web")
+HAS_NODE = shutil.which("node") is not None
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import build_workflows  # noqa: E402
 
 
 def read(name):
@@ -15,28 +21,52 @@ def read(name):
         return f.read()
 
 
+def modules():
+    return sorted(os.path.basename(p) for p in glob.glob(os.path.join(WEB, "*.mjs")))
+
+
 class Page(unittest.TestCase):
-    def test_elements_used_by_the_script_exist(self):
-        used = set(re.findall(r'\$\("#([\w-]+)', read("app.mjs")))
+    def test_elements_used_by_the_scripts_exist(self):
+        used = {i for m in modules() for i in re.findall(r'\$\("#([\w-]+)', read(m))}
         defined = set(re.findall(r'id="([\w-]+)"', read("paintaplate.html")))
         self.assertTrue(used, "no element lookups found")
         self.assertEqual(sorted(used - defined), [])
 
+    def test_imports_resolve_to_exported_names(self):
+        for name in modules():
+            for names, target in re.findall(r'import \{([^}]+)\} from "\./([\w.]+)"', read(name)):
+                self.assertIn(target, modules(), f"{name} imports {target}")
+                source = read(target)
+                for sym in (s.strip() for s in names.split(",")):
+                    self.assertRegex(source, rf"export (const|function|class|async function) {sym}\b", f"{name}: {sym} from {target}")
+
     def test_workflows_loaded_by_the_page_exist(self):
-        names = re.search(r'for \(const name of \[([^\]]+)\]\) WF\[name\]', read("app.mjs")).group(1)
-        for name in re.findall(r'"(\w+)"', names):
-            self.assertTrue(os.path.isfile(os.path.join(WEB, "workflows", f"{name}.json")), name)
+        names = re.findall(r'"(\w+)"', re.search(r"const WORKFLOWS = \[([^\]]+)\]", read("app.mjs")).group(1))
+        self.assertEqual(sorted(names), sorted(build_workflows.NAMES))
 
     def test_menu_entry_does_not_load_the_app_into_the_graph_editor(self):
-        """ComfyUI loads every .js file in web/ into the graph editor: the app itself must stay .mjs."""
-        js = [f for f in os.listdir(WEB) if f.endswith(".js")]
-        self.assertEqual(js, ["open.js"])
+        """ComfyUI loads every .js file in web/ into the graph editor: the app's modules must stay .mjs."""
+        self.assertEqual([f for f in os.listdir(WEB) if f.endswith(".js")], ["open.js"])
 
-    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    @unittest.skipUnless(HAS_NODE, "node is not installed")
     def test_scripts_parse(self):
-        for name in ("app.mjs", "open.js"):
+        for name in modules() + ["open.js"]:
             r = subprocess.run(["node", "--check", os.path.join(WEB, name)], capture_output=True, text=True)
-            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(r.returncode, 0, f"{name}: {r.stderr}")
+
+    @unittest.skipUnless(HAS_NODE, "node is not installed")
+    def test_javascript_unit_tests(self):
+        """tests/js: the pure rules of logic.mjs and the frame cache of frames.mjs, in Node's own test runner."""
+        r = subprocess.run(["node", "--test", *sorted(glob.glob(os.path.join(ROOT, "tests", "js", "*.test.mjs")))],
+                           capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(r.returncode, 0, r.stdout[-3000:] + r.stderr[-2000:])
+
+    @unittest.skipUnless(HAS_NODE, "node is not installed")
+    def test_page_and_python_drop_the_same_optional_links(self):
+        code = "import('./web/logic.mjs').then((m) => console.log(JSON.stringify(m.OPTIONAL)))"
+        r = subprocess.run(["node", "--input-type=module", "-e", code], capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual({k: tuple(v) for k, v in json.loads(r.stdout).items()}, build_workflows.OPTIONAL)
 
 
 if __name__ == "__main__":
