@@ -20,18 +20,45 @@ Start ComfyUI with `--preview-method latent2rgb` for live previews. On a 96 GB c
 
 ## Models
 
-| Folder | File | Source | Licence |
-| --- | --- | --- | --- |
-| `diffusion_models` | `flux3-image-klein-int8-convrot.safetensors` (5.8 GB) | `black-forest-labs/flux-3-image-klein-comfy` | FLUX Kommunity |
-| `text_encoders` | `qwen3vl_4b_int8_convrot.safetensors` (4.9 GB) | same repo | FLUX Kommunity |
-| `vae` | `flux2-vae.safetensors` | same repo, `vae/` | FLUX Kommunity |
-| `diffusion_models` | `ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors` (21.5 GB) | `Lightricks/LTX-2.5` | LTX-2 Community |
-| `text_encoders` | `gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors` (15.4 GB) | `Lightricks/LTX-2.5` | LTX-2 Community |
-| `vae` | `ltx-2.5-video-vae-conv-bf16.safetensors`, `ltx-2.5-audio-vae-bf16.safetensors` | `Lightricks/LTX-2.5` | LTX-2 Community |
-| `loras` | `LTX25_Ripple_v11.safetensors` | `WepeNerd/LTX-Ripple` | LTX-2 Community |
-| `checkpoints` | `sam3.1_multiplex_fp16.safetensors` | `Comfy-Org/sam3.1` (the file of the official SAM 3 template) | SAM License |
+| Folder in `ComfyUI/models` | File (download) | Repository | Size | Licence |
+| --- | --- | --- | --- | --- |
+| `diffusion_models` | [`flux3-image-klein-int8-convrot.safetensors`](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/blob/main/diffusion_models/flux3-image-klein-int8-convrot.safetensors) | [black-forest-labs/flux-3-image-klein-comfy](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy) | 5.8 GB | FLUX Kommunity |
+| `text_encoders` | [`qwen3vl_4b_int8_convrot.safetensors`](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/blob/main/text_encoders/qwen3vl_4b_int8_convrot.safetensors) | [black-forest-labs/flux-3-image-klein-comfy](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy) | 4.9 GB | FLUX Kommunity |
+| `vae` | [`flux2-vae.safetensors`](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/blob/main/vae/flux2-vae.safetensors) | [black-forest-labs/flux-3-image-klein-comfy](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy) | 0.3 GB | FLUX Kommunity |
+| `diffusion_models` | [`ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors`](https://huggingface.co/Lightricks/LTX-2.5/blob/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors) | [Lightricks/LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) | 21.5 GB | LTX-2 Community |
+| `text_encoders` | [`gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors`](https://huggingface.co/Lightricks/LTX-2.5/blob/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors) | [Lightricks/LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) | 15.4 GB | LTX-2 Community |
+| `vae` | [`ltx-2.5-video-vae-conv-bf16.safetensors`](https://huggingface.co/Lightricks/LTX-2.5/blob/main/vae/ltx-2.5-video-vae-conv-bf16.safetensors) | [Lightricks/LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) | 1.5 GB | LTX-2 Community |
+| `vae` | [`ltx-2.5-audio-vae-bf16.safetensors`](https://huggingface.co/Lightricks/LTX-2.5/blob/main/vae/ltx-2.5-audio-vae-bf16.safetensors) | [Lightricks/LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) | 0.4 GB | LTX-2 Community |
+| `loras` | [`LTX25_Ripple_v11.safetensors`](https://huggingface.co/WepeNerd/LTX-Ripple/blob/main/LTX25_Ripple_v11.safetensors) | [WepeNerd/LTX-Ripple](https://huggingface.co/WepeNerd/LTX-Ripple) | 0.7 GB | LTX-2 Community |
+| `checkpoints` | [`sam3.1_multiplex_fp16.safetensors`](https://huggingface.co/Comfy-Org/sam3.1/blob/main/checkpoints/sam3.1_multiplex_fp16.safetensors) | [Comfy-Org/sam3.1](https://huggingface.co/Comfy-Org/sam3.1) | 1.7 GB | SAM License |
 
-All models are open weights. The FLUX, LTX and SAM repositories ask you to accept their licence on Hugging Face first. Everything fits in about 52 GB of VRAM, plus working memory for the shot.
+All nine files are open weights, about 52 GB in all. The FLUX 3 Image Klein and LTX 2.5 repositories ask you to accept their licence on Hugging Face before downloading (approval is automatic). `tools/pod_setup.sh` downloads every file to the right folder with your `HF_TOKEN`. The models fit in about 52 GB of VRAM, plus working memory for the shot.
+
+## Run it on Runpod
+
+A Runpod pod is the quickest way to try PaintAPlate with every model. Tested on an RTX PRO 6000 (96 GB).
+
+1. Accept the FLUX 3 Image Klein and LTX 2.5 licences on Hugging Face, then save your Hugging Face token as a Runpod secret named `huggingface_token`.
+2. Deploy a pod with these settings:
+
+| Setting | Value |
+| --- | --- |
+| Image | `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404` (keep its own start command) |
+| GPU | a machine with CUDA 13 drivers: the setup installs PyTorch for CUDA 13.0 |
+| Container disk | 80 GB, or less with a network volume at `/workspace` that keeps the models between pods |
+| HTTP ports | `8188` (the app), `8888` (JupyterLab) |
+| Environment | `HF_TOKEN` = `{{ RUNPOD_SECRET_huggingface_token }}` |
+
+3. Open JupyterLab on port 8888, start a terminal and run:
+
+```bash
+git clone https://github.com/AInVFX/ainvfx-paintaplate /workspace/ainvfx-paintaplate
+bash /workspace/ainvfx-paintaplate/tools/runpod_start.sh
+```
+
+4. When it prints `ready: https://...`, open that address.
+
+The script installs ComfyUI, ComfyUI-LTXVideo and this pack at the tested versions, downloads the nine models, then starts ComfyUI. Run it again after a restart: it skips what is already there. The pod keeps billing until you stop it.
 
 ## Use
 
