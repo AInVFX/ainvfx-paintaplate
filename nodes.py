@@ -198,68 +198,43 @@ class FitToPlate(io.ComfyNode):
             display_name="Fit to Plate",
             category=CATEGORY,
             description="Prepares generated frames for compositing: resizes them to the plate, aligns them "
-                        "to it, matches colour and grain around the edit, and returns the edit mask at "
-                        "plate size, grown and softened. Feed both outputs to Image Composite Masked.",
+                        "to it, matches colour and grain at the edge of the edit, and returns the edit mask "
+                        "at plate size, grown, softened and steady from frame to frame. Feed both outputs "
+                        "to Image Composite Masked.",
             inputs=[
                 io.Image.Input("plate", tooltip="The plate, in the same colour space as 'image'."),
                 io.Image.Input("image", tooltip="Generated frames, any size."),
                 io.Mask.Input("mask", optional=True, tooltip="The edited area, any size. Empty means no edit."),
-                io.Boolean.Input("align", default=True, tooltip="Measure and remove a small shift per frame."),
+                io.Boolean.Input("align", default=True,
+                                 tooltip="Measure a small shift per frame, smooth it over time, remove it."),
                 io.Float.Input("max_shift", default=8.0, min=0.0, max=64.0, step=0.5,
                                tooltip="Largest shift in pixels treated as misalignment."),
                 io.Boolean.Input("match_color", default=True,
-                                 tooltip="Match colour to the plate in a band around the edit."),
+                                 tooltip="Match colour and exposure to the plate at the edge of the edit, "
+                                         "spread smoothly inside it."),
                 io.Float.Input("grain", default=1.0, min=0.0, max=2.0, step=0.05,
                                tooltip="Add grain up to the plate's level. 0 adds none."),
                 io.Int.Input("grow", default=8, min=0, max=256, tooltip="Grow the mask, in plate pixels."),
                 io.Int.Input("feather", default=12, min=0, max=256, tooltip="Soften the mask edge, in plate pixels."),
+                io.Int.Input("steady", default=2, min=0, max=12, optional=True,
+                             tooltip="Frames on each side over which the mask edge, the shift and the colour "
+                                     "match are smoothed. 0 treats every frame on its own."),
             ],
             outputs=[io.Image.Output(display_name="image"), io.Mask.Output(display_name="mask")],
         )
 
     @classmethod
-    def execute(cls, plate, image, align, max_shift, match_color, grain, grow, feather, mask=None) -> io.NodeOutput:
+    def execute(cls, plate, image, align, max_shift, match_color, grain, grow, feather, mask=None,
+                steady=2) -> io.NodeOutput:
         n, h, w = min(plate.shape[0], image.shape[0]), plate.shape[1], plate.shape[2]
         image = resize(image[:n], h, w)
-        if mask is None:
-            mask = torch.zeros((n, h, w))
-        mask = resize(mask[:n] if mask.shape[0] >= n else mask[:1].expand(n, -1, -1), h, w).clamp(0, 1)
-        scale = min(1.0, 512 / max(h, w))  # alignment runs on a small structure map
-        target = np.median([mathops.noise_sigma(f) for f in frames_np(plate[: n : max(1, n // 3)][:3])], 0)  # the plate's grain, once
-        reach = max(8, grow + feather) + 2 * feather
-        bar = comfy.utils.ProgressBar(n)
-
-        def small(a):
-            return mathops.ndimage.zoom(a, scale, order=1) if scale < 1 else a
-
-        def fit(args):
-            i, p, g, m = args
-            if align:
-                keep = small(1.0 - m)
-                dy, dx = mathops.phase_shift(small(mathops.structure(p)) * keep, small(mathops.structure(g)) * keep, max_shift * scale)
-                if dy or dx:
-                    g = mathops.ndimage.shift(g, (dy / scale, dx / scale, 0), order=1, mode="nearest")
-            ys, xs = np.nonzero(m > 0)
-            if len(ys):  # colour and grain only where the edit is, plus a margin
-                y0, y1 = max(0, ys.min() - reach), min(h, ys.max() + reach + 1)
-                x0, x1 = max(0, xs.min() - reach), min(w, xs.max() + reach + 1)
-                crop, gc = (slice(y0, y1), slice(x0, x1)), g[y0:y1, x0:x1]
-                if match_color:
-                    gc = mathops.match_color(gc, p[crop], mathops.ring(m[crop], max(8, grow + feather)))
-                if grain > 0:
-                    gc = mathops.add_grain(gc, target, np.random.default_rng(i), grain)
-                g = g.copy()
-                g[crop] = gc
-            if grow:
-                m = (mathops.ndimage.distance_transform_edt(m < 0.5) <= grow).astype(np.float32)
-            if feather:
-                m = mathops.ndimage.gaussian_filter(m, feather / 2.0)
-            bar.update(1)
-            return g.astype(np.float32), np.clip(m, 0, 1).astype(np.float32)
-
-        with ThreadPoolExecutor(min(16, os.cpu_count() or 4)) as pool:  # numpy and scipy release the GIL
-            done = list(pool.map(fit, zip(range(n), frames_np(plate[:n]), frames_np(image), frames_np(mask))))
-        return io.NodeOutput(to_image([d[0] for d in done]), to_image([d[1] for d in done]))
+        masks = np.zeros((1, 8, 8), np.float32) if mask is None else mask[:n].float().cpu().numpy()
+        bar = comfy.utils.ProgressBar(2 * n)
+        images, out = mathops.fit_to_plate(
+            n, h, w, lambda i: plate[i].float().cpu().numpy(), lambda i: image[i].float().cpu().numpy(), masks,
+            align=align, max_shift=max_shift, match_color=match_color, grain=grain, grow=grow, feather=feather,
+            steady=steady, workers=min(16, os.cpu_count() or 4), progress=lambda: bar.update(1))
+        return io.NodeOutput(to_image(images), to_image(out))
 
 
 class RelightTransfer(io.ComfyNode):

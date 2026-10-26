@@ -1,9 +1,9 @@
-"""Write the five PaintAPlate workflows to web/workflows/*.json (API format).
+"""Write the PaintAPlate workflows to web/workflows/*.json.
 
-Each file holds {"prompt": <API workflow>, "slots": {name: [[node_id, input], ...]}}.
-The page fills the slots and posts the prompt to ComfyUI. Every node is a core
-node, a ComfyUI-LTXVideo node or one of the four PaintAPlate nodes, so each
-graph also opens as a normal workflow in ComfyUI.
+Each file is a plain ComfyUI workflow in API format, so ComfyUI opens it with Open or by drag
+and drop. The page fills some inputs before it posts a workflow: each node lists them in
+`_meta.slots` as {input name: slot name}, and the outputs the page reads carry `_meta.output`.
+Every node is a core node, a ComfyUI-LTXVideo node or one of the four PaintAPlate nodes.
 
     python tools/build_workflows.py
 """
@@ -11,6 +11,7 @@ import json
 import os
 
 OUT = os.environ.get("PAINTAPLATE_WORKFLOWS_OUT") or os.path.join(os.path.dirname(__file__), "..", "web", "workflows")
+NAMES = ("ingest", "edit", "snap", "shot", "matte", "comp", "export")
 
 KLEIN = "flux3-image-klein-int8-convrot.safetensors"
 LTX = "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
@@ -25,28 +26,6 @@ class Slot:
         self.name, self.default = name, default
 
 
-class Graph:
-    def __init__(self):
-        self.prompt, self.slots = {}, {}
-
-    def __call__(self, cls, **inputs):
-        nid = str(len(self.prompt) + 1)
-        node = {"class_type": cls, "inputs": {}}
-        for key, value in inputs.items():
-            key = key.replace("__", ".")  # images__image0 -> images.image0 (dynamic inputs)
-            if isinstance(value, Slot):
-                self.slots.setdefault(value.name, []).append([nid, key])
-                value = value.default
-            node["inputs"][key] = [value.nid, 0] if isinstance(value, Ref) else value
-        self.prompt[nid] = node
-        return Ref(nid)
-
-    def save(self, name):
-        os.makedirs(OUT, exist_ok=True)
-        with open(os.path.join(OUT, f"{name}.json"), "w") as f:
-            json.dump({"prompt": self.prompt, "slots": self.slots}, f, indent=1)
-
-
 class Ref:
     def __init__(self, nid):
         self.nid = nid
@@ -55,39 +34,113 @@ class Ref:
         return [self.nid, i]
 
 
+class Graph:
+    def __init__(self):
+        self.prompt = {}
+
+    def __call__(self, cls, _title=None, _output=None, **inputs):
+        nid = str(len(self.prompt) + 1)
+        node = {"class_type": cls, "inputs": {}}
+        meta, slots = {}, {}
+        for key, value in inputs.items():
+            key = key.replace("__", ".")  # images__image0 -> images.image0 (dynamic inputs)
+            if isinstance(value, Slot):
+                slots[key] = value.name
+                value = value.default
+            node["inputs"][key] = [value.nid, 0] if isinstance(value, Ref) else value
+        if _title:
+            meta["title"] = _title
+        if slots:
+            meta["slots"] = slots
+        if _output:
+            meta["output"] = _output
+        if meta:
+            node["_meta"] = meta
+        self.prompt[nid] = node
+        return Ref(nid)
+
+    def link_slot(self, ref, key, name):
+        """A link the page may remove, named like a slot (the page drops the mask link when there is no matte)."""
+        self.prompt[ref.nid].setdefault("_meta", {}).setdefault("slots", {})[key] = name
+
+    def save(self, name, out=None):
+        out = out or OUT
+        os.makedirs(out, exist_ok=True)
+        with open(os.path.join(out, f"{name}.json"), "w") as f:
+            json.dump(self.prompt, f, indent=1)
+
+
+def slots_of(prompt):
+    """{slot name: [[node id, input], ...]} from the `_meta.slots` of every node."""
+    slots = {}
+    for nid, node in prompt.items():
+        for key, name in node.get("_meta", {}).get("slots", {}).items():
+            slots.setdefault(name, []).append([nid, key])
+    return slots
+
+
+def outputs_of(prompt):
+    """{output name: node id} from `_meta.output`."""
+    return {node["_meta"]["output"]: nid for nid, node in prompt.items() if node.get("_meta", {}).get("output")}
+
+
+def load(name, folder=None):
+    """(prompt, slots, outputs) of one saved workflow."""
+    with open(os.path.join(folder or OUT, f"{name}.json")) as f:
+        prompt = json.load(f)
+    return prompt, slots_of(prompt), outputs_of(prompt)
+
+
+def fill(name, values, folder=None):
+    """The prompt of a saved workflow with its slots set, as the page posts it."""
+    prompt, slots, _ = load(name, folder)
+    for slot, value in values.items():
+        for nid, key in slots.get(slot, []):
+            prompt[nid]["inputs"][key] = value
+    return prompt
+
+
 def plate(g, pad, path="path"):
-    """The plate as display-referred sRGB frames: Load Plate, then core colour conversion."""
-    load = g("PaintAPlate_LoadPlate", path=Slot(path, ""), max_frames=Slot("max_frames", 121), pad_8n1=pad)
-    srgb = g("ImageColorSpace", image=load[0], source=Slot("color_space", "sRGB"), destination="sRGB")
+    """The plate as display-referred sRGB frames: Load Plate, then core colour conversion.
+
+    Every workflow converts the same whole plate: core tone-maps SDR output with one peak per
+    batch, so a different batch could change the exposure of an HDR plate between steps.
+    """
+    load = g("PaintAPlate_LoadPlate", _title="Plate", path=Slot(path, ""), max_frames=Slot("max_frames", 121),
+             pad_8n1=pad)
+    srgb = g("ImageColorSpace", _title="Plate in sRGB", image=load[0], source=Slot("color_space", "sRGB"),
+             destination="sRGB")
     return load, srgb
 
 
 def ingest():
-    """Hero frame at working size, a playback proxy and the plate spec."""
+    """The first frame at working size, a playback proxy of the real frames, and the plate spec."""
     g = Graph()
     load, srgb = plate(g, pad=True)  # same inputs as every other Load Plate of the plate: decoded once, then cached
     first = g("ImageFromBatch", image=srgb, batch_index=0, length=1)
     hero = g("ImageScaleToMaxDimension", image=first, upscale_method="lanczos", largest_size=1920)
-    g("SaveImage", images=hero, filename_prefix=Slot("prefix", "paintaplate/plate/hero"))
-    proxy = g("ImageScaleToMaxDimension", image=srgb, upscale_method="area", largest_size=960)
+    g("SaveImage", _title="First frame", _output="hero", images=hero,
+      filename_prefix=Slot("prefix", "paintaplate/plate/hero"))
+    real = g("ImageFromBatch", _title="Real frames (no padding)", image=srgb, batch_index=0, length=load[4])
+    proxy = g("ImageScaleToMaxDimension", image=real, upscale_method="area", largest_size=Slot("proxy_size", 960))
     video = g("CreateVideo", images=proxy, fps=load[3], bit_depth=8, color_space="sRGB", codec="none")
-    g("SaveVideo", video=video, filename_prefix=Slot("video_prefix", "paintaplate/plate/proxy"),
-      format="auto", format__codec="auto")
-    g("PreviewAny", source=load[5])
+    g("SaveVideo", _title="Playback proxy", _output="proxy", video=video,
+      filename_prefix=Slot("video_prefix", "paintaplate/plate/proxy"), format="auto", format__codec="auto")
+    g("PreviewAny", _title="Plate spec", _output="spec", source=load[5])
     g.save("ingest")
 
 
 def edit():
-    """One FLUX 3 Image Klein edit inside a mask, composited back over the untouched frame."""
+    """One FLUX 3 Image Klein edit inside a mask: the edited frame, and the edit alone as an RGBA patch."""
     g = Graph()
     model = g("UNETLoader", unet_name=Slot("klein", KLEIN), weight_dtype="default")
     clip = g("CLIPLoader", clip_name="qwen3vl_4b_int8_convrot.safetensors", type="flux3", device="default")
     vae = g("VAELoader", vae_name=Slot("vae", "flux2-vae.safetensors"))
-    base = g("LoadImage", image=Slot("base", ""))
-    reference = g("LoadImage", image=Slot("reference", ""))
-    start = g("LoadImage", image=Slot("start", ""))
-    mask = g("LoadImageMask", image=Slot("mask", ""), channel="red")
-    positive = g("CLIPTextEncode", text=Slot("caption", ""), clip=clip)
+    base = g("LoadImage", _title="Frame before the edit", image=Slot("base", ""))
+    reference = g("LoadImage", _title="Reference: the strokes", image=Slot("reference", ""))
+    start = g("LoadImage", _title="Start image", image=Slot("start", ""))
+    mask = g("LoadImageMask", _title="Edit mask", image=Slot("mask", ""), channel="red")
+    positive = g("CLIPTextEncode", _title="Caption", text=Slot("caption", ""), clip=clip)
     negative = g("ConditioningZeroOut", conditioning=positive)
     ref = g("ReferenceMultiLatent", positive=positive, negative=negative, vae=vae,
             resolution="keep resolution", images__image0=reference)
@@ -100,8 +153,21 @@ def edit():
     soft = g("ImageToMask", channel="red", image=g("ImageBlur", image=g("MaskToImage", mask=grown),
                                                     blur_radius=Slot("feather", 12), sigma=Slot("sigma", 6.0)))
     result = g("ImageCompositeMasked", destination=base, source=decoded, x=0, y=0, resize_source=False, mask=soft)
-    g("PreviewImage", images=result)
+    g("PreviewImage", _title="Edited frame", _output="result", images=result)
+    # Join Image with Alpha stores 1 - mask as alpha: the inverted soft mask gives alpha = soft mask
+    patch = g("JoinImageWithAlpha", image=decoded, alpha=g("InvertMask", mask=soft))
+    g("PreviewImage", _title="Edit patch (RGBA)", _output="patch", images=patch)
     g.save("edit")
+
+
+def snap():
+    """SAM 3.1 grows an erase stroke to the whole object under it, on the first frame."""
+    g = Graph()
+    sam = g("CheckpointLoaderSimple", ckpt_name=Slot("sam", "sam3.1_multiplex_fp16.safetensors"))
+    found = g("SAM3_Detect", model=sam, image=g("LoadImage", _title="First frame", image=Slot("image", "")),
+              positive_coords=Slot("points", "[]"), threshold=0.5, refine_iterations=2, individual_masks=False)
+    g("PreviewImage", _title="Object mask", _output="mask", images=g("MaskToImage", mask=found))
+    g.save("snap")
 
 
 def shot():
@@ -111,11 +177,13 @@ def shot():
     frames = g("ImageScale", image=srgb, upscale_method="lanczos", width=Slot("width", 960),
                height=Slot("height", 544), crop="disabled")
     size = g("GetImageSize", image=frames)
-    hero = g("ImageScale", image=g("LoadImage", image=Slot("hero", "")), upscale_method="lanczos",
-             width=size[0], height=size[1], crop="disabled")
+    hero = g("ImageScale", image=g("LoadImage", _title="Edited first frame", image=Slot("hero", "")),
+             upscale_method="lanczos", width=size[0], height=size[1], crop="disabled")
     rest = g("ImageFromBatch", image=frames, batch_index=1, length=4096)
-    reference = g("BatchImagesNode", images__image0=hero, images__image1=rest)  # frame 0 replaced
-    model = g("LoraLoaderModelOnly", model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"),
+    reference = g("BatchImagesNode", _title="Reference: first frame replaced", images__image0=hero,
+                  images__image1=rest)
+    model = g("LoraLoaderModelOnly", _title="Ripple IC-LoRA",
+              model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"),
               lora_name=Slot("ripple", "LTX25_Ripple_v11.safetensors"), strength_model=Slot("strength", 1.35))
     clip = g("CLIPLoader", clip_name=Slot("gemma", GEMMA), type="ltxv", device="default")
     vae = g("VAELoader", vae_name=Slot("video_vae", "ltx-2.5-video-vae-conv-bf16.safetensors"))
@@ -135,10 +203,11 @@ def shot():
     video_latent = g("LTXVSeparateAVLatent", av_latent=sampled[0])
     cropped = g("LTXVCropGuides", positive=guide[0], negative=guide[1], latent=video_latent[0])
     decoded = g("VAEDecode", samples=cropped[2], vae=vae)
-    g("SaveImage", images=decoded, filename_prefix=Slot("prefix", "paintaplate/plate/shot/f"))
+    g("SaveImage", _title="Shot frames", _output="frames", images=decoded,
+      filename_prefix=Slot("prefix", "paintaplate/plate/shot/f"))
     video = g("CreateVideo", images=decoded, fps=load[3], bit_depth=8, color_space="sRGB", codec="none")
-    g("SaveVideo", video=video, filename_prefix=Slot("video_prefix", "paintaplate/plate/shot"),
-      format="auto", format__codec="auto")
+    g("SaveVideo", _title="Shot video (whole frame regenerated)", _output="video", video=video,
+      filename_prefix=Slot("video_prefix", "paintaplate/plate/shot"), format="auto", format__codec="auto")
     g.save("shot")
 
 
@@ -149,33 +218,64 @@ def matte():
     frames = g("ImageScale", image=srgb, upscale_method="area", width=Slot("width", 960),
                height=Slot("height", 544), crop="disabled")
     sam = g("CheckpointLoaderSimple", ckpt_name=Slot("sam", "sam3.1_multiplex_fp16.safetensors"))
-    track = g("SAM3_VideoTrack", images=frames, model=sam, initial_mask=g("LoadImageMask", image=Slot("mask", ""),
-                                                                         channel="red"),
+    track = g("SAM3_VideoTrack", images=frames, model=sam,
+              initial_mask=g("LoadImageMask", _title="Area on the first frame", image=Slot("mask", ""),
+                             channel="red"),
               detection_threshold=0.5, max_objects=4, detect_interval=1)
     masks = g("SAM3_TrackToMask", track_data=track, object_indices="")
-    g("SaveImage", images=g("MaskToImage", mask=masks), filename_prefix=Slot("prefix", "paintaplate/plate/matte/m"))
+    g("SaveImage", _title="Matte frames", _output="frames", images=g("MaskToImage", mask=masks),
+      filename_prefix=Slot("prefix", "paintaplate/plate/matte/m"))
     g.save("matte")
 
 
-def snap():
-    """SAM 3.1 grows an erase stroke to the whole object under one point, on the first frame."""
+def mattes(g):
+    """The erase and paint mattes as one mask. A missing matte is the other one again (the page sets both)."""
+    erase = g("PaintAPlate_LoadPlate", _title="Erase matte", path=Slot("matte_a", ""), max_frames=1024, pad_8n1=False)
+    add = g("PaintAPlate_LoadPlate", _title="Paint matte", path=Slot("matte_b", ""), max_frames=1024, pad_8n1=False)
+    return g("MaskComposite", destination=g("ImageToMask", image=erase, channel="red"),
+             source=g("ImageToMask", image=add, channel="red"), x=0, y=0, operation="add")
+
+
+def fitted(g, base, gen, union):
+    """Fit to Plate, then the composite: the edit over `base`, everything else untouched."""
+    fit = g("PaintAPlate_FitToPlate", plate=base, image=gen, mask=union, align=True, max_shift=8.0,
+            match_color=True, grain=Slot("grain", 1.0), grow=Slot("grow", 8), feather=Slot("feather", 12),
+            steady=Slot("steady", 2))
+    g.link_slot(fit, "mask", "fit_mask")  # the page drops this link when there is no matte
+    final = g("ImageCompositeMasked", _title="Composite", destination=base, source=fit[0], x=0, y=0,
+              resize_source=False, mask=fit[1])
+    return fit, final
+
+
+def comp():
+    """The composite at preview size, as an MP4 to play in the page: what the export will look like."""
     g = Graph()
-    sam = g("CheckpointLoaderSimple", ckpt_name=Slot("sam", "sam3.1_multiplex_fp16.safetensors"))
-    found = g("SAM3_Detect", model=sam, image=g("LoadImage", image=Slot("image", "")), positive_coords=Slot("points", "[]"),
-              threshold=0.5, refine_iterations=2, individual_masks=False)
-    g("PreviewImage", images=g("MaskToImage", mask=found))
-    g.save("snap")
+    load, srgb = plate(g, pad=True)
+    small = g("ImageScale", image=srgb, upscale_method="area", width=Slot("width", 960), height=Slot("height", 544),
+              crop="disabled")
+    gen = g("PaintAPlate_LoadPlate", _title="Generated shot", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
+    union = mattes(g)
+    small_lin = g("ImageColorSpace", image=small, source="sRGB", destination="linear")
+    relit = g("PaintAPlate_RelightTransfer", plate=small_lin, source=small_lin,
+              relit=g("ImageColorSpace", image=gen, source="sRGB", destination="linear"),
+              radius=Slot("radius", 8), strength=Slot("strength", 1.0), align=True)
+    back = g("ImageColorSpace", image=relit, source="linear", destination="sRGB")
+    base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=small, on_true=back)
+    _, final = fitted(g, base, gen, union)
+    real = g("ImageFromBatch", image=final, batch_index=0, length=load[4])
+    video = g("CreateVideo", images=real, fps=load[3], bit_depth=8, color_space="sRGB", codec="none")
+    g("SaveVideo", _title="Composite preview", _output="video", video=video,
+      filename_prefix=Slot("video_prefix", "paintaplate/plate/comp"), format="auto", format__codec="auto")
+    g.save("comp")
 
 
 def export():
-    """Full quality: the shot fitted onto the plate, relight optional, saved in the plate's format."""
+    """Full quality: the shot fitted onto the plate, relight optional, saved in the plate's format, plus its matte."""
     g = Graph()
-    load = g("PaintAPlate_LoadPlate", path=Slot("path", ""), max_frames=Slot("max_frames", 121), pad_8n1=True)
-    gen = g("PaintAPlate_LoadPlate", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
-    erase = g("PaintAPlate_LoadPlate", path=Slot("matte_a", ""), max_frames=1024, pad_8n1=False)
-    add = g("PaintAPlate_LoadPlate", path=Slot("matte_b", ""), max_frames=1024, pad_8n1=False)
-    union = g("MaskComposite", destination=g("ImageToMask", image=erase, channel="red"),
-              source=g("ImageToMask", image=add, channel="red"), x=0, y=0, operation="add")
+    load = g("PaintAPlate_LoadPlate", _title="Plate", path=Slot("path", ""), max_frames=Slot("max_frames", 121),
+             pad_8n1=True)
+    gen = g("PaintAPlate_LoadPlate", _title="Generated shot", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
+    union = mattes(g)
     gen_plate = g("ImageColorSpace", image=gen, source="sRGB", destination=Slot("color_space", "sRGB"))
     # Relight: light from the regenerated shot, detail from the plate, all in linear light.
     size = g("GetImageSize", image=gen)
@@ -190,16 +290,17 @@ def export():
     back = g("ImageColorSpace", image=relit, source="linear", destination=Slot("color_space", "sRGB"))
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=load, on_true=back)
     # the new pixels are matched to the plate they are composited onto: relit when the light changed
-    fit = g("PaintAPlate_FitToPlate", plate=base, image=gen_plate, mask=union, align=True, max_shift=8.0,
-            match_color=True, grain=Slot("grain", 1.0), grow=Slot("grow", 8), feather=Slot("feather", 12))
-    g.slots["fit_mask"] = [[fit.nid, "mask"]]  # the page drops this link when there is no matte
-    final = g("ImageCompositeMasked", destination=base, source=fit[0], x=0, y=0, resize_source=False, mask=fit[1])
-    g("PaintAPlate_SavePlate", images=final, plate=load[2], filename_prefix=Slot("prefix", "paintaplate/plate/export"),
-      keep_untouched=Slot("keep_untouched", True), changed=fit[1])
+    fit, final = fitted(g, base, gen_plate, union)
+    g("PaintAPlate_SavePlate", _title="Export", _output="export", images=final, plate=load[2],
+      filename_prefix=Slot("prefix", "paintaplate/plate/export"), keep_untouched=Slot("keep_untouched", True),
+      changed=fit[1])
+    matte_frames = g("ImageFromBatch", image=g("MaskToImage", mask=fit[1]), batch_index=0, length=load[4])
+    g("SaveImage", _title="Matte: where the plate changed", _output="matte", images=matte_frames,
+      filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))
     g.save("export")
 
 
 if __name__ == "__main__":
-    for build in (ingest, edit, snap, shot, matte, export):
+    for build in (ingest, edit, snap, shot, matte, comp, export):
         build()
     print("wrote", sorted(os.listdir(OUT)))

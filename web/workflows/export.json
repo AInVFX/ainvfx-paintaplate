@@ -1,366 +1,377 @@
 {
- "prompt": {
-  "1": {
-   "class_type": "PaintAPlate_LoadPlate",
-   "inputs": {
-    "path": "",
-    "max_frames": 121,
-    "pad_8n1": true
-   }
+ "1": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 121,
+   "pad_8n1": true
   },
-  "2": {
-   "class_type": "PaintAPlate_LoadPlate",
-   "inputs": {
-    "path": "",
-    "max_frames": 1024,
-    "pad_8n1": false
-   }
-  },
-  "3": {
-   "class_type": "PaintAPlate_LoadPlate",
-   "inputs": {
-    "path": "",
-    "max_frames": 1024,
-    "pad_8n1": false
-   }
-  },
-  "4": {
-   "class_type": "PaintAPlate_LoadPlate",
-   "inputs": {
-    "path": "",
-    "max_frames": 1024,
-    "pad_8n1": false
-   }
-  },
-  "5": {
-   "class_type": "ImageToMask",
-   "inputs": {
-    "image": [
-     "3",
-     0
-    ],
-    "channel": "red"
-   }
-  },
-  "6": {
-   "class_type": "ImageToMask",
-   "inputs": {
-    "image": [
-     "4",
-     0
-    ],
-    "channel": "red"
-   }
-  },
-  "7": {
-   "class_type": "MaskComposite",
-   "inputs": {
-    "destination": [
-     "5",
-     0
-    ],
-    "source": [
-     "6",
-     0
-    ],
-    "x": 0,
-    "y": 0,
-    "operation": "add"
-   }
-  },
-  "8": {
-   "class_type": "ImageColorSpace",
-   "inputs": {
-    "image": [
-     "2",
-     0
-    ],
-    "source": "sRGB",
-    "destination": "sRGB"
-   }
-  },
-  "9": {
-   "class_type": "GetImageSize",
-   "inputs": {
-    "image": [
-     "2",
-     0
-    ]
-   }
-  },
-  "10": {
-   "class_type": "ImageColorSpace",
-   "inputs": {
-    "image": [
-     "1",
-     0
-    ],
-    "source": "sRGB",
-    "destination": "sRGB"
-   }
-  },
-  "11": {
-   "class_type": "ImageScale",
-   "inputs": {
-    "image": [
-     "10",
-     0
-    ],
-    "upscale_method": "area",
-    "width": [
-     "9",
-     0
-    ],
-    "height": [
-     "9",
-     1
-    ],
-    "crop": "disabled"
-   }
-  },
-  "12": {
-   "class_type": "ImageColorSpace",
-   "inputs": {
-    "image": [
-     "1",
-     0
-    ],
-    "source": "sRGB",
-    "destination": "linear"
-   }
-  },
-  "13": {
-   "class_type": "ImageColorSpace",
-   "inputs": {
-    "image": [
-     "11",
-     0
-    ],
-    "source": "sRGB",
-    "destination": "linear"
-   }
-  },
-  "14": {
-   "class_type": "ImageColorSpace",
-   "inputs": {
-    "image": [
-     "2",
-     0
-    ],
-    "source": "sRGB",
-    "destination": "linear"
-   }
-  },
-  "15": {
-   "class_type": "PaintAPlate_RelightTransfer",
-   "inputs": {
-    "plate": [
-     "12",
-     0
-    ],
-    "source": [
-     "13",
-     0
-    ],
-    "relit": [
-     "14",
-     0
-    ],
-    "radius": 16,
-    "strength": 1.0,
-    "align": true
-   }
-  },
-  "16": {
-   "class_type": "ImageColorSpace",
-   "inputs": {
-    "image": [
-     "15",
-     0
-    ],
-    "source": "linear",
-    "destination": "sRGB"
-   }
-  },
-  "17": {
-   "class_type": "ComfySwitchNode",
-   "inputs": {
-    "switch": false,
-    "on_false": [
-     "1",
-     0
-    ],
-    "on_true": [
-     "16",
-     0
-    ]
-   }
-  },
-  "18": {
-   "class_type": "PaintAPlate_FitToPlate",
-   "inputs": {
-    "plate": [
-     "17",
-     0
-    ],
-    "image": [
-     "8",
-     0
-    ],
-    "mask": [
-     "7",
-     0
-    ],
-    "align": true,
-    "max_shift": 8.0,
-    "match_color": true,
-    "grain": 1.0,
-    "grow": 8,
-    "feather": 12
-   }
-  },
-  "19": {
-   "class_type": "ImageCompositeMasked",
-   "inputs": {
-    "destination": [
-     "17",
-     0
-    ],
-    "source": [
-     "18",
-     0
-    ],
-    "x": 0,
-    "y": 0,
-    "resize_source": false,
-    "mask": [
-     "18",
-     1
-    ]
-   }
-  },
-  "20": {
-   "class_type": "PaintAPlate_SavePlate",
-   "inputs": {
-    "images": [
-     "19",
-     0
-    ],
-    "plate": [
-     "1",
-     2
-    ],
-    "filename_prefix": "paintaplate/plate/export",
-    "keep_untouched": true,
-    "changed": [
-     "18",
-     1
-    ]
+  "_meta": {
+   "title": "Plate",
+   "slots": {
+    "path": "path",
+    "max_frames": "max_frames"
    }
   }
  },
- "slots": {
-  "path": [
-   [
-    "1",
-    "path"
-   ]
-  ],
-  "max_frames": [
-   [
-    "1",
-    "max_frames"
-   ]
-  ],
-  "shot": [
-   [
-    "2",
-    "path"
-   ]
-  ],
-  "matte_a": [
-   [
+ "2": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 1024,
+   "pad_8n1": false
+  },
+  "_meta": {
+   "title": "Generated shot",
+   "slots": {
+    "path": "shot"
+   }
+  }
+ },
+ "3": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 1024,
+   "pad_8n1": false
+  },
+  "_meta": {
+   "title": "Erase matte",
+   "slots": {
+    "path": "matte_a"
+   }
+  }
+ },
+ "4": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 1024,
+   "pad_8n1": false
+  },
+  "_meta": {
+   "title": "Paint matte",
+   "slots": {
+    "path": "matte_b"
+   }
+  }
+ },
+ "5": {
+  "class_type": "ImageToMask",
+  "inputs": {
+   "image": [
     "3",
-    "path"
-   ]
-  ],
-  "matte_b": [
-   [
+    0
+   ],
+   "channel": "red"
+  }
+ },
+ "6": {
+  "class_type": "ImageToMask",
+  "inputs": {
+   "image": [
     "4",
-    "path"
-   ]
-  ],
-  "color_space": [
-   [
-    "8",
-    "destination"
+    0
    ],
-   [
+   "channel": "red"
+  }
+ },
+ "7": {
+  "class_type": "MaskComposite",
+  "inputs": {
+   "destination": [
+    "5",
+    0
+   ],
+   "source": [
+    "6",
+    0
+   ],
+   "x": 0,
+   "y": 0,
+   "operation": "add"
+  }
+ },
+ "8": {
+  "class_type": "ImageColorSpace",
+  "inputs": {
+   "image": [
+    "2",
+    0
+   ],
+   "source": "sRGB",
+   "destination": "sRGB"
+  },
+  "_meta": {
+   "slots": {
+    "destination": "color_space"
+   }
+  }
+ },
+ "9": {
+  "class_type": "GetImageSize",
+  "inputs": {
+   "image": [
+    "2",
+    0
+   ]
+  }
+ },
+ "10": {
+  "class_type": "ImageColorSpace",
+  "inputs": {
+   "image": [
+    "1",
+    0
+   ],
+   "source": "sRGB",
+   "destination": "sRGB"
+  },
+  "_meta": {
+   "slots": {
+    "source": "color_space"
+   }
+  }
+ },
+ "11": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "image": [
     "10",
-    "source"
+    0
    ],
-   [
+   "upscale_method": "area",
+   "width": [
+    "9",
+    0
+   ],
+   "height": [
+    "9",
+    1
+   ],
+   "crop": "disabled"
+  }
+ },
+ "12": {
+  "class_type": "ImageColorSpace",
+  "inputs": {
+   "image": [
+    "1",
+    0
+   ],
+   "source": "sRGB",
+   "destination": "linear"
+  },
+  "_meta": {
+   "slots": {
+    "source": "color_space"
+   }
+  }
+ },
+ "13": {
+  "class_type": "ImageColorSpace",
+  "inputs": {
+   "image": [
+    "11",
+    0
+   ],
+   "source": "sRGB",
+   "destination": "linear"
+  }
+ },
+ "14": {
+  "class_type": "ImageColorSpace",
+  "inputs": {
+   "image": [
+    "2",
+    0
+   ],
+   "source": "sRGB",
+   "destination": "linear"
+  }
+ },
+ "15": {
+  "class_type": "PaintAPlate_RelightTransfer",
+  "inputs": {
+   "plate": [
     "12",
-    "source"
+    0
    ],
-   [
+   "source": [
+    "13",
+    0
+   ],
+   "relit": [
+    "14",
+    0
+   ],
+   "radius": 16,
+   "strength": 1.0,
+   "align": true
+  },
+  "_meta": {
+   "slots": {
+    "radius": "radius",
+    "strength": "strength"
+   }
+  }
+ },
+ "16": {
+  "class_type": "ImageColorSpace",
+  "inputs": {
+   "image": [
+    "15",
+    0
+   ],
+   "source": "linear",
+   "destination": "sRGB"
+  },
+  "_meta": {
+   "slots": {
+    "destination": "color_space"
+   }
+  }
+ },
+ "17": {
+  "class_type": "ComfySwitchNode",
+  "inputs": {
+   "switch": false,
+   "on_false": [
+    "1",
+    0
+   ],
+   "on_true": [
     "16",
-    "destination"
+    0
    ]
-  ],
-  "radius": [
-   [
-    "15",
-    "radius"
-   ]
-  ],
-  "strength": [
-   [
-    "15",
-    "strength"
-   ]
-  ],
-  "relight": [
-   [
+  },
+  "_meta": {
+   "slots": {
+    "switch": "relight"
+   }
+  }
+ },
+ "18": {
+  "class_type": "PaintAPlate_FitToPlate",
+  "inputs": {
+   "plate": [
     "17",
-    "switch"
-   ]
-  ],
-  "grain": [
-   [
+    0
+   ],
+   "image": [
+    "8",
+    0
+   ],
+   "mask": [
+    "7",
+    0
+   ],
+   "align": true,
+   "max_shift": 8.0,
+   "match_color": true,
+   "grain": 1.0,
+   "grow": 8,
+   "feather": 12,
+   "steady": 2
+  },
+  "_meta": {
+   "slots": {
+    "grain": "grain",
+    "grow": "grow",
+    "feather": "feather",
+    "steady": "steady",
+    "mask": "fit_mask"
+   }
+  }
+ },
+ "19": {
+  "class_type": "ImageCompositeMasked",
+  "inputs": {
+   "destination": [
+    "17",
+    0
+   ],
+   "source": [
     "18",
-    "grain"
-   ]
-  ],
-  "grow": [
-   [
+    0
+   ],
+   "x": 0,
+   "y": 0,
+   "resize_source": false,
+   "mask": [
     "18",
-    "grow"
+    1
    ]
-  ],
-  "feather": [
-   [
+  },
+  "_meta": {
+   "title": "Composite"
+  }
+ },
+ "20": {
+  "class_type": "PaintAPlate_SavePlate",
+  "inputs": {
+   "images": [
+    "19",
+    0
+   ],
+   "plate": [
+    "1",
+    2
+   ],
+   "filename_prefix": "paintaplate/plate/export",
+   "keep_untouched": true,
+   "changed": [
     "18",
-    "feather"
+    1
    ]
-  ],
-  "fit_mask": [
-   [
+  },
+  "_meta": {
+   "title": "Export",
+   "slots": {
+    "filename_prefix": "prefix",
+    "keep_untouched": "keep_untouched"
+   },
+   "output": "export"
+  }
+ },
+ "21": {
+  "class_type": "MaskToImage",
+  "inputs": {
+   "mask": [
     "18",
-    "mask"
+    1
    ]
-  ],
-  "prefix": [
-   [
-    "20",
-    "filename_prefix"
+  }
+ },
+ "22": {
+  "class_type": "ImageFromBatch",
+  "inputs": {
+   "image": [
+    "21",
+    0
+   ],
+   "batch_index": 0,
+   "length": [
+    "1",
+    4
    ]
-  ],
-  "keep_untouched": [
-   [
-    "20",
-    "keep_untouched"
-   ]
-  ]
+  }
+ },
+ "23": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "images": [
+    "22",
+    0
+   ],
+   "filename_prefix": "paintaplate/plate/matte/matte"
+  },
+  "_meta": {
+   "title": "Matte: where the plate changed",
+   "slots": {
+    "filename_prefix": "matte_prefix"
+   },
+   "output": "matte"
+  }
  }
 }

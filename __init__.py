@@ -4,9 +4,13 @@ The app is a page served by ComfyUI from ./web: open it from the Extensions menu
 or at /extensions/ainvfx-paintaplate/paintaplate.html. Every step runs as a
 workflow from ./web/workflows; the nodes in nodes.py only fill gaps in core.
 """
+import importlib
+
 from comfy_api.v0_0_2 import ComfyExtension, io
 
 from .nodes import NODES
+
+importlib.import_module(f"{__name__}.routes")  # adds the page's download route to ComfyUI's server
 
 WEB_DIRECTORY = "./web"
 

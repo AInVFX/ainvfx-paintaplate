@@ -5,12 +5,13 @@
 Every class must exist and every input name must be one the class declares.
 """
 import glob
-import json
 import os
 import re
 import sys
 
 HERE = os.path.dirname(__file__)
+sys.path.insert(0, HERE)
+from build_workflows import load  # noqa: E402
 
 
 def scan(files):
@@ -40,21 +41,22 @@ def main(comfy, ltx):
              *glob.glob(os.path.join(ltx, "**", "*.py"), recursive=True), os.path.join(HERE, "..", "nodes.py")]
     known = scan(files)
     problems = 0
-    for wf in sorted(glob.glob(os.path.join(HERE, "..", "web", "workflows", "*.json"))):
-        data = json.load(open(wf))
-        for nid, node in data["prompt"].items():
+    folder = os.path.join(HERE, "..", "web", "workflows")
+    for wf in sorted(glob.glob(os.path.join(folder, "*.json"))):
+        prompt, slots, _ = load(os.path.splitext(os.path.basename(wf))[0], folder)
+        for nid, node in prompt.items():
             cls = node["class_type"]
             if cls not in known:
                 print(f"{os.path.basename(wf)} #{nid}: unknown class {cls}"); problems += 1; continue
             for name, value in node["inputs"].items():
                 if name.split(".")[0] not in known[cls]:
                     print(f"{os.path.basename(wf)} #{nid} {cls}: unknown input '{name}'"); problems += 1
-                if isinstance(value, list) and value[0] not in data["prompt"]:
+                if isinstance(value, list) and value[0] not in prompt:
                     print(f"{os.path.basename(wf)} #{nid} {cls}: link to missing node {value[0]}"); problems += 1
-        for slot, targets in data["slots"].items():
+        for slot, targets in slots.items():
             for nid, name in targets:
-                assert nid in data["prompt"] and name in data["prompt"][nid]["inputs"], (wf, slot)
-        print(f"{os.path.basename(wf)}: {len(data['prompt'])} nodes, {len(data['slots'])} slots")
+                assert nid in prompt and name in prompt[nid]["inputs"], (wf, slot)
+        print(f"{os.path.basename(wf)}: {len(prompt)} nodes, {len(slots)} slots")
     print("OK" if not problems else f"{problems} problem(s)")
     return problems
 

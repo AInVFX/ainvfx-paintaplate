@@ -17,7 +17,7 @@ def main(comfy):
     made = []
     for path in glob.glob(os.path.join(os.path.dirname(__file__), "..", "web", "workflows", "*.json")):
         with open(path) as f:
-            prompt = json.load(f)["prompt"]
+            prompt = json.load(f)
         for node in prompt.values():
             field, folder = FOLDER.get(node["class_type"], (None, None))
             name = node["inputs"].get(field) if field else None

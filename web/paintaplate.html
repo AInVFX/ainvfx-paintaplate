@@ -9,68 +9,119 @@
   <script type="module" src="app.mjs"></script>
 </head>
 <body>
-  <header>
+  <header class="top">
     <img class="logo" src="logo.png" alt="AInVFX">
     <span class="name">PaintAPlate</span>
     <span id="spec" class="spec"></span>
+    <button id="help-btn" class="quiet" title="Keys (?)" aria-label="Keys">?</button>
     <button id="open-btn">Open plate</button>
-    <button id="export-btn" class="primary" disabled>Export</button>
+    <button id="export-btn" class="primary" disabled title="Download the export and its matte as one zip">Export</button>
   </header>
 
   <nav class="tools" aria-label="Tools">
-    <button data-tool="paint" title="Paint something new (B)" aria-label="Paint"><svg viewBox="0 0 24 24"><path d="M4 20c2 0 4-1 4-4 0-1.5 1-2.5 2.5-2.5S13 14.5 13 16c0 3-3 4-9 4zM12.5 12.5 20 5l-1-1-7.5 7.5"/></svg></button>
-    <button data-tool="erase" title="Erase to the clean plate (E)" aria-label="Erase"><svg viewBox="0 0 24 24"><path d="M15 4l5 5-9 9H6l-2-2 11-12zM9 18h11"/></svg></button>
-    <button data-tool="light" title="Paint where the light comes from (L)" aria-label="Light"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg></button>
-    <button data-tool="restore" title="Restore the plate under the brush (R)" aria-label="Restore"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 3-6.2M4 4v4h4"/></svg></button>
-    <input id="size" type="range" min="4" max="256" value="48" aria-label="Brush size" title="Brush size ([ and ])">
-    <input id="color" type="color" value="#f5b800" aria-label="Colour" title="Brush and light colour">
+    <button data-tool="paint" title="Paint something new (B)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20c2 0 4-1 4-4 0-1.5 1-2.5 2.5-2.5S13 14.5 13 16c0 3-3 4-9 4zM12.5 12.5 20 5l-1-1-7.5 7.5"/></svg>
+      <span>Paint</span>
+    </button>
+    <div class="tool-group">
+      <button data-tool="erase" title="Erase to the clean plate (E)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4l5 5-9 9H6l-2-2 11-12zM9 18h11"/></svg>
+        <span>Erase</span>
+      </button>
+      <label class="whole" title="SAM 3.1 grows the stroke to the whole object under it">
+        <input id="whole" type="checkbox" checked><span>Whole object</span>
+      </label>
+    </div>
+    <button data-tool="light" title="Paint where the light comes from (L)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>
+      <span>Light</span>
+    </button>
+    <div class="brush">
+      <label for="size">Brush</label>
+      <input id="size" type="range" min="4" max="320" value="48" title="Brush size (- and =)">
+      <output id="size-out" for="size">48</output>
+    </div>
+    <label class="swatch" title="Colour of the paint and of the light">
+      <input id="color" type="color" value="#f5b800" aria-label="Colour">
+    </label>
   </nav>
 
   <main class="stage">
-    <canvas id="view"></canvas>
-    <video id="player" loop muted playsinline hidden></video>
-    <div id="empty" class="empty">
-      <p>Open a plate to start: a video file, or a folder of EXR, PNG, TIFF or DPX frames.</p>
-      <button id="empty-open" class="primary">Open plate</button>
+    <div class="promptbar">
+      <span id="tool-name" class="tool-name">Paint</span>
+      <input id="prompt" autocomplete="off" spellcheck="false" aria-label="Describe the edit"
+             placeholder="Describe what to paint, then paint it on the frame">
     </div>
-    <div class="views" role="tablist">
-      <button id="view-paint" class="on" role="tab">Frame</button>
-      <button id="view-shot" role="tab" disabled>Shot</button>
+    <div id="viewport" class="viewport">
+      <canvas id="view"></canvas>
+      <div id="wipe" class="wipe" hidden>
+        <span class="label left">Plate</span><span class="label right">Result</span><span class="grip" title="Drag to compare"></span>
+      </div>
+      <p id="hud" class="hud" aria-live="polite"></p>
+      <div id="empty" class="empty">
+        <p>Open a plate to start: a video file, or a folder of EXR, PNG, TIFF or DPX frames. You can also drop it here.</p>
+        <button id="empty-open" class="primary">Open plate</button>
+      </div>
+      <video id="plate-video" muted playsinline preload="auto" hidden></video>
+      <video id="shot-video" muted playsinline preload="auto" hidden></video>
+    </div>
+    <div class="transport">
+      <button id="play-btn" class="play" aria-label="Play (Space)" title="Play or pause (Space)" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-play" d="M8 5v14l11-7z"/><path class="i-pause" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+      </button>
+      <output id="frame-now" class="frame-now" title="Current frame">0</output>
+      <div id="timeline" class="timeline" role="slider" tabindex="0" aria-label="Frame" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+        <div id="tl-range" class="tl-range"></div>
+        <div id="tl-render" class="tl-render"></div>
+        <div id="tl-key" class="tl-key" hidden title="Edits are painted on this frame"></div>
+        <div id="tl-head" class="tl-head"></div>
+      </div>
+      <output id="frame-total" class="frame-total"></output>
+      <span id="fps" class="fps"></span>
+      <span id="render-note" class="render-note"></span>
+      <button id="wipe-btn" class="quiet" aria-pressed="false" title="Compare the plate and the result (F6)" disabled>Wipe</button>
     </div>
   </main>
 
   <aside class="side">
-    <section>
-      <h2>Options</h2>
-      <button class="option" data-i="0" aria-label="Pick option 1 (1)"><img alt=""><span>1</span></button>
-      <button class="option" data-i="1" aria-label="Pick option 2 (2)"><img alt=""><span>2</span></button>
-      <button id="reroll" title="Two new options (Enter)">New options</button>
-    </section>
-    <section>
-      <h2>Edits</h2>
-      <ol id="stack"></ol>
-    </section>
+    <h2>History</h2>
+    <ol id="history"></ol>
+    <p id="history-empty" class="history-empty">Your edits appear here. Describe, then paint on the frame.</p>
   </aside>
 
-  <footer>
-    <input id="prompt" placeholder="What did you paint? A fire, a wooden desk, a splashing wave" autocomplete="off">
-    <label id="whole-wrap" class="whole" hidden title="SAM 3.1 grows the stroke to the object under it"><input id="whole" type="checkbox" checked> Whole object</label>
-    <p id="status" role="status">Ready</p>
+  <footer class="log">
+    <p id="status" role="status">Starting</p>
+    <button id="log-btn" class="quiet" aria-expanded="false" aria-controls="log">Log</button>
+    <ol id="log" hidden></ol>
   </footer>
 
   <dialog id="help" class="help">
     <h2>Keys</h2>
+    <h3>Playback, as in RV</h3>
     <dl>
-      <dt>B, E, L, R</dt><dd>Paint, Erase, Light, Restore</dd>
-      <dt>[ and ]</dt><dd>Brush size</dd>
-      <dt>1 and 2</dt><dd>Pick an option</dd>
-      <dt>Enter</dt><dd>Two new options</dd>
-      <dt>Esc</dt><dd>Discard the edit</dd>
-      <dt>Ctrl+Z</dt><dd>Undo a stroke</dd>
-      <dt>Hold O</dt><dd>See the original frame</dd>
-      <dt>Space</dt><dd>Play or pause the shot</dd>
+      <dt>Space, Down</dt><dd>Play or pause</dd>
+      <dt>Left, Right</dt><dd>Step one frame</dd>
+      <dt>Home, End</dt><dd>Go to the in point, the out point</dd>
+      <dt>[ and ]</dt><dd>Set the in point, the out point</dd>
+      <dt>\</dt><dd>Clear the in and out points</dd>
+      <dt>Wheel</dt><dd>Step through frames</dd>
+      <dt>F6</dt><dd>Wipe between the plate and the result</dd>
+      <dt>Alt + drag</dt><dd>Pan</dd>
+      <dt>Ctrl + drag</dt><dd>Zoom</dd>
+      <dt>f, 1</dt><dd>Fit the frame, show it 1:1</dd>
+      <dt>`</dt><dd>Full screen</dd>
+    </dl>
+    <h3>Painting</h3>
+    <dl>
+      <dt>B, E, L</dt><dd>Paint, Erase, Light</dd>
+      <dt>- and =</dt><dd>Brush size</dd>
+      <dt>Enter</dt><dd>Start the edit now, or try another</dd>
+      <dt>Esc</dt><dd>Cancel the edit in progress</dd>
+      <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo</dd>
+      <dt>Hold O</dt><dd>See the plate</dd>
       <dt>?</dt><dd>Show or hide these keys</dd>
     </dl>
+    <form method="dialog"><button class="primary">Close</button></form>
   </dialog>
 
   <dialog id="open">

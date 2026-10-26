@@ -3,21 +3,23 @@
     python tests/comfy_live.py --comfy /path/to/ComfyUI --python /path/to/python [--url http://127.0.0.1:8188]
 
 1. Starts ComfyUI (unless --url points at a running one) with this pack installed.
-2. Checks the nodes, the app page and the frontend extension are served.
-3. Posts all five workflows with realistic values: ComfyUI's own validator must accept each one.
+2. Checks the nodes, the app page, the frontend extension and the download route are served.
+3. Posts every workflow with realistic values: ComfyUI's own validator must accept each one.
    Model files may be empty placeholders: model workflows are cancelled right after validation.
-4. Runs `ingest` and `export` end to end on an EXR sequence with extra layers, a ProRes MOV
-   with audio and timecode, and a 16-bit PNG sequence, then checks the files on disk.
+4. Runs `ingest`, `comp` and `export` end to end on an EXR sequence with extra layers, a ProRes MOV
+   with audio and timecode, and a 16-bit PNG sequence, then checks the files on disk and the zip.
 """
-import argparse, json, os, shutil, subprocess, sys, time, urllib.request, uuid
+import argparse, io, json, os, shutil, subprocess, sys, time, urllib.request, uuid, zipfile
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 import plateio  # noqa: E402
 import test_plateio  # noqa: E402
 import OpenEXR  # noqa: E402
+from build_workflows import fill  # noqa: E402
 
 N, W, H = 17, 192, 108
 FAILS = []
@@ -51,14 +53,6 @@ def http(url, data=None, files=None, timeout=60):
     return (json.loads(raw) if "json" in ctype else raw), ctype
 
 
-def fill(name, values):
-    wf = json.load(open(os.path.join(HERE, "..", "web", "workflows", f"{name}.json")))
-    for slot, value in values.items():
-        for nid, inp in wf["slots"].get(slot, []):
-            wf["prompt"][nid]["inputs"][inp] = value
-    return wf
-
-
 def submit(url, prompt):
     res, _ = http(f"{url}/prompt", {"prompt": prompt, "client_id": "paintaplate-test"})
     return res
@@ -83,6 +77,11 @@ def error_of(entry):
     return None
 
 
+def fill_check(name, slot):
+    from build_workflows import load
+    return slot in load(name)[1]
+
+
 def make_plates(input_dir):
     root = os.path.join(input_dir, "paintaplate_test")
     shutil.rmtree(root, ignore_errors=True)
@@ -102,7 +101,7 @@ def make_plates(input_dir):
 def fake_shot_and_matte(out_dir, run):
     """What `shot` and `matte` would write: sRGB frames at half size, and a mask of the edit."""
     sw, sh = W // 2, H // 2 + (H // 2) % 2
-    base = os.path.join(out_dir, "paintaplate_test", run)
+    base = os.path.join(out_dir, "paintaplate", f"test_{run}")
     for sub in ("shot", "matte_a"):
         os.makedirs(os.path.join(base, sub), exist_ok=True)
     for i in range(plateio.pad_count_8n1(N)):
@@ -111,7 +110,7 @@ def fake_shot_and_matte(out_dir, run):
         for sub, img in (("shot", frame), ("matte_a", m)):
             codec, pix, opts = plateio.still_target({"ext": ".png"}, False)
             open(os.path.join(base, sub, f"f_{i + 1:05d}_.png"), "wb").write(plateio.encode_still(img, None, codec, pix, opts))
-    return f"paintaplate_test/{run}"
+    return f"paintaplate/test_{run}"
 
 
 def verify_export(kind, plate_dir, out_dir, relight):
@@ -181,6 +180,8 @@ def main():
         exts, _ = http(f"{url}/extensions")
         check(any(e.endswith("ainvfx-paintaplate/open.js") for e in exts) and not any(e.endswith("app.mjs") for e in exts),
               "only open.js loads into the graph editor")
+        refused, _ = http(f"{url}/paintaplate/download?run=../../etc")
+        check(b"No export" in refused, "download route refuses paths outside output/paintaplate")
 
         stats, _ = http(f"{url}/system_stats")
         comfy_root = a.comfy
@@ -206,8 +207,10 @@ def main():
             "matte": {"path": plates["exr"][0], "color_space": "linear", "max_frames": N, "mask": "paintaplate/test/mask.png", "width": 96, "height": 64,
                       "prefix": "paintaplate_test/matte/m"},
         }
+        missing_slots = [(name, slot) for name, v in values.items() for slot in v if not fill_check(name, slot)]
+        check(not missing_slots, f"every value the test sets is a slot of its workflow {missing_slots or ''}")
         for name in ("edit", "snap", "shot", "matte"):  # model workflows: validate, then cancel
-            res = submit(url, fill(name, values[name])["prompt"])
+            res = submit(url, fill(name, values[name]))
             ok = "prompt_id" in res
             check(ok, f"{name}: accepted" + ("" if ok else f" -> {json.dumps(res.get('node_errors') or res.get('error'))[:600]}"))
             if ok:
@@ -217,7 +220,7 @@ def main():
         print("3. ingest and export, end to end")
         for kind, (path, cs) in plates.items():
             res = submit(url, fill("ingest", {**values["ingest"], "path": path, "color_space": cs,
-                                              "prefix": f"paintaplate_test/{kind}/hero", "video_prefix": f"paintaplate_test/{kind}/proxy"})["prompt"])
+                                              "prefix": f"paintaplate_test/{kind}/hero", "video_prefix": f"paintaplate_test/{kind}/proxy"}))
             if "prompt_id" not in res:
                 check(False, f"ingest {kind}: rejected {json.dumps(res)[:500]}"); continue
             entry, dt = wait(url, res["prompt_id"])
@@ -228,18 +231,36 @@ def main():
                 found = [f for o in outs.values() for key in ("images", "gifs", "video") for f in o.get(key, [])]
                 keys = sorted({key for o in outs.values() for key in o})
                 check(any(f["filename"].endswith(".png") for f in found), f"ingest {kind}: hero PNG ({keys})")
-                check(any(f["filename"].endswith((".mp4", ".webm")) for f in found), f"ingest {kind}: playback proxy video")
+                proxies = [f for f in found if f["filename"].endswith((".mp4", ".webm"))]
+                check(bool(proxies), f"ingest {kind}: playback proxy video")
+                if proxies:  # the proxy holds the real frames only, not the 8n+1 padding
+                    pv = plateio.probe_video(os.path.join(output_dir, proxies[0]["subfolder"], proxies[0]["filename"]))
+                    check(pv["frames"] in (N, 0) and abs(pv["width"] / pv["height"] - W / H) < 0.02,
+                          f"ingest {kind}: proxy has {pv['frames']} frames at {pv['width']}x{pv['height']}")
                 texts = [t for o in outs.values() for t in o.get("text", [])]
                 spec = json.loads(texts[0]) if texts else {}
                 check(spec.get("frames") == N and spec.get("width") == W, f"ingest {kind}: spec {spec.get('kind')}, {spec.get('width')}x{spec.get('height')}, {spec.get('frames')} frames, guess {spec.get('color_space_guess')}")
             for relight in (False, True) if kind == "exr" else (False,):
                 run = f"{kind}_r{int(relight)}"
                 shot = fake_shot_and_matte(output_dir, run)
-                exp_dir = f"paintaplate_test/{run}/export"
+                if not relight:  # the composite the page plays: an MP4 of the real frames
+                    res = submit(url, fill("comp", {"path": path, "color_space": cs, "max_frames": N, "width": W // 2,
+                                                    "height": H // 2 + (H // 2) % 2, "shot": f"output:{shot}/shot",
+                                                    "matte_a": f"output:{shot}/matte_a", "matte_b": f"output:{shot}/matte_a",
+                                                    "relight": False, "grow": 2, "feather": 3, "video_prefix": f"{shot}/comp"}))
+                    entry, dt = wait(url, res["prompt_id"]) if "prompt_id" in res else (None, 0)
+                    err = error_of(entry) if entry else json.dumps(res)[:400]
+                    vids = [f for o in (entry or {}).get("outputs", {}).values() for f in o.get("images", []) + o.get("video", [])
+                            if f["filename"].endswith(".mp4")]
+                    ok = bool(vids) and not err
+                    frames = plateio.probe_video(os.path.join(output_dir, vids[0]["subfolder"], vids[0]["filename"]))["frames"] if ok else -1
+                    check(ok and frames in (N, 0), f"comp {run}: composite MP4 in {dt:.1f} s, {frames} frames" + (f" -> {err}" if err else ""))
+                exp_dir = f"{shot}/export"
                 shutil.rmtree(os.path.join(output_dir, exp_dir), ignore_errors=True)
                 res = submit(url, fill("export", {"path": path, "color_space": cs, "max_frames": N, "shot": f"output:{shot}/shot",
                                                   "matte_a": f"output:{shot}/matte_a", "matte_b": f"output:{shot}/matte_a",
-                                                  "relight": relight, "keep_untouched": not relight, "prefix": exp_dir})["prompt"])
+                                                  "relight": relight, "keep_untouched": not relight, "prefix": exp_dir,
+                                                  "matte_prefix": f"{shot}/matte/matte", "grow": 4, "feather": 6}))
                 if "prompt_id" not in res:
                     check(False, f"export {run}: rejected {json.dumps(res)[:600]}"); continue
                 entry, dt = wait(url, res["prompt_id"])
@@ -247,6 +268,13 @@ def main():
                 check(entry is not None and not err, f"export {run}: ran in {dt:.1f} s" + (f" -> {err}" if err else ""))
                 if entry and not err:
                     verify_export(kind, os.path.join(input_dir, path), os.path.join(output_dir, exp_dir), relight)
+                    mattes = sorted(os.listdir(os.path.join(output_dir, shot, "matte")))
+                    check(len(mattes) == N, f"export {run}: matte saved, {len(mattes)} frames")
+                    blob, ctype = http(f"{url}/paintaplate/download?run={shot}&name=test_{run}")
+                    names = zipfile.ZipFile(io.BytesIO(blob)).namelist() if "zip" in ctype else []
+                    check(any(n.startswith("export/") for n in names) and sum(n.startswith("matte/") for n in names) == N,
+                          f"download {run}: zip with {sum(n.startswith('export/') for n in names)} export and "
+                          f"{sum(n.startswith('matte/') for n in names)} matte files")
     finally:
         if proc:
             proc.terminate(); proc.wait(20)

@@ -25,13 +25,12 @@ def call(path, body=None):
 
 
 def fill(name, values, edit=None):
-    wf = json.load(open(os.path.join(WF, f"{name}.json")))
-    for slot, value in values.items():
-        for nid, inp in wf["slots"].get(slot, []):
-            wf["prompt"][nid]["inputs"][inp] = value
+    sys.path.insert(0, os.path.join(HERE, "..", "tools"))
+    from build_workflows import fill as fill_slots
+    prompt = fill_slots(name, values, WF)
     if edit:
-        edit(wf["prompt"])
-    return wf["prompt"]
+        edit(prompt)
+    return prompt
 
 
 def run(prompt, label):
@@ -59,9 +58,21 @@ def path_of(f):
     return os.path.join(COMFY, f["type"], f["subfolder"], f["filename"])
 
 
-def fit(w, h, long, step):
-    k = long / max(w, h)
-    return [max(step, round(v * k / step) * step) for v in (w, h)]
+def fit(w, h, cap, step):
+    """The page's fitSize: multiples of `step` that keep the aspect within 1.5%, as large as allowed."""
+    long, short = max(w, h), min(w, h)
+    top = max(step, min(cap, long) // step * step)
+    best, size = None, top
+    while size >= max(step, top * 0.75):
+        s = max(step, int(short * size / long / step + 0.5) * step)
+        err = abs(size / s - long / short) / (long / short)
+        if best is None or err < best[2]:
+            best = (size, s, err)
+        if err <= 0.015:
+            best = (size, s, err)
+            break
+        size -= step
+    return [best[0], best[1]] if w >= h else [best[1], best[0]]
 
 
 def ingest(plate, cs):
@@ -80,8 +91,6 @@ def inputs(hero, tool, box, size, tag):
     x0, y0, x1, y1 = [int(v * s) for v, s in zip(box, (w, h, w, h))]
     mask = Image.new("L", (w, h), 0); ImageDraw.Draw(mask).ellipse((x0, y0, x1, y1), fill=255)
     ref = base.copy()
-    if tool == "erase":  # the hole is filled from its surroundings, so the model cannot copy the object back
-        ref = fill_hole(base, mask)
     if tool == "paint":
         ImageDraw.Draw(ref).ellipse((x0, y0, x1, y1), fill=(245, 120, 20))
     elif tool == "light":
@@ -95,36 +104,18 @@ def inputs(hero, tool, box, size, tag):
     return names, (x0, y0, x1, y1)
 
 
-def fill_hole(img, mask):
-    """Push-pull fill: average the known pixels at coarser and coarser scales, then paste them into the hole."""
-    a = np.asarray(img, np.float32) / 255.0
-    known = (np.asarray(mask, np.float32) < 128).astype(np.float32)[..., None]
-    levels, cur, w = [], a * known, known
-    while min(cur.shape[:2]) > 4:
-        levels.append((cur, w))
-        h2, w2 = cur.shape[0] // 2, cur.shape[1] // 2
-        cur = cur[:h2 * 2, :w2 * 2].reshape(h2, 2, w2, 2, 3).sum((1, 3))
-        w = w[:h2 * 2, :w2 * 2].reshape(h2, 2, w2, 2, 1).sum((1, 3))
-    fill = cur / np.maximum(w, 1e-6)
-    for c, wk in reversed(levels):
-        up = np.asarray(Image.fromarray((np.clip(fill, 0, 1) * 255).astype(np.uint8)).resize((c.shape[1], c.shape[0]), Image.BILINEAR), np.float32) / 255
-        fill = np.where(wk > 0, c / np.maximum(wk, 1e-6), up)
-    out = a * known + fill * (1 - known)
-    return Image.fromarray((np.clip(out, 0, 1) * 255).astype(np.uint8))
-
-
 def caption(tool, box, words):
     bbox = [round(v * 1000) for v in (box[1], box[0], box[3], box[2])]
-    text = {"erase": "Fill the blurred patch inside <obj_1> with the background that continues around it, with matching detail, light and focus. Add no new object. Keep everything else unchanged.",
+    text = {"erase": "Remove the object inside <obj_1> completely, with its shadow and its reflection. Show the surface and the background that continue behind it, with matching detail, light, shadows and focus. Add no new object. Keep everything else unchanged.",
             "paint": f"Replace the rough coloured drawing inside <obj_1> with {words}, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.",
             "light": f"Relight the whole scene with {words} coming from <obj_1>, with physically consistent shadows and reflections. Keep the content, framing and textures unchanged."}[tool]
-    desc = {"erase": "area to clean", "paint": words, "light": "light source"}[tool]
+    desc = {"erase": "object to remove", "paint": words, "light": "light source"}[tool]
     return f"{text} {json.dumps([{'id': 'obj_1', 'bbox': bbox, 'desc': desc}])}"
 
 
 def edit(plate, cs, tool, box, words=""):
     hero, spec = ingest(plate, cs)
-    work = fit(spec["width"], spec["height"], 1920, 64); prev = fit(spec["width"], spec["height"], 768, 16)
+    work = fit(spec["width"], spec["height"], 1920, 32); prev = fit(spec["width"], spec["height"], 768, 16)
     for klein in os.environ.get("KLEINS", "flux3-image-klein-int8-convrot.safetensors,flux3-image-klein-nvfp4.safetensors").split(","):
         q = "int8" if "int8" in klein else "nvfp4"
         names, _ = inputs(hero, tool, box, prev, f"{tool}_prev")
@@ -132,7 +123,7 @@ def edit(plate, cs, tool, box, words=""):
         base = dict(klein=klein, base=names["base"], reference=names["reference"],
                     start=names["base"] if light else names["reference"], mask=names["mask"],
                     caption=caption(tool, box, words), steps=8, denoise=0.65 if light else 1.0,
-                    grow=prev[0] // 48, feather=6, sigma=3)
+                    grow=prev[0] // (24 if tool == "erase" else 48), feather=6, sigma=3)
         for seed in (1, 2, 1):  # the third run is warm and cached text: the interactive case
             outs, _, dt = run(fill("edit", {**base, "seed": seed}), f"preview {tool} {q} seed {seed}")
             if outs:
@@ -145,7 +136,8 @@ def edit(plate, cs, tool, box, words=""):
         outs, _, dt = run(fill("edit", {**base, "seed": 1, "steps": steps, "denoise": 0.35, "base": names_w["base"],
                                         "reference": names_w["reference"],
                                         "start": f"bench/{tool}_{q}_start.png", "mask": names_w["mask"],
-                                        "grow": work[0] // 48, "feather": 12, "sigma": 6}), f"refine {tool} {q} {steps} steps")
+                                        "grow": work[0] // (24 if tool == "erase" else 48), "feather": 12, "sigma": 6}),
+                          f"refine {tool} {q} {steps} steps")
         if outs:
             Image.open(path_of(outs[0])).save(f"{BENCH}/{tool}_{q}_refined_{steps}.png")
 

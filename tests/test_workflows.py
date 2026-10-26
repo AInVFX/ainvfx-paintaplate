@@ -1,4 +1,4 @@
-"""The six workflows the page runs: generated from tools/build_workflows.py, and valid against ComfyUI's source."""
+"""The workflows the page runs: generated from tools/build_workflows.py, openable in ComfyUI, valid against its source."""
 import json
 import os
 import subprocess
@@ -9,6 +9,8 @@ import unittest
 from _env import COMFY, LTX, ROOT
 
 WORKFLOWS = os.path.join(ROOT, "web", "workflows")
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import build_workflows  # noqa: E402
 
 
 class Workflows(unittest.TestCase):
@@ -22,16 +24,34 @@ class Workflows(unittest.TestCase):
                 with open(os.path.join(out, name)) as a, open(os.path.join(WORKFLOWS, name)) as b:
                     self.assertEqual(json.load(a), json.load(b), f"{name} is stale: run tools/build_workflows.py")
 
-    def test_every_slot_points_at_a_real_input(self):
-        """Each named slot the page fills names a node and an input that exist in the prompt."""
+    def test_files_open_in_comfyui_as_api_workflows(self):
+        """ComfyUI's frontend loads a JSON file as an API workflow when every top-level value has a class_type
+        and an inputs object (src/scripts/metadata/json.ts and app.ts, ComfyUI_frontend 1.57.1)."""
         for name in os.listdir(WORKFLOWS):
             with open(os.path.join(WORKFLOWS, name)) as f:
-                wf = json.load(f)
-            for slot, targets in wf["slots"].items():
+                data = json.load(f)
+            for nid, node in data.items():
+                self.assertIsInstance(node.get("class_type"), str, f"{name} #{nid}")
+                self.assertIsInstance(node.get("inputs"), dict, f"{name} #{nid}")
+
+    def test_every_slot_points_at_a_real_input(self):
+        """Each named slot the page fills names a node and an input that exist in the prompt."""
+        for name in build_workflows.NAMES:
+            prompt, slots, outputs = build_workflows.load(name, WORKFLOWS)
+            self.assertTrue(slots, name)
+            for slot, targets in slots.items():
                 for node, field in targets:
-                    self.assertIn(node, wf["prompt"], f"{name}: slot {slot}")
-                    if slot != "fit_mask":  # a link the page removes, not a value it sets
-                        self.assertIn(field, wf["prompt"][node]["inputs"], f"{name}: slot {slot}")
+                    self.assertIn(node, prompt, f"{name}: slot {slot}")
+                    self.assertIn(field, prompt[node]["inputs"], f"{name}: slot {slot}")
+            for out, node in outputs.items():
+                self.assertIn(node, prompt, f"{name}: output {out}")
+
+    def test_outputs_the_page_reads(self):
+        """The page picks results by output name, not by position."""
+        wanted = {"ingest": {"hero", "proxy", "spec"}, "edit": {"patch", "result"}, "snap": {"mask"},
+                  "shot": {"frames", "video"}, "matte": {"frames"}, "comp": {"video"}, "export": {"export", "matte"}}
+        for name, keys in wanted.items():
+            self.assertEqual(set(build_workflows.load(name, WORKFLOWS)[2]), keys, name)
 
     @unittest.skipUnless(COMFY and os.path.isdir(LTX), "set COMFYUI_DIR (and LTXVIDEO_DIR) to check against source")
     def test_classes_and_inputs_exist_in_source(self):

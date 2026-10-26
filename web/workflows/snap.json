@@ -1,71 +1,69 @@
 {
- "prompt": {
-  "1": {
-   "class_type": "CheckpointLoaderSimple",
-   "inputs": {
-    "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
-   }
+ "1": {
+  "class_type": "CheckpointLoaderSimple",
+  "inputs": {
+   "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
   },
-  "2": {
-   "class_type": "LoadImage",
-   "inputs": {
-    "image": ""
-   }
-  },
-  "3": {
-   "class_type": "SAM3_Detect",
-   "inputs": {
-    "model": [
-     "1",
-     0
-    ],
-    "image": [
-     "2",
-     0
-    ],
-    "positive_coords": "[]",
-    "threshold": 0.5,
-    "refine_iterations": 2,
-    "individual_masks": false
-   }
-  },
-  "4": {
-   "class_type": "MaskToImage",
-   "inputs": {
-    "mask": [
-     "3",
-     0
-    ]
-   }
-  },
-  "5": {
-   "class_type": "PreviewImage",
-   "inputs": {
-    "images": [
-     "4",
-     0
-    ]
+  "_meta": {
+   "slots": {
+    "ckpt_name": "sam"
    }
   }
  },
- "slots": {
-  "sam": [
-   [
+ "2": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": ""
+  },
+  "_meta": {
+   "title": "First frame",
+   "slots": {
+    "image": "image"
+   }
+  }
+ },
+ "3": {
+  "class_type": "SAM3_Detect",
+  "inputs": {
+   "model": [
     "1",
-    "ckpt_name"
-   ]
-  ],
-  "image": [
-   [
+    0
+   ],
+   "image": [
     "2",
-    "image"
-   ]
-  ],
-  "points": [
-   [
+    0
+   ],
+   "positive_coords": "[]",
+   "threshold": 0.5,
+   "refine_iterations": 2,
+   "individual_masks": false
+  },
+  "_meta": {
+   "slots": {
+    "positive_coords": "points"
+   }
+  }
+ },
+ "4": {
+  "class_type": "MaskToImage",
+  "inputs": {
+   "mask": [
     "3",
-    "positive_coords"
+    0
    ]
-  ]
+  }
+ },
+ "5": {
+  "class_type": "PreviewImage",
+  "inputs": {
+   "images": [
+    "4",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Object mask",
+   "output": "mask"
+  }
  }
 }

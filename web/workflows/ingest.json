@@ -1,135 +1,154 @@
 {
- "prompt": {
-  "1": {
-   "class_type": "PaintAPlate_LoadPlate",
-   "inputs": {
-    "path": "",
-    "max_frames": 121,
-    "pad_8n1": true
-   }
+ "1": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 121,
+   "pad_8n1": true
   },
-  "2": {
-   "class_type": "ImageColorSpace",
-   "inputs": {
-    "image": [
-     "1",
-     0
-    ],
-    "source": "sRGB",
-    "destination": "sRGB"
-   }
-  },
-  "3": {
-   "class_type": "ImageFromBatch",
-   "inputs": {
-    "image": [
-     "2",
-     0
-    ],
-    "batch_index": 0,
-    "length": 1
-   }
-  },
-  "4": {
-   "class_type": "ImageScaleToMaxDimension",
-   "inputs": {
-    "image": [
-     "3",
-     0
-    ],
-    "upscale_method": "lanczos",
-    "largest_size": 1920
-   }
-  },
-  "5": {
-   "class_type": "SaveImage",
-   "inputs": {
-    "images": [
-     "4",
-     0
-    ],
-    "filename_prefix": "paintaplate/plate/hero"
-   }
-  },
-  "6": {
-   "class_type": "ImageScaleToMaxDimension",
-   "inputs": {
-    "image": [
-     "2",
-     0
-    ],
-    "upscale_method": "area",
-    "largest_size": 960
-   }
-  },
-  "7": {
-   "class_type": "CreateVideo",
-   "inputs": {
-    "images": [
-     "6",
-     0
-    ],
-    "fps": [
-     "1",
-     3
-    ],
-    "bit_depth": 8,
-    "color_space": "sRGB",
-    "codec": "none"
-   }
-  },
-  "8": {
-   "class_type": "SaveVideo",
-   "inputs": {
-    "video": [
-     "7",
-     0
-    ],
-    "filename_prefix": "paintaplate/plate/proxy",
-    "format": "auto",
-    "format.codec": "auto"
-   }
-  },
-  "9": {
-   "class_type": "PreviewAny",
-   "inputs": {
-    "source": [
-     "1",
-     5
-    ]
+  "_meta": {
+   "title": "Plate",
+   "slots": {
+    "path": "path",
+    "max_frames": "max_frames"
    }
   }
  },
- "slots": {
-  "path": [
-   [
+ "2": {
+  "class_type": "ImageColorSpace",
+  "inputs": {
+   "image": [
     "1",
-    "path"
-   ]
-  ],
-  "max_frames": [
-   [
-    "1",
-    "max_frames"
-   ]
-  ],
-  "color_space": [
-   [
+    0
+   ],
+   "source": "sRGB",
+   "destination": "sRGB"
+  },
+  "_meta": {
+   "title": "Plate in sRGB",
+   "slots": {
+    "source": "color_space"
+   }
+  }
+ },
+ "3": {
+  "class_type": "ImageFromBatch",
+  "inputs": {
+   "image": [
     "2",
-    "source"
+    0
+   ],
+   "batch_index": 0,
+   "length": 1
+  }
+ },
+ "4": {
+  "class_type": "ImageScaleToMaxDimension",
+  "inputs": {
+   "image": [
+    "3",
+    0
+   ],
+   "upscale_method": "lanczos",
+   "largest_size": 1920
+  }
+ },
+ "5": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "images": [
+    "4",
+    0
+   ],
+   "filename_prefix": "paintaplate/plate/hero"
+  },
+  "_meta": {
+   "title": "First frame",
+   "slots": {
+    "filename_prefix": "prefix"
+   },
+   "output": "hero"
+  }
+ },
+ "6": {
+  "class_type": "ImageFromBatch",
+  "inputs": {
+   "image": [
+    "2",
+    0
+   ],
+   "batch_index": 0,
+   "length": [
+    "1",
+    4
    ]
-  ],
-  "prefix": [
-   [
-    "5",
-    "filename_prefix"
-   ]
-  ],
-  "video_prefix": [
-   [
+  },
+  "_meta": {
+   "title": "Real frames (no padding)"
+  }
+ },
+ "7": {
+  "class_type": "ImageScaleToMaxDimension",
+  "inputs": {
+   "image": [
+    "6",
+    0
+   ],
+   "upscale_method": "area",
+   "largest_size": 960
+  },
+  "_meta": {
+   "slots": {
+    "largest_size": "proxy_size"
+   }
+  }
+ },
+ "8": {
+  "class_type": "CreateVideo",
+  "inputs": {
+   "images": [
+    "7",
+    0
+   ],
+   "fps": [
+    "1",
+    3
+   ],
+   "bit_depth": 8,
+   "color_space": "sRGB",
+   "codec": "none"
+  }
+ },
+ "9": {
+  "class_type": "SaveVideo",
+  "inputs": {
+   "video": [
     "8",
-    "filename_prefix"
+    0
+   ],
+   "filename_prefix": "paintaplate/plate/proxy",
+   "format": "auto",
+   "format.codec": "auto"
+  },
+  "_meta": {
+   "title": "Playback proxy",
+   "slots": {
+    "filename_prefix": "video_prefix"
+   },
+   "output": "proxy"
+  }
+ },
+ "10": {
+  "class_type": "PreviewAny",
+  "inputs": {
+   "source": [
+    "1",
+    5
    ]
-  ]
+  },
+  "_meta": {
+   "title": "Plate spec",
+   "output": "spec"
+  }
  }
 }
