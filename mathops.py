@@ -165,11 +165,9 @@ def steady_masks(masks: np.ndarray, radius: int, grow: float, feather: float) ->
     span = 2 * radius + 1
     if radius > 0 and len(m) > 1:
         m = ndimage.maximum_filter1d(m, span, axis=0, mode="nearest")
-    if grow > 0:
-        r = int(np.ceil(grow))
-        yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
-        disk = yy ** 2 + xx ** 2 <= grow ** 2
-        m = np.stack([ndimage.grey_dilation(f, footprint=disk) for f in m])
+    if grow > 0:  # two running maxima, along rows then columns: as fast at 50 px as at 5 (the feather rounds the corners)
+        size = 2 * int(np.ceil(grow)) + 1
+        m = ndimage.maximum_filter1d(ndimage.maximum_filter1d(m, size, axis=2, mode="nearest"), size, axis=1, mode="nearest")
     if radius > 0 and len(m) > 1:
         m = ndimage.uniform_filter1d(m, span, axis=0, mode="nearest")
     if feather > 0:

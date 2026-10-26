@@ -21,25 +21,41 @@ if curl -s -m 3 -o /dev/null http://127.0.0.1:8188/system_stats; then
   log "ComfyUI is already running: $APP"
 else
   log "setup: ComfyUI, ComfyUI-LTXVideo, this pack and 52 GB of models (log: $W/setup.log)"
-  if ! bash "$HERE/tools/pod_setup.sh" > "$W/setup.log" 2>&1; then
+  bash "$HERE/tools/pod_setup.sh" > "$W/setup.log" 2>&1 &
+  setup=$!
+  shown=0; last=0
+  report() { # each new setup line, then the models arriving, every 15 s
+    local n; n=$(wc -l < "$W/setup.log" 2>/dev/null || echo 0)
+    if [ "$n" -gt "$shown" ]; then sed -n "$((shown + 1)),${n}p" "$W/setup.log" | sed 's/^/    /'; shown=$n; fi
+    if [ $((SECONDS - last)) -ge 15 ] && ! grep -q "models done" "$W/models.log" 2>/dev/null; then
+      last=$SECONDS
+      log "models: $(du -sb "$W/models" 2>/dev/null | awk '{printf "%.1f", $1 / 1e9}') of 52 GB"
+    fi
+  }
+  while kill -0 "$setup" 2>/dev/null; do report; sleep 2; done
+  report
+  if ! wait "$setup"; then
     log "setup failed: see $W/setup.log"
     if [ "$main" = 1 ]; then sleep infinity; fi
     exit 1
   fi
-  log "waiting for the models (log: $W/models.log)"
-  for _ in $(seq 360); do
+  for _ in $(seq 720); do
     grep -q "models done" "$W/models.log" 2>/dev/null && break
-    sleep 5
+    report; sleep 5
   done
+  log "models ready: $(du -sb "$W/models" 2>/dev/null | awk '{printf "%.1f", $1 / 1e9}') GB"
   flags=(--listen 0.0.0.0 --port 8188 --preview-method latent2rgb)
   vram=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n 1)
   if [ "${vram:-0}" -ge 80000 ]; then flags+=(--highvram); fi  # every model stays loaded on a 96 GB card
   cd "$W/ComfyUI" || exit 1
+  log "starting ComfyUI (log: $W/comfyui.log)"
   nohup "$VENV/bin/python" main.py "${flags[@]}" > "$W/comfyui.log" 2>&1 &
+  t0=$SECONDS
   for _ in $(seq 120); do
     curl -s -m 3 -o /dev/null http://127.0.0.1:8188/system_stats && break
     sleep 2
   done
+  log "ComfyUI answered after $((SECONDS - t0)) s"
   log "ready: $APP"
 fi
 if [ "$main" = 1 ]; then sleep infinity; fi  # keep the pod running

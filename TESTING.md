@@ -9,12 +9,12 @@ python -m unittest discover -s tests -v
 
 | Module | What it proves | Needs |
 | --- | --- | --- |
-| `test_plateio` | EXR layers and header kept, ProRes round trip (codec, colour tags, timecode, audio), PNG, TIFF, DPX and EXR writers, frame names, 8n+1 padding | Python only |
+| `test_plateio` | EXR layers and header kept, ProRes round trip (codec, colour tags, timecode, audio), PNG, TIFF, DPX and EXR writers, frame names, 8n+1 padding, sequences with missing frames or on twos keep their frame numbers | Python only |
 | `test_mathops` | Alignment survives a relight, colour gain is clamped, grain level matches, relight keeps the plate's detail, push-pull fill, steady masks, and a composite whose edge holds still and matches the plate | Python only |
 | `test_workflows` | `web/workflows` is current; each file opens in ComfyUI as an API workflow; every slot and output the page uses exists; every class and input exists in ComfyUI and ComfyUI-LTXVideo source | source check: `COMFYUI_DIR` |
 | `test_web` | Every element and workflow the page uses exists; the scripts parse; only the menu entry loads into the graph editor | `node` for parsing |
 | `test_lint` | pyflakes on all Python, shellcheck on the scripts | `pyflakes`, `shellcheck` |
-| `test_live` | A real ComfyUI loads the pack and serves the page and the download route; every workflow validates; EXR, ProRes and 16-bit PNG plates ingest, composite and export with untouched pixels and extra layers bit-identical, a matte per frame and a zip; headless Chromium opens a plate, plays it, paints, erases and relights, bypasses an edit, wipes and downloads the zip through the page | `COMFYUI_DIR`, `playwright` |
+| `test_live` | A real ComfyUI loads the pack and serves the page and the download route; every workflow validates; EXR, ProRes and 16-bit PNG plates ingest, composite and export with untouched pixels and extra layers bit-identical, a matte per frame and a zip with the parts asked for; headless Chromium opens a plate, plays it, paints, erases and relights, bypasses an edit, wipes, and downloads the zip through the Export dialog | `COMFYUI_DIR`, `playwright` |
 
 `tools/ci_comfyui.sh <folder>` prepares the ComfyUI for `test_live`: ComfyUI and ComfyUI-LTXVideo at the tested commits, this pack linked in, and empty model files from `tools/placeholders.py`. No model runs: model workflows are cancelled right after ComfyUI validates them, and the browser test swaps them for stand-ins made of core nodes. GitHub Actions (`.github/workflows/tests.yml`) runs the Python level, then the ComfyUI level, on every push.
 

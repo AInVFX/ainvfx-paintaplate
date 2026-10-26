@@ -72,7 +72,7 @@ def flow(page, url, open_plate, shots, wait_s=120):
     """The flow both runs share: the page must already show 'Ready'."""
     status = lambda: page.inner_text("#status")  # noqa: E731
     open_plate()
-    page.wait_for_function("document.querySelector('#empty').hidden", timeout=wait_s * 1000)
+    page.wait_for_function("document.querySelector('#spec').textContent && document.querySelector('#opening').hidden", timeout=wait_s * 1000)
     print("opened:", status(), "|", page.inner_text("#spec"))
     page.keyboard.press("Space"); page.wait_for_timeout(600); page.keyboard.press("Space")  # play, then pause
     playing_frame = page.inner_text("#frame-now")
@@ -93,14 +93,16 @@ def flow(page, url, open_plate, shots, wait_s=120):
                            timeout=wait_s * 1000)
     page.locator("#history li").nth(1).locator(".eye").click()
     page.wait_for_function("!document.querySelector('#history li.off') && !document.querySelector('#history li.busy')", timeout=wait_s * 1000)
-    page.wait_for_function("document.querySelector('#status').textContent.startsWith('Exported')", timeout=wait_s * 3000)
+    page.wait_for_function("document.querySelector('#render-left').textContent === 'export ready'", timeout=wait_s * 3000)
     page.keyboard.press("F6")  # wipe on, at frame 10
     page.keyboard.press("End")
     page.screenshot(path=f"{shots}/3_exported_wipe.png")
     final = status()
-    print("final:", final, "| frame while playing:", playing_frame)
+    print("final:", final, "| frame while playing:", playing_frame, "| steps:", page.inner_text("#stages").replace("\n", " "))
     with page.expect_download(timeout=wait_s * 1000) as dl:
         page.click("#export-btn")
+        page.check("#x-review")
+        page.click("#x-go")
     path = f"{shots}/download.zip"
     dl.value.save_as(path)
     names = zipfile.ZipFile(path).namelist()
@@ -170,7 +172,7 @@ def main():
                 print("status:", page.inner_text("#status"))
                 page.screenshot(path=f"{SHOTS}/fail.png")
                 raise
-            ok = final.startswith("Exported")
+            ok = final.startswith("Exported") or final.startswith("Downloading")
             browser.close()
     except Exception as exc:
         print("FAILED AT:", type(exc).__name__, str(exc).splitlines()[0][:200])
@@ -184,7 +186,7 @@ def main():
     print(f"zip: {len(exports)} EXR frames, {len(mattes)} matte frames; console errors: {len(errors)}")
     for e in errors[:10]:
         print("  console:", e[:300])
-    passed = ok and exports and mattes and not errors
+    passed = ok and exports and mattes and "review.mp4" in names and not errors
     print("UI FLOW PASSED" if passed else "UI FLOW FAILED")
     return 0 if passed else 1
 
@@ -210,7 +212,7 @@ def remote(a):
             if a.cs:
                 page.select_option("#cs", a.cs)
             page.click("#open-go")
-            page.wait_for_function("document.querySelector('#empty').hidden", timeout=300000)
+            page.wait_for_function("document.querySelector('#spec').textContent && document.querySelector('#opening').hidden", timeout=300000)
             mark("plate open: " + page.inner_text("#spec")); page.screenshot(path=f"{shots}/1_open.png")
             box = page.locator("#view").bounding_box()
             page.wait_for_timeout(a.think * 1000)  # a person looks at the frame before painting
@@ -239,6 +241,7 @@ def remote(a):
             if status().startswith("Exported"):
                 with page.expect_download(timeout=600000) as dl:
                     page.click("#export-btn")
+                    page.click("#x-go")
                 dl.value.save_as(f"{shots}/export.zip")
                 mark(f"downloaded {len(zipfile.ZipFile(f'{shots}/export.zip').namelist())} files")
         except Exception as exc:

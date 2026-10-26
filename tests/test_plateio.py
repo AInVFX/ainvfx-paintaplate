@@ -2,6 +2,7 @@
 import os, sys, unittest, tempfile
 from fractions import Fraction
 import numpy as np
+from PIL import Image
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import plateio  # noqa: E402
 
@@ -129,6 +130,27 @@ class PlateIO(unittest.TestCase):
     def test_pad(self):
         assert [plateio.pad_count_8n1(n) for n in (1, 2, 9, 10, 97, 100, 121)] == [1, 9, 9, 17, 97, 105, 121]
         print("8n+1 padding: ok")
+
+
+class Sequences(unittest.TestCase):
+    def test_missing_frames_keep_their_numbers(self):
+        """As in OpenRV: a missing frame holds the one before, later frames keep their numbers, frames on twos stay on twos."""
+        with tempfile.TemporaryDirectory() as d:
+            for n in (1001, 1002, 1004, 1005):  # 1003 is missing
+                Image.fromarray(np.full((4, 4, 3), n % 256, np.uint8)).save(os.path.join(d, f"shot.{n}.png"))
+            files, step, missing = plateio.sequence_frames(d)
+            self.assertEqual((len(files), step, missing), (5, 1, [1003]))
+            self.assertTrue(files[2].endswith("shot.1002.png"))
+            spec = plateio.probe_plate(d)
+            self.assertEqual((spec["frames"], spec["missing"]), (5, [1003]))
+            self.assertTrue(plateio.output_frame_name(spec, 4, "/out", ".png").endswith("shot.1005.png"))
+        with tempfile.TemporaryDirectory() as d:
+            for n in (1, 3, 5, 7):  # on twos
+                Image.fromarray(np.zeros((4, 4, 3), np.uint8)).save(os.path.join(d, f"t_{n:04d}.png"))
+            spec = plateio.probe_plate(d)
+            self.assertEqual((spec["frames"], spec["step"], spec["missing"]), (4, 2, []))
+            self.assertTrue(plateio.output_frame_name(spec, 3, "/out", ".png").endswith("t_0007.png"))
+        print("sequences: missing frames hold, numbers kept, frames on twos")
 
 
 if __name__ == "__main__":

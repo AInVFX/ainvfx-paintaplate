@@ -17,6 +17,7 @@ it runs and is tested outside ComfyUI.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from fractions import Fraction
@@ -70,7 +71,17 @@ def frame_number(path: str) -> int | None:
 
 
 def find_sequence(folder: str) -> list[str]:
-    """Numbered frames of the largest image sequence in a folder, in order."""
+    """Numbered frames of the largest image sequence in a folder, in order, a missing frame held from the one before."""
+    return sequence_frames(folder)[0]
+
+
+def sequence_frames(folder: str) -> tuple[list[str], int, list[int]]:
+    """(one file per frame number, step, missing numbers) for the largest image sequence in a folder.
+
+    As OpenRV's FileSequence maps frame numbers to files, a missing number keeps its place: the frame
+    before it holds, so every later frame keeps its number. The step is the common gap between numbers
+    (2 for frames on twos), so a sequence on twos is not mistaken for one with every other frame missing.
+    """
     groups: dict[tuple[str, str], list[tuple[int, str]]] = {}
     for name in os.listdir(folder):
         full = os.path.join(folder, name)
@@ -85,8 +96,25 @@ def find_sequence(folder: str) -> list[str]:
         groups.setdefault(key, []).append((num, full))
     if not groups:
         raise FileNotFoundError(f"No image frames found in {folder}")
-    best = max(groups.values(), key=len)
-    return [p for _, p in sorted(best)]
+    key, best = max(groups.items(), key=lambda kv: len(kv[1]))
+    if key[1] == "_":  # core Save Image's counter names (f_00001_.png): numbers count files, not frames
+        return [p for _, p in sorted(best)], 1, []
+    found = {}
+    for num, path in sorted(best):
+        found.setdefault(num, path)  # two files for one number: the first in name order
+    nums = sorted(found)
+    step = 0
+    for a, b in zip(nums, nums[1:]):
+        step = math.gcd(step, b - a)
+    step = step or 1
+    files, missing, last = [], [], found[nums[0]]
+    for num in range(nums[0], nums[-1] + 1, step):
+        if num in found:
+            last = found[num]
+        else:
+            missing.append(num)
+        files.append(last)
+    return files, step, missing
 
 
 def _fps_from_spec(fps) -> Fraction:
@@ -166,10 +194,10 @@ def probe_still(path: str) -> dict:
 def probe_plate(path: str, fps_hint: float = 24.0) -> dict:
     """Spec of a plate: a video file, a single image, or a folder of frames."""
     if os.path.isdir(path):
-        files = find_sequence(path)
+        files, step, missing = sequence_frames(path)
         first = files[0]
         ext = os.path.splitext(first)[1].lower()
-        spec = {"kind": "sequence", "source": path, "files": files, "ext": ext,
+        spec = {"kind": "sequence", "source": path, "files": files, "ext": ext, "step": step, "missing": missing,
                 "first_frame": frame_number(first) or 0, "fps": float(fps_hint),
                 "fps_num": _fps_from_spec(fps_hint).numerator, "fps_den": _fps_from_spec(fps_hint).denominator,
                 "frames": len(files)}
@@ -231,7 +259,7 @@ def output_frame_name(spec: dict, index: int, out_dir: str, ext: str | None = No
         src = os.path.basename(spec["files"][min(index, len(spec["files"]) - 1)])
         m = _FRAME_RE.match(src)
         if m and spec.get("kind") == "sequence":
-            num = spec["first_frame"] + index
+            num = spec["first_frame"] + index * spec.get("step", 1)
             return os.path.join(out_dir, f"{m.group('prefix')}{num:0{len(m.group('num'))}d}{m.group('suffix')}{ext}")
         stem = os.path.splitext(src)[0]
         return os.path.join(out_dir, f"{stem}{ext}")

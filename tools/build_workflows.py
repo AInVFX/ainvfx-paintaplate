@@ -3,7 +3,7 @@
 Each file is a plain ComfyUI workflow in API format, so ComfyUI opens it with Open or by drag
 and drop. The page fills some inputs before it posts a workflow: each node lists them in
 `_meta.slots` as {input name: slot name}, and the outputs the page reads carry `_meta.output`.
-Every node is a core node, a ComfyUI-LTXVideo node or one of the four PaintAPlate nodes.
+Every node is a core node, a ComfyUI-LTXVideo node or one of the five PaintAPlate nodes.
 
     python tools/build_workflows.py
 """
@@ -174,8 +174,13 @@ def shot():
     """LTX 2.5 with the Ripple IC-LoRA: the edited first frame carries through the whole shot."""
     g = Graph()
     load, srgb = plate(g, pad=True)
-    frames = g("ImageScale", image=srgb, upscale_method="lanczos", width=Slot("width", 960),
+    scaled = g("ImageScale", image=srgb, upscale_method="lanczos", width=Slot("width", 960),
                height=Slot("height", 544), crop="disabled")
+    # what an erase takes away, filled in the frames LTX follows: shown the object, LTX kept its shape
+    hole = g("PaintAPlate_LoadPlate", _title="Erase matte", path=Slot("hole", ""), max_frames=1024, pad_8n1=False)
+    frames = g("PaintAPlate_FillMatte", _title="Erased objects filled", images=scaled,
+               mask=g("ImageToMask", image=hole, channel="red"), grow=Slot("hole_grow", 60), feather=Slot("hole_feather", 60))
+    g.link_slot(frames, "mask", "hole_mask")  # the page drops this link when no edit erases
     size = g("GetImageSize", image=frames)
     hero = g("ImageScale", image=g("LoadImage", _title="Edited first frame", image=Slot("hero", "")),
              upscale_method="lanczos", width=size[0], height=size[1], crop="disabled")

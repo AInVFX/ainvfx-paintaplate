@@ -19,18 +19,24 @@ const TOOLS = { b: "paint", e: "erase", l: "light" };
 const NAME = { paint: "Paint", erase: "Erase", light: "Light" };
 const HINT = {
   paint: "Describe what to paint, then paint it on the frame. A fire, a wooden desk, a red umbrella",
-  erase: "Erase needs no words: paint over what should go",
+  erase: "Optional: name what to remove, then paint over it. A red umbrella, a man in a coat",
   light: "Optional: describe the light, then paint where it comes from. Warm sunset, neon sign",
 };
 const BACKGROUND = ["shot", "matte", "comp", "export"];
+// The node whose progress stands for the whole workflow: other nodes report too, and would restart the bar.
+const MAIN = { ingest: "PaintAPlate_LoadPlate", edit: "KSampler", shot: "SamplerCustomAdvanced", matte: "SAM3_VideoTrack",
+  comp: "PaintAPlate_FitToPlate", export: "PaintAPlate_FitToPlate" };
 
 const S = {
   plate: null, original: null, hero: null, heroVersion: 0,
   edits: [], draft: null, running: null, removed: [], ids: 0, count: 0, chain: Promise.resolve(), queued: 0,
-  tool: "paint", size: 48, color: "#f5b800",
+  tool: "paint", size: 48, colors: { paint: "#000000", light: "#ffd890" }, rub: false,
+  get color() { return this.colors[this.tool] ?? "#000000"; },
   frame: 0, playing: false, inPt: 0, outPt: 0, wipe: null, compare: false,
   fit: { w: 0, h: 0, x: 0, y: 0 }, zoom: { k: 1, x: 0, y: 0 },
-  shot: null, shotDirty: false, stage: { phase: "none" }, run: 0, exported: null, wantDownload: false,
+  shot: null, shotDirty: false, stage: null, run: 0, exported: null, wantDownload: null,
+  background: (() => { try { return localStorage.getItem("paintaplate.background") !== "0"; } catch { return true; } })(), // prepare the export after each change
+  previewCap: (() => { try { return +localStorage.getItem("paintaplate.preview") || 960; } catch { return 960; } })(), // long side of the shot preview
   heroKey: "", renders: new Map(), // set of edits -> what has been rendered for it
   uploads: new Map(), timer: 0,
 };
@@ -44,15 +50,23 @@ const fx = document.createElement("canvas"); // scratch layer for masked overlay
 const post = (path, body) =>
   fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-async function upload(blob, name, sub = `paintaplate/${S.plate.id}`) {
-  const form = new FormData();
-  form.append("image", blob, name);
-  form.append("subfolder", sub);
-  form.append("overwrite", "true");
-  const r = await fetch("/upload/image", { method: "POST", body: form });
-  if (!r.ok) throw new Error(`Upload failed: ${name}`);
-  const j = await r.json();
-  return j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
+function upload(blob, name, sub = `paintaplate/${S.plate.id}`, onProgress) { // XMLHttpRequest: it reports upload progress
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append("image", blob, name);
+    form.append("subfolder", sub);
+    form.append("overwrite", "true");
+    const x = new XMLHttpRequest();
+    x.open("POST", "/upload/image");
+    x.upload.onprogress = (e) => onProgress?.(e.loaded);
+    x.onerror = () => reject(new Error(`Upload failed: ${name}`));
+    x.onload = () => {
+      if (x.status < 200 || x.status > 299) return reject(new Error(`Upload failed: ${name}`));
+      const j = JSON.parse(x.responseText);
+      resolve(j.subfolder ? `${j.subfolder}/${j.name}` : j.name);
+    };
+    x.send(form);
+  });
 }
 
 function parse(prompt) { // slots and outputs are written in each node's _meta by tools/build_workflows.py
@@ -64,12 +78,13 @@ function parse(prompt) { // slots and outputs are written in each node's _meta b
   return { prompt, slots, outputs };
 }
 
-function run(name, values, { kind = name, preview, progress, front = false, edit } = {}) {
+function run(name, values, { kind = name, preview, progress, step, front = false, edit } = {}) {
   const wf = structuredClone(WF[name]);
   for (const [slot, value] of Object.entries(values))
     for (const [id, input] of wf.slots[slot] ?? []) wf.prompt[id].inputs[input] = value;
   edit?.(wf);
-  const job = { kind, preview, progress, retries: 1, key: JSON.stringify(wf.prompt) };
+  const job = { kind, preview, progress, step: step && ((id) => step(wf.prompt[id]?.class_type)), retries: 1, key: JSON.stringify(wf.prompt),
+    main: new Set(Object.entries(wf.prompt).filter(([, n]) => n.class_type === MAIN[name]).map(([id]) => id)) };
   job.done = new Promise((resolve, reject) => Object.assign(job, { resolve, reject }));
   job.submit = () => post("/prompt", { prompt: wf.prompt, client_id: CLIENT, front }).then((r) => r.json()).then((j) => {
     if (!j.prompt_id) throw new Error(rejection(j));
@@ -98,6 +113,12 @@ async function finish(id, error) {
   early.delete(id);
   // An interrupt can land on the next prompt when the one it targeted had just finished: run it again once.
   if (error === "cancelled" && !job.cancelled && job.retries-- > 0) return job.submit();
+  if (error && /out of memory|allocation on device/i.test(error) && !job.freed) { // models and caches piled up on the GPU
+    job.freed = true;
+    status("The GPU ran out of memory: freeing ComfyUI's memory, then trying once more.");
+    await post("/free", { unload_models: true, free_memory: true });
+    return job.submit();
+  }
   live.delete(job);
   if (error) return job.reject(new Error(error));
   const history = await (await fetch(`/history/${id}`)).json();
@@ -143,7 +164,16 @@ function connect() {
     const heard = byId.get(d?.prompt_id);
     if (heard) heard.heard = Date.now();
     if (type === "execution_start") { running = d.prompt_id; byId.get(d.prompt_id)?.progress?.(0); }
-    else if (type === "progress") byId.get(d.prompt_id)?.progress?.(d.value / d.max);
+    else if (type === "executing" && d.node) {
+      const job = byId.get(d.prompt_id);
+      job?.step?.(d.node);
+      if (job?.main.has(String(d.node))) job.inMain = true;
+      else if (job?.inMain) job.progress?.(0.97); // the main node is done; saving remains
+    }
+    else if (type === "progress") {
+      const job = byId.get(d.prompt_id);
+      if (job && (!job.main.size || job.main.has(String(d.node)))) job.progress?.(0.02 + (0.93 * d.value) / d.max);
+    }
     else if (type === "execution_success") finish(d.prompt_id);
     else if (type === "execution_error") finish(d.prompt_id, `${d.node_type}: ${d.exception_message}`);
     else if (type === "execution_interrupted") finish(d.prompt_id, "cancelled");
@@ -170,7 +200,7 @@ const texts = (out) => Object.values(out).flatMap((o) => o.text ?? []);
 const fileOf = (name, out, key) => files({ x: out[WF[name].outputs[key]] ?? {} })[0];
 const textOf = (name, out, key) => out[WF[name].outputs[key]]?.text?.[0];
 const url = (f) => `/view?${new URLSearchParams({ filename: f.filename, subfolder: f.subfolder, type: f.type })}`;
-const quiet = (e) => e?.message !== "cancelled" && status(e?.message ?? String(e));
+const quiet = (e) => { if (e?.message === "cancelled") return; console.error(e); status(e?.message ?? String(e)); };
 
 // ---------- Images ----------
 
@@ -231,13 +261,13 @@ function colorName(hex) {
 }
 
 function caption(e) { // the same text and table FLUX 3 Image Layout Prompt writes, built here per edit
-  const words = e.prompt;
+  const words = e.prompt, painted = e.strokes.filter((s) => s.tool !== "rub"); // eraser strokes have no colour
   const text = {
-    erase: "Remove the object inside <obj_1> completely, with its shadow and its reflection. Show the surface and the background that continue behind it, with matching detail, light, shadows and focus. Add no new object. Keep everything else unchanged.",
-    paint: `Replace the rough coloured drawing inside <obj_1> with ${words || "a realistic object of that shape and colour"}, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.`,
-    light: `Relight the whole scene with ${words || `${colorName(e.strokes.find((s) => !dark(s.color))?.color ?? e.color)} light`} coming from <obj_1>, with physically consistent shadows and reflections.${e.strokes.some((s) => dark(s.color)) ? " Dark strokes are hints of where shadows fall: make every shadow agree with the light." : ""} Keep the content, framing and textures unchanged.`,
-  }[e.tool];
-  const desc = { erase: "object to remove", paint: words || "the drawn object", light: "light source" }[e.tool];
+    erase: () => `Remove ${words ? `the ${words}` : "the object"} inside <obj_1> completely, with its shadow and its reflection. Show the surface and the background that continue behind it, with matching detail, light, shadows and focus. Add no new object. Keep everything else unchanged.`,
+    paint: () => `Replace the rough coloured drawing inside <obj_1> with ${words || "a realistic object of that shape and colour"}, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.`,
+    light: () => `Relight the whole scene with ${words || `${colorName(painted.find((s) => !dark(s.color))?.color ?? e.color)} light`} coming from <obj_1>, with physically consistent shadows and reflections.${painted.some((s) => dark(s.color)) ? " Dark strokes are hints of where shadows fall: make every shadow agree with the light." : ""} Keep the content, framing and textures unchanged.`,
+  }[e.tool]();
+  const desc = { erase: words ? `${words} to remove` : "object to remove", paint: words || "the drawn object", light: "light source" }[e.tool];
   return `${text} ${JSON.stringify([{ id: "obj_1", bbox: bounds(e.mask), desc }])}`;
 }
 
@@ -249,43 +279,63 @@ async function openPlate(list, typed, cs) {
   Object.assign(S, { plate: null, hero: null, original: null }); // nothing to draw while the new plate loads
   const id = Date.now().toString(36), sub = `paintaplate/${id}`;
   let path = typed, out;
+  const name = list.length ? list[0].name.replace(/[._]?\d*\.[^.]+$/, "") : typed.split("/").pop();
+  opening(name, list.length > 0);
   try {
     if (list.length) {
-      for (const [i, f] of list.entries()) { status(`Uploading ${i + 1} of ${list.length}`); await upload(f, f.name, sub); }
+      const total = list.reduce((a, f) => a + f.size, 0), t0 = performance.now();
+      let sent = 0;
+      for (const [i, f] of list.entries()) {
+        await upload(f, f.name, sub, (n) => {
+          const done = sent + n, rate = done / Math.max(0.1, (performance.now() - t0) / 1000);
+          openStep("upload", done / total, `${list.length > 1 ? `File ${i + 1} of ${list.length}, ` : ""}${gb(done)} of ${gb(total)}`,
+            rate > 0 ? (total - done) / rate : null);
+        });
+        sent += f.size;
+      }
       path = list.length === 1 ? `${sub}/${list[0].name}` : sub;
     }
-    status("Reading the plate");
-    out = await run("ingest", { path, color_space: cs, prefix: `${sub}/hero`, video_prefix: `${sub}/proxy` }).done;
+    openStep("read", 0, "Decoding the frames");
+    const t0 = performance.now();
+    out = await run("ingest", { path, color_space: cs, prefix: `${sub}/hero`, video_prefix: `${sub}/proxy` }, {
+      progress: (f) => openStep(OPENING.at, f, null, f > 0.02 ? ((performance.now() - t0) / 1000) * (1 - f) / f : null),
+      step: (cls) => { const k = INGEST[cls]; if (k && OPENING.order.indexOf(k) >= OPENING.order.indexOf(OPENING.at)) openStep(k, 0); } }).done;
   } catch (err) {
-    $("#empty").hidden = false;
+    $("#empty").hidden = false; $("#opening").hidden = true;
     for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = true;
     throw err;
   }
+  openStep("load", 0);
+  $("#opening").hidden = true; // the first frame shows from here; the playback video keeps arriving behind it
   const spec = JSON.parse(textOf("ingest", out, "spec"));
   const [w, h] = [spec.width, spec.height];
   const stem = (spec.kind === "video" ? spec.source : spec.first_file ?? spec.source ?? "plate").split(/[\\/]/).pop()
     .replace(/\.[^.]+$/, "").replace(/[._]?\d+$/, "") || "plate";
   S.plate = { id, path, cs, spec, frames: spec.frames, fps: spec.fps || 24, name: stem,
     first: spec.kind === "video" ? 1 : spec.first_frame ?? 1,
-    work: fitSize(w, h, 1920, 32), prev: fitSize(w, h, 768, 16), shot: fitSize(w, h, 960, 32) };
+    work: fitSize(w, h, 1920, 32), prev: fitSize(w, h, 768, 16), shot: fitSize(w, h, S.previewCap, 32),
+    track: fitSize(w, h, 960, 32) }; // SAM tracks at the standard size whatever the preview size: the export's mattes use it
   if (Q.get("shot") === "full") S.plate.shot = S.plate.work;
   S.original = snap(await loadImage(url(fileOf("ingest", out, "hero"))), S.plate.work);
   Object.assign(S, { hero: S.original, heroVersion: 0, edits: [], draft: null, running: null, removed: [], count: 0,
-    frame: 0, inPt: 0, outPt: S.plate.frames - 1, shot: null, shotDirty: false, exported: null, wantDownload: false,
+    frame: 0, inPt: 0, outPt: S.plate.frames - 1, shot: null, shotDirty: false, exported: null, wantDownload: null,
     stage: { phase: "none" }, zoom: { k: 1, x: 0, y: 0 }, wipe: null, heroKey: "" });
   S.uploads.clear(); S.renders.clear();
   [view.width, view.height] = S.plate.work;
   view.classList.add("painting");
   plateVid.src = url(fileOf("ingest", out, "proxy"));
+  plateVid.addEventListener("canplaythrough", () => { if (OPENING.at === "load") { OPENING.at = "done"; status("Ready to play. Describe the edit at the top, then paint on the frame."); } }, { once: true });
   shotVid.removeAttribute("src"); shotVid.load();
-  $("#empty").hidden = true;
   for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = false;
   const kind = spec.kind === "video" ? spec.codec : `${spec.ext.slice(1).toUpperCase()} ${spec.kind}`;
   $("#spec").textContent = `${S.plate.name}: ${kind}, ${w} × ${h}, ${Math.round(S.plate.fps * 1000) / 1000} fps, ${spec.frames} frames, ${cs}`;
   document.activeElement?.blur();
-  fitView(); historyUI(); timelineUI(); stageUI(); exportUI(); render();
+  S.took = {};
+  fitView(); historyUI(); timelineUI(); stagesUI(); exportUI(); render();
   warm();
   const offered = [...$("#cs").options].some((o) => o.value === spec.color_space_guess);
+  const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).map((n) => n).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
+  if (gaps) setTimeout(() => status(gaps.trim()), 50);
   status(spec.color_space_guess === cs ? "Describe the edit at the top, then paint on the frame."
     : offered ? `The file suggests ${spec.color_space_guess}. Reopen with it if colours look wrong.`
     : `The file suggests ${spec.color_space_guess}, which this ComfyUI does not offer yet: update ComfyUI past v0.42.5.`);
@@ -305,6 +355,141 @@ async function warm() { // load the image model while the user looks at the fram
     grow: 0, feather: 1, sigma: 1 }, { kind: "warm" }).done.catch(() => {});
 }
 
+// What opening a plate does, in order. Ingest's nodes tell the page which step runs.
+const OPENING = { order: ["upload", "read", "convert", "first", "proxy", "load", "done"], at: "upload",
+  label: { upload: "Upload the files", read: "Read the frames", convert: "Convert the colours", first: "Save the first frame",
+    proxy: "Encode the playback video", load: "Load it in the browser" } };
+const INGEST = { PaintAPlate_LoadPlate: "read", ImageColorSpace: "convert", ImageScaleToMaxDimension: "first", SaveImage: "first",
+  CreateVideo: "proxy", SaveVideo: "proxy" };
+const gb = (n) => (n > 1e9 ? `${(n / 1e9).toFixed(2)} GB` : `${Math.round(n / 1e6)} MB`);
+const secs = (t) => { // "about 40 s left", "about 1 min 40 s left": rounded to 10 s past a minute
+  if (t == null || !isFinite(t)) return "";
+  if (t < 60) return `about ${Math.max(1, Math.round(t))} s left`;
+  const r = Math.round(t / 10) * 10, m = Math.floor(r / 60), s = r % 60;
+  return m >= 10 || !s ? `about ${Math.round(t / 60)} min left` : `about ${m} min ${s} s left`;
+};
+
+function opening(name, uploading) {
+  $("#empty").hidden = true;
+  $("#opening").hidden = false;
+  $("#op-title").textContent = `Opening ${name || "the plate"}`;
+  OPENING.at = uploading ? "upload" : "read";
+  OPENING.skip = uploading ? [] : ["upload"];
+  openStep(OPENING.at, 0);
+}
+
+function openStep(id, f = 0, text = null, left = null) { // one step of opening, with a bar for it and the list of all steps
+  OPENING.at = id;
+  const order = OPENING.order.filter((k) => !OPENING.skip?.includes(k) && k !== "done"), i = order.indexOf(id);
+  $("#op-bar").style.width = `${Math.round(((Math.max(0, i) + Math.min(1, f)) / order.length) * 100)}%`;
+  $("#op-step").textContent = [text ?? OPENING.label[id] ?? "", f > 0 && f < 1 ? `${Math.round(f * 100)}%` : "", secs(left)].filter(Boolean).join(", ");
+  $("#op-steps").replaceChildren(...order.map((k, j) => Object.assign(document.createElement("li"), {
+    className: j < i || id === "done" ? "done" : j === i ? "now" : "", textContent: OPENING.label[k] })));
+}
+
+// ---------- Decoded frames, cached as in OpenRV ----------
+// OpenRV's FBCache (src/lib/ip/IPCore/FBCache.cpp) keeps decoded frames within a memory budget and ranks them by use: the
+// frame on screen first, then by distance from it, frames ahead in the playing direction counting closer than frames behind,
+// distances wrapping round the in and out points because playback loops; frames outside them count least. Its region cache
+// fills from the in point to the out point, and the timeline shows what is cached as a green stripe. Here a hidden reader
+// video plays the clip once and keeps every frame it presents; frames it skipped are fetched by seeking. Stepping and
+// scrubbing then draw from memory, with no seek; playback itself stays with the browser's video pipeline.
+const CACHE_MB = +Q.get("cache") || 384; // per video: about 180 frames at 960 x 544
+const BEHIND = 3; // a frame behind the playhead counts as three frames ahead (RV's look-behind fraction)
+
+class FrameCache {
+  constructor(video) { Object.assign(this, { video, frames: new Map(), bytes: 0, src: "", reader: null, token: 0 }); }
+
+  reset() {
+    for (const b of this.frames.values()) b.close();
+    this.frames.clear(); this.bytes = 0; this.token++;
+    if (this.reader) { this.reader.pause(); this.reader.removeAttribute("src"); this.reader.load(); this.reader = null; }
+    this.src = this.video.getAttribute("src") || "";
+    cacheUI();
+  }
+
+  get(f) { return this.src === (this.video.getAttribute("src") || "") ? this.frames.get(f) : undefined; }
+
+  use(f) { // RV's look-ahead utility, simplified
+    if (!S.plate) return 0;
+    if (f === S.frame) return Infinity;
+    const lo = S.inPt, hi = S.outPt, span = hi - lo + 1;
+    if (f < lo || f > hi) return 1 / (1 + span + Math.min(Math.abs(f - lo), Math.abs(f - hi)));
+    const at = Math.min(Math.max(S.frame, lo), hi), ahead = (f - at + span) % span, behind = (at - f + span) % span;
+    return 1 / (1 + Math.min(ahead, behind * BEHIND));
+  }
+
+  put(f, bitmap) { // keep it if the budget allows, freeing frames of less use (never one of more use than this one)
+    const size = bitmap.width * bitmap.height * 4, want = this.use(f);
+    if (this.frames.has(f)) { bitmap.close(); return; }
+    while (this.bytes + size > CACHE_MB * 1e6 && this.frames.size) {
+      let worst = null, low = Infinity;
+      for (const k of this.frames.keys()) { const u = this.use(k); if (u < low) { low = u; worst = k; } }
+      if (low >= want) { bitmap.close(); return; }
+      this.frames.get(worst).close(); this.frames.delete(worst); this.bytes -= size;
+    }
+    this.frames.set(f, bitmap); this.bytes += size;
+    cacheUI();
+  }
+
+  async grab(v, f) { // the frame the video shows now
+    if (v.readyState < 2 || this.frames.has(f)) return;
+    try { this.put(f, await createImageBitmap(v)); } catch { /* the video changed meanwhile */ }
+  }
+
+  fill() { // RV's region cache: read from the in point to the out point, at playing speed, in a hidden reader
+    const src = this.video.getAttribute("src");
+    if (!src || !S.plate || !("requestVideoFrameCallback" in HTMLVideoElement.prototype)) return;
+    if (this.src !== src) this.reset();
+    const token = this.token, fps = S.plate.fps, r = (this.reader = document.createElement("video"));
+    Object.assign(r, { muted: true, playsInline: true, preload: "auto", src });
+    const live = () => token === this.token && S.plate;
+    const onFrame = (_, meta) => {
+      if (!live()) return;
+      const f = Math.round(meta.mediaTime * fps);
+      this.grab(r, f);
+      if (f >= S.outPt || r.ended) return gaps();
+      r.requestVideoFrameCallback(onFrame);
+    };
+    const gaps = async () => { // frames the reader skipped, by seeking, the most useful first
+      r.pause();
+      const todo = [];
+      for (let f = S.inPt; f <= S.outPt; f++) if (!this.frames.has(f)) todo.push(f);
+      todo.sort((a, b) => this.use(b) - this.use(a));
+      for (const f of todo) {
+        if (!live() || this.bytes > CACHE_MB * 1e6 * 0.98) return;
+        r.currentTime = (f + 0.5) / fps;
+        await new Promise((ok) => r.addEventListener("seeked", ok, { once: true }));
+        await this.grab(r, f);
+      }
+    };
+    r.addEventListener("loadeddata", () => {
+      if (!live()) return;
+      r.currentTime = (S.inPt + 0.5) / fps;
+      r.requestVideoFrameCallback(onFrame);
+      r.play().catch(() => gaps());
+    }, { once: true });
+    r.addEventListener("error", () => { if (live()) this.reader = null; }, { once: true });
+  }
+}
+
+const caches = new Map([[plateVid, new FrameCache(plateVid)], [shotVid, new FrameCache(shotVid)]]);
+
+function cacheUI() { // the green stripe along the top of the timeline: frames that draw at once
+  if (cacheUI.queued) return;
+  cacheUI.queued = requestAnimationFrame(() => {
+    cacheUI.queued = 0;
+    const c = $("#tl-cache"), p = S.plate;
+    if (!p) return;
+    const w = (c.width = Math.max(1, Math.round(c.clientWidth * devicePixelRatio))), x = c.getContext("2d");
+    c.height = 4;
+    x.clearRect(0, 0, w, 4);
+    const cache = caches.get(shotReady() ? shotVid : plateVid);
+    x.fillStyle = "#4caf6a";
+    for (const f of cache.frames.keys()) x.fillRect(Math.floor((f / p.frames) * w), 0, Math.ceil(w / p.frames), 4);
+  });
+}
+
 // ---------- Playback, as in RV ----------
 
 const time = (f) => (f + 0.5) / S.plate.fps;
@@ -319,7 +504,7 @@ function play() {
   S.playing = true;
   $("#play-btn").classList.add("playing");
   for (const v of [plateVid, shotVid]) if (v.getAttribute("src")) { v.currentTime = time(S.frame); v.play().catch(() => {}); }
-  const done = S.stage.phase === "preview" ? `, the edited shot is ${Math.round((S.stage.progress ?? 0) * 100)}% done` : "";
+  const left = renderLeft(), done = left ? `, the edited shot is ${secs(left)}` : "";
   if (S.edits.some((e) => e.on && e.patch)) {
     if (!S.shot) hud(`Playing the plate${done}`, 2500);
     else if (stale()) hud(`Playing the previous render${done}`, 2500);
@@ -353,16 +538,24 @@ function tick() {
 function seek(f) {
   if (!S.plate) return;
   S.frame = clampFrame(f);
-  if (!S.playing) for (const v of [plateVid, shotVid]) if (v.getAttribute("src") && v.readyState) v.currentTime = time(S.frame);
+  if (!S.playing) for (const v of [plateVid, shotVid]) {
+    if (v.getAttribute("src") && v.readyState && !caches.get(v).get(S.frame)) v.currentTime = time(S.frame);
+  }
   render(); timelineUI();
 }
 
 for (const v of [plateVid, shotVid]) {
-  v.addEventListener("seeked", () => !S.playing && render());
+  v.addEventListener("seeked", () => { if (!S.playing) { render(); caches.get(v).grab(v, S.frame); } });
+  v.addEventListener("loadeddata", () => { caches.get(v).reset(); caches.get(v).fill(); });
   v.addEventListener("error", () => v.getAttribute("src") &&
     status(`This browser cannot play the ${v === plateVid ? "plate" : "shot"} preview (H.264 MP4). Chrome, Edge, Safari and Firefox can.`));
 }
 plateVid.addEventListener("loadeddata", () => seek(S.frame));
+plateVid.addEventListener("progress", () => { // the playback video arriving in the browser
+  if (OPENING.at !== "load" || !plateVid.duration) return;
+  const end = plateVid.buffered.length ? plateVid.buffered.end(plateVid.buffered.length - 1) : 0;
+  if (end < plateVid.duration - 0.05) $("#status").textContent = `Loading the playback video: ${Math.round((end / plateVid.duration) * 100)}%`;
+});
 shotVid.addEventListener("loadeddata", () => {
   if (S.playing) { shotVid.currentTime = plateVid.currentTime; shotVid.play().catch(() => {}); }
   else seek(S.frame);
@@ -411,7 +604,7 @@ function recompose() {
   if (r?.comp) setShot(r.comp, key);
   else if (!key) setShot(null, key);
   S.shotDirty = !!key && !r?.exported;
-  stageUI(); exportUI();
+  stagesUI(); exportUI();
 }
 
 function setShot(src, key) {
@@ -427,7 +620,11 @@ function render() {
   const first = S.frame === 0 && !S.playing;
   const edited = first ? S.hero : shotReady() ? shotVid : plateVid;
   const plate = first ? S.original : plateVid;
-  const draw = (src) => { if (!(src instanceof HTMLVideoElement) || src.readyState >= 2) ctx.drawImage(src, 0, 0, W, H); };
+  const draw = (src) => {
+    const cached = src instanceof HTMLVideoElement && !S.playing && caches.get(src).get(S.frame);
+    if (cached) ctx.drawImage(cached, 0, 0, W, H);
+    else if (!(src instanceof HTMLVideoElement) || src.readyState >= 2) ctx.drawImage(src, 0, 0, W, H);
+  };
   ctx.globalAlpha = 1;
   if (S.compare) draw(plate);
   else if (S.wipe !== null) {
@@ -476,7 +673,7 @@ function strokes(e, alpha) {
 }
 
 function softMask(e) { // the edit mask with a soft edge, close to what the workflow composites with
-  const key = `${e.strokes.length}:${e.snapped ?? 0}`;
+  const key = `${e.strokes.length}:${e.snapped ?? 0}:${!!e.sam}`;
   if (e.soft?.key !== key) {
     const c = canvas([e.mask.width, e.mask.height]), x = c.getContext("2d");
     x.filter = `blur(${Math.max(2, Math.round(e.mask.width / 160))}px)`;
@@ -489,8 +686,10 @@ function softMask(e) { // the edit mask with a soft edge, close to what the work
 function drawCursor() { // the brush outline, at its real size on the frame
   if (!S.cursor || stroke || S.playing) return;
   ctx.lineWidth = Math.max(1.5, view.width / 900);
-  ctx.strokeStyle = S.tool === "erase" ? "#ff8070" : S.color;
+  ctx.strokeStyle = S.rub ? "#ffffff" : S.tool === "erase" ? "#ff8070" : S.color === "#000000" ? "#d8d8d8" : S.color;
+  if (S.rub) ctx.setLineDash([6, 5]);
   ctx.beginPath(); ctx.arc(S.cursor[0], S.cursor[1], S.size / 2, 0, 2 * Math.PI); ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 function placeWipe() {
@@ -538,9 +737,11 @@ let stroke = null, nav = null;
 view.addEventListener("pointerdown", (e) => {
   if (!S.plate) return;
   if (e.button === 1 || (e.button === 0 && (e.altKey || e.ctrlKey || e.metaKey))) return navigate(e);
-  if (e.button !== 0) return;
+  const rub = S.rub || (e.pointerType === "pen" && (e.buttons & 32)); // the eraser tool, or a pen's eraser end
+  if (e.button !== 0 && !rub) return;
   if (S.playing) pause();
   if (S.frame !== 0) { seek(0); hud("Edits are painted on the first frame"); }
+  if (rub) return rubOut(e);
   cancel(...BACKGROUND); // the GPU goes to the edit
   clearTimeout(S.timer);
   let d = S.draft;
@@ -564,8 +765,28 @@ view.addEventListener("pointerup", () => {
   if (nav) { nav = null; view.classList.remove("panning"); return; }
   if (!stroke) return;
   stroke = null;
+  if (S.draft && !painted(S.draft)) return discard(); // everything was rubbed out
   schedule();
 });
+
+function rubOut(e) { // the eraser works on the strokes in progress, or on the edit just made
+  let d = S.draft;
+  if (!d && S.last && S.last === S.edits.at(-1) && S.last.strokes.length) d = S.running === S.last ? reopen(S.last) : reopenDone(S.last);
+  if (!d) return hud("Nothing to rub out: the eraser takes away strokes you just painted");
+  cancel(...BACKGROUND);
+  clearTimeout(S.timer);
+  view.setPointerCapture(e.pointerId);
+  stroke = { tool: "rub", size: S.size, points: [] };
+  d.strokes.push(stroke);
+  addPoint(d, e);
+}
+
+function reopenDone(edit) { // the eraser on a finished edit: it becomes strokes again, and runs again 2 s later
+  edit.kept = edit.strokes.length;
+  edit.state = "drawing";
+  historyUI();
+  return (S.draft = edit);
+}
 
 function schedule() { // run the draft once the strokes have stopped for WAIT ms
   clearTimeout(S.timer);
@@ -589,6 +810,15 @@ function addPoint(d, e) {
 
 function drawStroke(d, s, from = 0) {
   const pc = d.paint.getContext("2d"), mc = d.mask.getContext("2d");
+  if (s.tool === "rub") { // the eraser takes strokes away, whatever drew them
+    for (const c of [pc, mc]) c.globalCompositeOperation = "destination-out";
+    for (let i = from; i < s.points.length; i++) {
+      const [x, y, p] = s.points[i], [px, py] = s.points[Math.max(i - 1, 0)], r = (s.size * (0.5 + p)) / 2;
+      line(mc, px, py, x, y, r, "#fff"); line(pc, px, py, x, y, r, "#fff");
+    }
+    for (const c of [pc, mc]) c.globalCompositeOperation = "source-over";
+    return;
+  }
   for (let i = from; i < s.points.length; i++) {
     const [x, y, p] = s.points[i], [px, py] = s.points[Math.max(i - 1, 0)], r = (s.size * (0.5 + p)) / 2;
     line(mc, px, py, x, y, r, "#fff");
@@ -609,11 +839,15 @@ function glow(c, x, y, r, color) {
   c.globalCompositeOperation = "source-over";
 }
 
-function redrawStrokes(d) {
+function redrawStrokes(d) { // painted strokes, then SAM's object, then the eraser strokes on top of both
   for (const c of [d.paint, d.mask]) c.getContext("2d").clearRect(0, 0, c.width, c.height);
-  for (const s of d.strokes) drawStroke(d, s);
-  d.snapped = 0;
+  for (const s of d.strokes) if (s.tool !== "rub") drawStroke(d, s);
+  if (d.sam) d.mask.getContext("2d").drawImage(d.sam, 0, 0);
+  for (const s of d.strokes) if (s.tool === "rub") drawStroke(d, s);
+  d.soft = null;
 }
+
+const painted = (d) => d.strokes.filter((s) => s.tool !== "rub").length; // SAM grows from these
 
 function navigate(e) { // RV: Alt or middle button drag pans, Ctrl drag zooms
   e.preventDefault();
@@ -694,8 +928,9 @@ async function generate(edit) {
   recompose(); historyUI(); render();
   try {
     const before = layered(S.edits.indexOf(edit));
-    if (edit.tool === "erase" && edit.whole && edit.snapped !== edit.strokes.length) {
-      edit.snapped = edit.strokes.length;
+    if (edit.tool === "erase" && edit.whole && edit.snapped !== painted(edit)) {
+      edit.snapped = painted(edit);
+      edit.sam = null; redrawStrokes(edit);
       await snapErase(edit, before);
       if (!alive()) return;
     }
@@ -721,8 +956,10 @@ async function generate(edit) {
     status(`Edit ${edit.n}: ${NAME[edit.tool].toLowerCase()}, full size`);
     const work = p.work, start = snap(before, work);
     start.getContext("2d").drawImage(edit.preview, 0, 0, work[0], work[1]);
-    const full = await run("edit", { ...values, base: await baseUpload(edit, before, work),
-      start: await uploadCanvas(start, `${tag}_start.png`), reference: await uploadCanvas(editImage(edit, before, work), `${tag}_ref_full.png`),
+    const startName = await uploadCanvas(start, `${tag}_start.png`);
+    const full = await run("edit", { ...values, base: await baseUpload(edit, before, work), start: startName,
+      // an erase refines the quick result, which has no object left: shown the original, Klein drew part of it back
+      reference: edit.tool === "erase" ? startName : await uploadCanvas(editImage(edit, before, work), `${tag}_ref_full.png`),
       mask: await uploadCanvas(maskAt(edit, work), `${tag}_mask_full.png`), steps: REFINE_STEPS, denoise: 0.35,
       grow: Math.round(work[0] / reach(edit)), feather: 12, sigma: 6 }, { kind: "edit", front: true,
       progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
@@ -768,7 +1005,8 @@ async function snapErase(edit, before) { // SAM 3.1 grows the erase strokes to t
   const d = sam.getContext("2d"), img = d.getImageData(0, 0, size[0], size[1]);
   for (let i = 0; i < img.data.length; i += 4) { img.data[i + 3] = img.data[i]; img.data[i] = img.data[i + 1] = img.data[i + 2] = 255; }
   d.putImageData(img, 0, 0);
-  edit.mask.getContext("2d").drawImage(sam, 0, 0, edit.mask.width, edit.mask.height);
+  edit.sam = snap(sam, [edit.mask.width, edit.mask.height]);
+  redrawStrokes(edit);
   render();
 }
 
@@ -841,8 +1079,9 @@ function stopEdit(edit) {
 function undo() {
   const d = S.draft;
   if (d) {
-    d.strokes.pop();
-    if (d.strokes.length) { redrawStrokes(d); render(); schedule(); }
+    const gone = d.strokes.pop();
+    if (gone?.tool !== "rub") { d.sam = null; d.snapped = 0; }
+    if (painted(d)) { redrawStrokes(d); render(); schedule(); }
     else discard();
     return;
   }
@@ -865,7 +1104,7 @@ function discard() { // Esc: drop the strokes in progress, or stop the edit bein
   stopEdit(d);
   if (S.draft === d) S.draft = null;
   if (d.patch) { // it had a result: go back to it
-    if (d.kept !== undefined) { d.strokes.length = d.kept; redrawStrokes(d); d.snapped = d.strokes.length; }
+    if (d.kept !== undefined) { d.strokes.length = d.kept; redrawStrokes(d); d.snapped = painted(d); }
     Object.assign(d, { state: "done", preview: null, latent: null, force: false, kept: undefined });
     status("Cancelled. The edit keeps its last result.");
   } else {
@@ -952,17 +1191,59 @@ function editProgress(edit, f) { // the state line of one History row, without r
 let idleTimer;
 function touch() { clearTimeout(idleTimer); idleTimer = setTimeout(idle, 1500); }
 
-function idle() {
+function idle() { // one pipeline at a time: a running one goes on, unless the set of edits changed under it
   if (!S.plate) return;
   if (S.draft || S.running || S.queued || stroke) return touch();
-  if (S.shotDirty) pipeline().catch((e) => {
-    if (e?.message === "cancelled") { S.shotDirty = true; touch(); }
-    else { quiet(e); stage({ phase: "none" }); }
-  });
+  if (S.piping) { if (S.shotDirty && S.piping !== S.heroKey) cancel(...BACKGROUND); return; }
+  const r = S.renders.get(S.heroKey);
+  if (!S.shotDirty && !((S.background || S.wantDownload) && S.heroKey && !r?.exported)) return;
+  S.piping = S.heroKey || "-";
+  pipeline().catch((e) => {
+    if (e?.message === "cancelled") S.shotDirty = true;
+    else { quiet(e); S.stage = null; S.wantDownload = null; stagesUI(); exportUI(); }
+  }).finally(() => { S.piping = null; touch(); });
 }
 
 const grow = (w, erase) => Math.max(4, Math.round(w / (erase ? 24 : 160))); // composite edge, in pixels of that size
 const feather = (w) => Math.max(6, Math.round(w / 96));
+
+// Every step of a render, in order. `final` steps make the export; they run after the preview when the export is
+// prepared in the background, or when Export asks for them.
+const STAGES = [
+  { id: "erase", label: "Track the erase", ref: 6 }, { id: "shot", label: "Shot", ref: 20 }, { id: "track", label: "Track the paint", ref: 5 },
+  { id: "comp", label: "Composite", ref: 14 },
+  { id: "full", label: "Shot at full size", ref: 45, final: true }, { id: "trackfull", label: "Track at full size", ref: 5, final: true },
+  { id: "export", label: "Export", ref: 18, final: true },
+];
+S.took = {}; // measured seconds per step, for this plate: the next estimates use them
+
+function plan(r, active) { // the steps this set of edits needs: no tracking for a relight alone, no second pass when the preview is full size
+  const p = S.plate, [sw, sh] = p.shot, onePass = sw === p.work[0] && sh === p.work[1];
+  const erase = active.some((e) => e.tool === "erase"), paint = active.some((e) => e.tool === "paint");
+  r.skip = new Set([!erase && "erase", !paint && "track", onePass && "full", (onePass || !paint) && "trackfull"].filter(Boolean));
+  return r;
+}
+
+function estimate(id) { // seconds: what this step took last time, or a measured reference scaled to this plate
+  if (S.took[id]) return S.took[id];
+  const p = S.plate, ref = 928 * 512 * 97;
+  const size = ["full", "export"].includes(id) ? p.work : ["erase", "track", "trackfull"].includes(id) ? p.track : p.shot;
+  const scale = (size[0] * size[1] * p.frames) / ref * (["full", "export"].includes(id) ? 0.73 : 1);
+  return STAGES.find((x) => x.id === id).ref * Math.max(0.25, scale);
+}
+
+async function step(r, id, work) { // run one step of a render, timed and shown
+  if (r.done?.[id] !== undefined || r.skip?.has(id)) return;
+  const t0 = performance.now();
+  S.stage = { key: S.heroKey, id, progress: 0, t0 };
+  stagesUI();
+  await work((f) => { if (S.stage?.id === id) { S.stage.progress = f; stagesUI(); } });
+  const dt = (performance.now() - t0) / 1000;
+  (r.done ??= {})[id] = dt;
+  S.took[id] = dt;
+  S.stage = null;
+  stagesUI();
+}
 
 async function pipeline() {
   S.shotDirty = false;
@@ -972,63 +1253,72 @@ async function pipeline() {
   const fresh = () => key === S.heroKey;
   let r = S.renders.get(key);
   if (!r) { r = { v: ++S.run }; r.base = `paintaplate/${p.id}/v${r.v}`; S.renders.set(key, r); }
+  plan(r, active);
   const base = r.base, relight = active.some((e) => e.tool === "light"), [sw, sh] = p.shot;
   const erase = active.some((e) => e.tool === "erase");
-  const pct = (phase, label) => (f) => fresh() && stage({ phase, label, progress: f });
   r.hero ??= await uploadCanvas(S.hero, `hero_v${r.v}.png`);
   const common = { path: p.path, color_space: p.cs, max_frames: p.frames, hero: r.hero, seed: active[0].seed };
-  if (!r.shot) {
-    pct("preview", "Rendering the shot")(0);
-    await run("shot", { ...common, width: sw, height: sh, prefix: `${base}/shot/f`, video_prefix: `${base}/raw` },
-      { kind: "shot", progress: pct("preview", "Rendering the shot") }).done;
+  // the erase is tracked on the plate first: its matte also clears the erased objects from the frames LTX follows
+  await step(r, "erase", async (progress) => { r.erased = await track(active, null, base, "", progress, null, ["erase"]); });
+  // a large, soft hole: filled tight to the object, its outline above a man in the rain read as an umbrella to LTX
+  const hole = r.erased?.found.matte_a ?? "", holed = (size) => ({ hole, hole_grow: Math.round(size[0] / 16), hole_feather: Math.round(size[0] / 16) });
+  const noHole = (wf) => { if (!hole) dropInput(wf, "hole_mask", ["hole"]); };
+  await step(r, "shot", async (progress) => {
+    const out = await run("shot", { ...common, ...holed(p.shot), width: sw, height: sh, prefix: `${base}/shot/f`, video_prefix: `${base}/raw` },
+      { kind: "shot", progress, edit: noHole }).done;
     r.shot = `output:${base}/shot`;
+    r.raw = url(fileOf("shot", out, "video"));
+  });
+  if (!fresh()) return;
+  if (!r.comp && S.shot?.url !== r.raw) { // a rough look at once: the whole frame as the model made it, until the composite
+    setShot(r.raw, key);
+    hud("Rough preview: Space plays it. The composite follows.", 2500);
   }
+  await step(r, "track", async (progress) => { r.painted = await track(active, r.shot, base, "", progress, null, ["paint"]); });
+  r.mattes = mattesOf({ ...r.erased?.found, ...r.painted?.found });
   if (!fresh()) return;
-  r.mattes ??= await track(active, r.shot, base, "", pct("preview", "Tracking the edits"));
-  if (!fresh()) return;
-  if (!r.comp) {
+  await step(r, "comp", async (progress) => {
     const comp = await run("comp", { path: p.path, color_space: p.cs, max_frames: p.frames, width: sw, height: sh, shot: r.shot,
-      ...r.mattes.values, relight, grow: grow(sw, erase), feather: feather(sw), video_prefix: `${base}/comp` },
-      { kind: "comp", progress: pct("preview", "Compositing"), edit: (wf) => { if (!r.mattes.any) dropMattes(wf); } }).done;
+      ...r.mattes.values, relight, grow: grow(sw, erase), feather: feather(sw), grain: 0, video_prefix: `${base}/comp` },
+      { kind: "comp", progress, edit: (wf) => { if (!r.mattes.any) dropMattes(wf); } }).done;
     r.comp = url(fileOf("comp", comp, "video"));
-  }
+  });
   if (!fresh()) return;
   if (S.shot?.url !== r.comp) {
     setShot(r.comp, key);
     hud("The edited shot is ready: Space plays it", 2500);
-    status("The edited shot is ready. The export renders next, at full size.");
+    status(S.background ? "The edited shot is ready. The export is prepared next, at full quality."
+      : "The edited shot is ready. Export renders it at full quality when you need it.");
   }
-  if (!r.final) {
-    if (sw !== p.work[0] || sh !== p.work[1]) {
-      await run("shot", { ...common, width: p.work[0], height: p.work[1], prefix: `${base}/full/f`, video_prefix: `${base}/full` },
-        { kind: "shot", progress: pct("export", "Rendering at full size") }).done;
-      r.final = `output:${base}/full`;
-    } else r.final = r.shot;
-  }
+  if (!S.background && !S.wantDownload) return stagesUI();
+  await step(r, "full", async (progress) => {
+    await run("shot", { ...common, ...holed(p.work), width: p.work[0], height: p.work[1], prefix: `${base}/full/f`, video_prefix: `${base}/full` },
+      { kind: "shot", progress, edit: noHole }).done;
+  });
+  r.final = r.skip.has("full") ? r.shot : `output:${base}/full`;
   if (!fresh()) return;
-  r.full ??= r.final !== r.shot && active.some((e) => e.tool === "paint")
-    ? await track(active, r.final, base, "_full", pct("export", "Tracking at full size"), r.mattes) : r.mattes;
+  await step(r, "trackfull", async (progress) => { r.full = await track(active, r.final, base, "_full", progress, r.mattes, ["paint"]); });
+  r.full ??= r.mattes;
   if (!fresh()) return;
-  if (!r.exported) {
+  await step(r, "export", async (progress) => {
     const done = await run("export", { path: p.path, color_space: p.cs, max_frames: p.frames, shot: r.final, ...r.full.values, relight,
       keep_untouched: !relight, prefix: `${base}/export`, matte_prefix: `${base}/matte/matte`, grow: grow(p.spec.width, erase),
-      feather: feather(p.spec.width) }, { kind: "export", progress: pct("export", "Exporting at full quality"),
-      edit: (wf) => { if (!r.full.any) dropMattes(wf); } }).done;
+      feather: feather(p.spec.width) }, { kind: "export", progress, edit: (wf) => { if (!r.full.any) dropMattes(wf); } }).done;
     r.exported = { run: base, name: `${p.name}_paintaplate_v${r.v}`, text: textOf("export", done, "export") ?? "" };
-  }
+  });
   if (!fresh()) return;
   S.exported = r.exported;
-  stage({ phase: "ready" }); exportUI();
-  status(`Exported to the output folder: ${S.exported.text.split("\n")[0]}. Export downloads it as a zip.`);
-  if (S.wantDownload) { S.wantDownload = false; download(); }
+  stagesUI(); exportUI();
+  status(`Exported to the output folder: ${S.exported.text.split("\n")[0]}.`);
+  if (S.wantDownload) { const parts = S.wantDownload; S.wantDownload = null; download(parts); }
 }
 
-async function track(active, shotPath, base, suffix, progress, previous) { // SAM 3.1 follows each kind of edit through the shot
-  const p = S.plate, [sw, sh] = p.shot, found = { ...(previous?.found ?? {}) };
+async function track(active, shotPath, base, suffix, progress, previous, tools) { // SAM 3.1 follows a kind of edit through the shot
+  const p = S.plate, [sw, sh] = p.track, found = { ...(previous?.found ?? {}) };
   for (const [key, tool, path, cs] of [["matte_a", "erase", p.path, p.cs], ["matte_b", "paint", shotPath, "sRGB"]]) {
     const edits = active.filter((e) => e.tool === tool);
-    if (!edits.length || (previous && tool === "erase")) continue; // the erase matte follows the plate: it does not change
-    const union = canvas(p.shot), u = union.getContext("2d");
+    if (!edits.length || !tools.includes(tool)) continue; // the erase follows the plate; the paint follows the shot
+    const union = canvas(p.track), u = union.getContext("2d");
     u.fillStyle = "#000"; u.fillRect(0, 0, sw, sh);
     u.globalCompositeOperation = "lighten";
     for (const e of edits) u.drawImage(tool === "paint" ? whiteOf(e.patch) : e.mask, 0, 0, sw, sh);
@@ -1036,6 +1326,10 @@ async function track(active, shotPath, base, suffix, progress, previous) { // SA
       mask: await uploadCanvas(union, `${key}${suffix}_${S.run}.png`) }, { kind: "matte", progress }).done;
     found[key] = `output:${base}/${key}${suffix}`;
   }
+  return mattesOf(found);
+}
+
+function mattesOf(found) { // a missing matte is the other one again: the workflows take both
   const a = found.matte_a ?? found.matte_b, b = found.matte_b ?? found.matte_a;
   return { found, any: !!a, values: { matte_a: a ?? "", matte_b: b ?? "" } };
 }
@@ -1054,9 +1348,13 @@ function whiteOf(img, tint) { // a patch's alpha (where the edit put new pixels)
 }
 
 function dropMattes(wf) { // relight only: no matte, so nothing to composite and no matte to save
-  for (const [id, input] of wf.slots.fit_mask ?? []) delete wf.prompt[id].inputs[input];
-  const gone = new Set([...(wf.slots.matte_a ?? []), ...(wf.slots.matte_b ?? [])].map(([id]) => id));
-  if (wf.outputs.matte) gone.add(wf.outputs.matte);
+  dropInput(wf, "fit_mask", ["matte_a", "matte_b"], wf.outputs.matte);
+}
+
+function dropInput(wf, link, sources, extra) { // cut a link the page names, and remove what fed it
+  for (const [id, input] of wf.slots[link] ?? []) delete wf.prompt[id].inputs[input];
+  const gone = new Set(sources.flatMap((k) => (wf.slots[k] ?? []).map(([id]) => id)));
+  if (extra) gone.add(extra);
   for (let grew = true; grew;) {
     grew = false;
     for (const [id, node] of Object.entries(wf.prompt)) {
@@ -1067,12 +1365,15 @@ function dropMattes(wf) { // relight only: no matte, so nothing to composite and
   for (const id of gone) delete wf.prompt[id];
 }
 
-function download() {
+const PARTS = { export: "the result in the plate's format", matte: "its matte", review: "a review movie", shot: "the regenerated shot" };
+
+function download(parts = ["export", "matte"]) {
   const a = Object.assign(document.createElement("a"), {
-    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name })}`,
+    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, parts: parts.join(",") })}`,
     download: `${S.exported.name}.zip` });
   document.body.append(a); a.click(); a.remove();
-  status(`Downloading ${S.exported.name}.zip: the export in the plate's format, and its matte.`);
+  const what = parts.map((k) => PARTS[k]);
+  status(`Downloading ${S.exported.name}.zip: ${what.slice(0, -1).join(", ")}${what.length > 1 ? " and " : ""}${what.at(-1)}.`);
 }
 
 // ---------- Interface ----------
@@ -1089,19 +1390,59 @@ function status(text) {
   log.scrollTop = log.scrollHeight;
 }
 
-function stage(s) { S.stage = s; stageUI(); exportUI(); }
+function renderLeft(finalToo = false) { // seconds until the preview (or the export) is ready, from the steps still to run
+  const p = S.plate, r = S.renders.get(S.heroKey);
+  if (!p || !S.heroKey || (finalToo ? r?.exported : r?.comp)) return 0;
+  const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
+  const skip = r?.skip ?? plan({}, active).skip;
+  let t = 0;
+  for (const st of STAGES) {
+    if (st.final && !finalToo) break;
+    if (skip.has(st.id) || r?.done?.[st.id] !== undefined) continue;
+    const est = estimate(st.id);
+    if (S.stage?.id === st.id && S.stage.key === S.heroKey) {
+      const run = (performance.now() - S.stage.t0) / 1000, f = S.stage.progress;
+      t += f > 0.05 ? Math.max(0, run * (1 - f) / f) : Math.max(est - run, est * 0.2);
+    } else t += est;
+  }
+  return t;
+}
 
-function stageUI() {
-  const bar = $("#tl-render"), note = $("#render-note"), s = S.stage;
+function stagesUI() { // the Render panel: every step, done, running or waiting, and the time left
+  const list = $("#stages"), p = S.plate, r = S.renders.get(S.heroKey);
+  const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
+  $("#render").hidden = !p;
+  list.hidden = !active.length;
+  if (!p || !active.length) { $("#render-left").textContent = ""; return timelineBar(); }
+  const skip = r?.skip ?? plan({}, active).skip, waiting = !S.background && !S.wantDownload;
+  list.replaceChildren(...STAGES.filter((st) => !skip.has(st.id)).map((st) => {
+    const li = document.createElement("li"), took = r?.done?.[st.id];
+    const now = S.stage?.id === st.id && S.stage.key === S.heroKey;
+    li.className = took !== undefined ? "done" : now ? "now" : st.final && waiting ? "later" : "";
+    li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time"></span>';
+    li.children[1].textContent = st.label;
+    li.children[2].textContent = took !== undefined ? `${Math.round(took)} s` : now ? `${Math.round(S.stage.progress * 100)}%`
+      : st.final && waiting ? "on Export" : `~${Math.round(estimate(st.id))} s`;
+    return li;
+  }));
+  const pre = renderLeft(), all = renderLeft(true);
+  const busy = S.stage?.key === S.heroKey;
+  $("#render-left").textContent = stale() || !r?.comp ? (pre ? `preview ${secs(pre)}` : busy ? "preview almost ready" : "")
+    : r?.exported ? "export ready" : waiting ? "preview ready" : all ? `export ${secs(all)}` : busy ? "export almost ready" : "";
+  timelineBar();
+}
+
+function timelineBar() { // the line under the timeline: the preview in gold, then the export in grey, green when exported
+  const bar = $("#tl-render"), r = S.renders.get(S.heroKey);
   bar.className = "tl-render";
-  bar.style.width = "0";
-  note.textContent = "";
-  if (s.phase === "preview" || s.phase === "export") {
-    bar.classList.toggle("export", s.phase === "export");
-    bar.style.width = `${Math.round((s.progress ?? 0) * 100)}%`;
-    note.textContent = `${s.label} ${Math.round((s.progress ?? 0) * 100)}%`;
-  } else if (s.phase === "ready") { bar.classList.add("ready"); note.textContent = "Exported"; }
-  if (stale() && s.phase !== "preview") bar.classList.add("stale");
+  if (!S.plate || !S.heroKey || !r) { bar.style.width = "0"; if (S.heroKey && stale()) bar.classList.add("stale"); return; }
+  const steps = STAGES.filter((st) => !r.skip?.has(st.id) && (!st.final || S.background || S.wantDownload || r.exported));
+  const total = steps.reduce((a, st) => a + estimate(st.id), 0);
+  let done = steps.reduce((a, st) => a + (r.done?.[st.id] !== undefined ? estimate(st.id) : 0), 0);
+  if (S.stage?.key === S.heroKey) done += estimate(S.stage.id) * S.stage.progress;
+  bar.style.width = `${Math.round((done / Math.max(1, total)) * 100)}%`;
+  if (r.exported) bar.classList.add("ready");
+  else if (r.comp) bar.classList.add("export");
 }
 
 function timelineUI() {
@@ -1114,28 +1455,52 @@ function timelineUI() {
   r.style.width = `${((S.outPt - S.inPt + 1) / n) * 100}%`;
   r.classList.toggle("full", S.inPt === 0 && S.outPt === n - 1);
   $("#tl-key").hidden = !S.edits.some((e) => e.on && e.patch);
+  cacheUI();
   $("#tl-key").style.left = pos(0);
   $("#frame-now").textContent = p.first + S.frame;
   $("#frame-total").textContent = `/ ${p.first + n - 1}`;
   $("#fps").textContent = `${Math.round(p.fps * 100) / 100} fps`;
   const t = $("#timeline");
   t.setAttribute("aria-valuemin", p.first); t.setAttribute("aria-valuemax", p.first + n - 1); t.setAttribute("aria-valuenow", p.first + S.frame);
-  stageUI();
+  stagesUI();
+}
+
+function setPreview(cap) { // a smaller shot preview renders faster; the export stays at full size
+  S.previewCap = cap;
+  try { localStorage.setItem("paintaplate.preview", String(cap)); } catch { /* this session only */ }
+  $("#preview-size").value = String(cap);
+  if (!S.plate) return;
+  const [w, h] = [S.plate.spec.width, S.plate.spec.height];
+  S.plate.shot = fitSize(w, h, cap, 32);
+  S.renders.clear(); S.exported = null;
+  if (S.shot) S.shot.key = ""; // what plays now is from the other size until the new preview is ready
+  S.shotDirty = !!S.heroKey;
+  status(`Previews at ${S.plate.shot[0]} × ${S.plate.shot[1]}. The export stays at full size.`);
+  stagesUI(); exportUI(); touch();
 }
 
 function exportUI() {
   const b = $("#export-btn"), edits = S.edits.some((e) => e.on && e.patch);
-  b.disabled = !S.plate || (!edits && !S.exported);
-  const s = S.stage;
-  b.textContent = S.exported ? "Export" : s.phase === "export" ? `Export ${Math.round((s.progress ?? 0) * 100)}%` : "Export";
-  b.title = S.exported ? "Download the export and its matte as one zip" : "Renders the export in the plate's format, then downloads it";
+  b.disabled = !S.plate || !edits;
+  b.textContent = S.wantDownload ? `Exporting${renderLeft(true) ? `, ${secs(renderLeft(true))}` : ""}` : "Export";
+}
+
+function exportDialog() {
+  const r = S.renders.get(S.heroKey), ready = !!r?.exported && !S.shotDirty, kind = S.plate.spec.kind;
+  $("#x-format").textContent = kind === "video" ? `${S.plate.spec.codec} movie` : `${S.plate.spec.ext.slice(1).toUpperCase()} ${kind}`;
+  $("#x-bg").checked = S.background;
+  $("#x-note").textContent = ready ? "Ready: the zip downloads at once."
+    : `The full-quality render runs first, ${secs(renderLeft(true)) || "a moment"}. The zip downloads when it is done.`;
+  $("#export").showModal();
 }
 
 function setTool(t) {
   S.tool = t;
+  S.rub = false;
+  $("#rub-btn").setAttribute("aria-pressed", "false");
   $$(".tools [data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === t));
-  $("#tool-name").textContent = NAME[t];
   $("#prompt").placeholder = HINT[t];
+  colorUI();
   render();
 }
 
@@ -1173,18 +1538,48 @@ async function boot() {
 
 $$(".tools [data-tool]").forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
 $("#size").oninput = (e) => setSize(+e.target.value);
-$("#color").oninput = (e) => (S.color = e.target.value);
+function setColor(c) { // the colour of the current tool: Paint and Light keep their own
+  if (S.tool === "erase") return;
+  S.colors[S.tool] = c;
+  colorUI();
+}
+function colorUI() {
+  const c = S.color, off = S.tool === "erase";
+  $$(".swatches .sw[data-color]").forEach((b) => b.setAttribute("aria-pressed", String(!off && b.dataset.color === c)));
+  $(".swatches").classList.toggle("off", off);
+  $("#color").value = c;
+  $(".swatches .custom").classList.toggle("on", !off && ![...$$(".swatches .sw[data-color]")].some((b) => b.dataset.color === c));
+}
+$$(".swatches .sw[data-color]").forEach((b) => (b.onclick = () => setColor(b.dataset.color)));
+$("#color").oninput = (e) => setColor(e.target.value);
+function setRub(on) {
+  S.rub = on;
+  $("#rub-btn").setAttribute("aria-pressed", String(on));
+  hud(on ? "Eraser: rub out the strokes you just painted" : NAME[S.tool]);
+  render();
+}
+$("#rub-btn").onclick = () => setRub(!S.rub);
 $("#whole").onchange = () => setTool("erase");
 $("#prompt").oninput = () => { if (S.draft && !stroke) schedule(); };
 $("#open-btn").onclick = $("#empty-open").onclick = openDialog;
 $("#help-btn").onclick = () => $("#help").showModal();
 $("#play-btn").onclick = () => (S.playing ? pause() : play());
 $("#wipe-btn").onclick = () => setWipe(S.wipe === null);
-$("#export-btn").onclick = () => {
-  if (S.exported && !S.shotDirty && S.renders.get(S.heroKey)?.exported === S.exported) return download();
-  S.wantDownload = true;
-  status("The download starts when the export is ready.");
-  touch();
+$("#export-btn").onclick = exportDialog;
+$("#preview-size").value = String(S.previewCap);
+$("#preview-size").onchange = (e) => setPreview(+e.target.value);
+$("#x-bg").onchange = (e) => {
+  S.background = e.target.checked;
+  try { localStorage.setItem("paintaplate.background", S.background ? "1" : "0"); } catch { /* private mode: this session only */ }
+  stagesUI(); touch();
+};
+$("#x-go").onclick = () => {
+  const parts = ["export", ...["matte", "review", "shot"].filter((k) => $(`#x-${k}`).checked)];
+  const r = S.renders.get(S.heroKey);
+  if (r?.exported && !S.shotDirty) return download(parts);
+  S.wantDownload = parts;
+  status("Rendering the export at full quality: the zip downloads when it is done.");
+  exportUI(); stagesUI(); touch();
 };
 $("#log-btn").onclick = () => {
   const open = $("#log").hidden;
@@ -1246,6 +1641,7 @@ addEventListener("keydown", (e) => {
   else if (k === "`") document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
   else if (k === "?") $("#help").showModal();
   else if (TOOLS[low] && !mod) setTool(TOOLS[low]);
+  else if (low === "x" && !mod) setRub(!S.rub);
   else if (k === "-" || k === "_") setSize(S.size / 1.2);
   else if (k === "=" || k === "+") setSize(S.size * 1.2);
   else if (k === "Enter") { if (S.draft) launch(S.draft); else if (S.edits.length) again(S.edits.at(-1)); }
@@ -1257,7 +1653,7 @@ addEventListener("keydown", (e) => {
   e.preventDefault();
 });
 addEventListener("keyup", (e) => { if (e.key.toLowerCase() === "o" && S.compare) { S.compare = false; render(); } });
-new ResizeObserver(fitView).observe($("#viewport"));
+new ResizeObserver(() => { fitView(); cacheUI(); }).observe($("#viewport"));
 
 setTool("paint");
 setSize(48);

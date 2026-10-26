@@ -60,7 +60,9 @@ if [ -d .git ]; then
   git pull -q --ff-only 2>/dev/null || true  # moves a branch forward; a pinned commit stays as it is
 fi
 pin ComfyUI > "$W/pins.txt"
+log "ComfyUI: PyTorch for CUDA 13.0"
 uv pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cu130
+log "ComfyUI: its Python packages"
 uv pip install -q -r requirements.txt
 [ -e models ] && [ ! -L models ] && rm -rf models
 ln -sfn "$M" models
@@ -77,6 +79,7 @@ cd custom_nodes
     git pull -q --ff-only 2>/dev/null || true
   fi
   pin ComfyUI-LTXVideo >> "$W/pins.txt"
+  log "ComfyUI-LTXVideo: its Python packages"
   uv pip install -q -r requirements.txt
 )
 

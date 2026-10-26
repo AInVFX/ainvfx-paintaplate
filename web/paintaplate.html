@@ -40,15 +40,28 @@
       <label for="size">Brush</label>
       <input id="size" type="range" min="4" max="320" value="48" title="Brush size (- and =)">
       <output id="size-out" for="size">48</output>
+      <button id="rub-btn" class="rub" aria-pressed="false" title="Eraser: rub out strokes you just painted (X)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3l5 5-10 10H6l-3-3L16 3zM9 9l6 6M6 21h14"/></svg>
+        <span>Eraser</span>
+      </button>
     </div>
-    <label class="swatch" title="Colour of the paint and of the light">
-      <input id="color" type="color" value="#f5b800" aria-label="Colour">
-    </label>
+    <div class="swatches" role="group" aria-label="Colour of the paint, or of the light">
+      <button class="sw" data-color="#000000" style="--c:#000000" title="Black" aria-label="Black"></button>
+      <button class="sw" data-color="#ffffff" style="--c:#ffffff" title="White" aria-label="White"></button>
+      <button class="sw" data-color="#d32f2f" style="--c:#d32f2f" title="Red" aria-label="Red"></button>
+      <button class="sw" data-color="#f57c00" style="--c:#f57c00" title="Orange" aria-label="Orange"></button>
+      <button class="sw" data-color="#fbc02d" style="--c:#fbc02d" title="Yellow" aria-label="Yellow"></button>
+      <button class="sw" data-color="#388e3c" style="--c:#388e3c" title="Green" aria-label="Green"></button>
+      <button class="sw" data-color="#1976d2" style="--c:#1976d2" title="Blue" aria-label="Blue"></button>
+      <button class="sw" data-color="#6d4c41" style="--c:#6d4c41" title="Brown" aria-label="Brown"></button>
+      <button class="sw" data-color="#ffd890" style="--c:#ffd890" title="Warm light" aria-label="Warm light"></button>
+      <label class="sw custom" title="Any colour"><input id="color" type="color" value="#000000" aria-label="Any colour"></label>
+    </div>
   </nav>
 
   <main class="stage">
     <div class="promptbar">
-      <span id="tool-name" class="tool-name">Paint</span>
+      <label for="prompt" class="prompt-label">Prompt</label>
       <input id="prompt" autocomplete="off" spellcheck="false" aria-label="Describe the edit"
              placeholder="Describe what to paint, then paint it on the frame">
     </div>
@@ -58,6 +71,12 @@
         <span class="label left">Plate</span><span class="label right">Result</span><span class="grip" title="Drag to compare"></span>
       </div>
       <p id="hud" class="hud" aria-live="polite"></p>
+      <div id="opening" class="opening" hidden>
+        <p id="op-title" class="op-title">Opening the plate</p>
+        <div class="op-bar"><div id="op-bar"></div></div>
+        <p id="op-step" class="op-step"></p>
+        <ol id="op-steps" class="op-steps"></ol>
+      </div>
       <div id="empty" class="empty">
         <p>Open a plate to start: a video file, or a folder of EXR, PNG, TIFF or DPX frames. You can also drop it here.</p>
         <button id="empty-open" class="primary">Open plate</button>
@@ -72,13 +91,13 @@
       <output id="frame-now" class="frame-now" title="Current frame">0</output>
       <div id="timeline" class="timeline" role="slider" tabindex="0" aria-label="Frame" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
         <div id="tl-range" class="tl-range"></div>
+        <canvas id="tl-cache" class="tl-cache" title="Frames cached in memory: they show at once"></canvas>
         <div id="tl-render" class="tl-render"></div>
         <div id="tl-key" class="tl-key" hidden title="Edits are painted on this frame"></div>
         <div id="tl-head" class="tl-head"></div>
       </div>
       <output id="frame-total" class="frame-total"></output>
       <span id="fps" class="fps"></span>
-      <span id="render-note" class="render-note"></span>
       <button id="wipe-btn" class="quiet" aria-pressed="false" title="Compare the plate and the result (F6)" disabled>Wipe</button>
     </div>
   </main>
@@ -87,6 +106,15 @@
     <h2>History</h2>
     <ol id="history"></ol>
     <p id="history-empty" class="history-empty">Your edits appear here. Describe, then paint on the frame.</p>
+    <section id="render" class="render" hidden>
+      <h2>Render <span id="render-left"></span></h2>
+      <label class="preview-size">Preview size
+        <select id="preview-size" title="The shot preview and its composite. Smaller renders faster; the export stays at full size.">
+          <option value="960">Standard (960)</option><option value="640">Fast (640)</option><option value="448">Draft (448)</option>
+        </select>
+      </label>
+      <ol id="stages"></ol>
+    </section>
   </aside>
 
   <footer class="log">
@@ -115,6 +143,7 @@
     <dl>
       <dt>B, E, L</dt><dd>Paint, Erase, Light</dd>
       <dt>- and =</dt><dd>Brush size</dd>
+      <dt>X</dt><dd>Eraser: rub out the strokes you just painted</dd>
       <dt>Enter</dt><dd>Start the edit now, or try another</dd>
       <dt>Esc</dt><dd>Cancel the edit in progress</dd>
       <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo</dd>
@@ -122,6 +151,20 @@
       <dt>?</dt><dd>Show or hide these keys</dd>
     </dl>
     <form method="dialog"><button class="primary">Close</button></form>
+  </dialog>
+
+  <dialog id="export">
+    <form method="dialog">
+      <h2>Export</h2>
+      <p class="hint">Rendered at full quality, saved in ComfyUI's output folder, then downloaded as one zip.</p>
+      <label class="check"><input type="checkbox" checked disabled> The result <small id="x-format"></small></label>
+      <label class="check"><input id="x-matte" type="checkbox" checked> Its matte <small>where the plate changed, PNG frames</small></label>
+      <label class="check"><input id="x-review" type="checkbox"> A review movie <small>H.264 MP4 of the composite, preview size</small></label>
+      <label class="check"><input id="x-shot" type="checkbox"> The regenerated shot <small>the whole frame as the model made it, MP4</small></label>
+      <label class="check bg"><input id="x-bg" type="checkbox" checked> Prepare the export in the background after each change</label>
+      <p id="x-note" class="hint"></p>
+      <menu><button value="cancel">Cancel</button><button id="x-go" value="ok" class="primary">Export</button></menu>
+    </form>
   </dialog>
 
   <dialog id="open">

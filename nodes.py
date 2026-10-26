@@ -104,10 +104,19 @@ class LoadPlate(io.ComfyNode):
         full = resolve(path)
         spec = plateio.probe_plate(full)
         if spec["kind"] == "video":  # core's decoder, trimmed before decoding
+            bar = comfy.utils.ProgressBar(1)
             parts = [InputImpl.VideoFromFile(full, duration=max_frames / spec["fps"]).get_components()]
-        else:  # frames decode in parallel: PyAV releases the GIL while decoding
+            bar.update(1)
+        else:  # frames decode in parallel: PyAV releases the GIL while decoding; each one counts as progress
+            files = spec["files"][:max_frames]
+            bar = comfy.utils.ProgressBar(len(files))
+
+            def read(f):
+                part = InputImpl.VideoFromFile(f).get_components()
+                bar.update(1)
+                return part
             with ThreadPoolExecutor(min(16, os.cpu_count() or 4)) as pool:
-                parts = list(pool.map(lambda f: InputImpl.VideoFromFile(f).get_components(), spec["files"][:max_frames]))
+                parts = list(pool.map(read, files))
         images = torch.cat([p.images for p in parts])[:max_frames]
         if parts[0].alpha is not None:
             alpha = torch.cat([p.alpha[..., -1] for p in parts])[:max_frames]
@@ -281,4 +290,51 @@ class RelightTransfer(io.ComfyNode):
         return io.NodeOutput(to_image(out))
 
 
-NODES = [LoadPlate, SavePlate, FitToPlate, RelightTransfer]
+class FillMatte(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_FillMatte",
+            display_name="Fill Matte",
+            category=CATEGORY,
+            description="Fills the masked area of every frame from the pixels around it, as a smooth blur. Before "
+                        "LTX follows a plate, it removes what an erase takes away: shown the object in the plate, "
+                        "LTX kept its shape in every frame and painted it in the colours of the background.",
+            inputs=[
+                io.Image.Input("images", tooltip="The frames, any size."),
+                io.Mask.Input("mask", optional=True, tooltip="The area to fill, any size; a short batch repeats its "
+                              "last mask. Empty or missing leaves the frames as they are."),
+                io.Int.Input("grow", default=16, min=0, max=256, tooltip="Grow the area, in pixels of the frames."),
+                io.Int.Input("feather", default=8, min=0, max=256, tooltip="Soften its edge, in pixels of the frames."),
+            ],
+            outputs=[io.Image.Output(display_name="images")],
+        )
+
+    @classmethod
+    def execute(cls, images, grow, feather, mask=None) -> io.NodeOutput:
+        if mask is None or not torch.any(mask > 0.02):
+            return io.NodeOutput(images)
+        n, h, w = images.shape[:3]
+        masks = resize(mask[:n] if mask.shape[0] >= n else torch.cat([mask, mask[-1:].expand(n - mask.shape[0], -1, -1)]), h, w)
+        bar = comfy.utils.ProgressBar(n)
+        r = int(grow)
+
+        def one(args):
+            img, m = args
+            if r:
+                m = mathops.ndimage.grey_dilation(m, size=(2 * r + 1, 2 * r + 1))
+            if feather:
+                m = mathops.ndimage.gaussian_filter(m, feather / 2.0)
+            m = np.clip(m, 0.0, 1.0)
+            filled = mathops.push_pull(img[..., :3], (m < 0.02).astype(np.float32))
+            out = img.copy()
+            out[..., :3] = img[..., :3] * (1 - m[..., None]) + filled * m[..., None]
+            bar.update(1)
+            return out.astype(np.float32)
+
+        with ThreadPoolExecutor(min(16, os.cpu_count() or 4)) as pool:
+            out = list(pool.map(one, zip(frames_np(images), frames_np(masks))))
+        return io.NodeOutput(to_image(out))
+
+
+NODES = [LoadPlate, SavePlate, FitToPlate, RelightTransfer, FillMatte]
