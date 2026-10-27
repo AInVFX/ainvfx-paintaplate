@@ -83,7 +83,8 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .hud { position: absolute; left: 14px; top: 10px; margin: 0; padding: 4px 9px; border-radius: 4px; background: #000a; color: var(--text); font-variant-numeric: tabular-nums; pointer-events: none; opacity: 0; transition: opacity .25s; max-width: calc(100% - 28px); }
 .hud.on { opacity: 1; transition: none; }
 .wipe { position: absolute; top: 0; height: 100%; width: 0; border-left: 2px solid #fff; box-shadow: 0 0 0 1px #0006; pointer-events: none; }
-.wipe .grip { position: absolute; left: -12px; top: 50%; width: 22px; height: 44px; margin-top: -22px; border-radius: 11px; background: #fff; border: 2px solid #222; cursor: ew-resize; pointer-events: auto; }
+.wipe .grip { position: absolute; left: -15px; top: 50%; width: 28px; height: 64px; margin-top: -32px; border-radius: 14px; background: #fff; border: 2px solid #222; cursor: ew-resize; pointer-events: auto; }
+#view.painting.near-wipe { cursor: ew-resize; }
 .wipe .label { position: absolute; top: 10px; padding: 2px 7px; border-radius: 3px; background: #000a; font-size: 12px; white-space: nowrap; }
 .wipe .left { right: 8px; }
 .wipe .right { left: 8px; }
@@ -117,6 +118,12 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 #history li.off { opacity: .5; }
 #history li.off .thumb { filter: grayscale(1); }
 #history li.failed { border-color: #6b2f29; }
+#history li.selected { border-color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); }
+.history-head { display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px; }
+.history-head h2 { margin: 0; }
+.undo { display: flex; gap: 2px; }
+.undo button { width: 28px; height: 26px; padding: 0; display: grid; place-items: center; }
+.undo svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 #history .thumb { width: 60px; height: 40px; object-fit: cover; border-radius: 3px; background: #111; display: block; }
 #history .what { min-width: 0; }
 #history .title { display: block; font-weight: 600; }
@@ -153,9 +160,12 @@ dialog .check.bg { margin-top: 16px; padding-top: 12px; border-top: 1px solid va
 .log { grid-area: log; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 12px; border-top: 1px solid var(--line); background: var(--panel); }
 #status { flex: 1; min-width: 0; margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #log-btn { padding: 2px 10px; }
-#log { flex-basis: 100%; list-style: none; margin: 0; padding: 6px 0 2px; max-height: 160px; overflow-y: auto; border-top: 1px solid var(--line); color: var(--muted); font-variant-numeric: tabular-nums; }
-#log li { display: flex; gap: 10px; }
-#log time { color: var(--faint); flex: none; }
+/* the log reads like ComfyUI's console: near black, monospace, errors in red */
+#log { flex-basis: 100%; list-style: none; margin: 0; padding: 8px 10px; max-height: 180px; overflow-y: auto; border-radius: 4px;
+  background: #0b0b0b; color: #c9d1d9; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+#log li { display: flex; gap: 12px; }
+#log time { color: #6e7681; flex: none; }
+#log li.error span { color: #ff7b72; }
 
 /* Dialogs */
 dialog { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; width: min(460px, 92vw); }

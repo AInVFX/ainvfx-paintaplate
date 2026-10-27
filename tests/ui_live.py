@@ -29,6 +29,7 @@ def stand_ins(out):
     g("PreviewImage", _output="result", images=g("ImageCompositeMasked", destination=base, source=inv, x=0, y=0,
                                                    resize_source=False, mask=grown))
     g("PreviewImage", _output="patch", images=g("JoinImageWithAlpha", image=inv, alpha=g("InvertMask", mask=grown)))
+    g("PreviewImage", _output="relit", images=inv)
     g.save("edit", out)
 
     g = Graph()  # shot: the Ripple reference itself (hero frame + plate frames), saved like the real one
@@ -41,6 +42,7 @@ def stand_ins(out):
     g("SaveVideo", _output="video", video=g("CreateVideo", images=ref, fps=load[3], bit_depth=8, color_space="sRGB", codec="none"),
       filename_prefix=Slot("video_prefix", "x/v"), format="auto", format__codec="auto")
     g.save("shot", out)
+    g.save("clean", out)  # the erase pass: the same stand-in, saved under its name
 
     g = Graph()  # matte: the first-frame mask repeated over every frame
     _, srgb = plate(g, pad=True)
@@ -51,10 +53,18 @@ def stand_ins(out):
     g("SaveImage", _output="frames", images=g("RepeatImageBatch", image=m, amount=size[2]), filename_prefix=Slot("prefix", "x/m"))
     g.save("matte", out)
 
-    g = Graph()  # snap: no object found, the page keeps the painted stroke
-    g("LoadImage", image=Slot("image", "")); g("PrimitiveString", value=Slot("points", "[]"))
-    g("PreviewImage", _output="mask", images=g("MaskToImage", mask=g("SolidMask", value=0.0, width=64, height=64)))
+    g = Graph()  # snap: no object at any point and none by name, the page keeps the painted stroke
+    g("LoadImage", image=Slot("image", "")); g("PrimitiveString", value=Slot("words", ""))
+    empty = g("MaskToImage", mask=g("SolidMask", value=0.0, width=64, height=64))
+    for k in range(5):
+        g("PrimitiveString", value=Slot(f"point_{k}", "[]")); g("PreviewImage", _output=f"point_{k}", images=empty)
+    g("PreviewImage", _output="named", images=empty)
     g.save("snap", out)
+
+    g = Graph()  # prompt: the request comes back as the caption (it ends with the locked rows, as an answer would)
+    g("LoadImage", image=Slot("image", "")); g("PrimitiveStringMultiline", value=Slot("system", ""))
+    g("PreviewAny", _output="text", source=g("PrimitiveStringMultiline", value=Slot("request", "")))
+    g.save("prompt", out)
 
 
 def stroke(page, box, pts):
@@ -220,6 +230,8 @@ def remote(a):
                 page.keyboard.press(key); page.fill("#prompt", words); page.locator("#prompt").blur()
                 if size:  # brush size in frame pixels, set on the slider
                     page.eval_on_selector("#size", "(el, v) => { el.value = v; el.dispatchEvent(new Event('input')); }", size[0])
+                if len(size) > 1 and "whole" in size[1]:  # options after the brush size: {"whole": false} paints an erase as is
+                    page.set_checked("#whole", size[1]["whole"])
                 stroke(page, box, pts); mark(f"{key} stroke")
                 page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)
                 page.wait_for_function(DONE.format(n=i + 1), timeout=300000)
@@ -227,7 +239,7 @@ def remote(a):
             seen = set()
             deadline = time.time() + a.timeout * 8
             while time.time() < deadline:
-                note = page.inner_text("#render-note")
+                note = page.inner_text("#render-left")
                 tag = note.rsplit(" ", 1)[0] if note else status()[:40]
                 if tag not in seen:
                     seen.add(tag); mark("stage: " + (note or status()))

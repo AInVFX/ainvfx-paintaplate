@@ -319,5 +319,99 @@
    "title": "Edit patch (RGBA)",
    "output": "patch"
   }
+ },
+ "24": {
+  "class_type": "ImageColorSpace",
+  "inputs": {
+   "image": [
+    "4",
+    0
+   ],
+   "source": "sRGB",
+   "destination": "linear"
+  }
+ },
+ "25": {
+  "class_type": "ImageScaleBy",
+  "inputs": {
+   "image": [
+    "24",
+    0
+   ],
+   "upscale_method": "area",
+   "scale_by": 0.5
+  }
+ },
+ "26": {
+  "class_type": "ImageScaleBy",
+  "inputs": {
+   "image": [
+    "19",
+    0
+   ],
+   "upscale_method": "area",
+   "scale_by": 0.5
+  }
+ },
+ "27": {
+  "class_type": "ImageColorSpace",
+  "inputs": {
+   "image": [
+    "26",
+    0
+   ],
+   "source": "sRGB",
+   "destination": "linear"
+  }
+ },
+ "28": {
+  "class_type": "PaintAPlate_RelightTransfer",
+  "inputs": {
+   "plate": [
+    "24",
+    0
+   ],
+   "source": [
+    "25",
+    0
+   ],
+   "relit": [
+    "27",
+    0
+   ],
+   "radius": 8,
+   "strength": 0.0,
+   "align": true
+  },
+  "_meta": {
+   "slots": {
+    "strength": "relight",
+    "plate": "relit_frame"
+   }
+  }
+ },
+ "29": {
+  "class_type": "ImageColorSpace",
+  "inputs": {
+   "image": [
+    "28",
+    0
+   ],
+   "source": "linear",
+   "destination": "sRGB"
+  }
+ },
+ "30": {
+  "class_type": "PreviewImage",
+  "inputs": {
+   "images": [
+    "29",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Relit frame",
+   "output": "relit"
+  }
  }
 }

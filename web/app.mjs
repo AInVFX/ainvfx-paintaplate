@@ -3,9 +3,9 @@
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
-import { WF, cancel, connect, loadWorkflows, objectInfo, onNotice, outputFile, outputText, run, upload, viewUrl } from "./comfy.mjs";
+import { WF, cancel, connect, loadWorkflows, objectInfo, onNotice, outputFile, outputFiles, outputText, run, upload, viewUrl } from "./comfy.mjs";
 import { FrameCache } from "./frames.mjs";
-import { caption, dark, dependsOnChange, fitSize, gb, secs } from "./logic.mjs";
+import { caption, dark, dependsOnChange, fitSize, gb, pickObjects, reconcile, secs, shotPrompt, upsampleRequest } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -14,19 +14,26 @@ const Q = new URLSearchParams(location.search);
 // ---------- Tuning: every number that sets a size, a delay or a budget ----------
 const WAIT = +Q.get("wait") || 2000; // ms after the last stroke before an edit starts
 // FLUX 3 Image Klein: a quick pass at EDIT_SIDE, then a full-size pass that refines it with a light denoise
-const QUICK = { steps: 8, denoise: 1, lightDenoise: 0.65, feather: 6, sigma: 3 };
+const QUICK = { steps: 16, denoise: 1, feather: 6, sigma: 3 }; // 16: the official distilled setting, 1.8 s at 768 on an RTX PRO 6000
 const FULL = { steps: +Q.get("refine") || 8, denoise: 0.35, feather: 12, sigma: 6 };
 const CACHE_MB = +Q.get("cache") || 384; // decoded frames kept per video: about 180 frames at 960 x 544
 const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-size edits, quick edits, SAM tracking
+// the erase matte only places the erase pass's box, grown by 1/24 of the width: 640 is enough, at half the time of 960
+const ERASE_TRACK_SIDE = 640;
+const WARM_ALL_VRAM = 60e9; // bytes of GPU memory above which LTX 2.5 is loaded at start too: every model then stays loaded
 const PREVIEW_SIDES = [960, 640, 448]; // the preview sizes offered: Standard, Fast, Draft
 // An edit mask grows by the frame width over this: 27 px at 1280, enough for the object's edge. At 24 an erase reached
 // what stood next to the object, and Klein sometimes took it too (a head under an umbrella, one seed in five).
 const EDIT_GROW = 48;
-const HOLE_EDGE = 16; // the erased object filled before LTX: grown and softened by the width over this
+const PAINT_ZONE = 10; // paint may change the frame within the width over this of its strokes: room for an explosion and its glow
+const ZONE_SOFT = { feather: 31, sigma: 10 }; // the zone's edge: Blur Image's largest radius and sigma
+const WIPE_GRAB = 14; // CSS px on each side of the wipe line where a press moves the wipe instead of painting
 const COMPOSITE_GROW = { erase: 24, other: 160 }, COMPOSITE_FEATHER = 96; // the composite's matte edge, same rule
 const IDLE_MS = 1500; // quiet time after editing before a render starts
-const WORKFLOWS = ["ingest", "edit", "snap", "shot", "matte", "comp", "export"];
-const BACKGROUND = ["shot", "matte", "comp", "export"]; // job kinds a new stroke cancels
+const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "shot", "matte", "comp", "export", "warm"];
+const BACKGROUND = ["clean", "shot", "matte", "comp", "export"]; // job kinds a new stroke cancels
+const UPSAMPLER = {}; // Black Forest Labs' system prompts for Klein's upsampler (upsampler.json): table and plain
+const SCENE = { format: "paintaplate-scene", version: 1 };
 
 const TOOLS = { b: "paint", e: "erase", l: "light" };
 const NAME = { paint: "Paint", erase: "Erase", light: "Light" };
@@ -45,7 +52,7 @@ const S = {
   fit: { w: 0, h: 0, x: 0, y: 0 }, zoom: { k: 1, x: 0, y: 0 },
   shot: null, shotDirty: false, stage: null, run: 0, exported: null, wantDownload: null,
   background: (() => { try { return localStorage.getItem("paintaplate.background") !== "0"; } catch { return true; } })(), // prepare the export after each change
-  previewCap: (() => { try { return +localStorage.getItem("paintaplate.preview") || PREVIEW_SIDES[0]; } catch { return PREVIEW_SIDES[0]; } })(), // long side of the shot preview
+  previewCap: (() => { try { return +localStorage.getItem("paintaplate.preview") || PREVIEW_SIDES[1]; } catch { return PREVIEW_SIDES[1]; } })(), // long side of the shot preview: Fast by default
   heroKey: "", renders: new Map(), // set of edits -> what has been rendered for it
   uploads: new Map(), timer: 0,
 };
@@ -54,7 +61,7 @@ const view = $("#view"), ctx = view.getContext("2d");
 const plateVid = $("#plate-video"), shotVid = $("#shot-video");
 const fx = document.createElement("canvas"); // scratch layer for masked overlays
 
-const quiet = (e) => { if (e?.message === "cancelled") return; console.error(e); status(e?.message ?? String(e)); };
+const quiet = (e) => { if (e?.message === "cancelled") return; console.error(e); status(e?.message ?? String(e), "error"); };
 const uploadCanvas = async (c, name) => upload(await blob(c), name, `paintaplate/${S.plate.id}`);
 
 // ---------- What Klein sees ----------
@@ -68,9 +75,21 @@ function editImage(e, before, size) { // what Klein sees: the strokes over the f
 
 const maskAt = (e, size) => (e.tool === "light" ? snap(null, size, "#fff") : snap(e.mask, size, "#000"));
 
-function captionOf(e) { // the instruction and layout table for an edit
+function templateCaption(e) { // the page's own caption, when the upsampler gives nothing back
   const colors = e.strokes.filter((s) => s.tool !== "rub").map((s) => s.color); // eraser strokes have no colour
   return caption({ tool: e.tool, words: e.prompt, colors, color: e.color, bbox: bounds(e.mask) });
+}
+
+async function captionFor(e, reference, key) { // Klein's own upsampler writes the caption Klein was trained on; the page keeps its box
+  if (e.caption?.key === key) return e.caption.text;
+  const ask = upsampleRequest({ tool: e.tool, words: e.prompt, bbox: bounds(e.mask) });
+  let text = "";
+  try {
+    const out = await run("prompt", { image: reference, request: ask.request, system: UPSAMPLER[ask.mode] }, { kind: "edit", front: true }).done;
+    text = (outputText("prompt", out, "text") ?? "").trim();
+  } catch (err) { if (err?.message === "cancelled") throw err; quiet(err); }
+  e.caption = { key, text: text ? (ask.locked ? reconcile(text, ask.locked) : text) : templateCaption(e) };
+  return e.caption.text;
 }
 
 // ---------- Plate ----------
@@ -116,10 +135,11 @@ async function openPlate(list, typed, cs) {
   S.plate = { id, path, cs, spec, frames: spec.frames, fps: spec.fps || 24, name: stem,
     first: spec.kind === "video" ? 1 : spec.first_frame ?? 1,
     work: fitSize(w, h, WORK_SIDE, 32), prev: fitSize(w, h, EDIT_SIDE, 16), shot: fitSize(w, h, S.previewCap, 32),
-    track: fitSize(w, h, TRACK_SIDE, 32) }; // SAM tracks at one size whatever the preview size: the export's mattes use it
+    track: fitSize(w, h, TRACK_SIDE, 32), trackErase: fitSize(w, h, ERASE_TRACK_SIDE, 32) }; // SAM tracks at one size whatever the preview size
   if (Q.get("shot") === "full") S.plate.shot = S.plate.work;
   S.original = snap(await loadImage(viewUrl(outputFile("ingest", out, "hero"))), S.plate.work);
-  Object.assign(S, { hero: S.original, edits: [], draft: null, running: null, removed: [], count: 0,
+  $("#prompt").value = "";
+  Object.assign(S, { hero: S.original, edits: [], draft: null, running: null, removed: [], count: 0, selected: null, hover: null, last: null,
     frame: 0, inPt: 0, outPt: S.plate.frames - 1, shot: null, shotDirty: false, exported: null, wantDownload: null,
     stage: { phase: "none" }, zoom: { k: 1, x: 0, y: 0 }, wipe: null, heroKey: "" });
   S.uploads.clear(); S.renders.clear();
@@ -134,7 +154,6 @@ async function openPlate(list, typed, cs) {
   document.activeElement?.blur();
   S.took = {};
   fitView(); historyUI(); timelineUI(); stagesUI(); exportUI(); render();
-  warm();
   const offered = [...$("#cs").options].some((o) => o.value === spec.color_space_guess);
   const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).map((n) => n).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
@@ -150,11 +169,18 @@ function stopEverything() {
   cancel("edit", "snap", "warm", ...BACKGROUND);
 }
 
-async function warm() { // load the image model while the user looks at the frame, so the first edit is quick
-  const size = S.plate.prev, base = await uploadCanvas(snap(S.original, size), "warm.png");
-  const mask = await uploadCanvas(snap(null, size, "#000"), "warm_mask.png");
-  run("edit", { base, reference: base, start: base, mask, caption: "warm up", seed: 0, steps: 1, denoise: 1,
-    grow: 0, feather: 1, sigma: 1 }, { kind: "warm" }).done.catch(() => {});
+async function warmAll() { // every model loads while the person looks at the page: the first edit and the first shot start at once
+  const t0 = performance.now(), vram = (await (await fetch("/system_stats")).json()).devices?.[0]?.vram_total ?? 0;
+  // ComfyUI keeps its history in memory until it restarts: a model that a prompt in it used is still loaded
+  const history = Object.values(await (await fetch("/history?max_items=200")).json());
+  const used = new Set(history.flatMap((h) => Object.values(h.prompt?.[2] ?? {}).map((n) => n.class_type)));
+  const tiny = await upload(await blob(snap(null, [256, 144], "#808080")), "warm.png", "paintaplate/warm");
+  const mask = await upload(await blob(snap(null, [256, 144], "#000")), "warm_mask.png", "paintaplate/warm");
+  const jobs = [["edit", "ReferenceMultiLatent", { base: tiny, reference: tiny, start: tiny, mask, caption: "warm up", seed: 0, steps: 1, denoise: 1,
+    grow: 0, feather: 1, sigma: 1 }], ["prompt", "TextGenerate", { image: tiny, request: "Say yes.", system: "Answer with one word.", max_length: 4 }]];
+  if (vram >= WARM_ALL_VRAM) jobs.push(["warm", "LTXVConditioning", {}]); // on a smaller card LTX would push the edit models out
+  for (const [name, cls, values] of jobs) if (!used.has(cls)) await run(name, values, { kind: "warm" }).done.catch(() => {}); // SAM loads in a second
+  if (!S.plate) status(`Ready: every model loaded in ${Math.round((performance.now() - t0) / 1000)} s, so the first edit starts at once. Open a plate.`);
 }
 
 // What opening a plate does, in order. Ingest's nodes tell the page which step runs.
@@ -298,9 +324,9 @@ function frameAt(e) { // pointer position in frame pixels (working size); stays 
   return [((e.clientX - r.left) * view.width) / r.width, ((e.clientY - r.top) * view.height) / r.height];
 }
 
-function layered(upto = S.edits.length) { // the first frame with the active edits before index `upto`
+function layered(upto = S.edits.length, keep = () => true) { // the first frame with the active edits before index `upto`
   const c = snap(S.original, S.plate.work), x = c.getContext("2d");
-  for (const e of S.edits.slice(0, upto)) if (e.on && e.patch && e.state !== "generating") x.drawImage(e.patch, 0, 0, c.width, c.height);
+  for (const e of S.edits.slice(0, upto)) if (e.on && e.patch && e.state !== "generating" && keep(e)) x.drawImage(e.patch, 0, 0, c.width, c.height);
   return c;
 }
 
@@ -309,9 +335,9 @@ function recompose() {
   const key = S.edits.filter((e) => e.on && e.patch && e.state !== "generating").map((e) => `${e.id}.${e.version}`).join(",");
   if (key === S.heroKey) return;
   S.heroKey = key;
-  const r = S.renders.get(key); // a set of edits seen before plays at once (a bypass turned back on, for example)
+  const r = S.renders.get(key), pv = previewOf(r); // a set of edits seen before plays at once (a bypass turned back on, for example)
   S.exported = r?.exported ?? null;
-  if (r?.comp) setShot(r.comp, key);
+  if (r?.review || pv?.comp) setShot(r.review ?? pv.comp, key); // the full-size review once there is one
   else if (!key) setShot(null, key);
   S.shotDirty = !!key && !r?.exported;
   stagesUI(); exportUI();
@@ -357,7 +383,8 @@ function overlays(W, H) { // on the first frame: the strokes, then the edit taki
     ctx.drawImage(fx, 0, 0);
   }
   if (S.draft) strokes(S.draft, 1);
-  if (S.hover && S.hover !== e && S.hover.tool !== "light" && S.hover.strokes.length) strokes(S.hover, 0.55); // History: which edit is which
+  const shown = S.hover ?? S.selected; // History: which edit is which, and the one selected
+  if (shown && shown !== e && shown.tool !== "light" && shown.strokes.length) strokes(shown, S.hover ? 0.55 : 0.8);
   if (e && e.launched && !e.preview) { // the strokes stay until the first preview replaces them, then fade into it
     const t = e.shown ? (performance.now() - e.shown) / 350 : 0;
     if (t < 1) { strokes(e, 1 - t); if (e.shown) requestAnimationFrame(render); }
@@ -394,7 +421,7 @@ function softMask(e) { // the edit mask with a soft edge, close to what the work
 }
 
 function drawCursor() { // the brush outline, at its real size on the frame
-  if (!S.cursor || stroke || S.playing) return;
+  if (!S.cursor || stroke || S.playing || view.classList.contains("near-wipe")) return;
   ctx.lineWidth = Math.max(1.5, view.width / 900);
   ctx.strokeStyle = S.rub ? "#ffffff" : S.tool === "erase" ? "#ff8070" : S.color === "#000000" ? "#d8d8d8" : S.color;
   if (S.rub) ctx.setLineDash([6, 5]);
@@ -418,18 +445,24 @@ function setWipe(on) {
   hud(on ? "Wipe: the plate on the left, the result on the right" : "Wipe off");
 }
 
-$("#wipe .grip").addEventListener("pointerdown", (e) => {
+function nearWipe(e) { // a press this close to the wipe line moves the wipe: it never paints
+  if (S.wipe === null || !S.plate) return false;
+  const r = view.getBoundingClientRect();
+  return Math.abs(e.clientX - (r.left + S.wipe * r.width)) <= WIPE_GRAB;
+}
+
+function dragWipe(e, el) {
   e.preventDefault();
-  const grip = e.currentTarget;
-  grip.setPointerCapture(e.pointerId);
+  el.setPointerCapture(e.pointerId);
   const move = (ev) => {
     const r = view.getBoundingClientRect();
     S.wipe = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
     placeWipe(); render();
   };
-  grip.addEventListener("pointermove", move);
-  grip.addEventListener("pointerup", () => grip.removeEventListener("pointermove", move), { once: true });
-});
+  el.addEventListener("pointermove", move);
+  el.addEventListener("pointerup", () => el.removeEventListener("pointermove", move), { once: true });
+}
+$("#wipe .grip").addEventListener("pointerdown", (e) => dragWipe(e, e.currentTarget));
 
 let hudTimer;
 function hud(text, ms = 1600) {
@@ -447,6 +480,7 @@ let stroke = null, nav = null;
 view.addEventListener("pointerdown", (e) => {
   if (!S.plate) return;
   if (e.button === 1 || (e.button === 0 && (e.altKey || e.ctrlKey || e.metaKey))) return navigate(e);
+  if (e.button === 0 && nearWipe(e)) return dragWipe(e, view);
   const rub = S.rub || (e.pointerType === "pen" && (e.buttons & 32)); // the eraser tool, or a pen's eraser end
   if (e.button !== 0 && !rub) return;
   if (S.playing) pause();
@@ -455,9 +489,11 @@ view.addEventListener("pointerdown", (e) => {
   cancel(...BACKGROUND); // the GPU goes to the edit
   clearTimeout(S.timer);
   let d = S.draft;
-  if (!d && S.running && S.running === S.last && S.running.tool === S.tool && S.running === S.edits.at(-1)) d = reopen(S.running);
+  const chosen = S.selected?.tool === S.tool ? S.selected : null; // the selected edit takes the strokes of its own tool
+  if (!d && chosen) d = chosen === S.running ? reopen(chosen) : reopenDone(chosen);
+  else if (!d && S.running && S.running === S.last && S.running.tool === S.tool && S.running === S.edits.at(-1)) d = reopen(S.running);
   if (d && d.tool !== S.tool) { launch(d); d = null; }
-  if (!d) d = S.draft = newEdit();
+  if (!d) { if (S.selected) select(null); d = S.draft = newEdit(); }
   view.setPointerCapture(e.pointerId);
   stroke = { tool: d.tool, color: S.color, size: S.size, points: [] };
   d.strokes.push(stroke);
@@ -468,6 +504,7 @@ view.addEventListener("pointermove", (e) => {
   if (nav) return navigateMove(e);
   if (stroke && S.draft) return addPoint(S.draft, e);
   S.cursor = frameAt(e);
+  view.classList.toggle("near-wipe", nearWipe(e));
   if (!S.playing) requestAnimationFrame(render);
 });
 view.addEventListener("pointerleave", () => { S.cursor = null; if (!S.playing) requestAnimationFrame(render); });
@@ -479,10 +516,11 @@ view.addEventListener("pointerup", () => {
   schedule();
 });
 
-function rubOut(e) { // the eraser works on the strokes in progress, or on the edit just made
+function rubOut(e) { // the eraser works on the strokes in progress, on the selected edit, or on the edit just made
   let d = S.draft;
-  if (!d && S.last && S.last === S.edits.at(-1) && S.last.strokes.length) d = S.running === S.last ? reopen(S.last) : reopenDone(S.last);
-  if (!d) return hud("Nothing to rub out: the eraser takes away strokes you just painted");
+  const target = S.selected ?? (S.last === S.edits.at(-1) ? S.last : null);
+  if (!d && target?.strokes.length) d = S.running === target ? reopen(target) : reopenDone(target);
+  if (!d) return hud("Nothing to rub out: select an edit in History, or paint first");
   cancel(...BACKGROUND);
   clearTimeout(S.timer);
   view.setPointerCapture(e.pointerId);
@@ -604,8 +642,21 @@ function launch(edit) {
   S.last = edit; // the edit the next strokes may still join
   edit.thumb ??= strokesThumb(edit);
   S.removed = [];
+  if (S.selected !== edit) $("#prompt").value = ""; // the words now belong to the edit: select it in History to change them
   historyUI(); render();
   queue(() => generate(edit));
+  queue(regenerateDependents); // the edits above it that saw it run again
+}
+
+async function regenerateDependents() {
+  for (const e of [...S.edits]) if (e.on && e.state === "done" && needsRegen(e)) await generate(e);
+  recompose(); historyUI(); render(); timelineUI();
+}
+
+function select(edit) { // a History row: its words in the prompt field, its strokes on the frame; painting or typing changes it
+  S.selected = edit;
+  if (edit) { setTool(edit.tool); $("#prompt").value = edit.prompt; } else if (!S.draft) $("#prompt").value = "";
+  historyUI(); render();
 }
 
 function reopen(edit) { // more strokes on the edit being generated: stop it and keep drawing
@@ -633,6 +684,7 @@ async function generate(edit) {
   const token = (edit.token = (edit.token ?? 0) + 1);
   const alive = () => edit.token === token && S.edits.includes(edit) && edit.on;
   const p = S.plate, light = edit.tool === "light", tag = `e${edit.id}_${token}`;
+  cancel("warm"); // an edit never waits for the warm-up: what it needs loads now
   S.running = edit;
   Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null });
   recompose(); historyUI(); render();
@@ -650,19 +702,25 @@ async function generate(edit) {
       edit.shown ??= performance.now();
       render();
     });
-    // 1. A quick pass at preview size: its steps appear live inside the strokes.
-    status(`Edit ${edit.n}: ${NAME[edit.tool].toLowerCase()}, first look`);
+    // 1. The caption: Klein's upsampler sees the frame (with the strokes, for paint) and reads a short request.
     const size = p.prev, base = await baseUpload(edit, before, size);
     const reference = await uploadCanvas(editImage(edit, before, size), `${tag}_ref.png`);
-    const values = { base, reference, start: light ? base : reference, caption: captionOf(edit), steps: QUICK.steps, seed: edit.seed,
-      mask: await uploadCanvas(maskAt(edit, size), `${tag}_mask.png`), denoise: light ? QUICK.lightDenoise : QUICK.denoise,
-      grow: Math.round(size[0] / EDIT_GROW), feather: QUICK.feather, sigma: QUICK.sigma };
+    status(`Edit ${edit.n}: ${NAME[edit.tool].toLowerCase()}, writing the prompt`);
+    const key = [edit.tool, edit.prompt, bounds(edit.mask), painted(edit), edit.sam ? 1 : 0, activeBefore(edit).map((e) => `${e.id}.${e.version}`)].join("|");
+    const cap = await captionFor(edit, reference, key);
+    if (!alive()) return;
+    // 2. A quick pass at preview size: its steps appear live inside the strokes. Paint may change a zone around them.
+    status(`Edit ${edit.n}: ${NAME[edit.tool].toLowerCase()}, first look`);
+    const zone = edit.tool === "paint", soft = (s) => (zone ? ZONE_SOFT : s);
+    const values = { base, reference, start: light ? base : reference, caption: cap, steps: QUICK.steps, seed: edit.seed,
+      mask: await uploadCanvas(maskAt(edit, size), `${tag}_mask.png`), denoise: QUICK.denoise,
+      grow: Math.round(size[0] / (zone ? PAINT_ZONE : EDIT_GROW)), ...soft({ feather: QUICK.feather, sigma: QUICK.sigma }) };
     const quick = await run("edit", values, { kind: "edit", front: true, preview: show, progress: (f) => editProgress(edit, f / 2) }).done;
     if (!alive()) return;
     edit.preview = await loadImage(viewUrl(outputFile("edit", quick, "patch")));
     edit.shown ??= performance.now();
     edit.latent = null; render();
-    // 2. The same seed at full size, starting from the quick pass: it resolves in place.
+    // 3. The same seed at full size, starting from the quick pass: it resolves in place.
     status(`Edit ${edit.n}: ${NAME[edit.tool].toLowerCase()}, full size`);
     const work = p.work, start = snap(before, work);
     start.getContext("2d").drawImage(edit.preview, 0, 0, work[0], work[1]);
@@ -671,10 +729,11 @@ async function generate(edit) {
       // an erase refines the quick result, which has no object left: shown the original, Klein drew part of it back
       reference: edit.tool === "erase" ? startName : await uploadCanvas(editImage(edit, before, work), `${tag}_ref_full.png`),
       mask: await uploadCanvas(maskAt(edit, work), `${tag}_mask_full.png`), steps: FULL.steps, denoise: FULL.denoise,
-      grow: Math.round(work[0] / EDIT_GROW), feather: FULL.feather, sigma: FULL.sigma }, { kind: "edit", front: true,
-      progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
+      grow: Math.round(work[0] / (zone ? PAINT_ZONE : EDIT_GROW)), ...soft({ feather: FULL.feather, sigma: FULL.sigma }),
+      relight: light ? 1 : 0 }, { kind: "edit", front: true, progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
     if (!alive()) return;
-    edit.patch = await loadImage(viewUrl(outputFile("edit", full, "patch")));
+    // a relight shows the frame as the export will make it: Klein's light on the plate's own detail
+    edit.patch = await loadImage(viewUrl(outputFile("edit", full, light ? "relit" : "patch")));
     Object.assign(edit, { preview: null, latent: null, state: "done", version: edit.version + 1, force: false, kept: undefined });
     edit.foot = footprint(edit);
     edit.basis = activeBefore(edit).map(record);
@@ -693,26 +752,26 @@ async function generate(edit) {
 }
 
 
-async function snapErase(edit, before) { // SAM 3.1 grows the erase strokes to the whole object under them
-  const size = S.plate.prev, k = size[0] / S.plate.work[0];
-  const pts = edit.strokes.flatMap((s) => s.points);
-  const picks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * (pts.length - 1))))]; // up to five points
-  const points = picks.map((i) => ({ x: Math.round(pts[i][0] * k), y: Math.round(pts[i][1] * k) }));
-  status("Finding the object under the stroke");
-  const out = await run("snap", { image: await uploadCanvas(snap(before, size), `e${edit.id}_snap.png`), points: JSON.stringify(points) },
+async function snapErase(edit, before) { // SAM 3.1 finds the whole object under the erase strokes: by name, else point by point
+  const size = S.plate.prev, k = size[0] / S.plate.work[0], area = size[0] * size[1];
+  const pts = edit.strokes.filter((s) => s.tool !== "rub").flatMap((s) => s.points);
+  const picks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * (pts.length - 1))))]; // up to five points, one prompt each
+  const points = Object.fromEntries(picks.map((i, j) => [`point_${j}`, JSON.stringify([{ x: Math.round(pts[i][0] * k), y: Math.round(pts[i][1] * k) }])]));
+  status(edit.prompt ? `Finding the ${edit.prompt} under the stroke` : "Finding the object under the stroke");
+  const out = await run("snap", { image: await uploadCanvas(snap(before, size), `e${edit.id}_snap.png`), words: edit.prompt, ...points },
     { kind: "snap", front: true }).done;
-  const pixels = (c) => c.getContext("2d").getImageData(0, 0, size[0], size[1]).data;
-  const sam = snap(await loadImage(viewUrl(outputFile("snap", out, "mask"))), size), s = pixels(sam), m = pixels(maskAt(edit, size));
-  let area = 0, painted = 0, both = 0;
-  for (let i = 0; i < s.length; i += 4) {
-    if (m[i] > 127) painted++;
-    if (s[i] > 127) { area++; if (m[i] > 127) both++; }
-  }
-  // one object that holds the stroke: not a whole wall or shopfront grown from a small stroke
-  if (!area || area > 0.12 * size[0] * size[1] || area > 40 * painted || both < 0.5 * painted)
-    return status("Erasing only what you painted: no single object under the stroke.");
-  const d = sam.getContext("2d"), img = d.getImageData(0, 0, size[0], size[1]);
-  for (let i = 0; i < img.data.length; i += 4) { img.data[i + 3] = img.data[i]; img.data[i] = img.data[i + 1] = img.data[i + 2] = 255; }
+  const bits = (c) => { // a mask canvas as 0 and 1 per pixel
+    const d = c.getContext("2d").getImageData(0, 0, size[0], size[1]).data, m = new Uint8Array(area);
+    for (let i = 0; i < area; i++) m[i] = d[i * 4] > 127 ? 1 : 0;
+    return m;
+  };
+  const fileBits = async (f) => bits(snap(await loadImage(viewUrl(f)), size));
+  const objects = pickObjects({ painted: bits(maskAt(edit, size)), area,
+    named: await Promise.all(outputFiles("snap", out, "named").map(fileBits)),
+    points: await Promise.all(picks.map((_, j) => outputFile("snap", out, `point_${j}`)).filter(Boolean).map(fileBits)) });
+  if (!objects.length) return status("Erasing only what you painted: no single object under the stroke.");
+  const sam = canvas(size), d = sam.getContext("2d"), img = d.createImageData(size[0], size[1]);
+  for (let i = 0; i < area; i++) if (objects.some((m) => m[i])) img.data.fill(255, i * 4, i * 4 + 4);
   d.putImageData(img, 0, 0);
   edit.sam = snap(sam, [edit.mask.width, edit.mask.height]);
   redrawStrokes(edit);
@@ -759,6 +818,8 @@ function removeEdit(edit) {
   if (i < 0) return;
   if (S.running === edit) stopEdit(edit);
   if (S.draft === edit) S.draft = null;
+  if (S.hover === edit) S.hover = null; // its row is gone before the pointer leaves it: its strokes must go too
+  if (S.selected === edit) S.selected = null;
   S.edits.splice(i, 1);
   if (edit.patch) S.removed.push({ edit, i });
   status(`Edit ${edit.n} removed.${edit.patch ? " Ctrl+Shift+Z brings it back." : ""}`);
@@ -802,7 +863,7 @@ function redo() {
 function discard() { // Esc: drop the strokes in progress, or stop the edit being generated
   clearTimeout(S.timer);
   const d = S.draft ?? S.running;
-  if (!d) return;
+  if (!d) return S.selected && select(null);
   stopEdit(d);
   if (S.draft === d) S.draft = null;
   if (d.patch) { // it had a result: go back to it
@@ -857,7 +918,7 @@ function historyUI() {
     const li = document.createElement("li");
     li.dataset.id = e.id;
     li.className = [e.on ? "" : "off", e.state === "generating" || e.state === "queued" || e.state === "drawing" ? "busy" : "",
-      e.state === "failed" ? "failed" : ""].join(" ").trim();
+      e.state === "failed" ? "failed" : "", S.selected === e ? "selected" : ""].join(" ").trim();
     li.innerHTML = `<img class="thumb" alt=""><div class="what"><span class="title"></span><small></small></div>
       <div class="acts"><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
       <button class="again" title="Try another">${ICON.again}</button><button class="del" title="Remove this edit">${ICON.del}</button></div>`;
@@ -870,16 +931,18 @@ function historyUI() {
       small.innerHTML = '<span class="state"></span>';
       small.firstChild.textContent = STATE[e.state];
     } else small.textContent = e.on ? what : `Bypassed: ${what}`;
-    small.title = what;
+    small.title = e.caption?.text ? `What Klein received: ${e.caption.text}` : what;
     li.querySelector(".eye").onclick = () => toggle(e);
     li.querySelector(".again").onclick = () => again(e);
     li.querySelector(".del").onclick = () => removeEdit(e);
     li.querySelector(".again").disabled = e.state === "drawing" || !e.strokes.length;
     li.onmouseenter = () => { S.hover = e; render(); };
     li.onmouseleave = () => { S.hover = null; render(); };
-    li.onclick = (ev) => { if (!ev.target.closest("button")) { pause(); seek(0); } };
+    li.onclick = (ev) => { if (!ev.target.closest("button")) { pause(); seek(0); select(S.selected === e ? null : e); } };
     return li;
   }));
+  $("#undo-btn").disabled = !S.draft && !S.edits.length;
+  $("#redo-btn").disabled = !S.removed.length;
   exportUI(); timelineUI();
 }
 
@@ -911,37 +974,43 @@ const feather = (w) => Math.max(6, Math.round(w / COMPOSITE_FEATHER));
 
 // Every step of a render, in order. `final` steps make the export; they run after the preview when the export is
 // prepared in the background, or when Export asks for them.
+// `preview` steps are made once per preview size, so going back to a size plays what it made at once.
 const STAGES = [
-  { id: "erase", label: "Track the erase", ref: 6 }, { id: "shot", label: "Shot", ref: 20 }, { id: "track", label: "Track the paint", ref: 5 },
-  { id: "comp", label: "Composite", ref: 14 },
-  { id: "full", label: "Shot at full size", ref: 45, final: true }, { id: "trackfull", label: "Track at full size", ref: 5, final: true },
-  { id: "export", label: "Export", ref: 18, final: true },
+  { id: "erase", label: "Track the erase", ref: 6 }, { id: "clean", label: "Erase pass", ref: 10, preview: true },
+  { id: "shot", label: "Shot", ref: 20, preview: true }, { id: "track", label: "Track the paint", ref: 5, preview: true },
+  { id: "comp", label: "Composite", ref: 14, preview: true },
+  { id: "cleanfull", label: "Erase pass at full size", ref: 35, final: true }, { id: "full", label: "Shot at full size", ref: 45, final: true },
+  { id: "trackfull", label: "Track at full size", ref: 5, final: true }, { id: "export", label: "Export", ref: 18, final: true },
 ];
+const previewOf = (r) => r?.previews?.[S.plate.shot.join("x")]; // what this preview size made for a set of edits
+const doneOf = (r, st) => (st.preview ? previewOf(r) : r)?.done?.[st.id]; // seconds a step took, if it ran
 S.took = {}; // measured seconds per step, for this plate: the next estimates use them
 
-function plan(r, active) { // the steps this set of edits needs: no tracking for a relight alone, no second pass when the preview is full size
+function plan(r, active) { // the steps this set of edits needs: the erase pass for erases, Ripple for paint and light, no second size when the preview is full size
   const p = S.plate, [sw, sh] = p.shot, onePass = sw === p.work[0] && sh === p.work[1];
-  const erase = active.some((e) => e.tool === "erase"), paint = active.some((e) => e.tool === "paint");
-  r.skip = new Set([!erase && "erase", !paint && "track", onePass && "full", (onePass || !paint) && "trackfull"].filter(Boolean));
+  const erase = active.some((e) => e.tool === "erase"), paint = active.some((e) => e.tool === "paint"), carry = active.some((e) => e.tool !== "erase");
+  r.skip = new Set([!erase && "erase", !erase && "clean", !carry && "shot", !paint && "track", (onePass || !erase) && "cleanfull",
+    (onePass || !carry) && "full", (onePass || !paint) && "trackfull"].filter(Boolean));
   return r;
 }
 
 function estimate(id) { // seconds: what this step took last time, or a measured reference scaled to this plate
   if (S.took[id]) return S.took[id];
   const p = S.plate, ref = 928 * 512 * 97;
-  const size = ["full", "export"].includes(id) ? p.work : ["erase", "track", "trackfull"].includes(id) ? p.track : p.shot;
-  const scale = (size[0] * size[1] * p.frames) / ref * (["full", "export"].includes(id) ? 0.73 : 1);
+  const big = ["full", "cleanfull", "export"].includes(id);
+  const size = big ? p.work : ["erase", "track", "trackfull"].includes(id) ? p.track : p.shot;
+  const scale = (size[0] * size[1] * p.frames) / ref * (big ? 0.73 : 1);
   return STAGES.find((x) => x.id === id).ref * Math.max(0.25, scale);
 }
 
-async function step(r, id, work) { // run one step of a render, timed and shown
-  if (r.done?.[id] !== undefined || r.skip?.has(id)) return;
+async function step(r, id, work, store = r) { // run one step of a render, timed and shown; preview steps keep their result per size
+  if (store.done?.[id] !== undefined || r.skip?.has(id)) return;
   const t0 = performance.now();
   S.stage = { key: S.heroKey, id, progress: 0, t0 };
   stagesUI();
   await work((f) => { if (S.stage?.id === id) { S.stage.progress = f; stagesUI(); } });
   const dt = (performance.now() - t0) / 1000;
-  (r.done ??= {})[id] = dt;
+  (store.done ??= {})[id] = dt;
   S.took[id] = dt;
   S.stage = null;
   stagesUI();
@@ -949,77 +1018,90 @@ async function step(r, id, work) { // run one step of a render, timed and shown
 
 async function pipeline() {
   S.shotDirty = false;
-  cancel(...BACKGROUND);
+  cancel(...BACKGROUND, "warm");
   const p = S.plate, key = S.heroKey, active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
   if (!key || !active.length) return;
   const fresh = () => key === S.heroKey;
   let r = S.renders.get(key);
-  if (!r) { r = { v: ++S.run }; r.base = `paintaplate/${p.id}/v${r.v}`; S.renders.set(key, r); }
+  if (!r) { r = { v: ++S.run, previews: {} }; r.base = `paintaplate/${p.id}/v${r.v}`; S.renders.set(key, r); }
   plan(r, active);
-  const base = r.base, relight = active.some((e) => e.tool === "light"), [sw, sh] = p.shot;
-  const erase = active.some((e) => e.tool === "erase");
+  const [sw, sh] = p.shot, sized = `${sw}x${sh}`, pv = (r.previews[sized] ??= {}), base = r.base;
+  const relight = active.some((e) => e.tool === "light"), erase = active.some((e) => e.tool === "erase");
+  const carry = active.some((e) => e.tool !== "erase"); // paint and light: Ripple carries them through the shot
   r.hero ??= await uploadCanvas(S.hero, `hero_v${r.v}.png`);
-  const common = { path: p.path, color_space: p.cs, max_frames: p.frames, hero: r.hero, seed: active[0].seed };
-  // the erase is tracked on the plate first: its matte also clears the erased objects from the frames LTX follows
+  if (erase) r.clean0 ??= await uploadCanvas(layered(S.edits.length, (e) => e.tool === "erase"), `clean_v${r.v}.png`);
+  const common = { color_space: p.cs, max_frames: p.frames, seed: active[0].seed };
+  const prompt = shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt })));
+  // the erase is tracked on the plate first: the erase pass regenerates its areas, the composite keeps them
   await step(r, "erase", async (progress) => { r.erased = await track(active, null, base, "", progress, null, ["erase"]); });
-  // a large, soft hole: filled tight to the object, its outline above a man in the rain read as an umbrella to LTX
-  const hole = r.erased?.found.matte_a ?? "", holed = (size) => ({ hole, hole_grow: Math.round(size[0] / HOLE_EDGE), hole_feather: Math.round(size[0] / HOLE_EDGE) });
-  await step(r, "shot", async (progress) => {
-    const out = await run("shot", { ...common, ...holed(p.shot), width: sw, height: sh, prefix: `${base}/shot/f`, video_prefix: `${base}/raw` },
-      { kind: "shot", progress }).done;
-    r.shot = `output:${base}/shot`;
-    r.raw = viewUrl(outputFile("shot", out, "video"));
-  });
+  const passes = async (store, size, dir, final) => { // the erase pass makes a clean plate; Ripple carries paint and light over it
+    await step(r, final ? "cleanfull" : "clean", async (progress) => {
+      const out = await run("clean", { ...common, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, width: size[0], height: size[1],
+        prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean` }, { kind: "clean", progress }).done;
+      store.clean = `output:${base}/${dir}/clean`;
+      store.raw = viewUrl(outputFile("clean", out, "video"));
+    }, store);
+    await step(r, final ? "full" : "shot", async (progress) => {
+      const plate = erase ? { path: store.clean, color_space: "sRGB" } : { path: p.path };
+      const out = await run("shot", { ...common, ...plate, hero: r.hero, prompt, width: size[0], height: size[1],
+        prefix: `${base}/${dir}/shot/f`, video_prefix: `${base}/${dir}/raw` }, { kind: "shot", progress }).done;
+      store.shot = `output:${base}/${dir}/shot`;
+      store.raw = viewUrl(outputFile("shot", out, "video"));
+    }, store);
+    return carry ? store.shot : store.clean;
+  };
+  const made = await passes(pv, p.shot, sized, false);
   if (!fresh()) return;
-  if (!r.comp && S.shot?.url !== r.raw) { // a rough look at once: the whole frame as the model made it, until the composite
-    setShot(r.raw, key);
+  if (!pv.comp && !r.review && S.shot?.url !== pv.raw) { // a rough look at once: the whole frame as the model made it, until the composite
+    setShot(pv.raw, key);
     hud("Rough preview: Space plays it. The composite follows.", 2500);
   }
-  await step(r, "track", async (progress) => { r.painted = await track(active, r.shot, base, "", progress, null, ["paint"]); });
-  r.mattes = mattesOf({ ...r.erased?.found, ...r.painted?.found });
+  await step(r, "track", async (progress) => { pv.painted = await track(active, made, base, `_${sized}`, progress, null, ["paint"]); }, pv);
+  pv.mattes = mattesOf({ ...r.erased?.found, ...pv.painted?.found });
   if (!fresh()) return;
   await step(r, "comp", async (progress) => {
-    const comp = await run("comp", { path: p.path, color_space: p.cs, max_frames: p.frames, width: sw, height: sh, shot: r.shot,
-      ...r.mattes.values, relight, grow: grow(sw, erase), feather: feather(sw), grain: 0, video_prefix: `${base}/comp` },
+    const comp = await run("comp", { path: p.path, color_space: p.cs, max_frames: p.frames, width: sw, height: sh, shot: made,
+      ...pv.mattes.values, relight, grow: grow(sw, erase), feather: feather(sw), grain: 0, video_prefix: `${base}/${sized}/comp` },
       { kind: "comp", progress }).done;
-    r.comp = viewUrl(outputFile("comp", comp, "video"));
-  });
+    pv.comp = viewUrl(outputFile("comp", comp, "video"));
+  }, pv);
   if (!fresh()) return;
-  if (S.shot?.url !== r.comp) {
-    setShot(r.comp, key);
+  if (!r.review && S.shot?.url !== pv.comp) {
+    setShot(pv.comp, key);
     hud("The edited shot is ready: Space plays it", 2500);
     status(S.background ? "The edited shot is ready. The export is prepared next, at full quality."
       : "The edited shot is ready. Export renders it at full quality when you need it.");
   }
   if (!S.background && !S.wantDownload) return stagesUI();
-  await step(r, "full", async (progress) => {
-    await run("shot", { ...common, ...holed(p.work), width: p.work[0], height: p.work[1], prefix: `${base}/full/f`, video_prefix: `${base}/full` },
-      { kind: "shot", progress }).done;
-  });
-  r.final = r.skip.has("full") ? r.shot : `output:${base}/full`;
+  const onePass = sw === p.work[0] && sh === p.work[1];
+  const final = onePass ? made : await passes(r, p.work, "full", true);
   if (!fresh()) return;
-  await step(r, "trackfull", async (progress) => { r.full = await track(active, r.final, base, "_full", progress, r.mattes, ["paint"]); });
-  r.full ??= r.mattes;
+  await step(r, "trackfull", async (progress) => { r.full = await track(active, final, base, "_full", progress, pv.mattes, ["paint"]); });
+  r.full ??= pv.mattes;
   if (!fresh()) return;
   await step(r, "export", async (progress) => {
-    const done = await run("export", { path: p.path, color_space: p.cs, max_frames: p.frames, shot: r.final, ...r.full.values, relight,
-      keep_untouched: !relight, prefix: `${base}/export`, matte_prefix: `${base}/matte/matte`, grow: grow(p.spec.width, erase),
-      feather: feather(p.spec.width) }, { kind: "export", progress }).done;
+    const done = await run("export", { path: p.path, color_space: p.cs, max_frames: p.frames, shot: final, ...r.full.values, relight,
+      keep_untouched: !relight, prefix: `${base}/export`, matte_prefix: `${base}/matte/matte`, review_prefix: `${base}/review`,
+      grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
     r.exported = { run: base, name: `${p.name}_paintaplate_v${r.v}`, text: outputText("export", done, "export") ?? "" };
+    r.review = viewUrl(outputFile("export", done, "review"));
   });
   if (!fresh()) return;
   S.exported = r.exported;
+  setShot(r.review, key);
+  hud("Full size: the viewer now plays the export", 2500);
   stagesUI(); exportUI();
   status(`Exported to the output folder: ${S.exported.text.split("\n")[0]}.`);
   if (S.wantDownload) { const parts = S.wantDownload; S.wantDownload = null; download(parts); }
 }
 
 async function track(active, shotPath, base, suffix, progress, previous, tools) { // SAM 3.1 follows a kind of edit through the shot
-  const p = S.plate, [sw, sh] = p.track, found = { ...(previous?.found ?? {}) };
+  const p = S.plate, found = { ...(previous?.found ?? {}) };
   for (const [key, tool, path, cs] of [["matte_a", "erase", p.path, p.cs], ["matte_b", "paint", shotPath, "sRGB"]]) {
     const edits = active.filter((e) => e.tool === tool);
     if (!edits.length || !tools.includes(tool)) continue; // the erase follows the plate; the paint follows the shot
-    const union = canvas(p.track), u = union.getContext("2d");
+    const size = tool === "erase" ? p.trackErase : p.track, [sw, sh] = size;
+    const union = canvas(size), u = union.getContext("2d");
     u.fillStyle = "#000"; u.fillRect(0, 0, sw, sh);
     u.globalCompositeOperation = "lighten";
     for (const e of edits) u.drawImage(tool === "paint" ? whiteOf(e.patch) : e.mask, 0, 0, sw, sh);
@@ -1048,9 +1130,10 @@ function download(parts = ["export", "matte"]) {
 
 // ---------- Interface ----------
 
-function status(text) {
+function status(text, level = "") {
   $("#status").textContent = text;
   const li = document.createElement("li");
+  li.className = level;
   li.innerHTML = "<time></time><span></span>";
   li.firstChild.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   li.lastChild.textContent = text;
@@ -1062,13 +1145,13 @@ function status(text) {
 
 function renderLeft(finalToo = false) { // seconds until the preview (or the export) is ready, from the steps still to run
   const p = S.plate, r = S.renders.get(S.heroKey);
-  if (!p || !S.heroKey || (finalToo ? r?.exported : r?.comp)) return 0;
+  if (!p || !S.heroKey || (finalToo ? r?.exported : previewOf(r)?.comp || r?.review)) return 0;
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
   const skip = r?.skip ?? plan({}, active).skip;
   let t = 0;
   for (const st of STAGES) {
     if (st.final && !finalToo) break;
-    if (skip.has(st.id) || r?.done?.[st.id] !== undefined) continue;
+    if (skip.has(st.id) || doneOf(r, st) !== undefined) continue;
     const est = estimate(st.id);
     if (S.stage?.id === st.id && S.stage.key === S.heroKey) {
       const run = (performance.now() - S.stage.t0) / 1000, f = S.stage.progress;
@@ -1086,7 +1169,7 @@ function stagesUI() { // the Render panel: every step, done, running or waiting,
   if (!p || !active.length) { $("#render-left").textContent = ""; return timelineBar(); }
   const skip = r?.skip ?? plan({}, active).skip, waiting = !S.background && !S.wantDownload;
   list.replaceChildren(...STAGES.filter((st) => !skip.has(st.id)).map((st) => {
-    const li = document.createElement("li"), took = r?.done?.[st.id];
+    const li = document.createElement("li"), took = doneOf(r, st);
     const now = S.stage?.id === st.id && S.stage.key === S.heroKey;
     li.className = took !== undefined ? "done" : now ? "now" : st.final && waiting ? "later" : "";
     li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time"></span>';
@@ -1097,7 +1180,7 @@ function stagesUI() { // the Render panel: every step, done, running or waiting,
   }));
   const pre = renderLeft(), all = renderLeft(true);
   const busy = S.stage?.key === S.heroKey;
-  $("#render-left").textContent = stale() || !r?.comp ? (pre ? `preview ${secs(pre)}` : busy ? "preview almost ready" : "")
+  $("#render-left").textContent = stale() || !(previewOf(r)?.comp || r?.review) ? (pre ? `preview ${secs(pre)}` : busy ? "preview almost ready" : "")
     : r?.exported ? "export ready" : waiting ? "preview ready" : all ? `export ${secs(all)}` : busy ? "export almost ready" : "";
   timelineBar();
 }
@@ -1108,11 +1191,11 @@ function timelineBar() { // the line under the timeline: the preview in gold, th
   if (!S.plate || !S.heroKey || !r) { bar.style.width = "0"; if (S.heroKey && stale()) bar.classList.add("stale"); return; }
   const steps = STAGES.filter((st) => !r.skip?.has(st.id) && (!st.final || S.background || S.wantDownload || r.exported));
   const total = steps.reduce((a, st) => a + estimate(st.id), 0);
-  let done = steps.reduce((a, st) => a + (r.done?.[st.id] !== undefined ? estimate(st.id) : 0), 0);
+  let done = steps.reduce((a, st) => a + (doneOf(r, st) !== undefined ? estimate(st.id) : 0), 0);
   if (S.stage?.key === S.heroKey) done += estimate(S.stage.id) * S.stage.progress;
   bar.style.width = `${Math.round((done / Math.max(1, total)) * 100)}%`;
   if (r.exported) bar.classList.add("ready");
-  else if (r.comp) bar.classList.add("export");
+  else if (previewOf(r)?.comp) bar.classList.add("export");
 }
 
 function timelineUI() {
@@ -1142,9 +1225,7 @@ function setPreview(cap) { // a smaller shot preview renders faster; the export 
   if (!S.plate) return;
   const [w, h] = [S.plate.spec.width, S.plate.spec.height];
   S.plate.shot = fitSize(w, h, cap, 32);
-  S.renders.clear(); S.exported = null;
-  if (S.shot) S.shot.key = ""; // what plays now is from the other size until the new preview is ready
-  S.shotDirty = !!S.heroKey;
+  S.heroKey = ""; recompose(); // what this size made already plays at once; the full size and its export never depend on it
   status(`Previews at ${S.plate.shot[0]} × ${S.plate.shot[1]}. The export stays at full size.`);
   stagesUI(); exportUI(); touch();
 }
@@ -1153,6 +1234,7 @@ function exportUI() {
   const b = $("#export-btn"), edits = S.edits.some((e) => e.on && e.patch);
   b.disabled = !S.plate || !edits;
   b.textContent = S.wantDownload ? `Exporting${renderLeft(true) ? `, ${secs(renderLeft(true))}` : ""}` : "Export";
+  $("#save-btn").disabled = !S.plate;
 }
 
 function exportDialog() {
@@ -1181,17 +1263,57 @@ function setSize(v) {
   render();
 }
 
-function openDialog() { $("#files").value = ""; $("#open").showModal(); }
+function openDialog() { $("#files").value = ""; $("#scene").value = ""; $("#open").showModal(); }
+
+// ---------- Scenes: the plate and every edit with its strokes, words and seed, in a file to open again ----------
+
+function saveScene() {
+  const [W, H] = S.plate.work, r5 = (v) => Math.round(v * 1e5) / 1e5;
+  const scene = { ...SCENE, saved: new Date().toISOString(), plate: { path: S.plate.path, color_space: S.plate.cs, name: S.plate.name },
+    preview: S.previewCap, in: S.inPt, out: S.outPt,
+    edits: S.edits.map((e) => ({ tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on,
+      caption: e.caption?.text ?? "", strokes: e.strokes.map((s) => ({ tool: s.tool, color: s.color, size: r5(s.size / W),
+        points: s.points.map(([x, y, pr]) => [r5(x / W), r5(y / H), r5(pr)]) })) })) }; // positions as fractions of the frame
+  const a = Object.assign(document.createElement("a"), { download: `${S.plate.name}.paintaplate.json`,
+    href: URL.createObjectURL(new Blob([JSON.stringify(scene, null, 1)], { type: "application/json" })) });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  status(`Scene saved as ${a.download}. Open plate opens it again, on this ComfyUI.`);
+}
+
+async function openScene(file) { // the plate opens, then every edit runs again with its own seed and words
+  const scene = JSON.parse(await file.text());
+  if (scene.format !== SCENE.format || !(scene.version <= SCENE.version)) throw new Error("This file is not a PaintAPlate scene.");
+  if (scene.preview) setPreview(scene.preview);
+  await openPlate([], scene.plate.path, scene.plate.color_space);
+  const [W, H] = S.plate.work;
+  for (const saved of scene.edits) {
+    const e = Object.assign(newEdit(), { tool: saved.tool, color: saved.color, prompt: saved.prompt ?? "", seed: saved.seed,
+      whole: !!saved.whole, on: saved.on !== false, state: "queued", n: ++S.count,
+      strokes: saved.strokes.map((s) => ({ tool: s.tool, color: s.color, size: s.size * W, points: s.points.map(([x, y, pr]) => [x * W, y * H, pr]) })) });
+    redrawStrokes(e);
+    e.thumb = strokesThumb(e);
+    S.edits.push(e);
+    if (e.on) queue(() => generate(e));
+  }
+  if (Number.isInteger(scene.in) && Number.isInteger(scene.out)) [S.inPt, S.outPt] = [scene.in, scene.out];
+  queue(regenerateDependents);
+  historyUI(); timelineUI();
+  status(`Scene opened: ${scene.edits.length} edit${scene.edits.length === 1 ? "" : "s"} run again with their own seeds.`);
+}
 
 async function boot() { // the workflows, the WebSocket, then what this ComfyUI lacks: nodes, then model files
   onNotice(status);
   await loadWorkflows(WORKFLOWS);
+  Object.assign(UPSAMPLER, await (await fetch("upsampler.json")).json());
   connect();
   const combo = (spec) => (Array.isArray(spec?.[0]) ? spec[0] : spec?.[1]?.options ?? []); // V1 or V3 schema
   const spaces = combo((await objectInfo("ImageColorSpace"))?.input.required.source);
   $("#cs").replaceChildren(...(spaces.length ? spaces : ["sRGB"]).map((s) => new Option(s, s)));
   const needs = { PaintAPlate_LoadPlate: "this pack", PaintAPlate_FillMatte: "this pack, restart ComfyUI after an update",
-    LTXAddVideoICLoRAGuide: "ComfyUI-LTXVideo", SAM3_VideoTrack: "ComfyUI 0.42 or newer", ReferenceMultiLatent: "ComfyUI 0.41 or newer" };
+    PaintAPlate_BoxMatte: "this pack, restart ComfyUI after an update", LTXAddVideoICLoRAGuide: "ComfyUI-LTXVideo",
+    LTXVInpaintPreprocess: "ComfyUI-LTXVideo", SAM3_VideoTrack: "ComfyUI 0.42 or newer", ReferenceMultiLatent: "ComfyUI 0.41 or newer",
+    TextGenerate: "ComfyUI 0.41 or newer" };
   const missing = [];
   for (const [cls, from] of Object.entries(needs)) if (!(await objectInfo(cls))) missing.push(`${cls} (${from})`);
   if (missing.length) return status(`Missing nodes: ${missing.join(", ")}. Install them, then reload this page.`);
@@ -1200,7 +1322,9 @@ async function boot() { // the workflows, the WebSocket, then what this ComfyUI 
     for (const [k, v] of Object.entries(n.inputs)) if (typeof v === "string" && v.endsWith(".safetensors")) models.set(v, [n.class_type, k]);
   const absent = [];
   for (const [file, [cls, input]] of models) if (!combo((await objectInfo(cls))?.input.required[input]).includes(file)) absent.push(file);
-  status(absent.length ? `Missing model files: ${absent.join(", ")}. See the README for where to put them.` : "Ready. Open a plate to start.");
+  if (absent.length) return status(`Missing model files: ${absent.join(", ")}. See the README for where to put them.`);
+  status("Ready. Open a plate to start. The models load in the background.");
+  warmAll().catch(() => {}); // a ComfyUI that reports no GPU details simply skips it
 }
 
 $$(".tools [data-tool]").forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
@@ -1227,7 +1351,14 @@ function setRub(on) {
 }
 $("#rub-btn").onclick = () => setRub(!S.rub);
 $("#whole").onchange = () => setTool("erase");
-$("#prompt").oninput = () => { if (S.draft && !stroke) schedule(); };
+$("#prompt").oninput = () => { // the words belong to the edit being drawn, or to the selected one, which runs again after the pause
+  if (stroke) return;
+  if (!S.draft && S.selected?.state === "done") S.draft = reopenDone(S.selected);
+  if (S.draft) schedule();
+};
+$("#undo-btn").onclick = () => undo();
+$("#redo-btn").onclick = () => redo();
+$("#save-btn").onclick = () => S.plate && saveScene();
 $("#open-btn").onclick = $("#empty-open").onclick = openDialog;
 $("#help-btn").onclick = () => $("#help").showModal();
 $("#play-btn").onclick = () => (S.playing ? pause() : play());
@@ -1254,7 +1385,10 @@ $("#log-btn").onclick = () => {
   $("#log-btn").setAttribute("aria-expanded", String(open));
 };
 $("#files").onchange = (e) => { const ext = e.target.files[0]?.name.split(".").pop().toLowerCase(); $("#cs").value = ext === "exr" ? "linear" : "sRGB"; };
-$("#open-go").onclick = () => openPlate([...$("#files").files], $("#path").value.trim(), $("#cs").value).catch(quiet);
+$("#open-go").onclick = () => {
+  const scene = $("#scene").files[0];
+  (scene ? openScene(scene) : openPlate([...$("#files").files], $("#path").value.trim(), $("#cs").value)).catch(quiet);
+};
 
 const timeline = $("#timeline");
 let scrub = false;

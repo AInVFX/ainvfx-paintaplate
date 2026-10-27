@@ -69,11 +69,52 @@ test("optional links drop with what fed them when their slots are empty", () => 
 });
 
 test("every workflow names the outputs and the progress node the page reads", () => {
-  const wanted = { ingest: ["hero", "proxy", "spec"], edit: ["patch", "result"], snap: ["mask"], shot: ["frames", "video"],
-    matte: ["frames"], comp: ["video"], export: ["export", "matte"] };
+  const wanted = { ingest: ["hero", "proxy", "spec"], prompt: ["text"], edit: ["patch", "relit", "result"],
+    snap: ["named", "point_0", "point_1", "point_2", "point_3", "point_4"], clean: ["frames", "video"], shot: ["frames", "video"],
+    matte: ["frames"], comp: ["video"], export: ["export", "matte", "review"], warm: ["frame"] };
   for (const [name, outs] of Object.entries(wanted)) {
     const wf = workflow(name);
     assert.deepEqual(Object.keys(wf.outputs).sort(), outs.sort(), name);
     assert.equal(wf.progress.size, name === "snap" ? 0 : 1, name);
   }
+});
+
+import { pickObjects, reconcile, shotPrompt, splitTable, upsampleRequest, RIPPLE } from "../../web/logic.mjs";
+
+test("the upsampler request locks one row in Klein's edit format, and a relight stays plain", () => {
+  const erase = upsampleRequest({ tool: "erase", words: "red umbrella", bbox: [342, 404, 428, 556] });
+  assert.equal(erase.mode, "table");
+  assert.deepEqual(erase.locked, [{ id: "obj_1", from: "ref_image_0", src_bbox: [342, 404, 428, 556], tgt_bbox: null, desc: "red umbrella" }]);
+  assert.match(erase.request, /"src_bbox": \[342, 404, 428, 556\], "tgt_bbox": null/); // json.dumps spacing, as BFL's code writes it
+  assert.equal(upsampleRequest({ tool: "paint", words: "a fire", bbox: [1, 2, 3, 4] }).locked[0].from, "target");
+  const light = upsampleRequest({ tool: "light", words: "night time", bbox: [0, 0, 1000, 1000] });
+  assert.equal(light.mode, "plain"); assert.equal(light.locked, null); assert.match(light.request, /night time/);
+});
+
+test("reconcile keeps the locked row, takes the upsampler's description and its cited rows, and survives a cut-off table", () => {
+  const locked = [{ id: "obj_1", from: "ref_image_0", src_bbox: [342, 404, 428, 556], tgt_bbox: null, desc: "red umbrella" }];
+  const answer = 'Remove the umbrella <obj_1> above the figure <person_1>. [{"id": "obj_1", "from": "ref_image_0", "src_bbox": [1, 1, 900, 900], ' +
+    '"tgt_bbox": null, "desc": "A broad red umbrella."}, {"id": "person_1", "from": "ref_image_0", "src_bbox": [401, 452, 807, 531], ' +
+    '"tgt_bbox": [401, 452, 807, 531], "desc": "A figure in a coat."}, {"id": "ghost_1", "from": "target", "src_bbox": null, "tgt_bbox": [1, 1, 5, 5], "desc": "x"}]';
+  const [caption, rows] = splitTable(reconcile(answer, locked));
+  assert.equal(caption, "Remove the umbrella <obj_1> above the figure <person_1>.");
+  assert.deepEqual(rows[0], { ...locked[0], desc: "A broad red umbrella." }); // box kept, description adopted
+  assert.equal(rows[1].id, "person_1"); assert.equal(rows.length, 2); // ghost_1 is not cited: dropped
+  const [, cut] = splitTable(reconcile('Remove the umbrella <obj_1>. [{"id": "obj_1", "from": "ref_ima', locked));
+  assert.deepEqual(cut, locked);
+});
+
+test("the shot prompt names paint and light, never an erase", () => {
+  assert.equal(shotPrompt([]), RIPPLE);
+  const p = shotPrompt([{ tool: "erase", words: "red umbrella" }, { tool: "paint", words: "an explosion" }, { tool: "light", words: "night" }]);
+  assert.ok(!p.includes("umbrella")); assert.match(p, /Added in the first frame: an explosion/); assert.match(p, /relit: night/);
+});
+
+test("whole object: named instances the stroke touches win; points keep only objects two of them agree on", () => {
+  const W = 10, H = 10, area = W * H, mask = (cells) => { const m = new Uint8Array(area); for (const [x, y] of cells) m[y * W + x] = 1; return m; };
+  const box = (x0, y0, x1, y1) => mask([...Array(area).keys()].map((i) => [i % W, (i / W) | 0]).filter(([x, y]) => x >= x0 && x < x1 && y >= y0 && y < y1));
+  const van = box(3, 3, 6, 6), road = box(0, 8, 10, 10), sky = box(0, 0, 10, 3), stroke = box(4, 4, 5, 9);
+  assert.deepEqual(pickObjects({ painted: stroke, named: [van, box(8, 0, 9, 1)], points: [], area }), [van]);
+  assert.deepEqual(pickObjects({ painted: stroke, named: [], points: [van, van, road.map((v, i) => (i < 85 ? v : 0)), sky], area }), [van, van]);
+  assert.deepEqual(pickObjects({ painted: stroke, named: [], points: [van], area }), [van]); // a dab: one point, one object
 });

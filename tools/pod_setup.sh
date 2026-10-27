@@ -4,7 +4,7 @@
 # The refs default to the tested commits. The pack is the repo this script lives in.
 # Code, models and pins live in $WORKDIR (a network volume survives the pod); the Python env
 # goes on the fast container disk. Accept the Hugging Face licences of FLUX 3 Image Klein,
-# LTX 2.5 and SAM 3.1 first: the downloads use your token.
+# LTX 2.5 and the LTX in-outpainting IC-LoRA first: the downloads use your token.
 set -euo pipefail
 W=${WORKDIR:-/workspace}; VENV=${VENV:-/opt/venv}
 COMFY_REF=${1:-${COMFY_REF:-19ae172b}}; LTX_REF=${2:-${LTX_REF:-220e1d4}}
@@ -32,23 +32,34 @@ pip install -q -U pip uv huggingface_hub hf_transfer
 
 log "models (in the background)"
 M=$W/models; mkdir -p "$M"
+rev() { # the tested revision of each model repository (checked 27 Oct 2026)
+  case "$1" in
+    black-forest-labs/flux-3-image-klein-comfy) echo feef60b0aaf63a4773ace96636ebbcf43b881312 ;;
+    Lightricks/LTX-2.5) echo 49b093a39c19169a8a81721dcc541e07e945232f ;;
+    Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting) echo 8becd61405133263d9e580be41a92e8f827b01ed ;;
+    WepeNerd/LTX-Ripple) echo 76abac5ede8a3415b9d1cd803843a38ecb351600 ;;
+    Comfy-Org/sam3.1) echo 7bb8374780a725b4353ed31f3a9395c9742b5621 ;;
+  esac
+}
 get() { # repo, file in repo, target folder
   [ -s "$M/$3/$(basename "$2")" ] && return
-  HF_HUB_ENABLE_HF_TRANSFER=1 hf download "$1" "$2" --local-dir "$M/.dl/$3" >/dev/null && mkdir -p "$M/$3" && mv "$M/.dl/$3/$2" "$M/$3/"
+  HF_HUB_ENABLE_HF_TRANSFER=1 hf download "$1" "$2" --revision "$(rev "$1")" --local-dir "$M/.dl/$3" >/dev/null &&
+    mkdir -p "$M/$3" && mv "$M/.dl/$3/$2" "$M/$3/"
 }
-SAM=$(python -c "from huggingface_hub import list_repo_files as l; print(next(f for f in l('Comfy-Org/sam3.1') if f.endswith('sam3.1_multiplex_fp16.safetensors')))")
 ( get black-forest-labs/flux-3-image-klein-comfy diffusion_models/flux3-image-klein-int8-convrot.safetensors diffusion_models &
   if [ "${WITH_NVFP4:-0}" = 1 ]; then  # only tests/gpu_bench.py compares it
     get black-forest-labs/flux-3-image-klein-comfy diffusion_models/flux3-image-klein-nvfp4.safetensors diffusion_models &
   fi
   get black-forest-labs/flux-3-image-klein-comfy text_encoders/qwen3vl_4b_int8_convrot.safetensors text_encoders &
+  get black-forest-labs/flux-3-image-klein-comfy text_encoders/qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors text_encoders &
   get black-forest-labs/flux-3-image-klein-comfy vae/flux2-vae.safetensors vae &
   get Lightricks/LTX-2.5 diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors diffusion_models &
   get Lightricks/LTX-2.5 text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors text_encoders &
   get Lightricks/LTX-2.5 vae/ltx-2.5-video-vae-conv-bf16.safetensors vae &
   get Lightricks/LTX-2.5 vae/ltx-2.5-audio-vae-bf16.safetensors vae &
   get WepeNerd/LTX-Ripple LTX25_Ripple_v11.safetensors loras &
-  get Comfy-Org/sam3.1 "$SAM" checkpoints &
+  get Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors loras &
+  get Comfy-Org/sam3.1 checkpoints/sam3.1_multiplex_fp16.safetensors checkpoints &
   wait; log "models done" ) > "$W/models.log" 2>&1 &
 
 log "ComfyUI $COMFY_REF"

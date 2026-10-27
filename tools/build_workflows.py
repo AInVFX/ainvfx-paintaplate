@@ -12,11 +12,17 @@ import json
 import os
 
 OUT = os.environ.get("PAINTAPLATE_WORKFLOWS_OUT") or os.path.join(os.path.dirname(__file__), "..", "web", "workflows")
-NAMES = ("ingest", "edit", "snap", "shot", "matte", "comp", "export")
+NAMES = ("ingest", "prompt", "edit", "snap", "clean", "shot", "matte", "comp", "export", "warm")
 
 KLEIN = "flux3-image-klein-int8-convrot.safetensors"
 LTX = "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
 GEMMA = "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors"
+UPSAMPLER = "qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors"
+INOUTPAINT = "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors"
+SAM = "sam3.1_multiplex_fp16.safetensors"
+SNAP_POINTS = 5  # stroke points SAM looks at one by one
+# Lightricks' distilled schedule from the official LTX 2.5 inpaint workflow (stage 1, euler_ancestral)
+INPAINT_SIGMAS = "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
 RIPPLE_PROMPT = ("Use the reference video for motion, timing, camera movement, framing and lighting changes; "
                  "follow the edited first frame for every change of content, light and style.")
 NEGATIVE = "blurry, low resolution, ugly, garbled mess, compression artifacts, glitch, flicker, still image"
@@ -101,7 +107,8 @@ def load(name, folder=None):
 
 # Optional links: when every source slot is left empty, the link goes, with every node that fed it
 # (no erase: nothing to fill before LTX; a relight alone: no matte to composite with or to save).
-OPTIONAL = {"hole_mask": ("hole",), "fit_mask": ("matte_a", "matte_b")}
+# no words for an erase: no search by name; not a relight: no light transfer on the edited frame.
+OPTIONAL = {"hole_mask": ("hole",), "fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -162,6 +169,21 @@ def ingest():
     g.save("ingest")
 
 
+def prompt():
+    """FLUX 3 Image Klein's own prompt upsampler: the frame and a short request in, the caption Klein was trained on out.
+
+    Black Forest Labs' card: do not use the model without it. Greedy decoding, so a caption is reproducible; the
+    multi-token-prediction head drafts tokens (measured 8 s against 15 s without it, on an RTX PRO 6000).
+    """
+    g = Graph()
+    text = g("TextGenerate", _progress=True, clip=g("CLIPLoader", clip_name=Slot("upsampler", UPSAMPLER), type="flux3", device="default"),
+             prompt=Slot("request", ""), image=g("LoadImage", _title="Reference", image=Slot("image", "")),
+             max_length=Slot("max_length", 1024), sampling_mode="off", thinking=False, use_default_template=True, mtp="auto",
+             system_prompt=g("PrimitiveStringMultiline", _title="System prompt", value=Slot("system", "")))
+    g("PreviewAny", _title="Caption", _output="text", source=text)
+    g.save("prompt")
+
+
 def edit():
     """One FLUX 3 Image Klein edit inside a mask: the edited frame, and the edit alone as an RGBA patch."""
     g = Graph()
@@ -189,17 +211,80 @@ def edit():
     # Join Image with Alpha stores 1 - mask as alpha: the inverted soft mask gives alpha = soft mask
     patch = g("JoinImageWithAlpha", image=decoded, alpha=g("InvertMask", mask=soft))
     g("PreviewImage", _title="Edit patch (RGBA)", _output="patch", images=patch)
+    # a relight: the frame as the export will make it, light from Klein, detail from the plate (dropped otherwise)
+    base_lin = g("ImageColorSpace", image=base, source="sRGB", destination="linear")
+    relit = g("PaintAPlate_RelightTransfer", plate=base_lin, source=half(g, base_lin),
+              relit=g("ImageColorSpace", image=half(g, result), source="sRGB", destination="linear"),
+              radius=8, strength=Slot("relight", 0.0), align=True)
+    g.link_slot(relit, "plate", "relit_frame")
+    g("PreviewImage", _title="Relit frame", _output="relit", images=g("ImageColorSpace", image=relit, source="linear", destination="sRGB"))
     g.save("edit")
 
 
 def snap():
-    """SAM 3.1 grows an erase stroke to the whole object under it, on the first frame."""
+    """SAM 3.1 finds the whole object under an erase stroke: from each stroke point, and by name when there are words."""
     g = Graph()
-    sam = g("CheckpointLoaderSimple", ckpt_name=Slot("sam", "sam3.1_multiplex_fp16.safetensors"))
-    found = g("SAM3_Detect", model=sam, image=g("LoadImage", _title="First frame", image=Slot("image", "")),
-              positive_coords=Slot("points", "[]"), threshold=0.5, refine_iterations=2, individual_masks=False)
-    g("PreviewImage", _title="Object mask", _output="mask", images=g("MaskToImage", mask=found))
+    sam = g("CheckpointLoaderSimple", ckpt_name=Slot("sam", SAM))
+    image = g("LoadImage", _title="First frame", image=Slot("image", ""))
+    for k in range(SNAP_POINTS):  # one prompt per point: given together, the points asked SAM for one region holding them all
+        found = g("SAM3_Detect", model=sam, image=image, positive_coords=Slot(f"point_{k}", "[]"), threshold=0.5,
+                  refine_iterations=2, individual_masks=False)
+        g("PreviewImage", _title=f"Object at point {k + 1}", _output=f"point_{k}", images=g("MaskToImage", mask=found))
+    named = g("SAM3_Detect", model=sam, image=image, conditioning=g("CLIPTextEncode", text=Slot("words", ""), clip=sam[1]),
+              threshold=0.4, refine_iterations=2, individual_masks=True)
+    g.link_slot(named, "conditioning", "named")  # dropped when the erase has no words
+    # a blank frame first: when nothing has that name, Preview Image would get an empty batch and fail the whole prompt
+    size = g("GetImageSize", image=image)
+    blank = g("EmptyImage", width=size[0], height=size[1], batch_size=1, color=0)
+    g("PreviewImage", _title="Objects with that name", _output="named",
+      images=g("BatchImagesNode", images__image0=blank, images__image1=g("MaskToImage", mask=named)))
     g.save("snap")
+
+
+def clean():
+    """The erase pass: LTX 2.5 with Lightricks' in-outpainting IC-LoRA regenerates every erased area of the shot.
+
+    The reference is the plate with each erased area painted the green the LoRA was trained on, as a grown box: shown
+    the object's own outline moving, LTX drew a car back where the van had been; a box hides that shape. The erased
+    first frame starts the shot at strength 0.7 (the official workflow's start image). The prompt stays empty: the card
+    says prompts describe the scene, never the edit, and a named object came back.
+    """
+    g = Graph()
+    load, srgb = plate(g, pad=True)
+    frames = g("ImageScale", image=srgb, upscale_method="lanczos", width=Slot("width", 960), height=Slot("height", 544), crop="disabled")
+    size = g("GetImageSize", image=frames)
+    hole = g("ImageToMask", channel="red", image=g("ImageScale", image=g("PaintAPlate_LoadPlate", _title="Erase matte", path=Slot("hole", ""),
+                                                                          max_frames=1024, pad_8n1=False),
+                                                  upscale_method="area", width=size[0], height=size[1], crop="disabled"))
+    boxes = g("PaintAPlate_BoxMatte", mask=hole, grow=Slot("box_grow", 0.35))
+    reference = g("LTXVInpaintPreprocess", _title="Reference: erased areas in green", images=frames, mask=boxes)
+    model = g("LoraLoaderModelOnly", _title="In-outpainting IC-LoRA",
+              model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"),
+              lora_name=Slot("inoutpaint", INOUTPAINT), strength_model=1.0)
+    clip = g("CLIPLoader", clip_name=Slot("gemma", GEMMA), type="ltxv", device="default")
+    vae = g("VAELoader", vae_name=Slot("video_vae", "ltx-2.5-video-vae-conv-bf16.safetensors"))
+    audio_vae = g("VAELoader", vae_name="ltx-2.5-audio-vae-bf16.safetensors")
+    cond = g("LTXVConditioning", positive=g("CLIPTextEncode", text="", clip=clip),
+             negative=g("CLIPTextEncode", text=NEGATIVE, clip=clip), frame_rate=load[3])
+    first = g("ImageScale", image=g("LoadImage", _title="Erased first frame", image=Slot("hero", "")), upscale_method="lanczos",
+              width=size[0], height=size[1], crop="disabled")
+    latent = g("LTXVImgToVideoInplace", vae=vae, image=first, latent=g("EmptyLTXVLatentVideo", width=size[0], height=size[1],
+                                                                       length=size[2], batch_size=1), strength=0.7, bypass=False)
+    guide = g("LTXAddVideoICLoRAGuide", positive=cond[0], negative=cond[1], vae=vae, latent=latent, image=reference, frame_idx=0,
+              strength=1.0, latent_downscale_factor=1.0, crop="disabled", use_tiled_encode=False, tile_size=256, tile_overlap=64,
+              use_streaming=False, tile_frames=97)
+    audio = g("LTXVEmptyLatentAudio", audio_vae=audio_vae, frames_number=size[2], frame_rate=load[3], batch_size=1)
+    sampled = g("SamplerCustomAdvanced", _progress=True, noise=g("RandomNoise", noise_seed=Slot("seed", 0)),
+                guider=g("CFGGuider", model=model, positive=guide[0], negative=guide[1], cfg=1.0),
+                sampler=g("KSamplerSelect", sampler_name="euler_ancestral"), sigmas=g("ManualSigmas", sigmas=INPAINT_SIGMAS),
+                latent_image=g("LTXVConcatAVLatent", video_latent=guide[2], audio_latent=audio))
+    decoded = g("VAEDecode", vae=vae, samples=g("LTXVCropGuides", positive=guide[0], negative=guide[1],
+                                                 latent=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])[2])
+    g("SaveImage", _title="Clean frames", _output="frames", images=decoded, filename_prefix=Slot("prefix", "paintaplate/plate/clean/f"))
+    video = g("CreateVideo", images=decoded, fps=load[3], bit_depth=8, color_space="sRGB", codec="none")
+    g("SaveVideo", _title="Clean shot (erased areas regenerated)", _output="video", video=video,
+      filename_prefix=Slot("video_prefix", "paintaplate/plate/clean"), format="auto", format__codec="auto")
+    g.save("clean")
 
 
 def shot():
@@ -337,13 +422,38 @@ def export():
     g("PaintAPlate_SavePlate", _title="Export", _output="export", images=final, plate=load[2],
       filename_prefix=Slot("prefix", "paintaplate/plate/export"), keep_untouched=Slot("keep_untouched", True),
       changed=fit[1])
+    review = g("ImageScaleToMaxDimension", upscale_method="lanczos", largest_size=1920,
+               image=g("ImageFromBatch", batch_index=0, length=load[4],
+                       image=g("ImageColorSpace", image=final, source=Slot("color_space", "sRGB"), destination="sRGB")))
+    g("SaveVideo", _title="Review movie (full size, H.264)", _output="review", format="auto", format__codec="auto",
+      video=g("CreateVideo", images=review, fps=load[3], bit_depth=8, color_space="sRGB", codec="none"),
+      filename_prefix=Slot("review_prefix", "paintaplate/plate/review"))
     matte_frames = g("ImageFromBatch", image=g("MaskToImage", mask=fit[1]), batch_index=0, length=load[4])
     g("SaveImage", _title="Matte: where the plate changed", _output="matte", images=matte_frames,
       filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))
     g.save("export")
 
 
+def warm():
+    """LTX 2.5, Gemma and both VAEs loaded with one step on a tiny latent, while the person looks at the page."""
+    g = Graph()
+    clip = g("CLIPLoader", clip_name=Slot("gemma", GEMMA), type="ltxv", device="default")
+    vae = g("VAELoader", vae_name=Slot("video_vae", "ltx-2.5-video-vae-conv-bf16.safetensors"))
+    audio_vae = g("VAELoader", vae_name="ltx-2.5-audio-vae-bf16.safetensors")
+    model = g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default")
+    cond = g("LTXVConditioning", positive=g("CLIPTextEncode", text="warm up", clip=clip),
+             negative=g("CLIPTextEncode", text="", clip=clip), frame_rate=24.0)
+    latent = g("LTXVConcatAVLatent", video_latent=g("EmptyLTXVLatentVideo", width=64, height=64, length=9, batch_size=1),
+               audio_latent=g("LTXVEmptyLatentAudio", audio_vae=audio_vae, frames_number=9, frame_rate=24, batch_size=1))
+    sampled = g("SamplerCustomAdvanced", _progress=True, noise=g("RandomNoise", noise_seed=0),
+                guider=g("CFGGuider", model=model, positive=cond[0], negative=cond[1], cfg=1.0),
+                sampler=g("KSamplerSelect", sampler_name="euler"), sigmas=g("ManualSigmas", sigmas="1.0, 0.0"), latent_image=latent)
+    decoded = g("VAEDecode", vae=vae, samples=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])
+    g("PreviewImage", _title="One warm frame", _output="frame", images=g("ImageFromBatch", image=decoded, batch_index=0, length=1))
+    g.save("warm")
+
+
 if __name__ == "__main__":
-    for build in (ingest, edit, snap, shot, matte, comp, export):
+    for build in (ingest, prompt, edit, snap, clean, shot, matte, comp, export, warm):
         build()
     print("wrote", sorted(os.listdir(OUT)))

@@ -171,6 +171,9 @@ async def execute(pid, prompt):
                             "animated": [True]}
         o[outs["spec"]] = {"text": [plateio.spec_json(spec)]}
         await steps(pid, 2, 0.4)
+    elif "text" in outs:  # prompt: the request comes back as the caption
+        o[outs["text"]] = {"text": [v.get("request", "")]}
+        await steps(pid, 1, 0.2)
     elif "patch" in outs:  # edit: a tinted, softened copy of the reference inside the mask, with step previews
         base, ref = load_image(v["base"]), load_image(v["reference"])
         mask = load_image(v["mask"], "L")
@@ -196,14 +199,19 @@ async def execute(pid, prompt):
         result = new * soft[..., None] + base * (1 - soft[..., None])
         o[outs["result"]] = {"images": [save_png(result, "temp", f"paintaplate/{pid[:8]}_result")]}
         o[outs["patch"]] = {"images": [save_png(np.dstack([new, soft]), "temp", f"paintaplate/{pid[:8]}_patch")]}
-    elif "mask" in outs and len(prompt) < 8:  # snap: a disc around the points
+        if "relit" in outs:
+            o[outs["relit"]] = {"images": [save_png(result, "temp", f"paintaplate/{pid[:8]}_relit")]}
+    elif "point_0" in outs:  # snap: an object around each point it was given, none found by name
         img = load_image(v["image"])
         h, w = img.shape[:2]
-        pts = json.loads(v["points"]) or [{"x": w // 2, "y": h // 2}]
-        cx, cy = np.mean([p["x"] for p in pts]), np.mean([p["y"] for p in pts])
         yy, xx = np.mgrid[0:h, 0:w]
-        disc = ((xx - cx) / (0.05 * w)) ** 2 + ((yy - cy) / (0.14 * h)) ** 2 < 1
-        o[outs["mask"]] = {"images": [save_png(disc.astype(np.float32), "temp", f"paintaplate/{pid[:8]}_snap")]}
+        for k in range(5):
+            disc = np.zeros((h, w), bool)
+            for p in json.loads(v.get(f"point_{k}") or "[]"):
+                disc |= ((xx - p["x"]) / (0.05 * w)) ** 2 + ((yy - p["y"]) / (0.14 * h)) ** 2 < 1
+            o[outs[f"point_{k}"]] = {"images": [save_png(disc.astype(np.float32), "temp", f"paintaplate/{pid[:8]}_snap{k}")]}
+        if "named" in outs:
+            o[outs["named"]] = {"images": []}
         await steps(pid, 2, 0.5)
     elif "frames" in outs and "video" in outs:  # shot: the edited first frame pasted on every frame
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
@@ -246,6 +254,8 @@ async def execute(pid, prompt):
                     save_png(resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w)),
                              "output", v["matte_prefix"], i)
             o[outs["export"]] = {"text": [f"1 file(s) in {d}\nplate_00001_.mp4"]}
+            if "review" in outs:
+                o[outs["review"]] = {"images": [save_mp4(out, v.get("review_prefix", f"{v['prefix']}/review"), spec["fps"])], "animated": [True]}
     else:
         await steps(pid, 1, 0.2)
     return o

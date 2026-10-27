@@ -26,7 +26,7 @@ fi
 if curl -s -m 3 -o /dev/null http://127.0.0.1:8188/system_stats; then
   log "ComfyUI is already running: $APP"
 else
-  log "setup: ComfyUI, ComfyUI-LTXVideo, this pack and 52 GB of models (log: $W/setup.log)"
+  log "setup: ComfyUI, ComfyUI-LTXVideo, this pack and 60 GB of models (log: $W/setup.log)"
   bash "$HERE/tools/pod_setup.sh" > "$W/setup.log" 2>&1 &
   setup=$!
   shown=0; last=0
@@ -35,7 +35,7 @@ else
     if [ "$n" -gt "$shown" ]; then sed -n "$((shown + 1)),${n}p" "$W/setup.log" | sed 's/^/    /'; shown=$n; fi
     if [ $((SECONDS - last)) -ge 15 ] && ! grep -q "models done" "$W/models.log" 2>/dev/null; then
       last=$SECONDS
-      log "models: $(du -sb "$W/models" 2>/dev/null | awk '{printf "%.1f", $1 / 1e9}') of 52 GB"
+      log "models: $(du -sb "$W/models" 2>/dev/null | awk '{printf "%.1f", $1 / 1e9}') of 60 GB"
     fi
   }
   while kill -0 "$setup" 2>/dev/null; do report; sleep 2; done

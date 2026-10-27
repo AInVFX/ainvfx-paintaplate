@@ -177,6 +177,7 @@ export function connect() {
 // ---------- Outputs ----------
 
 export const files = (out) => Object.values(out).flatMap((o) => [...(o.images ?? []), ...(o.gifs ?? []), ...(o.video ?? [])]);
-export const outputFile = (name, out, key) => files({ x: out[WF[name].outputs[key]] ?? {} })[0];
+export const outputFiles = (name, out, key) => files({ x: out[WF[name].outputs[key]] ?? {} });
+export const outputFile = (name, out, key) => outputFiles(name, out, key)[0];
 export const outputText = (name, out, key) => out[WF[name].outputs[key]]?.text?.[0];
 export const viewUrl = (f) => `/view?${new URLSearchParams({ filename: f.filename, subfolder: f.subfolder, type: f.type })}`;

@@ -48,8 +48,9 @@ class Workflows(unittest.TestCase):
 
     def test_outputs_the_page_reads(self):
         """The page picks results by output name, not by position."""
-        wanted = {"ingest": {"hero", "proxy", "spec"}, "edit": {"patch", "result"}, "snap": {"mask"},
-                  "shot": {"frames", "video"}, "matte": {"frames"}, "comp": {"video"}, "export": {"export", "matte"}}
+        wanted = {"ingest": {"hero", "proxy", "spec"}, "prompt": {"text"}, "edit": {"patch", "relit", "result"},
+                  "snap": {"named"} | {f"point_{k}" for k in range(5)}, "clean": {"frames", "video"}, "shot": {"frames", "video"},
+                  "matte": {"frames"}, "comp": {"video"}, "export": {"export", "matte", "review"}, "warm": {"frame"}}
         for name, keys in wanted.items():
             self.assertEqual(set(build_workflows.load(name, WORKFLOWS)[2]), keys, name)
 

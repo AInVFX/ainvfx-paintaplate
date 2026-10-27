@@ -15,6 +15,7 @@
     <span id="spec" class="spec"></span>
     <button id="help-btn" class="quiet" title="Keys (?)" aria-label="Keys">?</button>
     <button id="open-btn">Open plate</button>
+    <button id="save-btn" disabled title="Save the scene: the plate and every edit with its strokes, words and seed">Save scene</button>
     <button id="export-btn" class="primary" disabled title="Download the export and its matte as one zip">Export</button>
   </header>
 
@@ -103,9 +104,15 @@
   </main>
 
   <aside class="side">
-    <h2>History</h2>
+    <div class="history-head">
+      <h2>History</h2>
+      <span class="undo">
+        <button id="undo-btn" class="quiet" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+        <button id="redo-btn" class="quiet" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
+      </span>
+    </div>
     <ol id="history"></ol>
-    <p id="history-empty" class="history-empty">Your edits appear here. Describe, then paint on the frame.</p>
+    <p id="history-empty" class="history-empty">Your edits appear here. Describe, then paint on the frame. Click an edit to change its words or strokes.</p>
     <section id="render" class="render" hidden>
       <h2>Render <span id="render-left"></span></h2>
       <label class="preview-size">Preview size
@@ -145,6 +152,7 @@
       <dt>- and =</dt><dd>Brush size</dd>
       <dt>X</dt><dd>Eraser: rub out the strokes you just painted</dd>
       <dt>Enter</dt><dd>Start the edit now, or try another</dd>
+      <dt>Click an edit</dt><dd>Select it: its words come back; paint, rub out or retype to change it. Esc deselects</dd>
       <dt>Esc</dt><dd>Cancel the edit in progress</dd>
       <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo</dd>
       <dt>Hold O</dt><dd>See the plate</dd>
@@ -173,6 +181,7 @@
       <label>Files <input id="files" type="file" multiple accept=".exr,.png,.tif,.tiff,.dpx,.mov,.mp4,.mkv,.mxf"></label>
       <label>Or a path in ComfyUI's input folder <input id="path" placeholder="plates/shot010"></label>
       <label>Colour space <select id="cs"></select></label>
+      <label>Or a scene saved by PaintAPlate <input id="scene" type="file" accept=".json,application/json"></label>
       <menu><button value="cancel">Cancel</button><button id="open-go" value="ok" class="primary">Open</button></menu>
     </form>
   </dialog>

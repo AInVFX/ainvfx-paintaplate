@@ -40,7 +40,7 @@
   },
   "_meta": {
    "slots": {
-    "positive_coords": "points"
+    "positive_coords": "point_0"
    }
   }
  },
@@ -62,8 +62,283 @@
    ]
   },
   "_meta": {
-   "title": "Object mask",
-   "output": "mask"
+   "title": "Object at point 1",
+   "output": "point_0"
+  }
+ },
+ "6": {
+  "class_type": "SAM3_Detect",
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "image": [
+    "2",
+    0
+   ],
+   "positive_coords": "[]",
+   "threshold": 0.5,
+   "refine_iterations": 2,
+   "individual_masks": false
+  },
+  "_meta": {
+   "slots": {
+    "positive_coords": "point_1"
+   }
+  }
+ },
+ "7": {
+  "class_type": "MaskToImage",
+  "inputs": {
+   "mask": [
+    "6",
+    0
+   ]
+  }
+ },
+ "8": {
+  "class_type": "PreviewImage",
+  "inputs": {
+   "images": [
+    "7",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Object at point 2",
+   "output": "point_1"
+  }
+ },
+ "9": {
+  "class_type": "SAM3_Detect",
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "image": [
+    "2",
+    0
+   ],
+   "positive_coords": "[]",
+   "threshold": 0.5,
+   "refine_iterations": 2,
+   "individual_masks": false
+  },
+  "_meta": {
+   "slots": {
+    "positive_coords": "point_2"
+   }
+  }
+ },
+ "10": {
+  "class_type": "MaskToImage",
+  "inputs": {
+   "mask": [
+    "9",
+    0
+   ]
+  }
+ },
+ "11": {
+  "class_type": "PreviewImage",
+  "inputs": {
+   "images": [
+    "10",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Object at point 3",
+   "output": "point_2"
+  }
+ },
+ "12": {
+  "class_type": "SAM3_Detect",
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "image": [
+    "2",
+    0
+   ],
+   "positive_coords": "[]",
+   "threshold": 0.5,
+   "refine_iterations": 2,
+   "individual_masks": false
+  },
+  "_meta": {
+   "slots": {
+    "positive_coords": "point_3"
+   }
+  }
+ },
+ "13": {
+  "class_type": "MaskToImage",
+  "inputs": {
+   "mask": [
+    "12",
+    0
+   ]
+  }
+ },
+ "14": {
+  "class_type": "PreviewImage",
+  "inputs": {
+   "images": [
+    "13",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Object at point 4",
+   "output": "point_3"
+  }
+ },
+ "15": {
+  "class_type": "SAM3_Detect",
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "image": [
+    "2",
+    0
+   ],
+   "positive_coords": "[]",
+   "threshold": 0.5,
+   "refine_iterations": 2,
+   "individual_masks": false
+  },
+  "_meta": {
+   "slots": {
+    "positive_coords": "point_4"
+   }
+  }
+ },
+ "16": {
+  "class_type": "MaskToImage",
+  "inputs": {
+   "mask": [
+    "15",
+    0
+   ]
+  }
+ },
+ "17": {
+  "class_type": "PreviewImage",
+  "inputs": {
+   "images": [
+    "16",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Object at point 5",
+   "output": "point_4"
+  }
+ },
+ "18": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": "",
+   "clip": [
+    "1",
+    1
+   ]
+  },
+  "_meta": {
+   "slots": {
+    "text": "words"
+   }
+  }
+ },
+ "19": {
+  "class_type": "SAM3_Detect",
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "image": [
+    "2",
+    0
+   ],
+   "conditioning": [
+    "18",
+    0
+   ],
+   "threshold": 0.4,
+   "refine_iterations": 2,
+   "individual_masks": true
+  },
+  "_meta": {
+   "slots": {
+    "conditioning": "named"
+   }
+  }
+ },
+ "20": {
+  "class_type": "GetImageSize",
+  "inputs": {
+   "image": [
+    "2",
+    0
+   ]
+  }
+ },
+ "21": {
+  "class_type": "EmptyImage",
+  "inputs": {
+   "width": [
+    "20",
+    0
+   ],
+   "height": [
+    "20",
+    1
+   ],
+   "batch_size": 1,
+   "color": 0
+  }
+ },
+ "22": {
+  "class_type": "MaskToImage",
+  "inputs": {
+   "mask": [
+    "19",
+    0
+   ]
+  }
+ },
+ "23": {
+  "class_type": "BatchImagesNode",
+  "inputs": {
+   "images.image0": [
+    "21",
+    0
+   ],
+   "images.image1": [
+    "22",
+    0
+   ]
+  }
+ },
+ "24": {
+  "class_type": "PreviewImage",
+  "inputs": {
+   "images": [
+    "23",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Objects with that name",
+   "output": "named"
   }
  }
 }

@@ -1,0 +1,82 @@
+{
+ "1": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "clip_name": "qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors",
+   "type": "flux3",
+   "device": "default"
+  },
+  "_meta": {
+   "slots": {
+    "clip_name": "upsampler"
+   }
+  }
+ },
+ "2": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": ""
+  },
+  "_meta": {
+   "title": "Reference",
+   "slots": {
+    "image": "image"
+   }
+  }
+ },
+ "3": {
+  "class_type": "PrimitiveStringMultiline",
+  "inputs": {
+   "value": ""
+  },
+  "_meta": {
+   "title": "System prompt",
+   "slots": {
+    "value": "system"
+   }
+  }
+ },
+ "4": {
+  "class_type": "TextGenerate",
+  "inputs": {
+   "clip": [
+    "1",
+    0
+   ],
+   "prompt": "",
+   "image": [
+    "2",
+    0
+   ],
+   "max_length": 1024,
+   "sampling_mode": "off",
+   "thinking": false,
+   "use_default_template": true,
+   "mtp": "auto",
+   "system_prompt": [
+    "3",
+    0
+   ]
+  },
+  "_meta": {
+   "slots": {
+    "prompt": "request",
+    "max_length": "max_length"
+   },
+   "progress": true
+  }
+ },
+ "5": {
+  "class_type": "PreviewAny",
+  "inputs": {
+   "source": [
+    "4",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Caption",
+   "output": "text"
+  }
+ }
+}

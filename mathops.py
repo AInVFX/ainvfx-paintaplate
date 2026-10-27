@@ -287,6 +287,27 @@ def guided_filter(guide: np.ndarray, src: np.ndarray, r: int, eps: float) -> np.
     return box(a, r) * g + box(b, r)
 
 
+# Light may change by 4 stops down and 3 up: night needs about that. At 0.25 (2 stops) a night relight stayed in dusk.
+RATIO_RANGE = (1.0 / 16.0, 8.0)
+
+
+def box_matte(mask: np.ndarray, grow: float) -> np.ndarray:
+    """Each frame's mask as its bounding box, grown by `grow` of its size on each side. (N, H, W) in and out.
+
+    An erased object's own outline, moving through the reference frames, told LTX a vehicle was there: it drew one
+    back. The grown box keeps where the object was and hides what it was.
+    """
+    out = np.zeros(mask.shape, np.float32)
+    for i, m in enumerate(mask):
+        ys, xs = np.nonzero(m > 0.5)
+        if not len(xs):
+            continue
+        y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+        gy, gx = int(round((y1 - y0) * grow)), int(round((x1 - x0) * grow))
+        out[i, max(0, y0 - gy):y1 + gy, max(0, x0 - gx):x1 + gx] = 1.0
+    return out
+
+
 def relight(plate: np.ndarray, source: np.ndarray, relit: np.ndarray,
             radius: int, strength: float = 1.0) -> np.ndarray:
     """Move the light of `relit` onto `plate`, keeping the plate's own detail.
@@ -301,7 +322,7 @@ def relight(plate: np.ndarray, source: np.ndarray, relit: np.ndarray,
     ratio = (guided_filter(guide, relit[..., :3].clip(0), radius, eps) + 1e-3) / \
             (guided_filter(guide, source[..., :3].clip(0), radius, eps) + 1e-3)
     ratio = ndimage.median_filter(ratio, size=(3, 3, 1))  # isolated specks at sharp edges go
-    ratio = ndimage.gaussian_filter(np.clip(ratio, 0.25, 4.0), (1.0, 1.0, 0)) ** strength
+    ratio = ndimage.gaussian_filter(np.clip(ratio, *RATIO_RANGE), (1.0, 1.0, 0)) ** strength
     if ratio.shape[:2] != plate.shape[:2]:
         zoom = (plate.shape[0] / ratio.shape[0], plate.shape[1] / ratio.shape[1], 1)
         ratio = ndimage.zoom(ratio, zoom, order=1)[: plate.shape[0], : plate.shape[1]]
