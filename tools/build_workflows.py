@@ -20,6 +20,7 @@ GEMMA = "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors"
 UPSAMPLER = "qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors"
 INOUTPAINT = "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors"
 SAM = "sam3.1_multiplex_fp16.safetensors"
+TINY = "taeltx2_3.safetensors"  # the tiny LTX 2.5 decoder of the live preview (models/vae_approx)
 SNAP_POINTS = 5  # stroke points SAM looks at one by one
 # Lightricks' distilled schedule from the official LTX 2.5 inpaint workflow (stage 1, euler_ancestral)
 INPAINT_SIGMAS = "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
@@ -241,6 +242,12 @@ def snap():
     g.save("snap")
 
 
+def live(g, model, size, load):
+    """The page's live preview while LTX samples: off (0 steps) unless the page sets `live`."""
+    return g("PaintAPlate_LivePreview", _title="Live preview", model=model, decoder=Slot("tiny", TINY), frames=size[2], fps=load[3],
+             every=Slot("live", 0), size=320)
+
+
 def clean():
     """The erase pass: LTX 2.5 with Lightricks' in-outpainting IC-LoRA regenerates every erased area of the shot.
 
@@ -258,9 +265,9 @@ def clean():
                                                   upscale_method="area", width=size[0], height=size[1], crop="disabled"))
     boxes = g("PaintAPlate_BoxMatte", mask=hole, grow=Slot("box_grow", 0.35))
     reference = g("LTXVInpaintPreprocess", _title="Reference: erased areas in green", images=frames, mask=boxes)
-    model = g("LoraLoaderModelOnly", _title="In-outpainting IC-LoRA",
-              model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"),
-              lora_name=Slot("inoutpaint", INOUTPAINT), strength_model=1.0)
+    model = live(g, g("LoraLoaderModelOnly", _title="In-outpainting IC-LoRA",
+                      model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"),
+                      lora_name=Slot("inoutpaint", INOUTPAINT), strength_model=1.0), size, load)
     clip = g("CLIPLoader", clip_name=Slot("gemma", GEMMA), type="ltxv", device="default")
     vae = g("VAELoader", vae_name=Slot("video_vae", "ltx-2.5-video-vae-conv-bf16.safetensors"))
     audio_vae = g("VAELoader", vae_name="ltx-2.5-audio-vae-bf16.safetensors")
@@ -304,9 +311,9 @@ def shot():
     rest = g("ImageFromBatch", image=frames, batch_index=1, length=4096)
     reference = g("BatchImagesNode", _title="Reference: first frame replaced", images__image0=hero,
                   images__image1=rest)
-    model = g("LoraLoaderModelOnly", _title="Ripple IC-LoRA",
-              model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"),
-              lora_name=Slot("ripple", "LTX25_Ripple_v11.safetensors"), strength_model=Slot("strength", 1.35))
+    model = live(g, g("LoraLoaderModelOnly", _title="Ripple IC-LoRA",
+                      model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"),
+                      lora_name=Slot("ripple", "LTX25_Ripple_v11.safetensors"), strength_model=Slot("strength", 1.35)), size, load)
     clip = g("CLIPLoader", clip_name=Slot("gemma", GEMMA), type="ltxv", device="default")
     vae = g("VAELoader", vae_name=Slot("video_vae", "ltx-2.5-video-vae-conv-bf16.safetensors"))
     audio_vae = g("VAELoader", vae_name="ltx-2.5-audio-vae-bf16.safetensors")

@@ -131,6 +131,7 @@ def main():
     ap.add_argument("--timeout", type=int, default=150)
     ap.add_argument("--out", default=SHOTS, help="folder for screenshots and timings")
     ap.add_argument("--think", type=float, default=0, help="seconds between opening the plate and the first stroke")
+    ap.add_argument("--graph", action="store_true", help="after the export, also save the scene's ComfyUI graph")
     ap.add_argument("--channel", default="", help="a browser channel, such as chrome (it plays H.264; Playwright's Chromium does not)")
     a = ap.parse_args()
     if a.url:
@@ -256,6 +257,12 @@ def remote(a):
                     page.click("#x-go")
                 dl.value.save_as(f"{shots}/export.zip")
                 mark(f"downloaded {len(zipfile.ZipFile(f'{shots}/export.zip').namelist())} files")
+                if a.graph:  # the scene as one ComfyUI workflow, from the Export dialog
+                    page.click("#export-btn")
+                    with page.expect_download(timeout=120000) as dl:
+                        page.click("#x-graph")
+                    dl.value.save_as(f"{shots}/scene.comfyui.json")
+                    mark(f"ComfyUI graph saved: {len(json.load(open(f'{shots}/scene.comfyui.json')))} nodes")
         except Exception as exc:
             mark(f"FAILED: {type(exc).__name__}: {str(exc).splitlines()[0][:160]} | status: {status()}")
             page.screenshot(path=f"{shots}/fail.png")

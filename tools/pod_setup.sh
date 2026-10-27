@@ -39,6 +39,7 @@ rev() { # the tested revision of each model repository (checked 27 Oct 2026)
     Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting) echo 8becd61405133263d9e580be41a92e8f827b01ed ;;
     WepeNerd/LTX-Ripple) echo 76abac5ede8a3415b9d1cd803843a38ecb351600 ;;
     Comfy-Org/sam3.1) echo 7bb8374780a725b4353ed31f3a9395c9742b5621 ;;
+    Kijai/LTX2.3_comfy) echo 6d980fde0d330f2fed6ff8dfdfddb06d88a004e5 ;;
   esac
 }
 get() { # repo, file in repo, target folder
@@ -60,6 +61,7 @@ get() { # repo, file in repo, target folder
   get WepeNerd/LTX-Ripple LTX25_Ripple_v11.safetensors loras &
   get Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors loras &
   get Comfy-Org/sam3.1 checkpoints/sam3.1_multiplex_fp16.safetensors checkpoints &
+  get Kijai/LTX2.3_comfy vae/taeltx2_3.safetensors vae_approx &  # the live preview's tiny decoder (MIT, madebyollin/taehv)
   wait; log "models done" ) > "$W/models.log" 2>&1 &
 
 log "ComfyUI $COMFY_REF"

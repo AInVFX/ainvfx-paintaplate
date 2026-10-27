@@ -5,7 +5,7 @@ import { fillWorkflow, parseWorkflow } from "./logic.mjs";
 
 const CLIENT = crypto.randomUUID();
 export const WF = {}; // name -> { prompt, slots, outputs, progress }
-const live = new Set(); // jobs not finished yet
+const live = new Set(); // jobs not finished yet (a job's own `live` is its live-preview callback)
 const byId = new Map(); // prompt id -> job, for WebSocket messages
 const early = new Map(); // results that arrived before /prompt answered
 const memo = new Map(); // prompt -> outputs, for prompts ComfyUI serves entirely from its cache
@@ -48,10 +48,11 @@ export function upload(blob, name, sub, onProgress) { // XMLHttpRequest, not fet
 }
 
 // Post a workflow with its slots filled. `kind` groups jobs for cancel(); `progress` receives 0..1 from the node
-// marked as the workflow's progress; `preview` receives step images; `step` receives the class of each node that runs.
-export function run(name, values, { kind = name, preview, progress, step, front = false } = {}) {
+// marked as the workflow's progress; `preview` receives step images; `step` receives the class of each node that runs;
+// `live` receives the live previews of a shot.
+export function run(name, values, { kind = name, preview, progress, step, live: onLive, front = false } = {}) {
   const wf = fillWorkflow(WF[name], values);
-  const job = { kind, preview, progress, retries: 1, key: JSON.stringify(wf.prompt), main: wf.progress,
+  const job = { kind, preview, progress, live: onLive, retries: 1, key: JSON.stringify(wf.prompt), main: wf.progress,
     step: step && ((id) => step(wf.prompt[id]?.class_type)) };
   job.done = new Promise((resolve, reject) => Object.assign(job, { resolve, reject }));
   job.submit = () => post("/prompt", { prompt: wf.prompt, client_id: CLIENT, front }).then((r) => r.json()).then((j) => {
@@ -143,7 +144,8 @@ function message({ data }) {
     else if (job?.inMain) job.progress?.(0.97); // the main node is done; saving remains
   } else if (type === "progress") {
     if (job && (!job.main.size || job.main.has(String(d.node)))) job.progress?.(0.02 + (0.93 * d.value) / d.max);
-  } else if (type === "execution_success") finish(d.prompt_id);
+  } else if (type === "paintaplate.live") job?.live?.(d); // a live preview of a shot being sampled (nodes.py, Live Preview)
+  else if (type === "execution_success") finish(d.prompt_id);
   else if (type === "execution_error") finish(d.prompt_id, `${d.node_type}: ${d.exception_message}`);
   else if (type === "execution_interrupted") finish(d.prompt_id, "cancelled");
 }

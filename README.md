@@ -45,10 +45,11 @@ After `git pull`, `bash tools/runpod_start.sh --restart` loads the new code in a
 | `ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors` | `loras/` | 1.3 GB | [Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting) (`8becd61`) |
 | `LTX25_Ripple_v11.safetensors` | `loras/` | 0.7 GB | [WepeNerd/LTX-Ripple](https://huggingface.co/WepeNerd/LTX-Ripple) (`76abac5`) |
 | `sam3.1_multiplex_fp16.safetensors` | `checkpoints/` | 1.7 GB | [Comfy-Org/sam3.1](https://huggingface.co/Comfy-Org/sam3.1) (`7bb8374`) |
+| `taeltx2_3.safetensors` | `vae_approx/` | 0.02 GB | [Kijai/LTX2.3_comfy](https://huggingface.co/Kijai/LTX2.3_comfy) (`6d980fd`), from [madebyollin/taehv](https://github.com/madebyollin/taehv) (MIT) |
 
 ## Use it
 
-Open a plate: a video file, or a folder of EXR, PNG, TIFF or DPX frames. Type a few words, pick a tool, paint on the first frame. The edit starts 2 seconds after your last stroke.
+Open a plate: a video file, or a folder of EXR, PNG, TIFF or DPX frames. Type a few words, pick a tool, paint on the first frame. The edit starts 2 seconds after your last stroke; the prompt writer starts as soon as you lift the brush.
 
 - **Paint** adds what you describe where you paint. It may change the frame a little around your strokes, so a fire can light what it touches.
 - **Erase** removes the object under your stroke. With **Whole object**, SAM 3.1 finds all of it: name it ("red umbrella") and the stroke may even cross the background. A shadow outside the object stays: erase it with a second stroke, Whole object off.
@@ -56,7 +57,7 @@ Open a plate: a video file, or a folder of EXR, PNG, TIFF or DPX frames. Type a 
 
 Click an edit in History to select it: its words come back, and painting, rubbing out or retyping changes it. The edits above it follow when they depend on it. Undo and redo sit at the top of History. **Save scene** writes a `.paintaplate.json` file with the plate and every edit; Open plate opens it again on the same ComfyUI. The models load while you look at the page, so the first edit starts at once. Press `?` for the keys; playback follows OpenRV.
 
-The shot renders in idle time: first a quick preview (Fast, 640, by default), then the full size and the export in the background. **Export** downloads the result, its matte, a review movie or the regenerated shot as one zip.
+The shot renders in idle time: first a quick preview (Fast, 640, by default), then the full size and the export in the background. While LTX samples the preview, a small animation of the shot plays every other step. **Export** downloads the result, its matte, a review movie or the regenerated shot as one zip. In the same dialog, **ComfyUI graph** saves the whole scene as one ComfyUI workflow: every edit with its caption and seed, then the render, joined by links. Drop it on the same ComfyUI to open it and keep editing there.
 
 ## Tested on
 
@@ -76,12 +77,12 @@ The five plates in `tests/plates`, and Tears of Steel source footage as a 1920 x
 | `comp`, `export` | The new pixels fitted to the plate (alignment, colour, grain), composited inside the mattes, saved in the plate's format |
 | `warm` | Loads LTX 2.5 at start, on cards with 60 GB or more |
 
-The page fills each workflow's slots before posting it: every node lists them in `_meta.slots`, and `tools/build_workflows.py` writes the files. The six PaintAPlate nodes only fill gaps in core ComfyUI: Load Plate, Save Plate, Fit to Plate, Relight Transfer, Fill Matte and Box Matte. Their maths live in `mathops.py` and their file handling in `plateio.py`, both tested without torch. `TESTING.md` maps the code and every test level.
+The page fills each workflow's slots before posting it: every node lists them in `_meta.slots`, and `tools/build_workflows.py` writes the files. The seven PaintAPlate nodes only fill gaps in core ComfyUI: Load Plate, Save Plate, Fit to Plate, Relight Transfer, Fill Matte, Box Matte and Live Preview. Their maths live in `mathops.py` and their file handling in `plateio.py`, both tested without torch. `TESTING.md` maps the code and every test level.
 
 ## Change it
 
 - The workflows: edit `tools/build_workflows.py`, then run `python tools/build_workflows.py`. Each file also opens in ComfyUI by drag and drop.
-- The page: `web/app.mjs` (the app, with its tuning block at the top), `web/logic.mjs` (pure rules, tested in Node), `web/comfy.mjs` (the ComfyUI client).
+- The page: `web/app.mjs` (the app, with its tuning block at the top), `web/logic.mjs` (pure rules, tested in Node), `web/graph.mjs` (the scene as one ComfyUI workflow, tested in Node), `web/comfy.mjs` (the ComfyUI client).
 - The upsampler's system prompts: `web/upsampler.json`, Black Forest Labs' own text (Apache 2.0).
 - Tests: `python -m unittest discover -s tests -v`.
 

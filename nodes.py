@@ -1,12 +1,13 @@
-"""The six PaintAPlate nodes. Each one fills a gap in core ComfyUI.
+"""The seven PaintAPlate nodes. Each one fills a gap in core ComfyUI.
 
 Colour conversion, compositing, masks, Klein, LTX and SAM 3 stay in core nodes: these nodes only
 load and save plates, fit generated frames to the plate, transfer a new light onto it and fill an
-erased object in the frames LTX follows, or turn an erase matte into boxes. Each node converts tensors and calls plateio (files) or
+erased object in the frames LTX follows, turn an erase matte into boxes, or show a shot while LTX samples it. Each node converts tensors and calls plateio (files) or
 mathops (pixels), which are tested without torch or ComfyUI.
 """
 from __future__ import annotations
 
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 
@@ -15,9 +16,13 @@ import torch
 import torch.nn.functional as F
 
 import comfy.model_management as mm
+import comfy.sd
 import comfy.utils
 import folder_paths
 from comfy_api.v0_0_2 import InputImpl, io, ui
+from comfy_execution.utils import get_executing_context
+from PIL import Image
+from server import PromptServer
 
 from . import mathops, plateio
 
@@ -358,4 +363,80 @@ class BoxMatte(io.ComfyNode):
         return io.NodeOutput(torch.from_numpy(out).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()))
 
 
-NODES = [LoadPlate, SavePlate, FitToPlate, RelightTransfer, FillMatte, BoxMatte]
+LIVE = ThreadPoolExecutor(1)  # live previews are encoded off the sampling thread, one at a time
+_TINY = {}  # tiny decoders by path, loaded once
+
+
+class LivePreview(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_LivePreview",
+            display_name="Live Preview",
+            category=CATEGORY,
+            description="Shows a shot while the video model samples it: every few steps, a tiny decoder turns the predicted "
+                        "frames into a small looping animation for the page. The model itself is unchanged.",
+            inputs=[
+                io.Model.Input("model"),
+                io.String.Input("decoder", default="taeltx2_3.safetensors",
+                                tooltip="A tiny video decoder in models/vae_approx. Without it there is no preview, and the shot "
+                                        "still renders."),
+                io.Int.Input("frames", default=121, min=1, max=4096,
+                             tooltip="Frames of the shot. Latent frames after them are guide frames, never shown."),
+                io.Float.Input("fps", default=24.0, min=1.0, max=120.0),
+                io.Int.Input("every", default=0, min=0, max=100, tooltip="Steps between two previews. 0 turns the preview off."),
+                io.Int.Input("size", default=320, min=64, max=1280, tooltip="Long side of the preview, in pixels."),
+            ],
+            outputs=[io.Model.Output(display_name="model")],
+        )
+
+    @classmethod
+    def execute(cls, model, decoder, frames, fps, every, size) -> io.NodeOutput:
+        path = folder_paths.get_full_path("vae_approx", decoder) if every > 0 else None
+        if not path:
+            return io.NodeOutput(model)
+        if path not in _TINY:
+            _TINY[path] = comfy.sd.VAE(sd=comfy.utils.load_torch_file(path))
+        tiny, server, context = _TINY[path], PromptServer.instance, get_executing_context()
+        prompt_id, client = context.prompt_id if context else server.last_prompt_id, server.client_id
+        latent_frames, state = (frames - 1) // 8 + 1, {"step": 0, "busy": False}
+
+        def send(video, step):  # a looping WebP in the temp folder, and a message telling the page where it is
+            try:
+                h, w = video.shape[1:3]
+                k = size / max(h, w)
+                images = [Image.fromarray(f).resize((max(2, round(w * k)), max(2, round(h * k))), Image.BILINEAR) for f in video]
+                folder = os.path.join(folder_paths.get_temp_directory(), "paintaplate_live")
+                os.makedirs(folder, exist_ok=True)
+                name = f"{prompt_id}_{step:03d}.webp"
+                images[0].save(os.path.join(folder, name), save_all=True, append_images=images[1:], duration=round(1000 / fps),
+                               loop=0, quality=55, method=0)
+                server.send_sync("paintaplate.live", {"prompt_id": prompt_id, "step": step,
+                                                      "image": {"filename": name, "subfolder": "paintaplate_live", "type": "temp"}}, client)
+            finally:
+                state["busy"] = False
+
+        def post_cfg(args):  # called once per step with the frames the model predicts: decode them now, encode them aside
+            denoised = args["denoised"]
+            state["step"] += 1
+            if state["step"] % every == 0 and not state["busy"] and not state.get("off"):
+                try:
+                    video = denoised.tensors[0] if getattr(denoised, "is_nested", False) else denoised
+                    shapes = getattr(args["model"], "latent_shapes", None)  # LTX 2.5 samples video and audio packed in one latent
+                    if shapes and video.ndim == 3:
+                        video = comfy.utils.unpack_latents(video, shapes)[0]
+                    images = tiny.decode(video[:1, :, :latent_frames])
+                    images = images.reshape(-1, *images.shape[-3:])
+                    state["busy"] = True
+                    LIVE.submit(send, (images.clamp(0, 1) * 255).to(torch.uint8).cpu().numpy(), state["step"])
+                except Exception as exc:  # a preview never stops a shot: it switches itself off
+                    state["off"] = True
+                    logging.warning("PaintAPlate Live Preview is off for this shot: %s", exc)
+            return denoised
+
+        patched = model.clone()
+        patched.set_model_sampler_post_cfg_function(post_cfg)
+        return io.NodeOutput(patched)
+
+
+NODES = [LoadPlate, SavePlate, FitToPlate, RelightTransfer, FillMatte, BoxMatte, LivePreview]
