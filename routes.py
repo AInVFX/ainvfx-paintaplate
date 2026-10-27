@@ -3,8 +3,8 @@
     GET /paintaplate/download?run=paintaplate/<plate>/v3&name=shot010_paintaplate_v3&parts=export,matte
 
 `parts` chooses what the zip holds (default: export,matte): export is the result in the plate's own
-format, matte where the plate changed, review the composite as an H.264 MP4, shot the whole frame as
-the model made it. Only run folders under output/paintaplate are read, and only plain files inside
+format, matte where the plate changed, review an H.264 MP4 of the result (the export's full-size movie,
+else the preview composite), shot the whole frame as the model made it (the full-size pass first). Only run folders under output/paintaplate are read, and only plain files inside
 them: a symbolic link is skipped. The zip functions are plain Python (tests/test_routes.py);
 setup() adds the route to ComfyUI's server.
 """
@@ -20,9 +20,13 @@ import zipfile
 import folder_paths
 from aiohttp import web
 
-# part: (paths in the run folder, the first match wins for a file; its name in the zip, None for a folder)
-PARTS = {"export": (["export"], None), "matte": (["matte"], None), "review": (["comp_*.mp4"], "review.mp4"),
-         "shot": (["full_*.mp4", "raw_*.mp4"], "regenerated_shot.mp4")}
+# part: (paths in the run folder, the first match wins for a file; its name in the zip, None for a folder).
+# The page keeps each preview size's composite and passes in a folder named after the size (640x352/), the
+# full-size passes in full/, and the export's review movie at the top; the last patterns read older runs.
+PARTS = {"export": (["export"], None), "matte": (["matte"], None),
+         "review": (["review_*.mp4", "*/comp_*.mp4", "comp_*.mp4"], "review.mp4"),
+         "shot": (["full/raw_*.mp4", "full/clean_*.mp4", "*/raw_*.mp4", "*/clean_*.mp4", "full_*.mp4", "raw_*.mp4"],
+                  "regenerated_shot.mp4")}
 DEFAULT_PARTS = ["export", "matte"]
 
 

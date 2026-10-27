@@ -43,6 +43,20 @@ class Routes(unittest.TestCase):
             with self.assertRaises(FileNotFoundError, msg=bad):
                 routes.run_folder(bad)
 
+    def test_parts_of_a_run_laid_out_by_size(self):
+        """The export's full-size review and the full-size pass win over what a preview size made."""
+        with tempfile.TemporaryDirectory() as d:
+            for rel in ("export/shot.1001.exr", "640x352/comp_00001_.mp4", "640x352/raw_00001_.mp4", "review_00001_.mp4",
+                        "full/clean_00001_.mp4", "full/raw_00001_.mp4"):
+                os.makedirs(os.path.dirname(os.path.join(d, rel)) or d, exist_ok=True)
+                touch(os.path.join(d, rel))
+            got = dict((arc, os.path.relpath(path, d)) for path, arc in routes.collect(d, ["export", "review", "shot"]))
+            self.assertEqual(got["review.mp4"], "review_00001_.mp4")
+            self.assertEqual(got["regenerated_shot.mp4"], os.path.join("full", "raw_00001_.mp4"))
+            os.remove(os.path.join(d, "review_00001_.mp4"))  # before the export: the preview's composite
+            got = dict((arc, os.path.relpath(path, d)) for path, arc in routes.collect(d, ["review"]))
+            self.assertEqual(got["review.mp4"], os.path.join("640x352", "comp_00001_.mp4"))
+
     def test_parts_and_names(self):
         names = [arc for _, arc in routes.collect(self.folder, ["export", "matte", "review", "shot"])]
         self.assertEqual(names, ["export/shot.1001.exr", "export/shot.1002.exr", "matte/matte_00001_.png",
