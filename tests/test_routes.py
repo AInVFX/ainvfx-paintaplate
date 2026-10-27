@@ -8,7 +8,8 @@ import types
 import unittest
 import zipfile
 
-from _env import ROOT
+from _env import ROOT, require
+require("aiohttp")
 
 OUT = tempfile.mkdtemp(prefix="paintaplate_out_")
 sys.modules["folder_paths"] = types.SimpleNamespace(get_output_directory=lambda: OUT)

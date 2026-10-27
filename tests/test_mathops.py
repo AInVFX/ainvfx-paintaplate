@@ -1,7 +1,9 @@
 """Checks for the fitting maths on synthetic frames (numpy only)."""
 import os, sys, unittest
-import numpy as np
-from scipy import ndimage
+from _env import require
+require("numpy", "scipy")
+import numpy as np  # noqa: E402
+from scipy import ndimage  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import mathops as m  # noqa: E402
 

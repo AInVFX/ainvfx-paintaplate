@@ -1,21 +1,23 @@
 # Testing PaintAPlate
 
-One command runs the suite. Levels that need more than Python skip themselves and say what they need.
+One command runs the suite. A test whose package or tool is missing skips itself and says what to install. In CI (GitHub Actions sets `CI=true`) the same miss fails instead, so a broken install never passes as skipped.
 
 ```bash
 pip install -r tests/requirements.txt
 python -m unittest discover -s tests -v
 ```
 
+Where the system Python refuses `pip` (Ubuntu, Debian), install into a virtual environment first: `python3 -m venv ~/.venvs/paintaplate && . ~/.venvs/paintaplate/bin/activate`. Every package in `tests/requirements.txt` has wheels for Python 3.12 to 3.14.
+
 | Module | What it proves | Needs |
 | --- | --- | --- |
-| `test_plateio` | EXR layers and header kept, ProRes round trip (codec, colour tags, timecode, audio), PNG, TIFF, DPX and EXR writers, frame names, 8n+1 padding, sequences with missing frames or on twos keep their frame numbers | Python only |
-| `test_mathops` | Alignment survives a relight, grain level and seam field, fill hole and dilate, relight frame (the same light from half-size inputs), relight keeps the plate's detail, push-pull fill, steady masks, and a composite whose edge holds still and matches the plate (a shorter matte holds its last frame) | Python only |
-| `test_routes` | The download route reads only run folders under output/paintaplate, never follows a symbolic link, zips the parts asked for, reuses a current zip and rebuilds a stale one | Python only |
+| `test_plateio` | EXR layers and header kept, ProRes round trip (codec, colour tags, timecode, audio), PNG, TIFF, DPX and EXR writers, frame names, 8n+1 padding, sequences with missing frames or on twos keep their frame numbers | `tests/requirements.txt` |
+| `test_mathops` | Alignment survives a relight, grain level and seam field, fill hole and dilate, relight frame (the same light from half-size inputs), relight keeps the plate's detail, push-pull fill, steady masks, and a composite whose edge holds still and matches the plate (a shorter matte holds its last frame) | `tests/requirements.txt` |
+| `test_routes` | The download route reads only run folders under output/paintaplate, never follows a symbolic link, zips the parts asked for, reuses a current zip and rebuilds a stale one | `tests/requirements.txt` |
 | `test_workflows` | `web/workflows` is current; each file opens in ComfyUI as an API workflow; every slot and output the page uses exists; every class and input exists in ComfyUI and ComfyUI-LTXVideo source | source check: `COMFYUI_DIR` |
-| `test_web` | The page's modules import only names that exist, every element they look up exists, only the menu entry loads into the graph editor, the scripts parse, the page and Python drop the same optional links, and `tests/js` passes | `node` |
-| `tests/js` | Node's own test runner: sizes, time left, captions, edit dependencies and the frame cache's ranking (`logic.mjs`), optional links on the real workflow files, the frame cache's budget and eviction (`frames.mjs`), outputs read only once ComfyUI has recorded the prompt (`comfy.mjs`) | `node` |
-| `test_lint` | pyflakes on all Python, shellcheck on the scripts | `pyflakes`, `shellcheck` |
+| `test_web` | The page's modules import only names that exist, every element they look up exists, only the menu entry loads into the graph editor, the scripts parse, the page and Python drop the same optional links, and `tests/js` passes | Node.js 20 or newer for the last three |
+| `tests/js` | Node.js's own test runner: sizes, time left, captions, edit dependencies and the frame cache's ranking (`logic.mjs`), optional links on the real workflow files, the frame cache's budget and eviction (`frames.mjs`), outputs read only once ComfyUI has recorded the prompt (`comfy.mjs`) | Node.js 20 or newer |
+| `test_lint` | pyflakes on all Python, shellcheck on the scripts | `tests/requirements.txt` (it brings both) |
 | `test_live` | A real ComfyUI loads the pack and serves the page and the download route; every workflow validates; EXR, ProRes and 16-bit PNG plates ingest, composite and export with untouched pixels and extra layers bit-identical, a matte per frame and a zip with the parts asked for; headless Chromium opens a plate, plays it, paints, erases and relights, bypasses an edit, wipes, and downloads the zip through the Export dialog | `COMFYUI_DIR`, `playwright` |
 
 `node --test tests/js/*.test.mjs` runs the JavaScript tests alone. To run one Python module, work from `tests/`: `python -m unittest -v test_web`.

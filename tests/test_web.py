@@ -3,15 +3,13 @@ import glob
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import unittest
 
-from _env import ROOT
+from _env import ROOT, tool
 
 WEB = os.path.join(ROOT, "web")
-HAS_NODE = shutil.which("node") is not None
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import build_workflows  # noqa: E402
 
@@ -19,6 +17,10 @@ import build_workflows  # noqa: E402
 def read(name):
     with open(os.path.join(WEB, name), encoding="utf-8") as f:
         return f.read()
+
+
+def node():
+    return tool("node", "install Node.js 20 or newer")
 
 
 def modules():
@@ -48,23 +50,20 @@ class Page(unittest.TestCase):
         """ComfyUI loads every .js file in web/ into the graph editor: the app's modules must stay .mjs."""
         self.assertEqual([f for f in os.listdir(WEB) if f.endswith(".js")], ["open.js"])
 
-    @unittest.skipUnless(HAS_NODE, "node is not installed")
     def test_scripts_parse(self):
         for name in modules() + ["open.js"]:
-            r = subprocess.run(["node", "--check", os.path.join(WEB, name)], capture_output=True, text=True)
+            r = subprocess.run([node(), "--check", os.path.join(WEB, name)], capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, f"{name}: {r.stderr}")
 
-    @unittest.skipUnless(HAS_NODE, "node is not installed")
     def test_javascript_unit_tests(self):
         """tests/js: the pure rules of logic.mjs and the frame cache of frames.mjs, in Node's own test runner."""
-        r = subprocess.run(["node", "--test", *sorted(glob.glob(os.path.join(ROOT, "tests", "js", "*.test.mjs")))],
+        r = subprocess.run([node(), "--test", *sorted(glob.glob(os.path.join(ROOT, "tests", "js", "*.test.mjs")))],
                            capture_output=True, text=True, cwd=ROOT)
         self.assertEqual(r.returncode, 0, r.stdout[-3000:] + r.stderr[-2000:])
 
-    @unittest.skipUnless(HAS_NODE, "node is not installed")
     def test_page_and_python_drop_the_same_optional_links(self):
         code = "import('./web/logic.mjs').then((m) => console.log(JSON.stringify(m.OPTIONAL)))"
-        r = subprocess.run(["node", "--input-type=module", "-e", code], capture_output=True, text=True, cwd=ROOT)
+        r = subprocess.run([node(), "--input-type=module", "-e", code], capture_output=True, text=True, cwd=ROOT)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual({k: tuple(v) for k, v in json.loads(r.stdout).items()}, build_workflows.OPTIONAL)
 

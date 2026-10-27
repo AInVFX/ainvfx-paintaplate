@@ -8,7 +8,7 @@ import subprocess
 import sys
 import unittest
 
-from _env import COMFY, PYTHON, ROOT
+from _env import COMFY, PYTHON, ROOT, missing
 
 TESTS = os.path.join(ROOT, "tests")
 
@@ -27,9 +27,10 @@ class LiveComfyUI(unittest.TestCase):
         out = run("comfy_live.py", 600)
         self.assertIn("ALL PASSED", out, out[-3000:])
 
-    @unittest.skipUnless(importlib.util.find_spec("playwright"), "pip install playwright && playwright install chromium")
     def test_page_flow_in_a_browser(self):
-        """Headless Chromium paints, erases, relights, picks options and exports through the real page."""
+        """Headless Chromium paints, erases, relights, bypasses an edit, wipes and exports through the real page."""
+        if importlib.util.find_spec("playwright") is None:
+            missing("pip install playwright && python -m playwright install chromium")
         out = run("ui_live.py", 900)
         self.assertIn("UI FLOW PASSED", out, out[-3000:])
 

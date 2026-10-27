@@ -1,8 +1,10 @@
 """Round-trip tests for the plate I/O helpers (numpy, PyAV, OpenEXR; no GPU, no ComfyUI)."""
 import os, sys, unittest, tempfile
 from fractions import Fraction
-import numpy as np
-from PIL import Image
+from _env import require
+require("numpy", "PIL", "av", "OpenEXR")
+import numpy as np  # noqa: E402
+from PIL import Image  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import plateio  # noqa: E402
 
