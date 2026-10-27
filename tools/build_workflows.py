@@ -284,6 +284,11 @@ def fitted(g, base, gen, union):
     return fit, final
 
 
+def half(g, image):
+    """Half size: the light ratio is smooth, so what feeds only the ratio converts to linear light at a quarter of the cost."""
+    return g("ImageScaleBy", image=image, upscale_method="area", scale_by=0.5)
+
+
 def comp():
     """The composite at preview size, as an MP4 to play in the page: what the export will look like."""
     g = Graph()
@@ -293,9 +298,9 @@ def comp():
     gen = g("PaintAPlate_LoadPlate", _title="Generated shot", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
     union = mattes(g)
     small_lin = g("ImageColorSpace", image=small, source="sRGB", destination="linear")
-    relit = g("PaintAPlate_RelightTransfer", plate=small_lin, source=small_lin,
-              relit=g("ImageColorSpace", image=gen, source="sRGB", destination="linear"),
-              radius=Slot("radius", 8), strength=Slot("strength", 1.0), align=True)
+    relit = g("PaintAPlate_RelightTransfer", plate=small_lin, source=half(g, small_lin),
+              relit=g("ImageColorSpace", image=half(g, gen), source="sRGB", destination="linear"),
+              radius=Slot("radius", 4), strength=Slot("strength", 1.0), align=True)
     back = g("ImageColorSpace", image=relit, source="linear", destination="sRGB")
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=small, on_true=back)
     _, final = fitted(g, base, gen, union)
@@ -314,16 +319,17 @@ def export():
     gen = g("PaintAPlate_LoadPlate", _title="Generated shot", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
     union = mattes(g)
     gen_plate = g("ImageColorSpace", image=gen, source="sRGB", destination=Slot("color_space", "sRGB"))
-    # Relight: light from the regenerated shot, detail from the plate, all in linear light.
+    # Relight: light from the regenerated shot, detail from the plate, all in linear light. The plate as the
+    # model saw it is the same sRGB conversion every other workflow makes, so ComfyUI has it cached.
     size = g("GetImageSize", image=gen)
     source = g("ImageScale", image=g("ImageColorSpace", image=load, source=Slot("color_space", "sRGB"),
                                      destination="sRGB"),
                upscale_method="area", width=size[0], height=size[1], crop="disabled")
     relit = g("PaintAPlate_RelightTransfer",
               plate=g("ImageColorSpace", image=load, source=Slot("color_space", "sRGB"), destination="linear"),
-              source=g("ImageColorSpace", image=source, source="sRGB", destination="linear"),
-              relit=g("ImageColorSpace", image=gen, source="sRGB", destination="linear"),
-              radius=Slot("radius", 16), strength=Slot("strength", 1.0), align=True)
+              source=g("ImageColorSpace", image=half(g, source), source="sRGB", destination="linear"),
+              relit=g("ImageColorSpace", image=half(g, gen), source="sRGB", destination="linear"),
+              radius=Slot("radius", 8), strength=Slot("strength", 1.0), align=True)
     back = g("ImageColorSpace", image=relit, source="linear", destination=Slot("color_space", "sRGB"))
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=load, on_true=back)
     # the new pixels are matched to the plate they are composited onto: relit when the light changed

@@ -169,21 +169,21 @@
   }
  },
  "13": {
-  "class_type": "ImageColorSpace",
+  "class_type": "ImageScaleBy",
   "inputs": {
    "image": [
     "11",
     0
    ],
-   "source": "sRGB",
-   "destination": "linear"
+   "upscale_method": "area",
+   "scale_by": 0.5
   }
  },
  "14": {
   "class_type": "ImageColorSpace",
   "inputs": {
    "image": [
-    "2",
+    "13",
     0
    ],
    "source": "sRGB",
@@ -191,6 +191,28 @@
   }
  },
  "15": {
+  "class_type": "ImageScaleBy",
+  "inputs": {
+   "image": [
+    "2",
+    0
+   ],
+   "upscale_method": "area",
+   "scale_by": 0.5
+  }
+ },
+ "16": {
+  "class_type": "ImageColorSpace",
+  "inputs": {
+   "image": [
+    "15",
+    0
+   ],
+   "source": "sRGB",
+   "destination": "linear"
+  }
+ },
+ "17": {
   "class_type": "PaintAPlate_RelightTransfer",
   "inputs": {
    "plate": [
@@ -198,14 +220,14 @@
     0
    ],
    "source": [
-    "13",
-    0
-   ],
-   "relit": [
     "14",
     0
    ],
-   "radius": 16,
+   "relit": [
+    "16",
+    0
+   ],
+   "radius": 8,
    "strength": 1.0,
    "align": true
   },
@@ -216,11 +238,11 @@
    }
   }
  },
- "16": {
+ "18": {
   "class_type": "ImageColorSpace",
   "inputs": {
    "image": [
-    "15",
+    "17",
     0
    ],
    "source": "linear",
@@ -232,7 +254,7 @@
    }
   }
  },
- "17": {
+ "19": {
   "class_type": "ComfySwitchNode",
   "inputs": {
    "switch": false,
@@ -241,7 +263,7 @@
     0
    ],
    "on_true": [
-    "16",
+    "18",
     0
    ]
   },
@@ -251,11 +273,11 @@
    }
   }
  },
- "18": {
+ "20": {
   "class_type": "PaintAPlate_FitToPlate",
   "inputs": {
    "plate": [
-    "17",
+    "19",
     0
    ],
    "image": [
@@ -285,22 +307,22 @@
    "progress": true
   }
  },
- "19": {
+ "21": {
   "class_type": "ImageCompositeMasked",
   "inputs": {
    "destination": [
-    "17",
+    "19",
     0
    ],
    "source": [
-    "18",
+    "20",
     0
    ],
    "x": 0,
    "y": 0,
    "resize_source": false,
    "mask": [
-    "18",
+    "20",
     1
    ]
   },
@@ -308,11 +330,11 @@
    "title": "Composite"
   }
  },
- "20": {
+ "22": {
   "class_type": "PaintAPlate_SavePlate",
   "inputs": {
    "images": [
-    "19",
+    "21",
     0
    ],
    "plate": [
@@ -322,7 +344,7 @@
    "filename_prefix": "paintaplate/plate/export",
    "keep_untouched": true,
    "changed": [
-    "18",
+    "20",
     1
    ]
   },
@@ -335,20 +357,20 @@
    "output": "export"
   }
  },
- "21": {
+ "23": {
   "class_type": "MaskToImage",
   "inputs": {
    "mask": [
-    "18",
+    "20",
     1
    ]
   }
  },
- "22": {
+ "24": {
   "class_type": "ImageFromBatch",
   "inputs": {
    "image": [
-    "21",
+    "23",
     0
    ],
    "batch_index": 0,
@@ -358,11 +380,11 @@
    ]
   }
  },
- "23": {
+ "25": {
   "class_type": "SaveImage",
   "inputs": {
    "images": [
-    "22",
+    "24",
     0
    ],
    "filename_prefix": "paintaplate/plate/matte/matte"

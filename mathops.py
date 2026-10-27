@@ -314,15 +314,15 @@ def relight_frame(plate: np.ndarray, source: np.ndarray, relit: np.ndarray, radi
                   align: bool = True) -> np.ndarray:
     """One frame of Relight Transfer: `relit` aligned to `source`, then its light moved onto `plate`.
 
-    The ratio of light is smooth, so it is computed at half the size of `source` and enlarged.
+    The ratio of light is computed at the size of `source` and `relit`, then enlarged to the plate. Light
+    is smooth, so the workflows give them at half the plate's size: converting them to linear light then
+    costs a quarter. `radius` is in pixels of that size; a shift counts as misalignment up to 8 plate pixels.
     """
     if align:
-        dy, dx = phase_shift(structure(source), structure(relit), 8.0)
+        dy, dx = phase_shift(structure(source), structure(relit), 8.0 * source.shape[1] / plate.shape[1])
         if dy or dx:
             relit = ndimage.shift(relit, (dy, dx, 0), order=1, mode="nearest")
-    half = (0.5, 0.5, 1)
-    return relight(plate, ndimage.zoom(source, half, order=1), ndimage.zoom(relit, half, order=1),
-                   max(1, radius // 2), strength).astype(np.float32)
+    return relight(plate, source, relit, max(1, radius), strength).astype(np.float32)
 
 
 GRAIN_UNIT = _grain_unit()

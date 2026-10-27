@@ -19,7 +19,9 @@ const FULL = { steps: +Q.get("refine") || 8, denoise: 0.35, feather: 12, sigma: 
 const CACHE_MB = +Q.get("cache") || 384; // decoded frames kept per video: about 180 frames at 960 x 544
 const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-size edits, quick edits, SAM tracking
 const PREVIEW_SIDES = [960, 640, 448]; // the preview sizes offered: Standard, Fast, Draft
-const EDIT_GROW = { erase: 24, paint: 48, light: 48 }; // an edit mask grows by the frame width over this
+// An edit mask grows by the frame width over this: 27 px at 1280, enough for the object's edge. At 24 an erase reached
+// what stood next to the object, and Klein sometimes took it too (a head under an umbrella, one seed in five).
+const EDIT_GROW = 48;
 const HOLE_EDGE = 16; // the erased object filled before LTX: grown and softened by the width over this
 const COMPOSITE_GROW = { erase: 24, other: 160 }, COMPOSITE_FEATHER = 96; // the composite's matte edge, same rule
 const IDLE_MS = 1500; // quiet time after editing before a render starts
@@ -654,7 +656,7 @@ async function generate(edit) {
     const reference = await uploadCanvas(editImage(edit, before, size), `${tag}_ref.png`);
     const values = { base, reference, start: light ? base : reference, caption: captionOf(edit), steps: QUICK.steps, seed: edit.seed,
       mask: await uploadCanvas(maskAt(edit, size), `${tag}_mask.png`), denoise: light ? QUICK.lightDenoise : QUICK.denoise,
-      grow: Math.round(size[0] / reach(edit)), feather: QUICK.feather, sigma: QUICK.sigma };
+      grow: Math.round(size[0] / EDIT_GROW), feather: QUICK.feather, sigma: QUICK.sigma };
     const quick = await run("edit", values, { kind: "edit", front: true, preview: show, progress: (f) => editProgress(edit, f / 2) }).done;
     if (!alive()) return;
     edit.preview = await loadImage(viewUrl(outputFile("edit", quick, "patch")));
@@ -669,7 +671,7 @@ async function generate(edit) {
       // an erase refines the quick result, which has no object left: shown the original, Klein drew part of it back
       reference: edit.tool === "erase" ? startName : await uploadCanvas(editImage(edit, before, work), `${tag}_ref_full.png`),
       mask: await uploadCanvas(maskAt(edit, work), `${tag}_mask_full.png`), steps: FULL.steps, denoise: FULL.denoise,
-      grow: Math.round(work[0] / reach(edit)), feather: FULL.feather, sigma: FULL.sigma }, { kind: "edit", front: true,
+      grow: Math.round(work[0] / EDIT_GROW), feather: FULL.feather, sigma: FULL.sigma }, { kind: "edit", front: true,
       progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
     if (!alive()) return;
     edit.patch = await loadImage(viewUrl(outputFile("edit", full, "patch")));
@@ -690,7 +692,6 @@ async function generate(edit) {
   }
 }
 
-const reach = (e) => EDIT_GROW[e.tool];
 
 async function snapErase(edit, before) { // SAM 3.1 grows the erase strokes to the whole object under them
   const size = S.plate.prev, k = size[0] / S.plate.work[0];

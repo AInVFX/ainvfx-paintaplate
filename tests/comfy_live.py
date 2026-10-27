@@ -256,7 +256,8 @@ def main():
                     frames = plateio.probe_video(os.path.join(output_dir, vids[0]["subfolder"], vids[0]["filename"]))["frames"] if ok else -1
                     check(ok and frames in (N, 0), f"comp {run}: composite MP4 in {dt:.1f} s, {frames} frames" + (f" -> {err}" if err else ""))
                 exp_dir = f"{shot}/export"
-                shutil.rmtree(os.path.join(output_dir, exp_dir), ignore_errors=True)
+                for folder in (exp_dir, f"{shot}/matte"):  # a second run on the same ComfyUI starts clean
+                    shutil.rmtree(os.path.join(output_dir, folder), ignore_errors=True)
                 res = submit(url, fill("export", {"path": path, "color_space": cs, "max_frames": N, "shot": f"output:{shot}/shot",
                                                   "matte_a": f"output:{shot}/matte_a", "matte_b": f"output:{shot}/matte_a",
                                                   "relight": relight, "keep_untouched": not relight, "prefix": exp_dir,

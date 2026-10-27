@@ -48,7 +48,11 @@ class MathOps(unittest.TestCase):
         out = m.relight_frame(base, source, relit, radius=8, strength=1.0, align=True)
         ratio = out[20:-20, 20:-20] / base[20:-20, 20:-20]
         assert abs(np.median(ratio) - 1.5) < 0.05, np.median(ratio)
-        print(f"relight frame: ok (median ratio {np.median(ratio):.3f})")
+        half = lambda im: ndimage.zoom(im, (0.5, 0.5, 1), order=1)  # noqa: E731
+        small = m.relight_frame(base, half(source), half(relit), radius=4, strength=1.0, align=True)
+        assert small.shape == base.shape  # measured at half size, applied at the plate's
+        assert abs(np.median(small[20:-20, 20:-20] / base[20:-20, 20:-20]) - 1.5) < 0.05
+        print(f"relight frame: ok (median ratio {np.median(ratio):.3f}, the same from half-size inputs)")
 
     def test_relight_keeps_detail(self):
         plate = base * 3.0  # values above 1.0, like an EXR

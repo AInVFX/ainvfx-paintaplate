@@ -270,10 +270,12 @@ class RelightTransfer(io.ComfyNode):
                         "stay the plate's. All three inputs are linear light.",
             inputs=[
                 io.Image.Input("plate", tooltip="The plate in linear light, any size."),
-                io.Image.Input("source", tooltip="The plate as the model saw it, in linear light."),
+                io.Image.Input("source", tooltip="The plate as the model saw it, in linear light. The light is "
+                               "measured at this size: half the plate's size is plenty, light is smooth."),
                 io.Image.Input("relit", tooltip="The regenerated shot, same size as 'source', in linear light."),
-                io.Int.Input("radius", default=16, min=1, max=256,
-                             tooltip="Detail size kept from the plate. Lower lets sharper new shadows through."),
+                io.Int.Input("radius", default=8, min=1, max=256,
+                             tooltip="Detail size kept from the plate, in pixels of 'source'. Lower lets sharper "
+                                     "new shadows through."),
                 io.Float.Input("strength", default=1.0, min=0.0, max=2.0, step=0.05),
                 io.Boolean.Input("align", default=True, tooltip="Remove a small shift of 'relit' first."),
             ],

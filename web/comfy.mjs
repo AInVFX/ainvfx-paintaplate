@@ -89,12 +89,22 @@ async function finish(id, error) {
   }
   live.delete(job);
   if (error) return job.reject(new Error(error));
-  const history = await (await fetch(`/history/${id}`)).json();
-  let out = history[id]?.outputs ?? {};
+  let out = (await historyRecord(id))?.outputs ?? {};
   if (files(out).length || Object.values(out).some((o) => o.text?.length)) memo.set(job.key, out);
   else out = memo.get(job.key) ?? out;
   if (memo.size > MEMO_MAX) memo.delete(memo.keys().next().value);
   job.resolve(out);
+}
+
+// ComfyUI reports success from inside the run and records the history just after (execution.py, then main.py's
+// task_done): read too early, the record is missing and the outputs look empty. So wait for the record.
+export async function historyRecord(id, { tries = 100, wait = 100 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    const record = (await (await fetch(`/history/${id}`)).json())[id];
+    if (record?.status?.completed || record?.status?.status_str === "error") return record;
+    await new Promise((ok) => setTimeout(ok, wait));
+  }
+  return null;
 }
 
 function drop(job) { // remove it from the queue, and stop it if it is the one running (ComfyUI checks the id)
