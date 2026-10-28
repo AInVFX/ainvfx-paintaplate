@@ -51,6 +51,7 @@ const HINT = {
   erase: "Optional: name what to remove, then paint over it. A red umbrella, a man in a coat",
   light: "Optional: describe the light, then paint where it comes from. Warm sunset, neon sign",
 };
+const FLUID_MISSING = "Fluid shots need ainvfx-fluid.safetensors in models/loras: download it from huggingface.co/AInVFX/ainvfx-fluid (folder ltx-2.5).";
 const FLUID_HINT = "Describe the fluid: smoke plume, wild fire, thick white steam (ainvfxfluid is added)";
 
 const S = {
@@ -849,7 +850,7 @@ function keysUI(force = false) { // the keyframe diamonds on the timeline, over 
 
 async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-fluid: the keyframes become smoke, steam or fire
   const p = S.plate, f = S.fluid;
-  if (!S.fluidReady) return status("Fluid shots need ainvfx-fluid.safetensors in models/loras: see the README.");
+  if (!S.fluidReady) return status(FLUID_MISSING);
   if (!f.keys.length) return status("Paint a keyframe first: flat colour blobs on frame 0 and on the last frame.");
   if (another) f.seed = (Math.random() * 2 ** 31) | 0;
   cancel("fluid");
@@ -901,12 +902,12 @@ const blankForm = () => blankSpec({ width: $("#b-width").value, height: $("#b-he
 function blankNote() { // what the blank plate will be, snapped to what LTX and ainvfx-fluid take
   const s = blankForm();
   $("#b-note").textContent = `${s.width} × ${s.height}, ${s.frames} frames at ${s.fps} fps: ${(s.frames / s.fps).toFixed(2)} s.` +
-    (s.frames === FLUID.tested ? "" : ` ${FLUID.tested} frames is the tested length.`) + (S.fluidReady ? "" : " Needs ainvfx-fluid.safetensors in models/loras.");
+    (s.frames === FLUID.tested ? "" : ` ${FLUID.tested} frames is the tested length.`) + (S.fluidReady ? "" : ` ${FLUID_MISSING}`);
   $("#blank-go").disabled = !S.fluidReady;
 }
 
 async function openBlank() { // a black canvas LTX and ainvfx-fluid take, then a fluid shot on it
-  if (!S.fluidReady) return status("Fluid shots need ainvfx-fluid.safetensors in models/loras: see the README.");
+  if (!S.fluidReady) return status(FLUID_MISSING);
   const spec = blankForm(), r = await post("/paintaplate/blank", spec);
   if (!r.ok) throw new Error(await r.text());
   const { path } = await r.json();
@@ -1942,7 +1943,7 @@ async function boot() { // the workflows, the WebSocket, then what this ComfyUI 
   const combo = (spec) => (Array.isArray(spec?.[0]) ? spec[0] : spec?.[1]?.options ?? []); // V1 or V3 schema
   const spaces = combo((await objectInfo("ImageColorSpace"))?.input.required.source);
   $("#cs").replaceChildren(...(spaces.length ? spaces : ["sRGB"]).map((s) => new Option(s, s)));
-  const needs = { PaintAPlate_LoadPlate: "this pack", PaintAPlate_FillMatte: "this pack, restart ComfyUI after an update",
+  const needs = { PaintAPlate_LoadPlate: "this pack",
     PaintAPlate_BoxMatte: "this pack, restart ComfyUI after an update", LTXAddVideoICLoRAGuide: "ComfyUI-LTXVideo",
     LTXVInpaintPreprocess: "ComfyUI-LTXVideo", SAM3_VideoTrack: "ComfyUI 0.42 or newer", ReferenceMultiLatent: "ComfyUI 0.41 or newer",
     TextGenerate: "ComfyUI 0.41 or newer" };
@@ -1960,7 +1961,7 @@ async function boot() { // the workflows, the WebSocket, then what this ComfyUI 
   S.fluidReady = !absent.some(only) && !!info.PaintAPlate_KeyframeVideo && !!info.LTXICLoRALoaderModelOnly; // fluid shots are optional
   if (!S.fluidReady) log(`Fluid shots are off: ${absent.filter(only).join(", ") || "update this pack and ComfyUI-LTXVideo"} (blank plates need ainvfx-fluid in models/loras).`);
   const missingFiles = absent.filter((file) => !only(file));
-  if (missingFiles.length) return status(`Missing model files: ${missingFiles.join(", ")}. See the README for where to put them.`);
+  if (missingFiles.length) return status(`Missing model files: ${missingFiles.join(", ")}. tools/pod_setup.sh lists each one with its models folder and downloads it.`);
   log(`Page ready in ${Math.round(performance.now() - t0)} ms: ${WORKFLOWS.length} workflows, ${classes.length} node classes and ${models.size} model files checked`);
   status("Ready. Open a plate to start. The models load in the background.");
   warmAll().catch(() => {}); // a ComfyUI that reports no GPU details simply skips it

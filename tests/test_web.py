@@ -67,6 +67,12 @@ class Page(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual({k: tuple(v) for k, v in json.loads(r.stdout).items()}, build_workflows.OPTIONAL)
 
+    def test_page_and_python_share_the_ripple_sentence(self):
+        """The shot prompt starts with one Ripple sentence: the page's (logic.RIPPLE) is the workflow's default."""
+        code = "import('./web/logic.mjs').then((m) => console.log(JSON.stringify(m.RIPPLE)))"
+        r = subprocess.run([node(), "--input-type=module", "-e", code], capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(json.loads(r.stdout), build_workflows.RIPPLE_PROMPT)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

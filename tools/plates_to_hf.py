@@ -1,6 +1,6 @@
-"""Publish the test plates as a Hugging Face dataset, then take them out of git.
+"""Publish test plates to a Hugging Face dataset, with clean metadata and a card.
 
-    HF_TOKEN=hf_... python tools/plates_to_hf.py [--repo AInVFX/ainvfx-paintaplate] [--src tests/plates] [--dry-run]
+    HF_TOKEN=hf_... python tools/plates_to_hf.py [--repo AInVFX/ainvfx-paintaplate] --src <folder of MP4 plates> [--dry-run]
 
 What it does, in order:
 1. Re-muxes every MP4 into a temporary folder with the streams copied bit for bit and the container metadata replaced.
@@ -9,7 +9,6 @@ What it does, in order:
 2. Writes the dataset card (README.md, marked WIP, CC BY 4.0) with a table of the plates. It replaces the card the
    repository was created with.
 3. Creates the dataset repository if needed, uploads the folder in one commit and lists what arrived.
-4. Says how to take tests/plates out of the repository: the second patch of 0.4.3, or git rm.
 
 Needs huggingface_hub (pip install huggingface_hub) and PyAV (the pack's own requirement). A `hf download` of the
 dataset into ComfyUI/input/plates is what tools/pod_setup.sh does with PLATES=1.
@@ -110,7 +109,7 @@ def remux(src: str, dst: str) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--repo", default="AInVFX/ainvfx-paintaplate", help="the dataset repository (default AInVFX/ainvfx-paintaplate)")
-    ap.add_argument("--src", default=os.path.join(os.path.dirname(__file__), "..", "tests", "plates"))
+    ap.add_argument("--src", required=True, help="the folder of MP4 plates to publish (plates never go in git)")
     ap.add_argument("--private", action="store_true", help="create the repository private")
     ap.add_argument("--dry-run", action="store_true", help="prepare the folder and the card, upload nothing")
     a = ap.parse_args()
@@ -149,7 +148,7 @@ def main() -> int:
     missing = sorted(set(names) - set(arrived))
     print(f"Uploaded: {len(arrived)} plates at https://huggingface.co/datasets/{a.repo}")
     if missing:
-        print(f"Missing on the Hub: {missing}. Run the script again before you take the plates out of git.", file=sys.stderr)
+        print(f"Missing on the Hub: {missing}. Run the script again.", file=sys.stderr)
         return 1
     shutil.rmtree(work, ignore_errors=True)
     print("\nNow take the plates out of git, from the repository root:\n"

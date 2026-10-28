@@ -26,6 +26,18 @@ test("frames stay within the budget, the least useful going first, never one mor
   assert.equal(cache.bytes, 1200);
 });
 
+test("evicting a frame frees its own size, whatever the size of the new one", () => {
+  const view = { fps: 24, frame: 0, inPt: 0, outPt: 99 };
+  const cache = new FrameCache(video("a.mp4"), { view: () => view, changed: () => {}, budget: 1000 });
+  cache.reset();
+  const big = { width: 20, height: 10, closed: false, close() { this.closed = true; } }; // 800 bytes
+  cache.put(5, big);
+  const small = frame(); // 400 bytes, on the playhead: the big frame goes
+  cache.put(0, small);
+  assert.ok(big.closed && cache.get(0) === small);
+  assert.equal(cache.bytes, 400);
+});
+
 test("a new source empties the cache", () => {
   let src = "a.mp4";
   const cache = new FrameCache({ getAttribute: () => src }, { view: () => ({ fps: 24, frame: 0, inPt: 0, outPt: 9 }) });

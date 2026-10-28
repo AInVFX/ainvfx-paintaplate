@@ -145,5 +145,19 @@ class Keyframes(unittest.TestCase):
         self.assertAlmostEqual(float(video[8].mean()), 0.3, places=5)  # frame 99 clamped to the last frame
         self.assertEqual(float(video[1:8].max()), 0.0)
 
+class ResizeTo(unittest.TestCase):
+    def test_resize_matches_scipy_zoom(self):
+        """resize_to gives scipy's zoom (order 1, grid_mode, edges clamped), larger and smaller, colour and masks."""
+        img = np.random.default_rng(3).random((37, 53, 3), dtype=np.float32)
+        for h, w in ((64, 90), (20, 31), (37, 80)):
+            ref = ndimage.zoom(img, (h / 37, w / 53, 1), order=1, grid_mode=True, mode="nearest")
+            got = m.resize_to(img, h, w)
+            self.assertEqual(got.shape, (h, w, 3))
+            self.assertLess(float(np.abs(got - ref).max()), 1e-5)
+        mask = ndimage.zoom(img[..., 0], (20 / 37, 31 / 53), order=1, grid_mode=True, mode="nearest")
+        self.assertLess(float(np.abs(m.resize_to(img[..., 0], 20, 31) - mask).max()), 1e-5)
+        self.assertIs(m.resize_to(img, 37, 53), img)  # the same size: no copy
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -4,9 +4,9 @@
 // ---------- Workflows as data ----------
 
 // Optional links: when every source slot is left empty, the link goes, with every node that fed it. The same rule as
-// tools/build_workflows.py (OPTIONAL there; a test checks they match): no erase, nothing to fill before LTX; a relight
-// alone, no matte to composite with, nor to save (the export's "matte" output goes with it).
-export const OPTIONAL = { hole_mask: ["hole"], fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"] };
+// tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
+// no matte to composite with, nor to save (the export's "matte" output goes with it).
+export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"] };
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
   const slots = {}, outputs = {}, progress = new Set();

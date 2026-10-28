@@ -22,6 +22,11 @@ INOUTPAINT = "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors"
 SAM = "sam3.1_multiplex_fp16.safetensors"
 TINY = "taeltx2_3.safetensors"  # the tiny LTX 2.5 decoder of the live preview (models/vae_approx)
 FLUID = "ainvfx-fluid.safetensors"  # AInVFX's IC-LoRA: painted keyframes become smoke, steam or fire (models/loras)
+KLEIN_TEXT = "qwen3vl_4b_int8_convrot.safetensors"  # FLUX 3 Image Klein's text encoder (models/text_encoders)
+KLEIN_VAE = "flux2-vae.safetensors"  # its VAE (models/vae)
+LTX_VAE = "ltx-2.5-video-vae-conv-bf16.safetensors"  # LTX 2.5's video VAE (models/vae)
+LTX_AUDIO_VAE = "ltx-2.5-audio-vae-bf16.safetensors"  # its audio VAE (models/vae)
+RIPPLE_LORA = "LTX25_Ripple_v11.safetensors"  # WepeNerd's Ripple IC-LoRA, which carries paint and light (models/loras)
 FLUID_NEGATIVE = "blurry, low quality, distorted, watermark"  # the negative prompt of its model card's samples
 SNAP_POINTS = 5  # stroke points SAM looks at one by one
 # Lightricks' distilled schedule from the official LTX 2.5 inpaint workflow (stage 1, euler_ancestral)
@@ -109,9 +114,9 @@ def load(name, folder=None):
 
 
 # Optional links: when every source slot is left empty, the link goes, with every node that fed it
-# (no erase: nothing to fill before LTX; a relight alone: no matte to composite with or to save).
+# (a relight alone: no matte to composite with or to save).
 # no words for an erase: no search by name; not a relight: no light transfer on the edited frame.
-OPTIONAL = {"hole_mask": ("hole",), "fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",)}
+OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -191,8 +196,8 @@ def edit():
     """One FLUX 3 Image Klein edit inside a mask: the edited frame, and the edit alone as an RGBA patch."""
     g = Graph()
     model = g("UNETLoader", unet_name=Slot("klein", KLEIN), weight_dtype="default")
-    clip = g("CLIPLoader", clip_name="qwen3vl_4b_int8_convrot.safetensors", type="flux3", device="default")
-    vae = g("VAELoader", vae_name=Slot("vae", "flux2-vae.safetensors"))
+    clip = g("CLIPLoader", clip_name=KLEIN_TEXT, type="flux3", device="default")
+    vae = g("VAELoader", vae_name=Slot("vae", KLEIN_VAE))
     base = g("LoadImage", _title="Frame before the edit", image=Slot("base", ""))
     reference = g("LoadImage", _title="Reference: the strokes", image=Slot("reference", ""))
     start = g("LoadImage", _title="Start image", image=Slot("start", ""))
@@ -271,8 +276,8 @@ def clean():
                       model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"),
                       lora_name=Slot("inoutpaint", INOUTPAINT), strength_model=1.0), size, load)
     clip = g("CLIPLoader", clip_name=Slot("gemma", GEMMA), type="ltxv", device="default")
-    vae = g("VAELoader", vae_name=Slot("video_vae", "ltx-2.5-video-vae-conv-bf16.safetensors"))
-    audio_vae = g("VAELoader", vae_name="ltx-2.5-audio-vae-bf16.safetensors")
+    vae = g("VAELoader", vae_name=Slot("video_vae", LTX_VAE))
+    audio_vae = g("VAELoader", vae_name=LTX_AUDIO_VAE)
     cond = g("LTXVConditioning", positive=g("CLIPTextEncode", text="", clip=clip),
              negative=g("CLIPTextEncode", text=NEGATIVE, clip=clip), frame_rate=load[3])
     first = g("ImageScale", image=g("LoadImage", _title="Erased first frame", image=Slot("hero", "")), upscale_method="lanczos",
@@ -297,28 +302,26 @@ def clean():
 
 
 def shot():
-    """LTX 2.5 with the Ripple IC-LoRA: the edited first frame carries through the whole shot."""
+    """LTX 2.5 with the Ripple IC-LoRA: the edited first frame carries through the whole shot.
+
+    When an edit erases, the page gives this workflow the erase pass's result as its plate, so nothing is filled here.
+    """
     g = Graph()
     load, srgb = plate(g, pad=True)
     scaled = g("ImageScale", image=srgb, upscale_method="lanczos", width=Slot("width", 960),
                height=Slot("height", 544), crop="disabled")
-    # what an erase takes away, filled in the frames LTX follows: shown the object, LTX kept its shape
-    hole = g("PaintAPlate_LoadPlate", _title="Erase matte", path=Slot("hole", ""), max_frames=1024, pad_8n1=False)
-    frames = g("PaintAPlate_FillMatte", _title="Erased objects filled", images=scaled,
-               mask=g("ImageToMask", image=hole, channel="red"), grow=Slot("hole_grow", 60), feather=Slot("hole_feather", 60))
-    g.link_slot(frames, "mask", "hole_mask")  # the page drops this link when no edit erases
-    size = g("GetImageSize", image=frames)
+    size = g("GetImageSize", image=scaled)
     hero = g("ImageScale", image=g("LoadImage", _title="Edited first frame", image=Slot("hero", "")),
              upscale_method="lanczos", width=size[0], height=size[1], crop="disabled")
-    rest = g("ImageFromBatch", image=frames, batch_index=1, length=4096)
+    rest = g("ImageFromBatch", image=scaled, batch_index=1, length=4096)
     reference = g("BatchImagesNode", _title="Reference: first frame replaced", images__image0=hero,
                   images__image1=rest)
     model = live(g, g("LoraLoaderModelOnly", _title="Ripple IC-LoRA",
                       model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"),
-                      lora_name=Slot("ripple", "LTX25_Ripple_v11.safetensors"), strength_model=Slot("strength", 1.35)), size, load)
+                      lora_name=Slot("ripple", RIPPLE_LORA), strength_model=Slot("strength", 1.35)), size, load)
     clip = g("CLIPLoader", clip_name=Slot("gemma", GEMMA), type="ltxv", device="default")
-    vae = g("VAELoader", vae_name=Slot("video_vae", "ltx-2.5-video-vae-conv-bf16.safetensors"))
-    audio_vae = g("VAELoader", vae_name="ltx-2.5-audio-vae-bf16.safetensors")
+    vae = g("VAELoader", vae_name=Slot("video_vae", LTX_VAE))
+    audio_vae = g("VAELoader", vae_name=LTX_AUDIO_VAE)
     cond = g("LTXVConditioning", positive=g("CLIPTextEncode", text=Slot("prompt", RIPPLE_PROMPT), clip=clip),
              negative=g("CLIPTextEncode", text=NEGATIVE, clip=clip), frame_rate=load[3])
     empty = g("EmptyLTXVLatentVideo", width=size[0], height=size[1], length=size[2], batch_size=1)
@@ -348,7 +351,7 @@ def matte():
     _, srgb = plate(g, pad=True)
     frames = g("ImageScale", image=srgb, upscale_method="area", width=Slot("width", 960),
                height=Slot("height", 544), crop="disabled")
-    sam = g("CheckpointLoaderSimple", ckpt_name=Slot("sam", "sam3.1_multiplex_fp16.safetensors"))
+    sam = g("CheckpointLoaderSimple", ckpt_name=Slot("sam", SAM))
     track = g("SAM3_VideoTrack", _progress=True, images=frames, model=sam,
               initial_mask=g("LoadImageMask", _title="Area on the first frame", image=Slot("mask", ""),
                              channel="red"),
@@ -447,8 +450,8 @@ def warm():
     """LTX 2.5, Gemma and both VAEs loaded with one step on a tiny latent, while the person looks at the page."""
     g = Graph()
     clip = g("CLIPLoader", clip_name=Slot("gemma", GEMMA), type="ltxv", device="default")
-    vae = g("VAELoader", vae_name=Slot("video_vae", "ltx-2.5-video-vae-conv-bf16.safetensors"))
-    audio_vae = g("VAELoader", vae_name="ltx-2.5-audio-vae-bf16.safetensors")
+    vae = g("VAELoader", vae_name=Slot("video_vae", LTX_VAE))
+    audio_vae = g("VAELoader", vae_name=LTX_AUDIO_VAE)
     model = g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default")
     cond = g("LTXVConditioning", positive=g("CLIPTextEncode", text="warm up", clip=clip),
              negative=g("CLIPTextEncode", text="", clip=clip), frame_rate=24.0)
@@ -481,8 +484,8 @@ def fluid():
              strength_model=Slot("strength", 1.0))
     model = live(g, lora, size, load)
     clip = g("CLIPLoader", clip_name=Slot("gemma", GEMMA), type="ltxv", device="default")
-    vae = g("VAELoader", vae_name=Slot("video_vae", "ltx-2.5-video-vae-conv-bf16.safetensors"))
-    audio_vae = g("VAELoader", vae_name="ltx-2.5-audio-vae-bf16.safetensors")
+    vae = g("VAELoader", vae_name=Slot("video_vae", LTX_VAE))
+    audio_vae = g("VAELoader", vae_name=LTX_AUDIO_VAE)
     cond = g("LTXVConditioning", positive=g("CLIPTextEncode", text=Slot("prompt", "ainvfxfluid, smoke plume"), clip=clip),
              negative=g("CLIPTextEncode", text=FLUID_NEGATIVE, clip=clip), frame_rate=load[3])
     empty = g("EmptyLTXVLatentVideo", width=size[0], height=size[1], length=size[2], batch_size=1)

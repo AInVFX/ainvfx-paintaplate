@@ -50,9 +50,20 @@ class Workflows(unittest.TestCase):
         """The page picks results by output name, not by position."""
         wanted = {"ingest": {"hero", "proxy", "spec"}, "prompt": {"text"}, "edit": {"patch", "relit", "result"},
                   "snap": {"named"} | {f"point_{k}" for k in range(5)}, "clean": {"frames", "video"}, "shot": {"frames", "video"},
-                  "matte": {"frames"}, "comp": {"video"}, "export": {"export", "matte", "review"}, "warm": {"frame"}}
+                  "matte": {"frames"}, "comp": {"video"}, "export": {"export", "matte", "review"}, "warm": {"frame"},
+                  "fluid": {"plate", "video"}}
         for name, keys in wanted.items():
             self.assertEqual(set(build_workflows.load(name, WORKFLOWS)[2]), keys, name)
+
+    def test_setup_downloads_every_model_file(self):
+        """tools/pod_setup.sh downloads every model file a workflow loads: the two lists never drift apart."""
+        import glob, json, re
+        setup = open(os.path.join(ROOT, "tools", "pod_setup.sh")).read()
+        fetched = {os.path.basename(f) for f in re.findall(r"\bget \S+ (\S+\.safetensors) \S+", setup)}
+        loaded = {v for f in glob.glob(os.path.join(WORKFLOWS, "*.json")) for n in json.load(open(f)).values()
+                  for v in n["inputs"].values() if isinstance(v, str) and v.endswith(".safetensors")}
+        self.assertTrue(loaded)
+        self.assertEqual(loaded - fetched, set())
 
     @unittest.skipUnless(COMFY and os.path.isdir(LTX), "set COMFYUI_DIR (and LTXVIDEO_DIR) to check against source")
     def test_classes_and_inputs_exist_in_source(self):

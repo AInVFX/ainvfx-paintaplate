@@ -311,9 +311,9 @@ class FillMatte(io.ComfyNode):
             node_id="PaintAPlate_FillMatte",
             display_name="Fill Matte",
             category=CATEGORY,
-            description="Fills the masked area of every frame from the pixels around it, as a smooth blur. Before "
-                        "LTX follows a plate, it removes what an erase takes away: shown the object in the plate, "
-                        "LTX kept its shape in every frame and painted it in the colours of the background.",
+            description="Fills the masked area of every frame from the pixels around it, as a smooth blur, before "
+                        "LTX follows the frames: shown an object, LTX kept its shape. A standalone node: "
+                        "PaintAPlate's own workflows erase with the in-outpainting IC-LoRA instead.",
             inputs=[
                 io.Image.Input("images", tooltip="The frames, any size."),
                 io.Mask.Input("mask", optional=True, tooltip="The area to fill, any size; a short batch repeats its "

@@ -3,13 +3,15 @@
 #   HF_TOKEN=... [PLATES=1] bash tools/pod_setup.sh [comfyui_ref] [ltxvideo_ref]
 # PLATES=1 also downloads the AInVFX test plates into ComfyUI's input/plates folder (tools/get_plates.sh);
 # FLUID=0 skips AInVFX's ainvfx-fluid IC-LoRA (0.65 GB), which the blank plate's fluid shots need.
-# The refs default to the tested commits. The pack is the repo this script lives in.
+# The refs default to the tested commits, in tools/pins.sh. The pack is the repo this script lives in.
 # Code, models and pins live in $WORKDIR (a network volume survives the pod); the Python env
 # goes on the fast container disk. Accept the Hugging Face licences of FLUX 3 Image Klein,
 # LTX 2.5 and the LTX in-outpainting IC-LoRA first: the downloads use your token.
 set -euo pipefail
 W=${WORKDIR:-/workspace}; VENV=${VENV:-/opt/venv}
-COMFY_REF=${1:-${COMFY_REF:-426f5eea}}; LTX_REF=${2:-${LTX_REF:-220e1d4}}
+# shellcheck source-path=SCRIPTDIR source=pins.sh
+. "$(dirname "$0")/pins.sh"
+COMFY_REF=${1:-${COMFY_REF:-$COMFY_PIN}}; LTX_REF=${2:-${LTX_REF:-$LTX_PIN}}
 PACK=${PACK:-$(cd "$(dirname "$0")/.." && pwd)}
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 # Code comes from GitHub, or from an upload when a pod cannot reach it (tools/offline_bundle.sh).

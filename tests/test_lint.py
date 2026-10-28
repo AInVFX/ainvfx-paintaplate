@@ -17,7 +17,7 @@ class Lint(unittest.TestCase):
 
     def test_shellcheck(self):
         shellcheck = tool("shellcheck", f"{INSTALL} (it brings shellcheck-py), or install shellcheck")
-        r = subprocess.run([shellcheck, *glob.glob(os.path.join(ROOT, "tools", "*.sh"))], capture_output=True, text=True)
+        r = subprocess.run([shellcheck, "-x", *glob.glob(os.path.join(ROOT, "tools", "*.sh"))], capture_output=True, text=True)  # -x: pins.sh
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 

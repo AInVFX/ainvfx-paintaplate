@@ -10,7 +10,7 @@ from server import PromptServer
 from . import routes
 from .nodes import NODES
 
-routes.setup(PromptServer.instance)  # the page's download route
+routes.setup(PromptServer.instance)  # the page's routes: download, plate list, thumbnails, blank plate
 
 WEB_DIRECTORY = "./web"
 

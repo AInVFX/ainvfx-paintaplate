@@ -1,4 +1,4 @@
-"""The page's HTTP routes: the export download, and the plate browser of the Open dialog.
+"""The page's HTTP routes: the export download, the plate browser of the Open dialog, and the blank plate.
 
     GET /paintaplate/download?run=paintaplate/<plate>/v3&name=shot010_paintaplate_v3&parts=export,matte
     GET /paintaplate/plates                      the plates in input/plates, as JSON (see list_plates)

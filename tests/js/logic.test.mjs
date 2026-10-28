@@ -110,15 +110,15 @@ test("the frame cache keeps the frame on screen first, frames ahead before frame
 });
 
 test("optional links drop with what fed them when their slots are empty", () => {
-  const shot = workflow("shot");
-  const bare = fillWorkflow(shot, { path: "plate.mp4" });
-  assert.equal(classes(bare).filter((c) => c === "PaintAPlate_LoadPlate").length, 1); // no erase matte loader
-  const fill = Object.values(bare.prompt).find((n) => n.class_type === "PaintAPlate_FillMatte");
-  assert.equal(fill.inputs.mask, undefined); // frames pass through untouched
-  assert.equal(classes(fillWorkflow(shot, { path: "plate.mp4", hole: "output:m" })).filter((c) => c === "PaintAPlate_LoadPlate").length, 2);
+  const comp = workflow("comp");
+  const bare = fillWorkflow(comp, { path: "plate.mp4", shot: "output:s" });
+  const fit = (wf) => Object.values(wf.prompt).find((n) => n.class_type.includes("FitToPlate"));
+  assert.equal(fit(bare).inputs.mask, undefined); // no matte: the link goes
+  const matted = fillWorkflow(comp, { path: "plate.mp4", shot: "output:s", matte_a: "output:m" });
+  assert.ok(fit(matted).inputs.mask && Object.keys(matted.prompt).length > Object.keys(bare.prompt).length); // with what fed it
   const relight = fillWorkflow(workflow("export"), { path: "plate.exr", shot: "output:s", relight: true });
   assert.equal(Object.values(relight.prompt).some((n) => n._meta?.output === "matte"), false); // no matte to save
-  assert.equal(shot.prompt[shot.slots.path[0][0]].inputs.path, ""); // filling copies: the parsed workflow stays as saved
+  assert.equal(comp.prompt[comp.slots.path[0][0]].inputs.path, ""); // filling copies: the parsed workflow stays as saved
 });
 
 test("every workflow names the outputs and the progress node the page reads", () => {

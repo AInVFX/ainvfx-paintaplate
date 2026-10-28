@@ -33,9 +33,10 @@ export class FrameCache {
       let worst = null, low = Infinity;
       for (const k of this.frames.keys()) { const u = this.use(k); if (u < low) { low = u; worst = k; } }
       if (low >= want) return void bitmap.close();
-      this.frames.get(worst).close();
+      const old = this.frames.get(worst);
+      this.bytes -= old.width * old.height * 4; // the evicted frame's own size, read before close() zeroes it
+      old.close();
       this.frames.delete(worst);
-      this.bytes -= size;
     }
     this.frames.set(f, bitmap);
     this.bytes += size;

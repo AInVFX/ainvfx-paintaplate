@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 .ci/
+# test plates live on the Hugging Face dataset AInVFX/ainvfx-paintaplate, never in git
+tests/plates/

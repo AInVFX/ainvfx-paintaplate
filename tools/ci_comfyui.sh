@@ -6,8 +6,10 @@ set -euo pipefail
 W=${1:-$PWD/.ci}
 PACK=$(cd "$(dirname "$0")/.." && pwd)
 PY=${PYTHON:-python}
-COMFY_REF=${COMFY_REF:-426f5eea}
-LTX_REF=${LTX_REF:-220e1d4}
+# shellcheck source-path=SCRIPTDIR source=pins.sh
+. "$(dirname "$0")/pins.sh"
+COMFY_REF=${COMFY_REF:-$COMFY_PIN}
+LTX_REF=${LTX_REF:-$LTX_PIN}
 C="$W/ComfyUI"
 mkdir -p "$W"
 [ -d "$C" ] || git clone -q --filter=blob:none https://github.com/comfyanonymous/ComfyUI "$C"
