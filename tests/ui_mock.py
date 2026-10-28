@@ -4,7 +4,8 @@
 
 Opens a plate from the plate browser, paints two edits, removes one, undoes and redoes, selects an edit and retypes its
 words, tries another seed with Ctrl+Enter, undoes three steps, changes the preview size, uses the viewer's colour and the
-right-click menu, and checks the log. Then a fluid shot: a blank plate, keyframes painted, copied, pasted, dragged,
+right-click menu, and checks the log. Then one edit at a time: new words and more strokes change the edit just made, and
+New edit (the N key, the button, the menu) or another tool starts a new one. Then a fluid shot: a blank plate, keyframes painted, copied, pasted, dragged,
 deleted and brought back, generated, and opened as the plate. Prints UI MOCK PASSED at the end; tests/test_ui_mock.py
 runs it. Screenshots go to /tmp/paintaplate_ui_mock.
 """
@@ -63,11 +64,18 @@ def flow(page, port):
     check(not page.is_disabled("#undo-btn"), "undo is live after a stroke")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
     check(titles() == ["1. Paint"] and words() == ["a red fire"], f"edit 1 is done with its words: {titles()} {words()}")
+    seen = len(page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)"))
     page.click("[data-tool=erase]")
     page.fill("#prompt", "")
     stroke([(0.7, 0.3), (0.75, 0.35)])
     page.wait_for_function(DONE.format(n=2), timeout=120000)
     check(titles() == ["2. Erase", "1. Paint"], f"two edits, numbered from the bottom: {titles()}")
+    lines = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")[seen:]
+    found = next((i for i, line in enumerate(lines) if "under the stroke" in line), len(lines))
+    started = next((i for i, line in enumerate(lines) if line.startswith("Edit 2: Erase")), -1)
+    asked = sum("asking Klein's prompt writer" in line for line in lines)
+    check(found < started and asked == 1, f"a whole-object erase: SAM runs while the strokes rest, the prompt writer once "
+          f"(SAM at line {found}, start at line {started}, {asked} request(s))")
 
     page.click("#history li:last-child .del")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
@@ -79,6 +87,9 @@ def flow(page, port):
     page.keyboard.press("Control+Shift+z")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
     check(titles() == ["1. Erase"], f"redo removes it again: {titles()}")
+    check(page.is_visible("#editing") and page.text_content("#editing") == "Editing 1 · Erase",
+          "undo and redo keep the current edit: the next strokes still change it")
+    page.keyboard.press("Escape")
 
     page.click("#history li .what")
     check(page.text_content("#editing") == "Editing 1 · Erase" and page.is_checked("#whole"), "selecting shows the editing tag and the edit's switches")
@@ -124,6 +135,38 @@ def flow(page, port):
     log = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
     for key in ("posted as", "prompt writer", "Klein quick pass", "ComfyUI started it"):
         check(any(key in line for line in log), f"the log says what happens under the hood: {key}")
+
+    # One edit at a time: new words and more strokes change the current edit; New edit and another tool start a new one
+    page.keyboard.press("b")
+    page.fill("#prompt", "a dog"); page.evaluate("document.activeElement.blur()")
+    stroke([(0.2, 0.7), (0.25, 0.75)])
+    page.wait_for_function(DONE.format(n=3), timeout=120000)
+    check(titles()[0] == "3. Paint" and page.is_visible("#editing") and page.text_content("#editing") == "Editing 3 · Paint"
+          and page.input_value("#prompt") == "a dog", "the edit just made stays current, its words in the prompt")
+    page.locator(".promptbar").screenshot(path=os.path.join(SHOTS, "5_promptbar.png"))
+    page.fill("#prompt", "a cat"); page.evaluate("document.activeElement.blur()")
+    stroke([(0.26, 0.7), (0.3, 0.74)])
+    page.wait_for_function("document.querySelector('#history li small')?.textContent === 'a cat' && !document.querySelector('#history li.busy')",
+                           timeout=120000)
+    check(len(titles()) == 3 and words()[0] == "a cat", f"new words and more strokes change the same edit: {titles()} {words()}")
+    page.keyboard.press("n")
+    check(page.is_hidden("#editing") and page.input_value("#prompt") == "" and page.is_disabled("#new-edit"), "N, New edit, closes the current edit")
+    page.fill("#prompt", "a bird"); page.evaluate("document.activeElement.blur()")
+    stroke([(0.6, 0.7), (0.65, 0.72)])
+    page.wait_for_function(DONE.format(n=4), timeout=120000)
+    check(titles()[:2] == ["4. Paint", "3. Paint"] and words()[:2] == ["a bird", "a cat"], f"after New edit the strokes make edit 4: {titles()} {words()}")
+    page.keyboard.press("l")
+    check(page.is_hidden("#editing") and page.input_value("#prompt") == "", "another tool closes the current edit")
+    stroke([(0.1, 0.1), (0.2, 0.12)])
+    page.wait_for_function(DONE.format(n=5), timeout=120000)
+    check(titles()[0] == "5. Light" and words()[1] == "a bird", f"the light is a new edit: {titles()} {words()}")
+    page.click("#new-edit")
+    check(page.is_hidden("#editing") and page.is_disabled("#new-edit"), "the New edit button closes it too")
+    page.click("#history li .what")
+    page.mouse.click(cx, cy, button="right")
+    page.hover("#ctx > li:has(> span:first-child:text-is('Edit'))")
+    page.click("#ctx .sub button:has-text('New edit')")
+    check(page.is_hidden("#editing") and len(titles()) == 5, "New edit in the right-click menu closes the selected edit")
     page.screenshot(path=os.path.join(SHOTS, "2_end.png"))
     errors = [e for e in errors if "favicon" not in e]
     check(not errors, f"no console errors: {errors}")

@@ -328,6 +328,17 @@ export function nearKeys(keys, frame) { // the keyframes before and after a fram
   return { prev, next };
 }
 
+// One edit at a time: the strokes in progress, else the current edit (the one just started, or picked in History).
+export function strokeTarget({ draft, current, tool }) { // where a new stroke goes: "draft", "current" or "new"
+  if (draft) return "draft";
+  return current?.tool === tool ? "current" : "new";
+}
+
+export function toolEndsEdit({ draft, current }, tool) { // picking another tool than the edit being worked on starts a new edit
+  const work = draft ?? current;
+  return !!work && work.tool !== tool;
+}
+
 export function fluidPrompt(words) { // the trigger first, as the model card asks; no words: its own example
   const rest = (words || "").trim().replace(/^ainvfxfluid\s*,?\s*/i, "");
   return `${FLUID.trigger}, ${rest || FLUID.prompt}`;

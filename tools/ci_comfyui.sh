@@ -6,7 +6,7 @@ set -euo pipefail
 W=${1:-$PWD/.ci}
 PACK=$(cd "$(dirname "$0")/.." && pwd)
 PY=${PYTHON:-python}
-COMFY_REF=${COMFY_REF:-19ae172b}
+COMFY_REF=${COMFY_REF:-426f5eea}
 LTX_REF=${LTX_REF:-220e1d4}
 C="$W/ComfyUI"
 mkdir -p "$W"

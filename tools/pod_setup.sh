@@ -9,7 +9,7 @@
 # LTX 2.5 and the LTX in-outpainting IC-LoRA first: the downloads use your token.
 set -euo pipefail
 W=${WORKDIR:-/workspace}; VENV=${VENV:-/opt/venv}
-COMFY_REF=${1:-${COMFY_REF:-19ae172b}}; LTX_REF=${2:-${LTX_REF:-220e1d4}}
+COMFY_REF=${1:-${COMFY_REF:-426f5eea}}; LTX_REF=${2:-${LTX_REF:-220e1d4}}
 PACK=${PACK:-$(cd "$(dirname "$0")/.." && pwd)}
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 # Code comes from GitHub, or from an upload when a pod cannot reach it (tools/offline_bundle.sh).

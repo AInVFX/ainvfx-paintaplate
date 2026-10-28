@@ -67,6 +67,10 @@
       <button id="editing" class="editing" type="button" hidden title="This edit is selected: its words and strokes are yours to change. Click, or press Esc, to deselect"></button>
       <input id="prompt" autocomplete="off" spellcheck="false" aria-label="Describe the edit"
              placeholder="Describe what to paint, then paint it on the frame">
+      <button id="new-edit" class="new-edit" type="button" disabled title="New edit (N): this edit is done, the next strokes start a separate one">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        <span>New edit</span>
+      </button>
     </div>
     <div id="viewport" class="viewport">
       <canvas id="view"></canvas>
@@ -168,7 +172,8 @@
     </dl>
     <h3>Painting</h3>
     <dl>
-      <dt>B, E, L</dt><dd>Paint, Erase, Light</dd>
+      <dt>B, E, L</dt><dd>Paint, Erase, Light. Another tool starts a new edit</dd>
+      <dt>N</dt><dd>New edit: the next strokes start a separate edit</dd>
       <dt>- and =</dt><dd>Brush size</dd>
       <dt>X</dt><dd>Eraser: rub out the strokes you just painted</dd>
       <dt>Enter</dt><dd>Start the edit now</dd>

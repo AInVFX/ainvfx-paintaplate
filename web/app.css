@@ -63,6 +63,8 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .prompt-label { flex: none; color: var(--muted); font-weight: 600; }
 .editing { flex: none; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #141414; background: var(--gold); border-color: var(--gold); }
 .editing::after { content: " ×"; font-weight: 400; }
+.new-edit { flex: none; display: flex; align-items: center; gap: 6px; padding: 5px 12px 5px 9px; font-size: 12px; }
+.new-edit svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 #prompt { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--text); background: var(--surround); border: 1px solid var(--line); border-radius: var(--radius); padding: 9px 12px; }
 #prompt:focus { border-color: var(--gold-dim); outline: none; }
 #prompt::placeholder { color: var(--faint); }

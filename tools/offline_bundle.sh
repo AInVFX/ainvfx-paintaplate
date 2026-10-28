@@ -8,7 +8,7 @@
 #   3. bash /workspace/ainvfx-paintaplate/tools/runpod_start.sh
 # pod_setup.sh then skips git for these folders and records their versions from PINNED.
 set -euo pipefail
-COMFY_REF=${COMFY_REF:-19ae172b}; LTX_REF=${LTX_REF:-220e1d4}
+COMFY_REF=${COMFY_REF:-426f5eea}; LTX_REF=${LTX_REF:-220e1d4}
 OUT=$(realpath -m "${1:-paintaplate_offline.tar.gz}")
 PACK=$(cd "$(dirname "$0")/.." && pwd)
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT

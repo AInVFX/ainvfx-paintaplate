@@ -2,8 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fillWorkflow, fitSize, frameUse, gb,
-  parseWorkflow, previewSize, previewSizes, secs } from "../../web/logic.mjs";
+import { DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -171,4 +170,20 @@ test("whole object: named instances the stroke touches win; points keep only obj
   assert.deepEqual(pickObjects({ painted: stroke, named: [van, box(8, 0, 9, 1)], points: [], area }), [van]);
   assert.deepEqual(pickObjects({ painted: stroke, named: [], points: [van, van, road.map((v, i) => (i < 85 ? v : 0)), sky], area }), [van, van]);
   assert.deepEqual(pickObjects({ painted: stroke, named: [], points: [van], area }), [van]); // a dab: one point, one object
+});
+
+test("a stroke goes to the strokes in progress, else to the current edit of its tool, else to a new edit", () => {
+  const paint = { tool: "paint" }, erase = { tool: "erase" };
+  assert.equal(strokeTarget({ draft: paint, current: erase, tool: "paint" }), "draft");
+  assert.equal(strokeTarget({ draft: null, current: paint, tool: "paint" }), "current");
+  assert.equal(strokeTarget({ draft: null, current: paint, tool: "erase" }), "new");
+  assert.equal(strokeTarget({ draft: null, current: null, tool: "light" }), "new");
+});
+
+test("another tool than the edit being worked on starts a new edit; the same tool keeps it", () => {
+  const paint = { tool: "paint" };
+  assert.equal(toolEndsEdit({ draft: null, current: paint }, "light"), true);
+  assert.equal(toolEndsEdit({ draft: paint, current: null }, "erase"), true);
+  assert.equal(toolEndsEdit({ draft: null, current: paint }, "paint"), false);
+  assert.equal(toolEndsEdit({ draft: null, current: null }, "erase"), false);
 });

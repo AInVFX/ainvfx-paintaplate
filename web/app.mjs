@@ -7,7 +7,7 @@ import { WF, cancel, connect, loadWorkflows, objectInfo, onLog, onNotice, output
 import { FrameCache } from "./frames.mjs";
 import { sceneGraph } from "./graph.mjs";
 import { CHANNEL_NAMES, DISPLAY, FLUID, PARAMS, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fitSize,
-  formatParam, gb, pickObjects, previewSize, previewSizes, reconcile, secs, shotPrompt, upsampleRequest } from "./logic.mjs";
+  formatParam, gb, pickObjects, previewSize, previewSizes, reconcile, secs, shotPrompt, strokeTarget, toolEndsEdit, upsampleRequest } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -161,7 +161,7 @@ async function openPlate(list, typed, cs, opts = {}) { // opts.fluid: a blank pl
   S.plate.shot = previewSize([w, h], S.plate.work, S.previewCap);
   S.original = snap(await loadImage(viewUrl(outputFile("ingest", out, "hero"))), S.plate.work);
   $("#prompt").value = "";
-  Object.assign(S, { hero: S.original, edits: [], draft: null, running: null, past: [], future: [], selected: null, hover: null, last: null, live: null,
+  Object.assign(S, { hero: S.original, edits: [], draft: null, running: null, past: [], future: [], selected: null, hover: null, live: null,
     frame: 0, inPt: 0, outPt: S.plate.frames - 1, shot: null, shotDirty: false, exported: null, wantDownload: null,
     stage: { phase: "none" }, zoom: { k: 1, x: 0, y: 0 }, wipe: null, heroKey: "" });
   S.uploads.clear(); S.renders.clear();
@@ -560,11 +560,9 @@ view.addEventListener("pointerdown", (e) => {
   S.live = null;
   mark(); // one undo step per stroke
   let d = S.draft;
-  const chosen = S.selected?.tool === S.tool ? S.selected : null; // the selected edit takes the strokes of its own tool
-  if (!d && chosen) d = chosen === S.running ? reopen(chosen) : reopenDone(chosen);
-  else if (!d && S.running && S.running === S.last && S.running.tool === S.tool && S.running === S.edits.at(-1)) d = reopen(S.running);
-  if (d && d.tool !== S.tool) { launch(d); d = null; }
-  if (!d) { if (S.selected) select(null); d = S.draft = newEdit(); }
+  const to = strokeTarget({ draft: S.draft, current: S.selected, tool: S.tool }); // the current edit takes the strokes of its own tool
+  if (to === "current") d = S.selected === S.running ? reopen(S.selected) : reopenDone(S.selected);
+  if (to === "new") { S.selected = null; d = S.draft = newEdit(); editingUI(); }
   view.setPointerCapture(e.pointerId);
   stroke = { tool: d.tool, color: S.color, size: S.size, points: [] };
   d.strokes.push(stroke);
@@ -591,9 +589,9 @@ view.addEventListener("pointerup", () => {
   schedule();
 });
 
-function rubOut(e) { // the eraser works on the strokes in progress, on the selected edit, or on the edit just made
+function rubOut(e) { // the eraser works on the strokes in progress, or on the current edit
   let d = S.draft;
-  const target = S.selected ?? (S.last === S.edits.at(-1) ? S.last : null);
+  const target = S.selected;
   if (!d && target?.strokes.length) d = S.running === target ? reopen(target) : reopenDone(target);
   if (!d) return hud("Nothing to rub out: select an edit in History, or paint first");
   cancel(...BACKGROUND);
@@ -612,10 +610,15 @@ function reopenDone(edit) { // the eraser on a finished edit: it becomes strokes
   return (S.draft = edit);
 }
 
+function takeInputs(edit) { // the words and the Whole object switch belong to the edit being drawn, as they change
+  edit.prompt = $("#prompt").value.trim();
+  if (edit.tool === "erase") edit.whole = $("#whole").checked;
+}
+
 function schedule(typing = false) { // run the draft once the strokes (and the typing) have stopped for WAIT ms
   clearTimeout(S.timer); clearTimeout(S.prefetchTimer);
   if (!S.draft) return;
-  S.draft.prompt = $("#prompt").value.trim(); // the words belong to the draft as they are typed: the prompt writer sees them
+  takeInputs(S.draft); // the prefetch sees them: SAM finds the whole object first, then the prompt writer writes for its box
   S.timer = setTimeout(() => S.draft && launch(S.draft), WAIT);
   if (typing) S.prefetchTimer = setTimeout(() => prefetch(S.draft), PREFETCH_MS); // not on every keystroke
   else prefetch(S.draft);
@@ -940,14 +943,12 @@ function launch(edit) {
   if (S.draft === edit) S.draft = null;
   clearTimeout(S.timer);
   if (!edit.strokes.length) return;
-  edit.prompt = $("#prompt").value.trim();
-  if (edit.tool === "erase") edit.whole = $("#whole").checked;
+  takeInputs(edit);
   if (!S.edits.includes(edit)) S.edits.push(edit);
   edit.state = "queued";
   edit.launched = performance.now();
-  S.last = edit; // the edit the next strokes may still join
   edit.thumb ??= strokesThumb(edit);
-  if (S.selected !== edit) $("#prompt").value = ""; // the words now belong to the edit: select it in History to change them
+  S.selected = edit; // it stays the current edit: new words, more strokes or the switch change it, until New edit or another tool
   historyUI(); render();
   queue(() => generate(edit));
   queue(regenerateDependents); // the edits above it that saw it run again
@@ -958,17 +959,39 @@ async function regenerateDependents() {
   recompose(); historyUI(); render(); timelineUI();
 }
 
-function select(edit) { // a History row: its words in the prompt field, its strokes on the frame; painting or typing changes it
+function select(edit) { // a History row becomes the current edit: its words in the prompt field, its strokes on the frame
+  if (edit && S.draft && S.draft !== edit) launch(S.draft); // the strokes in progress start before another edit is picked
   S.selected = edit;
   if (edit) { setTool(edit.tool); $("#prompt").value = edit.prompt; if (edit.tool === "erase") $("#whole").checked = !!edit.whole; }
   else if (!S.draft) $("#prompt").value = "";
-  const tag = $("#editing");
-  tag.hidden = !edit;
-  if (edit) {
-    tag.textContent = `Editing ${num(edit)} · ${NAME[edit.tool]}`;
-    hud(`Edit ${num(edit)} selected: retype its words, paint more, or rub strokes out, and it runs again. Esc deselects.`, 3500);
-  }
+  if (edit) hud(`Edit ${num(edit)} selected: retype its words, paint more, or rub strokes out, and it runs again. N starts a new edit.`, 3500);
   historyUI(); render();
+}
+
+function editingUI() { // the Editing tag and the New edit button: which edit new strokes and words change
+  const e = S.selected ?? (S.edits.includes(S.draft) ? S.draft : null), tag = $("#editing");
+  tag.hidden = !e;
+  if (e) tag.textContent = `Editing ${num(e)} · ${NAME[e.tool]}`;
+  $("#new-edit").disabled = !S.plate || !!S.fluid || (!S.draft && !S.selected);
+}
+
+function nextEdit() { // New edit (N): the strokes in progress start now, and the next strokes make a separate edit
+  if (!S.plate || S.fluid) return;
+  if (S.draft) launch(S.draft);
+  S.selected = null;
+  $("#prompt").value = "";
+  historyUI(); render();
+  hud(`New edit: describe it, then paint. The tool stays ${NAME[S.tool]}.`, 2500);
+}
+
+function pickTool(t) { // the person picks a tool: another tool than the edit being worked on starts a new edit
+  if (!S.fluid && toolEndsEdit({ draft: S.draft, current: S.selected }, t)) {
+    if (S.draft) launch(S.draft);
+    S.selected = null;
+    $("#prompt").value = "";
+    historyUI();
+  }
+  setTool(t);
 }
 
 function reopen(edit) { // more strokes on the edit being generated: stop it and keep drawing
@@ -1135,7 +1158,6 @@ function rebuild() { // after a bypass, a removal or another try: make again onl
   cancel(...BACKGROUND);
   const r = S.running; // an edit being generated whose base changed, or which is to run again, stops now: its pass would be thrown away
   if (r && (r.force || !S.edits.includes(r) || !r.on || dependsOnChange(r, activeBefore(r).map(record), r.saw ?? []))) { log(`Edit ${num(r)}: its pass is stopped, it runs again`); stopEdit(r); }
-  S.last = null;
   recompose(); historyUI(); render();
   queue(async () => {
     for (const e of [...S.edits]) {
@@ -1203,7 +1225,8 @@ function restore(snap) {
   clearTimeout(S.timer); clearTimeout(S.prefetchTimer);
   cancel(...BACKGROUND, "edit", "snap", "prefetch", "warm");
   for (const e of [...S.edits, S.draft].filter(Boolean)) if (e.state === "generating" || e.state === "queued") e.token = (e.token ?? 0) + 1;
-  Object.assign(S, { running: null, draft: null, last: null, hover: null, selected: null });
+  const kept = S.selected; // the current edit stays current while it exists: the next strokes still change it
+  Object.assign(S, { running: null, draft: null, hover: null, selected: null });
   const apply = ({ e, strokes, prompt, seed, on, whole }) => {
     const same = strokes.length === e.strokes.length && strokes.every((st, i) => st === e.strokes[i]);
     Object.assign(e, { prompt, seed, on, whole });
@@ -1218,10 +1241,10 @@ function restore(snap) {
     e.state = e.patch ? "done" : "generating";
     if (!e.strokes.length) e.state = "done"; // nothing left to make: rebuild skips it
   }
-  $("#editing").hidden = true;
   if (snap.draft) { S.draft = apply(snap.draft); S.draft.state = "drawing"; $("#prompt").value = S.draft.prompt; if (painted(S.draft)) schedule(); }
-  else if (!S.selected && !S.fluid) $("#prompt").value = ""; // in a fluid shot the words belong to the shot, not to an edit
   S.edits = S.edits.filter((e) => e.strokes.length); // an edit undone to no strokes at all is gone
+  if (!S.draft && S.edits.includes(kept)) { S.selected = kept; $("#prompt").value = kept.prompt; }
+  else if (!S.draft && !S.fluid) $("#prompt").value = ""; // in a fluid shot the words belong to the shot, not to an edit
   if (snap.keys && S.fluid) { // a fluid shot's keyframes: their frames and strokes as they were
     S.fluid.keys = snap.keys.map(({ k, frame, strokes }) => {
       const same = strokes.length === k.strokes.length && strokes.every((st, i) => st === k.strokes[i]);
@@ -1308,6 +1331,7 @@ function strokesThumb(edit) { // the frame with the strokes, until the edit has 
 }
 
 function historyUI() {
+  editingUI();
   const list = $("#history");
   $("#history-empty").hidden = S.edits.length > 0;
   list.replaceChildren(...[...S.edits].reverse().map((e) => {
@@ -1833,10 +1857,10 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Save scene", "", saveScene, !p], ["Export…", "", exportDialog, !edits],
       ["ComfyUI graph", "", () => saveGraph().catch(quiet), !edits]]],
     ["Edit", [["Undo", "Ctrl+Z", undo, !S.past.length], ["Redo", "Ctrl+Shift+Z", redo, !S.future.length], "-",
-      ["Start the edit now", "Enter", () => S.draft && launch(S.draft), !S.draft], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
+      ["New edit", "N", nextEdit, !p || !!S.fluid || (!S.draft && !S.selected)], ["Start the edit now", "Enter", () => S.draft && launch(S.draft), !S.draft], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
       ["Deselect", "Esc", () => select(null), !S.selected]]],
-    ["Tools", [["Paint", "B", () => setTool("paint"), !p, S.tool === "paint" && !S.rub], ["Erase", "E", () => setTool("erase"), !p || !!S.fluid, S.tool === "erase" && !S.rub],
-      ["Light", "L", () => setTool("light"), !p || !!S.fluid, S.tool === "light" && !S.rub], ["Eraser", "X", () => setRub(!S.rub), !p, S.rub], "-",
+    ["Tools", [["Paint", "B", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Erase", "E", () => pickTool("erase"), !p || !!S.fluid, S.tool === "erase" && !S.rub],
+      ["Light", "L", () => pickTool("light"), !p || !!S.fluid, S.tool === "light" && !S.rub], ["Eraser", "X", () => setRub(!S.rub), !p, S.rub], "-",
       ["Whole object", "", () => $("#whole").click(), !p, $("#whole").checked], ["Smaller brush", "-", () => setSize(S.size / 1.2), !p],
       ["Larger brush", "=", () => setSize(S.size * 1.2), !p]]],
     ["Control", [["Play or pause", "Space", () => (S.playing ? pause() : play()), !p, S.playing], ["Next frame", "Right", step(1), !p],
@@ -1942,7 +1966,7 @@ async function boot() { // the workflows, the WebSocket, then what this ComfyUI 
   warmAll().catch(() => {}); // a ComfyUI that reports no GPU details simply skips it
 }
 
-$$(".tools [data-tool]").forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
+$$(".tools [data-tool]").forEach((b) => (b.onclick = () => pickTool(b.dataset.tool)));
 $("#size").oninput = (e) => setSize(+e.target.value);
 function setColor(c) { // the colour of the current tool: Paint and Light keep their own
   if (S.tool === "erase") return;
@@ -1965,18 +1989,19 @@ function setRub(on) {
   render();
 }
 $("#rub-btn").onclick = () => setRub(!S.rub);
-$("#whole").onchange = () => { // on a selected erase, the switch is a change like the words: it runs again after the pause
-  setTool("erase");
+$("#whole").onchange = () => { // on the current erase, the switch is a change like the words: it runs again after the pause
+  pickTool("erase");
   if (!S.draft && S.selected?.tool === "erase" && S.selected.state === "done") { mark(); S.draft = reopenDone(S.selected); }
-  if (S.draft?.tool === "erase") { S.draft.whole = $("#whole").checked; schedule(); }
+  if (S.draft?.tool === "erase") schedule();
 };
-$("#prompt").oninput = () => { // the words belong to the edit being drawn, or to the selected one, which runs again after the pause
+$("#prompt").oninput = () => { // the words belong to the edit being drawn, or to the current one, which runs again after the pause
   if (stroke) return;
   if (S.fluid) return staleFluid(); // new words for a fluid shot: the one on show used the old ones
   if (!S.draft && S.selected?.state === "done") { mark(); S.draft = reopenDone(S.selected); }
   if (S.draft) schedule(true);
 };
 $("#editing").onclick = () => select(null);
+$("#new-edit").onclick = () => nextEdit();
 $("#blank-go").onclick = () => openBlank().catch(quiet);
 for (const id of ["#b-width", "#b-height", "#b-fps", "#b-frames"]) $(id).oninput = blankNote;
 $("#fluid-go").onclick = () => generateFluid().catch(quiet);
@@ -2080,7 +2105,8 @@ addEventListener("keydown", (e) => {
   else if (k === "1" && !mod) zoomTo(S.plate.work[0] / S.fit.w);
   else if (k === "`") fullScreen();
   else if (k === "?") $("#help").showModal();
-  else if (TOOLS[low] && !mod) setTool(TOOLS[low]);
+  else if (TOOLS[low] && !mod) pickTool(TOOLS[low]);
+  else if (low === "n" && !mod) nextEdit();
   else if (low === "x" && !mod) setRub(!S.rub);
   else if (k === "-" || k === "_") setSize(S.size / 1.2);
   else if (k === "=" || k === "+") setSize(S.size * 1.2);

@@ -127,7 +127,9 @@ def main():
     ap.add_argument("--url", default="", help="a running ComfyUI with the real workflows and models (no stand-ins)")
     ap.add_argument("--path", default="", help="plate path in that ComfyUI's input folder, typed into the open dialog")
     ap.add_argument("--cs", default="linear")
-    ap.add_argument("--strokes", default="", help='JSON list of [key, words, [[x, y], ...], brush size]')
+    ap.add_argument("--strokes", default="", help='JSON list of [key, words, [[x, y], ...], brush size, {"whole": false, "color": "#d32f2f"}]')
+    ap.add_argument("--fluid", default="", help='with --url: a fluid shot from a blank plate first, as fluid_shot() describes; '
+                    '--strokes then edit it as the plate')
     ap.add_argument("--timeout", type=int, default=150)
     ap.add_argument("--out", default=SHOTS, help="folder for screenshots and timings")
     ap.add_argument("--think", type=float, default=0, help="seconds between opening the plate and the first stroke")
@@ -202,11 +204,54 @@ def main():
     return 0 if passed else 1
 
 
+def fluid_shot(page, spec, shots, mark):
+    """A fluid shot from a blank plate: the keyframes painted stroke by stroke, then one ainvfx-fluid pass.
+
+    `spec`: {"size": [w, h], "fps": 24, "frames": 121, "words": "...", "keys": [[frame, colour, [[x, y], ...], brush], ...]}.
+    A key's frame is 0, -1 for the last frame, or 8k + 1 between; its colour is one of the page's swatches. Strokes on
+    one frame build one keyframe, so flat zones for sky and ground can go under the fluid's blob, as the model card says.
+    """
+    page.click("#open-btn")
+    w, h = spec.get("size", [960, 512])
+    page.fill("#b-width", str(w)); page.fill("#b-height", str(h))
+    page.select_option("#b-fps", str(spec.get("fps", 24))); page.fill("#b-frames", str(spec.get("frames", 121)))
+    page.dispatch_event("#b-frames", "input")
+    page.click("#blank-go")
+    page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=120000)
+    mark("blank plate open: " + page.inner_text("#spec"))
+    page.fill("#prompt", spec.get("words", "")); page.evaluate("document.activeElement.blur()")
+    box = page.locator("#view").bounding_box()
+
+    def seek(frame):
+        page.evaluate("document.activeElement.blur()")
+        page.keyboard.press("End" if frame < 0 else "Home")
+        for _ in range(max(frame, 0)):
+            page.keyboard.press("ArrowRight")
+
+    for frame, color, pts, size in spec["keys"]:
+        seek(frame)
+        page.click(f".swatches .sw[data-color='{color}']")
+        page.eval_on_selector("#size", "(el, v) => { el.value = v; el.dispatchEvent(new Event('input')); }", size)
+        stroke(page, box, pts)
+    frames = sorted({k[0] for k in spec["keys"]}, key=lambda f: (f < 0, f))
+    for f in frames:
+        seek(f); page.locator("#view").screenshot(path=f"{shots}/0_key_{'last' if f < 0 else f}.png")
+    mark(f"fluid: {len(frames)} keyframes, {len(spec['keys'])} strokes")
+    page.evaluate("document.activeElement.blur()")
+    page.keyboard.press("Enter")
+    page.wait_for_function("/generating/.test(document.querySelector('#fluid-state').textContent)", timeout=60000)
+    mark("fluid: generating")
+    page.wait_for_function("/v\\d+ ready/.test(document.querySelector('#fluid-state').textContent)", timeout=900000)
+    mark("fluid: shot ready | " + page.inner_text("#status"))
+
+
 def remote(a):
     """The real page, workflows and models on a remote ComfyUI: a timed mark for every stage."""
     shots = a.out
     shutil.rmtree(shots, ignore_errors=True); os.makedirs(shots)
-    strokes = json.loads(a.strokes) if a.strokes else [["b", "a small campfire", [[0.45, 0.8], [0.5, 0.75], [0.55, 0.8]]]]
+    fluid = json.loads(a.fluid) if a.fluid else None
+    default = [] if fluid else [["b", "a small campfire", [[0.45, 0.8], [0.5, 0.75], [0.55, 0.8]]]]
+    strokes = json.loads(a.strokes) if a.strokes else default
     marks, errors, t0 = [], [], time.time()
     mark = lambda what: (marks.append((round(time.time() - t0, 1), what)), print(f"{marks[-1][0]:7.1f} s  {what}"))  # noqa: E731
     with sync_playwright() as p:
@@ -219,54 +264,67 @@ def remote(a):
             page.goto(f"{a.url}/extensions/ainvfx-paintaplate/paintaplate.html")
             page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
             mark("page ready: " + status())
-            page.click("#open-btn"); page.fill("#path", a.path)
-            if a.cs:
-                page.select_option("#cs", a.cs)
-            page.click("#open-go")
-            page.wait_for_function("document.querySelector('#spec').textContent && document.querySelector('#opening').hidden", timeout=300000)
-            mark("plate open: " + page.inner_text("#spec")); page.screenshot(path=f"{shots}/1_open.png")
-            box = page.locator("#view").bounding_box()
-            page.wait_for_timeout(a.think * 1000)  # a person looks at the frame before painting
-            for i, (key, words, pts, *size) in enumerate(strokes):
-                page.keyboard.press(key); page.fill("#prompt", words); page.locator("#prompt").blur()
-                if size:  # brush size in frame pixels, set on the slider
-                    page.eval_on_selector("#size", "(el, v) => { el.value = v; el.dispatchEvent(new Event('input')); }", size[0])
-                if len(size) > 1 and "whole" in size[1]:  # options after the brush size: {"whole": false} paints an erase as is
-                    page.set_checked("#whole", size[1]["whole"])
-                stroke(page, box, pts); mark(f"{key} stroke")
-                page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)
-                page.wait_for_function(DONE.format(n=i + 1), timeout=300000)
-                mark(f"{key} edit on the first frame | {status()}"); page.screenshot(path=f"{shots}/2_{key}_done.png")
-            seen = set()
-            deadline = time.time() + a.timeout * 8
-            while time.time() < deadline:
-                note = page.inner_text("#render-left")
-                tag = note.rsplit(" ", 1)[0] if note else status()[:40]
-                if tag not in seen:
-                    seen.add(tag); mark("stage: " + (note or status()))
-                if status().startswith("Exported") or "Error" in status() or status().startswith("Missing"):
-                    break
-                time.sleep(1)
-            mark("final: " + status())
-            page.keyboard.press("F6"); page.keyboard.press("End"); time.sleep(1); page.screenshot(path=f"{shots}/3_wipe.png")
-            page.keyboard.press("F6"); page.keyboard.press("Home"); page.keyboard.press("Space"); time.sleep(2)
-            page.keyboard.press("Space"); page.screenshot(path=f"{shots}/4_played.png")
-            if status().startswith("Exported"):
-                with page.expect_download(timeout=600000) as dl:
-                    page.click("#export-btn")
-                    page.click("#x-go")
-                dl.value.save_as(f"{shots}/export.zip")
-                mark(f"downloaded {len(zipfile.ZipFile(f'{shots}/export.zip').namelist())} files")
-                if a.graph:  # the scene as one ComfyUI workflow, from the Export dialog
-                    page.click("#export-btn")
-                    with page.expect_download(timeout=120000) as dl:
-                        page.click("#x-graph")
-                    dl.value.save_as(f"{shots}/scene.comfyui.json")
-                    mark(f"ComfyUI graph saved: {len(json.load(open(f'{shots}/scene.comfyui.json')))} nodes")
+            if fluid:  # a fluid shot first; with strokes, it then opens as the plate
+                fluid_shot(page, fluid, shots, mark)
+                if strokes:
+                    page.click("#fluid-use")
+                    page.wait_for_function("document.querySelector('#fluid').hidden && document.querySelector('#spec').textContent.includes('prores')",
+                                           timeout=300000)
+            else:
+                page.click("#open-btn"); page.fill("#path", a.path)
+                if a.cs:
+                    page.select_option("#cs", a.cs)
+                page.click("#open-go")
+                page.wait_for_function("document.querySelector('#spec').textContent && document.querySelector('#opening').hidden", timeout=300000)
+            if strokes:
+                mark("plate open: " + page.inner_text("#spec")); page.screenshot(path=f"{shots}/1_open.png")
+                box = page.locator("#view").bounding_box()
+                page.wait_for_timeout(a.think * 1000)  # a person looks at the frame before painting
+                for i, (key, words, pts, *size) in enumerate(strokes):
+                    page.keyboard.press(key); page.fill("#prompt", words); page.locator("#prompt").blur()
+                    if size:  # brush size in frame pixels, set on the slider
+                        page.eval_on_selector("#size", "(el, v) => { el.value = v; el.dispatchEvent(new Event('input')); }", size[0])
+                    opts = size[1] if len(size) > 1 else {}  # options after the brush size
+                    if "whole" in opts:  # {"whole": false} paints an erase as is
+                        page.set_checked("#whole", opts["whole"])
+                    if "color" in opts:  # {"color": "#d32f2f"}: a swatch for the paint or the light
+                        page.click(f".swatches .sw[data-color='{opts['color']}']")
+                    stroke(page, box, pts); mark(f"{key} stroke")
+                    page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)
+                    page.wait_for_function(DONE.format(n=i + 1), timeout=300000)
+                    mark(f"{key} edit on the first frame | {status()}"); page.screenshot(path=f"{shots}/2_{key}_done.png")
+                seen = set()
+                deadline = time.time() + a.timeout * 8
+                while time.time() < deadline:
+                    note = page.inner_text("#render-left")
+                    tag = note.rsplit(" ", 1)[0] if note else status()[:40]
+                    if tag not in seen:
+                        seen.add(tag); mark("stage: " + (note or status()))
+                    if status().startswith("Exported") or "Error" in status() or status().startswith("Missing"):
+                        break
+                    time.sleep(1)
+                mark("final: " + status())
+                page.keyboard.press("F6"); page.keyboard.press("End"); time.sleep(1); page.screenshot(path=f"{shots}/3_wipe.png")
+                page.keyboard.press("F6"); page.keyboard.press("Home"); page.keyboard.press("Space"); time.sleep(2)
+                page.keyboard.press("Space"); page.screenshot(path=f"{shots}/4_played.png")
+                if status().startswith("Exported"):
+                    with page.expect_download(timeout=600000) as dl:
+                        page.click("#export-btn")
+                        page.click("#x-go")
+                    dl.value.save_as(f"{shots}/export.zip")
+                    mark(f"downloaded {len(zipfile.ZipFile(f'{shots}/export.zip').namelist())} files")
+                    if a.graph:  # the scene as one ComfyUI workflow, from the Export dialog
+                        page.click("#export-btn")
+                        with page.expect_download(timeout=120000) as dl:
+                            page.click("#x-graph")
+                        dl.value.save_as(f"{shots}/scene.comfyui.json")
+                        mark(f"ComfyUI graph saved: {len(json.load(open(f'{shots}/scene.comfyui.json')))} nodes")
         except Exception as exc:
             mark(f"FAILED: {type(exc).__name__}: {str(exc).splitlines()[0][:160]} | status: {status()}")
             page.screenshot(path=f"{shots}/fail.png")
+        page_log = page.eval_on_selector_all("#log li", "els => els.map(e => e.textContent)")  # what ran, with which values
         browser.close()
+    open(f"{shots}/page_log.txt", "w").write("\n".join(page_log) + "\n")
     json.dump({"marks": marks, "errors": errors}, open(f"{shots}/timings.json", "w"), indent=1)
     print("console errors:", errors[:5])
     return 0
