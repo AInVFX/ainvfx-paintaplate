@@ -3,6 +3,7 @@
     GET /paintaplate/download?run=paintaplate/<plate>/v3&name=shot010_paintaplate_v3&parts=export,matte
     GET /paintaplate/plates                      the plates in input/plates, as JSON (see list_plates)
     GET /paintaplate/thumb?path=plates/boat.mp4  the first frame of one of them as a small JPEG, cached in temp
+    POST /paintaplate/blank {width, height, fps, frames}  a black ProRes 4444 plate in input/paintaplate/blank, for a fluid shot
 
 `parts` chooses what the zip holds (default: export,matte): export is the result in the plate's own
 format, matte where the plate changed, review an H.264 MP4 of the result (the export's full-size movie,
@@ -31,6 +32,7 @@ except ImportError:  # imported as a plain module by the tests, outside the pack
     import plateio
 
 PLATES = "plates"  # the folder under ComfyUI's input folder that the Open dialog lists
+BLANK = "paintaplate/blank"  # and the one that holds the black canvases of fluid shots
 THUMB_WIDTH = 240
 
 # part: (paths in the run folder, the first match wins for a file; its name in the zip, None for a folder).
@@ -185,8 +187,45 @@ async def thumb(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(path, headers={"Cache-Control": "max-age=3600"})
 
 
+# ---------- The blank plate of a fluid shot ----------
+
+def blank_plate(width: int, height: int, fps: float, frames: int) -> str:
+    """The input-folder path of a black plate of this size, frame rate and length, written once (ProRes 4444).
+
+    LTX and ainvfx-fluid need sides in multiples of 64 and 8k + 1 frames; the page keeps to the trained limits.
+    """
+    if not (64 <= width <= 4096 and 64 <= height <= 4096 and width % 64 == 0 and height % 64 == 0):
+        raise ValueError("width and height must be multiples of 64, from 64 to 4096")
+    if not (9 <= frames <= 1025 and (frames - 1) % 8 == 0):
+        raise ValueError("the length must be 8k + 1 frames, from 9 to 1025")
+    if not 1 <= fps <= 120:
+        raise ValueError("the frame rate must be from 1 to 120")
+    rel = f"{BLANK}/fluid_{width}x{height}_{fps:g}fps_{frames}f.mov"
+    full = os.path.join(os.path.abspath(folder_paths.get_input_directory()), rel)
+    if not os.path.exists(full):
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        part = f"{full[:-4]}.{uuid.uuid4().hex}.mov"  # the muxer reads the format from the extension
+        try:
+            plateio.write_blank(part, width, height, fps, frames)
+            os.replace(part, full)
+        finally:
+            if os.path.exists(part):
+                os.remove(part)
+    return rel
+
+
+async def blank(request: web.Request) -> web.Response:
+    try:
+        body = await request.json()
+        rel = await asyncio.to_thread(blank_plate, int(body["width"]), int(body["height"]), float(body["fps"]), int(body["frames"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise web.HTTPBadRequest(text=f"No blank plate: {exc}") from exc
+    return web.json_response({"path": rel})
+
+
 def setup(server) -> None:
     """Add the routes to ComfyUI's server (or to anything with an aiohttp RouteTableDef as `routes`)."""
     server.routes.get("/paintaplate/download")(download)
     server.routes.get("/paintaplate/plates")(plates)
     server.routes.get("/paintaplate/thumb")(thumb)
+    server.routes.post("/paintaplate/blank")(blank)

@@ -155,5 +155,34 @@ class Sequences(unittest.TestCase):
         print("sequences: missing frames hold, numbers kept, frames on twos")
 
 
+
+class BlankCanvas(unittest.TestCase):
+    def test_blank_plate_is_black_prores_4444(self):
+        """The canvas of a fluid shot: ProRes 4444 at its frame rate and length, every frame black."""
+        path = plateio.write_blank(os.path.join(tempfile.mkdtemp(), "blank.mov"), 192, 128, 24, 25)
+        spec = plateio.probe_plate(path)
+        self.assertEqual((spec["codec"], spec["width"], spec["height"], spec["fps"], spec["frames"]), ("prores", 192, 128, 24.0, 25))
+        self.assertIn("4444", spec["profile"])
+        with av.open(path) as c:
+            frames = [f.to_ndarray(format="rgb24") for f in c.decode(video=0)]
+        self.assertEqual(len(frames), 25)
+        self.assertLessEqual(max(int(f.max()) for f in frames), 1)
+        print("blank canvas: ProRes 4444, 25 black frames: ok")
+
+    def test_prores_4444_plate_exports(self):
+        """A ProRes 4444 plate decodes as 12-bit 4:4:4; the export writes it again with prores_ks, which takes 10-bit."""
+        spec = plateio.probe_plate(plateio.write_blank(os.path.join(tempfile.mkdtemp(), "p4444.mov"), 128, 64, 25, 9))
+        self.assertEqual(spec["pix_fmt"], "yuv444p12le")
+        self.assertEqual(plateio.encoder_pix_fmt("prores_ks", "yuv444p12le"), "yuv444p10le")
+        self.assertEqual(plateio.encoder_pix_fmt("prores_ks", "yuv422p10le"), "yuv422p10le")
+        writer = plateio.VideoWriter(spec, os.path.join(tempfile.mkdtemp(), "out.mov"))
+        for _ in range(9):
+            writer.write(np.full((64, 128, 3), 0.5, np.float32))
+        writer.close()
+        back = plateio.probe_plate(writer.path)
+        self.assertEqual((back["codec"], back["frames"]), ("prores", 9))
+        self.assertIn("4444", back["profile"])
+        print("ProRes 4444 plate export: ok", writer.notes)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

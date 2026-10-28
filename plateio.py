@@ -383,6 +383,58 @@ def still_target(spec: dict, has_alpha: bool) -> tuple[str, str, dict]:
     return "png", "rgb48be", {}
 
 
+def write_blank(path: str, width: int, height: int, fps: float, frames: int) -> str:
+    """A black ProRes 4444 plate with Rec. 709 tags: the canvas of a fluid shot.
+
+    ProRes codes every frame on its own, so one black frame is encoded and its packet written `frames` times: a
+    1920 x 1088 x 121 canvas takes about a second instead of half a minute.
+    """
+    if av is None:
+        raise RuntimeError("PyAV is required")
+    rate = Fraction(fps).limit_denominator(1001)
+    with av.open(path, "w") as out:
+        stream = out.add_stream("prores_ks", rate=rate)
+        stream.width, stream.height, stream.pix_fmt = width, height, "yuv444p10le"
+        cc = stream.codec_context
+        cc.color_primaries = cc.color_trc = cc.colorspace = 1  # Rec. 709
+        cc.color_range = 1  # limited range, as ProRes
+        cc.options = {"profile": "4"}  # 4444
+        black = av.VideoFrame.from_ndarray(np.zeros((height, width, 3), np.uint16), format="rgb48le")
+        try:
+            frame = black.reformat(format="yuv444p10le", dst_colorspace=1, src_color_range=2, dst_color_range=1)
+        except (ValueError, TypeError, AVError):  # an older PyAV without colour-range arguments
+            frame = black.reformat(format="yuv444p10le")
+        frame.pts = 0
+        first = (list(stream.encode(frame)) + list(stream.encode(None)))[0]
+        data, base, step = bytes(first), first.time_base, first.duration or 1
+        for i in range(frames):
+            packet = av.Packet(data)
+            packet.stream, packet.time_base, packet.pts, packet.dts, packet.duration = stream, base, i * step, i * step, step
+            packet.is_keyframe = True
+            out.mux(packet)
+    return path
+
+
+def encoder_pix_fmt(encoder: str, want: str) -> str:
+    """The pixel format nearest `want` that `encoder` writes: the same chroma layout at the highest depth it offers.
+
+    FFmpeg's ProRes decoder reports a 4444 plate as yuv444p12le, and prores_ks writes yuv444p10le: asked to open with
+    the decoder's format, the encoder refused it and the export failed.
+    """
+    try:
+        offered = [f.name for f in (av.codec.Codec(encoder, "w").video_formats or [])]
+    except (AVError, ValueError, TypeError):
+        offered = []
+    if not offered or want in offered:
+        return want
+    family = lambda f: (re.match(r"^([a-z]+\d*)p", f) or re.match(r"^(.*)$", f)).group(1)  # yuv444, yuva444, yuv420, gbr
+    depth = lambda f: int((re.findall(r"p(\d+)", f) or ["8"])[0])
+    same = [f for f in offered if family(f) == family(want)]
+    if same:
+        return max(same, key=depth)
+    return _DEFAULT_PIX.get(encoder) if _DEFAULT_PIX.get(encoder) in offered else offered[0]
+
+
 class VideoWriter:
     """Encode frames in the source codec, pixel format, colour tags and timecode.
 
@@ -407,6 +459,9 @@ class VideoWriter:
         self.stream.width = spec["width"]
         self.stream.height = spec["height"]
         pix = spec.get("pix_fmt") or _DEFAULT_PIX.get(encoder, "yuv420p")
+        if (written := encoder_pix_fmt(encoder, pix)) != pix:
+            self.notes.append(f"{encoder} does not write {pix}: using {written}.")
+            pix = written
         try:
             self.stream.pix_fmt = pix
         except (ValueError, AVError):

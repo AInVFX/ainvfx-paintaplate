@@ -3,8 +3,10 @@
     python tests/ui_mock.py [--port 8199] [--keep]
 
 Opens a plate from the plate browser, paints two edits, removes one, undoes and redoes, selects an edit and retypes its
-words, tries another seed with Ctrl+Enter, undoes three steps, changes the preview size, and checks the log. Prints
-UI MOCK PASSED at the end; tests/test_ui_mock.py runs it. Screenshots go to /tmp/paintaplate_ui_mock.
+words, tries another seed with Ctrl+Enter, undoes three steps, changes the preview size, uses the viewer's colour and the
+right-click menu, and checks the log. Then a fluid shot: a blank plate, keyframes painted, copied, pasted, dragged,
+deleted and brought back, generated, and opened as the plate. Prints UI MOCK PASSED at the end; tests/test_ui_mock.py
+runs it. Screenshots go to /tmp/paintaplate_ui_mock.
 """
 import argparse, json, os, shutil, subprocess, sys, time, urllib.request
 
@@ -127,6 +129,66 @@ def flow(page, port):
     check(not errors, f"no console errors: {errors}")
 
 
+def fluid_flow(page):
+    """A blank plate: keyframes on the LTX grid, copied, pasted, dragged, deleted and undone; then the shot, used as the plate."""
+    errors = []
+    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+    page.click("#open-btn")
+    page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.select_option("#b-fps", "24"); page.fill("#b-frames", "33")
+    page.dispatch_event("#b-frames", "input")
+    note = page.text_content("#b-note")
+    check(note.startswith("512 × 320, 33 frames at 24 fps"), f"the blank plate form says what it will make: {note}")
+    page.click("#blank-go")
+    page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
+    check(not page.is_hidden("#fluid") and page.is_disabled("[data-tool=erase]") and page.is_disabled("[data-tool=light]"),
+          "a blank plate opens as a fluid shot: its panel shows, Erase and Light wait for a plate")
+    box = page.eval_on_selector("#view", "e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }")
+
+    def stroke(pts):
+        page.mouse.move(box["x"] + pts[0][0] * box["w"], box["y"] + pts[0][1] * box["h"])
+        page.mouse.down()
+        for x, y in pts[1:]:
+            page.mouse.move(box["x"] + x * box["w"], box["y"] + y * box["h"], steps=5)
+        page.mouse.up()
+
+    def keys():
+        return page.eval_on_selector_all("#tl-keys .tl-kf", "els => els.map(e => +e.dataset.frame).sort((a, b) => a - b)")
+
+    page.fill("#prompt", "thick white smoke")
+    page.evaluate("document.activeElement.blur()")
+    stroke([(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)])
+    page.keyboard.press("End")
+    stroke([(0.45, 0.3), (0.55, 0.2)])
+    check(keys() == [0, 32], f"a keyframe on frame 0 and one on the last frame: {keys()}")
+    page.keyboard.press("Home")
+    page.keyboard.press("Control+c")
+    for _ in range(9):
+        page.keyboard.press("ArrowRight")
+    page.keyboard.press("Control+v")
+    check(keys() == [0, 9, 32], f"Ctrl+C on frame 0, Ctrl+V on frame 9 (8k + 1): {keys()}")
+    tl = page.eval_on_selector("#timeline", "e => { const r = e.getBoundingClientRect(); return { x: r.x, w: r.width }; }")
+    kf = page.eval_on_selector("#tl-keys .tl-kf[data-frame='9']", "e => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }")
+    page.mouse.move(kf["x"], kf["y"]); page.mouse.down()
+    page.mouse.move(tl["x"] + (17.5 / 33) * tl["w"], kf["y"], steps=6); page.mouse.up()
+    check(keys() == [0, 17, 32], f"dragging a diamond moves its keyframe along the grid: {keys()}")
+    page.keyboard.press("Delete")
+    check(keys() == [0, 32], f"Delete removes the keyframe on the playhead: {keys()}")
+    page.keyboard.press("Control+z")
+    check(keys() == [0, 17, 32], f"Ctrl+Z brings it back: {keys()}")
+    page.keyboard.press("Enter")
+    page.wait_for_function("/v1 ready/.test(document.querySelector('#fluid-state').textContent)", timeout=120000)
+    log = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
+    sent = [line for line in log if line.startswith("Fluid v1: 3 keyframe")]
+    check(sent and 'prompt "ainvfxfluid, thick white smoke"' in sent[0] and "at 1, 18, 33," in sent[0],
+          f"Enter generates with the trigger, the words and the three keyframes: {sent}")
+    page.screenshot(path=os.path.join(SHOTS, "4_fluid.png"))
+    page.click("#fluid-use")
+    page.wait_for_function("document.querySelector('#fluid').hidden && document.querySelector('#spec').textContent.includes('prores')", timeout=60000)
+    check(not page.is_disabled("[data-tool=erase]"), "Use as the plate opens the fluid shot as a plate: Erase and Light are back")
+    check(not errors, f"no console errors in the fluid shot: {errors}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8199)
@@ -152,6 +214,7 @@ def main():
             browser = p.chromium.launch()
             page = browser.new_page(viewport={"width": 1400, "height": 900})
             flow(page, a.port)
+            fluid_flow(page)
             browser.close()
     finally:
         mock.terminate()

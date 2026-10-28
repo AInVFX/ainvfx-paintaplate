@@ -123,8 +123,18 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .tl-render.export { background: var(--muted); }
 .tl-render.ready { background: var(--ok); width: 100% !important; opacity: .55; }
 .tl-render.stale { background: var(--faint); width: 100% !important; }
+.tl-keys { position: absolute; inset: 0; pointer-events: none; }
+.tl-slot { position: absolute; bottom: 0; width: 1px; height: 7px; margin-left: -0.5px; background: var(--line-strong); }
+.tl-kf { position: absolute; top: 50%; width: 11px; height: 11px; margin: -6px 0 0 -6px; padding: 0; border: 1px solid #141414; border-radius: 1px; background: var(--gold); transform: rotate(45deg); cursor: grab; pointer-events: auto; }
+.tl-kf:hover:not(:disabled) { background: #ffd34d; border-color: #141414; }
+.tl-kf.on { box-shadow: 0 0 0 2px var(--text); }
+.fluid-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+fieldset.blank { margin: 14px 0 0; padding: 6px 12px 12px; border: 1px solid var(--line); border-radius: var(--radius); }
+fieldset.blank legend { color: var(--muted); padding: 0 4px; }
+.blank-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.blank-row label { margin: 4px 0; }
 .tl-key { position: absolute; top: 50%; width: 9px; height: 9px; margin: -5px 0 0 -4px; background: var(--gold); transform: rotate(45deg); }
-.tl-head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--gold); }
+.tl-head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--gold); pointer-events: none; } /* a keyframe under the playhead stays draggable */
 .tl-head::after { content: ""; position: absolute; left: -4px; top: 0; border: 5px solid transparent; border-top-color: var(--gold); }
 #wipe-btn[aria-pressed="true"] { color: var(--gold); border-color: var(--gold); background: transparent; }
 

@@ -4,7 +4,7 @@ Each file is a plain ComfyUI workflow in API format, so ComfyUI opens it with Op
 and drop. The page fills some inputs before it posts a workflow: each node lists them in
 `_meta.slots` as {input name: slot name}, the outputs the page reads carry `_meta.output`, and
 the node whose progress stands for the whole workflow carries `_meta.progress`.
-Every node is a core node, a ComfyUI-LTXVideo node or one of the five PaintAPlate nodes.
+Every node is a core node, a ComfyUI-LTXVideo node or one of the PaintAPlate nodes (nodes.py).
 
     python tools/build_workflows.py
 """
@@ -12,7 +12,7 @@ import json
 import os
 
 OUT = os.environ.get("PAINTAPLATE_WORKFLOWS_OUT") or os.path.join(os.path.dirname(__file__), "..", "web", "workflows")
-NAMES = ("ingest", "prompt", "edit", "snap", "clean", "shot", "matte", "comp", "export", "warm")
+NAMES = ("ingest", "prompt", "edit", "snap", "clean", "shot", "matte", "comp", "export", "warm", "fluid")
 
 KLEIN = "flux3-image-klein-int8-convrot.safetensors"
 LTX = "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
@@ -21,6 +21,8 @@ UPSAMPLER = "qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors"
 INOUTPAINT = "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors"
 SAM = "sam3.1_multiplex_fp16.safetensors"
 TINY = "taeltx2_3.safetensors"  # the tiny LTX 2.5 decoder of the live preview (models/vae_approx)
+FLUID = "ainvfx-fluid.safetensors"  # AInVFX's IC-LoRA: painted keyframes become smoke, steam or fire (models/loras)
+FLUID_NEGATIVE = "blurry, low quality, distorted, watermark"  # the negative prompt of its model card's samples
 SNAP_POINTS = 5  # stroke points SAM looks at one by one
 # Lightricks' distilled schedule from the official LTX 2.5 inpaint workflow (stage 1, euler_ancestral)
 INPAINT_SIGMAS = "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
@@ -460,7 +462,49 @@ def warm():
     g.save("warm")
 
 
+def fluid():
+    """A fluid shot from painted keyframes: LTX 2.5 with AInVFX's ainvfx-fluid IC-LoRA, one distilled pass.
+
+    As its model card and example workflow: the IC-LoRA loader reads the reference downscale factor (2) from the file
+    and hands it to the guide; the control video is black with the keyframes at their frames, at the size and length
+    of the shot; euler_ancestral, the 8 distilled sigmas, CFG 1, no first-frame image (the LoRA reads frame 0 from the
+    control video). The blank plate gives the size, frame rate and length, and Save Plate writes the shot in its format
+    (ProRes 4444), so it opens as the next plate.
+    """
+    g = Graph()
+    load, srgb = plate(g, pad=True)
+    size = g("GetImageSize", image=srgb)
+    control = g("PaintAPlate_KeyframeVideo", _title="Control video: the keyframes on black", width=size[0], height=size[1],
+                frames=size[2], keys=Slot("keys", "[]"))
+    lora = g("LTXICLoRALoaderModelOnly", _title="ainvfx-fluid IC-LoRA (reads its downscale factor)",
+             model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"), lora_name=Slot("fluid", FLUID),
+             strength_model=Slot("strength", 1.0))
+    model = live(g, lora, size, load)
+    clip = g("CLIPLoader", clip_name=Slot("gemma", GEMMA), type="ltxv", device="default")
+    vae = g("VAELoader", vae_name=Slot("video_vae", "ltx-2.5-video-vae-conv-bf16.safetensors"))
+    audio_vae = g("VAELoader", vae_name="ltx-2.5-audio-vae-bf16.safetensors")
+    cond = g("LTXVConditioning", positive=g("CLIPTextEncode", text=Slot("prompt", "ainvfxfluid, smoke plume"), clip=clip),
+             negative=g("CLIPTextEncode", text=FLUID_NEGATIVE, clip=clip), frame_rate=load[3])
+    empty = g("EmptyLTXVLatentVideo", width=size[0], height=size[1], length=size[2], batch_size=1)
+    guide = g("LTXAddVideoICLoRAGuide", positive=cond[0], negative=cond[1], vae=vae, latent=empty, image=control, frame_idx=0,
+              strength=1.0, latent_downscale_factor=lora[1], crop="disabled", use_tiled_encode=False, tile_size=256,
+              tile_overlap=64, use_streaming=False, tile_frames=97)
+    audio = g("LTXVEmptyLatentAudio", audio_vae=audio_vae, frames_number=size[2], frame_rate=load[3], batch_size=1)
+    sampled = g("SamplerCustomAdvanced", _progress=True, noise=g("RandomNoise", noise_seed=Slot("seed", 42)),
+                guider=g("CFGGuider", model=model, positive=guide[0], negative=guide[1], cfg=1.0),
+                sampler=g("KSamplerSelect", sampler_name="euler_ancestral"), sigmas=g("ManualSigmas", sigmas=INPAINT_SIGMAS),
+                latent_image=g("LTXVConcatAVLatent", video_latent=guide[2], audio_latent=audio))
+    decoded = g("VAEDecode", vae=vae, samples=g("LTXVCropGuides", positive=guide[0], negative=guide[1],
+                                                 latent=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])[2])
+    g("PaintAPlate_SavePlate", _title="The fluid plate, in the blank plate's format", _output="plate", images=decoded,
+      plate=load[2], filename_prefix=Slot("prefix", "paintaplate/fluid/plate"), keep_untouched=False)
+    g("SaveVideo", _title="Fluid shot preview", _output="video", format="auto", format__codec="auto",
+      video=g("CreateVideo", images=decoded, fps=load[3], bit_depth=8, color_space="sRGB", codec="none"),
+      filename_prefix=Slot("video_prefix", "paintaplate/fluid/preview"))
+    g.save("fluid")
+
+
 if __name__ == "__main__":
-    for build in (ingest, prompt, edit, snap, clean, shot, matte, comp, export, warm):
+    for build in (ingest, prompt, edit, snap, clean, shot, matte, comp, export, warm, fluid):
         build()
     print("wrote", sorted(os.listdir(OUT)))

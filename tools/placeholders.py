@@ -10,7 +10,7 @@ import sys
 
 FOLDER = {"UNETLoader": ("unet_name", "diffusion_models"), "CLIPLoader": ("clip_name", "text_encoders"),
           "VAELoader": ("vae_name", "vae"), "LoraLoaderModelOnly": ("lora_name", "loras"),
-          "CheckpointLoaderSimple": ("ckpt_name", "checkpoints")}
+          "CheckpointLoaderSimple": ("ckpt_name", "checkpoints"), "LTXICLoRALoaderModelOnly": ("lora_name", "loras")}
 
 
 def main(comfy):

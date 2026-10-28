@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { DISPLAY, caption, clampParam, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fillWorkflow, fitSize, frameUse, gb,
+import { DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fillWorkflow, fitSize, frameUse, gb,
   parseWorkflow, previewSize, previewSizes, secs } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
@@ -53,6 +53,22 @@ test("the viewer's colour: identity at rest, one channel as grey, invert, exposu
   assert.equal(displayLabel({ ...DISPLAY, exposure: 1, gamma: 2.2, channel: "r" }), "E +1.0 · γ 2.20 · Red");
   assert.equal(displayActive(DISPLAY), false);
   assert.equal(displayActive({ ...DISPLAY, invert: true }), true);
+});
+
+test("a blank plate: sides in 64s up to 1920, 8k + 1 frames, a trained frame rate; keyframes on the LTX grid", () => {
+  assert.deepEqual(blankSpec({ width: 1000, height: 500, fps: 30, frames: 100 }), { width: 1024, height: 512, fps: 25, frames: 97 });
+  assert.deepEqual(blankSpec({ width: 4000, height: 10, fps: 60, frames: 999 }), { width: 1920, height: 256, fps: 50, frames: 321 });
+  assert.deepEqual(keySlots(121).slice(0, 3), [0, 1, 9]);
+  assert.deepEqual(keySlots(121).slice(-2), [113, 120]); // as the model card: 1, 9, 17, ... 113, then the last frame
+  assert.deepEqual(keySlots(9), [0, 1, 8]);
+  assert.equal(snapKey(60, 121), 57);
+  const keys = [{ frame: 0 }, { frame: 9 }, { frame: 120 }];
+  assert.equal(moveKey(keys, keys[1], 118, 121), 113); // the last frame is taken: the nearest free slot
+  assert.equal(moveKey(keys, keys[1], 40, 121), 41);
+  assert.deepEqual(nearKeys(keys, 50), { prev: keys[1], next: keys[2] });
+  assert.equal(fluidPrompt(""), "ainvfxfluid, smoke plume");
+  assert.equal(fluidPrompt("ainvfxfluid, wild fire"), "ainvfxfluid, wild fire");
+  assert.equal(fluidPrompt(" thick white steam "), "ainvfxfluid, thick white steam");
 });
 
 test("time left reads in seconds, then minutes and seconds", () => {

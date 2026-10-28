@@ -89,7 +89,7 @@ class Routes(unittest.TestCase):
             asyncio.run(routes.download(types.SimpleNamespace(query={"run": "../../etc"})))
         app = types.SimpleNamespace(routes=web.RouteTableDef())
         routes.setup(app)
-        self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/plates", "/paintaplate/thumb"])
+        self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/plates", "/paintaplate/thumb", "/paintaplate/blank"])
         print("download route: folders, parts, symlinks, zip reuse, handler: ok")
 
 
@@ -148,6 +148,37 @@ class PlateBrowser(unittest.TestCase):
                 self.assertEqual(r.status, 404)
         asyncio.run(run())
 
+
+
+class BlankPlate(unittest.TestCase):
+    def test_blank_plate_route(self):
+        """A black canvas in input/paintaplate/blank: written once, refused outside 64-multiples, 8k + 1 frames and 1 to 120 fps."""
+        require("av", "numpy")
+        rel = routes.blank_plate(128, 64, 25, 17)
+        self.assertEqual(rel, "paintaplate/blank/fluid_128x64_25fps_17f.mov")
+        full = os.path.join(INPUT, rel)
+        spec = routes.plateio.probe_plate(full)
+        self.assertEqual((spec["codec"], spec["width"], spec["height"], spec["frames"], spec["fps"]), ("prores", 128, 64, 17, 25.0))
+        first = os.path.getmtime(full)
+        time.sleep(0.02)
+        self.assertEqual(routes.blank_plate(128, 64, 25, 17), rel)
+        self.assertEqual(os.path.getmtime(full), first)  # reused, not rewritten
+        for bad in ((100, 64, 25, 17), (128, 64, 25, 16), (128, 64, 0, 17)):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                routes.blank_plate(*bad)
+
+        async def run():
+            table = web.RouteTableDef()
+            routes.setup(types.SimpleNamespace(routes=table))
+            app = web.Application()
+            app.add_routes(table)
+            from aiohttp.test_utils import TestClient, TestServer
+            async with TestClient(TestServer(app)) as client:
+                r = await client.post("/paintaplate/blank", json={"width": 128, "height": 64, "fps": 25, "frames": 17})
+                self.assertEqual((r.status, (await r.json())["path"]), (200, rel))
+                r = await client.post("/paintaplate/blank", json={"width": 130, "height": 64, "fps": 25, "frames": 17})
+                self.assertEqual(r.status, 400)
+        asyncio.run(run())
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

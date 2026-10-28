@@ -152,8 +152,8 @@ def main() -> int:
         print(f"Missing on the Hub: {missing}. Run the script again before you take the plates out of git.", file=sys.stderr)
         return 1
     shutil.rmtree(work, ignore_errors=True)
-    print("\nNow take the plates out of git: apply the second patch of 0.4.3 (git am 0002-*.patch),\n"
-          "or from the repository root: git rm -r --quiet tests/plates && git commit -m \"Test plates moved to Hugging Face\"")
+    print("\nNow take the plates out of git, from the repository root:\n"
+          "  git rm -r --quiet tests/plates && git commit -m \"Test plates moved to Hugging Face\"")
     return 0
 
 

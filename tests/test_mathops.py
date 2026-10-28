@@ -133,5 +133,17 @@ class MathOps(unittest.TestCase):
         self.assertEqual(box[0].sum(), 20 * 20)  # grown by half its size on each side
         self.assertEqual(box[1].sum(), 0)
 
+
+class Keyframes(unittest.TestCase):
+    def test_keyframe_video(self):
+        """Black frames, each key at its frame (clamped), the later of two keys on one frame winning."""
+        images = {"a": np.full((4, 6, 3), 0.8, np.float32), "b": np.full((4, 6, 3), 0.3, np.float32)}
+        video = m.keyframe_video([{"frame": 0, "image": "a"}, {"frame": 99, "image": "b"}, {"frame": 0, "image": "b"}],
+                                       6, 4, 9, images.__getitem__)
+        self.assertEqual(video.shape, (9, 4, 6, 3))
+        self.assertAlmostEqual(float(video[0].mean()), 0.3, places=5)
+        self.assertAlmostEqual(float(video[8].mean()), 0.3, places=5)  # frame 99 clamped to the last frame
+        self.assertEqual(float(video[1:8].max()), 0.0)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -290,3 +290,45 @@ export function displayMatrix({ saturation = 1, hue = 0, channel = "rgb", invert
   const sign = invert ? -1 : 1;
   return [...m.flatMap((row) => [...row.map((v) => +(sign * v).toFixed(5) + 0), 0, invert ? 1 : 0]), 0, 0, 0, 1, 0].join(" ");
 }
+
+// ---------- A fluid shot on a blank plate: AInVFX's ainvfx-fluid IC-LoRA (its model card, read 28 Oct 2026) ----------
+// Sides in multiples of 64 (the LoRA's reference downscale factor is 2), up to the app's 1920; 8k + 1 frames, 121 tested,
+// 33 and 321 seen in training; 24, 25 and 50 fps trained. Keyframes sit on frame 0, on the last frame, and between on
+// the first frame of each 8-frame group of the LTX VAE (8k + 1).
+export const FLUID = { trigger: "ainvfxfluid", step: 64, minSide: 256, maxSide: 1920, minFrames: 9, maxFrames: 321, tested: 121,
+  rates: [24, 25, 50], prompt: "smoke plume" };
+const nearest = (list, v) => list.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
+
+export function blankSpec({ width, height, fps, frames }) { // the blank plate LTX and ainvfx-fluid take, nearest to what was typed
+  const side = (v) => Math.min(FLUID.maxSide, Math.max(FLUID.minSide, Math.round((+v || 0) / FLUID.step) * FLUID.step));
+  const n = Math.min(FLUID.maxFrames, Math.max(FLUID.minFrames, Math.round(((+frames || 0) - 1) / 8) * 8 + 1));
+  return { width: side(width), height: side(height), fps: nearest(FLUID.rates, +fps || FLUID.rates[1]), frames: n };
+}
+
+export function keySlots(frames) { // where a keyframe may sit: frame 0, each 8k + 1 that starts a whole group of 8, the last frame
+  const slots = [0];
+  for (let f = 1; f <= frames - 8; f += 8) slots.push(f);
+  if (frames - 1 > slots.at(-1)) slots.push(frames - 1);
+  return slots;
+}
+
+export const snapKey = (frame, frames) => nearest(keySlots(frames), frame);
+
+export function moveKey(keys, key, frame, frames) { // where a dragged keyframe lands: the free slot nearest the pointer, else where it was
+  const taken = new Set(keys.filter((k) => k !== key).map((k) => k.frame)), free = keySlots(frames).filter((f) => !taken.has(f));
+  return free.length ? nearest(free, frame) : key.frame;
+}
+
+export function nearKeys(keys, frame) { // the keyframes before and after a frame: onion skins, Alt+Left and Alt+Right
+  let prev = null, next = null;
+  for (const k of keys) {
+    if (k.frame < frame && (!prev || k.frame > prev.frame)) prev = k;
+    if (k.frame > frame && (!next || k.frame < next.frame)) next = k;
+  }
+  return { prev, next };
+}
+
+export function fluidPrompt(words) { // the trigger first, as the model card asks; no words: its own example
+  const rest = (words || "").trim().replace(/^ainvfxfluid\s*,?\s*/i, "");
+  return `${FLUID.trigger}, ${rest || FLUID.prompt}`;
+}

@@ -231,6 +231,27 @@ async def execute(pid, prompt):
         m = resize(load_image(v["mask"], "L"), v["width"], v["height"])
         await steps(pid, 4, 1.0)
         o[outs["frames"]] = {"images": [save_png(m, "output", v["prefix"], i) for i in range(len(frames))][:1]}
+    elif "plate" in outs:  # fluid: each keyframe softened into a cloud, crossfaded to the next, written in the blank plate's format
+        frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
+        h, w = frames[0].shape[:2]
+        keys = sorted(json.loads(v.get("keys") or "[]"), key=lambda k: k["frame"])
+        clouds = [(k["frame"], np.asarray(Image.open(resolve(k["image"])).convert("RGB").resize((w, h)).filter(ImageFilter.GaussianBlur(4)),
+                                          np.float32) / 255) for k in keys]
+        await steps(pid, 8, 2.0)
+        shot = []
+        for i in range(len(frames)):
+            a = max((c for c in clouds if c[0] <= i), key=lambda c: c[0], default=clouds[0])
+            b = min((c for c in clouds if c[0] >= i), key=lambda c: c[0], default=clouds[-1])
+            t = 0.0 if b[0] == a[0] else (i - a[0]) / (b[0] - a[0])
+            shot.append(a[1] * (1 - t) + b[1] * t)
+        d = os.path.join(folder("output"), v["prefix"])
+        os.makedirs(d, exist_ok=True)
+        writer = plateio.VideoWriter(spec, os.path.join(d, os.path.basename(spec["source"])))
+        for f in shot:
+            writer.write(f)
+        writer.close()
+        o[outs["plate"]] = {"text": [f"1 file(s) in {d}\n{os.path.basename(writer.path)}"]}
+        o[outs["video"]] = {"images": [save_mp4(shot, v["video_prefix"], spec["fps"])], "animated": [True]}
     elif "video" in outs or "export" in outs:  # comp and export: blend the shot over the plate through the matte
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         n = spec["frames"]

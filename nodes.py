@@ -1,12 +1,14 @@
-"""The seven PaintAPlate nodes. Each one fills a gap in core ComfyUI.
+"""The eight PaintAPlate nodes. Each one fills a gap in core ComfyUI.
 
 Colour conversion, compositing, masks, Klein, LTX and SAM 3 stay in core nodes: these nodes only
 load and save plates, fit generated frames to the plate, transfer a new light onto it and fill an
-erased object in the frames LTX follows, turn an erase matte into boxes, or show a shot while LTX samples it. Each node converts tensors and calls plateio (files) or
+erased object in the frames LTX follows, turn an erase matte into boxes, show a shot while LTX samples it, or build
+the keyframe control video of a fluid shot. Each node converts tensors and calls plateio (files) or
 mathops (pixels), which are tested without torch or ComfyUI.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -363,6 +365,48 @@ class BoxMatte(io.ComfyNode):
         return io.NodeOutput(torch.from_numpy(out).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()))
 
 
+class KeyframeVideo(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_KeyframeVideo",
+            display_name="Keyframe Video",
+            category=CATEGORY,
+            description="Builds the control video of an IC-LoRA that reads painted keyframes, such as AInVFX's ainvfx-fluid: "
+                        "black frames, with each keyframe image at its frame.",
+            search_aliases=["keyframes", "control video", "ainvfx-fluid"],
+            inputs=[
+                io.Int.Input("width", default=960, min=64, max=8192),
+                io.Int.Input("height", default=512, min=64, max=8192),
+                io.Int.Input("frames", default=121, min=1, max=4096),
+                io.String.Input("keys", default="[]", multiline=True,
+                                tooltip='A JSON list of {"frame": n, "image": "folder/key.png"}, images in ComfyUI\'s input folder.'),
+            ],
+            outputs=[io.Image.Output(display_name="images")],
+        )
+
+    @classmethod
+    def fingerprint_inputs(cls, width, height, frames, keys):
+        stamps = []
+        for key in json.loads(keys or "[]"):  # a keyframe image replaced under the same name runs again
+            try:
+                stamps.append(os.path.getmtime(resolve(key["image"])))
+            except (OSError, ValueError, KeyError, TypeError):
+                stamps.append(None)
+        return f"{width}|{height}|{frames}|{keys}|{stamps}"
+
+    @classmethod
+    def execute(cls, width, height, frames, keys) -> io.NodeOutput:
+        def read(name):
+            with Image.open(resolve(name)) as im:
+                im = im.convert("RGB")
+                if im.size != (width, height):
+                    im = im.resize((width, height), Image.NEAREST)  # flat colours stay flat
+                return np.asarray(im, np.float32) / 255.0
+        video = mathops.keyframe_video(json.loads(keys or "[]"), width, height, frames, read)
+        return io.NodeOutput(torch.from_numpy(video).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()))
+
+
 LIVE = ThreadPoolExecutor(1)  # live previews are encoded off the sampling thread, one at a time
 _TINY = {}  # tiny decoders by path, loaded once
 
@@ -439,4 +483,4 @@ class LivePreview(io.ComfyNode):
         return io.NodeOutput(patched)
 
 
-NODES = [LoadPlate, SavePlate, FitToPlate, RelightTransfer, FillMatte, BoxMatte, LivePreview]
+NODES = [LoadPlate, SavePlate, FitToPlate, RelightTransfer, FillMatte, BoxMatte, LivePreview, KeyframeVideo]

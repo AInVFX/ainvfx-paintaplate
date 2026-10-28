@@ -288,6 +288,19 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
     return [d[0] for d in done], [d[1] for d in done]
 
 
+def keyframe_video(keys, width: int, height: int, frames: int, read) -> np.ndarray:
+    """A control video (frames, height, width, 3): black, with each key's image at its frame.
+
+    `keys` is a list of {"frame": n, "image": name} and `read(name)` returns that image as (height, width, 3) floats.
+    A frame outside the clip is clamped to it; of two keys on one frame, the later wins. ainvfx-fluid reads keyframes
+    painted in flat colours this way: on frame 0, on the last frame, and on the 8k + 1 frames between.
+    """
+    video = np.zeros((frames, height, width, 3), np.float32)
+    for key in keys:
+        video[min(max(int(key["frame"]), 0), frames - 1)] = np.asarray(read(key["image"]), np.float32)[:height, :width, :3]
+    return video
+
+
 def box(x: np.ndarray, r: int) -> np.ndarray:
     return ndimage.uniform_filter(x, size=(2 * r + 1, 2 * r + 1) + (1,) * (x.ndim - 2), mode="reflect")
 

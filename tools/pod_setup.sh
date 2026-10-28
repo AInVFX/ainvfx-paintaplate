@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Standalone setup of a PaintAPlate GPU machine (tested on a Runpod RTX PRO 6000).
 #   HF_TOKEN=... [PLATES=1] bash tools/pod_setup.sh [comfyui_ref] [ltxvideo_ref]
-# PLATES=1 also downloads the AInVFX test plates into ComfyUI's input/plates folder (tools/get_plates.sh).
+# PLATES=1 also downloads the AInVFX test plates into ComfyUI's input/plates folder (tools/get_plates.sh);
+# FLUID=0 skips AInVFX's ainvfx-fluid IC-LoRA (0.65 GB), which the blank plate's fluid shots need.
 # The refs default to the tested commits. The pack is the repo this script lives in.
 # Code, models and pins live in $WORKDIR (a network volume survives the pod); the Python env
 # goes on the fast container disk. Accept the Hugging Face licences of FLUX 3 Image Klein,
@@ -41,6 +42,7 @@ rev() { # the tested revision of each model repository (checked 27 Oct 2026)
     WepeNerd/LTX-Ripple) echo 76abac5ede8a3415b9d1cd803843a38ecb351600 ;;
     Comfy-Org/sam3.1) echo 7bb8374780a725b4353ed31f3a9395c9742b5621 ;;
     Kijai/LTX2.3_comfy) echo 6d980fde0d330f2fed6ff8dfdfddb06d88a004e5 ;;
+    AInVFX/ainvfx-fluid) echo caee4eb18cf76a2077b6cc5f775e424653fd1462 ;;
   esac
 }
 get() { # repo, file in repo, target folder
@@ -63,6 +65,9 @@ get() { # repo, file in repo, target folder
   get Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors loras &
   get Comfy-Org/sam3.1 checkpoints/sam3.1_multiplex_fp16.safetensors checkpoints &
   get Kijai/LTX2.3_comfy vae/taeltx2_3.safetensors vae_approx &  # the live preview's tiny decoder (MIT, madebyollin/taehv)
+  if [ "${FLUID:-1}" != 0 ]; then  # AInVFX's IC-LoRA for fluid shots from a blank plate (LTX-2.x Community License)
+    get AInVFX/ainvfx-fluid ltx-2.5/ainvfx-fluid.safetensors loras &
+  fi
   wait; log "models done" ) > "$W/models.log" 2>&1 &
 
 log "ComfyUI $COMFY_REF"

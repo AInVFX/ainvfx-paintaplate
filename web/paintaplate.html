@@ -49,6 +49,7 @@
     <div class="swatches" role="group" aria-label="Colour of the paint, or of the light">
       <button class="sw" data-color="#000000" style="--c:#000000" title="Black" aria-label="Black"></button>
       <button class="sw" data-color="#ffffff" style="--c:#ffffff" title="White" aria-label="White"></button>
+      <button class="sw" data-color="#c8c8c8" style="--c:#c8c8c8" title="Light grey (smoke, in a fluid shot)" aria-label="Light grey"></button>
       <button class="sw" data-color="#d32f2f" style="--c:#d32f2f" title="Red" aria-label="Red"></button>
       <button class="sw" data-color="#f57c00" style="--c:#f57c00" title="Orange" aria-label="Orange"></button>
       <button class="sw" data-color="#fbc02d" style="--c:#fbc02d" title="Yellow" aria-label="Yellow"></button>
@@ -96,6 +97,7 @@
         <canvas id="tl-cache" class="tl-cache" title="Frames cached in memory: they show at once"></canvas>
         <div id="tl-render" class="tl-render"></div>
         <div id="tl-key" class="tl-key" hidden title="Edits are painted on this frame"></div>
+        <div id="tl-keys" class="tl-keys"></div>
         <div id="tl-head" class="tl-head"></div>
       </div>
       <output id="frame-total" class="frame-total"></output>
@@ -115,6 +117,15 @@
     </div>
     <ol id="history"></ol>
     <p id="history-empty" class="history-empty">Your edits appear here. Describe, then paint on the frame. Click an edit to change its words or strokes.</p>
+    <section id="fluid" class="render fluid" hidden>
+      <h2>Fluid shot <span id="fluid-state"></span></h2>
+      <p class="hint">AInVFX's ainvfx-fluid IC-LoRA turns the painted blobs into smoke, steam or fire in one LTX 2.5 pass. The shot then opens as a plate, for every edit.</p>
+      <div class="fluid-actions">
+        <button id="fluid-go" class="primary" type="button" title="Generate the fluid shot from the keyframes (Enter)">Generate</button>
+        <button id="fluid-again" type="button" title="Generate with another seed (Ctrl+Enter)">Another seed</button>
+        <button id="fluid-use" type="button" title="Open the shot as the plate: erase, paint, relight and export it">Use as the plate</button>
+      </div>
+    </section>
     <section id="render" class="render" hidden>
       <h2>Render <span id="render-left"></span></h2>
       <label class="preview-size">Preview size
@@ -168,6 +179,15 @@
       <dt>Hold O</dt><dd>See the plate</dd>
       <dt>?</dt><dd>Show or hide these keys</dd>
     </dl>
+    <h3>Fluid shot, on a blank plate</h3>
+    <dl>
+      <dt>Paint</dt><dd>Flat colour blobs: light grey smoke, white steam, orange and yellow fire. Keyframes snap to frame 0, the last frame and the 8-frame grid</dd>
+      <dt>Ctrl+C, Ctrl+V</dt><dd>Copy the keyframe on this frame, paste it on another</dd>
+      <dt>Drag a diamond</dt><dd>Move a keyframe along the timeline</dd>
+      <dt>Delete</dt><dd>Delete the keyframe on this frame</dd>
+      <dt>Alt+Left, Alt+Right</dt><dd>Previous, next keyframe</dd>
+      <dt>Enter, Ctrl+Enter</dt><dd>Generate the fluid shot, then with another seed</dd>
+    </dl>
     <h3>Colour, as in RV: the viewer only, the export never changes</h3>
     <dl>
       <dt>Shift+E, K, Y</dt><dd>Exposure, contrast, gamma: then drag on the frame, or use the wheel, - and =</dd>
@@ -205,6 +225,18 @@
       <label>Or a path in ComfyUI's input folder <input id="path" placeholder="plates/shot010"></label>
       <label>Colour space <select id="cs"></select></label>
       <label>Or a scene saved by PaintAPlate <input id="scene" type="file" accept=".json,application/json"></label>
+      <fieldset class="blank">
+        <legend>Or a blank plate, for a fluid shot</legend>
+        <p class="hint">Paint flat colour keyframes; AInVFX's ainvfx-fluid IC-LoRA turns them into smoke, steam or fire, as a new plate. Sides in multiples of 64, 8k + 1 frames, 24, 25 or 50 fps.</p>
+        <div class="blank-row">
+          <label>Width <input id="b-width" type="number" min="256" max="1920" step="64" value="960"></label>
+          <label>Height <input id="b-height" type="number" min="256" max="1920" step="64" value="512"></label>
+          <label>Frame rate <select id="b-fps"><option>24</option><option selected>25</option><option>50</option></select></label>
+          <label>Frames <input id="b-frames" type="number" min="9" max="321" step="8" value="121"></label>
+        </div>
+        <p id="b-note" class="hint"></p>
+        <button id="blank-go" type="button">Open a blank plate</button>
+      </fieldset>
       <menu><button value="cancel">Cancel</button><button id="open-go" value="ok" class="primary">Open</button></menu>
     </form>
   </dialog>

@@ -206,6 +206,9 @@ def main():
             "snap": {"image": "paintaplate/test/base.png", "point_0": '[{"x": 40, "y": 30}]', "words": "box"},
             "prompt": {"image": "paintaplate/test/base.png", "request": "Remove the box.", "system": "Answer in one sentence."},
             "warm": {},
+            "fluid": {"path": plates["mov"][0], "color_space": "sRGB", "max_frames": N, "prompt": "ainvfxfluid, smoke plume",
+                      "keys": json.dumps([{"frame": 0, "image": "paintaplate/test/base.png"}]), "seed": 1,
+                      "prefix": "paintaplate/test/fluid/plate", "video_prefix": "paintaplate/test/fluid/preview"},
             "clean": {"path": plates["exr"][0], "color_space": "linear", "max_frames": N, "hero": "paintaplate/test/base.png", "width": 96,
                       "height": 64, "hole": plates["exr"][0], "seed": 1, "prefix": "paintaplate_test/clean/f", "video_prefix": "paintaplate_test/clean"},
             "matte": {"path": plates["exr"][0], "color_space": "linear", "max_frames": N, "mask": "paintaplate/test/mask.png", "width": 96, "height": 64,
@@ -213,7 +216,7 @@ def main():
         }
         missing_slots = [(name, slot) for name, v in values.items() for slot in v if not fill_check(name, slot)]
         check(not missing_slots, f"every value the test sets is a slot of its workflow {missing_slots or ''}")
-        for name in ("prompt", "edit", "snap", "clean", "shot", "matte", "warm"):  # model workflows: validate, then cancel
+        for name in ("prompt", "edit", "snap", "clean", "shot", "matte", "warm", "fluid"):  # model workflows: validate, then cancel
             res = submit(url, fill(name, values[name]))
             ok = "prompt_id" in res
             check(ok, f"{name}: accepted" + ("" if ok else f" -> {json.dumps(res.get('node_errors') or res.get('error'))[:600]}"))
