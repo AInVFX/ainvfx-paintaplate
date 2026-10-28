@@ -6,6 +6,8 @@
 # After updating the code on a pod where ComfyUI already runs, --restart stops it first, so the new
 # nodes load:  cd /workspace/ainvfx-paintaplate && git pull && bash tools/runpod_start.sh --restart
 # When the pod cannot reach GitHub, upload the offline bundle instead (tools/offline_bundle.sh).
+# PLATES=1 adds the AInVFX test plates to ComfyUI's input/plates folder, where the Open plate dialog lists them:
+#   PLATES=1 bash tools/runpod_start.sh         (or, on a pod that is already running: bash tools/get_plates.sh)
 # As a container's start command (process 1), it also starts Runpod's services and keeps the pod running.
 set -uo pipefail
 W=${WORKDIR:-/workspace}; VENV=${VENV:-/opt/venv}
@@ -25,6 +27,7 @@ fi
 
 if curl -s -m 3 -o /dev/null http://127.0.0.1:8188/system_stats; then
   log "ComfyUI is already running: $APP"
+  if [ "${PLATES:-0}" != 0 ]; then bash "$HERE/tools/get_plates.sh" "$W/ComfyUI" || log "the test plates did not download"; fi
 else
   log "setup: ComfyUI, ComfyUI-LTXVideo, this pack and 60 GB of models (log: $W/setup.log)"
   bash "$HERE/tools/pod_setup.sh" > "$W/setup.log" 2>&1 &

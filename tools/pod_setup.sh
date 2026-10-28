@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Standalone setup of a PaintAPlate GPU machine (tested on a Runpod RTX PRO 6000).
-#   HF_TOKEN=... bash tools/pod_setup.sh [comfyui_ref] [ltxvideo_ref]
+#   HF_TOKEN=... [PLATES=1] bash tools/pod_setup.sh [comfyui_ref] [ltxvideo_ref]
+# PLATES=1 also downloads the AInVFX test plates into ComfyUI's input/plates folder (tools/get_plates.sh).
 # The refs default to the tested commits. The pack is the repo this script lives in.
 # Code, models and pins live in $WORKDIR (a network volume survives the pod); the Python env
 # goes on the fast container disk. Accept the Hugging Face licences of FLUX 3 Image Klein,
@@ -103,4 +104,8 @@ if [ "$PACK" != "$dst" ]; then
   ln -sfn "$PACK" "$dst"
 fi
 uv pip install -q -r "$PACK/requirements.txt"
+if [ "${PLATES:-0}" != 0 ]; then  # the AInVFX test plates into input/plates, where the Open plate dialog lists them
+  log "test plates from Hugging Face"
+  bash "$PACK/tools/get_plates.sh" "$W/ComfyUI" || log "the test plates did not download: run bash tools/get_plates.sh later"
+fi
 cat "$W/pins.txt"; log "setup done"

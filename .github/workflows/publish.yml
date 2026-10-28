@@ -1,11 +1,7 @@
 name: Publish to Comfy Registry
+# Manual until the contest submission (AInVFX, 27 Oct 2026): Actions > Publish to Comfy Registry > Run workflow.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - "pyproject.toml"
 
 jobs:
   publish-node:

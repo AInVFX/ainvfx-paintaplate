@@ -6,7 +6,7 @@ It serves web/ at /extensions/ainvfx-paintaplate/, answers /object_info, /upload
 /view, /queue, /interrupt and /ws, and runs each workflow with numpy instead of models: an edit tints and
 blurs the reference inside the mask and streams step previews, the shot pastes the edited first frame over
 every frame, the matte repeats the first mask, the composite and the export blend through the matte. The
-download route is the pack's own routes.py. --plate writes a 1280 x 704 test plate to input/plates/desk.mp4.
+download route and the plate browser are the pack's own routes.py. --plate writes a 1280 x 704 test plate to input/plates/desk.mp4.
 Each job waits a little, so the page's progress, cancelling and ordering behave as they do on a GPU.
 """
 import argparse, asyncio, importlib, io, json, os, struct, sys, time, types, uuid
@@ -132,7 +132,8 @@ def inputs_by_slot(prompt):
     vals = {}
     for node in prompt.values():
         for key, slot in node.get("_meta", {}).get("slots", {}).items():
-            vals[slot] = node["inputs"][key]
+            if key in node["inputs"]:  # an optional link the page dropped keeps its slot name in _meta
+                vals[slot] = node["inputs"][key]
     return vals
 
 
@@ -366,9 +367,11 @@ async def ws_route(request):
 
 
 def download_routes():
-    """The pack's own routes.py, with ComfyUI's folder_paths stubbed."""
+    """The pack's own routes.py (the download, the plate browser), with ComfyUI's folder_paths stubbed."""
     fp = types.ModuleType("folder_paths")
     fp.get_output_directory = lambda: folder("output")
+    fp.get_input_directory = lambda: folder("input")
+    fp.get_temp_directory = lambda: folder("temp")
     sys.modules["folder_paths"] = fp
     server = types.SimpleNamespace(routes=web.RouteTableDef())
     importlib.import_module("routes").setup(server)
@@ -378,6 +381,7 @@ def download_routes():
 async def start():
     app = web.Application(client_max_size=1024 ** 3)
     app.router.add_post("/prompt", prompt_route)
+    app.router.add_get("/history", lambda r: web.json_response({}))  # the page reads it once at start, for the models already loaded
     app.router.add_get("/history/{pid}", history_route)
     app.router.add_get("/view", view_route)
     app.router.add_post("/upload/image", upload_route)

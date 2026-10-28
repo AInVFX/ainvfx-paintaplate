@@ -43,17 +43,47 @@ export function dropLink(wf, link, sources, extra) { // cut the input `link` nam
 
 // ---------- Sizes and time ----------
 
-// Multiples of `step` (what the models need) that keep the plate's aspect within 1.5%, as large as `cap` allows.
-export function fitSize(w, h, cap, step) {
+// Multiples of `step` (what the models need) that keep the plate's aspect within `tol` (1.5%), as large as `cap` allows.
+export function fitSize(w, h, cap, step, tol = 0.015) {
   const long = Math.max(w, h), short = Math.min(w, h), aspect = long / short;
   const top = Math.max(step, Math.floor(Math.min(cap, long) / step) * step);
   let best = null;
   for (let L = top; L >= Math.max(step, top * 0.75); L -= step) {
     const s = Math.max(step, Math.round((short * L) / long / step) * step), err = Math.abs(L / s - aspect) / aspect;
     if (!best || err < best.err) best = { L, s, err };
-    if (err <= 0.015) { best = { L, s, err }; break; }
+    if (err <= tol) { best = { L, s, err }; break; }
   }
   return w >= h ? [best.L, best.s] : [best.s, best.L];
+}
+
+// ---------- Preview sizes: from the plate's own size, never a fixed list ----------
+// The shot preview at `cap` on its long side, for a plate of native size `plate` edited at working size `work` (its
+// multiples-of-32 size, 1920 at most): an exact half, third or quarter of the working size when one sits within 12.5%
+// under the cap and keeps the plate's aspect (it divides the working pixels evenly), else the largest multiples of `step`
+// under the cap within `tol` of the plate's aspect (2.5%: a preview is for looking; the export never depends on it).
+// A cap at or above the working size is the working size itself: one pass, as the export.
+export function previewSize(plate, work, cap, step = 32, tol = 0.025) {
+  const [W, H] = work, long = Math.max(W, H), aspect = plate[0] / plate[1];
+  if (cap >= long) return [W, H];
+  for (const k of [2, 3, 4]) {
+    const fits = W % (step * k) === 0 && H % (step * k) === 0 && long / k <= cap && long / k >= cap * 0.875;
+    if (fits && Math.abs(W / H - aspect) / aspect <= tol) return [W / k, H / k];
+  }
+  return fitSize(plate[0], plate[1], cap, step, tol);
+}
+
+export const PREVIEW_CAPS = [["Standard", 960], ["Fast", 640], ["Draft", 448]];
+
+// The Preview size menu for a plate: Full, then each cap below the working size, with the size it gives and the whole
+// number it divides the working size by (0 when it does not divide it). Two caps that give one size are listed once.
+export function previewSizes(plate, work, step = 32) {
+  const long = Math.max(...work), out = [];
+  for (const [label, cap] of [["Full", long], ...PREVIEW_CAPS.filter(([, c]) => c < long)]) {
+    const size = previewSize(plate, work, cap, step), k = work[0] / size[0];
+    if (out.some((o) => o.size[0] === size[0] && o.size[1] === size[1])) continue;
+    out.push({ label, cap, size, div: Number.isInteger(k) && work[1] / size[1] === k ? k : 0 });
+  }
+  return out;
 }
 
 export const gb = (n) => (n > 1e9 ? `${(n / 1e9).toFixed(2)} GB` : `${Math.round(n / 1e6)} MB`);
@@ -207,4 +237,56 @@ export function frameUse(f, { frame, inPt, outPt }, behind = 3) {
   if (f < inPt || f > outPt) return 1 / (1 + span + Math.min(Math.abs(f - inPt), Math.abs(f - outPt)));
   const at = Math.min(Math.max(frame, inPt), outPt), ahead = (f - at + span) % span, back = (at - f + span) % span;
   return 1 / (1 + Math.min(ahead, back * behind));
+}
+
+// ---------- The viewer's colour, as in RV's Color menu: display only, the export never changes ----------
+// Exposure and contrast act in linear light (contrast about 18% grey), gamma on the display values, then saturation, hue,
+// one channel shown as grey, and invert. The page applies them as one SVG filter on the canvas (app.mjs, setDisplay).
+export const DISPLAY = { exposure: 0, contrast: 1, gamma: 1, saturation: 1, hue: 0, channel: "rgb", invert: false };
+export const PARAMS = { // the interactive edits: label, step for - and = and the wheel, change per pixel dragged, limits
+  exposure: { label: "Exposure", step: 0.1, drag: 0.01, min: -10, max: 10 }, // stops: one per 100 px dragged
+  contrast: { label: "Contrast", step: 0.05, drag: 0.005, min: 0, max: 4 },
+  gamma: { label: "Gamma", step: 0.05, drag: 0.005, min: 0.1, max: 8 },
+  saturation: { label: "Saturation", step: 0.05, drag: 0.005, min: 0, max: 4 },
+  hue: { label: "Hue", step: 5, drag: 0.5, min: -180, max: 180 }, // degrees
+};
+export const CHANNEL_NAMES = { rgb: "All channels", r: "Red", g: "Green", b: "Blue", l: "Luminance" };
+export const clampParam = (name, v) => +Math.min(PARAMS[name].max, Math.max(PARAMS[name].min, v)).toFixed(3);
+export const displayActive = (d) => Object.keys(DISPLAY).some((k) => d[k] !== DISPLAY[k]);
+
+export function formatParam(name, v) {
+  if (name === "exposure") return `${v > 0 ? "+" : ""}${v.toFixed(1)} stop${Math.abs(v) === 1 ? "" : "s"}`;
+  return name === "hue" ? `${Math.round(v)}°` : v.toFixed(2);
+}
+
+export function displayLabel(d) { // the transport's reminder of what the viewer changes: "E +1.0 · γ 2.20 · Red"
+  const parts = [];
+  if (d.exposure) parts.push(`E ${d.exposure > 0 ? "+" : ""}${d.exposure.toFixed(1)}`);
+  if (d.contrast !== 1) parts.push(`C ${d.contrast.toFixed(2)}`);
+  if (d.gamma !== 1) parts.push(`γ ${d.gamma.toFixed(2)}`);
+  if (d.saturation !== 1) parts.push(`Sat ${d.saturation.toFixed(2)}`);
+  if (d.hue) parts.push(`Hue ${Math.round(d.hue)}°`);
+  if (d.channel !== "rgb") parts.push(CHANNEL_NAMES[d.channel]);
+  if (d.invert) parts.push("Inverted");
+  return parts.join(" · ");
+}
+
+// The two transfer functions: slope and intercept in linear light (exposure, then contrast about 18% grey), then gamma.
+export const displayTransfer = ({ exposure = 0, contrast = 1, gamma = 1 }) =>
+  ({ slope: contrast * 2 ** exposure, intercept: 0.18 * (1 - contrast), exponent: 1 / gamma });
+
+const LUMA = [0.2126, 0.7152, 0.0722];
+const PICK = { r: [1, 0, 0], g: [0, 1, 0], b: [0, 0, 1], l: LUMA };
+const times = (A, B) => A.map((row) => B[0].map((_, j) => row.reduce((a, v, k) => a + v * B[k][j], 0)));
+
+export function displayMatrix({ saturation = 1, hue = 0, channel = "rgb", invert = false }) { // the 20 values of a feColorMatrix
+  const s = saturation, t = (hue * Math.PI) / 180, c = Math.cos(t), n = Math.sin(t);
+  const sat = [0, 1, 2].map((i) => [0, 1, 2].map((j) => LUMA[j] * (1 - s) + (i === j ? s : 0)));
+  const rot = [[0.213 + c * 0.787 - n * 0.213, 0.715 - c * 0.715 - n * 0.715, 0.072 - c * 0.072 + n * 0.928], // SVG's hueRotate
+    [0.213 - c * 0.213 + n * 0.143, 0.715 + c * 0.285 + n * 0.14, 0.072 - c * 0.072 - n * 0.283],
+    [0.213 - c * 0.213 - n * 0.787, 0.715 - c * 0.715 + n * 0.715, 0.072 + c * 0.928 + n * 0.072]];
+  let m = times(sat, rot);
+  if (PICK[channel]) m = Array(3).fill(times([PICK[channel]], m)[0]);
+  const sign = invert ? -1 : 1;
+  return [...m.flatMap((row) => [...row.map((v) => +(sign * v).toFixed(5) + 0), 0, invert ? 1 : 0]), 0, 0, 0, 1, 0].join(" ");
 }

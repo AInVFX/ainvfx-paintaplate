@@ -1,0 +1,162 @@
+"""The page's behaviour in headless Chromium against tests/mock_comfy.py: no ComfyUI, no GPU, about two minutes.
+
+    python tests/ui_mock.py [--port 8199] [--keep]
+
+Opens a plate from the plate browser, paints two edits, removes one, undoes and redoes, selects an edit and retypes its
+words, tries another seed with Ctrl+Enter, undoes three steps, changes the preview size, and checks the log. Prints
+UI MOCK PASSED at the end; tests/test_ui_mock.py runs it. Screenshots go to /tmp/paintaplate_ui_mock.
+"""
+import argparse, json, os, shutil, subprocess, sys, time, urllib.request
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
+SHOTS = "/tmp/paintaplate_ui_mock"
+DONE = "document.querySelectorAll('#history li').length === {n} && !document.querySelector('#history li.busy')"
+
+
+def check(ok, what):
+    print(("  ok   " if ok else "  FAIL ") + what)
+    if not ok:
+        raise AssertionError(what)
+
+
+def flow(page, port):
+    errors = []
+    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+    page.on("response", lambda r: errors.append(f"{r.status}: {r.url}") if r.status >= 400 else None)
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html")
+    page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=20000)
+
+    page.click("#open-btn")
+    page.wait_for_selector("#plates .plate", timeout=10000)
+    names = page.eval_on_selector_all("#plates .plate .plate-name", "els => els.map(e => e.textContent)")
+    check("desk.mp4" in names, f"the plate browser lists input/plates: {names}")
+    page.click("#plates .plate:has-text('desk.mp4')")
+    check(page.input_value("#path") == "plates/desk.mp4", "one click fills the path")
+    page.click("#open-go")
+    page.wait_for_function("document.querySelector('#spec').textContent.includes('fps')", timeout=60000)
+    page.wait_for_function("/Describe the edit|Ready to play/.test(document.querySelector('#status').textContent)", timeout=60000)
+    menu = page.eval_on_selector_all("#preview-size option", "els => els.map(e => e.textContent)")
+    check(any("Fast · 640 × 352 (1/2)" in m for m in menu) and menu[0].startswith("Full"), f"the preview menu comes from the plate: {menu}")
+    page.screenshot(path=os.path.join(SHOTS, "1_open.png"))
+    box = page.eval_on_selector("#view", "e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }")
+
+    def stroke(pts):
+        page.mouse.move(box["x"] + pts[0][0] * box["w"], box["y"] + pts[0][1] * box["h"])
+        page.mouse.down()
+        for x, y in pts[1:]:
+            page.mouse.move(box["x"] + x * box["w"], box["y"] + y * box["h"], steps=5)
+        page.mouse.up()
+
+    def titles():
+        return page.eval_on_selector_all("#history li .title", "els => els.map(e => e.textContent)")
+
+    def words():
+        return page.eval_on_selector_all("#history li small", "els => els.map(e => e.textContent)")
+
+    page.fill("#prompt", "a red fire")
+    stroke([(0.3, 0.5), (0.4, 0.52), (0.5, 0.5)])
+    stroke([(0.3, 0.6), (0.5, 0.62)])
+    check(not page.is_disabled("#undo-btn"), "undo is live after a stroke")
+    page.wait_for_function(DONE.format(n=1), timeout=120000)
+    check(titles() == ["1. Paint"] and words() == ["a red fire"], f"edit 1 is done with its words: {titles()} {words()}")
+    page.click("[data-tool=erase]")
+    page.fill("#prompt", "")
+    stroke([(0.7, 0.3), (0.75, 0.35)])
+    page.wait_for_function(DONE.format(n=2), timeout=120000)
+    check(titles() == ["2. Erase", "1. Paint"], f"two edits, numbered from the bottom: {titles()}")
+
+    page.click("#history li:last-child .del")
+    page.wait_for_function(DONE.format(n=1), timeout=120000)
+    check(titles() == ["1. Erase"], f"after a removal the numbers start from 1 again: {titles()}")
+    check(not page.is_disabled("#undo-btn") and page.is_disabled("#redo-btn"), "undo is live, redo is not")
+    page.keyboard.press("Control+z")
+    page.wait_for_function(DONE.format(n=2), timeout=120000)
+    check(titles() == ["2. Erase", "1. Paint"] and not page.is_disabled("#redo-btn"), f"undo brings the removed edit back: {titles()}")
+    page.keyboard.press("Control+Shift+z")
+    page.wait_for_function(DONE.format(n=1), timeout=120000)
+    check(titles() == ["1. Erase"], f"redo removes it again: {titles()}")
+
+    page.click("#history li .what")
+    check(page.text_content("#editing") == "Editing 1 · Erase" and page.is_checked("#whole"), "selecting shows the editing tag and the edit's switches")
+    page.fill("#prompt", "the lamp")
+    page.wait_for_function("document.querySelector('#history li.busy') !== null", timeout=20000)
+    page.wait_for_function(DONE.format(n=1), timeout=120000)
+    check("the lamp" in page.get_attribute("#history li small", "title"), "retyping the words of a selected edit runs it again with them")
+    page.keyboard.press("Escape")
+    page.click("#history li .what")
+    page.keyboard.press("Control+Enter")
+    page.wait_for_function("document.querySelector('#history li.busy') !== null", timeout=20000)
+    page.wait_for_function(DONE.format(n=1), timeout=120000)
+    log = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
+    check(any("another try" in line for line in log), "Ctrl+Enter tries another seed on the selected edit")
+    page.keyboard.press("Escape")
+    for _ in range(3):
+        page.keyboard.press("Control+z")
+        page.wait_for_timeout(300)
+    page.wait_for_function("!document.querySelector('#history li.busy')", timeout=180000)
+    check(titles() == ["2. Erase", "1. Paint"] and words() == ["Whole object", "a red fire"],
+          f"three undos go back through the seed, the words and the removal: {titles()} {words()}")
+    page.select_option("#preview-size", index=1)
+    check("928 × 512" in page.text_content("#status"), "the preview size menu sets the shot size")
+    page.evaluate("document.activeElement.blur()")
+    cx, cy = box["x"] + box["w"] * 0.5, box["y"] + box["h"] * 0.5
+    page.mouse.move(cx, cy)
+    page.keyboard.press("Shift+R")
+    view_filter = "getComputedStyle(document.querySelector('#view')).filter"
+    check("url(" in page.evaluate(view_filter) and page.text_content("#display-state") == "Red", "Shift+R shows the red channel, as RV's r")
+    page.keyboard.press("Shift+E")
+    page.mouse.down(); page.mouse.move(cx + 100, cy, steps=5); page.mouse.up()
+    label = page.text_content("#display-state")
+    check(label.startswith("E +1.0") and len(titles()) == 2, f"Shift+E then a 100 px drag adds one stop and paints nothing: {label}")
+    page.mouse.click(cx, cy, button="right")
+    groups = page.eval_on_selector_all("#ctx > li > span:first-child", "els => els.map(e => e.textContent)")
+    check(groups == ["File", "Edit", "Tools", "Control", "Colour", "View", "Help"], f"right-click opens the menu: {groups}")
+    page.hover("#ctx > li:has-text('Colour')")
+    page.screenshot(path=os.path.join(SHOTS, "3_menu.png"))
+    page.click("#ctx .sub button:has-text('Reset colour')")
+    check(page.is_hidden("#display-state") and page.evaluate(view_filter) == "none" and page.is_hidden("#ctx"),
+          "Reset colour in the menu clears the filter and closes the menu")
+    page.wait_for_timeout(2500)
+    log = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
+    for key in ("posted as", "prompt writer", "Klein quick pass", "ComfyUI started it"):
+        check(any(key in line for line in log), f"the log says what happens under the hood: {key}")
+    page.screenshot(path=os.path.join(SHOTS, "2_end.png"))
+    errors = [e for e in errors if "favicon" not in e]
+    check(not errors, f"no console errors: {errors}")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--port", type=int, default=8199)
+    ap.add_argument("--root", default="/tmp/paintaplate_mock_ui")
+    a = ap.parse_args()
+    from playwright.sync_api import sync_playwright
+    shutil.rmtree(a.root, ignore_errors=True)
+    os.makedirs(SHOTS, exist_ok=True)
+    mock = subprocess.Popen([sys.executable, os.path.join(HERE, "mock_comfy.py"), "--plate", "--port", str(a.port), "--root", a.root],
+                            stdout=open(os.path.join(SHOTS, "mock.log"), "w"), stderr=subprocess.STDOUT)
+    try:
+        for _ in range(60):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{a.port}/system_stats", timeout=1)
+                break
+            except Exception:
+                time.sleep(0.5)
+        else:
+            raise RuntimeError("the mock ComfyUI did not start")
+        items = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{a.port}/paintaplate/plates").read())
+        check([i["path"] for i in items] == ["plates/desk.mp4"], "the plates route lists the mock's plate")
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page(viewport={"width": 1400, "height": 900})
+            flow(page, a.port)
+            browser.close()
+    finally:
+        mock.terminate()
+    print("UI MOCK PASSED")
+
+
+if __name__ == "__main__":
+    main()

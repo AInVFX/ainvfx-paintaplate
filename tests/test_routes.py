@@ -12,9 +12,13 @@ from _env import ROOT, require
 require("aiohttp")
 
 OUT = tempfile.mkdtemp(prefix="paintaplate_out_")
-sys.modules["folder_paths"] = types.SimpleNamespace(get_output_directory=lambda: OUT)
+INPUT = tempfile.mkdtemp(prefix="paintaplate_in_")
+TEMP = tempfile.mkdtemp(prefix="paintaplate_tmp_")
+sys.modules["folder_paths"] = types.SimpleNamespace(get_output_directory=lambda: OUT, get_input_directory=lambda: INPUT,
+                                                    get_temp_directory=lambda: TEMP)
 sys.path.insert(0, ROOT)
 import routes  # noqa: E402
+import test_plateio  # noqa: E402
 from aiohttp import web  # noqa: E402
 
 
@@ -85,8 +89,64 @@ class Routes(unittest.TestCase):
             asyncio.run(routes.download(types.SimpleNamespace(query={"run": "../../etc"})))
         app = types.SimpleNamespace(routes=web.RouteTableDef())
         routes.setup(app)
-        self.assertEqual([r.path for r in app.routes], ["/paintaplate/download"])
+        self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/plates", "/paintaplate/thumb"])
         print("download route: folders, parts, symlinks, zip reuse, handler: ok")
+
+
+class PlateBrowser(unittest.TestCase):
+    """The Open dialog's list of input/plates and their thumbnails: videos and frame folders, nothing outside."""
+
+    @classmethod
+    def setUpClass(cls):
+        require("av", "numpy", "PIL")
+        cls.root = os.path.join(INPUT, "plates")
+        os.makedirs(cls.root)
+        test_plateio.make_prores(os.path.join(cls.root, "shot.mov"), n=5, w=96, h=64)
+        os.makedirs(os.path.join(cls.root, "exr_shot"))
+        test_plateio.make_exr_sequence(os.path.join(cls.root, "exr_shot"), n=3, h=36, w=64)
+        os.makedirs(os.path.join(cls.root, "empty_folder"))
+        touch(os.path.join(cls.root, "notes.txt"), b"not a plate")
+        touch(os.path.join(INPUT, "elsewhere.txt"), b"private")
+        os.symlink(os.path.join(INPUT, "elsewhere.txt"), os.path.join(cls.root, "link.mov"))
+
+    def test_list_plates(self):
+        items = routes.list_plates()
+        self.assertEqual([i["path"] for i in items], ["plates/exr_shot", "plates/shot.mov"])  # no text file, empty folder or link
+        mov = next(i for i in items if i["kind"] == "video")
+        self.assertEqual((mov["width"], mov["height"], mov["frames"], mov["color_space"]), (96, 64, 5, "sRGB"))
+        exr = next(i for i in items if i["kind"] == "sequence")
+        self.assertEqual((exr["ext"], exr["frames"], exr["color_space"]), (".exr", 3, "linear ACEScg"))  # the test EXR carries AP1 chromaticities
+
+    def test_thumbnails_are_jpegs_made_once(self):
+        from PIL import Image
+        for rel in ("plates/shot.mov", "plates/exr_shot"):
+            path = routes.thumbnail(rel, width=48)
+            with Image.open(path) as im:
+                self.assertEqual((im.format, im.width), ("JPEG", 48))
+            first = os.path.getmtime(path)
+            time.sleep(0.02)
+            self.assertEqual(routes.thumbnail(rel, width=48), path)
+            self.assertEqual(os.path.getmtime(path), first)  # reused, not rewritten
+        for bad in ("plates/notes.txt", "plates/link.mov", "../elsewhere.txt", "elsewhere.txt", "", os.path.join(INPUT, "plates", "shot.mov")):
+            with self.assertRaises((FileNotFoundError, StopIteration, ValueError, OSError), msg=bad):
+                routes.thumbnail(bad)
+
+    def test_handlers(self):
+        async def run():
+            table = web.RouteTableDef()
+            routes.setup(types.SimpleNamespace(routes=table))
+            app = web.Application()
+            app.add_routes(table)
+            from aiohttp.test_utils import TestClient, TestServer
+            async with TestClient(TestServer(app)) as client:
+                r = await client.get("/paintaplate/plates")
+                self.assertEqual(r.status, 200)
+                self.assertEqual([i["name"] for i in await r.json()], ["exr_shot", "shot.mov"])
+                r = await client.get("/paintaplate/thumb", params={"path": "plates/shot.mov"})
+                self.assertEqual((r.status, r.headers["Content-Type"]), (200, "image/jpeg"))
+                r = await client.get("/paintaplate/thumb", params={"path": "../elsewhere.txt"})
+                self.assertEqual(r.status, 404)
+        asyncio.run(run())
 
 
 if __name__ == "__main__":

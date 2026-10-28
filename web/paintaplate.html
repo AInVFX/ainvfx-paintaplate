@@ -63,6 +63,7 @@
   <main class="stage">
     <div class="promptbar">
       <label for="prompt" class="prompt-label">Prompt</label>
+      <button id="editing" class="editing" type="button" hidden title="This edit is selected: its words and strokes are yours to change. Click, or press Esc, to deselect"></button>
       <input id="prompt" autocomplete="off" spellcheck="false" aria-label="Describe the edit"
              placeholder="Describe what to paint, then paint it on the frame">
     </div>
@@ -99,6 +100,7 @@
       </div>
       <output id="frame-total" class="frame-total"></output>
       <span id="fps" class="fps"></span>
+      <button id="display-state" class="display-state" hidden title="The viewer's colour, display only: the export never changes. Click to reset"></button>
       <button id="wipe-btn" class="quiet" aria-pressed="false" title="Compare the plate and the result (F6)" disabled>Wipe</button>
     </div>
   </main>
@@ -116,9 +118,7 @@
     <section id="render" class="render" hidden>
       <h2>Render <span id="render-left"></span></h2>
       <label class="preview-size">Preview size
-        <select id="preview-size" title="The shot preview and its composite. Smaller renders faster; the export stays at full size.">
-          <option value="960">Standard (960)</option><option value="640">Fast (640)</option><option value="448">Draft (448)</option>
-        </select>
+        <select id="preview-size" title="The shot preview and its composite, in sizes this plate divides into. Smaller renders faster; the export stays at full size."></select>
       </label>
       <ol id="stages"></ol>
     </section>
@@ -129,6 +129,15 @@
     <button id="log-btn" class="quiet" aria-expanded="false" aria-controls="log">Log</button>
     <ol id="log" hidden></ol>
   </footer>
+
+  <ul id="ctx" class="ctx" role="menu" aria-label="All actions" hidden></ul>
+  <svg class="defs" width="0" height="0" aria-hidden="true" focusable="false">
+    <filter id="display-filter" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
+      <feComponentTransfer color-interpolation-filters="linearRGB"><feFuncR class="fx-lin" type="linear" slope="1"/><feFuncG class="fx-lin" type="linear" slope="1"/><feFuncB class="fx-lin" type="linear" slope="1"/></feComponentTransfer>
+      <feComponentTransfer><feFuncR class="fx-gamma" type="gamma" exponent="1"/><feFuncG class="fx-gamma" type="gamma" exponent="1"/><feFuncB class="fx-gamma" type="gamma" exponent="1"/></feComponentTransfer>
+      <feColorMatrix id="fx-matrix" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0"/>
+    </filter>
+  </svg>
 
   <dialog id="help" class="help">
     <h2>Keys</h2>
@@ -151,13 +160,23 @@
       <dt>B, E, L</dt><dd>Paint, Erase, Light</dd>
       <dt>- and =</dt><dd>Brush size</dd>
       <dt>X</dt><dd>Eraser: rub out the strokes you just painted</dd>
-      <dt>Enter</dt><dd>Start the edit now, or try another</dd>
-      <dt>Click an edit</dt><dd>Select it: its words come back; paint, rub out or retype to change it. Esc deselects</dd>
+      <dt>Enter</dt><dd>Start the edit now</dd>
+      <dt>Ctrl+Enter</dt><dd>Try another seed on the selected edit, else the last one</dd>
+      <dt>Click an edit</dt><dd>Select it: its words come back; retype them, paint more, rub strokes out or switch Whole object, and it runs again. Esc deselects</dd>
       <dt>Esc</dt><dd>Cancel the edit in progress</dd>
-      <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo</dd>
+      <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo: one step per stroke, per removal, per change of words or seed</dd>
       <dt>Hold O</dt><dd>See the plate</dd>
       <dt>?</dt><dd>Show or hide these keys</dd>
     </dl>
+    <h3>Colour, as in RV: the viewer only, the export never changes</h3>
+    <dl>
+      <dt>Shift+E, K, Y</dt><dd>Exposure, contrast, gamma: then drag on the frame, or use the wheel, - and =</dd>
+      <dt>Shift+S, H</dt><dd>Saturation, hue, the same way. Backspace resets the one you edit, Esc leaves</dd>
+      <dt>Shift+C, R, G, B, L</dt><dd>All channels, red, green, blue, luminance</dd>
+      <dt>Shift+I</dt><dd>Invert</dd>
+      <dt>Right-click</dt><dd>Every action, by menu, with its key</dd>
+    </dl>
+    <p class="hint">RV uses E, C, R, G, B and L without Shift. Here E, B and L pick the tools.</p>
     <form method="dialog"><button class="primary">Close</button></form>
   </dialog>
 
@@ -179,6 +198,9 @@
   <dialog id="open">
     <form method="dialog">
       <h2>Open plate</h2>
+      <p class="hint plates-hint">Plates on this ComfyUI (its input/plates folder): click one, or double-click to open it.</p>
+      <div id="plates" class="plates" role="listbox" aria-label="Plates on this ComfyUI"></div>
+      <p id="plates-empty" class="hint" hidden></p>
       <label>Files <input id="files" type="file" multiple accept=".exr,.png,.tif,.tiff,.dpx,.mov,.mp4,.mkv,.mxf"></label>
       <label>Or a path in ComfyUI's input folder <input id="path" placeholder="plates/shot010"></label>
       <label>Colour space <select id="cs"></select></label>

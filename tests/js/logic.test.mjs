@@ -2,7 +2,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { caption, dependsOnChange, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, secs } from "../../web/logic.mjs";
+import { DISPLAY, caption, clampParam, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fillWorkflow, fitSize, frameUse, gb,
+  parseWorkflow, previewSize, previewSizes, secs } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -15,6 +16,43 @@ test("sizes keep the plate's aspect within 1.5% in multiples of the step", () =>
     const [a, b] = fitSize(w, h, cap, 32);
     assert.ok(a % 32 === 0 && b % 32 === 0 && Math.max(a, b) <= cap);
   }
+});
+
+test("preview sizes come from the plate's size: exact divisions of the working size first, else the best fit under each cap", () => {
+  const hd = [[1920, 1080], [1920, 1088]]; // a 1080p plate and its working size (multiples of 32)
+  assert.deepEqual(previewSize(...hd, 960), [960, 544]); // an exact half of the working size, 0.7% off the plate's aspect
+  assert.deepEqual(previewSize(...hd, 640), [640, 352]); // nothing divides: the largest fit within 2.5% of 16:9
+  assert.deepEqual(previewSize(...hd, 448), [448, 256]);
+  assert.deepEqual(previewSize(...hd, 1920), [1920, 1088]); // the cap at the working size: one pass
+  assert.deepEqual(previewSize(...hd, 4096), [1920, 1088]);
+  assert.deepEqual(previewSize([1920, 1088], [1920, 1088], 640), [608, 352]); // a 1088-high plate: 640 x 352 would be 3% off
+  assert.deepEqual(previewSize([1280, 704], [1280, 704], 640), [640, 352]); // an exact half
+  assert.deepEqual(previewSize([1280, 704], [1280, 704], 960), [928, 512]);
+  assert.deepEqual(previewSize([1080, 1920], [1088, 1920], 640), [352, 640]); // portrait keeps its orientation
+  const menu = previewSizes(...hd);
+  assert.deepEqual(menu.map((o) => [o.label, o.cap, o.size, o.div]),
+    [["Full", 1920, [1920, 1088], 1], ["Standard", 960, [960, 544], 2], ["Fast", 640, [640, 352], 0], ["Draft", 448, [448, 256], 0]]);
+  assert.deepEqual(previewSizes([640, 352], [640, 352]).map((o) => o.label), ["Full", "Draft"]); // caps at or above the plate are the plate: listed once
+  for (const o of [...menu, ...previewSizes([1920, 1012], [1920, 1024]), ...previewSizes([720, 480], [672, 448])]) {
+    assert.ok(o.size[0] % 32 === 0 && o.size[1] % 32 === 0, String(o.size));
+  }
+});
+
+test("the viewer's colour: identity at rest, one channel as grey, invert, exposure in stops, contrast about 18% grey", () => {
+  assert.equal(displayMatrix(DISPLAY), "1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0");
+  assert.equal(displayMatrix({ ...DISPLAY, channel: "r" }), "1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 1 0");
+  assert.equal(displayMatrix({ ...DISPLAY, channel: "l" }), "0.2126 0.7152 0.0722 0 0 0.2126 0.7152 0.0722 0 0 0.2126 0.7152 0.0722 0 0 0 0 0 1 0");
+  assert.equal(displayMatrix({ ...DISPLAY, invert: true }), "-1 0 0 0 1 0 -1 0 0 1 0 0 -1 0 1 0 0 0 1 0");
+  assert.deepEqual(displayMatrix({ ...DISPLAY, saturation: 0 }).split(" ").map(Number).slice(0, 3), [0.2126, 0.7152, 0.0722]);
+  const spun = displayMatrix({ ...DISPLAY, hue: 120 }).split(" ").map(Number); // every row still sums to 1: greys stay grey
+  for (const r of [0, 5, 10]) assert.ok(Math.abs(spun[r] + spun[r + 1] + spun[r + 2] - 1) < 1e-3);
+  assert.deepEqual(displayTransfer({ exposure: 1, contrast: 1, gamma: 2 }), { slope: 2, intercept: 0, exponent: 0.5 });
+  const c = displayTransfer({ exposure: 0, contrast: 2, gamma: 1 });
+  assert.ok(Math.abs(c.slope * 0.18 + c.intercept - 0.18) < 1e-9); // 18% grey holds still
+  assert.equal(clampParam("exposure", 12), 10);
+  assert.equal(displayLabel({ ...DISPLAY, exposure: 1, gamma: 2.2, channel: "r" }), "E +1.0 · γ 2.20 · Red");
+  assert.equal(displayActive(DISPLAY), false);
+  assert.equal(displayActive({ ...DISPLAY, invert: true }), true);
 });
 
 test("time left reads in seconds, then minutes and seconds", () => {

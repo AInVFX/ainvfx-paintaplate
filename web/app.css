@@ -61,6 +61,8 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .stage { grid-area: stage; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .promptbar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .prompt-label { flex: none; color: var(--muted); font-weight: 600; }
+.editing { flex: none; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #141414; background: var(--gold); border-color: var(--gold); }
+.editing::after { content: " ×"; font-weight: 400; }
 #prompt { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--text); background: var(--surround); border: 1px solid var(--line); border-radius: var(--radius); padding: 9px 12px; }
 #prompt:focus { border-color: var(--gold-dim); outline: none; }
 #prompt::placeholder { color: var(--faint); }
@@ -68,6 +70,22 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 #view { display: block; background: #111; touch-action: none; transform-origin: 0 0; position: absolute; left: 0; top: 0; image-rendering: auto; }
 #view.painting { cursor: none; }
 #view.panning { cursor: grabbing; }
+#view.painting.scrub { cursor: ew-resize; }
+.defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+.display-state { padding: 3px 9px; font-size: 12px; color: #141414; background: var(--gold); border-color: var(--gold); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.display-state::after { content: " ×"; }
+.ctx, .ctx .sub { position: fixed; z-index: 50; list-style: none; margin: 0; padding: 4px; min-width: 140px; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: 0 10px 28px #000b; }
+.ctx .sub { position: absolute; left: calc(100% - 2px); top: -5px; display: none; min-width: 240px; }
+.ctx.flip .sub { left: auto; right: calc(100% - 2px); }
+.ctx .group { position: relative; display: flex; justify-content: space-between; gap: 16px; padding: 5px 10px; border-radius: 4px; cursor: default; }
+.ctx .group:hover { background: var(--raised); }
+.ctx .group:hover > .sub { display: block; }
+.ctx .arrow { color: var(--muted); }
+.ctx button { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; width: 100%; padding: 4px 8px; border: 0; border-radius: 4px; background: transparent; text-align: left; }
+.ctx button:hover:not(:disabled) { background: var(--raised); }
+.ctx button[aria-checked="true"] .check::before { content: "✓"; color: var(--gold); }
+.ctx kbd { color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.ctx .sep { height: 1px; margin: 4px 6px; background: var(--line); }
 .empty { position: relative; text-align: center; max-width: 400px; color: var(--muted); padding: 24px; }
 .opening { position: relative; width: min(420px, 86%); padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); z-index: 2; }
 .op-title { margin: 0 0 12px; font-weight: 600; }
@@ -139,7 +157,7 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .render h2 { display: flex; justify-content: space-between; gap: 8px; }
 #render-left { font-weight: 400; color: var(--gold); font-variant-numeric: tabular-nums; }
 .preview-size { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 10px; color: var(--muted); font-size: 12px; }
-.preview-size select { font: inherit; color: var(--text); background: var(--surround); border: 1px solid var(--line); border-radius: var(--radius); padding: 3px 6px; }
+.preview-size select { flex: 1; min-width: 0; max-width: 180px; font: inherit; color: var(--text); background: var(--surround); border: 1px solid var(--line); border-radius: var(--radius); padding: 3px 6px; }
 #stages { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
 #stages li { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: 6px; color: var(--faint); }
 #stages .dot { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--faint); }
@@ -160,6 +178,7 @@ dialog .check.bg { margin-top: 16px; padding-top: 12px; border-top: 1px solid va
 .log { grid-area: log; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 12px; border-top: 1px solid var(--line); background: var(--panel); }
 #status { flex: 1; min-width: 0; margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #log-btn { padding: 2px 10px; }
+#log-btn.alert { color: #ff7b72; border-color: #6b2f29; }
 /* the log reads like ComfyUI's console: near black, monospace, errors in red */
 #log { flex-basis: 100%; list-style: none; margin: 0; padding: 8px 10px; max-height: 180px; overflow-y: auto; border-radius: 4px;
   background: #0b0b0b; color: #c9d1d9; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
@@ -173,6 +192,14 @@ dialog::backdrop { background: #0009; }
 dialog label { display: block; margin: 12px 0; color: var(--muted); }
 dialog input, dialog select { display: block; width: 100%; margin-top: 6px; font: inherit; color: var(--text); background: var(--surround); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; }
 dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; margin: 16px 0 0; }
+#open { width: min(760px, 94vw); }
+.plates-hint { margin-top: 4px; }
+.plates { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 8px; max-height: 42vh; overflow-y: auto; padding: 2px; }
+.plate { display: flex; flex-direction: column; gap: 3px; padding: 4px; text-align: left; background: var(--surround); }
+.plate img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 3px; background: #111; display: block; }
+.plate .plate-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plate small { color: var(--muted); font-size: 11px; }
+.plate.on { border-color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); }
 .help { width: min(520px, 92vw); }
 .help h3 { font-size: 12px; font-weight: 600; color: var(--gold); margin: 14px 0 6px; }
 .help dl { display: grid; grid-template-columns: 150px 1fr; gap: 5px 14px; margin: 0; }

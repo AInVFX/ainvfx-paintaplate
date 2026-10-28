@@ -3,10 +3,11 @@
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
-import { WF, cancel, connect, loadWorkflows, objectInfo, onNotice, outputFile, outputFiles, outputText, run, upload, viewUrl } from "./comfy.mjs";
+import { WF, cancel, connect, loadWorkflows, objectInfo, onLog, onNotice, outputFile, outputFiles, outputText, run, upload, viewUrl } from "./comfy.mjs";
 import { FrameCache } from "./frames.mjs";
 import { sceneGraph } from "./graph.mjs";
-import { caption, dark, dependsOnChange, fitSize, gb, pickObjects, reconcile, secs, shotPrompt, upsampleRequest } from "./logic.mjs";
+import { CHANNEL_NAMES, DISPLAY, PARAMS, caption, clampParam, dark, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fitSize,
+  formatParam, gb, pickObjects, previewSize, previewSizes, reconcile, secs, shotPrompt, upsampleRequest } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -23,7 +24,9 @@ const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-s
 const ERASE_TRACK_SIDE = 640;
 const LIVE = { every: 2, vram: 24e9 }; // the live preview while LTX samples: every other step, on cards with room for its tiny decoder
 const WARM_ALL_VRAM = 60e9; // bytes of GPU memory above which LTX 2.5 is loaded at start too: every model then stays loaded
-const PREVIEW_SIDES = [960, 640, 448]; // the preview sizes offered: Standard, Fast, Draft
+const PREVIEW_CAP = 640; // the preview size by default: Fast. The menu is built per plate (logic.previewSizes)
+const PREFETCH_MS = 500; // quiet time after a keystroke before the prompt writer starts on the new words
+const UNDO_MAX = 60; // steps kept for undo
 // An edit mask grows by the frame width over this: 27 px at 1280, enough for the object's edge. At 24 an erase reached
 // what stood next to the object, and Klein sometimes took it too (a head under an umbrella, one seed in five).
 const EDIT_GROW = 48;
@@ -38,6 +41,10 @@ const UPSAMPLER = {}; // Black Forest Labs' system prompts for Klein's upsampler
 const SCENE = { format: "paintaplate-scene", version: 1 };
 
 const TOOLS = { b: "paint", e: "erase", l: "light" };
+// The viewer's colour keys, after OpenRV's rvui.mu: exposure e, gamma y, contrast k, saturation S, hue h; channels c r g b l.
+// Here E, B and L pick tools, so exposure and the channels take Shift.
+const COLOR_KEYS = { "Shift+e": "exposure", y: "gamma", k: "contrast", "Shift+s": "saturation", h: "hue" };
+const CHANNEL_KEYS = { "Shift+c": "rgb", "Shift+r": "r", "Shift+g": "g", "Shift+b": "b", "Shift+l": "l" };
 const NAME = { paint: "Paint", erase: "Erase", light: "Light" };
 const HINT = {
   paint: "Describe what to paint, then paint it on the frame. A fire, a wooden desk, a red umbrella",
@@ -47,14 +54,15 @@ const HINT = {
 
 const S = {
   plate: null, original: null, hero: null,
-  edits: [], draft: null, running: null, removed: [], ids: 0, count: 0, chain: Promise.resolve(), queued: 0,
+  edits: [], draft: null, running: null, ids: 0, past: [], future: [], chain: Promise.resolve(), queued: 0,
   tool: "paint", size: 48, colors: { paint: "#000000", light: "#ffd890" }, rub: false,
   get color() { return this.colors[this.tool] ?? "#000000"; },
   frame: 0, playing: false, inPt: 0, outPt: 0, wipe: null, compare: false,
   fit: { w: 0, h: 0, x: 0, y: 0 }, zoom: { k: 1, x: 0, y: 0 },
+  display: { ...DISPLAY }, mode: null, scrub: null, // the viewer's colour (display only), and its interactive edit as in RV
   shot: null, shotDirty: false, stage: null, run: 0, exported: null, wantDownload: null,
   background: (() => { try { return localStorage.getItem("paintaplate.background") !== "0"; } catch { return true; } })(), // prepare the export after each change
-  previewCap: (() => { try { return +localStorage.getItem("paintaplate.preview") || PREVIEW_SIDES[1]; } catch { return PREVIEW_SIDES[1]; } })(), // long side of the shot preview: Fast by default
+  previewCap: (() => { try { return +localStorage.getItem("paintaplate.preview") || PREVIEW_CAP; } catch { return PREVIEW_CAP; } })(), // long side of the shot preview: Fast by default
   heroKey: "", renders: new Map(), // set of edits -> what has been rendered for it
   uploads: new Map(), timer: 0, live: null, vram: 0, // the live preview on show, the GPU's memory in bytes
 };
@@ -64,6 +72,8 @@ const plateVid = $("#plate-video"), shotVid = $("#shot-video");
 const fx = document.createElement("canvas"); // scratch layer for masked overlays
 
 const quiet = (e) => { if (e?.message === "cancelled") return; console.error(e); status(e?.message ?? String(e), "error"); };
+const num = (e) => S.edits.indexOf(e) + 1 || "New"; // an edit's number: its place in History, 1 at the bottom
+const snapKeyOf = (e) => `${painted(e)}|${e.whole ? e.prompt : ""}`; // what SAM's answer depends on: the strokes, and the name when it searches by name
 const uploadCanvas = async (c, name) => upload(await blob(c), name, `paintaplate/${S.plate.id}`);
 
 // ---------- What Klein sees ----------
@@ -84,13 +94,16 @@ function templateCaption(e) { // the page's own caption, when the upsampler give
 
 async function captionFor(e, reference, key, kind = "edit") { // Klein's own upsampler writes the caption Klein was trained on; the page keeps its box
   if (e.caption?.key === key) return e.caption.text;
+  if (e.caption?.key === "scene") { e.caption.key = key; log(`Edit ${num(e)}: the caption saved with the scene is used as it is`); return e.caption.text; }
   const ask = upsampleRequest({ tool: e.tool, words: e.prompt, bbox: bounds(e.mask) });
+  log(`Edit ${num(e)}: asking Klein's prompt writer (${ask.mode} mode) for "${e.prompt || "no words"}" in box ${JSON.stringify(bounds(e.mask))}`);
   let text = "";
   try {
     const out = await run("prompt", { image: reference, request: ask.request, system: UPSAMPLER[ask.mode] }, { kind, front: true }).done;
     text = (outputText("prompt", out, "text") ?? "").trim();
   } catch (err) { if (err?.message === "cancelled") throw err; quiet(err); }
   e.caption = { key, text: text ? (ask.locked ? reconcile(text, ask.locked) : text) : templateCaption(e) };
+  log(text ? `Edit ${num(e)}: caption from the prompt writer: ${e.caption.text}` : `Edit ${num(e)}: no answer from the prompt writer, the page's own caption: ${e.caption.text}`);
   return e.caption.text;
 }
 
@@ -136,12 +149,13 @@ async function openPlate(list, typed, cs) {
     .replace(/\.[^.]+$/, "").replace(/[._]?\d+$/, "") || "plate";
   S.plate = { id, path, cs, spec, frames: spec.frames, fps: spec.fps || 24, name: stem,
     first: spec.kind === "video" ? 1 : spec.first_frame ?? 1,
-    work: fitSize(w, h, WORK_SIDE, 32), prev: fitSize(w, h, EDIT_SIDE, 16), shot: fitSize(w, h, S.previewCap, 32),
+    work: fitSize(w, h, WORK_SIDE, 32), prev: fitSize(w, h, EDIT_SIDE, 16),
     track: fitSize(w, h, TRACK_SIDE, 32), trackErase: fitSize(w, h, ERASE_TRACK_SIDE, 32) }; // SAM tracks at one size whatever the preview size
-  if (Q.get("shot") === "full") S.plate.shot = S.plate.work;
+  if (Q.get("shot") === "full") S.previewCap = Math.max(w, h);
+  S.plate.shot = previewSize([w, h], S.plate.work, S.previewCap);
   S.original = snap(await loadImage(viewUrl(outputFile("ingest", out, "hero"))), S.plate.work);
   $("#prompt").value = "";
-  Object.assign(S, { hero: S.original, edits: [], draft: null, running: null, removed: [], count: 0, selected: null, hover: null, last: null, live: null,
+  Object.assign(S, { hero: S.original, edits: [], draft: null, running: null, past: [], future: [], selected: null, hover: null, last: null, live: null,
     frame: 0, inPt: 0, outPt: S.plate.frames - 1, shot: null, shotDirty: false, exported: null, wantDownload: null,
     stage: { phase: "none" }, zoom: { k: 1, x: 0, y: 0 }, wipe: null, heroKey: "" });
   S.uploads.clear(); S.renders.clear();
@@ -155,7 +169,8 @@ async function openPlate(list, typed, cs) {
   $("#spec").textContent = `${S.plate.name}: ${kind}, ${w} × ${h}, ${Math.round(S.plate.fps * 1000) / 1000} fps, ${spec.frames} frames, ${cs}`;
   document.activeElement?.blur();
   S.took = {};
-  fitView(); historyUI(); timelineUI(); stagesUI(); exportUI(); render();
+  previewUI(); fitView(); historyUI(); timelineUI(); stagesUI(); exportUI(); render();
+  log(`Plate ${S.plate.name}: ${w} x ${h}, ${spec.frames} frames; edits at ${S.plate.work.join(" x ")}, quick passes at ${S.plate.prev.join(" x ")}, preview at ${S.plate.shot.join(" x ")}, tracking at ${S.plate.track.join(" x ")}`);
   const offered = [...$("#cs").options].some((o) => o.value === spec.color_space_guess);
   const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).map((n) => n).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
@@ -435,7 +450,7 @@ function softMask(e) { // the edit mask with a soft edge, close to what the work
 }
 
 function drawCursor() { // the brush outline, at its real size on the frame
-  if (!S.cursor || stroke || S.playing || view.classList.contains("near-wipe")) return;
+  if (!S.cursor || stroke || S.playing || S.mode || view.classList.contains("near-wipe")) return;
   ctx.lineWidth = Math.max(1.5, view.width / 900);
   ctx.strokeStyle = S.rub ? "#ffffff" : S.tool === "erase" ? "#ff8070" : S.color === "#000000" ? "#d8d8d8" : S.color;
   if (S.rub) ctx.setLineDash([6, 5]);
@@ -493,6 +508,12 @@ let stroke = null, nav = null;
 
 view.addEventListener("pointerdown", (e) => {
   if (!S.plate) return;
+  if (S.mode && e.button === 0 && !e.altKey && !e.ctrlKey && !e.metaKey) { // a colour edit: dragging changes the value, as in RV
+    e.preventDefault();
+    view.setPointerCapture(e.pointerId);
+    S.scrub = { x: e.clientX, start: S.display[S.mode] };
+    return;
+  }
   if (e.button === 1 || (e.button === 0 && (e.altKey || e.ctrlKey || e.metaKey))) return navigate(e);
   if (e.button === 0 && nearWipe(e)) return dragWipe(e, view);
   const rub = S.rub || (e.pointerType === "pen" && (e.buttons & 32)); // the eraser tool, or a pen's eraser end
@@ -501,8 +522,9 @@ view.addEventListener("pointerdown", (e) => {
   if (S.frame !== 0) { seek(0); hud("Edits are painted on the first frame"); }
   if (rub) return rubOut(e);
   cancel(...BACKGROUND, "prefetch"); // the GPU goes to the edit; a caption written for fewer strokes is outdated
-  clearTimeout(S.timer);
+  clearTimeout(S.timer); clearTimeout(S.prefetchTimer);
   S.live = null;
+  mark(); // one undo step per stroke
   let d = S.draft;
   const chosen = S.selected?.tool === S.tool ? S.selected : null; // the selected edit takes the strokes of its own tool
   if (!d && chosen) d = chosen === S.running ? reopen(chosen) : reopenDone(chosen);
@@ -516,6 +538,7 @@ view.addEventListener("pointerdown", (e) => {
 });
 
 view.addEventListener("pointermove", (e) => {
+  if (S.scrub) return setDisplay({ [S.mode]: clampParam(S.mode, S.scrub.start + (e.clientX - S.scrub.x) * PARAMS[S.mode].drag) });
   if (nav) return navigateMove(e);
   if (stroke && S.draft) return addPoint(S.draft, e);
   S.cursor = frameAt(e);
@@ -524,6 +547,7 @@ view.addEventListener("pointermove", (e) => {
 });
 view.addEventListener("pointerleave", () => { S.cursor = null; if (!S.playing) requestAnimationFrame(render); });
 view.addEventListener("pointerup", () => {
+  if (S.scrub) { S.scrub = null; return leaveMode(); } // RV leaves the edit when the drag ends
   if (nav) { nav = null; view.classList.remove("panning"); return; }
   if (!stroke) return;
   stroke = null;
@@ -537,7 +561,8 @@ function rubOut(e) { // the eraser works on the strokes in progress, on the sele
   if (!d && target?.strokes.length) d = S.running === target ? reopen(target) : reopenDone(target);
   if (!d) return hud("Nothing to rub out: select an edit in History, or paint first");
   cancel(...BACKGROUND);
-  clearTimeout(S.timer);
+  clearTimeout(S.timer); clearTimeout(S.prefetchTimer);
+  mark();
   view.setPointerCapture(e.pointerId);
   stroke = { tool: "rub", size: S.size, points: [] };
   d.strokes.push(stroke);
@@ -551,16 +576,18 @@ function reopenDone(edit) { // the eraser on a finished edit: it becomes strokes
   return (S.draft = edit);
 }
 
-function schedule() { // run the draft once the strokes have stopped for WAIT ms
-  clearTimeout(S.timer);
+function schedule(typing = false) { // run the draft once the strokes (and the typing) have stopped for WAIT ms
+  clearTimeout(S.timer); clearTimeout(S.prefetchTimer);
   if (!S.draft) return;
+  S.draft.prompt = $("#prompt").value.trim(); // the words belong to the draft as they are typed: the prompt writer sees them
   S.timer = setTimeout(() => S.draft && launch(S.draft), WAIT);
-  prefetch(S.draft);
+  if (typing) S.prefetchTimer = setTimeout(() => prefetch(S.draft), PREFETCH_MS); // not on every keystroke
+  else prefetch(S.draft);
   hud(`The edit starts in ${Math.round(WAIT / 1000)} s. Enter starts it now, Esc cancels.`, WAIT);
 }
 
 function newEdit() {
-  return { id: ++S.ids, n: 0, tool: S.tool, color: S.color, prompt: "", seed: (Math.random() * 2 ** 31) | 0,
+  return { id: ++S.ids, tool: S.tool, color: S.color, prompt: "", seed: (Math.random() * 2 ** 31) | 0,
     strokes: [], on: true, state: "drawing", version: 0, basis: [],
     paint: canvas(S.plate.work), mask: canvas(S.plate.work), patch: null, foot: null };
 }
@@ -652,12 +679,11 @@ function launch(edit) {
   if (!edit.strokes.length) return;
   edit.prompt = $("#prompt").value.trim();
   if (edit.tool === "erase") edit.whole = $("#whole").checked;
-  if (!S.edits.includes(edit)) { edit.n = ++S.count; S.edits.push(edit); }
+  if (!S.edits.includes(edit)) S.edits.push(edit);
   edit.state = "queued";
   edit.launched = performance.now();
   S.last = edit; // the edit the next strokes may still join
   edit.thumb ??= strokesThumb(edit);
-  S.removed = [];
   if (S.selected !== edit) $("#prompt").value = ""; // the words now belong to the edit: select it in History to change them
   historyUI(); render();
   queue(() => generate(edit));
@@ -671,7 +697,14 @@ async function regenerateDependents() {
 
 function select(edit) { // a History row: its words in the prompt field, its strokes on the frame; painting or typing changes it
   S.selected = edit;
-  if (edit) { setTool(edit.tool); $("#prompt").value = edit.prompt; } else if (!S.draft) $("#prompt").value = "";
+  if (edit) { setTool(edit.tool); $("#prompt").value = edit.prompt; if (edit.tool === "erase") $("#whole").checked = !!edit.whole; }
+  else if (!S.draft) $("#prompt").value = "";
+  const tag = $("#editing");
+  tag.hidden = !edit;
+  if (edit) {
+    tag.textContent = `Editing ${num(edit)} · ${NAME[edit.tool]}`;
+    hud(`Edit ${num(edit)} selected: retype its words, paint more, or rub strokes out, and it runs again. Esc deselects.`, 3500);
+  }
   historyUI(); render();
 }
 
@@ -702,12 +735,14 @@ async function generate(edit) {
   const p = S.plate, light = edit.tool === "light", tag = `e${edit.id}_${token}`;
   cancel("warm"); // an edit never waits for the warm-up: what it needs loads now
   S.running = edit;
+  edit.saw = activeBefore(edit).map(record); // the edits under it as it starts: a change to them restarts it (rebuild)
   Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null });
   recompose(); historyUI(); render();
+  log(`Edit ${num(edit)}: ${NAME[edit.tool]} "${edit.prompt || ""}", seed ${edit.seed}${edit.tool === "erase" ? `, whole object ${edit.whole ? "on" : "off"}` : ""}, ${painted(edit)} stroke${painted(edit) === 1 ? "" : "s"}, over ${edit.saw.length} edit${edit.saw.length === 1 ? "" : "s"}`);
   try {
     await edit.preparing; // the snap and the caption started when the strokes stopped: reused when nothing changed since
     if (!alive()) return;
-    status(`Edit ${edit.n}: ${NAME[edit.tool].toLowerCase()}, writing the prompt`);
+    status(`Edit ${num(edit)}: ${NAME[edit.tool].toLowerCase()}, writing the prompt`);
     const { before, below, base, reference, cap } = await prepare(edit, S.edits.indexOf(edit), "edit");
     if (!alive()) return;
     const show = (b) => alive() && createImageBitmap(b).then((bm) => {
@@ -717,16 +752,18 @@ async function generate(edit) {
       render();
     });
     // 1. A quick pass at preview size: its steps appear live inside the strokes. Paint may change a zone around them.
-    status(`Edit ${edit.n}: ${NAME[edit.tool].toLowerCase()}, first look`);
+    status(`Edit ${num(edit)}: ${NAME[edit.tool].toLowerCase()}, first look`);
     const size = p.prev, values = { base, reference, start: light ? base : reference, caption: cap, seed: edit.seed,
       mask: await uploadCanvas(maskAt(edit, size), `${tag}_mask.png`), ...editSettings(edit, size, QUICK) };
+    log(`Edit ${num(edit)}: Klein quick pass at ${size.join(" x ")}, ${QUICK.steps} steps`);
     const quick = await run("edit", values, { kind: "edit", front: true, preview: show, progress: (f) => editProgress(edit, f / 2) }).done;
     if (!alive()) return;
     edit.preview = await loadImage(viewUrl(outputFile("edit", quick, "patch")));
     edit.shown ??= performance.now();
     edit.latent = null; render();
     // 2. The same seed at full size, starting from the quick pass: it resolves in place.
-    status(`Edit ${edit.n}: ${NAME[edit.tool].toLowerCase()}, full size`);
+    status(`Edit ${num(edit)}: ${NAME[edit.tool].toLowerCase()}, full size`);
+    log(`Edit ${num(edit)}: Klein full-size pass at ${p.work.join(" x ")}, ${FULL.steps} steps from the quick result at denoise ${FULL.denoise}`);
     const work = p.work, start = snap(before, work);
     start.getContext("2d").drawImage(edit.preview, 0, 0, work[0], work[1]);
     const startName = await uploadCanvas(start, `${tag}_start.png`);
@@ -741,11 +778,13 @@ async function generate(edit) {
     Object.assign(edit, { preview: null, latent: null, state: "done", version: edit.version + 1, force: false, kept: undefined });
     edit.foot = footprint(edit);
     edit.basis = activeBefore(edit).map(record);
+    edit.made = recordOf(edit); // the strokes, words, seed and switches this result came from: undo compares against it
     S.running = null;
     recompose();
     edit.thumb = thumbOf(edit);
     historyUI(); render(); timelineUI();
-    status(`Edit ${edit.n} is on the first frame. The shot renders when you stop editing.`);
+    status(`Edit ${num(edit)} is on the first frame. The shot renders when you stop editing.`);
+    log(`Edit ${num(edit)}: done, ${((performance.now() - edit.launched) / 1000).toFixed(1)} s after it started`);
   } catch (err) {
     if (edit.token === token) {
       Object.assign(edit, { state: edit.patch ? "done" : "failed", preview: null, latent: null });
@@ -767,16 +806,19 @@ function editSettings(edit, size, pass) { // steps, denoise, and the growth and 
 async function prepare(edit, index, kind) {
   const below = (index < 0 ? S.edits : S.edits.slice(0, index)).filter((e) => e.on && e.patch), size = S.plate.prev;
   const before = layered(index < 0 ? S.edits.length : index);
-  if (edit.tool === "erase" && edit.whole && edit.snapped !== painted(edit)) {
+  if (edit.tool === "erase" && !edit.whole && edit.sam) { edit.sam = null; edit.snapped = ""; redrawStrokes(edit); } // Whole object turned off: the strokes alone
+  if (edit.tool === "erase" && edit.whole && edit.snapped !== snapKeyOf(edit)) {
     edit.sam = null; redrawStrokes(edit);
     await snapErase(edit, before, kind === "edit" ? "snap" : kind);
-    edit.snapped = painted(edit); // only once SAM has answered: a snap stopped half way runs again
+    edit.snapped = snapKeyOf(edit); // only once SAM has answered: a snap stopped half way, or new words, runs it again
   }
   const base = await baseUpload(below, before, size);
   const reference = await uploadCanvas(editImage(edit, before, size), `e${edit.id}_${painted(edit)}_ref.png`);
   const key = [edit.tool, edit.prompt, bounds(edit.mask), painted(edit), edit.sam ? 1 : 0, below.map((e) => `${e.id}.${e.version}`)].join("|");
   return { before, below, base, reference, cap: await captionFor(edit, reference, key, kind) };
 }
+
+const recordOf = (e) => JSON.stringify({ strokes: e.strokes.map((s) => s.points.length), tool: e.tool, prompt: e.prompt, seed: e.seed, whole: !!e.whole });
 
 function prefetch(edit) { // the snap and the prompt writer start as the strokes stop: by the time the edit starts, they are often done
   if (!edit || !painted(edit) || !S.plate) return;
@@ -801,6 +843,7 @@ async function snapErase(edit, before, kind = "snap") { // SAM 3.1 finds the who
   const objects = pickObjects({ painted: bits(maskAt(edit, size)), area,
     named: await Promise.all(outputFiles("snap", out, "named").map(fileBits)),
     points: await Promise.all(picks.map((_, j) => outputFile("snap", out, `point_${j}`)).filter(Boolean).map(fileBits)) });
+  log(`Edit ${num(edit)}: SAM 3.1 ${edit.prompt ? `found ${outputFiles("snap", out, "named").length - 1} object(s) named "${edit.prompt}", ` : ""}looked at ${picks.length} stroke point(s); ${objects.length} mask(s) kept`);
   if (!objects.length) return status("Erasing only what you painted: no single object under the stroke.");
   const sam = canvas(size), d = sam.getContext("2d"), img = d.createImageData(size[0], size[1]);
   for (let i = 0; i < area; i++) if (objects.some((m) => m[i])) img.data.fill(255, i * 4, i * 4 + 4);
@@ -827,6 +870,8 @@ const needsRegen = (edit) => dependsOnChange(edit, activeBefore(edit).map(record
 
 function rebuild() { // after a bypass, a removal or another try: make again only what depends on the change
   cancel(...BACKGROUND);
+  const r = S.running; // an edit being generated whose base changed, or which is to run again, stops now: its pass would be thrown away
+  if (r && (r.force || !S.edits.includes(r) || !r.on || dependsOnChange(r, activeBefore(r).map(record), r.saw ?? []))) { log(`Edit ${num(r)}: its pass is stopped, it runs again`); stopEdit(r); }
   S.last = null;
   recompose(); historyUI(); render();
   queue(async () => {
@@ -839,29 +884,32 @@ function rebuild() { // after a bypass, a removal or another try: make again onl
 }
 
 function toggle(edit) {
+  mark();
   edit.on = !edit.on;
   if (!edit.on && S.running === edit) stopEdit(edit);
-  status(edit.on ? `Edit ${edit.n} is back on.` : `Edit ${edit.n} is bypassed.`);
+  status(edit.on ? `Edit ${num(edit)} is back on.` : `Edit ${num(edit)} is bypassed.`);
   rebuild();
 }
 
 function removeEdit(edit) {
   const i = S.edits.indexOf(edit);
   if (i < 0) return;
+  mark();
+  const n = num(edit);
   if (S.running === edit) stopEdit(edit);
   if (S.draft === edit) S.draft = null;
   if (S.hover === edit) S.hover = null; // its row is gone before the pointer leaves it: its strokes must go too
-  if (S.selected === edit) S.selected = null;
+  if (S.selected === edit) select(null);
   S.edits.splice(i, 1);
-  if (edit.patch) S.removed.push({ edit, i });
-  status(`Edit ${edit.n} removed.${edit.patch ? " Ctrl+Shift+Z brings it back." : ""}`);
+  status(`Edit ${n} removed. Ctrl+Z brings it back.`);
   rebuild();
 }
 
 function again(edit) { // a new seed for one edit; the edits above it follow if they depend on it
   if (!edit.strokes.length || edit.state === "drawing") return;
-  Object.assign(edit, { seed: (Math.random() * 2 ** 31) | 0, on: true, force: true, launched: 0 });
-  status(`Edit ${edit.n}: another try.`);
+  mark();
+  Object.assign(edit, { seed: (Math.random() * 2 ** 31) | 0, on: true, force: true, launched: performance.now() });
+  status(`Edit ${num(edit)}: another try, seed ${edit.seed}.`);
   rebuild();
 }
 
@@ -871,35 +919,77 @@ function stopEdit(edit) {
   if (S.running === edit) S.running = null;
 }
 
-function undo() {
-  const d = S.draft;
-  if (d) {
-    const gone = d.strokes.pop();
-    if (gone?.tool !== "rub") { d.sam = null; d.snapped = 0; }
-    if (painted(d)) { redrawStrokes(d); render(); schedule(); }
-    else discard();
-    return;
-  }
-  const last = S.edits.at(-1);
-  if (last) removeEdit(last);
+// ---------- Undo and redo: every change to the edits is one step, back and forth ----------
+// A step is a snapshot of the edits in order, each with its strokes, words, seed and switches, plus the strokes in
+// progress. Undo restores the snapshot; an edit whose result no longer matches its strokes, words or seed is made again.
+
+function snapshot() {
+  const rec = (e) => ({ e, strokes: e.strokes.slice(), prompt: e.prompt, seed: e.seed, on: e.on, whole: !!e.whole });
+  return { edits: S.edits.map(rec), draft: S.draft ? rec(S.draft) : null };
 }
 
-function redo() {
-  const r = S.removed.pop();
-  if (!r) return status("Nothing to bring back.");
-  S.edits.splice(Math.min(r.i, S.edits.length), 0, r.edit);
-  status(`Edit ${r.edit.n} is back.`);
+function mark() { // call before a change: the state undo comes back to
+  S.past.push(snapshot());
+  if (S.past.length > UNDO_MAX) S.past.shift();
+  S.future = [];
+  undoUI();
+}
+
+function restore(snap) {
+  clearTimeout(S.timer); clearTimeout(S.prefetchTimer);
+  cancel(...BACKGROUND, "edit", "snap", "prefetch", "warm");
+  for (const e of [...S.edits, S.draft].filter(Boolean)) if (e.state === "generating" || e.state === "queued") e.token = (e.token ?? 0) + 1;
+  Object.assign(S, { running: null, draft: null, last: null, hover: null, selected: null });
+  const apply = ({ e, strokes, prompt, seed, on, whole }) => {
+    const same = strokes.length === e.strokes.length && strokes.every((st, i) => st === e.strokes[i]);
+    Object.assign(e, { prompt, seed, on, whole });
+    if (!same) { e.strokes = strokes.slice(); e.sam = null; e.snapped = ""; e.caption = null; redrawStrokes(e); }
+    if (e.tool === "erase" && e.whole && !e.sam) e.snapped = "";
+    return e;
+  };
+  S.edits = snap.edits.map(apply);
+  for (const e of S.edits) { // a result that matches is kept; anything else is made again by rebuild()
+    const current = e.patch && e.made === recordOf(e);
+    e.force = !!e.patch && !current;
+    e.state = e.patch ? "done" : "generating";
+    if (!e.strokes.length) e.state = "done"; // nothing left to make: rebuild skips it
+  }
+  $("#editing").hidden = true;
+  if (snap.draft) { S.draft = apply(snap.draft); S.draft.state = "drawing"; $("#prompt").value = S.draft.prompt; if (painted(S.draft)) schedule(); }
+  else if (!S.selected) $("#prompt").value = "";
+  S.edits = S.edits.filter((e) => e.strokes.length); // an edit undone to no strokes at all is gone
+  undoUI();
   rebuild();
 }
 
+function undo() {
+  if (!S.past.length) return status("Nothing to undo.");
+  S.future.push(snapshot());
+  restore(S.past.pop());
+  status(`Undone. ${S.past.length} step${S.past.length === 1 ? "" : "s"} further back, Ctrl+Shift+Z redoes.`);
+}
+
+function redo() {
+  if (!S.future.length) return status("Nothing to redo.");
+  S.past.push(snapshot());
+  restore(S.future.pop());
+  status(`Redone. ${S.future.length} step${S.future.length === 1 ? "" : "s"} further ahead.`);
+}
+
+function undoUI() {
+  $("#undo-btn").disabled = !S.past.length;
+  $("#redo-btn").disabled = !S.future.length;
+}
+
 function discard() { // Esc: drop the strokes in progress, or stop the edit being generated
-  clearTimeout(S.timer);
+  clearTimeout(S.timer); clearTimeout(S.prefetchTimer);
   const d = S.draft ?? S.running;
   if (!d) return S.selected && select(null);
+  mark();
   stopEdit(d);
   if (S.draft === d) S.draft = null;
   if (d.patch) { // it had a result: go back to it
-    if (d.kept !== undefined) { d.strokes.length = d.kept; redrawStrokes(d); d.snapped = painted(d); }
+    if (d.kept !== undefined) { d.strokes.length = d.kept; redrawStrokes(d); d.snapped = snapKeyOf(d); }
     Object.assign(d, { state: "done", preview: null, latent: null, force: false, kept: undefined });
     status("Cancelled. The edit keeps its last result.");
   } else {
@@ -956,7 +1046,8 @@ function historyUI() {
       <button class="again" title="Try another">${ICON.again}</button><button class="del" title="Remove this edit">${ICON.del}</button></div>`;
     const img = li.querySelector(".thumb");
     if (e.thumb) img.src = e.thumb; else img.removeAttribute("src");
-    li.querySelector(".title").textContent = `${e.n || "New"}. ${NAME[e.tool]}`;
+    li.title = "Select this edit: its words come back; retype them, paint more or rub strokes out, and it runs again";
+    li.querySelector(".title").textContent = `${num(e)}. ${NAME[e.tool]}`;
     const what = e.tool === "erase" ? (e.whole ? "Whole object" : "Painted area") : e.prompt || (e.tool === "light" ? "From the strokes" : "No words");
     const small = li.querySelector("small");
     if (STATE[e.state] && e.on) {
@@ -973,8 +1064,7 @@ function historyUI() {
     li.onclick = (ev) => { if (!ev.target.closest("button")) { pause(); seek(0); select(S.selected === e ? null : e); } };
     return li;
   }));
-  $("#undo-btn").disabled = !S.draft && !S.edits.length;
-  $("#redo-btn").disabled = !S.removed.length;
+  undoUI();
   exportUI(); timelineUI();
 }
 
@@ -1041,11 +1131,13 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   const t0 = performance.now();
   S.stage = { key: S.heroKey, id, progress: 0, t0 };
   stagesUI();
+  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label} (about ${Math.round(estimate(id))} s)`);
   await work((f) => { if (S.stage?.id === id) { S.stage.progress = f; stagesUI(); } });
   const dt = (performance.now() - t0) / 1000;
   (store.done ??= {})[id] = dt;
   S.took[id] = dt;
   S.stage = null;
+  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label} took ${dt.toFixed(1)} s`);
   stagesUI();
 }
 
@@ -1065,6 +1157,8 @@ async function pipeline() {
   if (erase) r.clean0 ??= await uploadCanvas(layered(S.edits.length, (e) => e.tool === "erase"), `clean_v${r.v}.png`);
   const common = { color_space: p.cs, max_frames: p.frames, seed: active[0].seed };
   const prompt = shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt })));
+  log(`Render v${r.v}: ${active.length} edit(s) (${active.map((e) => `${num(e)} ${NAME[e.tool]}`).join(", ")}), preview at ${sized}, seed ${common.seed}, steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => st.id).join(" > ")}`);
+  if (carry) log(`Render v${r.v}: LTX prompt: ${prompt}`);
   // the erase is tracked on the plate first: the erase pass regenerates its areas, the composite keeps them
   await step(r, "erase", async (progress) => { r.erased = await track(active, null, base, "", progress, null, ["erase"]); });
   const passes = async (store, size, dir, final) => { // the erase pass makes a clean plate; Ripple carries paint and light over it
@@ -1127,6 +1221,7 @@ async function pipeline() {
   hud("Full size: the viewer now plays the export", 2500);
   stagesUI(); exportUI();
   status(`Exported to the output folder: ${S.exported.text.split("\n")[0]}.`);
+  log(`Export v${r.v}: ${S.exported.text.replace(/\n/g, "; ")}`);
   if (S.wantDownload) { const parts = S.wantDownload; S.wantDownload = null; download(parts); }
 }
 
@@ -1165,17 +1260,22 @@ function download(parts = ["export", "matte"]) {
 
 // ---------- Interface ----------
 
-function status(text, level = "") {
+function status(text, level = "") { // the status line, and a line in the log
   $("#status").textContent = text;
+  log(text, level);
+}
+
+function log(text, level = "") { // the log panel only: what happens under the hood, with the time
   const li = document.createElement("li");
   li.className = level;
   li.innerHTML = "<time></time><span></span>";
   li.firstChild.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   li.lastChild.textContent = text;
-  const log = $("#log");
-  log.append(li);
-  while (log.children.length > 200) log.firstChild.remove();
-  log.scrollTop = log.scrollHeight;
+  const list = $("#log");
+  list.append(li);
+  while (list.children.length > 400) list.firstChild.remove();
+  list.scrollTop = list.scrollHeight;
+  if (level === "error" && list.hidden) $("#log-btn").classList.add("alert"); // an error while the log is closed: the button says so
 }
 
 function renderLeft(finalToo = false) { // seconds until the preview (or the export) is ready, from the steps still to run
@@ -1256,13 +1356,21 @@ function timelineUI() {
 function setPreview(cap) { // a smaller shot preview renders faster; the export stays at full size
   S.previewCap = cap;
   try { localStorage.setItem("paintaplate.preview", String(cap)); } catch { /* this session only */ }
-  $("#preview-size").value = String(cap);
   if (!S.plate) return;
-  const [w, h] = [S.plate.spec.width, S.plate.spec.height];
-  S.plate.shot = fitSize(w, h, cap, 32);
+  S.plate.shot = previewSize([S.plate.spec.width, S.plate.spec.height], S.plate.work, cap);
+  previewUI();
   S.heroKey = ""; recompose(); // what this size made already plays at once; the full size and its export never depend on it
   status(`Previews at ${S.plate.shot[0]} × ${S.plate.shot[1]}. The export stays at full size.`);
   stagesUI(); exportUI(); touch();
+}
+
+function previewUI() { // the Preview size menu: the sizes this plate can take, the one in use selected
+  const sel = $("#preview-size"), p = S.plate;
+  if (!p) return;
+  const sizes = previewSizes([p.spec.width, p.spec.height], p.work);
+  sel.replaceChildren(...sizes.map((o) => new Option(`${o.label} · ${o.size[0]} × ${o.size[1]}${o.div > 1 ? ` (1/${o.div})` : o.label === "Full" ? " (slow)" : ""}`, String(o.cap))));
+  const on = sizes.find((o) => o.size[0] === p.shot[0] && o.size[1] === p.shot[1]) ?? sizes.at(-1);
+  sel.value = String(on.cap);
 }
 
 function exportUI() {
@@ -1298,7 +1406,27 @@ function setSize(v) {
   render();
 }
 
-function openDialog() { $("#files").value = ""; $("#scene").value = ""; $("#open").showModal(); }
+function openDialog() { $("#files").value = ""; $("#scene").value = ""; $("#open").showModal(); listPlates().catch(quiet); }
+
+async function listPlates() { // input/plates, each with its first frame: one click fills the path, a double click opens it
+  const grid = $("#plates"), note = $("#plates-empty");
+  grid.replaceChildren(); note.hidden = false; note.textContent = "Looking for plates in ComfyUI's input/plates folder";
+  const items = await (await fetch("/paintaplate/plates")).json();
+  note.hidden = items.length > 0;
+  note.textContent = "No plates in ComfyUI's input/plates folder yet. On a pod, bash tools/get_plates.sh fetches the AInVFX set (no restart). Or choose files below.";
+  grid.replaceChildren(...items.map((it) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "plate"; b.dataset.path = it.path;
+    b.title = `${it.path}: ${it.width} x ${it.height}, ${it.frames} frames at ${it.fps} fps${it.kind === "video" ? "" : `, ${it.ext.slice(1).toUpperCase()} frames`}`;
+    b.innerHTML = '<img alt="" loading="lazy"><span class="plate-name"></span><small></small>';
+    b.firstChild.src = `/paintaplate/thumb?${new URLSearchParams({ path: it.path })}&v=${it.mtime}`;
+    b.children[1].textContent = it.name;
+    b.children[2].textContent = `${it.width} × ${it.height} · ${it.frames} fr`;
+    b.onclick = () => { $("#path").value = it.path; $("#cs").value = it.color_space; $("#files").value = ""; $$("#plates .plate").forEach((x) => x.classList.toggle("on", x === b)); };
+    b.ondblclick = () => { b.onclick(); $("#open-go").click(); };
+    return b;
+  }));
+}
 
 // ---------- Scenes: the plate and every edit with its strokes, words and seed, in a file to open again ----------
 
@@ -1345,7 +1473,7 @@ async function openScene(file) { // the plate opens, then every edit runs again 
   const [W, H] = S.plate.work;
   for (const saved of scene.edits) {
     const e = Object.assign(newEdit(), { tool: saved.tool, color: saved.color, prompt: saved.prompt ?? "", seed: saved.seed,
-      whole: !!saved.whole, on: saved.on !== false, state: "queued", n: ++S.count,
+      whole: !!saved.whole, on: saved.on !== false, state: "queued", launched: performance.now(), caption: saved.caption ? { key: "scene", text: saved.caption } : null,
       strokes: saved.strokes.map((s) => ({ tool: s.tool, color: s.color, size: s.size * W, points: s.points.map(([x, y, pr]) => [x * W, y * H, pr]) })) });
     redrawStrokes(e);
     e.thumb = strokesThumb(e);
@@ -1355,13 +1483,143 @@ async function openScene(file) { // the plate opens, then every edit runs again 
   if (Number.isInteger(scene.in) && Number.isInteger(scene.out)) [S.inPt, S.outPt] = [scene.in, scene.out];
   queue(regenerateDependents);
   historyUI(); timelineUI();
-  status(`Scene opened: ${scene.edits.length} edit${scene.edits.length === 1 ? "" : "s"} run again with their own seeds.`);
+  status(`Scene opened: ${scene.edits.length} edit${scene.edits.length === 1 ? "" : "s"} run again with their own seeds and captions.`);
 }
+
+function clearRange() { S.inPt = 0; S.outPt = S.plate.frames - 1; hud("In and out points cleared"); timelineUI(); }
+function fullScreen() { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); }
+
+// ---------- The viewer's colour, as in RV: exposure, contrast, gamma, saturation, hue, channels, invert ----------
+// Display only: one SVG filter on the canvas, and none at the defaults, so playback pays nothing until a value moves. It
+// works on the 8-bit preview, where values above white are already clipped; the export never changes.
+
+function setDisplay(change) {
+  Object.assign(S.display, change);
+  const d = S.display, { slope, intercept, exponent } = displayTransfer(d), on = displayActive(d);
+  for (const f of $$("#display-filter .fx-lin")) { f.setAttribute("slope", String(slope)); f.setAttribute("intercept", String(intercept)); }
+  for (const f of $$("#display-filter .fx-gamma")) f.setAttribute("exponent", String(exponent));
+  $("#fx-matrix").setAttribute("values", displayMatrix(d));
+  view.style.filter = on ? "url(#display-filter)" : "";
+  $("#display-state").hidden = !on;
+  $("#display-state").textContent = displayLabel(d);
+  hud(S.mode ? `${PARAMS[S.mode].label} ${formatParam(S.mode, d[S.mode])}` : on ? displayLabel(d) : "Colour as shot", 1400);
+}
+
+function colorMode(name) { // RV's interactive edit: drag on the frame, or the wheel, - and =; Backspace resets; Esc or the key again leaves
+  if (S.mode === name) return leaveMode();
+  S.mode = name;
+  view.classList.add("scrub");
+  hud(`${PARAMS[name].label} ${formatParam(name, S.display[name])}: drag on the frame, or the wheel, - and =. Backspace resets, Esc leaves.`, 4000);
+  render();
+}
+
+function leaveMode() {
+  if (!S.mode) return;
+  const name = S.mode;
+  S.mode = S.scrub = null;
+  view.classList.remove("scrub");
+  hud(displayActive(S.display) ? displayLabel(S.display) : `${PARAMS[name].label} as shot`);
+}
+
+const stepColor = (name, dir) => setDisplay({ [name]: clampParam(name, S.display[name] + dir * PARAMS[name].step) });
+
+function modeKey(k, combo) { // the keys of an interactive edit, as RV's paramscrub table; any other key leaves it, then acts
+  if (k === "-" || k === "_") stepColor(S.mode, -1);
+  else if (k === "=" || k === "+") stepColor(S.mode, 1);
+  else if (k === "Backspace" || k === "Delete" || combo === "Shift+r") setDisplay({ [S.mode]: DISPLAY[S.mode] });
+  else if (k === "Escape" || k === "Enter" || COLOR_KEYS[combo] === S.mode) leaveMode();
+  else { leaveMode(); return false; }
+  return true;
+}
+
+function resetDisplay() { leaveMode(); setDisplay({ ...DISPLAY }); }
+
+// ---------- The right-click menu, as RV's: every action of the page, with its key ----------
+
+function menuItems() { // [group, [[label, key, action, disabled, checked] or "-", ...]]
+  const p = !!S.plate, d = S.display, edits = S.edits.some((e) => e.on && e.patch);
+  const chan = (c, key) => [CHANNEL_NAMES[c], key, () => setDisplay({ channel: c }), !p, d.channel === c];
+  const param = (name, key) => [`${PARAMS[name].label}…`, key, () => colorMode(name), !p, S.mode === name];
+  const step = (by) => () => { pause(); seek(S.frame + by); };
+  return [
+    ["File", [["Open plate…", "", openDialog], ["Save scene", "", saveScene, !p], ["Export…", "", exportDialog, !edits],
+      ["ComfyUI graph", "", () => saveGraph().catch(quiet), !edits]]],
+    ["Edit", [["Undo", "Ctrl+Z", undo, !S.past.length], ["Redo", "Ctrl+Shift+Z", redo, !S.future.length], "-",
+      ["Start the edit now", "Enter", () => S.draft && launch(S.draft), !S.draft], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
+      ["Deselect", "Esc", () => select(null), !S.selected]]],
+    ["Tools", [["Paint", "B", () => setTool("paint"), !p, S.tool === "paint" && !S.rub], ["Erase", "E", () => setTool("erase"), !p, S.tool === "erase" && !S.rub],
+      ["Light", "L", () => setTool("light"), !p, S.tool === "light" && !S.rub], ["Eraser", "X", () => setRub(!S.rub), !p, S.rub], "-",
+      ["Whole object", "", () => $("#whole").click(), !p, $("#whole").checked], ["Smaller brush", "-", () => setSize(S.size / 1.2), !p],
+      ["Larger brush", "=", () => setSize(S.size * 1.2), !p]]],
+    ["Control", [["Play or pause", "Space", () => (S.playing ? pause() : play()), !p, S.playing], ["Next frame", "Right", step(1), !p],
+      ["Previous frame", "Left", step(-1), !p], "-", ["Go to the in point", "Home", () => { pause(); seek(S.inPt); }, !p],
+      ["Go to the out point", "End", () => { pause(); seek(S.outPt); }, !p], ["Set the in point", "[", () => setIn(S.frame), !p],
+      ["Set the out point", "]", () => setOut(S.frame), !p], ["Clear in and out", "\\", clearRange, !p]]],
+    ["Colour", [param("exposure", "Shift+E"), param("contrast", "K"), param("gamma", "Y"), param("saturation", "Shift+S"), param("hue", "H"), "-",
+      ["Invert", "Shift+I", () => setDisplay({ invert: !d.invert }), !p, d.invert], ["Reset colour", "", resetDisplay, !displayActive(d)]]],
+    ["View", [chan("rgb", "Shift+C"), chan("r", "Shift+R"), chan("g", "Shift+G"), chan("b", "Shift+B"), chan("l", "Shift+L"), "-",
+      ["Fit", "F", () => zoomTo(1), !p], ["1:1", "1", () => zoomTo(S.plate.work[0] / S.fit.w), !p],
+      ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["Full screen", "`", fullScreen],
+      ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
+    ["Help", [["Keys", "?", () => $("#help").showModal()]]],
+  ];
+}
+
+function openMenu(x, y) {
+  const root = $("#ctx");
+  root.replaceChildren(...menuItems().map(([group, items]) => {
+    const li = document.createElement("li"), sub = document.createElement("ul");
+    li.className = "group";
+    li.innerHTML = '<span></span><span class="arrow">▸</span>';
+    li.firstChild.textContent = group;
+    sub.className = "sub";
+    sub.setAttribute("role", "menu");
+    for (const it of items) {
+      const row = document.createElement("li");
+      if (it === "-") { row.className = "sep"; sub.append(row); continue; }
+      const [label, key, action, disabled = false, checked] = it, b = document.createElement("button");
+      b.type = "button";
+      b.disabled = !!disabled;
+      b.setAttribute("role", checked === undefined ? "menuitem" : "menuitemcheckbox");
+      if (checked !== undefined) b.setAttribute("aria-checked", String(!!checked));
+      b.innerHTML = '<span class="check"></span><span></span><kbd></kbd>';
+      b.children[1].textContent = label;
+      b.children[2].textContent = key;
+      b.onclick = () => { closeMenu(); action(); };
+      row.append(b);
+      sub.append(row);
+    }
+    li.onmouseenter = () => { // a submenu that would leave the window moves up
+      sub.style.top = "";
+      const r = sub.getBoundingClientRect();
+      if (r.bottom > innerHeight - 8) sub.style.top = `${Math.round(innerHeight - 8 - r.bottom - 5)}px`;
+    };
+    li.append(sub);
+    return li;
+  }));
+  root.hidden = false;
+  root.style.left = `${Math.max(8, Math.min(x, innerWidth - root.offsetWidth - 8))}px`;
+  root.style.top = `${Math.max(8, Math.min(y, innerHeight - root.offsetHeight - 8))}px`;
+  root.classList.toggle("flip", x + root.offsetWidth + 260 > innerWidth); // no room on the right: the submenus open on the left
+}
+
+function closeMenu() { $("#ctx").hidden = true; }
+
+$("#viewport").addEventListener("contextmenu", (e) => { e.preventDefault(); openMenu(e.clientX, e.clientY); });
+document.addEventListener("pointerdown", (e) => { // a press outside the open menu closes it and does nothing else
+  if ($("#ctx").hidden || e.target.closest("#ctx")) return;
+  closeMenu();
+  e.stopPropagation();
+  e.preventDefault();
+}, true);
+addEventListener("blur", closeMenu);
 
 async function boot() { // the workflows, the WebSocket, then what this ComfyUI lacks: nodes, then model files
   onNotice(status);
-  await loadWorkflows(WORKFLOWS);
-  Object.assign(UPSAMPLER, await (await fetch("upsampler.json")).json());
+  onLog(log);
+  const t0 = performance.now();
+  const [, upsampler] = await Promise.all([loadWorkflows(WORKFLOWS), fetch("upsampler.json").then((r) => r.json())]);
+  Object.assign(UPSAMPLER, upsampler);
   connect();
   const combo = (spec) => (Array.isArray(spec?.[0]) ? spec[0] : spec?.[1]?.options ?? []); // V1 or V3 schema
   const spaces = combo((await objectInfo("ImageColorSpace"))?.input.required.source);
@@ -1370,18 +1628,17 @@ async function boot() { // the workflows, the WebSocket, then what this ComfyUI 
     PaintAPlate_BoxMatte: "this pack, restart ComfyUI after an update", LTXAddVideoICLoRAGuide: "ComfyUI-LTXVideo",
     LTXVInpaintPreprocess: "ComfyUI-LTXVideo", SAM3_VideoTrack: "ComfyUI 0.42 or newer", ReferenceMultiLatent: "ComfyUI 0.41 or newer",
     TextGenerate: "ComfyUI 0.41 or newer" };
-  const missing = [];
-  for (const [cls, from] of Object.entries(needs)) if (!(await objectInfo(cls))) missing.push(`${cls} (${from})`);
-  if (missing.length) return status(`Missing nodes: ${missing.join(", ")}. Install them, then reload this page.`);
   const models = new Map(); // every model file the workflows load, by loader and input
   for (const wf of Object.values(WF)) for (const n of Object.values(wf.prompt))
     for (const [k, v] of Object.entries(n.inputs)) if (typeof v === "string" && v.endsWith(".safetensors")) models.set(v, [n.class_type, k]);
-  const absent = [];
-  for (const [file, [cls, input]] of models) { // only lists count: a file named in a text input is optional (the live preview's decoder)
-    const options = combo((await objectInfo(cls))?.input.required[input]);
-    if (options.length && !options.includes(file)) absent.push(file);
-  }
+  const classes = [...new Set([...Object.keys(needs), ...[...models.values()].map(([cls]) => cls)])];
+  const info = Object.fromEntries(await Promise.all(classes.map(async (cls) => [cls, await objectInfo(cls)]))); // one round trip for all
+  const missing = Object.entries(needs).filter(([cls]) => !info[cls]).map(([cls, from]) => `${cls} (${from})`);
+  if (missing.length) return status(`Missing nodes: ${missing.join(", ")}. Install them, then reload this page.`);
+  const absent = []; // only lists count: a file named in a text input is optional (the live preview's decoder)
+  for (const [file, [cls, input]] of models) { const options = combo(info[cls]?.input.required[input]); if (options.length && !options.includes(file)) absent.push(file); }
   if (absent.length) return status(`Missing model files: ${absent.join(", ")}. See the README for where to put them.`);
+  log(`Page ready in ${Math.round(performance.now() - t0)} ms: ${WORKFLOWS.length} workflows, ${classes.length} node classes and ${models.size} model files checked`);
   status("Ready. Open a plate to start. The models load in the background.");
   warmAll().catch(() => {}); // a ComfyUI that reports no GPU details simply skips it
 }
@@ -1409,12 +1666,18 @@ function setRub(on) {
   render();
 }
 $("#rub-btn").onclick = () => setRub(!S.rub);
-$("#whole").onchange = () => setTool("erase");
+$("#whole").onchange = () => { // on a selected erase, the switch is a change like the words: it runs again after the pause
+  setTool("erase");
+  if (!S.draft && S.selected?.tool === "erase" && S.selected.state === "done") { mark(); S.draft = reopenDone(S.selected); }
+  if (S.draft?.tool === "erase") { S.draft.whole = $("#whole").checked; schedule(); }
+};
 $("#prompt").oninput = () => { // the words belong to the edit being drawn, or to the selected one, which runs again after the pause
   if (stroke) return;
-  if (!S.draft && S.selected?.state === "done") S.draft = reopenDone(S.selected);
-  if (S.draft) schedule();
+  if (!S.draft && S.selected?.state === "done") { mark(); S.draft = reopenDone(S.selected); }
+  if (S.draft) schedule(true);
 };
+$("#editing").onclick = () => select(null);
+$("#display-state").onclick = () => resetDisplay();
 $("#undo-btn").onclick = () => undo();
 $("#redo-btn").onclick = () => redo();
 $("#save-btn").onclick = () => S.plate && saveScene();
@@ -1443,6 +1706,8 @@ $("#log-btn").onclick = () => {
   const open = $("#log").hidden;
   $("#log").hidden = !open;
   $("#log-btn").setAttribute("aria-expanded", String(open));
+  $("#log-btn").classList.remove("alert");
+  if (open) $("#log").scrollTop = $("#log").scrollHeight;
 };
 $("#files").onchange = (e) => { const ext = e.target.files[0]?.name.split(".").pop().toLowerCase(); $("#cs").value = ext === "exr" ? "linear" : "sRGB"; };
 $("#open-go").onclick = () => {
@@ -1467,6 +1732,7 @@ for (const el of [$("#viewport"), timeline]) el.addEventListener("wheel", (e) =>
   e.preventDefault();
   wheel += e.deltaY;
   if (Math.abs(wheel) < 40) return;
+  if (S.mode) { stepColor(S.mode, wheel < 0 ? 1 : -1); wheel = 0; return; } // during a colour edit the wheel changes the value (RV)
   pause();
   seek(S.frame + Math.sign(wheel) * (e.ctrlKey ? 10 : 1));
   wheel = 0;
@@ -1481,31 +1747,36 @@ document.addEventListener("drop", (e) => {
 
 addEventListener("keydown", (e) => {
   if (e.target.matches("input, select, textarea")) {
-    if (e.key === "Enter" && e.target.id === "prompt") { if (S.draft) launch(S.draft); e.target.blur(); e.preventDefault(); }
+    if (e.key === "Enter" && e.target.id === "prompt") { enter(e.ctrlKey || e.metaKey); e.target.blur(); e.preventDefault(); }
     else if (e.key === "Escape") e.target.blur();
     return;
   }
   if (e.key === "?" && $("#help").open) { $("#help").close(); return e.preventDefault(); }
   if ($("dialog[open]")) return;
-  const k = e.key, low = k.toLowerCase(), mod = e.ctrlKey || e.metaKey;
+  const k = e.key, low = k.toLowerCase(), mod = e.ctrlKey || e.metaKey, combo = `${e.shiftKey && k.length === 1 ? "Shift+" : ""}${low}`;
+  if (!$("#ctx").hidden) { if (k === "Escape") closeMenu(); return e.preventDefault(); } // the menu is open: Esc closes it
   if (!S.plate && !["?", "F6"].includes(k)) return;
+  if (S.mode && modeKey(k, combo)) return e.preventDefault();
+  if (!mod && !e.altKey && COLOR_KEYS[combo]) { colorMode(COLOR_KEYS[combo]); return e.preventDefault(); }
+  if (!mod && !e.altKey && CHANNEL_KEYS[combo]) { setDisplay({ channel: CHANNEL_KEYS[combo] }); return e.preventDefault(); }
+  if (!mod && combo === "Shift+i") { setDisplay({ invert: !S.display.invert }); return e.preventDefault(); }
   if (k === " " || k === "ArrowDown") S.playing ? pause() : play();
   else if (k === "ArrowLeft" || k === "ArrowRight") { pause(); seek(S.frame + (k === "ArrowLeft" ? -1 : 1)); }
   else if (k === "Home") { pause(); seek(S.inPt); }
   else if (k === "End") { pause(); seek(S.outPt); }
   else if (k === "[") setIn(S.frame);
   else if (k === "]") setOut(S.frame);
-  else if (k === "\\") { S.inPt = 0; S.outPt = S.plate.frames - 1; hud("In and out points cleared"); timelineUI(); }
+  else if (k === "\\") clearRange();
   else if (k === "F6") setWipe(S.wipe === null);
   else if (low === "f" && !mod) zoomTo(1);
   else if (k === "1" && !mod) zoomTo(S.plate.work[0] / S.fit.w);
-  else if (k === "`") document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+  else if (k === "`") fullScreen();
   else if (k === "?") $("#help").showModal();
   else if (TOOLS[low] && !mod) setTool(TOOLS[low]);
   else if (low === "x" && !mod) setRub(!S.rub);
   else if (k === "-" || k === "_") setSize(S.size / 1.2);
   else if (k === "=" || k === "+") setSize(S.size * 1.2);
-  else if (k === "Enter") { if (S.draft) launch(S.draft); else if (S.edits.length) again(S.edits.at(-1)); }
+  else if (k === "Enter") enter(mod);
   else if (k === "Escape") discard();
   else if (low === "z" && mod) e.shiftKey ? redo() : undo();
   else if (low === "y" && mod) redo();
@@ -1514,6 +1785,12 @@ addEventListener("keydown", (e) => {
   e.preventDefault();
 });
 addEventListener("keyup", (e) => { if (e.key.toLowerCase() === "o" && S.compare) { S.compare = false; render(); } });
+function enter(another) { // Enter starts the edit in progress now; Ctrl+Enter tries another seed on the selected edit, else the last one
+  if (S.draft) return launch(S.draft);
+  if (!another) return;
+  const target = S.selected ?? S.edits.at(-1);
+  if (target) again(target);
+}
 new ResizeObserver(() => { fitView(); cacheUI(); }).observe($("#viewport"));
 
 setTool("paint");

@@ -14,18 +14,25 @@ const QUIET_MS = 15000; // a prompt not heard of for this long is looked up in /
 let running = null; // the prompt ComfyUI is executing now
 let socket = false; // the WebSocket is open: when it is not, finished prompts are found by polling /history
 let notice = () => {};
+let log = () => {};
+const infos = new Map(); // class -> /object_info answer, asked once
 
 export const onNotice = (fn) => { notice = fn; }; // what the client has to tell the person (a retry, for example)
+export const onLog = (fn) => { log = fn; }; // every job posted, started, finished, failed or cancelled, with its timing
+const short = (id) => (id ? String(id).slice(0, 8) : "?");
+const took = (job) => `${((Date.now() - job.posted) / 1000).toFixed(1)} s`;
 
 export const post = (path, body) =>
   fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-export async function loadWorkflows(names) {
-  for (const name of names) WF[name] = parseWorkflow(await (await fetch(`workflows/${name}.json`)).json());
+export async function loadWorkflows(names) { // all at once: ten small files, one round trip
+  const loaded = await Promise.all(names.map(async (name) => [name, parseWorkflow(await (await fetch(`workflows/${name}.json`)).json())]));
+  for (const [name, wf] of loaded) WF[name] = wf;
 }
 
-export async function objectInfo(cls) {
-  return (await (await fetch(`/object_info/${cls}`)).json())[cls];
+export function objectInfo(cls) { // one request per class, however often it is asked
+  if (!infos.has(cls)) infos.set(cls, fetch(`/object_info/${cls}`).then((r) => r.json()).then((j) => j[cls]).catch(() => { infos.delete(cls); return undefined; }));
+  return infos.get(cls);
 }
 
 export function upload(blob, name, sub, onProgress) { // XMLHttpRequest, not fetch: it reports upload progress
@@ -52,13 +59,14 @@ export function upload(blob, name, sub, onProgress) { // XMLHttpRequest, not fet
 // `live` receives the live previews of a shot.
 export function run(name, values, { kind = name, preview, progress, step, live: onLive, front = false } = {}) {
   const wf = fillWorkflow(WF[name], values);
-  const job = { kind, preview, progress, live: onLive, retries: 1, key: JSON.stringify(wf.prompt), main: wf.progress,
-    step: step && ((id) => step(wf.prompt[id]?.class_type)) };
+  const job = { kind, name, preview, progress, live: onLive, retries: 1, key: JSON.stringify(wf.prompt), main: wf.progress, posted: Date.now(),
+    step: step && ((id) => step(wf.prompt[id]?.class_type)), classes: Object.fromEntries(Object.entries(wf.prompt).map(([id, n]) => [id, n.class_type])) };
   job.done = new Promise((resolve, reject) => Object.assign(job, { resolve, reject }));
   job.submit = () => post("/prompt", { prompt: wf.prompt, client_id: CLIENT, front }).then((r) => r.json()).then((j) => {
     if (!j.prompt_id) throw new Error(rejection(j));
     job.id = j.prompt_id;
     job.heard = Date.now();
+    log(`${name}: posted as ${short(job.id)} (${Object.keys(wf.prompt).length} nodes${front ? ", front of the queue" : ""}${j.number != null ? `, number ${j.number}` : ""})`);
     if (job.cancelled) return void drop(job); // cancelled while it was being posted
     byId.set(job.id, job);
     if (early.has(job.id)) finish(job.id, early.get(job.id));
@@ -81,7 +89,7 @@ async function finish(id, error) {
   byId.delete(id);
   early.delete(id);
   // An interrupt can land on the next prompt when the one it targeted had just finished: run it again once.
-  if (error === "cancelled" && !job.cancelled && job.retries-- > 0) return job.submit();
+  if (error === "cancelled" && !job.cancelled && job.retries-- > 0) { log(`${job.name} ${short(id)}: interrupted by a stray interrupt, posted again`); return job.submit(); }
   if (error && /out of memory|allocation on device/i.test(error) && !job.freed) { // models and caches piled up on the GPU
     job.freed = true;
     notice("The GPU ran out of memory: freeing ComfyUI's memory, then trying once more.");
@@ -89,11 +97,13 @@ async function finish(id, error) {
     return job.submit();
   }
   live.delete(job);
-  if (error) return job.reject(new Error(error));
+  if (error) { log(`${job.name} ${short(id)}: failed after ${took(job)}: ${error}`, "error"); return job.reject(new Error(error)); }
   let out = (await historyRecord(id))?.outputs ?? {};
-  if (files(out).length || Object.values(out).some((o) => o.text?.length)) memo.set(job.key, out);
+  const fresh = files(out).length || Object.values(out).some((o) => o.text?.length);
+  if (fresh) memo.set(job.key, out);
   else out = memo.get(job.key) ?? out;
   if (memo.size > MEMO_MAX) memo.delete(memo.keys().next().value);
+  log(`${job.name} ${short(id)}: done in ${took(job)}${fresh ? "" : " (served from ComfyUI's cache)"}`);
   job.resolve(out);
 }
 
@@ -121,6 +131,7 @@ export function cancel(...kinds) {
     live.delete(job);
     byId.delete(job.id);
     job.reject(new Error("cancelled"));
+    log(`${job.name} ${short(job.id)}: cancelled after ${took(job)}`);
     drop(job);
   }
 }
@@ -137,10 +148,11 @@ function message({ data }) {
   const { type, data: d } = JSON.parse(data);
   const job = byId.get(d?.prompt_id);
   if (job) job.heard = Date.now();
-  if (type === "execution_start") { running = d.prompt_id; job?.progress?.(0); }
+  if (type === "execution_start") { running = d.prompt_id; job?.progress?.(0); if (job) log(`${job.name} ${short(d.prompt_id)}: ComfyUI started it ${took(job)} after the post`); }
+  else if (type === "execution_cached" && job && d.nodes?.length) log(`${job.name} ${short(d.prompt_id)}: ${d.nodes.length} of ${Object.keys(job.classes).length} nodes from ComfyUI's cache`);
   else if (type === "executing" && d.node) {
     job?.step?.(d.node);
-    if (job?.main.has(String(d.node))) job.inMain = true;
+    if (job?.main.has(String(d.node))) { if (!job.inMain) log(`${job.name} ${short(d.prompt_id)}: ${job.classes[String(d.node)]} is running`); job.inMain = true; }
     else if (job?.inMain) job.progress?.(0.97); // the main node is done; saving remains
   } else if (type === "progress") {
     if (job && (!job.main.size || job.main.has(String(d.node)))) job.progress?.(0.02 + (0.93 * d.value) / d.max);

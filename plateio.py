@@ -427,8 +427,10 @@ class VideoWriter:
             prof = str(spec.get("profile", "")).lower().replace(" ", "")
             opts["profile"] = str(next((v for k, v in sorted(_PRORES_PROFILES.items(), key=lambda kv: -len(kv[0])) if k in prof), 4 if "444" in pix else 3))
         elif encoder in ("libx264", "libx265"):
-            opts["crf"] = "8"  # near-transparent: the codec is the only loss on untouched pixels
-            opts["preset"] = "slow"
+            # crf 8 is visually lossless: the codec is the only loss on untouched pixels. The preset trades encode
+            # time for file size at the same quality; medium encodes about twice as fast as slow (checked on x264).
+            opts["crf"] = "8"
+            opts["preset"] = "medium"
         cc.options = opts
         if spec.get("timecode"):
             self.stream.metadata["timecode"] = spec["timecode"]
