@@ -4,7 +4,7 @@
 
 The pack is copied to a temporary folder where `edit`, `snap`, `shot` and `matte` are replaced by
 stand-ins built from core nodes only (same slots and outputs, no models), so the whole flow runs on a
-CPU: open a plate, play it, paint, erase and light, let each edit start by itself, bypass and bring back
+CPU: open a plate, play it, paint, erase and light, start each edit with Generate (Enter), bypass and bring back
 an edit, let the idle time render the shot, the composite and the export, wipe, then download the zip.
 `ingest`, `comp` and `export` are the real workflows. Screenshots go to /tmp/paintaplate_ui.
 """
@@ -94,7 +94,8 @@ def flow(page, url, open_plate, shots, wait_s=120):
         page.keyboard.press(key)
         page.fill("#prompt", words)
         page.locator("#prompt").blur()
-        stroke(page, box, pts)  # the edit starts by itself once the strokes stop
+        stroke(page, box, pts)
+        page.keyboard.press("Enter")  # Generate: the edit, then its shot
         page.wait_for_function(DONE.format(n=i + 1), timeout=wait_s * 1000)
         page.screenshot(path=f"{shots}/2_{key}_done.png")
         print(f"edit {key}: done |", status())
@@ -170,7 +171,7 @@ def main():
             page = browser.new_page(viewport={"width": 1280, "height": 800}, accept_downloads=True)
             page.on("console", lambda m: (m.type == "error" and errors.append(m.text), print("   [console]", m.type, m.text[:200])))
             page.on("pageerror", lambda e: errors.append(str(e)))
-            page.goto(f"{url}/extensions/ainvfx-paintaplate/paintaplate.html?wait=400")
+            page.goto(f"{url}/extensions/ainvfx-paintaplate/paintaplate.html")
             page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=30000)
             page.screenshot(path=f"{SHOTS}/1_empty.png")
 
@@ -290,6 +291,7 @@ def remote(a):
                     if "color" in opts:  # {"color": "#d32f2f"}: a swatch for the paint or the light
                         page.click(f".swatches .sw[data-color='{opts['color']}']")
                     stroke(page, box, pts); mark(f"{key} stroke")
+                    page.keyboard.press("Enter")  # Generate
                     page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)
                     page.wait_for_function(DONE.format(n=i + 1), timeout=300000)
                     mark(f"{key} edit on the first frame | {status()}"); page.screenshot(path=f"{shots}/2_{key}_done.png")

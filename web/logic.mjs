@@ -6,7 +6,7 @@
 // Optional links: when every source slot is left empty, the link goes, with every node that fed it. The same rule as
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
-export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"] };
+export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_element: ["seed"] };
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
   const slots = {}, outputs = {}, progress = new Set();
@@ -329,6 +329,25 @@ export function nearKeys(keys, frame) { // the keyframes before and after a fram
 }
 
 // One edit at a time: the strokes in progress, else the current edit (the one just started, or picked in History).
+// What a failed step's ComfyUI message means, in one plain sentence. The page puts it after "<step> failed:", and the
+// log keeps ComfyUI's own words.
+const SAVED = { matte_a: "the erase matte", matte_b: "the paint matte", clean: "the erase pass", shot: "the shot", plate: "the fluid shot" };
+export function plainError(message) {
+  const m = String(message ?? "");
+  if (/out of memory|allocation on device/i.test(m)) return "the GPU ran out of memory.";
+  const empty = m.match(/No image frames found in (\S+)/);
+  if (empty) {
+    const part = empty[1].split(/[\\/]/).filter(Boolean).find((p) => SAVED[p.replace(/_(\d+x\d+|full)$/, "")]);
+    return `${part ? SAVED[part.replace(/_(\d+x\d+|full)$/, "")] : "the step before it"} saved no frames, so there was nothing to read.`;
+  }
+  if (/leaves the ComfyUI folders|outside the output folder|Absolute plate paths/i.test(m)) return "the file is outside ComfyUI's input and output folders.";
+  if (/Unsupported plate/i.test(m)) return "PaintAPlate cannot read this kind of file.";
+  if (/value not in list|not found in list|failed validation|Missing nodes|does not exist in/i.test(m)) return "a model or a node it needs is missing.";
+  if (/No such file|FileNotFound|not found/i.test(m)) return "a file it needs is missing.";
+  if (/Upload failed/i.test(m)) return "the browser could not send a picture to ComfyUI.";
+  return "ComfyUI stopped with an error.";
+}
+
 export function strokeTarget({ draft, current, tool }) { // where a new stroke goes: "draft", "current" or "new"
   if (draft) return "draft";
   return current?.tool === tool ? "current" : "new";
@@ -342,4 +361,17 @@ export function toolEndsEdit({ draft, current }, tool) { // picking another tool
 export function fluidPrompt(words) { // the trigger first, as the model card asks; no words: its own example
   const rest = (words || "").trim().replace(/^ainvfxfluid\s*,?\s*/i, "");
   return `${FLUID.trigger}, ${rest || FLUID.prompt}`;
+}
+
+// The paint matte's seed: the pixels where the edited first frame (a) differs from the plate's (b) by more than
+// `threshold` (0 to 255, on the largest channel), inside the paint zones (z, white). RGBA arrays of one size; 1 or 0 per
+// pixel. The zone is wider than what was painted, and a matte started from all of it followed whatever stood nearby.
+export function changedMask(a, b, z, threshold = 24) {
+  const n = a.length >> 2, out = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const j = i * 4;
+    if (z[j] < 128) continue;
+    if (Math.max(Math.abs(a[j] - b[j]), Math.abs(a[j + 1] - b[j + 1]), Math.abs(a[j + 2] - b[j + 2])) > threshold) out[i] = 1;
+  }
+  return out;
 }

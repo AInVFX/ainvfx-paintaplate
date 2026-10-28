@@ -6,15 +6,14 @@ import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
 import { WF, cancel, connect, loadWorkflows, objectInfo, onLog, onNotice, outputFile, outputFiles, outputText, post, run, upload, viewUrl } from "./comfy.mjs";
 import { FrameCache } from "./frames.mjs";
 import { sceneGraph } from "./graph.mjs";
-import { CHANNEL_NAMES, DISPLAY, FLUID, PARAMS, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fitSize,
-  formatParam, gb, pickObjects, previewSize, previewSizes, reconcile, secs, shotPrompt, strokeTarget, toolEndsEdit, upsampleRequest } from "./logic.mjs";
+import { CHANNEL_NAMES, DISPLAY, FLUID, PARAMS, blankSpec, caption, changedMask, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fitSize,
+  formatParam, gb, pickObjects, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, strokeTarget, toolEndsEdit, upsampleRequest } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
 const Q = new URLSearchParams(location.search);
 
 // ---------- Tuning: every number that sets a size, a delay or a budget ----------
-const WAIT = +Q.get("wait") || 2000; // ms after the last stroke before an edit starts
 // FLUX 3 Image Klein: a quick pass at EDIT_SIDE, then a full-size pass that refines it with a light denoise
 const QUICK = { steps: 16, denoise: 1, feather: 6, sigma: 3 }; // 16: the official distilled setting, 1.8 s at 768 on an RTX PRO 6000
 const FULL = { steps: +Q.get("refine") || 8, denoise: 0.35, feather: 12, sigma: 6 };
@@ -34,7 +33,12 @@ const PAINT_ZONE = 10; // paint may change the frame within the width over this 
 const ZONE_SOFT = { feather: 31, sigma: 10 }; // the zone's edge: Blur Image's largest radius and sigma
 const WIPE_GRAB = 14; // CSS px on each side of the wipe line where a press moves the wipe instead of painting
 const COMPOSITE_GROW = { erase: 24, other: 160 }, COMPOSITE_FEATHER = 96; // the composite's matte edge, same rule
-const IDLE_MS = 1500; // quiet time after editing before a render starts
+// The paint matte also takes what the shot changed by 0.1 or more within 1/16 of the width of SAM's matte (Follow Matte):
+// a flame or a car that SAM drops mid-shot stays in the composite. The matte starts from the first-frame pixels the edit
+// changed by more than `seed` (0 to 255), not from the whole paint zone
+const FOLLOW = { zone: 1 / 16, threshold: 0.1, seed: 24 };
+const IDLE_MS = 300; // after Generate, a bypass, a removal or an undo, the render starts this soon
+const RESULTS_KEPT = 8; // results kept per edit, by the strokes, words, seed and switch that made them: undo gets them back at once
 const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "shot", "matte", "comp", "export", "warm", "fluid"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "export"]; // job kinds a new stroke cancels
 const UPSAMPLER = {}; // Black Forest Labs' system prompts for Klein's upsampler (upsampler.json): table and plain
@@ -56,7 +60,7 @@ const FLUID_HINT = "Describe the fluid: smoke plume, wild fire, thick white stea
 
 const S = {
   plate: null, original: null, hero: null,
-  edits: [], draft: null, running: null, ids: 0, past: [], future: [], chain: Promise.resolve(), queued: 0,
+  edits: [], draft: null, running: null, ids: 0, vers: 0, past: [], future: [], chain: Promise.resolve(), queued: 0,
   tool: "paint", size: 48, colors: { paint: "#000000", light: "#ffd890" }, rub: false,
   get color() { return this.colors[this.tool] ?? "#000000"; },
   frame: 0, playing: false, inPt: 0, outPt: 0, wipe: null, compare: false,
@@ -67,7 +71,7 @@ const S = {
   background: (() => { try { return localStorage.getItem("paintaplate.background") !== "0"; } catch { return true; } })(), // prepare the export after each change
   previewCap: (() => { try { return +localStorage.getItem("paintaplate.preview") || PREVIEW_CAP; } catch { return PREVIEW_CAP; } })(), // long side of the shot preview: Fast by default
   heroKey: "", renders: new Map(), // set of edits -> what has been rendered for it
-  uploads: new Map(), timer: 0, live: null, vram: 0, // the live preview on show, the GPU's memory in bytes
+  uploads: new Map(), live: null, vram: 0, // the live preview on show, the GPU's memory in bytes
 };
 
 const view = $("#view"), ctx = view.getContext("2d");
@@ -170,7 +174,7 @@ async function openPlate(list, typed, cs, opts = {}) { // opts.fluid: a blank pl
   [view.width, view.height] = S.plate.work;
   view.classList.add("painting");
   plateVid.src = viewUrl(outputFile("ingest", out, "proxy"));
-  plateVid.addEventListener("canplaythrough", () => { if (OPENING.at === "load") { OPENING.at = "done"; status("Ready to play. Describe the edit at the top, then paint on the frame."); } }, { once: true });
+  plateVid.addEventListener("canplaythrough", () => { if (OPENING.at === "load") { OPENING.at = "done"; status("Ready to play. Describe the edit at the top, paint on the frame, then Generate."); } }, { once: true });
   shotVid.removeAttribute("src"); shotVid.load();
   for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = false;
   const kind = spec.kind === "video" ? spec.codec : `${spec.ext.slice(1).toUpperCase()} ${spec.kind}`;
@@ -182,7 +186,7 @@ async function openPlate(list, typed, cs, opts = {}) { // opts.fluid: a blank pl
   const offered = [...$("#cs").options].some((o) => o.value === spec.color_space_guess);
   const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).map((n) => n).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
-  status(spec.color_space_guess === cs ? "Describe the edit at the top, then paint on the frame."
+  status(spec.color_space_guess === cs ? "Describe the edit at the top, paint on the frame, then Generate."
     : offered ? `The file suggests ${spec.color_space_guess}. Reopen with it if colours look wrong.`
     : `The file suggests ${spec.color_space_guess}, which this ComfyUI does not offer yet: update ComfyUI past v0.42.5.`);
   if (S.fluid) enterFluid(); else fluidUI();
@@ -190,7 +194,7 @@ async function openPlate(list, typed, cs, opts = {}) { // opts.fluid: a blank pl
 
 function stopEverything() {
   pause();
-  clearTimeout(S.timer); clearTimeout(idleTimer);
+  clearTimeout(S.prefetchTimer); clearTimeout(idleTimer);
   for (const e of S.edits) e.token = (e.token ?? 0) + 1;
   cancel("edit", "snap", "warm", "fluid", ...BACKGROUND);
 }
@@ -332,8 +336,9 @@ function setOut(f) { S.outPt = Math.max(f, S.inPt); hud(`Out point: frame ${S.pl
 function fitView() { // the frame fills the viewport with the plate's own aspect; zoom and pan sit on top
   if (!S.plate) return;
   const box = $("#viewport").getBoundingClientRect(), aspect = S.plate.spec.width / S.plate.spec.height;
-  let w = box.width - 24, h = w / aspect;
-  if (h > box.height - 24) { h = box.height - 24; w = h * aspect; }
+  const pad = Math.min(box.width, box.height) < 420 ? 8 : 24; // a phone keeps most of its screen for the frame
+  let w = box.width - pad, h = w / aspect;
+  if (h > box.height - pad) { h = box.height - pad; w = h * aspect; }
   S.fit = { w, h, x: (box.width - w) / 2, y: (box.height - h) / 2 };
   applyView();
 }
@@ -393,7 +398,8 @@ function render() {
   if (S.fluid) return renderFluid();
   const W = view.width, H = view.height;
   const first = S.frame === 0 && !S.playing;
-  const edited = S.live ?? (first ? S.hero : shotReady() ? shotVid : plateVid);
+  const live = S.draft || stroke ? null : S.live; // while an edit is painted, the frame shows it, not the live preview of a render
+  const edited = live ?? (first ? S.hero : shotReady() ? shotVid : plateVid);
   const plate = first ? S.original : plateVid;
   const draw = (src) => {
     const cached = src instanceof HTMLVideoElement && !S.playing && caches.get(src).get(S.frame);
@@ -405,9 +411,9 @@ function render() {
   else if (S.wipe !== null) {
     draw(plate);
     ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip();
-    draw(edited); if (first && !S.live) overlays(W, H);
+    draw(edited); if (first && !live) overlays(W, H);
     ctx.restore();
-  } else { draw(edited); if (first && !S.live) overlays(W, H); }
+  } else { draw(edited); if (first && !live) overlays(W, H); }
   drawCursor();
 }
 
@@ -536,12 +542,18 @@ function hud(text, ms = 1600) {
   hudTimer = setTimeout(() => el.classList.remove("on"), ms);
 }
 
-// ---------- Painting: the edit starts by itself when the strokes stop ----------
+// ---------- Painting: the strokes wait for Generate (Enter), which makes the edit, then its shot ----------
 
-let stroke = null, nav = null;
+let stroke = null, nav = null, pinch = null;
+const touches = new Map(); // fingers on the frame: two pan and zoom it, as Alt and Ctrl drags do with a mouse
 
 view.addEventListener("pointerdown", (e) => {
   if (!S.plate) return;
+  if (e.pointerType === "touch") {
+    touches.set(e.pointerId, [e.clientX, e.clientY]);
+    if (touches.size === 2) return pinchStart();
+    if (touches.size > 2 || pinch) return;
+  }
   if (S.mode && e.button === 0 && !e.altKey && !e.ctrlKey && !e.metaKey) { // a colour edit: dragging changes the value, as in RV
     e.preventDefault();
     view.setPointerCapture(e.pointerId);
@@ -556,14 +568,13 @@ view.addEventListener("pointerdown", (e) => {
   if (S.fluid) return paintKey(e, rub);
   if (S.frame !== 0) { seek(0); hud("Edits are painted on the first frame"); }
   if (rub) return rubOut(e);
-  cancel(...BACKGROUND, "prefetch"); // the GPU goes to the edit; a caption written for fewer strokes is outdated
-  clearTimeout(S.timer); clearTimeout(S.prefetchTimer);
-  S.live = null;
+  cancel("prefetch"); // a caption written for fewer strokes is outdated
+  clearTimeout(S.prefetchTimer);
   mark(); // one undo step per stroke
   let d = S.draft;
   const to = strokeTarget({ draft: S.draft, current: S.selected, tool: S.tool }); // the current edit takes the strokes of its own tool
-  if (to === "current") d = S.selected === S.running ? reopen(S.selected) : reopenDone(S.selected);
-  if (to === "new") { S.selected = null; d = S.draft = newEdit(); editingUI(); }
+  if (to === "current") d = busy(S.selected) ? reopen(S.selected) : reopenDone(S.selected); // the edit changes: its passes and its render stop
+  if (to === "new") { S.selected = null; d = S.draft = newEdit(); editingUI(); } // a new edit: what renders goes on until Generate
   view.setPointerCapture(e.pointerId);
   stroke = { tool: d.tool, color: S.color, size: S.size, points: [] };
   d.strokes.push(stroke);
@@ -571,6 +582,8 @@ view.addEventListener("pointerdown", (e) => {
 });
 
 view.addEventListener("pointermove", (e) => {
+  if (touches.has(e.pointerId)) touches.set(e.pointerId, [e.clientX, e.clientY]);
+  if (pinch) return pinchMove();
   if (S.scrub) return setDisplay({ [S.mode]: clampParam(S.mode, S.scrub.start + (e.clientX - S.scrub.x) * PARAMS[S.mode].drag) });
   if (nav) return navigateMove(e);
   if (stroke && S.keyDraft) return addKeyPoint(S.keyDraft, e);
@@ -580,23 +593,26 @@ view.addEventListener("pointermove", (e) => {
   if (!S.playing) requestAnimationFrame(render);
 });
 view.addEventListener("pointerleave", () => { S.cursor = null; if (!S.playing) requestAnimationFrame(render); });
-view.addEventListener("pointerup", () => {
+view.addEventListener("pointercancel", (e) => view.dispatchEvent(new PointerEvent("pointerup", e))); // the browser took the touch: end as a lift
+view.addEventListener("pointerup", (e) => {
+  touches.delete(e.pointerId);
+  if (pinch) { if (touches.size < 2) pinch = null; return; }
   if (S.scrub) { S.scrub = null; return leaveMode(); } // RV leaves the edit when the drag ends
   if (nav) { nav = null; view.classList.remove("panning"); return; }
   if (!stroke) return;
   stroke = null;
   if (S.keyDraft) { S.keyDraft = null; fluidUI(); return render(); }
   if (S.draft && !painted(S.draft)) return discard(); // everything was rubbed out
-  schedule();
+  prepareSoon();
 });
 
 function rubOut(e) { // the eraser works on the strokes in progress, or on the current edit
   let d = S.draft;
   const target = S.selected;
-  if (!d && target?.strokes.length) d = S.running === target ? reopen(target) : reopenDone(target);
+  if (!d && target?.strokes.length) d = busy(target) ? reopen(target) : reopenDone(target);
   if (!d) return hud("Nothing to rub out: select an edit in History, or paint first");
-  cancel(...BACKGROUND);
-  clearTimeout(S.timer); clearTimeout(S.prefetchTimer);
+  cancel("prefetch");
+  clearTimeout(S.prefetchTimer);
   mark();
   view.setPointerCapture(e.pointerId);
   stroke = { tool: "rub", size: S.size, points: [] };
@@ -604,7 +620,10 @@ function rubOut(e) { // the eraser works on the strokes in progress, or on the c
   addPoint(d, e);
 }
 
-function reopenDone(edit) { // the eraser on a finished edit: it becomes strokes again, and runs again 2 s later
+const busy = (e) => e === S.running || e.state === "queued"; // an edit being generated, or waiting for its turn
+
+function reopenDone(edit) { // a finished edit changes (strokes, words, the switch): strokes again until Generate; its render stops
+  cancel(...BACKGROUND);
   edit.kept = edit.strokes.length;
   edit.state = "drawing";
   historyUI();
@@ -616,19 +635,18 @@ function takeInputs(edit) { // the words and the Whole object switch belong to t
   if (edit.tool === "erase") edit.whole = $("#whole").checked;
 }
 
-function schedule(typing = false) { // run the draft once the strokes (and the typing) have stopped for WAIT ms
-  clearTimeout(S.timer); clearTimeout(S.prefetchTimer);
-  if (!S.draft) return;
+function prepareSoon(typing = false) { // the draft waits for Generate; SAM and the prompt writer start now, so Generate starts at once
+  clearTimeout(S.prefetchTimer);
+  if (!S.draft) return generateUI();
   takeInputs(S.draft); // the prefetch sees them: SAM finds the whole object first, then the prompt writer writes for its box
-  S.timer = setTimeout(() => S.draft && launch(S.draft), WAIT);
   if (typing) S.prefetchTimer = setTimeout(() => prefetch(S.draft), PREFETCH_MS); // not on every keystroke
-  else prefetch(S.draft);
-  hud(`The edit starts in ${Math.round(WAIT / 1000)} s. Enter starts it now, Esc cancels.`, WAIT);
+  else { prefetch(S.draft); hud("Generate (Enter) makes the edit, then its shot. Esc cancels.", 2500); }
+  generateUI();
 }
 
 function newEdit() {
   return { id: ++S.ids, tool: S.tool, color: S.color, prompt: "", seed: (Math.random() * 2 ** 31) | 0,
-    strokes: [], on: true, state: "drawing", version: 0, basis: [],
+    strokes: [], on: true, state: "drawing", version: 0, basis: [], results: new Map(),
     paint: canvas(S.plate.work), mask: canvas(S.plate.work), patch: null, foot: null };
 }
 
@@ -679,6 +697,35 @@ function redrawStrokes(d) { // painted strokes, then SAM's object, then the eras
 }
 
 const painted = (d) => d.strokes.filter((s) => s.tool !== "rub").length; // SAM grows from these
+
+function pinchStart() { // a second finger: the first one's stroke is taken back, then the two fingers pan and zoom
+  if (stroke) dropStroke();
+  const [a, b] = [...touches.values()];
+  pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, m: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], start: { ...S.zoom } };
+}
+
+function pinchMove() {
+  if (touches.size < 2) return;
+  const [a, b] = [...touches.values()], s = pinch.start, m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const k = Math.max(0.25, Math.min(16, s.k * (Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d)));
+  const box = $("#viewport").getBoundingClientRect(), ox = pinch.m[0] - box.left - S.fit.x, oy = pinch.m[1] - box.top - S.fit.y;
+  S.zoom = { k, x: ox - ((ox - s.x) * k) / s.k + m[0] - pinch.m[0], y: oy - ((oy - s.y) * k) / s.k + m[1] - pinch.m[1] }; // about where the fingers met
+  applyView(); render();
+}
+
+function dropStroke() { // the stroke a finger began before the pinch goes, with its undo step
+  const owner = S.keyDraft ?? S.draft, s = stroke;
+  stroke = null; S.keyDraft = null;
+  if (owner) {
+    owner.strokes.splice(owner.strokes.lastIndexOf(s), 1);
+    if (owner.canvas) { redrawKey(owner); if (!owner.strokes.length) S.fluid.keys.splice(S.fluid.keys.indexOf(owner), 1); } else redrawStrokes(owner);
+  }
+  S.past.pop(); undoUI();
+  const d = S.draft;
+  if (d && !painted(d) && !S.edits.includes(d)) S.draft = null; // nothing left of a new edit
+  else if (d && S.edits.includes(d) && reuse(d)) { S.draft = null; historyUI(); touch(); } // a made edit back as it was
+  render(); generateUI();
+}
 
 function navigate(e) { // RV: Alt or middle button drag pans, Ctrl drag zooms
   e.preventDefault();
@@ -760,8 +807,17 @@ function redrawKey(key) {
   for (const s of key.strokes) drawKeyStroke(key, s);
 }
 
-function staleFluid() { // the keyframes or the words changed: the shot on show comes from the old ones
-  if (S.fluid?.result) S.fluid.result.stale = true;
+// what a fluid shot is made from: its keyframes, its words and its seed. Shots already made are kept by it, so Enter never makes one twice
+const fluidSig = () => JSON.stringify([[...S.fluid.keys].sort((a, b) => a.frame - b.frame).map((k) => [k.frame, strokesSig(k.strokes)]),
+  $("#prompt").value.trim(), S.fluid.seed]);
+
+function staleFluid() { // the keyframes or the words changed: the shot on show comes from the old ones, and a run of the old ones stops
+  const f = S.fluid;
+  if (f?.busy && f.busy.sig !== fluidSig()) {
+    cancel("fluid");
+    log(`Fluid v${f.busy.v}: stopped, its keyframes or words changed`);
+    hud("Stopped: the keyframes or the words changed. Generate starts again.", 2500);
+  }
   fluidUI(); timelineUI();
 }
 
@@ -853,11 +909,20 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
   if (!S.fluidReady) return status(FLUID_MISSING);
   if (!f.keys.length) return status("Paint a keyframe first: flat colour blobs on frame 0 and on the last frame.");
   if (another) f.seed = (Math.random() * 2 ** 31) | 0;
+  else { // Enter again: a shot being made, or already made, from these keyframes, words and seed is not made twice
+    if (f.busy?.sig === fluidSig()) return hud(`Fluid shot v${f.busy.v} is being made from these keyframes and words`, 2500);
+    const made = f.made?.get(fluidSig());
+    if (made) {
+      if (f.result !== made) { f.result = made; setShot(made.preview, "fluid"); log(`Fluid v${made.v}: made before from these keyframes, words and seed: shown again, nothing runs`); }
+      f.view = "result"; fluidUI(); render();
+      return hud(`Fluid shot v${made.v} is already made from these keyframes and words. Ctrl+Enter tries another seed.`, 3000);
+    }
+  }
   cancel("fluid");
-  const v = ++f.runs, dir = `paintaplate/${p.id}/fluid_v${v}`, size = [p.spec.width, p.spec.height], prompt = fluidPrompt($("#prompt").value);
+  const sig = fluidSig(), v = ++f.runs, dir = `paintaplate/${p.id}/fluid_v${v}`, size = [p.spec.width, p.spec.height], prompt = fluidPrompt($("#prompt").value);
   f.prompt = $("#prompt").value.trim();
   const t0 = performance.now();
-  f.busy = { v, progress: 0 };
+  f.busy = { v, sig, progress: 0 };
   f.view = "keys";
   fluidUI(); render();
   try {
@@ -869,7 +934,8 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     const out = await run("fluid", { path: p.path, color_space: "sRGB", max_frames: p.frames, keys: JSON.stringify(keys), prompt, seed: f.seed,
       prefix: `${dir}/plate`, video_prefix: `${dir}/preview`, live: liveEvery() },
       { kind: "fluid", progress: (x) => { if (f.busy) { f.busy.progress = x; fluidUI(); } }, live: showLive }).done;
-    f.result = { v, seed: f.seed, prompt, path: `output:${dir}/plate/${p.spec.source.split(/[\\/]/).pop()}`, preview: viewUrl(outputFile("fluid", out, "video")) };
+    f.result = { v, sig, seed: f.seed, prompt, path: `output:${dir}/plate/${p.spec.source.split(/[\\/]/).pop()}`, preview: viewUrl(outputFile("fluid", out, "video")) };
+    (f.made ??= new Map()).set(sig, f.result);
     f.view = "result";
     f.busy = null;
     setShot(f.result.preview, "fluid");
@@ -922,15 +988,14 @@ function fluidUI() { // the panel, the tools and the help of a fluid shot; none 
   if (S.plate) $("#render").hidden = on;
   $("#history-empty").textContent = on ? FLUID_HELP : HISTORY_HELP;
   for (const t of ["erase", "light"]) $(`.tools [data-tool="${t}"]`).disabled = on;
-  if (!on) return;
-  const n = f.keys.length, busy = f.busy, r = f.result;
+  if (!on) return generateUI();
+  const n = f.keys.length, busy = f.busy, r = f.result, stale = !!r && r.sig !== fluidSig();
   $("#spec").textContent = `Fluid shot on a blank plate: ${S.plate.spec.width} × ${S.plate.spec.height}, ${S.plate.fps} fps, ${S.plate.frames} frames`;
   $("#fluid-state").textContent = busy ? `generating ${Math.round((busy.progress ?? 0) * 100)}%`
-    : r ? (r.stale ? "keyframes changed" : `v${r.v} ready`) : `${n} keyframe${n === 1 ? "" : "s"}`;
-  $("#fluid-go").disabled = !n || !S.fluidReady;
-  $("#fluid-go").textContent = busy ? "Generating…" : r ? "Generate again" : "Generate";
+    : r ? (stale ? "keyframes changed" : `v${r.v} ready`) : `${n} keyframe${n === 1 ? "" : "s"}`;
   $("#fluid-again").disabled = !n || !S.fluidReady;
   $("#fluid-use").disabled = !r || !!busy;
+  generateUI();
 }
 
 // ---------- Edits: generate, keep, bypass, remove ----------
@@ -940,19 +1005,41 @@ function queue(fn) {
   S.chain = S.chain.then(fn).catch(quiet).finally(() => { S.queued--; touch(); });
 }
 
-function launch(edit) {
+function launch(edit) { // Generate: the edit on the first frame, then its shot. A result it already has is used again
   if (S.draft === edit) S.draft = null;
-  clearTimeout(S.timer);
-  if (!edit.strokes.length) return;
+  clearTimeout(S.prefetchTimer);
+  if (!edit.strokes.length) return generateUI();
   takeInputs(edit);
   if (!S.edits.includes(edit)) S.edits.push(edit);
-  edit.state = "queued";
   edit.launched = performance.now();
-  edit.thumb ??= strokesThumb(edit);
   S.selected = edit; // it stays the current edit: new words, more strokes or the switch change it, until New edit or another tool
+  if (reuse(edit)) {
+    log(`Edit ${num(edit)}: unchanged since a result it already has, so nothing runs again`);
+    hud(`Edit ${num(edit)} has not changed: its result stays. Ctrl+Enter tries another seed.`, 3000);
+    recompose(); historyUI(); render(); timelineUI();
+    queue(regenerateDependents);
+    return;
+  }
+  edit.state = "queued";
+  edit.thumb ??= strokesThumb(edit);
   historyUI(); render();
   queue(() => generate(edit));
   queue(regenerateDependents); // the edits above it that saw it run again
+}
+
+function reuse(edit) { // a result made from the same strokes, words, seed and switch comes back without a pass
+  const rec = recordOf(edit), same = edit.made === rec && !!edit.patch, hit = same ? null : edit.results?.get(rec);
+  if (!same && !hit) return false;
+  if (hit) Object.assign(edit, hit, { made: rec });
+  Object.assign(edit, { state: "done", force: false, kept: undefined, preview: null, latent: null });
+  return true;
+}
+
+function keep(edit) { // the result just made, kept by what made it
+  const m = (edit.results ??= new Map());
+  m.delete(edit.made);
+  m.set(edit.made, { patch: edit.patch, version: edit.version, foot: edit.foot, basis: edit.basis, thumb: edit.thumb });
+  while (m.size > RESULTS_KEPT) m.delete(m.keys().next().value);
 }
 
 async function regenerateDependents() {
@@ -965,7 +1052,7 @@ function select(edit) { // a History row becomes the current edit: its words in 
   S.selected = edit;
   if (edit) { setTool(edit.tool); $("#prompt").value = edit.prompt; if (edit.tool === "erase") $("#whole").checked = !!edit.whole; }
   else if (!S.draft) $("#prompt").value = "";
-  if (edit) hud(`Edit ${num(edit)} selected: retype its words, paint more, or rub strokes out, and it runs again. N starts a new edit.`, 3500);
+  if (edit) hud(`Edit ${num(edit)} selected: retype its words, paint more or rub strokes out, then Generate. N starts a new edit.`, 3500);
   historyUI(); render();
 }
 
@@ -974,6 +1061,7 @@ function editingUI() { // the Editing tag and the New edit button: which edit ne
   tag.hidden = !e;
   if (e) tag.textContent = `Editing ${num(e)} · ${NAME[e.tool]}`;
   $("#new-edit").disabled = !S.plate || !!S.fluid || (!S.draft && !S.selected);
+  generateUI();
 }
 
 function nextEdit() { // New edit (N): the strokes in progress start now, and the next strokes make a separate edit
@@ -995,12 +1083,12 @@ function pickTool(t) { // the person picks a tool: another tool than the edit be
   setTool(t);
 }
 
-function reopen(edit) { // more strokes on the edit being generated: stop it and keep drawing
+function reopen(edit) { // the edit being generated, or waiting for its turn, changes: it stops and waits for Generate
   edit.token = (edit.token ?? 0) + 1;
-  cancel("edit", "snap", "prefetch");
+  if (S.running === edit) { cancel("edit", "snap", "prefetch"); S.running = null; }
+  cancel(...BACKGROUND);
   edit.state = "drawing"; edit.preview = edit.latent = null;
   edit.kept = edit.strokes.length;
-  S.running = null;
   historyUI();
   return (S.draft = edit);
 }
@@ -1016,7 +1104,7 @@ async function baseUpload(below, before, size) { // the frame under an edit, upl
 }
 
 async function generate(edit) {
-  if (!S.edits.includes(edit) || !edit.on) return;
+  if (!S.edits.includes(edit) || !edit.on || edit.state === "drawing") return; // changed since it was queued: it waits for Generate
   const token = (edit.token = (edit.token ?? 0) + 1);
   const alive = () => edit.token === token && S.edits.includes(edit) && edit.on;
   const p = S.plate, light = edit.tool === "light", tag = `e${edit.id}_${token}`;
@@ -1062,22 +1150,23 @@ async function generate(edit) {
     if (!alive()) return;
     // a relight shows the frame as the export will make it: Klein's light on the plate's own detail
     edit.patch = await loadImage(viewUrl(outputFile("edit", full, light ? "relit" : "patch")));
-    Object.assign(edit, { preview: null, latent: null, state: "done", version: edit.version + 1, force: false, kept: undefined });
+    Object.assign(edit, { preview: null, latent: null, state: "done", version: ++S.vers, force: false, kept: undefined }); // versions are unique: a kept result never meets a new one
     edit.foot = footprint(edit);
     edit.basis = activeBefore(edit).map(record);
     edit.made = recordOf(edit); // the strokes, words, seed and switches this result came from: undo compares against it
     S.running = null;
     recompose();
     edit.thumb = thumbOf(edit);
+    keep(edit);
     historyUI(); render(); timelineUI();
-    status(`Edit ${num(edit)} is on the first frame. The shot renders when you stop editing.`);
+    status(`Edit ${num(edit)} is on the first frame. Its shot renders next.`);
     log(`Edit ${num(edit)}: done, ${((performance.now() - edit.launched) / 1000).toFixed(1)} s after it started`);
   } catch (err) {
     if (edit.token === token) {
       Object.assign(edit, { state: edit.patch ? "done" : "failed", preview: null, latent: null });
       S.running = null; recompose(); historyUI(); render();
     }
-    if (err?.message !== "cancelled") throw err;
+    if (err?.message !== "cancelled") throw explained(err, `Edit ${num(edit)}`);
   }
 }
 
@@ -1105,7 +1194,9 @@ async function prepare(edit, index, kind) {
   return { before, below, base, reference, cap: await captionFor(edit, reference, key, kind) };
 }
 
-const recordOf = (e) => JSON.stringify({ strokes: e.strokes.map((s) => s.points.length), tool: e.tool, prompt: e.prompt, seed: e.seed, whole: !!e.whole });
+// what a set of strokes is: tool, colour, size, and the points themselves (a sum, so two strokes of the same length differ)
+const strokesSig = (strokes) => strokes.map((s) => `${s.tool}:${s.color ?? ""}:${Math.round(s.size)}:${s.points.length}:${Math.round(s.points.reduce((a, q) => a + q[0] * 3 + q[1], 0))}`).join(";");
+const recordOf = (e) => JSON.stringify({ strokes: strokesSig(e.strokes), tool: e.tool, prompt: e.prompt, seed: e.seed, whole: !!e.whole });
 
 function prefetch(edit) { // the snap and the prompt writer start as the strokes stop: by the time the edit starts, they are often done
   if (!edit || !painted(edit) || !S.plate) return;
@@ -1223,7 +1314,7 @@ function mark() { // call before a change: the state undo comes back to
 }
 
 function restore(snap) {
-  clearTimeout(S.timer); clearTimeout(S.prefetchTimer);
+  clearTimeout(S.prefetchTimer);
   cancel(...BACKGROUND, "edit", "snap", "prefetch", "warm");
   for (const e of [...S.edits, S.draft].filter(Boolean)) if (e.state === "generating" || e.state === "queued") e.token = (e.token ?? 0) + 1;
   const kept = S.selected; // the current edit stays current while it exists: the next strokes still change it
@@ -1236,13 +1327,13 @@ function restore(snap) {
     return e;
   };
   S.edits = snap.edits.map(apply);
-  for (const e of S.edits) { // a result that matches is kept; anything else is made again by rebuild()
-    const current = e.patch && e.made === recordOf(e);
+  for (const e of S.edits) { // a result that matches, or one made before from the same strokes and words, is kept; rebuild() makes the rest
+    const current = e.patch && (e.made === recordOf(e) || reuse(e));
     e.force = !!e.patch && !current;
     e.state = e.patch ? "done" : "generating";
     if (!e.strokes.length) e.state = "done"; // nothing left to make: rebuild skips it
   }
-  if (snap.draft) { S.draft = apply(snap.draft); S.draft.state = "drawing"; $("#prompt").value = S.draft.prompt; if (painted(S.draft)) schedule(); }
+  if (snap.draft) { S.draft = apply(snap.draft); S.draft.state = "drawing"; $("#prompt").value = S.draft.prompt; if (painted(S.draft)) prepareSoon(); }
   S.edits = S.edits.filter((e) => e.strokes.length); // an edit undone to no strokes at all is gone
   if (!S.draft && S.edits.includes(kept)) { S.selected = kept; $("#prompt").value = kept.prompt; }
   else if (!S.draft && !S.fluid) $("#prompt").value = ""; // in a fluid shot the words belong to the shot, not to an edit
@@ -1280,7 +1371,7 @@ function undoUI() {
 }
 
 function discard() { // Esc: drop the strokes in progress, or stop the edit being generated
-  clearTimeout(S.timer); clearTimeout(S.prefetchTimer);
+  clearTimeout(S.prefetchTimer);
   const d = S.draft ?? S.running;
   if (!d) return S.selected && select(null);
   mark();
@@ -1375,18 +1466,18 @@ function editProgress(edit, f) { // the state line of one History row, without r
 // ---------- In idle time: the shot, its mattes, the composite to play, then the export ----------
 
 let idleTimer;
-function touch() { clearTimeout(idleTimer); idleTimer = setTimeout(idle, IDLE_MS); }
+function touch(ms = IDLE_MS) { clearTimeout(idleTimer); idleTimer = setTimeout(idle, ms); }
 
 function idle() { // one pipeline at a time: a running one goes on, unless the set of edits changed under it
   if (!S.plate) return;
-  if (S.draft || S.running || S.queued || stroke) return touch();
+  if ((S.draft && S.edits.includes(S.draft)) || S.running || S.queued) return touch(); // an edit of this render changes; a new edit being painted lets it run
   if (S.piping) { if (S.shotDirty && S.piping !== S.heroKey) cancel(...BACKGROUND); return; }
   const r = S.renders.get(S.heroKey);
   if (!S.shotDirty && !((S.background || S.wantDownload) && S.heroKey && !r?.exported)) return;
   S.piping = S.heroKey || "-";
   pipeline().catch((e) => {
     if (e?.message === "cancelled") S.shotDirty = true;
-    else { quiet(e); S.stage = null; S.wantDownload = null; stagesUI(); exportUI(); }
+    else { const st = STAGES.find((x) => x.id === S.stage?.id); quiet(explained(e, st?.label ?? "The render")); S.stage = null; S.wantDownload = null; stagesUI(); exportUI(); generateUI(); }
   }).finally(() => { S.piping = null; touch(); });
 }
 
@@ -1484,7 +1575,8 @@ async function pipeline() {
     setShot(pv.raw, key);
     hud("Rough preview: Space plays it. The composite follows.", 2500);
   }
-  await step(r, "track", async (progress) => { pv.painted = await track(active, made, base, `_${sized}`, progress, null, ["paint"]); }, pv);
+  await step(r, "track", async (progress) => { pv.painted = await track(active, made, base, `_${sized}`, progress, null, ["paint"],
+    erase ? { path: pv.clean, cs: "sRGB" } : { path: p.path, cs: p.cs }); }, pv);
   pv.mattes = mattesOf({ ...r.erased?.found, ...pv.painted?.found });
   if (!fresh()) return;
   await step(r, "comp", async (progress) => {
@@ -1504,7 +1596,13 @@ async function pipeline() {
   const onePass = sw === p.work[0] && sh === p.work[1];
   const final = onePass ? made : await passes(r, p.work, "full", true);
   if (!fresh()) return;
-  await step(r, "trackfull", async (progress) => { r.full = await track(active, final, base, "_full", progress, pv.mattes, ["paint"]); });
+  if (!onePass && !r.review && r.raw && S.shot?.url !== r.raw) { // the full-size shot as LTX made it, until the export is ready:
+    setShot(r.raw, key); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640, 28 Oct)
+    hud("Full size: Space plays the shot as LTX made it. The export follows.", 2500);
+    log(`Render v${r.v}: the viewer plays the full-size shot until the export is ready`);
+  }
+  await step(r, "trackfull", async (progress) => { r.full = await track(active, final, base, "_full", progress, pv.mattes, ["paint"],
+    erase ? { path: onePass ? pv.clean : r.clean, cs: "sRGB" } : { path: p.path, cs: p.cs }); });
   r.full ??= pv.mattes;
   if (!fresh()) return;
   await step(r, "export", async (progress) => {
@@ -1524,7 +1622,16 @@ async function pipeline() {
   if (S.wantDownload) { const parts = S.wantDownload; S.wantDownload = null; download(parts); }
 }
 
-async function track(active, shotPath, base, suffix, progress, previous, tools) { // SAM 3.1 follows a kind of edit through the shot
+function elementOf(zones, size) { // where the edits changed the first frame, inside the paint zones: the paint matte starts here
+  const [w, h] = size, data = (c) => c.getContext("2d").getImageData(0, 0, w, h).data;
+  const bits = changedMask(data(snap(S.hero, size)), data(snap(S.original, size)), data(zones), FOLLOW.seed);
+  const c = canvas(size), x = c.getContext("2d"), img = x.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) img.data.fill(bits[i] ? 255 : 0, i * 4, i * 4 + 3), (img.data[i * 4 + 3] = 255);
+  x.putImageData(img, 0, 0);
+  return c;
+}
+
+async function track(active, shotPath, base, suffix, progress, previous, tools, under = null) { // SAM 3.1 follows a kind of edit through the shot; `under`: the plate the shot was made over
   const p = S.plate, found = { ...(previous?.found ?? {}) };
   for (const [key, tool, path, cs] of [["matte_a", "erase", p.path, p.cs], ["matte_b", "paint", shotPath, "sRGB"]]) {
     const edits = active.filter((e) => e.tool === tool);
@@ -1534,8 +1641,13 @@ async function track(active, shotPath, base, suffix, progress, previous, tools) 
     u.fillStyle = "#000"; u.fillRect(0, 0, sw, sh);
     u.globalCompositeOperation = "lighten";
     for (const e of edits) u.drawImage(tool === "paint" ? whiteOf(e.patch) : e.mask, 0, 0, sw, sh);
-    await run("matte", { path, color_space: cs, max_frames: p.frames, width: sw, height: sh, prefix: `${base}/${key}${suffix}/m`,
-      mask: await uploadCanvas(union, `${key}${suffix}_${S.run}.png`) }, { kind: "matte", progress }).done;
+    const compare = tool === "paint" && under ? { base: under.path, base_color_space: under.cs } : {}; // the paint matte follows what the shot changed
+    if (tool === "paint") compare.seed = await uploadCanvas(elementOf(union, size), `seed${suffix}_${S.run}.png`); // from what the edits changed
+    const out = await run("matte", { path, color_space: cs, max_frames: p.frames, width: sw, height: sh, prefix: `${base}/${key}${suffix}/m`,
+      mask: await uploadCanvas(union, `${key}${suffix}_${S.run}.png`), zone: FOLLOW.zone, threshold: FOLLOW.threshold, ...compare },
+      { kind: "matte", progress }).done;
+    const note = outputText("matte", out, "follow");
+    if (note) log(`${tool === "erase" ? "Erase" : "Paint"} matte${suffix ? ` (${suffix.slice(1)})` : ""}: ${note}`);
     found[key] = `output:${base}/${key}${suffix}`;
   }
   return mattesOf(found);
@@ -1558,6 +1670,13 @@ function download(parts = ["export", "matte"]) {
 }
 
 // ---------- Interface ----------
+
+function explained(err, what) { // ComfyUI's own message goes to the log; the status line says what failed, why, and what to do
+  if (err?.message === "cancelled") return err;
+  const raw = err?.message ?? String(err);
+  log(`${what} failed. ComfyUI said: ${raw}`, "error");
+  return new Error(`${what} failed: ${plainError(raw)} Generate tries again.`);
+}
 
 function status(text, level = "") { // the status line, and a line in the log
   $("#status").textContent = text;
@@ -1858,7 +1977,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Save scene", "", saveScene, !p], ["Export…", "", exportDialog, !edits],
       ["ComfyUI graph", "", () => saveGraph().catch(quiet), !edits]]],
     ["Edit", [["Undo", "Ctrl+Z", undo, !S.past.length], ["Redo", "Ctrl+Shift+Z", redo, !S.future.length], "-",
-      ["New edit", "N", nextEdit, !p || !!S.fluid || (!S.draft && !S.selected)], ["Start the edit now", "Enter", () => S.draft && launch(S.draft), !S.draft], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
+      ["New edit", "N", nextEdit, !p || !!S.fluid || (!S.draft && !S.selected)], ["Generate", "Enter", () => enter(false), $("#generate").disabled], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
       ["Deselect", "Esc", () => select(null), !S.selected]]],
     ["Tools", [["Paint", "B", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Erase", "E", () => pickTool("erase"), !p || !!S.fluid, S.tool === "erase" && !S.rub],
       ["Light", "L", () => pickTool("light"), !p || !!S.fluid, S.tool === "light" && !S.rub], ["Eraser", "X", () => setRub(!S.rub), !p, S.rub], "-",
@@ -1883,6 +2002,8 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
     ["Previous keyframe", "Alt+Left", () => jumpKey(-1)], ["Next keyframe", "Alt+Right", () => jumpKey(1)]]]);
   return groups;
 }
+
+const SHEET = matchMedia("(max-width: 900px) and (orientation: portrait), (max-width: 600px), (max-height: 520px)"); // phones: the menu along the bottom
 
 function openMenu(x, y) {
   const root = $("#ctx");
@@ -1916,7 +2037,15 @@ function openMenu(x, y) {
     li.append(sub);
     return li;
   }));
+  for (const g of root.querySelectorAll(".group")) g.onclick = (ev) => { // a tap opens a group: phones have no hover
+    if (ev.target.closest("button")) return;
+    const open = !g.classList.contains("open");
+    root.querySelectorAll(".group.open").forEach((o) => o.classList.remove("open"));
+    g.classList.toggle("open", open);
+  };
+  root.classList.toggle("sheet", SHEET.matches);
   root.hidden = false;
+  if (SHEET.matches) { root.style.left = root.style.top = ""; return; }
   root.style.left = `${Math.max(8, Math.min(x, innerWidth - root.offsetWidth - 8))}px`;
   root.style.top = `${Math.max(8, Math.min(y, innerHeight - root.offsetHeight - 8))}px`;
   root.classList.toggle("flip", x + root.offsetWidth + 260 > innerWidth); // no room on the right: the submenus open on the left
@@ -1926,7 +2055,7 @@ function closeMenu() { $("#ctx").hidden = true; }
 
 $("#viewport").addEventListener("contextmenu", (e) => { e.preventDefault(); openMenu(e.clientX, e.clientY); });
 document.addEventListener("pointerdown", (e) => { // a press outside the open menu closes it and does nothing else
-  if ($("#ctx").hidden || e.target.closest("#ctx")) return;
+  if ($("#ctx").hidden || e.target.closest("#ctx, #menu-btn")) return;
   closeMenu();
   e.stopPropagation();
   e.preventDefault();
@@ -1944,7 +2073,7 @@ async function boot() { // the workflows, the WebSocket, then what this ComfyUI 
   const spaces = combo((await objectInfo("ImageColorSpace"))?.input.required.source);
   $("#cs").replaceChildren(...(spaces.length ? spaces : ["sRGB"]).map((s) => new Option(s, s)));
   const needs = { PaintAPlate_LoadPlate: "this pack",
-    PaintAPlate_BoxMatte: "this pack, restart ComfyUI after an update", LTXAddVideoICLoRAGuide: "ComfyUI-LTXVideo",
+    PaintAPlate_BoxMatte: "this pack, restart ComfyUI after an update", PaintAPlate_FollowMatte: "this pack, restart ComfyUI after an update", LTXAddVideoICLoRAGuide: "ComfyUI-LTXVideo",
     LTXVInpaintPreprocess: "ComfyUI-LTXVideo", SAM3_VideoTrack: "ComfyUI 0.42 or newer", ReferenceMultiLatent: "ComfyUI 0.41 or newer",
     TextGenerate: "ComfyUI 0.41 or newer" };
   const models = new Map(); // every model file the workflows load, by loader and input
@@ -1990,22 +2119,24 @@ function setRub(on) {
   render();
 }
 $("#rub-btn").onclick = () => setRub(!S.rub);
-$("#whole").onchange = () => { // on the current erase, the switch is a change like the words: it runs again after the pause
+$("#whole").onchange = () => { // on the current erase, the switch is a change like the words: Generate runs it again
   pickTool("erase");
-  if (!S.draft && S.selected?.tool === "erase" && S.selected.state === "done") { mark(); S.draft = reopenDone(S.selected); }
-  if (S.draft?.tool === "erase") schedule();
+  const cur = S.selected;
+  if (!S.draft && cur?.tool === "erase") { mark(); if (busy(cur)) reopen(cur); else reopenDone(cur); }
+  if (S.draft?.tool === "erase") prepareSoon();
 };
-$("#prompt").oninput = () => { // the words belong to the edit being drawn, or to the current one, which runs again after the pause
+$("#prompt").oninput = () => { // the words belong to the edit being drawn, or to the current one, which Generate runs again
   if (stroke) return;
   if (S.fluid) return staleFluid(); // new words for a fluid shot: the one on show used the old ones
-  if (!S.draft && S.selected?.state === "done") { mark(); S.draft = reopenDone(S.selected); }
-  if (S.draft) schedule(true);
+  const cur = S.selected;
+  if (!S.draft && cur) { mark(); if (busy(cur)) reopen(cur); else reopenDone(cur); }
+  if (S.draft) prepareSoon(true); else generateUI();
 };
 $("#editing").onclick = () => select(null);
 $("#new-edit").onclick = () => nextEdit();
 $("#blank-go").onclick = () => openBlank().catch(quiet);
 for (const id of ["#b-width", "#b-height", "#b-fps", "#b-frames"]) $(id).oninput = blankNote;
-$("#fluid-go").onclick = () => generateFluid().catch(quiet);
+$("#generate").onclick = () => enter(false);
 $("#fluid-again").onclick = () => generateFluid(true).catch(quiet);
 $("#fluid-use").onclick = () => useFluid().catch(quiet);
 $("#display-state").onclick = () => resetDisplay();
@@ -2015,6 +2146,11 @@ $("#save-btn").onclick = () => S.plate && saveScene();
 $("#x-graph").onclick = () => saveGraph().catch(quiet);
 $("#open-btn").onclick = $("#empty-open").onclick = openDialog;
 $("#help-btn").onclick = () => $("#help").showModal();
+$("#menu-btn").onclick = (e) => { // the same menu as a right-click, for touch screens
+  if (!$("#ctx").hidden) return closeMenu();
+  const r = e.currentTarget.getBoundingClientRect();
+  openMenu(r.left, r.bottom + 4);
+};
 $("#play-btn").onclick = () => (S.playing ? pause() : play());
 $("#wipe-btn").onclick = () => setWipe(S.wipe === null);
 $("#export-btn").onclick = exportDialog;
@@ -2120,12 +2256,26 @@ addEventListener("keydown", (e) => {
   e.preventDefault();
 });
 addEventListener("keyup", (e) => { if (e.key.toLowerCase() === "o" && S.compare) { S.compare = false; render(); } });
-function enter(another) { // Enter starts the edit in progress now; Ctrl+Enter tries another seed on the selected edit, else the last one
+function enter(another) { // Generate (Enter): the edit in progress, then its shot; nothing already made runs again. Ctrl+Enter: another seed
   if (S.fluid) return void generateFluid(another).catch(quiet); // a fluid shot: generate it, Ctrl+Enter with another seed
   if (S.draft) return launch(S.draft);
-  if (!another) return;
-  const target = S.selected ?? S.edits.at(-1);
-  if (target) again(target);
+  if (another) { const target = S.selected ?? S.edits.at(-1); if (target) again(target); return; }
+  if (renderPending()) { S.shotDirty = true; touch(0); return hud("The shot renders now", 2000); } // a render that stopped or failed goes on
+  hud(S.edits.length ? "Nothing changed since the last result. Ctrl+Enter tries another seed." : "Paint on the frame first, then Generate.", 3000);
+}
+
+function renderPending() { // the edits on show have no finished render, and none runs or waits
+  const r = S.renders.get(S.heroKey);
+  return !!S.plate && !S.fluid && !!S.heroKey && !S.piping && !S.running && !S.queued && !(previewOf(r)?.comp && (r?.exported || !S.background));
+}
+
+function generateUI() { // the Generate button is live when Enter has something to start
+  const b = $("#generate"), f = S.fluid;
+  const working = f ? !!f.busy : !!(S.running || S.queued || S.piping);
+  const todo = !S.plate ? false : f ? S.fluidReady && f.keys.length > 0 && !f.made?.has(fluidSig()) && !(f.busy && f.busy.sig === fluidSig())
+    : (!!S.draft && painted(S.draft) > 0) || renderPending();
+  b.disabled = !todo;
+  b.textContent = working && !todo ? "Generating…" : "Generate";
 }
 new ResizeObserver(() => { fitView(); cacheUI(); }).observe($("#viewport"));
 

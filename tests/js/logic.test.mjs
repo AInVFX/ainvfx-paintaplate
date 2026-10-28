@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit } from "../../web/logic.mjs";
+import { changedMask, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -124,7 +124,7 @@ test("optional links drop with what fed them when their slots are empty", () => 
 test("every workflow names the outputs and the progress node the page reads", () => {
   const wanted = { ingest: ["hero", "proxy", "spec"], prompt: ["text"], edit: ["patch", "relit", "result"],
     snap: ["named", "point_0", "point_1", "point_2", "point_3", "point_4"], clean: ["frames", "video"], shot: ["frames", "video"],
-    matte: ["frames"], comp: ["video"], export: ["export", "matte", "review"], warm: ["frame"] };
+    matte: ["follow", "frames"], comp: ["video"], export: ["export", "matte", "review"], warm: ["frame"] };
   for (const [name, outs] of Object.entries(wanted)) {
     const wf = workflow(name);
     assert.deepEqual(Object.keys(wf.outputs).sort(), outs.sort(), name);
@@ -186,4 +186,22 @@ test("another tool than the edit being worked on starts a new edit; the same too
   assert.equal(toolEndsEdit({ draft: paint, current: null }, "erase"), true);
   assert.equal(toolEndsEdit({ draft: null, current: paint }, "paint"), false);
   assert.equal(toolEndsEdit({ draft: null, current: null }, "erase"), false);
+});
+
+test("a failed step says why in plain words", () => {
+  assert.equal(plainError("PaintAPlate_LoadPlate: No image frames found in /w/ComfyUI/output/paintaplate/a1/v2/matte_b_640x352"),
+    "the paint matte saved no frames, so there was nothing to read.");
+  assert.equal(plainError("PaintAPlate_LoadPlate: No image frames found in /w/output/paintaplate/a1/v2/640x352/clean"), "the erase pass saved no frames, so there was nothing to read.");
+  assert.equal(plainError("KSampler: CUDA out of memory. Tried to allocate 2 GiB"), "the GPU ran out of memory.");
+  assert.equal(plainError("PaintAPlate_LoadPlate: Plate path leaves the ComfyUI folders: ../x"), "the file is outside ComfyUI's input and output folders.");
+  assert.equal(plainError("UNETLoader: Value not in list: unet_name: 'x.safetensors' not in []"), "a model or a node it needs is missing.");
+  assert.equal(plainError("something odd"), "ComfyUI stopped with an error.");
+});
+
+test("the paint matte starts where the edit changed the first frame, inside the paint zones", () => {
+  const px = (r, g, b) => [r, g, b, 255];
+  const a = new Uint8ClampedArray([...px(200, 50, 20), ...px(10, 10, 10), ...px(90, 90, 90), ...px(200, 0, 0)]);
+  const b = new Uint8ClampedArray([...px(10, 10, 10), ...px(10, 10, 10), ...px(80, 90, 90), ...px(0, 0, 0)]);
+  const z = new Uint8ClampedArray([...px(255, 255, 255), ...px(255, 255, 255), ...px(255, 255, 255), ...px(0, 0, 0)]);
+  assert.deepEqual([...changedMask(a, b, z)], [1, 0, 0, 0]);
 });

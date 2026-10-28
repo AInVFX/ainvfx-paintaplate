@@ -327,6 +327,42 @@ class BoxMatte(io.ComfyNode):
         return io.NodeOutput(torch.from_numpy(out).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()))
 
 
+class FollowMatte(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_FollowMatte",
+            display_name="Follow Matte",
+            category=CATEGORY,
+            description="One matte per frame from SAM 3.1's track, safe for the composite. It follows the object's own region "
+                        "from the first-frame mask: objects SAM finds by itself elsewhere are left out; where the object is not "
+                        "seen, the last matte holds (with no mask, the first-frame mask); with the plate the shot was made over, "
+                        "the matte also takes what the shot changed near the object, so a generated element is never dropped.",
+            inputs=[
+                io.Mask.Input("masks", tooltip="SAM 3.1's masks, one per frame it tracked. It may return fewer, or none."),
+                io.Mask.Input("first", tooltip="The area on the first frame that SAM was asked to follow."),
+                io.Image.Input("frames", tooltip="The frames SAM tracked: their count sets the matte's length. For paint, the shot."),
+                io.Image.Input("base", optional=True, tooltip="The plate the shot was made over, at the same size."),
+                io.Mask.Input("element", optional=True,
+                              tooltip="Where the edit changed the first frame: the object's region starts here instead of at first."),
+                io.Float.Input("zone", default=0.0625, min=0.0, max=0.5, step=0.005,
+                               tooltip="How far from the object's region SAM's mask may move and a change still joins, as a fraction of the width."),
+                io.Float.Input("threshold", default=0.1, min=0.01, max=1.0, step=0.01,
+                               tooltip="How much a pixel must change, from 0 to 1, to join the matte."),
+            ],
+            outputs=[io.Mask.Output(display_name="mask"), io.String.Output(display_name="summary")],
+        )
+
+    @classmethod
+    def execute(cls, masks, first, frames, zone, threshold, base=None, element=None) -> io.NodeOutput:
+        shot = frames[..., :3].float().cpu().numpy()
+        plate = base[..., :3].float().cpu().numpy() if base is not None else None
+        out, summary = mathops.follow_matte(masks.float().cpu().numpy(), len(shot), first.float().cpu().numpy(),
+                                            shot if plate is not None else None, plate, zone=zone, threshold=threshold,
+                                            element=element.float().cpu().numpy() if element is not None else None)
+        return io.NodeOutput(torch.from_numpy(out).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()), summary)
+
+
 class KeyframeVideo(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -445,4 +481,4 @@ class LivePreview(io.ComfyNode):
         return io.NodeOutput(patched)
 
 
-NODES = [LoadPlate, SavePlate, FitToPlate, RelightTransfer, BoxMatte, LivePreview, KeyframeVideo]
+NODES = [LoadPlate, SavePlate, FitToPlate, RelightTransfer, BoxMatte, FollowMatte, LivePreview, KeyframeVideo]

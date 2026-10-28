@@ -13,6 +13,9 @@
     <img class="logo" src="logo.png" alt="AInVFX">
     <span class="name">PaintAPlate</span>
     <span id="spec" class="spec"></span>
+    <button id="menu-btn" class="quiet menu-btn" title="Every action, with its key (or right-click on the frame)" aria-label="Menu" aria-haspopup="menu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
     <button id="help-btn" class="quiet" title="Keys (?)" aria-label="Keys">?</button>
     <button id="open-btn">Open plate</button>
     <button id="save-btn" disabled title="Save the scene: the plate and every edit with its strokes, words and seed">Save scene</button>
@@ -67,6 +70,7 @@
       <button id="editing" class="editing" type="button" hidden title="This edit is selected: its words and strokes are yours to change. Click, or press Esc, to deselect"></button>
       <input id="prompt" autocomplete="off" spellcheck="false" aria-label="Describe the edit"
              placeholder="Describe what to paint, then paint it on the frame">
+      <button id="generate" class="primary generate" type="button" disabled title="Generate (Enter): the edit on the first frame, then its shot. What is already made never runs again">Generate</button>
       <button id="new-edit" class="new-edit" type="button" disabled title="New edit (N): this edit is done, the next strokes start a separate one">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span>New edit</span>
@@ -120,12 +124,11 @@
       </span>
     </div>
     <ol id="history"></ol>
-    <p id="history-empty" class="history-empty">Your edits appear here. Describe, then paint on the frame. Click an edit to change its words or strokes.</p>
+    <p id="history-empty" class="history-empty">Your edits appear here. Describe, paint on the frame, then Generate. Click an edit to change its words or strokes.</p>
     <section id="fluid" class="render fluid" hidden>
       <h2>Fluid shot <span id="fluid-state"></span></h2>
-      <p class="hint">AInVFX's ainvfx-fluid IC-LoRA turns the painted blobs into smoke, steam or fire in one LTX 2.5 pass. The shot then opens as a plate, for every edit.</p>
+      <p class="hint">AInVFX's ainvfx-fluid IC-LoRA turns the painted blobs into smoke, steam or fire in one LTX 2.5 pass: Generate, at the top. The shot then opens as a plate, for every edit.</p>
       <div class="fluid-actions">
-        <button id="fluid-go" class="primary" type="button" title="Generate the fluid shot from the keyframes (Enter)">Generate</button>
         <button id="fluid-again" type="button" title="Generate with another seed (Ctrl+Enter)">Another seed</button>
         <button id="fluid-use" type="button" title="Open the shot as the plate: erase, paint, relight and export it">Use as the plate</button>
       </div>
@@ -176,10 +179,11 @@
       <dt>N</dt><dd>New edit: the next strokes start a separate edit</dd>
       <dt>- and =</dt><dd>Brush size</dd>
       <dt>X</dt><dd>Eraser: rub out the strokes you just painted</dd>
-      <dt>Enter</dt><dd>Start the edit now</dd>
+      <dt>Enter</dt><dd>Generate: the edit on the first frame, then its shot. Pressed again with nothing changed, nothing runs twice</dd>
       <dt>Ctrl+Enter</dt><dd>Try another seed on the selected edit, else the last one</dd>
-      <dt>Click an edit</dt><dd>Select it: its words come back; retype them, paint more, rub strokes out or switch Whole object, and it runs again. Esc deselects</dd>
+      <dt>Click an edit</dt><dd>Select it: its words come back; retype them, paint more, rub strokes out or switch Whole object, then Generate. Esc deselects</dd>
       <dt>Esc</dt><dd>Cancel the edit in progress</dd>
+      <dt>Two fingers</dt><dd>On a touch screen: pan and zoom the frame. ☰ at the top holds every action</dd>
       <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo: one step per stroke, per removal, per change of words or seed</dd>
       <dt>Hold O</dt><dd>See the plate</dd>
       <dt>?</dt><dd>Show or hide these keys</dd>

@@ -153,6 +153,57 @@ class ResizeTo(unittest.TestCase):
         self.assertLess(float(np.abs(m.resize_to(img[..., 0], 20, 31) - mask).max()), 1e-5)
         self.assertIs(m.resize_to(img, 37, 53), img)  # the same size: no copy
 
+    def test_follow_matte(self):
+        n, h, w = 12, 60, 120
+        shot = np.zeros((n, h, w, 3), np.float32)
+        base = np.zeros_like(shot)
+        sam = np.zeros((n, h, w), np.float32)
+        for t in range(n):  # a car that drives right, a flame above it that SAM never sees, then SAM loses the car too
+            x = 20 + t
+            shot[t, 30:40, x:x + 15] = 0.9
+            shot[t, 20:30, x + 4:x + 10] = 0.8
+            if t < 8:
+                sam[t, 30:40, x:x + 15] = 1
+        first = sam[0].copy()
+        shot[:, 5:15, 90:110] = 0.5  # far away, the regenerated smoke differs from the plate's, and SAM finds a stray object in it
+        sam[3:, 8:12, 95:100] = 1
+        out, summary = m.follow_matte(sam, n, first, shot, base, zone=0.25)
+        self.assertEqual(out.shape, (n, h, w))
+        for t in range(n):  # the flame and the car stay in every frame, also after SAM lost them
+            self.assertEqual(out[t, 25, 20 + t + 6], 1, t)
+            self.assertEqual(out[t, 35, 20 + t + 7], 1, t)
+        self.assertEqual(out[:, :, :12].max(), 0)  # what the shot did not change stays out
+        self.assertEqual(out[:, :, 80:].max(), 0)  # the stray object and the changes around it are left out
+        self.assertIn("on 8 of 12", summary)
+        self.assertIn("left out", summary)
+        held, summary = m.follow_matte(np.zeros((0, h, w), np.float32), n, first)  # SAM returned no mask
+        self.assertTrue((held == (first > 0.5)).all())
+        self.assertIn("no mask", summary)
+        part, _ = m.follow_matte(sam[:3], n, first)  # fewer masks than frames: the last matte holds
+        self.assertTrue((part[11] == part[2]).all())
+        erase, start = np.zeros((n, h, w), np.float32), np.zeros((h, w), np.float32)  # an erase: a gap, then further on
+        start[30:40, 20:30] = 1
+        for t in (0, 1, 2, 3, 7, 8):
+            x = 20 + (3 * t if t < 4 else 6 * t)
+            erase[t, 30:40, x:x + 10] = 1
+        erase[:, 0:4, 116:120] = 1  # a stray object on every frame
+        out, summary = m.follow_matte(erase, n, start, zone=0.1)
+        self.assertEqual(out[:, 0:4, 116:120].max(), 0)  # the stray is left out
+        self.assertTrue((out[5] == out[3]).all())  # the gap holds the last matte
+        self.assertEqual(out[7, 35, 66], 1)  # found again further on: the search grew over the gap
+        self.assertIn("on 6 of 12", summary)
+        blob = np.zeros((n, h, w), np.float32)  # SAM's first mask is the whole paint zone; then it splits in two
+        blob[0, 10:50, 10:100] = 1
+        blob[1:, 30:40, 20:35] = 1
+        blob[1:, 10:20, 85:95] = 1
+        blob[1:, 15, 35:86] = 1  # joined to the element by a thin line, as SAM joined a smoke plume's edges to a car
+        blob[1:, 15:31, 35] = 1
+        element = np.zeros((h, w), np.float32)  # what the edit changed: the element only
+        element[30:40, 20:35] = 1
+        out, _ = m.follow_matte(blob, n, blob[0], element=element, zone=0.1)
+        self.assertEqual(out[0, 15, 90], 0)  # the zone's far side, where the edit changed nothing, is left out from frame 0
+        self.assertEqual(out[5, 35, 25], 1)  # the element stays
+        self.assertEqual(out[5, 15, 90], 0)  # the far piece is left out, though a thin line joins it to the element
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

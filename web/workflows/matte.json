@@ -108,19 +108,117 @@
   }
  },
  "8": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 121,
+   "pad_8n1": true
+  },
+  "_meta": {
+   "title": "Plate under the shot",
+   "slots": {
+    "path": "base",
+    "max_frames": "max_frames"
+   }
+  }
+ },
+ "9": {
+  "class_type": "ImageColorSpace",
+  "inputs": {
+   "image": [
+    "8",
+    0
+   ],
+   "source": "sRGB",
+   "destination": "sRGB"
+  },
+  "_meta": {
+   "slots": {
+    "source": "base_color_space"
+   }
+  }
+ },
+ "10": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "image": [
+    "9",
+    0
+   ],
+   "upscale_method": "area",
+   "width": 960,
+   "height": 544,
+   "crop": "disabled"
+  },
+  "_meta": {
+   "slots": {
+    "width": "width",
+    "height": "height"
+   }
+  }
+ },
+ "11": {
+  "class_type": "LoadImageMask",
+  "inputs": {
+   "image": "",
+   "channel": "red"
+  },
+  "_meta": {
+   "title": "Where the edit changed the first frame",
+   "slots": {
+    "image": "seed"
+   }
+  }
+ },
+ "12": {
+  "class_type": "PaintAPlate_FollowMatte",
+  "inputs": {
+   "masks": [
+    "7",
+    0
+   ],
+   "first": [
+    "5",
+    0
+   ],
+   "frames": [
+    "3",
+    0
+   ],
+   "base": [
+    "10",
+    0
+   ],
+   "element": [
+    "11",
+    0
+   ],
+   "zone": 0.0625,
+   "threshold": 0.1
+  },
+  "_meta": {
+   "slots": {
+    "zone": "zone",
+    "threshold": "threshold",
+    "base": "follow_base",
+    "element": "follow_element"
+   }
+  }
+ },
+ "13": {
   "class_type": "MaskToImage",
   "inputs": {
    "mask": [
-    "7",
+    "12",
     0
    ]
   }
  },
- "9": {
+ "14": {
   "class_type": "SaveImage",
   "inputs": {
    "images": [
-    "8",
+    "13",
     0
    ],
    "filename_prefix": "paintaplate/plate/matte/m"
@@ -131,6 +229,19 @@
     "filename_prefix": "prefix"
    },
    "output": "frames"
+  }
+ },
+ "15": {
+  "class_type": "PreviewAny",
+  "inputs": {
+   "source": [
+    "12",
+    1
+   ]
+  },
+  "_meta": {
+   "title": "How the matte followed",
+   "output": "follow"
   }
  }
 }

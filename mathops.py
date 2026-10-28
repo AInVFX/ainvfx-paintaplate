@@ -360,4 +360,84 @@ def relight_frame(plate: np.ndarray, source: np.ndarray, relit: np.ndarray, radi
     return relight(plate, source, relit, max(1, radius), strength).astype(np.float32)
 
 
+def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=None, zone: float = 1 / 16,
+                 threshold: float = 0.1, workers: int = 8, element=None):
+    """One matte per frame from a tracker's masks, made safe for the composite. Returns (mattes (n, H, W), summary).
+
+    A tracker can return no masks, fewer than the frames, lose part of an object, or find other objects by itself
+    (SAM 3.1's video tracker found some on 102 of 121 frames from an empty first-frame mask, 28 Oct). A broken matte
+    drops a good result from the composite, or leaves the erase pass with no frames to read. So the matte follows the
+    object's own region, which starts as `element` (for paint, the pixels the edit changed on the first frame) or else
+    as the first-frame mask, and moves by at most `zone` of the width per frame:
+    - the tracker's mask within `zone` of the width of that region is the object; the rest is left out, even where a
+      thin line joins it to the object (SAM's paint matte traced a smoke plume's edges, joined to a painted car). After
+      frames where the object was not seen, the search grows by `zone` per frame, up to four times, so an object that
+      comes back nearby is found again. The region keeps only the object's thick parts (an opening of 1/240 of the
+      width), so it never creeps along a thin line; the matte itself keeps the thin parts near the object;
+    - a frame where the object is not seen keeps the previous matte (with no mask at all, the first-frame mask holds);
+    - with `shot` and `base` (the regenerated frames and the plate they were made over, (N, H, W, 3) in 0 to 1), the
+      matte also takes every pixel the shot changed by `threshold` or more within `zone` of the object's region: a
+      generated element stays in where the tracker dropped it, and the region moves with it. Where the shot equals the
+      plate, losing the matte changes nothing visible.
+    """
+    masks = np.asarray(masks, np.float32).reshape((-1,) + np.shape(masks)[-2:]) if np.size(masks) else np.zeros((0, 1, 1), np.float32)
+    first = np.asarray(first, np.float32)
+    first = first[0] if first.ndim == 3 else first
+    h, w = (shot.shape[1:3] if shot is not None else masks.shape[1:3] if len(masks) else first.shape[-2:])
+    fit = lambda m: (m if m.shape == (h, w) else resize_to(m.astype(np.float32), h, w)) > 0.5  # noqa: E731
+    seed = fit(first)
+    el = None if element is None or not np.size(element) else fit(np.asarray(element, np.float32).reshape(np.shape(element)[-2:]))
+    tracked = lambda t: fit(masks[t]) if t < len(masks) else np.zeros((h, w), bool)  # noqa: E731
+    grow = lambda m, r: dilate(m.astype(np.uint8), min(r, max(h, w))) > 0  # noqa: E731
+
+    changes = None
+    if shot is not None and base is not None:
+        def change(t):  # where the shot differs from the plate under it, without one-pixel edges from a small shift
+            b = base[min(t, len(base) - 1)]
+            b = b if b.shape[:2] == (h, w) else resize_to(b, h, w)
+            d = ndimage.gaussian_filter(np.abs(shot[min(t, len(shot) - 1)][..., :3] - b[..., :3]).max(axis=-1), 1.0)
+            return ndimage.binary_opening(d > threshold, structure=np.ones((3, 3), bool))
+        with ThreadPoolExecutor(max(1, workers)) as pool:  # numpy and scipy release the GIL
+            changes = list(pool.map(change, range(n)))
+    reach, thin = max(2.0, zone * w), max(1.0, w / 240)
+    line = el if el is not None and el.any() else seed  # the object's own region
+    out, prev, peak = np.zeros((n, h, w), np.float32), seed, int(seed.sum())
+    seen = strays = held = added = lost = 0
+    most = 1.0
+    for t in range(n):
+        s = tracked(t)
+        near = grow(line, reach * min(1 + lost, 4)) if line.any() else np.ones((h, w), bool)
+        core = s & near  # SAM's mask near the region: what lies further away is left out, even joined to it
+        strays += bool((s & ~near).any())
+        peak = max(peak, int(core.sum()))
+        found = core
+        if changes is not None:
+            gain = changes[t] & grow(core | line, reach)
+            if int(gain.sum()) > 3 * max(peak, 1):  # never a runaway: changes far beyond the object's size stay out
+                gain = changes[t] & grow(core, reach) if core.any() else np.zeros_like(s)
+            if int((gain & ~core).sum()) > 0.25 * int(core.sum()) + 16:
+                added += 1
+                most = max(most, float((core | gain).sum()) / max(int(core.sum()), 1))
+            found = core | gain
+        seen += bool(core.any())
+        if found.any():
+            f = ndimage.binary_fill_holes(found)
+            thick = grow(~grow(~found, thin), thin)  # the object without its thin lines: the region never creeps along them
+            line, lost = (ndimage.binary_fill_holes(thick) if thick.any() else f), 0
+        else:  # the object is not seen: the last matte holds, and the search grows
+            f, lost = prev, lost + 1
+            held += bool(prev.any())
+        out[t], prev = f, f
+    if not len(masks) or not masks.any():
+        summary = "SAM 3.1 returned no mask: the first-frame mask holds on every frame"
+    else:
+        summary = f"SAM 3.1 found the object on {seen} of {n} frames"
+        if strays:
+            summary += f"; what it found further than the object can move, on {strays} frame(s), is left out"
+        if held:
+            summary += f"; the last matte held on {held} frame(s) where the object was not seen"
+        if added:
+            summary += f"; the shot's changes near the object added area on {added} frame(s), up to {most:.1f} times SAM's mask"
+    return out, summary
+
 GRAIN_UNIT = _grain_unit()

@@ -115,8 +115,10 @@ def load(name, folder=None):
 
 # Optional links: when every source slot is left empty, the link goes, with every node that fed it
 # (a relight alone: no matte to composite with or to save).
-# no words for an erase: no search by name; not a relight: no light transfer on the edited frame.
-OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",)}
+# no words for an erase: no search by name; not a relight: no light transfer on the edited frame;
+# an erase matte: no plate under a shot to compare with, and no changed pixels to start from.
+OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",),
+            "follow_element": ("seed",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -346,19 +348,30 @@ def shot():
 
 
 def matte():
-    """SAM 3.1 follows a painted area through the shot, from the first frame."""
+    """SAM 3.1 follows a painted or erased area through the frames from the first frame, then Follow Matte makes the
+    track safe: one matte per frame even when SAM returns none, the last matte where SAM loses the object, and for
+    paint every pixel the shot changed near the matte, compared with the plate the shot was made over (`base`)."""
     g = Graph()
     _, srgb = plate(g, pad=True)
     frames = g("ImageScale", image=srgb, upscale_method="area", width=Slot("width", 960),
                height=Slot("height", 544), crop="disabled")
     sam = g("CheckpointLoaderSimple", ckpt_name=Slot("sam", SAM))
-    track = g("SAM3_VideoTrack", _progress=True, images=frames, model=sam,
-              initial_mask=g("LoadImageMask", _title="Area on the first frame", image=Slot("mask", ""),
-                             channel="red"),
+    first = g("LoadImageMask", _title="Area on the first frame", image=Slot("mask", ""), channel="red")
+    track = g("SAM3_VideoTrack", _progress=True, images=frames, model=sam, initial_mask=first,
               detection_threshold=0.5, max_objects=4, detect_interval=1)
     masks = g("SAM3_TrackToMask", track_data=track, object_indices="")
-    g("SaveImage", _title="Matte frames", _output="frames", images=g("MaskToImage", mask=masks),
+    under = g("PaintAPlate_LoadPlate", _title="Plate under the shot", path=Slot("base", ""), max_frames=Slot("max_frames", 121),
+              pad_8n1=True)
+    under = g("ImageScale", image=g("ImageColorSpace", image=under, source=Slot("base_color_space", "sRGB"), destination="sRGB"),
+              upscale_method="area", width=Slot("width", 960), height=Slot("height", 544), crop="disabled")
+    element = g("LoadImageMask", _title="Where the edit changed the first frame", image=Slot("seed", ""), channel="red")
+    follow = g("PaintAPlate_FollowMatte", masks=masks, first=first, frames=frames, base=under, element=element,
+               zone=Slot("zone", 0.0625), threshold=Slot("threshold", 0.1))
+    g.link_slot(follow, "base", "follow_base")  # dropped for an erase matte: no shot to compare
+    g.link_slot(follow, "element", "follow_element")  # dropped for an erase matte: the object is the first-frame mask
+    g("SaveImage", _title="Matte frames", _output="frames", images=g("MaskToImage", mask=follow[0]),
       filename_prefix=Slot("prefix", "paintaplate/plate/matte/m"))
+    g("PreviewAny", _title="How the matte followed", _output="follow", source=follow[1])
     g.save("matte")
 
 

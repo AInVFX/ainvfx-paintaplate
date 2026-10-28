@@ -33,6 +33,8 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .name { font: 600 14px Montserrat, Inter, system-ui, sans-serif; }
 .spec { flex: 1; min-width: 0; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 6px; }
 #help-btn { width: 30px; padding: 5px 0; }
+.menu-btn { width: 32px; padding: 4px 0; display: grid; place-items: center; }
+.menu-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 
 /* Tools */
 .tools { grid-area: tools; display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 12px 8px; border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; }
@@ -63,6 +65,7 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .prompt-label { flex: none; color: var(--muted); font-weight: 600; }
 .editing { flex: none; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #141414; background: var(--gold); border-color: var(--gold); }
 .editing::after { content: " ×"; font-weight: 400; }
+.generate { flex: none; min-width: 92px; }
 .new-edit { flex: none; display: flex; align-items: center; gap: 6px; padding: 5px 12px 5px 9px; font-size: 12px; }
 .new-edit svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 #prompt { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--text); background: var(--surround); border: 1px solid var(--line); border-radius: var(--radius); padding: 9px 12px; }
@@ -81,7 +84,14 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .ctx.flip .sub { left: auto; right: calc(100% - 2px); }
 .ctx .group { position: relative; display: flex; justify-content: space-between; gap: 16px; padding: 5px 10px; border-radius: 4px; cursor: default; }
 .ctx .group:hover { background: var(--raised); }
-.ctx .group:hover > .sub { display: block; }
+.ctx .group:hover > .sub, .ctx .group.open > .sub { display: block; }
+/* on a phone the menu is a sheet along the bottom: a tap opens a group under its name */
+.ctx.sheet { left: 8px; right: 8px; top: auto; bottom: 8px; max-height: 72dvh; overflow-y: auto; min-width: 0; }
+.ctx.sheet .group { flex-wrap: wrap; padding: 10px 12px; font-size: 15px; }
+.ctx.sheet .group:hover > .sub { display: none; }
+.ctx.sheet .group.open > .sub { display: block; }
+.ctx.sheet .sub { position: static; flex-basis: 100%; min-width: 0; margin: 6px 0 0; padding: 0; border: 0; box-shadow: none; background: transparent; }
+.ctx.sheet button { padding: 10px 8px; font-size: 14px; }
 .ctx .arrow { color: var(--muted); }
 .ctx button { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; width: 100%; padding: 4px 8px; border: 0; border-radius: 4px; background: transparent; text-align: left; }
 .ctx button:hover:not(:disabled) { background: var(--raised); }
@@ -219,13 +229,57 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 .help dd { margin: 0; color: var(--muted); }
 .help form { display: flex; justify-content: flex-end; margin-top: 14px; }
 
-@media (max-width: 900px) {
-  body { grid-template: "top" 46px "tools" auto "stage" minmax(320px, 1fr) "side" auto "log" auto / 1fr; overflow-y: auto; height: auto; min-height: 100vh; }
-  .tools { flex-direction: row; flex-wrap: wrap; align-items: center; border-right: 0; border-bottom: 1px solid var(--line); }
-  .tools [data-tool] { min-width: 64px; }
-  .tool-group { flex-direction: row; align-items: center; }
-  .brush { flex-direction: row; margin: 0; padding: 0 0 0 8px; border-top: 0; border-left: 1px solid var(--line); }
-  #size { writing-mode: horizontal-tb; direction: ltr; height: auto; width: 120px; }
-  .side { border-left: 0; border-top: 1px solid var(--line); }
+/* A phone upright, or a narrow window: one column that scrolls. The header, the tools, the prompt, the frame and the
+   transport fill the first screen; History and Render follow; the status line stays on the bottom edge. */
+@media (max-width: 900px) and (orientation: portrait), (max-width: 600px) {
+  body { grid-template: "top" auto "tools" auto "stage" auto "side" auto "log" auto / minmax(0, 1fr); height: auto; min-height: 100dvh; overflow-x: hidden; overflow-y: auto; }
+  .top { flex-wrap: wrap; gap: 4px 6px; padding: 5px 8px; }
+  .top .name { display: none; }
+  .spec { order: 9; flex-basis: 100%; padding: 0 0 2px; font-size: 11px; }
+  .top button { padding: 5px 9px; }
+  .tools { flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 6px; padding: 6px 8px; border-right: 0; border-bottom: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; }
+  .tools [data-tool] { flex: none; min-width: 56px; padding: 5px 0 3px; }
+  .tool-group { flex: none; flex-direction: row; align-items: center; }
+  .whole { width: 62px; }
+  .brush { flex: none; flex-direction: row; margin: 0; padding: 0 0 0 8px; border-top: 0; border-left: 1px solid var(--line); }
+  #size { writing-mode: horizontal-tb; direction: ltr; height: auto; width: 92px; }
+  .rub { width: auto; padding: 4px 8px; }
+  .swatches { flex: none; grid-template-columns: repeat(11, 26px); padding: 0 0 0 8px; border-top: 0; border-left: 1px solid var(--line); }
+  .promptbar { flex-wrap: wrap; gap: 6px; padding: 6px 8px; }
+  .prompt-label { display: none; }
+  #prompt { order: -1; flex-basis: 100%; font-size: 16px; padding: 8px 10px; } /* 16 px: a phone does not zoom in on the field */
+  .generate { flex: 1; }
+  .viewport { flex: none; height: clamp(190px, 62vw, 64dvh); }
+  .transport { gap: 8px; padding: 6px 8px 8px; }
+  .fps, .frame-total { display: none; }
+  .side { border-left: 0; border-top: 1px solid var(--line); overflow: visible; padding: 10px; }
+  .log { position: sticky; bottom: 0; z-index: 5; }
+  #log { max-height: 40dvh; }
+  .help dl { grid-template-columns: 1fr; gap: 0 0; }
+  .help dd { margin-bottom: 8px; }
+  .blank-row { grid-template-columns: repeat(2, 1fr); }
+}
+/* A phone on its side: the tools down the left, the frame as tall as the screen allows, History and Render below */
+@media (max-height: 520px) and (orientation: landscape) {
+  body { grid-template: "top top" 38px "tools stage" calc(100dvh - 38px - 32px) "side side" auto "log log" auto / 64px minmax(0, 1fr); height: auto; min-height: 100dvh; overflow-y: auto; }
+  .top { gap: 6px; padding: 0 8px; }
+  .top .name { display: none; }
+  .top button { padding: 3px 9px; }
+  .tools { gap: 5px; padding: 6px 5px; }
+  .tools [data-tool] { padding: 4px 0 2px; font-size: 11px; }
+  .tools [data-tool] svg { width: 18px; height: 18px; }
+  .whole { font-size: 10px; }
+  #size { height: 70px; }
+  .swatches { grid-template-columns: repeat(2, 22px); gap: 4px; }
+  .sw { width: 22px; height: 22px; }
+  .promptbar { gap: 6px; padding: 4px 8px; }
+  .prompt-label { display: none; }
+  #prompt { font-size: 16px; padding: 5px 8px; }
+  .new-edit span { display: none; }
+  .transport { gap: 6px; padding: 4px 8px 5px; }
+  .fps, .frame-total { display: none; }
+  .side { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .log { position: sticky; bottom: 0; z-index: 5; padding: 4px 10px; }
+  #log { max-height: 50dvh; }
 }
 @media (prefers-reduced-motion: reduce) { .hud { transition: none; } }
