@@ -1,6 +1,6 @@
 # AInVFX PaintAPlate: architecture
 
-This document explains what PaintAPlate does, how it is built and where each part lives, for anyone who maintains the code. It describes version 0.4.6. `TESTING.md` covers the tests.
+This document explains what PaintAPlate does, how it is built and where each part lives, for anyone who maintains the code. It describes version 0.4.7. `TESTING.md` covers the tests.
 
 ## 1. What PaintAPlate does
 
@@ -54,12 +54,12 @@ COMFYUI SERVER
   core API ....... /prompt /ws /history /interrupt /queue /free /upload/image /view /object_info /system_stats
   routes.py ...... /paintaplate/download  /paintaplate/plates  /paintaplate/thumb  /paintaplate/blank
   web/workflows .. 11 API workflows, written by tools/build_workflows.py
-        |  core nodes, ComfyUI-LTXVideo nodes and the 8 PaintAPlate nodes
+        |  core nodes, ComfyUI-LTXVideo nodes and the 7 PaintAPlate nodes
         v
 NODE PACK (Python)
-  nodes.py ....... 8 thin nodes: they convert tensors, then call
+  nodes.py ....... 7 thin nodes: they convert tensors, then call
   plateio.py ..... files: probe, read, write (numpy, PyAV and OpenEXR; no torch)
-  mathops.py ..... pixels: fit, fill, relight, mattes, keyframes (numpy and scipy; no torch)
+  mathops.py ..... pixels: fit, relight, mattes, keyframes (numpy and scipy; no torch)
         v
 MODELS (about 60 GB)
   FLUX 3 Image Klein (int8) and its prompt writer; LTX 2.5 (22B distilled, int8) with the Ripple,
@@ -70,7 +70,7 @@ MODELS (about 60 GB)
 
 These rules keep the code small and easy to change. Follow them in every change.
 
-1. **All GPU work is a ComfyUI workflow.** The page loads a workflow file, fills its slots and posts it. The 8 PaintAPlate nodes only do what core ComfyUI cannot. So the app runs on any ComfyUI, and a Comfy API deployment stays possible.
+1. **All GPU work is a ComfyUI workflow.** The page loads a workflow file, fills its slots and posts it. The 7 PaintAPlate nodes only do what core ComfyUI cannot. So the app runs on any ComfyUI, and a Comfy API deployment stays possible.
 2. **Workflows are generated.** `tools/build_workflows.py` writes `web/workflows`. Nobody edits the JSON by hand: a test fails when the files and the generator disagree.
 3. **Each workflow describes itself.** In each node's `_meta`, `slots` maps the node's inputs to slot names, `output` names an output the page reads, and `progress` marks the node whose progress bar stands for the whole workflow.
 4. **Optional links.** Some links exist only when the page has something to send: a matte to composite with, words to search by, a relit frame. When their slots stay empty, the page drops the link and every node that fed it. The rule is written twice, as `OPTIONAL` in `logic.mjs` and in `build_workflows.py`, and a test keeps the two equal.
@@ -126,8 +126,8 @@ Without `ainvfx-fluid.safetensors`, fluid shots switch off and the rest of the a
 
 | File | What it does |
 | --- | --- |
-| `__init__.py` | The entry point: registers the routes, serves `web/`, and exposes the 8 nodes (V3 schema, `comfy_api.v0_0_2`). |
-| `nodes.py` | The 8 nodes, and the path guards `resolve` and `output_folder`. |
+| `__init__.py` | The entry point: registers the routes, serves `web/`, and exposes the 7 nodes (V3 schema, `comfy_api.v0_0_2`). |
+| `nodes.py` | The 7 nodes, and the path guards `resolve` and `output_folder`. |
 | `plateio.py` | Files: sequences (a missing frame keeps its place, as in OpenRV), the plate spec, EXR writing that keeps every layer and header, still writers (PNG, TIFF, DPX, EXR), `VideoWriter` (the source codec, colour tags, timecode and audio), and the blank canvas. |
 | `mathops.py` | Pixels: phase-correlation alignment, grain level, the colour seam field, push-pull fill, steady masks, `fit_to_plate`, `relight`, `box_matte`, `keyframe_video`, and the fast bilinear `resize_to`. |
 | `routes.py` | The 4 routes: the zip download, the plate list, thumbnails, and the blank plate. |
@@ -168,7 +168,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | `warm` | Loads the LTX 2.5 stack at page open, on cards of 60 GB or more | `warmAll` |
 | `fluid` | The ainvfx-fluid pass, saved as ProRes 4444 | `generateFluid` |
 
-### The 8 nodes, in `nodes.py`
+### The 7 nodes, in `nodes.py`
 
 | Node | What it does | Used by |
 | --- | --- | --- |
@@ -179,7 +179,6 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | Box Matte | A mask grown to its bounding box: it hides an erased object's outline | `clean` |
 | Live Preview | A sampler hook: a tiny-decoder WebP every N steps; it switches itself off on any error | `clean`, `shot`, `fluid` |
 | Keyframe Video | Black frames with each keyframe at its frame | `fluid` |
-| Fill Matte | Fills a masked area from the pixels around it. A standalone node: no PaintAPlate workflow uses it since 0.4.6 | none |
 
 ### Tools, in `tools/`
 

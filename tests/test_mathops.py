@@ -33,16 +33,11 @@ class MathOps(unittest.TestCase):
         assert np.abs(gain - [1 / 0.9, 1 / 1.1, 1 / 0.85]).max() < 0.02, gain
         print("grain level and seam field: ok")
 
-    def test_fill_hole(self):
-        img = np.zeros((64, 96, 3), np.float32); img[..., 1] = np.linspace(0, 1, 96)[None, :]
-        img[20:44, 40:60] = [1, 0, 0]  # an object to fill
+    def test_dilate(self):
         mask = np.zeros((64, 96), np.float32); mask[20:44, 40:60] = 1
-        out = m.fill_hole(img, mask, grow=3, feather=2)
-        assert out[32, 50, 0] < 0.05 and abs(out[32, 50, 1] - 50 / 95) < 0.08  # the green ramp continues through it
-        assert np.array_equal(out[:, :25], img[:, :25])  # far from the mask nothing moves
         grown = m.dilate(mask, 4)
         assert grown[16, 50] == 1 and grown[15, 50] == 0 and grown[32, 63] == 1  # 4 px on every side
-        print("fill hole and dilate: ok")
+        print("dilate: ok")
 
     def test_relight_frame_aligns_first(self):
         source = base

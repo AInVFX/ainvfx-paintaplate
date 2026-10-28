@@ -172,20 +172,6 @@ def dilate(m: np.ndarray, grow: float) -> np.ndarray:
     return ndimage.maximum_filter1d(ndimage.maximum_filter1d(m, size, axis=-1, mode="nearest"), size, axis=-2, mode="nearest")
 
 
-def fill_hole(img: np.ndarray, mask: np.ndarray, grow: float, feather: float) -> np.ndarray:
-    """`img` with the masked area, grown and softened, replaced by a smooth fill from the pixels around it."""
-    m = mask.astype(np.float32)
-    if grow > 0:
-        m = dilate(m, grow)
-    if feather > 0:
-        m = ndimage.gaussian_filter(m, feather / 2.0)
-    m = np.clip(m, 0.0, 1.0)
-    out = np.array(img, np.float32, copy=True)
-    filled = push_pull(out[..., :3], (m < 0.02).astype(np.float32))
-    out[..., :3] = out[..., :3] * (1 - m[..., None]) + filled * m[..., None]
-    return out
-
-
 def smooth_track(track: np.ndarray, radius: int) -> np.ndarray:
     """A per-frame measurement (N, K) made steady: the median over 2r+1 frames, then their mean."""
     track = np.asarray(track, np.float64)

@@ -304,44 +304,6 @@ class RelightTransfer(io.ComfyNode):
         return io.NodeOutput(to_image(out))
 
 
-class FillMatte(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="PaintAPlate_FillMatte",
-            display_name="Fill Matte",
-            category=CATEGORY,
-            description="Fills the masked area of every frame from the pixels around it, as a smooth blur, before "
-                        "LTX follows the frames: shown an object, LTX kept its shape. A standalone node: "
-                        "PaintAPlate's own workflows erase with the in-outpainting IC-LoRA instead.",
-            inputs=[
-                io.Image.Input("images", tooltip="The frames, any size."),
-                io.Mask.Input("mask", optional=True, tooltip="The area to fill, any size; a short batch repeats its "
-                              "last mask. Empty or missing leaves the frames as they are."),
-                io.Int.Input("grow", default=16, min=0, max=256, tooltip="Grow the area, in pixels of the frames."),
-                io.Int.Input("feather", default=8, min=0, max=256, tooltip="Soften its edge, in pixels of the frames."),
-            ],
-            outputs=[io.Image.Output(display_name="images")],
-        )
-
-    @classmethod
-    def execute(cls, images, grow, feather, mask=None) -> io.NodeOutput:
-        if mask is None or not torch.any(mask > 0.02):
-            return io.NodeOutput(images)
-        n, h, w = images.shape[:3]
-        masks = resize(mask[:n] if mask.shape[0] >= n else torch.cat([mask, mask[-1:].expand(n - mask.shape[0], -1, -1)]), h, w)
-        bar = comfy.utils.ProgressBar(n)
-
-        def one(args):
-            out = mathops.fill_hole(*args, grow, feather)
-            bar.update(1)
-            return out
-
-        with ThreadPoolExecutor(WORKERS) as pool:
-            out = list(pool.map(one, zip(frames_np(images), frames_np(masks))))
-        return io.NodeOutput(to_image(out))
-
-
 class BoxMatte(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -483,4 +445,4 @@ class LivePreview(io.ComfyNode):
         return io.NodeOutput(patched)
 
 
-NODES = [LoadPlate, SavePlate, FitToPlate, RelightTransfer, FillMatte, BoxMatte, LivePreview, KeyframeVideo]
+NODES = [LoadPlate, SavePlate, FitToPlate, RelightTransfer, BoxMatte, LivePreview, KeyframeVideo]
