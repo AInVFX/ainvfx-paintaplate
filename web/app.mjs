@@ -4,12 +4,12 @@
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
 import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onLog, onNotice, outputFile, outputFiles, outputText, post, run, setSalt, upload, viewUrl } from "./comfy.mjs";
-import { DECODED, Display } from "./display.mjs";
+import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
 import { sceneGraph } from "./graph.mjs";
 import { CHANNEL_NAMES, DISPLAY, FLUID, PARAMS, blankSpec, caption, changedMask, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
-  erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, relightSpace, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
-  stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest } from "./logic.mjs";
+  erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
+  stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -45,10 +45,12 @@ const FOLLOW = { zone: 1 / 16, threshold: 0.1, seed: 24 };
 const IDLE_MS = 300; // after Generate, a bypass, a removal or an undo, the render starts this soon
 const RESULTS_KEPT = 8; // results kept per edit, by the strokes, words, seed and switch that made them: undo gets them back at once
 const RENDERS_WANTED = 6; // sets of edits whose renders go on in the background: the most recently shown
-const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "export", "warm", "fluid"];
-const BACKGROUND = ["clean", "shot", "matte", "comp", "export"]; // job kinds a new stroke cancels
+const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid"];
+const BACKGROUND = ["clean", "shot", "matte", "comp", "review", "export"]; // the render's job kinds: Generate and a new plate stop them
 const UPSAMPLER = {}; // Black Forest Labs' system prompts for Klein's upsampler (upsampler.json): table and plain
-const SCENE = { format: "paintaplate-scene", version: 2 }; // 2: a fluid shot keeps its own words, whether it was made, and its bypass
+const SCENE = { format: "paintaplate-scene", version: 3 }; // 3: the OCIO config, the plate's colour space by its OCIO name, the display and view
+const OCIO_PREF = "paintaplate.ocio"; // the config, display, view and look, kept for the next session as RV keeps them
+const saved = (key) => { try { return JSON.parse(localStorage.getItem(key)) ?? {}; } catch { return {}; } };
 
 const TOOLS = { b: "paint", e: "erase", l: "light" };
 // The viewer's colour keys, after OpenRV's rvui.mu: exposure e, gamma y, contrast k, saturation S, hue h; channels c r g b l.
@@ -74,7 +76,7 @@ const S = {
   display: { ...DISPLAY }, mode: null, scrub: null, // the viewer's colour (display only), and its interactive edit as in RV
   fluid: null, clip: null, fluidReady: true, // a fluid shot on a blank plate, the last one, a copied keyframe
   shot: null, stage: null, run: 0, exported: null, wantDownload: null,
-  background: (() => { try { return localStorage.getItem("paintaplate.background") !== "0"; } catch { return true; } })(), // prepare the export after each change
+  ocio: { config: "", display: "", view: "", look: "", ...saved(OCIO_PREF), info: null }, // the OCIO config and the viewer's view, as in RV
   previewCap: (() => { try { return +localStorage.getItem("paintaplate.preview") || PREVIEW_CAP; } catch { return PREVIEW_CAP; } })(), // long side of the shot preview: Fast by default
   heroKey: "", renders: new Map(), // set of edits -> what has been rendered for it
   erases: new Map(), // set of erases -> their matte and clean plates, for every render that has the same erases
@@ -102,6 +104,9 @@ const uploadCanvas = async (c, name) => {
   if (!S.uploaded.has(h)) S.uploaded.set(h, upload(b, `${h.slice(0, 32)}.png`, "paintaplate/up").catch((err) => { S.uploaded.delete(h); throw err; }));
   return S.uploaded.get(h);
 };
+
+const modelSpace = () => S.ocio.info?.model ?? "@model"; // the sRGB-encoded Rec.709 the models see, by its name in the config
+const knownSpace = (name) => (name && S.ocio.info?.spaces.some((s) => s.name === name) ? name : null);
 
 const folderOf = (name, out, key) => { // the folder a workflow saved its frames in, wherever an earlier session put it
   const f = outputFile(name, out, key);
@@ -166,12 +171,14 @@ async function writeCaption(e, reference, key, kind) {
 
 // ---------- Plate ----------
 
-async function openPlate(list, typed, cs, opts = {}) { // opts.fluid: a blank plate, opened as a fluid shot; opts.under: the same edits on another plate
+// opts.cs: the plate's colour space (else read from the file); opts.fluid: a blank plate, opened as a fluid shot; opts.under:
+// the same edits on another plate, or on the same plate in another colour space
+async function openPlate(list, typed, opts = {}) {
   if (!list.length && !typed) return status("Choose files, or type a path in ComfyUI's input folder.");
   stopEverything();
   Object.assign(S, { plate: null, hero: null, original: null }); // nothing to draw while the new plate loads
   const id = Date.now().toString(36), sub = `paintaplate/${id}`;
-  let path = typed, out;
+  let path = typed, out, cs;
   const name = list.length ? list[0].name.replace(/[._]?\d*\.[^.]+$/, "") : typed.split("/").pop();
   opening(name, list.length > 0);
   try {
@@ -189,10 +196,14 @@ async function openPlate(list, typed, cs, opts = {}) { // opts.fluid: a blank pl
       path = list.length === 1 ? `${sub}/${list[0].name}` : sub;
     }
     openStep("read", 0, "Decoding the frames");
-    const st = await fetch(`/paintaplate/stat?${new URLSearchParams({ path })}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const st = await fetch(`/paintaplate/stat?${new URLSearchParams({ path, config: S.ocio.config })}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     setSalt(st ? JSON.stringify([path, st.files, st.size, st.mtime]) : null); // the plate's identity: job index keys change when it does
+    cs = knownSpace(opts.cs) ?? st?.color_space ?? modelSpace(); // one colour space per plate: the viewer, the models and the export use it
+    // a video plate's proxy keeps its own values at the working size, so the viewer converts it with OCIO as it does the plate
+    const video = st?.kind === "video", work = st?.width ? fitSize(st.width, st.height, WORK_SIDE, 32) : null;
     const t0 = performance.now();
-    out = await run("ingest", { path, color_space: cs, prefix: `${sub}/hero`, video_prefix: `${sub}/proxy` }, {
+    out = await run("ingest", { path, config: S.ocio.config, color_space: cs, proxy_space: video ? cs : "@model",
+      proxy_size: video && work ? Math.max(...work) : DEEP_SIDE, prefix: `${sub}/hero`, video_prefix: `${sub}/proxy` }, {
       progress: (f) => openStep(OPENING.at, f, null, f > 0.02 ? ((performance.now() - t0) / 1000) * (1 - f) / f : null),
       step: (cls) => { const k = INGEST[cls]; if (k && OPENING.order.indexOf(k) >= OPENING.order.indexOf(OPENING.at)) openStep(k, 0); } }).done;
   } catch (err) {
@@ -206,7 +217,8 @@ async function openPlate(list, typed, cs, opts = {}) { // opts.fluid: a blank pl
   const [w, h] = [spec.width, spec.height];
   const stem = (spec.kind === "video" ? spec.source : spec.first_file ?? spec.source ?? "plate").split(/[\\/]/).pop()
     .replace(/\.[^.]+$/, "").replace(/[._]?\d+$/, "") || "plate";
-  S.plate = { id, path, cs, spec, frames: spec.frames, fps: spec.fps || 24, name: stem,
+  S.plate = { id, path, cs, spec, frames: spec.frames, fps: spec.fps || 24, name: stem, deep: spec.kind !== "video", // an image sequence: read at full precision
+    proxySpace: spec.kind === "video" ? cs : modelSpace(),
     first: spec.kind === "video" ? 1 : spec.first_frame ?? 1,
     work: fitSize(w, h, WORK_SIDE, 32), prev: fitSize(w, h, EDIT_SIDE, 16),
     track: fitSize(w, h, TRACK_SIDE, 32), trackErase: fitSize(w, h, ERASE_TRACK_SIDE, 32) }; // SAM tracks at one size whatever the preview size
@@ -233,12 +245,10 @@ async function openPlate(list, typed, cs, opts = {}) { // opts.fluid: a blank pl
   if (opts.under) recompose(); // the edits' patches on the new first frame, until they are made again on it
   previewUI(); fitView(); historyUI(); timelineUI(); stagesUI(); exportUI(); render();
   log(`Plate ${S.plate.name}: ${w} x ${h}, ${spec.frames} frames; edits at ${S.plate.work.join(" x ")}, quick passes at ${S.plate.prev.join(" x ")}, preview at ${S.plate.shot.join(" x ")}, tracking at ${S.plate.track.join(" x ")}`);
-  const offered = [...$("#cs").options].some((o) => o.value === spec.color_space_guess);
+
   const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).map((n) => n).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
-  status(spec.color_space_guess === cs ? "Describe the edit at the top, paint on the frame, then Generate."
-    : offered ? `The file suggests ${spec.color_space_guess}. Reopen with it if colours look wrong.`
-    : `The file suggests ${spec.color_space_guess}, which this ComfyUI does not offer yet: update ComfyUI past v0.42.5.`);
+  status(`${S.plate.name} in ${cs}${opts.cs ? "" : ", read from the file"} (right-click > OCIO > File Color Space changes it). Describe the edit at the top, paint on the frame, then Generate.`);
   if (keying()) enterFluid(); else fluidUI();
 }
 
@@ -292,7 +302,8 @@ function openStep(id, f = 0, text = null, left = null) { // one step of opening,
 const playhead = () => (S.plate ? { fps: S.plate.fps, frame: S.frame, inPt: S.inPt, outPt: S.outPt } : null);
 const caches = new Map([plateVid, shotVid].map((v) => [v, new FrameCache(v, { view: playhead, changed: () => cacheUI(), budget: CACHE_MB * 1e6 })]));
 const deepOf = (v) => new DeepFrames(v, { view: playhead, changed: () => cacheUI(), budget: DEEP_MB * 1e6 });
-const deep = deepOf(plateVid), deepShot = deepOf(shotVid), look = new Display(); // full precision: the plate, an image-sequence export
+const deep = deepOf(plateVid), deepShot = deepOf(shotVid); // full precision: an image-sequence plate, and its full-quality review
+const look = new Display({ onready: () => render(), onerror: (m) => log(m, "error") }); // the viewer's OCIO, as in RV
 
 function cacheUI() { // the green stripe along the top of the timeline: frames that draw at once
   if (cacheUI.queued) return;
@@ -423,8 +434,8 @@ function recompose() {
   S.heroKey = key;
   const r = S.renders.get(key), pv = previewOf(r); // a set of edits seen before plays at once (a bypass turned back on, for example)
   S.exported = r?.exported ?? null;
-  const best = r?.review ?? r?.raw ?? pv?.comp ?? pv?.raw; // the export, else the full-size shot, else the preview
-  if (best) setShot(best, key);
+  const best = r?.review ?? r?.raw ?? pv?.comp ?? pv?.raw; // the full quality, else the full-size shot, else the preview
+  if (best) setShot(best, key, best === r?.review ? r.reviewSpace : "@model", best === r?.review ? r.reviewFrames : null);
   else if (!key) setShot(null, key);
   stagesUI(); exportUI();
 }
@@ -440,9 +451,9 @@ function showLive(d) { // the shot as LTX predicts it, every other step: a small
   img.src = viewUrl(d.image);
 }
 
-function setShot(src, key) {
+function setShot(src, key, space = "@model", frames = null) { // the shot on show, the colour space of its values, its EXR frames
   S.live = null; // the shot itself, rough or composited, replaces the live preview
-  S.shot = src ? { url: src, key } : null;
+  S.shot = src ? { url: src, key, space, frames } : null;
   if (src) { if (shotVid.getAttribute("src") !== src) shotVid.src = src; }
   else { shotVid.removeAttribute("src"); shotVid.load(); }
   render(); timelineUI();
@@ -477,24 +488,33 @@ function render() {
   const first = still && S.frame === 0 && (!S.shot?.url || stale() || editingFirst());
   const pic = live || first || !S.shot?.url ? null : shotFrame();
   if (S.playing && S.shot?.url && !live && !pic) return; // the shot video catches up in a frame: the last frame stays on screen
+  const p = S.plate, model = modelSpace(), exact = [];
+  const draw = (src, space) => { // through OCIO from the colour space its values are in; false when it cannot draw yet
+    const img = src ? look.image(src, S.display, space) : null;
+    if (img) { ctx.drawImage(img, 0, 0, W, H); if (src.data) exact.push(true); }
+    return !!img;
+  };
+  // the plate in its own values, so a new File Color Space shows at once: an image sequence's frames once they arrive,
+  // else the playback video (a video plate's own values at the working size), else the first frame as ingested
   const drawPlate = () => {
-    const cached = still && S.frame !== 0 && caches.get(plateVid).get(S.frame);
-    const exact = displayActive(S.display) && deep.get(S.frame); // the colour tools read the plate's own values when it has them
-    if (exact) ctx.drawImage(look.image(exact, S.display, S.plate.cs), 0, 0, W, H);
-    else if (still && S.frame === 0) ctx.drawImage(look.image(S.original, S.display), 0, 0, W, H);
-    else if (cached) ctx.drawImage(look.image(cached, S.display), 0, 0, W, H);
-    else if (plateVid.readyState >= 2) ctx.drawImage(look.image(plateVid, S.display), 0, 0, W, H);
+    if (p.deep && draw(deep.get(S.frame), p.cs)) return;
+    const cached = still && caches.get(plateVid).get(S.frame);
+    if (cached) return void draw(cached, p.proxySpace);
+    if (plateVid.readyState >= 2 && (!still || !plateVid.seeking)) return void draw(plateVid, p.proxySpace);
+    if (S.frame === 0) draw(S.original, model);
   };
   const drawEdited = () => {
-    if (live) { ctx.drawImage(look.image(live, S.display), 0, 0, W, H); return "live"; }
+    if (live) { draw(live, model); return "live"; }
     if (pic) {
-      const exactShot = displayActive(S.display) && deepShot.get(S.frame); // the export in its own values, once a colour value moves
-      ctx.drawImage(exactShot ? look.image(exactShot, S.display, S.plate.cs) : look.image(pic, S.display), 0, 0, W, H);
+      if (!(S.shot.frames && draw(deepShot.get(S.frame), p.cs))) draw(pic, S.shot.space); // the review's EXR frames as they arrive
       if (pic === held.canvas) return "held";
       if (still) keepFrame(pic);
       return "shot";
     }
-    if (still && S.frame === 0) { ctx.drawImage(look.image(S.hero, S.display), 0, 0, W, H); overlays(W, H); return "hero"; }
+    if (still && S.frame === 0) { // the first frame with its edits, in the model space; with none, the plate itself
+      if (S.heroKey) draw(S.hero, model); else drawPlate();
+      overlays(W, H); return "hero";
+    }
     drawPlate();
     return "plate";
   };
@@ -508,6 +528,7 @@ function render() {
     ctx.restore();
   } else shown = drawEdited();
   view.dataset.picture = shown; // what the edited side shows: live, hero, shot, held or plate (tests/ui_mock.py reads it)
+  view.dataset.precision = exact.length ? "float" : "8-bit"; // an image sequence's own values, or 8-bit frames
   drawCursor();
 }
 
@@ -517,8 +538,8 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, W, H);
   const cached = caches.get(shotVid).get(S.frame), made = !!f.result && f.result.sig === fluidSig();
-  const shot = () => ctx.drawImage(look.image(cached || shotVid, S.display), 0, 0, W, H); // a decoded frame first: no seek shows
-  if (S.live && f.busy) ctx.drawImage(look.image(S.live, S.display), 0, 0, W, H);
+  const shot = () => ctx.drawImage(look.image(cached || shotVid, S.display, modelSpace()), 0, 0, W, H); // a decoded frame first: no seek shows
+  if (S.live && f.busy) ctx.drawImage(look.image(S.live, S.display, modelSpace()), 0, 0, W, H);
   else if (f.result && (S.playing ? made : f.view === "result") && !S.compare && (cached || shotReady())) { // playing a made shot: never the keyframes
     if (S.wipe === null) shot();
     else { keysLayer(W, H); ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip(); shot(); ctx.restore(); }
@@ -1029,7 +1050,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
       redrawKey(k), keys.push({ frame: k.frame, image: await uploadCanvas(snap(k.canvas, size, "#000"), `fluid_v${v}_key${k.frame}.png`) });
     log(`Fluid v${v}: ${keys.length} keyframe(s) at ${keys.map((k) => p.first + k.frame).join(", ")}, ${size.join(" x ")}, ${p.frames} frames at ${p.fps} fps, seed ${f.seed}, prompt "${prompt}"`);
     status(`Fluid shot v${v}: one LTX 2.5 pass with ainvfx-fluid`);
-    const out = await run("fluid", { path: f.blankPath ?? p.path, color_space: "sRGB", max_frames: p.frames, keys: JSON.stringify(keys), prompt, seed: f.seed,
+    const out = await run("fluid", { path: f.blankPath ?? p.path, config: S.ocio.config, color_space: "@model", max_frames: p.frames, keys: JSON.stringify(keys), prompt, seed: f.seed,
       prefix: `${dir}/plate`, video_prefix: `${dir}/preview`, live: liveEvery() },
       { kind: "fluid", progress: (x) => { if (f.busy) { f.busy.progress = x; fluidUI(); fluidProgress(); } }, live: showLive }).done;
     f.result = { v, sig, seed: f.seed, prompt, path: `${folderOf("fluid", out, "video")}/plate/${(f.blankPath ?? p.spec.source).split(/[\\/]/).pop()}`, preview: viewUrl(outputFile("fluid", out, "video")) };
@@ -1069,7 +1090,7 @@ function leaveKeys() { // the keyframes close: the viewer shows the plate the fl
 async function rebase() { // the plate under the edits: the fluid shot when it is on and made, else the blank plate
   const f = S.fluid, made = f.on !== false && f.result, path = made ? f.result.path : f.blankPath;
   if (!path || S.plate?.path === path) { historyUI(); return render(); }
-  await openPlate([], path, "sRGB", { under: true });
+  await openPlate([], path, { under: true, cs: modelSpace() });
   log(`The plate under the edits: ${made ? `the fluid shot v${f.result.v}` : "the blank plate"}`); // once it is open
   if (S.edits.some((e) => e.on && e.state === "done")) queue(regenerateDependents); // made again on it, or taken back
 }
@@ -1127,7 +1148,7 @@ function blankNote() { // what the blank plate will be, snapped to what LTX and 
   const s = blankForm();
   $("#b-note").textContent = `${s.width} × ${s.height}, ${s.frames} frames at ${s.fps} fps: ${(s.frames / s.fps).toFixed(2)} s.` +
     (s.frames === FLUID.tested ? "" : ` ${FLUID.tested} frames is the tested length.`) + (S.fluidReady ? "" : ` ${FLUID_MISSING}`);
-  $("#blank-go").disabled = !S.fluidReady;
+  openGoUI();
 }
 
 async function openBlank() { // a black canvas LTX and ainvfx-fluid take, then a fluid shot on it
@@ -1137,7 +1158,7 @@ async function openBlank() { // a black canvas LTX and ainvfx-fluid take, then a
   const { path } = await r.json();
   $("#open").close();
   log(`Blank plate: ${spec.width} x ${spec.height}, ${spec.frames} frames at ${spec.fps} fps (${path})`);
-  await openPlate([], path, "sRGB", { fluid: { blankPath: path } });
+  await openPlate([], path, { fluid: { blankPath: path }, cs: modelSpace() });
 }
 
 function fluidUI() { // the panel, the tools and the help of a fluid shot; none of it outside one
@@ -1644,7 +1665,8 @@ function touch(ms = IDLE_MS) { clearTimeout(idleTimer); idleTimer = setTimeout(i
 
 // ---------- The render queue ----------
 // Every set of edits shown since the plate opened is a render. Its steps fall in three classes: the preview, the full-size
-// passes, the export. One step runs at a time: every preview before any full size, every full size before any export, and
+// passes with the full-quality review, and the export, which runs only when Export asks for it. One step runs at a time:
+// every preview before any full size, every full size before any export, and
 // within a class the render on show first, then the most recently shown (logic.nextRender). Nothing stops a step but
 // Generate: a bypass, an undo or another edit lets it finish, keeps its result, and the render resumes at its next step
 // later. Generate stops a full-size or export step in its first half (logic.stopsForEdit), and that step runs again later.
@@ -1673,10 +1695,10 @@ function want(key) { // the set of edits on show becomes the most recently shown
 function nextClass(r) { // the class of a render's next step: "preview", "full" or "export"; null when it waits or is done
   if (r.failed) return null;
   plan(r, r.active);
-  const pv = r.previews[S.plate.shot.join("x")] ?? {}, final = S.background || (!!S.wantDownload && r.key === S.heroKey);
+  const pv = r.previews[S.plate.shot.join("x")] ?? {}, exporting = !!S.wantDownload && r.key === S.heroKey;
   for (const st of STAGES) {
     if (r.skip.has(st.id) || (st.preview ? pv : r).done?.[st.id] !== undefined) continue;
-    return !st.final ? "preview" : !final ? null : st.id === "export" ? "export" : "full";
+    return !st.final ? "preview" : !st.onDemand ? "full" : exporting ? "export" : null;
   }
   return null;
 }
@@ -1718,15 +1740,16 @@ const liveEvery = () => (S.vram >= LIVE.vram ? LIVE.every : 0); // steps between
 const grow = (w, erase) => Math.max(4, Math.round(w / (erase ? COMPOSITE_GROW.erase : COMPOSITE_GROW.other))); // pixels at width w
 const feather = (w) => Math.max(6, Math.round(w / COMPOSITE_FEATHER));
 
-// Every step of a render, in order. `final` steps make the export; they run after the preview when the export is
-// prepared in the background, or when Export asks for them.
-// `preview` steps are made once per preview size, so going back to a size plays what it made at once.
+// Every step of a render, in order. `preview` steps run at the preview size, once per size, so going back to a size plays what
+// it made at once. `final` steps run at full size right after them: the passes, then the full-quality review the viewer plays.
+// The export (`onDemand`) writes the result for compositing software, only when Export asks for it.
 const STAGES = [
   { id: "erase", label: "Track the erase", ref: 6 }, { id: "clean", label: "Erase pass", ref: 10, preview: true },
   { id: "shot", label: "Shot", ref: 20, preview: true }, { id: "track", label: "Track the paint", ref: 5, preview: true },
   { id: "comp", label: "Composite", ref: 14, preview: true },
   { id: "cleanfull", label: "Erase pass at full size", ref: 32, final: true }, { id: "full", label: "Shot at full size", ref: 45, final: true },
-  { id: "trackfull", label: "Track at full size", ref: 5, final: true }, { id: "export", label: "Export", ref: 18, final: true },
+  { id: "trackfull", label: "Track at full size", ref: 5, final: true }, { id: "review", label: "Full quality", ref: 12, final: true },
+  { id: "export", label: "Export", ref: 10, final: true, onDemand: true },
 ];
 const previewOf = (r) => r?.previews?.[S.plate.shot.join("x")]; // what this preview size made for a set of edits
 const doneOf = (r, st) => (st.preview ? previewOf(r) : r)?.done?.[st.id]; // seconds a step took, if it ran
@@ -1743,7 +1766,7 @@ function plan(r, active) { // the steps this set of edits needs: the erase pass 
 function estimate(id) { // seconds: what this step took last time, or a measured reference scaled to this plate
   if (S.took[id]) return S.took[id];
   const p = S.plate, ref = 928 * 512 * 97;
-  const big = ["full", "cleanfull", "export"].includes(id);
+  const big = ["full", "cleanfull", "review", "export"].includes(id);
   const size = big ? p.work : ["erase", "track", "trackfull"].includes(id) ? p.track : p.shot;
   const scale = (size[0] * size[1] * p.frames) / ref * (big ? 0.73 : 1);
   return STAGES.find((x) => x.id === id).ref * Math.max(0.25, scale);
@@ -1785,7 +1808,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const E = erase ? S.erases.get(ekey) ?? S.erases.set(ekey, { sizes: {} }).get(ekey) : null;
   r.hero ??= await uploadCanvas(r.heroFrame, `hero_v${r.v}.png`);
   if (erase) r.clean0 ??= E.clean0 ??= await uploadCanvas(r.cleanFrame, `clean_v${r.v}.png`);
-  const common = { color_space: p.cs, max_frames: p.frames, seed: active[0].seed };
+  const common = { config: S.ocio.config, color_space: p.cs, max_frames: p.frames, seed: active[0].seed };
   const prompt = shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt })));
   const scene = erase ? erasePrompt(erases.map((e) => e.caption)) : ""; // the scene as it stays, never the erased object
   if (!r.told) {
@@ -1821,7 +1844,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       Object.assign(store, E.full);
     }, store);
     await step(r, final ? "full" : "shot", async (progress) => {
-      const plate = erase ? { path: store.clean, color_space: "sRGB" } : { path: p.path }, show = !final && here();
+      const plate = erase ? { path: store.clean, color_space: "@model" } : { path: p.path }, show = !final && here();
       const out = await run("shot", { ...common, ...plate, hero: r.hero, prompt, width: size[0], height: size[1],
         prefix: `${base}/${dir}/shot/f`, video_prefix: `${base}/${dir}/raw`, live: show ? liveEvery() : 0 },
         { kind: "shot", progress, live: show ? showLive : null }).done;
@@ -1832,51 +1855,60 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   };
   const made = await passes(pv, p.shot, sized, false);
   if (here() && !pv.comp && !r.review && S.shot?.url !== pv.raw) { // a rough look at once: the whole frame as the model made it, until the composite
-    setShot(pv.raw, key);
+    setShot(pv.raw, key, "@model");
     hud("Rough preview: Space plays it. The composite follows.", 2500);
   }
   await step(r, "track", async (progress) => { pv.painted = await track(active, made, base, `_${sized}`, progress, null, ["paint"],
-    erase ? { path: pv.clean, cs: "sRGB" } : { path: p.path, cs: p.cs }, r.heroFrame); }, pv);
+    erase ? { path: pv.clean, cs: "@model" } : { path: p.path, cs: p.cs }, r.heroFrame); }, pv);
   pv.mattes = mattesOf({ ...r.erased?.found, ...pv.painted?.found });
   await step(r, "comp", async (progress) => {
-    const comp = await run("comp", { path: p.path, color_space: p.cs, max_frames: p.frames, width: sw, height: sh, shot: made,
+    const comp = await run("comp", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, width: sw, height: sh, shot: made,
       ...pv.mattes.values, relight, grow: grow(sw, erase), feather: feather(sw), grain: 0, video_prefix: `${base}/${sized}/comp` },
       { kind: "comp", progress }).done;
     pv.comp = viewUrl(outputFile("comp", comp, "video"));
   }, pv);
   if (here() && !r.review && S.shot?.url !== pv.comp) {
-    setShot(pv.comp, key);
-    hud("The edited shot is ready: Space plays it", 2500);
-    status(S.background ? "The edited shot is ready. The export is prepared next, at full quality."
-      : "The edited shot is ready. Export renders it at full quality when you need it.");
+    setShot(pv.comp, key, "@model");
+    hud("The preview is ready: Space plays it. The full quality follows.", 2500);
+    status("The preview is ready. The full-size passes and the full-quality review follow; Export writes the result when you need it.");
   }
-  if (!S.background && !(S.wantDownload && here())) return;
   const onePass = sw === p.work[0] && sh === p.work[1];
   const final = onePass ? made : await passes(r, p.work, "full", true);
-  if (here() && !onePass && !r.review && r.raw && S.shot?.url !== r.raw) { // the full-size shot as LTX made it, until the export is ready:
-    setShot(r.raw, key); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640, 28 Oct)
-    hud("Full size: Space plays the shot as LTX made it. The export follows.", 2500);
-    log(`Render v${r.v}: the viewer plays the full-size shot until the export is ready`);
+  if (here() && !onePass && !r.review && r.raw && S.shot?.url !== r.raw) { // the full-size shot as LTX made it, until the full quality:
+    setShot(r.raw, key, "@model"); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640, 28 Oct)
+    hud("Full size: Space plays the shot as LTX made it. The full quality follows.", 2500);
+    log(`Render v${r.v}: the viewer plays the full-size shot until the full quality is ready`);
   }
   await step(r, "trackfull", async (progress) => { r.full = await track(active, final, base, "_full", progress, pv.mattes, ["paint"],
-    erase ? { path: onePass ? pv.clean : r.clean, cs: "sRGB" } : { path: p.path, cs: p.cs }, r.heroFrame); });
+    erase ? { path: onePass ? pv.clean : r.clean, cs: "@model" } : { path: p.path, cs: p.cs }, r.heroFrame); });
   r.full ??= pv.mattes;
-  await step(r, "export", async (progress) => {
-    const done = await run("export", { path: p.path, color_space: p.cs, relight_space: relightSpace(p.cs), max_frames: p.frames, shot: final, ...r.full.values, relight,
-      keep_untouched: !relight, prefix: `${base}/export`, matte_prefix: `${base}/matte/matte`, review_prefix: `${base}/review`,
-      grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
-    const review = outputFile("export", done, "review"); // its folder holds the export: a job taken from the index keeps its own
-    r.exported = { run: review?.subfolder ?? base, name: `${p.name}_paintaplate_v${r.v}`, text: outputText("export", done, "export") ?? "" };
-    r.review = review ? viewUrl(review) : r.raw;
+  await step(r, "review", async (progress) => { // the full-size composite at the plate's quality, which the viewer plays once made
+    const out = await run("review", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...r.full.values,
+      relight, grow: grow(p.spec.width, erase), feather: feather(p.spec.width), movie_space: p.deep ? "@model" : p.cs,
+      review_prefix: `${base}/review`, frames_prefix: p.deep ? `${base}/review/frames` : "" }, { kind: "review", progress }).done;
+    const movie = outputFile("review", out, "review"), frame = p.deep ? outputFile("review", out, "frames") : null;
+    Object.assign(r, { review: viewUrl(movie), reviewSpace: p.deep ? "@model" : p.cs, run: movie?.subfolder ?? base, // the render's folder,
+      reviewFrames: frame ? `output:${frame.subfolder}/${framePattern(frame.filename)}` : null }); // wherever the job index took it from
   });
-  if (!here()) return log(`Export v${r.v} is ready, in the background: ${r.exported.text.split("\n")[0]}`);
+  if (!here()) return log(`Render v${r.v}: the full quality is ready, in the background`);
+  setShot(r.review, key, r.reviewSpace, r.reviewFrames);
+  hud("Full quality: the viewer plays the full-size composite", 2500);
+  stagesUI(); exportUI();
+  if (!S.wantDownload) return status(`Full quality: the viewer plays the full-size composite${p.deep ? ", its EXR frames at full precision as they load" : ""}. Export writes the result for compositing software.`);
+  await step(r, "export", async (progress) => { // only when Export asks: the plate's own format, and the matte, beside the review
+    const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final,
+      ...r.full.values, relight, keep_untouched: !relight, prefix: `${dir}/export`, matte_prefix: `${dir}/matte/matte`,
+      grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
+    const file = outputFile("export", done, "export"); // a job taken from the index keeps its own folder
+    r.exported = { run: file ? file.subfolder.replace(/\/export$/, "") : dir, name: `${p.name}_paintaplate_v${r.v}`, text: outputText("export", done, "export") ?? "" };
+  });
   S.exported = r.exported;
-  if (r.review) setShot(r.review, key);
-  hud("Full size: the viewer now plays the export", 2500);
   stagesUI(); exportUI();
   status(`Exported to the output folder: ${S.exported.text.split("\n")[0]}.`);
   log(`Export v${r.v}: ${S.exported.text.replace(/\n/g, "; ")}`);
-  if (S.wantDownload) { const parts = S.wantDownload; S.wantDownload = null; download(parts); }
+  const parts = S.wantDownload;
+  S.wantDownload = null;
+  download(parts);
 }
 
 function elementOf(zones, size, hero = S.hero) { // where the edits changed the first frame, inside the paint zones: the paint matte starts here
@@ -1890,7 +1922,7 @@ function elementOf(zones, size, hero = S.hero) { // where the edits changed the 
 
 async function track(active, shotPath, base, suffix, progress, previous, tools, under = null, hero = S.hero) { // SAM 3.1 follows a kind of edit through the shot; `under`: the plate the shot was made over
   const p = S.plate, found = { ...(previous?.found ?? {}) };
-  for (const [key, tool, path, cs] of [["matte_a", "erase", p.path, p.cs], ["matte_b", "paint", shotPath, "sRGB"]]) {
+  for (const [key, tool, path, cs] of [["matte_a", "erase", p.path, p.cs], ["matte_b", "paint", shotPath, "@model"]]) {
     const edits = active.filter((e) => e.tool === tool);
     if (!edits.length || !tools.includes(tool)) continue; // the erase follows the plate; the paint follows the shot
     const size = tool === "erase" ? p.trackErase : p.track, [sw, sh] = size;
@@ -1900,7 +1932,7 @@ async function track(active, shotPath, base, suffix, progress, previous, tools, 
     for (const e of edits) u.drawImage(tool === "paint" ? whiteOf(e.patch) : e.mask, 0, 0, sw, sh);
     const compare = tool === "paint" && under ? { base: under.path, base_color_space: under.cs } : {}; // the paint matte follows what the shot changed
     if (tool === "paint") compare.seed = await uploadCanvas(elementOf(union, size, hero), `seed${suffix}.png`); // from what the edits changed
-    const out = await run("matte", { path, color_space: cs, max_frames: p.frames, width: sw, height: sh, prefix: `${base}/${key}${suffix}/m`,
+    const out = await run("matte", { path, config: S.ocio.config, color_space: cs, max_frames: p.frames, width: sw, height: sh, prefix: `${base}/${key}${suffix}/m`,
       mask: await uploadCanvas(union, `${key}${suffix}.png`), zone: FOLLOW.zone, threshold: FOLLOW.threshold, ...compare },
       { kind: "matte", progress }).done;
     const note = outputText("matte", out, "follow");
@@ -1953,15 +1985,15 @@ function log(text, level = "") { // the log panel only: what happens under the h
   if (level === "error" && list.hidden) $("#log-btn").classList.add("alert"); // an error while the log is closed: the button says so
 }
 
-function renderLeft(finalToo = false) { // seconds until the preview (or the export) is ready, from the steps still to run
-  const p = S.plate, r = S.renders.get(S.heroKey);
-  if (!p || !S.heroKey || (finalToo ? r?.exported : previewOf(r)?.comp || r?.review)) return 0;
+function renderLeft(finalToo = false) { // seconds until the preview, or the full quality (and the export once asked for), is ready
+  const p = S.plate, r = S.renders.get(S.heroKey), exporting = !!S.wantDownload;
+  if (!p || !S.heroKey || (finalToo ? (exporting ? r?.exported : r?.review) : previewOf(r)?.comp || r?.review)) return 0;
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
   const skip = r?.skip ?? plan({}, active).skip;
   let t = 0;
   for (const st of STAGES) {
     if (st.final && !finalToo) break;
-    if (skip.has(st.id) || doneOf(r, st) !== undefined) continue;
+    if (skip.has(st.id) || doneOf(r, st) !== undefined || (st.onDemand && !exporting)) continue;
     const est = estimate(st.id);
     if (S.stage?.id === st.id && S.stage.key === S.heroKey) {
       const run = (performance.now() - S.stage.t0) / 1000, f = S.stage.progress;
@@ -1977,34 +2009,34 @@ function stagesUI() { // the Render panel: every step, done, running or waiting,
   $("#render").hidden = !p || keying();
   list.hidden = !active.length;
   if (!p || !active.length) { $("#render-left").textContent = ""; return timelineBar(); }
-  const skip = r?.skip ?? plan({}, active).skip, waiting = !S.background && !S.wantDownload;
+  const skip = r?.skip ?? plan({}, active).skip, later = (st) => st.onDemand && !S.wantDownload; // the export waits for Export
   list.replaceChildren(...STAGES.filter((st) => !skip.has(st.id)).map((st) => {
     const li = document.createElement("li"), took = doneOf(r, st);
     const now = S.stage?.id === st.id && S.stage.key === S.heroKey;
-    li.className = took !== undefined ? "done" : now ? "now" : st.final && waiting ? "later" : "";
+    li.className = took !== undefined ? "done" : now ? "now" : later(st) ? "later" : "";
     li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time"></span>';
     li.children[1].textContent = st.label;
     li.children[2].textContent = took !== undefined ? `${Math.round(took)} s` : now ? `${Math.round(S.stage.progress * 100)}%`
-      : st.final && waiting ? "on Export" : `~${Math.round(estimate(st.id))} s`;
+      : later(st) ? "on Export" : `~${Math.round(estimate(st.id))} s`;
     return li;
   }));
   const pre = renderLeft(), all = renderLeft(true);
-  const busy = S.stage?.key === S.heroKey;
+  const busy = S.stage?.key === S.heroKey, what = S.wantDownload ? "export" : "full quality";
   $("#render-left").textContent = stale() || !(previewOf(r)?.comp || r?.review) ? (pre ? `preview ${secs(pre)}` : busy ? "preview almost ready" : "")
-    : r?.exported ? "export ready" : waiting ? "preview ready" : all ? `export ${secs(all)}` : busy ? "export almost ready" : "";
+    : r?.exported ? "exported" : r?.review && !S.wantDownload ? "full quality" : all ? `${what} ${secs(all)}` : busy ? `${what} almost ready` : "";
   timelineBar();
 }
 
-function timelineBar() { // the line under the timeline: the preview in gold, then the export in grey, green when exported
+function timelineBar() { // the line under the timeline: the preview in gold, then the full quality in grey, green once it plays
   const bar = $("#tl-render"), r = S.renders.get(S.heroKey);
   bar.className = "tl-render";
   if (!S.plate || !S.heroKey || !r) { bar.style.width = "0"; if (S.heroKey && stale()) bar.classList.add("stale"); return; }
-  const steps = STAGES.filter((st) => !r.skip?.has(st.id) && (!st.final || S.background || S.wantDownload || r.exported));
+  const steps = STAGES.filter((st) => !r.skip?.has(st.id) && (!st.onDemand || S.wantDownload || r.exported));
   const total = steps.reduce((a, st) => a + estimate(st.id), 0);
   let done = steps.reduce((a, st) => a + (doneOf(r, st) !== undefined ? estimate(st.id) : 0), 0);
   if (S.stage?.key === S.heroKey) done += estimate(S.stage.id) * S.stage.progress;
   bar.style.width = `${Math.round((done / Math.max(1, total)) * 100)}%`;
-  if (r.exported) bar.classList.add("ready");
+  if (r.review) bar.classList.add("ready");
   else if (previewOf(r)?.comp) bar.classList.add("export");
 }
 
@@ -2057,11 +2089,11 @@ function exportUI() {
 }
 
 function exportDialog() {
-  const r = S.renders.get(S.heroKey), ready = !!r?.exported, kind = S.plate.spec.kind;
+  const r = S.renders.get(S.heroKey), kind = S.plate.spec.kind;
   $("#x-format").textContent = kind === "video" ? `${S.plate.spec.codec} movie` : `${S.plate.spec.ext.slice(1).toUpperCase()} ${kind}`;
-  $("#x-bg").checked = S.background;
-  $("#x-note").textContent = ready ? "Ready: the zip downloads at once."
-    : `The full-quality render runs first, ${secs(renderLeft(true)) || "a moment"}. The zip downloads when it is done.`;
+  $("#x-note").textContent = r?.exported ? "Written: the zip downloads at once."
+    : r?.review ? "Export writes the result and its matte from the full-quality shot, in seconds, then the zip downloads."
+    : `The full quality finishes first, ${secs(renderLeft(true)) || "in a moment"}; then the export is written and the zip downloads.`;
   $("#export").showModal();
 }
 
@@ -2086,27 +2118,127 @@ function setSize(v) {
   render();
 }
 
-function openDialog() { $("#files").value = ""; $("#scene").value = ""; blankNote(); $("#open").showModal(); listPlates().catch(quiet); }
+// ---------- The Open dialog: ComfyUI's files, an upload, a scene, a blank plate ----------
+// One tab per source. ComfyUI files browses the input and output folders and their subfolders: videos, animated images and
+// image sequences, each sequence named by its frame pattern. Items are drawn BROWSE_PAGE at a time as the list scrolls, and
+// each thumbnail is fetched only when it shows, so a folder of thousands of outputs opens at once. A click reads one item.
+const BROWSE_PAGE = 120;
+const OPEN = { tab: "files", at: "", by: "name", ...saved("paintaplate.open"), items: [], shown: 0, chosen: null, scene: null };
+const keepOpen = () => { try { localStorage.setItem("paintaplate.open", JSON.stringify({ tab: OPEN.tab, at: OPEN.at, by: $("#browse-sort").value })); } catch { /* this session only */ } };
+const ITEM_ICON = { folder: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/></svg>',
+  scene: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM4 9h16M9 5l-2 4M15 5l-2 4"/></svg>' };
 
-async function listPlates() { // input/plates, each with its first frame: one click fills the path, a double click opens it
-  const grid = $("#plates"), note = $("#plates-empty");
-  grid.replaceChildren(); note.hidden = false; note.textContent = "Looking for plates in ComfyUI's input/plates folder";
-  const items = await (await fetch("/paintaplate/plates")).json();
-  note.hidden = items.length > 0;
-  note.textContent = "No plates in ComfyUI's input/plates folder yet. On a pod, bash tools/get_plates.sh fetches the AInVFX set (no restart). Or choose files below.";
-  grid.replaceChildren(...items.map((it) => {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "plate"; b.dataset.path = it.path;
-    b.title = `${it.path}: ${it.width} x ${it.height}, ${it.frames} frames at ${it.fps} fps${it.kind === "video" ? "" : `, ${it.ext.slice(1).toUpperCase()} frames`}`;
-    b.innerHTML = '<img alt="" loading="lazy"><span class="plate-name"></span><small></small>';
-    b.firstChild.src = `/paintaplate/thumb?${new URLSearchParams({ path: it.path })}&v=${it.mtime}`;
-    b.children[1].textContent = it.name;
-    b.children[2].textContent = `${it.width} × ${it.height} · ${it.frames} fr`;
-    b.onclick = () => { $("#path").value = it.path; $("#cs").value = it.color_space; $("#files").value = ""; $$("#plates .plate").forEach((x) => x.classList.toggle("on", x === b)); };
-    b.ondblclick = () => { b.onclick(); $("#open-go").click(); };
-    return b;
-  }));
+function openDialog() {
+  for (const id of ["#files", "#scene", "#path"]) $(id).value = "";
+  Object.assign(OPEN, { chosen: null, scene: null });
+  $("#browse-sort").value = OPEN.by;
+  for (const id of ["#files-note", "#browse-info"]) $(id).textContent = "";
+  blankNote(); showTab(OPEN.tab); $("#open").showModal();
+  browse(OPEN.at).catch(() => browse("").catch(quiet));
+  listScenes().catch(quiet);
 }
+
+function showTab(tab) {
+  OPEN.tab = tab; keepOpen();
+  for (const b of $$("#open [role=tab]")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+  for (const panel of $$("#open .tab")) panel.hidden = panel.dataset.tab !== tab;
+  openGoUI();
+}
+
+function openGoUI() { // the Open button names what it opens, and waits for something to open
+  const t = OPEN.tab, b = $("#open-go");
+  b.textContent = { files: "Open", upload: "Upload and open", scenes: "Open the scene", blank: "Open a blank plate" }[t];
+  b.disabled = t === "files" ? !(OPEN.chosen || $("#path").value.trim()) : t === "upload" ? !$("#files").files.length
+    : t === "scenes" ? !(OPEN.scene || $("#scene").files.length) : !S.fluidReady;
+}
+
+async function browse(path) { // a folder of the input or output folder, listed with no file opened
+  const r = await fetch(`/paintaplate/browse?${new URLSearchParams({ path })}`), got = await r.json();
+  if (!r.ok) throw new Error(got.error ?? "No such folder");
+  Object.assign(OPEN, { at: got.path, items: got.items, singles: got.singles, chosen: null });
+  keepOpen();
+  $("#crumbs").replaceChildren(...crumbs(got.path).map((c, i, all) => Object.assign(document.createElement("button"),
+    { type: "button", textContent: c.label, disabled: i === all.length - 1, onclick: () => browse(c.path).catch(quiet) })));
+  for (const b of $$("#open [data-root]")) b.classList.toggle("on", got.path.startsWith("output:") === (b.dataset.root === "output:"));
+  $("#browse-info").textContent = "";
+  drawBrowse();
+  openGoUI();
+}
+
+const browseList = () => browseItems(OPEN.items, { query: $("#browse-find").value, by: $("#browse-sort").value });
+
+function drawBrowse(more = false) { // the folder's items, sorted and filtered: BROWSE_PAGE more each time the list nears its end
+  const box = $("#browse"), list = browseList();
+  if (!more) { box.replaceChildren(); OPEN.shown = 0; box.scrollTop = 0; }
+  const next = list.slice(OPEN.shown, OPEN.shown + BROWSE_PAGE);
+  OPEN.shown += next.length;
+  box.append(...next.map(browseItem));
+  const singles = OPEN.singles ? ` ${OPEN.singles} single image${OPEN.singles === 1 ? " is" : "s are"} not listed: a plate is a video or a sequence.` : "";
+  $("#browse-note").textContent = OPEN.items.length ? `${list.length} item${list.length === 1 ? "" : "s"}${list.length < OPEN.items.length ? ` of ${OPEN.items.length}` : ""}.${singles}`
+    : `Nothing to open here.${singles}`;
+}
+
+function browseItem(it) {
+  const b = document.createElement("button");
+  Object.assign(b, { type: "button", className: `item ${it.kind}`, title: it.path });
+  b.dataset.path = it.path;
+  b.setAttribute("role", "option");
+  b.innerHTML = '<span class="thumb"></span><span class="name"></span><small></small>';
+  b.children[1].textContent = it.name;
+  b.children[2].textContent = { folder: "Folder", scene: "Scene" }[it.kind] ?? (it.kind === "sequence" ? `${it.frames} frames · ${gb(it.size)}` : gb(it.size));
+  if (it.kind === "video" || it.kind === "sequence") {
+    const img = Object.assign(new Image(), { alt: "", loading: "lazy", decoding: "async", onerror: () => img.remove(),
+      src: `/paintaplate/thumb?${new URLSearchParams({ path: it.path, v: Math.round(it.mtime) })}` });
+    b.firstChild.append(img);
+  } else b.firstChild.innerHTML = ITEM_ICON[it.kind];
+  b.onclick = () => (it.kind === "folder" ? browse(it.path).catch(quiet) : chooseItem(it, b).catch(quiet));
+  b.ondblclick = () => { if (it.kind !== "folder") $("#open-go").click(); };
+  return b;
+}
+
+async function chooseItem(it, b) { // one click: the item's details, read from the file; a double click opens it
+  OPEN.chosen = it;
+  $("#path").value = "";
+  for (const x of $$("#browse .item.on")) x.classList.remove("on");
+  b.classList.add("on");
+  openGoUI();
+  const info = $("#browse-info");
+  if (it.kind === "scene") return void (info.textContent = `${it.name}: a scene, opened with its plate and every edit`);
+  info.textContent = `${it.name}: reading the file`;
+  const r = await fetch(`/paintaplate/stat?${new URLSearchParams({ path: it.path, config: S.ocio.config })}`), st = await r.json();
+  if (OPEN.chosen !== it) return;
+  const fmt = st.kind === "video" ? `${st.codec} ${st.pix_fmt ?? ""}`.trim() : `${(st.ext ?? "").slice(1).toUpperCase()} frames`;
+  info.textContent = r.ok ? `${it.name}: ${st.width} × ${st.height}, ${st.frames} frames${st.kind === "video" ? ` at ${Math.round(st.fps * 1000) / 1000} fps` : ""}, ${fmt}, ${gb(st.size)}. Colour space: ${st.color_space}.`
+    : `${it.name} cannot be opened: ${st.error ?? r.status}`;
+}
+
+async function listScenes() { // scenes saved on this ComfyUI, newest first: a click picks one, a double click opens it
+  const items = await (await fetch("/paintaplate/scenes")).json();
+  $("#scenes").replaceChildren(...items.map((sc) => {
+    const li = document.createElement("li"), b = document.createElement("button"), a = document.createElement("a");
+    Object.assign(b, { type: "button", className: "scene" });
+    b.innerHTML = '<span class="name"></span><small></small>';
+    b.children[0].textContent = sc.name;
+    b.children[1].textContent = `${sc.plate || "plate"} · ${sc.edits} edit${sc.edits === 1 ? "" : "s"} · ${new Date(sc.mtime * 1000).toLocaleString()}`;
+    b.onclick = () => { OPEN.scene = sc.name; $("#scene").value = ""; for (const x of $$("#scenes .scene.on")) x.classList.remove("on"); b.classList.add("on"); openGoUI(); };
+    b.ondblclick = () => { b.onclick(); $("#open-go").click(); };
+    Object.assign(a, { href: `/paintaplate/scenes/${encodeURIComponent(sc.name)}`, download: `${sc.name}.paintaplate.json`, textContent: "Download" });
+    li.append(b, a);
+    return li;
+  }));
+  $("#scenes-empty").hidden = items.length > 0;
+}
+
+function filesUI() { // what the Upload tab will send
+  const files = [...$("#files").files], total = files.reduce((a, f) => a + f.size, 0);
+  $("#files-note").textContent = !files.length ? "" : files.length === 1 ? `${files[0].name}, ${gb(total)}` : `${files.length} files, ${gb(total)}: the frames of one sequence`;
+  openGoUI();
+}
+
+const sceneFile = (path) => { // a scene found by browsing, read through ComfyUI's own /view
+  const out = path.startsWith("output:"), rel = path.slice(out ? 7 : 0), i = rel.lastIndexOf("/");
+  return viewUrl({ filename: rel.slice(i + 1), subfolder: i < 0 ? "" : rel.slice(0, i), type: out ? "output" : "input" });
+};
 
 // ---------- Scenes: the plate and every edit with its strokes, words and seed, in a file to open again ----------
 
@@ -2119,18 +2251,17 @@ const unpackStrokes = (saved, [W, H], from) => { // `from`: the scene's own work
   return saved.map((s) => ({ tool: s.tool, color: s.color, size: s.size * kx, points: s.points.map(([x, y, pr]) => [x * kx, y * ky, pr]) }));
 };
 
-function saveScene() {
-  const work = S.plate.work, f = S.fluid;
-  const scene = { ...SCENE, saved: new Date().toISOString(), work, plate: { path: S.fluid?.blankPath ?? S.plate.path, color_space: S.plate.cs, name: S.plate.name },
+async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it again, or downloads it
+  const work = S.plate.work, f = S.fluid, { config, display, view, look: lk } = S.ocio;
+  const scene = { ...SCENE, saved: new Date().toISOString(), work, ocio: { config, display, view, look: lk },
+    plate: { path: S.fluid?.blankPath ?? S.plate.path, color_space: S.plate.cs, name: S.plate.name },
     preview: S.previewCap, in: S.inPt, out: S.outPt,
     edits: S.edits.map((e) => ({ tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on,
       caption: e.caption?.text ?? "", strokes: packStrokes(e.strokes) })),
     ...(f ? { fluid: { prompt: keying() ? $("#prompt").value.trim() : f.prompt ?? "", seed: f.seed, made: !!f.result, on: f.on !== false, keys: f.keys.map((k) => ({ frame: k.frame, strokes: packStrokes(k.strokes) })) } } : {}) };
-  const a = Object.assign(document.createElement("a"), { download: `${S.plate.name}.paintaplate.json`,
-    href: URL.createObjectURL(new Blob([JSON.stringify(scene, null, 1)], { type: "application/json" })) });
-  document.body.append(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  status(`Scene saved as ${a.download}. Open plate opens it again, on this ComfyUI.`);
+  const name = (S.plate.name || "scene").replace(/[^\w.-]/g, "_").slice(0, 100), r = await post(`/paintaplate/scenes/${encodeURIComponent(name)}`, scene);
+  if (!r.ok) throw new Error(`The scene was not saved: ${await r.text()}`);
+  status(`Scene ${name} saved on this ComfyUI: Open plate > Scenes opens it again, or downloads it.`);
 }
 
 async function saveGraph() { // the whole scene as one ComfyUI workflow, to open in ComfyUI and keep editing there
@@ -2155,13 +2286,20 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
   status(`Saved ${a.download}: ${Object.keys(graph).length} nodes. Drop it on this ComfyUI to open it: it reads the plate and the strokes from the input folder.`);
 }
 
-async function openScene(file) { // the plate opens, then every edit runs again with its own seed and words
-  const scene = JSON.parse(await file.text());
+async function openScene(text) { // the plate opens in its colour space, then every edit runs again with its own seed and words
+  const scene = JSON.parse(text), o = scene.ocio;
   if (scene.format !== SCENE.format || !(scene.version <= SCENE.version)) throw new Error("This file is not a PaintAPlate scene.");
+  if (o) { // its OCIO config and view, where this ComfyUI has them
+    if (o.config && o.config !== S.ocio.config) await loadOcio(o.config).catch((err) => log(`${err.message}: the scene opens in the config in use`, "error"));
+    const info = S.ocio.info;
+    if (info.displays.some((d) => d.name === o.display && d.views.includes(o.view))) Object.assign(S.ocio, { display: o.display, view: o.view });
+    S.ocio.look = info.looks.includes(o.look) ? o.look : "";
+    look.setView(S.ocio); saveOcio();
+  }
   if (scene.preview) setPreview(scene.preview);
   const from = scene.version >= 2 && Array.isArray(scene.work) ? scene.work : null; // strokes in pixels of this working size
-  await openPlate([], scene.plate.path, scene.plate.color_space,
-    scene.fluid ? { fluid: { blankPath: scene.plate.path, seed: scene.fluid.seed, prompt: scene.fluid.prompt ?? "", on: scene.fluid.on !== false } } : {});
+  await openPlate([], scene.plate.path, { cs: scene.version >= 3 ? scene.plate.color_space : undefined, // older scenes: read from the file
+    ...(scene.fluid ? { fluid: { blankPath: scene.plate.path, seed: scene.fluid.seed, prompt: scene.fluid.prompt ?? "", on: scene.fluid.on !== false } } : {}) });
   if (scene.fluid) { // the fluid shot first: its keyframes, then the shot itself, the plate the edits were painted on
     S.fluid.keys = scene.fluid.keys.map((k) => { const key = newKey(k.frame); key.strokes = unpackStrokes(k.strokes, S.plate.work, from); redrawKey(key); return key; });
     fluidUI(); timelineUI(); historyUI(); render();
@@ -2186,31 +2324,29 @@ async function openScene(file) { // the plate opens, then every edit runs again 
 function clearRange() { S.inPt = 0; S.outPt = S.plate.frames - 1; hud("In and out points cleared"); timelineUI(); }
 function fullScreen() { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); }
 
-// ---------- The viewer's colour, as in RV: exposure, contrast, gamma, saturation, hue, channels, invert ----------
-// Display only, after OpenRV: each frame goes through one WebGL2 shader before it is drawn (display.mjs), the strokes and
-// marks after it. Once a colour value moves, an image-sequence plate and its export are read in their own values (DeepFrames),
-// so lower exposure brings back what lies above white in an EXR. At the defaults an 8-bit frame is drawn as it is, and
-// nothing is fetched. The export itself never changes.
-
-function wantDeep() { // once a colour value moves: the plate, and an export the viewer plays, in their own values
+// ---------- The viewer's colour, as in RV: OCIO, then exposure, contrast, gamma, saturation, hue, channels, invert ----------
+// Display only, after OpenRV: each frame goes through one WebGL2 program before it is drawn (display.mjs), the strokes and
+// marks after it: OCIO from the colour space its values are in to scene-linear, the colour tools there, then the look and
+// the display and view. An image-sequence plate and its full-quality review are read in their own values (DeepFrames),
+// so lower exposure brings back what lies above white in an EXR. The export itself never changes.
+function wantDeep() { // an image sequence's own values around the playhead: the plate, and its review once it plays
   const p = S.plate;
-  if (!p || !displayActive(S.display) || p.spec.kind === "video" || !DECODED.has(p.cs) || !look.ready) return;
+  if (!p?.deep || !look.ready) return;
   fetchDeep(deep, p.path, p.name);
-  const r = S.renders.get(S.heroKey);
-  if (r?.exported && S.shot?.url === r.review) fetchDeep(deepShot, `output:${r.exported.run}/export`, `the export v${r.v}`);
+  if (S.shot?.frames) fetchDeep(deepShot, S.shot.frames, "the full-quality review");
 }
 
 function fetchDeep(cache, path, what) { // frames as RGB half floats from the frame route, ranked like the 8-bit cache
   const fresh = cache.fillDeep(async (first, count) => {
     const r = await fetch(`/paintaplate/frames?${new URLSearchParams({ path, first, count, side: DEEP_SIDE })}`);
     if (!r.ok) {
-      log(`Full-precision frames stopped for ${what}: ${await r.text()}. The colour tools use the playback video.`);
+      log(`Full-precision frames stopped for ${what}: ${await r.text()}. The viewer plays the 8-bit movie.`);
       throw new Error("frames");
     }
     const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number);
     return { width, height, data: new Uint16Array(await r.arrayBuffer()) };
   }, path);
-  if (fresh) log(`Full-precision frames: ${what} (${S.plate.cs}) at ${DEEP_SIDE} px on the long side, read in the background for the colour tools`);
+  if (fresh) log(`Full-precision frames: ${what} (${S.plate.cs}) at ${DEEP_SIDE} px on the long side, read in the background`);
 }
 
 function setDisplay(change) {
@@ -2251,6 +2387,61 @@ function modeKey(k, combo) { // the keys of an interactive edit, as RV's paramsc
 
 function resetDisplay() { leaveMode(); setDisplay({ ...DISPLAY }); }
 
+// ---------- OCIO, as in RV: the plate's File Color Space, the look, the display and view, the config ----------
+
+function saveOcio() { try { const { config, display, view, look: lk } = S.ocio; localStorage.setItem(OCIO_PREF, JSON.stringify({ config, display, view, look: lk })); } catch { /* this session only */ } }
+
+async function loadOcio(name) { // the config's colour spaces, displays, views and looks; the view kept when the config has it
+  const r = await fetch(`/paintaplate/ocio?${new URLSearchParams({ config: name ?? "" })}`), info = await r.json();
+  if (!r.ok) throw new Error(info.error ?? `OCIO config ${name}`);
+  const o = S.ocio, has = (d, v) => info.displays.some((x) => x.name === d && x.views.includes(v));
+  Object.assign(o, { info, config: info.config });
+  if (!has(o.display, o.view)) Object.assign(o, { display: info.display, view: info.view });
+  if (o.look && !info.looks.includes(o.look)) o.look = "";
+  look.setView(o); saveOcio();
+  return info;
+}
+
+function setOcio(change) { // the display, the view or the look: the viewer only, at once, also while the shot plays
+  Object.assign(S.ocio, change);
+  look.setView(S.ocio); saveOcio();
+  const v = `${S.ocio.display}: ${S.ocio.view}${S.ocio.look ? `, look ${S.ocio.look}` : ""}`;
+  hud(v, 1800); log(`OCIO view: ${v}`); render();
+}
+
+async function setPlateSpace(cs) { // the plate's File Color Space, as RV calls it: the viewer at once, then the models and the export
+  const p = S.plate;
+  if (!p || p.cs === cs) return;
+  log(`File Color Space: ${cs}, was ${p.cs}`);
+  Object.assign(p, { cs, proxySpace: p.deep ? p.proxySpace : cs }); // a video plate's proxy holds its own values
+  hud(`File Color Space: ${cs}`, 2000); render();
+  const edits = S.edits.some((e) => e.on && e.state === "done");
+  await openPlate([], p.path, { under: true, cs }); // the first frame in the model space again, and the edits made again on it
+  if (edits) queue(regenerateDependents);
+  status(`File Color Space ${cs}: the viewer shows it, and the first frame${edits ? " and the edits are" : " is"} made again in it. Switching back takes the earlier results from the job index.`);
+}
+
+async function setConfig(name) { // RV's Change Config: the viewer and the workflows use another OCIO config
+  await loadOcio(name);
+  log(`OCIO config: ${S.ocio.info.label}`);
+  const p = S.plate;
+  if (!p) return render();
+  const st = knownSpace(p.cs) ? null : await fetch(`/paintaplate/stat?${new URLSearchParams({ path: p.path, config: S.ocio.config })}`).then((r) => r.json());
+  const cs = st?.color_space ?? p.cs, edits = S.edits.some((e) => e.on && e.state === "done");
+  await openPlate([], p.path, { under: true, cs });
+  if (edits) queue(regenerateDependents);
+}
+
+function ocioItems() { // RV's OCIO menu (ocio_source_setup.py): the File Color Space tree by family, the look, the displays and views, the config
+  const o = S.ocio, info = o.info, p = S.plate;
+  const spaces = (node) => [...node.children.map((c) => [c.name, "", spaces(c)]),
+    ...node.spaces.map((name) => [name, "", () => setPlateSpace(name).catch(quiet), !p, p?.cs === name])];
+  return [["File Color Space", "", spaces(ocioTree(info.spaces)), !p],
+    ["Look", "", [["None", "", () => setOcio({ look: "" }), false, !o.look], ...info.looks.map((lk) => [lk, "", () => setOcio({ look: lk }), false, o.look === lk])]],
+    ["Displays", "", info.displays.map((d) => [d.name, "", d.views.map((v) => [v, "", () => setOcio({ display: d.name, view: v }), false, o.display === d.name && o.view === v])])],
+    "-", ["Change Config", "", info.configs.map((c) => [c.label, "", () => setConfig(c.name).catch(quiet), false, c.name === info.config])]];
+}
+
 // ---------- The right-click menu, as RV's: every action of the page, with its key ----------
 
 function menuItems() { // [group, [[label, key, action, disabled, checked] or "-", ...]]
@@ -2260,7 +2451,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
   const step = (by) => () => { pause(); seek(S.frame + by); };
   const groups = [
     ["File", [["Open plate…", "", openDialog], ["Fluid keyframes", "", editFluid, !S.fluid || keying()],
-      ["Save scene", "", saveScene, !p], ["Export…", "", exportDialog, !edits],
+      ["Save scene", "", () => saveScene().catch(quiet), !p], ["Export…", "", exportDialog, !edits],
       ["ComfyUI graph", "", () => saveGraph().catch(quiet), !edits]]],
     ["Edit", [["Undo", "Ctrl+Z", undo, !S.past.length], ["Redo", "Ctrl+Shift+Z", redo, !S.future.length], "-",
       ["New edit", "N", nextEdit, !p || keying() || (!S.draft && !S.selected)], ["Generate", "Enter", () => enter(false), $("#generate").disabled], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
@@ -2275,6 +2466,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Set the out point", "]", () => setOut(S.frame), !p], ["Clear in and out", "\\", clearRange, !p]]],
     ["Colour", [param("exposure", "Shift+E"), param("contrast", "K"), param("gamma", "Y"), param("saturation", "Shift+S"), param("hue", "H"), "-",
       ["Invert", "Shift+I", () => setDisplay({ invert: !d.invert }), !p, d.invert], ["Reset colour", "", resetDisplay, !displayActive(d)]]],
+    ...(S.ocio.info ? [["OCIO", ocioItems()]] : []),
     ["View", [chan("rgb", "Shift+C"), chan("r", "Shift+R"), chan("g", "Shift+G"), chan("b", "Shift+B"), chan("l", "Shift+L"), "-",
       ["Fit", "F", () => zoomTo(1), !p], ["1:1", "1", () => zoomTo(S.plate.work[0] / S.fit.w), !p],
       ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["Full screen", "`", fullScreen],
@@ -2291,42 +2483,53 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
 
 const SHEET = matchMedia("(max-width: 900px) and (orientation: portrait), (max-width: 600px), (max-height: 520px)"); // phones: the menu along the bottom
 
+function menuList(items) { // a submenu: actions, separators, and nested submenus for items whose action is a list
+  const sub = document.createElement("ul");
+  sub.className = "sub";
+  sub.setAttribute("role", "menu");
+  for (const it of items) {
+    const row = document.createElement("li");
+    if (it === "-") { row.className = "sep"; sub.append(row); continue; }
+    const [label, key, action, disabled = false, checked] = it;
+    if (Array.isArray(action)) { sub.append(menuGroup(label, action, disabled)); continue; }
+    const b = document.createElement("button");
+    b.type = "button";
+    b.disabled = !!disabled;
+    b.setAttribute("role", checked === undefined ? "menuitem" : "menuitemcheckbox");
+    if (checked !== undefined) b.setAttribute("aria-checked", String(!!checked));
+    b.innerHTML = '<span class="check"></span><span></span><kbd></kbd>';
+    b.children[1].textContent = label;
+    b.children[2].textContent = key;
+    b.onclick = () => { closeMenu(); action(); };
+    row.append(b);
+    sub.append(row);
+  }
+  return sub;
+}
+
+function menuGroup(label, items, disabled = false) { // a row that opens its submenu on hover, or on a tap
+  const li = document.createElement("li"), sub = menuList(items);
+  li.className = disabled ? "group off" : "group";
+  li.innerHTML = '<span></span><span class="arrow">▸</span>';
+  li.firstChild.textContent = label;
+  li.onmouseenter = () => { // a submenu that would leave the window opens on the left, or moves up
+    sub.style.top = "";
+    sub.classList.remove("left");
+    const r = sub.getBoundingClientRect();
+    if (r.right > innerWidth - 8) sub.classList.add("left");
+    if (r.bottom > innerHeight - 8) sub.style.top = `${Math.round(innerHeight - 8 - r.bottom - 5)}px`;
+  };
+  li.append(sub);
+  return li;
+}
+
 function openMenu(x, y) {
   const root = $("#ctx");
-  root.replaceChildren(...menuItems().map(([group, items]) => {
-    const li = document.createElement("li"), sub = document.createElement("ul");
-    li.className = "group";
-    li.innerHTML = '<span></span><span class="arrow">▸</span>';
-    li.firstChild.textContent = group;
-    sub.className = "sub";
-    sub.setAttribute("role", "menu");
-    for (const it of items) {
-      const row = document.createElement("li");
-      if (it === "-") { row.className = "sep"; sub.append(row); continue; }
-      const [label, key, action, disabled = false, checked] = it, b = document.createElement("button");
-      b.type = "button";
-      b.disabled = !!disabled;
-      b.setAttribute("role", checked === undefined ? "menuitem" : "menuitemcheckbox");
-      if (checked !== undefined) b.setAttribute("aria-checked", String(!!checked));
-      b.innerHTML = '<span class="check"></span><span></span><kbd></kbd>';
-      b.children[1].textContent = label;
-      b.children[2].textContent = key;
-      b.onclick = () => { closeMenu(); action(); };
-      row.append(b);
-      sub.append(row);
-    }
-    li.onmouseenter = () => { // a submenu that would leave the window moves up
-      sub.style.top = "";
-      const r = sub.getBoundingClientRect();
-      if (r.bottom > innerHeight - 8) sub.style.top = `${Math.round(innerHeight - 8 - r.bottom - 5)}px`;
-    };
-    li.append(sub);
-    return li;
-  }));
+  root.replaceChildren(...menuItems().map(([group, items]) => menuGroup(group, items)));
   for (const g of root.querySelectorAll(".group")) g.onclick = (ev) => { // a tap opens a group: phones have no hover
-    if (ev.target.closest("button")) return;
+    if (ev.target.closest("button") || ev.target.closest(".group") !== g) return;
     const open = !g.classList.contains("open");
-    root.querySelectorAll(".group.open").forEach((o) => o.classList.remove("open"));
+    for (const o of g.parentElement.querySelectorAll(":scope > .group.open")) o.classList.remove("open");
     g.classList.toggle("open", open);
   };
   root.classList.toggle("sheet", SHEET.matches);
@@ -2334,7 +2537,6 @@ function openMenu(x, y) {
   if (SHEET.matches) { root.style.left = root.style.top = ""; return; }
   root.style.left = `${Math.max(8, Math.min(x, innerWidth - root.offsetWidth - 8))}px`;
   root.style.top = `${Math.max(8, Math.min(y, innerHeight - root.offsetHeight - 8))}px`;
-  root.classList.toggle("flip", x + root.offsetWidth + 260 > innerWidth); // no room on the right: the submenus open on the left
 }
 
 function closeMenu() { $("#ctx").hidden = true; }
@@ -2356,9 +2558,8 @@ async function boot() { // the workflows, the WebSocket, then what this ComfyUI 
   Object.assign(UPSAMPLER, upsampler);
   connect();
   const combo = (spec) => (Array.isArray(spec?.[0]) ? spec[0] : spec?.[1]?.options ?? []); // V1 or V3 schema
-  const spaces = combo((await objectInfo("ImageColorSpace"))?.input.required.source);
-  $("#cs").replaceChildren(...(spaces.length ? spaces : ["sRGB"]).map((s) => new Option(s, s)));
-  const needs = { PaintAPlate_LoadPlate: "this pack",
+  await loadOcio(S.ocio.config).catch((err) => { log(`${err.message}: the default OCIO config is used instead`, "error"); return loadOcio(""); });
+  const needs = { PaintAPlate_LoadPlate: "this pack", PaintAPlate_ColorSpace: "this pack, restart ComfyUI after an update",
     PaintAPlate_FollowMatte: "this pack, restart ComfyUI after an update", PaintAPlate_LevelFill: "this pack, restart ComfyUI after an update",
     LTXAddVideoICLoRAGuide: "ComfyUI-LTXVideo",
     LTXVInpaintPreprocess: "ComfyUI-LTXVideo", SAM3_VideoTrack: "ComfyUI 0.42 or newer", ReferenceMultiLatent: "ComfyUI 0.41 or newer",
@@ -2379,6 +2580,7 @@ async function boot() { // the workflows, the WebSocket, then what this ComfyUI 
   const missingFiles = absent.filter((file) => !only(file));
   if (missingFiles.length) return status(`Missing model files: ${missingFiles.join(", ")}. tools/pod_setup.sh lists each one with its models folder and downloads it.`);
   log(`Page ready in ${Math.round(performance.now() - t0)} ms: ${WORKFLOWS.length} workflows, ${classes.length} node classes and ${models.size} model files checked`);
+  log(`OCIO: ${S.ocio.info.label}, viewed on ${S.ocio.display} through ${S.ocio.view}${S.ocio.config === "$OCIO" ? " ($OCIO)" : ""}`);
   status("Ready. Open a plate to start. The models load in the background.");
   warmAll().catch(() => {}); // a ComfyUI that reports no GPU details simply skips it
 }
@@ -2449,14 +2651,14 @@ $("#prompt").oninput = () => { // the words belong to the edit being drawn, or t
 };
 $("#editing").onclick = () => select(null);
 $("#new-edit").onclick = () => nextEdit();
-$("#blank-go").onclick = () => openBlank().catch(quiet);
+
 for (const id of ["#b-width", "#b-height", "#b-fps", "#b-frames"]) $(id).oninput = blankNote;
 $("#generate").onclick = () => enter(false);
 $("#fluid-again").onclick = () => generateFluid(true).catch(quiet);
 $("#display-state").onclick = () => resetDisplay();
 $("#undo-btn").onclick = () => undo();
 $("#redo-btn").onclick = () => redo();
-$("#save-btn").onclick = () => S.plate && saveScene();
+$("#save-btn").onclick = () => S.plate && saveScene().catch(quiet);
 $("#x-graph").onclick = () => saveGraph().catch(quiet);
 $("#open-btn").onclick = $("#empty-open").onclick = openDialog;
 $("#help-btn").onclick = () => $("#help").showModal();
@@ -2470,17 +2672,13 @@ $("#wipe-btn").onclick = () => setWipe(S.wipe === null);
 $("#export-btn").onclick = exportDialog;
 $("#preview-size").value = String(S.previewCap);
 $("#preview-size").onchange = (e) => setPreview(+e.target.value);
-$("#x-bg").onchange = (e) => {
-  S.background = e.target.checked;
-  try { localStorage.setItem("paintaplate.background", S.background ? "1" : "0"); } catch { /* private mode: this session only */ }
-  stagesUI(); touch();
-};
+
 $("#x-go").onclick = () => {
   const parts = ["export", ...["matte", "review", "shot"].filter((k) => $(`#x-${k}`).checked)];
   const r = S.renders.get(S.heroKey);
   if (r?.exported) return download(parts);
   S.wantDownload = parts;
-  status("Rendering the export at full quality: the zip downloads when it is done.");
+  status("Writing the export in the plate's own format: the zip downloads when it is done.");
   exportUI(); stagesUI(); touch();
 };
 $("#log-btn").onclick = () => {
@@ -2490,10 +2688,24 @@ $("#log-btn").onclick = () => {
   $("#log-btn").classList.remove("alert");
   if (open) $("#log").scrollTop = $("#log").scrollHeight;
 };
-$("#files").onchange = (e) => { const ext = e.target.files[0]?.name.split(".").pop().toLowerCase(); $("#cs").value = ext === "exr" ? "linear" : "sRGB"; };
-$("#open-go").onclick = () => {
-  const scene = $("#scene").files[0];
-  (scene ? openScene(scene) : openPlate([...$("#files").files], $("#path").value.trim(), $("#cs").value)).catch(quiet);
+for (const b of $$("#open [role=tab]")) b.onclick = () => showTab(b.dataset.tab);
+for (const b of $$("#open [data-root]")) b.onclick = () => browse(b.dataset.root).catch(quiet);
+$("#browse-find").oninput = () => drawBrowse();
+$("#browse-sort").onchange = () => { keepOpen(); drawBrowse(); };
+$("#browse").onscroll = (e) => { const el = e.currentTarget; if (el.scrollTop + el.clientHeight > el.scrollHeight - 240 && OPEN.shown < browseList().length) drawBrowse(true); };
+$("#path").oninput = () => { OPEN.chosen = null; for (const x of $$("#browse .item.on")) x.classList.remove("on"); openGoUI(); };
+$("#files").onchange = filesUI;
+$("#scene").onchange = () => { OPEN.scene = null; openGoUI(); };
+$("#drop").ondragover = (e) => { e.preventDefault(); e.currentTarget.classList.add("over"); };
+$("#drop").ondragleave = (e) => e.currentTarget.classList.remove("over");
+$("#drop").ondrop = (e) => { e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.remove("over"); $("#files").files = e.dataTransfer.files; filesUI(); };
+$("#open-go").onclick = () => { // what the tab on show holds
+  const t = OPEN.tab, typed = $("#path").value.trim(), it = OPEN.chosen, go = (job) => { $("#open").close(); job.catch(quiet); };
+  if (t === "blank") return go(openBlank());
+  if (t === "upload") return go(openPlate([...$("#files").files], ""));
+  if (t === "scenes") return go(($("#scene").files[0]?.text() ?? fetch(`/paintaplate/scenes/${encodeURIComponent(OPEN.scene)}`).then((r) => r.text())).then(openScene));
+  if (!typed && it?.kind === "scene") return go(fetch(sceneFile(it.path)).then((r) => r.text()).then(openScene));
+  return go(openPlate([], typed || it.path));
 };
 
 const timeline = $("#timeline");
@@ -2523,7 +2735,7 @@ document.addEventListener("dragover", (e) => e.preventDefault());
 document.addEventListener("drop", (e) => {
   e.preventDefault();
   const list = [...e.dataTransfer.files];
-  if (list.length) openPlate(list, "", /\.exr$/i.test(list[0].name) ? "linear" : "sRGB").catch(quiet);
+  if (list.length) openPlate(list, "").catch(quiet);
 });
 
 addEventListener("keydown", (e) => {

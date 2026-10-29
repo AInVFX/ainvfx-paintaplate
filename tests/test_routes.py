@@ -42,10 +42,10 @@ class Routes(unittest.TestCase):
         touch(os.path.join(OUT, "paintaplate", "abc", "v2", "matte", "m.png"))  # a run without an export
 
     def test_only_run_folders_under_output_paintaplate(self):
-        self.assertEqual(routes.run_folder("paintaplate/abc/v1"), self.folder)
+        self.assertEqual(routes.folders.run_folder("paintaplate/abc/v1"), self.folder)
         for bad in ("../..", "paintaplate", "paintaplate/../..", "/etc", "paintaplate/abc/v9", "secret.txt"):
             with self.assertRaises(FileNotFoundError, msg=bad):
-                routes.run_folder(bad)
+                routes.folders.run_folder(bad)
 
     def test_parts_of_a_run_laid_out_by_size(self):
         """The export's full-size review and the full-size pass win over what a preview size made."""
@@ -89,8 +89,10 @@ class Routes(unittest.TestCase):
             asyncio.run(routes.download(types.SimpleNamespace(query={"run": "../../etc"})))
         app = types.SimpleNamespace(routes=web.RouteTableDef())
         routes.setup(app)
-        self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/plates", "/paintaplate/thumb", "/paintaplate/blank",
-                                                          "/paintaplate/jobs/{key}", "/paintaplate/jobs/{key}", "/paintaplate/stat", "/paintaplate/frames"])
+        self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/browse", "/paintaplate/thumb",
+                         "/paintaplate/blank", "/paintaplate/jobs/{key}", "/paintaplate/jobs/{key}", "/paintaplate/stat",
+                         "/paintaplate/frames", "/paintaplate/scenes", "/paintaplate/scenes/{name}", "/paintaplate/scenes/{name}",
+                         "/paintaplate/ocio", "/paintaplate/ocio/shader"])
         print("download route: folders, parts, symlinks, zip reuse, handler: ok")
 
 
@@ -109,18 +111,59 @@ class PlateBrowser(unittest.TestCase):
         touch(os.path.join(cls.root, "notes.txt"), b"not a plate")
         touch(os.path.join(INPUT, "elsewhere.txt"), b"private")
         os.symlink(os.path.join(INPUT, "elsewhere.txt"), os.path.join(cls.root, "link.mov"))
+        from PIL import Image
+        os.makedirs(os.path.join(OUT, "video"), exist_ok=True)
+        import numpy as np, plateio
+        plateio.write_movie(lambda i: np.full((32, 64, 3), 40 * i, np.uint8), 3, os.path.join(OUT, "video", "ComfyUI_00001_.mp4"), 24)
+        for k in range(3):
+            Image.new("RGB", (96, 48), (60 * k, 90, 30)).save(os.path.join(OUT, f"ComfyUI_{k + 1:05d}_.png"))
+        frames = [Image.new("RGB", (96, 48), (40 * k, 0, 0)) for k in range(4)]
+        frames[0].save(os.path.join(OUT, "anim_00001_.webp"), save_all=True, append_images=frames[1:], duration=40)
 
-    def test_list_plates(self):
-        items = routes.list_plates()
-        self.assertEqual([i["path"] for i in items], ["plates/exr_shot", "plates/shot.mov"])  # no text file, empty folder or link
-        mov = next(i for i in items if i["kind"] == "video")
-        self.assertEqual((mov["width"], mov["height"], mov["frames"], mov["color_space"]), (96, 64, 5, "sRGB"))
-        exr = next(i for i in items if i["kind"] == "sequence")
-        self.assertEqual((exr["ext"], exr["frames"], exr["color_space"]), (".exr", 3, "linear ACEScg"))  # the test EXR carries AP1 chromaticities
+    def test_browse_lists_folders_without_opening_files(self):
+        """input and output, subfolders, videos, frame patterns; no text file, no link, nothing outside."""
+        got = routes.browse("plates")
+        self.assertEqual((got["path"], got["parent"]), ("plates", ""))
+        self.assertEqual(sorted((i["kind"], i["path"]) for i in got["items"]),
+                         [("folder", "plates/empty_folder"), ("folder", "plates/exr_shot"), ("video", "plates/shot.mov")])
+        seq = routes.browse("plates/exr_shot")["items"]
+        self.assertEqual([(i["kind"], i["frames"]) for i in seq], [("sequence", 3)])
+        self.assertTrue(seq[0]["path"].startswith("plates/exr_shot/") and "#" in seq[0]["path"])
+        out = routes.browse("output:")
+        self.assertEqual(out["path"], "output:")
+        kinds = {i["path"]: i["kind"] for i in out["items"]}
+        self.assertEqual(kinds["output:video"], "folder")
+        self.assertEqual(kinds["output:ComfyUI_#####_.png"], "sequence")  # core Save Image's names, one plate
+        self.assertEqual(kinds["output:anim_00001_.webp"], "video")  # core Save Animated WEBP
+        self.assertEqual(routes.browse("output:video")["parent"], "output:")
+        for bad in ("../", "output:../", "plates/shot.mov", "/etc"):
+            with self.assertRaises((FileNotFoundError, ValueError), msg=bad):
+                routes.browse(bad)
+
+    def test_plate_info_names_the_colour_space_in_the_config(self):
+        info = routes.plate_info("plates/exr_shot")
+        self.assertEqual((info["kind"], info["frames"], info["color_space"]), ("sequence", 3, "ACEScg"))  # AP1 chromaticities
+        info = routes.plate_info("plates/shot.mov")
+        self.assertEqual((info["kind"], info["width"], info["color_space"]), ("video", 96, "sRGB Encoded Rec.709 (sRGB)"))
+        self.assertEqual(routes.plate_info("output:ComfyUI_#####_.png")["frames"], 3)
+
+    def test_scenes_saved_on_this_comfyui(self):
+        import json
+        scene = {"format": "paintaplate-scene", "plate": {"path": "plates/shot.mov"}, "edits": [{}, {}]}
+        routes.save_scene("shot010", json.dumps(scene).encode())
+        self.assertEqual([(x["name"], x["plate"], x["edits"]) for x in routes.list_scenes()], [("shot010", "shot.mov", 2)])
+        with open(routes.scene_path("shot010"), encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh), scene)
+        for bad in ("../x", ".hidden", "a/b", ""):
+            with self.assertRaises(ValueError, msg=bad):
+                routes.scene_path(bad)
+        with self.assertRaises(ValueError):
+            routes.save_scene("other", b'{"format": "something else"}')
 
     def test_thumbnails_are_jpegs_made_once(self):
         from PIL import Image
-        for rel in ("plates/shot.mov", "plates/exr_shot"):
+        for rel in ("plates/shot.mov", "plates/exr_shot", "output:video/ComfyUI_00001_.mp4", "output:ComfyUI_#####_.png",
+                    "output:anim_00001_.webp"):
             path = routes.thumbnail(rel, width=48)
             with Image.open(path) as im:
                 self.assertEqual((im.format, im.width), ("JPEG", 48))
@@ -140,9 +183,17 @@ class PlateBrowser(unittest.TestCase):
             app.add_routes(table)
             from aiohttp.test_utils import TestClient, TestServer
             async with TestClient(TestServer(app)) as client:
-                r = await client.get("/paintaplate/plates")
+                r = await client.get("/paintaplate/browse", params={"path": "plates"})
                 self.assertEqual(r.status, 200)
-                self.assertEqual([i["name"] for i in await r.json()], ["exr_shot", "shot.mov"])
+                self.assertEqual(sorted(i["name"] for i in (await r.json())["items"]), ["empty_folder", "exr_shot", "shot.mov"])
+                r = await client.get("/paintaplate/stat", params={"path": "plates/shot.mov"})
+                self.assertEqual((await r.json())["frames"], 5)
+                r = await client.get("/paintaplate/ocio")
+                self.assertIn("sRGB - Display", [d["name"] for d in (await r.json())["displays"]])
+                r = await client.get("/paintaplate/ocio/shader", params={"space": "ACEScg", "display": "sRGB - Display", "view": "Raw"})
+                self.assertIn("ocioOut", (await r.json())["out"]["text"])
+                r = await client.get("/paintaplate/ocio/shader", params={"space": "nothing", "display": "x", "view": "y"})
+                self.assertEqual(r.status, 400)
                 r = await client.get("/paintaplate/thumb", params={"path": "plates/shot.mov"})
                 self.assertEqual((r.status, r.headers["Content-Type"]), (200, "image/jpeg"))
                 r = await client.get("/paintaplate/thumb", params={"path": "../elsewhere.txt"})
@@ -199,7 +250,7 @@ class DeepFramesTest(unittest.TestCase):
         np.testing.assert_allclose(data[:, 2:-2, 2:-2].mean((1, 2)), [[3.5, 0.25, -0.125], [4.5, 0.25, -0.125]], atol=0.01)
         body, w, h = routes.deep_frames("deep_seq", 2, 3, 256)  # past the end, the last frame holds
         self.assertEqual(len(body), 3 * 100 * 200 * 3 * 2)
-        with self.assertRaises(FileNotFoundError):
+        with self.assertRaises(ValueError):
             routes.deep_frames("../outside", 0, 1, 64)
         export = os.path.join(OUT, "paintaplate", "deep", "v1", "export")  # an EXR export, as Save Plate writes it
         os.makedirs(export, exist_ok=True)
@@ -207,8 +258,14 @@ class DeepFramesTest(unittest.TestCase):
                      {"RGB": np.full((10, 20, 3), 6.0, np.float16)}).write(os.path.join(export, "f.1001.exr"))
         body, w, h = routes.deep_frames("output:paintaplate/deep/v1/export", 0, 1, 256)
         self.assertEqual((w, h, float(np.frombuffer(body, "<f2")[0])), (20, 10, 6.0))
-        with self.assertRaises(FileNotFoundError):
+        with self.assertRaises(ValueError):
             routes.deep_frames("output:../escape", 0, 1, 64)
+        review = os.path.join(OUT, "paintaplate", "deep", "v1", "review")  # the review frames Save Frames writes in EXR
+        os.makedirs(review, exist_ok=True)
+        import plateio
+        plateio.write_exrs(lambda i: np.full((10, 20, 3), 3.0 + i, np.float32), [os.path.join(review, f"frames_{k:05d}_.exr") for k in (1, 2)])
+        body, w, h = routes.deep_frames("output:paintaplate/deep/v1/review/frames_#####_.exr", 1, 1, 256)
+        self.assertEqual(float(np.frombuffer(body, "<f2")[0]), 4.0)
         print("deep frames: ok (values above 1.0 and below 0 kept as half floats, resized, held past the end)")
 
 if __name__ == "__main__":
@@ -256,5 +313,5 @@ class JobIndex(unittest.TestCase):
             touch(os.path.join(INPUT, "stat", "seq", f"f.{i:04d}.exr"), b"xx")
         self.assertEqual(routes.plate_stat("stat/seq")["files"], 2)
         for bad in ("../x", "stat/none.mp4", "output:../../etc"):
-            with self.assertRaises(FileNotFoundError, msg=bad):
+            with self.assertRaises((FileNotFoundError, ValueError), msg=bad):
                 routes.plate_stat(bad)

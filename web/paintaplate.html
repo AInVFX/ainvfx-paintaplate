@@ -19,7 +19,7 @@
     <button id="help-btn" class="quiet" title="Keys (?)" aria-label="Keys">?</button>
     <button id="open-btn">Open plate</button>
     <button id="save-btn" disabled title="Save the scene: the plate and every edit with its strokes, words and seed">Save scene</button>
-    <button id="export-btn" class="primary" disabled title="Download the export and its matte as one zip">Export</button>
+    <button id="export-btn" class="primary" disabled title="Write the result in the plate's own format and its matte, then download one zip">Export</button>
   </header>
 
   <nav class="tools" aria-label="Tools">
@@ -177,7 +177,7 @@
       <dt>Click an edit</dt><dd>Select it: its words come back; retype them, paint more, rub strokes out or switch Whole object, then Generate. Esc deselects</dd>
       <dt>Esc</dt><dd>Cancel the edit in progress</dd>
       <dt>Two fingers</dt><dd>On a touch screen: pan and zoom the frame. ☰ at the top holds every action</dd>
-      <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo: one step per stroke, per removal, per change of words or seed</dd>
+      <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo (Ctrl+Y redoes too): one step per stroke, per removal, per change of words or seed</dd>
       <dt>Hold O</dt><dd>See the plate</dd>
       <dt>?</dt><dd>Show or hide these keys</dd>
     </dl>
@@ -199,37 +199,66 @@
       <dt>Right-click</dt><dd>Every action, by menu, with its key</dd>
     </dl>
     <p class="hint">RV uses E, C, R, G, B and L without Shift. Here E, B and L pick the tools.</p>
+    <h3>OCIO, as in RV: right-click, then OCIO</h3>
+    <dl>
+      <dt>File Color Space</dt><dd>The plate's colour space, by family. The viewer shows it at once; the models and the export use it too, so the edits are made again in it</dd>
+      <dt>Look, Displays</dt><dd>The look, then the display and its view: the viewer only, while the shot plays</dd>
+      <dt>Change Config</dt><dd>The config named by $OCIO when it is set, as in RV, else OCIO's built-in configs</dd>
+    </dl>
     <form method="dialog"><button class="primary">Close</button></form>
   </dialog>
 
   <dialog id="export">
     <form method="dialog">
       <h2>Export</h2>
-      <p class="hint">Rendered at full quality, saved in ComfyUI's output folder, then downloaded as one zip.</p>
+      <p class="hint">The viewer already plays the full quality. Export writes the result in the plate's own format and its matte, in ComfyUI's output folder, then downloads one zip.</p>
       <label class="check"><input type="checkbox" checked disabled> The result <small id="x-format"></small></label>
       <label class="check"><input id="x-matte" type="checkbox" checked> Its matte <small>where the plate changed, PNG frames</small></label>
-      <label class="check"><input id="x-review" type="checkbox"> A review movie <small>H.264 MP4 of the result, full size</small></label>
+      <label class="check"><input id="x-review" type="checkbox"> The review movie <small>H.264 MP4 of the full-quality composite</small></label>
       <label class="check"><input id="x-shot" type="checkbox"> The regenerated shot <small>the whole frame as the model made it, MP4</small></label>
-      <label class="check bg"><input id="x-bg" type="checkbox" checked> Prepare the export in the background after each change</label>
+
       <p id="x-note" class="hint"></p>
       <menu><button id="x-graph" value="cancel" title="One ComfyUI workflow for the whole scene: the edits, their captions and seeds, and the render, to keep editing in ComfyUI">ComfyUI graph</button>
         <button value="cancel">Cancel</button><button id="x-go" value="ok" class="primary">Export</button></menu>
     </form>
   </dialog>
 
-  <dialog id="open">
+  <dialog id="open" class="open">
     <form method="dialog">
       <h2>Open plate</h2>
-      <p class="hint plates-hint">Plates on this ComfyUI (its input/plates folder): click one, or double-click to open it.</p>
-      <div id="plates" class="plates" role="listbox" aria-label="Plates on this ComfyUI"></div>
-      <p id="plates-empty" class="hint" hidden></p>
-      <label>Files <input id="files" type="file" multiple accept=".exr,.png,.tif,.tiff,.dpx,.mov,.mp4,.mkv,.mxf"></label>
-      <label>Or a path in ComfyUI's input folder <input id="path" placeholder="plates/shot010"></label>
-      <label>Colour space <select id="cs"></select></label>
-      <label>Or a scene saved by PaintAPlate <input id="scene" type="file" accept=".json,application/json"></label>
-      <fieldset class="blank">
-        <legend>Or a blank plate, for a fluid shot</legend>
-        <p class="hint">Paint flat colour keyframes; AInVFX's ainvfx-fluid IC-LoRA turns them into smoke, steam or fire, as a new plate. Sides in multiples of 64, 8k + 1 frames, 24, 25 or 50 fps.</p>
+      <div class="tabs" role="tablist" aria-label="Where the plate comes from">
+        <button type="button" role="tab" data-tab="files" aria-selected="true">ComfyUI files</button>
+        <button type="button" role="tab" data-tab="upload" aria-selected="false">Upload</button>
+        <button type="button" role="tab" data-tab="scenes" aria-selected="false">Scenes</button>
+        <button type="button" role="tab" data-tab="blank" aria-selected="false">Blank plate</button>
+      </div>
+      <section class="tab" data-tab="files" role="tabpanel">
+        <div class="browse-bar">
+          <span class="roots"><button type="button" data-root="">Input</button><button type="button" data-root="output:">Output</button></span>
+          <nav id="crumbs" class="crumbs" aria-label="Folder"></nav>
+          <input id="browse-find" type="search" placeholder="Filter by name" aria-label="Filter by name">
+          <select id="browse-sort" aria-label="Order"><option value="name">By name</option><option value="newest">Newest first</option></select>
+        </div>
+        <div id="browse" class="browse" role="listbox" aria-label="Folders and plates"></div>
+        <p id="browse-note" class="hint"></p>
+        <p id="browse-info" class="browse-info" aria-live="polite"></p>
+        <label>Or type a path: in the input folder, or output:… for the output folder
+          <input id="path" placeholder="plates/shot010.mp4, output:video/ComfyUI_00001_.mp4 or output:frames/f_#####_.png"></label>
+      </section>
+      <section class="tab" data-tab="upload" role="tabpanel" hidden>
+        <label id="drop" class="drop">Drop a video file, or the frames of one sequence, here. Or click to choose them.
+          <input id="files" type="file" multiple accept=".exr,.png,.tif,.tiff,.dpx,.mov,.mp4,.mkv,.mxf,.webm,.webp,.gif"></label>
+        <p id="files-note" class="hint"></p>
+        <p class="hint">The files go to ComfyUI's input folder, then open as the plate.</p>
+      </section>
+      <section class="tab" data-tab="scenes" role="tabpanel" hidden>
+        <p class="hint">Scenes saved on this ComfyUI with Save scene. A scene opens its plate, then makes every edit again: what this machine made already comes back from the job index.</p>
+        <ul id="scenes" class="scenes"></ul>
+        <p id="scenes-empty" class="hint" hidden>No scene saved on this ComfyUI yet.</p>
+        <label>Or a scene file from this computer <input id="scene" type="file" accept=".json,application/json"></label>
+      </section>
+      <section class="tab" data-tab="blank" role="tabpanel" hidden>
+        <p class="hint">A fluid shot: paint flat colour keyframes, and AInVFX's ainvfx-fluid IC-LoRA turns them into smoke, steam or fire, as a new plate. Sides in multiples of 64, 8k + 1 frames, 24, 25 or 50 fps.</p>
         <div class="blank-row">
           <label>Width <input id="b-width" type="number" min="256" max="1920" step="64" value="960"></label>
           <label>Height <input id="b-height" type="number" min="256" max="1920" step="64" value="512"></label>
@@ -237,9 +266,8 @@
           <label>Frames <input id="b-frames" type="number" min="9" max="321" step="8" value="121"></label>
         </div>
         <p id="b-note" class="hint"></p>
-        <button id="blank-go" type="button">Open a blank plate</button>
-      </fieldset>
-      <menu><button value="cancel">Cancel</button><button id="open-go" value="ok" class="primary">Open</button></menu>
+      </section>
+      <menu><button value="cancel">Cancel</button><button id="open-go" type="button" class="primary">Open</button></menu>
     </form>
   </dialog>
 </body>

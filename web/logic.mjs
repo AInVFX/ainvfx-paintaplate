@@ -6,7 +6,8 @@
 // Optional links: when every source slot is left empty, the link goes, with every node that fed it. The same rule as
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
-export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_element: ["seed"] };
+export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_element: ["seed"],
+  review_frames: ["frames_prefix"] };
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
   const slots = {}, outputs = {}, progress = new Set();
@@ -86,7 +87,7 @@ export function previewSizes(plate, work, step = 32) {
   return out;
 }
 
-export const gb = (n) => (n > 1e9 ? `${(n / 1e9).toFixed(2)} GB` : `${Math.round(n / 1e6)} MB`);
+export const gb = (n) => (n > 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
 
 export function secs(t) { // "about 40 s left", "about 1 min 40 s left": rounded to 10 s past a minute
   if (t == null || !isFinite(t)) return "";
@@ -359,9 +360,7 @@ export function pickedColor(data) {
   for (let i = 0; i < data.length; i += 4) if (data[i + 3] > 0) { r += data[i]; g += data[i + 1]; b += data[i + 2]; n++; }
   return n ? `#${[r, g, b].map((v) => Math.round(v / n).toString(16).padStart(2, "0")).join("")}` : null;
 }
-// The encoding a relight export works in: the plate's own when Relight Transfer decodes it (sRGB or linear), so core's
-// colour conversions around it do nothing; any other colour space goes through linear light.
-export const relightSpace = (cs) => (cs === "sRGB" || cs === "linear" ? cs : "linear");
+
 export const displayActive = (d) => Object.keys(DISPLAY).some((k) => d[k] !== DISPLAY[k]);
 
 export function formatParam(name, v) {
@@ -443,6 +442,39 @@ export function nearKeys(keys, frame) { // the keyframes before and after a fram
 // What a failed step's ComfyUI message means, in one plain sentence. The page puts it after "<step> failed:", and the
 // log keeps ComfyUI's own words.
 const SAVED = { matte_a: "the erase matte", matte_b: "the paint matte", clean: "the erase pass", shot: "the shot", plate: "the fluid shot" };
+// ---------- OCIO, as RV's menu shows it ----------
+
+// The colour spaces as RV's OCIO menu builds its File Color Space tree (ocio_source_setup.py): each family path, such as
+// "Input/ARRI", a submenu; the spaces in it; spaces without a family at the top. { name, children, spaces }
+export function ocioTree(spaces) {
+  const node = (name) => ({ name, children: new Map(), spaces: [] }), root = node("");
+  for (const s of spaces) {
+    let at = root;
+    for (const part of (s.family || "").split("/").filter(Boolean)) at = at.children.get(part) ?? at.children.set(part, node(part)).get(part);
+    at.spaces.push(s.name);
+  }
+  const plain = (n) => ({ name: n.name, children: [...n.children.values()].map(plain), spaces: n.spaces });
+  return plain(root);
+}
+
+// ---------- The plate browser of the Open dialog ----------
+
+// Folders first, then by name (numbers in order: shot2 before shot10) or newest first; `query` keeps names that contain it
+export function browseItems(items, { query = "", by = "name" } = {}) {
+  const q = query.trim().toLowerCase(), name = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+  return items.filter((i) => !q || i.name.toLowerCase().includes(q)).sort((a, b) =>
+    (a.kind === "folder") !== (b.kind === "folder") ? (a.kind === "folder" ? -1 : 1) : by === "newest" ? b.mtime - a.mtime || name(a, b) : name(a, b));
+}
+
+// A page path as breadcrumbs, the root first: "output:video/shot" gives Output, video, shot, each with the path it opens
+export function crumbs(path) {
+  const out = path.startsWith("output:"), base = out ? "output:" : "", parts = path.slice(base.length).split("/").filter(Boolean);
+  return [{ label: out ? "Output" : "Input", path: base }, ...parts.map((p, i) => ({ label: p, path: base + parts.slice(0, i + 1).join("/") }))];
+}
+
+// The frame pattern of a sequence from one of its file names: core's f_00001_.exr gives f_#####_.exr
+export const framePattern = (name) => name.replace(/(\d+)(\D*)$/, (_, d, rest) => "#".repeat(d.length) + rest);
+
 export function plainError(message) {
   const m = String(message ?? "");
   if (/out of memory|allocation on device/i.test(m)) return "the GPU ran out of memory.";

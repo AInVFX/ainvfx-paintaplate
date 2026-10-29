@@ -10,7 +10,7 @@ deleted and brought back, generated, and opened as the plate. Prints UI MOCK PAS
 runs it. Screenshots go to /tmp/paintaplate_ui_mock.
 """
 import re
-import argparse, json, os, shutil, subprocess, sys, time, urllib.request
+import argparse, json, os, shutil, subprocess, sys, time, urllib.request, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -33,25 +33,41 @@ def flow(page, port):
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=20000)
 
     page.click("#open-btn")
-    page.wait_for_selector("#plates .plate", timeout=10000)
-    names = page.eval_on_selector_all("#plates .plate .plate-name", "els => els.map(e => e.textContent)")
-    check("desk.mp4" in names, f"the plate browser lists input/plates: {names}")
-    page.click("#plates .plate:has-text('desk.mp4')")
-    check(page.input_value("#path") == "plates/desk.mp4", "one click fills the path")
+    page.wait_for_selector("#browse .item.folder", timeout=10000)
+    page.click("#browse .item.folder:has-text('plates')")
+    page.wait_for_selector("#browse .item.video", timeout=10000)
+    names = page.eval_on_selector_all("#browse .item .name", "els => els.map(e => e.textContent)")
+    trail = page.eval_on_selector_all("#crumbs button", "els => els.map(e => e.textContent)")
+    check("desk.mp4" in names and trail == ["Input", "plates"], f"the plate browser lists input/plates, with breadcrumbs: {names} {trail}")
+    page.click("#browse .item:has-text('desk.mp4')")
+    page.wait_for_function("document.querySelector('#browse-info').textContent.includes('Colour space')", timeout=10000)
+    info = page.text_content("#browse-info")
+    check("1280 × 704" in info and "49 frames" in info and "sRGB Encoded Rec.709 (sRGB)" in info and not page.is_disabled("#open-go"),
+          f"one click reads the plate and its colour space in the OCIO config: {info}")
+    shown = {}
+    for t in ("upload", "scenes", "blank", "files"):
+        page.click(f"#open [data-tab={t}]")
+        shown[t] = page.evaluate("[...document.querySelectorAll('#open .tab')].filter((s) => !s.hidden).map((s) => s.dataset.tab).join()")
+    check(all(v == k for k, v in shown.items()), f"one tab per source: ComfyUI files, Upload, Scenes, Blank plate: {shown}")
     hdr = page.evaluate("""async () => { // an EXR through the frame route and the viewer's shader, as the colour tools see it
       const [{ Display }, { DISPLAY }] = await Promise.all(["display.mjs", "logic.mjs"].map((m) => import(new URL(m, location.href).href)));
       const r = await fetch("/paintaplate/frames?path=paintaplate/hdr_test&first=0&count=1&side=64");
-      const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number), look = new Display(), out = document.createElement("canvas");
-      const frame = { width, height, data: new Uint16Array(await r.arrayBuffer()) };
+      const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number), out = document.createElement("canvas");
+      const frame = { width, height, data: new Uint16Array(await r.arrayBuffer()) }, space = "Linear Rec.709 (sRGB)";
+      let ready;
+      const loaded = new Promise((ok) => (ready = ok)), look = new Display({ onready: () => ready() });
+      look.setView({ config: "", display: "sRGB - Display", view: "Un-tone-mapped", look: "" });
+      look.image(frame, DISPLAY, space); // the OCIO program loads once, from the server's GLSL
+      await loaded;
       [out.width, out.height] = [width, height];
       const x = out.getContext("2d", { willReadFrequently: true }), read = (stops) => {
-        x.drawImage(look.image(frame, { ...DISPLAY, exposure: stops }, "linear"), 0, 0);
+        x.drawImage(look.image(frame, { ...DISPLAY, exposure: stops }, space), 0, 0);
         return [x.getImageData(8, height >> 1, 1, 1).data[0], x.getImageData(width - 9, height >> 1, 1, 1).data[0]];
       };
       return { size: [width, height], stops0: read(0), down2: read(-2) };
     }""")
     check(hdr["stops0"][0] >= 254 and hdr["down2"][0] >= 253 and abs(hdr["stops0"][1] - 188) <= 2 and abs(hdr["down2"][1] - 99) <= 2,
-          f"an EXR keeps its range through the frame route and the shader: 4.0 stays white two stops down, 0.5 goes from 188 to 99: {hdr}")
+          f"an EXR keeps its range through the frame route and the viewer's OCIO program: 4.0 stays white two stops down, 0.5 goes from 188 to 99: {hdr}")
     page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps')", timeout=60000)
     page.wait_for_function("/Describe the edit|Ready to play/.test(document.querySelector('#status').textContent)", timeout=60000)
@@ -85,11 +101,18 @@ def flow(page, port):
     page.keyboard.press("Enter")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
     check(titles() == ["1. Paint"] and words() == ["a red fire"], f"Enter generates edit 1 with its words: {titles()} {words()}")
-    page.wait_for_function("document.querySelector('#render-left').textContent === 'export ready'", timeout=120000)
+    page.wait_for_function("document.querySelector('#render-left').textContent === 'full quality'", timeout=120000)
     lines = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
     full = [i for i, line in enumerate(lines) if "plays the full-size shot" in line]
-    done = [i for i, line in enumerate(lines) if line.startswith("Export v")]
-    check(bool(full and done) and full[-1] < done[-1], f"the viewer plays the full-size shot while the export runs, then the export: {full} {done}")
+    done = [i for i, line in enumerate(lines) if REVIEWED in line]
+    check(bool(full and done) and full[-1] < done[-1] and not any(line.startswith("Export v") for line in lines),
+          f"Generate makes the full quality and nothing for compositing software: the full-size shot plays, then the review: {full} {done}")
+    with page.expect_download(timeout=120000) as dl:
+        page.click("#export-btn"); page.click("#x-go")
+    zipped = zipfile.ZipFile(dl.value.path()).namelist()
+    lines = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
+    check(any(n.startswith("export/") for n in zipped) and any(n.startswith("matte/") for n in zipped) and any(line.startswith("Export v") for line in lines),
+          f"Export writes the result and its matte when pressed, then the zip downloads: {sorted({n.split('/')[0] for n in zipped})}")
     page.evaluate("document.activeElement.blur()")
     for _ in range(3):
         page.keyboard.press("ArrowRight")
@@ -127,9 +150,9 @@ def flow(page, port):
     lines = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")[seen:]
     check(not any("Track the erase (about" in line or "Erase pass (about" in line for line in lines),
           "the paint removed, the next render uses the erase's matte and clean plate again: nothing tracks or cleans twice")
-    page.wait_for_function("document.querySelector('#render-left').textContent === 'export ready'", timeout=120000)
+    page.wait_for_function("document.querySelector('#render-left').textContent === 'full quality'", timeout=120000)
     lines = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")[seen:]
-    stopped = [line for line in lines if re.match(r"^(clean|cleanup|shot|matte|comp|export) \S+: cancelled", line)]
+    stopped = [line for line in lines if re.match(r"^(clean|cleanup|shot|matte|comp|review|export) \S+: cancelled", line)]
     check(not stopped, f"a removal stops no render step: the render it leaves keeps what it made {stopped}")
     behind = [line for line in lines if line.endswith(", in the background")]
     check(bool(behind), f"the render of the edits before the removal goes on in the background: {behind[:2]}")
@@ -195,7 +218,7 @@ def flow(page, port):
           f"Shift+E then a 100 px drag adds one stop to the pixels and paints nothing: {label}, red {red[0]:.0f} to {up[0]:.0f}")
     page.mouse.click(cx, cy, button="right")
     groups = page.eval_on_selector_all("#ctx > li > span:first-child", "els => els.map(e => e.textContent)")
-    check(groups == ["File", "Edit", "Tools", "Control", "Colour", "View", "Help"], f"right-click opens the menu: {groups}")
+    check(groups == ["File", "Edit", "Tools", "Control", "Colour", "OCIO", "View", "Help"], f"right-click opens the menu: {groups}")
     page.hover(f"#ctx > li:nth-child({groups.index('Colour') + 1})")  # by place: Tools holds « Pick a colour » too
     page.screenshot(path=os.path.join(SHOTS, "3_menu.png"))
     page.click("#ctx .sub button:has-text('Reset colour')")
@@ -269,17 +292,42 @@ def added(page, steps):  # how many jobs of each step were taken from the job in
     return {f"{s}: {w}": sum(1 for line in lines if line.startswith(f"{s}: {w}")) for s in steps for w in ("made before", "posted")}
 
 
+REVIEWED = "Full quality took"  # a render's full-quality review in the log: "Render v2: Full quality took 3.1 s"
+
+
+def open_path(page, path):
+    """Open plate, ComfyUI files: a path typed into the dialog, then Open."""
+    page.click("#open-btn"); page.click("#open [data-tab=files]"); page.fill("#path", path); page.click("#open-go")
+
+
+def save_scene(page):
+    """Save scene keeps it on this ComfyUI: the newest scene, read back through the scenes route."""
+    page.click("#save-btn")
+    page.wait_for_function("/saved on this ComfyUI/.test(document.querySelector('#status').textContent)", timeout=20000)
+    base = page.url.split("/extensions/")[0]
+    name = json.loads(urllib.request.urlopen(f"{base}/paintaplate/scenes").read())[0]["name"]
+    return name, json.loads(urllib.request.urlopen(f"{base}/paintaplate/scenes/{name}").read())
+
+
+def open_scene(page, name):
+    """Open plate, Scenes: the scene by its name, then Open."""
+    page.click("#open-btn"); page.click("#open [data-tab=scenes]")
+    page.wait_for_selector("#scenes .scene", timeout=10000)
+    page.evaluate("(n) => [...document.querySelectorAll('#scenes .scene')].find((b) => b.querySelector('.name').textContent === n).click()", name)
+    page.click("#open-go")
+
+
 def fluid_flow(page):
     """A blank plate: keyframes on the LTX grid, copied, pasted, dragged, deleted and undone; then its shot, the first edit."""
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
-    page.click("#open-btn")
+    page.click("#open-btn"); page.click("#open [data-tab=blank]")
     page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.select_option("#b-fps", "24"); page.fill("#b-frames", "33")
     page.dispatch_event("#b-frames", "input")
     note = page.text_content("#b-note")
     check(note.startswith("512 × 320, 33 frames at 24 fps"), f"the blank plate form says what it will make: {note}")
-    page.click("#blank-go")
+    page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     check(not page.is_hidden("#fluid") and page.is_disabled("[data-tool=erase]") and page.is_disabled("[data-tool=light]"),
           "a blank plate opens as a fluid shot: its panel shows, Erase and Light wait for a plate")
@@ -355,24 +403,19 @@ def fluid_flow(page):
       const f = document.querySelector('#history li[data-id="fluid"] small');
       return t.join() === '2. Paint,1. Fluid' && !document.querySelector('#history li.busy') && !!f && f.textContent.includes('thick white smoke'); })()"""
     page.wait_for_function(rows_done, timeout=120000)
-    page.wait_for_function("window.__lines.some((t) => t.startsWith('Export v'))", timeout=120000)  # its render made, through the export
-    with page.expect_download() as dl:
-        page.click("#save-btn")
-    path = os.path.join(SHOTS, dl.value.suggested_filename)  # the page knows a scene by its name
-    dl.value.save_as(path)
-    with open(path, encoding="utf-8") as fh:
-        scene = json.load(fh)
+    page.wait_for_function(f"window.__lines.some((t) => t.includes('{REVIEWED}'))", timeout=120000)  # its render made, through the full quality
+    name, scene = save_scene(page)
     check(scene["fluid"]["prompt"] == "thick white smoke" and scene["fluid"]["made"] and [e["prompt"] for e in scene["edits"]] == ["a lantern"],
           f"the scene keeps the fluid shot's own words, that it was made, and the edit on it: {scene['fluid']['prompt']!r}, {[e['prompt'] for e in scene['edits']]}")
 
     page.evaluate(WATCH)
-    page.click("#open-btn"); page.set_input_files("#scene", path); page.click("#open-go")
+    open_scene(page, name)
     page.wait_for_function("window.__lines.some((t) => t.startsWith('Scene opened'))", timeout=120000)
     page.wait_for_function(rows_done, timeout=120000)
-    page.wait_for_function("window.__lines.some((t) => t.startsWith('export: made before') || t.startsWith('export: posted'))", timeout=120000)
-    grew = added(page, ("ingest", "fluid", "edit", "shot", "matte", "comp", "export"))
+    page.wait_for_function("window.__lines.some((t) => t.startsWith('review: made before') || t.startsWith('review: posted'))", timeout=120000)
+    grew = added(page, ("ingest", "fluid", "edit", "shot", "matte", "comp", "review"))
     posted = {k: v for k, v in grew.items() if k.endswith("posted") and v}
-    check(not posted and all(grew[f"{s}: made before"] >= 1 for s in ("fluid", "edit", "shot", "export")),
+    check(not posted and all(grew[f"{s}: made before"] >= 1 for s in ("fluid", "edit", "shot", "review")),
           f"the scene opens again as it was: the fluid shot, the edit and every render step from the job index, nothing run twice: {grew}")
     check(not errors, f"no console errors in the fluid shot: {errors}")
 
@@ -381,10 +424,7 @@ def scene_flow(page):
     """A plate with a paint and a whole-object erase, saved as a scene and opened again: every job from the job index."""
     errors = []
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
-    page.click("#open-btn")
-    page.wait_for_selector("#plates .plate", timeout=10000)
-    page.click("#plates .plate:has-text('desk.mp4')")
-    page.click("#open-go")
+    open_path(page, "plates/desk.mp4")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps')", timeout=60000)
     page.wait_for_function("/Describe the edit|Ready to play/.test(document.querySelector('#status').textContent)", timeout=60000)
     box = page.eval_on_selector("#view", "e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }")
@@ -402,8 +442,8 @@ def scene_flow(page):
             page.wait_for_timeout(1000)
             calm = calm + 1 if page.text_content("#generate").strip() == "Generate" else 0
 
-    def exports(n):  # the export of the edits on show, the last step of their render
-        page.wait_for_function(f"window.__lines.filter((t) => t.startsWith('Export v')).length >= {n}", timeout=180000)
+    def reviews(n):  # the full quality of the edits on show, the last step Generate starts
+        page.wait_for_function(f"window.__lines.filter((t) => t.includes('{REVIEWED}')).length >= {n}", timeout=180000)
 
     page.evaluate(WATCH)
     page.keyboard.press("b")
@@ -412,7 +452,7 @@ def scene_flow(page):
     page.keyboard.press("Enter")
     page.wait_for_function("""(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
       return t.join() === '1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
-    exports(1)  # each set of edits renders to its export before the next edit, so the scene's every step is made once
+    reviews(1)  # each set of edits renders to its export before the next edit, so the scene's every step is made once
     page.keyboard.press("e")
     page.fill("#prompt", "the cup"); page.evaluate("document.activeElement.blur()")
     stroke([(0.6, 0.4), (0.62, 0.45)])
@@ -420,24 +460,130 @@ def scene_flow(page):
     page.keyboard.press("Enter")
     page.wait_for_function("""(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
       return t.join() === '2. Erase,1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
-    exports(2)
+    reviews(2)
     settled()
-    with page.expect_download() as dl:
-        page.click("#save-btn")
-    path = os.path.join(SHOTS, dl.value.suggested_filename)
-    dl.value.save_as(path)
+    name, _ = save_scene(page)
     page.evaluate(WATCH)
-    page.click("#open-btn"); page.set_input_files("#scene", path); page.click("#open-go")
+    open_scene(page, name)
     page.wait_for_function("window.__lines.some((t) => t.startsWith('Scene opened'))", timeout=120000)
     page.wait_for_function("""(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
       return t.join() === '2. Erase,1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
-    page.wait_for_function("window.__lines.some((t) => t.startsWith('export: made before') || t.startsWith('export: posted'))", timeout=180000)
+    page.wait_for_function("window.__lines.some((t) => t.startsWith('review: made before') || t.startsWith('review: posted'))", timeout=180000)
     settled()
-    grew = added(page, ("ingest", "prompt", "edit", "clean", "cleanup", "shot", "matte", "comp", "export"))
+    grew = added(page, ("ingest", "prompt", "edit", "clean", "cleanup", "shot", "matte", "comp", "review"))
     posted = {k: v for k, v in grew.items() if k.endswith("posted") and v}
-    check(not posted and grew["edit: made before"] >= 2 and grew["export: made before"] >= 1,
+    check(not posted and grew["edit: made before"] >= 2 and grew["review: made before"] >= 1,
           f"a plate's scene opens again from the job index: the edits and every render step, nothing run twice: {grew}")
     check(not errors, f"no page errors in the scene: {errors}")
+
+
+def menu(page, *labels):
+    """Right-click the frame, then go through RV's submenus to the item, as a person would with a mouse."""
+    page.click("#view", button="right")
+    for label in labels[:-1]:
+        page.locator("#ctx li.group > span:first-child", has_text=re.compile(f"^{re.escape(label)}$")).first.hover()
+    page.get_by_role("menuitemcheckbox", name=labels[-1], exact=True).click()
+
+
+def ocio_flow(page):
+    """RV's OCIO menu on the right-click: another view, then another File Color Space, at once; the second is made again."""
+    errors = []
+    page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+    open_path(page, "plates/desk.mp4")
+    page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
+    page.wait_for_timeout(1000)
+    pixel = lambda: page.evaluate("(() => { const c = document.querySelector('#view'); return [...c.getContext('2d').getImageData(c.width >> 1, c.height >> 1, 1, 1).data.slice(0, 3)]; })()")  # noqa: E731
+    before = pixel()
+    page.evaluate(WATCH)
+    menu(page, "OCIO", "Displays", "sRGB - Display", "ACES 2.0 - SDR 100 nits (Rec.709)")
+    page.wait_for_function("window.__lines.some((t) => t.startsWith('OCIO view: sRGB - Display: ACES 2.0'))", timeout=10000)
+    page.wait_for_timeout(500)
+    aces = pixel()
+    check(aces != before, f"another view applies at once: the same frame through ACES 2.0 SDR, {before} becomes {aces}")
+    page.keyboard.press("Space")  # while it plays
+    menu(page, "OCIO", "Displays", "sRGB - Display", "Un-tone-mapped")
+    page.keyboard.press("Space")
+    page.keyboard.press("Home")
+    page.wait_for_timeout(700)
+    check(max(abs(a - b) for a, b in zip(pixel(), before)) <= 2, "back to Un-tone-mapped while it plays, the frame looks as it did")
+    menu(page, "OCIO", "File Color Space", "Utility", "Linear Rec.709 (sRGB)")
+    page.wait_for_function("document.querySelector('#spec').textContent.includes('Linear Rec.709 (sRGB)') && document.querySelector('#opening').hidden", timeout=60000)
+    page.wait_for_timeout(700)
+    lines, linear = page.evaluate("window.__lines"), pixel()
+    said = [t for t in lines if t.startswith("File Color Space") or t.startswith("ingest:")]
+    check(any(t.startswith("File Color Space: Linear Rec.709 (sRGB)") for t in said) and any(t.startswith("ingest: posted") for t in said) and linear != before,
+          f"another File Color Space: the viewer shows it, and the plate opens again in it for the models and the export: {before} becomes {linear}; {said}")
+    menu(page, "OCIO", "File Color Space", "Utility", "sRGB Encoded Rec.709 (sRGB)")
+    page.wait_for_function("document.querySelector('#spec').textContent.includes('sRGB Encoded Rec.709 (sRGB)') && document.querySelector('#opening').hidden", timeout=60000)
+    check(not errors, f"no page errors with OCIO: {errors}")
+
+
+def oom_flow(page):
+    """The GPU runs out of memory once (the mock's /mock/oom): the page frees ComfyUI's memory, waits until it is released,
+    then runs the fluid shot again. Posted at once, the retry ran before ComfyUI freed anything and ran out again (29 Oct)."""
+    base = page.url.split("/extensions/")[0]
+    urllib.request.urlopen(urllib.request.Request(f"{base}/mock/oom", json.dumps({"workflow": "fluid", "times": 1}).encode(),
+                                                  {"Content-Type": "application/json"}))
+    page.click("#open-btn"); page.click("#open [data-tab=blank]")
+    page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.select_option("#b-fps", "24"); page.fill("#b-frames", "33")
+    page.dispatch_event("#b-frames", "input"); page.click("#open-go")
+    page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
+    box = page.eval_on_selector("#view", "e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }")
+    page.mouse.move(box["x"] + 0.45 * box["w"], box["y"] + 0.7 * box["h"]); page.mouse.down()
+    page.mouse.move(box["x"] + 0.55 * box["w"], box["y"] + 0.6 * box["h"], steps=6); page.mouse.up()
+    page.evaluate("document.activeElement.blur()"); page.keyboard.press("Enter")
+    page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
+      return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden; })()""", timeout=120000)
+    ev = json.loads(urllib.request.urlopen(f"{base}/mock/events").read())
+    oom, free, posted = [e for e in ev if e[0] == "oom"], [e for e in ev if e[0] == "free"], [e for e in ev if e[0] == "prompt"]
+    waited = len(posted) >= 2 and len(free) == 1 and posted[-1][1] >= free[0][1] + 1.0
+    check(len(oom) == 1 and waited, f"out of memory once: the page frees ComfyUI's memory, waits until it is released, then makes the shot: "
+          f"{[(e[0], round(e[1] - ev[0][1], 2)) for e in ev]}")
+
+
+def keys_flow(page):
+    """Every key the Keys dialog documents does what it says, and every key the menu shows is in the Keys dialog."""
+    doc = page.evaluate("[...document.querySelectorAll('#help dt')].map((e) => e.textContent).join(' | ')")  # the keys column
+    page.click("#view", button="right")
+    keys = page.evaluate("[...new Set([...document.querySelectorAll('#ctx kbd')].map((k) => k.textContent).filter(Boolean))]")
+    page.keyboard.press("Escape")
+    undocumented = [k for k in keys if not re.search(rf"(?<![A-Za-z]){re.escape(k.split('+')[-1])}(?![A-Za-z])", doc, re.I)]
+    check(keys and not undocumented, f"every key in the right-click menu is in the Keys dialog: {undocumented or len(keys)}")
+    page.evaluate("document.activeElement.blur()")
+    text = lambda q: page.text_content(q)  # noqa: E731
+    attr = lambda q, a: page.get_attribute(q, a)  # noqa: E731
+    frame = lambda: int(text("#frame-now"))  # noqa: E731
+    results = {}
+
+    def key(k, test, *, hold=0):
+        page.keyboard.press(k)
+        page.wait_for_timeout(hold or 60)
+        results[k] = bool(test())
+    page.keyboard.press("Home"); start = frame()
+    key("ArrowRight", lambda: frame() == start + 1); key("ArrowLeft", lambda: frame() == start)
+    key("End", lambda: frame() == int(text("#frame-total").strip("/ "))); key("Home", lambda: frame() == start)
+    key("Space", lambda: "playing" in attr("#play-btn", "class")); page.keyboard.press("Space")
+    key("ArrowDown", lambda: "playing" in attr("#play-btn", "class")); page.keyboard.press("ArrowDown")
+    key("]", lambda: "Out point" in text("#hud")); key("[", lambda: "In point" in text("#hud")); key("\\", lambda: "cleared" in text("#hud"))
+    key("F6", lambda: attr("#wipe-btn", "aria-pressed") == "true"); page.keyboard.press("F6")
+    key("1", lambda: text("#hud") == "1:1"); key("f", lambda: text("#hud") == "Fit")
+    key("e", lambda: "on" in attr("[data-tool=erase]", "class")); key("l", lambda: "on" in attr("[data-tool=light]", "class"))
+    key("b", lambda: "on" in attr("[data-tool=paint]", "class"))
+    size = int(text("#size-out")); key("=", lambda: int(text("#size-out")) > size); key("-", lambda: int(text("#size-out")) == size)
+    key("x", lambda: attr("#rub-btn", "aria-pressed") == "true"); page.keyboard.press("x")
+    key("i", lambda: attr("#pick", "aria-pressed") == "true"); key("Escape", lambda: attr("#pick", "aria-pressed") == "false")
+    for k, name in (("Shift+E", "Exposure"), ("k", "Contrast"), ("y", "Gamma"), ("Shift+S", "Saturation"), ("h", "Hue")):
+        key(k, lambda name=name: text("#hud").startswith(name)); page.keyboard.press("Escape")
+    key("Shift+E", lambda: True); key("=", lambda: text("#display-state").startswith("E +0.1")); key("Backspace", lambda: page.is_hidden("#display-state"))
+    page.keyboard.press("Escape")
+    for k, name in (("Shift+R", "Red"), ("Shift+G", "Green"), ("Shift+B", "Blue"), ("Shift+L", "Luminance")):
+        key(k, lambda name=name: text("#display-state") == name)
+    key("Shift+C", lambda: page.is_hidden("#display-state"))
+    key("Shift+I", lambda: text("#display-state") == "Inverted"); page.keyboard.press("Shift+I")
+    page.keyboard.down("o"); page.wait_for_timeout(60); results["hold O"] = text("#hud") == "Plate"; page.keyboard.up("o")
+    key("?", lambda: page.evaluate("document.querySelector('#help').open")); key("?", lambda: not page.evaluate("document.querySelector('#help').open"))
+    failed = [k for k, ok in results.items() if not ok]
+    check(not failed, f"every documented key does what the Keys dialog says ({len(results)} presses): {failed or 'all'}")
 
 
 def phone(browser, port):
@@ -492,8 +638,8 @@ def main():
                 time.sleep(0.5)
         else:
             raise RuntimeError("the mock ComfyUI did not start")
-        items = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{a.port}/paintaplate/plates").read())
-        check([i["path"] for i in items] == ["plates/desk.mp4"], "the plates route lists the mock's plate")
+        items = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{a.port}/paintaplate/browse?path=plates").read())["items"]
+        check([i["path"] for i in items] == ["plates/desk.mp4"], "the browse route lists the mock's plate")
         import numpy as np, OpenEXR  # an EXR with values above white, outside input/plates, for the frame route
         hdr = os.path.join(a.root, "input", "paintaplate", "hdr_test")
         os.makedirs(hdr, exist_ok=True)
@@ -502,11 +648,14 @@ def main():
         for n in (1001, 1002):
             OpenEXR.File({"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}, {"RGB": img}).write(os.path.join(hdr, f"f.{n}.exr"))
         with sync_playwright() as p:
-            browser = p.chromium.launch()
+            browser = p.chromium.launch(channel=os.environ.get("PLAYWRIGHT_CHANNEL") or None)
             page = browser.new_page(viewport={"width": 1400, "height": 900})
             flow(page, a.port)
             fluid_flow(page)
             scene_flow(page)
+            ocio_flow(page)
+            keys_flow(page)
+            oom_flow(page)
             phone(browser, a.port)
             browser.close()
     finally:

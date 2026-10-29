@@ -5,27 +5,59 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Three jobs side by side, none repeating another's tests: the Python and Node level, the page against the mock ComfyUI,
+# and a real ComfyUI on CPU. The page jobs drive the runner's own Google Chrome when it has one (no browser download, no
+# system packages, and it plays H.264); else Playwright's Chromium is installed.
 jobs:
   unit:
-    name: Unit tests (no ComfyUI, no models)
+    name: Unit tests (no ComfyUI, no browser)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
       - run: pip install -r tests/requirements.txt
       - run: python -m unittest discover -s tests -v
 
-  comfyui:
-    name: Live tests (ComfyUI on CPU, placeholder models, headless browser)
-    needs: unit
+  page:
+    name: Page tests (headless browser, mock ComfyUI)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: pip install -r tests/requirements.txt playwright && python -m playwright install --with-deps chromium
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+      - run: pip install -r tests/requirements.txt playwright
+      - name: Browser
+        run: |
+          if command -v google-chrome >/dev/null; then echo "PLAYWRIGHT_CHANNEL=chrome" >> "$GITHUB_ENV"
+          else python -m playwright install --with-deps chromium; fi
+      - run: python -m unittest -v test_ui_mock
+        working-directory: tests
+
+  comfyui:
+    name: Live tests (ComfyUI on CPU, placeholder models, headless browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            tests/requirements.txt
+            requirements.txt
+            tools/pins.sh
+      - run: pip install -r tests/requirements.txt playwright
+      - name: Browser
+        run: |
+          if command -v google-chrome >/dev/null; then echo "PLAYWRIGHT_CHANNEL=chrome" >> "$GITHUB_ENV"
+          else python -m playwright install --with-deps chromium; fi
       - run: bash tools/ci_comfyui.sh "$RUNNER_TEMP/ci" | tail -n 1 >> "$GITHUB_ENV"
-      - run: python -m unittest discover -s tests -v
+      - run: python -m unittest -v test_live test_workflows
+        working-directory: tests

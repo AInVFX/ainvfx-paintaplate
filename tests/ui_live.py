@@ -106,16 +106,16 @@ def flow(page, url, open_plate, shots, wait_s=120):
                            timeout=wait_s * 1000)
     page.locator("#history li").nth(1).locator(".eye").click()
     page.wait_for_function("!document.querySelector('#history li.off') && !document.querySelector('#history li.busy')", timeout=wait_s * 1000)
-    page.wait_for_function("document.querySelector('#render-left').textContent === 'export ready'", timeout=wait_s * 3000)
+    page.wait_for_function("document.querySelector('#render-left').textContent === 'full quality'", timeout=wait_s * 3000)
     page.keyboard.press("F6")  # wipe on, at frame 10
     page.keyboard.press("End")
-    page.screenshot(path=f"{shots}/3_exported_wipe.png")
-    final = status()
-    print("final:", final, "| frame while playing:", playing_frame, "| steps:", page.inner_text("#stages").replace("\n", " "))
-    with page.expect_download(timeout=wait_s * 1000) as dl:
+    page.screenshot(path=f"{shots}/3_full_quality_wipe.png")
+    with page.expect_download(timeout=wait_s * 3000) as dl:  # Export: only now is the result written in the plate's format
         page.click("#export-btn")
         page.check("#x-review")
         page.click("#x-go")
+    final = status()
+    print("final:", final, "| frame while playing:", playing_frame, "| steps:", page.inner_text("#stages").replace("\n", " "))
     path = f"{shots}/download.zip"
     dl.value.save_as(path)
     names = zipfile.ZipFile(path).namelist()
@@ -129,7 +129,7 @@ def main():
     ap.add_argument("--port", type=int, default=8190)
     ap.add_argument("--url", default="", help="a running ComfyUI with the real workflows and models (no stand-ins)")
     ap.add_argument("--path", default="", help="plate path in that ComfyUI's input folder, typed into the open dialog")
-    ap.add_argument("--cs", default="linear")
+
     ap.add_argument("--strokes", default="", help='JSON list of [key, words, [[x, y], ...], brush size, {"whole": false, "color": "#d32f2f"}]')
     ap.add_argument("--fluid", default="", help='with --url: a fluid shot from a blank plate first, as fluid_shot() describes; '
                     '--strokes then edit it as the plate')
@@ -169,7 +169,7 @@ def main():
                     raise SystemExit("ComfyUI did not start")
                 time.sleep(1)
         with sync_playwright() as p:
-            browser = p.chromium.launch()
+            browser = p.chromium.launch(channel=os.environ.get("PLAYWRIGHT_CHANNEL") or None)
             page = browser.new_page(viewport={"width": 1280, "height": 800}, accept_downloads=True)
             page.on("console", lambda m: (m.type == "error" and errors.append(m.text), print("   [console]", m.type, m.text[:200])))
             page.on("pageerror", lambda e: errors.append(str(e)))
@@ -177,10 +177,10 @@ def main():
             page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=30000)
             page.screenshot(path=f"{SHOTS}/1_empty.png")
 
-            def open_plate():
+            def open_plate():  # Upload: the EXR frames go to the input folder; the colour space is read from the file
                 page.click("#open-btn")
+                page.click("#open [data-tab=upload]")
                 page.set_input_files("#files", exr)
-                page.select_option("#cs", "linear")
                 page.click("#open-go")
             try:
                 final, names = flow(page, url, open_plate, SHOTS)
@@ -215,11 +215,12 @@ def fluid_shot(page, spec, shots, mark):
     one frame build one keyframe, so flat zones for sky and ground can go under the fluid's blob, as the model card says.
     """
     page.click("#open-btn")
+    page.click("#open [data-tab=blank]")
     w, h = spec.get("size", [960, 512])
     page.fill("#b-width", str(w)); page.fill("#b-height", str(h))
     page.select_option("#b-fps", str(spec.get("fps", 24))); page.fill("#b-frames", str(spec.get("frames", 121)))
     page.dispatch_event("#b-frames", "input")
-    page.click("#blank-go")
+    page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=120000)
     mark("blank plate open: " + page.inner_text("#spec"))
     page.fill("#prompt", spec.get("words", "")); page.evaluate("document.activeElement.blur()")
@@ -272,10 +273,7 @@ def remote(a):
             if fluid:  # a fluid shot first: once made, it is the plate the strokes are painted on
                 fluid_shot(page, fluid, shots, mark)
             else:
-                page.click("#open-btn"); page.fill("#path", a.path)
-                if a.cs:
-                    page.select_option("#cs", a.cs)
-                page.click("#open-go")
+                page.click("#open-btn"); page.click("#open [data-tab=files]"); page.fill("#path", a.path); page.click("#open-go")
                 page.wait_for_function("document.querySelector('#spec').textContent && document.querySelector('#opening').hidden", timeout=300000)
             if strokes:
                 mark("plate open: " + page.inner_text("#spec")); page.screenshot(path=f"{shots}/1_open.png")
@@ -302,14 +300,14 @@ def remote(a):
                     tag = note.rsplit(" ", 1)[0] if note else status()[:40]
                     if tag not in seen:
                         seen.add(tag); mark("stage: " + (note or status()))
-                    if status().startswith("Exported") or "Error" in status() or status().startswith("Missing"):
+                    if note == "full quality" or "Error" in status() or status().startswith("Missing"):
                         break
                     time.sleep(1)
                 mark("final: " + status())
                 page.keyboard.press("F6"); page.keyboard.press("End"); time.sleep(1); page.screenshot(path=f"{shots}/3_wipe.png")
                 page.keyboard.press("F6"); page.keyboard.press("Home"); page.keyboard.press("Space"); time.sleep(2)
                 page.keyboard.press("Space"); page.screenshot(path=f"{shots}/4_played.png")
-                if status().startswith("Exported"):
+                if page.inner_text("#render-left") == "full quality":  # Export writes the result, then the zip downloads
                     with page.expect_download(timeout=600000) as dl:
                         page.click("#export-btn")
                         page.click("#x-go")

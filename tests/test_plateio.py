@@ -244,5 +244,48 @@ class FloatReadTest(unittest.TestCase):
                 np.testing.assert_allclose(plateio.read_float(path), rgb, atol=1e-3)
         print("float read: ok (2.5, 0.25 and -0.125 kept, in RGB order, from half and float EXR)")
 
+
+class Browser(unittest.TestCase):
+    """Frame patterns, the plate browser's scan, the review frames and animated images."""
+
+    def test_a_pattern_names_one_sequence_of_a_mixed_folder(self):
+        with tempfile.TemporaryDirectory() as d:
+            for k in range(3):
+                open(os.path.join(d, f"ComfyUI_{k + 1:05d}_.png"), "w").close()
+                open(os.path.join(d, f"shot.{1001 + k}.exr"), "w").close()
+            open(os.path.join(d, "alone.png"), "w").close()
+            os.mkdir(os.path.join(d, "sub"))
+            self.assertEqual(plateio.split_pattern(os.path.join(d, "shot.####.exr"))[1:], ("shot.", "", ".exr"))
+            self.assertEqual(plateio.split_pattern(os.path.join(d, "ComfyUI_%05d_.png"))[1:], ("ComfyUI_", "_", ".png"))
+            self.assertIsNone(plateio.split_pattern(os.path.join(d, "a.mp4")))
+            names = lambda p: [os.path.basename(f) for f in plateio.sequence_frames(os.path.join(d, p))[0]]  # noqa: E731
+            self.assertEqual(names("ComfyUI_#####_.png"), [f"ComfyUI_{k:05d}_.png" for k in (1, 2, 3)])
+            self.assertEqual(names("shot.####.exr"), ["shot.1001.exr", "shot.1002.exr", "shot.1003.exr"])
+            scan = plateio.scan_folder(d)
+            self.assertEqual(sorted((i["kind"], i["name"], i.get("frames")) for i in scan["items"]),
+                             [("folder", "sub", None), ("sequence", "ComfyUI_#####_.png", 3), ("sequence", "shot.####.exr", 3)])
+            self.assertEqual(scan["singles"], 1)
+
+    def test_review_frames_keep_every_half_float_value(self):
+        with tempfile.TemporaryDirectory() as d:
+            frames = [np.full((6, 8, 3), v, np.float32) for v in (4.0, -0.5)]
+            paths = [os.path.join(d, f"r_{k:05d}_.exr") for k in (1, 2)]
+            plateio.write_exrs(lambda i: frames[i], paths)
+            for f, p in zip(frames, paths):
+                np.testing.assert_array_equal(plateio.read_float(p), f)
+
+    def test_an_animated_image_is_a_video_plate(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "anim_00001_.webp")
+            frames = [Image.new("RGB", (32, 16), (50 * k, 0, 0)) for k in range(5)]
+            frames[0].save(path, save_all=True, append_images=frames[1:], duration=40)
+            spec = plateio.probe_plate(path)
+            self.assertEqual((spec["kind"], spec["width"]), ("video", 32))
+
+    def test_hdr_video_tags_guess_the_colour_space(self):
+        self.assertEqual(plateio.guess_color_space({"kind": "video", "ext": ".mov", "color_trc": 16}), "HDR PQ")
+        self.assertEqual(plateio.guess_color_space({"kind": "video", "ext": ".mp4", "color_trc": 1}), "sRGB")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

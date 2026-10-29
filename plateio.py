@@ -40,8 +40,11 @@ except ImportError:
 
 IMAGE_EXTS = {".exr", ".png", ".tif", ".tiff", ".dpx", ".jpg", ".jpeg", ".webp", ".avif"}
 VIDEO_EXTS = {".mov", ".mp4", ".mkv", ".mxf", ".avi", ".webm", ".m4v"}
+ANIMATIONS = {".gif", ".webp"}  # animated images, as core's Save Animated WEBP writes them: videos, never frames of a sequence
 # The last number in a name is the frame: "shot.1001.exr", and also "f_00001_.png" as core Save Image writes.
 _FRAME_RE = re.compile(r"^(?P<prefix>.*?)(?P<num>\d+)(?P<suffix>[^\d]*?)(?P<ext>\.[A-Za-z0-9]+)$")
+# One sequence of a folder, as RV and Nuke name it: shot.####.exr, ComfyUI_#####_.png or shot.%04d.exr
+_PATTERN_RE = re.compile(r"^(?P<prefix>.*?)(?:#+|%0?\d*d)(?P<suffix>[^#%\d]*?)(?P<ext>\.[A-Za-z0-9]+)$")
 
 # Encoder to use for each decoder name found in a source file.
 _ENCODERS = {
@@ -74,32 +77,52 @@ def frame_number(path: str) -> int | None:
     return int(m.group("num")) if m else None
 
 
+def split_pattern(path: str) -> tuple[str, str, str, str] | None:
+    """(folder, prefix, suffix, extension) of a frame pattern such as /shots/a/shot.####.exr; None for any other path."""
+    m = _PATTERN_RE.match(os.path.basename(path))
+    return (os.path.dirname(path), m.group("prefix"), m.group("suffix"), m.group("ext").lower()) if m else None
+
+
+def is_sequence(path: str) -> bool:
+    return os.path.isdir(path) or split_pattern(path) is not None
+
+
+def pattern_of(prefix: str, suffix: str, ext: str, digits: int) -> str:
+    return f"{prefix}{'#' * max(1, digits)}{suffix}{ext}"
+
+
 def find_sequence(folder: str) -> list[str]:
     """Numbered frames of the largest image sequence in a folder, in order, a missing frame held from the one before."""
     return sequence_frames(folder)[0]
 
 
 def sequence_frames(folder: str) -> tuple[list[str], int, list[int]]:
-    """(one file per frame number, step, missing numbers) for the largest image sequence in a folder.
+    """(one file per frame number, step, missing numbers) for the largest image sequence in a folder, or for the one a
+    frame pattern names.
 
     As OpenRV's FileSequence maps frame numbers to files, a missing number keeps its place: the frame
     before it holds, so every later frame keeps its number. The step is the common gap between numbers
     (2 for frames on twos), so a sequence on twos is not mistaken for one with every other frame missing.
     """
+    pattern = split_pattern(folder)
+    if pattern:
+        folder = pattern[0]
     groups: dict[tuple[str, str], list[tuple[int, str]]] = {}
     for name in os.listdir(folder):
         full = os.path.join(folder, name)
         if not os.path.isfile(full):
             continue
         ext = os.path.splitext(name)[1].lower()
-        if ext not in IMAGE_EXTS:
+        if ext not in IMAGE_EXTS or ext in ANIMATIONS:
             continue
         m = _FRAME_RE.match(name)
         key = (m.group("prefix"), m.group("suffix"), ext) if m else (name, "", ext)
+        if pattern and key != pattern[1:]:
+            continue
         num = int(m.group("num")) if m else 0
         groups.setdefault(key, []).append((num, full))
     if not groups:
-        raise FileNotFoundError(f"No image frames found in {folder}")
+        raise FileNotFoundError(f"No image frames found in {folder if not pattern else os.path.join(folder, pattern_of(*pattern[1:], 4))}")
     key, best = max(groups.items(), key=lambda kv: len(kv[1]))
     if key[1] == "_":  # core Save Image's counter names (f_00001_.png): numbers count files, not frames
         return [p for _, p in sorted(best)], 1, []
@@ -199,8 +222,8 @@ def probe_still(path: str) -> dict:
 
 
 def probe_plate(path: str, fps_hint: float = 24.0) -> dict:
-    """Spec of a plate: a video file, a single image, or a folder of frames."""
-    if os.path.isdir(path):
+    """Spec of a plate: a video file or an animated image, a single image, a folder of frames, or a frame pattern."""
+    if is_sequence(path):
         files, step, missing = sequence_frames(path)
         first = files[0]
         ext = os.path.splitext(first)[1].lower()
@@ -211,7 +234,7 @@ def probe_plate(path: str, fps_hint: float = 24.0) -> dict:
             spec["exr"] = exr_info(first)
         return spec
     ext = os.path.splitext(path)[1].lower()
-    if ext in VIDEO_EXTS:
+    if ext in VIDEO_EXTS or (ext in ANIMATIONS and probe_video(path)["frames"] != 1):
         spec = probe_video(path)
         spec.update({"kind": "video", "source": path, "ext": ext})
         return spec
@@ -231,6 +254,9 @@ def guess_color_space(spec: dict) -> str:
     EXR is scene-linear by convention: its chromaticities say which gamut.
     ACEScg (AP1) has its red primary at (0.713, 0.293).
     """
+    trc = spec.get("color_trc")  # FFmpeg's numbers: 16 SMPTE ST 2084, 18 ARIB STD-B67, 8 linear
+    if spec.get("kind") == "video" and trc in (16, 18, 8):
+        return {16: "HDR PQ", 18: "HDR", 8: "linear"}[trc]
     if spec.get("ext") != ".exr":
         return "sRGB"
     for part in spec.get("exr", {}).get("parts", []):
@@ -362,6 +388,59 @@ def write_pngs(frame_at, paths: list, workers: int = 8, level: int = 1, tick=Non
             tick()
     with ThreadPoolExecutor(max(1, workers)) as pool:
         list(pool.map(one, range(len(paths))))
+
+
+def write_exrs(frame_at, paths: list, workers: int = 8, tick=None) -> None:
+    """Write frame_at(i), an (H, W, 3) float array, to paths[i] as a half-float EXR with lossless PIZ compression, several
+    frames at once: OpenEXR releases the GIL while it compresses (a 1080p frame: 83 ms, 5.3 MB, 29 Oct). These are the
+    review frames the viewer reads at full precision; the export keeps the plate's own EXR layers and header instead."""
+    def one(i):
+        rgb = np.ascontiguousarray(np.nan_to_num(frame_at(i)[..., :3], nan=0.0, posinf=65504.0, neginf=-65504.0)
+                                   .clip(-65504.0, 65504.0).astype(np.float16))
+        with OpenEXR.File({"compression": OpenEXR.PIZ_COMPRESSION, "type": OpenEXR.scanlineimage}, {"RGB": rgb}) as f:
+            f.write(paths[i])
+        if tick:
+            tick()
+    with ThreadPoolExecutor(max(1, workers)) as pool:
+        list(pool.map(one, range(len(paths))))
+
+
+def scan_folder(folder: str) -> dict:
+    """What the plate browser shows of a folder, from names, sizes and times alone, so a folder of thousands of ComfyUI
+    outputs lists at once: subfolders, videos and animated images, saved scenes, and image sequences (numbered images
+    grouped by name, each named by its frame pattern). An image alone in its group is not a plate: only counted."""
+    items, groups, singles = [], {}, 0
+    with os.scandir(folder) as it:
+        for e in it:
+            if e.name.startswith(".") or e.is_symlink():
+                continue
+            st = e.stat(follow_symlinks=False)
+            if e.is_dir(follow_symlinks=False):
+                items.append({"name": e.name, "kind": "folder", "mtime": st.st_mtime})
+                continue
+            ext = os.path.splitext(e.name)[1].lower()
+            if ext in VIDEO_EXTS or ext in ANIMATIONS:
+                items.append({"name": e.name, "kind": "video", "size": st.st_size, "mtime": st.st_mtime})
+            elif e.name.endswith(".paintaplate.json"):
+                items.append({"name": e.name, "kind": "scene", "size": st.st_size, "mtime": st.st_mtime})
+            elif ext in IMAGE_EXTS:
+                m = _FRAME_RE.match(e.name)
+                if not m:
+                    singles += 1
+                    continue
+                g = groups.setdefault((m.group("prefix"), m.group("suffix"), ext), {"files": 0, "size": 0, "mtime": 0.0,
+                                                                                    "digits": len(m.group("num")), "first": e.name})
+                g["files"] += 1
+                g["size"] += st.st_size
+                g["mtime"] = max(g["mtime"], st.st_mtime)
+                g["first"] = min(g["first"], e.name)
+    for (prefix, suffix, ext), g in groups.items():
+        if g["files"] < 2:
+            singles += 1
+            continue
+        items.append({"name": pattern_of(prefix, suffix, ext, g["digits"]), "kind": "sequence", "frames": g["files"],
+                      "size": g["size"], "mtime": g["mtime"], "first": g["first"]})
+    return {"items": items, "singles": singles}
 
 
 def write_movie(frame_at, n: int, path: str, fps: float, workers: int = 8, crf: int = 18, preset: str = "veryfast",

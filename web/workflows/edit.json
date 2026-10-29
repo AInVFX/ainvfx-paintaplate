@@ -357,28 +357,17 @@
   }
  },
  "25": {
-  "class_type": "ImageColorSpace",
-  "inputs": {
-   "image": [
-    "4",
-    0
-   ],
-   "source": "sRGB",
-   "destination": "linear"
-  }
- },
- "26": {
   "class_type": "ImageScaleBy",
   "inputs": {
    "image": [
-    "25",
+    "4",
     0
    ],
    "upscale_method": "area",
    "scale_by": 0.5
   }
  },
- "27": {
+ "26": {
   "class_type": "ImageScaleBy",
   "inputs": {
    "image": [
@@ -389,35 +378,26 @@
    "scale_by": 0.5
   }
  },
- "28": {
-  "class_type": "ImageColorSpace",
-  "inputs": {
-   "image": [
-    "27",
-    0
-   ],
-   "source": "sRGB",
-   "destination": "linear"
-  }
- },
- "29": {
+ "27": {
   "class_type": "PaintAPlate_RelightTransfer",
   "inputs": {
    "plate": [
-    "25",
+    "4",
     0
    ],
    "source": [
-    "26",
+    "25",
     0
    ],
    "relit": [
-    "28",
+    "26",
     0
    ],
    "radius": 8,
    "strength": 0.0,
-   "align": true
+   "align": true,
+   "plate_space": "sRGB",
+   "shot_space": "sRGB"
   },
   "_meta": {
    "slots": {
@@ -426,22 +406,11 @@
    }
   }
  },
- "30": {
-  "class_type": "ImageColorSpace",
-  "inputs": {
-   "image": [
-    "29",
-    0
-   ],
-   "source": "linear",
-   "destination": "sRGB"
-  }
- },
- "31": {
+ "28": {
   "class_type": "SaveImage",
   "inputs": {
    "images": [
-    "30",
+    "27",
     0
    ],
    "filename_prefix": "paintaplate/edits/edit"

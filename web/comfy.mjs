@@ -19,7 +19,7 @@ const infos = new Map(); // class -> /object_info answer, asked once
 // The job index (routes.py): a finished job's outputs on disk, by the hash of its workflow, the plate and its values. A job
 // that matches takes them back instead of running, in this session or a later one on the same machine. Only workflows whose
 // outputs are saved files take part: the warm-up exists for its side effect, and SAM's object search keeps previews.
-const INDEXED = new Set(["ingest", "prompt", "edit", "clean", "cleanup", "shot", "matte", "comp", "export", "fluid"]);
+const INDEXED = new Set(["ingest", "prompt", "edit", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "fluid"]);
 const hashes = {}; // workflow name -> hash of its file: a new workflow makes new keys
 let salt = null; // the plate's identity (path, size, time); null: no index, as when the plate could not be checked
 export const setSalt = (s) => { salt = s; };
@@ -37,7 +37,15 @@ async function indexed(key) { // the outputs a finished job with this key made, 
   try { const r = await fetch(`/paintaplate/jobs/${key}`); return r.ok ? (await r.json()).outputs : null; } catch { return null; }
 }
 
-export const onNotice = (fn) => { notice = fn; }; // what the client has to tell the person (a retry, for example)
+export const onNotice = (fn) => { notice = fn; };
+// Until ComfyUI has released its models after /free: half of the GPU free, or `limit` ms. Its prompt worker applies a free
+// between prompts, so the retry of a job that ran out of memory waits for it.
+async function released(limit = 15000) {
+  for (const t0 = Date.now(); Date.now() - t0 < limit; await new Promise((ok) => setTimeout(ok, 500))) {
+    const gpu = (await fetch("/system_stats").then((r) => r.json()).catch(() => null))?.devices?.[0];
+    if (!gpu?.vram_total || gpu.vram_free > gpu.vram_total / 2) return;
+  }
+} // what the client has to tell the person (a retry, for example)
 export const onLog = (fn) => { log = fn; }; // every job posted, started, finished, failed or cancelled, with its timing
 const short = (id) => (id ? String(id).slice(0, 8) : "?");
 const took = (job) => `${((Date.now() - job.posted) / 1000).toFixed(1)} s`;
@@ -126,6 +134,7 @@ async function finish(id, error) {
     job.freed = true;
     notice("The GPU ran out of memory: freeing ComfyUI's memory, then trying once more.");
     await post("/free", { unload_models: true, free_memory: true });
+    await released(); // ComfyUI frees between prompts: a job posted at once ran first, with every model still loaded (29 Oct)
     return job.submit();
   }
   live.delete(job);
@@ -224,7 +233,8 @@ export function connect() {
 
 // ---------- Outputs ----------
 
-export const files = (out) => Object.values(out).flatMap((o) => [...(o.images ?? []), ...(o.gifs ?? []), ...(o.video ?? [])]);
+// The files a job made, as ComfyUI's history lists them; `files` holds what Save Plate wrote (ComfyUI's frontend ignores it)
+export const files = (out) => Object.values(out).flatMap((o) => [...(o.images ?? []), ...(o.gifs ?? []), ...(o.video ?? []), ...(o.files ?? [])]);
 // A job the job index can keep: it made something, and every file it made is in the output folder, as routes.write_job
 // asks. A preview in the temporary folder is gone after a restart; posting it only earns a refusal, which browsers log.
 export const recordable = (out) => Object.keys(out ?? {}).length > 0 && files(out).every((f) => f.type === "output");

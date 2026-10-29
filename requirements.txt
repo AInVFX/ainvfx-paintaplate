@@ -1,1 +1,2 @@
 OpenEXR>=3.3
+opencolorio>=2.4

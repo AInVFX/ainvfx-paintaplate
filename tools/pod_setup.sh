@@ -44,7 +44,7 @@ rev() { # the tested revision of each model repository (checked 27 Oct 2026)
     WepeNerd/LTX-Ripple) echo 76abac5ede8a3415b9d1cd803843a38ecb351600 ;;
     Comfy-Org/sam3.1) echo 7bb8374780a725b4353ed31f3a9395c9742b5621 ;;
     Kijai/LTX2.3_comfy) echo 6d980fde0d330f2fed6ff8dfdfddb06d88a004e5 ;;
-    AInVFX/ainvfx-fluid) echo caee4eb18cf76a2077b6cc5f775e424653fd1462 ;;
+    AInVFX/ainvfx-fluid) echo fd4855a18d879c551bf4c5f49b1a877874437cb6 ;;
   esac
 }
 get() { # repo, file in repo, target folder

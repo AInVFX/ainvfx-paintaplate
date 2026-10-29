@@ -70,6 +70,18 @@ def wait(url, pid, limit=240):
     return None, limit
 
 
+def settle(url, pid, limit=60):
+    """Wait for a cancelled prompt to leave ComfyUI's queue. A prompt deleted before it started never reaches the history,
+    so waiting for its record would only run out the clock (60 s a workflow, before 0.5.0)."""
+    t0 = time.time()
+    while time.time() - t0 < limit:
+        q, _ = http(f"{url}/queue")
+        if not any(item[1] == pid for key in ("queue_running", "queue_pending") for item in q.get(key, [])):
+            return time.time() - t0
+        time.sleep(0.2)
+    return limit
+
+
 def error_of(entry):
     for kind, msg in entry.get("status", {}).get("messages", []):
         if kind == "execution_error":
@@ -94,8 +106,8 @@ def make_plates(input_dir):
         rgb = rng.random((H, W, 3)).astype(np.float32)
         codec, pix, opts = plateio.still_target({"ext": ".png", "pix_fmt": "rgb48be"}, False)
         open(os.path.join(png, f"plate.{1001 + i}.png"), "wb").write(plateio.encode_still(rgb, None, codec, pix, opts))
-    return {"exr": ("paintaplate_test/exr", "linear"), "mov": ("paintaplate_test/plate.mov", "sRGB"),
-            "png16": ("paintaplate_test/png16", "sRGB")}
+    srgb = "sRGB Encoded Rec.709 (sRGB)"  # OCIO names in the built-in studio config; the test EXR carries AP1 chromaticities
+    return {"exr": ("paintaplate_test/exr", "ACEScg"), "mov": ("paintaplate_test/plate.mov", srgb), "png16": ("paintaplate_test/png16", srgb)}
 
 
 def fake_shot_and_matte(out_dir, run):
@@ -197,21 +209,21 @@ def main():
 
         print("2. ComfyUI's validator accepts every workflow")
         values = {
-            "ingest": {"path": plates["exr"][0], "color_space": "linear", "prefix": "paintaplate_test/hero", "video_prefix": "paintaplate_test/proxy"},
+            "ingest": {"path": plates["exr"][0], "color_space": "ACEScg", "prefix": "paintaplate_test/hero", "video_prefix": "paintaplate_test/proxy"},
             "edit": {"base": "paintaplate/test/base.png", "reference": "paintaplate/test/base.png", "start": "paintaplate/test/base.png",
                      "mask": "paintaplate/test/mask.png", "caption": 'Remove <obj_1>. [{"id": "obj_1", "bbox": [100, 200, 300, 500], "desc": "x"}]',
                      "seed": 1, "steps": 8, "denoise": 1.0, "grow": 16, "feather": 6, "sigma": 3},
-            "shot": {"path": plates["exr"][0], "color_space": "linear", "max_frames": N, "hero": "paintaplate/test/base.png", "width": 96, "height": 64,
+            "shot": {"path": plates["exr"][0], "color_space": "ACEScg", "max_frames": N, "hero": "paintaplate/test/base.png", "width": 96, "height": 64,
                      "seed": 1, "prefix": "paintaplate_test/shot/f", "video_prefix": "paintaplate_test/shotpreview"},
             "snap": {"image": "paintaplate/test/base.png", "point_0": '[{"x": 40, "y": 30}]', "words": "box"},
             "prompt": {"image": "paintaplate/test/base.png", "request": "Remove the box.", "system": "Answer in one sentence."},
             "warm": {},
-            "fluid": {"path": plates["mov"][0], "color_space": "sRGB", "max_frames": N, "prompt": "ainvfxfluid, smoke plume",
+            "fluid": {"path": plates["mov"][0], "color_space": "@model", "max_frames": N, "prompt": "ainvfxfluid, smoke plume",
                       "keys": json.dumps([{"frame": 0, "image": "paintaplate/test/base.png"}]), "seed": 1,
                       "prefix": "paintaplate/test/fluid/plate", "video_prefix": "paintaplate/test/fluid/preview"},
-            "clean": {"path": plates["exr"][0], "color_space": "linear", "max_frames": N, "hero": "paintaplate/test/base.png", "width": 96,
+            "clean": {"path": plates["exr"][0], "color_space": "ACEScg", "max_frames": N, "hero": "paintaplate/test/base.png", "width": 96,
                       "height": 64, "hole": plates["exr"][0], "seed": 1, "prefix": "paintaplate_test/clean/f", "video_prefix": "paintaplate_test/clean"},
-            "matte": {"path": plates["exr"][0], "color_space": "linear", "max_frames": N, "mask": "paintaplate/test/mask.png", "width": 96, "height": 64,
+            "matte": {"path": plates["exr"][0], "color_space": "ACEScg", "max_frames": N, "mask": "paintaplate/test/mask.png", "width": 96, "height": 64,
                       "prefix": "paintaplate_test/matte/m"},
         }
         missing_slots = [(name, slot) for name, v in values.items() for slot in v if not fill_check(name, slot)]
@@ -222,7 +234,7 @@ def main():
             check(ok, f"{name}: accepted" + ("" if ok else f" -> {json.dumps(res.get('node_errors') or res.get('error'))[:600]}"))
             if ok:
                 http(f"{url}/queue", {"delete": [res["prompt_id"]]}); http(f"{url}/interrupt", {"prompt_id": res["prompt_id"]})
-                wait(url, res["prompt_id"], 60)
+                settle(url, res["prompt_id"])
 
         print("3. ingest and export, end to end")
         for kind, (path, cs) in plates.items():
@@ -262,6 +274,22 @@ def main():
                     ok = bool(vids) and not err
                     frames = plateio.probe_video(os.path.join(output_dir, vids[0]["subfolder"], vids[0]["filename"]))["frames"] if ok else -1
                     check(ok and frames in (N, 0), f"comp {run}: composite MP4 in {dt:.1f} s, {frames} frames" + (f" -> {err}" if err else ""))
+                seq = kind != "mov"  # the review of an image sequence also writes half-float EXR frames for the viewer
+                res = submit(url, fill("review", {"path": path, "color_space": cs, "max_frames": N, "shot": f"output:{shot}/shot",
+                                                  "matte_a": f"output:{shot}/matte_a", "matte_b": f"output:{shot}/matte_a",
+                                                  "relight": relight, "grow": 4, "feather": 6, "movie_space": "@model" if seq else cs,
+                                                  "review_prefix": f"{shot}/review", "frames_prefix": f"{shot}/review/frames" if seq else ""}))
+                entry, dt = wait(url, res["prompt_id"]) if "prompt_id" in res else (None, 0)
+                err = error_of(entry) if entry else json.dumps(res)[:400]
+                check(entry is not None and not err, f"review {run}: ran in {dt:.1f} s" + (f" -> {err}" if err else ""))
+                rdir = os.path.join(output_dir, shot, "review")
+                exrs = sorted(f for f in os.listdir(rdir) if f.endswith(".exr")) if os.path.isdir(rdir) else []
+                check(len(exrs) == (N if seq else 0), f"review {run}: {len(exrs)} EXR frames (an image sequence: one per frame; a video: none)")
+                if seq and exrs and not relight:  # outside the edit the review holds the plate's own values, as half floats
+                    src = plateio.find_sequence(os.path.join(input_dir, path))
+                    a, b = plateio.read_float(src[3]), plateio.read_float(os.path.join(rdir, exrs[3]))
+                    out = np.zeros((H, W), bool); out[92:, :] = True; out[:, 160:] = True
+                    check(np.allclose(a[out], b[out], rtol=2e-3, atol=2e-4), f"review {run}: untouched pixels are the plate's own values")
                 exp_dir = f"{shot}/export"
                 for folder in (exp_dir, f"{shot}/matte"):  # a second run on the same ComfyUI starts clean
                     shutil.rmtree(os.path.join(output_dir, folder), ignore_errors=True)

@@ -2,6 +2,7 @@ numpy
 scipy
 av
 OpenEXR>=3.3
+opencolorio>=2.4
 pillow
 pyflakes
 aiohttp

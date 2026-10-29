@@ -1,10 +1,10 @@
-"""The eight PaintAPlate nodes. Each one fills a gap in core ComfyUI.
+"""The eleven PaintAPlate nodes. Each one does what core ComfyUI cannot.
 
-Colour conversion, compositing, masks, Klein, LTX and SAM 3 stay in core nodes: these nodes only
-load and save plates, fit generated frames to the plate, transfer a new light onto it and fill an
-erased object in the frames LTX follows, turn an erase matte into boxes, show a shot while LTX samples it, or build
-the keyframe control video of a fluid shot. Each node converts tensors and calls plateio (files) or
-mathops (pixels), which are tested without torch or ComfyUI.
+Compositing, masks, Klein, LTX and SAM 3.1 stay in core nodes. These nodes load and save plates in their own format,
+convert colour with OpenColorIO, fit generated frames to the plate, transfer a new light onto it, keep a matte on what an
+edit made, level an erase's fill, save frames and movies several at once, show a shot while LTX samples it, and build the
+keyframe control video of a fluid shot. Each node converts tensors and calls plateio (files), mathops (pixels) or ocio
+(colour), which are tested without torch or ComfyUI.
 """
 from __future__ import annotations
 
@@ -21,45 +21,21 @@ import comfy.model_management as mm
 import comfy.sd
 import comfy.utils
 import folder_paths
-from comfy_api.v0_0_2 import InputImpl, io, ui
+from comfy_api.v0_0_2 import InputImpl, io
 from comfy_execution.utils import get_executing_context
 from PIL import Image
 from server import PromptServer
 
-from . import mathops, plateio
+from . import folders, mathops, ocio, plateio
+
 
 Plate = io.Custom("PAINTAPLATE_PLATE")
 WORKERS = min(16, os.cpu_count() or 4)  # frames in parallel: numpy, scipy and PyAV release the GIL
 CATEGORY = "AInVFX/PaintAPlate"
-COLOR_SPACES = ["sRGB", "HDR", "HDR ACEScct", "HDR LogC3", "HDR PQ", "linear", "linear ACEScg"]
 
 
-def resolve(path: str) -> str:
-    """'output:sub/dir' reads from the output folder; any other path from the input folder.
 
-    Absolute paths are refused unless PAINTAPLATE_ALLOW_ABSOLUTE=1, which suits a
-    workstation and keeps a shared server's disk private.
-    """
-    path = path.strip()
-    root = folder_paths.get_output_directory() if path.startswith("output:") else folder_paths.get_input_directory()
-    rel = path.removeprefix("output:")
-    if os.path.isabs(rel):
-        if os.environ.get("PAINTAPLATE_ALLOW_ABSOLUTE") != "1":
-            raise ValueError("Absolute plate paths need PAINTAPLATE_ALLOW_ABSOLUTE=1")
-        return rel
-    full = os.path.abspath(os.path.join(root, rel))
-    if os.path.commonpath([full, os.path.abspath(root)]) != os.path.abspath(root):
-        raise ValueError(f"Plate path leaves the ComfyUI folders: {path}")
-    return full
-
-
-def output_folder(prefix: str) -> str:
-    """A folder under ComfyUI's output folder, never outside it (as core Save Image refuses too)."""
-    root = os.path.abspath(folder_paths.get_output_directory())
-    full = os.path.abspath(os.path.join(root, prefix))
-    if os.path.commonpath([full, root]) != root:
-        raise ValueError(f"Saving outside the output folder is not allowed: {prefix}")
-    return full
+resolve, output_folder = folders.plate_path, folders.output_folder
 
 
 def frames_np(images: torch.Tensor):
@@ -90,11 +66,11 @@ class LoadPlate(io.ComfyNode):
             category=CATEGORY,
             description="Loads a video file or a folder of frames (EXR, PNG, TIFF, DPX) at full precision, "
                         "with the spec Save Plate needs. Pixels stay in the plate's colour space: convert "
-                        "them with Convert Image Color Space.",
+                        "them with Color Space (OCIO).",
             search_aliases=["plate", "image sequence", "exr sequence", "load frames"],
             inputs=[
-                io.String.Input("path", tooltip="A file or a folder of frames in ComfyUI's input folder. "
-                                                "Start with 'output:' to read from the output folder."),
+                io.String.Input("path", tooltip="A file, a folder of frames or a frame pattern (shot.####.exr) in ComfyUI's "
+                                                "input folder. Start with 'output:' to read from the output folder."),
                 io.Int.Input("max_frames", default=121, min=1, max=1024,
                              tooltip="Frames to load from the start. 121 frames are 5 s at 24 fps."),
                 io.Boolean.Input("pad_8n1", default=False,
@@ -114,7 +90,7 @@ class LoadPlate(io.ComfyNode):
     @classmethod
     def fingerprint_inputs(cls, path, max_frames, pad_8n1):
         full = resolve(path)
-        files = plateio.find_sequence(full) if os.path.isdir(full) else [full]
+        files = plateio.find_sequence(full) if plateio.is_sequence(full) else [full]
         return f"{path}|{max_frames}|{pad_8n1}|{len(files)}|{max(os.path.getmtime(f) for f in files)}"
 
     @classmethod
@@ -148,6 +124,36 @@ class LoadPlate(io.ComfyNode):
         device, dtype = mm.intermediate_device(), mm.intermediate_dtype()
         return io.NodeOutput(images.to(device=device, dtype=dtype), alpha.to(device=device, dtype=dtype),
                              spec, float(spec["fps"]), count, plateio.spec_json(spec))
+
+
+class ColorSpace(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_ColorSpace",
+            display_name="Color Space (OCIO)",
+            category=CATEGORY,
+            description="Converts frames between two colour spaces of an OpenColorIO config, several frames at once. "
+                        "@model is the sRGB-encoded Rec.709 the models see, entered with core's tone mapping of values "
+                        "above 1.0; @linear is that space in linear light. Alpha is not converted.",
+            search_aliases=["ocio", "opencolorio", "colour space", "color space", "aces"],
+            inputs=[
+                io.Image.Input("image"),
+                io.String.Input("config", default=ocio.BUILTIN,
+                                tooltip="$OCIO for the config the OCIO environment variable names, or a built-in config "
+                                        "such as ocio://studio-config-latest."),
+                io.String.Input("source", default="@model", tooltip="A colour space of the config (a name, an alias or a "
+                                "role such as scene_linear), or @model or @linear."),
+                io.String.Input("destination", default="@model", tooltip="The same, for the result."),
+            ],
+            outputs=[io.Image.Output(display_name="image")],
+        )
+
+    @classmethod
+    def execute(cls, image, config, source, destination) -> io.NodeOutput:
+        if source == destination:
+            return io.NodeOutput(image)
+        return io.NodeOutput(to_image(ocio.convert(frames_np(image), config, source, destination)))
 
 
 class SavePlate(io.ComfyNode):
@@ -220,7 +226,10 @@ class SavePlate(io.ComfyNode):
             if spec["ext"] == ".exr" and plateio.OpenEXR is None:
                 notes.append("OpenEXR is not installed: extra EXR layers were not copied.")
         text = f"{len(written)} file(s) in {out_dir}\n" + "\n".join(notes + [os.path.basename(p) for p in written[:3]])
-        return io.NodeOutput(ui=ui.PreviewText(text))
+        # the files themselves, under a key ComfyUI's frontend ignores: the job index keeps the record while they exist,
+        # and the page finds the render's folder from them
+        sub = os.path.relpath(out_dir, folder_paths.get_output_directory()).replace(os.sep, "/")
+        return io.NodeOutput(ui={"text": [text], "files": [{"filename": os.path.basename(p), "subfolder": sub, "type": "output"} for p in written]})
 
 
 class FitToPlate(io.ComfyNode):
@@ -515,28 +524,33 @@ class SaveFrames(io.ComfyNode):
             node_id="PaintAPlate_SaveFrames",
             display_name="Save Frames",
             category=CATEGORY,
-            description="Saves a batch as numbered PNG frames, named as core Save Image names them, several frames at "
-                        "once. Core writes one frame after another: 35 s for 121 frames at 1920 x 1088, where this "
-                        "node takes about a second on a pod with 16 cores.",
+            description="Saves a batch as numbered frames, named as core Save Image names them, several frames at once: "
+                        "8-bit PNG, as core saves them, or half-float EXR with lossless PIZ compression, values above 1.0 "
+                        "kept. Core writes one frame after another: 35 s for 121 PNG frames at 1920 x 1088, where this node "
+                        "takes about a second on a pod with 16 cores.",
             inputs=[
                 io.Image.Input("images"),
                 io.String.Input("filename_prefix", default="paintaplate/frames/f",
                                 tooltip="As in Save Image: a folder under the output folder, then the file name."),
+                io.Combo.Input("format", options=["png", "exr"], default="png", optional=True,
+                               tooltip="png: 8 bits, as core Save Image. exr: half float, every value as it is."),
             ],
             is_output_node=True,
         )
 
     @classmethod
-    def execute(cls, images, filename_prefix) -> io.NodeOutput:
+    def execute(cls, images, filename_prefix, format="png") -> io.NodeOutput:
         n, h, w = images.shape[0], images.shape[1], images.shape[2]
         folder, name, counter, sub, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory(), w, h)
-        names = [f"{name}_{counter + i:05}_.png" for i in range(n)]
-        bar = comfy.utils.ProgressBar(n)
+        names = [f"{name}_{counter + i:05}_.{format}" for i in range(n)]
+        paths, bar = [os.path.join(folder, f) for f in names], comfy.utils.ProgressBar(n)
+        if format == "exr":
+            plateio.write_exrs(lambda i: images[i].float().cpu().numpy(), paths, workers=WORKERS, tick=lambda: bar.update(1))
+            return io.NodeOutput(ui={"images": [{"filename": f, "subfolder": sub, "type": "output"} for f in names]})
 
         def frame(i):  # as core Save Image: scaled by 255 and clipped, not rounded, so every pixel matches what it wrote
             return np.clip(255.0 * images[i].float().cpu().numpy(), 0, 255).astype(np.uint8)
-
-        plateio.write_pngs(frame, [os.path.join(folder, f) for f in names], workers=WORKERS, tick=lambda: bar.update(1))
+        plateio.write_pngs(frame, paths, workers=WORKERS, tick=lambda: bar.update(1))
         return io.NodeOutput(ui={"images": [{"filename": f, "subfolder": sub, "type": "output"} for f in names]})
 
 
@@ -555,12 +569,15 @@ class SaveMovie(io.ComfyNode):
                 io.Float.Input("fps", default=24.0, min=1.0, max=240.0),
                 io.String.Input("filename_prefix", default="paintaplate/movie",
                                 tooltip="As in Save Video: a folder under the output folder, then the file name."),
+                io.Int.Input("crf", default=18, min=0, max=51, optional=True,
+                             tooltip="x264's quality: 18 as core Save Video, lower is closer to the frames. The page's full-quality "
+                                     "movies (the plate it plays, the review) use 12."),
             ],
             is_output_node=True,
         )
 
     @classmethod
-    def execute(cls, images, fps, filename_prefix) -> io.NodeOutput:
+    def execute(cls, images, fps, filename_prefix, crf=18) -> io.NodeOutput:
         n, h, w = images.shape[0], images.shape[1], images.shape[2]
         folder, name, counter, sub, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory(), w, h)
         file = f"{name}_{counter:05}_.mp4"
@@ -569,8 +586,9 @@ class SaveMovie(io.ComfyNode):
         def frame(i):  # as core Save Video: scaled by 255 and clipped, not rounded
             return np.clip(255.0 * images[i].float().cpu().numpy(), 0, 255).astype(np.uint8)
 
-        plateio.write_movie(frame, n, os.path.join(folder, file), fps, workers=WORKERS, tick=lambda: bar.update(1))
+        plateio.write_movie(frame, n, os.path.join(folder, file), fps, workers=WORKERS, crf=crf, tick=lambda: bar.update(1))
         return io.NodeOutput(ui={"images": [{"filename": file, "subfolder": sub, "type": "output"}], "animated": [True]})
 
 
-NODES = [LoadPlate, SavePlate, SaveFrames, SaveMovie, FitToPlate, RelightTransfer, FollowMatte, LevelFill, LivePreview, KeyframeVideo]
+NODES = [LoadPlate, SavePlate, ColorSpace, SaveFrames, SaveMovie, FitToPlate, RelightTransfer, FollowMatte, LevelFill, LivePreview,
+         KeyframeVideo]

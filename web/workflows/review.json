@@ -1,0 +1,409 @@
+{
+ "1": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 121,
+   "pad_8n1": true
+  },
+  "_meta": {
+   "title": "Plate",
+   "slots": {
+    "path": "path",
+    "max_frames": "max_frames"
+   }
+  }
+ },
+ "2": {
+  "class_type": "PaintAPlate_ColorSpace",
+  "inputs": {
+   "image": [
+    "1",
+    0
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "@model"
+  },
+  "_meta": {
+   "title": "Plate in the model space",
+   "slots": {
+    "config": "config",
+    "source": "color_space"
+   }
+  }
+ },
+ "3": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 1024,
+   "pad_8n1": false
+  },
+  "_meta": {
+   "title": "Generated shot",
+   "slots": {
+    "path": "shot"
+   }
+  }
+ },
+ "4": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 1024,
+   "pad_8n1": false
+  },
+  "_meta": {
+   "title": "Erase matte",
+   "slots": {
+    "path": "matte_a"
+   }
+  }
+ },
+ "5": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 1024,
+   "pad_8n1": false
+  },
+  "_meta": {
+   "title": "Paint matte",
+   "slots": {
+    "path": "matte_b"
+   }
+  }
+ },
+ "6": {
+  "class_type": "ImageToMask",
+  "inputs": {
+   "image": [
+    "4",
+    0
+   ],
+   "channel": "red"
+  }
+ },
+ "7": {
+  "class_type": "ImageToMask",
+  "inputs": {
+   "image": [
+    "5",
+    0
+   ],
+   "channel": "red"
+  }
+ },
+ "8": {
+  "class_type": "MaskComposite",
+  "inputs": {
+   "destination": [
+    "6",
+    0
+   ],
+   "source": [
+    "7",
+    0
+   ],
+   "x": 0,
+   "y": 0,
+   "operation": "add"
+  }
+ },
+ "9": {
+  "class_type": "PaintAPlate_ColorSpace",
+  "inputs": {
+   "image": [
+    "3",
+    0
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "@model"
+  },
+  "_meta": {
+   "title": "Shot in the plate's colour space",
+   "slots": {
+    "config": "config",
+    "destination": "color_space"
+   }
+  }
+ },
+ "10": {
+  "class_type": "GetImageSize",
+  "inputs": {
+   "image": [
+    "3",
+    0
+   ]
+  }
+ },
+ "11": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "image": [
+    "2",
+    0
+   ],
+   "upscale_method": "area",
+   "width": [
+    "10",
+    0
+   ],
+   "height": [
+    "10",
+    1
+   ],
+   "crop": "disabled"
+  }
+ },
+ "12": {
+  "class_type": "PaintAPlate_ColorSpace",
+  "inputs": {
+   "image": [
+    "1",
+    0
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "@linear"
+  },
+  "_meta": {
+   "slots": {
+    "config": "config",
+    "source": "color_space"
+   }
+  }
+ },
+ "13": {
+  "class_type": "ImageScaleBy",
+  "inputs": {
+   "image": [
+    "11",
+    0
+   ],
+   "upscale_method": "area",
+   "scale_by": 0.5
+  }
+ },
+ "14": {
+  "class_type": "ImageScaleBy",
+  "inputs": {
+   "image": [
+    "3",
+    0
+   ],
+   "upscale_method": "area",
+   "scale_by": 0.5
+  }
+ },
+ "15": {
+  "class_type": "PaintAPlate_RelightTransfer",
+  "inputs": {
+   "plate": [
+    "12",
+    0
+   ],
+   "source": [
+    "13",
+    0
+   ],
+   "relit": [
+    "14",
+    0
+   ],
+   "plate_space": "linear",
+   "shot_space": "sRGB",
+   "radius": 8,
+   "strength": 1.0,
+   "align": true
+  },
+  "_meta": {
+   "slots": {
+    "radius": "radius",
+    "strength": "strength"
+   }
+  }
+ },
+ "16": {
+  "class_type": "PaintAPlate_ColorSpace",
+  "inputs": {
+   "image": [
+    "15",
+    0
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@linear",
+   "destination": "@model"
+  },
+  "_meta": {
+   "slots": {
+    "config": "config",
+    "destination": "color_space"
+   }
+  }
+ },
+ "17": {
+  "class_type": "ComfySwitchNode",
+  "inputs": {
+   "switch": false,
+   "on_false": [
+    "1",
+    0
+   ],
+   "on_true": [
+    "16",
+    0
+   ]
+  },
+  "_meta": {
+   "slots": {
+    "switch": "relight"
+   }
+  }
+ },
+ "18": {
+  "class_type": "PaintAPlate_FitToPlate",
+  "inputs": {
+   "plate": [
+    "17",
+    0
+   ],
+   "image": [
+    "9",
+    0
+   ],
+   "mask": [
+    "8",
+    0
+   ],
+   "align": true,
+   "max_shift": 8.0,
+   "match_color": true,
+   "grain": 1.0,
+   "grow": 8,
+   "feather": 12,
+   "steady": 2
+  },
+  "_meta": {
+   "slots": {
+    "grain": "grain",
+    "grow": "grow",
+    "feather": "feather",
+    "steady": "steady",
+    "mask": "fit_mask"
+   },
+   "progress": true
+  }
+ },
+ "19": {
+  "class_type": "ImageCompositeMasked",
+  "inputs": {
+   "destination": [
+    "17",
+    0
+   ],
+   "source": [
+    "18",
+    0
+   ],
+   "x": 0,
+   "y": 0,
+   "resize_source": false,
+   "mask": [
+    "18",
+    1
+   ]
+  },
+  "_meta": {
+   "title": "Composite"
+  }
+ },
+ "20": {
+  "class_type": "ImageFromBatch",
+  "inputs": {
+   "image": [
+    "19",
+    0
+   ],
+   "batch_index": 0,
+   "length": [
+    "1",
+    4
+   ]
+  }
+ },
+ "21": {
+  "class_type": "PaintAPlate_ColorSpace",
+  "inputs": {
+   "image": [
+    "20",
+    0
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "@model"
+  },
+  "_meta": {
+   "title": "Movie values",
+   "slots": {
+    "config": "config",
+    "source": "color_space",
+    "destination": "movie_space"
+   }
+  }
+ },
+ "22": {
+  "class_type": "ImageScaleToMaxDimension",
+  "inputs": {
+   "upscale_method": "lanczos",
+   "largest_size": 1920,
+   "image": [
+    "21",
+    0
+   ]
+  }
+ },
+ "23": {
+  "class_type": "PaintAPlate_SaveMovie",
+  "inputs": {
+   "images": [
+    "22",
+    0
+   ],
+   "fps": [
+    "1",
+    3
+   ],
+   "crf": 12,
+   "filename_prefix": "paintaplate/plate/review"
+  },
+  "_meta": {
+   "title": "Review movie (full quality, H.264)",
+   "slots": {
+    "filename_prefix": "review_prefix"
+   },
+   "output": "review"
+  }
+ },
+ "24": {
+  "class_type": "PaintAPlate_SaveFrames",
+  "inputs": {
+   "images": [
+    "20",
+    0
+   ],
+   "format": "exr",
+   "filename_prefix": ""
+  },
+  "_meta": {
+   "title": "Review frames (half-float EXR, image sequences only)",
+   "slots": {
+    "filename_prefix": "frames_prefix",
+    "images": "review_frames"
+   },
+   "output": "frames"
+  }
+ }
+}

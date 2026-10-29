@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, relightSpace, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayUniforms, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit } from "../../web/logic.mjs";
+import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayUniforms, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -127,7 +127,7 @@ test("optional links drop with what fed them when their slots are empty", () => 
 test("every workflow names the outputs and the progress node the page reads", () => {
   const wanted = { ingest: ["hero", "proxy", "spec"], prompt: ["text"], edit: ["patch", "relit", "result"],
     snap: ["named", "point_0", "point_1", "point_2", "point_3", "point_4"], clean: ["frames", "video"], shot: ["frames", "video"],
-    matte: ["follow", "frames"], comp: ["video"], export: ["export", "matte", "review"], warm: ["frame"] };
+    matte: ["follow", "frames"], comp: ["video"], review: ["frames", "review"], export: ["export", "matte"], warm: ["frame"] };
   for (const [name, outs] of Object.entries(wanted)) {
     const wf = workflow(name);
     assert.deepEqual(Object.keys(wf.outputs).sort(), outs.sort(), name);
@@ -289,8 +289,24 @@ test("the colour picker averages the pixels under the cursor", () => {
   assert.equal(pickedColor(new Uint8ClampedArray([0, 0, 0, 0])), null);
 });
 
-test("a relight export works in the plate's own encoding when Relight Transfer decodes it", () => {
-  assert.equal(relightSpace("sRGB"), "sRGB");
-  assert.equal(relightSpace("linear"), "linear");
-  assert.equal(relightSpace("HDR PQ"), "linear"); // any other colour space goes through linear light, as before
+
+import { browseItems, crumbs, framePattern, ocioTree } from "../../web/logic.mjs";
+
+test("the OCIO menu's File Color Space tree follows the families, as RV builds it", () => {
+  const tree = ocioTree([{ name: "ACEScg", family: "ACES" }, { name: "ARRI LogC4", family: "Input/ARRI" }, { name: "Sony S-Log3", family: "Input/Sony" }, { name: "Raw", family: "" }]);
+  assert.deepEqual(tree.spaces, ["Raw"]);
+  assert.deepEqual(tree.children.map((c) => c.name), ["ACES", "Input"]);
+  assert.deepEqual(tree.children[1].children.map((c) => [c.name, c.spaces]), [["ARRI", ["ARRI LogC4"]], ["Sony", ["Sony S-Log3"]]]);
+});
+
+test("the plate browser: folders first, numbers in order or newest first, a filter on the name, breadcrumbs, frame patterns", () => {
+  const items = [{ name: "shot10.mp4", kind: "video", mtime: 3 }, { name: "renders", kind: "folder", mtime: 1 }, { name: "shot2.mp4", kind: "video", mtime: 9 },
+    { name: "ComfyUI_#####_.png", kind: "sequence", mtime: 5 }];
+  assert.deepEqual(browseItems(items).map((i) => i.name), ["renders", "ComfyUI_#####_.png", "shot2.mp4", "shot10.mp4"]);
+  assert.deepEqual(browseItems(items, { by: "newest" }).map((i) => i.name), ["renders", "shot2.mp4", "ComfyUI_#####_.png", "shot10.mp4"]);
+  assert.deepEqual(browseItems(items, { query: "SHOT" }).map((i) => i.name), ["shot2.mp4", "shot10.mp4"]);
+  assert.deepEqual(crumbs("output:video/a"), [{ label: "Output", path: "output:" }, { label: "video", path: "output:video" }, { label: "a", path: "output:video/a" }]);
+  assert.deepEqual(crumbs(""), [{ label: "Input", path: "" }]);
+  assert.equal(framePattern("frames_00001_.exr"), "frames_#####_.exr");
+  assert.equal(framePattern("shot.1001.exr"), "shot.####.exr");
 });

@@ -1,7 +1,7 @@
 // One ComfyUI workflow for a whole scene: the workflows the page runs, joined by links instead of files, so the scene
 // opens in ComfyUI and keeps working there. Pure functions over workflows parsed by logic.mjs, tested in Node.
 
-import { relightSpace, fillWorkflow, stageOne } from "./logic.mjs";
+import { fillWorkflow, stageOne } from "./logic.mjs";
 
 const LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]); // the nodes a link can stand in for
 const EDIT_OUT = ["result", "patch", "relit"]; // an edit's saved images: inside one scene, links carry them
@@ -64,11 +64,11 @@ export function sceneGraph(WF, { plate, edits, render }) {
   const over = (id, destination, source, mask) => node(id, "ImageCompositeMasked", { destination, source, x: 0, y: 0, resize_source: false, mask });
   const union = (id, masks, size) => scaleMask(id, masks.slice(1).reduce((a, m, i) =>
     node(`${id} ${i + 2}`, "MaskComposite", { destination: a, source: m, x: 0, y: 0, operation: "add" }), masks[0]), size);
-  const common = { path: plate.path, color_space: plate.cs, relight_space: relightSpace(plate.cs), max_frames: plate.frames }, out = (s) => `${render.prefix}/${s}`, drop = ["frames"];
+  const common = { path: plate.path, config: plate.config, color_space: plate.cs, max_frames: plate.frames }, out = (s) => `${render.prefix}/${s}`, drop = ["frames"];
 
   node("plate", "PaintAPlate_LoadPlate", { path: plate.path, max_frames: plate.frames, pad_8n1: true });
-  const srgb = node("plate in sRGB", "ImageColorSpace", { image: ["plate", 0], source: plate.cs, destination: "sRGB" });
-  let frame = scale("first frame", node("frame 0", "ImageFromBatch", { image: srgb, batch_index: 0, length: 1 }), plate.work), erasedFrame = frame;
+  const model = node("plate in the model space", "PaintAPlate_ColorSpace", { image: ["plate", 0], config: plate.config, source: plate.cs, destination: "@model" });
+  let frame = scale("first frame", node("frame 0", "ImageFromBatch", { image: model, batch_index: 0, length: 1 }), plate.work), erasedFrame = frame;
   const erased = [], painted = [];
   edits.forEach((e, k) => {
     const t = `edit ${k + 1}`, mask = node(`${t} mask`, "LoadImageMask", { image: e.mask, channel: "red" });
@@ -98,14 +98,14 @@ export function sceneGraph(WF, { plate, edits, render }) {
     made = add(instantiate(WF.cleanup, "erase pass", { ...values, width: plate.work[0], height: plate.work[1], prefix: out("clean/f"),
       video_prefix: out("clean") }, { hole: erasedMatte, hero: erasedFrame, low: half }, { drop })).frames;
   }
-  if (edits.some((e) => e.tool !== "erase")) made = add(instantiate(WF.shot, "shot", { ...common, ...(made ? { color_space: "sRGB" } : {}),
+  if (edits.some((e) => e.tool !== "erase")) made = add(instantiate(WF.shot, "shot", { ...common, ...(made ? { color_space: "@model" } : {}),
     width: plate.work[0], height: plate.work[1], seed: render.seed, prompt: render.prompt, prefix: out("shot/f"), video_prefix: out("raw") },
     { hero: frame, ...(made ? { path: made } : {}) }, { drop })).frames;
-  if (painted.length) paintMatte = add(instantiate(WF.matte, "paint tracking", { ...common, color_space: "sRGB", width: plate.track[0],
+  if (painted.length) paintMatte = add(instantiate(WF.matte, "paint tracking", { ...common, color_space: "@model", width: plate.track[0],
     height: plate.track[1], prefix: out("matte_b/m") }, { path: made, mask: union("painted area", painted, plate.track) }, { drop })).frames;
   const relight = edits.some((e) => e.tool === "light"), a = erasedMatte ?? paintMatte;
   add(instantiate(WF.export, "export", { ...common, relight, keep_untouched: !relight, grow: render.grow, feather: render.feather,
-    prefix: out("export"), matte_prefix: out("matte/matte"), review_prefix: out("review") },
+    prefix: out("export"), matte_prefix: out("matte/matte") },
     { shot: made, ...(a ? { matte_a: a, matte_b: paintMatte ?? erasedMatte } : {}) }));
   return merge(parts);
 }

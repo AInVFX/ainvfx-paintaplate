@@ -25,7 +25,8 @@ from build_workflows import outputs_of  # noqa: E402
 
 A = None  # parsed arguments
 JOBS, HISTORY, SOCKETS = [], {}, {}
-STATE = {"running": None, "interrupt": False}
+STATE = {"running": None, "interrupt": False, "oom": {}}
+EVENTS = []  # (what, time, ...) for the out-of-memory test: the failure, /free, every fluid job posted
 
 
 def folder(kind):
@@ -158,6 +159,12 @@ async def send_preview(pid, img):
 
 async def execute(pid, prompt):
     outs = outputs_of(prompt)
+    kind = "fluid" if "plate" in outs else None
+    if kind and STATE["oom"].get(kind, 0) > 0:  # armed by /mock/oom: the GPU runs out of memory, as ComfyUI reports it
+        STATE["oom"][kind] -= 1
+        EVENTS.append(("oom", time.time(), kind))
+        await steps(pid, 1, 0.2)
+        raise RuntimeError("Allocation on device 0 would exceed allowed memory. (out of memory)")
     v = inputs_by_slot(prompt)
     o = {}
     if "spec" in outs:  # ingest
@@ -215,6 +222,24 @@ async def execute(pid, prompt):
         if "named" in outs:
             o[outs["named"]] = {"images": []}
         await steps(pid, 2, 0.5)
+    elif "review" in outs:  # review: the composite at full size, as a movie, and as half-float EXR frames for an image sequence
+        frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
+        n, (h, w) = spec["frames"], frames[0].shape[:2]
+        shot, _ = read_plate(v["shot"], 1024)
+        matte = read_plate(v["matte_a"], 1024)[0] if v.get("matte_a") else None
+        await steps(pid, 6, 2.0)
+        out = []
+        for i in range(n):
+            p, g = frames[i], resize(shot[min(i, len(shot) - 1)], w, h)
+            m = resize(matte[min(i, len(matte) - 1)][..., 0], w, h)[..., None] if matte is not None else np.ones((h, w, 1), np.float32)
+            out.append(g * m + p * (1 - m))
+        o[outs["review"]] = {"images": [save_mp4(out, v["review_prefix"], spec["fps"])], "animated": [True]}
+        if "frames" in outs:
+            sub, _, stem = v["frames_prefix"].rpartition("/")
+            os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
+            names = [f"{stem}_{i + 1:05d}_.exr" for i in range(n)]
+            plateio.write_exrs(lambda i: out[i], [os.path.join(folder("output"), sub, f) for f in names])
+            o[outs["frames"]] = {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
     elif "frames" in outs and "video" in outs:  # shot: the edited first frame pasted on every frame
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         w, h = v["width"], v["height"]
@@ -276,9 +301,8 @@ async def execute(pid, prompt):
                 for i in range(n):
                     save_png(resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w)),
                              "output", v["matte_prefix"], i)
-            o[outs["export"]] = {"text": [f"1 file(s) in {d}\nplate_00001_.mp4"]}
-            if "review" in outs:
-                o[outs["review"]] = {"images": [save_mp4(out, v.get("review_prefix", f"{v['prefix']}/review"), spec["fps"])], "animated": [True]}
+            o[outs["export"]] = {"text": [f"1 file(s) in {d}\nplate_00001_.webm"],
+                                 "files": [{"filename": "plate_00001_.webm", "subfolder": v["prefix"], "type": "output"}]}
     else:
         await steps(pid, 1, 0.2)
     return o
@@ -317,6 +341,8 @@ async def worker():
 async def prompt_route(request):
     body = await request.json()
     pid = str(uuid.uuid4())
+    if "plate" in outputs_of(body["prompt"]):
+        EVENTS.append(("prompt", time.time(), "fluid"))
     if body.get("front"):
         JOBS.insert(0, (pid, body["prompt"]))
     else:
@@ -359,7 +385,7 @@ async def interrupt_route(request):
     return web.json_response({})
 
 
-SPACES = ["sRGB", "HDR", "HDR ACEScct", "HDR LogC3", "HDR PQ", "linear", "linear ACEScg"]
+
 
 
 async def object_info_route(request):
@@ -371,9 +397,28 @@ async def object_info_route(request):
                 if isinstance(val, str) and val.endswith(".safetensors"):
                     models.setdefault(node["class_type"], {}).setdefault(k, []).append(val)
     required = {k: [opts] for k, opts in models.get(cls, {}).items()}
-    if cls == "ImageColorSpace":
-        required["source"] = ["COMBO", {"options": SPACES}]
+
     return web.json_response({cls: {"input": {"required": required}}})
+
+
+async def free_route(request):  # ComfyUI releases memory between prompts: here, one second after /free
+    EVENTS.append(("free", time.time()))
+    STATE["release_at"] = time.time() + 1.0
+    return web.json_response({})
+
+
+async def oom_route(request):  # mock only: the next `times` jobs of `workflow` run out of GPU memory
+    body = await request.json()
+    STATE["oom"][body["workflow"]] = body.get("times", 1)
+    STATE["armed"] = True
+    return web.json_response({})
+
+
+async def system_stats_route(request):  # once armed, the GPU's memory: nearly full until /free releases it
+    if STATE.get("armed"):
+        low = time.time() < STATE.get("release_at", float("inf"))
+        return web.json_response({"system": {}, "devices": [{"name": "mock", "vram_total": 96e9, "vram_free": 2e9 if low else 90e9}]})
+    return web.json_response({"system": {}})
 
 
 async def ws_route(request):
@@ -410,7 +455,10 @@ async def start():
     app.router.add_post("/queue", queue_route)
     app.router.add_post("/interrupt", interrupt_route)
     app.router.add_get("/object_info/{cls}", object_info_route)
-    app.router.add_get("/system_stats", lambda r: web.json_response({"system": {}}))
+    app.router.add_get("/system_stats", system_stats_route)
+    app.router.add_post("/free", free_route)
+    app.router.add_post("/mock/oom", oom_route)
+    app.router.add_get("/mock/events", lambda r: web.json_response(EVENTS))
     app.router.add_get("/ws", ws_route)
     app.router.add_routes(download_routes())
     app.router.add_static("/extensions/ainvfx-paintaplate/", os.path.join(REPO, "web"))

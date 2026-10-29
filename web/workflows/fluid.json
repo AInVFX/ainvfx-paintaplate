@@ -15,18 +15,20 @@
   }
  },
  "2": {
-  "class_type": "ImageColorSpace",
+  "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
     "1",
     0
    ],
-   "source": "sRGB",
-   "destination": "sRGB"
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "@model"
   },
   "_meta": {
-   "title": "Plate in sRGB",
+   "title": "Plate in the model space",
    "slots": {
+    "config": "config",
     "source": "color_space"
    }
   }

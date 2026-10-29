@@ -12,7 +12,8 @@ import json
 import os
 
 OUT = os.environ.get("PAINTAPLATE_WORKFLOWS_OUT") or os.path.join(os.path.dirname(__file__), "..", "web", "workflows")
-NAMES = ("ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "export", "warm", "fluid")
+NAMES = ("ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid")
+OCIO_CONFIG = "ocio://studio-config-latest"  # the page fills the config in use: $OCIO when it is set, as in RV
 
 KLEIN = "flux3-image-klein-int8-convrot.safetensors"
 LTX = "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
@@ -118,9 +119,10 @@ def load(name, folder=None):
 # Optional links: when every source slot is left empty, the link goes, with every node that fed it
 # (a relight alone: no matte to composite with or to save).
 # no words for an erase: no search by name; not a relight: no light transfer on the edited frame;
-# an erase matte: no plate under a shot to compare with, and no changed pixels to start from.
+# an erase matte: no plate under a shot to compare with, and no changed pixels to start from; a video plate's review:
+# no EXR frames, its movie is the plate's own quality.
 OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",),
-            "follow_element": ("seed",)}
+            "follow_element": ("seed",), "review_frames": ("frames_prefix",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -151,30 +153,41 @@ def fill(name, values, folder=None):
     return prompt
 
 
-def plate(g, pad, path="path", progress=False):
-    """The plate as display-referred sRGB frames: Load Plate, then core colour conversion.
+def colour(g, image, source, destination, title=None):
+    """Color Space (OCIO) in the config the page names (Slot config)."""
+    return g("PaintAPlate_ColorSpace", _title=title, image=image, config=Slot("config", OCIO_CONFIG), source=source,
+             destination=destination)
 
-    Every workflow converts the same whole plate: core tone-maps SDR output with one peak per
-    batch, so a different batch could change the exposure of an HDR plate between steps.
+
+def plate(g, pad, path="path", progress=False):
+    """The plate in the model space: Load Plate, then Color Space (OCIO) from the plate's file colour space to @model.
+
+    Every workflow converts the same whole plate: the tone mapping of values above 1.0 shares one peak per batch, as
+    core's did, so a different batch could change the exposure of an HDR plate between steps.
     """
     load = g("PaintAPlate_LoadPlate", _title="Plate", _progress=progress, path=Slot(path, ""),
              max_frames=Slot("max_frames", 121), pad_8n1=pad)
-    srgb = g("ImageColorSpace", _title="Plate in sRGB", image=load[0], source=Slot("color_space", "sRGB"),
-             destination="sRGB")
-    return load, srgb
+    return load, colour(g, load[0], Slot("color_space", "@model"), "@model", "Plate in the model space")
 
 
 def ingest():
-    """The first frame at working size, a playback proxy of the real frames, and the plate spec."""
+    """The first frame at working size in the model space, a playback proxy of the real frames, and the plate spec.
+
+    The proxy keeps a video plate's own values, which the viewer converts with OCIO as it does the plate (the page sets
+    `proxy_space` to the plate's colour space and `proxy_size` to the working size). An image sequence's proxy is in the
+    model space, at 960: the viewer reads its frames at full precision as they arrive.
+    """
     g = Graph()
-    load, srgb = plate(g, pad=True, progress=True)  # same inputs as every other Load Plate: decoded once, then cached
-    first = g("ImageFromBatch", image=srgb, batch_index=0, length=1)
+    load, model = plate(g, pad=True, progress=True)  # same inputs as every other Load Plate: decoded once, then cached
+    first = g("ImageFromBatch", image=model, batch_index=0, length=1)
     hero = g("ImageScaleToMaxDimension", image=first, upscale_method="lanczos", largest_size=1920)
     g("SaveImage", _title="First frame", _output="hero", images=hero,
       filename_prefix=Slot("prefix", "paintaplate/plate/hero"))
-    real = g("ImageFromBatch", _title="Real frames (no padding)", image=srgb, batch_index=0, length=load[4])
-    proxy = g("ImageScaleToMaxDimension", image=real, upscale_method="area", largest_size=Slot("proxy_size", 960))
-    g("PaintAPlate_SaveMovie", _title="Playback proxy", _output="proxy", filename_prefix=Slot("video_prefix", "paintaplate/plate/proxy"), images=proxy, fps=load[3])
+    real = g("ImageFromBatch", _title="Real frames (no padding)", image=load[0], batch_index=0, length=load[4])
+    shown = colour(g, real, Slot("color_space", "@model"), Slot("proxy_space", "@model"), "Proxy values")
+    proxy = g("ImageScaleToMaxDimension", image=shown, upscale_method="area", largest_size=Slot("proxy_size", 960))
+    g("PaintAPlate_SaveMovie", _title="Playback proxy", _output="proxy", filename_prefix=Slot("video_prefix", "paintaplate/plate/proxy"),
+      images=proxy, fps=load[3], crf=12)
     g("PreviewAny", _title="Plate spec", _output="spec", source=load[5])
     g.save("ingest")
 
@@ -228,14 +241,12 @@ def edit():
     # Join Image with Alpha stores 1 - mask as alpha: the inverted soft mask gives alpha = soft mask
     patch = g("JoinImageWithAlpha", image=filled, alpha=g("InvertMask", mask=soft))
     g("SaveImage", _title="Edit patch (RGBA)", _output="patch", images=patch, filename_prefix=Slot("prefix", EDIT_PREFIX))
-    # a relight: the frame as the export will make it, light from Klein, detail from the plate (dropped otherwise)
-    base_lin = g("ImageColorSpace", image=base, source="sRGB", destination="linear")
-    relit = g("PaintAPlate_RelightTransfer", plate=base_lin, source=half(g, base_lin),
-              relit=g("ImageColorSpace", image=half(g, result), source="sRGB", destination="linear"),
-              radius=8, strength=Slot("relight", 0.0), align=True)
+    # a relight: the frame as the export will make it, light from Klein, detail from the plate (dropped otherwise).
+    # Relight Transfer decodes the sRGB frames to linear light and encodes its result back itself
+    relit = g("PaintAPlate_RelightTransfer", plate=base, source=half(g, base), relit=half(g, result), radius=8,
+              strength=Slot("relight", 0.0), align=True, plate_space="sRGB", shot_space="sRGB")
     g.link_slot(relit, "plate", "relit_frame")
-    g("SaveImage", _title="Relit frame", _output="relit", images=g("ImageColorSpace", image=relit, source="linear", destination="sRGB"),
-      filename_prefix=Slot("prefix", EDIT_PREFIX))
+    g("SaveImage", _title="Relit frame", _output="relit", images=relit, filename_prefix=Slot("prefix", EDIT_PREFIX))
     g.save("edit")
 
 
@@ -292,8 +303,8 @@ def clean():
     working size, and `cleanup` the second.
     """
     g = Graph()
-    load, srgb = plate(g, pad=True)
-    frames = g("ImageScale", image=srgb, upscale_method="lanczos", width=Slot("width", 960), height=Slot("height", 544), crop="disabled")
+    load, model = plate(g, pad=True)
+    frames = g("ImageScale", image=model, upscale_method="lanczos", width=Slot("width", 960), height=Slot("height", 544), crop="disabled")
     size = g("GetImageSize", image=frames)
     matte = g("ImageScale", image=g("PaintAPlate_LoadPlate", _title="Erase matte", path=Slot("hole", ""), max_frames=1024, pad_8n1=False),
               upscale_method="area", width=size[0], height=size[1], crop="disabled")
@@ -335,8 +346,8 @@ def cleanup():
     181 s on a 1080p plate, this stage 82.8 s, 30.1 s of it saving the frames (28 Oct).
     """
     g = Graph()
-    load, srgb = plate(g, pad=True)
-    frames = g("ImageScale", _title="Plate at full size", image=srgb, upscale_method="bilinear", width=Slot("width", 1920),
+    load, model = plate(g, pad=True)
+    frames = g("ImageScale", _title="Plate at full size", image=model, upscale_method="bilinear", width=Slot("width", 1920),
                height=Slot("height", 1088), crop="disabled")
     size = g("GetImageSize", image=frames)
     matte = g("ImageScale", image=g("PaintAPlate_LoadPlate", _title="Erase matte", path=Slot("hole", ""), max_frames=1024, pad_8n1=False),
@@ -376,8 +387,8 @@ def shot():
     When an edit erases, the page gives this workflow the erase pass's result as its plate, so nothing is filled here.
     """
     g = Graph()
-    load, srgb = plate(g, pad=True)
-    scaled = g("ImageScale", image=srgb, upscale_method="lanczos", width=Slot("width", 960),
+    load, model = plate(g, pad=True)
+    scaled = g("ImageScale", image=model, upscale_method="lanczos", width=Slot("width", 960),
                height=Slot("height", 544), crop="disabled")
     size = g("GetImageSize", image=scaled)
     hero = g("ImageScale", image=g("LoadImage", _title="Edited first frame", image=Slot("hero", "")),
@@ -417,8 +428,8 @@ def matte():
     track safe: one matte per frame even when SAM returns none, the last matte where SAM loses the object, and for
     paint every pixel the shot changed near the matte, compared with the plate the shot was made over (`base`)."""
     g = Graph()
-    _, srgb = plate(g, pad=True)
-    frames = g("ImageScale", image=srgb, upscale_method="area", width=Slot("width", 960),
+    _, model = plate(g, pad=True)
+    frames = g("ImageScale", image=model, upscale_method="area", width=Slot("width", 960),
                height=Slot("height", 544), crop="disabled")
     sam = g("CheckpointLoaderSimple", ckpt_name=Slot("sam", SAM))
     first = g("LoadImageMask", _title="Area on the first frame", image=Slot("mask", ""), channel="red")
@@ -427,7 +438,7 @@ def matte():
     masks = g("SAM3_TrackToMask", track_data=track, object_indices="")
     under = g("PaintAPlate_LoadPlate", _title="Plate under the shot", path=Slot("base", ""), max_frames=Slot("max_frames", 121),
               pad_8n1=True)
-    under = g("ImageScale", image=g("ImageColorSpace", image=under, source=Slot("base_color_space", "sRGB"), destination="sRGB"),
+    under = g("ImageScale", image=colour(g, under, Slot("base_color_space", "@model"), "@model"),
               upscale_method="area", width=Slot("width", 960), height=Slot("height", 544), crop="disabled")
     element = g("LoadImageMask", _title="Where the edit changed the first frame", image=Slot("seed", ""), channel="red")
     follow = g("PaintAPlate_FollowMatte", masks=masks, first=first, frames=frames, base=under, element=element,
@@ -467,8 +478,8 @@ def half(g, image):
 def comp():
     """The composite at preview size, as an MP4 to play in the page: what the export will look like."""
     g = Graph()
-    load, srgb = plate(g, pad=True)
-    small = g("ImageScale", image=srgb, upscale_method="area", width=Slot("width", 960), height=Slot("height", 544),
+    load, model = plate(g, pad=True)
+    small = g("ImageScale", image=model, upscale_method="area", width=Slot("width", 960), height=Slot("height", 544),
               crop="disabled")
     gen = g("PaintAPlate_LoadPlate", _title="Generated shot", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
     union = mattes(g)
@@ -481,39 +492,54 @@ def comp():
     g.save("comp")
 
 
-def export():
-    """Full quality: the shot fitted onto the plate, relight optional, saved in the plate's format, plus its matte."""
-    g = Graph()
-    load = g("PaintAPlate_LoadPlate", _title="Plate", path=Slot("path", ""), max_frames=Slot("max_frames", 121),
-             pad_8n1=True)
+def composite(g):
+    """The full-size composite in the plate's own colour space, which review and export share: the shot fitted onto the
+    plate, relit when the light changed, and everywhere else the plate's own pixels."""
+    load, model = plate(g, pad=True)
     gen = g("PaintAPlate_LoadPlate", _title="Generated shot", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
     union = mattes(g)
-    gen_plate = g("ImageColorSpace", image=gen, source="sRGB", destination=Slot("color_space", "sRGB"))
-    # Relight: light from the regenerated shot, detail from the plate, all in linear light. The plate as the
-    # model saw it is the same sRGB conversion every other workflow makes, so ComfyUI has it cached.
+    gen_plate = colour(g, gen, "@model", Slot("color_space", "@model"), "Shot in the plate's colour space")
+    # Relight: the light from the regenerated shot, the detail from the plate, in linear light. The plate as the model saw
+    # it is the conversion every workflow makes, so ComfyUI has it cached.
     size = g("GetImageSize", image=gen)
-    source = g("ImageScale", image=g("ImageColorSpace", image=load, source=Slot("color_space", "sRGB"),
-                                     destination="sRGB"),
-               upscale_method="area", width=size[0], height=size[1], crop="disabled")
-    # The relight works in the plate's own encoding when that is sRGB or linear (relight_space, filled by the page): the
-    # two core conversions are then no-ops, and Relight Transfer decodes and encodes each frame in parallel. At full size
-    # core took 19.5 s for each of them on a 1080p shot (28 Oct). Any other colour space still goes through linear light.
-    relit = g("PaintAPlate_RelightTransfer",
-              plate=g("ImageColorSpace", image=load, source=Slot("color_space", "sRGB"), destination=Slot("relight_space", "linear")),
-              source=half(g, source), relit=half(g, gen), plate_space=Slot("relight_space", "linear"), shot_space="sRGB",
+    source = g("ImageScale", image=model, upscale_method="area", width=size[0], height=size[1], crop="disabled")
+    relit = g("PaintAPlate_RelightTransfer", plate=colour(g, load[0], Slot("color_space", "@model"), "@linear"),
+              source=half(g, source), relit=half(g, gen), plate_space="linear", shot_space="sRGB",
               radius=Slot("radius", 8), strength=Slot("strength", 1.0), align=True)
-    back = g("ImageColorSpace", image=relit, source=Slot("relight_space", "linear"), destination=Slot("color_space", "sRGB"))
-    base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=load, on_true=back)
+    back = colour(g, relit, "@linear", Slot("color_space", "@model"))
+    base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=load[0], on_true=back)
     # the new pixels are matched to the plate they are composited onto: relit when the light changed
     fit, final = fitted(g, base, gen_plate, union)
+    return load, fit, final
+
+
+def review():
+    """What the viewer plays once the shot is made, at the plate's quality: the full-size composite as a movie (a video
+    plate's own values, an image sequence in the model space) and, for an image sequence, as half-float EXR frames in the
+    plate's own colour space, which the viewer reads at full precision. It runs right after the full-size passes;
+    nothing here is written for compositing software (that is export, when Export is pressed)."""
+    g = Graph()
+    load, _, final = composite(g)
+    real = g("ImageFromBatch", image=final, batch_index=0, length=load[4])
+    movie = g("ImageScaleToMaxDimension", upscale_method="lanczos", largest_size=1920,
+              image=colour(g, real, Slot("color_space", "@model"), Slot("movie_space", "@model"), "Movie values"))
+    g("PaintAPlate_SaveMovie", _title="Review movie (full quality, H.264)", _output="review", images=movie, fps=load[3], crf=12,
+      filename_prefix=Slot("review_prefix", "paintaplate/plate/review"))
+    frames = g("PaintAPlate_SaveFrames", _title="Review frames (half-float EXR, image sequences only)", _output="frames",
+               images=real, format="exr", filename_prefix=Slot("frames_prefix", ""))
+    g.link_slot(frames, "images", "review_frames")  # dropped for a video plate
+    g.save("review")
+
+
+def export():
+    """For compositing software, when Export is pressed: the composite the review shows, written by Save Plate in the
+    plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers, the untouched
+    pixels exactly the source's), with the matte of where the plate changed."""
+    g = Graph()
+    load, fit, final = composite(g)
     g("PaintAPlate_SavePlate", _title="Export", _output="export", images=final, plate=load[2],
       filename_prefix=Slot("prefix", "paintaplate/plate/export"), keep_untouched=Slot("keep_untouched", True),
       changed=fit[1])
-    review = g("ImageScaleToMaxDimension", upscale_method="lanczos", largest_size=1920,
-               image=g("ImageFromBatch", batch_index=0, length=load[4],
-                       image=g("ImageColorSpace", image=final, source=Slot("color_space", "sRGB"), destination="sRGB")))
-    g("PaintAPlate_SaveMovie", _title="Review movie (full size, H.264)", _output="review", images=review, fps=load[3],
-      filename_prefix=Slot("review_prefix", "paintaplate/plate/review"))
     matte_frames = g("ImageFromBatch", image=g("MaskToImage", mask=fit[1]), batch_index=0, length=load[4])
     g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed", _output="matte", images=matte_frames,
       filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))
@@ -549,8 +575,8 @@ def fluid():
     (ProRes 4444), so it opens as the next plate.
     """
     g = Graph()
-    load, srgb = plate(g, pad=True)
-    size = g("GetImageSize", image=srgb)
+    load, model = plate(g, pad=True)
+    size = g("GetImageSize", image=model)
     control = g("PaintAPlate_KeyframeVideo", _title="Control video: the keyframes on black", width=size[0], height=size[1],
                 frames=size[2], keys=Slot("keys", "[]"))
     lora = g("LTXICLoRALoaderModelOnly", _title="ainvfx-fluid IC-LoRA (reads its downscale factor)",
@@ -582,6 +608,6 @@ def fluid():
 
 
 if __name__ == "__main__":
-    for build in (ingest, prompt, edit, snap, clean, cleanup, shot, matte, comp, export, warm, fluid):
+    for build in (ingest, prompt, edit, snap, clean, cleanup, shot, matte, comp, review, export, warm, fluid):
         build()
     print("wrote", sorted(os.listdir(OUT)))
