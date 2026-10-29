@@ -80,7 +80,6 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .sw.pick[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent, #f5a623); }
 #view.panning { cursor: grabbing; }
 #view.painting.scrub { cursor: ew-resize; }
-.defs { position: absolute; width: 0; height: 0; overflow: hidden; }
 .display-state { padding: 3px 9px; font-size: 12px; color: #141414; background: var(--gold); border-color: var(--gold); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .display-state::after { content: " ×"; }
 .ctx, .ctx .sub { position: fixed; z-index: 50; list-style: none; margin: 0; padding: 4px; min-width: 140px; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: 0 10px 28px #000b; }

@@ -1,5 +1,7 @@
 # AInVFX PaintAPlate
 
+**AInVFX's entry in Comfy's Open Source Higgsfield contest** (October 2026). #OpenSourceHiggsfield
+
 Paint on the first frame of a shot to erase, add or relight. The edit appears on that frame in seconds, then carries through the whole shot. You review the result at the plate's own quality, an EXR against its EXR, through OpenColorIO as in OpenRV. Export then writes it in the plate's own format: same file type, bit depth, frame numbers, colour tags, timecode, audio and EXR layers, with every untouched pixel identical to the plate.
 
 PaintAPlate is a ComfyUI node pack with its own page. Every step is a ComfyUI workflow from `web/workflows`, open weights only:
@@ -11,10 +13,35 @@ PaintAPlate is a ComfyUI node pack with its own page. Every step is a ComfyUI wo
 
 It was tested on an RTX PRO 6000 (96 GB). Smaller cards have not been tested.
 
-## Run it on Runpod
+On Hugging Face: the 23 test plates, [AInVFX/ainvfx-paintaplate](https://huggingface.co/datasets/AInVFX/ainvfx-paintaplate) (synthetic, CC BY 4.0); the IC-LoRA [AInVFX/ainvfx-fluid](https://huggingface.co/AInVFX/ainvfx-fluid) and its synthetic training data, [AInVFX/ainvfx-fluid](https://huggingface.co/datasets/AInVFX/ainvfx-fluid) (dataset).
 
-1. Accept the licences of the gated models on Hugging Face: [FLUX 3 Image Klein](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy), [LTX 2.5](https://huggingface.co/Lightricks/LTX-2.5) and the [in-outpainting IC-LoRA](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting). Create a read token.
-2. Start a pod with an RTX PRO 6000, the image `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`, a host with CUDA 13.0 or newer, 150 GB of disk, ports 8188 and 8888, and your token in an `HF_TOKEN` environment variable. Prefer a European data centre.
+## Install it
+
+The steps are the same on Windows, macOS and Linux. PaintAPlate needs ComfyUI v0.43.0 or newer and [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo), and its models need a large NVIDIA GPU: on a Mac or a smaller card, run it on Runpod (option 3).
+
+### 1. With ComfyUI Manager (recommended)
+
+1. In ComfyUI, open **Manager > Custom Nodes Manager**, search for **PaintAPlate** and install **AInVFX PaintAPlate** ([its Registry page](https://registry.comfy.org/nodes/ainvfx-paintaplate)). Install **ComfyUI-LTXVideo** the same way, then restart ComfyUI. The Manager installs the pack's Python packages, OpenEXR and OpenColorIO, which have wheels for all three systems. With comfy-cli: `comfy node install ainvfx-paintaplate`.
+2. Download the models, about 60 GB (next section).
+3. Start ComfyUI, then open **Extensions > Open PaintAPlate**, or `http://127.0.0.1:8188/extensions/ainvfx-paintaplate/paintaplate.html`.
+
+### 2. By hand, with git
+
+In a terminal (PowerShell on Windows), from your ComfyUI folder, with the Python that runs ComfyUI:
+
+```sh
+cd custom_nodes
+git clone https://github.com/AInVFX/ainvfx-paintaplate
+git clone https://github.com/Lightricks/ComfyUI-LTXVideo
+python -m pip install -r ainvfx-paintaplate/requirements.txt -r ComfyUI-LTXVideo/requirements.txt
+```
+
+Then download the models and open the page, as in steps 2 and 3 above. ComfyUI-LTXVideo was tested at `220e1d4`.
+
+### 3. On Runpod
+
+1. Accept the licences of the gated models (next section) and create a Hugging Face read token.
+2. Start a pod with an RTX PRO 6000, the image `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`, a host with CUDA 13.0 or newer, a 150 GB container disk, ports 8188 and 8888, and your token in an `HF_TOKEN` environment variable. Prefer a European data centre.
 3. In the pod's JupyterLab terminal:
 
    ```sh
@@ -22,16 +49,21 @@ It was tested on an RTX PRO 6000 (96 GB). Smaller cards have not been tested.
    PLATES=1 bash /workspace/ainvfx-paintaplate/tools/runpod_start.sh
    ```
 
-   The script installs the tested ComfyUI and ComfyUI-LTXVideo, links this pack, downloads 60 GB of models and starts ComfyUI. `PLATES=1` adds the 23 test plates of the dataset [AInVFX/ainvfx-paintaplate](https://huggingface.co/datasets/AInVFX/ainvfx-paintaplate) to `input/plates`; `FLUID=0` skips ainvfx-fluid. The script prints each step, then the page's address: `https://<pod id>-8188.proxy.runpod.net/extensions/ainvfx-paintaplate/paintaplate.html`.
+   The script installs the tested ComfyUI and ComfyUI-LTXVideo, links this pack, downloads the models and starts ComfyUI, in about 3 minutes. `PLATES=1` adds the test plates to `input/plates`; `FLUID=0` skips ainvfx-fluid. It prints each step, then the page's address: `https://<pod id>-8188.proxy.runpod.net/extensions/ainvfx-paintaplate/paintaplate.html`.
 
 After `git pull`, `bash tools/runpod_start.sh --restart` loads the new code. `tools/offline_bundle.sh` prepares a pod that cannot reach GitHub. Port 8188 has no password: anyone with the pod's address can use it.
 
-## Run it on your own machine
+## The models
 
-1. Install ComfyUI v0.43.0 or newer, and [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo) (tested at `220e1d4`).
-2. Clone this repository into `ComfyUI/custom_nodes/` and install its requirements, OpenEXR and OpenColorIO: `pip install -r requirements.txt`.
-3. Download the models below into `ComfyUI/models/`. `tools/pod_setup.sh` does it with your token, at the tested revisions.
-4. Start ComfyUI, then open **Extensions > Open PaintAPlate**, or `http://127.0.0.1:8188/extensions/ainvfx-paintaplate/paintaplate.html`.
+First accept the licences of [FLUX 3 Image Klein](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy), [LTX 2.5](https://huggingface.co/Lightricks/LTX-2.5) and the [in-outpainting IC-LoRA](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting) on Hugging Face, and create a read token. Then set the token and run `get_models.py` with the Python that runs ComfyUI, from your ComfyUI folder:
+
+| Your setup | Set the token | Run |
+| --- | --- | --- |
+| Windows, portable ComfyUI (from the folder that holds `python_embeded`) | `$env:HF_TOKEN = "hf_..."` | `python_embeded\python.exe ComfyUI\custom_nodes\ainvfx-paintaplate\get_models.py` |
+| Comfy Desktop, Windows or macOS (its terminal panel, in the ComfyUI base folder) | `$env:HF_TOKEN = "hf_..."` on Windows, `export HF_TOKEN=hf_...` on macOS | `python custom_nodes/ainvfx-paintaplate/get_models.py` |
+| Linux or macOS, ComfyUI installed by hand (its virtual environment active) | `export HF_TOKEN=hf_...` | `python custom_nodes/ainvfx-paintaplate/get_models.py` |
+
+The script finds the models folder of the ComfyUI it is installed in; name another one as its argument (`get_models.py path/to/models`) if your models live elsewhere. It downloads every file at the tested revision into its folder, skips files already there, and says which file failed and why (a licence not accepted, a missing token); run it again to finish. `--no-fluid` skips ainvfx-fluid and `--list` prints the list without downloading. The same files, to download by hand if you prefer:
 
 | File | Folder under `models/` | Size | Repository (tested revision) |
 | --- | --- | --- | --- |

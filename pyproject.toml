@@ -1,6 +1,6 @@
 [project]
 name = "ainvfx-paintaplate"
-version = "0.5.0"
+version = "0.5.1"
 description = "Paint on the first frame of a plate to erase, add or relight, watch the edit carry through the shot, and export it in the plate's own format, layers and untouched pixels."
 license = { file = "LICENSE" }
 requires-python = ">=3.10"

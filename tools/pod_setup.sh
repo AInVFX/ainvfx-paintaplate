@@ -2,7 +2,8 @@
 # Standalone setup of a PaintAPlate GPU machine (tested on a Runpod RTX PRO 6000).
 #   HF_TOKEN=... [PLATES=1] bash tools/pod_setup.sh [comfyui_ref] [ltxvideo_ref]
 # PLATES=1 also downloads the AInVFX test plates into ComfyUI's input/plates folder (tools/get_plates.sh);
-# FLUID=0 skips AInVFX's ainvfx-fluid IC-LoRA (0.65 GB), which the blank plate's fluid shots need.
+# FLUID=0 skips AInVFX's ainvfx-fluid IC-LoRA (0.65 GB), which the blank plate's fluid shots need. The models and their
+# revisions are in get_models.py, at the root of the pack.
 # The refs default to the tested commits, in tools/pins.sh. The pack is the repo this script lives in.
 # Code, models and pins live in $WORKDIR (a network volume survives the pod); the Python env
 # goes on the fast container disk. Accept the Hugging Face licences of FLUX 3 Image Klein,
@@ -36,41 +37,10 @@ pip install -q -U pip uv huggingface_hub hf_transfer
 
 log "models (in the background)"
 M=$W/models; mkdir -p "$M"
-rev() { # the tested revision of each model repository (checked 27 Oct 2026)
-  case "$1" in
-    black-forest-labs/flux-3-image-klein-comfy) echo feef60b0aaf63a4773ace96636ebbcf43b881312 ;;
-    Lightricks/LTX-2.5) echo 49b093a39c19169a8a81721dcc541e07e945232f ;;
-    Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting) echo 8becd61405133263d9e580be41a92e8f827b01ed ;;
-    WepeNerd/LTX-Ripple) echo 76abac5ede8a3415b9d1cd803843a38ecb351600 ;;
-    Comfy-Org/sam3.1) echo 7bb8374780a725b4353ed31f3a9395c9742b5621 ;;
-    Kijai/LTX2.3_comfy) echo 6d980fde0d330f2fed6ff8dfdfddb06d88a004e5 ;;
-    AInVFX/ainvfx-fluid) echo fd4855a18d879c551bf4c5f49b1a877874437cb6 ;;
-  esac
-}
-get() { # repo, file in repo, target folder
-  [ -s "$M/$3/$(basename "$2")" ] && return
-  HF_HUB_ENABLE_HF_TRANSFER=1 hf download "$1" "$2" --revision "$(rev "$1")" --local-dir "$M/.dl/$3" >/dev/null &&
-    mkdir -p "$M/$3" && mv "$M/.dl/$3/$2" "$M/$3/"
-}
-( get black-forest-labs/flux-3-image-klein-comfy diffusion_models/flux3-image-klein-int8-convrot.safetensors diffusion_models &
-  if [ "${WITH_NVFP4:-0}" = 1 ]; then  # only tests/gpu_bench.py compares it
-    get black-forest-labs/flux-3-image-klein-comfy diffusion_models/flux3-image-klein-nvfp4.safetensors diffusion_models &
-  fi
-  get black-forest-labs/flux-3-image-klein-comfy text_encoders/qwen3vl_4b_int8_convrot.safetensors text_encoders &
-  get black-forest-labs/flux-3-image-klein-comfy text_encoders/qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors text_encoders &
-  get black-forest-labs/flux-3-image-klein-comfy vae/flux2-vae.safetensors vae &
-  get Lightricks/LTX-2.5 diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors diffusion_models &
-  get Lightricks/LTX-2.5 text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors text_encoders &
-  get Lightricks/LTX-2.5 vae/ltx-2.5-video-vae-conv-bf16.safetensors vae &
-  get Lightricks/LTX-2.5 vae/ltx-2.5-audio-vae-bf16.safetensors vae &
-  get WepeNerd/LTX-Ripple LTX25_Ripple_v11.safetensors loras &
-  get Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors loras &
-  get Comfy-Org/sam3.1 checkpoints/sam3.1_multiplex_fp16.safetensors checkpoints &
-  get Kijai/LTX2.3_comfy vae/taeltx2_3.safetensors vae_approx &  # the live preview's tiny decoder (MIT, madebyollin/taehv)
-  if [ "${FLUID:-1}" != 0 ]; then  # AInVFX's IC-LoRA for fluid shots from a blank plate (LTX-2.x Community License)
-    get AInVFX/ainvfx-fluid ltx-2.5/ainvfx-fluid.safetensors loras &
-  fi
-  wait; log "models done" ) > "$W/models.log" 2>&1 &
+# get_models.py, at the root of the pack, holds every model file and its tested revision: FLUID=0 skips ainvfx-fluid,
+# WITH_NVFP4=1 adds FLUX 3 Image Klein's nvfp4 file (only tests/gpu_bench.py compares it)
+flags=(); [ "${FLUID:-1}" = 0 ] && flags+=(--no-fluid); [ "${WITH_NVFP4:-0}" = 1 ] && flags+=(--nvfp4)
+( HF_HUB_ENABLE_HF_TRANSFER=1 python "$PACK/get_models.py" "$M" ${flags[@]+"${flags[@]}"}; log "models done" ) > "$W/models.log" 2>&1 &
 
 log "ComfyUI $COMFY_REF"
 [ -d "$W/ComfyUI" ] || clone https://github.com/comfyanonymous/ComfyUI "$W/ComfyUI"

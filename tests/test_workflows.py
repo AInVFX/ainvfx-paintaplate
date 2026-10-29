@@ -57,11 +57,12 @@ class Workflows(unittest.TestCase):
             self.assertEqual(set(build_workflows.load(name, WORKFLOWS)[2]), keys, name)
 
     def test_setup_downloads_every_model_file(self):
-        """tools/pod_setup.sh downloads every model file a workflow loads: the two lists never drift apart."""
-        import glob, json, re
-        with open(os.path.join(ROOT, "tools", "pod_setup.sh"), encoding="utf-8") as fh:
-            setup = fh.read()
-        fetched = {os.path.basename(f) for f in re.findall(r"\bget \S+ (\S+\.safetensors) \S+", setup)}
+        """get_models.py downloads every model file a workflow loads, at a pinned revision, and the pod setup runs it."""
+        import glob, json
+        sys.path.insert(0, ROOT)
+        import get_models
+        fetched = {os.path.basename(path) for _, path, _ in get_models.MODELS}
+        self.assertTrue(all(repo in get_models.REVISIONS and len(get_models.REVISIONS[repo]) == 40 for repo, _, _ in get_models.MODELS))
         def nodes(path):
             with open(path, encoding="utf-8") as fh:
                 return json.load(fh).values()
@@ -69,6 +70,8 @@ class Workflows(unittest.TestCase):
                   for v in n["inputs"].values() if isinstance(v, str) and v.endswith(".safetensors")}
         self.assertTrue(loaded)
         self.assertEqual(loaded - fetched, set())
+        with open(os.path.join(ROOT, "tools", "pod_setup.sh"), encoding="utf-8") as fh:
+            self.assertIn('"$PACK/get_models.py" "$M"', fh.read())
 
     @unittest.skipUnless(COMFY and os.path.isdir(LTX), "set COMFYUI_DIR (and LTXVIDEO_DIR) to check against source")
     def test_classes_and_inputs_exist_in_source(self):

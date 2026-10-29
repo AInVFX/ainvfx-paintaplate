@@ -95,7 +95,7 @@ These rules keep the code small and easy to change. Follow them in every change.
 8. **One colour space per plate.** The plate's file colour space is a name in the OCIO config. The viewer converts from it, the workflows convert from it to the model space, and the export converts the edited pixels back to it. Changing it makes the first frame and the edits again in it; the job index keeps the earlier results, so switching back takes them at once.
 9. **Previews may trade quality for speed. The review matches the plate, and the export never trades.** The review of a video plate is a movie of its own values at the working size; the review of an image sequence is also its half-float EXR frames, which the viewer compares with the plate's own frames at full precision.
 10. **Paths stay inside ComfyUI.** Every path from the page resolves under ComfyUI's input or output folder (`folders.plate_path`), symbolic links are refused, and absolute paths need `PAINTAPLATE_ALLOW_ABSOLUTE=1`.
-11. **One home per value.** Sizes, delays and budgets: the tuning block at the top of `app.mjs`. Model files: the constants at the top of `build_workflows.py`. Tested ComfyUI and ComfyUI-LTXVideo commits: `tools/pins.sh`. Model revisions: `rev()` in `tools/pod_setup.sh`.
+11. **One home per value.** Sizes, delays and budgets: the tuning block at the top of `app.mjs`. Model files: the constants at the top of `build_workflows.py`. Tested ComfyUI and ComfyUI-LTXVideo commits: `tools/pins.sh`. Model files and revisions: `get_models.py`.
 12. **A log line for every wait.** Each step a person waits for writes one line in the page's log: what runs, with which values, and how long it took.
 
 ## 5. The life of an edit
@@ -167,6 +167,7 @@ Open plate has one tab per source: **ComfyUI files**, **Upload**, **Scenes** and
 | `routes.py` | The routes: the plate browser and its thumbnails, a plate's size, time, spec and colour space (`stat`), the frames of an image sequence as RGB half floats (`frames`), the blank plate, the job index (`jobs`), scenes, OCIO and its shaders, and the zip download. |
 | `pyproject.toml` | Package and Registry metadata: the version, `PublisherId` `ainvfx`, `requires-comfyui`. |
 | `requirements.txt` | The runtime packages beyond ComfyUI's own: OpenEXR and OpenColorIO. |
+| `get_models.py` | Every model file the workflows load, with its repository, its tested revision and its folder, downloaded with ComfyUI's own Python on Windows, macOS or Linux. The pod setup runs it. |
 
 Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), `.gitignore` (the test plates included: they live on Hugging Face) and `.comfyignore` (what the Registry package leaves out). `.github/workflows/tests.yml` runs three jobs side by side on every push: the unit tests, the page against the mock ComfyUI, and a CPU ComfyUI with a headless browser. `.github/workflows/publish.yml` publishes to the Comfy Registry when run by hand, with its action pinned to a commit.
 
@@ -230,7 +231,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | `placeholders.py` | Empty model files, so a CPU ComfyUI validates the workflows in CI. |
 | `pins.sh` | The tested ComfyUI and ComfyUI-LTXVideo commits, read by the three scripts below. |
 | `ci_comfyui.sh` | Builds the CPU ComfyUI of the live tests, at the pins. |
-| `pod_setup.sh` | GPU machine setup: PyTorch for CUDA 13.0, the pinned ComfyUI and ComfyUI-LTXVideo, the pack's requirements, every model at a pinned revision. `FLUID=0` skips ainvfx-fluid; `PLATES=1` adds the test plates. |
+| `pod_setup.sh` | GPU machine setup: PyTorch for CUDA 13.0, the pinned ComfyUI and ComfyUI-LTXVideo, the pack's requirements, and the models through `get_models.py`. `FLUID=0` skips ainvfx-fluid; `PLATES=1` adds the test plates. |
 | `runpod_start.sh` | One command on a Runpod pod: the setup with its progress, then ComfyUI on port 8188 (`--highvram` from 80 GB of VRAM), and the app's address. `--restart` after an update. |
 | `get_plates.sh` | The test plates, from the Hugging Face dataset `AInVFX/ainvfx-paintaplate` into `input/plates`. |
 | `plates_to_hf.py` | Publishes plates: re-muxed with the ComfyUI metadata replaced, a card, one upload. |
@@ -276,7 +277,7 @@ At load, `boot()` loads the OCIO config, then checks that every node class and m
 | To change | Edit | Then |
 | --- | --- | --- |
 | A workflow | `tools/build_workflows.py` | Run it, and commit the JSON with it |
-| A model file | Its constant at the top of `build_workflows.py`, plus its `get` line and `rev()` in `tools/pod_setup.sh` | Regenerate; `test_workflows` checks that the setup downloads every file the workflows load |
+| A model file | Its constant at the top of `build_workflows.py`, plus its line in `MODELS` and its revision in `get_models.py` | Regenerate; `test_workflows` checks that `get_models.py` downloads every file the workflows load |
 | A size, delay or budget | The tuning block of `app.mjs` | |
 | A rule of the page | `logic.mjs`, with its test in `tests/js/logic.test.mjs` | `node --test tests/js/*.test.mjs` |
 | What the page does | `app.mjs`, with a check in `tests/ui_mock.py` | `python tests/ui_mock.py` |
@@ -292,7 +293,7 @@ Before and after any change: `python -m unittest discover -s tests -v` and `node
 ## 13. Pins and versions
 
 - **ComfyUI v0.43.0** (`426f5eea`) and **ComfyUI-LTXVideo** `220e1d4`, in `tools/pins.sh`. `requires-comfyui` is `>=0.43.0`: the first release that contains what the pack was tested on.
-- **Models** at pinned Hugging Face revisions (`rev()` in `tools/pod_setup.sh`), about 60 GB in all. ainvfx-fluid (0.65 GB, revision `fd4855a`, trained on synthetic data) is optional.
+- **Models** at pinned Hugging Face revisions (`get_models.py`), about 60 GB in all. ainvfx-fluid (0.65 GB, revision `fd4855a`, trained on synthetic data) is optional.
 - **OpenColorIO** 2.4 or newer (`requirements.txt`); 2.6.0 was tested, with its built-in configs.
 - **The Registry publish** runs by hand (Actions > Publish to Comfy Registry), with `Comfy-Org/publish-node-action` pinned to a commit.
 
