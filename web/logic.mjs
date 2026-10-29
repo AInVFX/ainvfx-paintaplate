@@ -352,6 +352,13 @@ export const PARAMS = { // the interactive edits: label, step for - and = and th
 };
 export const CHANNEL_NAMES = { rgb: "All channels", r: "Red", g: "Green", b: "Blue", l: "Luminance" };
 export const clampParam = (name, v) => +Math.min(PARAMS[name].max, Math.max(PARAMS[name].min, v)).toFixed(3);
+// The colour picker (I): the average of the pixels under the cursor as #rrggbb, for the brush. `data` holds RGBA bytes,
+// as getImageData returns them; transparent pixels, outside the frame, do not count.
+export function pickedColor(data) {
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < data.length; i += 4) if (data[i + 3] > 0) { r += data[i]; g += data[i + 1]; b += data[i + 2]; n++; }
+  return n ? `#${[r, g, b].map((v) => Math.round(v / n).toString(16).padStart(2, "0")).join("")}` : null;
+}
 export const displayActive = (d) => Object.keys(DISPLAY).some((k) => d[k] !== DISPLAY[k]);
 
 export function formatParam(name, v) {
@@ -379,7 +386,8 @@ const LUMA = [0.2126, 0.7152, 0.0722];
 const PICK = { r: [1, 0, 0], g: [0, 1, 0], b: [0, 0, 1], l: LUMA };
 const times = (A, B) => A.map((row) => B[0].map((_, j) => row.reduce((a, v, k) => a + v * B[k][j], 0)));
 
-export function displayMatrix({ saturation = 1, hue = 0, channel = "rgb", invert = false }) { // the 20 values of a feColorMatrix
+export function displayUniforms(d) { // the shader's values (display.mjs): exposure and contrast, a 3 x 3 matrix and its offset, gamma
+  const { saturation = 1, hue = 0, channel = "rgb", invert = false } = d;
   const s = saturation, t = (hue * Math.PI) / 180, c = Math.cos(t), n = Math.sin(t);
   const sat = [0, 1, 2].map((i) => [0, 1, 2].map((j) => LUMA[j] * (1 - s) + (i === j ? s : 0)));
   const rot = [[0.213 + c * 0.787 - n * 0.213, 0.715 - c * 0.715 - n * 0.715, 0.072 - c * 0.072 + n * 0.928], // SVG's hueRotate
@@ -388,7 +396,7 @@ export function displayMatrix({ saturation = 1, hue = 0, channel = "rgb", invert
   let m = times(sat, rot);
   if (PICK[channel]) m = Array(3).fill(times([PICK[channel]], m)[0]);
   const sign = invert ? -1 : 1;
-  return [...m.flatMap((row) => [...row.map((v) => +(sign * v).toFixed(5) + 0), 0, invert ? 1 : 0]), 0, 0, 0, 1, 0].join(" ");
+  return { ...displayTransfer(d), matrix: m.map((row) => row.map((v) => +(sign * v).toFixed(5) + 0)), offset: [0, 1, 2].map(() => (invert ? 1 : 0)) };
 }
 
 // ---------- A fluid shot on a blank plate: AInVFX's ainvfx-fluid IC-LoRA (its model card, read 28 Oct 2026) ----------

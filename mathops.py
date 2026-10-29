@@ -394,23 +394,44 @@ def guided_filter(guide: np.ndarray, src: np.ndarray, r: int, eps: float) -> np.
 
 # Light may change by 4 stops down and 3 up: night needs about that. At 0.25 (2 stops) a night relight stayed in dusk.
 RATIO_RANGE = (1.0 / 16.0, 8.0)
+# A channel holding a small share of the luma (the blue of grass, of a red roof) is too dark to divide by on its own: below
+# this share of the luma, its ratio leans on the luma's. Divided alone, the blue of the mossy cliff in the lighthouse plate
+# swung between the limits of RATIO_RANGE from frame to frame, and drew saturated, flickering specks (28 Oct 2026).
+CHANNEL_FLOOR = 0.1
+# The colour of the new light changes slowly across the frame; its brightness may have sharp edges (new shadows). The colour
+# is smoothed over this many radii, so the regenerated shot's colour noise never reaches single pixels of the plate.
+TINT_SPREAD = 4.0
+
+
+def light_ratio(source: np.ndarray, relit: np.ndarray, radius: int) -> np.ndarray:
+    """The change of light from `source` to `relit` (H, W, 3), both linear light at the same size.
+
+    Brightness: the ratio of the two lumas, smoothed by an edge-aware filter that follows `source`, so a new shadow keeps
+    its edge. Colour: each channel's ratio over that brightness, with every channel floored at CHANNEL_FLOOR of the luma
+    and smoothed over TINT_SPREAD radii, so a dark channel cannot swing the colour of a pixel.
+    """
+    guide = np.log(luma(source).clip(0) + 1e-3)
+    eps = 1e-2 * max(guide.var(), 1e-6)  # smooth enough that fine detail never enters the ratio
+    lit = guided_filter(guide, relit[..., :3].clip(0), radius, eps).clip(0)
+    was = guided_filter(guide, source[..., :3].clip(0), radius, eps).clip(0)
+    y_lit, y_was = luma(lit)[..., None], luma(was)[..., None]
+    bright = (y_lit + 1e-3) / (y_was + 1e-3)
+    tint = np.log((lit + CHANNEL_FLOOR * y_lit + 1e-3) / (was + CHANNEL_FLOOR * y_was + 1e-3) / bright)
+    f = max(1, round(TINT_SPREAD * radius / 4))  # the colour is smooth: blur it at a fraction of the size
+    sigma = TINT_SPREAD * radius / f
+    tint = resize_to(ndimage.gaussian_filter(shrink(tint, f), (sigma, sigma, 0), mode="nearest"), *tint.shape[:2])
+    ratio = ndimage.median_filter(bright * np.exp(tint), size=(3, 3, 1))  # isolated specks at sharp edges go
+    return ndimage.gaussian_filter(np.clip(ratio, *RATIO_RANGE), (1.0, 1.0, 0)).astype(np.float32)
 
 
 def relight(plate: np.ndarray, source: np.ndarray, relit: np.ndarray,
             radius: int, strength: float = 1.0) -> np.ndarray:
     """Move the light of `relit` onto `plate`, keeping the plate's own detail.
 
-    All three images are linear light. `source` and `relit` share the working
-    size; `plate` can be larger. The change of light is the ratio relit/source,
-    smoothed with an edge-aware filter; the plate is multiplied by it, so its
-    texture, grain and values above 1.0 stay its own.
+    All three images are linear light. `source` and `relit` share the working size; `plate` can be larger. The change
+    of light (`light_ratio`) multiplies the plate, so its texture, grain and values above 1.0 stay its own.
     """
-    guide = np.log(luma(source).clip(0) + 1e-3)
-    eps = 1e-2 * max(guide.var(), 1e-6)  # smooth enough that fine detail never enters the ratio
-    ratio = (guided_filter(guide, relit[..., :3].clip(0), radius, eps) + 1e-3) / \
-            (guided_filter(guide, source[..., :3].clip(0), radius, eps) + 1e-3)
-    ratio = ndimage.median_filter(ratio, size=(3, 3, 1))  # isolated specks at sharp edges go
-    ratio = ndimage.gaussian_filter(np.clip(ratio, *RATIO_RANGE), (1.0, 1.0, 0)) ** strength
+    ratio = light_ratio(source, relit, radius) ** strength
     if ratio.shape[:2] != plate.shape[:2]:
         ratio = resize_to(ratio, plate.shape[0], plate.shape[1])
     out = plate.copy()

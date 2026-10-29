@@ -1,6 +1,6 @@
 # AInVFX PaintAPlate: architecture
 
-This document explains what PaintAPlate does, how it is built and where each part lives, for anyone who maintains the code. It describes version 0.4.10. `TESTING.md` covers the tests.
+This document explains what PaintAPlate does, how it is built and where each part lives, for anyone who maintains the code. It describes version 0.4.11. `TESTING.md` covers the tests.
 
 ## 1. What PaintAPlate does
 
@@ -46,14 +46,16 @@ BROWSER   web/paintaplate.html, served by ComfyUI at /extensions/ainvfx-paintapl
   app.mjs ........ state, interface, edits and the render pipeline (the largest file, about 2,100 lines)
   logic.mjs ...... pure rules: workflows as data, sizes, captions, dependencies, colour, keyframes, edit targets
   graph.mjs ...... the whole scene as one ComfyUI workflow
-  frames.mjs ..... the decoded-frame cache, after OpenRV
+  frames.mjs ..... the decoded-frame caches, after OpenRV: 8-bit frames, and full-precision frames
+  display.mjs .... the viewer's colour: one WebGL2 shader, after OpenRV
   canvas.mjs ..... canvas helpers
   comfy.mjs ...... the only module that talks to ComfyUI
         |  HTTP and WebSocket, to the server that serves the page
         v
 COMFYUI SERVER
   core API ....... /prompt /ws /history /interrupt /queue /free /upload/image /view /object_info /system_stats
-  routes.py ...... /paintaplate/download  /paintaplate/plates  /paintaplate/thumb  /paintaplate/blank
+  routes.py ...... /paintaplate/download  /paintaplate/plates  /paintaplate/thumb  /paintaplate/blank  /paintaplate/stat
+                   /paintaplate/jobs  /paintaplate/frames
   web/workflows .. 12 API workflows, written by tools/build_workflows.py
         |  core nodes, ComfyUI-LTXVideo nodes and the 8 PaintAPlate nodes
         v
@@ -86,7 +88,7 @@ These rules keep the code small and easy to change. Follow them in every change.
 ## 5. The life of an edit
 
 1. **Open a plate** (`openPlate`). The `ingest` workflow decodes the plate once. It saves the first frame (at most 1920 px on the long side), a 960 px H.264 playback video and the plate spec (codec, size, frame rate, frame count, colour space). The page then sets its sizes: the working size, 768 px for quick passes, 960 px for tracking (640 px for erase mattes) and the preview size.
-2. **Paint.** Each edit draws on two canvases: `paint` (what Klein sees, for a paint) and `mask` (where the edit may act). `strokeTarget` decides which edit a stroke joins.
+2. **Paint.** Each edit draws on two canvases: `paint` (what Klein sees, for a paint) and `mask` (where the edit may act). `strokeTarget` decides which edit a stroke joins. I (or the pipette by the swatches) picks a colour from the frame for the brush (`pickedColor`).
 3. **Prepare while the strokes rest** (`prepareSoon`, then `prefetch` and `prepare`). `takeInputs` reads the words and the Whole object switch into the edit. For an erase with Whole object, the `snap` workflow asks SAM 3.1 for the object by name and from up to five stroke points, and `pickObjects` keeps the right masks. Then the `prompt` workflow asks the prompt writer for a caption, and `reconcile` puts the page's boxes back into it. An erase sends one locked box per painted part (`paintBoxes`), and a caption that removes something the paint does not cover gives way to the page's own (`erasesPaint`). A new stroke cancels this work.
 4. **Run the edit** (`launch`, then `generate`) when you press Generate (Enter). An edit whose strokes, words, seed and switch match a result it already made takes that result back (`reuse`, up to `RESULTS_KEPT` results per edit), so pressing Generate twice runs nothing twice. Ctrl+Enter tries another seed. The `edit` workflow runs twice: a quick pass at 768 px (16 steps, denoise 1, with live previews inside the strokes), then a full-size pass from that result (8 steps, denoise 0.35). The result is the edit's patch. An erase's fill is levelled with the background around it first (`levelFill`): Klein can leave a faint, pale shape of the removed object, which LTX then animates. The edit stays the current edit. For an erase, the full pass ends in Level Fill, which levels Klein's fill with the background around it: left in, a pale imprint of the removed object became smoke in the erase pass. The `edit` workflow saves its outputs to the output folder, so the job index finds them later.
 5. **Stack the first frame** (`recompose`). Active patches stack on `S.original` to make `S.hero`. When an edit changes, the edits above it run again only if they depend on it (`dependsOnChange`: one of the two is a light, or their footprints overlap on a 96-cell grid).
@@ -131,7 +133,7 @@ Without `ainvfx-fluid.safetensors`, fluid shots switch off and the rest of the a
 | `nodes.py` | The 8 nodes, and the path guards `resolve` and `output_folder`. |
 | `plateio.py` | Files: sequences (a missing frame keeps its place, as in OpenRV), the plate spec, EXR writing that keeps every layer and header, still writers (PNG, TIFF, DPX, EXR), `VideoWriter` (the source codec, colour tags, timecode and audio), and the blank canvas. |
 | `mathops.py` | Pixels: phase-correlation alignment, grain level, the colour seam field, push-pull fill, steady masks, `fit_to_plate`, `relight`, `follow_matte`, `level_fill`, `keyframe_video`, and the fast bilinear `resize_to`. |
-| `routes.py` | The routes: the zip download, the plate list, thumbnails, the blank plate, a plate's size and time (`stat`), and the job index (`jobs`: a finished job's outputs by the hash of its inputs, kept while all its files exist). |
+| `routes.py` | The routes: the zip download, the plate list, thumbnails, the blank plate, a plate's size and time (`stat`), and the job index (`jobs`: a finished job's outputs by the hash of its inputs, kept while all its files exist). Also the frames of an image-sequence plate or export as RGB half floats (`frames`), which the viewer's colour reads. |
 | `pyproject.toml` | Package and Registry metadata: the version, `PublisherId` `ainvfx`, `requires-comfyui`. |
 | `requirements.txt` | The one runtime package beyond ComfyUI's own: OpenEXR. |
 
@@ -141,13 +143,14 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 
 | File | What it does |
 | --- | --- |
-| `paintaplate.html` | The page: header, tools, the prompt bar (with the Editing tag, Generate and New edit), the menu button, viewport, timeline, the History, Fluid and Render panels, the log, the right-click menu, the colour filter, and the Keys, Export and Open dialogs. |
+| `paintaplate.html` | The page: header, tools, the prompt bar (with the Editing tag, Generate and New edit), the menu button, viewport, timeline, the History, Fluid and Render panels, the log, the right-click menu, and the Keys, Export and Open dialogs. |
 | `app.mjs` | The app (section 9). |
 | `comfy.mjs` | The ComfyUI client: loads the workflows, posts jobs, follows the WebSocket, cancels by job kind, and reads outputs once ComfyUI has recorded the prompt. Before it posts an indexed job it asks the job index, and after a job finishes it records it there. |
 | `logic.mjs` | Pure rules: filling workflows, sizes, captions, the prompt writer's request and `reconcile`, the shot prompt, the whole-object picker, dependencies, the frame ranking, colour maths, keyframe slots, edit targets. |
 | `graph.mjs` | `sceneGraph`: the whole scene as one ComfyUI workflow, identical nodes shared (Export dialog > ComfyUI graph). |
-| `frames.mjs` | `FrameCache`: decoded frames within a memory budget (384 MB by default), ranked by distance from the playhead. |
+| `frames.mjs` | `FrameCache`: decoded frames within a memory budget (384 MB by default), ranked by distance from the playhead. `DeepFrames`: the same for an image sequence's own values as RGB half floats (512 MB per cache), fetched from `/paintaplate/frames` once a colour value moves, never for a frame the budget cannot keep. |
 | `canvas.mjs` | Canvas helpers; mask bounds as FLUX boxes (0 to 1000). |
+| `display.mjs` | `Display`: the viewer's colour as one WebGL2 shader, in OpenRV's order: linear light, exposure and contrast, one matrix (hue, saturation, channel, invert), gamma, sRGB. An 8-bit frame at the defaults is drawn as it is. |
 | `open.js` | « Open PaintAPlate » in ComfyUI's Extensions menu. It is the only `.js` file, because ComfyUI loads every `.js` file in `web/` into its graph editor; the page's own modules use `.mjs`. |
 | `app.css` | The dark, RV-like style, with its colours as tokens on `:root`. On a phone held upright, one column that scrolls; on a phone on its side, the tools down the left; the menu as a sheet along the bottom. |
 | `upsampler.json` | Black Forest Labs' two system prompts for the prompt writer (table and plain). |
@@ -177,7 +180,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | Load Plate | A video or a frame folder at full precision: frames, alpha, spec, frame rate, frame count; optional 8k + 1 padding | most workflows |
 | Save Plate | Writes the plate's format, with the exact source pixels wherever nothing changed | `export`, `fluid` |
 | Fit to Plate | Resizes, aligns, matches the colour at the edge, adds grain, steadies the soft mask | `comp`, `export` |
-| Relight Transfer | The new light from the regenerated frame; the texture and highlights from the plate | `edit`, `comp`, `export` |
+| Relight Transfer | The new light from the regenerated frame: its brightness with sharp edges, its colour smooth, and no channel divided by almost no light (`light_ratio`); the texture and highlights from the plate | `edit`, `comp`, `export` |
 | Follow Matte | One matte per frame from SAM's track, following the object's own region, which starts where the edit changed the first frame (for paint) or at the first-frame mask, and moves by at most 1/16 of the width per frame: SAM's mask further away stays out, even joined to the object by a thin line, the last matte holds where the object is not seen (the first-frame mask when SAM returns none), and for paint every pixel the shot changed near the object joins | `matte` |
 | Level Fill | An erase's fill levelled with the background it continues: where the fill is flat and a few levels off the background around it, the difference goes, low frequencies only; edges, revealed objects and textured fills stay as they are. Off, it passes the image through | `edit` |
 | Live Preview | A sampler hook: a tiny-decoder WebP every N steps; it switches itself off on any error | `clean`, `shot`, `fluid` |
@@ -226,7 +229,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | In idle time | `pipeline`, `plan`, the render steps, the download. |
 | Interface | Status, messages (`explained`: what failed, why in plain words from `plainError`, and what to do), the log, the size menu, the dialogs. |
 | Scenes | Saving and opening a `.paintaplate.json`; `saveGraph` (the scene as one ComfyUI workflow). |
-| The viewer's colour | Exposure, contrast, gamma, saturation, hue, channels and invert, for display only, as one SVG filter. |
+| The viewer's colour | Exposure, contrast, gamma, saturation, hue, channels and invert, for display only, as one WebGL2 shader on each frame (`display.mjs`). Once a value moves, an image-sequence plate and its export are read in their own values (`DeepFrames`, `/paintaplate/frames`), so lower exposure brings back what lies above white in an EXR. |
 | The right-click menu | Every action with its key, also behind the menu button for touch screens; then `boot()`, the keyboard handler and `enter` (Generate). |
 
 At load, `boot()` checks that every node class and model file the workflows need exists, and names what is missing.

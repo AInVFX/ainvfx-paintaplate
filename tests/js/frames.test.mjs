@@ -1,7 +1,7 @@
 // The frame cache's budget and eviction (web/frames.mjs), with plain objects standing in for videos and frames.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FrameCache } from "../../web/frames.mjs";
+import { DeepFrames, FrameCache } from "../../web/frames.mjs";
 
 const video = (src) => ({ getAttribute: () => src });
 const frame = () => ({ width: 10, height: 10, closed: false, close() { this.closed = true; } }); // 400 bytes
@@ -49,4 +49,41 @@ test("a new source empties the cache", () => {
   cache.reset();
   assert.ok(b.closed);
   assert.equal(cache.frames.size, 0);
+});
+
+test("full-precision frames: the playhead's first, half floats untouched, within the budget", async () => {
+  const view = { fps: 24, frame: 5, inPt: 0, outPt: 9 }, asked = [];
+  const cache = new DeepFrames({ getAttribute: () => "plate.mp4" }, { view: () => view, budget: 36 * 8 });
+  const fetchFrames = async (first, count) => { asked.push([first, count]); return { width: 2, height: 3, data: new Uint16Array(18 * count).fill(0x4000) }; };
+  cache.fillDeep(fetchFrames, "plate");
+  cache.fillDeep(fetchFrames, "plate"); // the same path while it fills: nothing more
+  await new Promise((ok) => setTimeout(ok, 30));
+  assert.equal(asked.filter(([f]) => f === 5).length, 1);
+  assert.equal(asked[0][0], 5);
+  assert.equal(cache.get(5).data[0], 0x4000); // 2.0 as a half float: above white, kept
+  assert.equal(cache.get(5).bytes, 36);
+  assert.equal(cache.frames.size, 8);
+  assert.ok(cache.bytes <= cache.budget);
+  cache.fillDeep(fetchFrames, "export"); // another path starts again
+  assert.equal(cache.frames.size, 0);
+});
+
+test("full-precision frames: a failed path is not fetched again; a full budget fetches nothing", async () => {
+  const view = { fps: 24, frame: 0, inPt: 0, outPt: 9 }, tick = () => new Promise((ok) => setTimeout(ok, 20));
+  const cache = new DeepFrames({ getAttribute: () => "plate.mp4" }, { view: () => view, budget: 36 * 4 });
+  let calls = 0;
+  const fail = async () => { calls++; throw new Error("404"); };
+  assert.equal(cache.fillDeep(fail, "plate"), true); // a new path
+  await tick();
+  assert.equal(cache.fillDeep(fail, "plate"), false);
+  await tick();
+  assert.equal(calls, 1);
+  const ok = async (first, count) => { calls++; return { width: 2, height: 3, data: new Uint16Array(18 * count) }; };
+  cache.fillDeep(ok, "export");
+  await tick();
+  const made = calls;
+  assert.equal(cache.frames.size, 4);
+  cache.fillDeep(ok, "export");
+  await tick();
+  assert.equal(calls, made); // the budget holds the four frames of most use: nothing more to fetch
 });

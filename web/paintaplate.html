@@ -60,6 +60,7 @@
       <button class="sw" data-color="#1976d2" style="--c:#1976d2" title="Blue" aria-label="Blue"></button>
       <button class="sw" data-color="#6d4c41" style="--c:#6d4c41" title="Brown" aria-label="Brown"></button>
       <button class="sw" data-color="#ffd890" style="--c:#ffd890" title="Warm light" aria-label="Warm light"></button>
+      <button class="sw pick" id="pick" title="Pick a colour from the frame (I)" aria-label="Pick a colour from the frame" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.2 1.6a1.9 1.9 0 0 1 2.7 2.7l-1.6 1.6.7.7-1 1-.7-.7-5.6 5.6H3.6v-2.1l5.6-5.6-.7-.7 1-1 .7.7z"/></svg></button>
       <label class="sw custom" title="Any colour"><input id="color" type="color" value="#000000" aria-label="Any colour"></label>
     </div>
   </nav>
@@ -149,14 +150,6 @@
   </footer>
 
   <ul id="ctx" class="ctx" role="menu" aria-label="All actions" hidden></ul>
-  <svg class="defs" width="0" height="0" aria-hidden="true" focusable="false">
-    <filter id="display-filter" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
-      <feComponentTransfer color-interpolation-filters="linearRGB"><feFuncR class="fx-lin" type="linear" slope="1"/><feFuncG class="fx-lin" type="linear" slope="1"/><feFuncB class="fx-lin" type="linear" slope="1"/></feComponentTransfer>
-      <feComponentTransfer><feFuncR class="fx-gamma" type="gamma" exponent="1"/><feFuncG class="fx-gamma" type="gamma" exponent="1"/><feFuncB class="fx-gamma" type="gamma" exponent="1"/></feComponentTransfer>
-      <feColorMatrix id="fx-matrix" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0"/>
-    </filter>
-  </svg>
-
   <dialog id="help" class="help">
     <h2>Keys</h2>
     <h3>Playback, as in RV</h3>
@@ -179,6 +172,7 @@
       <dt>N</dt><dd>New edit: the next strokes start a separate edit</dd>
       <dt>- and =</dt><dd>Brush size</dd>
       <dt>X</dt><dd>Eraser: rub out the strokes you just painted</dd>
+      <dt>I</dt><dd>Pick a colour: click the frame, then paint with that colour. Esc cancels</dd>
       <dt>Enter</dt><dd>Generate: the edit on the first frame, then its shot. Pressed again with nothing changed, nothing runs twice</dd>
       <dt>Ctrl+Enter</dt><dd>Try another seed on the selected edit, else the last one</dd>
       <dt>Click an edit</dt><dd>Select it: its words come back; retype them, paint more, rub strokes out or switch Whole object, then Generate. Esc deselects</dd>

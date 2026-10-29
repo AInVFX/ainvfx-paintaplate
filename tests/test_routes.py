@@ -90,7 +90,7 @@ class Routes(unittest.TestCase):
         app = types.SimpleNamespace(routes=web.RouteTableDef())
         routes.setup(app)
         self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/plates", "/paintaplate/thumb", "/paintaplate/blank",
-                                                          "/paintaplate/jobs/{key}", "/paintaplate/jobs/{key}", "/paintaplate/stat"])
+                                                          "/paintaplate/jobs/{key}", "/paintaplate/jobs/{key}", "/paintaplate/stat", "/paintaplate/frames"])
         print("download route: folders, parts, symlinks, zip reuse, handler: ok")
 
 
@@ -180,6 +180,36 @@ class BlankPlate(unittest.TestCase):
                 r = await client.post("/paintaplate/blank", json={"width": 130, "height": 64, "fps": 25, "frames": 17})
                 self.assertEqual(r.status, 400)
         asyncio.run(run())
+
+
+class DeepFramesTest(unittest.TestCase):
+    def test_frames_keep_values_above_white(self):
+        import numpy as np
+        import OpenEXR
+        folder = os.path.join(INPUT, "deep_seq")
+        os.makedirs(folder, exist_ok=True)
+        for i in range(3):
+            rgb = np.zeros((100, 200, 3), np.float16)
+            rgb[..., 0], rgb[..., 1], rgb[..., 2] = 2.5 + i, 0.25, -0.125
+            OpenEXR.File({"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage},
+                         {"RGB": rgb}).write(os.path.join(folder, f"f.{1001 + i}.exr"))
+        body, w, h = routes.deep_frames("deep_seq", 1, 2, 80)
+        self.assertEqual((w, h), (80, 40))
+        data = np.frombuffer(body, "<f2").reshape(2, h, w, 3).astype(np.float32)
+        np.testing.assert_allclose(data[:, 2:-2, 2:-2].mean((1, 2)), [[3.5, 0.25, -0.125], [4.5, 0.25, -0.125]], atol=0.01)
+        body, w, h = routes.deep_frames("deep_seq", 2, 3, 256)  # past the end, the last frame holds
+        self.assertEqual(len(body), 3 * 100 * 200 * 3 * 2)
+        with self.assertRaises(FileNotFoundError):
+            routes.deep_frames("../outside", 0, 1, 64)
+        export = os.path.join(OUT, "paintaplate", "deep", "v1", "export")  # an EXR export, as Save Plate writes it
+        os.makedirs(export, exist_ok=True)
+        OpenEXR.File({"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage},
+                     {"RGB": np.full((10, 20, 3), 6.0, np.float16)}).write(os.path.join(export, "f.1001.exr"))
+        body, w, h = routes.deep_frames("output:paintaplate/deep/v1/export", 0, 1, 256)
+        self.assertEqual((w, h, float(np.frombuffer(body, "<f2")[0])), (20, 10, 6.0))
+        with self.assertRaises(FileNotFoundError):
+            routes.deep_frames("output:../escape", 0, 1, 64)
+        print("deep frames: ok (values above 1.0 and below 0 kept as half floats, resized, held past the end)")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

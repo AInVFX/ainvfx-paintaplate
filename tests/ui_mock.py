@@ -38,6 +38,20 @@ def flow(page, port):
     check("desk.mp4" in names, f"the plate browser lists input/plates: {names}")
     page.click("#plates .plate:has-text('desk.mp4')")
     check(page.input_value("#path") == "plates/desk.mp4", "one click fills the path")
+    hdr = page.evaluate("""async () => { // an EXR through the frame route and the viewer's shader, as the colour tools see it
+      const [{ Display }, { DISPLAY }] = await Promise.all(["display.mjs", "logic.mjs"].map((m) => import(new URL(m, location.href).href)));
+      const r = await fetch("/paintaplate/frames?path=paintaplate/hdr_test&first=0&count=1&side=64");
+      const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number), look = new Display(), out = document.createElement("canvas");
+      const frame = { width, height, data: new Uint16Array(await r.arrayBuffer()) };
+      [out.width, out.height] = [width, height];
+      const x = out.getContext("2d", { willReadFrequently: true }), read = (stops) => {
+        x.drawImage(look.image(frame, { ...DISPLAY, exposure: stops }, "linear"), 0, 0);
+        return [x.getImageData(8, height >> 1, 1, 1).data[0], x.getImageData(width - 9, height >> 1, 1, 1).data[0]];
+      };
+      return { size: [width, height], stops0: read(0), down2: read(-2) };
+    }""")
+    check(hdr["stops0"][0] >= 254 and hdr["down2"][0] >= 253 and abs(hdr["stops0"][1] - 188) <= 2 and abs(hdr["down2"][1] - 99) <= 2,
+          f"an EXR keeps its range through the frame route and the shader: 4.0 stays white two stops down, 0.5 goes from 188 to 99: {hdr}")
     page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps')", timeout=60000)
     page.wait_for_function("/Describe the edit|Ready to play/.test(document.querySelector('#status').textContent)", timeout=60000)
@@ -163,21 +177,42 @@ def flow(page, port):
     page.evaluate("document.activeElement.blur()")
     cx, cy = box["x"] + box["w"] * 0.5, box["y"] + box["h"] * 0.5
     page.mouse.move(cx, cy)
+    # the viewer's colour lives in the canvas pixels now (a WebGL2 shader), so the checks read them
+    pixel = lambda fx=0.5, fy=0.5: page.evaluate("""([fx, fy]) => { const c = document.querySelector('#view'), s = [0, 0, 0];
+      const d = c.getContext('2d').getImageData(Math.round(c.width * fx) - 2, Math.round(c.height * fy) - 2, 5, 5).data;
+      for (let i = 0; i < d.length; i += 4) for (let k = 0; k < 3; k++) s[k] += d[i + k] / 25; return s; }""", [fx, fy])
+    grid = [(x / 10, y / 10) for x in range(1, 10) for y in range(1, 10)]  # a point lit enough to see one more stop
+    spot = max(grid, key=lambda p: (lambda v: v[0] if 40 < v[0] < 180 else -abs(v[0] - 110))(pixel(*p)))
+    before = pixel(*spot)
     page.keyboard.press("Shift+R")
-    view_filter = "getComputedStyle(document.querySelector('#view')).filter"
-    check("url(" in page.evaluate(view_filter) and page.text_content("#display-state") == "Red", "Shift+R shows the red channel, as RV's r")
+    red = pixel(*spot)
+    check(page.text_content("#display-state") == "Red" and max(red) - min(red) < 3 and abs(red[0] - before[0]) < 4,
+          f"Shift+R shows the red channel in grey, as RV's r: {[round(v) for v in before]} then {[round(v) for v in red]}")
     page.keyboard.press("Shift+E")
     page.mouse.down(); page.mouse.move(cx + 100, cy, steps=5); page.mouse.up()
-    label = page.text_content("#display-state")
-    check(label.startswith("E +1.0") and len(titles()) == 2, f"Shift+E then a 100 px drag adds one stop and paints nothing: {label}")
+    label, up = page.text_content("#display-state"), pixel(*spot)
+    check(label.startswith("E +1.0") and len(titles()) == 2 and (up[0] > red[0] + 8 or red[0] > 240),
+          f"Shift+E then a 100 px drag adds one stop to the pixels and paints nothing: {label}, red {red[0]:.0f} to {up[0]:.0f}")
     page.mouse.click(cx, cy, button="right")
     groups = page.eval_on_selector_all("#ctx > li > span:first-child", "els => els.map(e => e.textContent)")
     check(groups == ["File", "Edit", "Tools", "Control", "Colour", "View", "Help"], f"right-click opens the menu: {groups}")
-    page.hover("#ctx > li:has-text('Colour')")
+    page.hover(f"#ctx > li:nth-child({groups.index('Colour') + 1})")  # by place: Tools holds « Pick a colour » too
     page.screenshot(path=os.path.join(SHOTS, "3_menu.png"))
     page.click("#ctx .sub button:has-text('Reset colour')")
-    check(page.is_hidden("#display-state") and page.evaluate(view_filter) == "none" and page.is_hidden("#ctx"),
-          "Reset colour in the menu clears the filter and closes the menu")
+    back = pixel(*spot)
+    check(page.is_hidden("#display-state") and page.is_hidden("#ctx") and all(abs(p - q) < 3 for p, q in zip(back, before)),
+          "Reset colour in the menu brings the pixels back and closes the menu")
+    # The colour picker: I, then a click on the frame, gives the brush the colour under it
+    color = page.input_value("#color")
+    page.keyboard.press("i")
+    check(page.evaluate("document.querySelector('#view').classList.contains('picking')"), "I arms the colour picker: a crosshair over the frame")
+    want = pixel(0.9, 0.1)
+    page.mouse.click(box["x"] + box["w"] * 0.9, box["y"] + box["h"] * 0.1)
+    got = page.input_value("#color")
+    rgb = [int(got[i:i + 2], 16) for i in (1, 3, 5)]
+    check(all(abs(p - q) <= 6 for p, q in zip(rgb, want)) and not page.evaluate("document.querySelector('#view').classList.contains('picking')"),
+          f"a click picks the colour under it for the brush: {got} against the frame's {[round(v) for v in want]}")
+    page.fill("#color", color)
     page.wait_for_timeout(2500)
     log = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
     for key in ("posted as", "prompt writer", "Klein quick pass", "ComfyUI started it"):
@@ -342,6 +377,13 @@ def main():
             raise RuntimeError("the mock ComfyUI did not start")
         items = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{a.port}/paintaplate/plates").read())
         check([i["path"] for i in items] == ["plates/desk.mp4"], "the plates route lists the mock's plate")
+        import numpy as np, OpenEXR  # an EXR with values above white, outside input/plates, for the frame route
+        hdr = os.path.join(a.root, "input", "paintaplate", "hdr_test")
+        os.makedirs(hdr, exist_ok=True)
+        img = np.zeros((32, 64, 3), np.float16)
+        img[:, :32], img[:, 32:] = 4.0, 0.5
+        for n in (1001, 1002):
+            OpenEXR.File({"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}, {"RGB": img}).write(os.path.join(hdr, f"f.{n}.exr"))
         with sync_playwright() as p:
             browser = p.chromium.launch()
             page = browser.new_page(viewport={"width": 1400, "height": 900})

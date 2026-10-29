@@ -4,10 +4,11 @@
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
 import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onLog, onNotice, outputFile, outputFiles, outputText, post, run, setSalt, upload, viewUrl } from "./comfy.mjs";
-import { FrameCache } from "./frames.mjs";
+import { DECODED, Display } from "./display.mjs";
+import { DeepFrames, FrameCache } from "./frames.mjs";
 import { sceneGraph } from "./graph.mjs";
-import { CHANNEL_NAMES, DISPLAY, FLUID, PARAMS, blankSpec, caption, changedMask, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fitSize,
-  erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
+import { CHANNEL_NAMES, DISPLAY, FLUID, PARAMS, blankSpec, caption, changedMask, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
+  erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
@@ -19,6 +20,8 @@ const Q = new URLSearchParams(location.search);
 const QUICK = { steps: 16, denoise: 1, feather: 6, sigma: 3 }; // 16: the official distilled setting, 1.8 s at 768 on an RTX PRO 6000
 const FULL = { steps: +Q.get("refine") || 8, denoise: 0.35, feather: 12, sigma: 6 };
 const CACHE_MB = +Q.get("cache") || 384; // decoded frames kept per video: about 180 frames at 960 x 544
+const DEEP_MB = +Q.get("deep") || 512; // per cache (the plate, an export): an image sequence in its own values, about 160 frames of RGB half floats at 960 x 540
+const DEEP_SIDE = 960; // their long side, the playback video's
 const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-size edits, quick edits, SAM tracking
 // the erase matte only places the erase pass's box, grown by 1/24 of the width: 640 is enough, at half the time of 960
 const ERASE_TRACK_SIDE = 640;
@@ -286,6 +289,8 @@ function openStep(id, f = 0, text = null, left = null) { // one step of opening,
 
 const playhead = () => (S.plate ? { fps: S.plate.fps, frame: S.frame, inPt: S.inPt, outPt: S.outPt } : null);
 const caches = new Map([plateVid, shotVid].map((v) => [v, new FrameCache(v, { view: playhead, changed: () => cacheUI(), budget: CACHE_MB * 1e6 })]));
+const deepOf = (v) => new DeepFrames(v, { view: playhead, changed: () => cacheUI(), budget: DEEP_MB * 1e6 });
+const deep = deepOf(plateVid), deepShot = deepOf(shotVid), look = new Display(); // full precision: the plate, an image-sequence export
 
 function cacheUI() { // the green stripe along the top of the timeline: frames that draw at once
   if (cacheUI.queued) return;
@@ -360,7 +365,7 @@ function seek(f) {
 
 for (const v of [plateVid, shotVid]) {
   v.addEventListener("seeked", () => { if (!S.playing) { render(); caches.get(v).grab(v, S.frame); } });
-  v.addEventListener("loadeddata", () => { caches.get(v).reset(); caches.get(v).fill(); });
+  v.addEventListener("loadeddata", () => { caches.get(v).reset(); caches.get(v).fill(); if (v === plateVid || v === shotVid) wantDeep(); });
   v.addEventListener("error", () => v.getAttribute("src") &&
     status(`This browser cannot play the ${v === plateVid ? "plate" : "shot"} preview (H.264 MP4). Chrome, Edge, Safari and Firefox can.`));
 }
@@ -464,6 +469,7 @@ function shotFrame() { // the shot at the playhead: a cached frame, the video wh
 function render() {
   if (!S.plate || !S.hero) return;
   if (S.fluid) return renderFluid();
+  wantDeep(); // once a colour value moves, the frames' own values load around the playhead, as OpenRV's cache does
   const W = view.width, H = view.height, still = !S.playing;
   const live = S.draft || stroke ? null : S.live; // while an edit is painted, the frame shows it, not the live preview of a render
   const first = still && S.frame === 0 && (!S.shot?.url || stale() || editingFirst());
@@ -471,19 +477,22 @@ function render() {
   if (S.playing && S.shot?.url && !live && !pic) return; // the shot video catches up in a frame: the last frame stays on screen
   const drawPlate = () => {
     const cached = still && S.frame !== 0 && caches.get(plateVid).get(S.frame);
-    if (still && S.frame === 0) ctx.drawImage(S.original, 0, 0, W, H);
-    else if (cached) ctx.drawImage(cached, 0, 0, W, H);
-    else if (plateVid.readyState >= 2) ctx.drawImage(plateVid, 0, 0, W, H);
+    const exact = displayActive(S.display) && deep.get(S.frame); // the colour tools read the plate's own values when it has them
+    if (exact) ctx.drawImage(look.image(exact, S.display, S.plate.cs), 0, 0, W, H);
+    else if (still && S.frame === 0) ctx.drawImage(look.image(S.original, S.display), 0, 0, W, H);
+    else if (cached) ctx.drawImage(look.image(cached, S.display), 0, 0, W, H);
+    else if (plateVid.readyState >= 2) ctx.drawImage(look.image(plateVid, S.display), 0, 0, W, H);
   };
   const drawEdited = () => {
-    if (live) { ctx.drawImage(live, 0, 0, W, H); return "live"; }
+    if (live) { ctx.drawImage(look.image(live, S.display), 0, 0, W, H); return "live"; }
     if (pic) {
-      ctx.drawImage(pic, 0, 0, W, H);
+      const exactShot = displayActive(S.display) && deepShot.get(S.frame); // the export in its own values, once a colour value moves
+      ctx.drawImage(exactShot ? look.image(exactShot, S.display, S.plate.cs) : look.image(pic, S.display), 0, 0, W, H);
       if (pic === held.canvas) return "held";
       if (still) keepFrame(pic);
       return "shot";
     }
-    if (still && S.frame === 0) { ctx.drawImage(S.hero, 0, 0, W, H); overlays(W, H); return "hero"; }
+    if (still && S.frame === 0) { ctx.drawImage(look.image(S.hero, S.display), 0, 0, W, H); overlays(W, H); return "hero"; }
     drawPlate();
     return "plate";
   };
@@ -505,8 +514,8 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
   ctx.globalAlpha = 1;
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, W, H);
-  const shot = () => ctx.drawImage((!S.playing && caches.get(shotVid).get(S.frame)) || shotVid, 0, 0, W, H);
-  if (S.live && f.busy) ctx.drawImage(S.live, 0, 0, W, H);
+  const shot = () => ctx.drawImage(look.image((!S.playing && caches.get(shotVid).get(S.frame)) || shotVid, S.display), 0, 0, W, H);
+  if (S.live && f.busy) ctx.drawImage(look.image(S.live, S.display), 0, 0, W, H);
   else if (f.result && f.view === "result" && !S.compare && shotReady()) {
     if (S.wipe === null) shot();
     else { keysLayer(W, H); ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip(); shot(); ctx.restore(); }
@@ -573,6 +582,7 @@ function softMask(e) { // the edit mask with a soft edge, close to what the work
 }
 
 function drawCursor() { // the brush outline, at its real size on the frame
+  if (S.picking) return; // the picker shows a crosshair instead of the brush
   if (!S.cursor || stroke || S.playing || S.mode || view.classList.contains("near-wipe")) return;
   ctx.lineWidth = Math.max(1.5, view.width / 900);
   ctx.strokeStyle = S.rub ? "#ffffff" : S.tool === "erase" ? "#ff8070" : S.color === "#000000" ? "#d8d8d8" : S.color;
@@ -637,6 +647,7 @@ view.addEventListener("pointerdown", (e) => {
     if (touches.size === 2) return pinchStart();
     if (touches.size > 2 || pinch) return;
   }
+  if (S.picking && e.button === 0) { e.preventDefault(); return pickAt(e); }
   if (S.mode && e.button === 0 && !e.altKey && !e.ctrlKey && !e.metaKey) { // a colour edit: dragging changes the value, as in RV
     e.preventDefault();
     view.setPointerCapture(e.pointerId);
@@ -2099,19 +2110,39 @@ function clearRange() { S.inPt = 0; S.outPt = S.plate.frames - 1; hud("In and ou
 function fullScreen() { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); }
 
 // ---------- The viewer's colour, as in RV: exposure, contrast, gamma, saturation, hue, channels, invert ----------
-// Display only: one SVG filter on the canvas, and none at the defaults, so playback pays nothing until a value moves. It
-// works on the 8-bit preview, where values above white are already clipped; the export never changes.
+// Display only, after OpenRV: each frame goes through one WebGL2 shader before it is drawn (display.mjs), the strokes and
+// marks after it. Once a colour value moves, an image-sequence plate and its export are read in their own values (DeepFrames),
+// so lower exposure brings back what lies above white in an EXR. At the defaults an 8-bit frame is drawn as it is, and
+// nothing is fetched. The export itself never changes.
+
+function wantDeep() { // once a colour value moves: the plate, and an export the viewer plays, in their own values
+  const p = S.plate;
+  if (!p || !displayActive(S.display) || p.spec.kind === "video" || !DECODED.has(p.cs) || !look.ready) return;
+  fetchDeep(deep, p.path, p.name);
+  const r = S.renders.get(S.heroKey);
+  if (r?.exported && S.shot?.url === r.review) fetchDeep(deepShot, `output:${r.exported.run}/export`, `the export v${r.v}`);
+}
+
+function fetchDeep(cache, path, what) { // frames as RGB half floats from the frame route, ranked like the 8-bit cache
+  const fresh = cache.fillDeep(async (first, count) => {
+    const r = await fetch(`/paintaplate/frames?${new URLSearchParams({ path, first, count, side: DEEP_SIDE })}`);
+    if (!r.ok) {
+      log(`Full-precision frames stopped for ${what}: ${await r.text()}. The colour tools use the playback video.`);
+      throw new Error("frames");
+    }
+    const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number);
+    return { width, height, data: new Uint16Array(await r.arrayBuffer()) };
+  }, path);
+  if (fresh) log(`Full-precision frames: ${what} (${S.plate.cs}) at ${DEEP_SIDE} px on the long side, read in the background for the colour tools`);
+}
 
 function setDisplay(change) {
   Object.assign(S.display, change);
-  const d = S.display, { slope, intercept, exponent } = displayTransfer(d), on = displayActive(d);
-  for (const f of $$("#display-filter .fx-lin")) { f.setAttribute("slope", String(slope)); f.setAttribute("intercept", String(intercept)); }
-  for (const f of $$("#display-filter .fx-gamma")) f.setAttribute("exponent", String(exponent));
-  $("#fx-matrix").setAttribute("values", displayMatrix(d));
-  view.style.filter = on ? "url(#display-filter)" : "";
+  const d = S.display, on = displayActive(d);
   $("#display-state").hidden = !on;
   $("#display-state").textContent = displayLabel(d);
   hud(S.mode ? `${PARAMS[S.mode].label} ${formatParam(S.mode, d[S.mode])}` : on ? displayLabel(d) : "Colour as shot", 1400);
+  render();
 }
 
 function colorMode(name) { // RV's interactive edit: drag on the frame, or the wheel, - and =; Backspace resets; Esc or the key again leaves
@@ -2158,7 +2189,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["New edit", "N", nextEdit, !p || !!S.fluid || (!S.draft && !S.selected)], ["Generate", "Enter", () => enter(false), $("#generate").disabled], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
       ["Deselect", "Esc", () => select(null), !S.selected]]],
     ["Tools", [["Paint", "B", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Erase", "E", () => pickTool("erase"), !p || !!S.fluid, S.tool === "erase" && !S.rub],
-      ["Light", "L", () => pickTool("light"), !p || !!S.fluid, S.tool === "light" && !S.rub], ["Eraser", "X", () => setRub(!S.rub), !p, S.rub], "-",
+      ["Light", "L", () => pickTool("light"), !p || !!S.fluid, S.tool === "light" && !S.rub], ["Eraser", "X", () => setRub(!S.rub), !p, S.rub], ["Pick a colour", "I", () => picker(true), !p, !!S.picking], "-",
       ["Whole object", "", () => $("#whole").click(), !p, $("#whole").checked], ["Smaller brush", "-", () => setSize(S.size / 1.2), !p],
       ["Larger brush", "=", () => setSize(S.size * 1.2), !p]]],
     ["Control", [["Play or pause", "Space", () => (S.playing ? pause() : play()), !p, S.playing], ["Next frame", "Right", step(1), !p],
@@ -2291,6 +2322,34 @@ function colorUI() {
 }
 $$(".swatches .sw[data-color]").forEach((b) => (b.onclick = () => setColor(b.dataset.color)));
 $("#color").oninput = (e) => setColor(e.target.value);
+$("#pick").onclick = () => picker(!S.picking);
+
+// The colour picker (I, or the pipette by the swatches): the next click on the frame takes the colour under it, as shot
+// (before the viewer's colour tools), averaged over 5 x 5 pixels of the working size. The brush then paints with it; with
+// Erase, which has no colour, the tool becomes Paint.
+const PICK_SIDE = 5;
+function picker(on) {
+  S.picking = on && !!S.plate;
+  view.classList.toggle("picking", S.picking);
+  $("#pick").setAttribute("aria-pressed", String(S.picking));
+  if (S.picking) hud("Pick a colour: click the frame. Esc cancels.", 4000);
+  render();
+}
+function pickAt(e) {
+  const [x, y] = frameAt(e), [W, H] = S.plate.work;
+  const first = !S.playing && S.frame === 0 && (!S.shot?.url || stale() || editingFirst()); // as render() chooses
+  const plate = S.frame === 0 ? S.hero : caches.get(plateVid).get(S.frame) || plateVid;
+  const src = S.fluid || first || !S.shot?.url ? plate : shotFrame() || plate;
+  const kx = (src.videoWidth || src.width) / W, ky = (src.videoHeight || src.height) / H, n = PICK_SIDE;
+  const c = canvas([n, n]), d = c.getContext("2d", { willReadFrequently: true });
+  d.drawImage(src, (x - n / 2) * kx, (y - n / 2) * ky, n * kx, n * ky, 0, 0, n, n);
+  const color = pickedColor(d.getImageData(0, 0, n, n).data);
+  picker(false);
+  if (!color) return;
+  if (S.tool === "erase") pickTool("paint");
+  setColor(color);
+  hud(`${S.tool === "light" ? "Light" : "Paint"} colour ${color}`, 2000);
+}
 function setRub(on) {
   S.rub = on;
   $("#rub-btn").setAttribute("aria-pressed", String(on));
@@ -2403,6 +2462,8 @@ addEventListener("keydown", (e) => {
   if (!$("#ctx").hidden) { if (k === "Escape") closeMenu(); return e.preventDefault(); } // the menu is open: Esc closes it
   if (!S.plate && !["?", "F6"].includes(k)) return;
   if (S.mode && modeKey(k, combo)) return e.preventDefault();
+  if (S.picking && k === "Escape") { picker(false); return e.preventDefault(); }
+  if (!mod && !e.altKey && combo === "i") { if (!e.repeat) picker(!S.picking); return e.preventDefault(); } // the colour picker, as in Photoshop
   if (!mod && !e.altKey && COLOR_KEYS[combo]) { colorMode(COLOR_KEYS[combo]); return e.preventDefault(); }
   if (!mod && !e.altKey && CHANNEL_KEYS[combo]) { setDisplay({ channel: CHANNEL_KEYS[combo] }); return e.preventDefault(); }
   if (!mod && combo === "Shift+i") { setDisplay({ invert: !S.display.invert }); return e.preventDefault(); }

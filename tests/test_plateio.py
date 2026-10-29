@@ -184,5 +184,18 @@ class BlankCanvas(unittest.TestCase):
         self.assertIn("4444", back["profile"])
         print("ProRes 4444 plate export: ok", writer.notes)
 
+
+class FloatReadTest(unittest.TestCase):
+    def test_read_float_keeps_exr_values(self):
+        import OpenEXR
+        rgb = np.zeros((4, 6, 3), np.float32)
+        rgb[..., 0], rgb[..., 1], rgb[..., 2] = 2.5, 0.25, -0.125
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "f.0001.exr")
+            for kind in (np.float16, np.float32):  # half EXR decodes to gbrpf16le, float EXR to gbrpf32le
+                OpenEXR.File({"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}, {"RGB": rgb.astype(kind)}).write(path)
+                np.testing.assert_allclose(plateio.read_float(path), rgb, atol=1e-3)
+        print("float read: ok (2.5, 0.25 and -0.125 kept, in RGB order, from half and float EXR)")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

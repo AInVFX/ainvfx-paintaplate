@@ -30,11 +30,12 @@ import zipfile
 
 import folder_paths
 from aiohttp import web
+import numpy as np
 
 try:
-    from . import plateio
+    from . import mathops, plateio
 except ImportError:  # imported as a plain module by the tests, outside the package
-    import plateio
+    import mathops, plateio
 
 PLATES = "plates"  # the folder under ComfyUI's input folder that the Open dialog lists
 BLANK = "paintaplate/blank"  # and the one that holds the black canvases of fluid shots
@@ -332,6 +333,46 @@ async def stat(request: web.Request) -> web.Response:
         return web.json_response(await asyncio.to_thread(plate_stat, request.query.get("path", "")))
     except (FileNotFoundError, NotADirectoryError):
         return web.Response(status=404)
+DEEP_FRAMES_MAX = 16  # frames per request
+STILLS = (".exr", ".png", ".tif", ".tiff", ".dpx")
+
+
+def deep_frames(rel: str, first: int, count: int, side: int) -> tuple[bytes, int, int]:
+    """Frames `first` to `first + count - 1` of an image-sequence plate or export (`output:` and its run folder), at most `side` px on the long side, as RGB half floats.
+
+    The viewer's colour tools read these, as OpenRV's cache keeps an EXR's half floats: values above 1.0 and below 0
+    stay as stored, and nothing passes through an 8-bit video. A missing frame holds the one before (plateio), and a
+    frame past the end holds the last, as Load Plate pads a shot.
+    """
+    full = run_folder(rel[len("output:"):]) if rel.startswith("output:") else input_path(rel)  # an export folder, or a plate
+    if os.path.isdir(full):
+        files = plateio.sequence_frames(full)[0]
+    elif full.lower().endswith(STILLS):
+        files = [full]
+    else:
+        raise ValueError("A video plate: the viewer reads its playback video")
+    if not files:
+        raise ValueError("No frames in this plate")
+    first, count, side = max(0, first), min(max(1, count), DEEP_FRAMES_MAX), min(max(64, side), 4096)
+    out = []
+    for i in range(first, first + count):
+        rgb = plateio.read_float(files[min(i, len(files) - 1)])
+        h, w = rgb.shape[:2]
+        k = min(1.0, side / max(h, w))
+        out.append(mathops.resize_to(rgb, max(1, round(h * k)), max(1, round(w * k))) if k < 1.0 else rgb)
+    data = np.nan_to_num(np.stack(out), nan=0.0, posinf=65504.0, neginf=-65504.0).clip(-65504.0, 65504.0).astype("<f2")
+    return data.tobytes(), data.shape[2], data.shape[1]
+
+
+async def frames(request):
+    q = request.rel_url.query
+    try:
+        body, w, h = await asyncio.to_thread(deep_frames, q.get("path", ""), int(q.get("first", 0)),
+                                             int(q.get("count", 1)), int(q.get("side", 960)))
+    except (FileNotFoundError, ValueError) as e:
+        return web.Response(status=404, text=str(e))
+    return web.Response(body=body, content_type="application/octet-stream",
+                        headers={"X-Frame-Size": f"{w}x{h}", "Cache-Control": "no-store"})
 
 
 def setup(server) -> None:
@@ -343,3 +384,4 @@ def setup(server) -> None:
     server.routes.get("/paintaplate/jobs/{key}")(job_get)
     server.routes.post("/paintaplate/jobs/{key}")(job_post)
     server.routes.get("/paintaplate/stat")(stat)
+    server.routes.get("/paintaplate/frames")(frames)

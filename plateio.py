@@ -323,6 +323,25 @@ def read_native(path: str, with_alpha: bool) -> np.ndarray:
         return frame.to_ndarray(format="rgba64le" if with_alpha else "rgb48le")
 
 
+PLANAR_FLOATS = {"gbrpf16le": "<f2", "gbrapf16le": "<f2", "gbrpf32le": "<f4", "gbrapf32le": "<f4"}
+
+
+def read_float(path: str) -> np.ndarray:
+    """One still frame in its own values, as float32 RGB (H, W, 3): an EXR's linear light above 1.0 and below 0 as stored,
+    other formats scaled to 0 to 1. The viewer's colour tools read these, as OpenRV's cache keeps an EXR's half floats."""
+    with av.open(path) as c:
+        frame = next(c.decode(video=0))
+        dtype = PLANAR_FLOATS.get(frame.format.name)
+        if dtype:  # FFmpeg decodes EXR to planar floats in G, B, R order (half or float): read the planes, convert nothing
+            planes = []
+            for p in frame.planes[:3]:
+                a = np.frombuffer(p, dtype)
+                planes.append(a[: frame.height * (p.line_size // a.itemsize)].reshape(frame.height, -1)[:, : frame.width])
+            g, b, r = planes
+            return np.stack([r, g, b], -1).astype(np.float32)
+        return frame.to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
+
+
 def to_uint16(rgb: np.ndarray, alpha: np.ndarray | None = None) -> np.ndarray:
     data = np.clip(rgb, 0.0, 1.0)
     if alpha is not None:

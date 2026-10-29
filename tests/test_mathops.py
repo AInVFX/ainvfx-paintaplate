@@ -65,6 +65,20 @@ class MathOps(unittest.TestCase):
         assert big.shape == (2 * H, 2 * W, 3)
         print("relight transfer: ok (ratio follows the light, highlights kept, any plate size)")
 
+    def test_relight_colour_of_light(self):
+        """One colour of light per area: a dark channel's noise never reaches single pixels (the lighthouse specks, 28 Oct)."""
+        rng = np.random.default_rng(3)
+        tex = rng.uniform(0.1, 1.5, (96, 128, 1)).astype(np.float32)
+        warm = np.array([1.8, 1.3, 0.9], np.float32)
+        grey = np.full((96, 128, 3), 0.2, np.float32) * tex
+        np.testing.assert_allclose(m.light_ratio(grey, grey * warm, 8)[16:80, 16:112].mean((0, 1)), warm, rtol=0.08)
+        moss = np.full((96, 128, 3), [0.10, 0.12, 0.003], np.float32) * tex  # almost no blue
+        relit = moss * warm
+        relit[..., 2] += rng.uniform(0, 0.01, (96, 128)).astype(np.float32)  # the regenerated shot's own noise there
+        blue = m.light_ratio(moss, relit, 8)[..., 2]
+        self.assertLess(blue.max() / blue.min(), 1.5)  # one smooth ratio, not specks between 1/16 and 8
+        print(f"relight colour: ok (warm light kept, blue ratio of the mossy rock {blue.min():.2f} to {blue.max():.2f})")
+
 
     def test_fill_and_steady_masks(self):
         ramp = np.zeros((64, 96, 3), np.float32); ramp[..., 0] = np.linspace(0, 1, 96)[None, :]

@@ -74,6 +74,10 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; display: grid; place-items: center; background: #181818; }
 #view { display: block; background: #111; touch-action: none; transform-origin: 0 0; position: absolute; left: 0; top: 0; image-rendering: auto; }
 #view.painting { cursor: none; }
+#view.picking { cursor: crosshair; }
+.sw.pick { display: grid; place-items: center; background: var(--panel-2, #2a2d33); color: var(--text, #e6e6e6); }
+.sw.pick svg { width: 12px; height: 12px; fill: currentColor; }
+.sw.pick[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent, #f5a623); }
 #view.panning { cursor: grabbing; }
 #view.painting.scrub { cursor: ew-resize; }
 .defs { position: absolute; width: 0; height: 0; overflow: hidden; }

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit } from "../../web/logic.mjs";
+import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayUniforms, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -38,13 +38,16 @@ test("preview sizes come from the plate's size: exact divisions of the working s
 });
 
 test("the viewer's colour: identity at rest, one channel as grey, invert, exposure in stops, contrast about 18% grey", () => {
-  assert.equal(displayMatrix(DISPLAY), "1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0");
-  assert.equal(displayMatrix({ ...DISPLAY, channel: "r" }), "1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 1 0");
-  assert.equal(displayMatrix({ ...DISPLAY, channel: "l" }), "0.2126 0.7152 0.0722 0 0 0.2126 0.7152 0.0722 0 0 0.2126 0.7152 0.0722 0 0 0 0 0 1 0");
-  assert.equal(displayMatrix({ ...DISPLAY, invert: true }), "-1 0 0 0 1 0 -1 0 0 1 0 0 -1 0 1 0 0 0 1 0");
-  assert.deepEqual(displayMatrix({ ...DISPLAY, saturation: 0 }).split(" ").map(Number).slice(0, 3), [0.2126, 0.7152, 0.0722]);
-  const spun = displayMatrix({ ...DISPLAY, hue: 120 }).split(" ").map(Number); // every row still sums to 1: greys stay grey
-  for (const r of [0, 5, 10]) assert.ok(Math.abs(spun[r] + spun[r + 1] + spun[r + 2] - 1) < 1e-3);
+  const flat = (d) => displayUniforms(d).matrix.flat();
+  assert.deepEqual(flat(DISPLAY), [1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  assert.deepEqual(displayUniforms(DISPLAY).offset, [0, 0, 0]);
+  assert.deepEqual(flat({ ...DISPLAY, channel: "r" }), [1, 0, 0, 1, 0, 0, 1, 0, 0]);
+  assert.deepEqual(flat({ ...DISPLAY, channel: "l" }), [0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722]);
+  assert.deepEqual(flat({ ...DISPLAY, invert: true }), [-1, 0, 0, 0, -1, 0, 0, 0, -1]);
+  assert.deepEqual(displayUniforms({ ...DISPLAY, invert: true }).offset, [1, 1, 1]);
+  assert.deepEqual(flat({ ...DISPLAY, saturation: 0 }).slice(0, 3), [0.2126, 0.7152, 0.0722]);
+  for (const row of displayUniforms({ ...DISPLAY, hue: 120 }).matrix) assert.ok(Math.abs(row[0] + row[1] + row[2] - 1) < 1e-3); // greys stay grey
+  assert.deepEqual(displayUniforms({ ...DISPLAY, exposure: -2 }).slope, 0.25); // exposure scales linear light, as OpenRV's matrix does
   assert.deepEqual(displayTransfer({ exposure: 1, contrast: 1, gamma: 2 }), { slope: 2, intercept: 0, exponent: 0.5 });
   const c = displayTransfer({ exposure: 0, contrast: 2, gamma: 1 });
   assert.ok(Math.abs(c.slope * 0.18 + c.intercept - 0.18) < 1e-9); // 18% grey holds still
@@ -278,4 +281,10 @@ test("a job index key leaves out output folders and the live preview rate, and k
   const a = indexValues({ seed: 4, prefix: "paintaplate/x/v1/clean/f", video_prefix: "v1/clean", live: 2, hero: "up/ab.png", prompt: "A street." });
   assert.deepEqual(a, [["hero", "up/ab.png"], ["prompt", "A street."], ["seed", 4]]);
   assert.deepEqual(indexValues({ prompt: "A street.", hero: "up/ab.png", seed: 4, matte_prefix: "v9/m" }), a, "in any order, from any session");
+});
+
+test("the colour picker averages the pixels under the cursor", () => {
+  assert.equal(pickedColor(new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 255, 255])), "#800080");
+  assert.equal(pickedColor(new Uint8ClampedArray([10, 20, 30, 255, 200, 200, 200, 0])), "#0a141e"); // outside the frame: not counted
+  assert.equal(pickedColor(new Uint8ClampedArray([0, 0, 0, 0])), null);
 });
