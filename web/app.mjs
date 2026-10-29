@@ -48,7 +48,7 @@ const RENDERS_WANTED = 6; // sets of edits whose renders go on in the background
 const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "export", "warm", "fluid"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "export"]; // job kinds a new stroke cancels
 const UPSAMPLER = {}; // Black Forest Labs' system prompts for Klein's upsampler (upsampler.json): table and plain
-const SCENE = { format: "paintaplate-scene", version: 1 };
+const SCENE = { format: "paintaplate-scene", version: 2 }; // 2: a fluid shot keeps its own words, whether it was made, and its bypass
 
 const TOOLS = { b: "paint", e: "erase", l: "light" };
 // The viewer's colour keys, after OpenRV's rvui.mu: exposure e, gamma y, contrast k, saturation S, hue h; channels c r g b l.
@@ -906,7 +906,7 @@ function redrawKey(key) {
 
 // what a fluid shot is made from: its keyframes, its words and its seed. Shots already made are kept by it, so Enter never makes one twice
 const fluidSig = () => JSON.stringify([[...S.fluid.keys].sort((a, b) => a.frame - b.frame).map((k) => [k.frame, strokesSig(k.strokes)]),
-  $("#prompt").value.trim(), S.fluid.seed]);
+  keying() ? $("#prompt").value.trim() : S.fluid.prompt ?? "", S.fluid.seed]); // the field holds another edit's words once the keyframes close
 
 function staleFluid() { // the keyframes or the words changed: the shot on show comes from the old ones, and a run of the old ones stops
   historyUI(); // the fluid row says what changed
@@ -1026,13 +1026,13 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
   try {
     const keys = [];
     for (const k of [...f.keys].sort((a, b) => a.frame - b.frame)) // the control video's keyframes: the paint on black, at the shot's size
-      keys.push({ frame: k.frame, image: await uploadCanvas(snap(k.canvas, size, "#000"), `fluid_v${v}_key${k.frame}.png`) });
+      redrawKey(k), keys.push({ frame: k.frame, image: await uploadCanvas(snap(k.canvas, size, "#000"), `fluid_v${v}_key${k.frame}.png`) });
     log(`Fluid v${v}: ${keys.length} keyframe(s) at ${keys.map((k) => p.first + k.frame).join(", ")}, ${size.join(" x ")}, ${p.frames} frames at ${p.fps} fps, seed ${f.seed}, prompt "${prompt}"`);
     status(`Fluid shot v${v}: one LTX 2.5 pass with ainvfx-fluid`);
     const out = await run("fluid", { path: f.blankPath ?? p.path, color_space: "sRGB", max_frames: p.frames, keys: JSON.stringify(keys), prompt, seed: f.seed,
       prefix: `${dir}/plate`, video_prefix: `${dir}/preview`, live: liveEvery() },
       { kind: "fluid", progress: (x) => { if (f.busy) { f.busy.progress = x; fluidUI(); fluidProgress(); } }, live: showLive }).done;
-    f.result = { v, sig, seed: f.seed, prompt, path: `output:${dir}/plate/${(f.blankPath ?? p.spec.source).split(/[\\/]/).pop()}`, preview: viewUrl(outputFile("fluid", out, "video")) };
+    f.result = { v, sig, seed: f.seed, prompt, path: `${folderOf("fluid", out, "video")}/plate/${(f.blankPath ?? p.spec.source).split(/[\\/]/).pop()}`, preview: viewUrl(outputFile("fluid", out, "video")) };
     (f.made ??= new Map()).set(sig, f.result);
     f.view = "result";
     f.busy = null;
@@ -1069,8 +1069,8 @@ function leaveKeys() { // the keyframes close: the viewer shows the plate the fl
 async function rebase() { // the plate under the edits: the fluid shot when it is on and made, else the blank plate
   const f = S.fluid, made = f.on !== false && f.result, path = made ? f.result.path : f.blankPath;
   if (!path || S.plate?.path === path) { historyUI(); return render(); }
-  log(`The plate under the edits: ${made ? `the fluid shot v${f.result.v}` : "the blank plate"}`);
   await openPlate([], path, "sRGB", { under: true });
+  log(`The plate under the edits: ${made ? `the fluid shot v${f.result.v}` : "the blank plate"}`); // once it is open
   if (S.edits.some((e) => e.on && e.state === "done")) queue(regenerateDependents); // made again on it, or taken back
 }
 
@@ -1277,6 +1277,7 @@ async function generate(edit) {
     await edit.preparing; // the snap and the caption started when the strokes stopped: reused when nothing changed since
     if (!alive()) return;
     status(`Edit ${num(edit)}: ${NAME[edit.tool].toLowerCase()}, writing the prompt`);
+    redrawStrokes(edit); // in one pass from its strokes, as a scene opened again draws them: the same images, the same job
     const { before, below, base, reference, cap } = await prepare(edit, S.edits.indexOf(edit), "edit");
     if (!alive()) return;
     const show = (b) => alive() && createImageBitmap(b).then((bm) => {
@@ -2109,19 +2110,22 @@ async function listPlates() { // input/plates, each with its first frame: one cl
 
 // ---------- Scenes: the plate and every edit with its strokes, words and seed, in a file to open again ----------
 
-const r5 = (v) => Math.round(v * 1e5) / 1e5;
-const packStrokes = (strokes, [W, H]) => strokes.map((s) => ({ tool: s.tool, color: s.color, size: r5(s.size / W),
-  points: s.points.map(([x, y, pr]) => [r5(x / W), r5(y / H), r5(pr)]) })); // positions as fractions of the frame
-const unpackStrokes = (saved, [W, H]) => saved.map((s) => ({ tool: s.tool, color: s.color, size: s.size * W,
-  points: s.points.map(([x, y, pr]) => [x * W, y * H, pr]) }));
+// Strokes as drawn, in pixels of the working size the scene names (`work`, scene version 2): opened again on the same
+// plate they come back exactly, so the images made from them are the same files and the job index knows their jobs.
+// Version 1 kept fractions of the frame rounded to five places, which moved a stroke by a few thousandths of a pixel.
+const packStrokes = (strokes) => strokes.map((s) => ({ tool: s.tool, color: s.color, size: s.size, points: s.points.map(([x, y, pr]) => [x, y, pr]) }));
+const unpackStrokes = (saved, [W, H], from) => { // `from`: the scene's own working size; none for a version 1 scene
+  const [kx, ky] = from ? [W / from[0], H / from[1]] : [W, H];
+  return saved.map((s) => ({ tool: s.tool, color: s.color, size: s.size * kx, points: s.points.map(([x, y, pr]) => [x * kx, y * ky, pr]) }));
+};
 
 function saveScene() {
   const work = S.plate.work, f = S.fluid;
-  const scene = { ...SCENE, saved: new Date().toISOString(), plate: { path: S.fluid?.blankPath ?? S.plate.path, color_space: S.plate.cs, name: S.plate.name },
+  const scene = { ...SCENE, saved: new Date().toISOString(), work, plate: { path: S.fluid?.blankPath ?? S.plate.path, color_space: S.plate.cs, name: S.plate.name },
     preview: S.previewCap, in: S.inPt, out: S.outPt,
     edits: S.edits.map((e) => ({ tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on,
-      caption: e.caption?.text ?? "", strokes: packStrokes(e.strokes, work) })),
-    ...(f ? { fluid: { prompt: $("#prompt").value.trim(), seed: f.seed, keys: f.keys.map((k) => ({ frame: k.frame, strokes: packStrokes(k.strokes, work) })) } } : {}) };
+      caption: e.caption?.text ?? "", strokes: packStrokes(e.strokes) })),
+    ...(f ? { fluid: { prompt: keying() ? $("#prompt").value.trim() : f.prompt ?? "", seed: f.seed, made: !!f.result, on: f.on !== false, keys: f.keys.map((k) => ({ frame: k.frame, strokes: packStrokes(k.strokes) })) } } : {}) };
   const a = Object.assign(document.createElement("a"), { download: `${S.plate.name}.paintaplate.json`,
     href: URL.createObjectURL(new Blob([JSON.stringify(scene, null, 1)], { type: "application/json" })) });
   document.body.append(a); a.click(); a.remove();
@@ -2155,17 +2159,19 @@ async function openScene(file) { // the plate opens, then every edit runs again 
   const scene = JSON.parse(await file.text());
   if (scene.format !== SCENE.format || !(scene.version <= SCENE.version)) throw new Error("This file is not a PaintAPlate scene.");
   if (scene.preview) setPreview(scene.preview);
+  const from = scene.version >= 2 && Array.isArray(scene.work) ? scene.work : null; // strokes in pixels of this working size
   await openPlate([], scene.plate.path, scene.plate.color_space,
-    scene.fluid ? { fluid: { blankPath: scene.plate.path, seed: scene.fluid.seed, prompt: scene.fluid.prompt ?? "" } } : {});
-  if (scene.fluid) { // a fluid shot: its keyframes come back, ready to generate
-    S.fluid.keys = scene.fluid.keys.map((k) => { const key = newKey(k.frame); key.strokes = unpackStrokes(k.strokes, S.plate.work); redrawKey(key); return key; });
-    fluidUI(); timelineUI(); render();
-    return status(`Scene opened: a fluid shot with ${S.fluid.keys.length} keyframe${S.fluid.keys.length === 1 ? "" : "s"}. Enter generates it.`);
+    scene.fluid ? { fluid: { blankPath: scene.plate.path, seed: scene.fluid.seed, prompt: scene.fluid.prompt ?? "", on: scene.fluid.on !== false } } : {});
+  if (scene.fluid) { // the fluid shot first: its keyframes, then the shot itself, the plate the edits were painted on
+    S.fluid.keys = scene.fluid.keys.map((k) => { const key = newKey(k.frame); key.strokes = unpackStrokes(k.strokes, S.plate.work, from); redrawKey(key); return key; });
+    fluidUI(); timelineUI(); historyUI(); render();
+    if (scene.fluid.made && S.fluid.keys.length) await generateFluid(); // the machine that made it takes it back from the job index
+    else if (!scene.edits.length) return status(`Scene opened: a fluid shot with ${S.fluid.keys.length} keyframe${S.fluid.keys.length === 1 ? "" : "s"}. Enter generates it.`);
   }
   for (const saved of scene.edits) {
     const e = Object.assign(newEdit(), { tool: saved.tool, color: saved.color, prompt: saved.prompt ?? "", seed: saved.seed,
       whole: !!saved.whole, on: saved.on !== false, state: "queued", launched: performance.now(), caption: saved.caption ? { key: "scene", text: saved.caption } : null,
-      strokes: unpackStrokes(saved.strokes, S.plate.work) });
+      strokes: unpackStrokes(saved.strokes, S.plate.work, from) });
     redrawStrokes(e);
     e.thumb = strokesThumb(e);
     S.edits.push(e);

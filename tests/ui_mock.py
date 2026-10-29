@@ -258,6 +258,17 @@ def flow(page, port):
     check(not errors, f"no console errors: {errors}")
 
 
+WATCH = """() => { window.__lines = []; if (window.__watch) window.__watch.disconnect();
+  window.__watch = new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) =>
+    (n.querySelectorAll ? [...n.querySelectorAll('span')] : [n]).forEach((s) => window.__lines.push(s.textContent)))));
+  window.__watch.observe(document.querySelector('#log'), { childList: true, subtree: true }); }"""  # lines added from now on
+
+
+def added(page, steps):  # how many jobs of each step were taken from the job index, and how many were posted, since WATCH
+    lines = page.evaluate("window.__lines")
+    return {f"{s}: {w}": sum(1 for line in lines if line.startswith(f"{s}: {w}")) for s in steps for w in ("made before", "posted")}
+
+
 def fluid_flow(page):
     """A blank plate: keyframes on the LTX grid, copied, pasted, dragged, deleted and undone; then its shot, the first edit."""
     errors = []
@@ -332,7 +343,101 @@ def fluid_flow(page):
     page.wait_for_function("[...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('under the edits: the fluid shot v1')).length >= 2", timeout=60000)
     check(page.get_attribute('#history li[data-id="fluid"] .eye', "aria-pressed") == "true",
           "the eye on the fluid row bypasses it (the blank plate under the edits) and turns it back on (its shot)")
+
+    # A paint edit on the fluid shot, then the scene saved and opened again: all of it comes back, from the job index
+    box = page.eval_on_selector("#view", "e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }")
+    page.keyboard.press("b")
+    page.fill("#prompt", "a lantern"); page.evaluate("document.activeElement.blur()")
+    stroke([(0.2, 0.25), (0.3, 0.3)])
+    page.evaluate(WATCH)
+    page.keyboard.press("Enter")
+    rows_done = """(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
+      const f = document.querySelector('#history li[data-id="fluid"] small');
+      return t.join() === '2. Paint,1. Fluid' && !document.querySelector('#history li.busy') && !!f && f.textContent.includes('thick white smoke'); })()"""
+    page.wait_for_function(rows_done, timeout=120000)
+    page.wait_for_function("window.__lines.some((t) => t.startsWith('Export v'))", timeout=120000)  # its render made, through the export
+    with page.expect_download() as dl:
+        page.click("#save-btn")
+    path = os.path.join(SHOTS, dl.value.suggested_filename)  # the page knows a scene by its name
+    dl.value.save_as(path)
+    with open(path, encoding="utf-8") as fh:
+        scene = json.load(fh)
+    check(scene["fluid"]["prompt"] == "thick white smoke" and scene["fluid"]["made"] and [e["prompt"] for e in scene["edits"]] == ["a lantern"],
+          f"the scene keeps the fluid shot's own words, that it was made, and the edit on it: {scene['fluid']['prompt']!r}, {[e['prompt'] for e in scene['edits']]}")
+
+    page.evaluate(WATCH)
+    page.click("#open-btn"); page.set_input_files("#scene", path); page.click("#open-go")
+    page.wait_for_function("window.__lines.some((t) => t.startsWith('Scene opened'))", timeout=120000)
+    page.wait_for_function(rows_done, timeout=120000)
+    page.wait_for_function("window.__lines.some((t) => t.startsWith('export: made before') || t.startsWith('export: posted'))", timeout=120000)
+    grew = added(page, ("ingest", "fluid", "edit", "shot", "matte", "comp", "export"))
+    posted = {k: v for k, v in grew.items() if k.endswith("posted") and v}
+    check(not posted and all(grew[f"{s}: made before"] >= 1 for s in ("fluid", "edit", "shot", "export")),
+          f"the scene opens again as it was: the fluid shot, the edit and every render step from the job index, nothing run twice: {grew}")
     check(not errors, f"no console errors in the fluid shot: {errors}")
+
+
+def scene_flow(page):
+    """A plate with a paint and a whole-object erase, saved as a scene and opened again: every job from the job index."""
+    errors = []
+    page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+    page.click("#open-btn")
+    page.wait_for_selector("#plates .plate", timeout=10000)
+    page.click("#plates .plate:has-text('desk.mp4')")
+    page.click("#open-go")
+    page.wait_for_function("document.querySelector('#spec').textContent.includes('fps')", timeout=60000)
+    page.wait_for_function("/Describe the edit|Ready to play/.test(document.querySelector('#status').textContent)", timeout=60000)
+    box = page.eval_on_selector("#view", "e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }")
+
+    def stroke(pts):
+        page.mouse.move(box["x"] + pts[0][0] * box["w"], box["y"] + pts[0][1] * box["h"])
+        page.mouse.down()
+        for x, y in pts[1:]:
+            page.mouse.move(box["x"] + x * box["w"], box["y"] + y * box["h"], steps=5)
+        page.mouse.up()
+
+    def settled(limit=180):  # Generate says Generate again for three seconds running: no edit, no render step left
+        calm, t0 = 0, time.time()
+        while calm < 3 and time.time() - t0 < limit:
+            page.wait_for_timeout(1000)
+            calm = calm + 1 if page.text_content("#generate").strip() == "Generate" else 0
+
+    def exports(n):  # the export of the edits on show, the last step of their render
+        page.wait_for_function(f"window.__lines.filter((t) => t.startsWith('Export v')).length >= {n}", timeout=180000)
+
+    page.evaluate(WATCH)
+    page.keyboard.press("b")
+    page.fill("#prompt", "a red fire"); page.evaluate("document.activeElement.blur()")
+    stroke([(0.3, 0.6), (0.35, 0.65)])
+    page.keyboard.press("Enter")
+    page.wait_for_function("""(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
+      return t.join() === '1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
+    exports(1)  # each set of edits renders to its export before the next edit, so the scene's every step is made once
+    page.keyboard.press("e")
+    page.fill("#prompt", "the cup"); page.evaluate("document.activeElement.blur()")
+    stroke([(0.6, 0.4), (0.62, 0.45)])
+    page.wait_for_timeout(1500)
+    page.keyboard.press("Enter")
+    page.wait_for_function("""(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
+      return t.join() === '2. Erase,1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
+    exports(2)
+    settled()
+    with page.expect_download() as dl:
+        page.click("#save-btn")
+    path = os.path.join(SHOTS, dl.value.suggested_filename)
+    dl.value.save_as(path)
+    page.evaluate(WATCH)
+    page.click("#open-btn"); page.set_input_files("#scene", path); page.click("#open-go")
+    page.wait_for_function("window.__lines.some((t) => t.startsWith('Scene opened'))", timeout=120000)
+    page.wait_for_function("""(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
+      return t.join() === '2. Erase,1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
+    page.wait_for_function("window.__lines.some((t) => t.startsWith('export: made before') || t.startsWith('export: posted'))", timeout=180000)
+    settled()
+    grew = added(page, ("ingest", "prompt", "edit", "clean", "cleanup", "shot", "matte", "comp", "export"))
+    posted = {k: v for k, v in grew.items() if k.endswith("posted") and v}
+    check(not posted and grew["edit: made before"] >= 2 and grew["export: made before"] >= 1,
+          f"a plate's scene opens again from the job index: the edits and every render step, nothing run twice: {grew}")
+    check(not errors, f"no page errors in the scene: {errors}")
 
 
 def phone(browser, port):
@@ -401,6 +506,7 @@ def main():
             page = browser.new_page(viewport={"width": 1400, "height": 900})
             flow(page, a.port)
             fluid_flow(page)
+            scene_flow(page)
             phone(browser, a.port)
             browser.close()
     finally:
