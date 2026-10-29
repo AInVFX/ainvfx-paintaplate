@@ -306,23 +306,6 @@ def guided_filter(guide: np.ndarray, src: np.ndarray, r: int, eps: float) -> np.
 RATIO_RANGE = (1.0 / 16.0, 8.0)
 
 
-def box_matte(mask: np.ndarray, grow: float) -> np.ndarray:
-    """Each frame's mask as its bounding box, grown by `grow` of its size on each side. (N, H, W) in and out.
-
-    An erased object's own outline, moving through the reference frames, told LTX a vehicle was there: it drew one
-    back. The grown box keeps where the object was and hides what it was.
-    """
-    out = np.zeros(mask.shape, np.float32)
-    for i, m in enumerate(mask):
-        ys, xs = np.nonzero(m > 0.5)
-        if not len(xs):
-            continue
-        y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
-        gy, gx = int(round((y1 - y0) * grow)), int(round((x1 - x0) * grow))
-        out[i, max(0, y0 - gy):y1 + gy, max(0, x0 - gx):x1 + gx] = 1.0
-    return out
-
-
 def relight(plate: np.ndarray, source: np.ndarray, relit: np.ndarray,
             radius: int, strength: float = 1.0) -> np.ndarray:
     """Move the light of `relit` onto `plate`, keeping the plate's own detail.

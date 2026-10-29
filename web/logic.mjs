@@ -127,24 +127,27 @@ const pyJSON = (v) => JSON.stringify(v).replace(/("(?:[^"\\]|\\.)*")|([,:])/g, (
 export const KEEP_TOUCHED = " Where the drawing touches an object, the new element acts on that object itself (it burns it, rests on it, " +
   "wets it or lights it); add no props, fuel or supports that were not asked for."; // a fire on a towel came with logs without it
 
-export function upsampleRequest({ tool, words, bbox }) {
+export function upsampleRequest({ tool, words, bbox, boxes = null }) {
   if (tool === "light") {
     const ask = `Relight the whole photograph: ${words || "warm light coming from the painted area"}. Keep every object, its position, shape, ` +
       "size and texture, the framing and the camera exactly as they are.";
     return { mode: "plain", locked: null,
       request: `Reference images follow in order (the first image, the second image, ...).\nUser request: ${ask}\nOutput the caption.` };
   }
-  const row = tool === "erase"
-    ? { id: "obj_1", from: "ref_image_0", src_bbox: bbox, tgt_bbox: null, desc: words || "the object to remove" }
-    : { id: "obj_1", from: "target", src_bbox: null, tgt_bbox: bbox, desc: words || "a realistic object of the drawing's shape and colour" };
+  const parts = tool === "erase" && boxes?.length > 1 ? boxes : null; // several painted parts: one locked row each
+  const rows = parts ? parts.map((b, i) => ({ id: `obj_${i + 1}`, from: "ref_image_0", src_bbox: b, tgt_bbox: null, desc: words || "an object to remove" }))
+    : [tool === "erase" ? { id: "obj_1", from: "ref_image_0", src_bbox: boxes?.[0] ?? bbox, tgt_bbox: null, desc: words || "the object to remove" }
+      : { id: "obj_1", from: "target", src_bbox: null, tgt_bbox: bbox, desc: words || "a realistic object of the drawing's shape and colour" }];
+  const cites = rows.map((r) => `<${r.id}>`), list = cites.length > 1 ? `${cites.slice(0, -1).join(", ")} and ${cites.at(-1)}` : cites[0];
   const ask = tool === "erase"
-    ? `Remove the ${words || "object"} <obj_1> completely, with its shadow and its reflection, and continue the background behind it.`
+    ? parts ? `Remove the ${words || "objects"} ${list} completely, with their shadows and their reflections, and continue the background behind them. Remove nothing else.`
+      : `Remove the ${words || "object"} <obj_1> completely, with its shadow and its reflection, and continue the background behind it. Remove nothing else.`
     : `Replace the rough coloured drawing at <obj_1> with ${words || "a realistic object of the same shape and colour"}, photographed in the ` +
       `same light, perspective, focus and grain as the scene, casting its own light and shadows on what is around it.${KEEP_TOUCHED}`;
   const instruction = `ORIGINAL PROMPT:\n${ask}\n\nLOCKED BOUNDING-BOX ANNOTATIONS ([y_min, x_min, y_max, x_max] on a 0-1000 canvas, with ` +
     "(0, 0) at the top-left). This is an authoritative JSON list of dictionaries; preserve every supplied identity, provenance value, " +
-    `null, and coordinate exactly:\n${pyJSON([row])}`;
-  return { mode: "table", locked: [row],
+    `null, and coordinate exactly:\n${pyJSON(rows)}`;
+  return { mode: "table", locked: rows,
     request: `Reference images follow in attachment order: ref_image_0, ref_image_1, ...\nUser editing instruction: ${instruction}\n` +
       "Decide the edit, imagine the target image, and output the annotation record." };
 }
@@ -182,6 +185,209 @@ export function reconcile(text, locked) {
   const out = locked.map((lock) => ({ ...lock, desc: String(byId.get(lock.id)?.desc ?? "").trim() || lock.desc }));
   for (const r of rows ?? []) { const a = addedRow(r, caption); if (a && !out.some((o) => o.id === a.id)) out.push(a); }
   return `${caption} ${pyJSON(out)}`;
+}
+
+// ---------- An erase: one locked box per painted part ----------
+// One box around a truss, a crane and a door took in an astronaut between them, and the upsampler removed him instead (28 Oct).
+// A few tight boxes cover the paint, so they hold what was painted and little else.
+// paint: { bits, w, h } on a coarse grid; boxes are [y_min, x_min, y_max, x_max] on 0..1000.
+export function paintBoxes({ bits, w, h }, { max = 4, fill = 0.4, gain = 0.25, margin = 8 } = {}) {
+  // a box: the painted cells in it and their tight bounds. The emptiest box splits in two, along its long side, where the two
+  // halves' tight boxes cover the least, while that saves a quarter of its area and fewer than `max` boxes exist
+  const tight = (cells) => {
+    let y1 = h, x1 = w, y2 = -1, x2 = -1;
+    for (const c of cells) { const y = Math.floor(c / w), x = c % w; y1 = Math.min(y1, y); x1 = Math.min(x1, x); y2 = Math.max(y2, y); x2 = Math.max(x2, x); }
+    return { cells, y1, x1, y2, x2, area: (y2 - y1 + 1) * (x2 - x1 + 1) };
+  };
+  const all = [];
+  for (let c = 0; c < w * h; c++) if (bits[c]) all.push(c);
+  if (!all.length) return [];
+  const boxes = [tight(all)];
+  while (boxes.length < max) {
+    const b = boxes.filter((x) => x.cells.length < fill * x.area).sort((a, z) => (z.area - z.cells.length) - (a.area - a.cells.length))[0];
+    if (!b) break;
+    const vertical = b.x2 - b.x1 >= b.y2 - b.y1, key = (c) => (vertical ? c % w : Math.floor(c / w));
+    const sorted = [...b.cells].sort((p, q) => key(p) - key(q));
+    let best = null;
+    for (let i = 1; i < sorted.length; i++) {
+      if (key(sorted[i]) === key(sorted[i - 1])) continue;
+      const a = tight(sorted.slice(0, i)), z = tight(sorted.slice(i));
+      if (!best || a.area + z.area < best[0].area + best[1].area) best = [a, z];
+    }
+    if (!best || best[0].area + best[1].area > (1 - gain) * b.area) break;
+    boxes.splice(boxes.indexOf(b), 1, ...best);
+  }
+  const box = (b) => [Math.max(0, Math.floor((b.y1 / h) * 1000) - margin), Math.max(0, Math.floor((b.x1 / w) * 1000) - margin),
+    Math.min(1000, Math.ceil(((b.y2 + 1) / h) * 1000) + margin), Math.min(1000, Math.ceil(((b.x2 + 1) / w) * 1000) + margin)];
+  return boxes.sort((a, z) => a.x1 - z.x1 || a.y1 - z.y1).map(box); // numbered left to right, as the upsampler numbers its rows
+}
+
+// Whether a caption erases what was painted: it cites a locked row (<obj_1>), or the rows it removes and cites hold most of the
+// paint. `paint`: { bits, w, h }, the painted area on a coarse grid. On 28 Oct the bad caption removed person_1, a box with none
+// of the paint in it; the good one never cited <obj_1> but removed four rows that held nearly all of it.
+export function erasesPaint(text, locked, paint, share = 0.5) {
+  const [caption, rows] = splitTable(text);
+  if (locked.some((r) => caption.includes(`<${r.id}>`))) return true;
+  const ids = new Set(locked.map((r) => r.id));
+  const boxes = (rows ?? []).filter((r) => r && !ids.has(r.id) && r.tgt_bbox == null && validBox(r.src_bbox) && caption.includes(`<${r.id}>`))
+    .map((r) => r.src_bbox);
+  let painted = 0, inside = 0;
+  for (let y = 0; y < paint.h; y++) for (let x = 0; x < paint.w; x++) {
+    if (!paint.bits[y * paint.w + x]) continue;
+    painted++;
+    const Y = ((y + 0.5) / paint.h) * 1000, X = ((x + 0.5) / paint.w) * 1000;
+    if (boxes.some(([y1, x1, y2, x2]) => Y >= y1 - 10 && Y <= y2 + 10 && X >= x1 - 10 && X <= x2 + 10)) inside++;
+  }
+  return painted > 0 && inside / painted >= share;
+}
+
+// The erase pass's prompt: the scene as it stays, in the upsampler's own words for what it kept (rows with a box in the
+// result). People and text stay out (a pose in words fights the plate's own motion), and the erased object is never named
+// (named, the umbrella came back). Nothing kept: no prompt, as LTX's inpainting guide recommends.
+const UNNAMED = /^(?:person|people|man|woman|child|boy|girl|crowd|en_text)$/i;
+export function erasePrompt(captions) {
+  const descs = [];
+  for (const text of captions) {
+    const [, rows] = splitTable(text ?? "");
+    for (const r of rows ?? []) {
+      if (!r || r.from !== "ref_image_0" || !validBox(r.tgt_bbox) || UNNAMED.test(String(r.id ?? "").replace(/_\d+$/, ""))) continue;
+      const d = String(r.desc ?? "").trim().replace(/\s+/g, " ");
+      if (d && !descs.includes(d)) descs.push(d);
+    }
+  }
+  return descs.map((d) => (/[.!?]$/.test(d) ? d : `${d}.`)).join(" ");
+}
+
+// The full size's first stage, as in Lightricks' two-stage LTX workflows: half the working size, in multiples of 32. The second
+// stage refines it at full size in 2 steps (8 steps at full size took 181 s on a 1080p plate, 28 Oct).
+export const stageOne = ([w, h], step = 32) => [Math.max(step, Math.round(w / 2 / step) * step), Math.max(step, Math.round(h / 2 / step) * step)];
+
+// ---------- An erase's fill, levelled with the background it continues ----------
+// Klein's fill can sit a few levels off the background around it: a pale, soft shape where the object was, which LTX then
+// animated into smoke (+4 to +6 levels on a backdrop at 18, 28 Oct). The background is estimated inside the patch from the frame
+// around it (push-pull on a grid of `cell` px); where the fill is flat and close to that estimate, the difference goes, low
+// frequencies only. Where they differ a lot (an edge, a revealed object) or the fill is textured, nothing changes.
+// fill: RGBA of the patch (alpha: where it covers); base: RGBA of the frame under it; paint: RGBA of the painted area (red: where
+// the object is), all width x height. Around the paint the patch only blends, and there the plate itself is the background.
+// Returns the patch's new RGBA and how far it moved inside, on average, in levels.
+const ramp = (v, [lo, hi]) => (v <= lo ? 1 : v >= hi ? 0 : (hi - v) / (hi - lo));
+function pushPull(val, wt, w, h, ch) { // fills the cells of weight below 1 from the cells around them, coarse to fine
+  if (w <= 1 && h <= 1) return;
+  const w2 = Math.ceil(w / 2), h2 = Math.ceil(h / 2), v2 = new Float32Array(w2 * h2 * ch), t2 = new Float32Array(w2 * h2);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const c = y * w + x, t = wt[c], d = (y >> 1) * w2 + (x >> 1);
+    if (!t) continue;
+    t2[d] += t;
+    for (let k = 0; k < ch; k++) v2[d * ch + k] += val[c * ch + k] * t;
+  }
+  for (let d = 0; d < w2 * h2; d++) if (t2[d]) { for (let k = 0; k < ch; k++) v2[d * ch + k] /= t2[d]; t2[d] = Math.min(1, t2[d]); }
+  pushPull(v2, t2, w2, h2, ch);
+  for (let y = 0; y < h; y++) {
+    const gy = Math.min(h2 - 1, Math.max(0, (y + 0.5) / 2 - 0.5)), y0 = Math.floor(gy), y1 = Math.min(h2 - 1, y0 + 1), ty = gy - y0;
+    for (let x = 0; x < w; x++) {
+      const c = y * w + x, t = Math.min(1, wt[c]);
+      if (t >= 1) continue;
+      const gx = Math.min(w2 - 1, Math.max(0, (x + 0.5) / 2 - 0.5)), x0 = Math.floor(gx), x1 = Math.min(w2 - 1, x0 + 1), tx = gx - x0;
+      for (let k = 0; k < ch; k++) {
+        const at = (yy, xx) => v2[(yy * w2 + xx) * ch + k];
+        const u = (at(y0, x0) * (1 - tx) + at(y0, x1) * tx) * (1 - ty) + (at(y1, x0) * (1 - tx) + at(y1, x1) * tx) * ty;
+        val[c * ch + k] = val[c * ch + k] * t + u * (1 - t);
+      }
+      wt[c] = 1;
+    }
+  }
+}
+function smoothInside(v, m, w, h, ch, passes) { // box blur of v over the cells where m is 1, normalised so the edge keeps its value
+  let a = Float32Array.from(v, (x, i) => x * m[Math.floor(i / ch)]), b = Float32Array.from(m);
+  for (let p = 0; p < passes; p++) for (const [dx, dy] of [[1, 0], [0, 1]]) {
+    const a2 = new Float32Array(a.length), b2 = new Float32Array(b.length);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const c = y * w + x;
+      for (let s = -1; s <= 1; s++) {
+        const xx = x + s * dx, yy = y + s * dy;
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        const o = yy * w + xx;
+        b2[c] += b[o];
+        for (let k = 0; k < ch; k++) a2[c * ch + k] += a[o * ch + k];
+      }
+    }
+    a = a2; b = b2;
+  }
+  for (let c = 0; c < w * h; c++) for (let k = 0; k < ch; k++) v[c * ch + k] = m[c] && b[c] > 0 ? a[c * ch + k] / b[c] : 0;
+}
+export function levelFill({ fill, base, paint = null, width: W, height: H, cell = 8, near = [6, 20], flat = [6, 14] }) {
+  const w = Math.ceil(W / cell), h = Math.ceil(H / cell), n = w * h;
+  const cnt = new Float32Array(n), sa = new Float32Array(n), so = new Float32Array(n), sb = new Float32Array(n * 3), sf = new Float32Array(n * 3);
+  const sl = new Float32Array(n), sl2 = new Float32Array(n);
+  for (let y = 0; y < H; y++) {
+    const row = Math.floor(y / cell) * w;
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4, c = row + Math.floor(x / cell), a = fill[i + 3] / 255;
+      cnt[c]++;
+      so[c] += paint ? paint[i] / 255 : a;
+      for (let k = 0; k < 3; k++) sb[c * 3 + k] += base[i + k];
+      if (a <= 0) continue;
+      const l = 0.2126 * fill[i] + 0.7152 * fill[i + 1] + 0.0722 * fill[i + 2];
+      sa[c] += a; sl[c] += a * l; sl2[c] += a * l * l;
+      for (let k = 0; k < 3; k++) sf[c * 3 + k] += a * fill[i + k];
+    }
+  }
+  // The background each cell continues, from the cells around the patch of a similar brightness: a backdrop continues the
+  // backdrop, not the lit floor below it (one estimate from every cell brightened the fill by the door, 29 Oct).
+  const known = new Uint8Array(n);
+  for (let c = 0; c < n; c++) known[c] = so[c] <= 0.01 * cnt[c] ? 1 : 0;
+  if (!known.some((k) => k)) return { rgba: new Uint8ClampedArray(fill), moved: 0 }; // the patch covers everything: nothing to level with
+  const luma3 = (v, c) => 0.2126 * v[c * 3] + 0.7152 * v[c * 3 + 1] + 0.0722 * v[c * 3 + 2];
+  const BANDS = [2.5, 4, 5.5, 7, 8.5], member = (l, b) => Math.max(0, 1 - Math.abs(Math.log2(Math.max(0, l) + 4) - BANDS[b]) / 1.5);
+  const mean = Float32Array.from(sb, (v, i) => v / cnt[Math.floor(i / 3)]);
+  const bands = BANDS.map((_, b) => {
+    const val = new Float32Array(n * 3), wt = new Float32Array(n);
+    for (let c = 0; c < n; c++) if (known[c]) { wt[c] = member(luma3(mean, c), b); for (let k = 0; k < 3; k++) val[c * 3 + k] = mean[c * 3 + k]; }
+    if (!wt.some((t) => t > 0.05)) return null;
+    pushPull(val, wt, w, h, 3);
+    return val;
+  });
+  const bg = Float32Array.from(mean);
+  for (let c = 0; c < n; c++) {
+    if (known[c] || sa[c] <= 0) continue;
+    for (let k = 0; k < 3; k++) bg[c * 3 + k] = 0;
+    const l = (0.2126 * sf[c * 3] + 0.7152 * sf[c * 3 + 1] + 0.0722 * sf[c * 3 + 2]) / sa[c];
+    let tw = 0;
+    bands.forEach((val, b) => { const m = val ? member(l, b) : 0; if (!m) return; tw += m; for (let k = 0; k < 3; k++) bg[c * 3 + k] += m * val[c * 3 + k]; });
+    if (tw) for (let k = 0; k < 3; k++) bg[c * 3 + k] /= tw;
+    else for (let k = 0; k < 3; k++) bg[c * 3 + k] = sf[c * 3 + k] / sa[c]; // nothing as bright around it: left as it is
+  }
+  const corr = new Float32Array(n * 3), m = new Float32Array(n);
+  for (let c = 0; c < n; c++) {
+    if (sa[c] <= 0) continue;
+    m[c] = 1;
+    const d = [0, 1, 2].map((j) => bg[c * 3 + j] - sf[c * 3 + j] / sa[c]);
+    const L = sl[c] / sa[c], std = Math.sqrt(Math.max(0, sl2[c] / sa[c] - L * L)), dl = 0.2126 * d[0] + 0.7152 * d[1] + 0.0722 * d[2];
+    // the imprint of what was removed goes its own way: a bright object leaves a pale shape (darken only), a dark one a smudge
+    const object = known[c] ? 0 : luma3(mean, c) - luma3(bg, c), along = object > 2 ? dl < 0 : object < -2 ? dl > 0 : true;
+    const k = along ? ramp(Math.abs(dl), near) * ramp(std, flat) : 0;
+    for (let j = 0; j < 3; j++) corr[c * 3 + j] = d[j] * k;
+  }
+  smoothInside(corr, m, w, h, 3, 2);
+  const out = new Uint8ClampedArray(fill);
+  let moved = 0, covered = 0;
+  for (let y = 0; y < H; y++) {
+    const gy = Math.min(h - 1, Math.max(0, (y + 0.5) / cell - 0.5)), y0 = Math.floor(gy), y1 = Math.min(h - 1, y0 + 1), ty = gy - y0;
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      if (!fill[i + 3]) continue;
+      const gx = Math.min(w - 1, Math.max(0, (x + 0.5) / cell - 0.5)), x0 = Math.floor(gx), x1 = Math.min(w - 1, x0 + 1), tx = gx - x0;
+      let dl = 0;
+      for (let k = 0; k < 3; k++) {
+        const at = (yy, xx) => corr[(yy * w + xx) * 3 + k];
+        const v = (at(y0, x0) * (1 - tx) + at(y0, x1) * tx) * (1 - ty) + (at(y1, x0) * (1 - tx) + at(y1, x1) * tx) * ty;
+        out[i + k] = fill[i + k] + v;
+        dl += [0.2126, 0.7152, 0.0722][k] * v;
+      }
+      moved += Math.abs(dl); covered++;
+    }
+  }
+  return { rgba: out, moved: covered ? moved / covered : 0 };
 }
 
 // ---------- The shot's prompt ----------

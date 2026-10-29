@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { changedMask, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit } from "../../web/logic.mjs";
+import { changedMask, erasePrompt, erasesPaint, levelFill, paintBoxes, stageOne, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -204,4 +204,72 @@ test("the paint matte starts where the edit changed the first frame, inside the 
   const b = new Uint8ClampedArray([...px(10, 10, 10), ...px(10, 10, 10), ...px(80, 90, 90), ...px(0, 0, 0)]);
   const z = new Uint8ClampedArray([...px(255, 255, 255), ...px(255, 255, 255), ...px(255, 255, 255), ...px(0, 0, 0)]);
   assert.deepEqual([...changedMask(a, b, z)], [1, 0, 0, 0]);
+});
+
+test("an erase painted in separate parts locks one box per part and asks to remove nothing else", () => {
+  const boxes = [[0, 0, 120, 508], [0, 492, 471, 758]];
+  const ask = upsampleRequest({ tool: "erase", words: "", bbox: [0, 0, 471, 758], boxes });
+  assert.deepEqual(ask.locked.map((r) => [r.id, r.src_bbox, r.tgt_bbox]), [["obj_1", boxes[0], null], ["obj_2", boxes[1], null]]);
+  assert.match(ask.request, /Remove the objects <obj_1> and <obj_2> completely, with their shadows/);
+  assert.match(ask.request, /Remove nothing else\./);
+  const one = upsampleRequest({ tool: "erase", words: "van", bbox: [10, 20, 30, 40], boxes: [[10, 20, 30, 40]] });
+  assert.deepEqual(one.locked.map((r) => r.src_bbox), [[10, 20, 30, 40]]);
+  assert.match(one.request, /Remove the van <obj_1> completely, with its shadow and its reflection, and continue the background behind it\. Remove nothing else\./);
+});
+
+test("the paint splits into a few tight boxes, so what stands between the strokes stays out of them", () => {
+  const w = 96, h = 54, bits = new Uint8Array(w * h);
+  for (let y = 0; y < 5; y++) for (let x = 0; x < 48; x++) bits[y * w + x] = 1; // a truss along the top
+  for (let y = 0; y < 25; y++) for (let x = 47; x < 50; x++) bits[y * w + x] = 1; // a mast that joins it
+  const boxes = paintBoxes({ bits, w, h });
+  const inside = (y, x) => boxes.some(([y1, x1, y2, x2]) => y >= y1 && y <= y2 && x >= x1 && x <= x2);
+  assert.equal(boxes.length, 2, JSON.stringify(boxes));
+  assert.ok(inside(40, 200) && inside(300, 505), "every painted part is in a box");
+  assert.ok(!inside(300, 200), "the place between them, where an astronaut stood, is in none");
+  assert.deepEqual(paintBoxes({ bits: new Uint8Array(w * h), w, h }), []);
+});
+
+test("a caption must erase what was painted: a locked box it cites, or removed rows that hold the paint", () => {
+  const w = 100, h = 50, bits = new Uint8Array(w * h);
+  for (let y = 0; y < 11; y++) for (let x = 60; x < 80; x++) bits[y * w + x] = 1;
+  const paint = { bits, w, h }, locked = [{ id: "obj_1", from: "ref_image_0", src_bbox: [0, 600, 220, 800], tgt_bbox: null, desc: "the object to remove" }];
+  const row = (id, src_bbox, desc) => ({ id, from: "ref_image_0", src_bbox, tgt_bbox: null, desc });
+  const astronaut = `Remove the astronaut <person_1>. Keep every other element unchanged. ${JSON.stringify([...locked, row("person_1", [400, 180, 600, 240], "An astronaut")])}`;
+  const crane = `Remove the crane <crane_1> completely. ${JSON.stringify([...locked, row("crane_1", [0, 590, 230, 810], "A crane")])}`;
+  assert.equal(erasesPaint(astronaut, locked, paint), false, "the paint holds no astronaut: the page's own caption is used");
+  assert.equal(erasesPaint(crane, locked, paint), true);
+  assert.equal(erasesPaint(`Remove the object <obj_1>. ${JSON.stringify(locked)}`, locked, paint), true);
+});
+
+test("the erase pass's prompt is the scene as it stays: no people, no text, nothing erased", () => {
+  const rows = [{ id: "obj_1", from: "ref_image_0", src_bbox: [1, 2, 3, 4], tgt_bbox: null, desc: "the van" },
+    { id: "street_1", from: "ref_image_0", src_bbox: [0, 0, 1000, 1000], tgt_bbox: [0, 0, 1000, 1000], desc: "A wet asphalt street at night" },
+    { id: "person_1", from: "ref_image_0", src_bbox: [10, 10, 50, 20], tgt_bbox: [10, 10, 50, 20], desc: "A man walking" },
+    { id: "En_Text_1", from: "ref_image_0", src_bbox: [10, 10, 90, 90], tgt_bbox: [10, 10, 90, 90], desc: "A sign that reads OPEN" }];
+  const caption = `Remove the van <obj_1>. ${JSON.stringify(rows)}`;
+  assert.equal(erasePrompt([caption, caption]), "A wet asphalt street at night.");
+  assert.equal(erasePrompt(["Remove the van <obj_1>.", undefined]), "");
+});
+
+test("an erase's fill is levelled with the background around it: a flat lift goes, texture stays, the imprint goes its own way", () => {
+  const W = 64, H = 48, rgba = (f) => {
+    const a = new Uint8ClampedArray(W * H * 4);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) a.set(f(x, y), (y * W + x) * 4);
+    return a;
+  };
+  const inside = (x, y) => x >= 16 && x < 48 && y >= 12 && y < 36, at = (a) => [a[(24 * W + 32) * 4], a[(24 * W + 33) * 4]];
+  const base = rgba((x, y) => (inside(x, y) ? [200, 200, 200, 255] : [18, 18, 18, 255])); // a bright object on a dark backdrop
+  const paint = rgba((x, y) => (inside(x, y) ? [255, 255, 255, 255] : [0, 0, 0, 255]));
+  const fill = (v) => rgba((x, y) => (inside(x, y) ? (typeof v === "function" ? v(x, y) : [v, v, v, 255]) : [0, 0, 0, 0]));
+  const level = (f) => levelFill({ fill: f, base, paint, width: W, height: H, cell: 4 }).rgba;
+  assert.deepEqual(at(level(fill(24))), [18, 18], "a fill 6 levels too bright comes down to the backdrop");
+  const checker = fill((x, y) => ((x + y) % 2 ? [54, 54, 54, 255] : [0, 0, 0, 255]));
+  assert.deepEqual(at(level(checker)), at(checker), "a textured fill is left alone");
+  assert.deepEqual(at(level(fill(12))), [12, 12], "a bright object's fill is never brightened");
+});
+
+test("the full size's first stage is half the working size, in multiples of 32", () => {
+  assert.deepEqual(stageOne([1920, 1088]), [960, 544]);
+  assert.deepEqual(stageOne([1280, 704]), [640, 352]);
+  assert.deepEqual(stageOne([1920, 800]), [960, 416]);
 });

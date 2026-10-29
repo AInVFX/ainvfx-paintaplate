@@ -1,0 +1,622 @@
+{
+ "1": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 121,
+   "pad_8n1": true
+  },
+  "_meta": {
+   "title": "Plate",
+   "slots": {
+    "path": "path",
+    "max_frames": "max_frames"
+   }
+  }
+ },
+ "2": {
+  "class_type": "ImageColorSpace",
+  "inputs": {
+   "image": [
+    "1",
+    0
+   ],
+   "source": "sRGB",
+   "destination": "sRGB"
+  },
+  "_meta": {
+   "title": "Plate in sRGB",
+   "slots": {
+    "source": "color_space"
+   }
+  }
+ },
+ "3": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "image": [
+    "2",
+    0
+   ],
+   "upscale_method": "bilinear",
+   "width": 1920,
+   "height": 1088,
+   "crop": "disabled"
+  },
+  "_meta": {
+   "title": "Plate at full size",
+   "slots": {
+    "width": "width",
+    "height": "height"
+   }
+  }
+ },
+ "4": {
+  "class_type": "GetImageSize",
+  "inputs": {
+   "image": [
+    "3",
+    0
+   ]
+  }
+ },
+ "5": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 1024,
+   "pad_8n1": false
+  },
+  "_meta": {
+   "title": "Erase matte",
+   "slots": {
+    "path": "hole"
+   }
+  }
+ },
+ "6": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "image": [
+    "5",
+    0
+   ],
+   "upscale_method": "area",
+   "width": [
+    "4",
+    0
+   ],
+   "height": [
+    "4",
+    1
+   ],
+   "crop": "disabled"
+  }
+ },
+ "7": {
+  "class_type": "ImageScaleBy",
+  "inputs": {
+   "image": [
+    "6",
+    0
+   ],
+   "upscale_method": "area",
+   "scale_by": 0.03125
+  },
+  "_meta": {
+   "title": "Erase matte on LTX's 32 px grid"
+  }
+ },
+ "8": {
+  "class_type": "ImageToMask",
+  "inputs": {
+   "channel": "red",
+   "image": [
+    "7",
+    0
+   ]
+  }
+ },
+ "9": {
+  "class_type": "ThresholdMask",
+  "inputs": {
+   "value": 0.02,
+   "mask": [
+    "8",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Every block the matte touches"
+  }
+ },
+ "10": {
+  "class_type": "GrowMask",
+  "inputs": {
+   "expand": 1,
+   "tapered_corners": false,
+   "mask": [
+    "9",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "One block more on every side",
+   "slots": {
+    "expand": "grid_grow"
+   }
+  }
+ },
+ "11": {
+  "class_type": "MaskToImage",
+  "inputs": {
+   "mask": [
+    "10",
+    0
+   ]
+  }
+ },
+ "12": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "image": [
+    "11",
+    0
+   ],
+   "upscale_method": "nearest-exact",
+   "width": [
+    "4",
+    0
+   ],
+   "height": [
+    "4",
+    1
+   ],
+   "crop": "disabled"
+  }
+ },
+ "13": {
+  "class_type": "ImageToMask",
+  "inputs": {
+   "channel": "red",
+   "image": [
+    "12",
+    0
+   ]
+  }
+ },
+ "14": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "image": [
+    "11",
+    0
+   ],
+   "upscale_method": "bilinear",
+   "width": [
+    "4",
+    0
+   ],
+   "height": [
+    "4",
+    1
+   ],
+   "crop": "disabled"
+  },
+  "_meta": {
+   "title": "The blocks with a soft edge"
+  }
+ },
+ "15": {
+  "class_type": "ImageToMask",
+  "inputs": {
+   "channel": "red",
+   "image": [
+    "14",
+    0
+   ]
+  }
+ },
+ "16": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 1024,
+   "pad_8n1": false
+  },
+  "_meta": {
+   "title": "Erase pass at half size",
+   "slots": {
+    "path": "low"
+   }
+  }
+ },
+ "17": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "upscale_method": "bilinear",
+   "width": [
+    "4",
+    0
+   ],
+   "height": [
+    "4",
+    1
+   ],
+   "crop": "disabled",
+   "image": [
+    "16",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Stage 1 at full size"
+  }
+ },
+ "18": {
+  "class_type": "ImageCompositeMasked",
+  "inputs": {
+   "destination": [
+    "3",
+    0
+   ],
+   "source": [
+    "17",
+    0
+   ],
+   "x": 0,
+   "y": 0,
+   "resize_source": false,
+   "mask": [
+    "15",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Stage 1 inside the blocks, the plate around them"
+  }
+ },
+ "19": {
+  "class_type": "UNETLoader",
+  "inputs": {
+   "unet_name": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+   "weight_dtype": "default"
+  },
+  "_meta": {
+   "slots": {
+    "unet_name": "ltx"
+   }
+  }
+ },
+ "20": {
+  "class_type": "LoraLoaderModelOnly",
+  "inputs": {
+   "model": [
+    "19",
+    0
+   ],
+   "lora_name": "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors",
+   "strength_model": 1.0
+  },
+  "_meta": {
+   "title": "In-outpainting IC-LoRA",
+   "slots": {
+    "lora_name": "inoutpaint"
+   }
+  }
+ },
+ "21": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "clip_name": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+   "type": "ltxv",
+   "device": "default"
+  },
+  "_meta": {
+   "slots": {
+    "clip_name": "gemma"
+   }
+  }
+ },
+ "22": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "ltx-2.5-video-vae-conv-bf16.safetensors"
+  },
+  "_meta": {
+   "slots": {
+    "vae_name": "video_vae"
+   }
+  }
+ },
+ "23": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "ltx-2.5-audio-vae-bf16.safetensors"
+  }
+ },
+ "24": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": "",
+   "clip": [
+    "21",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "The scene as it stays",
+   "slots": {
+    "text": "prompt"
+   }
+  }
+ },
+ "25": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": "blurry, low resolution, ugly, garbled mess, compression artifacts, glitch, flicker, still image",
+   "clip": [
+    "21",
+    0
+   ]
+  }
+ },
+ "26": {
+  "class_type": "LTXVConditioning",
+  "inputs": {
+   "positive": [
+    "24",
+    0
+   ],
+   "negative": [
+    "25",
+    0
+   ],
+   "frame_rate": [
+    "1",
+    3
+   ]
+  }
+ },
+ "27": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": ""
+  },
+  "_meta": {
+   "title": "Erased first frame",
+   "slots": {
+    "image": "hero"
+   }
+  }
+ },
+ "28": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "image": [
+    "27",
+    0
+   ],
+   "upscale_method": "lanczos",
+   "width": [
+    "4",
+    0
+   ],
+   "height": [
+    "4",
+    1
+   ],
+   "crop": "disabled"
+  }
+ },
+ "29": {
+  "class_type": "VAEEncodeTiled",
+  "inputs": {
+   "pixels": [
+    "18",
+    0
+   ],
+   "vae": [
+    "22",
+    0
+   ],
+   "tile_size": 512,
+   "overlap": 64,
+   "temporal_size": 500,
+   "temporal_overlap": 64
+  }
+ },
+ "30": {
+  "class_type": "LTXVImgToVideoInplace",
+  "inputs": {
+   "vae": [
+    "22",
+    0
+   ],
+   "image": [
+    "28",
+    0
+   ],
+   "strength": 1.0,
+   "bypass": false,
+   "latent": [
+    "29",
+    0
+   ]
+  }
+ },
+ "31": {
+  "class_type": "LTXVEmptyLatentAudio",
+  "inputs": {
+   "audio_vae": [
+    "23",
+    0
+   ],
+   "frames_number": [
+    "4",
+    2
+   ],
+   "frame_rate": [
+    "1",
+    3
+   ],
+   "batch_size": 1
+  }
+ },
+ "32": {
+  "class_type": "RandomNoise",
+  "inputs": {
+   "noise_seed": 0
+  },
+  "_meta": {
+   "slots": {
+    "noise_seed": "seed"
+   }
+  }
+ },
+ "33": {
+  "class_type": "CFGGuider",
+  "inputs": {
+   "model": [
+    "20",
+    0
+   ],
+   "positive": [
+    "26",
+    0
+   ],
+   "negative": [
+    "26",
+    1
+   ],
+   "cfg": 1.0
+  }
+ },
+ "34": {
+  "class_type": "KSamplerSelect",
+  "inputs": {
+   "sampler_name": "euler"
+  }
+ },
+ "35": {
+  "class_type": "ManualSigmas",
+  "inputs": {
+   "sigmas": "0.725, 0.421875, 0.0"
+  }
+ },
+ "36": {
+  "class_type": "LTXVConcatAVLatent",
+  "inputs": {
+   "video_latent": [
+    "30",
+    0
+   ],
+   "audio_latent": [
+    "31",
+    0
+   ]
+  }
+ },
+ "37": {
+  "class_type": "SamplerCustomAdvanced",
+  "inputs": {
+   "noise": [
+    "32",
+    0
+   ],
+   "guider": [
+    "33",
+    0
+   ],
+   "sampler": [
+    "34",
+    0
+   ],
+   "sigmas": [
+    "35",
+    0
+   ],
+   "latent_image": [
+    "36",
+    0
+   ]
+  },
+  "_meta": {
+   "progress": true
+  }
+ },
+ "38": {
+  "class_type": "LTXVSeparateAVLatent",
+  "inputs": {
+   "av_latent": [
+    "37",
+    0
+   ]
+  }
+ },
+ "39": {
+  "class_type": "VAEDecode",
+  "inputs": {
+   "vae": [
+    "22",
+    0
+   ],
+   "samples": [
+    "38",
+    0
+   ]
+  }
+ },
+ "40": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "images": [
+    "39",
+    0
+   ],
+   "filename_prefix": "paintaplate/plate/full/clean/f"
+  },
+  "_meta": {
+   "title": "Clean frames",
+   "slots": {
+    "filename_prefix": "prefix"
+   },
+   "output": "frames"
+  }
+ },
+ "41": {
+  "class_type": "CreateVideo",
+  "inputs": {
+   "images": [
+    "39",
+    0
+   ],
+   "fps": [
+    "1",
+    3
+   ],
+   "bit_depth": 8,
+   "color_space": "sRGB",
+   "codec": "none"
+  }
+ },
+ "42": {
+  "class_type": "SaveVideo",
+  "inputs": {
+   "video": [
+    "41",
+    0
+   ],
+   "filename_prefix": "paintaplate/plate/full/clean",
+   "format": "auto",
+   "format.codec": "auto"
+  },
+  "_meta": {
+   "title": "Clean shot at full size",
+   "slots": {
+    "filename_prefix": "video_prefix"
+   },
+   "output": "video"
+  }
+ }
+}

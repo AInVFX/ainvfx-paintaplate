@@ -93,31 +93,98 @@
   }
  },
  "7": {
+  "class_type": "ImageScaleBy",
+  "inputs": {
+   "image": [
+    "6",
+    0
+   ],
+   "upscale_method": "area",
+   "scale_by": 0.03125
+  },
+  "_meta": {
+   "title": "Erase matte on LTX's 32 px grid"
+  }
+ },
+ "8": {
   "class_type": "ImageToMask",
   "inputs": {
    "channel": "red",
    "image": [
-    "6",
+    "7",
     0
    ]
   }
  },
- "8": {
-  "class_type": "PaintAPlate_BoxMatte",
+ "9": {
+  "class_type": "ThresholdMask",
   "inputs": {
+   "value": 0.02,
    "mask": [
-    "7",
+    "8",
     0
-   ],
-   "grow": 0.35
+   ]
   },
   "_meta": {
+   "title": "Every block the matte touches"
+  }
+ },
+ "10": {
+  "class_type": "GrowMask",
+  "inputs": {
+   "expand": 1,
+   "tapered_corners": false,
+   "mask": [
+    "9",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "One block more on every side",
    "slots": {
-    "grow": "box_grow"
+    "expand": "grid_grow"
    }
   }
  },
- "9": {
+ "11": {
+  "class_type": "MaskToImage",
+  "inputs": {
+   "mask": [
+    "10",
+    0
+   ]
+  }
+ },
+ "12": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "image": [
+    "11",
+    0
+   ],
+   "upscale_method": "nearest-exact",
+   "width": [
+    "4",
+    0
+   ],
+   "height": [
+    "4",
+    1
+   ],
+   "crop": "disabled"
+  }
+ },
+ "13": {
+  "class_type": "ImageToMask",
+  "inputs": {
+   "channel": "red",
+   "image": [
+    "12",
+    0
+   ]
+  }
+ },
+ "14": {
   "class_type": "LTXVInpaintPreprocess",
   "inputs": {
    "images": [
@@ -125,7 +192,7 @@
     0
    ],
    "mask": [
-    "8",
+    "13",
     0
    ]
   },
@@ -133,7 +200,7 @@
    "title": "Reference: erased areas in green"
   }
  },
- "10": {
+ "15": {
   "class_type": "UNETLoader",
   "inputs": {
    "unet_name": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
@@ -145,11 +212,11 @@
    }
   }
  },
- "11": {
+ "16": {
   "class_type": "LoraLoaderModelOnly",
   "inputs": {
    "model": [
-    "10",
+    "15",
     0
    ],
    "lora_name": "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors",
@@ -162,11 +229,11 @@
    }
   }
  },
- "12": {
+ "17": {
   "class_type": "PaintAPlate_LivePreview",
   "inputs": {
    "model": [
-    "11",
+    "16",
     0
    ],
    "decoder": "taeltx2_3.safetensors",
@@ -189,7 +256,7 @@
    }
   }
  },
- "13": {
+ "18": {
   "class_type": "CLIPLoader",
   "inputs": {
    "clip_name": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
@@ -202,7 +269,7 @@
    }
   }
  },
- "14": {
+ "19": {
   "class_type": "VAELoader",
   "inputs": {
    "vae_name": "ltx-2.5-video-vae-conv-bf16.safetensors"
@@ -213,41 +280,47 @@
    }
   }
  },
- "15": {
+ "20": {
   "class_type": "VAELoader",
   "inputs": {
    "vae_name": "ltx-2.5-audio-vae-bf16.safetensors"
   }
  },
- "16": {
+ "21": {
   "class_type": "CLIPTextEncode",
   "inputs": {
    "text": "",
    "clip": [
-    "13",
+    "18",
     0
    ]
+  },
+  "_meta": {
+   "title": "The scene as it stays",
+   "slots": {
+    "text": "prompt"
+   }
   }
  },
- "17": {
+ "22": {
   "class_type": "CLIPTextEncode",
   "inputs": {
    "text": "blurry, low resolution, ugly, garbled mess, compression artifacts, glitch, flicker, still image",
    "clip": [
-    "13",
+    "18",
     0
    ]
   }
  },
- "18": {
+ "23": {
   "class_type": "LTXVConditioning",
   "inputs": {
    "positive": [
-    "16",
+    "21",
     0
    ],
    "negative": [
-    "17",
+    "22",
     0
    ],
    "frame_rate": [
@@ -256,7 +329,7 @@
    ]
   }
  },
- "19": {
+ "24": {
   "class_type": "LoadImage",
   "inputs": {
    "image": ""
@@ -268,11 +341,11 @@
    }
   }
  },
- "20": {
+ "25": {
   "class_type": "ImageScale",
   "inputs": {
    "image": [
-    "19",
+    "24",
     0
    ],
    "upscale_method": "lanczos",
@@ -287,7 +360,7 @@
    "crop": "disabled"
   }
  },
- "21": {
+ "26": {
   "class_type": "EmptyLTXVLatentVideo",
   "inputs": {
    "width": [
@@ -305,46 +378,46 @@
    "batch_size": 1
   }
  },
- "22": {
+ "27": {
   "class_type": "LTXVImgToVideoInplace",
   "inputs": {
    "vae": [
-    "14",
+    "19",
     0
    ],
    "image": [
-    "20",
+    "25",
     0
    ],
    "latent": [
-    "21",
+    "26",
     0
    ],
    "strength": 0.7,
    "bypass": false
   }
  },
- "23": {
+ "28": {
   "class_type": "LTXAddVideoICLoRAGuide",
   "inputs": {
    "positive": [
-    "18",
+    "23",
     0
    ],
    "negative": [
-    "18",
+    "23",
     1
    ],
    "vae": [
-    "14",
+    "19",
     0
    ],
    "latent": [
-    "22",
+    "27",
     0
    ],
    "image": [
-    "9",
+    "14",
     0
    ],
    "frame_idx": 0,
@@ -358,11 +431,11 @@
    "tile_frames": 97
   }
  },
- "24": {
+ "29": {
   "class_type": "LTXVEmptyLatentAudio",
   "inputs": {
    "audio_vae": [
-    "15",
+    "20",
     0
    ],
    "frames_number": [
@@ -376,7 +449,7 @@
    "batch_size": 1
   }
  },
- "25": {
+ "30": {
   "class_type": "RandomNoise",
   "inputs": {
    "noise_seed": 0
@@ -387,70 +460,70 @@
    }
   }
  },
- "26": {
+ "31": {
   "class_type": "CFGGuider",
   "inputs": {
    "model": [
-    "12",
+    "17",
     0
    ],
    "positive": [
-    "23",
+    "28",
     0
    ],
    "negative": [
-    "23",
+    "28",
     1
    ],
    "cfg": 1.0
   }
  },
- "27": {
+ "32": {
   "class_type": "KSamplerSelect",
   "inputs": {
    "sampler_name": "euler_ancestral"
   }
  },
- "28": {
+ "33": {
   "class_type": "ManualSigmas",
   "inputs": {
    "sigmas": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
   }
  },
- "29": {
+ "34": {
   "class_type": "LTXVConcatAVLatent",
   "inputs": {
    "video_latent": [
-    "23",
+    "28",
     2
    ],
    "audio_latent": [
-    "24",
+    "29",
     0
    ]
   }
  },
- "30": {
+ "35": {
   "class_type": "SamplerCustomAdvanced",
   "inputs": {
    "noise": [
-    "25",
+    "30",
     0
    ],
    "guider": [
-    "26",
+    "31",
     0
    ],
    "sampler": [
-    "27",
+    "32",
     0
    ],
    "sigmas": [
-    "28",
+    "33",
     0
    ],
    "latent_image": [
-    "29",
+    "34",
     0
    ]
   },
@@ -458,50 +531,50 @@
    "progress": true
   }
  },
- "31": {
+ "36": {
   "class_type": "LTXVSeparateAVLatent",
   "inputs": {
    "av_latent": [
-    "30",
+    "35",
     0
    ]
   }
  },
- "32": {
+ "37": {
   "class_type": "LTXVCropGuides",
   "inputs": {
    "positive": [
-    "23",
+    "28",
     0
    ],
    "negative": [
-    "23",
+    "28",
     1
    ],
    "latent": [
-    "31",
+    "36",
     0
    ]
   }
  },
- "33": {
+ "38": {
   "class_type": "VAEDecode",
   "inputs": {
    "vae": [
-    "14",
+    "19",
     0
    ],
    "samples": [
-    "32",
+    "37",
     2
    ]
   }
  },
- "34": {
+ "39": {
   "class_type": "SaveImage",
   "inputs": {
    "images": [
-    "33",
+    "38",
     0
    ],
    "filename_prefix": "paintaplate/plate/clean/f"
@@ -514,11 +587,11 @@
    "output": "frames"
   }
  },
- "35": {
+ "40": {
   "class_type": "CreateVideo",
   "inputs": {
    "images": [
-    "33",
+    "38",
     0
    ],
    "fps": [
@@ -530,11 +603,11 @@
    "codec": "none"
   }
  },
- "36": {
+ "41": {
   "class_type": "SaveVideo",
   "inputs": {
    "video": [
-    "35",
+    "40",
     0
    ],
    "filename_prefix": "paintaplate/plate/clean",

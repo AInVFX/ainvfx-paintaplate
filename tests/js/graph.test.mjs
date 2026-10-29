@@ -4,7 +4,7 @@ import test from "node:test";
 import { parseWorkflow } from "../../web/logic.mjs";
 import { sceneGraph } from "../../web/graph.mjs";
 
-const WF = Object.fromEntries(["edit", "matte", "clean", "shot", "export"].map((n) =>
+const WF = Object.fromEntries(["edit", "matte", "clean", "cleanup", "shot", "export"].map((n) =>
   [n, parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${n}.json`, import.meta.url))))]));
 const plate = { path: "plates/shot.mp4", cs: "sRGB", frames: 121, work: [1280, 704], prev: [768, 416], track: [960, 528], trackErase: [640, 352] };
 const pass = { steps: 8, denoise: 1, grow: 16, feather: 6, sigma: 3 };
@@ -42,4 +42,18 @@ test("an erase alone needs no Ripple pass, a relight alone no tracking and no ma
   assert.equal(count(light, "SAM3_VideoTrack"), 0);
   assert.equal(count(light, "SaveImage"), 0);
   assert.equal(Object.values(light).find((n) => n.class_type === "PaintAPlate_SavePlate").inputs.keep_untouched, false);
+});
+
+test("an erase renders at half size, then 2 steps at full size from it, with the scene's prompt", () => {
+  const g = sceneGraph(WF, { plate, edits: [edit("erase", 1)], render: { ...render, erasePrompt: "A wet street at night." } });
+  linked(g);
+  const node = (title) => Object.entries(g).find(([, n]) => n._meta.title.endsWith(title));
+  const [, up] = node("Stage 1 at full size");
+  assert.equal(g[up.inputs.image[0]].class_type, "VAEDecode", "stage 1's frames reach stage 2 by link");
+  assert.equal(up.inputs.width[0] !== undefined ? g[up.inputs.width[0]].class_type : "", "GetImageSize");
+  const scaled = Object.values(g).filter((n) => n._meta.title.startsWith("erase pass at half size") && n.class_type === "ImageScale" && n.inputs.width === 640);
+  assert.equal(scaled.length, 1, "stage 1 runs at half of 1280 x 704");
+  const sigmas = Object.values(g).filter((n) => n.class_type === "ManualSigmas").map((n) => n.inputs.sigmas).sort();
+  assert.deepEqual(sigmas, ["0.725, 0.421875, 0.0", "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"]);
+  assert.equal(Object.values(g).filter((n) => n.class_type === "CLIPTextEncode" && n.inputs.text === "A wet street at night.").length, 1);
 });

@@ -7,7 +7,8 @@ import { WF, cancel, connect, loadWorkflows, objectInfo, onLog, onNotice, output
 import { FrameCache } from "./frames.mjs";
 import { sceneGraph } from "./graph.mjs";
 import { CHANNEL_NAMES, DISPLAY, FLUID, PARAMS, blankSpec, caption, changedMask, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fitSize,
-  formatParam, gb, pickObjects, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, strokeTarget, toolEndsEdit, upsampleRequest } from "./logic.mjs";
+  erasePrompt, erasesPaint, formatParam, gb, levelFill, paintBoxes, pickObjects, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
+  strokeTarget, toolEndsEdit, upsampleRequest } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -26,6 +27,7 @@ const WARM_ALL_VRAM = 60e9; // bytes of GPU memory above which LTX 2.5 is loaded
 const PREVIEW_CAP = 640; // the preview size by default: Fast. The menu is built per plate (logic.previewSizes)
 const PREFETCH_MS = 500; // quiet time after a keystroke before the prompt writer starts on the new words
 const UNDO_MAX = 60; // steps kept for undo
+const PAINT_GRID = 96; // cells across the frame for an erase's locked boxes and the check of its caption (logic.paintBoxes, erasesPaint)
 // An edit mask grows by the frame width over this: 27 px at 1280, enough for the object's edge. At 24 an erase reached
 // what stood next to the object, and Klein sometimes took it too (a head under an umbrella, one seed in five).
 const EDIT_GROW = 48;
@@ -39,7 +41,7 @@ const COMPOSITE_GROW = { erase: 24, other: 160 }, COMPOSITE_FEATHER = 96; // the
 const FOLLOW = { zone: 1 / 16, threshold: 0.1, seed: 24 };
 const IDLE_MS = 300; // after Generate, a bypass, a removal or an undo, the render starts this soon
 const RESULTS_KEPT = 8; // results kept per edit, by the strokes, words, seed and switch that made them: undo gets them back at once
-const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "shot", "matte", "comp", "export", "warm", "fluid"];
+const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "export", "warm", "fluid"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "export"]; // job kinds a new stroke cancels
 const UPSAMPLER = {}; // Black Forest Labs' system prompts for Klein's upsampler (upsampler.json): table and plain
 const SCENE = { format: "paintaplate-scene", version: 1 };
@@ -71,6 +73,8 @@ const S = {
   background: (() => { try { return localStorage.getItem("paintaplate.background") !== "0"; } catch { return true; } })(), // prepare the export after each change
   previewCap: (() => { try { return +localStorage.getItem("paintaplate.preview") || PREVIEW_CAP; } catch { return PREVIEW_CAP; } })(), // long side of the shot preview: Fast by default
   heroKey: "", renders: new Map(), // set of edits -> what has been rendered for it
+  erases: new Map(), // set of erases -> their matte and clean plates, for every render that has the same erases
+  peek: null, // the History row picked: frame 0 shows its strokes over the edited first frame
   uploads: new Map(), live: null, vram: 0, // the live preview on show, the GPU's memory in bytes
 };
 
@@ -103,19 +107,52 @@ function templateCaption(e) { // the page's own caption, when the upsampler give
   return caption({ tool: e.tool, words: e.prompt, colors, color: e.color, bbox: bounds(e.mask) });
 }
 
-async function captionFor(e, reference, key, kind = "edit") { // Klein's own upsampler writes the caption Klein was trained on; the page keeps its box
+function paintGrid(e) { // the painted area on a coarse grid: an erase's locked boxes, and the check of its caption
+  const w = PAINT_GRID, h = Math.max(1, Math.round((w * e.mask.height) / e.mask.width));
+  const d = snap(e.mask, [w, h], "#000").getContext("2d").getImageData(0, 0, w, h).data, bits = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) bits[i] = d[i * 4] > 32 ? 1 : 0;
+  return { bits, w, h };
+}
+
+async function captionFor(e, reference, key, kind = "edit") { // Klein's own upsampler writes the caption Klein was trained on; the page keeps its boxes
   if (e.caption?.key === key) return e.caption.text;
   if (e.caption?.key === "scene") { e.caption.key = key; log(`Edit ${num(e)}: the caption saved with the scene is used as it is`); return e.caption.text; }
-  const ask = upsampleRequest({ tool: e.tool, words: e.prompt, bbox: bounds(e.mask) });
-  log(`Edit ${num(e)}: asking Klein's prompt writer (${ask.mode} mode) for "${e.prompt || "no words"}" in box ${JSON.stringify(bounds(e.mask))}`);
+  if (e.captioning?.key === key) { // the same request is on its way (the strokes rested, then Generate): wait for it rather than ask twice
+    try { return await e.captioning.promise; } catch (err) { if (err?.message !== "cancelled" || kind !== "edit") throw err; }
+  }
+  const promise = writeCaption(e, reference, key, kind);
+  e.captioning = { key, promise };
+  try { return await promise; } finally { if (e.captioning?.promise === promise) e.captioning = null; }
+}
+
+async function writeCaption(e, reference, key, kind) {
+  const paint = e.tool === "erase" ? paintGrid(e) : null; // an erase locks one box per painted part
+  const ask = upsampleRequest({ tool: e.tool, words: e.prompt, bbox: bounds(e.mask), boxes: paint && paintBoxes(paint) });
+  const where = ask.locked?.length > 1 ? `boxes ${JSON.stringify(ask.locked.map((r) => r.src_bbox))}` : `box ${JSON.stringify(ask.locked?.[0]?.src_bbox ?? bounds(e.mask))}`;
+  log(`Edit ${num(e)}: asking Klein's prompt writer (${ask.mode} mode) for "${e.prompt || "no words"}" in ${where}`);
   let text = "";
   try {
     const out = await run("prompt", { image: reference, request: ask.request, system: UPSAMPLER[ask.mode] }, { kind, front: true }).done;
     text = (outputText("prompt", out, "text") ?? "").trim();
   } catch (err) { if (err?.message === "cancelled") throw err; quiet(err); }
-  e.caption = { key, text: text ? (ask.locked ? reconcile(text, ask.locked) : text) : templateCaption(e) };
-  log(text ? `Edit ${num(e)}: caption from the prompt writer: ${e.caption.text}` : `Edit ${num(e)}: no answer from the prompt writer, the page's own caption: ${e.caption.text}`);
+  let made = text ? (ask.locked ? reconcile(text, ask.locked) : text) : "";
+  if (made && paint && !erasesPaint(made, ask.locked, paint)) { // it removed something the paint does not cover (an astronaut, 28 Oct)
+    log(`Edit ${num(e)}: the prompt writer removed something the paint does not cover: ${splitTable(made)[0]}`);
+    made = "";
+  }
+  e.caption = { key, text: made || templateCaption(e) };
+  log(made ? `Edit ${num(e)}: caption from the prompt writer: ${e.caption.text}` : `Edit ${num(e)}: the page's own caption: ${e.caption.text}`);
   return e.caption.text;
+}
+
+function levelled(e, patch, under) { // an erase's fill, levelled with the background it continues (logic.levelFill)
+  const [W, H] = S.plate.work, t0 = performance.now(), c = snap(patch, [W, H]), x = c.getContext("2d"), img = x.getImageData(0, 0, W, H);
+  const data = (k) => k.getContext("2d").getImageData(0, 0, W, H).data;
+  const { rgba, moved } = levelFill({ fill: img.data, base: data(under), paint: data(maskAt(e, [W, H])), width: W, height: H });
+  img.data.set(rgba);
+  x.putImageData(img, 0, 0);
+  log(`Edit ${num(e)}: the fill levelled with the background around it, ${moved.toFixed(1)} levels on average, in ${Math.round(performance.now() - t0)} ms`);
+  return c;
 }
 
 // ---------- Plate ----------
@@ -166,10 +203,10 @@ async function openPlate(list, typed, cs, opts = {}) { // opts.fluid: a blank pl
   S.plate.shot = previewSize([w, h], S.plate.work, S.previewCap);
   S.original = snap(await loadImage(viewUrl(outputFile("ingest", out, "hero"))), S.plate.work);
   $("#prompt").value = "";
-  Object.assign(S, { hero: S.original, edits: [], draft: null, running: null, past: [], future: [], selected: null, hover: null, live: null,
+  Object.assign(S, { hero: S.original, edits: [], draft: null, running: null, past: [], future: [], selected: null, hover: null, peek: null, live: null,
     frame: 0, inPt: 0, outPt: S.plate.frames - 1, shot: null, shotDirty: false, exported: null, wantDownload: null,
     stage: { phase: "none" }, zoom: { k: 1, x: 0, y: 0 }, wipe: null, heroKey: "" });
-  S.uploads.clear(); S.renders.clear();
+  S.uploads.clear(); S.renders.clear(); S.erases.clear();
   S.fluid = opts.fluid ? { keys: [], seed: (Math.random() * 2 ** 31) | 0, runs: 0, result: null, view: "keys", prompt: "", ...opts.fluid, busy: null } : null;
   [view.width, view.height] = S.plate.work;
   view.classList.add("painting");
@@ -251,7 +288,7 @@ function cacheUI() { // the green stripe along the top of the timeline: frames t
     const w = (c.width = Math.max(1, Math.round(c.clientWidth * devicePixelRatio))), x = c.getContext("2d");
     c.height = 4;
     x.clearRect(0, 0, w, 4);
-    const cache = caches.get(shotReady() ? shotVid : plateVid);
+    const cache = caches.get(S.shot?.url ? shotVid : plateVid);
     x.fillStyle = "#4caf6a";
     for (const f of cache.frames.keys()) x.fillRect(Math.floor((f / p.frames) * w), 0, Math.ceil(w / p.frames), 4);
   });
@@ -269,6 +306,7 @@ function play() {
   if (!S.plate || S.playing) return;
   if (S.frame >= S.outPt) S.frame = S.inPt;
   S.playing = true;
+  S.peek = null;
   $("#play-btn").classList.add("playing");
   for (const v of [plateVid, shotVid]) if (v.getAttribute("src")) { v.currentTime = time(S.frame); v.play().catch(() => {}); }
   const left = renderLeft(), done = left ? `, the edited shot is ${secs(left)}` : "";
@@ -284,6 +322,7 @@ function pause() {
   S.playing = false;
   for (const v of [plateVid, shotVid]) v.pause();
   $("#play-btn").classList.remove("playing");
+  if (S.shot?.url && shotVid.readyState >= 2) keepFrame(shotVid); // shown while the video seeks to the exact frame
   seek(S.frame);
 }
 
@@ -327,6 +366,7 @@ shotVid.addEventListener("loadeddata", () => {
   if (S.playing) { shotVid.currentTime = plateVid.currentTime; shotVid.play().catch(() => {}); }
   else seek(S.frame);
 });
+shotVid.addEventListener("canplay", () => { if (!S.playing) render(); }); // a frame that arrives after "seeked" is drawn too
 
 function setIn(f) { S.inPt = Math.min(f, S.outPt); hud(`In point: frame ${S.plate.first + S.inPt}`); timelineUI(); }
 function setOut(f) { S.outPt = Math.max(f, S.inPt); hud(`Out point: frame ${S.plate.first + S.outPt}`); timelineUI(); }
@@ -393,27 +433,62 @@ function setShot(src, key) {
   render(); timelineUI();
 }
 
+// Once the shot of the current edits exists, it shows on every frame, playing or paused; the plate shows only in the wipe and
+// while O is held. Frame 0 shows the edited first frame with the strokes while edits are made. Paused, the viewer drew the plate
+// whenever the shot video had no frame ready, and frame 0 kept showing Klein's still (28 Oct).
+const held = { canvas: canvas([1, 1]), url: "" }; // the last shot frame drawn while paused: shown while the shot video seeks
+const editingFirst = () => !!(S.draft || stroke || S.running || S.queued || S.hover || S.peek);
+
+function keepFrame(src) {
+  const [W, H] = [view.width, view.height], c = held.canvas;
+  if (c.width !== W || c.height !== H) [c.width, c.height] = [W, H];
+  c.getContext("2d").drawImage(src, 0, 0, W, H);
+  held.url = S.shot.url;
+}
+
+function shotFrame() { // the shot at the playhead: a cached frame, the video when it shows that frame, or the frame held
+  const cached = !S.playing && caches.get(shotVid).get(S.frame);
+  if (cached) return cached;
+  if (shotVid.readyState >= 2 && (S.playing || !shotVid.seeking)) return shotVid;
+  return !S.playing && held.url === S.shot.url ? held.canvas : null;
+}
+
 function render() {
   if (!S.plate || !S.hero) return;
   if (S.fluid) return renderFluid();
-  const W = view.width, H = view.height;
-  const first = S.frame === 0 && !S.playing;
+  const W = view.width, H = view.height, still = !S.playing;
   const live = S.draft || stroke ? null : S.live; // while an edit is painted, the frame shows it, not the live preview of a render
-  const edited = live ?? (first ? S.hero : shotReady() ? shotVid : plateVid);
-  const plate = first ? S.original : plateVid;
-  const draw = (src) => {
-    const cached = src instanceof HTMLVideoElement && !S.playing && caches.get(src).get(S.frame);
-    if (cached) ctx.drawImage(cached, 0, 0, W, H);
-    else if (!(src instanceof HTMLVideoElement) || src.readyState >= 2) ctx.drawImage(src, 0, 0, W, H);
+  const first = still && S.frame === 0 && (!S.shot?.url || stale() || editingFirst());
+  const pic = live || first || !S.shot?.url ? null : shotFrame();
+  if (S.playing && S.shot?.url && !live && !pic) return; // the shot video catches up in a frame: the last frame stays on screen
+  const drawPlate = () => {
+    const cached = still && S.frame !== 0 && caches.get(plateVid).get(S.frame);
+    if (still && S.frame === 0) ctx.drawImage(S.original, 0, 0, W, H);
+    else if (cached) ctx.drawImage(cached, 0, 0, W, H);
+    else if (plateVid.readyState >= 2) ctx.drawImage(plateVid, 0, 0, W, H);
+  };
+  const drawEdited = () => {
+    if (live) { ctx.drawImage(live, 0, 0, W, H); return "live"; }
+    if (pic) {
+      ctx.drawImage(pic, 0, 0, W, H);
+      if (pic === held.canvas) return "held";
+      if (still) keepFrame(pic);
+      return "shot";
+    }
+    if (still && S.frame === 0) { ctx.drawImage(S.hero, 0, 0, W, H); overlays(W, H); return "hero"; }
+    drawPlate();
+    return "plate";
   };
   ctx.globalAlpha = 1;
-  if (S.compare) draw(plate);
+  let shown = "plate";
+  if (S.compare) drawPlate();
   else if (S.wipe !== null) {
-    draw(plate);
+    drawPlate();
     ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip();
-    draw(edited); if (first && !live) overlays(W, H);
+    shown = drawEdited();
     ctx.restore();
-  } else { draw(edited); if (first && !live) overlays(W, H); }
+  } else shown = drawEdited();
+  view.dataset.picture = shown; // what the edited side shows: live, hero, shot, held or plate (tests/ui_mock.py reads it)
   drawCursor();
 }
 
@@ -1013,6 +1088,7 @@ function launch(edit) { // Generate: the edit on the first frame, then its shot.
   if (!S.edits.includes(edit)) S.edits.push(edit);
   edit.launched = performance.now();
   S.selected = edit; // it stays the current edit: new words, more strokes or the switch change it, until New edit or another tool
+  S.peek = null;
   if (reuse(edit)) {
     log(`Edit ${num(edit)}: unchanged since a result it already has, so nothing runs again`);
     hud(`Edit ${num(edit)} has not changed: its result stays. Ctrl+Enter tries another seed.`, 3000);
@@ -1050,6 +1126,7 @@ async function regenerateDependents() {
 function select(edit) { // a History row becomes the current edit: its words in the prompt field, its strokes on the frame
   if (edit && S.draft && S.draft !== edit) launch(S.draft); // the strokes in progress start before another edit is picked
   S.selected = edit;
+  S.peek = edit; // frame 0 shows its strokes until playback starts or an edit is launched
   if (edit) { setTool(edit.tool); $("#prompt").value = edit.prompt; if (edit.tool === "erase") $("#whole").checked = !!edit.whole; }
   else if (!S.draft) $("#prompt").value = "";
   if (edit) hud(`Edit ${num(edit)} selected: retype its words, paint more or rub strokes out, then Generate. N starts a new edit.`, 3500);
@@ -1150,6 +1227,7 @@ async function generate(edit) {
     if (!alive()) return;
     // a relight shows the frame as the export will make it: Klein's light on the plate's own detail
     edit.patch = await loadImage(viewUrl(outputFile("edit", full, light ? "relit" : "patch")));
+    if (edit.tool === "erase") edit.patch = levelled(edit, edit.patch, snap(before, work));
     Object.assign(edit, { preview: null, latent: null, state: "done", version: ++S.vers, force: false, kept: undefined }); // versions are unique: a kept result never meets a new one
     edit.foot = footprint(edit);
     edit.basis = activeBefore(edit).map(record);
@@ -1204,7 +1282,17 @@ function prefetch(edit) { // the snap and the prompt writer start as the strokes
   edit.preparing = prepare(edit, S.edits.indexOf(edit), "prefetch").catch(() => {});
 }
 
-async function snapErase(edit, before, kind = "snap") { // SAM 3.1 finds the whole object under the erase strokes: by name, else point by point
+async function snapErase(edit, before, kind = "snap") { // one SAM request per strokes and words at a time: a second caller waits for it
+  const key = snapKeyOf(edit);
+  if (edit.snapping?.key === key) {
+    try { return await edit.snapping.promise; } catch (err) { if (err?.message !== "cancelled" || kind === "prefetch") throw err; }
+  }
+  const promise = findWhole(edit, before, kind);
+  edit.snapping = { key, promise };
+  try { return await promise; } finally { if (edit.snapping?.promise === promise) edit.snapping = null; }
+}
+
+async function findWhole(edit, before, kind) { // SAM 3.1 finds the whole object under the erase strokes: by name, else point by point
   const size = S.plate.prev, k = size[0] / S.plate.work[0], area = size[0] * size[1];
   const pts = edit.strokes.filter((s) => s.tool !== "rub").flatMap((s) => s.points);
   const picks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * (pts.length - 1))))]; // up to five points, one prompt each
@@ -1492,7 +1580,7 @@ const STAGES = [
   { id: "erase", label: "Track the erase", ref: 6 }, { id: "clean", label: "Erase pass", ref: 10, preview: true },
   { id: "shot", label: "Shot", ref: 20, preview: true }, { id: "track", label: "Track the paint", ref: 5, preview: true },
   { id: "comp", label: "Composite", ref: 14, preview: true },
-  { id: "cleanfull", label: "Erase pass at full size", ref: 35, final: true }, { id: "full", label: "Shot at full size", ref: 45, final: true },
+  { id: "cleanfull", label: "Erase pass at full size", ref: 32, final: true }, { id: "full", label: "Shot at full size", ref: 45, final: true },
   { id: "trackfull", label: "Track at full size", ref: 5, final: true }, { id: "export", label: "Export", ref: 18, final: true },
 ];
 const previewOf = (r) => r?.previews?.[S.plate.shot.join("x")]; // what this preview size made for a set of edits
@@ -1531,6 +1619,13 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   stagesUI();
 }
 
+function reused(r, store, id, take) { // a step that a render with the same erases made already: its result is used again
+  if (store.done?.[id] !== undefined) return;
+  take();
+  (store.done ??= {})[id] = 0;
+  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: made by an earlier render with the same erases, used again`);
+}
+
 async function pipeline() {
   S.shotDirty = false;
   cancel(...BACKGROUND, "warm");
@@ -1541,23 +1636,45 @@ async function pipeline() {
   if (!r) { r = { v: ++S.run, previews: {} }; r.base = `paintaplate/${p.id}/v${r.v}`; S.renders.set(key, r); }
   plan(r, active);
   const [sw, sh] = p.shot, sized = `${sw}x${sh}`, pv = (r.previews[sized] ??= {}), base = r.base;
-  const relight = active.some((e) => e.tool === "light"), erase = active.some((e) => e.tool === "erase");
+  const relight = active.some((e) => e.tool === "light"), erases = active.filter((e) => e.tool === "erase"), erase = erases.length > 0;
   const carry = active.some((e) => e.tool !== "erase"); // paint and light: Ripple carries them through the shot
+  // what the erases make depends on the erases alone: kept by them, so a render with the same erases uses it again (a paint
+  // added over an erase tracked and cleaned it all a second time, 28 Oct)
+  const ekey = erases.map((e) => `${e.id}.${e.version}`).join(",");
+  const E = erase ? S.erases.get(ekey) ?? S.erases.set(ekey, { sizes: {} }).get(ekey) : null;
   r.hero ??= await uploadCanvas(S.hero, `hero_v${r.v}.png`);
-  if (erase) r.clean0 ??= await uploadCanvas(layered(S.edits.length, (e) => e.tool === "erase"), `clean_v${r.v}.png`);
+  if (erase) r.clean0 ??= E.clean0 ??= await uploadCanvas(layered(S.edits.length, (e) => e.tool === "erase"), `clean_v${r.v}.png`);
   const common = { color_space: p.cs, max_frames: p.frames, seed: active[0].seed };
   const prompt = shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt })));
+  const scene = erase ? erasePrompt(erases.map((e) => e.caption?.text)) : ""; // the scene as it stays, never the erased object
   log(`Render v${r.v}: ${active.length} edit(s) (${active.map((e) => `${num(e)} ${NAME[e.tool]}`).join(", ")}), preview at ${sized}, seed ${common.seed}, steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => st.id).join(" > ")}`);
   if (carry) log(`Render v${r.v}: LTX prompt: ${prompt}`);
+  if (erase) log(`Render v${r.v}: erase pass prompt: ${scene || "none"}`);
   // the erase is tracked on the plate first: the erase pass regenerates its areas, the composite keeps them
-  await step(r, "erase", async (progress) => { r.erased = await track(active, null, base, "", progress, null, ["erase"]); });
+  if (E?.erased) reused(r, r, "erase", () => { r.erased = E.erased; });
+  await step(r, "erase", async (progress) => { r.erased = E.erased = await track(active, null, base, "", progress, null, ["erase"]); });
+  const cleanAt = async (size, progress, live) => { // the erase pass at `size`, kept by the erases: a preview, or the full size's first stage
+    const at = `${size[0]}x${size[1]}`, kept = (E.sizes[at] ??= {});
+    if (kept.clean) return kept;
+    const out = await run("clean", { ...common, seed: erases[0].seed, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, prompt: scene,
+      width: size[0], height: size[1], prefix: `${base}/${at}/clean/f`, video_prefix: `${base}/${at}/clean`, live: live ? liveEvery() : 0 },
+      { kind: "clean", progress, live: live ? showLive : null }).done;
+    return Object.assign(kept, { clean: `output:${base}/${at}/clean`, raw: viewUrl(outputFile("clean", out, "video")) });
+  };
   const passes = async (store, size, dir, final) => { // the erase pass makes a clean plate; Ripple carries paint and light over it
-    await step(r, final ? "cleanfull" : "clean", async (progress) => {
-      const out = await run("clean", { ...common, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, width: size[0], height: size[1],
-        prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean`, live: final ? 0 : liveEvery() },
-        { kind: "clean", progress, live: final ? null : showLive }).done;
-      store.clean = `output:${base}/${dir}/clean`;
-      store.raw = viewUrl(outputFile("clean", out, "video"));
+    const id = final ? "cleanfull" : "clean", kept = erase && (final ? E.full : E.sizes[`${size[0]}x${size[1]}`]);
+    if (kept?.clean) reused(r, store, id, () => Object.assign(store, { clean: kept.clean, raw: kept.raw }));
+    await step(r, id, async (progress) => {
+      if (!final) return void Object.assign(store, await cleanAt(size, progress, true));
+      // at full size, Lightricks' two stages: the erase pass at half the working size (the preview's own when it is that size),
+      // then 2 steps at full size from it, without the reference video. 8 steps at full size took 181 s on a 1080p plate (28 Oct)
+      const low = stageOne(p.work), first = await cleanAt(low, (f) => progress(f / 2), false);
+      log(`Render v${r.v}: erase pass at full size, 2 steps from the erase pass at ${low.join(" x ")}`);
+      const out = await run("cleanup", { ...common, seed: erases[0].seed, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, prompt: scene,
+        low: first.clean, width: size[0], height: size[1], prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean` },
+        { kind: "clean", progress: (f) => progress(0.5 + f / 2) }).done;
+      E.full = { clean: `output:${base}/${dir}/clean`, raw: viewUrl(outputFile("cleanup", out, "video")) };
+      Object.assign(store, E.full);
     }, store);
     await step(r, final ? "full" : "shot", async (progress) => {
       const plate = erase ? { path: store.clean, color_space: "sRGB" } : { path: p.path };
@@ -1883,6 +2000,7 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
   const graph = sceneGraph(WF, { edits,
     plate: { path: p.path, cs: p.cs, frames: p.frames, work: p.work, prev: p.prev, track: p.track, trackErase: p.trackErase },
     render: { prompt: shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt }))), seed: active[0].seed,
+      erasePrompt: erasePrompt(active.filter((e) => e.tool === "erase").map((e) => e.caption?.text)),
       grow: grow(p.spec.width, erase), feather: feather(p.spec.width), prefix: `paintaplate/${p.id}/graph` } });
   const a = Object.assign(document.createElement("a"), { download: `${p.name}.comfyui.json`,
     href: URL.createObjectURL(new Blob([JSON.stringify(graph, null, 1)], { type: "application/json" })) });
@@ -2073,7 +2191,7 @@ async function boot() { // the workflows, the WebSocket, then what this ComfyUI 
   const spaces = combo((await objectInfo("ImageColorSpace"))?.input.required.source);
   $("#cs").replaceChildren(...(spaces.length ? spaces : ["sRGB"]).map((s) => new Option(s, s)));
   const needs = { PaintAPlate_LoadPlate: "this pack",
-    PaintAPlate_BoxMatte: "this pack, restart ComfyUI after an update", PaintAPlate_FollowMatte: "this pack, restart ComfyUI after an update", LTXAddVideoICLoRAGuide: "ComfyUI-LTXVideo",
+    PaintAPlate_FollowMatte: "this pack, restart ComfyUI after an update", LTXAddVideoICLoRAGuide: "ComfyUI-LTXVideo",
     LTXVInpaintPreprocess: "ComfyUI-LTXVideo", SAM3_VideoTrack: "ComfyUI 0.42 or newer", ReferenceMultiLatent: "ComfyUI 0.41 or newer",
     TextGenerate: "ComfyUI 0.41 or newer" };
   const models = new Map(); // every model file the workflows load, by loader and input

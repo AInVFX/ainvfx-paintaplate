@@ -75,6 +75,13 @@ def flow(page, port):
     full = [i for i, line in enumerate(lines) if "plays the full-size shot" in line]
     done = [i for i, line in enumerate(lines) if line.startswith("Export v")]
     check(bool(full and done) and full[-1] < done[-1], f"the viewer plays the full-size shot while the export runs, then the export: {full} {done}")
+    page.evaluate("document.activeElement.blur()")
+    for _ in range(3):
+        page.keyboard.press("ArrowRight")
+    page.wait_for_function("document.querySelector('#view').dataset.picture === 'shot'", timeout=20000)
+    page.keyboard.press("Home")
+    page.wait_for_function("document.querySelector('#view').dataset.picture === 'shot'", timeout=20000)
+    check(page.get_attribute("#view", "data-picture") == "shot", "paused, on frame 3 and on frame 0, the viewer shows the shot, not the plate")
     made, renders = passes(), page.locator("#log li:has-text('Render v')").count()
     page.keyboard.press("Enter")
     page.wait_for_timeout(800)
@@ -95,9 +102,16 @@ def flow(page, port):
     check(found < started and asked == 1, f"a whole-object erase: SAM runs while the strokes rest, the prompt writer once "
           f"(SAM at line {found}, start at line {started}, {asked} request(s))")
 
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => e.textContent.includes('Erase pass took'))", timeout=120000)
+    seen = len(page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)"))
     page.click("#history li:last-child .del")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
     check(titles() == ["1. Erase"], f"after a removal the numbers start from 1 again: {titles()}")
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].slice(%d).some((e) => e.textContent.includes('used again'))" % seen,
+                           timeout=60000)
+    lines = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")[seen:]
+    check(not any("Track the erase (about" in line or "Erase pass (about" in line for line in lines),
+          "the paint removed, the next render uses the erase's matte and clean plate again: nothing tracks or cleans twice")
     check(not page.is_disabled("#undo-btn") and page.is_disabled("#redo-btn"), "undo is live, redo is not")
     page.keyboard.press("Control+z")
     page.wait_for_function(DONE.format(n=2), timeout=120000)

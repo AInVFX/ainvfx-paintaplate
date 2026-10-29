@@ -304,28 +304,6 @@ class RelightTransfer(io.ComfyNode):
         return io.NodeOutput(to_image(out))
 
 
-class BoxMatte(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="PaintAPlate_BoxMatte",
-            display_name="Box Matte",
-            category=CATEGORY,
-            description="Turns each frame's mask into its bounding box, grown on each side. Before LTX regenerates an erased "
-                        "area, the box hides the object's outline: shown it moving, LTX drew the object back.",
-            inputs=[
-                io.Mask.Input("mask", tooltip="The erased area in every frame."),
-                io.Float.Input("grow", default=0.35, min=0.0, max=2.0, step=0.05,
-                               tooltip="How much the box grows on each side, as a fraction of its own size."),
-            ],
-            outputs=[io.Mask.Output(display_name="mask")],
-        )
-
-    @classmethod
-    def execute(cls, mask, grow) -> io.NodeOutput:
-        out = mathops.box_matte(mask.float().cpu().numpy(), grow)
-        return io.NodeOutput(torch.from_numpy(out).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()))
-
 
 class FollowMatte(io.ComfyNode):
     @classmethod
@@ -481,4 +459,4 @@ class LivePreview(io.ComfyNode):
         return io.NodeOutput(patched)
 
 
-NODES = [LoadPlate, SavePlate, FitToPlate, RelightTransfer, BoxMatte, FollowMatte, LivePreview, KeyframeVideo]
+NODES = [LoadPlate, SavePlate, FitToPlate, RelightTransfer, FollowMatte, LivePreview, KeyframeVideo]

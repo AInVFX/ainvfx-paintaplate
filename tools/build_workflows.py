@@ -12,7 +12,7 @@ import json
 import os
 
 OUT = os.environ.get("PAINTAPLATE_WORKFLOWS_OUT") or os.path.join(os.path.dirname(__file__), "..", "web", "workflows")
-NAMES = ("ingest", "prompt", "edit", "snap", "clean", "shot", "matte", "comp", "export", "warm", "fluid")
+NAMES = ("ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "export", "warm", "fluid")
 
 KLEIN = "flux3-image-klein-int8-convrot.safetensors"
 LTX = "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
@@ -31,6 +31,7 @@ FLUID_NEGATIVE = "blurry, low quality, distorted, watermark"  # the negative pro
 SNAP_POINTS = 5  # stroke points SAM looks at one by one
 # Lightricks' distilled schedule from the official LTX 2.5 inpaint workflow (stage 1, euler_ancestral)
 INPAINT_SIGMAS = "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
+REFINE_SIGMAS = "0.725, 0.421875, 0.0"  # the high-resolution stage of Lightricks' two-stage LTX 2.5 workflows: 2 steps
 RIPPLE_PROMPT = ("Use the reference video for motion, timing, camera movement, framing and lighting changes; "
                  "follow the edited first frame for every change of content, light and style.")
 NEGATIVE = "blurry, low resolution, ugly, garbled mess, compression artifacts, glitch, flicker, still image"
@@ -257,30 +258,47 @@ def live(g, model, size, load):
              every=Slot("live", 0), size=320)
 
 
+def erased_blocks(g, matte, size):
+    """The erase matte as blocks of LTX's 32 px grid, grown by one block: (the blocks at `size`, the grid of blocks).
+
+    Blocks hide the object's outline: shown its own outline moving, LTX drew a car back where the van had been. They keep the
+    background around the object in view, so LTX continues it. One grown box per frame also hid the outline, but around a
+    truss, a crane and a door it covered the whole backdrop, and LTX animated a faint fill there into smoke (28 Oct).
+    """
+    cells = g("GrowMask", _title="One block more on every side", expand=Slot("grid_grow", 1), tapered_corners=False,
+              mask=g("ThresholdMask", _title="Every block the matte touches", value=0.02,
+                     mask=g("ImageToMask", channel="red", image=g("ImageScaleBy", _title="Erase matte on LTX's 32 px grid", image=matte,
+                                                                upscale_method="area", scale_by=1 / 32))))
+    grid = g("MaskToImage", mask=cells)
+    blocks = g("ImageToMask", channel="red", image=g("ImageScale", image=grid, upscale_method="nearest-exact", width=size[0],
+                                                     height=size[1], crop="disabled"))
+    return blocks, grid
+
+
 def clean():
     """The erase pass: LTX 2.5 with Lightricks' in-outpainting IC-LoRA regenerates every erased area of the shot.
 
-    The reference is the plate with each erased area painted the green the LoRA was trained on, as a grown box: shown
-    the object's own outline moving, LTX drew a car back where the van had been; a box hides that shape. The erased
-    first frame starts the shot at strength 0.7 (the official workflow's start image). The prompt stays empty: the card
-    says prompts describe the scene, never the edit, and a named object came back.
+    The reference is the plate with each erased area painted the green the LoRA was trained on, as blocks of LTX's grid
+    (`erased_blocks`). The erased first frame starts the shot at strength 0.7 (the official workflow's start image). The
+    prompt describes the scene as it stays, in the prompt writer's own words for what it kept (`erasePrompt` on the page);
+    it never names the erased object: named, an object came back. At full size this pass is the first stage, at half the
+    working size, and `cleanup` the second.
     """
     g = Graph()
     load, srgb = plate(g, pad=True)
     frames = g("ImageScale", image=srgb, upscale_method="lanczos", width=Slot("width", 960), height=Slot("height", 544), crop="disabled")
     size = g("GetImageSize", image=frames)
-    hole = g("ImageToMask", channel="red", image=g("ImageScale", image=g("PaintAPlate_LoadPlate", _title="Erase matte", path=Slot("hole", ""),
-                                                                          max_frames=1024, pad_8n1=False),
-                                                  upscale_method="area", width=size[0], height=size[1], crop="disabled"))
-    boxes = g("PaintAPlate_BoxMatte", mask=hole, grow=Slot("box_grow", 0.35))
-    reference = g("LTXVInpaintPreprocess", _title="Reference: erased areas in green", images=frames, mask=boxes)
+    matte = g("ImageScale", image=g("PaintAPlate_LoadPlate", _title="Erase matte", path=Slot("hole", ""), max_frames=1024, pad_8n1=False),
+              upscale_method="area", width=size[0], height=size[1], crop="disabled")
+    blocks, _ = erased_blocks(g, matte, size)
+    reference = g("LTXVInpaintPreprocess", _title="Reference: erased areas in green", images=frames, mask=blocks)
     model = live(g, g("LoraLoaderModelOnly", _title="In-outpainting IC-LoRA",
                       model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"),
                       lora_name=Slot("inoutpaint", INOUTPAINT), strength_model=1.0), size, load)
     clip = g("CLIPLoader", clip_name=Slot("gemma", GEMMA), type="ltxv", device="default")
     vae = g("VAELoader", vae_name=Slot("video_vae", LTX_VAE))
     audio_vae = g("VAELoader", vae_name=LTX_AUDIO_VAE)
-    cond = g("LTXVConditioning", positive=g("CLIPTextEncode", text="", clip=clip),
+    cond = g("LTXVConditioning", positive=g("CLIPTextEncode", _title="The scene as it stays", text=Slot("prompt", ""), clip=clip),
              negative=g("CLIPTextEncode", text=NEGATIVE, clip=clip), frame_rate=load[3])
     first = g("ImageScale", image=g("LoadImage", _title="Erased first frame", image=Slot("hero", "")), upscale_method="lanczos",
               width=size[0], height=size[1], crop="disabled")
@@ -301,6 +319,52 @@ def clean():
     g("SaveVideo", _title="Clean shot (erased areas regenerated)", _output="video", video=video,
       filename_prefix=Slot("video_prefix", "paintaplate/plate/clean"), format="auto", format__codec="auto")
     g.save("clean")
+
+
+def cleanup():
+    """The erase pass at full size: the high-resolution stage of Lightricks' two-stage LTX 2.5 inpainting workflow.
+
+    The first stage is the erase pass at half the working size (`clean`). Its frames, enlarged, go inside the erased blocks
+    over the plate at full size, and LTX refines them in 2 steps from sigma 0.725, with the IC-LoRA and without the reference
+    video, as the official workflow does. The erased first frame is kept as it is (strength 1). 8 steps at full size took
+    181 s on a 1080p plate, this stage 89 s, 29 s of it saving the frames (28 Oct).
+    """
+    g = Graph()
+    load, srgb = plate(g, pad=True)
+    frames = g("ImageScale", _title="Plate at full size", image=srgb, upscale_method="bilinear", width=Slot("width", 1920),
+               height=Slot("height", 1088), crop="disabled")
+    size = g("GetImageSize", image=frames)
+    matte = g("ImageScale", image=g("PaintAPlate_LoadPlate", _title="Erase matte", path=Slot("hole", ""), max_frames=1024, pad_8n1=False),
+              upscale_method="area", width=size[0], height=size[1], crop="disabled")
+    _, grid = erased_blocks(g, matte, size)
+    soft = g("ImageToMask", channel="red", image=g("ImageScale", _title="The blocks with a soft edge", image=grid, upscale_method="bilinear",
+                                                   width=size[0], height=size[1], crop="disabled"))
+    low = g("ImageScale", _title="Stage 1 at full size", upscale_method="bilinear", width=size[0], height=size[1], crop="disabled",
+            image=g("PaintAPlate_LoadPlate", _title="Erase pass at half size", path=Slot("low", ""), max_frames=1024, pad_8n1=False))
+    start = g("ImageCompositeMasked", _title="Stage 1 inside the blocks, the plate around them", destination=frames, source=low, x=0, y=0,
+              resize_source=False, mask=soft)
+    model = g("LoraLoaderModelOnly", _title="In-outpainting IC-LoRA", model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"),
+              lora_name=Slot("inoutpaint", INOUTPAINT), strength_model=1.0)
+    clip = g("CLIPLoader", clip_name=Slot("gemma", GEMMA), type="ltxv", device="default")
+    vae = g("VAELoader", vae_name=Slot("video_vae", LTX_VAE))
+    audio_vae = g("VAELoader", vae_name=LTX_AUDIO_VAE)
+    cond = g("LTXVConditioning", positive=g("CLIPTextEncode", _title="The scene as it stays", text=Slot("prompt", ""), clip=clip),
+             negative=g("CLIPTextEncode", text=NEGATIVE, clip=clip), frame_rate=load[3])
+    first = g("ImageScale", image=g("LoadImage", _title="Erased first frame", image=Slot("hero", "")), upscale_method="lanczos",
+              width=size[0], height=size[1], crop="disabled")
+    latent = g("LTXVImgToVideoInplace", vae=vae, image=first, strength=1.0, bypass=False,
+               latent=g("VAEEncodeTiled", pixels=start, vae=vae, tile_size=512, overlap=64, temporal_size=500, temporal_overlap=64))
+    audio = g("LTXVEmptyLatentAudio", audio_vae=audio_vae, frames_number=size[2], frame_rate=load[3], batch_size=1)
+    sampled = g("SamplerCustomAdvanced", _progress=True, noise=g("RandomNoise", noise_seed=Slot("seed", 0)),
+                guider=g("CFGGuider", model=model, positive=cond[0], negative=cond[1], cfg=1.0),
+                sampler=g("KSamplerSelect", sampler_name="euler"), sigmas=g("ManualSigmas", sigmas=REFINE_SIGMAS),
+                latent_image=g("LTXVConcatAVLatent", video_latent=latent, audio_latent=audio))
+    decoded = g("VAEDecode", vae=vae, samples=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])
+    g("SaveImage", _title="Clean frames", _output="frames", images=decoded, filename_prefix=Slot("prefix", "paintaplate/plate/full/clean/f"))
+    video = g("CreateVideo", images=decoded, fps=load[3], bit_depth=8, color_space="sRGB", codec="none")
+    g("SaveVideo", _title="Clean shot at full size", _output="video", video=video,
+      filename_prefix=Slot("video_prefix", "paintaplate/plate/full/clean"), format="auto", format__codec="auto")
+    g.save("cleanup")
 
 
 def shot():
@@ -521,6 +585,6 @@ def fluid():
 
 
 if __name__ == "__main__":
-    for build in (ingest, prompt, edit, snap, clean, shot, matte, comp, export, warm, fluid):
+    for build in (ingest, prompt, edit, snap, clean, cleanup, shot, matte, comp, export, warm, fluid):
         build()
     print("wrote", sorted(os.listdir(OUT)))

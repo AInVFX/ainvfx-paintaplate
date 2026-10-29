@@ -121,15 +121,6 @@ class MathOps(unittest.TestCase):
         print(f"fit to plate: ok (edge change per frame {flicker_new:.4f} against {flicker_old:.4f} before, "
               f"edge ratio {ratio.round(3).tolist()})")
 
-    def test_box_matte_hides_the_outline(self):
-        mask = np.zeros((2, 40, 60), np.float32)
-        mask[0, 10:20, 20:30] = 1  # a 10 x 10 object; the second frame is empty
-        box = m.box_matte(mask, 0.5)
-        self.assertEqual(box[0].sum(), 20 * 20)  # grown by half its size on each side
-        self.assertEqual(box[1].sum(), 0)
-
-
-class Keyframes(unittest.TestCase):
     def test_keyframe_video(self):
         """Black frames, each key at its frame (clamped), the later of two keys on one frame winning."""
         images = {"a": np.full((4, 6, 3), 0.8, np.float32), "b": np.full((4, 6, 3), 0.3, np.float32)}

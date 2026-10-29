@@ -1,7 +1,7 @@
 // One ComfyUI workflow for a whole scene: the workflows the page runs, joined by links instead of files, so the scene
 // opens in ComfyUI and keeps working there. Pure functions over workflows parsed by logic.mjs, tested in Node.
 
-import { fillWorkflow } from "./logic.mjs";
+import { fillWorkflow, stageOne } from "./logic.mjs";
 
 const LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]); // the nodes a link can stand in for
 const OUTPUTS = new Set(["SaveImage", "PreviewImage", "SaveVideo", "PreviewAny", "PaintAPlate_SavePlate"]); // never shared
@@ -54,7 +54,7 @@ export function merge(parts) {
 
 // The scene as one prompt. Each edit brings its mask and, for paint and light, its strokes as images already in ComfyUI's
 // input folder, its caption, seed and the settings of its two Klein passes. The passes chain as the page layers them; the
-// erases alone make the erase pass's first frame; the render runs at full size, as the export does.
+// erases alone make the erase pass's first frame; the render runs at full size, as the export does: the erase pass in two stages.
 export function sceneGraph(WF, { plate, edits, render }) {
   const parts = [], add = (inst) => (parts.push(inst.nodes), inst.saved);
   const node = (id, cls, inputs, k = 0) => (parts.push({ [id]: { class_type: cls, inputs, _meta: { title: id } } }), [id, k]);
@@ -90,8 +90,12 @@ export function sceneGraph(WF, { plate, edits, render }) {
   if (erased.length) {
     erasedMatte = add(instantiate(WF.matte, "erase tracking", { ...common, width: plate.trackErase[0], height: plate.trackErase[1],
       prefix: out("matte_a/m") }, { mask: union("erased area", erased, plate.trackErase) }, { drop })).frames;
-    made = add(instantiate(WF.clean, "erase pass", { ...common, width: plate.work[0], height: plate.work[1], seed: render.seed,
-      prefix: out("clean/f"), video_prefix: out("clean") }, { hole: erasedMatte, hero: erasedFrame }, { drop })).frames;
+    // the erase pass in Lightricks' two stages, as the page renders it: half the working size, then 2 steps at full size
+    const low = stageOne(plate.work), values = { ...common, seed: render.seed, prompt: render.erasePrompt ?? "" };
+    const half = add(instantiate(WF.clean, "erase pass at half size", { ...values, width: low[0], height: low[1], prefix: out("clean_half/f"),
+      video_prefix: out("clean_half") }, { hole: erasedMatte, hero: erasedFrame }, { drop })).frames;
+    made = add(instantiate(WF.cleanup, "erase pass", { ...values, width: plate.work[0], height: plate.work[1], prefix: out("clean/f"),
+      video_prefix: out("clean") }, { hole: erasedMatte, hero: erasedFrame, low: half }, { drop })).frames;
   }
   if (edits.some((e) => e.tool !== "erase")) made = add(instantiate(WF.shot, "shot", { ...common, ...(made ? { color_space: "sRGB" } : {}),
     width: plate.work[0], height: plate.work[1], seed: render.seed, prompt: render.prompt, prefix: out("shot/f"), video_prefix: out("raw") },
