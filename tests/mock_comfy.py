@@ -76,7 +76,8 @@ def read_plate(path, max_frames=1024, pad=False):
         with av.open(full) as c:
             frames = [f.to_ndarray(format="rgb24").astype(np.float32) / 255 for f in c.decode(video=0)][:max_frames]
     else:
-        frames = [np.asarray(Image.open(f).convert("RGB"), np.float32) / 255 for f in spec["files"][:max_frames]]
+        frames = [np.asarray(plateio.read_float(f), np.float32)[..., :3] if f.lower().endswith(".exr")  # scene-linear, as it is
+                  else np.asarray(Image.open(f).convert("RGB"), np.float32) / 255 for f in spec["files"][:max_frames]]
     n = len(frames)
     spec.update(frames=n, color_space_guess="sRGB")
     if pad:
@@ -222,10 +223,22 @@ async def execute(pid, prompt):
         if "named" in outs:
             o[outs["named"]] = {"images": []}
         await steps(pid, 2, 0.5)
+    elif "hdr" in outs:  # SDR to HDR: the shot decoded from sRGB, its brightest values lifted above 1.0, as half-float EXR frames
+        frames, spec = read_plate(v["path"], v.get("max_frames", 1024), pad=True)
+        await steps(pid, 8, 2.0)
+        sub, _, stem = v["prefix"].rpartition("/")
+        os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
+        names = [f"{stem}_{i + 1:05d}_.exr" for i in range(len(frames))]
+
+        def lifted(i):
+            lin = np.where(frames[i] <= 0.04045, frames[i] / 12.92, ((frames[i] + 0.055) / 1.055) ** 2.4)
+            return (lin * (1 + 3 * lin ** 4)).astype(np.float32)  # white becomes 4.0
+        plateio.write_exrs(lifted, [os.path.join(folder("output"), sub, f) for f in names])
+        o[outs["hdr"]] = {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
     elif "review" in outs:  # review: the composite at full size, as a movie, and as half-float EXR frames for an image sequence
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         n, (h, w) = spec["frames"], frames[0].shape[:2]
-        shot, _ = read_plate(v["shot"], 1024)
+        shot, _ = read_plate(v.get("hdr") or v["shot"], 1024)
         matte = read_plate(v["matte_a"], 1024)[0] if v.get("matte_a") else None
         await steps(pid, 6, 2.0)
         out = []
@@ -282,7 +295,7 @@ async def execute(pid, prompt):
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         n = spec["frames"]
         h, w = (v["height"], v["width"]) if "video" in outs else frames[0].shape[:2]
-        shot, _ = read_plate(v["shot"], 1024)
+        shot, _ = read_plate(v.get("hdr") or v["shot"], 1024)
         has_matte = bool(v.get("matte_a"))
         matte = read_plate(v["matte_a"], 1024)[0] if has_matte else None
         await steps(pid, 6, 1.5 if "video" in outs else 3.0)

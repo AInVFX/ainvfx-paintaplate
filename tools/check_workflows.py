@@ -23,8 +23,9 @@ def scan(files):
             block = re.split(r'(?<![\w])node_id\s*=\s*"|\nclass ', src[m.end(): m.end() + 12000])[0]
             names = set(re.findall(r'\.Input\(\s*"([^"]+)"', block)) | set(re.findall(r'\bid\s*=\s*"([^"]+)"', block))
             nodes.setdefault(m.group(1), set()).update(names)
-        # V1: NODE_CLASS_MAPPINGS entries, inputs from INPUT_TYPES (and the parent's, via super()).
-        for key, cls in re.findall(r'"([A-Za-z0-9_]+)"\s*:\s*([A-Za-z0-9_]+)\s*,', src):
+        # V1: NODE_CLASS_MAPPINGS entries or @comfy_node(name=...) classes, inputs from INPUT_TYPES (and the parent's, via super()).
+        for key, cls in (re.findall(r'"([A-Za-z0-9_]+)"\s*:\s*([A-Za-z0-9_]+)\s*,', src)  # or ComfyUI-LTXVideo's decorator
+                         + re.findall(r'@comfy_node\(\s*name\s*=\s*"([^"]+)"[^)]*\)\s*\nclass (\w+)', src)):
             cm = re.search(r'\nclass %s\b(?:\((\w+)\))?.*?(?=\nclass |\Z)' % re.escape(cls), src, re.S)
             if cm and "INPUT_TYPES" in cm.group(0):
                 body = cm.group(0).split("INPUT_TYPES", 1)[1].split("RETURN_TYPES", 1)[0]

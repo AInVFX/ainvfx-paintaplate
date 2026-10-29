@@ -81,6 +81,8 @@ The script finds the models folder of the ComfyUI it is installed in; name anoth
 | `taeltx2_3.safetensors` | `vae_approx/` | 0.02 GB | [Kijai/LTX2.3_comfy](https://huggingface.co/Kijai/LTX2.3_comfy) (`6d980fd`), from [madebyollin/taehv](https://github.com/madebyollin/taehv) (MIT) |
 | `ainvfx-fluid.safetensors` (optional: fluid shots) | `loras/` | 0.65 GB | [AInVFX/ainvfx-fluid](https://huggingface.co/AInVFX/ainvfx-fluid) (`fd4855a`), file `ltx-2.5/ainvfx-fluid.safetensors` |
 
+**SDR to HDR** (optional): Lightricks' LTX 2.5 SDR-to-HDR IC-LoRA, `ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors` (1.31 GB, `models/loras`), and its scene embeddings, `ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors` (12.6 MB, `models/embeddings`), from `Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR`. The repository is gated: accept its licence on Hugging Face first. `get_models.py` downloads both. Without them everything else works, and an EXR render ends with the SDR shot.
+
 ## Use it
 
 **Open plate** has one tab per source. **ComfyUI files** browses ComfyUI's input and output folders and their subfolders: videos, animated images, and image sequences, each named by its frame pattern (`shot.####.exr`, or `ComfyUI_#####_.png` for core Save Image's frames). It stays fast on folders of thousands of outputs. One click shows a plate's size, frames, format and colour space; a double click opens it. **Upload** sends files from your computer. **Scenes** opens a scene saved on this ComfyUI. **Blank plate** starts a fluid shot.
@@ -100,6 +102,8 @@ Click an edit in History to select it: its words come back, and painting, rubbin
 A **fluid shot** starts from a blank plate: paint flat colour blobs (light grey smoke, white steam, orange and yellow fire, flat zones for sky and ground) on frame 0 and on the last frame, describe the fluid, then Generate. The shot becomes the plate for every edit.
 
 Drag the line between the frame and History, or the top edge of the open log, to resize them; a double-click gives the first size back. The sizes are kept for the next session.
+
+**SDR to HDR.** For an EXR plate, the full-size shot goes through Lightricks' SDR-to-HDR IC-LoRA before the full quality. The edited area then holds scene-linear values, above 1.0 where the scene is bright. HDR Match fits them to the plate's own values, measured on the untouched pixels, so the edit sits in the plate's exposure. The switch sits above the render steps, and in Edit > SDR to HDR. A video plate stays 8-bit. A blank plate asks its bit depth: 16-bit half float runs its fluid shot through SDR to HDR, and the fluid shot then opens as an EXR plate for every edit. A render with a light edit leaves the step out: a relight keeps the plate's own values under a smooth light ratio, so they stay HDR.
 
 ## How it works
 

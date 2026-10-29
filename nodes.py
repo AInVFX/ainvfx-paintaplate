@@ -1,8 +1,8 @@
-"""The eleven PaintAPlate nodes. Each one does what core ComfyUI cannot.
+"""The twelve PaintAPlate nodes. Each one does what core ComfyUI cannot.
 
 Compositing, masks, Klein, LTX and SAM 3.1 stay in core nodes. These nodes load and save plates in their own format,
 convert colour with OpenColorIO, fit generated frames to the plate, transfer a new light onto it, keep a matte on what an
-edit made, level an erase's fill, save frames and movies several at once, show a shot while LTX samples it, and build the
+edit made, level an erase's fill, fit an HDR shot to the plate, save frames and movies several at once, show a shot while LTX samples it, and build the
 keyframe control video of a fluid shot. Each node converts tensors and calls plateio (files), mathops (pixels) or ocio
 (colour), which are tested without torch or ComfyUI.
 """
@@ -590,5 +590,43 @@ class SaveMovie(io.ComfyNode):
         return io.NodeOutput(ui={"images": [{"filename": file, "subfolder": sub, "type": "output"}], "animated": [True]})
 
 
+class HDRMatch(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_HDRMatch",
+            display_name="HDR Match",
+            category=CATEGORY,
+            description="Fits an HDR shot to the plate it is composited onto. SDR to HDR picks its own exposure for the whole "
+                        "frame, while the plate's untouched pixels hold the scene's real values: one curve per channel, "
+                        "measured where the edits changed nothing and over the whole shot (no flicker), maps the shot's "
+                        "values to the plate's. Beyond the measured range the curve keeps a constant gain, so new highlights "
+                        "keep their ratios. Without an HDR shot the image passes through; without a matte the HDR shot does.",
+            inputs=[
+                io.Image.Input("image", tooltip="The shot in the plate's colour space as the SDR pass made it: the output without an HDR shot."),
+                io.Image.Input("plate", tooltip="The plate's own values, in its colour space."),
+                io.Float.Input("grow", default=24.0, min=0.0, max=512.0,
+                               tooltip="Plate pixels the matte grows by before what is left counts as untouched: the composite's grow and feather."),
+                io.Mask.Input("mask", optional=True, tooltip="Where the edits changed the shot: the composite's matte."),
+                io.Image.Input("hdr", optional=True, tooltip="The HDR shot, in the plate's colour space."),
+            ],
+            outputs=[io.Image.Output(display_name="image")],
+        )
+
+    @classmethod
+    def execute(cls, image, plate, grow, mask=None, hdr=None) -> io.NodeOutput:
+        if hdr is None:
+            return io.NodeOutput(image)
+        if mask is None:
+            logging.info("PaintAPlate HDR Match: no matte, so nothing untouched to measure: the HDR shot as it was made")
+            return io.NodeOutput(hdr)
+        m = (mask if mask.ndim == 3 else mask[None]).float().cpu().numpy()
+        n, k = hdr.shape[0], plate.shape[0]
+        frames, report = mathops.hdr_match(n, lambda i: hdr[i].float().cpu().numpy(), lambda i: plate[min(i, k - 1)].float().cpu().numpy(),
+                                           lambda i: m[min(i, len(m) - 1)], grow=grow, workers=WORKERS)
+        logging.info("PaintAPlate HDR Match: %s", report["text"])
+        return io.NodeOutput(to_image(frames))
+
+
 NODES = [LoadPlate, SavePlate, ColorSpace, SaveFrames, SaveMovie, FitToPlate, RelightTransfer, FollowMatte, LevelFill, LivePreview,
-         KeyframeVideo]
+         KeyframeVideo, HDRMatch]

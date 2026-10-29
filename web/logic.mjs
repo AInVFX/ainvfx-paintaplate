@@ -7,7 +7,7 @@
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_element: ["seed"],
-  review_frames: ["frames_prefix"] };
+  review_frames: ["frames_prefix"], hdr_shot: ["hdr"] };
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
   const slots = {}, outputs = {}, progress = new Set();
@@ -526,3 +526,14 @@ export function panelSize(kind, wanted, view, { least, stage, around }) {
   const room = (kind === "side" ? view.width : view.height) - around - stage;
   return Math.round(Math.max(least, Math.min(wanted, room)));
 }
+
+// ---------- SDR to HDR ----------
+// Lightricks' LTX 2.5 SDR-to-HDR IC-LoRA makes 16-bit HDR from an SDR shot. It runs at full size for an EXR plate, unless
+// switched off; a video plate stays SDR. A relight keeps the plate's own values under a smooth light ratio, which stay HDR,
+// so a render with a light edit leaves it out. A blank plate asks its bit depth: 8-bit, or 16-bit half float, where its
+// fluid shot goes through it and becomes an EXR plate.
+export const HDR_DEPTH = 16;
+export const hdrPlate = (spec) => !!spec && spec.kind !== "video" && /^\.exr$/i.test(spec.ext ?? "");
+export const wantsHdr = (spec, tools, on) => !!on && hdrPlate(spec) && !tools.includes("light");
+export const hdrFps = (fps) => Math.min(30, +fps || 24); // the conditioning frame rate: at most 30, as in Lightricks' workflow
+export const blankDepth = (v) => (+v === HDR_DEPTH ? HDR_DEPTH : 8);

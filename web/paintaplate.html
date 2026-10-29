@@ -140,6 +140,7 @@
       <label class="preview-size">Preview size
         <select id="preview-size" title="The shot preview and its composite, in sizes this plate divides into. Smaller renders faster; the export stays at full size."></select>
       </label>
+      <label id="hdr-switch" class="hdr-switch" hidden title="Lightricks' SDR-to-HDR IC-LoRA after the full-size shot: scene-linear values in the edited area"><input type="checkbox" id="hdr-on" checked> SDR to HDR</label>
       <ol id="stages"></ol>
     </section>
   </aside>
@@ -268,6 +269,7 @@
           <label>Height <input id="b-height" type="number" min="256" max="1920" step="64" value="512"></label>
           <label>Frame rate <select id="b-fps"><option>24</option><option selected>25</option><option>50</option></select></label>
           <label>Frames <input id="b-frames" type="number" min="9" max="321" step="8" value="121"></label>
+          <label>Bit depth <select id="b-depth"><option value="8" selected>8-bit</option><option value="16">16-bit half float</option></select></label>
         </div>
         <p id="b-note" class="hint"></p>
       </section>

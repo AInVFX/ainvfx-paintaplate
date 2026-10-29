@@ -12,7 +12,7 @@ import json
 import os
 
 OUT = os.environ.get("PAINTAPLATE_WORKFLOWS_OUT") or os.path.join(os.path.dirname(__file__), "..", "web", "workflows")
-NAMES = ("ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid")
+NAMES = ("ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid", "hdr")
 OCIO_CONFIG = "ocio://studio-config-latest"  # the page fills the config in use: $OCIO when it is set, as in RV
 
 KLEIN = "flux3-image-klein-int8-convrot.safetensors"
@@ -28,6 +28,9 @@ KLEIN_VAE = "flux2-vae.safetensors"  # its VAE (models/vae)
 LTX_VAE = "ltx-2.5-video-vae-conv-bf16.safetensors"  # LTX 2.5's video VAE (models/vae)
 LTX_AUDIO_VAE = "ltx-2.5-audio-vae-bf16.safetensors"  # its audio VAE (models/vae)
 RIPPLE_LORA = "LTX25_Ripple_v11.safetensors"  # WepeNerd's Ripple IC-LoRA, which carries paint and light (models/loras)
+HDR_LORA = "ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors"  # Lightricks' SDR-to-HDR IC-LoRA (models/loras, gated)
+HDR_SCENE = "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors"  # its fixed scene embeddings: the prompt it takes (models/embeddings)
+HDR_SPACE = "ACES2065-1"  # the SDR-to-HDR frames are saved in it: the colour space the config's file rules give an EXR
 FLUID_NEGATIVE = "blurry, low quality, distorted, watermark"  # the negative prompt of its model card's samples
 SNAP_POINTS = 5  # stroke points SAM looks at one by one
 # Lightricks' distilled schedule from the official LTX 2.5 inpaint workflow (stage 1, euler_ancestral)
@@ -120,9 +123,9 @@ def load(name, folder=None):
 # (a relight alone: no matte to composite with or to save).
 # no words for an erase: no search by name; not a relight: no light transfer on the edited frame;
 # an erase matte: no plate under a shot to compare with, and no changed pixels to start from; a video plate's review:
-# no EXR frames, its movie is the plate's own quality.
+# no EXR frames, its movie is the plate's own quality; no SDR-to-HDR shot: the SDR shot goes on as it is.
 OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",),
-            "follow_element": ("seed",), "review_frames": ("frames_prefix",)}
+            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "hdr_shot": ("hdr",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -508,8 +511,16 @@ def composite(g):
               radius=Slot("radius", 8), strength=Slot("strength", 1.0), align=True)
     back = colour(g, relit, "@linear", Slot("color_space", "@model"))
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=load[0], on_true=back)
+    # SDR to HDR: where the hdr workflow made the shot again in scene-linear values, those values, fitted to the plate's own
+    # on the untouched pixels. Without them (the hdr_shot link dropped) HDR Match passes the SDR shot through.
+    hdr = colour(g, g("PaintAPlate_LoadPlate", _title="HDR shot", path=Slot("hdr", ""), max_frames=1024, pad_8n1=False),
+                 HDR_SPACE, Slot("color_space", "@model"), "HDR shot in the plate's colour space")
+    shot = g("PaintAPlate_HDRMatch", _title="HDR Match: the HDR shot fitted to the plate", image=gen_plate, plate=load[0], mask=union,
+             hdr=hdr, grow=Slot("hdr_grow", 24.0))
+    g.link_slot(shot, "hdr", "hdr_shot")
+    g.link_slot(shot, "mask", "fit_mask")  # no matte: the link goes, as Fit to Plate's does
     # the new pixels are matched to the plate they are composited onto: relit when the light changed
-    fit, final = fitted(g, base, gen_plate, union)
+    fit, final = fitted(g, base, shot, union)
     return load, fit, final
 
 
@@ -607,7 +618,48 @@ def fluid():
     g.save("fluid")
 
 
+
+def hdr():
+    """SDR to HDR: a full-size shot made again in scene-linear values by Lightricks' LTX 2.5 SDR-to-HDR IC-LoRA, saved as
+    half-float EXR frames in ACES2065-1 (HDR_SPACE).
+
+    As Lightricks' official workflow (example_workflows/2.5/HDR_workflows/LTX-2.5_ICLoRA_SDR_to_HDR_Distilled.json in the
+    pinned ComfyUI-LTXVideo): core Convert Image Color Space maps the shot from sRGB to ACEScct, the IC-LoRA's guide (not the
+    creative SDR-to-HDR expand); fixed scene embeddings stand for the prompt, positive and negative, at CFG 1; the 8 distilled
+    sigmas with euler; the video VAE in float32 encodes the guide and decodes the result, tiled; LTXVHDRDecodePostprocess
+    returns ACEScg scene-linear values (its own EXR writer stays off: Save Frames writes them). The conditioning frame rate is
+    at most 30, as there. The page gives it shots at the working size, already a multiple of 32.
+    """
+    g = Graph()
+    load = g("PaintAPlate_LoadPlate", _title="Shot (SDR)", path=Slot("path", ""), max_frames=Slot("max_frames", 121), pad_8n1=True)
+    guide = g("ImageColorSpace", _title="Guide: the shot from sRGB to ACEScct", image=load[0], source="sRGB", destination="HDR ACEScct")
+    size = g("GetImageSize", image=guide)
+    lora = g("LTXICLoRALoaderModelOnly", _title="SDR-to-HDR IC-LoRA (reads its downscale factor)",
+             model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"), lora_name=Slot("hdr_lora", HDR_LORA),
+             strength_model=1.0)
+    vae = g("LTXVVAEForceFloat32", _title="Video VAE in float32", vae=g("VAELoader", vae_name=Slot("video_vae", LTX_VAE)))
+    audio_vae = g("VAELoader", vae_name=LTX_AUDIO_VAE)
+    scene = g("LTXVLoadConditioning", _title="Scene embeddings: the fixed prompt", file_name=Slot("hdr_scene", HDR_SCENE), device="cpu")
+    cond = g("LTXVConditioning", positive=scene, negative=scene, frame_rate=Slot("cond_fps", 24.0))
+    empty = g("EmptyLTXVLatentVideo", width=size[0], height=size[1], length=size[2], batch_size=1)
+    guided = g("LTXAddVideoICLoRAGuide", positive=cond[0], negative=cond[1], vae=vae, latent=empty, image=guide, frame_idx=0,
+               strength=1.0, latent_downscale_factor=lora[1], crop="disabled", use_tiled_encode=False, tile_size=256,
+               tile_overlap=64, use_streaming=False, tile_frames=97)
+    audio = g("LTXVEmptyLatentAudio", audio_vae=audio_vae, frames_number=size[2], frame_rate=Slot("fps", 24), batch_size=1)
+    sampled = g("SamplerCustomAdvanced", _progress=True, noise=g("RandomNoise", noise_seed=42),
+                guider=g("CFGGuider", model=lora, positive=guided[0], negative=guided[1], cfg=1.0),
+                sampler=g("KSamplerSelect", sampler_name="euler"), sigmas=g("ManualSigmas", sigmas=INPAINT_SIGMAS),
+                latent_image=g("LTXVConcatAVLatent", video_latent=guided[2], audio_latent=audio))
+    video = g("LTXVCropGuides", positive=guided[0], negative=guided[1], latent=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])
+    decoded = g("VAEDecodeTiled", samples=video[2], vae=vae, tile_size=512, overlap=64, temporal_size=64, temporal_overlap=8)
+    linear = g("LTXVHDRDecodePostprocess", _title="ACEScct to ACEScg scene-linear", image=decoded, transfer="acescct", exposure=0.0,
+               save_exr=False, exr_color_space="acescg", output_dir="paintaplate/hdr_unused", filename_prefix="frame",
+               half_precision=True)
+    g("PaintAPlate_SaveFrames", _title="HDR frames (half-float EXR, ACES2065-1)", _output="hdr", format="exr",
+      images=colour(g, linear[1], "ACEScg", HDR_SPACE, "ACEScg to ACES2065-1"), filename_prefix=Slot("prefix", "paintaplate/plate/hdr/f"))
+    g.save("hdr")
+
 if __name__ == "__main__":
-    for build in (ingest, prompt, edit, snap, clean, cleanup, shot, matte, comp, review, export, warm, fluid):
+    for build in (ingest, prompt, edit, snap, clean, cleanup, shot, matte, comp, review, export, warm, fluid, hdr):
         build()
     print("wrote", sorted(os.listdir(OUT)))

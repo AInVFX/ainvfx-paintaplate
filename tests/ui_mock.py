@@ -586,6 +586,89 @@ def keys_flow(page):
     check(not failed, f"every documented key does what the Keys dialog says ({len(results)} presses): {failed or 'all'}")
 
 
+def make_hdr_plate(root):
+    """An EXR plate with values above white for the SDR-to-HDR checks: 17 frames, a sun moving across a gradient."""
+    import numpy as np, OpenEXR
+    seq = os.path.join(root, "input", "paintaplate", "hdr_room")
+    os.makedirs(seq, exist_ok=True)
+    yy, xx = np.mgrid[0:352, 0:640].astype(np.float32)
+    for k in range(17):
+        img = np.stack([xx / 640, yy / 352, np.full_like(xx, 0.25)], -1) * 0.8
+        img[(xx - 420 - 4 * k) ** 2 + (yy - 110) ** 2 < 30 ** 2] = 6.0
+        OpenEXR.File({"compression": OpenEXR.PIZ_COMPRESSION, "type": OpenEXR.scanlineimage}, {"RGB": img.astype(np.float16)}).write(
+            os.path.join(seq, f"room.{1001 + k}.exr"))
+
+
+def log_lines(page):
+    return page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
+
+
+def paint_once(page, words, pts):
+    box = page.eval_on_selector("#view", "e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }")
+    page.fill("#prompt", words); page.evaluate("document.activeElement.blur()")
+    page.mouse.move(box["x"] + pts[0][0] * box["w"], box["y"] + pts[0][1] * box["h"]); page.mouse.down()
+    for x, y in pts[1:]:
+        page.mouse.move(box["x"] + x * box["w"], box["y"] + y * box["h"], steps=5)
+    page.mouse.up()
+
+
+DONE = "[...document.querySelectorAll('#log li span')].slice(%d).some((e) => /Render v\\d+: Full quality took/.test(e.textContent))"
+
+
+def hdr_flow(page):
+    """SDR to HDR: no switch for a video plate; on by default for an EXR plate, where it runs after the full-size shot and
+    before the full quality; switched off, the next render leaves it out."""
+    errors = []
+    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    open_path(page, "plates/desk.mp4")
+    page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
+    check(page.is_hidden("#hdr-switch"), "a video plate stays SDR: no SDR-to-HDR switch")
+    open_path(page, "paintaplate/hdr_room")
+    page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
+    check(not page.is_hidden("#hdr-switch") and page.is_checked("#hdr-on"), "an EXR plate: SDR to HDR is on by default")
+    seen = len(log_lines(page))
+    page.keyboard.press("b")
+    paint_once(page, "a red lamp", [(0.3, 0.6), (0.36, 0.7)])
+    page.keyboard.press("Enter")
+    page.wait_for_function(DONE % seen, timeout=240000)
+    new = log_lines(page)[seen:]
+    at = lambda text: next((i for i, line in enumerate(new) if text in line), None)  # noqa: E731
+    check(at("SDR to HDR took") is not None and at("SDR to HDR took") < at("Full quality took"),
+          "the full-size shot goes through SDR to HDR before the full quality the viewer plays")
+    seen = len(log_lines(page))
+    page.click("#hdr-on")
+    page.wait_for_function(DONE % seen, timeout=240000)
+    new = log_lines(page)[seen:]
+    check(not any("SDR to HDR took" in line for line in new) and not page.is_checked("#hdr-on"),
+          "switched off, the next render ends with the SDR shot: no SDR-to-HDR step")
+    page.click("#hdr-on")
+    check(not errors, f"no console errors with SDR to HDR: {errors}")
+
+
+def fluid16_flow(page):
+    """A blank plate asked in 16-bit: its fluid shot goes through SDR to HDR and opens as an EXR plate, the switch on."""
+    errors = []
+    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    page.click("#open-btn"); page.click("#open [data-tab=blank]")
+    page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.select_option("#b-fps", "24"); page.fill("#b-frames", "17")
+    page.select_option("#b-depth", "16"); page.dispatch_event("#b-frames", "input")
+    note = page.text_content("#b-note")
+    check("16-bit: SDR to HDR" in note, f"the blank plate form says what 16-bit does: {note}")
+    seen = len(log_lines(page))
+    page.click("#open-go")
+    page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
+    paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)])
+    page.keyboard.press("Enter")
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].slice(%d).some((e) => e.textContent.includes('under the edits: the fluid shot v'))" % seen,
+                           timeout=240000)
+    page.wait_for_function("!document.querySelector('#hdr-switch').hidden", timeout=60000)
+    new = log_lines(page)[seen:]
+    check(any("16-bit" in line for line in new) and any("SDR to HDR took" in line for line in new),
+          "16-bit: the fluid shot goes through SDR to HDR")
+    check(page.is_checked("#hdr-on"), "the HDR fluid shot is an EXR plate: SDR to HDR is on for the edits on it")
+    check(not errors, f"no console errors in a 16-bit fluid shot: {errors}")
+
+
 def drag(page, selector, dx, dy):
     box = page.locator(selector).bounding_box()
     x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
@@ -691,6 +774,7 @@ def main():
         img[:, :32], img[:, 32:] = 4.0, 0.5
         for n in (1001, 1002):
             OpenEXR.File({"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}, {"RGB": img}).write(os.path.join(hdr, f"f.{n}.exr"))
+        make_hdr_plate(a.root)
         with sync_playwright() as p:
             browser = p.chromium.launch(channel=os.environ.get("PLAYWRIGHT_CHANNEL") or None)
             page = browser.new_page(viewport={"width": 1400, "height": 900})
@@ -700,6 +784,8 @@ def main():
             ocio_flow(page)
             keys_flow(page)
             oom_flow(page)
+            hdr_flow(page)
+            fluid16_flow(page)
             layout_flow(page, a.port)
             phone(browser, a.port)
             browser.close()

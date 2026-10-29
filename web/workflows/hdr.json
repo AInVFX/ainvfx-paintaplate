@@ -1,0 +1,380 @@
+{
+ "1": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 121,
+   "pad_8n1": true
+  },
+  "_meta": {
+   "title": "Shot (SDR)",
+   "slots": {
+    "path": "path",
+    "max_frames": "max_frames"
+   }
+  }
+ },
+ "2": {
+  "class_type": "ImageColorSpace",
+  "inputs": {
+   "image": [
+    "1",
+    0
+   ],
+   "source": "sRGB",
+   "destination": "HDR ACEScct"
+  },
+  "_meta": {
+   "title": "Guide: the shot from sRGB to ACEScct"
+  }
+ },
+ "3": {
+  "class_type": "GetImageSize",
+  "inputs": {
+   "image": [
+    "2",
+    0
+   ]
+  }
+ },
+ "4": {
+  "class_type": "UNETLoader",
+  "inputs": {
+   "unet_name": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+   "weight_dtype": "default"
+  },
+  "_meta": {
+   "slots": {
+    "unet_name": "ltx"
+   }
+  }
+ },
+ "5": {
+  "class_type": "LTXICLoRALoaderModelOnly",
+  "inputs": {
+   "model": [
+    "4",
+    0
+   ],
+   "lora_name": "ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors",
+   "strength_model": 1.0
+  },
+  "_meta": {
+   "title": "SDR-to-HDR IC-LoRA (reads its downscale factor)",
+   "slots": {
+    "lora_name": "hdr_lora"
+   }
+  }
+ },
+ "6": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "ltx-2.5-video-vae-conv-bf16.safetensors"
+  },
+  "_meta": {
+   "slots": {
+    "vae_name": "video_vae"
+   }
+  }
+ },
+ "7": {
+  "class_type": "LTXVVAEForceFloat32",
+  "inputs": {
+   "vae": [
+    "6",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Video VAE in float32"
+  }
+ },
+ "8": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "ltx-2.5-audio-vae-bf16.safetensors"
+  }
+ },
+ "9": {
+  "class_type": "LTXVLoadConditioning",
+  "inputs": {
+   "file_name": "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors",
+   "device": "cpu"
+  },
+  "_meta": {
+   "title": "Scene embeddings: the fixed prompt",
+   "slots": {
+    "file_name": "hdr_scene"
+   }
+  }
+ },
+ "10": {
+  "class_type": "LTXVConditioning",
+  "inputs": {
+   "positive": [
+    "9",
+    0
+   ],
+   "negative": [
+    "9",
+    0
+   ],
+   "frame_rate": 24.0
+  },
+  "_meta": {
+   "slots": {
+    "frame_rate": "cond_fps"
+   }
+  }
+ },
+ "11": {
+  "class_type": "EmptyLTXVLatentVideo",
+  "inputs": {
+   "width": [
+    "3",
+    0
+   ],
+   "height": [
+    "3",
+    1
+   ],
+   "length": [
+    "3",
+    2
+   ],
+   "batch_size": 1
+  }
+ },
+ "12": {
+  "class_type": "LTXAddVideoICLoRAGuide",
+  "inputs": {
+   "positive": [
+    "10",
+    0
+   ],
+   "negative": [
+    "10",
+    1
+   ],
+   "vae": [
+    "7",
+    0
+   ],
+   "latent": [
+    "11",
+    0
+   ],
+   "image": [
+    "2",
+    0
+   ],
+   "frame_idx": 0,
+   "strength": 1.0,
+   "latent_downscale_factor": [
+    "5",
+    1
+   ],
+   "crop": "disabled",
+   "use_tiled_encode": false,
+   "tile_size": 256,
+   "tile_overlap": 64,
+   "use_streaming": false,
+   "tile_frames": 97
+  }
+ },
+ "13": {
+  "class_type": "LTXVEmptyLatentAudio",
+  "inputs": {
+   "audio_vae": [
+    "8",
+    0
+   ],
+   "frames_number": [
+    "3",
+    2
+   ],
+   "frame_rate": 24,
+   "batch_size": 1
+  },
+  "_meta": {
+   "slots": {
+    "frame_rate": "fps"
+   }
+  }
+ },
+ "14": {
+  "class_type": "RandomNoise",
+  "inputs": {
+   "noise_seed": 42
+  }
+ },
+ "15": {
+  "class_type": "CFGGuider",
+  "inputs": {
+   "model": [
+    "5",
+    0
+   ],
+   "positive": [
+    "12",
+    0
+   ],
+   "negative": [
+    "12",
+    1
+   ],
+   "cfg": 1.0
+  }
+ },
+ "16": {
+  "class_type": "KSamplerSelect",
+  "inputs": {
+   "sampler_name": "euler"
+  }
+ },
+ "17": {
+  "class_type": "ManualSigmas",
+  "inputs": {
+   "sigmas": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
+  }
+ },
+ "18": {
+  "class_type": "LTXVConcatAVLatent",
+  "inputs": {
+   "video_latent": [
+    "12",
+    2
+   ],
+   "audio_latent": [
+    "13",
+    0
+   ]
+  }
+ },
+ "19": {
+  "class_type": "SamplerCustomAdvanced",
+  "inputs": {
+   "noise": [
+    "14",
+    0
+   ],
+   "guider": [
+    "15",
+    0
+   ],
+   "sampler": [
+    "16",
+    0
+   ],
+   "sigmas": [
+    "17",
+    0
+   ],
+   "latent_image": [
+    "18",
+    0
+   ]
+  },
+  "_meta": {
+   "progress": true
+  }
+ },
+ "20": {
+  "class_type": "LTXVSeparateAVLatent",
+  "inputs": {
+   "av_latent": [
+    "19",
+    0
+   ]
+  }
+ },
+ "21": {
+  "class_type": "LTXVCropGuides",
+  "inputs": {
+   "positive": [
+    "12",
+    0
+   ],
+   "negative": [
+    "12",
+    1
+   ],
+   "latent": [
+    "20",
+    0
+   ]
+  }
+ },
+ "22": {
+  "class_type": "VAEDecodeTiled",
+  "inputs": {
+   "samples": [
+    "21",
+    2
+   ],
+   "vae": [
+    "7",
+    0
+   ],
+   "tile_size": 512,
+   "overlap": 64,
+   "temporal_size": 64,
+   "temporal_overlap": 8
+  }
+ },
+ "23": {
+  "class_type": "LTXVHDRDecodePostprocess",
+  "inputs": {
+   "image": [
+    "22",
+    0
+   ],
+   "transfer": "acescct",
+   "exposure": 0.0,
+   "save_exr": false,
+   "exr_color_space": "acescg",
+   "output_dir": "paintaplate/hdr_unused",
+   "filename_prefix": "frame",
+   "half_precision": true
+  },
+  "_meta": {
+   "title": "ACEScct to ACEScg scene-linear"
+  }
+ },
+ "24": {
+  "class_type": "PaintAPlate_ColorSpace",
+  "inputs": {
+   "image": [
+    "23",
+    1
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "ACEScg",
+   "destination": "ACES2065-1"
+  },
+  "_meta": {
+   "title": "ACEScg to ACES2065-1",
+   "slots": {
+    "config": "config"
+   }
+  }
+ },
+ "25": {
+  "class_type": "PaintAPlate_SaveFrames",
+  "inputs": {
+   "format": "exr",
+   "images": [
+    "24",
+    0
+   ],
+   "filename_prefix": "paintaplate/plate/hdr/f"
+  },
+  "_meta": {
+   "title": "HDR frames (half-float EXR, ACES2065-1)",
+   "slots": {
+    "filename_prefix": "prefix"
+   },
+   "output": "hdr"
+  }
+ }
+}

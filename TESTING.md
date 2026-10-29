@@ -37,6 +37,7 @@ Where the system Python refuses `pip` (Ubuntu, Debian), install into a virtual e
 - **Keys**: every key the right-click menu shows is in the Keys dialog, and every documented key does what the dialog says;
 - **Out of memory**: the mock's `/mock/oom` makes the next fluid pass fail with ComfyUI's own message; the page asks ComfyUI to free its memory, waits until `/system_stats` shows it released, then makes the shot (posted at once, the retry ran before the free on a GPU, 29 Oct);
 - **Phones**, upright and on its side: the plate opened again from the job index, the frame, Generate, the transport, the status line, the log and the menu sheet fit the screen.
+- SDR to HDR: no switch for a video plate; on by default for an EXR plate, where the step runs after the full-size shot and before the full quality; switched off, the next render leaves it out; a 16-bit blank plate's fluid shot goes through it and opens as an EXR plate.
 - The layout: the side panel and the log resize from their dividers, the stage keeps its room, a new session keeps the sizes, a double-click gives the first sizes back.
 
 ## CI

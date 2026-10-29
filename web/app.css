@@ -197,6 +197,9 @@ dialog .check input { width: auto; display: inline; margin: 0; accent-color: var
 dialog .check small { color: var(--muted); }
 .hint { color: var(--muted); margin: 6px 0; }
 
+.hdr-switch { display: flex; gap: 6px; align-items: center; margin: 0 0 8px; color: var(--muted); font-size: 12px; cursor: pointer; }
+.hdr-switch[hidden] { display: none; }
+
 /* Log */
 /* Dividers: the side panel's width and the open log's height drag (app.mjs, layoutUI) */
 .split { z-index: 6; touch-action: none; background: transparent; transition: background .12s; }

@@ -125,6 +125,8 @@ On cards with 24 GB or more, preview passes show a live preview: every second st
 4. **The menu.** Right-click, then OCIO, with RV's labels: File Color Space (a tree by colour-space family), Look, Displays (each display with its views) and Change Config. RV binds no key for OCIO; neither does PaintAPlate. The display, the view, the look and the config are kept for the next session.
 5. **The workflows.** Color Space (OCIO) converts the plate to the model space as core ComfyUI's Convert Image Color Space made sRGB: values above 1.0 tone-mapped with the batch's peak, then a gamut compression (`ocio._into_model`). Out of the model space, values are decoded as they are. Relight Transfer works in `@linear`.
 
+**SDR to HDR.** The `hdr` workflow is Lightricks' official LTX 2.5 SDR-to-HDR graph: the shot mapped from sRGB to ACEScct by core Convert Image Color Space as the IC-LoRA's guide, fixed scene embeddings for the prompt, CFG 1, 8 distilled steps, a float32 tiled decode, and `LTXVHDRDecodePostprocess` for ACEScg values, saved as half-float EXR in ACES2065-1 (the file rules' space for EXR). The page runs it after the full-size shot (`step(r, "hdr")`) when `logic.wantsHdr` says so: an EXR plate, the switch on, no light edit; the switch is part of the render key (`|sdr`), so each setting keeps its renders. `review` and `export` load its frames, convert them to the plate's colour space and fit them with HDR Match (`mathops.hdr_match`): one curve per channel in log2, from the HDR shot's values to the plate's own, measured outside the grown matte over the whole shot, non-decreasing, and a constant gain beyond the measured range. Without HDR frames the `hdr_shot` link goes and HDR Match passes the SDR shot through. A 16-bit blank plate runs its fluid shot through `hdr`; the EXR frames become the plate under the edits.
+
 ## 7. The fluid shot
 
 1. **A blank plate.** In the Open dialog, the Blank plate tab posts to `/paintaplate/blank`, which writes a black ProRes 4444 canvas in `input/paintaplate/blank`, once per size. Sides are multiples of 64 up to 1920; lengths are 8k + 1 frames, from 9 to 321; frame rates are 24, 25 or 50 fps.
@@ -159,7 +161,7 @@ Open plate has one tab per source: **ComfyUI files**, **Upload**, **Scenes** and
 | File | What it does |
 | --- | --- |
 | `__init__.py` | The entry point: registers the routes, serves `web/`, and exposes the 11 nodes (V3 schema, `comfy_api.v0_0_2`). |
-| `nodes.py` | The 11 nodes. |
+| `nodes.py` | The 12 nodes. |
 | `folders.py` | Where paths from the page may point: `plate_path` (a file, a folder or a frame pattern under the input folder, or the output folder with `output:`), `output_folder`, `run_folder`. |
 | `plateio.py` | Files: sequences and frame patterns (a missing frame keeps its place, as in OpenRV), the plate spec and its colour guess, the folder scan of the plate browser, EXR writing that keeps every layer and header, still writers (PNG, TIFF, DPX, EXR), the review's half-float EXR frames, `VideoWriter` (the source codec, colour tags, timecode and audio), and the blank canvas. |
 | `mathops.py` | Pixels: phase-correlation alignment, grain level, the colour seam field, push-pull fill, steady masks, `fit_to_plate`, `relight`, `follow_matte`, `level_fill`, `keyframe_video`, and the fast bilinear `resize_to`. |
@@ -188,7 +190,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | `upsampler.json` | Black Forest Labs' two system prompts for the prompt writer (table and plain). |
 | `logo.png` | The logo, favicon and Registry icon. |
 
-### The 13 workflows, in `web/workflows`
+### The 14 workflows, in `web/workflows`
 
 | Workflow | What it does | Called by |
 | --- | --- | --- |
@@ -205,6 +207,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | `export` | The same composite, then Save Plate in the plate's format, and the matte | `pipeline`, on Export |
 | `warm` | Loads the LTX 2.5 stack at page open, on cards of 60 GB or more | `warmAll` |
 | `fluid` | The ainvfx-fluid pass, saved as ProRes 4444 | `generateFluid` |
+| `hdr` | SDR to HDR: Lightricks' LTX 2.5 IC-LoRA makes a full-size shot again in scene-linear values, as half-float EXR in ACES2065-1. |  |
 
 ### The 11 nodes, in `nodes.py`
 
@@ -221,6 +224,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | Level Fill | An erase's fill levelled with the background it continues; off, it passes the image through | `edit` |
 | Live Preview | A sampler hook: a tiny-decoder WebP every N steps; it switches itself off on any error | `clean`, `shot`, `fluid` |
 | Keyframe Video | Black frames with each keyframe at its frame | `fluid` |
+| HDR Match | Fits an HDR shot to the plate on the untouched pixels: one curve per channel (`mathops.hdr_match`). |  |
 
 ### Tools, in `tools/`
 

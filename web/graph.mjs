@@ -103,9 +103,11 @@ export function sceneGraph(WF, { plate, edits, render }) {
     { hero: frame, ...(made ? { path: made } : {}) }, { drop })).frames;
   if (painted.length) paintMatte = add(instantiate(WF.matte, "paint tracking", { ...common, color_space: "@model", width: plate.track[0],
     height: plate.track[1], prefix: out("matte_b/m") }, { path: made, mask: union("painted area", painted, plate.track) }, { drop })).frames;
-  const relight = edits.some((e) => e.tool === "light"), a = erasedMatte ?? paintMatte;
+  const relight = edits.some((e) => e.tool === "light"), a = erasedMatte ?? paintMatte, fps = plate.fps ?? 24;
+  const hdr = render.hdr && made ? add(instantiate(WF.hdr, "SDR to HDR", { config: plate.config, max_frames: plate.frames, fps: Math.round(fps),
+    cond_fps: Math.min(30, fps), prefix: out("hdr/f") }, { path: made }, { drop: ["hdr"] })).hdr : null;
   add(instantiate(WF.export, "export", { ...common, relight, keep_untouched: !relight, grow: render.grow, feather: render.feather,
-    prefix: out("export"), matte_prefix: out("matte/matte") },
-    { shot: made, ...(a ? { matte_a: a, matte_b: paintMatte ?? erasedMatte } : {}) }));
+    hdr_grow: render.grow + render.feather, prefix: out("export"), matte_prefix: out("matte/matte") },
+    { shot: made, ...(hdr ? { hdr } : {}), ...(a ? { matte_a: a, matte_b: paintMatte ?? erasedMatte } : {}) }));
   return merge(parts);
 }

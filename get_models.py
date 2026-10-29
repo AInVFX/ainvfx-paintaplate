@@ -4,9 +4,9 @@
 
 Run it with the Python that runs ComfyUI, which has huggingface_hub; it works the same on Windows, macOS and Linux.
 Without MODELS_FOLDER it uses the models folder of the ComfyUI this pack is installed in (custom_nodes/ainvfx-paintaplate).
-First accept the licences of FLUX 3 Image Klein, LTX 2.5 and the in-outpainting IC-LoRA on Hugging Face, then set the
+First accept the licences of FLUX 3 Image Klein, LTX 2.5, the in-outpainting IC-LoRA and the SDR-to-HDR IC-LoRA on Hugging Face, then set the
 HF_TOKEN environment variable to a read token. A file already in place is skipped, and several files download at once:
-about 60 GB in all, ainvfx-fluid 0.65 GB of it. tools/pod_setup.sh runs this script on a pod, so every model file and
+about 61 GB in all, ainvfx-fluid 0.65 GB and SDR to HDR 1.32 GB of it. tools/pod_setup.sh runs this script on a pod, so every model file and
 its revision has one home: here.
 """
 from __future__ import annotations
@@ -24,6 +24,7 @@ REVISIONS = {  # the tested revision of each repository
     "WepeNerd/LTX-Ripple": "76abac5ede8a3415b9d1cd803843a38ecb351600",
     "Comfy-Org/sam3.1": "7bb8374780a725b4353ed31f3a9395c9742b5621",
     "Kijai/LTX2.3_comfy": "6d980fde0d330f2fed6ff8dfdfddb06d88a004e5",
+    "Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR": "c7578ebddb54f4210e534e4d8cad698a5a520692",  # gated: accept its licence first
     "AInVFX/ainvfx-fluid": "fd4855a18d879c551bf4c5f49b1a877874437cb6",  # version 2, trained on synthetic data
 }
 MODELS = [  # (repository, file in the repository, folder under models/)
@@ -39,6 +40,8 @@ MODELS = [  # (repository, file in the repository, folder under models/)
     ("Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting", "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors", "loras"),
     ("Comfy-Org/sam3.1", "checkpoints/sam3.1_multiplex_fp16.safetensors", "checkpoints"),
     ("Kijai/LTX2.3_comfy", "vae/taeltx2_3.safetensors", "vae_approx"),  # the live preview's tiny decoder (MIT, madebyollin/taehv)
+    ("Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR", "ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors", "loras"),  # SDR to HDR
+    ("Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR", "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors", "embeddings"),  # its prompt
     ("AInVFX/ainvfx-fluid", "ltx-2.5/ainvfx-fluid.safetensors", "loras"),  # optional: fluid shots from a blank plate
 ]
 FLUID = "ainvfx-fluid.safetensors"

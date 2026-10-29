@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayUniforms, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize } from "../../web/logic.mjs";
+import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayUniforms, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -321,4 +321,17 @@ test("a divider's drag stays inside the window and never squeezes a panel or the
   assert.equal(panelSize("log", 330.4, view, log), 330);
   assert.equal(panelSize("log", 900, view, log), 570); // 900 - 90 - 240
   assert.equal(panelSize("log", 10, view, log), 60);
+});
+
+test("SDR to HDR: on for an EXR plate unless switched off or relit, never for a video; 16-bit blank plates; 30 fps at most", () => {
+  const exr = { kind: "sequence", ext: ".EXR" }, png = { kind: "sequence", ext: ".png" }, mp4 = { kind: "video", ext: ".mp4" };
+  assert.equal(hdrPlate(exr), true);
+  assert.equal(hdrPlate(png), false);
+  assert.equal(hdrPlate(mp4), false);
+  assert.equal(wantsHdr(exr, ["paint", "erase"], true), true);
+  assert.equal(wantsHdr(exr, ["paint"], false), false);
+  assert.equal(wantsHdr(exr, ["paint", "light"], true), false); // a relight keeps the plate's own values
+  assert.equal(wantsHdr(mp4, ["paint"], true), false);
+  assert.deepEqual([blankDepth("16"), blankDepth("8"), blankDepth("32"), blankDepth(undefined)], [16, 8, 8, 8]);
+  assert.deepEqual([hdrFps(24), hdrFps(50), hdrFps(0)], [24, 30, 24]);
 });

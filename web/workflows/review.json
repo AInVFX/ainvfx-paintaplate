@@ -264,6 +264,69 @@
   }
  },
  "18": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 1024,
+   "pad_8n1": false
+  },
+  "_meta": {
+   "title": "HDR shot",
+   "slots": {
+    "path": "hdr"
+   }
+  }
+ },
+ "19": {
+  "class_type": "PaintAPlate_ColorSpace",
+  "inputs": {
+   "image": [
+    "18",
+    0
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "ACES2065-1",
+   "destination": "@model"
+  },
+  "_meta": {
+   "title": "HDR shot in the plate's colour space",
+   "slots": {
+    "config": "config",
+    "destination": "color_space"
+   }
+  }
+ },
+ "20": {
+  "class_type": "PaintAPlate_HDRMatch",
+  "inputs": {
+   "image": [
+    "9",
+    0
+   ],
+   "plate": [
+    "1",
+    0
+   ],
+   "mask": [
+    "8",
+    0
+   ],
+   "hdr": [
+    "19",
+    0
+   ],
+   "grow": 24.0
+  },
+  "_meta": {
+   "title": "HDR Match: the HDR shot fitted to the plate",
+   "slots": {
+    "grow": "hdr_grow",
+    "hdr": "hdr_shot",
+    "mask": "fit_mask"
+   }
+  }
+ },
+ "21": {
   "class_type": "PaintAPlate_FitToPlate",
   "inputs": {
    "plate": [
@@ -271,7 +334,7 @@
     0
    ],
    "image": [
-    "9",
+    "20",
     0
    ],
    "mask": [
@@ -297,7 +360,7 @@
    "progress": true
   }
  },
- "19": {
+ "22": {
   "class_type": "ImageCompositeMasked",
   "inputs": {
    "destination": [
@@ -305,14 +368,14 @@
     0
    ],
    "source": [
-    "18",
+    "21",
     0
    ],
    "x": 0,
    "y": 0,
    "resize_source": false,
    "mask": [
-    "18",
+    "21",
     1
    ]
   },
@@ -320,11 +383,11 @@
    "title": "Composite"
   }
  },
- "20": {
+ "23": {
   "class_type": "ImageFromBatch",
   "inputs": {
    "image": [
-    "19",
+    "22",
     0
    ],
    "batch_index": 0,
@@ -334,11 +397,11 @@
    ]
   }
  },
- "21": {
+ "24": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
-    "20",
+    "23",
     0
    ],
    "config": "ocio://studio-config-latest",
@@ -354,22 +417,22 @@
    }
   }
  },
- "22": {
+ "25": {
   "class_type": "ImageScaleToMaxDimension",
   "inputs": {
    "upscale_method": "lanczos",
    "largest_size": 1920,
    "image": [
-    "21",
+    "24",
     0
    ]
   }
  },
- "23": {
+ "26": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
    "images": [
-    "22",
+    "25",
     0
    ],
    "fps": [
@@ -387,11 +450,11 @@
    "output": "review"
   }
  },
- "24": {
+ "27": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
-    "20",
+    "23",
     0
    ],
    "format": "exr",

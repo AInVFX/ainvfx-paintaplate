@@ -52,7 +52,7 @@ class Workflows(unittest.TestCase):
                   "snap": {"named"} | {f"point_{k}" for k in range(5)}, "clean": {"frames", "video"}, "cleanup": {"frames", "video"}, "shot": {"frames", "video"},
                   "matte": {"follow", "frames"}, "comp": {"video"}, "review": {"review", "frames"}, "export": {"export", "matte"},
                   "warm": {"frame"},
-                  "fluid": {"plate", "video"}}
+                  "fluid": {"plate", "video"}, "hdr": {"hdr"}}
         for name, keys in wanted.items():
             self.assertEqual(set(build_workflows.load(name, WORKFLOWS)[2]), keys, name)
 

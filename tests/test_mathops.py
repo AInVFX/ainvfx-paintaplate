@@ -258,5 +258,43 @@ class ResizeTo(unittest.TestCase):
         self.assertEqual(out[5, 35, 25], 1)  # the element stays
         self.assertEqual(out[5, 15, 90], 0)  # the far piece is left out, though a thin line joins it to the element
 
+
+class HDRMatch(unittest.TestCase):
+    """SDR to HDR picks its own exposure; HDR Match brings the shot back to the plate's values."""
+
+    def setUp(self):
+        rng = np.random.default_rng(3)
+        self.n, h, w = 6, 48, 64
+        self.plate = np.exp2(rng.uniform(-6, 2.5, (self.n, h, w, 3))).astype(np.float32)  # scene-linear, up to 5.7
+        self.shot = (0.6 * self.plate ** 0.8).astype(np.float32)  # another exposure and contrast, as SDR to HDR may give
+        self.changed = np.zeros((self.n, h, w), np.float32)
+        self.changed[:, 10:30, 20:40] = 1
+
+    def match(self, shot, changed):
+        return m.hdr_match(self.n, lambda i: shot[i], lambda i: self.plate[i], lambda i: changed[i], grow=2, step=1, workers=2)
+
+    def test_the_fit_brings_the_edited_area_to_the_plates_values(self):
+        out, report = self.match(self.shot, self.changed)
+        inside = self.changed[0] > 0
+        self.assertTrue(report["fitted"])
+        self.assertLess(float(np.median(np.abs(np.log2(out[0][inside] / self.plate[0][inside])))), 0.05)
+        self.assertLess(report["error"], 0.05)
+
+    def test_new_highlights_beyond_the_measured_range_keep_their_ratios(self):
+        shot, top = self.shot.copy(), float(self.shot.max())
+        shot[:, 15:20, 25:27], shot[:, 15:20, 27:30] = 16 * top, 32 * top  # inside the matte only, above anything untouched
+        out, _ = self.match(shot, self.changed)
+        low, high = out[0][15:20, 25:27], out[0][15:20, 27:30]
+        self.assertGreater(float(low.min()), float(self.plate[0][self.changed[0] == 0].max()))
+        np.testing.assert_allclose(high / low.mean(axis=(0, 1)), 2.0, rtol=1e-4)  # a constant gain: twice as bright stays twice
+
+    def test_a_change_over_the_whole_frame_keeps_the_shot_as_made(self):
+        out, report = self.match(self.shot, np.ones_like(self.changed))
+        self.assertFalse(report["fitted"])
+        np.testing.assert_array_equal(out[0], self.shot[0])
+
+    def test_pool_adjacent_violators(self):
+        np.testing.assert_allclose(m._non_decreasing(np.array([1.0, 3.0, 2.0, 4.0]), np.ones(4)), [1, 2.5, 2.5, 4])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

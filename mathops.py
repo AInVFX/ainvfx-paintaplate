@@ -554,3 +554,111 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     return out, summary
 
 GRAIN_UNIT = _grain_unit()
+
+
+# ---------- SDR to HDR: the HDR shot fitted to the plate ----------
+HDR_FLOOR = 2.0 ** -14  # the smallest normal half float: darker values carry no usable ratio
+
+
+def _non_decreasing(y: np.ndarray, w: np.ndarray) -> np.ndarray:
+    """Weighted isotonic regression (pool adjacent violators): the closest non-decreasing sequence to `y`."""
+    vals, wts, sizes = [], [], []
+    for v, wt in zip(y.tolist(), w.tolist()):
+        vals.append(v); wts.append(wt); sizes.append(1)
+        while len(vals) > 1 and vals[-2] > vals[-1]:
+            total = wts[-2] + wts[-1]
+            vals[-2:] = [(vals[-2] * wts[-2] + vals[-1] * wts[-1]) / total]
+            wts[-2:] = [total]
+            sizes[-2:] = [sizes[-2] + sizes[-1]]
+    return np.repeat(np.array(vals), sizes)
+
+
+def hdr_curve(shot: np.ndarray, plate: np.ndarray, bins: int = 48, least: int = 2048):
+    """One curve per channel from the shot's values to the plate's own, from samples of the same pixels ((K, 3) each), in
+    log2: the median plate value in each band of shot values, made non-decreasing. None when a channel has fewer than
+    `least` usable samples (both values finite and above the half-float floor)."""
+    curves = []
+    for c in range(3):
+        x, y = shot[:, c], plate[:, c]
+        ok = np.isfinite(x) & np.isfinite(y) & (x > HDR_FLOOR) & (y > HDR_FLOOR)
+        if ok.sum() < least:
+            return None
+        lx, ly = np.log2(x[ok]), np.log2(y[ok])
+        edges = np.unique(np.quantile(lx, np.linspace(0.001, 0.999, bins + 1)))
+        if len(edges) < 3:
+            return None
+        band = np.clip(np.searchsorted(edges, lx, side="right") - 1, 0, len(edges) - 2)
+        order = np.argsort(band, kind="stable")
+        band, lx, ly = band[order], lx[order], ly[order]
+        starts = np.searchsorted(band, np.arange(len(edges) - 1))
+        ends = np.searchsorted(band, np.arange(len(edges) - 1), side="right")
+        cx, cy, weight = [], [], []
+        for a, b in zip(starts, ends):  # one pass per band (48 at most), not per pixel
+            if b - a >= 16:
+                cx.append(np.median(lx[a:b])); cy.append(np.median(ly[a:b])); weight.append(b - a)
+        if len(cx) < 2:
+            return None
+        curves.append((np.array(cx), _non_decreasing(np.array(cy), np.array(weight, float))))
+    return curves
+
+
+def apply_curve(img: np.ndarray, curves) -> np.ndarray:
+    """`img`'s RGB through the curves of hdr_curve. Beyond the measured range each end goes on at slope 1 in log2, a
+    constant gain, so the shot's own highlights keep their ratios. Zero, negative and non-finite values become 0."""
+    out = np.array(img[..., :3], np.float32)
+    for c, (cx, cy) in enumerate(curves):
+        v = out[..., c]
+        good = np.isfinite(v) & (v > 0)
+        lv = np.log2(np.where(good, v, 1.0))
+        mapped = np.interp(lv, cx, cy)
+        mapped = np.where(lv < cx[0], cy[0] + (lv - cx[0]), mapped)
+        mapped = np.where(lv > cx[-1], cy[-1] + (lv - cx[-1]), mapped)
+        out[..., c] = np.where(good, np.exp2(mapped), 0.0)
+    return out
+
+
+def hdr_match(n: int, shot_at, plate_at, changed_at, *, grow: float = 24.0, step: int = 8, samples: int = 1_500_000,
+              workers: int = 8):
+    """The HDR shot fitted to the plate it is composited onto: (frames, report).
+
+    SDR to HDR picks its own exposure and contrast for the whole frame, while the plate's untouched pixels hold the
+    scene's real values. One curve per channel goes from the shot's values to the plate's own, measured where the edits
+    changed nothing (outside `changed_at(i)`, a mask at any size, grown by `grow` plate pixels), on a grid every `step`
+    plate pixels and over the whole shot, so the exposure cannot flicker. Frames may differ in size: samples are taken at
+    the same places of each frame. Every pixel goes through the curves; the composite keeps them inside the matte only.
+    Too few untouched pixels (an edit over the whole frame) leave the shot as it was made."""
+    first = plate_at(0)
+    hp, wp = first.shape[:2]
+    ys = np.minimum(np.arange(step // 2, hp, step), hp - 1)
+    xs = np.minimum(np.arange(step // 2, wp, step), wp - 1)
+    stride = max(1, int(np.ceil(n * len(ys) * len(xs) / samples)))
+
+    def sample(i):
+        s, p, m = shot_at(i), plate_at(i), changed_at(i)
+        hs, ws = s.shape[:2]
+        hm, wm = m.shape[:2]
+        near = dilate((m > 0.02).astype(np.float32), grow * hm / hp)
+        keep = near[(ys * hm // hp)[:, None], (xs * wm // wp)[None, :]] < 0.5
+        return s[(ys * hs // hp)[:, None], (xs * ws // wp)[None, :], :3][keep], p[ys[:, None], xs[None, :], :3][keep]
+
+    with ThreadPoolExecutor(max(1, workers)) as pool:  # numpy releases the GIL
+        parts = list(pool.map(sample, range(0, n, stride)))
+    shot = np.concatenate([a for a, _ in parts]) if parts else np.zeros((0, 3), np.float32)
+    plate = np.concatenate([b for _, b in parts]) if parts else np.zeros((0, 3), np.float32)
+    curves = hdr_curve(shot, plate)
+    if curves is None:
+        return [np.array(shot_at(i)[..., :3], np.float32) for i in range(n)], {
+            "samples": len(shot), "fitted": False,
+            "text": f"{len(shot)} untouched samples, too few to fit: the HDR shot as it was made"}
+    grey = np.log2(0.18)
+    moved = [float(np.interp(grey, cx, cy) - grey) if cx[0] <= grey <= cx[-1] else float(cy[0] - cx[0] if grey < cx[0] else cy[-1] - cx[-1])
+             for cx, cy in curves]
+    fitted = apply_curve(shot[None], curves)[0]
+    ok = np.all((fitted > HDR_FLOOR) & (plate > HDR_FLOOR) & np.isfinite(plate), axis=-1)
+    error = float(np.median(np.abs(np.log2(fitted[ok] / plate[ok])))) if ok.any() else float("nan")
+    with ThreadPoolExecutor(max(1, workers)) as pool:
+        frames = list(pool.map(lambda i: apply_curve(shot_at(i), curves), range(n)))
+    return frames, {"samples": len(shot), "fitted": True, "grey": moved, "error": error,
+                    "text": f"{len(shot)} untouched samples; at 18% grey the shot moves by "
+                            f"{', '.join(f'{m:+.2f}' for m in moved)} stops (R, G, B); median error after the fit {error:.3f} stops"}
+
