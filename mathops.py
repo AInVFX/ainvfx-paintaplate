@@ -556,77 +556,41 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
 GRAIN_UNIT = _grain_unit()
 
 
-# ---------- SDR to HDR: the HDR shot fitted to the plate ----------
+# ---------- SDR to HDR: the HDR shot's level fitted to the plate ----------
 HDR_FLOOR = 2.0 ** -14  # the smallest normal half float: darker values carry no usable ratio
+HDR_MIDTONES = (2.0 ** -6, 2.0 ** -0.5)  # plate luminance where the level is measured: above the noise, below SDR's white
 
 
-def _non_decreasing(y: np.ndarray, w: np.ndarray) -> np.ndarray:
-    """Weighted isotonic regression (pool adjacent violators): the closest non-decreasing sequence to `y`."""
-    vals, wts, sizes = [], [], []
-    for v, wt in zip(y.tolist(), w.tolist()):
-        vals.append(v); wts.append(wt); sizes.append(1)
-        while len(vals) > 1 and vals[-2] > vals[-1]:
-            total = wts[-2] + wts[-1]
-            vals[-2:] = [(vals[-2] * wts[-2] + vals[-1] * wts[-1]) / total]
-            wts[-2:] = [total]
-            sizes[-2:] = [sizes[-2] + sizes[-1]]
-    return np.repeat(np.array(vals), sizes)
+def hdr_level(shot: np.ndarray, plate: np.ndarray, band=HDR_MIDTONES, least: int = 2048):
+    """One gain per channel, in stops, that brings the HDR shot's level to the plate's: the median of log2(plate / shot) over
+    samples of the same pixels ((K, 3) each) whose plate luminance sits in `band`, the mid-tones, where the SDR the model saw
+    was still close to linear. None when fewer than `least` samples qualify. A gain changes no ratio within a channel."""
+    ok = np.all(np.isfinite(shot) & np.isfinite(plate) & (shot > HDR_FLOOR) & (plate > HDR_FLOOR), axis=-1)
+    lum = plate @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    ok &= (lum >= band[0]) & (lum <= band[1])
+    if ok.sum() < least:
+        return None
+    return np.median(np.log2(plate[ok] / shot[ok]), axis=0)
 
 
-def hdr_curve(shot: np.ndarray, plate: np.ndarray, bins: int = 48, least: int = 2048):
-    """One curve per channel from the shot's values to the plate's own, from samples of the same pixels ((K, 3) each), in
-    log2: the median plate value in each band of shot values, made non-decreasing. None when a channel has fewer than
-    `least` usable samples (both values finite and above the half-float floor)."""
-    curves = []
-    for c in range(3):
-        x, y = shot[:, c], plate[:, c]
-        ok = np.isfinite(x) & np.isfinite(y) & (x > HDR_FLOOR) & (y > HDR_FLOOR)
-        if ok.sum() < least:
-            return None
-        lx, ly = np.log2(x[ok]), np.log2(y[ok])
-        edges = np.unique(np.quantile(lx, np.linspace(0.001, 0.999, bins + 1)))
-        if len(edges) < 3:
-            return None
-        band = np.clip(np.searchsorted(edges, lx, side="right") - 1, 0, len(edges) - 2)
-        order = np.argsort(band, kind="stable")
-        band, lx, ly = band[order], lx[order], ly[order]
-        starts = np.searchsorted(band, np.arange(len(edges) - 1))
-        ends = np.searchsorted(band, np.arange(len(edges) - 1), side="right")
-        cx, cy, weight = [], [], []
-        for a, b in zip(starts, ends):  # one pass per band (48 at most), not per pixel
-            if b - a >= 16:
-                cx.append(np.median(lx[a:b])); cy.append(np.median(ly[a:b])); weight.append(b - a)
-        if len(cx) < 2:
-            return None
-        curves.append((np.array(cx), _non_decreasing(np.array(cy), np.array(weight, float))))
-    return curves
-
-
-def apply_curve(img: np.ndarray, curves) -> np.ndarray:
-    """`img`'s RGB through the curves of hdr_curve. Beyond the measured range each end goes on at slope 1 in log2, a
-    constant gain, so the shot's own highlights keep their ratios. Zero, negative and non-finite values become 0."""
+def apply_level(img: np.ndarray, stops) -> np.ndarray:
+    """`img`'s RGB times 2 to the `stops` of each channel; zero, negative and non-finite values become 0. Nothing is
+    clipped or compressed: the range above the plate's white stays as SDR to HDR made it, for grading."""
     out = np.array(img[..., :3], np.float32)
-    for c, (cx, cy) in enumerate(curves):
-        v = out[..., c]
-        good = np.isfinite(v) & (v > 0)
-        lv = np.log2(np.where(good, v, 1.0))
-        mapped = np.interp(lv, cx, cy)
-        mapped = np.where(lv < cx[0], cy[0] + (lv - cx[0]), mapped)
-        mapped = np.where(lv > cx[-1], cy[-1] + (lv - cx[-1]), mapped)
-        out[..., c] = np.where(good, np.exp2(mapped), 0.0)
-    return out
+    good = np.isfinite(out) & (out > 0)
+    return np.where(good, out * np.exp2(np.asarray(stops, np.float32)), 0.0).astype(np.float32)
 
 
 def hdr_match(n: int, shot_at, plate_at, changed_at, *, grow: float = 24.0, step: int = 8, samples: int = 1_500_000,
               workers: int = 8):
-    """The HDR shot fitted to the plate it is composited onto: (frames, report).
+    """The HDR shot at the level of the plate it is composited onto: (frames, report).
 
-    SDR to HDR picks its own exposure and contrast for the whole frame, while the plate's untouched pixels hold the
-    scene's real values. One curve per channel goes from the shot's values to the plate's own, measured where the edits
-    changed nothing (outside `changed_at(i)`, a mask at any size, grown by `grow` plate pixels), on a grid every `step`
-    plate pixels and over the whole shot, so the exposure cannot flicker. Frames may differ in size: samples are taken at
-    the same places of each frame. Every pixel goes through the curves; the composite keeps them inside the matte only.
-    Too few untouched pixels (an edit over the whole frame) leave the shot as it was made."""
+    SDR to HDR picks its own exposure and white balance, while the plate's untouched pixels hold the scene's real values.
+    One gain per channel (hdr_level) is measured where the edits changed nothing (outside `changed_at(i)`, a mask at any
+    size, grown by `grow` plate pixels), on a grid every `step` plate pixels, over the whole shot, so the level cannot
+    flicker; the mid-tones decide it, then every pixel is scaled by it. A gain keeps every ratio, so new content keeps the
+    range SDR to HDR gave it above the plate's white. Frames may differ in size: samples are taken at the same places of
+    each frame. Too few untouched mid-tones (an edit over the whole frame) leave the shot as it was made."""
     first = plate_at(0)
     hp, wp = first.shape[:2]
     ys = np.minimum(np.arange(step // 2, hp, step), hp - 1)
@@ -645,23 +609,19 @@ def hdr_match(n: int, shot_at, plate_at, changed_at, *, grow: float = 24.0, step
         parts = list(pool.map(sample, range(0, n, stride)))
     shot = np.concatenate([a for a, _ in parts]) if parts else np.zeros((0, 3), np.float32)
     plate = np.concatenate([b for _, b in parts]) if parts else np.zeros((0, 3), np.float32)
-    curves = hdr_curve(shot, plate)
-    if curves is None:
+    stops = hdr_level(shot, plate)
+    if stops is None:
         return [np.array(shot_at(i)[..., :3], np.float32) for i in range(n)], {
             "samples": len(shot), "fitted": False,
-            "text": f"{len(shot)} untouched samples, too few to fit: the HDR shot as it was made"}
-    grey = np.log2(0.18)
-    moved = [float(np.interp(grey, cx, cy) - grey) if cx[0] <= grey <= cx[-1] else float(cy[0] - cx[0] if grey < cx[0] else cy[-1] - cx[-1])
-             for cx, cy in curves]
-    fitted = apply_curve(shot[None], curves)[0]
-    ok = np.all((fitted > HDR_FLOOR) & (plate > HDR_FLOOR) & np.isfinite(plate), axis=-1)
-    error = float(np.median(np.abs(np.log2(fitted[ok] / plate[ok])))) if ok.any() else float("nan")
+            "text": f"{len(shot)} untouched samples, too few mid-tones to measure: the HDR shot as it was made"}
+    fitted, lum = apply_level(shot, stops), plate @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    mid = np.all((fitted > HDR_FLOOR) & (plate > HDR_FLOOR), axis=-1) & (lum >= HDR_MIDTONES[0]) & (lum <= HDR_MIDTONES[1])
+    error = float(np.median(np.abs(np.log2(fitted[mid] / plate[mid])))) if mid.any() else float("nan")
     with ThreadPoolExecutor(max(1, workers)) as pool:
-        frames = list(pool.map(lambda i: apply_curve(shot_at(i), curves), range(n)))
-    return frames, {"samples": len(shot), "fitted": True, "grey": moved, "error": error,
-                    "text": f"{len(shot)} untouched samples; at 18% grey the shot moves by "
-                            f"{', '.join(f'{m:+.2f}' for m in moved)} stops (R, G, B); median error after the fit {error:.3f} stops"}
-
+        frames = list(pool.map(lambda i: apply_level(shot_at(i), stops), range(n)))
+    return frames, {"samples": len(shot), "fitted": True, "stops": [float(x) for x in stops], "error": error,
+                    "text": f"{len(shot)} untouched samples; the level moves by {', '.join(f'{x:+.2f}' for x in stops)} stops "
+                            f"(R, G, B), nothing compressed; median mid-tone error after it {error:.3f} stops"}
 
 AP1_TO_REC709 = np.array([[1.70505, -0.62179, -0.08326], [-0.13026, 1.14080, -0.01055], [-0.02400, -0.12897, 1.15297]], np.float32)
 
