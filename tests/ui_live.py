@@ -26,10 +26,12 @@ def stand_ins(out):
     g("LoadImage", image=Slot("start", ""))
     grown = g("GrowMask", mask=g("LoadImageMask", image=Slot("mask", ""), channel="red"), expand=Slot("grow", 8), tapered_corners=True)
     inv = g("ImageInvert", image=ref)
-    g("PreviewImage", _output="result", images=g("ImageCompositeMasked", destination=base, source=inv, x=0, y=0,
-                                                   resize_source=False, mask=grown))
-    g("PreviewImage", _output="patch", images=g("JoinImageWithAlpha", image=inv, alpha=g("InvertMask", mask=grown)))
-    g("PreviewImage", _output="relit", images=inv)
+    # saved in the output folder, as the real edit saves them: the job index keeps the stand-in's jobs as it keeps Klein's
+    g("SaveImage", _output="result", images=g("ImageCompositeMasked", destination=base, source=inv, x=0, y=0,
+                                                resize_source=False, mask=grown), filename_prefix=Slot("prefix", "x/e"))
+    g("SaveImage", _output="patch", images=g("JoinImageWithAlpha", image=inv, alpha=g("InvertMask", mask=grown)),
+      filename_prefix=Slot("prefix", "x/e"))
+    g("SaveImage", _output="relit", images=inv, filename_prefix=Slot("prefix", "x/e"))
     g.save("edit", out)
 
     g = Graph()  # shot: the Ripple reference itself (hero frame + plate frames), saved like the real one
@@ -242,7 +244,9 @@ def fluid_shot(page, spec, shots, mark):
     page.keyboard.press("Enter")
     page.wait_for_function("/generating/.test(document.querySelector('#fluid-state').textContent)", timeout=60000)
     mark("fluid: generating")
-    page.wait_for_function("/v\\d+ ready/.test(document.querySelector('#fluid-state').textContent)", timeout=900000)
+    page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
+      return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden && document.querySelector('#opening').hidden; })()""",
+                           timeout=900000)  # made: the first edit, and the plate under the next ones
     mark("fluid: shot ready | " + page.inner_text("#status"))
 
 
@@ -265,12 +269,8 @@ def remote(a):
             page.goto(f"{a.url}/extensions/ainvfx-paintaplate/paintaplate.html")
             page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
             mark("page ready: " + status())
-            if fluid:  # a fluid shot first; with strokes, it then opens as the plate
+            if fluid:  # a fluid shot first: once made, it is the plate the strokes are painted on
                 fluid_shot(page, fluid, shots, mark)
-                if strokes:
-                    page.click("#fluid-use")
-                    page.wait_for_function("document.querySelector('#fluid').hidden && document.querySelector('#spec').textContent.includes('prores')",
-                                           timeout=300000)
             else:
                 page.click("#open-btn"); page.fill("#path", a.path)
                 if a.cs:

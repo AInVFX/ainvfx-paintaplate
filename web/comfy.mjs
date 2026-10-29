@@ -137,7 +137,7 @@ async function finish(id, error) {
   if (memo.size > MEMO_MAX) memo.delete(memo.keys().next().value);
   log(`${job.name} ${short(id)}: done in ${took(job)}${fresh ? "" : " (served from ComfyUI's cache)"}`);
   if (job.index && (files(out).length || Object.values(out).some((o) => o.text?.length))) // recorded for later sessions
-    post(`/paintaplate/jobs/${job.index}`, { workflow: job.name, outputs: out }).catch(() => {});
+    if (recordable(out)) post(`/paintaplate/jobs/${job.index}`, { workflow: job.name, outputs: out }).catch(() => {});
   job.resolve(out);
 }
 
@@ -225,6 +225,9 @@ export function connect() {
 // ---------- Outputs ----------
 
 export const files = (out) => Object.values(out).flatMap((o) => [...(o.images ?? []), ...(o.gifs ?? []), ...(o.video ?? [])]);
+// A job the job index can keep: it made something, and every file it made is in the output folder, as routes.write_job
+// asks. A preview in the temporary folder is gone after a restart; posting it only earns a refusal, which browsers log.
+export const recordable = (out) => Object.keys(out ?? {}).length > 0 && files(out).every((f) => f.type === "output");
 export const outputFiles = (name, out, key) => files({ x: out[WF[name].outputs[key]] ?? {} });
 export const outputFile = (name, out, key) => outputFiles(name, out, key)[0];
 export const outputText = (name, out, key) => out[WF[name].outputs[key]]?.text?.[0];

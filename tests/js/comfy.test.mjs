@@ -1,7 +1,7 @@
 // The ComfyUI client (web/comfy.mjs), with fetch stubbed.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { historyRecord } from "../../web/comfy.mjs";
+import { recordable, historyRecord } from "../../web/comfy.mjs";
 
 test("outputs are read only once ComfyUI has recorded the prompt", async () => {
   const answers = [{}, { abc: { status: { completed: false } } }, { abc: { status: { completed: true }, outputs: { 9: { images: [1] } } } }];
@@ -13,4 +13,12 @@ test("outputs are read only once ComfyUI has recorded the prompt", async () => {
   calls = 0;
   globalThis.fetch = async () => ({ json: async () => ({}) });
   assert.equal(await historyRecord("gone", { tries: 3, wait: 1 }), null);
+});
+
+test("the job index keeps only jobs whose files are all in the output folder", () => {
+  const saved = { 9: { images: [{ filename: "f_00001_.png", subfolder: "x", type: "output" }] }, 3: { text: ["1 file(s)"] } };
+  assert.equal(recordable(saved), true);
+  assert.equal(recordable({ ...saved, 20: { images: [{ filename: "ComfyUI_temp_a_00001_.png", subfolder: "", type: "temp" }] } }), false);
+  assert.equal(recordable({ 3: { text: ["a caption"] } }), true); // the prompt writer's words: no file at all
+  assert.equal(recordable({}), false);
 });

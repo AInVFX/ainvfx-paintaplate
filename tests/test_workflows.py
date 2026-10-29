@@ -58,9 +58,13 @@ class Workflows(unittest.TestCase):
     def test_setup_downloads_every_model_file(self):
         """tools/pod_setup.sh downloads every model file a workflow loads: the two lists never drift apart."""
         import glob, json, re
-        setup = open(os.path.join(ROOT, "tools", "pod_setup.sh")).read()
+        with open(os.path.join(ROOT, "tools", "pod_setup.sh"), encoding="utf-8") as fh:
+            setup = fh.read()
         fetched = {os.path.basename(f) for f in re.findall(r"\bget \S+ (\S+\.safetensors) \S+", setup)}
-        loaded = {v for f in glob.glob(os.path.join(WORKFLOWS, "*.json")) for n in json.load(open(f)).values()
+        def nodes(path):
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh).values()
+        loaded = {v for f in glob.glob(os.path.join(WORKFLOWS, "*.json")) for n in nodes(f)
                   for v in n["inputs"].values() if isinstance(v, str) and v.endswith(".safetensors")}
         self.assertTrue(loaded)
         self.assertEqual(loaded - fetched, set())
