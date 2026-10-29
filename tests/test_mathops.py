@@ -296,5 +296,14 @@ class HDRMatch(unittest.TestCase):
     def test_pool_adjacent_violators(self):
         np.testing.assert_allclose(m._non_decreasing(np.array([1.0, 3.0, 2.0, 4.0]), np.ones(4)), [1, 2.5, 2.5, 4])
 
+
+class HDRPreview(unittest.TestCase):
+    def test_acescct_codes_show_as_srgb(self):
+        grey = (np.log2(0.18) + 9.72) / 17.52  # ACEScct code of 18% grey
+        out = m.acescct_preview(np.array([[[grey] * 3, [0.0729055341958355] * 3]], np.float32))
+        self.assertEqual(len(set(out[0, 0].tolist())), 1)  # grey stays grey
+        self.assertAlmostEqual(int(out[0, 0, 0]), round(255 * (1.055 * (0.18 / 1.18) ** (1 / 2.4) - 0.055)), delta=1)
+        self.assertEqual(out[0, 1].tolist(), [0, 0, 0])  # the code of linear 0 is black
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

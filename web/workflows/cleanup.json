@@ -477,10 +477,37 @@
   }
  },
  "33": {
-  "class_type": "CFGGuider",
+  "class_type": "PaintAPlate_LivePreview",
   "inputs": {
    "model": [
     "20",
+    0
+   ],
+   "decoder": "taeltx2_3.safetensors",
+   "frames": [
+    "4",
+    2
+   ],
+   "fps": [
+    "1",
+    3
+   ],
+   "every": 0,
+   "size": 320
+  },
+  "_meta": {
+   "title": "Live preview",
+   "slots": {
+    "decoder": "tiny",
+    "every": "live"
+   }
+  }
+ },
+ "34": {
+  "class_type": "CFGGuider",
+  "inputs": {
+   "model": [
+    "33",
     0
    ],
    "positive": [
@@ -494,19 +521,19 @@
    "cfg": 1.0
   }
  },
- "34": {
+ "35": {
   "class_type": "KSamplerSelect",
   "inputs": {
    "sampler_name": "euler"
   }
  },
- "35": {
+ "36": {
   "class_type": "ManualSigmas",
   "inputs": {
    "sigmas": "0.725, 0.421875, 0.0"
   }
  },
- "36": {
+ "37": {
   "class_type": "LTXVConcatAVLatent",
   "inputs": {
    "video_latent": [
@@ -519,7 +546,7 @@
    ]
   }
  },
- "37": {
+ "38": {
   "class_type": "SamplerCustomAdvanced",
   "inputs": {
    "noise": [
@@ -527,19 +554,19 @@
     0
    ],
    "guider": [
-    "33",
-    0
-   ],
-   "sampler": [
     "34",
     0
    ],
-   "sigmas": [
+   "sampler": [
     "35",
     0
    ],
-   "latent_image": [
+   "sigmas": [
     "36",
+    0
+   ],
+   "latent_image": [
+    "37",
     0
    ]
   },
@@ -547,16 +574,16 @@
    "progress": true
   }
  },
- "38": {
+ "39": {
   "class_type": "LTXVSeparateAVLatent",
   "inputs": {
    "av_latent": [
-    "37",
+    "38",
     0
    ]
   }
  },
- "39": {
+ "40": {
   "class_type": "VAEDecode",
   "inputs": {
    "vae": [
@@ -564,16 +591,16 @@
     0
    ],
    "samples": [
-    "38",
+    "39",
     0
    ]
   }
  },
- "40": {
+ "41": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
-    "39",
+    "40",
     0
    ],
    "filename_prefix": "paintaplate/plate/full/clean/f"
@@ -586,12 +613,12 @@
    "output": "frames"
   }
  },
- "41": {
+ "42": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
    "filename_prefix": "paintaplate/plate/full/clean",
    "images": [
-    "39",
+    "40",
     0
    ],
    "fps": [

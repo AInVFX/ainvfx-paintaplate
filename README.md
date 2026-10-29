@@ -105,6 +105,8 @@ Drag the line between the frame and History, or the top edge of the open log, to
 
 **SDR to HDR.** For an EXR plate, the full-size shot goes through Lightricks' SDR-to-HDR IC-LoRA before the full quality. The edited area then holds scene-linear values, above 1.0 where the scene is bright. HDR Match fits them to the plate's own values, measured on the untouched pixels, so the edit sits in the plate's exposure. The switch sits above the render steps, and in Edit > SDR to HDR. A video plate stays 8-bit. A blank plate asks its bit depth: 16-bit half float runs its fluid shot through SDR to HDR, and the fluid shot then opens as an EXR plate for every edit. A render with a light edit leaves the step out: a relight keeps the plate's own values under a smooth light ratio, so they stay HDR.
 
+**While it generates.** Every LTX pass shows a live preview from its first step: in the frame until a shot exists, then in a corner over the preview that plays. Esc stops what generates (after cancelling an edit in progress, then the selection); what finished is kept, and Enter goes on from where it stopped. Shift+Esc is not used: Chrome opens its Task Manager with it on Windows and Linux. Shift+Home resets every colour change, as RV's Reset All Color.
+
 ## How it works
 
 | Workflow | What it does |

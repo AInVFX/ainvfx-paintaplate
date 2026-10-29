@@ -1,6 +1,6 @@
 """Download the models PaintAPlate's workflows load, at the tested revisions, into a ComfyUI models folder.
 
-    python get_models.py [MODELS_FOLDER] [--no-fluid] [--list] [--only FILE ...]
+    python get_models.py [MODELS_FOLDER] [--no-fluid] [--no-hdr] [--list] [--only FILE ...]
 
 Run it with the Python that runs ComfyUI, which has huggingface_hub; it works the same on Windows, macOS and Linux.
 Without MODELS_FOLDER it uses the models folder of the ComfyUI this pack is installed in (custom_nodes/ainvfx-paintaplate).
@@ -45,6 +45,8 @@ MODELS = [  # (repository, file in the repository, folder under models/)
     ("AInVFX/ainvfx-fluid", "ltx-2.5/ainvfx-fluid.safetensors", "loras"),  # optional: fluid shots from a blank plate
 ]
 FLUID = "ainvfx-fluid.safetensors"
+HDR = ("ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors", "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors")  # gated
+OPTIONAL = (FLUID, *HDR)  # without them, fluid shots or SDR to HDR switch off and the rest works
 NVFP4 = ("black-forest-labs/flux-3-image-klein-comfy", "diffusion_models/flux3-image-klein-nvfp4.safetensors", "diffusion_models")
 STAGING = ".paintaplate_downloads"  # inside the models folder, so a finished file moves into place without a copy
 
@@ -72,12 +74,13 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Download the models PaintAPlate's workflows load, at the tested revisions.")
     ap.add_argument("models", nargs="?", default=comfy_models(), help="ComfyUI's models folder (default: the one this pack is in)")
     ap.add_argument("--no-fluid", action="store_true", help="skip ainvfx-fluid: fluid shots from a blank plate switch off")
+    ap.add_argument("--no-hdr", action="store_true", help="skip the SDR-to-HDR IC-LoRA (gated): SDR to HDR switches off")
     ap.add_argument("--nvfp4", action="store_true", help=argparse.SUPPRESS)  # FLUX 3 Image Klein's nvfp4 file: tests/gpu_bench.py only
     ap.add_argument("--only", nargs="+", metavar="FILE", help="these files only")
     ap.add_argument("--list", action="store_true", help="list the files, their folders and repositories, then stop")
     a = ap.parse_args(argv)
     todo = [m for m in MODELS + ([NVFP4] if a.nvfp4 else [])
-            if not (a.no_fluid and m[1].endswith(FLUID)) and (not a.only or os.path.basename(m[1]) in a.only)]
+            if not (a.no_fluid and m[1].endswith(FLUID)) and not (a.no_hdr and os.path.basename(m[1]) in HDR) and (not a.only or os.path.basename(m[1]) in a.only)]
     if a.list:
         for repo, path, folder in todo:
             print(f"{folder}/{os.path.basename(path)}  from {repo} at {REVISIONS[repo][:7]}")
@@ -85,18 +88,21 @@ def main(argv=None) -> int:
     if not a.models or not os.path.isdir(a.models):
         print("Name ComfyUI's models folder: python get_models.py path/to/ComfyUI/models", file=sys.stderr)
         return 2
-    failed = 0
+    failed, missing = 0, []
     with ThreadPoolExecutor(6) as pool:
         for model, job in [(m, pool.submit(fetch, m, a.models)) for m in todo]:
             try:
                 print(job.result(), flush=True)
             except Exception as exc:  # a licence not accepted, no token, no network: say which file, go on with the others
                 failed += 1
+                missing.append(os.path.basename(model[1]))
                 print(f"FAILED: {model[2]}/{os.path.basename(model[1])} from {model[0]}: {str(exc).splitlines()[0][:300]}", flush=True)
     shutil.rmtree(os.path.join(a.models, STAGING), ignore_errors=True)
     print(f"{len(todo) - failed} of {len(todo)} model files in {a.models}" +
           (". Accept the licences on Hugging Face, set HF_TOKEN, then run this again: what is there is skipped." if failed else ""))
-    return 1 if failed else 0
+    if any(f in HDR for f in missing):
+        print("SDR to HDR stays off: accept the licence of Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR on Hugging Face, then run this again.")
+    return 1 if any(f not in OPTIONAL for f in missing) else 0  # an optional file missing leaves the rest working
 
 
 if __name__ == "__main__":

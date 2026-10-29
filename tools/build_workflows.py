@@ -273,9 +273,9 @@ def snap():
     g.save("snap")
 
 
-def live(g, model, size, load):
+def live(g, model, size, load, transfer="sRGB"):
     """The page's live preview while LTX samples: off (0 steps) unless the page sets `live`."""
-    return g("PaintAPlate_LivePreview", _title="Live preview", model=model, decoder=Slot("tiny", TINY), frames=size[2], fps=load[3],
+    return g("PaintAPlate_LivePreview", _title="Live preview", model=model, decoder=Slot("tiny", TINY), frames=size[2], fps=load[3], **({"transfer": transfer} if transfer != "sRGB" else {}),
              every=Slot("live", 0), size=320)
 
 
@@ -375,7 +375,7 @@ def cleanup():
                latent=g("VAEEncodeTiled", pixels=start, vae=vae, tile_size=512, overlap=64, temporal_size=500, temporal_overlap=64))
     audio = g("LTXVEmptyLatentAudio", audio_vae=audio_vae, frames_number=size[2], frame_rate=load[3], batch_size=1)
     sampled = g("SamplerCustomAdvanced", _progress=True, noise=g("RandomNoise", noise_seed=Slot("seed", 0)),
-                guider=g("CFGGuider", model=model, positive=cond[0], negative=cond[1], cfg=1.0),
+                guider=g("CFGGuider", model=live(g, model, size, load), positive=cond[0], negative=cond[1], cfg=1.0),
                 sampler=g("KSamplerSelect", sampler_name="euler"), sigmas=g("ManualSigmas", sigmas=REFINE_SIGMAS),
                 latent_image=g("LTXVConcatAVLatent", video_latent=latent, audio_latent=audio))
     decoded = g("VAEDecode", vae=vae, samples=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])
@@ -647,7 +647,7 @@ def hdr():
                tile_overlap=64, use_streaming=False, tile_frames=97)
     audio = g("LTXVEmptyLatentAudio", audio_vae=audio_vae, frames_number=size[2], frame_rate=Slot("fps", 24), batch_size=1)
     sampled = g("SamplerCustomAdvanced", _progress=True, noise=g("RandomNoise", noise_seed=42),
-                guider=g("CFGGuider", model=lora, positive=guided[0], negative=guided[1], cfg=1.0),
+                guider=g("CFGGuider", model=live(g, lora, size, load, "ACEScct"), positive=guided[0], negative=guided[1], cfg=1.0),
                 sampler=g("KSamplerSelect", sampler_name="euler"), sigmas=g("ManualSigmas", sigmas=INPAINT_SIGMAS),
                 latent_image=g("LTXVConcatAVLatent", video_latent=guided[2], audio_latent=audio))
     video = g("LTXVCropGuides", positive=guided[0], negative=guided[1], latent=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])

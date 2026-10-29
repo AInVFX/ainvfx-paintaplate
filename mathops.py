@@ -662,3 +662,16 @@ def hdr_match(n: int, shot_at, plate_at, changed_at, *, grow: float = 24.0, step
                     "text": f"{len(shot)} untouched samples; at 18% grey the shot moves by "
                             f"{', '.join(f'{m:+.2f}' for m in moved)} stops (R, G, B); median error after the fit {error:.3f} stops"}
 
+
+AP1_TO_REC709 = np.array([[1.70505, -0.62179, -0.08326], [-0.13026, 1.14080, -0.01055], [-0.02400, -0.12897, 1.15297]], np.float32)
+
+
+def acescct_preview(codes: np.ndarray) -> np.ndarray:
+    """ACEScct codes, as the SDR-to-HDR pass decodes them, as 8-bit sRGB for its live preview: decoded to ACEScg
+    (S-2016-001), to linear Rec.709, tone-mapped by Reinhard as LTXVHDRDecodePostprocess's own preview, then the sRGB curve."""
+    x = codes.astype(np.float32)
+    lin = np.where(x <= 0.155251141552511, (x - 0.0729055341958355) / 10.5402377416545, np.exp2(x * 17.52 - 9.72))
+    rgb = np.maximum(lin @ AP1_TO_REC709.T, 0.0)
+    t = rgb / (1.0 + rgb)
+    out = np.where(t <= 0.0031308, 12.92 * t, 1.055 * np.power(np.maximum(t, 1e-8), 1 / 2.4) - 0.055)
+    return (np.clip(out, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)

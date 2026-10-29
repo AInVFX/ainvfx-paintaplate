@@ -37,10 +37,10 @@ pip install -q -U pip uv huggingface_hub hf_transfer
 
 log "models (in the background)"
 M=$W/models; mkdir -p "$M"
-# get_models.py, at the root of the pack, holds every model file and its tested revision: FLUID=0 skips ainvfx-fluid,
+# get_models.py, at the root of the pack, holds every model file and its tested revision: FLUID=0 skips ainvfx-fluid, HDR=0 the SDR-to-HDR IC-LoRA,
 # WITH_NVFP4=1 adds FLUX 3 Image Klein's nvfp4 file (only tests/gpu_bench.py compares it)
-flags=(); [ "${FLUID:-1}" = 0 ] && flags+=(--no-fluid); [ "${WITH_NVFP4:-0}" = 1 ] && flags+=(--nvfp4)
-( HF_HUB_ENABLE_HF_TRANSFER=1 python "$PACK/get_models.py" "$M" ${flags[@]+"${flags[@]}"}; log "models done" ) > "$W/models.log" 2>&1 &
+flags=(); [ "${FLUID:-1}" = 0 ] && flags+=(--no-fluid); [ "${HDR:-1}" = 0 ] && flags+=(--no-hdr); [ "${WITH_NVFP4:-0}" = 1 ] && flags+=(--nvfp4)
+( HF_HUB_ENABLE_HF_TRANSFER=1 python "$PACK/get_models.py" "$M" ${flags[@]+"${flags[@]}"} || log "model files missing: see above"; log "models done" ) > "$W/models.log" 2>&1 &
 
 log "ComfyUI $COMFY_REF"
 [ -d "$W/ComfyUI" ] || clone https://github.com/comfyanonymous/ComfyUI "$W/ComfyUI"
@@ -57,7 +57,7 @@ log "ComfyUI: its Python packages"
 uv pip install -q -r requirements.txt
 [ -e models ] && [ ! -L models ] && rm -rf models
 ln -sfn "$M" models
-mkdir -p "$M/diffusion_models" "$M/text_encoders" "$M/vae" "$M/loras" "$M/checkpoints" "$M/vae_approx"
+mkdir -p "$M/diffusion_models" "$M/text_encoders" "$M/vae" "$M/loras" "$M/checkpoints" "$M/vae_approx" "$M/embeddings"
 
 log "ComfyUI-LTXVideo $LTX_REF"
 cd custom_nodes

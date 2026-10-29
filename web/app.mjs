@@ -9,7 +9,7 @@ import { DeepFrames, FrameCache } from "./frames.mjs";
 import { sceneGraph } from "./graph.mjs";
 import { CHANNEL_NAMES, DISPLAY, FLUID, PARAMS, blankSpec, caption, changedMask, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
   erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
-  stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH } from "./logic.mjs";
+  stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -25,7 +25,7 @@ const DEEP_SIDE = 960; // their long side, the playback video's
 const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-size edits, quick edits, SAM tracking
 // the erase matte only places the erase pass's box, grown by 1/24 of the width: 640 is enough, at half the time of 960
 const ERASE_TRACK_SIDE = 640;
-const LIVE = { every: 2, vram: 24e9 }; // the live preview while LTX samples: every other step, on cards with room for its tiny decoder
+const LIVE = { every: 2, vram: 24e9 }; // the live preview while LTX samples: from step 1, every other step, on cards with room for its tiny decoder
 const WARM_ALL_VRAM = 60e9; // bytes of GPU memory above which LTX 2.5 is loaded at start too: every model then stays loaded
 const PREVIEW_CAP = 640; // the preview size by default: Fast. The menu is built per plate (logic.previewSizes)
 const PREFETCH_MS = 500; // quiet time after a keystroke before the prompt writer starts on the new words
@@ -232,7 +232,7 @@ async function openPlate(list, typed, opts = {}) {
   S.plate.shot = previewSize([w, h], S.plate.work, S.previewCap);
   S.original = snap(await loadImage(viewUrl(outputFile("ingest", out, "hero"))), S.plate.work);
   $("#prompt").value = "";
-  Object.assign(S, { hero: S.original, running: null, live: null, frame: 0, inPt: 0, outPt: S.plate.frames - 1, shot: null, exported: null,
+  Object.assign(S, { hero: S.original, running: null, live: null, halted: false, frame: 0, inPt: 0, outPt: S.plate.frames - 1, shot: null, exported: null,
     wantDownload: null, stage: { phase: "none" }, wipe: null, heroKey: "" });
   if (!opts.under) Object.assign(S, { edits: [], draft: null, past: [], future: [], selected: null, hover: null, peek: null, zoom: { k: 1, x: 0, y: 0 } });
   S.uploads.clear(); S.renders.clear(); S.erases.clear();
@@ -460,10 +460,17 @@ function recompose() {
   stagesUI(); exportUI();
 }
 
-function showLive(d) { // the shot as LTX predicts it, every other step: a small looping animation until the shot itself arrives
-  const img = new Image(), key = S.heroKey;
+function showLive(d) { // the shot as LTX predicts it, from step 1: in the frame until a shot exists, then in a corner
+  const img = new Image(), key = S.heroKey, label = STAGES.find((x) => x.id === S.stage?.id)?.label ?? (keying() ? "Fluid shot" : "Generating");
   img.onload = () => {
-    if (key !== S.heroKey || S.shot?.key === key) return;
+    if (key !== S.heroKey) return;
+    if (S.shot?.key === key) { // a preview or a full-size shot already plays: the pass on its way shows as an inset over it
+      const box = $("#live-inset");
+      box.querySelector("img").src = img.src;
+      box.querySelector("figcaption").textContent = `${label}: step ${d.step}`;
+      box.hidden = false;
+      return;
+    }
     S.live = img;
     hud(`Live preview, step ${d.step}: the shot follows`, 2000);
     if (!showLive.on) { showLive.on = true; const tick = () => { if (!S.live) { showLive.on = false; return; } render(); requestAnimationFrame(tick); }; tick(); }
@@ -471,7 +478,29 @@ function showLive(d) { // the shot as LTX predicts it, every other step: a small
   img.src = viewUrl(d.image);
 }
 
+function hideLive() { $("#live-inset").hidden = true; } // the pass that sent it ended
+
+function generating() { return !!(S.queued || S.piping || S.fluid?.busy); }
+function escape() { // Esc: logic.escapeAction. A selection goes first; then the HUD says a second Esc stops what generates
+  const busy = generating(), what = escapeAction({ editing: !!(S.draft || S.running), selected: !!S.selected, generating: busy });
+  if (what === "discard") return discard();
+  if (what === "deselect") { select(null); if (busy) hud("Deselected. Esc again stops generating", 2500); return; }
+  if (what === "stop") stopGenerating();
+}
+function stopGenerating() { // everything that generates stops where it is: what finished is kept, and Enter goes on from there
+  if (!generating()) return;
+  S.halted = true;
+  if (S.running) discard();
+  cancel("fluid", ...BACKGROUND);
+  hideLive();
+  log("Stopped (Esc): what finished is kept. Enter goes on from where it stopped");
+  hud("Stopped. Enter goes on from where it stopped", 3000);
+  status("Stopped. Enter goes on from where it stopped.");
+  stagesUI(); generateUI();
+}
+
 function setShot(src, key, space = "@model", frames = null) { // the shot on show, the colour space of its values, its EXR frames
+  hideLive();
   S.live = null; // the shot itself, rough or composited, replaces the live preview
   S.shot = src ? { url: src, key, space, frames } : null;
   if (src) { if (shotVid.getAttribute("src") !== src) shotVid.src = src; }
@@ -1077,8 +1106,8 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     if (f.depth === HDR_DEPTH) { // 16-bit: SDR to HDR makes the fluid shot an EXR plate, so every edit on it renders in HDR too
       const t1 = performance.now();
       status(`Fluid shot v${v}: SDR to HDR, one LTX 2.5 pass with Lightricks' IC-LoRA`);
-      const made = await run("hdr", { path, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps), prefix: `${dir}/hdr/f` },
-        { kind: "fluid", progress: (x) => { if (f.busy) { f.busy.progress = x; fluidUI(); fluidProgress(); } } }).done;
+      const made = await run("hdr", { path, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps), prefix: `${dir}/hdr/f`, live: liveEvery() },
+        { kind: "fluid", progress: (x) => { if (f.busy) { f.busy.progress = x; fluidUI(); fluidProgress(); } }, live: showLive }).done;
       path = folderOf("hdr", made, "hdr");
       log(`Fluid v${v}: SDR to HDR took ${((performance.now() - t1) / 1000).toFixed(1)} s: half-float EXR frames in ${path}`);
     }
@@ -1753,7 +1782,7 @@ function preempt() { // Generate: a full-size or export step in its first half s
 }
 
 function idle() { // one render step at a time, from the render queue; the edits on the first frame go first
-  if (!S.plate) return;
+  if (!S.plate || S.halted) return; // Esc stopped what generates: Enter goes on
   if ((S.draft && S.edits.includes(S.draft)) || S.running || S.queued) return touch(); // an edit of this render changes; a new edit being painted lets it run
   if (S.heroKey) want(S.heroKey);
   if (S.piping) return; // the running step finishes; its render gives way at its next step when another must go first
@@ -1766,7 +1795,7 @@ function idle() { // one render step at a time, from the render queue; the edits
     r.failed = st?.id ?? "render"; // it waits for Generate, which tries it again
     const err = explained(e, `${st?.label ?? "The render"}${mine ? "" : ` of v${r.v}, in the background,`}`);
     if (mine) { quiet(err); S.wantDownload = null; } else log(err.message, "error");
-  }).finally(() => { S.piping = null; S.stage = null; stagesUI(); exportUI(); generateUI(); touch(); });
+  }).finally(() => { S.piping = null; S.stage = null; hideLive(); stagesUI(); exportUI(); generateUI(); touch(); });
 }
 
 const liveEvery = () => (S.vram >= LIVE.vram ? LIVE.every : 0); // steps between live previews, 0 for none
@@ -1815,6 +1844,7 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   stagesUI();
   log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label} (about ${Math.round(estimate(id))} s)${behind}`);
   await work((f) => { if (S.stage?.id === id) { S.stage.progress = f; stagesUI(); } });
+  hideLive();
   const dt = (performance.now() - t0) / 1000;
   (store.done ??= {})[id] = dt;
   S.took[id] = dt;
@@ -1870,16 +1900,16 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       if (!final) return void Object.assign(store, await cleanAt(size, progress, true));
       // at full size, Lightricks' two stages: the erase pass at half the working size (the preview's own when it is that size),
       // then 2 steps at full size from it, without the reference video. 8 steps at full size took 181 s on a 1080p plate (28 Oct)
-      const low = stageOne(p.work), first = await cleanAt(low, (f) => progress(f / 2), false);
+      const low = stageOne(p.work), first = await cleanAt(low, (f) => progress(f / 2), true);
       log(`Render v${r.v}: erase pass at full size, 2 steps from the erase pass at ${low.join(" x ")}`);
       const out = await run("cleanup", { ...common, seed: erases[0].seed, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, prompt: scene,
-        low: first.clean, width: size[0], height: size[1], prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean` },
-        { kind: "clean", progress: (f) => progress(0.5 + f / 2) }).done;
+        low: first.clean, width: size[0], height: size[1], prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean`, live: here() ? liveEvery() : 0 },
+        { kind: "clean", progress: (f) => progress(0.5 + f / 2), live: here() ? showLive : null }).done;
       E.full = { clean: folderOf("cleanup", out, "frames"), raw: viewUrl(outputFile("cleanup", out, "video")) };
       Object.assign(store, E.full);
     }, store);
     await step(r, final ? "full" : "shot", async (progress) => {
-      const plate = erase ? { path: store.clean, color_space: "@model" } : { path: p.path }, show = !final && here();
+      const plate = erase ? { path: store.clean, color_space: "@model" } : { path: p.path }, show = here();
       const out = await run("shot", { ...common, ...plate, hero: r.hero, prompt, width: size[0], height: size[1],
         prefix: `${base}/${dir}/shot/f`, video_prefix: `${base}/${dir}/raw`, live: show ? liveEvery() : 0 },
         { kind: "shot", progress, live: show ? showLive : null }).done;
@@ -1919,7 +1949,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   r.full ??= pv.mattes;
   await step(r, "hdr", async (progress) => { // SDR to HDR: the full-size shot made again in scene-linear values; review fits it to the plate
     const out = await run("hdr", { path: final, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps),
-      prefix: `${base}/full/hdr/f` }, { kind: "hdr", progress }).done;
+      prefix: `${base}/full/hdr/f`, live: here() ? liveEvery() : 0 }, { kind: "hdr", progress, live: here() ? showLive : null }).done;
     r.hdr = folderOf("hdr", out, "hdr");
   });
   const hdr = { hdr: r.hdr ?? "", hdr_grow: grow(p.spec.width, erase) + feather(p.spec.width) }; // HDR Match leaves the composite's edge out
@@ -2500,6 +2530,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
     ["Edit", [["Undo", "Ctrl+Z", undo, !S.past.length], ["Redo", "Ctrl+Shift+Z", redo, !S.future.length], "-",
       ["New edit", "N", nextEdit, !p || keying() || (!S.draft && !S.selected)], ["Generate", "Enter", () => enter(false), $("#generate").disabled], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
       ["SDR to HDR", "", () => setHdr(!S.toHdr), !p || !hdrPlate(p.spec) || !S.hdrReady, !!p && hdrPlate(p.spec) && S.hdrReady && S.toHdr],
+      ["Stop generating", "Esc", stopGenerating, !generating()],
       ["Deselect", "Esc", () => select(null), !S.selected]]],
     ["Tools", [["Paint", "B", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Erase", "E", () => pickTool("erase"), !p || (keying() && !S.fluid.result), S.tool === "erase" && !S.rub],
       ["Light", "L", () => pickTool("light"), !p || (keying() && !S.fluid.result), S.tool === "light" && !S.rub], ["Eraser", "X", () => setRub(!S.rub), !p, S.rub], ["Pick a colour", "I", () => picker(true), !p, !!S.picking], "-",
@@ -2510,7 +2541,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Go to the out point", "End", () => { pause(); seek(S.outPt); }, !p], ["Set the in point", "[", () => setIn(S.frame), !p],
       ["Set the out point", "]", () => setOut(S.frame), !p], ["Clear in and out", "\\", clearRange, !p]]],
     ["Colour", [param("exposure", "Shift+E"), param("contrast", "K"), param("gamma", "Y"), param("saturation", "Shift+S"), param("hue", "H"), "-",
-      ["Invert", "Shift+I", () => setDisplay({ invert: !d.invert }), !p, d.invert], ["Reset colour", "", resetDisplay, !displayActive(d)]]],
+      ["Invert", "Shift+I", () => setDisplay({ invert: !d.invert }), !p, d.invert], ["Reset all colour", "Shift+Home", resetDisplay, !displayActive(d)]]],
     ...(S.ocio.info ? [["OCIO", ocioItems()]] : []),
     ["View", [chan("rgb", "Shift+C"), chan("r", "Shift+R"), chan("g", "Shift+G"), chan("b", "Shift+B"), chan("l", "Shift+L"), "-",
       ["Fit", "F", () => zoomTo(1), !p], ["1:1", "1", () => zoomTo(S.plate.work[0] / S.fit.w), !p],
@@ -2849,6 +2880,7 @@ addEventListener("keydown", (e) => {
   const k = e.key, low = k.toLowerCase(), mod = e.ctrlKey || e.metaKey, combo = `${e.shiftKey && k.length === 1 ? "Shift+" : ""}${low}`;
   if (!$("#ctx").hidden) { if (k === "Escape") closeMenu(); return e.preventDefault(); } // the menu is open: Esc closes it
   if (!S.plate && !["?", "F6"].includes(k)) return;
+  if (k === "Home" && e.shiftKey && !mod) { resetDisplay(); hud("Colour reset"); return e.preventDefault(); } // RV's Reset All Color
   if (S.mode && modeKey(k, combo)) return e.preventDefault();
   if (S.picking && k === "Escape") { picker(false); return e.preventDefault(); }
   if (!mod && !e.altKey && combo === "i") { if (!e.repeat) picker(!S.picking); return e.preventDefault(); } // the colour picker, as in Photoshop
@@ -2876,7 +2908,7 @@ addEventListener("keydown", (e) => {
   else if (k === "-" || k === "_") setSize(S.size / 1.2);
   else if (k === "=" || k === "+") setSize(S.size * 1.2);
   else if (k === "Enter") enter(mod);
-  else if (k === "Escape") discard();
+  else if (k === "Escape") escape();
   else if (low === "z" && mod) e.shiftKey ? redo() : undo();
   else if (low === "y" && mod) redo();
   else if (low === "o" && !mod) { if (!S.compare) { S.compare = true; render(); hud("Plate"); } }
@@ -2885,16 +2917,20 @@ addEventListener("keydown", (e) => {
 });
 addEventListener("keyup", (e) => { if (e.key.toLowerCase() === "o" && S.compare) { S.compare = false; render(); } });
 function enter(another) { // Generate (Enter): the edit in progress, then its shot; nothing already made runs again. Ctrl+Enter: another seed
+  const resumed = S.halted;
+  S.halted = false; // a stop (Esc) lasts until Enter
   if (keying()) return void generateFluid(another).catch(quiet); // a fluid shot: generate it, Ctrl+Enter with another seed
   if (S.draft) return launch(S.draft);
   if (another) { const target = S.selected ?? S.edits.at(-1); if (target) again(target); return; }
-  if (renderPending()) { const r = S.renders.get(S.heroKey); if (r) r.failed = null; touch(0); return hud("The shot renders now", 2000); } // a failed render goes on
+  if (resumed || renderPending()) { // a stopped or failed render goes on
+    const r = S.renders.get(S.heroKey); if (r) r.failed = null; touch(0); return hud(resumed ? "Generating again from where it stopped" : "The shot renders now", 2000);
+  }
   hud(S.edits.length ? "Nothing changed since the last result. Ctrl+Enter tries another seed." : "Paint on the frame first, then Generate.", 3000);
 }
 
 function renderPending() { // the render of the edits on show failed, or never started: Generate starts it again
   const r = S.renders.get(S.heroKey);
-  return !!S.plate && !keying() && !!S.heroKey && !S.running && !S.queued && (r ? !!r.failed : !S.piping);
+  return !!S.plate && !keying() && !!S.heroKey && !S.running && !S.queued && (S.halted || (r ? !!r.failed : !S.piping));
 }
 
 function generateUI() { // the Generate button is live when Enter has something to start

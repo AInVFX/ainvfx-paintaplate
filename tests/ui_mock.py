@@ -221,7 +221,7 @@ def flow(page, port):
     check(groups == ["File", "Edit", "Tools", "Control", "Colour", "OCIO", "View", "Help"], f"right-click opens the menu: {groups}")
     page.hover(f"#ctx > li:nth-child({groups.index('Colour') + 1})")  # by place: Tools holds « Pick a colour » too
     page.screenshot(path=os.path.join(SHOTS, "3_menu.png"))
-    page.click("#ctx .sub button:has-text('Reset colour')")
+    page.click("#ctx .sub button:has-text('Reset all colour')")
     back = pixel(*spot)
     check(page.is_hidden("#display-state") and page.is_hidden("#ctx") and all(abs(p - q) < 3 for p, q in zip(back, before)),
           "Reset colour in the menu brings the pixels back and closes the menu")
@@ -576,6 +576,8 @@ def keys_flow(page):
         key(k, lambda name=name: text("#hud").startswith(name)); page.keyboard.press("Escape")
     key("Shift+E", lambda: True); key("=", lambda: text("#display-state").startswith("E +0.1")); key("Backspace", lambda: page.is_hidden("#display-state"))
     page.keyboard.press("Escape")
+    key("Shift+E", lambda: True); key("=", lambda: text("#display-state").startswith("E +0.1")); page.keyboard.press("Escape")
+    key("Shift+Home", lambda: page.is_hidden("#display-state"))  # RV's Reset All Color
     for k, name in (("Shift+R", "Red"), ("Shift+G", "Green"), ("Shift+B", "Blue"), ("Shift+L", "Luminance")):
         key(k, lambda name=name: text("#display-state") == name)
     key("Shift+C", lambda: page.is_hidden("#display-state"))
@@ -603,6 +605,16 @@ def log_lines(page):
     return page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
 
 
+def wait_log(page, js, timeout, what):
+    """page.wait_for_function; on a timeout, the page's last log lines, its render steps and its status, so a CI log says why."""
+    try:
+        page.wait_for_function(js, timeout=timeout)
+    except Exception:
+        print(f"  ... no {what}; the page's last log lines:\n    " + "\n    ".join(log_lines(page)[-30:]), flush=True)
+        print("  stages:", page.text_content("#stages"), "| status:", page.text_content("#status"), flush=True)
+        raise
+
+
 def paint_once(page, words, pts):
     box = page.eval_on_selector("#view", "e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }")
     page.fill("#prompt", words); page.evaluate("document.activeElement.blur()")
@@ -612,36 +624,60 @@ def paint_once(page, words, pts):
     page.mouse.up()
 
 
-DONE = "[...document.querySelectorAll('#log li span')].slice(%d).some((e) => /Render v\\d+: Full quality took/.test(e.textContent))"
+
+
+def added_line(text):  # a JS test: a line added to the log since WATCH holds `text` (the log keeps its last 400 lines only)
+    return "window.__lines.some((t) => t.includes(%s))" % json.dumps(text)
 
 
 def hdr_flow(page):
     """SDR to HDR: no switch for a video plate; on by default for an EXR plate, where it runs after the full-size shot and
-    before the full quality; switched off, the next render leaves it out."""
+    before the full quality, with its live preview in a corner; switched off, the next render leaves it out. Esc stops the
+    render on its way and Enter goes on."""
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    lines = lambda: page.evaluate("window.__lines")  # noqa: E731
     open_path(page, "plates/desk.mp4")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
     check(page.is_hidden("#hdr-switch"), "a video plate stays SDR: no SDR-to-HDR switch")
     open_path(page, "paintaplate/hdr_room")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
     check(not page.is_hidden("#hdr-switch") and page.is_checked("#hdr-on"), "an EXR plate: SDR to HDR is on by default")
-    seen = len(log_lines(page))
+    page.evaluate(WATCH)
     page.keyboard.press("b")
     paint_once(page, "a red lamp", [(0.3, 0.6), (0.36, 0.7)])
     page.keyboard.press("Enter")
-    page.wait_for_function(DONE % seen, timeout=240000)
-    new = log_lines(page)[seen:]
+    page.wait_for_function("!document.querySelector('#live-inset').hidden", timeout=240000)
+    caption = page.text_content("#live-inset figcaption")
+    wait_log(page, added_line(REVIEWED), 240000, "full quality")
+    check("step" in caption and page.is_hidden("#live-inset"),
+          f"a full-size pass shows its live preview in a corner while the preview plays, then it goes: {caption}")
+    new = lines()
     at = lambda text: next((i for i, line in enumerate(new) if text in line), None)  # noqa: E731
-    check(at("SDR to HDR took") is not None and at("SDR to HDR took") < at("Full quality took"),
+    check(at("SDR to HDR took") is not None and at("SDR to HDR took") < at(REVIEWED),
           "the full-size shot goes through SDR to HDR before the full quality the viewer plays")
-    seen = len(log_lines(page))
+    page.evaluate(WATCH)
     page.click("#hdr-on")
-    page.wait_for_function(DONE % seen, timeout=240000)
-    new = log_lines(page)[seen:]
-    check(not any("SDR to HDR took" in line for line in new) and not page.is_checked("#hdr-on"),
+    wait_log(page, added_line(REVIEWED), 240000, "full quality without SDR to HDR")
+    check(not any("SDR to HDR took" in line for line in lines()) and not page.is_checked("#hdr-on"),
           "switched off, the next render ends with the SDR shot: no SDR-to-HDR step")
     page.click("#hdr-on")
+    page.evaluate("document.activeElement.blur()")  # the switch keeps the focus, and a focused input takes the keys
+    page.evaluate(WATCH)
+    page.keyboard.press("Control+Enter")  # another seed: a new edit pass, then a new render
+    wait_log(page, "window.__lines.some((t) => /^Render v\\d+: .* \\(about \\d+ s\\)/.test(t))", 120000, "render step")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(400)
+    if not any(line.startswith("Stopped (Esc)") for line in lines()):  # Ctrl+Enter selected the edit: Esc deselects first
+        check("Esc again stops generating" in page.text_content("#hud"), "with an edit selected, Esc deselects first and says a second Esc stops generating")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(400)
+    check(any(line.startswith("Stopped (Esc)") for line in lines()) and not page.is_disabled("#generate"),
+          "Esc stops the render step on its way, and Generate can go on")
+    page.evaluate(WATCH)
+    page.keyboard.press("Enter")
+    wait_log(page, added_line(REVIEWED), 240000, "full quality after Enter")
+    check(True, "Enter goes on from where it stopped: the full quality is made")
     check(not errors, f"no console errors with SDR to HDR: {errors}")
 
 
@@ -654,15 +690,14 @@ def fluid16_flow(page):
     page.select_option("#b-depth", "16"); page.dispatch_event("#b-frames", "input")
     note = page.text_content("#b-note")
     check("16-bit: SDR to HDR" in note, f"the blank plate form says what 16-bit does: {note}")
-    seen = len(log_lines(page))
+    page.evaluate(WATCH)
     page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)])
     page.keyboard.press("Enter")
-    page.wait_for_function("[...document.querySelectorAll('#log li span')].slice(%d).some((e) => e.textContent.includes('under the edits: the fluid shot v'))" % seen,
-                           timeout=240000)
+    wait_log(page, added_line("under the edits: the fluid shot v"), 240000, "the HDR fluid shot under the edits")
     page.wait_for_function("!document.querySelector('#hdr-switch').hidden", timeout=60000)
-    new = log_lines(page)[seen:]
+    new = page.evaluate("window.__lines")
     check(any("16-bit" in line for line in new) and any("SDR to HDR took" in line for line in new),
           "16-bit: the fluid shot goes through SDR to HDR")
     check(page.is_checked("#hdr-on"), "the HDR fluid shot is an EXR plate: SDR to HDR is on for the edits on it")

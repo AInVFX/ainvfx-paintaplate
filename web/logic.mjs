@@ -537,3 +537,7 @@ export const hdrPlate = (spec) => !!spec && spec.kind !== "video" && /^\.exr$/i.
 export const wantsHdr = (spec, tools, on) => !!on && hdrPlate(spec) && !tools.includes("light");
 export const hdrFps = (fps) => Math.min(30, +fps || 24); // the conditioning frame rate: at most 30, as in Lightricks' workflow
 export const blankDepth = (v) => (+v === HDR_DEPTH ? HDR_DEPTH : 8);
+
+// Esc, one thing at a time: the strokes or the edit in progress, then the selection, then everything that generates. A stop
+// keeps what finished, and Enter goes on from there. (Shift+Esc opens Chrome's Task Manager on Windows and Linux.)
+export const escapeAction = ({ editing, selected, generating }) => (editing ? "discard" : selected ? "deselect" : generating ? "stop" : null);

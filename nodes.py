@@ -415,7 +415,7 @@ class LivePreview(io.ComfyNode):
             node_id="PaintAPlate_LivePreview",
             display_name="Live Preview",
             category=CATEGORY,
-            description="Shows a shot while the video model samples it: every few steps, a tiny decoder turns the predicted "
+            description="Shows a shot while the video model samples it: from the first step, every few steps, a tiny decoder turns the predicted "
                         "frames into a small looping animation for the page. The model itself is unchanged.",
             inputs=[
                 io.Model.Input("model"),
@@ -427,12 +427,14 @@ class LivePreview(io.ComfyNode):
                 io.Float.Input("fps", default=24.0, min=1.0, max=120.0),
                 io.Int.Input("every", default=0, min=0, max=100, tooltip="Steps between two previews. 0 turns the preview off."),
                 io.Int.Input("size", default=320, min=64, max=1280, tooltip="Long side of the preview, in pixels."),
+                io.Combo.Input("transfer", options=["sRGB", "ACEScct"], default="sRGB", optional=True,
+                               tooltip="What the decoded values are: sRGB, or ACEScct codes (the SDR-to-HDR pass), shown tone-mapped."),
             ],
             outputs=[io.Model.Output(display_name="model")],
         )
 
     @classmethod
-    def execute(cls, model, decoder, frames, fps, every, size) -> io.NodeOutput:
+    def execute(cls, model, decoder, frames, fps, every, size, transfer="sRGB") -> io.NodeOutput:
         path = folder_paths.get_full_path("vae_approx", decoder) if every > 0 else None
         if not path:
             return io.NodeOutput(model)
@@ -444,6 +446,8 @@ class LivePreview(io.ComfyNode):
 
         def send(video, step):  # a looping WebP in the temp folder, and a message telling the page where it is
             try:
+                if transfer == "ACEScct":
+                    video = mathops.acescct_preview(video)
                 h, w = video.shape[1:3]
                 k = size / max(h, w)
                 images = [Image.fromarray(f).resize((max(2, round(w * k)), max(2, round(h * k))), Image.BILINEAR) for f in video]
@@ -460,16 +464,21 @@ class LivePreview(io.ComfyNode):
         def post_cfg(args):  # called once per step with the frames the model predicts: decode them now, encode them aside
             denoised = args["denoised"]
             state["step"] += 1
-            if state["step"] % every == 0 and not state["busy"] and not state.get("off"):
+            if (state["step"] - 1) % every == 0 and not state["busy"] and not state.get("off"):  # the first at step 1, as early as it can
                 try:
                     video = denoised.tensors[0] if getattr(denoised, "is_nested", False) else denoised
                     shapes = getattr(args["model"], "latent_shapes", None)  # LTX 2.5 samples video and audio packed in one latent
                     if shapes and video.ndim == 3:
                         video = comfy.utils.unpack_latents(video, shapes)[0]
-                    images = tiny.decode(video[:1, :, :latent_frames])
-                    images = images.reshape(-1, *images.shape[-3:])
+                    video = video[:1, :, :latent_frames]
+                    k = max(1, max(video.shape[-2:]) * 32 // (2 * size))  # LTX's 32 px grid: decode at about twice the preview's size
+                    if k > 1:  # a full-size pass: the latent averaged first, so the tiny decoder costs what a preview pass costs
+                        video = F.avg_pool3d(video.float(), (1, k, k), ceil_mode=True).to(video.dtype)
+                    images = tiny.decode(video)
+                    images = images.reshape(-1, *images.shape[-3:]).clamp(0, 1)
                     state["busy"] = True
-                    LIVE.submit(send, (images.clamp(0, 1) * 255).to(torch.uint8).cpu().numpy(), state["step"])
+                    LIVE.submit(send, images.half().cpu().numpy() if transfer == "ACEScct" else (images * 255).to(torch.uint8).cpu().numpy(),
+                                state["step"])
                 except Exception as exc:  # a preview never stops a shot: it switches itself off
                     state["off"] = True
                     logging.warning("PaintAPlate Live Preview is off for this shot: %s", exc)

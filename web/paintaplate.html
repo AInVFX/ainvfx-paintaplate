@@ -79,6 +79,7 @@
     </div>
     <div id="viewport" class="viewport">
       <canvas id="view"></canvas>
+      <figure id="live-inset" class="live-inset" hidden><img alt="Live preview of the pass in progress"><figcaption></figcaption></figure>
       <div id="wipe" class="wipe" hidden>
         <span class="label left">Plate</span><span class="label right">Result</span><span class="grip" title="Drag to compare"></span>
       </div>
@@ -180,7 +181,7 @@
       <dt>Enter</dt><dd>Generate: the edit on the first frame, then its shot. Pressed again with nothing changed, nothing runs twice</dd>
       <dt>Ctrl+Enter</dt><dd>Try another seed on the selected edit, else the last one</dd>
       <dt>Click an edit</dt><dd>Select it: its words come back; retype them, paint more, rub strokes out or switch Whole object, then Generate. Esc deselects</dd>
-      <dt>Esc</dt><dd>Cancel the edit in progress</dd>
+      <dt>Esc</dt><dd>Cancel the edit in progress, then deselect, then stop generating. What finished is kept, and Enter goes on from there</dd>
       <dt>Two fingers</dt><dd>On a touch screen: pan and zoom the frame. ☰ at the top holds every action</dd>
       <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo (Ctrl+Y redoes too): one step per stroke, per removal, per change of words or seed</dd>
       <dt>Hold O</dt><dd>See the plate</dd>
@@ -198,6 +199,7 @@
     <h3>Colour, as in RV: the viewer only, the export never changes</h3>
     <dl>
       <dt>Shift+E, K, Y</dt><dd>Exposure, contrast, gamma: then drag on the frame, or use the wheel, - and =</dd>
+      <dt>Shift+Home</dt><dd>Reset all colour, as in RV</dd>
       <dt>Shift+S, H</dt><dd>Saturation, hue, the same way. Backspace resets the one you edit, Esc leaves</dd>
       <dt>Shift+C, R, G, B, L</dt><dd>All channels, red, green, blue, luminance</dd>
       <dt>Shift+I</dt><dd>Invert</dd>

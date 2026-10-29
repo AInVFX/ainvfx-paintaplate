@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayUniforms, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth } from "../../web/logic.mjs";
+import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayUniforms, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, escapeAction } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -334,4 +334,11 @@ test("SDR to HDR: on for an EXR plate unless switched off or relit, never for a 
   assert.equal(wantsHdr(mp4, ["paint"], true), false);
   assert.deepEqual([blankDepth("16"), blankDepth("8"), blankDepth("32"), blankDepth(undefined)], [16, 8, 8, 8]);
   assert.deepEqual([hdrFps(24), hdrFps(50), hdrFps(0)], [24, 30, 24]);
+});
+
+test("Esc does one thing at a time: the edit in progress, then the selection, then what generates", () => {
+  assert.equal(escapeAction({ editing: true, selected: true, generating: true }), "discard");
+  assert.equal(escapeAction({ editing: false, selected: true, generating: true }), "deselect");
+  assert.equal(escapeAction({ editing: false, selected: false, generating: true }), "stop");
+  assert.equal(escapeAction({ editing: false, selected: false, generating: false }), null);
 });

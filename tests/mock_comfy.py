@@ -139,12 +139,19 @@ def inputs_by_slot(prompt):
     return vals
 
 
-async def steps(pid, total, seconds, preview=None):
+async def steps(pid, total, seconds, preview=None, live=None):
+    every, frame = live or (0, None)
     for k in range(total):
         if STATE["interrupt"]:
             raise asyncio.CancelledError()
         await asyncio.sleep(seconds / total)
         await send({"type": "progress", "data": {"prompt_id": pid, "value": k + 1, "max": total}})
+        if every and k % every == 0:  # as Live Preview: the first at step 1, then every few steps, a WebP in the temp folder
+            name = f"{pid}_{k + 1:03d}.webp"
+            os.makedirs(os.path.join(folder("temp"), "paintaplate_live"), exist_ok=True)
+            Image.fromarray((np.clip(frame, 0, 1) * 255).astype(np.uint8)).resize((160, 90)).save(os.path.join(folder("temp"), "paintaplate_live", name), "WEBP")
+            await send({"type": "paintaplate.live", "data": {"prompt_id": pid, "step": k + 1,
+                                                              "image": {"filename": name, "subfolder": "paintaplate_live", "type": "temp"}}})
         if preview is not None:
             await send_preview(pid, preview(k + 1, total))
 
@@ -225,7 +232,7 @@ async def execute(pid, prompt):
         await steps(pid, 2, 0.5)
     elif "hdr" in outs:  # SDR to HDR: the shot decoded from sRGB, its brightest values lifted above 1.0, as half-float EXR frames
         frames, spec = read_plate(v["path"], v.get("max_frames", 1024), pad=True)
-        await steps(pid, 8, 2.0)
+        await steps(pid, 8, 2.0, live=(v.get("live") or 0, frames[0]))
         sub, _, stem = v["prefix"].rpartition("/")
         os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
         names = [f"{stem}_{i + 1:05d}_.exr" for i in range(len(frames))]
@@ -260,7 +267,7 @@ async def execute(pid, prompt):
         hero = resize(load_image(v["hero"]), w, h)
         changed = (np.abs(hero - frames[0]).max(-1) > 0.08).astype(np.float32)
         changed = np.asarray(Image.fromarray((changed * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(5)), np.float32)[..., None] / 255
-        await steps(pid, v.get("steps", 8), 3.0)
+        await steps(pid, v.get("steps", 8), 3.0, live=(v.get("live") or 0, hero))
         shot = [hero * changed + f * (1 - changed) for f in frames]
         shot[0] = hero
         o[outs["frames"]] = {"images": [save_png(f, "output", v["prefix"], i) for i, f in enumerate(shot)][:1]}
@@ -431,7 +438,7 @@ async def system_stats_route(request):  # once armed, the GPU's memory: nearly f
     if STATE.get("armed"):
         low = time.time() < STATE.get("release_at", float("inf"))
         return web.json_response({"system": {}, "devices": [{"name": "mock", "vram_total": 96e9, "vram_free": 2e9 if low else 90e9}]})
-    return web.json_response({"system": {}})
+    return web.json_response({"system": {}, "devices": [{"name": "mock", "vram_total": 32e9, "vram_free": 30e9}]})  # live previews on, no LTX warm-up
 
 
 async def ws_route(request):
