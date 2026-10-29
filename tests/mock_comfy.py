@@ -198,10 +198,11 @@ async def execute(pid, prompt):
             return small * t + noise * (1 - t)
         await steps(pid, v.get("steps", 8), 0.25 * v.get("steps", 8) * (1 if base.shape[1] < 1000 else 3), look)
         result = new * soft[..., None] + base * (1 - soft[..., None])
-        o[outs["result"]] = {"images": [save_png(result, "temp", f"paintaplate/{pid[:8]}_result")]}
-        o[outs["patch"]] = {"images": [save_png(np.dstack([new, soft]), "temp", f"paintaplate/{pid[:8]}_patch")]}
+        saved = "output" if prompt[outs["patch"]]["class_type"] == "SaveImage" else "temp"
+        o[outs["result"]] = {"images": [save_png(result, saved, f"paintaplate/{pid[:8]}_result")]}
+        o[outs["patch"]] = {"images": [save_png(np.dstack([new, soft]), saved, f"paintaplate/{pid[:8]}_patch")]}
         if "relit" in outs:
-            o[outs["relit"]] = {"images": [save_png(result, "temp", f"paintaplate/{pid[:8]}_relit")]}
+            o[outs["relit"]] = {"images": [save_png(result, saved, f"paintaplate/{pid[:8]}_relit")]}
     elif "point_0" in outs:  # snap: an object around each point it was given, none found by name
         img = load_image(v["image"])
         h, w = img.shape[:2]

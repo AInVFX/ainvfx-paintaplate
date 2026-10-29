@@ -262,133 +262,27 @@ export function erasePrompt(captions) {
 // stage refines it at full size in 2 steps (8 steps at full size took 181 s on a 1080p plate, 28 Oct).
 export const stageOne = ([w, h], step = 32) => [Math.max(step, Math.round(w / 2 / step) * step), Math.max(step, Math.round(h / 2 / step) * step)];
 
-// ---------- An erase's fill, levelled with the background it continues ----------
-// Klein's fill can sit a few levels off the background around it: a pale, soft shape where the object was, which LTX then
-// animated into smoke (+4 to +6 levels on a backdrop at 18, 28 Oct). The background is estimated inside the patch from the frame
-// around it (push-pull on a grid of `cell` px); where the fill is flat and close to that estimate, the difference goes, low
-// frequencies only. Where they differ a lot (an edge, a revealed object) or the fill is textured, nothing changes.
-// fill: RGBA of the patch (alpha: where it covers); base: RGBA of the frame under it; paint: RGBA of the painted area (red: where
-// the object is), all width x height. Around the paint the patch only blends, and there the plate itself is the background.
-// Returns the patch's new RGBA and how far it moved inside, on average, in levels.
-const ramp = (v, [lo, hi]) => (v <= lo ? 1 : v >= hi ? 0 : (hi - v) / (hi - lo));
-function pushPull(val, wt, w, h, ch) { // fills the cells of weight below 1 from the cells around them, coarse to fine
-  if (w <= 1 && h <= 1) return;
-  const w2 = Math.ceil(w / 2), h2 = Math.ceil(h / 2), v2 = new Float32Array(w2 * h2 * ch), t2 = new Float32Array(w2 * h2);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const c = y * w + x, t = wt[c], d = (y >> 1) * w2 + (x >> 1);
-    if (!t) continue;
-    t2[d] += t;
-    for (let k = 0; k < ch; k++) v2[d * ch + k] += val[c * ch + k] * t;
-  }
-  for (let d = 0; d < w2 * h2; d++) if (t2[d]) { for (let k = 0; k < ch; k++) v2[d * ch + k] /= t2[d]; t2[d] = Math.min(1, t2[d]); }
-  pushPull(v2, t2, w2, h2, ch);
-  for (let y = 0; y < h; y++) {
-    const gy = Math.min(h2 - 1, Math.max(0, (y + 0.5) / 2 - 0.5)), y0 = Math.floor(gy), y1 = Math.min(h2 - 1, y0 + 1), ty = gy - y0;
-    for (let x = 0; x < w; x++) {
-      const c = y * w + x, t = Math.min(1, wt[c]);
-      if (t >= 1) continue;
-      const gx = Math.min(w2 - 1, Math.max(0, (x + 0.5) / 2 - 0.5)), x0 = Math.floor(gx), x1 = Math.min(w2 - 1, x0 + 1), tx = gx - x0;
-      for (let k = 0; k < ch; k++) {
-        const at = (yy, xx) => v2[(yy * w2 + xx) * ch + k];
-        const u = (at(y0, x0) * (1 - tx) + at(y0, x1) * tx) * (1 - ty) + (at(y1, x0) * (1 - tx) + at(y1, x1) * tx) * ty;
-        val[c * ch + k] = val[c * ch + k] * t + u * (1 - t);
-      }
-      wt[c] = 1;
-    }
-  }
+// ---------- The render queue ----------
+// Every set of edits shown since the plate opened is a render, with three classes of steps: its preview, its full-size passes
+// and its export. The next step comes from the render whose next class is the lowest, so every preview runs before any full
+// size, and every full size before any export; within a class, the set of edits on show first, then the most recently shown.
+// An export someone is waiting for counts as a full-size step.
+export const RENDER_CLASSES = ["preview", "full", "export"];
+export function nextRender(items) { // items: [{ id, cls, current, wanted, urgent }]; the id of the render to run, or null
+  const rank = (x) => RENDER_CLASSES.indexOf(x.cls === "export" && x.urgent ? "full" : x.cls);
+  const best = items.filter((x) => RENDER_CLASSES.includes(x.cls))
+    .sort((a, b) => rank(a) - rank(b) || Number(b.current) - Number(a.current) || b.wanted - a.wanted)[0];
+  return best ? best.id : null;
 }
-function smoothInside(v, m, w, h, ch, passes) { // box blur of v over the cells where m is 1, normalised so the edge keeps its value
-  let a = Float32Array.from(v, (x, i) => x * m[Math.floor(i / ch)]), b = Float32Array.from(m);
-  for (let p = 0; p < passes; p++) for (const [dx, dy] of [[1, 0], [0, 1]]) {
-    const a2 = new Float32Array(a.length), b2 = new Float32Array(b.length);
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const c = y * w + x;
-      for (let s = -1; s <= 1; s++) {
-        const xx = x + s * dx, yy = y + s * dy;
-        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
-        const o = yy * w + xx;
-        b2[c] += b[o];
-        for (let k = 0; k < ch; k++) a2[c * ch + k] += a[o * ch + k];
-      }
-    }
-    a = a2; b = b2;
-  }
-  for (let c = 0; c < w * h; c++) for (let k = 0; k < ch; k++) v[c * ch + k] = m[c] && b[c] > 0 ? a[c * ch + k] / b[c] : 0;
-}
-export function levelFill({ fill, base, paint = null, width: W, height: H, cell = 8, near = [6, 20], flat = [6, 14] }) {
-  const w = Math.ceil(W / cell), h = Math.ceil(H / cell), n = w * h;
-  const cnt = new Float32Array(n), sa = new Float32Array(n), so = new Float32Array(n), sb = new Float32Array(n * 3), sf = new Float32Array(n * 3);
-  const sl = new Float32Array(n), sl2 = new Float32Array(n);
-  for (let y = 0; y < H; y++) {
-    const row = Math.floor(y / cell) * w;
-    for (let x = 0; x < W; x++) {
-      const i = (y * W + x) * 4, c = row + Math.floor(x / cell), a = fill[i + 3] / 255;
-      cnt[c]++;
-      so[c] += paint ? paint[i] / 255 : a;
-      for (let k = 0; k < 3; k++) sb[c * 3 + k] += base[i + k];
-      if (a <= 0) continue;
-      const l = 0.2126 * fill[i] + 0.7152 * fill[i + 1] + 0.0722 * fill[i + 2];
-      sa[c] += a; sl[c] += a * l; sl2[c] += a * l * l;
-      for (let k = 0; k < 3; k++) sf[c * 3 + k] += a * fill[i + k];
-    }
-  }
-  // The background each cell continues, from the cells around the patch of a similar brightness: a backdrop continues the
-  // backdrop, not the lit floor below it (one estimate from every cell brightened the fill by the door, 29 Oct).
-  const known = new Uint8Array(n);
-  for (let c = 0; c < n; c++) known[c] = so[c] <= 0.01 * cnt[c] ? 1 : 0;
-  if (!known.some((k) => k)) return { rgba: new Uint8ClampedArray(fill), moved: 0 }; // the patch covers everything: nothing to level with
-  const luma3 = (v, c) => 0.2126 * v[c * 3] + 0.7152 * v[c * 3 + 1] + 0.0722 * v[c * 3 + 2];
-  const BANDS = [2.5, 4, 5.5, 7, 8.5], member = (l, b) => Math.max(0, 1 - Math.abs(Math.log2(Math.max(0, l) + 4) - BANDS[b]) / 1.5);
-  const mean = Float32Array.from(sb, (v, i) => v / cnt[Math.floor(i / 3)]);
-  const bands = BANDS.map((_, b) => {
-    const val = new Float32Array(n * 3), wt = new Float32Array(n);
-    for (let c = 0; c < n; c++) if (known[c]) { wt[c] = member(luma3(mean, c), b); for (let k = 0; k < 3; k++) val[c * 3 + k] = mean[c * 3 + k]; }
-    if (!wt.some((t) => t > 0.05)) return null;
-    pushPull(val, wt, w, h, 3);
-    return val;
-  });
-  const bg = Float32Array.from(mean);
-  for (let c = 0; c < n; c++) {
-    if (known[c] || sa[c] <= 0) continue;
-    for (let k = 0; k < 3; k++) bg[c * 3 + k] = 0;
-    const l = (0.2126 * sf[c * 3] + 0.7152 * sf[c * 3 + 1] + 0.0722 * sf[c * 3 + 2]) / sa[c];
-    let tw = 0;
-    bands.forEach((val, b) => { const m = val ? member(l, b) : 0; if (!m) return; tw += m; for (let k = 0; k < 3; k++) bg[c * 3 + k] += m * val[c * 3 + k]; });
-    if (tw) for (let k = 0; k < 3; k++) bg[c * 3 + k] /= tw;
-    else for (let k = 0; k < 3; k++) bg[c * 3 + k] = sf[c * 3 + k] / sa[c]; // nothing as bright around it: left as it is
-  }
-  const corr = new Float32Array(n * 3), m = new Float32Array(n);
-  for (let c = 0; c < n; c++) {
-    if (sa[c] <= 0) continue;
-    m[c] = 1;
-    const d = [0, 1, 2].map((j) => bg[c * 3 + j] - sf[c * 3 + j] / sa[c]);
-    const L = sl[c] / sa[c], std = Math.sqrt(Math.max(0, sl2[c] / sa[c] - L * L)), dl = 0.2126 * d[0] + 0.7152 * d[1] + 0.0722 * d[2];
-    // the imprint of what was removed goes its own way: a bright object leaves a pale shape (darken only), a dark one a smudge
-    const object = known[c] ? 0 : luma3(mean, c) - luma3(bg, c), along = object > 2 ? dl < 0 : object < -2 ? dl > 0 : true;
-    const k = along ? ramp(Math.abs(dl), near) * ramp(std, flat) : 0;
-    for (let j = 0; j < 3; j++) corr[c * 3 + j] = d[j] * k;
-  }
-  smoothInside(corr, m, w, h, 3, 2);
-  const out = new Uint8ClampedArray(fill);
-  let moved = 0, covered = 0;
-  for (let y = 0; y < H; y++) {
-    const gy = Math.min(h - 1, Math.max(0, (y + 0.5) / cell - 0.5)), y0 = Math.floor(gy), y1 = Math.min(h - 1, y0 + 1), ty = gy - y0;
-    for (let x = 0; x < W; x++) {
-      const i = (y * W + x) * 4;
-      if (!fill[i + 3]) continue;
-      const gx = Math.min(w - 1, Math.max(0, (x + 0.5) / cell - 0.5)), x0 = Math.floor(gx), x1 = Math.min(w - 1, x0 + 1), tx = gx - x0;
-      let dl = 0;
-      for (let k = 0; k < 3; k++) {
-        const at = (yy, xx) => corr[(yy * w + xx) * 3 + k];
-        const v = (at(y0, x0) * (1 - tx) + at(y0, x1) * tx) * (1 - ty) + (at(y1, x0) * (1 - tx) + at(y1, x1) * tx) * ty;
-        out[i + k] = fill[i + k] + v;
-        dl += [0.2126, 0.7152, 0.0722][k] * v;
-      }
-      moved += Math.abs(dl); covered++;
-    }
-  }
-  return { rgba: out, moved: covered ? moved / covered : 0 };
-}
+
+// Generate stops a running render step only where that wastes least: a full-size or an export step in its first half. A step
+// past halfway costs less to finish than to run again, and a preview step is short and often reused by the new edit's render.
+export const stopsForEdit = ({ cls, progress }) => cls !== "preview" && progress < 0.5;
+
+// ---------- The job index ----------
+// A job's key hashes its workflow and the values that change what it makes. Output folders (the prefixes) and the live
+// preview's rate change nothing it makes, so they stay out, and a scene opened again on the same machine finds its jobs.
+export const indexValues = (values) => Object.keys(values).sort().filter((k) => !/prefix$/.test(k) && k !== "live").map((k) => [k, values[k]]);
 
 // ---------- The shot's prompt ----------
 export const RIPPLE = "Use the reference video for motion, timing, camera movement, framing and lighting changes; " +

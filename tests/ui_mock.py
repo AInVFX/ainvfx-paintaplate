@@ -9,6 +9,7 @@ New edit (the N key, the button, the menu) or another tool starts a new one. The
 deleted and brought back, generated, and opened as the plate. Prints UI MOCK PASSED at the end; tests/test_ui_mock.py
 runs it. Screenshots go to /tmp/paintaplate_ui_mock.
 """
+import re
 import argparse, json, os, shutil, subprocess, sys, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -112,6 +113,17 @@ def flow(page, port):
     lines = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")[seen:]
     check(not any("Track the erase (about" in line or "Erase pass (about" in line for line in lines),
           "the paint removed, the next render uses the erase's matte and clean plate again: nothing tracks or cleans twice")
+    page.wait_for_function("document.querySelector('#render-left').textContent === 'export ready'", timeout=120000)
+    lines = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")[seen:]
+    stopped = [line for line in lines if re.match(r"^(clean|cleanup|shot|matte|comp|export) \S+: cancelled", line)]
+    check(not stopped, f"a removal stops no render step: the render it leaves keeps what it made {stopped}")
+    behind = [line for line in lines if line.endswith(", in the background")]
+    check(bool(behind), f"the render of the edits before the removal goes on in the background: {behind[:2]}")
+    steps = [(i, line) for i, line in enumerate(lines) if re.match(r"^Render v\d+: .* \(about \d+ s\)", line)]
+    comp = next((i for i, line in steps if "Composite (about" in line and not line.endswith("in the background")), None)
+    full = next((i for i, line in steps if "at full size (about" in line or "Export (about" in line), None)
+    check(comp is not None and (full is None or comp < full),
+          f"the render queue: the preview of the edits on show runs before any full-size step (composite at {comp}, first full size at {full})")
     check(not page.is_disabled("#undo-btn") and page.is_disabled("#redo-btn"), "undo is live, redo is not")
     page.keyboard.press("Control+z")
     page.wait_for_function(DONE.format(n=2), timeout=120000)
@@ -285,6 +297,9 @@ def phone(browser, port):
         page.click("#open-btn"); page.fill("#path", "plates/desk.mp4"); page.click("#open-go")
         page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
         page.wait_for_timeout(500)
+        logged = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
+        check(any("ingest: made before with the same inputs, taken from the job index" in line for line in logged),
+              f"{name} phone: the plate opened again in a new session comes from the job index, with no new ingest")
         fits = page.evaluate("""() => { const W = innerWidth, H = innerHeight, r = (q) => document.querySelector(q).getBoundingClientRect();
           const inside = (q) => { const b = r(q); return b.left >= -1 && b.right <= W + 1 && b.top >= -1 && b.bottom <= H + 1 && b.width > 0; };
           return { sideways: document.documentElement.scrollWidth <= W, view: inside('#view'), play: inside('#play-btn'), timeline: inside('#timeline'),

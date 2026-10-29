@@ -143,6 +143,96 @@ def push_pull(values: np.ndarray, weight: np.ndarray) -> np.ndarray:
     return fill
 
 
+def _ramp(v: np.ndarray, lo: float, hi: float) -> np.ndarray:
+    """1 up to lo, 0 from hi, a straight line between."""
+    return np.clip((hi - v) / (hi - lo), 0.0, 1.0)
+
+
+def _box3(x: np.ndarray, axis: int) -> np.ndarray:
+    """Each cell plus its two neighbours along `axis`; nothing outside the grid."""
+    pad = [(0, 0)] * x.ndim
+    pad[axis] = (1, 1)
+    y, n = np.pad(x, pad), x.shape[axis]
+    return sum(np.take(y, range(k, k + n), axis=axis) for k in range(3))
+
+
+def level_fill(fill: np.ndarray, alpha: np.ndarray, base: np.ndarray, paint: np.ndarray | None = None, cell: int = 8,
+               near: tuple[float, float] = (6.0, 20.0), flat: tuple[float, float] = (6.0, 14.0)) -> tuple[np.ndarray, float]:
+    """An erase's fill, levelled with the background it continues: (the fill, how far it moved on average, in levels).
+
+    Klein's fill can sit a few levels off the background around it: a pale, soft shape where the object was, which LTX
+    then animated into smoke (+4 to +6 levels on a backdrop at 18, 28 Oct). The background inside the fill is estimated
+    from the frame around it on a grid of `cell` pixels, per brightness band, so a backdrop continues the backdrop and not
+    the lit floor below it, with `push_pull`. Where the fill is flat and close to that estimate, the difference goes, low
+    frequencies only. Where they differ a lot (an edge, a revealed object) or the fill is textured, nothing changes. The
+    imprint of the removed object goes one way only: a bright object leaves a pale shape (darkened), a dark one a smudge
+    (lightened).
+
+    fill and base: (H, W, 3 or 4) floats 0..1, the fill and the frame under it; alpha (H, W): where the fill covers;
+    paint (H, W): where the object was (alpha when None). Levels are 0 to 255.
+    """
+    H, W = fill.shape[:2]
+    h, w = -(-H // cell), -(-W // cell)
+
+    def cells(x):  # sums per cell of the grid
+        x = np.pad(x, ((0, h * cell - H), (0, w * cell - W)) + ((0, 0),) * (x.ndim - 2))
+        return x.reshape(h, cell, w, cell, *x.shape[2:]).sum((1, 3))
+
+    luma = np.array([0.2126, 0.7152, 0.0722])
+    f = fill[..., :3].astype(np.float64) * 255.0
+    a = np.clip(alpha.astype(np.float64), 0.0, 1.0)
+    p = a if paint is None else np.clip(paint.astype(np.float64), 0.0, 1.0)
+    count, sa = cells(np.ones((H, W))), cells(a)
+    known = cells(p) <= 0.01 * count  # cells the object never touched: the frame there is the background
+    if not known.any():
+        return fill.copy(), 0.0
+    mean = cells(base[..., :3].astype(np.float64) * 255.0) / count[..., None]
+    lit = f @ luma
+    safe = np.maximum(sa, 1e-9)
+    fmean = cells(a[..., None] * f) / safe[..., None]
+    lmean, lfill = mean @ luma, fmean @ luma
+    bands = (2.5, 4.0, 5.5, 7.0, 8.5)  # log2(level + 4): shadows to highlights
+
+    def member(level, k):
+        return np.maximum(0.0, 1.0 - np.abs(np.log2(np.maximum(0.0, level) + 4.0) - bands[k]) / 1.5)
+
+    unknown = ~known & (sa > 0)
+    total, weight = np.zeros_like(mean), np.zeros((h, w))
+    for k in range(len(bands)):
+        wk = np.where(known, member(lmean, k), 0.0)
+        if not (wk > 0.05).any():
+            continue
+        estimate = push_pull(np.where(known[..., None], mean, 0.0), wk)
+        mk = np.where(unknown, member(lfill, k), 0.0)
+        total, weight = total + mk[..., None] * estimate, weight + mk
+    # nothing as bright around it: the fill is its own background, and stays as it is
+    bg = np.where(unknown[..., None], np.where(weight[..., None] > 0, total / np.maximum(weight, 1e-9)[..., None], fmean), mean)
+    d = bg - fmean
+    level = cells(a * lit) / safe
+    std = np.sqrt(np.maximum(0.0, cells(a * lit * lit) / safe - level * level))
+    dl = d @ luma
+    removed = np.where(known, 0.0, lmean - bg @ luma)  # the object's brightness against the background
+    along = np.where(removed > 2, dl < 0, np.where(removed < -2, dl > 0, True))
+    covers = sa > 0
+    corr = np.where((along & covers)[..., None], d * (_ramp(np.abs(dl), *near) * _ramp(std, *flat))[..., None], 0.0)
+    num, den = corr, covers.astype(np.float64)
+    for _ in range(2):  # a soft correction that keeps its value up to the edge of the fill
+        for axis in (1, 0):
+            num, den = _box3(num, axis), _box3(den, axis)
+    corr = np.where((covers & (den > 0))[..., None], num / np.maximum(den, 1e-9)[..., None], 0.0)
+    gy = np.clip((np.arange(H) + 0.5) / cell - 0.5, 0, h - 1)
+    gx = np.clip((np.arange(W) + 0.5) / cell - 0.5, 0, w - 1)
+    y0, x0 = np.floor(gy).astype(int), np.floor(gx).astype(int)
+    y1, x1 = np.minimum(h - 1, y0 + 1), np.minimum(w - 1, x0 + 1)
+    ty, tx = (gy - y0)[:, None, None], (gx - x0)[None, :, None]
+    v = (corr[y0][:, x0] * (1 - tx) + corr[y0][:, x1] * tx) * (1 - ty) + (corr[y1][:, x0] * (1 - tx) + corr[y1][:, x1] * tx) * ty
+    inside = a > 0
+    out = fill.astype(np.float32).copy()
+    out[..., :3] = np.where(inside[..., None], np.clip(f + v, 0.0, 255.0), f) / 255.0
+    moved = float(np.abs(v @ luma)[inside].mean()) if inside.any() else 0.0
+    return out, moved
+
+
 def steady_masks(masks: np.ndarray, radius: int, grow: float, feather: float) -> np.ndarray:
     """Masks (N, H, W) whose edge moves smoothly from frame to frame.
 

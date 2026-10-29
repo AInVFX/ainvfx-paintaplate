@@ -131,6 +131,42 @@ class MathOps(unittest.TestCase):
         self.assertAlmostEqual(float(video[8].mean()), 0.3, places=5)  # frame 99 clamped to the last frame
         self.assertEqual(float(video[1:8].max()), 0.0)
 
+class LevelFill(unittest.TestCase):
+    """An erase's fill evened with the background it continues (Level Fill), as checked on set_planet on 28 Oct."""
+
+    def setUp(self):
+        H, W = 48, 64
+        yy, xx = np.mgrid[:H, :W]
+        self.inside = (xx >= 16) & (xx < 48) & (yy >= 12) & (yy < 36)
+        self.base = np.where(self.inside[..., None], 200, 18).repeat(3, -1).astype(np.float32) / 255  # a bright rig on a dark backdrop
+        self.alpha = self.paint = self.inside.astype(np.float32)
+
+    def level(self, fill):
+        out, moved = m.level_fill(fill, self.alpha, self.base, self.paint, cell=4)
+        return np.round(out[24, 32:34, 0] * 255).tolist(), moved
+
+    def fill(self, v):
+        return (np.where(self.inside[..., None], v, 0) * np.ones(3)).astype(np.float32) / 255
+
+    def test_a_pale_imprint_comes_down_to_the_backdrop(self):
+        got, moved = self.level(self.fill(24))
+        self.assertEqual(got, [18, 18])
+        self.assertAlmostEqual(moved, 6.0, delta=0.6)
+
+    def test_texture_and_the_wrong_direction_stay(self):
+        yy, xx = np.mgrid[:48, :64]
+        checker = self.fill(np.where((xx + yy) % 2, 54, 0)[..., None])
+        self.assertEqual(self.level(checker)[0], np.round(checker[24, 32:34, 0] * 255).tolist(), "a textured fill is left alone")
+        self.assertEqual(self.level(self.fill(12))[0], [12, 12], "a bright object's fill is never brightened")
+
+    def test_nothing_to_level_with(self):
+        everywhere = np.ones((48, 64), np.float32)
+        fill = self.fill(24)
+        out, moved = m.level_fill(fill, everywhere, self.base, everywhere, cell=4)
+        np.testing.assert_array_equal(out, fill)
+        self.assertEqual(moved, 0.0)
+
+
 class ResizeTo(unittest.TestCase):
     def test_resize_matches_scipy_zoom(self):
         """resize_to gives scipy's zoom (order 1, grid_mode, edges clamped), larger and smaller, colour and masks."""

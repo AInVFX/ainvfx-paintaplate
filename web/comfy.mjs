@@ -1,7 +1,7 @@
 // The ComfyUI client of the page: workflows, jobs, the WebSocket, uploads. No DOM and no app state.
 // Every step of the app is a workflow from ./workflows, written by tools/build_workflows.py.
 
-import { fillWorkflow, parseWorkflow } from "./logic.mjs";
+import { fillWorkflow, indexValues, parseWorkflow } from "./logic.mjs";
 
 const CLIENT = crypto.randomUUID();
 export const WF = {}; // name -> { prompt, slots, outputs, progress }
@@ -16,6 +16,26 @@ let socket = false; // the WebSocket is open: when it is not, finished prompts a
 let notice = () => {};
 let log = () => {};
 const infos = new Map(); // class -> /object_info answer, asked once
+// The job index (routes.py): a finished job's outputs on disk, by the hash of its workflow, the plate and its values. A job
+// that matches takes them back instead of running, in this session or a later one on the same machine. Only workflows whose
+// outputs are saved files take part: the warm-up exists for its side effect, and SAM's object search keeps previews.
+const INDEXED = new Set(["ingest", "prompt", "edit", "clean", "cleanup", "shot", "matte", "comp", "export", "fluid"]);
+const hashes = {}; // workflow name -> hash of its file: a new workflow makes new keys
+let salt = null; // the plate's identity (path, size, time); null: no index, as when the plate could not be checked
+export const setSalt = (s) => { salt = s; };
+
+export async function hashHex(data) { // SHA-256 of a string or a Blob, in hex; null where the page has no WebCrypto (plain http)
+  if (!globalThis.crypto?.subtle) return null;
+  const bytes = typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(await data.arrayBuffer());
+  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+const indexKey = async (name, values) => (INDEXED.has(name) && salt !== null && hashes[name]
+  ? hashHex(JSON.stringify([hashes[name], salt, indexValues(values)])) : null);
+
+async function indexed(key) { // the outputs a finished job with this key made, if its files are all still there
+  try { const r = await fetch(`/paintaplate/jobs/${key}`); return r.ok ? (await r.json()).outputs : null; } catch { return null; }
+}
 
 export const onNotice = (fn) => { notice = fn; }; // what the client has to tell the person (a retry, for example)
 export const onLog = (fn) => { log = fn; }; // every job posted, started, finished, failed or cancelled, with its timing
@@ -26,8 +46,11 @@ export const post = (path, body) =>
   fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 export async function loadWorkflows(names) { // all at once: ten small files, one round trip
-  const loaded = await Promise.all(names.map(async (name) => [name, parseWorkflow(await (await fetch(`workflows/${name}.json`)).json())]));
-  for (const [name, wf] of loaded) WF[name] = wf;
+  const loaded = await Promise.all(names.map(async (name) => {
+    const text = await (await fetch(`workflows/${name}.json`)).text();
+    return [name, parseWorkflow(JSON.parse(text)), await hashHex(text)];
+  }));
+  for (const [name, wf, hash] of loaded) [WF[name], hashes[name]] = [wf, hash];
 }
 
 export function objectInfo(cls) { // one request per class, however often it is asked
@@ -72,7 +95,16 @@ export function run(name, values, { kind = name, preview, progress, step, live: 
     if (early.has(job.id)) finish(job.id, early.get(job.id));
   }).catch((e) => job.reject(e));
   live.add(job);
-  job.submit();
+  indexKey(name, values).then(async (key) => { // the job index first: a job made before with the same inputs is not run again
+    job.index = key;
+    const outputs = key && (await indexed(key));
+    if (job.cancelled) return;
+    if (!outputs) return job.submit();
+    live.delete(job);
+    log(`${name}: made before with the same inputs, taken from the job index`);
+    progress?.(1);
+    job.resolve(outputs);
+  }).catch(() => { if (!job.cancelled) job.submit(); });
   return job;
 }
 
@@ -104,6 +136,8 @@ async function finish(id, error) {
   else out = memo.get(job.key) ?? out;
   if (memo.size > MEMO_MAX) memo.delete(memo.keys().next().value);
   log(`${job.name} ${short(id)}: done in ${took(job)}${fresh ? "" : " (served from ComfyUI's cache)"}`);
+  if (job.index && (files(out).length || Object.values(out).some((o) => o.text?.length))) // recorded for later sessions
+    post(`/paintaplate/jobs/${job.index}`, { workflow: job.name, outputs: out }).catch(() => {});
   job.resolve(out);
 }
 

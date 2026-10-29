@@ -459,4 +459,41 @@ class LivePreview(io.ComfyNode):
         return io.NodeOutput(patched)
 
 
-NODES = [LoadPlate, SavePlate, FitToPlate, RelightTransfer, FollowMatte, LivePreview, KeyframeVideo]
+class LevelFill(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_LevelFill",
+            display_name="Level Fill",
+            category=CATEGORY,
+            description="Levels an erase's fill with the background it continues. Where the fill is flat and a few levels "
+                        "off the background around it, the difference goes, low frequencies only; edges, revealed objects "
+                        "and textured fills stay as they are. Klein's pale imprint of a removed object, left in, becomes "
+                        "smoke in the erase pass.",
+            inputs=[
+                io.Image.Input("image", tooltip="The edited frame: Klein's fill inside the mask."),
+                io.Mask.Input("alpha", tooltip="Where the fill covers the frame: the edit's soft mask."),
+                io.Image.Input("base", tooltip="The frame under the edit."),
+                io.Mask.Input("paint", tooltip="Where the removed object was: the erase mask."),
+                io.Boolean.Input("enabled", default=True, tooltip="Off passes the image through, as paint and light edits need."),
+            ],
+            outputs=[io.Image.Output(display_name="image")],
+        )
+
+    @classmethod
+    def execute(cls, image, alpha, base, paint, enabled) -> io.NodeOutput:
+        if not enabled:
+            return io.NodeOutput(image)
+        h, w = image.shape[1:3]
+        as_batch = lambda m: m if m.ndim == 3 else m[None]  # noqa: E731
+        a = resize(as_batch(alpha), h, w).float().cpu().numpy()
+        p = resize(as_batch(paint), h, w).float().cpu().numpy()
+        out = []
+        for i, (fill, under) in enumerate(zip(frames_np(image), frames_np(resize(base[..., :3], h, w)))):
+            levelled, moved = mathops.level_fill(fill, a[min(i, len(a) - 1)], under, p[min(i, len(p) - 1)])
+            logging.info("PaintAPlate Level Fill: the fill moved %.1f levels on average", moved)
+            out.append(levelled)
+        return io.NodeOutput(to_image(out))
+
+
+NODES = [LoadPlate, SavePlate, FitToPlate, RelightTransfer, FollowMatte, LevelFill, LivePreview, KeyframeVideo]

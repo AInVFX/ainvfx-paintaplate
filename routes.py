@@ -4,6 +4,9 @@
     GET /paintaplate/plates                      the plates in input/plates, as JSON (see list_plates)
     GET /paintaplate/thumb?path=plates/boat.mp4  the first frame of one of them as a small JPEG, cached in temp
     POST /paintaplate/blank {width, height, fps, frames}  a black ProRes 4444 plate in input/paintaplate/blank, for a fluid shot
+    GET /paintaplate/jobs/<key>                  what a finished job with these inputs made, if its files are all still there (else outputs null)
+    POST /paintaplate/jobs/<key> {workflow, outputs}  record a finished job, by the hash of its inputs (output/paintaplate/jobs)
+    GET /paintaplate/stat?path=plates/boat.mp4   the size and time of a plate: a job index key changes when the plate does
 
 `parts` chooses what the zip holds (default: export,matte): export is the result in the plate's own
 format, matte where the plate changed, review an H.264 MP4 of the result (the export's full-size movie,
@@ -15,8 +18,10 @@ and its thumbnails are plain functions too (list_plates, thumbnail).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import glob
 import hashlib
+import json
 import logging
 import os
 import re
@@ -223,9 +228,118 @@ async def blank(request: web.Request) -> web.Response:
     return web.json_response({"path": rel})
 
 
+# ---------- The job index: a finished job's outputs, by the hash of everything that went into it ----------
+# The page hashes a job's workflow and inputs (logic.indexValues) and asks here before it posts the job. A record holds only
+# while every file it names is still a plain file in the output folder: a deleted file means the job runs again.
+JOBS = "paintaplate/jobs"
+JOB_KEY = re.compile(r"^[0-9a-f]{32,64}$")
+JOB_MAX = 1 << 20  # bytes of one record
+
+
+def job_path(key: str) -> str:
+    """Where the record of `key` lives. ValueError for anything but a lowercase hex hash."""
+    if not isinstance(key, str) or not JOB_KEY.match(key):
+        raise ValueError("Not a job key")
+    return os.path.join(folder_paths.get_output_directory(), JOBS, f"{key}.json")
+
+
+def record_files(outputs: dict) -> list:
+    """The files a record names, as ComfyUI's history lists them."""
+    return [f for o in outputs.values() if isinstance(o, dict) for k in ("images", "gifs", "video") for f in (o.get(k) or [])]
+
+
+def output_file(f) -> str | None:
+    """The path of one file a record names, when it is a plain file inside the output folder; else None."""
+    if not isinstance(f, dict) or f.get("type") != "output":
+        return None
+    out = os.path.abspath(folder_paths.get_output_directory())
+    name, sub = str(f.get("filename") or ""), str(f.get("subfolder") or "")
+    full = os.path.abspath(os.path.join(out, sub, name))
+    if not name or os.path.isabs(sub) or os.path.commonpath([full, out]) != out or os.path.islink(full) or not os.path.isfile(full):
+        return None
+    return full
+
+
+def read_job(key: str) -> dict | None:
+    """The record of `key` while all its files exist; a record whose files went is deleted, and None comes back."""
+    path = job_path(key)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rec = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    outputs = rec.get("outputs") if isinstance(rec, dict) else None
+    if not isinstance(outputs, dict) or not all(output_file(f) for f in record_files(outputs)):
+        with contextlib.suppress(OSError):
+            os.remove(path)
+        return None
+    return rec
+
+
+def write_job(key: str, outputs, workflow: str = "") -> None:
+    """Record what a job made. Only files in the output folder: a preview in temp is gone after a restart."""
+    path = job_path(key)
+    if not isinstance(outputs, dict) or not outputs:
+        raise ValueError("A job record needs outputs")
+    if not all(output_file(f) for f in record_files(outputs)):
+        raise ValueError("A job record names only files in the output folder")
+    data = json.dumps({"workflow": str(workflow)[:64], "outputs": outputs})
+    if len(data) > JOB_MAX:
+        raise ValueError("Job record too large")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{uuid.uuid4().hex}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(data)
+    os.replace(tmp, path)
+
+
+async def job_get(request: web.Request) -> web.Response:
+    try:
+        rec = await asyncio.to_thread(read_job, request.match_info["key"])
+    except ValueError:
+        return web.Response(status=400)
+    return web.json_response(rec or {"outputs": None})  # a miss is normal: no 404, which browsers log as an error
+
+
+async def job_post(request: web.Request) -> web.Response:
+    try:
+        body = await request.json()
+        await asyncio.to_thread(write_job, request.match_info["key"], body.get("outputs"), body.get("workflow", ""))
+    except (ValueError, AttributeError) as e:
+        return web.json_response({"error": str(e)}, status=400)
+    return web.json_response({"ok": True})
+
+
+def plate_stat(rel: str) -> dict:
+    """The size and time of a plate under the input folder, or under output when it starts with output:. A folder of
+    frames counts its plain files. A plate that changes on disk changes this, and with it every job index key."""
+    if rel.startswith("output:"):
+        out = os.path.abspath(folder_paths.get_output_directory())
+        full = os.path.abspath(os.path.join(out, rel[len("output:"):]))
+        if os.path.commonpath([full, out]) != out or full == out or os.path.islink(full) or not os.path.exists(full):
+            raise FileNotFoundError("No plate at this path")
+    else:
+        full = input_path(rel)
+    if os.path.isfile(full):
+        st = os.stat(full)
+        return {"files": 1, "size": st.st_size, "mtime": st.st_mtime_ns}
+    sts = [os.stat(e.path) for e in os.scandir(full) if e.is_file(follow_symlinks=False)]
+    return {"files": len(sts), "size": sum(s.st_size for s in sts), "mtime": max((s.st_mtime_ns for s in sts), default=0)}
+
+
+async def stat(request: web.Request) -> web.Response:
+    try:
+        return web.json_response(await asyncio.to_thread(plate_stat, request.query.get("path", "")))
+    except (FileNotFoundError, NotADirectoryError):
+        return web.Response(status=404)
+
+
 def setup(server) -> None:
     """Add the routes to ComfyUI's server (or to anything with an aiohttp RouteTableDef as `routes`)."""
     server.routes.get("/paintaplate/download")(download)
     server.routes.get("/paintaplate/plates")(plates)
     server.routes.get("/paintaplate/thumb")(thumb)
     server.routes.post("/paintaplate/blank")(blank)
+    server.routes.get("/paintaplate/jobs/{key}")(job_get)
+    server.routes.post("/paintaplate/jobs/{key}")(job_post)
+    server.routes.get("/paintaplate/stat")(stat)

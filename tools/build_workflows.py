@@ -32,6 +32,7 @@ SNAP_POINTS = 5  # stroke points SAM looks at one by one
 # Lightricks' distilled schedule from the official LTX 2.5 inpaint workflow (stage 1, euler_ancestral)
 INPAINT_SIGMAS = "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
 REFINE_SIGMAS = "0.725, 0.421875, 0.0"  # the high-resolution stage of Lightricks' two-stage LTX 2.5 workflows: 2 steps
+EDIT_PREFIX = "paintaplate/edits/edit"  # an edit's outputs are saved, so the job index finds them after a restart
 RIPPLE_PROMPT = ("Use the reference video for motion, timing, camera movement, framing and lighting changes; "
                  "follow the edited first frame for every change of content, light and style.")
 NEGATIVE = "blurry, low resolution, ugly, garbled mess, compression artifacts, glitch, flicker, still image"
@@ -196,7 +197,11 @@ def prompt():
 
 
 def edit():
-    """One FLUX 3 Image Klein edit inside a mask: the edited frame, and the edit alone as an RGBA patch."""
+    """One FLUX 3 Image Klein edit inside a mask: the edited frame, and the edit alone as an RGBA patch.
+
+    For an erase (`level` on), Level Fill evens Klein's fill with the background around it first. The outputs are saved
+    to the output folder rather than shown as previews, so a later session on the same machine finds them again.
+    """
     g = Graph()
     model = g("UNETLoader", unet_name=Slot("klein", KLEIN), weight_dtype="default")
     clip = g("CLIPLoader", clip_name=KLEIN_TEXT, type="flux3", device="default")
@@ -217,18 +222,22 @@ def edit():
     decoded = g("VAEDecode", samples=sampled, vae=vae)
     soft = g("ImageToMask", channel="red", image=g("ImageBlur", image=g("MaskToImage", mask=grown),
                                                     blur_radius=Slot("feather", 12), sigma=Slot("sigma", 6.0)))
-    result = g("ImageCompositeMasked", destination=base, source=decoded, x=0, y=0, resize_source=False, mask=soft)
-    g("PreviewImage", _title="Edited frame", _output="result", images=result)
+    # an erase's fill, levelled with the background it continues (Level Fill); paint and light pass through
+    filled = g("PaintAPlate_LevelFill", _title="Fill levelled with the background (erase only)", image=decoded, alpha=soft,
+               base=base, paint=mask, enabled=Slot("level", False))
+    result = g("ImageCompositeMasked", destination=base, source=filled, x=0, y=0, resize_source=False, mask=soft)
+    g("SaveImage", _title="Edited frame", _output="result", images=result, filename_prefix=Slot("prefix", EDIT_PREFIX))
     # Join Image with Alpha stores 1 - mask as alpha: the inverted soft mask gives alpha = soft mask
-    patch = g("JoinImageWithAlpha", image=decoded, alpha=g("InvertMask", mask=soft))
-    g("PreviewImage", _title="Edit patch (RGBA)", _output="patch", images=patch)
+    patch = g("JoinImageWithAlpha", image=filled, alpha=g("InvertMask", mask=soft))
+    g("SaveImage", _title="Edit patch (RGBA)", _output="patch", images=patch, filename_prefix=Slot("prefix", EDIT_PREFIX))
     # a relight: the frame as the export will make it, light from Klein, detail from the plate (dropped otherwise)
     base_lin = g("ImageColorSpace", image=base, source="sRGB", destination="linear")
     relit = g("PaintAPlate_RelightTransfer", plate=base_lin, source=half(g, base_lin),
               relit=g("ImageColorSpace", image=half(g, result), source="sRGB", destination="linear"),
               radius=8, strength=Slot("relight", 0.0), align=True)
     g.link_slot(relit, "plate", "relit_frame")
-    g("PreviewImage", _title="Relit frame", _output="relit", images=g("ImageColorSpace", image=relit, source="linear", destination="sRGB"))
+    g("SaveImage", _title="Relit frame", _output="relit", images=g("ImageColorSpace", image=relit, source="linear", destination="sRGB"),
+      filename_prefix=Slot("prefix", EDIT_PREFIX))
     g.save("edit")
 
 
@@ -327,7 +336,7 @@ def cleanup():
     The first stage is the erase pass at half the working size (`clean`). Its frames, enlarged, go inside the erased blocks
     over the plate at full size, and LTX refines them in 2 steps from sigma 0.725, with the IC-LoRA and without the reference
     video, as the official workflow does. The erased first frame is kept as it is (strength 1). 8 steps at full size took
-    181 s on a 1080p plate, this stage 89 s, 29 s of it saving the frames (28 Oct).
+    181 s on a 1080p plate, this stage 82.8 s, 30.1 s of it saving the frames (28 Oct).
     """
     g = Graph()
     load, srgb = plate(g, pad=True)

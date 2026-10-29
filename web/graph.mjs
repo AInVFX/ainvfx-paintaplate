@@ -4,6 +4,7 @@
 import { fillWorkflow, stageOne } from "./logic.mjs";
 
 const LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]); // the nodes a link can stand in for
+const EDIT_OUT = ["result", "patch", "relit"]; // an edit's saved images: inside one scene, links carry them
 const OUTPUTS = new Set(["SaveImage", "PreviewImage", "SaveVideo", "PreviewAny", "PaintAPlate_SavePlate"]); // never shared
 
 // One workflow under ids prefixed with `tag`: its slots filled with `values`, and the loader on each slot of `links` replaced
@@ -75,10 +76,10 @@ export function sceneGraph(WF, { plate, edits, render }) {
       node(`${t} strokes alpha`, "InvertMask", { mask: [`${t} strokes`, 1] })) : frame;
     const qBase = scale(`${t} base at 768`, frame, plate.prev), qRef = e.layer ? scale(`${t} reference at 768`, ref, plate.prev) : qBase;
     const quick = add(instantiate(WF.edit, `${t} quick`, { caption: e.caption, seed: e.seed, ...e.quick },
-      { base: qBase, reference: qRef, start: e.tool === "light" ? qBase : qRef, mask: scaleMask(`${t} mask at 768`, mask, plate.prev) }));
+      { base: qBase, reference: qRef, start: e.tool === "light" ? qBase : qRef, mask: scaleMask(`${t} mask at 768`, mask, plate.prev) }, { drop: EDIT_OUT }));
     const start = scale(`${t} start`, quick.result, plate.work);
-    const full = add(instantiate(WF.edit, `${t} full`, { caption: e.caption, seed: e.seed, ...e.full, relight: e.tool === "light" ? 1 : 0 },
-      { base: frame, reference: e.tool === "erase" ? start : ref, start, mask }));
+    const full = add(instantiate(WF.edit, `${t} full`, { caption: e.caption, seed: e.seed, ...e.full, relight: e.tool === "light" ? 1 : 0,
+      level: e.tool === "erase" }, { base: frame, reference: e.tool === "erase" ? start : ref, start, mask }, { drop: EDIT_OUT }));
     frame = e.tool === "light" ? full.relit : full.result;
     if (e.tool === "light") return;
     const patch = node(`${t} patch`, "SplitImageWithAlpha", { image: full.patch }), alpha = node(`${t} patch alpha`, "InvertMask", { mask: [`${t} patch`, 1] });

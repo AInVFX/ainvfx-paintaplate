@@ -89,7 +89,8 @@ class Routes(unittest.TestCase):
             asyncio.run(routes.download(types.SimpleNamespace(query={"run": "../../etc"})))
         app = types.SimpleNamespace(routes=web.RouteTableDef())
         routes.setup(app)
-        self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/plates", "/paintaplate/thumb", "/paintaplate/blank"])
+        self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/plates", "/paintaplate/thumb", "/paintaplate/blank",
+                                                          "/paintaplate/jobs/{key}", "/paintaplate/jobs/{key}", "/paintaplate/stat"])
         print("download route: folders, parts, symlinks, zip reuse, handler: ok")
 
 
@@ -182,3 +183,48 @@ class BlankPlate(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class JobIndex(unittest.TestCase):
+    """A finished job's outputs, kept by the hash of its inputs, while its files stay in the output folder."""
+
+    def test_a_record_holds_while_its_files_exist(self):
+        frame = os.path.join(OUT, "paintaplate", "j1", "clean", "f_00001_.png")
+        touch(frame)
+        outputs = {"7": {"images": [{"filename": "f_00001_.png", "subfolder": "paintaplate/j1/clean", "type": "output"}]},
+                   "9": {"text": ["a caption"]}}
+        key = "a" * 40
+        self.assertIsNone(routes.read_job(key))
+        routes.write_job(key, outputs, "clean")
+        self.assertEqual(routes.read_job(key)["outputs"], outputs)
+        os.remove(frame)
+        self.assertIsNone(routes.read_job(key), "a file gone: the job runs again")
+        self.assertFalse(os.path.exists(routes.job_path(key)), "and its record goes")
+
+    def test_keys_are_hashes_and_files_stay_in_the_output_folder(self):
+        for bad in ("../x", "A" * 40, "ab", "g" * 40, None):
+            with self.assertRaises(ValueError, msg=bad):
+                routes.job_path(bad)
+        touch(os.path.join(OUT, "paintaplate", "ok.png"))
+        leak = {"filename": "leak.exr", "subfolder": "paintaplate/abc/v1/export", "type": "output"}  # a symbolic link
+        for f in ({"filename": "secret.txt", "subfolder": "..", "type": "output"}, {"filename": "ok.png", "subfolder": "paintaplate", "type": "temp"},
+                  {"filename": "passwd", "subfolder": "/etc", "type": "output"}, leak):
+            with self.assertRaises(ValueError, msg=f):
+                routes.write_job("b" * 40, {"1": {"images": [f]}})
+        with self.assertRaises(ValueError):
+            routes.write_job("b" * 40, {})
+
+    def test_the_plate_stat_changes_with_the_plate(self):
+        path = os.path.join(INPUT, "stat", "stat.mp4")
+        touch(path, b"one")
+        first = routes.plate_stat("stat/stat.mp4")
+        self.assertEqual((first["files"], first["size"]), (1, 3))
+        touch(path, b"other")
+        os.utime(path, ns=(first["mtime"] + 10**9, first["mtime"] + 10**9))
+        self.assertNotEqual(routes.plate_stat("stat/stat.mp4"), first)
+        for i in (1, 2):
+            touch(os.path.join(INPUT, "stat", "seq", f"f.{i:04d}.exr"), b"xx")
+        self.assertEqual(routes.plate_stat("stat/seq")["files"], 2)
+        for bad in ("../x", "stat/none.mp4", "output:../../etc"):
+            with self.assertRaises(FileNotFoundError, msg=bad):
+                routes.plate_stat(bad)

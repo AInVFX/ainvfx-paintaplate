@@ -253,6 +253,34 @@
   }
  },
  "19": {
+  "class_type": "PaintAPlate_LevelFill",
+  "inputs": {
+   "image": [
+    "15",
+    0
+   ],
+   "alpha": [
+    "18",
+    0
+   ],
+   "base": [
+    "4",
+    0
+   ],
+   "paint": [
+    "7",
+    0
+   ],
+   "enabled": false
+  },
+  "_meta": {
+   "title": "Fill levelled with the background (erase only)",
+   "slots": {
+    "enabled": "level"
+   }
+  }
+ },
+ "20": {
   "class_type": "ImageCompositeMasked",
   "inputs": {
    "destination": [
@@ -260,7 +288,7 @@
     0
    ],
    "source": [
-    "15",
+    "19",
     0
    ],
    "x": 0,
@@ -272,20 +300,24 @@
    ]
   }
  },
- "20": {
-  "class_type": "PreviewImage",
+ "21": {
+  "class_type": "SaveImage",
   "inputs": {
    "images": [
-    "19",
+    "20",
     0
-   ]
+   ],
+   "filename_prefix": "paintaplate/edits/edit"
   },
   "_meta": {
    "title": "Edited frame",
+   "slots": {
+    "filename_prefix": "prefix"
+   },
    "output": "result"
   }
  },
- "21": {
+ "22": {
   "class_type": "InvertMask",
   "inputs": {
    "mask": [
@@ -294,33 +326,37 @@
    ]
   }
  },
- "22": {
+ "23": {
   "class_type": "JoinImageWithAlpha",
   "inputs": {
    "image": [
-    "15",
+    "19",
     0
    ],
    "alpha": [
-    "21",
-    0
-   ]
-  }
- },
- "23": {
-  "class_type": "PreviewImage",
-  "inputs": {
-   "images": [
     "22",
     0
    ]
-  },
-  "_meta": {
-   "title": "Edit patch (RGBA)",
-   "output": "patch"
   }
  },
  "24": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "images": [
+    "23",
+    0
+   ],
+   "filename_prefix": "paintaplate/edits/edit"
+  },
+  "_meta": {
+   "title": "Edit patch (RGBA)",
+   "slots": {
+    "filename_prefix": "prefix"
+   },
+   "output": "patch"
+  }
+ },
+ "25": {
   "class_type": "ImageColorSpace",
   "inputs": {
    "image": [
@@ -331,22 +367,11 @@
    "destination": "linear"
   }
  },
- "25": {
-  "class_type": "ImageScaleBy",
-  "inputs": {
-   "image": [
-    "24",
-    0
-   ],
-   "upscale_method": "area",
-   "scale_by": 0.5
-  }
- },
  "26": {
   "class_type": "ImageScaleBy",
   "inputs": {
    "image": [
-    "19",
+    "25",
     0
    ],
    "upscale_method": "area",
@@ -354,29 +379,40 @@
   }
  },
  "27": {
+  "class_type": "ImageScaleBy",
+  "inputs": {
+   "image": [
+    "20",
+    0
+   ],
+   "upscale_method": "area",
+   "scale_by": 0.5
+  }
+ },
+ "28": {
   "class_type": "ImageColorSpace",
   "inputs": {
    "image": [
-    "26",
+    "27",
     0
    ],
    "source": "sRGB",
    "destination": "linear"
   }
  },
- "28": {
+ "29": {
   "class_type": "PaintAPlate_RelightTransfer",
   "inputs": {
    "plate": [
-    "24",
-    0
-   ],
-   "source": [
     "25",
     0
    ],
+   "source": [
+    "26",
+    0
+   ],
    "relit": [
-    "27",
+    "28",
     0
    ],
    "radius": 8,
@@ -390,27 +426,31 @@
    }
   }
  },
- "29": {
+ "30": {
   "class_type": "ImageColorSpace",
   "inputs": {
    "image": [
-    "28",
+    "29",
     0
    ],
    "source": "linear",
    "destination": "sRGB"
   }
  },
- "30": {
-  "class_type": "PreviewImage",
+ "31": {
+  "class_type": "SaveImage",
   "inputs": {
    "images": [
-    "29",
+    "30",
     0
-   ]
+   ],
+   "filename_prefix": "paintaplate/edits/edit"
   },
   "_meta": {
    "title": "Relit frame",
+   "slots": {
+    "filename_prefix": "prefix"
+   },
    "output": "relit"
   }
  }

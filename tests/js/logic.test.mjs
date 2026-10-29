@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { changedMask, erasePrompt, erasesPaint, levelFill, paintBoxes, stageOne, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit } from "../../web/logic.mjs";
+import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayMatrix, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -251,25 +251,31 @@ test("the erase pass's prompt is the scene as it stays: no people, no text, noth
   assert.equal(erasePrompt(["Remove the van <obj_1>.", undefined]), "");
 });
 
-test("an erase's fill is levelled with the background around it: a flat lift goes, texture stays, the imprint goes its own way", () => {
-  const W = 64, H = 48, rgba = (f) => {
-    const a = new Uint8ClampedArray(W * H * 4);
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) a.set(f(x, y), (y * W + x) * 4);
-    return a;
-  };
-  const inside = (x, y) => x >= 16 && x < 48 && y >= 12 && y < 36, at = (a) => [a[(24 * W + 32) * 4], a[(24 * W + 33) * 4]];
-  const base = rgba((x, y) => (inside(x, y) ? [200, 200, 200, 255] : [18, 18, 18, 255])); // a bright object on a dark backdrop
-  const paint = rgba((x, y) => (inside(x, y) ? [255, 255, 255, 255] : [0, 0, 0, 255]));
-  const fill = (v) => rgba((x, y) => (inside(x, y) ? (typeof v === "function" ? v(x, y) : [v, v, v, 255]) : [0, 0, 0, 0]));
-  const level = (f) => levelFill({ fill: f, base, paint, width: W, height: H, cell: 4 }).rgba;
-  assert.deepEqual(at(level(fill(24))), [18, 18], "a fill 6 levels too bright comes down to the backdrop");
-  const checker = fill((x, y) => ((x + y) % 2 ? [54, 54, 54, 255] : [0, 0, 0, 255]));
-  assert.deepEqual(at(level(checker)), at(checker), "a textured fill is left alone");
-  assert.deepEqual(at(level(fill(12))), [12, 12], "a bright object's fill is never brightened");
-});
-
 test("the full size's first stage is half the working size, in multiples of 32", () => {
   assert.deepEqual(stageOne([1920, 1088]), [960, 544]);
   assert.deepEqual(stageOne([1280, 704]), [640, 352]);
   assert.deepEqual(stageOne([1920, 800]), [960, 416]);
+});
+
+test("the render queue: every preview first, then every full size, then every export; the set on show first, then the newest", () => {
+  const r = (id, cls, current = false, wanted = 1, urgent = false) => ({ id, cls, current, wanted, urgent });
+  assert.equal(nextRender([r("on show", "full", true, 3), r("older", "preview", false, 2)]), "older", "a preview before any full size");
+  assert.equal(nextRender([r("a", "preview", false, 1), r("b", "preview", false, 2), r("c", "preview", true, 3)]), "c");
+  assert.equal(nextRender([r("a", "full", false, 1), r("b", "full", false, 2)]), "b", "then the most recently shown");
+  assert.equal(nextRender([r("other", "full", false, 2), r("on show", "export", true, 3)]), "other", "an export waits for the full sizes");
+  assert.equal(nextRender([r("other", "full", false, 2), r("on show", "export", true, 1, true)]), "on show", "unless someone waits for it");
+  assert.equal(nextRender([r("done", null), r("failed", undefined)]), null);
+});
+
+test("Generate stops only a full-size or export step in its first half", () => {
+  assert.equal(stopsForEdit({ cls: "full", progress: 0.3 }), true);
+  assert.equal(stopsForEdit({ cls: "export", progress: 0.1 }), true);
+  assert.equal(stopsForEdit({ cls: "full", progress: 0.6 }), false, "past halfway it finishes");
+  assert.equal(stopsForEdit({ cls: "preview", progress: 0.05 }), false, "a preview step always finishes");
+});
+
+test("a job index key leaves out output folders and the live preview rate, and keeps every value that changes the result", () => {
+  const a = indexValues({ seed: 4, prefix: "paintaplate/x/v1/clean/f", video_prefix: "v1/clean", live: 2, hero: "up/ab.png", prompt: "A street." });
+  assert.deepEqual(a, [["hero", "up/ab.png"], ["prompt", "A street."], ["seed", 4]]);
+  assert.deepEqual(indexValues({ prompt: "A street.", hero: "up/ab.png", seed: 4, matte_prefix: "v9/m" }), a, "in any order, from any session");
 });
