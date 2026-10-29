@@ -64,10 +64,25 @@ def flow(page, port):
         x.drawImage(look.image(frame, { ...DISPLAY, exposure: stops }, space), 0, 0);
         return [x.getImageData(8, height >> 1, 1, 1).data[0], x.getImageData(width - 9, height >> 1, 1, 1).data[0]];
       };
-      return { size: [width, height], stops0: read(0), down2: read(-2) };
+      const stops0 = read(0), down2 = read(-2);
+      // a saturated 8-bit red through the sRGB program: the channel comes from the values the view shows, as in RV
+      const red = Object.assign(document.createElement("canvas"), { width: 8, height: 8 }), paint = red.getContext("2d");
+      paint.fillStyle = "rgb(179, 30, 27)";
+      paint.fillRect(0, 0, 8, 8);
+      const srgb = "sRGB Encoded Rec.709 (sRGB)", again = new Promise((ok) => (ready = ok));
+      look.image(red, { ...DISPLAY, channel: "r" }, srgb); // a second program, for this colour space
+      await again;
+      const grey = (channel) => {
+        x.clearRect(0, 0, width, height);
+        x.drawImage(look.image(red, { ...DISPLAY, channel }, srgb), 0, 0);
+        return [...x.getImageData(4, 4, 1, 1).data.slice(0, 3)];
+      };
+      return { size: [width, height], stops0, down2, red: grey("r"), luma: grey("l") };
     }""")
     check(hdr["stops0"][0] >= 254 and hdr["down2"][0] >= 253 and abs(hdr["stops0"][1] - 188) <= 2 and abs(hdr["down2"][1] - 99) <= 2,
           f"an EXR keeps its range through the frame route and the viewer's OCIO program: 4.0 stays white two stops down, 0.5 goes from 188 to 99: {hdr}")
+    check(all(abs(v - 179) <= 2 for v in hdr["red"]) and all(abs(v - 61) <= 2 for v in hdr["luma"]),
+          f"a channel comes from the values the view shows, as RV's OCIODisplay floods it: [179, 30, 27] shows red 179 and luminance 61: {hdr['red']} {hdr['luma']}")
     page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps')", timeout=60000)
     page.wait_for_function("/Describe the edit|Ready to play/.test(document.querySelector('#status').textContent)", timeout=60000)

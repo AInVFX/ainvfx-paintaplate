@@ -59,8 +59,10 @@ def zip_name(name: str, folder: str) -> str:
 
 def collect(folder: str, parts: list[str]) -> list[tuple[str, str]]:
     """(path on disk, name in the zip) for each part asked for, in a fixed order."""
+    real = os.path.realpath(folder)  # compared as real paths: the output folder itself may be a symbolic link
+
     def inside(path):
-        return not os.path.islink(path) and os.path.commonpath([os.path.realpath(path), folder]) == folder
+        return not os.path.islink(path) and os.path.commonpath([os.path.realpath(path), real]) == real
 
     files = []
     for part in [p for p in PARTS if p in parts]:
@@ -290,7 +292,7 @@ async def job_post(request: web.Request) -> web.Response:
     try:
         body = await request.json()
         await asyncio.to_thread(write_job, request.match_info["key"], body.get("outputs"), body.get("workflow", ""))
-    except (ValueError, AttributeError) as e:
+    except (ValueError, AttributeError, TypeError) as e:  # a malformed record is refused, never a server error
         return web.json_response({"error": str(e)}, status=400)
     return web.json_response({"ok": True})
 
@@ -397,7 +399,8 @@ def list_scenes() -> list[dict]:
 def save_scene(name: str, body: bytes) -> None:
     if len(body) > SCENE_MAX:
         raise ValueError("Scene too large")
-    if json.loads(body).get("format") != "paintaplate-scene":
+    scene = json.loads(body)
+    if not isinstance(scene, dict) or scene.get("format") != "paintaplate-scene":
         raise ValueError("Not a PaintAPlate scene")
     path = scene_path(name)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -416,7 +419,7 @@ async def scene_get(request: web.Request) -> web.StreamResponse:
         path = scene_path(request.match_info["name"])
     except ValueError as exc:
         raise web.HTTPBadRequest(text=str(exc)) from exc
-    if not os.path.isfile(path):
+    if os.path.islink(path) or not os.path.isfile(path):  # a link is never followed, as list_scenes skips it
         raise web.HTTPNotFound(text="No scene by this name")
     return web.FileResponse(path, headers={"Cache-Control": "no-store"})
 
@@ -445,7 +448,7 @@ async def ocio_shader(request: web.Request) -> web.Response:
                                       q.get("view", ""), q.get("look", ""))
     except Exception as exc:
         return web.json_response({"error": f"OCIO: {exc}"}, status=400)
-    return web.json_response(out, headers={"Cache-Control": "max-age=86400"})
+    return web.json_response(out, headers={"Cache-Control": "no-store"})  # a new $OCIO or an updated pack shows at once
 
 
 def setup(server) -> None:

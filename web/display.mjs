@@ -1,7 +1,9 @@
 // The viewer's colour on the GPU, as OpenRV chains its nodes when OCIO manages colour (ocio_source_setup): the file values
 // to the config's scene-linear space (OCIOFile), the colour tools there (RVColor: exposure and contrast, one matrix for hue,
-// saturation, the channel and invert, then gamma; ColorIPNode.cpp, read 28 Oct 2026), then the look and the display and
-// view (OCIOLook, OCIODisplay). OpenColorIO writes the two OCIO functions as GLSL ES 3.0 on the server (ocio.py), with
+// saturation and invert, then gamma; ColorIPNode.cpp, read 28 Oct 2026), then the look and the display and view
+// (OCIOLook, OCIODisplay), then the channel shown as grey, picked from the display values: OCIODisplay floods a channel
+// after its OCIO function (OCIOIPNode.cpp, read 29 Oct 2026). OpenColorIO writes the two OCIO functions as GLSL ES 3.0 on
+// the server (ocio.py), with
 // their lookup tables. A program is made once per colour space and view: changing the plate's colour space, the display
 // or the view swaps it, so it applies while the shot plays. Frames of an image sequence arrive as RGB half floats
 // (DeepFrames in frames.mjs), so values above 1.0 reach the shader; video frames and canvases are 8 bits.
@@ -21,7 +23,7 @@ in vec2 uv;
 out vec4 color;
 uniform sampler2D frame;
 uniform float slope, intercept, exponent;
-uniform mat3 mixing;
+uniform mat3 mixing, pick;
 uniform vec3 offset;
 ${fin}
 ${fout}
@@ -29,7 +31,7 @@ void main() {
   vec3 c = ocioIn(vec4(texture(frame, uv).rgb, 1.0)).rgb;
   c = mixing * (c * slope + intercept) + offset;
   if (exponent != 1.0) c = pow(max(c, 0.0), vec3(exponent));
-  color = vec4(ocioOut(vec4(c, 1.0)).rgb, 1.0);
+  color = vec4(pick * ocioOut(vec4(c, 1.0)).rgb, 1.0);
 }`;
 
 const floats = (b64) => { const s = atob(b64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return new Float32Array(u.buffer); };
@@ -102,7 +104,7 @@ export class Display {
       return { unit, target, tex, at: gl.getUniformLocation(program, t.sampler) };
     });
     gl.activeTexture(gl.TEXTURE0);
-    const at = Object.fromEntries(["frame", "slope", "intercept", "exponent", "mixing", "offset", "corner"].map((n) =>
+    const at = Object.fromEntries(["frame", "slope", "intercept", "exponent", "mixing", "offset", "pick", "corner"].map((n) =>
       [n, n === "corner" ? gl.getAttribLocation(program, n) : gl.getUniformLocation(program, n)]));
     return { program, at, tables };
   }
@@ -136,6 +138,7 @@ export class Display {
     gl.uniform1f(p.at.exponent, u.exponent);
     gl.uniformMatrix3fv(p.at.mixing, true, u.matrix.flat());
     gl.uniform3fv(p.at.offset, u.offset);
+    gl.uniformMatrix3fv(p.at.pick, true, u.pick.flat());
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     return this.canvas;
   }

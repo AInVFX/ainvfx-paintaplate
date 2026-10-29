@@ -37,12 +37,18 @@ test("preview sizes come from the plate's size: exact divisions of the working s
   }
 });
 
-test("the viewer's colour: identity at rest, one channel as grey, invert, exposure in stops, contrast about 18% grey", () => {
+test("the viewer's colour: identity at rest, one channel as grey from the display values, invert, exposure in stops, contrast about 18% grey", () => {
   const flat = (d) => displayUniforms(d).matrix.flat();
   assert.deepEqual(flat(DISPLAY), [1, 0, 0, 0, 1, 0, 0, 0, 1]);
   assert.deepEqual(displayUniforms(DISPLAY).offset, [0, 0, 0]);
-  assert.deepEqual(flat({ ...DISPLAY, channel: "r" }), [1, 0, 0, 1, 0, 0, 1, 0, 0]);
-  assert.deepEqual(flat({ ...DISPLAY, channel: "l" }), [0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722]);
+  // the channel is picked after the display and view, from the values shown, as OpenRV's OCIODisplay floods it
+  const pick = (d) => displayUniforms(d).pick.flat();
+  assert.deepEqual(pick(DISPLAY), [1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  assert.deepEqual(flat({ ...DISPLAY, channel: "r" }), [1, 0, 0, 0, 1, 0, 0, 0, 1]); // nothing picked in scene-linear
+  assert.deepEqual(pick({ ...DISPLAY, channel: "r" }), [1, 0, 0, 1, 0, 0, 1, 0, 0]);
+  assert.deepEqual(pick({ ...DISPLAY, channel: "l" }), [0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722]);
+  assert.deepEqual(flat({ ...DISPLAY, saturation: 0, channel: "g" }).slice(0, 3), [0.2126, 0.7152, 0.0722]); // the tools still apply
+  assert.deepEqual(pick({ ...DISPLAY, invert: true, channel: "b" }), [0, 0, 1, 0, 0, 1, 0, 0, 1]);
   assert.deepEqual(flat({ ...DISPLAY, invert: true }), [-1, 0, 0, 0, -1, 0, 0, 0, -1]);
   assert.deepEqual(displayUniforms({ ...DISPLAY, invert: true }).offset, [1, 1, 1]);
   assert.deepEqual(flat({ ...DISPLAY, saturation: 0 }).slice(0, 3), [0.2126, 0.7152, 0.0722]);

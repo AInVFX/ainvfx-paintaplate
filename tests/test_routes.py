@@ -43,9 +43,26 @@ class Routes(unittest.TestCase):
 
     def test_only_run_folders_under_output_paintaplate(self):
         self.assertEqual(routes.folders.run_folder("paintaplate/abc/v1"), self.folder)
-        for bad in ("../..", "paintaplate", "paintaplate/../..", "/etc", "paintaplate/abc/v9", "secret.txt"):
+        elsewhere = tempfile.mkdtemp(prefix="paintaplate_elsewhere_")
+        os.makedirs(os.path.join(elsewhere, "export"))
+        os.symlink(elsewhere, os.path.join(OUT, "paintaplate", "linked"))  # a render folder linked out of output/paintaplate
+        for bad in ("../..", "paintaplate", "paintaplate/../..", "/etc", "paintaplate/abc/v9", "secret.txt", "paintaplate/linked"):
             with self.assertRaises(FileNotFoundError, msg=bad):
                 routes.folders.run_folder(bad)
+
+    def test_an_output_folder_that_is_a_link(self):
+        """ComfyUI's output folder may itself be a symbolic link, to a bigger disk: its renders still download."""
+        alias = os.path.join(tempfile.mkdtemp(prefix="paintaplate_alias_"), "output")
+        os.symlink(OUT, alias)
+        stub = sys.modules["folder_paths"]
+        stub.get_output_directory = lambda: alias
+        try:
+            got = [arc for _, arc in routes.collect(routes.folders.run_folder("paintaplate/abc/v1"), ["export", "matte"])]
+        finally:
+            stub.get_output_directory = lambda: OUT
+        self.assertEqual(got, [arc for _, arc in routes.collect(self.folder, ["export", "matte"])])
+        self.assertIn("export/shot.1001.exr", got)
+        self.assertNotIn("export/leak.exr", got)
 
     def test_parts_of_a_run_laid_out_by_size(self):
         """The export's full-size review and the full-size pass win over what a preview size made."""
@@ -157,8 +174,15 @@ class PlateBrowser(unittest.TestCase):
         for bad in ("../x", ".hidden", "a/b", ""):
             with self.assertRaises(ValueError, msg=bad):
                 routes.scene_path(bad)
-        with self.assertRaises(ValueError):
-            routes.save_scene("other", b'{"format": "something else"}')
+        for body in (b'{"format": "something else"}', b"[]", b'"text"'):  # JSON that is no scene: refused, never a server error
+            with self.assertRaises(ValueError, msg=body):
+                routes.save_scene("other", body)
+        target = os.path.join(OUT, "not_a_scene.txt")
+        touch(target, b"private")
+        os.symlink(target, routes.scene_path("linked"))  # a link is never followed
+        with self.assertRaises(web.HTTPNotFound):
+            asyncio.run(routes.scene_get(types.SimpleNamespace(match_info={"name": "linked"})))
+        self.assertNotIn("linked", [x["name"] for x in routes.list_scenes()])
 
     def test_thumbnails_are_jpegs_made_once(self):
         from PIL import Image
@@ -300,6 +324,11 @@ class JobIndex(unittest.TestCase):
                 routes.write_job("b" * 40, {"1": {"images": [f]}})
         with self.assertRaises(ValueError):
             routes.write_job("b" * 40, {})
+
+        async def malformed():
+            return {"outputs": {"1": {"images": 5}}}
+        resp = asyncio.run(routes.job_post(types.SimpleNamespace(match_info={"key": "b" * 40}, json=malformed)))
+        self.assertEqual(resp.status, 400)  # a malformed record is refused, never a server error
 
     def test_the_plate_stat_changes_with_the_plate(self):
         path = os.path.join(INPUT, "stat", "stat.mp4")

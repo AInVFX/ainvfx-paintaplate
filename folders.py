@@ -66,10 +66,13 @@ def output_folder(prefix: str) -> str:
 
 
 def run_folder(rel: str) -> str:
-    """A render's folder under output/paintaplate. FileNotFoundError for any other path."""
+    """A render's folder under output/paintaplate. FileNotFoundError for any other path, and for a folder whose real path
+    leaves output/paintaplate through a symbolic link. The output folder itself may be a link (to a bigger disk)."""
     out = os.path.abspath(folder_paths.get_output_directory())
     root = os.path.join(out, "paintaplate")
     full = os.path.abspath(os.path.join(out, rel.removeprefix(OUTPUT)))
-    if os.path.commonpath([full, root]) != root or full == root or not os.path.isdir(full):
+    real_root, real = os.path.realpath(root), os.path.realpath(full)
+    if (os.path.commonpath([full, root]) != root or full == root or not os.path.isdir(full)
+            or os.path.commonpath([real, real_root]) != real_root or real == real_root):
         raise FileNotFoundError("No render at this path")
     return full

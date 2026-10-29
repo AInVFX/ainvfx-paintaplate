@@ -76,9 +76,10 @@ export function upload(blob, name, sub, onProgress) { // XMLHttpRequest, not fet
     x.open("POST", "/upload/image");
     x.upload.onprogress = (e) => onProgress?.(e.loaded);
     x.onerror = () => reject(new Error(`Upload failed: ${name}`));
-    x.onload = () => {
-      if (x.status < 200 || x.status > 299) return reject(new Error(`Upload failed: ${name}`));
-      const j = JSON.parse(x.responseText);
+    x.onload = () => { // an answer that is not ComfyUI's JSON (a proxy's error page) fails the upload, never hangs it
+      let j = null;
+      try { j = JSON.parse(x.responseText); } catch { /* reported below */ }
+      if (x.status < 200 || x.status > 299 || !j?.name) return reject(new Error(`Upload failed: ${name}`));
       resolve(j.subfolder ? `${j.subfolder}/${j.name}` : j.name);
     };
     x.send(form);
@@ -133,7 +134,7 @@ async function finish(id, error) {
   if (error && /out of memory|allocation on device/i.test(error) && !job.freed) { // models and caches piled up on the GPU
     job.freed = true;
     notice("The GPU ran out of memory: freeing ComfyUI's memory, then trying once more.");
-    await post("/free", { unload_models: true, free_memory: true });
+    await post("/free", { unload_models: true, free_memory: true }).catch(() => {}); // unanswered, the retry still runs
     await released(); // ComfyUI frees between prompts: a job posted at once ran first, with every model still loaded (29 Oct)
     return job.submit();
   }
@@ -151,10 +152,11 @@ async function finish(id, error) {
 }
 
 // ComfyUI reports success from inside the run and records the history just after (execution.py, then main.py's
-// task_done): read too early, the record is missing and the outputs look empty. So wait for the record.
+// task_done): read too early, the record is missing and the outputs look empty. So wait for the record. A read that
+// fails (a dropped connection, a proxy's error page) is asked again: thrown from finish(), it left a done job waiting.
 export async function historyRecord(id, { tries = 100, wait = 100 } = {}) {
   for (let i = 0; i < tries; i++) {
-    const record = (await (await fetch(`/history/${id}`)).json())[id];
+    const record = await fetch(`/history/${id}`).then((r) => r.json()).then((h) => h?.[id]).catch(() => undefined);
     if (record?.status?.completed || record?.status?.status_str === "error") return record;
     await new Promise((ok) => setTimeout(ok, wait));
   }

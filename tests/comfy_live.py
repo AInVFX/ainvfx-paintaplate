@@ -193,7 +193,7 @@ def main():
         check(any(e.endswith("ainvfx-paintaplate/open.js") for e in exts) and not any(e.endswith("app.mjs") for e in exts),
               "only open.js loads into the graph editor")
         refused, _ = http(f"{url}/paintaplate/download?run=../../etc")
-        check(b"No export" in refused, "download route refuses paths outside output/paintaplate")
+        check(b"No render at this path" in refused, "download route refuses paths outside output/paintaplate")
 
         stats, _ = http(f"{url}/system_stats")
         comfy_root = a.comfy

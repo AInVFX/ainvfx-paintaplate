@@ -341,8 +341,9 @@ export function frameUse(f, { frame, inPt, outPt }, behind = 3) {
 }
 
 // ---------- The viewer's colour, as in RV's Color menu: display only, the export never changes ----------
-// Exposure and contrast act in linear light (contrast about 18% grey), gamma on the display values, then saturation, hue,
-// one channel shown as grey, and invert. The page applies them as one SVG filter on the canvas (app.mjs, setDisplay).
+// In OpenRV's order under OCIO (display.mjs): in the config's scene-linear space, exposure and contrast (about 18% grey),
+// one matrix for saturation, hue and invert, then gamma, as RVColor; then the look, display and view; then the channel
+// shown as grey, picked from the display values, as RV's OCIODisplay floods a channel (OCIOIPNode.cpp, read 29 Oct 2026).
 export const DISPLAY = { exposure: 0, contrast: 1, gamma: 1, saturation: 1, hue: 0, channel: "rgb", invert: false };
 export const PARAMS = { // the interactive edits: label, step for - and = and the wheel, change per pixel dragged, limits
   exposure: { label: "Exposure", step: 0.1, drag: 0.01, min: -10, max: 10 }, // stops: one per 100 px dragged
@@ -388,17 +389,18 @@ const LUMA = [0.2126, 0.7152, 0.0722];
 const PICK = { r: [1, 0, 0], g: [0, 1, 0], b: [0, 0, 1], l: LUMA };
 const times = (A, B) => A.map((row) => B[0].map((_, j) => row.reduce((a, v, k) => a + v * B[k][j], 0)));
 
-export function displayUniforms(d) { // the shader's values (display.mjs): exposure and contrast, a 3 x 3 matrix and its offset, gamma
+// The shader's values (display.mjs). Before the display: exposure and contrast, a 3 x 3 matrix and its offset, gamma.
+// After it: `pick`, the channel shown as grey (rows of Rec. 709 weights for luminance, as RV's flood), else the identity.
+export function displayUniforms(d) {
   const { saturation = 1, hue = 0, channel = "rgb", invert = false } = d;
   const s = saturation, t = (hue * Math.PI) / 180, c = Math.cos(t), n = Math.sin(t);
   const sat = [0, 1, 2].map((i) => [0, 1, 2].map((j) => LUMA[j] * (1 - s) + (i === j ? s : 0)));
   const rot = [[0.213 + c * 0.787 - n * 0.213, 0.715 - c * 0.715 - n * 0.715, 0.072 - c * 0.072 + n * 0.928], // SVG's hueRotate
     [0.213 - c * 0.213 + n * 0.143, 0.715 + c * 0.285 + n * 0.14, 0.072 - c * 0.072 - n * 0.283],
     [0.213 - c * 0.213 - n * 0.787, 0.715 - c * 0.715 + n * 0.715, 0.072 + c * 0.928 + n * 0.072]];
-  let m = times(sat, rot);
-  if (PICK[channel]) m = Array(3).fill(times([PICK[channel]], m)[0]);
-  const sign = invert ? -1 : 1;
-  return { ...displayTransfer(d), matrix: m.map((row) => row.map((v) => +(sign * v).toFixed(5) + 0)), offset: [0, 1, 2].map(() => (invert ? 1 : 0)) };
+  const m = times(sat, rot), sign = invert ? -1 : 1, one = PICK[channel];
+  return { ...displayTransfer(d), matrix: m.map((row) => row.map((v) => +(sign * v).toFixed(5) + 0)), offset: [0, 1, 2].map(() => (invert ? 1 : 0)),
+           pick: one ? [[...one], [...one], [...one]] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]] };
 }
 
 // ---------- A fluid shot on a blank plate: AInVFX's ainvfx-fluid IC-LoRA (its model card, read 28 Oct 2026) ----------

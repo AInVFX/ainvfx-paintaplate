@@ -2398,7 +2398,7 @@ async function openScene(text) { // the plate opens in its colour space, then ev
 function clearRange() { S.inPt = 0; S.outPt = S.plate.frames - 1; hud("In and out points cleared"); timelineUI(); }
 function fullScreen() { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); }
 
-// ---------- The viewer's colour, as in RV: OCIO, then exposure, contrast, gamma, saturation, hue, channels, invert ----------
+// ---------- The viewer's colour, as in RV: the colour tools in scene-linear, then the OCIO view, then the channel ----------
 // Display only, after OpenRV: each frame goes through one WebGL2 program before it is drawn (display.mjs), the strokes and
 // marks after it: OCIO from the colour space its values are in to scene-linear, the colour tools there, then the look and
 // the display and view. An image-sequence plate and its full-quality review are read in their own values (DeepFrames),
