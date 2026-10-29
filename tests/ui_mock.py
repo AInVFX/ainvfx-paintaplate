@@ -259,7 +259,7 @@ def flow(page, port):
 
 
 def fluid_flow(page):
-    """A blank plate: keyframes on the LTX grid, copied, pasted, dragged, deleted and undone; then the shot, used as the plate."""
+    """A blank plate: keyframes on the LTX grid, copied, pasted, dragged, deleted and undone; then its shot, the first edit."""
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
@@ -306,20 +306,32 @@ def fluid_flow(page):
     page.keyboard.press("Control+z")
     check(keys() == [0, 17, 32], f"Ctrl+Z brings it back: {keys()}")
     page.keyboard.press("Enter")
-    page.wait_for_function("/v1 ready/.test(document.querySelector('#fluid-state').textContent)", timeout=120000)
+    page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
+      return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden; })()""", timeout=120000)
     log = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
     sent = [line for line in log if line.startswith("Fluid v1: 3 keyframe")]
     check(sent and 'prompt "ainvfxfluid, thick white smoke"' in sent[0] and "at 1, 18, 33," in sent[0],
           f"Enter generates with the trigger, the words and the three keyframes: {sent}")
+    rows = page.eval_on_selector_all("#history li .title", "els => els.map(e => e.textContent)")
+    check(rows == ["1. Fluid"] and any("under the edits: the fluid shot v1" in line for line in log) and not page.is_disabled("[data-tool=erase]"),
+          f"the fluid shot is the first edit and the plate under the next ones, with Erase and Light on: {rows}")
+    page.click('#history li[data-id="fluid"] .edit')
+    check(not page.is_hidden("#fluid"), "the pencil on the fluid row brings its keyframes back")
     page.keyboard.press("Enter")
     page.wait_for_timeout(800)
     log = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
-    check(not any(line.startswith("Fluid v2") for line in log) and "already made" in page.text_content("#hud")
-          and page.is_disabled("#generate"), "Enter again on the same keyframes and words makes nothing twice")
+    check(not any(line.startswith("Fluid v2") for line in log) and "already made" in page.text_content("#hud"),
+          "Enter again on the same keyframes and words makes nothing twice")
     page.screenshot(path=os.path.join(SHOTS, "4_fluid.png"))
-    page.click("#fluid-use")
-    page.wait_for_function("document.querySelector('#fluid').hidden && document.querySelector('#spec').textContent.includes('prores')", timeout=60000)
-    check(not page.is_disabled("[data-tool=erase]"), "Use as the plate opens the fluid shot as a plate: Erase and Light are back")
+    page.keyboard.press("e")
+    check(page.is_hidden("#fluid") and page.eval_on_selector_all("#history li .title", "els => els.map(e => e.textContent)") == ["1. Fluid"],
+          "another tool closes the keyframes: the fluid shot stays the first edit")
+    page.click('#history li[data-id="fluid"] .eye')
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => e.textContent.includes('under the edits: the blank plate'))", timeout=60000)
+    page.click('#history li[data-id="fluid"] .eye')
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('under the edits: the fluid shot v1')).length >= 2", timeout=60000)
+    check(page.get_attribute('#history li[data-id="fluid"] .eye', "aria-pressed") == "true",
+          "the eye on the fluid row bypasses it (the blank plate under the edits) and turns it back on (its shot)")
     check(not errors, f"no console errors in the fluid shot: {errors}")
 
 

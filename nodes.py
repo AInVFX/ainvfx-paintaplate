@@ -185,9 +185,14 @@ class SavePlate(io.ComfyNode):
             writer = plateio.VideoWriter(spec, os.path.join(out_dir, os.path.basename(spec["source"])),
                                          audio_source=spec["source"])
             bar = comfy.utils.ProgressBar(count)
-            for frame in frames_np(images[:count]):
-                writer.write(frame)
+            src = plateio.SourceFrames(spec["source"], writer.pix_fmt) if keep_untouched and changed is not None else None
+            for i, frame in enumerate(frames_np(images[:count])):
+                keep = None if src is None else changed[min(i, changed.shape[0] - 1)].float().cpu().numpy() <= 1.0 / 1024
+                writer.write(frame, keep=keep, source=None if src is None else src.next())
                 bar.update(1)
+            if src is not None:
+                src.close()
+                writer.notes.append("Untouched pixels are the source's own YUV samples.")
             writer.close()
             written, notes = [writer.path], writer.notes
         else:
@@ -535,4 +540,37 @@ class SaveFrames(io.ComfyNode):
         return io.NodeOutput(ui={"images": [{"filename": f, "subfolder": sub, "type": "output"} for f in names]})
 
 
-NODES = [LoadPlate, SavePlate, SaveFrames, FitToPlate, RelightTransfer, FollowMatte, LevelFill, LivePreview, KeyframeVideo]
+class SaveMovie(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_SaveMovie",
+            display_name="Save Movie",
+            category=CATEGORY,
+            description="Saves a batch as an H.264 movie for the page, as core Save Video makes it (crf 18, BT.709, "
+                        "limited range), with the frames converted several at once and x264 at preset veryfast: core "
+                        "took 8.3 s for 121 frames at 1920 x 1088.",
+            inputs=[
+                io.Image.Input("images"),
+                io.Float.Input("fps", default=24.0, min=1.0, max=240.0),
+                io.String.Input("filename_prefix", default="paintaplate/movie",
+                                tooltip="As in Save Video: a folder under the output folder, then the file name."),
+            ],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(cls, images, fps, filename_prefix) -> io.NodeOutput:
+        n, h, w = images.shape[0], images.shape[1], images.shape[2]
+        folder, name, counter, sub, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory(), w, h)
+        file = f"{name}_{counter:05}_.mp4"
+        bar = comfy.utils.ProgressBar(n)
+
+        def frame(i):  # as core Save Video: scaled by 255 and clipped, not rounded
+            return np.clip(255.0 * images[i].float().cpu().numpy(), 0, 255).astype(np.uint8)
+
+        plateio.write_movie(frame, n, os.path.join(folder, file), fps, workers=WORKERS, tick=lambda: bar.update(1))
+        return io.NodeOutput(ui={"images": [{"filename": file, "subfolder": sub, "type": "output"}], "animated": [True]})
+
+
+NODES = [LoadPlate, SavePlate, SaveFrames, SaveMovie, FitToPlate, RelightTransfer, FollowMatte, LevelFill, LivePreview, KeyframeVideo]

@@ -364,6 +364,83 @@ def write_pngs(frame_at, paths: list, workers: int = 8, level: int = 1, tick=Non
         list(pool.map(one, range(len(paths))))
 
 
+def write_movie(frame_at, n: int, path: str, fps: float, workers: int = 8, crf: int = 18, preset: str = "veryfast",
+                tick=None) -> None:
+    """An H.264 movie for the page to play, as core Save Video makes it (crf 18, yuv420p, BT.709 matrix and primaries, the
+    sRGB transfer tag, limited range), only faster: the frames convert to YUV several at once and x264 runs at preset
+    veryfast with its own threads. Core took 8.3 s for 121 frames at 1920 x 1088 on an RTX PRO 6000 pod (28 Oct)."""
+    first = np.ascontiguousarray(frame_at(0))
+    h, w = first.shape[:2]
+    with av.open(path, "w") as out:
+        st = out.add_stream("libx264", rate=Fraction(fps).limit_denominator(1001))
+        st.width, st.height, st.pix_fmt = w, h, "yuv420p"
+        st.options = {"crf": str(crf), "preset": preset}
+        cc = st.codec_context
+        cc.thread_count = 0  # x264 picks its threads
+        cc.color_primaries, cc.color_trc, cc.colorspace, cc.color_range = 1, 13, 1, 1  # BT.709, sRGB, BT.709, limited
+
+        def yuv(i):  # swscale with the BT.709 matrix, full-range RGB in and limited range out, as core converts
+            a = first if i == 0 else np.ascontiguousarray(frame_at(i))
+            f = av.VideoFrame.from_ndarray(a, format="rgb24").reformat(format="yuv420p", dst_colorspace=1)
+            if tick:
+                tick()
+            return f
+        with ThreadPoolExecutor(max(1, workers)) as pool:
+            for i, f in enumerate(pool.map(yuv, range(n))):
+                f.pts = i
+                for p in st.encode(f):
+                    out.mux(p)
+        for p in st.encode(None):
+            out.mux(p)
+
+
+def plane_array(plane, itemsize: int) -> np.ndarray:
+    """One plane of a frame as (height, width) samples, without its line padding."""
+    a = np.frombuffer(plane, np.uint16 if itemsize == 2 else np.uint8)
+    return a[: plane.height * (plane.line_size // itemsize)].reshape(plane.height, -1)[:, : plane.width]
+
+
+def keep_samples(frame, source, keep: np.ndarray):
+    """`frame` (planar YUV) with `source`'s own samples wherever `keep` (H, W) holds for every pixel a sample covers.
+
+    Untouched pixels then reach the encoder as the source's YUV samples, with no RGB round trip: a 4:2:0 plate lost up
+    to 12/255 to that round trip, even with a lossless encode (42.25 dB, 28 Oct). A chroma sample shared by four pixels
+    is kept only when all four are untouched.
+    """
+    itemsize = 2 if re.search(r"p1[0246]", frame.format.name) else 1
+    out = av.VideoFrame(frame.width, frame.height, frame.format.name)
+    for p_out, p_new, p_src in zip(out.planes, frame.planes, source.planes):
+        a, b = plane_array(p_new, itemsize).copy(), plane_array(p_src, itemsize)
+        fy, fx = max(1, round(keep.shape[0] / a.shape[0])), max(1, round(keep.shape[1] / a.shape[1]))
+        k = np.zeros((a.shape[0] * fy, a.shape[1] * fx), bool)
+        k[: min(keep.shape[0], k.shape[0]), : min(keep.shape[1], k.shape[1])] = keep[: k.shape[0], : k.shape[1]]
+        k = k.reshape(a.shape[0], fy, a.shape[1], fx).all(axis=(1, 3))
+        a[k] = b[k]
+        buf = np.zeros((p_out.height, p_out.line_size // itemsize), a.dtype)
+        buf[:, : a.shape[1]] = a
+        p_out.update(buf.tobytes())
+    out.pts = frame.pts
+    return out
+
+
+class SourceFrames:
+    """The frames of a video file, decoded in order, in the pixel format the writer encodes."""
+
+    def __init__(self, path: str, pix_fmt: str):
+        self.container = av.open(path)
+        self.frames = self.container.decode(video=0)
+        self.pix_fmt = pix_fmt
+
+    def next(self):
+        f = next(self.frames, None)
+        if f is None or f.format.name == self.pix_fmt:
+            return f
+        return f.reformat(format=self.pix_fmt)  # not the source's own samples, but the closest
+
+    def close(self) -> None:
+        self.container.close()
+
+
 def to_uint16(rgb: np.ndarray, alpha: np.ndarray | None = None) -> np.ndarray:
     data = np.clip(rgb, 0.0, 1.0)
     if alpha is not None:
@@ -543,8 +620,9 @@ class VideoWriter:
         self.dst_colorspace = spec.get("colorspace")
         self.dst_range = spec.get("color_range")
 
-    def write(self, rgb: np.ndarray) -> None:
-        """`rgb` is display-referred float (H, W, 3) in 0..1, as decoded by core."""
+    def write(self, rgb: np.ndarray, keep: np.ndarray | None = None, source=None) -> None:
+        """`rgb` is display-referred float (H, W, 3) in 0..1, as decoded by core. Where `keep` (H, W) holds, the source
+        frame's own YUV samples are written instead (`keep_samples`)."""
         arr = np.ascontiguousarray((np.clip(rgb, 0.0, 1.0) * 65535.0 + 0.5).astype(np.uint16))
         frame = av.VideoFrame.from_ndarray(arr, format="rgb48le")
         kwargs = {"format": self.pix_fmt}
@@ -557,6 +635,8 @@ class VideoWriter:
             frame = frame.reformat(**kwargs)
         except (ValueError, TypeError, AVError):  # an older PyAV without colour-range arguments
             frame = frame.reformat(format=self.pix_fmt)
+        if keep is not None and source is not None and self.pix_fmt.startswith("yuv"):
+            frame = keep_samples(frame, source, keep)
         frame.pts = self.index
         self.index += 1
         for packet in self.stream.encode(frame):

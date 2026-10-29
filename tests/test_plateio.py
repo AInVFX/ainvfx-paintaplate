@@ -199,6 +199,39 @@ class WritePngsTest(unittest.TestCase):
         print("PNG frames: ok (RGB and RGBA, written in parallel, every pixel exact)")
 
 
+class MovieAndSamplesTest(unittest.TestCase):
+    def test_movie_as_core_tags_it(self):
+        colours = [(128, 128, 128), (200, 40, 40), (30, 160, 90), (240, 220, 30), (20, 30, 200)]
+        frames = [np.full((48, 64, 3), c, np.uint8) for c in colours]
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "raw_00001_.mp4")
+            plateio.write_movie(lambda i: frames[i], len(frames), path, 24.0, workers=3)
+            with av.open(path) as c:
+                cc = c.streams.video[0].codec_context
+                tags = (cc.name, cc.pix_fmt, int(cc.colorspace), int(cc.color_range), int(cc.color_primaries), int(cc.color_trc))
+                got = [f.reformat(format="rgb24", src_colorspace=1, src_color_range=1, dst_color_range=2).to_ndarray()
+                       for f in c.decode(video=0)]
+        self.assertEqual(tags, ("h264", "yuv420p", 1, 1, 1, 13))  # as core: BT.709 matrix and primaries, sRGB transfer, limited
+        worst = max(np.abs(g[8:-8, 8:-8].astype(int) - f[8:-8, 8:-8]).max() for g, f in zip(got, frames))
+        self.assertLessEqual(worst, 4)  # the BT.709 matrix both ways: a wrong matrix shifts saturated colours far more
+        print(f"movie: ok (H.264 yuv420p, BT.709 and sRGB tags, flat colours back within {worst}/255)")
+
+    def test_untouched_samples_are_the_source(self):
+        rng = np.random.default_rng(10)
+        for fmt in ("yuv420p", "yuv422p10le"):
+            src = av.VideoFrame.from_ndarray(rng.integers(0, 256, (16, 24, 3), np.uint8), format="rgb24").reformat(format=fmt)
+            new = av.VideoFrame.from_ndarray(rng.integers(0, 256, (16, 24, 3), np.uint8), format="rgb24").reformat(format=fmt)
+            keep = np.zeros((16, 24), bool)
+            keep[:, 13:] = True  # an odd edge: the chroma column shared with column 12 changed, so it keeps the new sample
+            out = plateio.keep_samples(new, src, keep)
+            size = 2 if "10" in fmt else 1
+            y = [plateio.plane_array(f.planes[0], size) for f in (out, src, new)]
+            u = [plateio.plane_array(f.planes[1], size) for f in (out, src, new)]
+            self.assertTrue(np.array_equal(y[0][:, 13:], y[1][:, 13:]) and np.array_equal(y[0][:, :13], y[2][:, :13]))
+            self.assertTrue(np.array_equal(u[0][:, 7:], u[1][:, 7:]) and np.array_equal(u[0][:, :7], u[2][:, :7]))
+        print("untouched YUV samples: ok (4:2:0 and 4:2:2 10-bit, a shared chroma sample kept only when all its pixels are)")
+
+
 class FloatReadTest(unittest.TestCase):
     def test_read_float_keeps_exr_values(self):
         import OpenEXR

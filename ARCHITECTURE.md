@@ -1,6 +1,6 @@
 # AInVFX PaintAPlate: architecture
 
-This document explains what PaintAPlate does, how it is built and where each part lives, for anyone who maintains the code. It describes version 0.4.12. `TESTING.md` covers the tests.
+This document explains what PaintAPlate does, how it is built and where each part lives, for anyone who maintains the code. It describes version 0.4.13. `TESTING.md` covers the tests.
 
 ## 1. What PaintAPlate does
 
@@ -57,10 +57,10 @@ COMFYUI SERVER
   routes.py ...... /paintaplate/download  /paintaplate/plates  /paintaplate/thumb  /paintaplate/blank  /paintaplate/stat
                    /paintaplate/jobs  /paintaplate/frames
   web/workflows .. 12 API workflows, written by tools/build_workflows.py
-        |  core nodes, ComfyUI-LTXVideo nodes and the 9 PaintAPlate nodes
+        |  core nodes, ComfyUI-LTXVideo nodes and the 10 PaintAPlate nodes
         v
 NODE PACK (Python)
-  nodes.py ....... 9 thin nodes: they convert tensors, then call
+  nodes.py ....... 10 thin nodes: they convert tensors, then call
   plateio.py ..... files: probe, read, write (numpy, PyAV and OpenEXR; no torch)
   mathops.py ..... pixels: fit, relight, mattes, keyframes (numpy and scipy; no torch)
         v
@@ -73,7 +73,7 @@ MODELS (about 60 GB)
 
 These rules keep the code small and easy to change. Follow them in every change.
 
-1. **All GPU work is a ComfyUI workflow.** The page loads a workflow file, fills its slots and posts it. The 9 PaintAPlate nodes only do what core ComfyUI cannot. So the app runs on any ComfyUI, and a Comfy API deployment stays possible.
+1. **All GPU work is a ComfyUI workflow.** The page loads a workflow file, fills its slots and posts it. The 10 PaintAPlate nodes only do what core ComfyUI cannot. So the app runs on any ComfyUI, and a Comfy API deployment stays possible.
 2. **Workflows are generated.** `tools/build_workflows.py` writes `web/workflows`. Nobody edits the JSON by hand: a test fails when the files and the generator disagree.
 3. **Each workflow describes itself.** In each node's `_meta`, `slots` maps the node's inputs to slot names, `output` names an output the page reads, and `progress` marks the node whose progress bar stands for the whole workflow.
 4. **Optional links.** Some links exist only when the page has something to send: a matte to composite with, words to search by, a relit frame. When their slots stay empty, the page drops the link and every node that fed it. The rule is written twice, as `OPTIONAL` in `logic.mjs` and in `build_workflows.py`, and a test keeps the two equal.
@@ -109,7 +109,7 @@ On cards with 24 GB or more, preview passes show a live preview: every second st
 1. **A blank plate.** In the Open dialog, the blank plate form posts to `/paintaplate/blank`, which writes a black ProRes 4444 canvas in `input/paintaplate/blank`, once per size. Sides are multiples of 64 up to 1920; lengths are 8k + 1 frames, from 9 to 321; frame rates are 24, 25 or 50 fps.
 2. **Keyframes.** The brush paints on frame 0, on the last frame, and on the 8k + 1 frames between (`snapKey`). Diamonds on the timeline drag between free slots; Ctrl+C and Ctrl+V copy a keyframe, Delete removes it, and onion skins show the keyframes around the playhead.
 3. **Generate** (Enter, `generateFluid`). The `fluid` workflow runs one LTX 2.5 pass. Keyframe Video builds the control video (black frames with each keyframe at its frame). `LTXICLoRALoaderModelOnly` reads the LoRA's downscale factor and hands it to `LTXAddVideoICLoRAGuide`. The sampler is `euler_ancestral` with the 8 distilled sigmas at CFG 1, and the prompt is `ainvfxfluid, ` followed by your words (`fluidPrompt`).
-4. **Use as the plate.** Save Plate writes the shot as ProRes 4444, and « Use as the plate » opens it for every edit. File > Back to the fluid keyframes returns to them.
+4. **The first edit.** Once made, the fluid shot is the plate the next edits are painted on: History shows it as edit 1, Fluid, under the others. Its pencil brings the keyframes and words back (the edits above stay until a new shot is made), its eye bypasses it (the blank plate under the edits), and it can try another seed or be removed. Another tool closes the keyframes. The edits on it keep one result per plate they were made on (`recordOf`, `base`), so bypassing and turning it back on takes their results back.
 
 Without `ainvfx-fluid.safetensors`, fluid shots switch off and the rest of the app works (`boot` sets `S.fluidReady`).
 
@@ -129,8 +129,8 @@ Without `ainvfx-fluid.safetensors`, fluid shots switch off and the rest of the a
 
 | File | What it does |
 | --- | --- |
-| `__init__.py` | The entry point: registers the routes, serves `web/`, and exposes the 9 nodes (V3 schema, `comfy_api.v0_0_2`). |
-| `nodes.py` | The 9 nodes, and the path guards `resolve` and `output_folder`. |
+| `__init__.py` | The entry point: registers the routes, serves `web/`, and exposes the 10 nodes (V3 schema, `comfy_api.v0_0_2`). |
+| `nodes.py` | The 10 nodes, and the path guards `resolve` and `output_folder`. |
 | `plateio.py` | Files: sequences (a missing frame keeps its place, as in OpenRV), the plate spec, EXR writing that keeps every layer and header, still writers (PNG, TIFF, DPX, EXR), `VideoWriter` (the source codec, colour tags, timecode and audio), and the blank canvas. |
 | `mathops.py` | Pixels: phase-correlation alignment, grain level, the colour seam field, push-pull fill, steady masks, `fit_to_plate`, `relight`, `follow_matte`, `level_fill`, `keyframe_video`, and the fast bilinear `resize_to`. |
 | `routes.py` | The routes: the zip download, the plate list, thumbnails, the blank plate, a plate's size and time (`stat`), and the job index (`jobs`: a finished job's outputs by the hash of its inputs, kept while all its files exist). Also the frames of an image-sequence plate or export as RGB half floats (`frames`), which the viewer's colour reads. |
@@ -173,16 +173,17 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | `warm` | Loads the LTX 2.5 stack at page open, on cards of 60 GB or more | `warmAll` |
 | `fluid` | The ainvfx-fluid pass, saved as ProRes 4444 | `generateFluid` |
 
-### The 9 nodes, in `nodes.py`
+### The 10 nodes, in `nodes.py`
 
 | Node | What it does | Used by |
 | --- | --- | --- |
 | Load Plate | A video or a frame folder at full precision: frames, alpha, spec, frame rate, frame count; optional 8k + 1 padding | most workflows |
-| Save Plate | Writes the plate's format, with the exact source pixels wherever nothing changed | `export`, `fluid` |
+| Save Plate | Writes the plate's format, with the exact source pixels wherever nothing changed ; for a video plate, the untouched pixels are its own YUV samples, with no RGB round trip | `export`, `fluid` |
 | Fit to Plate | Resizes, aligns, matches the colour at the edge, adds grain, steadies the soft mask | `comp`, `export` |
 
 | Relight Transfer | The new light from the regenerated frame: its brightness with sharp edges, its colour smooth, and no channel divided by almost no light (`light_ratio`); the texture and highlights from the plate; sRGB inputs are decoded and the result encoded here, frame by frame in parallel (`plate_space`, `shot_space`) | `edit`, `comp`, `export` |
 | Save Frames | Saves a batch as numbered PNG frames, named as core Save Image names them, several frames at once (core took 35.3 s for a 1080p shot) | `clean`, `cleanup`, `shot`, `matte`, `export` |
+| Save Movie | Saves a batch as the H.264 movie the page plays, as core Save Video makes it (crf 18, BT.709, limited range), the frames converted several at once and x264 at preset veryfast (core took 8.3 s for a 1080p shot) | `ingest`, `clean`, `cleanup`, `shot`, `comp`, `export` |
 | Follow Matte | One matte per frame from SAM's track, following the object's own region, which starts where the edit changed the first frame (for paint) or at the first-frame mask, and moves by at most 1/16 of the width per frame: SAM's mask further away stays out, even joined to the object by a thin line, the last matte holds where the object is not seen (the first-frame mask when SAM returns none), and for paint every pixel the shot changed near the object joins | `matte` |
 | Level Fill | An erase's fill levelled with the background it continues: where the fill is flat and a few levels off the background around it, the difference goes, low frequencies only; edges, revealed objects and textured fills stay as they are. Off, it passes the image through | `edit` |
 | Live Preview | A sampler hook: a tiny-decoder WebP every N steps; it switches itself off on any error | `clean`, `shot`, `fluid` |

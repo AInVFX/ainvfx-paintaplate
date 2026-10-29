@@ -174,9 +174,7 @@ def ingest():
       filename_prefix=Slot("prefix", "paintaplate/plate/hero"))
     real = g("ImageFromBatch", _title="Real frames (no padding)", image=srgb, batch_index=0, length=load[4])
     proxy = g("ImageScaleToMaxDimension", image=real, upscale_method="area", largest_size=Slot("proxy_size", 960))
-    video = g("CreateVideo", images=proxy, fps=load[3], bit_depth=8, color_space="sRGB", codec="none")
-    g("SaveVideo", _title="Playback proxy", _output="proxy", video=video,
-      filename_prefix=Slot("video_prefix", "paintaplate/plate/proxy"), format="auto", format__codec="auto")
+    g("PaintAPlate_SaveMovie", _title="Playback proxy", _output="proxy", filename_prefix=Slot("video_prefix", "paintaplate/plate/proxy"), images=proxy, fps=load[3])
     g("PreviewAny", _title="Plate spec", _output="spec", source=load[5])
     g.save("ingest")
 
@@ -324,9 +322,7 @@ def clean():
     decoded = g("VAEDecode", vae=vae, samples=g("LTXVCropGuides", positive=guide[0], negative=guide[1],
                                                  latent=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])[2])
     g("PaintAPlate_SaveFrames", _title="Clean frames", _output="frames", images=decoded, filename_prefix=Slot("prefix", "paintaplate/plate/clean/f"))
-    video = g("CreateVideo", images=decoded, fps=load[3], bit_depth=8, color_space="sRGB", codec="none")
-    g("SaveVideo", _title="Clean shot (erased areas regenerated)", _output="video", video=video,
-      filename_prefix=Slot("video_prefix", "paintaplate/plate/clean"), format="auto", format__codec="auto")
+    g("PaintAPlate_SaveMovie", _title="Clean shot (erased areas regenerated)", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/clean"), images=decoded, fps=load[3])
     g.save("clean")
 
 
@@ -370,9 +366,7 @@ def cleanup():
                 latent_image=g("LTXVConcatAVLatent", video_latent=latent, audio_latent=audio))
     decoded = g("VAEDecode", vae=vae, samples=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])
     g("PaintAPlate_SaveFrames", _title="Clean frames", _output="frames", images=decoded, filename_prefix=Slot("prefix", "paintaplate/plate/full/clean/f"))
-    video = g("CreateVideo", images=decoded, fps=load[3], bit_depth=8, color_space="sRGB", codec="none")
-    g("SaveVideo", _title="Clean shot at full size", _output="video", video=video,
-      filename_prefix=Slot("video_prefix", "paintaplate/plate/full/clean"), format="auto", format__codec="auto")
+    g("PaintAPlate_SaveMovie", _title="Clean shot at full size", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/full/clean"), images=decoded, fps=load[3])
     g.save("cleanup")
 
 
@@ -414,9 +408,7 @@ def shot():
     decoded = g("VAEDecode", samples=cropped[2], vae=vae)
     g("PaintAPlate_SaveFrames", _title="Shot frames", _output="frames", images=decoded,
       filename_prefix=Slot("prefix", "paintaplate/plate/shot/f"))
-    video = g("CreateVideo", images=decoded, fps=load[3], bit_depth=8, color_space="sRGB", codec="none")
-    g("SaveVideo", _title="Shot video (whole frame regenerated)", _output="video", video=video,
-      filename_prefix=Slot("video_prefix", "paintaplate/plate/shot"), format="auto", format__codec="auto")
+    g("PaintAPlate_SaveMovie", _title="Shot video (whole frame regenerated)", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/shot"), images=decoded, fps=load[3])
     g.save("shot")
 
 
@@ -485,9 +477,7 @@ def comp():
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=small, on_true=relit)
     _, final = fitted(g, base, gen, union)
     real = g("ImageFromBatch", image=final, batch_index=0, length=load[4])
-    video = g("CreateVideo", images=real, fps=load[3], bit_depth=8, color_space="sRGB", codec="none")
-    g("SaveVideo", _title="Composite preview", _output="video", video=video,
-      filename_prefix=Slot("video_prefix", "paintaplate/plate/comp"), format="auto", format__codec="auto")
+    g("PaintAPlate_SaveMovie", _title="Composite preview", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/comp"), images=real, fps=load[3])
     g.save("comp")
 
 
@@ -522,8 +512,7 @@ def export():
     review = g("ImageScaleToMaxDimension", upscale_method="lanczos", largest_size=1920,
                image=g("ImageFromBatch", batch_index=0, length=load[4],
                        image=g("ImageColorSpace", image=final, source=Slot("color_space", "sRGB"), destination="sRGB")))
-    g("SaveVideo", _title="Review movie (full size, H.264)", _output="review", format="auto", format__codec="auto",
-      video=g("CreateVideo", images=review, fps=load[3], bit_depth=8, color_space="sRGB", codec="none"),
+    g("PaintAPlate_SaveMovie", _title="Review movie (full size, H.264)", _output="review", images=review, fps=load[3],
       filename_prefix=Slot("review_prefix", "paintaplate/plate/review"))
     matte_frames = g("ImageFromBatch", image=g("MaskToImage", mask=fit[1]), batch_index=0, length=load[4])
     g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed", _output="matte", images=matte_frames,
