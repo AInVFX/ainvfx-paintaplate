@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayUniforms, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit } from "../../web/logic.mjs";
+import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayUniforms, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -309,4 +309,16 @@ test("the plate browser: folders first, numbers in order or newest first, a filt
   assert.deepEqual(crumbs(""), [{ label: "Input", path: "" }]);
   assert.equal(framePattern("frames_00001_.exr"), "frames_#####_.exr");
   assert.equal(framePattern("shot.1001.exr"), "shot.####.exr");
+});
+
+test("a divider's drag stays inside the window and never squeezes a panel or the stage under its least", () => {
+  const side = { least: 220, stage: 320, around: 84 }, log = { least: 60, stage: 240, around: 90 };
+  const view = { width: 1400, height: 900 };
+  assert.equal(panelSize("side", 408, view, side), 408);
+  assert.equal(panelSize("side", 2000, view, side), 996); // 1400 - 84 - 320: the stage keeps 320 px
+  assert.equal(panelSize("side", 100, view, side), 220);
+  assert.equal(panelSize("side", 300, { width: 500, height: 900 }, side), 220); // a narrow window: the panel's least wins
+  assert.equal(panelSize("log", 330.4, view, log), 330);
+  assert.equal(panelSize("log", 900, view, log), 570); // 900 - 90 - 240
+  assert.equal(panelSize("log", 10, view, log), 60);
 });

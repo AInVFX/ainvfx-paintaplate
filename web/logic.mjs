@@ -518,3 +518,11 @@ export function changedMask(a, b, z, threshold = 24) {
   }
   return out;
 }
+
+// A divider's drag as a size the layout can take: never under the panel's least, and never leaving the stage under its own
+// least while the window has room. `kind` "side" sizes across the window's width, "log" down its height; `around` is what
+// the fixed parts take on that axis (the tools column, or the top bar and the log's status row).
+export function panelSize(kind, wanted, view, { least, stage, around }) {
+  const room = (kind === "side" ? view.width : view.height) - around - stage;
+  return Math.round(Math.max(least, Math.min(wanted, room)));
+}

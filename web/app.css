@@ -12,7 +12,7 @@
 [hidden] { display: none !important; }
 body {
   margin: 0; height: 100vh; display: grid; overflow: hidden;
-  grid-template: "top top top" 46px "tools stage side" minmax(0, 1fr) "log log log" auto / 84px minmax(0, 1fr) 288px;
+  grid-template: "top top top top" 46px "tools stage split side" minmax(0, 1fr) "log log log log" auto / 84px minmax(0, 1fr) 0 var(--side-w, 288px);
 }
 button {
   font: inherit; color: var(--text); background: var(--raised); border: 1px solid var(--line);
@@ -198,12 +198,18 @@ dialog .check small { color: var(--muted); }
 .hint { color: var(--muted); margin: 6px 0; }
 
 /* Log */
-.log { grid-area: log; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 12px; border-top: 1px solid var(--line); background: var(--panel); }
+/* Dividers: the side panel's width and the open log's height drag (app.mjs, layoutUI) */
+.split { z-index: 6; touch-action: none; background: transparent; transition: background .12s; }
+.split:hover, .split:focus-visible, .split.dragging { background: var(--gold); outline: none; }
+.split-side { grid-area: split; width: 6px; margin-left: -3px; cursor: ew-resize; }
+.split-log { position: absolute; left: 0; right: 0; top: -3px; height: 6px; cursor: ns-resize; }
+body.resizing, body.resizing * { user-select: none; }
+.log { position: relative; grid-area: log; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 12px; border-top: 1px solid var(--line); background: var(--panel); }
 #status { flex: 1; min-width: 0; margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #log-btn { padding: 2px 10px; }
 #log-btn.alert { color: #ff7b72; border-color: #6b2f29; }
 /* the log reads like ComfyUI's console: near black, monospace, errors in red */
-#log { flex-basis: 100%; list-style: none; margin: 0; padding: 8px 10px; max-height: 180px; overflow-y: auto; border-radius: 4px;
+#log { flex-basis: 100%; box-sizing: border-box; list-style: none; margin: 0; padding: 8px 10px; height: var(--log-h, 180px); overflow-y: auto; border-radius: 4px;
   background: #0b0b0b; color: #c9d1d9; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
 #log li { display: flex; gap: 12px; }
 #log time { color: #6e7681; flex: none; }
@@ -248,7 +254,8 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
   .fps, .frame-total { display: none; }
   .side { border-left: 0; border-top: 1px solid var(--line); overflow: visible; padding: 10px; }
   .log { position: sticky; bottom: 0; z-index: 5; }
-  #log { max-height: 40dvh; }
+  #log { height: auto; max-height: 40dvh; }
+  .split { display: none; }
   .help dl { grid-template-columns: 1fr; gap: 0 0; }
   .help dd { margin-bottom: 8px; }
   .blank-row { grid-template-columns: repeat(2, 1fr); }
@@ -274,7 +281,8 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
   .fps, .frame-total { display: none; }
   .side { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
   .log { position: sticky; bottom: 0; z-index: 5; padding: 4px 10px; }
-  #log { max-height: 50dvh; }
+  #log { height: auto; max-height: 50dvh; }
+  .split { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .hud { transition: none; } }
 

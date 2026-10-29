@@ -272,6 +272,9 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 
 At load, `boot()` loads the OCIO config, then checks that every node class and model file the workflows need exists, and names what is missing.
 
+
+**Layout.** `layoutUI` sets the side panel's width and the open log's height (`--side-w` and `--log-h` on the body's grid) from two dividers, kept inside the window by `logic.panelSize` so the stage keeps 320 px each way; `localStorage` keeps them (`paintaplate.layout`), and the ResizeObserver on `#viewport` refits the frame.
+
 ## 12. How to make common changes
 
 | To change | Edit | Then |

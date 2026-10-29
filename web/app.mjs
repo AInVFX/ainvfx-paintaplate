@@ -9,7 +9,7 @@ import { DeepFrames, FrameCache } from "./frames.mjs";
 import { sceneGraph } from "./graph.mjs";
 import { CHANNEL_NAMES, DISPLAY, FLUID, PARAMS, blankSpec, caption, changedMask, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
   erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
-  stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern } from "./logic.mjs";
+  stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -44,6 +44,10 @@ const COMPOSITE_GROW = { erase: 24, other: 160 }, COMPOSITE_FEATHER = 96; // the
 const FOLLOW = { zone: 1 / 16, threshold: 0.1, seed: 24 };
 const IDLE_MS = 300; // after Generate, a bypass, a removal or an undo, the render starts this soon
 const RESULTS_KEPT = 8; // results kept per edit, by the strokes, words, seed and switch that made them: undo gets them back at once
+const SIDE_W = 288, LOG_H = 180; // CSS px: the side panel's width and the open log's height until a divider moves them
+const PANEL_LEAST = { side: 220, log: 60 }, STAGE_LEAST = { side: 320, log: 320 }; // a drag never makes them smaller
+const PANEL_STEP = 16; // CSS px per arrow key on a focused divider
+const LAYOUT_PREF = "paintaplate.layout"; // the dragged sizes, kept for the next session
 const RENDERS_WANTED = 6; // sets of edits whose renders go on in the background: the most recently shown
 const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "review", "export"]; // the render's job kinds: Generate and a new plate stop them
@@ -414,7 +418,7 @@ function applyView() {
   Object.assign(view.style, { width: `${w}px`, height: `${h}px`, transform: `translate(${x + z.x}px, ${y + z.y}px) scale(${z.k})` });
   placeWipe();
 }
-addEventListener("resize", fitView);
+addEventListener("resize", () => { layoutUI(); fitView(); });
 
 function frameAt(e) { // pointer position in frame pixels (working size); stays right under zoom and pan
   const r = view.getBoundingClientRect();
@@ -2686,8 +2690,58 @@ $("#log-btn").onclick = () => {
   $("#log").hidden = !open;
   $("#log-btn").setAttribute("aria-expanded", String(open));
   $("#log-btn").classList.remove("alert");
+  $("#split-log").hidden = !open;
+  layoutUI();
   if (open) $("#log").scrollTop = $("#log").scrollHeight;
 };
+
+// The layout: the side panel and the log resize from their dividers. The ResizeObserver on #viewport refits the frame.
+const LAYOUT = saved(LAYOUT_PREF); // { side, log } in CSS px, as last dragged
+function layoutUI() { // the sizes on the page, kept inside the window as it is now; returns them
+  const view = { width: innerWidth, height: innerHeight }, open = !$("#log").hidden;
+  const bar = $(".log").offsetHeight - (open ? $("#log").offsetHeight : 0);
+  const around = { side: $(".tools").offsetWidth, log: $(".top").offsetHeight + bar };
+  const size = (kind, first) => panelSize(kind, LAYOUT[kind] ?? first, view, { least: PANEL_LEAST[kind], stage: STAGE_LEAST[kind], around: around[kind] });
+  const shown = { side: size("side", SIDE_W), log: size("log", LOG_H) };
+  document.body.style.setProperty("--side-w", `${shown.side}px`);
+  document.body.style.setProperty("--log-h", `${shown.log}px`);
+  $("#split-side").setAttribute("aria-valuenow", shown.side);
+  $("#split-log").setAttribute("aria-valuenow", shown.log);
+  return shown;
+}
+function keepLayout(kind, value) { // value undefined: back to the first size
+  if (value === undefined) delete LAYOUT[kind];
+  else { LAYOUT[kind] = value; LAYOUT[kind] = layoutUI()[kind]; } // kept as shown: inside the window
+  layoutUI();
+  try { localStorage.setItem(LAYOUT_PREF, JSON.stringify(LAYOUT)); } catch { /* this session only */ }
+}
+function divider(el, kind) { // drag it, or the arrow keys once focused; a double-click gives the first size back
+  const along = (e) => (kind === "side" ? e.clientX : e.clientY);
+  const size = () => (kind === "side" ? $(".side").offsetWidth : $("#log").offsetHeight);
+  el.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); el.setPointerCapture(e.pointerId);
+    const start = along(e), from = size();
+    el.classList.add("dragging"); document.body.classList.add("resizing");
+    const move = (m) => { LAYOUT[kind] = from - (along(m) - start); layoutUI(); }; // the panels sit right and below: toward them shrinks
+    const end = () => {
+      el.classList.remove("dragging"); document.body.classList.remove("resizing");
+      for (const [t, f] of [["pointermove", move], ["pointerup", end], ["pointercancel", end]]) el.removeEventListener(t, f);
+      keepLayout(kind, size());
+    };
+    for (const [t, f] of [["pointermove", move], ["pointerup", end], ["pointercancel", end]]) el.addEventListener(t, f);
+  });
+  el.addEventListener("dblclick", () => keepLayout(kind, undefined));
+  el.addEventListener("keydown", (e) => { // left and up grow the panel; nothing reaches the page's own keys
+    const sign = { ArrowLeft: 1, ArrowUp: 1, ArrowRight: -1, ArrowDown: -1 }[e.key];
+    if (sign === undefined) return;
+    e.preventDefault(); e.stopPropagation();
+    keepLayout(kind, size() + sign * PANEL_STEP);
+  });
+}
+divider($("#split-side"), "side");
+divider($("#split-log"), "log");
+layoutUI();
 for (const b of $$("#open [role=tab]")) b.onclick = () => showTab(b.dataset.tab);
 for (const b of $$("#open [data-root]")) b.onclick = () => browse(b.dataset.root).catch(quiet);
 $("#browse-find").oninput = () => drawBrowse();

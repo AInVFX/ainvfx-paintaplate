@@ -99,6 +99,8 @@ Click an edit in History to select it: its words come back, and painting, rubbin
 
 A **fluid shot** starts from a blank plate: paint flat colour blobs (light grey smoke, white steam, orange and yellow fire, flat zones for sky and ground) on frame 0 and on the last frame, describe the fluid, then Generate. The shot becomes the plate for every edit.
 
+Drag the line between the frame and History, or the top edge of the open log, to resize them; a double-click gives the first size back. The sizes are kept for the next session.
+
 ## How it works
 
 | Workflow | What it does |

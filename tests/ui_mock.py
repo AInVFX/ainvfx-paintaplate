@@ -586,6 +586,50 @@ def keys_flow(page):
     check(not failed, f"every documented key does what the Keys dialog says ({len(results)} presses): {failed or 'all'}")
 
 
+def drag(page, selector, dx, dy):
+    box = page.locator(selector).bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    page.mouse.move(x, y); page.mouse.down(); page.mouse.move(x + dx, y + dy, steps=5); page.mouse.up()
+
+
+def layout_flow(page, port):
+    """The side panel and the log resize from their dividers, keep the stage usable, keep their sizes for the next session,
+    and take their first size back on a double-click."""
+    width = lambda: page.evaluate("document.querySelector('.side').offsetWidth")
+    height = lambda: page.evaluate("document.querySelector('#log').offsetHeight")
+    frame = lambda: page.evaluate("document.querySelector('#viewport').getBoundingClientRect().toJSON()")
+    stage = lambda: page.evaluate("document.querySelector('.stage').getBoundingClientRect().toJSON()")
+    check(page.locator("#split-log").is_hidden(), "the log's divider shows only with the log open")
+    w0, v0 = width(), frame()
+    drag(page, "#split-side", -120, 0)
+    w1, v1 = width(), frame()
+    check(w1 == w0 + 120 and round(v0["width"] - v1["width"]) == 120, f"the side divider dragged 120 px left: History {w0} to {w1} px, the frame 120 px narrower")
+    drag(page, "#split-side", -3000, 0)
+    check(stage()["width"] >= 319, f"dragged to the far left, the stage keeps its room: {round(stage()['width'])} px")
+    drag(page, "#split-side", 3000 + 120, 0)
+    check(width() == 220, f"dragged to the far right, History keeps its least, 220 px: {width()}")
+    drag(page, "#split-side", -(w1 - 220), 0)
+    if page.evaluate("document.querySelector('#log').hidden"):
+        page.click("#log-btn")
+    h0 = height()
+    drag(page, "#split-log", 0, -150)
+    h1 = height()
+    check(h1 == h0 + 150, f"the log's divider dragged 150 px up: the log {h0} to {h1} px")
+    page.focus("#split-log"); page.keyboard.press("ArrowUp")
+    check(height() == h1 + 16, f"an arrow key on a focused divider moves it 16 px: {height()}")
+    drag(page, "#split-log", 0, -3000)
+    check(stage()["height"] >= 319, f"dragged to the top, the stage keeps its room: {round(stage()['height'])} px")
+    drag(page, "#split-log", 0, 3000)
+    page.focus("#split-log"); [page.keyboard.press("ArrowUp") for _ in range(2)]
+    h2 = height()
+    page.reload()
+    page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=20000)
+    page.click("#log-btn")
+    check((width(), height()) == (w1, h2), f"a new session keeps the dragged sizes: History {width()} px, the log {height()} px")
+    page.dblclick("#split-side"); page.dblclick("#split-log")
+    check((width(), height()) == (288, 180), f"a double-click gives the first sizes back: {width()} and {height()} px")
+
+
 def phone(browser, port):
     """The page on a phone, upright and on its side: the frame, the transport, the menu and the log fit the screen."""
     for name, size in (("upright", {"width": 390, "height": 844}), ("sideways", {"width": 844, "height": 390})):
@@ -656,6 +700,7 @@ def main():
             ocio_flow(page)
             keys_flow(page)
             oom_flow(page)
+            layout_flow(page, a.port)
             phone(browser, a.port)
             browser.close()
     finally:
