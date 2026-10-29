@@ -323,7 +323,7 @@ def clean():
                 latent_image=g("LTXVConcatAVLatent", video_latent=guide[2], audio_latent=audio))
     decoded = g("VAEDecode", vae=vae, samples=g("LTXVCropGuides", positive=guide[0], negative=guide[1],
                                                  latent=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])[2])
-    g("SaveImage", _title="Clean frames", _output="frames", images=decoded, filename_prefix=Slot("prefix", "paintaplate/plate/clean/f"))
+    g("PaintAPlate_SaveFrames", _title="Clean frames", _output="frames", images=decoded, filename_prefix=Slot("prefix", "paintaplate/plate/clean/f"))
     video = g("CreateVideo", images=decoded, fps=load[3], bit_depth=8, color_space="sRGB", codec="none")
     g("SaveVideo", _title="Clean shot (erased areas regenerated)", _output="video", video=video,
       filename_prefix=Slot("video_prefix", "paintaplate/plate/clean"), format="auto", format__codec="auto")
@@ -369,7 +369,7 @@ def cleanup():
                 sampler=g("KSamplerSelect", sampler_name="euler"), sigmas=g("ManualSigmas", sigmas=REFINE_SIGMAS),
                 latent_image=g("LTXVConcatAVLatent", video_latent=latent, audio_latent=audio))
     decoded = g("VAEDecode", vae=vae, samples=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])
-    g("SaveImage", _title="Clean frames", _output="frames", images=decoded, filename_prefix=Slot("prefix", "paintaplate/plate/full/clean/f"))
+    g("PaintAPlate_SaveFrames", _title="Clean frames", _output="frames", images=decoded, filename_prefix=Slot("prefix", "paintaplate/plate/full/clean/f"))
     video = g("CreateVideo", images=decoded, fps=load[3], bit_depth=8, color_space="sRGB", codec="none")
     g("SaveVideo", _title="Clean shot at full size", _output="video", video=video,
       filename_prefix=Slot("video_prefix", "paintaplate/plate/full/clean"), format="auto", format__codec="auto")
@@ -412,7 +412,7 @@ def shot():
     video_latent = g("LTXVSeparateAVLatent", av_latent=sampled[0])
     cropped = g("LTXVCropGuides", positive=guide[0], negative=guide[1], latent=video_latent[0])
     decoded = g("VAEDecode", samples=cropped[2], vae=vae)
-    g("SaveImage", _title="Shot frames", _output="frames", images=decoded,
+    g("PaintAPlate_SaveFrames", _title="Shot frames", _output="frames", images=decoded,
       filename_prefix=Slot("prefix", "paintaplate/plate/shot/f"))
     video = g("CreateVideo", images=decoded, fps=load[3], bit_depth=8, color_space="sRGB", codec="none")
     g("SaveVideo", _title="Shot video (whole frame regenerated)", _output="video", video=video,
@@ -442,7 +442,7 @@ def matte():
                zone=Slot("zone", 0.0625), threshold=Slot("threshold", 0.1))
     g.link_slot(follow, "base", "follow_base")  # dropped for an erase matte: no shot to compare
     g.link_slot(follow, "element", "follow_element")  # dropped for an erase matte: the object is the first-frame mask
-    g("SaveImage", _title="Matte frames", _output="frames", images=g("MaskToImage", mask=follow[0]),
+    g("PaintAPlate_SaveFrames", _title="Matte frames", _output="frames", images=g("MaskToImage", mask=follow[0]),
       filename_prefix=Slot("prefix", "paintaplate/plate/matte/m"))
     g("PreviewAny", _title="How the matte followed", _output="follow", source=follow[1])
     g.save("matte")
@@ -480,12 +480,9 @@ def comp():
               crop="disabled")
     gen = g("PaintAPlate_LoadPlate", _title="Generated shot", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
     union = mattes(g)
-    small_lin = g("ImageColorSpace", image=small, source="sRGB", destination="linear")
-    relit = g("PaintAPlate_RelightTransfer", plate=small_lin, source=half(g, small_lin),
-              relit=g("ImageColorSpace", image=half(g, gen), source="sRGB", destination="linear"),
-              radius=Slot("radius", 4), strength=Slot("strength", 1.0), align=True)
-    back = g("ImageColorSpace", image=relit, source="linear", destination="sRGB")
-    base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=small, on_true=back)
+    relit = g("PaintAPlate_RelightTransfer", plate=small, source=half(g, small), relit=half(g, gen),
+              plate_space="sRGB", shot_space="sRGB", radius=Slot("radius", 4), strength=Slot("strength", 1.0), align=True)
+    base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=small, on_true=relit)
     _, final = fitted(g, base, gen, union)
     real = g("ImageFromBatch", image=final, batch_index=0, length=load[4])
     video = g("CreateVideo", images=real, fps=load[3], bit_depth=8, color_space="sRGB", codec="none")
@@ -508,12 +505,14 @@ def export():
     source = g("ImageScale", image=g("ImageColorSpace", image=load, source=Slot("color_space", "sRGB"),
                                      destination="sRGB"),
                upscale_method="area", width=size[0], height=size[1], crop="disabled")
+    # The relight works in the plate's own encoding when that is sRGB or linear (relight_space, filled by the page): the
+    # two core conversions are then no-ops, and Relight Transfer decodes and encodes each frame in parallel. At full size
+    # core took 19.5 s for each of them on a 1080p shot (28 Oct). Any other colour space still goes through linear light.
     relit = g("PaintAPlate_RelightTransfer",
-              plate=g("ImageColorSpace", image=load, source=Slot("color_space", "sRGB"), destination="linear"),
-              source=g("ImageColorSpace", image=half(g, source), source="sRGB", destination="linear"),
-              relit=g("ImageColorSpace", image=half(g, gen), source="sRGB", destination="linear"),
+              plate=g("ImageColorSpace", image=load, source=Slot("color_space", "sRGB"), destination=Slot("relight_space", "linear")),
+              source=half(g, source), relit=half(g, gen), plate_space=Slot("relight_space", "linear"), shot_space="sRGB",
               radius=Slot("radius", 8), strength=Slot("strength", 1.0), align=True)
-    back = g("ImageColorSpace", image=relit, source="linear", destination=Slot("color_space", "sRGB"))
+    back = g("ImageColorSpace", image=relit, source=Slot("relight_space", "linear"), destination=Slot("color_space", "sRGB"))
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=load, on_true=back)
     # the new pixels are matched to the plate they are composited onto: relit when the light changed
     fit, final = fitted(g, base, gen_plate, union)
@@ -527,7 +526,7 @@ def export():
       video=g("CreateVideo", images=review, fps=load[3], bit_depth=8, color_space="sRGB", codec="none"),
       filename_prefix=Slot("review_prefix", "paintaplate/plate/review"))
     matte_frames = g("ImageFromBatch", image=g("MaskToImage", mask=fit[1]), batch_index=0, length=load[4])
-    g("SaveImage", _title="Matte: where the plate changed", _output="matte", images=matte_frames,
+    g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed", _output="matte", images=matte_frames,
       filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))
     g.save("export")
 

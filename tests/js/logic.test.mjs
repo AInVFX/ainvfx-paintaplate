@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayUniforms, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit } from "../../web/logic.mjs";
+import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, relightSpace, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayUniforms, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -287,4 +287,10 @@ test("the colour picker averages the pixels under the cursor", () => {
   assert.equal(pickedColor(new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 255, 255])), "#800080");
   assert.equal(pickedColor(new Uint8ClampedArray([10, 20, 30, 255, 200, 200, 200, 0])), "#0a141e"); // outside the frame: not counted
   assert.equal(pickedColor(new Uint8ClampedArray([0, 0, 0, 0])), null);
+});
+
+test("a relight export works in the plate's own encoding when Relight Transfer decodes it", () => {
+  assert.equal(relightSpace("sRGB"), "sRGB");
+  assert.equal(relightSpace("linear"), "linear");
+  assert.equal(relightSpace("HDR PQ"), "linear"); // any other colour space goes through linear light, as before
 });

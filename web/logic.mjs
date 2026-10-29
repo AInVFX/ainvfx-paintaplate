@@ -359,6 +359,9 @@ export function pickedColor(data) {
   for (let i = 0; i < data.length; i += 4) if (data[i + 3] > 0) { r += data[i]; g += data[i + 1]; b += data[i + 2]; n++; }
   return n ? `#${[r, g, b].map((v) => Math.round(v / n).toString(16).padStart(2, "0")).join("")}` : null;
 }
+// The encoding a relight export works in: the plate's own when Relight Transfer decodes it (sRGB or linear), so core's
+// colour conversions around it do nothing; any other colour space goes through linear light.
+export const relightSpace = (cs) => (cs === "sRGB" || cs === "linear" ? cs : "linear");
 export const displayActive = (d) => Object.keys(DISPLAY).some((k) => d[k] !== DISPLAY[k]);
 
 export function formatParam(name, v) {

@@ -1,11 +1,11 @@
 // One ComfyUI workflow for a whole scene: the workflows the page runs, joined by links instead of files, so the scene
 // opens in ComfyUI and keeps working there. Pure functions over workflows parsed by logic.mjs, tested in Node.
 
-import { fillWorkflow, stageOne } from "./logic.mjs";
+import { relightSpace, fillWorkflow, stageOne } from "./logic.mjs";
 
 const LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]); // the nodes a link can stand in for
 const EDIT_OUT = ["result", "patch", "relit"]; // an edit's saved images: inside one scene, links carry them
-const OUTPUTS = new Set(["SaveImage", "PreviewImage", "SaveVideo", "PreviewAny", "PaintAPlate_SavePlate"]); // never shared
+const OUTPUTS = new Set(["SaveImage", "PreviewImage", "SaveVideo", "PreviewAny", "PaintAPlate_SavePlate", "PaintAPlate_SaveFrames"]); // never shared
 
 // One workflow under ids prefixed with `tag`: its slots filled with `values`, and the loader on each slot of `links` replaced
 // by that link. A plate loader replaced this way takes its spec, frame rate and frame count from the `plate` node. Output
@@ -64,7 +64,7 @@ export function sceneGraph(WF, { plate, edits, render }) {
   const over = (id, destination, source, mask) => node(id, "ImageCompositeMasked", { destination, source, x: 0, y: 0, resize_source: false, mask });
   const union = (id, masks, size) => scaleMask(id, masks.slice(1).reduce((a, m, i) =>
     node(`${id} ${i + 2}`, "MaskComposite", { destination: a, source: m, x: 0, y: 0, operation: "add" }), masks[0]), size);
-  const common = { path: plate.path, color_space: plate.cs, max_frames: plate.frames }, out = (s) => `${render.prefix}/${s}`, drop = ["frames"];
+  const common = { path: plate.path, color_space: plate.cs, relight_space: relightSpace(plate.cs), max_frames: plate.frames }, out = (s) => `${render.prefix}/${s}`, drop = ["frames"];
 
   node("plate", "PaintAPlate_LoadPlate", { path: plate.path, max_frames: plate.frames, pad_8n1: true });
   const srgb = node("plate in sRGB", "ImageColorSpace", { image: ["plate", 0], source: plate.cs, destination: "sRGB" });

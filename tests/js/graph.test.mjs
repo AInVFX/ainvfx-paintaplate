@@ -25,7 +25,8 @@ test("a scene is one prompt: files only for the plate and the strokes, frames be
   assert.ok(Object.values(g).every((n) => n.class_type !== "PaintAPlate_LoadPlate" || n.inputs.path === plate.path));
   assert.equal(count(g, "PaintAPlate_LoadPlate"), 1); // the plate decodes once
   assert.equal(count(g, "UNETLoader"), 2); // Klein and LTX 2.5
-  assert.equal(count(g, "SaveImage"), 1); // the export's matte; the frames handed between steps are links
+  assert.equal(count(g, "SaveImage"), 0);
+  assert.equal(count(g, "PaintAPlate_SaveFrames"), 1); // the export's matte; the frames handed between steps are links
   assert.equal(count(g, "PaintAPlate_SavePlate"), 1);
   assert.equal(count(g, "SAM3_VideoTrack"), 2); // the erase on the plate, the paint on the shot
   const captions = Object.values(g).filter((n) => n.class_type === "CLIPTextEncode").map((n) => n.inputs.text);
@@ -41,6 +42,7 @@ test("an erase alone needs no Ripple pass, a relight alone no tracking and no ma
   linked(light);
   assert.equal(count(light, "SAM3_VideoTrack"), 0);
   assert.equal(count(light, "SaveImage"), 0);
+  assert.equal(count(light, "PaintAPlate_SaveFrames"), 0); // a relight alone: no matte to save
   assert.equal(Object.values(light).find((n) => n.class_type === "PaintAPlate_SavePlate").inputs.keep_untouched, false);
 });
 

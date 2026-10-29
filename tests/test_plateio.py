@@ -185,6 +185,20 @@ class BlankCanvas(unittest.TestCase):
         print("ProRes 4444 plate export: ok", writer.notes)
 
 
+class WritePngsTest(unittest.TestCase):
+    def test_frames_written_in_parallel_exactly(self):
+        rng = np.random.default_rng(5)
+        frames = [rng.integers(0, 256, (24, 40, 3), np.uint8) for _ in range(5)] + [rng.integers(0, 256, (24, 40, 4), np.uint8)]
+        ticks = []
+        with tempfile.TemporaryDirectory() as d:
+            paths = [os.path.join(d, f"f_{i + 1:05}_.png") for i in range(len(frames))]
+            plateio.write_pngs(lambda i: frames[i], paths, workers=3, tick=lambda: ticks.append(1))
+            back = [np.asarray(Image.open(p)) for p in paths]
+        self.assertEqual(len(ticks), len(frames))
+        self.assertTrue(all(np.array_equal(a, b) for a, b in zip(frames, back)))
+        print("PNG frames: ok (RGB and RGBA, written in parallel, every pixel exact)")
+
+
 class FloatReadTest(unittest.TestCase):
     def test_read_float_keeps_exr_values(self):
         import OpenEXR

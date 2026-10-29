@@ -439,19 +439,38 @@ def relight(plate: np.ndarray, source: np.ndarray, relit: np.ndarray,
     return out
 
 
+def srgb_to_linear(x: np.ndarray) -> np.ndarray:
+    """The sRGB transfer function, decoded (IEC 61966-2-1): display values to linear light."""
+    x = np.asarray(x, np.float32)
+    return np.where(x <= 0.04045, x / 12.92, ((np.maximum(x, 0.04045) + 0.055) / 1.055) ** 2.4).astype(np.float32)
+
+
+def linear_to_srgb(x: np.ndarray) -> np.ndarray:
+    """The sRGB transfer function, encoded: linear light to display values. Values above 1.0 stay above 1.0."""
+    x = np.asarray(x, np.float32)
+    return np.where(x <= 0.0031308, x * 12.92, 1.055 * np.maximum(x, 0.0031308) ** (1 / 2.4) - 0.055).astype(np.float32)
+
+
 def relight_frame(plate: np.ndarray, source: np.ndarray, relit: np.ndarray, radius: int, strength: float = 1.0,
-                  align: bool = True) -> np.ndarray:
+                  align: bool = True, plate_space: str = "linear", shot_space: str = "linear") -> np.ndarray:
     """One frame of Relight Transfer: `relit` aligned to `source`, then its light moved onto `plate`.
 
     The ratio of light is computed at the size of `source` and `relit`, then enlarged to the plate. Light
     is smooth, so the workflows give them at half the plate's size: converting them to linear light then
     costs a quarter. `radius` is in pixels of that size; a shift counts as misalignment up to 8 plate pixels.
     """
+    if shot_space == "sRGB":  # source and relit as the model saw and made them
+        source, relit = srgb_to_linear(source[..., :3]), srgb_to_linear(relit[..., :3])
+    if plate_space == "sRGB":  # decoded here, frame by frame, then encoded back: far cheaper than core at full size
+        plate = np.concatenate([srgb_to_linear(plate[..., :3]), plate[..., 3:]], -1)
     if align:
         dy, dx = phase_shift(structure(source), structure(relit), 8.0 * source.shape[1] / plate.shape[1])
         if dy or dx:
             relit = ndimage.shift(relit, (dy, dx, 0), order=1, mode="nearest")
-    return relight(plate, source, relit, max(1, radius), strength).astype(np.float32)
+    out = relight(plate, source, relit, max(1, radius), strength).astype(np.float32)
+    if plate_space == "sRGB":
+        out[..., :3] = linear_to_srgb(out[..., :3])
+    return out
 
 
 def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=None, zone: float = 1 / 16,

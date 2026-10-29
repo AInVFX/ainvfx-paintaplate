@@ -65,6 +65,18 @@ class MathOps(unittest.TestCase):
         assert big.shape == (2 * H, 2 * W, 3)
         print("relight transfer: ok (ratio follows the light, highlights kept, any plate size)")
 
+    def test_relight_in_srgb(self):
+        """sRGB inputs decoded inside Relight Transfer give the frame core's conversions around it gave."""
+        rng = np.random.default_rng(7)
+        plate = rng.uniform(0.05, 0.95, (64, 96, 3)).astype(np.float32)
+        source = plate[::2, ::2].copy()
+        relit = np.clip(source * np.array([1.3, 1.1, 0.8], np.float32), 0, 1)
+        lin = m.relight_frame(m.srgb_to_linear(plate), m.srgb_to_linear(source), m.srgb_to_linear(relit), 4, align=False)
+        enc = m.relight_frame(plate, source, relit, 4, align=False, plate_space="sRGB", shot_space="sRGB")
+        np.testing.assert_allclose(enc, m.linear_to_srgb(lin), atol=1e-5)
+        np.testing.assert_allclose(m.linear_to_srgb(m.srgb_to_linear(plate)), plate, atol=1e-6)
+        print("relight in sRGB: ok (the same frame as core's conversions around it)")
+
     def test_relight_colour_of_light(self):
         """One colour of light per area: a dark channel's noise never reaches single pixels (the lighthouse specks, 28 Oct)."""
         rng = np.random.default_rng(3)

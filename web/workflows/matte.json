@@ -215,7 +215,7 @@
   }
  },
  "14": {
-  "class_type": "SaveImage",
+  "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
     "13",

@@ -129,28 +129,17 @@
   }
  },
  "10": {
-  "class_type": "ImageColorSpace",
-  "inputs": {
-   "image": [
-    "3",
-    0
-   ],
-   "source": "sRGB",
-   "destination": "linear"
-  }
- },
- "11": {
   "class_type": "ImageScaleBy",
   "inputs": {
    "image": [
-    "10",
+    "3",
     0
    ],
    "upscale_method": "area",
    "scale_by": 0.5
   }
  },
- "12": {
+ "11": {
   "class_type": "ImageScaleBy",
   "inputs": {
    "image": [
@@ -161,32 +150,23 @@
    "scale_by": 0.5
   }
  },
- "13": {
-  "class_type": "ImageColorSpace",
-  "inputs": {
-   "image": [
-    "12",
-    0
-   ],
-   "source": "sRGB",
-   "destination": "linear"
-  }
- },
- "14": {
+ "12": {
   "class_type": "PaintAPlate_RelightTransfer",
   "inputs": {
    "plate": [
-    "10",
+    "3",
     0
    ],
    "source": [
-    "11",
+    "10",
     0
    ],
    "relit": [
-    "13",
+    "11",
     0
    ],
+   "plate_space": "sRGB",
+   "shot_space": "sRGB",
    "radius": 4,
    "strength": 1.0,
    "align": true
@@ -198,18 +178,7 @@
    }
   }
  },
- "15": {
-  "class_type": "ImageColorSpace",
-  "inputs": {
-   "image": [
-    "14",
-    0
-   ],
-   "source": "linear",
-   "destination": "sRGB"
-  }
- },
- "16": {
+ "13": {
   "class_type": "ComfySwitchNode",
   "inputs": {
    "switch": false,
@@ -218,7 +187,7 @@
     0
    ],
    "on_true": [
-    "15",
+    "12",
     0
    ]
   },
@@ -228,11 +197,11 @@
    }
   }
  },
- "17": {
+ "14": {
   "class_type": "PaintAPlate_FitToPlate",
   "inputs": {
    "plate": [
-    "16",
+    "13",
     0
    ],
    "image": [
@@ -262,22 +231,22 @@
    "progress": true
   }
  },
- "18": {
+ "15": {
   "class_type": "ImageCompositeMasked",
   "inputs": {
    "destination": [
-    "16",
+    "13",
     0
    ],
    "source": [
-    "17",
+    "14",
     0
    ],
    "x": 0,
    "y": 0,
    "resize_source": false,
    "mask": [
-    "17",
+    "14",
     1
    ]
   },
@@ -285,11 +254,11 @@
    "title": "Composite"
   }
  },
- "19": {
+ "16": {
   "class_type": "ImageFromBatch",
   "inputs": {
    "image": [
-    "18",
+    "15",
     0
    ],
    "batch_index": 0,
@@ -299,11 +268,11 @@
    ]
   }
  },
- "20": {
+ "17": {
   "class_type": "CreateVideo",
   "inputs": {
    "images": [
-    "19",
+    "16",
     0
    ],
    "fps": [
@@ -315,11 +284,11 @@
    "codec": "none"
   }
  },
- "21": {
+ "18": {
   "class_type": "SaveVideo",
   "inputs": {
    "video": [
-    "20",
+    "17",
     0
    ],
    "filename_prefix": "paintaplate/plate/comp",

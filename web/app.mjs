@@ -8,7 +8,7 @@ import { DECODED, Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
 import { sceneGraph } from "./graph.mjs";
 import { CHANNEL_NAMES, DISPLAY, FLUID, PARAMS, blankSpec, caption, changedMask, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
-  erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
+  erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, relightSpace, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
@@ -1793,7 +1793,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     erase ? { path: onePass ? pv.clean : r.clean, cs: "sRGB" } : { path: p.path, cs: p.cs }, r.heroFrame); });
   r.full ??= pv.mattes;
   await step(r, "export", async (progress) => {
-    const done = await run("export", { path: p.path, color_space: p.cs, max_frames: p.frames, shot: final, ...r.full.values, relight,
+    const done = await run("export", { path: p.path, color_space: p.cs, relight_space: relightSpace(p.cs), max_frames: p.frames, shot: final, ...r.full.values, relight,
       keep_untouched: !relight, prefix: `${base}/export`, matte_prefix: `${base}/matte/matte`, review_prefix: `${base}/review`,
       grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
     const review = outputFile("export", done, "review"); // its folder holds the export: a job taken from the index keeps its own

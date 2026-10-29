@@ -24,6 +24,8 @@ from fractions import Fraction
 
 import numpy as np
 
+from concurrent.futures import ThreadPoolExecutor
+
 try:
     import av
     AVError = av.error.FFmpegError
@@ -340,6 +342,26 @@ def read_float(path: str) -> np.ndarray:
             g, b, r = planes
             return np.stack([r, g, b], -1).astype(np.float32)
         return frame.to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
+
+
+def write_pngs(frame_at, paths: list, workers: int = 8, level: int = 1, tick=None) -> None:
+    """Write frame_at(i), an (H, W, 3 or 4) uint8 array, to paths[i] as PNG, several frames at once: PyAV releases the GIL
+    while it compresses. Core Save Image writes one frame after another at zlib level 4: 35.3 s for 121 frames at
+    1920 x 1088 on an RTX PRO 6000 pod (28 Oct). Level 1 compresses 3.5 times faster for files about 11% larger
+    (one such frame: 111 ms against 392 ms, 3.08 MB against 2.78 MB)."""
+    def one(i):
+        a = np.ascontiguousarray(frame_at(i))
+        fmt = "rgba" if a.shape[2] == 4 else "rgb24"
+        c = av.CodecContext.create("png", "w")
+        c.width, c.height, c.pix_fmt = a.shape[1], a.shape[0], fmt
+        c.options = {"compression_level": str(level)}
+        packets = c.encode(av.VideoFrame.from_ndarray(a, format=fmt)) + c.encode(None)
+        with open(paths[i], "wb") as fh:
+            fh.write(b"".join(bytes(p) for p in packets))
+        if tick:
+            tick()
+    with ThreadPoolExecutor(max(1, workers)) as pool:
+        list(pool.map(one, range(len(paths))))
 
 
 def to_uint16(rgb: np.ndarray, alpha: np.ndarray | None = None) -> np.ndarray:
