@@ -150,7 +150,7 @@ async def steps(pid, total, seconds, preview=None, live=None):
             name = f"{pid}_{k + 1:03d}.webp"
             os.makedirs(os.path.join(folder("temp"), "paintaplate_live"), exist_ok=True)
             Image.fromarray((np.clip(frame, 0, 1) * 255).astype(np.uint8)).resize((160, 90)).save(os.path.join(folder("temp"), "paintaplate_live", name), "WEBP")
-            await send({"type": "paintaplate.live", "data": {"prompt_id": pid, "step": k + 1,
+            await send({"type": "paintaplate.live", "data": {"prompt_id": pid, "step": k + 1, "steps": total,
                                                               "image": {"filename": name, "subfolder": "paintaplate_live", "type": "temp"}}})
         if preview is not None:
             await send_preview(pid, preview(k + 1, total))

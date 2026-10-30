@@ -1,5 +1,7 @@
 """The page's HTTP routes. Every path is a page path (folders.py): under the input folder, or the output folder with output:.
-    GET  /paintaplate/browse?path=output:video        a folder for the Open dialog: subfolders, videos, sequences, scenes
+    GET  /paintaplate/browse?path=output:video        a folder for the Open dialog: subfolders, videos, sequences, scenes;
+                                                      at a root, also the newest plates of the folders below it
+    GET  /paintaplate/version                         the pack's version, from pyproject.toml: the page's top bar and log
     GET  /paintaplate/thumb?path=output:a.mp4         the first frame of a plate as a small JPEG, made once, kept in temp
     GET  /paintaplate/stat?path=plates/boat.mp4&config=ocio://studio-config-latest
                                                       a plate's size and time (job index keys change with them), its spec
@@ -38,6 +40,23 @@ except ImportError:  # imported as a plain module by the tests, outside the pack
     import folders, mathops, ocio, plateio
 
 BLANK = "paintaplate/blank"  # the folder under the input folder that holds the black canvases of fluid shots
+FOUND_MAX = 60  # plates the Open dialog lists at a root from the folders below it, newest first
+FOUND_FOLDERS = 400  # folders read at most for them, breadth first: a root of thousands of folders still answers at once
+# PaintAPlate's own folders stay out of a root's plates: renders and the job index, uploaded masks, blank canvases
+FOUND_SKIP = {"output:paintaplate", "paintaplate/up", "paintaplate/blank", "paintaplate/warm"}
+
+
+def pack_version() -> str:
+    """The pack's version, from the pyproject.toml beside this file (the Registry package keeps it)."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyproject.toml"), encoding="utf-8") as f:
+            m = re.search(r'^version\s*=\s*"([^"]+)"', f.read(), re.M)
+        return m.group(1) if m else "unknown"
+    except OSError:
+        return "unknown"
+
+
+VERSION = pack_version()
 SCENES = "paintaplate/scenes"  # scenes saved on this ComfyUI, under the output folder
 THUMB_WIDTH = 240
 THUMBS_AT_ONCE = asyncio.Semaphore(4)  # a folder of thousands of outputs asks for its thumbnails as they scroll into view
@@ -124,7 +143,29 @@ def browse(rel: str) -> dict:
         item["path"] = f"{page}/{item['name']}" if page not in ("", folders.OUTPUT) else page + item["name"]
     parent = None if page in ("", folders.OUTPUT) else (page.rsplit("/", 1)[0] if "/" in page else
                                                         (folders.OUTPUT if page.startswith(folders.OUTPUT) else ""))
-    return {"path": page, "parent": parent, **listed}
+    return {"path": page, "parent": parent, **listed, "found": plates_below(full, page) if parent is None else []}
+
+
+def plates_below(full: str, page: str) -> list:
+    """At a root, the newest plates of the folders below it, so the Open dialog shows plates at once: FOUND_MAX of them,
+    from at most FOUND_FOLDERS folders read breadth first, PaintAPlate's own folders left out (FOUND_SKIP). Each carries
+    its page path and its folder's. Like scan_folder, it opens no file and follows no link."""
+    found, queue, read = [], [(full, page)], 0
+    while queue and read < FOUND_FOLDERS:
+        folder, at = queue.pop(0)
+        read += 1
+        try:
+            items = plateio.scan_folder(folder)["items"]
+        except OSError:  # a folder this process may not read
+            continue
+        for item in items:
+            path = at + item["name"] if at in ("", folders.OUTPUT) else f"{at}/{item['name']}"
+            if item["kind"] == "folder":
+                if path not in FOUND_SKIP:
+                    queue.append((os.path.join(folder, item["name"]), path))
+            elif folder != full and item["kind"] in ("video", "sequence"):  # the root's own plates are its items
+                found.append({**item, "path": path, "folder": at})
+    return sorted(found, key=lambda i: -i["mtime"])[:FOUND_MAX]
 
 
 def first_frame(full: str) -> np.ndarray:
@@ -161,6 +202,10 @@ def thumbnail(rel: str, width: int = THUMB_WIDTH) -> str:
     Image.fromarray((shown * 255.0 + 0.5).astype(np.uint8)).save(part, "JPEG", quality=80)
     os.replace(part, target)
     return target
+
+
+async def version_route(request: web.Request) -> web.Response:
+    return web.json_response({"version": VERSION})
 
 
 async def browse_route(request: web.Request) -> web.Response:
@@ -466,3 +511,4 @@ def setup(server) -> None:
     server.routes.post("/paintaplate/scenes/{name}")(scene_post)
     server.routes.get("/paintaplate/ocio")(ocio_route)
     server.routes.get("/paintaplate/ocio/shader")(ocio_shader)
+    server.routes.get("/paintaplate/version")(version_route)

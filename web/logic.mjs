@@ -108,13 +108,16 @@ export function colorName(hex) {
   return ["red", "warm orange", "golden yellow", "green", "cyan", "cool blue", "violet", "magenta"][Math.floor(((h + 360 + 22) % 360) / 45)];
 }
 
+// A light edit's colour, by name: its first light stroke's (dark strokes are shadow hints), else the tool's
+export const lightColor = (colors, color) => colorName(colors.find((c) => !dark(c)) ?? color);
+
 // tool: paint, erase or light; words: the prompt; colors: of the painted strokes; color: the tool's colour;
 // bbox: [y_min, x_min, y_max, x_max] on 0..1000. Only the chosen tool's text is built.
 export function caption({ tool, words, colors, color, bbox }) {
   const text = {
     erase: () => `Remove ${words ? `the ${words}` : "the object"} inside <obj_1> completely, with its shadow and its reflection. Show the surface and the background that continue behind it, with matching detail, light, shadows and focus. Add no new object. Keep everything else unchanged.`,
     paint: () => `Replace the rough coloured drawing inside <obj_1> with ${words || "a realistic object of that shape and colour"}, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.`,
-    light: () => `Relight the whole scene with ${words || `${colorName(colors.find((c) => !dark(c)) ?? color)} light`} coming from <obj_1>, with physically consistent shadows and reflections.${colors.some(dark) ? " Dark strokes are hints of where shadows fall: make every shadow agree with the light." : ""} Keep the content, framing and textures unchanged.`,
+    light: () => `Relight the whole scene with ${lightColor(colors, color)} light${words ? ` (${words})` : ""} coming from <obj_1>, with physically consistent shadows and reflections.${colors.some(dark) ? " Dark strokes are hints of where shadows fall: make every shadow agree with the light." : ""} Keep the content, framing and textures unchanged.`,
   }[tool]();
   const desc = { erase: words ? `${words} to remove` : "object to remove", paint: words || "the drawn object", light: "light source" }[tool];
   return `${text} ${JSON.stringify([{ id: "obj_1", bbox, desc }])}`;
@@ -128,10 +131,11 @@ const pyJSON = (v) => JSON.stringify(v).replace(/("(?:[^"\\]|\\.)*")|([,:])/g, (
 export const KEEP_TOUCHED = " Where the drawing touches an object, the new element acts on that object itself (it burns it, rests on it, " +
   "wets it or lights it); add no props, fuel or supports that were not asked for."; // a fire on a towel came with logs without it
 
-export function upsampleRequest({ tool, words, bbox, boxes = null }) {
-  if (tool === "light") {
-    const ask = `Relight the whole photograph: ${words || "warm light coming from the painted area"}. Keep every object, its position, shape, ` +
-      "size and texture, the framing and the camera exactly as they are.";
+export function upsampleRequest({ tool, words, bbox, boxes = null, colors = [], color = "#ffd890" }) {
+  if (tool === "light") { // the strokes' colour always counts: asked for warm light, an orange and a green light both came back orange (29 Oct)
+    const shadows = colors.some(dark) ? " Dark strokes mark where shadows fall: make every shadow agree with the light." : "";
+    const ask = `Relight the whole photograph with ${lightColor(colors, color)} light coming from the painted area${words ? `: ${words}` : ""}.${shadows} ` +
+      "Keep every object, its position, shape, size and texture, the framing and the camera exactly as they are.";
     return { mode: "plain", locked: null,
       request: `Reference images follow in order (the first image, the second image, ...).\nUser request: ${ask}\nOutput the caption.` };
   }
@@ -291,10 +295,10 @@ export const RIPPLE = "Use the reference video for motion, timing, camera moveme
 
 // The Ripple sentence, then one line per paint or light edit (its card: a short description of the change helps; an explosion
 // then stayed and grew instead of driving off with the car). An erase is never named: named, the umbrella came back.
-export function shotPrompt(edits) {
-  return [RIPPLE, ...edits.filter((e) => e.tool !== "erase" && e.words).map((e) => (e.tool === "paint"
+export function shotPrompt(edits) { // a light edit names its colour (`hue`), with or without words
+  return [RIPPLE, ...edits.filter((e) => (e.tool === "paint" && e.words) || e.tool === "light").map((e) => (e.tool === "paint"
     ? `Added in the first frame: ${e.words}; it keeps moving naturally and stays in place on what it touches for the whole shot.`
-    : `The first frame is relit: ${e.words}; this new light holds for the whole shot.`))].join(" ");
+    : `The first frame is relit${e.hue ? ` with ${e.hue} light` : ""}${e.words ? `: ${e.words}` : ""}; this new light holds for the whole shot.`))].join(" ");
 }
 
 // ---------- Whole object: which of SAM's masks belong to the erase ----------
@@ -354,8 +358,8 @@ export const PARAMS = { // the interactive edits: label, step for - and = and th
 };
 export const CHANNEL_NAMES = { rgb: "All channels", r: "Red", g: "Green", b: "Blue", l: "Luminance" };
 export const clampParam = (name, v) => +Math.min(PARAMS[name].max, Math.max(PARAMS[name].min, v)).toFixed(3);
-// The colour picker (I): the average of the pixels under the cursor as #rrggbb, for the brush. `data` holds RGBA bytes,
-// as getImageData returns them; transparent pixels, outside the frame, do not count.
+// The in-frame colour picker (Firefox, Safari): the average of the pixels under the click as #rrggbb, for the brush. `data`
+// holds RGBA bytes, as getImageData returns them; transparent pixels, outside the frame, do not count.
 export function pickedColor(data) {
   let r = 0, g = 0, b = 0, n = 0;
   for (let i = 0; i < data.length; i += 4) if (data[i + 3] > 0) { r += data[i]; g += data[i + 1]; b += data[i + 2]; n++; }
@@ -480,6 +484,7 @@ export const framePattern = (name) => name.replace(/(\d+)(\D*)$/, (_, d, rest) =
 export function plainError(message) {
   const m = String(message ?? "");
   if (/out of memory|allocation on device/i.test(m)) return "the GPU ran out of memory.";
+  if (/No answer from ComfyUI|is not valid JSON|Unexpected end of JSON input|Failed to fetch|NetworkError/i.test(m)) return "ComfyUI did not answer: it may be restarting, or the connection dropped.";
   const empty = m.match(/No image frames found in (\S+)/);
   if (empty) {
     const part = empty[1].split(/[\\/]/).filter(Boolean).find((p) => SAVED[p.replace(/_(\d+x\d+|full)$/, "")]);
@@ -533,7 +538,8 @@ export function panelSize(kind, wanted, view, { least, stage, around }) {
 // Lightricks' LTX 2.5 SDR-to-HDR IC-LoRA makes 16-bit HDR from an SDR shot. It runs at full size for an EXR plate, unless
 // switched off; a video plate stays SDR. A relight keeps the plate's own values under a smooth light ratio, which stay HDR,
 // so a render with a light edit leaves it out. A blank plate asks its bit depth: 8-bit, or 16-bit half float, where its
-// fluid shot goes through it and becomes an EXR plate.
+// fluid shot goes through it and becomes an EXR plate. The page keeps it off and hidden for now (HDR_ON in app.mjs): its
+// shots flicker (29 Oct).
 export const HDR_DEPTH = 16;
 export const hdrPlate = (spec) => !!spec && spec.kind !== "video" && /^\.exr$/i.test(spec.ext ?? "");
 export const wantsHdr = (spec, tools, on) => !!on && hdrPlate(spec) && !tools.includes("light");

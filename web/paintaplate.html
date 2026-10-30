@@ -12,6 +12,7 @@
   <header class="top">
     <img class="logo" src="logo.png" alt="AInVFX">
     <span class="name">PaintAPlate</span>
+    <span id="version" class="version" title="The version of AInVFX PaintAPlate on this ComfyUI"></span>
     <span id="spec" class="spec"></span>
     <button id="menu-btn" class="quiet menu-btn" title="Every action, with its key (or right-click on the frame)" aria-label="Menu" aria-haspopup="menu">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
@@ -60,7 +61,7 @@
       <button class="sw" data-color="#1976d2" style="--c:#1976d2" title="Blue" aria-label="Blue"></button>
       <button class="sw" data-color="#6d4c41" style="--c:#6d4c41" title="Brown" aria-label="Brown"></button>
       <button class="sw" data-color="#ffd890" style="--c:#ffd890" title="Warm light" aria-label="Warm light"></button>
-      <button class="sw pick" id="pick" title="Pick a colour from the frame (I)" aria-label="Pick a colour from the frame" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.2 1.6a1.9 1.9 0 0 1 2.7 2.7l-1.6 1.6.7.7-1 1-.7-.7-5.6 5.6H3.6v-2.1l5.6-5.6-.7-.7 1-1 .7.7z"/></svg></button>
+      <button class="sw pick" id="pick" hidden title="Pick a colour from the frame (I)" aria-label="Pick a colour from the frame" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.2 1.6a1.9 1.9 0 0 1 2.7 2.7l-1.6 1.6.7.7-1 1-.7-.7-5.6 5.6H3.6v-2.1l5.6-5.6-.7-.7 1-1 .7.7z"/></svg></button>
       <label class="sw custom" title="Any colour"><input id="color" type="color" value="#000000" aria-label="Any colour"></label>
     </div>
   </nav>
@@ -177,7 +178,7 @@
       <dt>N</dt><dd>New edit: the next strokes start a separate edit</dd>
       <dt>- and =</dt><dd>Brush size</dd>
       <dt>X</dt><dd>Eraser: rub out the strokes you just painted</dd>
-      <dt>I</dt><dd>Pick a colour: click the frame, then paint with that colour. Esc cancels</dd>
+      <dt>I</dt><dd>Pick a colour: in Chrome and Edge, the browser's eyedropper, anywhere on the screen; in Firefox and Safari, click the frame. Then paint with it. Esc cancels</dd>
       <dt>Enter</dt><dd>Generate: the edit on the first frame, then its shot. Pressed again with nothing changed, nothing runs twice</dd>
       <dt>Ctrl+Enter</dt><dd>Try another seed on the selected edit, else the last one</dd>
       <dt>Click an edit</dt><dd>Select it: its words come back; retype them, paint more, rub strokes out or switch Whole object, then Generate. Esc deselects</dd>
@@ -218,10 +219,10 @@
   <dialog id="export">
     <form method="dialog">
       <h2>Export</h2>
-      <p class="hint">The viewer already plays the full quality. Export writes the result in the plate's own format and its matte, in ComfyUI's output folder, then downloads one zip.</p>
+      <p class="hint">The viewer already plays the full-size composite. Export writes the result in the plate's own format and its matte, in ComfyUI's output folder, then downloads one zip.</p>
       <label class="check"><input type="checkbox" checked disabled> The result <small id="x-format"></small></label>
       <label class="check"><input id="x-matte" type="checkbox" checked> Its matte <small>where the plate changed, PNG frames</small></label>
-      <label class="check"><input id="x-review" type="checkbox"> The review movie <small>H.264 MP4 of the full-quality composite</small></label>
+      <label class="check"><input id="x-review" type="checkbox"> The review movie <small>H.264 MP4 of the full-size composite</small></label>
       <label class="check"><input id="x-shot" type="checkbox"> The regenerated shot <small>the whole frame as the model made it, MP4</small></label>
 
       <p id="x-note" class="hint"></p>

@@ -11,21 +11,25 @@ PaintAPlate is a ComfyUI node pack with its own page. Every step is a ComfyUI wo
 - **SAM 3.1** finds whole objects and follows every edit through the shot.
 - **ainvfx-fluid**, AInVFX's own IC-LoRA for LTX 2.5, trained on synthetic data (dataset `AInVFX/ainvfx-fluid`), turns flat painted keyframes into smoke, steam, fire, explosions, dust, fog or clouds, from a blank plate.
 
-It was tested on an RTX PRO 6000 (96 GB). Smaller cards have not been tested.
+**GPU.** PaintAPlate was tested on an NVIDIA RTX PRO 6000 with 96 GB of VRAM. Its models are large: an edit uses FLUX 3 Image Klein (5.8 GB), its text encoder (4.9 GB) and its prompt writer (6.7 GB), which the page loads as soon as it opens; a shot uses LTX 2.5 (21.5 GB) and its Gemma text encoder (15.4 GB), plus the memory of a full-size pass (up to 1920 x 1088 and 121 frames). On a 16 GB laptop GPU, the page ran out of memory as soon as it loaded its models. Cards between 16 and 96 GB have not been tested. On a smaller card or a Mac, run it on Runpod (option 3 below).
 
 On Hugging Face: the 23 test plates, [AInVFX/ainvfx-paintaplate](https://huggingface.co/datasets/AInVFX/ainvfx-paintaplate) (synthetic, CC BY 4.0); the IC-LoRA [AInVFX/ainvfx-fluid](https://huggingface.co/AInVFX/ainvfx-fluid) and its synthetic training data, [AInVFX/ainvfx-fluid](https://huggingface.co/datasets/AInVFX/ainvfx-fluid) (dataset).
 
 ## Install it
 
-The steps are the same on Windows, macOS and Linux. PaintAPlate needs ComfyUI v0.43.0 or newer and [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo), and its models need a large NVIDIA GPU: on a Mac or a smaller card, run it on Runpod (option 3).
+The steps are the same on Windows, macOS and Linux. PaintAPlate needs ComfyUI v0.43.0 or newer and [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo), and its models need a large NVIDIA GPU (see **GPU** above): on a Mac or a smaller card, run it on Runpod (option 3).
 
 ### 1. With ComfyUI Manager (recommended)
 
-1. In ComfyUI, open **Manager > Custom Nodes Manager**, search for **PaintAPlate** and install **AInVFX PaintAPlate** ([its Registry page](https://registry.comfy.org/nodes/ainvfx-paintaplate)). Install **ComfyUI-LTXVideo** the same way, then restart ComfyUI. The Manager installs the pack's Python packages, OpenEXR and OpenColorIO, which have wheels for all three systems. With comfy-cli: `comfy node install ainvfx-paintaplate`.
+1. In ComfyUI, open **Extensions > All Extensions** (ComfyUI's built-in Manager; with its legacy interface, **Manager > Custom Nodes Manager**), search for **PaintAPlate** and install **AInVFX PaintAPlate** ([its Registry page](https://registry.comfy.org/nodes/ainvfx-paintaplate)). Install **ComfyUI-LTXVideo** the same way, then restart ComfyUI. If there is no **Extensions** entry, the Manager is off: in ComfyUI's folder, run `pip install -r manager_requirements.txt`, then start ComfyUI with `--enable-manager` (Comfy Desktop starts with it). The Manager installs the pack's Python packages, OpenEXR and OpenColorIO, which have wheels for all three systems. With comfy-cli: `comfy node install ainvfx-paintaplate`.
 2. Download the models, about 60 GB (next section).
-3. Start ComfyUI, then open **Extensions > Open PaintAPlate**, or `http://127.0.0.1:8188/extensions/ainvfx-paintaplate/paintaplate.html`.
+3. Start ComfyUI, then open this address in your browser:
 
-### 2. By hand, with git
+   ```
+   http://127.0.0.1:8188/extensions/ainvfx-paintaplate/paintaplate.html
+   ```
+
+### 2. Manual installation
 
 In a terminal (PowerShell on Windows), from your ComfyUI folder, with the Python that runs ComfyUI:
 
@@ -49,7 +53,7 @@ Then download the models and open the page, as in steps 2 and 3 above. ComfyUI-L
    PLATES=1 bash /workspace/ainvfx-paintaplate/tools/runpod_start.sh
    ```
 
-   The script installs the tested ComfyUI and ComfyUI-LTXVideo, links this pack, downloads the models and starts ComfyUI, in about 3 minutes. `PLATES=1` adds the test plates to `input/plates`; `FLUID=0` skips ainvfx-fluid. It prints each step, then the page's address: `https://<pod id>-8188.proxy.runpod.net/extensions/ainvfx-paintaplate/paintaplate.html`.
+   The script installs the tested ComfyUI and ComfyUI-LTXVideo, links this pack, downloads the models and starts ComfyUI, in about 3 minutes. `PLATES=1` adds the test plates to `input/plates`; `FLUID=0` skips ainvfx-fluid. It prints each step, then the page's address, of the form `https://<pod id>-8188.proxy.runpod.net/extensions/ainvfx-paintaplate/paintaplate.html` (open the one it prints).
 
 After `git pull`, `bash tools/runpod_start.sh --restart` loads the new code. `tools/offline_bundle.sh` prepares a pod that cannot reach GitHub. Port 8188 has no password: anyone with the pod's address can use it.
 
@@ -61,7 +65,7 @@ First accept the licences of [FLUX 3 Image Klein](https://huggingface.co/black-f
 | --- | --- | --- |
 | Windows, portable ComfyUI (from the folder that holds `python_embeded`) | `$env:HF_TOKEN = "hf_..."` | `python_embeded\python.exe ComfyUI\custom_nodes\ainvfx-paintaplate\get_models.py` |
 | Comfy Desktop, Windows or macOS (its terminal panel, in the ComfyUI base folder) | `$env:HF_TOKEN = "hf_..."` on Windows, `export HF_TOKEN=hf_...` on macOS | `python custom_nodes/ainvfx-paintaplate/get_models.py` |
-| Linux or macOS, ComfyUI installed by hand (its virtual environment active) | `export HF_TOKEN=hf_...` | `python custom_nodes/ainvfx-paintaplate/get_models.py` |
+| Linux or macOS, ComfyUI installed manually (its virtual environment active) | `export HF_TOKEN=hf_...` | `python custom_nodes/ainvfx-paintaplate/get_models.py` |
 
 The script finds the models folder of the ComfyUI it is installed in; name another one as its argument (`get_models.py path/to/models`) if your models live elsewhere. It downloads every file at the tested revision into its folder, skips files already there, and says which file failed and why (a licence not accepted, a missing token); run it again to finish. `--no-fluid` skips ainvfx-fluid and `--list` prints the list without downloading. The same files, to download by hand if you prefer:
 
@@ -81,11 +85,11 @@ The script finds the models folder of the ComfyUI it is installed in; name anoth
 | `taeltx2_3.safetensors` | `vae_approx/` | 0.02 GB | [Kijai/LTX2.3_comfy](https://huggingface.co/Kijai/LTX2.3_comfy) (`6d980fd`), from [madebyollin/taehv](https://github.com/madebyollin/taehv) (MIT) |
 | `ainvfx-fluid.safetensors` (optional: fluid shots) | `loras/` | 0.65 GB | [AInVFX/ainvfx-fluid](https://huggingface.co/AInVFX/ainvfx-fluid) (`fd4855a`), file `ltx-2.5/ainvfx-fluid.safetensors` |
 
-**SDR to HDR** (optional): Lightricks' LTX 2.5 SDR-to-HDR IC-LoRA, `ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors` (1.31 GB, `models/loras`), and its scene embeddings, `ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors` (12.6 MB, `models/embeddings`), from `Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR`. The repository is gated: accept its licence on Hugging Face first. `get_models.py` downloads both. Without them everything else works, and an EXR render ends with the SDR shot.
+**SDR to HDR** (optional): Lightricks' LTX 2.5 SDR-to-HDR IC-LoRA, `ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors` (1.31 GB, `models/loras`), and its scene embeddings, `ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors` (12.6 MB, `models/embeddings`), from `Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR`. The repository is gated: accept its licence on Hugging Face first. `get_models.py` downloads both. Without them everything else works, and an EXR render ends with the SDR shot. For now the page keeps SDR to HDR off and hidden, as its shots flicker: `?hdr=1` at the end of the page's address turns it on to test it.
 
 ## Use it
 
-**Open plate** has one tab per source. **ComfyUI files** browses ComfyUI's input and output folders and their subfolders: videos, animated images, and image sequences, each named by its frame pattern (`shot.####.exr`, or `ComfyUI_#####_.png` for core Save Image's frames). It stays fast on folders of thousands of outputs. One click shows a plate's size, frames, format and colour space; a double click opens it. **Upload** sends files from your computer. **Scenes** opens a scene saved on this ComfyUI. **Blank plate** starts a fluid shot.
+**Open plate** has one tab per source. **ComfyUI files** browses ComfyUI's input and output folders and their subfolders (at the root of each, the newest plates of the folders below show at once): videos, animated images, and image sequences, each named by its frame pattern (`shot.####.exr`, or `ComfyUI_#####_.png` for core Save Image's frames). It stays fast on folders of thousands of outputs. One click shows a plate's size, frames, format and colour space; a double click opens it. **Upload** sends files from your computer. **Scenes** opens a scene saved on this ComfyUI. **Blank plate** starts a fluid shot.
 
 Type a few words, pick a tool, paint on the first frame, then **Generate** (or Enter).
 
@@ -93,7 +97,7 @@ Type a few words, pick a tool, paint on the first frame, then **Generate** (or E
 - **Erase** removes the object under your stroke. With **Whole object**, SAM 3.1 finds all of it: name it ("red umbrella") and the stroke may even cross the background. A shadow outside the object stays: erase it with a second stroke, Whole object off.
 - **Light** relights the shot. Describe the light ("night time", "warm sunset from the left") and paint where it comes from.
 
-The edit appears on the first frame, then the shot renders by itself: a quick preview first (Fast, 640, by default), with a small animation of the shot while LTX samples it, then the full size, then the **full quality**: the full-size composite at the plate's quality, which the viewer plays from then on. For an EXR plate, the wipe (F6) compares the result's EXR frames with the plate's own, at full precision, so exposure and the other colour tools show what the export will hold. **Export** writes the result in the plate's format and its matte, only when you press it, then downloads them as one zip, with the review movie or the regenerated shot if you tick them. In the same dialog, **ComfyUI graph** saves the whole scene as one ComfyUI workflow.
+The edit appears on the first frame, then the shot renders by itself: a quick preview first (Fast, 640, by default), with a small animation of the shot while LTX samples it, then the full size, then the **full-size composite** at the plate's quality, which the viewer plays from then on. For an EXR plate, the wipe (F6) compares the result's EXR frames with the plate's own, at full precision, so exposure and the other colour tools show what the export will hold. **Export** writes the result in the plate's format and its matte, only when you press it, then downloads them as one zip, with the review movie or the regenerated shot if you tick them. In the same dialog, **ComfyUI graph** saves the whole scene as one ComfyUI workflow.
 
 **Colour** follows OpenRV. Right-click the frame, then **OCIO**: **File Color Space** sets the plate's colour space (the viewer shows it at once, and the edits are made again in it), **Look** and **Displays** set what the viewer shows while the shot plays, and **Change Config** picks the OCIO config. The config is the one `$OCIO` names, as in RV, else OCIO's built-in ACES studio config. The plate's colour space is read from the file when it opens. Exposure (Shift+E), contrast (K), gamma (Y), saturation (Shift+S), hue (H) and the channels work as RV's.
 
@@ -103,7 +107,7 @@ A **fluid shot** starts from a blank plate: paint flat colour blobs (light grey 
 
 Drag the line between the frame and History, or the top edge of the open log, to resize them; a double-click gives the first size back. The sizes are kept for the next session.
 
-**SDR to HDR.** For an EXR plate, the full-size shot goes through Lightricks' SDR-to-HDR IC-LoRA before the full quality. The edited area then holds scene-linear values, above 1.0 where the scene is bright. HDR Match sets their level to the plate's (one gain per channel, measured on the untouched mid-tones), so the edit sits in the plate's exposure and keeps the range SDR to HDR made above the plate's white, for grading. The switch sits above the render steps, and in Edit > SDR to HDR. A video plate stays 8-bit. A blank plate asks its bit depth: 16-bit half float runs its fluid shot through SDR to HDR, and the fluid shot then opens as an EXR plate for every edit. A render with a light edit leaves the step out: a relight keeps the plate's own values under a smooth light ratio, so they stay HDR.
+**SDR to HDR** (off and hidden for now: its shots flicker; `?hdr=1` turns it on). For an EXR plate, the full-size shot goes through Lightricks' SDR-to-HDR IC-LoRA before the full-size composite. The edited area then holds scene-linear values, above 1.0 where the scene is bright. HDR Match sets their level to the plate's (one gain per channel, measured on the untouched mid-tones), so the edit sits in the plate's exposure and keeps the range SDR to HDR made above the plate's white, for grading. The switch sits above the render steps, and in Edit > SDR to HDR. A video plate stays 8-bit. A blank plate asks its bit depth: 16-bit half float runs its fluid shot through SDR to HDR, and the fluid shot then opens as an EXR plate for every edit. A render with a light edit leaves the step out: a relight keeps the plate's own values under a smooth light ratio, so they stay HDR.
 
 **While it generates.** Every LTX pass shows a live preview from its first step: in the frame until a shot exists, then in a corner over the preview that plays. Esc stops what generates (after cancelling an edit in progress, then the selection); what finished is kept, and Enter goes on from where it stopped. Shift+Esc is not used: Chrome opens its Task Manager with it on Windows and Linux. Shift+Home resets every colour change, as RV's Reset All Color.
 

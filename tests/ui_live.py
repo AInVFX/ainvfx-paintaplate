@@ -106,10 +106,10 @@ def flow(page, url, open_plate, shots, wait_s=120):
                            timeout=wait_s * 1000)
     page.locator("#history li").nth(1).locator(".eye").click()
     page.wait_for_function("!document.querySelector('#history li.off') && !document.querySelector('#history li.busy')", timeout=wait_s * 1000)
-    page.wait_for_function("document.querySelector('#render-left').textContent === 'full quality'", timeout=wait_s * 3000)
+    page.wait_for_function("document.querySelector('#render-left').textContent === 'full size ready'", timeout=wait_s * 3000)
     page.keyboard.press("F6")  # wipe on, at frame 10
     page.keyboard.press("End")
-    page.screenshot(path=f"{shots}/3_full_quality_wipe.png")
+    page.screenshot(path=f"{shots}/3_full_size_wipe.png")
     with page.expect_download(timeout=wait_s * 3000) as dl:  # Export: only now is the result written in the plate's format
         page.click("#export-btn")
         page.check("#x-review")
@@ -300,14 +300,14 @@ def remote(a):
                     tag = note.rsplit(" ", 1)[0] if note else status()[:40]
                     if tag not in seen:
                         seen.add(tag); mark("stage: " + (note or status()))
-                    if note == "full quality" or "Error" in status() or status().startswith("Missing"):
+                    if note == "full size ready" or "Error" in status() or status().startswith("Missing"):
                         break
                     time.sleep(1)
                 mark("final: " + status())
                 page.keyboard.press("F6"); page.keyboard.press("End"); time.sleep(1); page.screenshot(path=f"{shots}/3_wipe.png")
                 page.keyboard.press("F6"); page.keyboard.press("Home"); page.keyboard.press("Space"); time.sleep(2)
                 page.keyboard.press("Space"); page.screenshot(path=f"{shots}/4_played.png")
-                if page.inner_text("#render-left") == "full quality":  # Export writes the result, then the zip downloads
+                if page.inner_text("#render-left") == "full size ready":  # Export writes the result, then the zip downloads
                     with page.expect_download(timeout=600000) as dl:
                         page.click("#export-btn")
                         page.click("#x-go")

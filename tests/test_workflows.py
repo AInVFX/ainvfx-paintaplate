@@ -24,6 +24,21 @@ class Workflows(unittest.TestCase):
                 with open(os.path.join(out, name)) as a, open(os.path.join(WORKFLOWS, name)) as b:
                     self.assertEqual(json.load(a), json.load(b), f"{name} is stale: run tools/build_workflows.py")
 
+    def test_mattes_are_combined_at_one_size(self):
+        """Combine Masks crops its source to its destination and never scales it (comfy_extras/nodes_mask.py), and the
+        erase matte is tracked smaller than the paint matte: each composite scales the erase matte to the paint matte's
+        size first. Without it, the paint matte of a plate with an erase kept its top-left corner, stretched."""
+        for name in ("comp", "review", "export"):
+            with open(os.path.join(WORKFLOWS, f"{name}.json")) as f:
+                wf = json.load(f)
+            [combine] = [n for n in wf.values() if n["class_type"] == "MaskComposite"]
+            scaled = wf[wf[combine["inputs"]["destination"][0]]["inputs"]["image"][0]]
+            self.assertEqual(scaled["class_type"], "ImageScale", name)
+            size = wf[scaled["inputs"]["width"][0]]
+            self.assertEqual((size["class_type"], scaled["inputs"]["height"][0]), ("GetImageSize", scaled["inputs"]["width"][0]), name)
+            source = wf[combine["inputs"]["source"][0]]
+            self.assertEqual(size["inputs"]["image"], source["inputs"]["image"], f"{name}: the erase matte takes the paint matte's size")
+
     def test_files_open_in_comfyui_as_api_workflows(self):
         """ComfyUI's frontend loads a JSON file as an API workflow when every top-level value has a class_type
         and an inputs object (src/scripts/metadata/json.ts and app.ts, ComfyUI_frontend 1.57.1)."""

@@ -455,9 +455,15 @@ def matte():
 
 
 def mattes(g):
-    """The erase and paint mattes as one mask. A missing matte is the other one again (the page sets both)."""
+    """The erase and paint mattes as one mask, at the paint matte's size. A missing matte is the other one again (the page
+    sets both). The erase is tracked smaller (ERASE_TRACK_SIDE in app.mjs: 576 x 320 for a 1080p plate, the paint at
+    960 x 544), and Combine Masks crops its source to its destination instead of scaling it: the paint matte kept only its
+    top-left corner, stretched, so a boat painted on a plate with an erase vanished from the composite (29 Oct)."""
     erase = g("PaintAPlate_LoadPlate", _title="Erase matte", path=Slot("matte_a", ""), max_frames=1024, pad_8n1=False)
     add = g("PaintAPlate_LoadPlate", _title="Paint matte", path=Slot("matte_b", ""), max_frames=1024, pad_8n1=False)
+    size = g("GetImageSize", image=add)
+    erase = g("ImageScale", _title="Erase matte at the paint matte's size", image=erase, upscale_method="bilinear",
+              width=size[0], height=size[1], crop="disabled")
     return g("MaskComposite", destination=g("ImageToMask", image=erase, channel="red"),
              source=g("ImageToMask", image=add, channel="red"), x=0, y=0, operation="add")
 
@@ -534,7 +540,7 @@ def review():
     real = g("ImageFromBatch", image=final, batch_index=0, length=load[4])
     movie = g("ImageScaleToMaxDimension", upscale_method="lanczos", largest_size=1920,
               image=colour(g, real, Slot("color_space", "@model"), Slot("movie_space", "@model"), "Movie values"))
-    g("PaintAPlate_SaveMovie", _title="Review movie (full quality, H.264)", _output="review", images=movie, fps=load[3], crf=12,
+    g("PaintAPlate_SaveMovie", _title="Review movie (full-size composite, H.264)", _output="review", images=movie, fps=load[3], crf=12,
       filename_prefix=Slot("review_prefix", "paintaplate/plate/review"))
     frames = g("PaintAPlate_SaveFrames", _title="Review frames (half-float EXR, image sequences only)", _output="frames",
                images=real, format="exr", filename_prefix=Slot("frames_prefix", ""))

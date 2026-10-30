@@ -149,8 +149,11 @@ test("the upsampler request locks one row in Klein's edit format, and a relight 
   assert.deepEqual(erase.locked, [{ id: "obj_1", from: "ref_image_0", src_bbox: [342, 404, 428, 556], tgt_bbox: null, desc: "red umbrella" }]);
   assert.match(erase.request, /"src_bbox": \[342, 404, 428, 556\], "tgt_bbox": null/); // json.dumps spacing, as BFL's code writes it
   assert.equal(upsampleRequest({ tool: "paint", words: "a fire", bbox: [1, 2, 3, 4] }).locked[0].from, "target");
-  const light = upsampleRequest({ tool: "light", words: "night time", bbox: [0, 0, 1000, 1000] });
+  const light = upsampleRequest({ tool: "light", words: "night time", bbox: [0, 0, 1000, 1000], colors: ["#388e3c"], color: "#388e3c" });
   assert.equal(light.mode, "plain"); assert.equal(light.locked, null); assert.match(light.request, /night time/);
+  assert.match(light.request, /with green light coming from the painted area/); // the strokes' colour counts, words or not
+  const orange = upsampleRequest({ tool: "light", words: "", bbox: [0, 0, 1000, 1000], colors: ["#f57c00", "#000000"], color: "#f57c00" });
+  assert.match(orange.request, /with warm orange light coming from the painted area\. Dark strokes mark where shadows fall/);
 });
 
 test("reconcile keeps the locked row, takes the upsampler's description and its cited rows, and survives a cut-off table", () => {
@@ -168,8 +171,15 @@ test("reconcile keeps the locked row, takes the upsampler's description and its 
 
 test("the shot prompt names paint and light, never an erase", () => {
   assert.equal(shotPrompt([]), RIPPLE);
-  const p = shotPrompt([{ tool: "erase", words: "red umbrella" }, { tool: "paint", words: "an explosion" }, { tool: "light", words: "night" }]);
-  assert.ok(!p.includes("umbrella")); assert.match(p, /Added in the first frame: an explosion/); assert.match(p, /relit: night/);
+  const p = shotPrompt([{ tool: "erase", words: "red umbrella" }, { tool: "paint", words: "an explosion" }, { tool: "light", words: "night", hue: "cool blue" }]);
+  assert.ok(!p.includes("umbrella")); assert.match(p, /Added in the first frame: an explosion/); assert.match(p, /relit with cool blue light: night/);
+  assert.match(shotPrompt([{ tool: "light", words: "", hue: "green" }]), /relit with green light; this new light holds/); // no words: the colour still counts
+});
+
+test("the in-frame colour picker averages the pixels under the click", () => {
+  assert.equal(pickedColor(new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 255, 255])), "#800080");
+  assert.equal(pickedColor(new Uint8ClampedArray([10, 20, 30, 255, 200, 200, 200, 0])), "#0a141e"); // outside the frame: not counted
+  assert.equal(pickedColor(new Uint8ClampedArray([0, 0, 0, 0])), null);
 });
 
 test("whole object: named instances the stroke touches win; points keep only objects two of them agree on", () => {
@@ -202,6 +212,10 @@ test("a failed step says why in plain words", () => {
     "the paint matte saved no frames, so there was nothing to read.");
   assert.equal(plainError("PaintAPlate_LoadPlate: No image frames found in /w/output/paintaplate/a1/v2/640x352/clean"), "the erase pass saved no frames, so there was nothing to read.");
   assert.equal(plainError("KSampler: CUDA out of memory. Tried to allocate 2 GiB"), "the GPU ran out of memory.");
+  const gone = "ComfyUI did not answer: it may be restarting, or the connection dropped."; // a pod restarted under the page (29 Oct)
+  assert.equal(plainError(`Unexpected token '<', "<!DOCTYPE "... is not valid JSON`), gone);
+  assert.equal(plainError("No answer from ComfyUI (HTTP 502, an error page): it may be restarting, or the connection dropped"), gone);
+  assert.equal(plainError("Failed to fetch"), gone);
   assert.equal(plainError("PaintAPlate_LoadPlate: Plate path leaves the ComfyUI folders: ../x"), "the file is outside ComfyUI's input and output folders.");
   assert.equal(plainError("UNETLoader: Value not in list: unet_name: 'x.safetensors' not in []"), "a model or a node it needs is missing.");
   assert.equal(plainError("something odd"), "ComfyUI stopped with an error.");
@@ -287,12 +301,6 @@ test("a job index key leaves out output folders and the live preview rate, and k
   const a = indexValues({ seed: 4, prefix: "paintaplate/x/v1/clean/f", video_prefix: "v1/clean", live: 2, hero: "up/ab.png", prompt: "A street." });
   assert.deepEqual(a, [["hero", "up/ab.png"], ["prompt", "A street."], ["seed", 4]]);
   assert.deepEqual(indexValues({ prompt: "A street.", hero: "up/ab.png", seed: 4, matte_prefix: "v9/m" }), a, "in any order, from any session");
-});
-
-test("the colour picker averages the pixels under the cursor", () => {
-  assert.equal(pickedColor(new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 255, 255])), "#800080");
-  assert.equal(pickedColor(new Uint8ClampedArray([10, 20, 30, 255, 200, 200, 200, 0])), "#0a141e"); // outside the frame: not counted
-  assert.equal(pickedColor(new Uint8ClampedArray([0, 0, 0, 0])), null);
 });
 
 

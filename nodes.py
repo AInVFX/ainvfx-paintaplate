@@ -427,11 +427,18 @@ class LivePreview(io.ComfyNode):
             return io.NodeOutput(model)
         if path not in _TINY:
             _TINY[path] = comfy.sd.VAE(sd=comfy.utils.load_torch_file(path))
-        tiny, server, context = _TINY[path], PromptServer.instance, get_executing_context()
-        prompt_id, client = context.prompt_id if context else server.last_prompt_id, server.client_id
-        latent_frames, state = (frames - 1) // 8 + 1, {"step": 0, "busy": False}
+        tiny, server = _TINY[path], PromptServer.instance
+        latent_frames, state = (frames - 1) // 8 + 1, {"calls": 0, "busy": False}
 
-        def send(video, step):  # a looping WebP in the temp folder, and a message telling the page where it is
+        def where(args):  # this step and the pass's steps, from the sigmas CFGGuider puts in every model call's options
+            sigmas = args["model_options"].get("transformer_options", {}).get("sample_sigmas")
+            if sigmas is None or len(sigmas) < 2:  # a sampler without them: the calls counted, the total unknown
+                state["calls"] += 1
+                return state["calls"], 0
+            gap = (sigmas.float().cpu() - float(torch.as_tensor(args["sigma"]).flatten()[0])).abs()
+            return int(gap.argmin()) + 1, len(sigmas) - 1
+
+        def send(video, step, steps, prompt_id, client):  # a looping WebP in the temp folder, and a message telling the page where it is
             try:
                 if transfer == "ACEScct":
                     video = mathops.acescct_preview(video)
@@ -443,15 +450,15 @@ class LivePreview(io.ComfyNode):
                 name = f"{prompt_id}_{step:03d}.webp"
                 images[0].save(os.path.join(folder, name), save_all=True, append_images=images[1:], duration=round(1000 / fps),
                                loop=0, quality=55, method=0)
-                server.send_sync("paintaplate.live", {"prompt_id": prompt_id, "step": step,
+                server.send_sync("paintaplate.live", {"prompt_id": prompt_id, "step": step, "steps": steps,
                                                       "image": {"filename": name, "subfolder": "paintaplate_live", "type": "temp"}}, client)
             finally:
                 state["busy"] = False
 
         def post_cfg(args):  # called once per step with the frames the model predicts: decode them now, encode them aside
             denoised = args["denoised"]
-            state["step"] += 1
-            if (state["step"] - 1) % every == 0 and not state["busy"] and not state.get("off"):  # the first at step 1, as early as it can
+            step, steps = where(args)
+            if (step - 1) % every == 0 and not state["busy"] and not state.get("off"):  # the first at step 1, as early as it can
                 try:
                     video = denoised.tensors[0] if getattr(denoised, "is_nested", False) else denoised
                     shapes = getattr(args["model"], "latent_shapes", None)  # LTX 2.5 samples video and audio packed in one latent
@@ -464,8 +471,9 @@ class LivePreview(io.ComfyNode):
                     images = tiny.decode(video)
                     images = images.reshape(-1, *images.shape[-3:]).clamp(0, 1)
                     state["busy"] = True
+                    context = get_executing_context()  # the prompt running now: ComfyUI may reuse this node's output in a later one
                     LIVE.submit(send, images.half().cpu().numpy() if transfer == "ACEScct" else (images * 255).to(torch.uint8).cpu().numpy(),
-                                state["step"])
+                                step, steps, context.prompt_id if context else server.last_prompt_id, server.client_id)
                 except Exception as exc:  # a preview never stops a shot: it switches itself off
                     state["off"] = True
                     logging.warning("PaintAPlate Live Preview is off for this shot: %s", exc)
@@ -566,8 +574,8 @@ class SaveMovie(io.ComfyNode):
                 io.String.Input("filename_prefix", default="paintaplate/movie",
                                 tooltip="As in Save Video: a folder under the output folder, then the file name."),
                 io.Int.Input("crf", default=18, min=0, max=51, optional=True,
-                             tooltip="x264's quality: 18 as core Save Video, lower is closer to the frames. The page's full-quality "
-                                     "movies (the plate it plays, the review) use 12."),
+                             tooltip="x264's quality: 18 as core Save Video, lower is closer to the frames. The playback "
+                                     "proxy and the review use 12."),
             ],
             is_output_node=True,
         )

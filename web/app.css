@@ -31,6 +31,12 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .top { grid-area: top; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .logo { height: 15px; width: auto; display: block; }
 .name { font: 600 14px Montserrat, Inter, system-ui, sans-serif; }
+.version { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+#view.picking { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 16 16'%3E%3Cpath d='M11.2 1.6a1.9 1.9 0 0 1 2.7 2.7l-1.6 1.6.7.7-1 1-.7-.7-5.6 5.6H3.6v-2.1l5.6-5.6-.7-.7 1-1 .7.7z' fill='%23fff' stroke='%23000' stroke-width='.8'/%3E%3C/svg%3E") 5 19, crosshair; }
+.sw.pick { display: grid; place-items: center; background: var(--panel-2, #2a2d33); color: var(--text, #e6e6e6); }
+.sw.pick[hidden] { display: none; }
+.sw.pick svg { width: 12px; height: 12px; fill: currentColor; }
+.sw.pick[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent, #f5a623); }
 .spec { flex: 1; min-width: 0; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 6px; }
 #help-btn { width: 30px; padding: 5px 0; }
 .menu-btn { width: 32px; padding: 4px 0; display: grid; place-items: center; }
@@ -74,10 +80,6 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; display: grid; place-items: center; background: #181818; }
 #view { display: block; background: #111; touch-action: none; transform-origin: 0 0; position: absolute; left: 0; top: 0; image-rendering: auto; }
 #view.painting { cursor: none; }
-#view.picking { cursor: crosshair; }
-.sw.pick { display: grid; place-items: center; background: var(--panel-2, #2a2d33); color: var(--text, #e6e6e6); }
-.sw.pick svg { width: 12px; height: 12px; fill: currentColor; }
-.sw.pick[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent, #f5a623); }
 #view.panning { cursor: grabbing; }
 #view.painting.scrub { cursor: ew-resize; }
 .display-state { padding: 3px 9px; font-size: 12px; color: #141414; background: var(--gold); border-color: var(--gold); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -243,7 +245,7 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 @media (max-width: 900px) and (orientation: portrait), (max-width: 600px) {
   body { grid-template: "top" auto "tools" auto "stage" auto "side" auto "log" auto / minmax(0, 1fr); height: auto; min-height: 100dvh; overflow-x: hidden; overflow-y: auto; }
   .top { flex-wrap: wrap; gap: 4px 6px; padding: 5px 8px; }
-  .top .name { display: none; }
+  .top .name, .top .version { display: none; }
   .spec { order: 9; flex-basis: 100%; padding: 0 0 2px; font-size: 11px; }
   .top button { padding: 5px 9px; }
   .tools { flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 6px; padding: 6px 8px; border-right: 0; border-bottom: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; }
@@ -273,7 +275,7 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 @media (max-height: 520px) and (orientation: landscape) {
   body { grid-template: "top top" 38px "tools stage" calc(100dvh - 38px - 32px) "side side" auto "log log" auto / 64px minmax(0, 1fr); height: auto; min-height: 100dvh; overflow-y: auto; }
   .top { gap: 6px; padding: 0 8px; }
-  .top .name { display: none; }
+  .top .name, .top .version { display: none; }
   .top button { padding: 3px 9px; }
   .tools { gap: 5px; padding: 6px 5px; }
   .tools [data-tool] { padding: 4px 0 2px; font-size: 11px; }

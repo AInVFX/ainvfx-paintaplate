@@ -109,7 +109,7 @@ class Routes(unittest.TestCase):
         self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/browse", "/paintaplate/thumb",
                          "/paintaplate/blank", "/paintaplate/jobs/{key}", "/paintaplate/jobs/{key}", "/paintaplate/stat",
                          "/paintaplate/frames", "/paintaplate/scenes", "/paintaplate/scenes/{name}", "/paintaplate/scenes/{name}",
-                         "/paintaplate/ocio", "/paintaplate/ocio/shader"])
+                         "/paintaplate/ocio", "/paintaplate/ocio/shader", "/paintaplate/version"])
         print("download route: folders, parts, symlinks, zip reuse, handler: ok")
 
 
@@ -156,6 +156,35 @@ class PlateBrowser(unittest.TestCase):
         for bad in ("../", "output:../", "plates/shot.mov", "/etc"):
             with self.assertRaises((FileNotFoundError, ValueError), msg=bad):
                 routes.browse(bad)
+
+    def test_a_root_lists_the_newest_plates_below_it(self):
+        """At the input or output root, the plates of the folders below, newest first, each with its folder; PaintAPlate's
+        own folders stay out. Inside a folder, only that folder."""
+        import shutil
+        import numpy as np, plateio
+        renders = os.path.join(OUT, "paintaplate", "rootscan", "v1")
+        os.makedirs(renders, exist_ok=True)
+        try:
+            plateio.write_movie(lambda i: np.zeros((32, 64, 3), np.uint8), 3, os.path.join(renders, "raw.mp4"), 24)
+            found = {i["path"]: i["folder"] for i in routes.browse("")["found"]}
+            self.assertEqual(found.get("plates/shot.mov"), "plates")
+            self.assertTrue(any(p.startswith("plates/exr_shot/") and "#" in p for p in found), found)
+            out = routes.browse("output:")["found"]
+            paths = [i["path"] for i in out]
+            self.assertIn("output:video/ComfyUI_00001_.mp4", paths)
+            self.assertFalse([p for p in paths if p.startswith("output:paintaplate")], "renders stay out")
+            self.assertNotIn("output:anim_00001_.webp", paths, "the root's own plates are its items, listed once")
+            self.assertEqual([i["mtime"] for i in out], sorted((i["mtime"] for i in out), reverse=True))
+            self.assertEqual(routes.browse("plates")["found"], [])
+        finally:
+            shutil.rmtree(os.path.join(OUT, "paintaplate", "rootscan"), ignore_errors=True)
+
+    def test_the_version_is_pyproject_s(self):
+        """The page's top bar and its log show the pack's version, read from pyproject.toml."""
+        import json, tomllib
+        with open(os.path.join(ROOT, "pyproject.toml"), "rb") as f:
+            self.assertEqual(routes.VERSION, tomllib.load(f)["project"]["version"])
+        self.assertEqual(json.loads(asyncio.run(routes.version_route(None)).text), {"version": routes.VERSION})
 
     def test_plate_info_names_the_colour_space_in_the_config(self):
         info = routes.plate_info("plates/exr_shot")

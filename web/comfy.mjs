@@ -50,6 +50,15 @@ export const onLog = (fn) => { log = fn; }; // every job posted, started, finish
 const short = (id) => (id ? String(id).slice(0, 8) : "?");
 const took = (job) => `${((Date.now() - job.posted) / 1000).toFixed(1)} s`;
 
+// A server's answer as JSON, whatever its status (ComfyUI explains a refused job in JSON). An error page, such as a proxy's
+// HTML while ComfyUI restarts, or an empty answer, says so plainly instead of the browser's "Unexpected token '<'" (29 Oct)
+export async function answer(r) {
+  const text = await r.text();
+  try { return JSON.parse(text); } catch { /* not JSON: said below */ }
+  const what = text.trimStart().startsWith("<") ? ", an error page" : text ? "" : ", an empty answer";
+  throw new Error(`No answer from ComfyUI (HTTP ${r.status}${what}): it may be restarting, or the connection dropped`);
+}
+
 export const post = (path, body) =>
   fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
@@ -94,7 +103,7 @@ export function run(name, values, { kind = name, preview, progress, step, live: 
   const job = { kind, name, preview, progress, live: onLive, retries: 1, key: JSON.stringify(wf.prompt), main: wf.progress, posted: Date.now(),
     step: step && ((id) => step(wf.prompt[id]?.class_type)), classes: Object.fromEntries(Object.entries(wf.prompt).map(([id, n]) => [id, n.class_type])) };
   job.done = new Promise((resolve, reject) => Object.assign(job, { resolve, reject }));
-  job.submit = () => post("/prompt", { prompt: wf.prompt, client_id: CLIENT, front }).then((r) => r.json()).then((j) => {
+  job.submit = () => post("/prompt", { prompt: wf.prompt, client_id: CLIENT, front }).then(answer).then((j) => {
     if (!j.prompt_id) throw new Error(rejection(j));
     job.id = j.prompt_id;
     job.heard = Date.now();

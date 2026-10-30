@@ -31,9 +31,14 @@ def flow(page, port):
     page.on("response", lambda r: errors.append(f"{r.status}: {r.url}") if r.status >= 400 else None)
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=20000)
+    version = page.text_content("#version") or ""
+    first = page.eval_on_selector_all("#log li span", "els => els.slice(0, 3).map(e => e.textContent)")
+    check(version.count(".") == 2 and f"AInVFX PaintAPlate {version}" in first, f"the top bar shows the pack's version and the log names it first: {version} {first}")
 
     page.click("#open-btn")
-    page.wait_for_selector("#browse .item.folder", timeout=10000)
+    page.wait_for_selector("#browse .item.video:has-text('desk.mp4')", timeout=10000)
+    below = page.text_content("#browse .item.video:has-text('desk.mp4') small") or ""
+    check(below.startswith("plates"), f"the Input root lists the plates of the folders below it, each with its folder: {below}")
     page.click("#browse .item.folder:has-text('plates')")
     page.wait_for_selector("#browse .item.video", timeout=10000)
     names = page.eval_on_selector_all("#browse .item .name", "els => els.map(e => e.textContent)")
@@ -116,12 +121,12 @@ def flow(page, port):
     page.keyboard.press("Enter")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
     check(titles() == ["1. Paint"] and words() == ["a red fire"], f"Enter generates edit 1 with its words: {titles()} {words()}")
-    page.wait_for_function("document.querySelector('#render-left').textContent === 'full quality'", timeout=120000)
+    page.wait_for_function("document.querySelector('#render-left').textContent === 'full size ready'", timeout=120000)
     lines = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
     full = [i for i, line in enumerate(lines) if "plays the full-size shot" in line]
     done = [i for i, line in enumerate(lines) if REVIEWED in line]
     check(bool(full and done) and full[-1] < done[-1] and not any(line.startswith("Export v") for line in lines),
-          f"Generate makes the full quality and nothing for compositing software: the full-size shot plays, then the review: {full} {done}")
+          f"Generate makes the full-size composite and nothing for compositing software: the full-size shot plays, then the review: {full} {done}")
     with page.expect_download(timeout=120000) as dl:
         page.click("#export-btn"); page.click("#x-go")
     zipped = zipfile.ZipFile(dl.value.path()).namelist()
@@ -155,7 +160,7 @@ def flow(page, port):
     check(found < started and asked == 1, f"a whole-object erase: SAM runs while the strokes rest, the prompt writer once "
           f"(SAM at line {found}, start at line {started}, {asked} request(s))")
 
-    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => e.textContent.includes('Erase pass took'))", timeout=120000)
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => e.textContent.includes('Erase pass, preview took'))", timeout=120000)
     seen = len(page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)"))
     page.click("#history li:last-child .del")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
@@ -163,17 +168,17 @@ def flow(page, port):
     page.wait_for_function("[...document.querySelectorAll('#log li span')].slice(%d).some((e) => e.textContent.includes('used again'))" % seen,
                            timeout=60000)
     lines = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")[seen:]
-    check(not any("Track the erase (about" in line or "Erase pass (about" in line for line in lines),
+    check(not any("Track the erase (about" in line or "Erase pass, preview (about" in line for line in lines),
           "the paint removed, the next render uses the erase's matte and clean plate again: nothing tracks or cleans twice")
-    page.wait_for_function("document.querySelector('#render-left').textContent === 'full quality'", timeout=120000)
+    page.wait_for_function("document.querySelector('#render-left').textContent === 'full size ready'", timeout=120000)
     lines = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")[seen:]
     stopped = [line for line in lines if re.match(r"^(clean|cleanup|shot|matte|comp|review|export) \S+: cancelled", line)]
     check(not stopped, f"a removal stops no render step: the render it leaves keeps what it made {stopped}")
     behind = [line for line in lines if line.endswith(", in the background")]
     check(bool(behind), f"the render of the edits before the removal goes on in the background: {behind[:2]}")
     steps = [(i, line) for i, line in enumerate(lines) if re.match(r"^Render v\d+: .* \(about \d+ s\)", line)]
-    comp = next((i for i, line in steps if "Composite (about" in line and not line.endswith("in the background")), None)
-    full = next((i for i, line in steps if "at full size (about" in line or "Export (about" in line), None)
+    comp = next((i for i, line in steps if "Composite, preview (about" in line and not line.endswith("in the background")), None)
+    full = next((i for i, line in steps if ", full size (about" in line or "Export (about" in line), None)
     check(comp is not None and (full is None or comp < full),
           f"the render queue: the preview of the edits on show runs before any full-size step (composite at {comp}, first full size at {full})")
     check(not page.is_disabled("#undo-btn") and page.is_disabled("#redo-btn"), "undo is live, redo is not")
@@ -240,16 +245,24 @@ def flow(page, port):
     back = pixel(*spot)
     check(page.is_hidden("#display-state") and page.is_hidden("#ctx") and all(abs(p - q) < 3 for p, q in zip(back, before)),
           "Reset colour in the menu brings the pixels back and closes the menu")
-    # The colour picker: I, then a click on the frame, gives the brush the colour under it
+    # The colour picker: I opens the browser's own eyedropper (a stand-in here), which picks anywhere on the screen
     color = page.input_value("#color")
+    page.evaluate("""() => { window.__drops = 0;
+      window.EyeDropper = class { open() { window.__drops++; return Promise.resolve({ sRGBHex: "#2E7D32" }); } }; }""")
     page.keyboard.press("i")
-    check(page.evaluate("document.querySelector('#view').classList.contains('picking')"), "I arms the colour picker: a crosshair over the frame")
+    page.wait_for_function("document.querySelector('#color').value === '#2e7d32'", timeout=5000)
+    check(page.evaluate("window.__drops") == 1, "I opens the browser's eyedropper and the brush takes its colour")
+    # Without an eyedropper (Firefox, Safari), I arms the in-frame picker: a click gives the brush the colour on show there
+    page.evaluate("() => { window.__ED = window.EyeDropper; delete window.EyeDropper; }")
+    page.keyboard.press("i")
+    check(page.evaluate("document.querySelector('#view').classList.contains('picking')"), "without an eyedropper, I arms the in-frame picker")
     want = pixel(0.9, 0.1)
     page.mouse.click(box["x"] + box["w"] * 0.9, box["y"] + box["h"] * 0.1)
     got = page.input_value("#color")
     rgb = [int(got[i:i + 2], 16) for i in (1, 3, 5)]
     check(all(abs(p - q) <= 6 for p, q in zip(rgb, want)) and not page.evaluate("document.querySelector('#view').classList.contains('picking')"),
-          f"a click picks the colour under it for the brush: {got} against the frame's {[round(v) for v in want]}")
+          f"a click on the frame picks the colour on show there: {got} against the frame's {[round(v) for v in want]}")
+    page.evaluate("() => { window.EyeDropper = window.__ED; }")
     page.fill("#color", color)
     page.wait_for_timeout(2500)
     log = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
@@ -307,7 +320,7 @@ def added(page, steps):  # how many jobs of each step were taken from the job in
     return {f"{s}: {w}": sum(1 for line in lines if line.startswith(f"{s}: {w}")) for s in steps for w in ("made before", "posted")}
 
 
-REVIEWED = "Full quality took"  # a render's full-quality review in the log: "Render v2: Full quality took 3.1 s"
+REVIEWED = "Composite, full size took"  # a render's full-size composite in the log: "Render v2: Composite, full size took 3.1 s"
 
 
 def open_path(page, path):
@@ -418,7 +431,7 @@ def fluid_flow(page):
       const f = document.querySelector('#history li[data-id="fluid"] small');
       return t.join() === '2. Paint,1. Fluid' && !document.querySelector('#history li.busy') && !!f && f.textContent.includes('thick white smoke'); })()"""
     page.wait_for_function(rows_done, timeout=120000)
-    page.wait_for_function(f"window.__lines.some((t) => t.includes('{REVIEWED}'))", timeout=120000)  # its render made, through the full quality
+    page.wait_for_function(f"window.__lines.some((t) => t.includes('{REVIEWED}'))", timeout=120000)  # its render made, through the full-size composite
     name, scene = save_scene(page)
     check(scene["fluid"]["prompt"] == "thick white smoke" and scene["fluid"]["made"] and [e["prompt"] for e in scene["edits"]] == ["a lantern"],
           f"the scene keeps the fluid shot's own words, that it was made, and the edit on it: {scene['fluid']['prompt']!r}, {[e['prompt'] for e in scene['edits']]}")
@@ -457,7 +470,7 @@ def scene_flow(page):
             page.wait_for_timeout(1000)
             calm = calm + 1 if page.text_content("#generate").strip() == "Generate" else 0
 
-    def reviews(n):  # the full quality of the edits on show, the last step Generate starts
+    def reviews(n):  # the full-size composite of the edits on show, the last step Generate starts
         page.wait_for_function(f"window.__lines.filter((t) => t.includes('{REVIEWED}')).length >= {n}", timeout=180000)
 
     page.evaluate(WATCH)
@@ -632,7 +645,7 @@ def keys_flow(page):
     key("b", lambda: "on" in attr("[data-tool=paint]", "class"))
     size = int(text("#size-out")); key("=", lambda: int(text("#size-out")) > size); key("-", lambda: int(text("#size-out")) == size)
     key("x", lambda: attr("#rub-btn", "aria-pressed") == "true"); page.keyboard.press("x")
-    key("i", lambda: attr("#pick", "aria-pressed") == "true"); key("Escape", lambda: attr("#pick", "aria-pressed") == "false")
+    key("i", lambda: page.evaluate("window.__drops") >= 2)  # the eyedropper again: flow() put its stand-in in place
     for k, name in (("Shift+E", "Exposure"), ("k", "Contrast"), ("y", "Gamma"), ("Shift+S", "Saturation"), ("h", "Hue")):
         key(k, lambda name=name: text("#hud").startswith(name)); page.keyboard.press("Escape")
     key("Shift+E", lambda: True); key("=", lambda: text("#display-state").startswith("E +0.1")); key("Backspace", lambda: page.is_hidden("#display-state"))
@@ -691,10 +704,18 @@ def added_line(text):  # a JS test: a line added to the log since WATCH holds `t
     return "window.__lines.some((t) => t.includes(%s))" % json.dumps(text)
 
 
-def hdr_flow(page):
-    """SDR to HDR: no switch for a video plate; on by default for an EXR plate, where it runs after the full-size shot and
-    before the full quality, with its live preview in a corner; switched off, the next render leaves it out. Esc stops the
-    render on its way and Enter goes on."""
+def hdr_flow(page, port):
+    """SDR to HDR is off by default, as its shots flicker (29 Oct): an EXR plate shows no switch, a blank plate no 16-bit.
+    With ?hdr=1: no switch for a video plate; on by default for an EXR plate, where it runs after the full-size shot and
+    before the full-size composite, with its live preview in a corner naming its step of the pass's steps; switched off,
+    the next render leaves it out. Esc stops the render on its way and Enter goes on."""
+    open_path(page, "paintaplate/hdr_room")
+    page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
+    check(page.is_hidden("#hdr-switch") and page.evaluate("document.querySelector('#b-depth').closest('label').style.display") == "none",
+          "SDR to HDR is off by default: no switch for an EXR plate, no 16-bit blank plate")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?hdr=1")
+    page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
+    page.evaluate(WATCH)
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     lines = lambda: page.evaluate("window.__lines")  # noqa: E731
@@ -710,16 +731,16 @@ def hdr_flow(page):
     page.keyboard.press("Enter")
     page.wait_for_function("!document.querySelector('#live-inset').hidden", timeout=240000)
     caption = page.text_content("#live-inset figcaption")
-    wait_log(page, added_line(REVIEWED), 240000, "full quality")
-    check("step" in caption and page.is_hidden("#live-inset"),
+    wait_log(page, added_line(REVIEWED), 240000, "full-size composite")
+    check(bool(re.search(r"step \d+ of \d+", caption)) and page.is_hidden("#live-inset"),
           f"a full-size pass shows its live preview in a corner while the preview plays, then it goes: {caption}")
     new = lines()
     at = lambda text: next((i for i, line in enumerate(new) if text in line), None)  # noqa: E731
     check(at("SDR to HDR took") is not None and at("SDR to HDR took") < at(REVIEWED),
-          "the full-size shot goes through SDR to HDR before the full quality the viewer plays")
+          "the full-size shot goes through SDR to HDR before the full-size composite the viewer plays")
     page.evaluate(WATCH)
     page.click("#hdr-on")
-    wait_log(page, added_line(REVIEWED), 240000, "full quality without SDR to HDR")
+    wait_log(page, added_line(REVIEWED), 240000, "full-size composite without SDR to HDR")
     check(not any("SDR to HDR took" in line for line in lines()) and not page.is_checked("#hdr-on"),
           "switched off, the next render ends with the SDR shot: no SDR-to-HDR step")
     page.click("#hdr-on")
@@ -737,8 +758,8 @@ def hdr_flow(page):
           "Esc stops the render step on its way, and Generate can go on")
     page.evaluate(WATCH)
     page.keyboard.press("Enter")
-    wait_log(page, added_line(REVIEWED), 240000, "full quality after Enter")
-    check(True, "Enter goes on from where it stopped: the full quality is made")
+    wait_log(page, added_line(REVIEWED), 240000, "full-size composite after Enter")
+    check(True, "Enter goes on from where it stopped: the full-size composite is made")
     check(not errors, f"no console errors with SDR to HDR: {errors}")
 
 
@@ -880,7 +901,7 @@ def main():
             ocio_flow(page)
             keys_flow(page)
             oom_flow(page)
-            hdr_flow(page)
+            hdr_flow(page, a.port)
             fluid16_flow(page)
             layout_flow(page, a.port)
             phone(browser, a.port)
