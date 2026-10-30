@@ -11,7 +11,7 @@ Paint a plate is a ComfyUI node pack with its own page. Every step is a ComfyUI 
 - **SAM 3.1** finds whole objects and follows every edit through the shot.
 - **ainvfx-fluid**, AInVFX's own IC-LoRA for LTX 2.5, trained on synthetic data (dataset `AInVFX/ainvfx-fluid`), turns flat painted keyframes into smoke, steam, fire, explosions, dust, fog or clouds, from a blank plate.
 
-**GPU.** Paint a plate was tested on an NVIDIA RTX PRO 6000 with 96 GB of VRAM. Its models are large: an edit uses FLUX 3 Image Klein (5.8 GB), its text encoder (4.9 GB) and its prompt writer (6.7 GB), which the page loads as soon as it opens; a shot uses LTX 2.5 (21.5 GB) and its Gemma text encoder (15.4 GB), plus the memory of a full-size pass (up to 1920 x 1088 and 121 frames). On a 16 GB laptop GPU, the page ran out of memory as soon as it loaded its models. Cards between 16 and 96 GB have not been tested. On a smaller card or a Mac, run it on Runpod (option 3 below).
+**GPU.** Recommended and tested with 32 GB of VRAM or more. Its models are large: an edit uses FLUX 3 Image Klein (5.8 GB), its text encoder (4.9 GB) and its prompt writer (6.7 GB), which the page loads as soon as it opens; a shot uses LTX 2.5 (21.5 GB) and its Gemma text encoder (15.4 GB), plus the memory of a full-size pass (up to 1920 x 1088 and 121 frames). On a smaller card or a Mac, run it on Runpod (option 3 below).
 
 On Hugging Face: the 23 test plates, [AInVFX/ainvfx-paintaplate](https://huggingface.co/datasets/AInVFX/ainvfx-paintaplate) (synthetic, CC BY 4.0); the IC-LoRA [AInVFX/ainvfx-fluid](https://huggingface.co/AInVFX/ainvfx-fluid) and its synthetic training data, [AInVFX/ainvfx-fluid](https://huggingface.co/datasets/AInVFX/ainvfx-fluid) (dataset).
 
