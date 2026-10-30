@@ -7,7 +7,7 @@ on:
 
 # Three jobs side by side, none repeating another's tests: the Python and Node level, the page against the mock ComfyUI,
 # and a real ComfyUI on CPU. The page jobs drive the runner's own Google Chrome when it has one (no browser download, no
-# system packages, and it plays H.264); else Playwright's Chromium is installed.
+# system packages, and it plays H.264); else Playwright's Chromium is installed. Then, on main, the release job.
 jobs:
   unit:
     name: Unit tests (no ComfyUI, no browser)
@@ -61,3 +61,50 @@ jobs:
       - run: bash tools/ci_comfyui.sh "$RUNNER_TEMP/ci" | tail -n 1 >> "$GITHUB_ENV"
       - run: python -m unittest -v test_live test_workflows
         working-directory: tests
+
+  release:
+    name: Release (Comfy Registry, tag, GitHub release)
+    # On main, once the three jobs pass: a new version in pyproject.toml is published to the Comfy Registry, then tagged
+    # v<version> with its GitHub release (a pre-release before 1.0.0). Each step skips what is done already, so a re-run
+    # (Actions > tests > Run workflow) finishes a release that stopped half-way.
+    needs: [unit, page, comfyui]
+    if: github.ref == 'refs/heads/main' && github.repository_owner == 'AInVFX' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # the tag and the release
+    concurrency: release
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Version
+        id: version
+        run: python -c 'import tomllib; print("version=" + tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])' >> "$GITHUB_OUTPUT"
+      - name: Comfy Registry
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REGISTRY_ACCESS_TOKEN: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+        run: |
+          if curl -sf "https://api.comfy.org/nodes/ainvfx-paintaplate/versions/$VERSION" > /dev/null; then
+            echo "$VERSION is on the Registry already"
+            exit 0
+          fi
+          pip install comfy-cli==1.22.0  # pinned (released 30 Sept 2026): it receives the Registry token
+          comfy --skip-prompt --no-enable-telemetry env
+          comfy node publish --token "$REGISTRY_ACCESS_TOKEN"
+      - name: Tag and GitHub release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v$VERSION" > /dev/null 2>&1; then
+            echo "v$VERSION is released already"
+            exit 0
+          fi
+          git log -1 --format=%b > notes.md
+          args=(--target "$GITHUB_SHA" --title "AInVFX PaintAPlate $VERSION" --notes-file notes.md)
+          if [ "${VERSION%%.*}" = "0" ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "v$VERSION" "${args[@]}"

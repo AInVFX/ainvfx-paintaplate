@@ -289,3 +289,171 @@ class Browser(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class ExrDataWindowTest(unittest.TestCase):
+    """An EXR's data window, which FFmpeg reads into the display window: kept when the edit stays inside it, grown to
+    hold an edit outside it, and kept in place when offset or larger (overscan). Before 0.5.7 a smaller window failed
+    the export, and an offset one of the display's size was written shifted. Pixel values encode their place."""
+
+    def make(self, dw, disp=((0, 0), (63, 31))):
+        (x0, y0), (x1, y1) = dw
+        yy, xx = np.mgrid[y0:y1 + 1, x0:x1 + 1].astype(np.float32)
+        rgb = np.stack([xx / 100.0 + 0.001, yy / 100.0 + 0.001, np.full(xx.shape, 0.5, np.float32)], -1).astype(np.float16)
+        header = {"compression": OpenEXR.PIZ_COMPRESSION, "type": OpenEXR.scanlineimage,
+                  "dataWindow": (np.array(dw[0], np.int32), np.array(dw[1], np.int32)),
+                  "displayWindow": (np.array(disp[0], np.int32), np.array(disp[1], np.int32))}
+        path = os.path.join(tempfile.mkdtemp(), "dw.exr")
+        OpenEXR.File(header, {"RGB": rgb, "Z": xx + yy}).write(path)
+        return path
+
+    def read(self, path):
+        with OpenEXR.File(path, separate_channels=True) as f:
+            p = f.parts[0]
+            box = lambda k: tuple(int(v) for a in p.header[k] for v in a)  # noqa: E731
+            return box("dataWindow"), box("displayWindow"), {n: c.pixels.copy() for n, c in p.channels.items()}
+
+    def export(self, path, ys, ye, xs, xe):  # paints 2.0 over display rows ys..ye-1, columns xs..xe-1
+        rgb = plateio.read_float(path)
+        keep = np.ones(rgb.shape[:2], bool)
+        rgb[ys:ye, xs:xe], keep[ys:ye, xs:xe] = 2.0, False
+        out = path.replace(".exr", "_out.exr")
+        plateio.write_exr_like(path, rgb, None, out, keep=keep)
+        return self.read(path), self.read(out)
+
+    def same_outside(self, a, b, y, x):  # every channel bit-identical outside the edit at data rows y, columns x
+        untouched = np.ones(a["R"].shape, bool)
+        untouched[y, x] = False
+        for n in a:
+            self.assertTrue((a[n][untouched] == b[n][untouched]).all(), n)
+
+    def test_an_edit_inside_keeps_the_window(self):
+        (dw0, disp0, a), (dw1, disp1, b) = self.export(self.make(((8, 4), (55, 27))), 10, 14, 20, 30)
+        self.assertEqual((dw1, disp1), (dw0, disp0))
+        self.assertTrue((b["R"][6:10, 12:22] == 2.0).all())  # display (20..29, 10..13) is data (12..21, 6..9)
+        self.same_outside(a, b, slice(6, 10), slice(12, 22))
+
+    def test_an_edit_outside_grows_the_window_to_hold_it(self):
+        (_, _, a), (dw1, disp1, b) = self.export(self.make(((8, 4), (55, 27))), 0, 6, 2, 12)
+        self.assertEqual((dw1, disp1), ((2, 0, 55, 27), (0, 0, 63, 31)))  # the window and the edit's box, nothing more
+        self.assertTrue((b["R"][0:6, 0:10] == 2.0).all())
+        old = {n: v[4:28, 6:54] for n, v in b.items()}  # the old window inside the new one
+        self.same_outside(a, old, slice(0, 2), slice(0, 4))
+        self.assertEqual(float(b["Z"][:4].max()), 0.0)  # the other layers padded with zeros
+
+    def test_an_offset_window_stays_in_place(self):
+        (dw0, _, a), (dw1, _, b) = self.export(self.make(((10, 6), (73, 37))), 20, 24, 30, 40)
+        self.assertEqual(dw1, dw0)
+        self.assertTrue((b["R"][14:18, 20:30] == 2.0).all())
+        self.same_outside(a, b, slice(14, 18), slice(20, 30))  # the part beyond the display window included
+
+    def test_overscan_stays_the_source(self):
+        (dw0, _, a), (dw1, _, b) = self.export(self.make(((-8, -4), (71, 35))), 10, 14, 20, 30)
+        self.assertEqual(dw1, dw0)
+        self.assertTrue((b["R"][14:18, 28:38] == 2.0).all())
+        self.same_outside(a, b, slice(14, 18), slice(28, 38))
+
+    def test_a_relight_keeps_the_window(self):
+        src = self.make(((8, 4), (55, 27)))
+        out = src.replace(".exr", "_lit.exr")
+        plateio.write_exr_like(src, plateio.read_float(src) * 2.0, None, out)  # outside the window there is nothing to light
+        (dw0, _, a), (dw1, _, b) = self.read(src), self.read(out)
+        self.assertEqual(dw1, dw0)
+        self.assertTrue(np.allclose(b["R"].astype(np.float32), a["R"].astype(np.float32) * 2.0, rtol=1e-3))
+        print("EXR data window: kept, grown to hold an edit outside it, offset and overscan windows in place")
+
+
+class StillAlphaTest(unittest.TestCase):
+    """A PNG or TIFF plate's own alpha, kept sample for sample in the export, since no edit works on it; a plate with no
+    alpha gets none. Before 0.5.7 the export dropped it: the export workflow gives Save Plate no alpha. 8-bit levels come
+    back exactly: swscale's 16 to 8-bit RGBA conversion moved most of them up by one."""
+
+    def export(self, ext, deep, alpha=True, keep_untouched=True):
+        d, h, w = tempfile.mkdtemp(), 24, 32
+        codec, pix = {".png": ("png", "rgba64be" if deep else "rgba"), ".tif": ("tiff", "rgba64le" if deep else "rgba")}[ext]
+        if not alpha:
+            pix = pix.replace("rgba64", "rgb48").replace("rgba", "rgb24")
+        yy, xx = np.mgrid[0:h, 0:w]
+        for n in (1001, 1002):
+            rgba = np.stack([xx * 8, yy * 10, np.full((h, w), 128), (xx + yy) * 4 + n % 2], -1).astype(np.uint16) * 257
+            with open(os.path.join(d, f"f.{n}{ext}"), "wb") as f:
+                f.write(plateio.encode_still(rgba if alpha else rgba[..., :3], None, codec, pix))
+        spec, out_dir = plateio.probe_plate(d), os.path.join(d, "out")
+        os.makedirs(out_dir)
+        keep = np.ones((h, w), bool)
+        keep[4:10, 6:16] = False
+        top = 65535 if deep else 255
+        for i in range(2):
+            rgb = plateio.read_native(spec["files"][i], False, not deep).astype(np.float32) / top
+            rgb[4:10, 6:16] = (0.0, 1.0, 0.0)
+            out = plateio.write_still(spec, i, rgb, None, keep if keep_untouched else None, out_dir)
+            src, got = plateio.read_native(spec["files"][i], True, not deep), plateio.read_native(out, True, not deep)
+            self.assertEqual(plateio.carries_alpha(plateio.probe_still(out)["pix_fmt"]), alpha)
+            self.assertTrue((got[..., 3] == src[..., 3]).all())  # alpha: the plate's own (opaque when it has none)
+            self.assertTrue((got[keep][:, :3] == src[keep][:, :3]).all())
+            self.assertTrue((got[4:10, 6:16, :3].astype(int) == [0, top, 0]).all())
+
+    def test_png_8_bit(self):
+        self.export(".png", False)
+
+    def test_png_16_bit(self):
+        self.export(".png", True)
+
+    def test_tiff_8_bit(self):
+        self.export(".tif", False)
+
+    def test_a_relight_keeps_the_alpha(self):
+        self.export(".png", False, keep_untouched=False)
+
+    def test_no_alpha_stays_none(self):
+        self.export(".png", False, alpha=False)
+        print("still alpha: a PNG or TIFF plate's own alpha kept sample for sample; none added")
+
+
+class RawVideoNoteTest(unittest.TestCase):
+    """The export's note that untouched pixels are the source's own YUV samples, written only when they were: planar YUV
+    copies them; a video coded in RGB (here PNG in a QuickTime movie) is written through RGB, exactly, with no such note."""
+
+    def export(self, codec, pix_fmt, ext):
+        d = tempfile.mkdtemp()
+        src = os.path.join(d, f"plate{ext}")
+        with av.open(src, "w") as o:
+            s = o.add_stream(codec, rate=24)
+            s.width, s.height, s.pix_fmt = 64, 32, pix_fmt
+            for i in range(3):
+                rgb = np.zeros((32, 64, 3), np.uint8)
+                rgb[:, :32], rgb[:, 32:] = 40 * i + 60, 200 - 40 * i
+                frame = av.VideoFrame.from_ndarray(rgb, format="rgb24").reformat(format=pix_fmt)
+                frame.pts = i
+                for p in s.encode(frame):
+                    o.mux(p)
+            for p in s.encode(None):
+                o.mux(p)
+        writer = plateio.VideoWriter(plateio.probe_plate(src), os.path.join(d, f"out{ext}"))
+        source, keep, wants = plateio.SourceFrames(src, writer.pix_fmt), np.ones((32, 64), bool), []
+        keep[:, :16] = False  # an edit on the left quarter: green
+        with av.open(src) as a:
+            for f in a.decode(video=0):
+                rgb = f.to_ndarray(format="rgb24").astype(np.float32) / 255.0
+                rgb[:, :16] = (0.0, 1.0, 0.0)
+                wants.append(np.round(rgb * 255.0).astype(int))
+                writer.write(rgb, keep=keep, source=source.next())
+        writer.close()
+        source.close()
+        with av.open(writer.path) as b:
+            got = [y.to_ndarray(format="rgb24").astype(int) for y in b.decode(video=0)]
+        edit = max(int(np.abs(g - w)[:, :16].max()) for g, w in zip(got, wants))
+        untouched = max(int(np.abs(g - w)[:, 16:].max()) for g, w in zip(got, wants))
+        return edit, untouched, writer.notes
+
+    def test_planar_yuv_copies_the_samples_and_says_so(self):
+        edit, untouched, notes = self.export("rawvideo", "yuv420p", ".mkv")
+        self.assertLessEqual(edit, 6)
+        self.assertEqual(untouched, 0)
+        self.assertIn("Untouched pixels are the source's own YUV samples.", notes)
+
+    def test_rgb_video_says_nothing_of_yuv(self):
+        edit, untouched, notes = self.export("png", "rgb24", ".mov")  # PNG in a QuickTime movie
+        self.assertEqual((edit, untouched), (0, 0))
+        self.assertNotIn("Untouched pixels are the source's own YUV samples.", notes)
+        print("export note: untouched YUV samples named only when copied")

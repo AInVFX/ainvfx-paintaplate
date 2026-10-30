@@ -169,7 +169,7 @@ Open plate has one tab per source: **ComfyUI files**, **Upload**, **Scenes** and
 | `mathops.py` | Pixels: phase-correlation alignment, grain level, the colour seam field, push-pull fill, steady masks, `fit_to_plate`, `relight`, `follow_matte`, `level_fill`, `keyframe_video`, and the fast bilinear `resize_to`. |
 | `ocio.py` | Colour: the configs, the menu's description of one, the plate's colour space guess, conversions into and out of the model space, and the viewer's GLSL with its lookup tables. |
 | `routes.py` | The routes: the plate browser and its thumbnails, a plate's size, time, spec and colour space (`stat`), the frames of an image sequence as RGB half floats (`frames`), the blank plate, the job index (`jobs`), scenes, OCIO and its shaders, and the zip download. |
-| `pyproject.toml` | Package and Registry metadata: the version, `PublisherId` `ainvfx`, `requires-comfyui`. |
+| `pyproject.toml` | Package and Registry metadata: the version, `PublisherId` `ainvfx`, `requires-comfyui`, the dependencies as `requirements.txt` lists them (the Registry reads only this static list), and no accelerator classifier, since the nodes run on a CPU. |
 | `requirements.txt` | The runtime packages beyond ComfyUI's own: OpenEXR and OpenColorIO. |
 | `get_models.py` | Every model file the workflows load, with its repository, its tested revision and its folder, downloaded with ComfyUI's own Python on Windows, macOS or Linux. The pod setup runs it. |
 
@@ -216,7 +216,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | Node | What it does | Used by |
 | --- | --- | --- |
 | Load Plate | A video, a frame folder or a frame pattern at full precision: frames, alpha, spec, frame rate, frame count; optional 8k + 1 padding | most workflows |
-| Save Plate | Writes the plate's format, with the exact source pixels wherever nothing changed; for a video plate, the untouched pixels are its own YUV samples, with no RGB round trip. It lists the files it wrote, so the job index keeps them | `export`, `fluid` |
+| Save Plate | Writes the plate's format, with the exact source pixels wherever nothing changed; for a video plate in planar YUV, the untouched pixels are its own YUV samples, with no RGB round trip. The plate's own alpha stays as it is, and an EXR's data window grows only to hold an edit outside it. It lists the files it wrote, so the job index keeps them | `export`, `fluid` |
 | Color Space (OCIO) | Converts frames between two colour spaces of an OCIO config, several frames at once; `@model` and `@linear` as in section 6 | most workflows |
 | Save Frames | Saves a batch as numbered frames, named as core Save Image names them, several at once: 8-bit PNG, or half-float EXR with lossless PIZ compression (core took 35.3 s for 121 PNG frames at 1080p) | `clean`, `cleanup`, `shot`, `matte`, `review`, `export` |
 | Save Movie | Saves a batch as the H.264 movie the page plays, as core Save Video makes it (BT.709, limited range), crf 18 by default and 12 for the proxy and the review, the frames converted several at once and x264 at preset veryfast | `ingest`, `clean`, `cleanup`, `shot`, `comp`, `review` |
@@ -295,7 +295,7 @@ At load, `boot()` loads the OCIO config, then checks that every node class and m
 | A node | A class in `nodes.py`, added to the `NODES` list | Restart ComfyUI |
 | A route | `routes.py`, plus one line in `setup()` | A test in `test_routes.py` |
 | A pinned commit | `tools/pins.sh` | The source check (`COMFYUI_DIR` and `LTXVIDEO_DIR`), then a GPU run |
-| A release | `version` in `pyproject.toml`; one commit whose message says what changed and why, author `AInVFX <hello@ainvfx.com>` | The whole suite; the patch and the bundle checked on a fresh clone |
+| A release | `version` in `pyproject.toml`; one commit whose message says what changed and why, author `AInVFX <hello@ainvfx.com>`; pushed to `main`, CI releases it once the tests pass (below) | The whole suite; the patch and the bundle checked on a fresh clone |
 
 Before and after any change: `python -m unittest discover -s tests -v` and `node --test tests/js/*.test.mjs`.
 
@@ -304,7 +304,7 @@ Before and after any change: `python -m unittest discover -s tests -v` and `node
 - **ComfyUI v0.43.0** (`426f5eea`) and **ComfyUI-LTXVideo** `220e1d4`, in `tools/pins.sh`. `requires-comfyui` is `>=0.43.0`: the first release that contains what the pack was tested on.
 - **Models** at pinned Hugging Face revisions (`get_models.py`), about 60 GB in all. ainvfx-fluid (0.65 GB, revision `fd4855a`, trained on synthetic data) is optional.
 - **OpenColorIO** 2.4 or newer (`requirements.txt`); 2.6.0 was tested, with its built-in configs.
-- **The Registry publish** runs by hand (Actions > Publish to Comfy Registry), with `Comfy-Org/publish-node-action` pinned to a commit.
+- **Releases** run in CI: once the three test jobs pass on `main`, the `release` job of `tests.yml` publishes a new `version` to the Comfy Registry with comfy-cli 1.22.0 (pinned: it receives the Registry token), then tags it `v<version>` and makes its GitHub release, a pre-release before 1.0.0. Each step skips what is done already, so a re-run (Actions > tests > Run workflow) finishes a release that stopped half-way. The Registry lists a version once its automated security scan passes.
 
 ## 14. Known limits
 

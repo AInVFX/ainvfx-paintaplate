@@ -165,7 +165,8 @@ class SavePlate(io.ComfyNode):
             category=CATEGORY,
             description="Writes frames in the plate's own format: same file type, bit depth, frame numbers, "
                         "colour tags, timecode and audio. For EXR, every other layer and header attribute "
-                        "is kept. Outside 'changed', the exact source pixels are written back.",
+                        "is kept, and the data window grows only to hold an edit outside it. The plate's own "
+                        "alpha is kept as it is. Outside 'changed', the exact source pixels are written back.",
             is_output_node=True,
             inputs=[
                 io.Image.Input("images", tooltip="Frames in the plate's colour space."),
@@ -198,31 +199,17 @@ class SavePlate(io.ComfyNode):
                 bar.update(1)
             if src is not None:
                 src.close()
-                writer.notes.append("Untouched pixels are the source's own YUV samples.")
             writer.close()
             written, notes = [writer.path], writer.notes
         else:
-            has_alpha = alpha is not None
-            codec, pix_fmt, options = plateio.still_target(spec, has_alpha)
             bar = comfy.utils.ProgressBar(count)
             for i, rgb in enumerate(frames_np(images[:count])):
                 bar.update(1)
-                src = spec["files"][i]
-                out = plateio.output_frame_name(spec, i, out_dir)
-                a = alpha[i].float().cpu().numpy() if has_alpha else None
+                a = alpha[i].float().cpu().numpy() if alpha is not None else None
                 keep = None
                 if keep_untouched and changed is not None:
                     keep = changed[min(i, changed.shape[0] - 1)].float().cpu().numpy() <= 1.0 / 1024
-                if spec["ext"] == ".exr" and plateio.OpenEXR is not None:
-                    plateio.write_exr_like(src, rgb, a, out, keep=keep)
-                else:
-                    if keep is not None and codec != "exr":  # exact integers from the source
-                        rgb = np.where(keep[..., None], plateio.read_native(src, has_alpha),
-                                       plateio.to_uint16(rgb, a))
-                        a = None
-                    with open(out, "wb") as f:
-                        f.write(plateio.encode_still(rgb, a, codec, pix_fmt, options))
-                written.append(out)
+                written.append(plateio.write_still(spec, i, rgb, a, keep, out_dir))
             if spec["ext"] == ".exr" and plateio.OpenEXR is None:
                 notes.append("OpenEXR is not installed: extra EXR layers were not copied.")
         text = f"{len(written)} file(s) in {out_dir}\n" + "\n".join(notes + [os.path.basename(p) for p in written[:3]])

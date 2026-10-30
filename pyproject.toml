@@ -1,17 +1,14 @@
 [project]
 name = "ainvfx-paintaplate"
-version = "0.5.6"
+version = "0.5.7"
 description = "Paint on the first frame of a plate to erase, add or relight, watch the edit carry through the shot, and export it in the plate's own format, layers and untouched pixels."
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
-classifiers = [
-    "Operating System :: OS Independent",
-    "Environment :: GPU :: NVIDIA CUDA",
-]
-dynamic = ["dependencies"]
-
-[tool.setuptools.dynamic]
-dependencies = { file = ["requirements.txt"] }
+# The Registry reads only this static list; ComfyUI Manager and the Registry's node scan install requirements.txt.
+# tests/test_registry.py keeps the two equal.
+dependencies = ["OpenEXR>=3.3", "opencolorio>=2.4"]
+# No accelerator: the nodes run on a CPU (the CI runs them there). The models' GPU needs are in the README.
+classifiers = ["Operating System :: OS Independent"]
 
 [project.urls]
 Repository = "https://github.com/AInVFX/ainvfx-paintaplate"

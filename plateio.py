@@ -297,19 +297,63 @@ def output_frame_name(spec: dict, index: int, out_dir: str, ext: str | None = No
     return os.path.join(out_dir, f"{stem}.{index + spec.get('first_frame', 0):04d}{ext}")
 
 
+RGB_NAMES = ("R", "G", "B")
+
+
+def _window(header: dict, key: str) -> tuple[int, int, int, int]:
+    """An EXR header's data or display window as (x0, y0, x1, y1), inclusive."""
+    lo, hi = header[key]
+    return int(lo[0]), int(lo[1]), int(hi[0]), int(hi[1])
+
+
+def _place(chans: dict, header: dict, new: dict, keep: np.ndarray | None) -> dict:
+    """The part's channels with `new` (display-window arrays) written in, R, G and B keeping the source where `keep`
+    holds; `header`'s data window grows when an edit put something outside it (write_exr_like)."""
+    dx0, dy0, dx1, dy1 = _window(header, "dataWindow")
+    px0, py0, px1, py1 = _window(header, "displayWindow")
+    h, w = next(iter(new.values())).shape[:2]
+    if (h, w) != (py1 - py0 + 1, px1 - px0 + 1):
+        raise ValueError(f"Size mismatch: the frame is {w} x {h}, the display window {px1 - px0 + 1} x {py1 - py0 + 1}")
+    inside = np.zeros((h, w), bool)  # the display pixels the data window holds
+    inside[max(dy0 - py0, 0):max(dy1 - py0 + 1, 0), max(dx0 - px0, 0):max(dx1 - px0 + 1, 0)] = True
+    made = np.zeros((h, w), bool)
+    for arr in new.values():
+        made |= arr != 0
+    outside = made & ~inside if keep is None else made & ~inside & ~keep
+    nx0, ny0, nx1, ny1 = dx0, dy0, dx1, dy1
+    if outside.any():  # an edit beyond the data window: the smallest box that holds both
+        ys, xs = np.nonzero(outside)
+        nx0, ny0 = min(dx0, px0 + int(xs.min())), min(dy0, py0 + int(ys.min()))
+        nx1, ny1 = max(dx1, px0 + int(xs.max())), max(dy1, py0 + int(ys.max()))
+        header["dataWindow"] = (np.array([nx0, ny0], np.int32), np.array([nx1, ny1], np.int32))
+    ix0, iy0, ix1, iy1 = max(nx0, px0), max(ny0, py0), min(nx1, px1), min(ny1, py1)  # the display inside the window
+    out = {}
+    for name, src in chans.items():
+        a = np.zeros((ny1 - ny0 + 1, nx1 - nx0 + 1), src.dtype)
+        a[dy0 - ny0:dy1 - ny0 + 1, dx0 - nx0:dx1 - nx0 + 1] = src
+        if name in new and ix0 <= ix1 and iy0 <= iy1:
+            at = (slice(iy0 - ny0, iy1 - ny0 + 1), slice(ix0 - nx0, ix1 - nx0 + 1))
+            view = (slice(iy0 - py0, iy1 - py0 + 1), slice(ix0 - px0, ix1 - px0 + 1))
+            value = new[name][view].astype(src.dtype)
+            a[at] = value if keep is None or name not in RGB_NAMES else np.where(keep[view], a[at], value)
+        out[name] = a
+    return out
+
+
 def write_exr_like(src_path: str, rgb: np.ndarray, alpha: np.ndarray | None, out_path: str,
-                   keep: np.ndarray | None = None, extra_overrides: dict | None = None) -> None:
+                   keep: np.ndarray | None = None) -> None:
     """Write `rgb` (H, W, 3 float) into a copy of the source EXR frame.
 
-    Every channel, part and header attribute of the source is kept. Only R, G,
-    B (and A when `alpha` is given) of the RGB part are replaced, in the source
-    pixel type. Where `keep` (H, W bool) is True, the source pixels stay
-    bit-identical. `extra_overrides` maps other channel names to new 2D arrays
-    (for a regenerated alpha or depth).
+    Every channel, part and header attribute of the source is kept. Only R, G and B (and A when `alpha` is given) of the
+    RGB part are replaced, in the source pixel type. Where `keep` (H, W bool) is True, the source pixels stay bit-identical.
+
+    `rgb`, `alpha` and `keep` cover the display window, as FFmpeg and core read an EXR: the data window's pixels at their
+    place, zero where it holds none. The data window stays as it is unless an edit put something outside it; then it grows
+    to the smallest box that holds the edit too, and the part's other channels are padded with zeros. Pixels of the data
+    window outside the display window (overscan) stay the source's.
     """
     if OpenEXR is None:
         raise RuntimeError("OpenEXR is not installed")
-    extra_overrides = extra_overrides or {}
     with OpenEXR.File(src_path, separate_channels=True) as f:
         parts_out = []
         rgb_done = False
@@ -317,19 +361,12 @@ def write_exr_like(src_path: str, rgb: np.ndarray, alpha: np.ndarray | None, out
             header = dict(part.header)
             header.pop("channels", None)  # rebuilt from the channel arrays
             chans = {name: ch.pixels for name, ch in part.channels.items()}
-            if not rgb_done and {"R", "G", "B"} <= set(chans):
-                for i, name in enumerate(("R", "G", "B")):
-                    src = chans[name]
-                    if src.shape != rgb.shape[:2]:
-                        raise ValueError(f"Size mismatch for {name}: {src.shape} vs {rgb.shape[:2]}")
-                    new = rgb[..., i].astype(src.dtype)
-                    chans[name] = new if keep is None else np.where(keep, src, new)
+            if not rgb_done and set(RGB_NAMES) <= set(chans):
+                new = {name: rgb[..., i] for i, name in enumerate(RGB_NAMES)}
                 if alpha is not None and "A" in chans:
-                    chans["A"] = alpha.astype(chans["A"].dtype)
+                    new["A"] = alpha
+                chans = _place(chans, header, new, keep)
                 rgb_done = True
-            for name, arr in extra_overrides.items():
-                if name in chans:
-                    chans[name] = arr.astype(chans[name].dtype)
             name = header.get("name")
             parts_out.append(OpenEXR.Part(header, chans, name=name) if name else (header, chans))
         if len(parts_out) == 1 and isinstance(parts_out[0], tuple):
@@ -339,16 +376,26 @@ def write_exr_like(src_path: str, rgb: np.ndarray, alpha: np.ndarray | None, out
                      for i, p in enumerate(parts_out)]
             OpenEXR.File(parts).write(out_path)
 
+def read_native(path: str, with_alpha: bool, eight: bool = False) -> np.ndarray:
+    """Read one still frame exactly, as integers (RGB or RGBA): 8 bits for an 8-bit target, else 16.
 
-def read_native(path: str, with_alpha: bool) -> np.ndarray:
-    """Read one still frame exactly, as 16-bit integers (RGB or RGBA).
-
-    Core decodes to float through swscale, which can move a 16-bit value by a
-    few codes. The export copies untouched pixels from this exact read instead.
+    Core decodes to float through swscale, which can move a 16-bit value by a few codes. The export copies untouched
+    pixels from this exact read instead. An 8-bit frame is read at 8 bits: swscale's 16 to 8-bit step is not the
+    inverse of its 8 to 16-bit one, and moved 123 of the 256 levels up by one (29 Oct 2026).
     """
     with av.open(path) as c:
         frame = next(c.decode(video=0))
-        return frame.to_ndarray(format="rgba64le" if with_alpha else "rgb48le")
+        fmt = ("rgba" if with_alpha else "rgb24") if eight else ("rgba64le" if with_alpha else "rgb48le")
+        return frame.to_ndarray(format=fmt)
+
+
+def eight_bit_rgb(pix_fmt: str) -> bool:
+    """True for an 8-bit RGB format (rgb24, rgba, bgra, gbrp): written from 8-bit values, so swscale only reorders bytes."""
+    try:
+        f = av.VideoFormat(pix_fmt)
+        return bool(f.is_rgb) and not f.has_palette and all(c.bits == 8 for c in f.components)
+    except (ValueError, TypeError, AVError):
+        return False
 
 
 PLANAR_FLOATS = {"gbrpf16le": "<f2", "gbrapf16le": "<f2", "gbrpf32le": "<f4", "gbrapf32le": "<f4"}
@@ -527,11 +574,19 @@ def to_uint16(rgb: np.ndarray, alpha: np.ndarray | None = None) -> np.ndarray:
     return (data * 65535.0 + 0.5).astype(np.uint16)
 
 
+def to_uint8(rgb: np.ndarray, alpha: np.ndarray | None = None) -> np.ndarray:
+    data = np.clip(rgb, 0.0, 1.0)
+    if alpha is not None:
+        data = np.concatenate([data, np.clip(alpha, 0.0, 1.0)[..., None]], axis=-1)
+    return (data * 255.0 + 0.5).astype(np.uint8)
+
+
 def encode_still(rgb: np.ndarray, alpha: np.ndarray | None, codec: str, pix_fmt: str,
                  options: dict | None = None) -> bytes:
     """Encode one frame with a PyAV image codec (png, tiff, dpx, exr).
 
-    `rgb` is float (H, W, 3), or uint16 (H, W, 3 or 4) already quantised.
+    `rgb` is float (H, W, 3), or uint8 or uint16 (H, W, 3 or 4) already quantised; floats for an 8-bit format are
+    rounded here, not by swscale.
     PyAV takes planar float formats as (H, W, C) arrays in RGB order.
     """
     if av is None:
@@ -545,8 +600,14 @@ def encode_still(rgb: np.ndarray, alpha: np.ndarray | None, codec: str, pix_fmt:
             fmt = "gbrapf32le"
         frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(data), format=fmt)
     else:
-        arr = rgb if rgb.dtype == np.uint16 else to_uint16(rgb, alpha)
-        fmt = "rgba64le" if arr.shape[-1] == 4 else "rgb48le"
+        if rgb.dtype in (np.uint8, np.uint16):
+            arr = rgb
+        else:
+            arr = to_uint8(rgb, alpha) if eight_bit_rgb(pix_fmt) else to_uint16(rgb, alpha)
+        if arr.dtype == np.uint8:
+            fmt = "rgba" if arr.shape[-1] == 4 else "rgb24"
+        else:
+            fmt = "rgba64le" if arr.shape[-1] == 4 else "rgb48le"
         frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(arr), format=fmt)
     cc = av.CodecContext.create(codec, "w")
     cc.width, cc.height = w, h
@@ -572,12 +633,48 @@ def still_target(spec: dict, has_alpha: bool) -> tuple[str, str, dict]:
     if ext in (".tif", ".tiff"):
         return "tiff", ("rgba64le" if has_alpha else "rgb48le") if deep else ("rgba" if has_alpha else "rgb24"), {}
     if ext == ".dpx":
+        if has_alpha:  # FFmpeg's DPX encoder writes alpha as RGBA, 8 or 16 bits
+            return "dpx", "rgba64le" if deep else "rgba", {}
         if "12" in src_fmt:
             return "dpx", "gbrp12le", {}
         if "10" in src_fmt:
             return "dpx", "gbrp10le", {}
         return "dpx", "rgb48le" if deep else "rgb24", {}
     return "png", "rgb48be", {}
+
+
+def carries_alpha(pix_fmt: str) -> bool:
+    """True when a pixel format holds alpha (rgba, rgba64be, ya16be, gbrap10le, yuva444p10le)."""
+    if av is None or not pix_fmt:
+        return False
+    try:
+        return any(c.is_alpha for c in av.VideoFormat(pix_fmt).components)
+    except (ValueError, TypeError, AVError):
+        return False
+
+
+def write_still(spec: dict, index: int, rgb: np.ndarray, alpha: np.ndarray | None, keep: np.ndarray | None,
+                out_dir: str) -> str:
+    """Frame `index` of an image or sequence plate, written in its own format under its own name in `out_dir`; returns
+    the path. Where `keep` (H, W) holds, the source's exact pixels. The plate's own alpha stays sample for sample, since
+    no edit works on it, unless a new `alpha` is given."""
+    src, out = spec["files"][index], output_frame_name(spec, index, out_dir)
+    if spec["ext"] == ".exr" and OpenEXR is not None:
+        write_exr_like(src, rgb, alpha, out, keep=keep)
+        return out
+    own = alpha is None and carries_alpha(spec.get("pix_fmt", ""))
+    codec, pix_fmt, options = still_target(spec, alpha is not None or own)
+    data, a = rgb, alpha
+    if codec != "exr" and (keep is not None or own):  # the source's exact integers, at its own depth
+        eight = eight_bit_rgb(pix_fmt)
+        native = read_native(src, alpha is not None or own, eight)
+        new = to_uint8(rgb, alpha) if eight else to_uint16(rgb, alpha)
+        if own:
+            new = np.concatenate([new, native[..., 3:]], axis=-1)  # the plate's own alpha
+        data, a = (new if keep is None else np.where(keep[..., None], native, new)), None
+    with open(out, "wb") as f:
+        f.write(encode_still(data, a, codec, pix_fmt, options))
+    return out
 
 
 def write_blank(path: str, width: int, height: int, fps: float, frames: int) -> str:
@@ -666,6 +763,7 @@ class VideoWriter:
             self.stream.pix_fmt = pix
             self.notes.append(f"Pixel format {spec.get('pix_fmt')} refused by {encoder}: using {pix}.")
         self.pix_fmt = pix
+        self.eight = eight_bit_rgb(pix)  # written from 8-bit values (write)
         cc = self.stream.codec_context
         for attr in ("color_primaries", "color_trc", "colorspace", "color_range"):
             value = spec.get(attr)
@@ -696,14 +794,17 @@ class VideoWriter:
                 self.notes.append(f"Audio not copied: {exc}")
                 self.audio_in = None
         self.index = 0
+        self.samples_kept = False  # a frame kept the source's own samples: close() says so in the notes
         self.dst_colorspace = spec.get("colorspace")
         self.dst_range = spec.get("color_range")
 
     def write(self, rgb: np.ndarray, keep: np.ndarray | None = None, source=None) -> None:
         """`rgb` is display-referred float (H, W, 3) in 0..1, as decoded by core. Where `keep` (H, W) holds, the source
         frame's own YUV samples are written instead (`keep_samples`)."""
-        arr = np.ascontiguousarray((np.clip(rgb, 0.0, 1.0) * 65535.0 + 0.5).astype(np.uint16))
-        frame = av.VideoFrame.from_ndarray(arr, format="rgb48le")
+        if self.eight:  # 8-bit RGB: rounded here, since swscale's 16 to 8-bit step moves most levels up by one
+            frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(to_uint8(rgb)), format="rgb24")
+        else:
+            frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(to_uint16(rgb)), format="rgb48le")
         kwargs = {"format": self.pix_fmt}
         if self.dst_colorspace not in (None, 2):  # 2 = unspecified
             kwargs["dst_colorspace"] = self.dst_colorspace
@@ -716,6 +817,7 @@ class VideoWriter:
             frame = frame.reformat(format=self.pix_fmt)
         if keep is not None and source is not None and self.pix_fmt.startswith("yuv"):
             frame = keep_samples(frame, source, keep)
+            self.samples_kept = True
         frame.pts = self.index
         self.index += 1
         for packet in self.stream.encode(frame):
@@ -736,3 +838,5 @@ class VideoWriter:
                 self.out.mux(packet)
             self.audio_in.close()
         self.out.close()
+        if self.samples_kept:
+            self.notes.append("Untouched pixels are the source's own YUV samples.")
