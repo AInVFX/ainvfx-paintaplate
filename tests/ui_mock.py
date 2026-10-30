@@ -841,6 +841,19 @@ def layout_flow(page, port):
     check((width(), height()) == (288, 180), f"a double-click gives the first sizes back: {width()} and {height()} px")
 
 
+def close_flow(page):  # the × after the plate's name closes it: its renders stop, its frames leave memory, the page is empty
+    if page.is_hidden("#close-btn"):  # a plate first, by its path
+        page.click("#open-btn")
+        page.click("#open .tabs [data-tab='files']")
+        page.fill("#path", "plates/desk.mp4")
+        page.click("#open-go")
+        page.wait_for_selector("#close-btn", state="visible", timeout=20000)
+    page.click("#close-btn")
+    page.wait_for_function("!document.querySelector('#empty').hidden", timeout=5000)
+    check(page.is_hidden("#close-btn") and not page.text_content("#spec") and "Plate closed" in page.text_content("#status")
+          and page.is_disabled("#play-btn"), "the × after the plate's name closes it: the page is empty again and says the frames are freed")
+
+
 def phone(browser, port):
     """The page on a phone, upright and on its side: the frame, the transport, the menu and the log fit the screen."""
     for name, size in (("upright", {"width": 390, "height": 844}), ("sideways", {"width": 844, "height": 390})):
@@ -915,6 +928,7 @@ def main():
             hdr_flow(page, a.port)
             fluid16_flow(page)
             layout_flow(page, a.port)
+            close_flow(page)
             phone(browser, a.port)
             page.close()  # its renders ask for nothing more: the next upload the mock holds is the race page's own
             race = browser.new_page(viewport={"width": 1400, "height": 900})

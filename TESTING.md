@@ -42,6 +42,7 @@ Where the system Python refuses `pip` (Ubuntu, Debian), install into a virtual e
 - **Phones**, upright and on its side: the plate opened again from the job index, the frame, Generate, the transport, the status line, the log and the menu sheet fit the screen.
 - SDR to HDR: off by default (no switch for an EXR plate, no 16-bit blank plate); with `?hdr=1`, no switch for a video plate; on by default for an EXR plate, where the step runs after the full-size shot and before the full-size composite; switched off, the next render leaves it out; a 16-bit blank plate's fluid shot goes through it and opens as an EXR plate.
 - While it generates: a full-size pass shows its live preview in a corner; Esc stops the render step on its way and Enter goes on; Shift+Home resets every colour change.
+- Close plate: the × after the plate's name empties the page, disables playback and says the frames are freed.
 - The layout: the side panel and the log resize from their dividers, the stage keeps its room, a new session keeps the sizes, a double-click gives the first sizes back.
 
 ## CI

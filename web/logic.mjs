@@ -7,7 +7,7 @@
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_element: ["seed"],
-  review_frames: ["frames_prefix"], hdr_shot: ["hdr"] };
+  review_frames: ["frames_prefix"], hdr_shot: ["hdr"], relight_anchor: ["anchor"] };
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
   const slots = {}, outputs = {}, progress = new Set();
@@ -117,7 +117,7 @@ export function caption({ tool, words, colors, color, bbox }) {
   const text = {
     erase: () => `Remove ${words ? `the ${words}` : "the object"} inside <obj_1> completely, with its shadow and its reflection. Show the surface and the background that continue behind it, with matching detail, light, shadows and focus. Add no new object. Keep everything else unchanged.`,
     paint: () => `Replace the rough coloured drawing inside <obj_1> with ${words || "a realistic object of that shape and colour"}, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.`,
-    light: () => `Relight the whole scene with ${lightColor(colors, color)} light${words ? ` (${words})` : ""} coming from <obj_1>, with physically consistent shadows and reflections.${colors.some(dark) ? " Dark strokes are hints of where shadows fall: make every shadow agree with the light." : ""} Keep the content, framing and textures unchanged.`,
+    light: () => `Relight the whole scene with ${lightColor(colors, color)} light${words ? ` (${words})` : ""} falling where the rough light pass in <obj_1> shows it, with physically consistent shadows and reflections and no glow, halo or visible lamp.${colors.some(dark) ? " The darkened areas show where shade falls: make every shadow agree with the light." : ""} Keep the content, framing and textures unchanged.`,
   }[tool]();
   const desc = { erase: words ? `${words} to remove` : "object to remove", paint: words || "the drawn object", light: "light source" }[tool];
   return `${text} ${JSON.stringify([{ id: "obj_1", bbox, desc }])}`;
@@ -133,8 +133,12 @@ export const KEEP_TOUCHED = " Where the drawing touches an object, the new eleme
 
 export function upsampleRequest({ tool, words, bbox, boxes = null, colors = [], color = "#ffd890" }) {
   if (tool === "light") { // the strokes' colour always counts: asked for warm light, an orange and a green light both came back orange (29 Oct)
-    const shadows = colors.some(dark) ? " Dark strokes mark where shadows fall: make every shadow agree with the light." : "";
-    const ask = `Relight the whole photograph with ${lightColor(colors, color)} light coming from the painted area${words ? `: ${words}` : ""}.${shadows} ` +
+    // Klein and the prompt writer see the frame lit by the strokes (app.mjs relightGuide), never the strokes: shown the glowing
+    // strokes, Klein drew glowing spheres (30 Oct). The request asks for real light from that rough light pass, and no glow
+    const shadows = colors.some(dark) ? " The darkened areas show where shade falls: make every shadow agree with the light." : "";
+    const ask = `Relight the whole photograph with ${lightColor(colors, color)} light${words ? `: ${words}` : ""}. The image carries a rough light pass: ` +
+      `the brighter, tinted area shows where this light falls.${shadows} Turn it into natural, physically consistent lighting: light on the ` +
+      "surfaces that face it, a soft falloff and real shadows, with no glow, halo, sphere or visible lamp. " +
       "Keep every object, its position, shape, size and texture, the framing and the camera exactly as they are.";
     return { mode: "plain", locked: null,
       request: `Reference images follow in order (the first image, the second image, ...).\nUser request: ${ask}\nOutput the caption.` };
@@ -548,4 +552,41 @@ export const blankDepth = (v) => (+v === HDR_DEPTH ? HDR_DEPTH : 8);
 
 // Esc, one thing at a time: the strokes or the edit in progress, then the selection, then everything that generates. A stop
 // keeps what finished, and Enter goes on from there. (Shift+Esc opens Chrome's Task Manager on Windows and Linux.)
-export const escapeAction = ({ editing, selected, generating }) => (editing ? "discard" : selected ? "deselect" : generating ? "stop" : null);
+export const escapeAction = ({ opening = false, editing, selected, generating }) =>
+  (opening ? "cancelOpen" : editing ? "discard" : selected ? "deselect" : generating ? "stop" : null); // a plate opening comes first
+
+// The light brush lays soft dabs at a fixed spacing along a stroke, whatever the pointer's speed, so the light builds up
+// by stroke, never by how fast the hand moved. `points`: [x, y, radius]; `spacing(radius)`: the distance between dabs;
+// `carry`: the distance walked since the last dab, kept between calls, so drawing a stroke as it arrives gives the same
+// dabs as drawing it at once. The first point always gets a dab. Returns the dabs from point `from` on, and the carry.
+export function dabsAlong(points, from, spacing, carry = 0) {
+  const dabs = [];
+  for (let i = from; i < points.length; i++) {
+    const [x, y, r] = points[i];
+    if (i === 0) { dabs.push([x, y, r]); carry = 0; continue; }
+    const [px, py, pr] = points[i - 1], len = Math.hypot(x - px, y - py), s = Math.max(1, spacing((pr + r) / 2));
+    let last = -1;
+    for (let at = Math.max(0, s - carry); at <= len; at += s) {
+      const f = len > 0 ? at / len : 1;
+      dabs.push([px + (x - px) * f, py + (y - py) * f, pr + (r - pr) * f]);
+      last = at;
+    }
+    carry = last < 0 ? carry + len : len - last;
+  }
+  return { dabs, carry };
+}
+
+// A soft dab: its alpha by distance over its radius, close to a Gaussian, as colour stops of a radial gradient
+export const DAB_PROFILE = [[0, 1], [0.25, 0.85], [0.5, 0.5], [0.75, 0.18], [1, 0]];
+export function dabAlpha(d) { // the profile between its stops
+  if (d >= 1) return 0;
+  const i = DAB_PROFILE.findIndex(([at]) => at > d), [a0, k0] = DAB_PROFILE[i - 1], [a1, k1] = DAB_PROFILE[i];
+  return k0 + ((k1 - k0) * (d - a0)) / (a1 - a0);
+}
+// Each dab's alpha so the dabs of one straight stroke add up to `peak` on its centre line, at a spacing of
+// `spacingOverRadius` of their radius
+export function dabFlow(peak, spacingOverRadius) {
+  let sum = 0;
+  for (let k = -Math.ceil(1 / spacingOverRadius); k <= Math.ceil(1 / spacingOverRadius); k++) sum += dabAlpha(Math.abs(k * spacingOverRadius));
+  return peak / sum;
+}

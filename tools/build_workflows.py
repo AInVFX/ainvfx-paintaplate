@@ -123,9 +123,10 @@ def load(name, folder=None):
 # (a relight alone: no matte to composite with or to save).
 # no words for an erase: no search by name; not a relight: no light transfer on the edited frame;
 # an erase matte: no plate under a shot to compare with, and no changed pixels to start from; a video plate's review:
-# no EXR frames, its movie is the plate's own quality; no SDR-to-HDR shot: the SDR shot goes on as it is.
+# no EXR frames, its movie is the plate's own quality; no SDR-to-HDR shot: the SDR shot goes on as it is; no light edit:
+# no edited first frame to hold the light of.
 OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",),
-            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "hdr_shot": ("hdr",)}
+            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "hdr_shot": ("hdr",), "relight_anchor": ("anchor",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -492,8 +493,12 @@ def comp():
               crop="disabled")
     gen = g("PaintAPlate_LoadPlate", _title="Generated shot", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
     union = mattes(g)
+    anchor = g("ImageScale", image=g("LoadImage", _title="Edited first frame (the light to hold)", image=Slot("anchor", "")),
+               upscale_method="area", width=Slot("width", 960), height=Slot("height", 544), crop="disabled")
     relit = g("PaintAPlate_RelightTransfer", plate=small, source=half(g, small), relit=half(g, gen),
-              plate_space="sRGB", shot_space="sRGB", radius=Slot("radius", 4), strength=Slot("strength", 1.0), align=True)
+              plate_space="sRGB", shot_space="sRGB", radius=Slot("radius", 4), strength=Slot("strength", 1.0), align=True,
+              anchor=half(g, anchor), hold=Slot("hold", 1.0))
+    g.link_slot(relit, "anchor", "relight_anchor")
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=small, on_true=relit)
     _, final = fitted(g, base, gen, union)
     real = g("ImageFromBatch", image=final, batch_index=0, length=load[4])
@@ -512,9 +517,13 @@ def composite(g):
     # it is the conversion every workflow makes, so ComfyUI has it cached.
     size = g("GetImageSize", image=gen)
     source = g("ImageScale", image=model, upscale_method="area", width=size[0], height=size[1], crop="disabled")
+    # its anchor: the edited first frame, whose light every frame keeps (dropped without a light edit)
+    anchor = g("ImageScale", image=g("LoadImage", _title="Edited first frame (the light to hold)", image=Slot("anchor", "")),
+               upscale_method="area", width=size[0], height=size[1], crop="disabled")
     relit = g("PaintAPlate_RelightTransfer", plate=colour(g, load[0], Slot("color_space", "@model"), "@linear"),
               source=half(g, source), relit=half(g, gen), plate_space="linear", shot_space="sRGB",
-              radius=Slot("radius", 8), strength=Slot("strength", 1.0), align=True)
+              radius=Slot("radius", 8), strength=Slot("strength", 1.0), align=True, anchor=half(g, anchor), hold=Slot("hold", 1.0))
+    g.link_slot(relit, "anchor", "relight_anchor")
     back = colour(g, relit, "@linear", Slot("color_space", "@model"))
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=load[0], on_true=back)
     # SDR to HDR: where the hdr workflow made the shot again in scene-linear values, those values, fitted to the plate's own

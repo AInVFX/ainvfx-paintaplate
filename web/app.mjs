@@ -7,7 +7,7 @@ import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onLog, onNotic
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
 import { sceneGraph } from "./graph.mjs";
-import { CHANNEL_NAMES, DISPLAY, FLUID, PARAMS, blankSpec, caption, changedMask, lightColor, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
+import { CHANNEL_NAMES, DAB_PROFILE, DISPLAY, FLUID, PARAMS, dabFlow, dabsAlong, blankSpec, caption, changedMask, lightColor, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
   erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction } from "./logic.mjs";
 
@@ -50,6 +50,17 @@ const PANEL_LEAST = { side: 220, log: 60 }, STAGE_LEAST = { side: 320, log: 320 
 const PANEL_STEP = 16; // CSS px per arrow key on a focused divider
 const LAYOUT_PREF = "paintaplate.layout"; // the dragged sizes, kept for the next session
 const RENDERS_WANTED = 6; // sets of edits whose renders go on in the background: the most recently shown
+// The light brush: soft dabs every LIGHT.spacing of their radius, which is LIGHT.spread times the brush's. One stroke adds
+// at most LIGHT.flow of its colour (LIGHT.shade of darkness for a dark colour), so light builds up stroke by stroke and
+// mixed colours add up to white only after a few passes (30 Oct: one stroke of the earlier brush reached white at once).
+const LIGHT = { flow: 0.3, shade: 0.35, spread: 1.6, spacing: 0.25 };
+// What Klein sees for a light edit: the frame lit by its strokes, never the strokes (relightGuide). Light and shade spread
+// over GUIDE.blur of the width; light multiplies the frame by 1 + GUIDE.gain x light and adds GUIDE.lift of itself, so a
+// dark surface still shows its colour; shade multiplies the frame by 1 - GUIDE.depth x shade.
+const GUIDE = { blur: 1 / 16, gain: 2, lift: 0.12, depth: 0.6 };
+// Relight Transfer holds the edited first frame's light over the whole shot (its anchor). 1 also brings the shot's slow
+// drifts of level and colour back to the first frame's; 0 corrects the shot by its first frame alone
+const RELIGHT_HOLD = 1;
 const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid", "hdr"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "hdr", "review", "export"]; // the render's job kinds: Generate and a new plate stop them
 const UPSAMPLER = {}; // Black Forest Labs' system prompts for Klein's upsampler (upsampler.json): table and plain
@@ -123,11 +134,43 @@ const folderOf = (name, out, key) => { // the folder a workflow saved its frames
 
 // ---------- What Klein sees ----------
 
-function editImage(e, before, size) { // what Klein sees: the strokes over the frame; for an erase, the frame itself
+function editImage(e, before, size) { // what Klein sees: the strokes over the frame; an erase, the frame itself; a light, the frame lit by it
   const c = snap(before, size);
   if (e.tool === "erase") return c; // told to remove the object, Klein cleans it; shown a filled hole, it drew a new object there
+  if (e.tool === "light") return relightGuide(c, e);
   c.getContext("2d").drawImage(e.paint, 0, 0, size[0], size[1]);
   return c;
+}
+
+// A light edit's guide, for Klein and its prompt writer: a rough relight of the frame from the strokes. Shown the glowing
+// strokes over the frame, Klein drew them as glowing spheres (30 Oct). Light and shade spread wide (GUIDE.blur of the
+// width, at least the largest dab), then light multiplies the frame and shade darkens it: the guide says where light and
+// shade fall and in which colour, and Klein makes the real light and shadows from it.
+function relightGuide(frame, e) {
+  const [w, h] = [frame.width, frame.height], x = frame.getContext("2d");
+  const reach = Math.max(w * GUIDE.blur, LIGHT.spread * Math.max(0, ...e.strokes.map((s) => s.size)) * (w / e.paint.width));
+  const light = blurWide(e.paint, [w, h], reach, "#000"), lit = snap(frame, [w, h]), l = lit.getContext("2d");
+  l.globalCompositeOperation = "multiply"; l.drawImage(light, 0, 0); // the frame times the light: a bright surface takes more of it
+  x.globalCompositeOperation = "lighter";
+  for (let k = GUIDE.gain; k > 0; k -= 1) { x.globalAlpha = Math.min(1, k); x.drawImage(lit, 0, 0); }
+  x.globalAlpha = GUIDE.lift; x.drawImage(light, 0, 0);
+  x.globalCompositeOperation = "source-over";
+  if (e.shade) { x.globalAlpha = GUIDE.depth; x.drawImage(blurWide(e.shade, [w, h], reach), 0, 0); }
+  x.globalAlpha = 1;
+  return frame;
+}
+
+function blurWide(src, [w, h], reach, fill = null) { // a wide, smooth blur in every browser: down to a small canvas, then back up
+  const k = Math.max(1, reach / 3), small = [Math.max(2, Math.round(w / k)), Math.max(2, Math.round(h / k))];
+  let from = src;
+  for (const size of [[Math.max(small[0], Math.round(w / 4)), Math.max(small[1], Math.round(h / 4))], small, [w, h]]) {
+    const c = canvas(size), g = c.getContext("2d");
+    Object.assign(g, { imageSmoothingEnabled: true, imageSmoothingQuality: "high" });
+    if (fill) { g.fillStyle = fill; g.fillRect(0, 0, size[0], size[1]); }
+    g.drawImage(from, 0, 0, size[0], size[1]);
+    from = c;
+  }
+  return from;
 }
 
 const maskAt = (e, size) => (e.tool === "light" ? snap(null, size, "#fff") : snap(e.mask, size, "#000"));
@@ -186,6 +229,8 @@ async function writeCaption(e, reference, key, kind) {
 async function openPlate(list, typed, opts = {}) {
   if (!list.length && !typed) return status("Choose files, or type a path in ComfyUI's input folder.");
   stopEverything();
+  if (openCtl) { openCtl.abort(); cancel("ingest"); } // a plate still opening gives way to this one
+  const ctl = (openCtl = new AbortController()); // Cancel on the opening screen, or Esc, aborts it (cancelOpen)
   Object.assign(S, { plate: null, hero: null, original: null }); // nothing to draw while the new plate loads
   const id = Date.now().toString(36), sub = `paintaplate/${id}`;
   let path = typed, out, cs;
@@ -200,11 +245,12 @@ async function openPlate(list, typed, opts = {}) {
           const done = sent + n, rate = done / Math.max(0.1, (performance.now() - t0) / 1000);
           openStep("upload", done / total, `${list.length > 1 ? `File ${i + 1} of ${list.length}, ` : ""}${gb(done)} of ${gb(total)}`,
             rate > 0 ? (total - done) / rate : null);
-        });
+        }, ctl.signal);
         sent += f.size;
       }
       path = list.length === 1 ? `${sub}/${list[0].name}` : sub;
     }
+    if (ctl.signal.aborted) throw new Error("cancelled");
     openStep("read", 0, "Decoding the frames");
     const st = await fetch(`/paintaplate/stat?${new URLSearchParams({ path, config: S.ocio.config })}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     setSalt(st ? JSON.stringify([path, st.files, st.size, st.mtime]) : null); // the plate's identity: job index keys change when it does
@@ -217,10 +263,15 @@ async function openPlate(list, typed, opts = {}) {
       progress: (f) => openStep(OPENING.at, f, null, f > 0.02 ? ((performance.now() - t0) / 1000) * (1 - f) / f : null),
       step: (cls) => { const k = INGEST[cls]; if (k && OPENING.order.indexOf(k) >= OPENING.order.indexOf(OPENING.at)) openStep(k, 0); } }).done;
   } catch (err) {
-    $("#empty").hidden = false; $("#opening").hidden = true;
-    for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = true;
+    if (openCtl === ctl) { // cancelOpen has emptied the page already when it stopped this opening
+      openCtl = null;
+      $("#empty").hidden = false; $("#opening").hidden = true;
+      for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = true;
+    }
     throw err;
   }
+  if (openCtl !== ctl) throw new Error("cancelled"); // cancelled as the ingest finished
+  openCtl = null;
   openStep("load", 0);
   $("#opening").hidden = true; // the first frame shows from here; the playback video keeps arriving behind it
   const spec = JSON.parse(outputText("ingest", out, "spec"));
@@ -252,6 +303,7 @@ async function openPlate(list, typed, opts = {}) {
   $("#spec").textContent = `${S.plate.name}: ${kind}, ${w} × ${h}, ${Math.round(S.plate.fps * 1000) / 1000} fps, ${spec.frames} frames, ${cs}`;
   document.activeElement?.blur();
   S.took = {};
+  $("#close-btn").hidden = false;
   if (opts.under) recompose(); // the edits' patches on the new first frame, until they are made again on it
   previewUI(); fitView(); historyUI(); timelineUI(); stagesUI(); exportUI(); render();
   log(`Plate ${S.plate.name}: ${w} x ${h}, ${spec.frames} frames; edits at ${S.plate.work.join(" x ")}, quick passes at ${S.plate.prev.join(" x ")}, preview at ${S.plate.shot.join(" x ")}, tracking at ${S.plate.track.join(" x ")}`);
@@ -267,6 +319,45 @@ function stopEverything() {
   clearTimeout(S.prefetchTimer); clearTimeout(idleTimer);
   for (const e of S.edits) e.token = (e.token ?? 0) + 1;
   cancel("edit", "snap", "warm", "fluid", ...BACKGROUND);
+}
+
+let openCtl = null; // the plate opening now: its AbortController, until its first frame shows
+
+function cancelOpen() { // Cancel on the opening screen, or Esc: the upload and the reading stop, and the page is empty again
+  if (!openCtl) return;
+  const ctl = openCtl;
+  openCtl = null;
+  ctl.abort(); cancel("ingest");
+  log("Opening cancelled");
+  closePlate("Opening cancelled. Open a plate to start.");
+}
+
+// File > Close plate, the × after the plate's name, or a cancelled opening. Every job of the page stops, the plate's frames
+// and movies leave the browser's memory, and the page is empty as at start. ComfyUI keeps its models loaded, so the next
+// plate opens and edits at once, and the files made stay in its output folder for the job index.
+function closePlate(message = "Plate closed: its frames left the browser's memory. Open a plate to start.") {
+  if (openCtl) { openCtl.abort(); cancel("ingest"); openCtl = null; }
+  const had = S.plate?.name;
+  stopEverything();
+  if (S.picking) pickFrame(false);
+  if (S.mode) leaveMode();
+  closeMenu(); hideLive();
+  for (const v of [plateVid, shotVid]) { v.removeAttribute("src"); v.load(); }
+  for (const c of [...caches.values(), deep, deepShot]) c.reset();
+  setSalt(null);
+  Object.assign(S, { plate: null, hero: null, original: null, shot: null, exported: null, wantDownload: null, stage: null, running: null, live: null,
+    halted: false, frame: 0, inPt: 0, outPt: 0, wipe: null, heroKey: "", edits: [], draft: null, past: [], future: [], selected: null,
+    hover: null, peek: null, fluid: null, took: {}, zoom: { k: 1, x: 0, y: 0 } });
+  S.uploads.clear(); S.renders.clear(); S.erases.clear();
+  stroke = null;
+  view.getContext("2d").clearRect(0, 0, view.width, view.height);
+  view.classList.remove("painting");
+  $("#opening").hidden = true; $("#empty").hidden = false; $("#close-btn").hidden = true; $("#wipe").hidden = true; $("#render").hidden = true;
+  $("#spec").textContent = ""; $("#prompt").value = "";
+  for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = true;
+  historyUI(); exportUI(); fluidUI(); undoUI(); generateUI(); cacheUI();
+  if (had) log(`Plate ${had} closed: renders stopped, frames freed`);
+  status(message);
 }
 
 async function warmAll() { // every model loads while the person looks at the page: the first edit and the first shot start at once
@@ -487,7 +578,8 @@ function hideLive() { $("#live-inset").hidden = true; } // the pass that sent it
 
 function generating() { return !!(S.queued || S.piping || S.fluid?.busy); }
 function escape() { // Esc: logic.escapeAction. A selection goes first; then the HUD says a second Esc stops what generates
-  const busy = generating(), what = escapeAction({ editing: !!(S.draft || S.running), selected: !!S.selected, generating: busy });
+  const busy = generating(), what = escapeAction({ opening: !!openCtl, editing: !!(S.draft || S.running), selected: !!S.selected, generating: busy });
+  if (what === "cancelOpen") return cancelOpen();
   if (what === "discard") return discard();
   if (what === "deselect") { select(null); if (busy) hud("Deselected. Esc again stops generating", 2500); return; }
   if (what === "stop") stopGenerating();
@@ -498,7 +590,7 @@ function stopGenerating() { // everything that generates stops where it is: what
   if (S.running) discard();
   cancel("fluid", ...BACKGROUND);
   hideLive();
-  log("Stopped (Esc): what finished is kept. Enter goes on from where it stopped");
+  log("Stopped: what finished is kept. Enter goes on from where it stopped");
   hud("Stopped. Enter goes on from where it stopped", 3000);
   status("Stopped. Enter goes on from where it stopped.");
   stagesUI(); generateUI();
@@ -644,6 +736,10 @@ function strokes(e, alpha) {
     t.globalCompositeOperation = "destination-out"; t.drawImage(e.mask, 0, 0);
     t.globalCompositeOperation = "source-in"; t.fillStyle = "#fff4f0"; t.fillRect(0, 0, W, H);
     ctx.globalAlpha = 0.9 * alpha; ctx.drawImage(fx, 0, 0);
+  } else if (e.tool === "light") { // light adds to the frame, as light does; shade darkens it
+    if (e.shade) { ctx.globalAlpha = alpha; ctx.drawImage(e.shade, 0, 0); }
+    ctx.globalAlpha = alpha; ctx.globalCompositeOperation = "lighter"; ctx.drawImage(e.paint, 0, 0);
+    ctx.globalCompositeOperation = "source-over";
   } else { ctx.globalAlpha = 0.9 * alpha; ctx.drawImage(e.paint, 0, 0); }
   ctx.globalAlpha = 1;
 }
@@ -830,37 +926,55 @@ function addPoint(d, e) {
 
 function drawStroke(d, s, from = 0) {
   const pc = d.paint.getContext("2d"), mc = d.mask.getContext("2d");
-  if (s.tool === "rub") { // the eraser takes strokes away, whatever drew them
-    for (const c of [pc, mc]) c.globalCompositeOperation = "destination-out";
+  if (s.tool === "rub") { // the eraser takes strokes away, whatever drew them: paint, light or shade
+    const cs = [pc, mc, d.shade?.getContext("2d")].filter(Boolean);
+    for (const c of cs) c.globalCompositeOperation = "destination-out";
     for (let i = from; i < s.points.length; i++) {
       const [x, y, p] = s.points[i], [px, py] = s.points[Math.max(i - 1, 0)], r = (s.size * (0.5 + p)) / 2;
-      line(mc, px, py, x, y, r, "#fff"); line(pc, px, py, x, y, r, "#fff");
+      for (const c of cs) line(c, px, py, x, y, r, "#fff");
     }
-    for (const c of [pc, mc]) c.globalCompositeOperation = "source-over";
+    for (const c of cs) c.globalCompositeOperation = "source-over";
     return;
   }
   for (let i = from; i < s.points.length; i++) {
     const [x, y, p] = s.points[i], [px, py] = s.points[Math.max(i - 1, 0)], r = (s.size * (0.5 + p)) / 2;
     line(mc, px, py, x, y, r, "#fff");
     if (s.tool === "paint") line(pc, px, py, x, y, r, s.color);
-    if (s.tool === "light") dark(s.color) ? line(pc, px, py, x, y, r, "#000000a0") : glow(pc, x, y, r * 2.5, s.color);
   }
+  if (s.tool === "light") lightDabs(d, s, from);
 }
+
+// The light brush: soft dabs at a fixed spacing along the stroke (logic.dabsAlong), so the light never depends on how fast
+// the hand moved. Light adds up ("lighter") at a flow that gives one stroke at most LIGHT.flow of its colour; a dark colour
+// lays shade on its own layer (d.shade) the same way. The eraser takes both away.
+const carried = new WeakMap(); // stroke -> the distance walked since its last dab, between two pointer moves
+function lightDabs(d, s, from) {
+  const shade = dark(s.color), layer = shade ? (d.shade ??= canvas([d.paint.width, d.paint.height])) : d.paint;
+  const pts = s.points.map(([x, y, p]) => [x, y, ((s.size * (0.5 + p)) / 2) * LIGHT.spread]);
+  const { dabs, carry } = dabsAlong(pts, from, (r) => r * LIGHT.spacing, from ? carried.get(s) ?? 0 : 0);
+  carried.set(s, carry);
+  const c = layer.getContext("2d"), flow = dabFlow(shade ? LIGHT.shade : LIGHT.flow, LIGHT.spacing), rgb = shade ? "0, 0, 0" : rgbOf(s.color);
+  c.globalCompositeOperation = shade ? "source-over" : "lighter";
+  for (const [x, y, r] of dabs) {
+    const g = c.createRadialGradient(x, y, 0, x, y, r);
+    for (const [at, k] of DAB_PROFILE) g.addColorStop(at, `rgba(${rgb}, ${(flow * k).toFixed(4)})`);
+    c.fillStyle = g; c.fillRect(x - r, y - r, 2 * r, 2 * r);
+  }
+  c.globalCompositeOperation = "source-over";
+}
+
+const rgbOf = (hex) => { // "#rgb" or "#rrggbb" as "r, g, b"
+  const h = hex.replace("#", ""), f = h.length === 3 ? h.replace(/./g, "$&$&") : h.slice(0, 6);
+  return [0, 2, 4].map((i) => parseInt(f.slice(i, i + 2), 16) || 0).join(", ");
+};
 
 function line(c, x0, y0, x1, y1, r, color) {
   Object.assign(c, { strokeStyle: color, lineWidth: 2 * r, lineCap: "round", lineJoin: "round" });
   c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
 }
 
-function glow(c, x, y, r, color) {
-  const g = c.createRadialGradient(x, y, 0, x, y, r);
-  g.addColorStop(0, `${color}cc`); g.addColorStop(1, `${color}00`);
-  c.globalCompositeOperation = "lighter"; c.fillStyle = g; c.fillRect(x - r, y - r, 2 * r, 2 * r);
-  c.globalCompositeOperation = "source-over";
-}
-
 function redrawStrokes(d) { // painted strokes, then SAM's object, then the eraser strokes on top of both
-  for (const c of [d.paint, d.mask]) c.getContext("2d").clearRect(0, 0, c.width, c.height);
+  for (const c of [d.paint, d.mask, d.shade]) c?.getContext("2d").clearRect(0, 0, c.width, c.height);
   for (const s of d.strokes) if (s.tool !== "rub") drawStroke(d, s);
   if (d.sam) d.mask.getContext("2d").drawImage(d.sam, 0, 0);
   for (const s of d.strokes) if (s.tool === "rub") drawStroke(d, s);
@@ -1680,7 +1794,10 @@ function strokesThumb(edit) { // the frame with the strokes, until the edit has 
   const t = canvas([120, 80]), x = t.getContext("2d");
   x.drawImage(S.hero, 0, 0, 120, 80);
   if (edit.tool === "erase") { x.globalAlpha = 0.6; x.drawImage(whiteOf(edit.mask, "#ff5040"), 0, 0, 120, 80); }
-  else x.drawImage(edit.paint, 0, 0, 120, 80);
+  else if (edit.tool === "light") {
+    if (edit.shade) x.drawImage(edit.shade, 0, 0, 120, 80);
+    x.globalCompositeOperation = "lighter"; x.drawImage(edit.paint, 0, 0, 120, 80); x.globalCompositeOperation = "source-over";
+  } else x.drawImage(edit.paint, 0, 0, 120, 80);
   return t.toDataURL("image/jpeg", 0.8);
 }
 
@@ -1867,6 +1984,9 @@ function reused(r, store, id, take) { // a step that a render with the same eras
   log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: made by an earlier render with the same erases, used again`);
 }
 
+// The relight's anchor: the edited first frame, whose light Relight Transfer holds over the shot; none without a light edit
+const anchorOf = (relight, r) => (relight ? { anchor: r.hero, hold: RELIGHT_HOLD } : { anchor: "" });
+
 async function pipeline(r) { // a render's steps in order; a step made already is skipped, so a render resumes where it stopped
   const p = S.plate, key = r.key, active = r.active, here = () => key === S.heroKey; // here: the render on show
   cancel("warm");
@@ -1938,7 +2058,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   pv.mattes = mattesOf({ ...r.erased?.found, ...pv.painted?.found });
   await step(r, "comp", async (progress) => {
     const comp = await run("comp", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, width: sw, height: sh, shot: made,
-      ...pv.mattes.values, relight, grow: grow(sw, erase), feather: feather(sw), grain: 0, video_prefix: `${base}/${sized}/comp` },
+      ...pv.mattes.values, relight, ...anchorOf(relight, r), grow: grow(sw, erase), feather: feather(sw), grain: 0, video_prefix: `${base}/${sized}/comp` },
       { kind: "comp", progress }).done;
     pv.comp = viewUrl(outputFile("comp", comp, "video"));
   }, pv);
@@ -1964,7 +2084,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   });
   const hdr = { hdr: r.hdr ?? "", hdr_grow: grow(p.spec.width, erase) + feather(p.spec.width) }; // HDR Match leaves the composite's edge out
   await step(r, "review", async (progress) => { // the full-size composite at the plate's quality, which the viewer plays once made
-    const out = await run("review", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr, ...r.full.values,
+    const out = await run("review", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr, ...r.full.values, ...anchorOf(relight, r),
       relight, grow: grow(p.spec.width, erase), feather: feather(p.spec.width), movie_space: p.deep ? "@model" : p.cs,
       review_prefix: `${base}/review`, frames_prefix: p.deep ? `${base}/review/frames` : "" }, { kind: "review", progress }).done;
     const movie = outputFile("review", out, "review"), frame = p.deep ? outputFile("review", out, "frames") : null;
@@ -1977,7 +2097,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   stagesUI(); exportUI();
   if (!S.wantDownload) return status(`Composite, full size: the viewer plays it${p.deep ? ", its EXR frames at full precision as they load" : ""}. Export writes the result for compositing software.`);
   await step(r, "export", async (progress) => { // only when Export asks: the plate's own format, and the matte, beside the review
-    const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr,
+    const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr, ...anchorOf(relight, r),
       ...r.full.values, relight, keep_untouched: !relight, prefix: `${dir}/export`, matte_prefix: `${dir}/matte/matte`,
       grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
     const file = outputFile("export", done, "export"); // a job taken from the index keeps its own folder
@@ -2085,6 +2205,7 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
 }
 
 function stagesUI() {
+  $("#stop").hidden = !generating();
   hdrUI(); // the Render panel: every step, done, running or waiting, and the time left
   const list = $("#stages"), p = S.plate, r = S.renders.get(S.heroKey);
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
@@ -2356,12 +2477,14 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
   const edits = [];
   for (const e of active) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, caption: e.caption?.text || templateCaption(e),
     mask: await uploadCanvas(maskAt(e, p.work), `graph_e${e.id}_mask.png`),
-    layer: e.tool === "erase" ? null : await uploadCanvas(snap(e.paint, p.work), `graph_e${e.id}_strokes.png`),
+    layer: e.tool === "erase" ? null : e.tool === "light" // a light: the frame lit by its strokes, as Klein saw it
+      ? await uploadCanvas(editImage(e, layered(S.edits.indexOf(e)), p.work), `graph_e${e.id}_guide.png`)
+      : await uploadCanvas(snap(e.paint, p.work), `graph_e${e.id}_strokes.png`),
     quick: editSettings(e, p.prev, QUICK), full: editSettings(e, p.work, FULL) });
   const erase = active.some((e) => e.tool === "erase");
   const graph = sceneGraph(WF, { edits, about: { version: S.version, name: p.name },
     plate: { path: p.path, config: S.ocio.config, cs: p.cs, frames: p.frames, fps: p.fps, work: p.work, prev: p.prev, track: p.track, trackErase: p.trackErase },
-    render: { prompt: shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt, hue: e.hue ?? hueOf(e.src ?? e) }))), seed: active[0].seed,
+    render: { hold: RELIGHT_HOLD, prompt: shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt, hue: e.hue ?? hueOf(e.src ?? e) }))), seed: active[0].seed,
       erasePrompt: erasePrompt(active.filter((e) => e.tool === "erase").map((e) => e.caption?.text)),
       grow: grow(p.spec.width, erase), feather: feather(p.spec.width), prefix: `paintaplate/${p.id}/graph`,
       hdr: S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), S.toHdr) } });
@@ -2539,7 +2662,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
   const groups = [
     ["File", [["Open plate…", "", openDialog], ["Fluid keyframes", "", editFluid, !S.fluid || keying()],
       ["Save scene", "", () => saveScene().catch(quiet), !p], ["Export…", "", exportDialog, !edits],
-      ["ComfyUI graph", "", () => saveGraph().catch(quiet), !edits]]],
+      ["ComfyUI graph", "", () => saveGraph().catch(quiet), !edits], "-", ["Close plate", "", () => closePlate(), !p && !openCtl]]],
     ["Edit", [["Undo", "Ctrl+Z", undo, !S.past.length], ["Redo", "Ctrl+Shift+Z", redo, !S.future.length], "-",
       ["New edit", "N", nextEdit, !p || keying() || (!S.draft && !S.selected)], ["Generate", "Enter", () => enter(false), $("#generate").disabled], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
       ...(HDR_ON ? [["SDR to HDR", "", () => setHdr(!S.toHdr), !p || !hdrPlate(p.spec) || !S.hdrReady, !!p && hdrPlate(p.spec) && S.hdrReady && S.toHdr]] : []),
@@ -2766,6 +2889,9 @@ $("#save-btn").onclick = () => S.plate && saveScene().catch(quiet);
 $("#x-graph").onclick = () => saveGraph().catch(quiet);
 $("#open-btn").onclick = $("#empty-open").onclick = openDialog;
 $("#help-btn").onclick = () => $("#help").showModal();
+$("#stop").onclick = () => stopGenerating();
+$("#op-cancel").onclick = () => cancelOpen();
+$("#close-btn").onclick = () => closePlate();
 $("#menu-btn").onclick = (e) => { // the same menu as a right-click, for touch screens
   if (!$("#ctx").hidden) return closeMenu();
   const r = e.currentTarget.getBoundingClientRect();
@@ -2902,6 +3028,7 @@ addEventListener("keydown", (e) => {
   if ($("dialog[open]")) return;
   const k = e.key, low = k.toLowerCase(), mod = e.ctrlKey || e.metaKey, combo = `${e.shiftKey && k.length === 1 ? "Shift+" : ""}${low}`;
   if (!$("#ctx").hidden) { if (k === "Escape") closeMenu(); return e.preventDefault(); } // the menu is open: Esc closes it
+  if (k === "Escape" && openCtl) { cancelOpen(); return e.preventDefault(); } // a plate opening: Esc cancels it
   if (!S.plate && !["?", "F6"].includes(k)) return;
   if (k === "Home" && e.shiftKey && !mod) { resetDisplay(); hud("Colour reset"); return e.preventDefault(); } // RV's Reset All Color
   if (S.mode && modeKey(k, combo)) return e.preventDefault();
@@ -2963,6 +3090,7 @@ function generateUI() { // the Generate button is live when Enter has something 
     : (!!S.draft && painted(S.draft) > 0) || renderPending();
   b.disabled = !todo;
   b.textContent = working && !todo ? "Generating…" : "Generate";
+  $("#stop").hidden = !generating(); // Stop, beside Generate, while anything generates: what Esc stops
 }
 new ResizeObserver(() => { fitView(); cacheUI(); }).observe($("#viewport"));
 

@@ -163,9 +163,9 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
   const hdr = render.hdr && made ? add(instantiate(WF.hdr, "SDR to HDR", { config: plate.config, max_frames: plate.frames, fps: Math.round(fps),
     cond_fps: Math.min(30, fps), prefix: out("hdr/f") }, { path: made }, { drop: ["hdr"] })).hdr : null;
   sec = "output";
-  add(instantiate(WF.export, "export", { ...common, relight, keep_untouched: !relight, grow: render.grow, feather: render.feather,
+  add(instantiate(WF.export, "export", { ...common, relight, ...(relight ? { hold: render.hold ?? 1 } : {}), keep_untouched: !relight, grow: render.grow, feather: render.feather,
     hdr_grow: render.grow + render.feather, prefix: out("export"), matte_prefix: out("matte/matte") },
-    { shot: made, ...(hdr ? { hdr } : {}), ...(a ? { matte_a: a, matte_b: paintMatte ?? erasedMatte } : {}) }));
+    { shot: made, ...(relight ? { anchor: frame } : {}), ...(hdr ? { hdr } : {}), ...(a ? { matte_a: a, matte_b: paintMatte ?? erasedMatte } : {}) }));
   const files = `output/${render.prefix}`, n = edits.length, painting = edits.filter((e) => e.tool === "paint").length;
   const sections = [
     ["readme", "How this graph works", [`AInVFX Paint a plate${about.version ? ` ${about.version}` : ""}: the scene of ${about.name ?? plate.path}, as one ComfyUI workflow.`,

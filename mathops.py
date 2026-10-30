@@ -403,8 +403,9 @@ CHANNEL_FLOOR = 0.1
 TINT_SPREAD = 4.0
 
 
-def light_ratio(source: np.ndarray, relit: np.ndarray, radius: int) -> np.ndarray:
-    """The change of light from `source` to `relit` (H, W, 3), both linear light at the same size.
+def light_parts(source: np.ndarray, relit: np.ndarray, radius: int):
+    """The change of light from `source` to `relit`, both linear light at the same size, in two parts: the brightness
+    ratio (H, W, 1) and the colour ratio over it, in natural log (H, W, 3).
 
     Brightness: the ratio of the two lumas, smoothed by an edge-aware filter that follows `source`, so a new shadow keeps
     its edge. Colour: each channel's ratio over that brightness, with every channel floored at CHANNEL_FLOOR of the luma
@@ -420,18 +421,78 @@ def light_ratio(source: np.ndarray, relit: np.ndarray, radius: int) -> np.ndarra
     f = max(1, round(TINT_SPREAD * radius / 4))  # the colour is smooth: blur it at a fraction of the size
     sigma = TINT_SPREAD * radius / f
     tint = resize_to(ndimage.gaussian_filter(shrink(tint, f), (sigma, sigma, 0), mode="nearest"), *tint.shape[:2])
+    return bright, tint
+
+
+def light_ratio(source: np.ndarray, relit: np.ndarray, radius: int, remap=None) -> np.ndarray:
+    """The change of light from `source` to `relit` (H, W, 3), both linear light at the same size (`light_parts`).
+    `remap`, one frame's map from `anchor_maps`, first moves its level, spread and colour onto the edited first frame's."""
+    bright, tint = light_parts(source, relit, radius)
+    if remap is not None:
+        bright, tint = remap_light(bright, tint, remap)
     ratio = ndimage.median_filter(bright * np.exp(tint), size=(3, 3, 1))  # isolated specks at sharp edges go
     return ndimage.gaussian_filter(np.clip(ratio, *RATIO_RANGE), (1.0, 1.0, 0)).astype(np.float32)
 
 
+# The anchor (30 Oct). LTX's regenerated shot carries less light than the edited first frame it starts from (Adrien: the
+# first frame looked right, its shot dark and grey), and the light can fade along the shot. With the edited first frame as
+# an anchor, each frame's light is mapped in log space onto the first frame's edit: brightness by its median and its 10th
+# to 90th percentile spread, colour by its median per channel and its spread. The shot's own figures are smoothed over
+# ANCHOR_SIGMA frames, so the map changes slowly and adds no flicker. A gain stays within 1 / ANCHOR_GAIN and ANCHOR_GAIN,
+# a level shift within ANCHOR_SHIFT stops; a spread under ANCHOR_EPS (natural log) counts as no change of light.
+ANCHOR_SIGMA = 16.0
+ANCHOR_GAIN = 4.0
+ANCHOR_SHIFT = 2.0
+ANCHOR_EPS = 0.02
+
+
+def light_stats(source: np.ndarray, relit: np.ndarray, radius: int) -> dict:
+    """The figures `anchor_maps` matches, for one frame: the median and the spread of the log brightness ratio, the median
+    of each channel's log colour ratio and their mean spread (spreads from the 10th to the 90th percentile)."""
+    bright, tint = light_parts(source, relit, radius)
+    b = np.log(bright[::2, ::2, 0]).ravel()
+    c = tint[::2, ::2].reshape(-1, 3)
+    b10, b50, b90 = np.percentile(b, [10, 50, 90])
+    c10, c50, c90 = np.percentile(c, [10, 50, 90], axis=0)
+    return {"b_at": float(b50), "b_spread": float(b90 - b10), "c_at": c50.astype(np.float64), "c_spread": float(np.mean(c90 - c10))}
+
+
+def anchor_maps(stats: list, target: dict, hold: float = 1.0, sigma: float = ANCHOR_SIGMA) -> list:
+    """One map per frame that moves the shot's light (`stats`, from `light_stats`) onto the edited first frame's (`target`).
+
+    `hold` 0: every frame uses the first frame's figures, so one correction for the whole shot. `hold` 1: each frame uses the
+    shot's figures smoothed over `sigma` frames, so a slow fade of the light is brought back too.
+    """
+    n, hold = len(stats), float(np.clip(hold, 0.0, 1.0))
+    def series(x):
+        x = np.asarray(x, np.float64)
+        smooth = ndimage.gaussian_filter1d(x, sigma, axis=0, mode="nearest") if n > 1 else x
+        return (1.0 - hold) * x[0] + hold * smooth
+    b_at, b_spread = series([s["b_at"] for s in stats]), series([s["b_spread"] for s in stats])
+    c_at, c_spread = series([s["c_at"] for s in stats]), series([s["c_spread"] for s in stats])
+    shift, low = ANCHOR_SHIFT * np.log(2.0), 1.0 / ANCHOR_GAIN
+    gain = lambda want, have: float(np.clip(max(want, ANCHOR_EPS) / max(have, ANCHOR_EPS), low, ANCHOR_GAIN))
+    return [{"b_at": float(b_at[i]), "b_gain": gain(target["b_spread"], b_spread[i]),
+             "b_to": float(b_at[i] + np.clip(target["b_at"] - b_at[i], -shift, shift)),
+             "c_at": c_at[i], "c_gain": gain(target["c_spread"], c_spread[i]),
+             "c_to": c_at[i] + np.clip(np.asarray(target["c_at"]) - c_at[i], -shift, shift)} for i in range(n)]
+
+
+def remap_light(bright: np.ndarray, tint: np.ndarray, m: dict):
+    """One frame's light parts (`light_parts`) moved by its map (`anchor_maps`): level, spread and colour."""
+    b = (np.log(bright) - m["b_at"]) * m["b_gain"] + m["b_to"]
+    tint = (tint - np.asarray(m["c_at"], np.float32)) * m["c_gain"] + np.asarray(m["c_to"], np.float32)
+    return np.exp(b).astype(np.float32), tint.astype(np.float32)
+
+
 def relight(plate: np.ndarray, source: np.ndarray, relit: np.ndarray,
-            radius: int, strength: float = 1.0) -> np.ndarray:
+            radius: int, strength: float = 1.0, remap=None) -> np.ndarray:
     """Move the light of `relit` onto `plate`, keeping the plate's own detail.
 
     All three images are linear light. `source` and `relit` share the working size; `plate` can be larger. The change
     of light (`light_ratio`) multiplies the plate, so its texture, grain and values above 1.0 stay its own.
     """
-    ratio = light_ratio(source, relit, radius) ** strength
+    ratio = light_ratio(source, relit, radius, remap) ** strength
     if ratio.shape[:2] != plate.shape[:2]:
         ratio = resize_to(ratio, plate.shape[0], plate.shape[1])
     out = plate.copy()
@@ -451,23 +512,31 @@ def linear_to_srgb(x: np.ndarray) -> np.ndarray:
     return np.where(x <= 0.0031308, x * 12.92, 1.055 * np.maximum(x, 0.0031308) ** (1 / 2.4) - 0.055).astype(np.float32)
 
 
+def shot_pair(source: np.ndarray, relit: np.ndarray, align: bool, plate_width: int, shot_space: str = "linear"):
+    """`source` and `relit` in linear light, `relit` moved onto `source` when `align`: what a light ratio is measured on.
+    A shift counts as misalignment up to 8 plate pixels."""
+    if shot_space == "sRGB":  # source and relit as the model saw and made them
+        source, relit = srgb_to_linear(source[..., :3]), srgb_to_linear(relit[..., :3])
+    if align:
+        dy, dx = phase_shift(structure(source), structure(relit), 8.0 * source.shape[1] / plate_width)
+        if dy or dx:
+            relit = ndimage.shift(relit, (dy, dx, 0), order=1, mode="nearest")
+    return source, relit
+
+
 def relight_frame(plate: np.ndarray, source: np.ndarray, relit: np.ndarray, radius: int, strength: float = 1.0,
-                  align: bool = True, plate_space: str = "linear", shot_space: str = "linear") -> np.ndarray:
-    """One frame of Relight Transfer: `relit` aligned to `source`, then its light moved onto `plate`.
+                  align: bool = True, plate_space: str = "linear", shot_space: str = "linear", remap=None) -> np.ndarray:
+    """One frame of Relight Transfer: `relit` aligned to `source`, then its light moved onto `plate` (`remap`: its map
+    from `anchor_maps`, when the edited first frame anchors the light).
 
     The ratio of light is computed at the size of `source` and `relit`, then enlarged to the plate. Light
     is smooth, so the workflows give them at half the plate's size: converting them to linear light then
-    costs a quarter. `radius` is in pixels of that size; a shift counts as misalignment up to 8 plate pixels.
+    costs a quarter. `radius` is in pixels of that size.
     """
-    if shot_space == "sRGB":  # source and relit as the model saw and made them
-        source, relit = srgb_to_linear(source[..., :3]), srgb_to_linear(relit[..., :3])
+    source, relit = shot_pair(source, relit, align, plate.shape[1], shot_space)
     if plate_space == "sRGB":  # decoded here, frame by frame, then encoded back: far cheaper than core at full size
         plate = np.concatenate([srgb_to_linear(plate[..., :3]), plate[..., 3:]], -1)
-    if align:
-        dy, dx = phase_shift(structure(source), structure(relit), 8.0 * source.shape[1] / plate.shape[1])
-        if dy or dx:
-            relit = ndimage.shift(relit, (dy, dx, 0), order=1, mode="nearest")
-    out = relight(plate, source, relit, max(1, radius), strength).astype(np.float32)
+    out = relight(plate, source, relit, max(1, radius), strength, remap).astype(np.float32)
     if plate_space == "sRGB":
         out[..., :3] = linear_to_srgb(out[..., :3])
     return out

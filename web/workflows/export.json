@@ -190,6 +190,37 @@
   }
  },
  "14": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": ""
+  },
+  "_meta": {
+   "title": "Edited first frame (the light to hold)",
+   "slots": {
+    "image": "anchor"
+   }
+  }
+ },
+ "15": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "image": [
+    "14",
+    0
+   ],
+   "upscale_method": "area",
+   "width": [
+    "12",
+    0
+   ],
+   "height": [
+    "12",
+    1
+   ],
+   "crop": "disabled"
+  }
+ },
+ "16": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
@@ -207,7 +238,7 @@
    }
   }
  },
- "15": {
+ "17": {
   "class_type": "ImageScaleBy",
   "inputs": {
    "image": [
@@ -218,7 +249,7 @@
    "scale_by": 0.5
   }
  },
- "16": {
+ "18": {
   "class_type": "ImageScaleBy",
   "inputs": {
    "image": [
@@ -229,39 +260,57 @@
    "scale_by": 0.5
   }
  },
- "17": {
-  "class_type": "PaintAPlate_RelightTransfer",
+ "19": {
+  "class_type": "ImageScaleBy",
   "inputs": {
-   "plate": [
-    "14",
-    0
-   ],
-   "source": [
+   "image": [
     "15",
     0
    ],
-   "relit": [
+   "upscale_method": "area",
+   "scale_by": 0.5
+  }
+ },
+ "20": {
+  "class_type": "PaintAPlate_RelightTransfer",
+  "inputs": {
+   "plate": [
     "16",
+    0
+   ],
+   "source": [
+    "17",
+    0
+   ],
+   "relit": [
+    "18",
     0
    ],
    "plate_space": "linear",
    "shot_space": "sRGB",
    "radius": 8,
    "strength": 1.0,
-   "align": true
+   "align": true,
+   "anchor": [
+    "19",
+    0
+   ],
+   "hold": 1.0
   },
   "_meta": {
    "slots": {
     "radius": "radius",
-    "strength": "strength"
+    "strength": "strength",
+    "hold": "hold",
+    "anchor": "relight_anchor"
    }
   }
  },
- "18": {
+ "21": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
-    "17",
+    "20",
     0
    ],
    "config": "ocio://studio-config-latest",
@@ -275,7 +324,7 @@
    }
   }
  },
- "19": {
+ "22": {
   "class_type": "ComfySwitchNode",
   "inputs": {
    "switch": false,
@@ -284,7 +333,7 @@
     0
    ],
    "on_true": [
-    "18",
+    "21",
     0
    ]
   },
@@ -294,7 +343,7 @@
    }
   }
  },
- "20": {
+ "23": {
   "class_type": "PaintAPlate_LoadPlate",
   "inputs": {
    "path": "",
@@ -308,11 +357,11 @@
    }
   }
  },
- "21": {
+ "24": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
-    "20",
+    "23",
     0
    ],
    "config": "ocio://studio-config-latest",
@@ -327,7 +376,7 @@
    }
   }
  },
- "22": {
+ "25": {
   "class_type": "PaintAPlate_HDRMatch",
   "inputs": {
    "image": [
@@ -343,7 +392,7 @@
     0
    ],
    "hdr": [
-    "21",
+    "24",
     0
    ],
    "grow": 24.0
@@ -357,15 +406,15 @@
    }
   }
  },
- "23": {
+ "26": {
   "class_type": "PaintAPlate_FitToPlate",
   "inputs": {
    "plate": [
-    "19",
+    "22",
     0
    ],
    "image": [
-    "22",
+    "25",
     0
    ],
    "mask": [
@@ -391,22 +440,22 @@
    "progress": true
   }
  },
- "24": {
+ "27": {
   "class_type": "ImageCompositeMasked",
   "inputs": {
    "destination": [
-    "19",
+    "22",
     0
    ],
    "source": [
-    "23",
+    "26",
     0
    ],
    "x": 0,
    "y": 0,
    "resize_source": false,
    "mask": [
-    "23",
+    "26",
     1
    ]
   },
@@ -414,11 +463,11 @@
    "title": "Composite"
   }
  },
- "25": {
+ "28": {
   "class_type": "PaintAPlate_SavePlate",
   "inputs": {
    "images": [
-    "24",
+    "27",
     0
    ],
    "plate": [
@@ -428,7 +477,7 @@
    "filename_prefix": "paintaplate/plate/export",
    "keep_untouched": true,
    "changed": [
-    "23",
+    "26",
     1
    ]
   },
@@ -441,20 +490,20 @@
    "output": "export"
   }
  },
- "26": {
+ "29": {
   "class_type": "MaskToImage",
   "inputs": {
    "mask": [
-    "23",
+    "26",
     1
    ]
   }
  },
- "27": {
+ "30": {
   "class_type": "ImageFromBatch",
   "inputs": {
    "image": [
-    "26",
+    "29",
     0
    ],
    "batch_index": 0,
@@ -464,11 +513,11 @@
    ]
   }
  },
- "28": {
+ "31": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
-    "27",
+    "30",
     0
    ],
    "filename_prefix": "paintaplate/plate/matte/matte"

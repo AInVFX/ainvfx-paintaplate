@@ -95,7 +95,8 @@ test("captions name the object when given and build only the chosen tool", () =>
   assert.match(caption({ tool: "paint", words: "a cactus", colors: ["#3d7a35"], color: "#3d7a35", bbox }), /with a cactus, in exactly/);
   const light = caption({ tool: "light", words: "", colors: ["#ffd890", "#000000"], color: "#ffd890", bbox });
   assert.match(light, /warm orange light/);
-  assert.match(light, /Dark strokes are hints/);
+  assert.match(light, /darkened areas show where shade falls/);
+  assert.match(light, /no glow, halo or visible lamp/); // the strokes are a rough light pass, never a glowing object
   assert.ok(light.endsWith(JSON.stringify([{ id: "obj_1", bbox, desc: "light source" }])));
 });
 
@@ -151,9 +152,10 @@ test("the upsampler request locks one row in Klein's edit format, and a relight 
   assert.equal(upsampleRequest({ tool: "paint", words: "a fire", bbox: [1, 2, 3, 4] }).locked[0].from, "target");
   const light = upsampleRequest({ tool: "light", words: "night time", bbox: [0, 0, 1000, 1000], colors: ["#388e3c"], color: "#388e3c" });
   assert.equal(light.mode, "plain"); assert.equal(light.locked, null); assert.match(light.request, /night time/);
-  assert.match(light.request, /with green light coming from the painted area/); // the strokes' colour counts, words or not
+  assert.match(light.request, /with green light: night time\. The image carries a rough light pass/);
+  assert.match(light.request, /no glow, halo, sphere or visible lamp/); // the strokes' colour counts, words or not
   const orange = upsampleRequest({ tool: "light", words: "", bbox: [0, 0, 1000, 1000], colors: ["#f57c00", "#000000"], color: "#f57c00" });
-  assert.match(orange.request, /with warm orange light coming from the painted area\. Dark strokes mark where shadows fall/);
+  assert.match(orange.request, /with warm orange light\. The image carries a rough light pass: the brighter, tinted area shows where this light falls\. The darkened areas show where shade falls/);
 });
 
 test("reconcile keeps the locked row, takes the upsampler's description and its cited rows, and survives a cut-off table", () => {
@@ -355,4 +357,33 @@ test("Esc does one thing at a time: the edit in progress, then the selection, th
   assert.equal(escapeAction({ editing: false, selected: true, generating: true }), "deselect");
   assert.equal(escapeAction({ editing: false, selected: false, generating: true }), "stop");
   assert.equal(escapeAction({ editing: false, selected: false, generating: false }), null);
+});
+
+import { dabAlpha, dabFlow, dabsAlong } from "../../web/logic.mjs";
+
+test("Esc cancels a plate that is opening before anything else", () => {
+  assert.equal(escapeAction({ opening: true, editing: true, selected: true, generating: true }), "cancelOpen");
+  assert.equal(escapeAction({ editing: false, selected: false, generating: true }), "stop");
+});
+
+test("light dabs fall at a fixed spacing, however the stroke's points arrive", () => {
+  const pts = [[0, 0, 10], [3, 0, 10], [40, 0, 10], [41, 0, 10], [100, 0, 10]], spacing = (r) => r * 0.25;
+  const all = dabsAlong(pts, 0, spacing).dabs;
+  let carry = 0, parts = [];
+  for (let i = 0; i < pts.length; i++) { const got = dabsAlong(pts.slice(0, i + 1), i, spacing, carry); parts = parts.concat(got.dabs); carry = got.carry; }
+  assert.deepEqual(parts, all); // drawn as the pointer moves or in one pass: the same dabs
+  assert.deepEqual(all[0], [0, 0, 10]);
+  assert.equal(all.length, 41); // every 2.5 px from 0 to 100
+  for (let i = 1; i < all.length; i++) assert.ok(Math.abs(all[i][0] - all[i - 1][0] - 2.5) < 1e-9);
+});
+
+test("one light stroke adds its flow on its centre line, whatever the spacing", () => {
+  for (const spacing of [0.25, 0.2, 0.5]) {
+    let sum = 0;
+    for (let k = -20; k <= 20; k++) sum += dabFlow(0.3, spacing) * dabAlpha(Math.abs(k * spacing));
+    assert.ok(Math.abs(sum - 0.3) < 1e-9, `${spacing}: ${sum}`);
+  }
+  assert.equal(dabAlpha(0), 1);
+  assert.equal(dabAlpha(1), 0);
+  assert.ok(Math.abs(dabAlpha(0.375) - 0.675) < 1e-9);
 });

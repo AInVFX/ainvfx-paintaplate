@@ -305,5 +305,68 @@ class HDRPreview(unittest.TestCase):
         self.assertAlmostEqual(int(out[0, 0, 0]), round(255 * (1.055 * (0.18 / 1.18) ** (1 / 2.4) - 0.055)), delta=1)
         self.assertEqual(out[0, 1].tolist(), [0, 0, 0])  # the code of linear 0 is black
 
+
+import mathops  # noqa: E402
+from scipy import ndimage  # noqa: E402
+
+
+class AnchoredRelight(unittest.TestCase):
+    """With the edited first frame as an anchor, a shot that carries less light, fading, keeps the first frame's light."""
+
+    def frames(self, n=24, h=64, w=96):
+        rng = np.random.default_rng(3)
+        tex = 0.12 + 0.3 * ndimage.gaussian_filter(rng.random((h, w + n)), 1.5)
+        x = np.arange(w + n)[None, :]
+        pool = np.exp(-(((x - 30) / 18.0) ** 2)) * np.ones((h, 1))  # a pool of light that pans with the scene
+        warm = np.array([1.25, 1.0, 0.75])
+        plates, lights = [], []
+        for t in range(n):
+            plates.append(np.repeat(tex[:, t:t + w, None], 3, -1).astype(np.float32))
+            lights.append(pool[:, t:t + w])
+        return plates, lights, warm
+
+    def relit(self, plate, light, warm, strength, tint):  # brighter in the pool, darker around, warmer inside
+        b = np.exp(strength * (np.log(3.0) * light - np.log(1.6)))[..., None]
+        return (plate * b * warm[None, None] ** (tint * light[..., None])).astype(np.float32)
+
+    def spread(self, plate, out, light):
+        r = np.log(mathops.luma(out) / mathops.luma(plate))
+        return float(np.percentile(r, 90) - np.percentile(r, 10))
+
+    def test_anchor_keeps_the_first_frames_light(self):
+        plates, lights, warm = self.frames()
+        n, radius = len(plates), 2
+        anchor = self.relit(plates[0], lights[0], warm, 1.0, 1.0)
+        shots = [self.relit(p, l, warm, 0.45 - 0.2 * t / n, 0.35) for t, (p, l) in enumerate(zip(plates, lights))]
+        target = mathops.light_stats(plates[0], anchor, radius)
+        maps = mathops.anchor_maps([mathops.light_stats(p, s, radius) for p, s in zip(plates, shots)], target, 1.0)
+        want = self.spread(plates[0], mathops.relight(plates[0], plates[0], anchor, radius), lights[0])
+        for t in (0, n // 2, n - 1):
+            held = self.spread(plates[t], mathops.relight(plates[t], plates[t], shots[t], radius, 1.0, maps[t]), lights[t])
+            alone = self.spread(plates[t], mathops.relight(plates[t], plates[t], shots[t], radius), lights[t])
+            self.assertLess(abs(held - want) / want, 0.2, f"frame {t}: spread {held:.3f} against the first frame's {want:.3f}")
+            self.assertLess(alone / want, 0.6, f"frame {t}: without the anchor the shot keeps {alone / want:.2f} of the light")
+        warmth = lambda img, p: float(np.median(np.log(img[..., 0] / img[..., 2]) - np.log(p[..., 0] / p[..., 2])))
+        out = mathops.relight(plates[-1], plates[-1], shots[-1], radius, 1.0, maps[-1])
+        self.assertGreater(warmth(out, plates[-1]), 0.6 * warmth(anchor, plates[0]))
+
+    def test_maps_change_slowly(self):  # a noisy shot: its correction moves by little from one frame to the next
+        plates, lights, warm = self.frames()
+        rng = np.random.default_rng(5)
+        shots = [self.relit(p, l, warm, 0.4 + 0.08 * rng.standard_normal(), 0.4) for p, l in zip(plates, lights)]
+        target = mathops.light_stats(plates[0], self.relit(plates[0], lights[0], warm, 1.0, 1.0), 2)
+        maps = mathops.anchor_maps([mathops.light_stats(p, s, 2) for p, s in zip(plates, shots)], target, 1.0)
+        gains = np.array([m["b_gain"] for m in maps])
+        self.assertLess(np.abs(np.diff(gains)).max(), 0.05)
+        flat = mathops.anchor_maps([mathops.light_stats(p, s, 2) for p, s in zip(plates, shots)], target, 0.0)
+        self.assertEqual(len({round(m["b_gain"], 9) for m in flat}), 1)  # hold 0: one correction for the whole shot
+
+    def test_identity_map_changes_nothing(self):
+        plates, lights, warm = self.frames(n=1)
+        shot = self.relit(plates[0], lights[0], warm, 0.5, 0.5)
+        same = {"b_at": 0.0, "b_gain": 1.0, "b_to": 0.0, "c_at": np.zeros(3), "c_gain": 1.0, "c_to": np.zeros(3)}
+        np.testing.assert_allclose(mathops.light_ratio(plates[0], shot, 2, same), mathops.light_ratio(plates[0], shot, 2), rtol=1e-4)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

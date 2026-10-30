@@ -14,6 +14,7 @@
     <img class="mark" src="brand/paint-a-plate.png" alt="Paint a plate">
     <span id="version" class="version" title="The version of AInVFX Paint a plate on this ComfyUI"></span>
     <span id="spec" class="spec"></span>
+    <button id="close-btn" class="quiet close-plate" type="button" hidden title="Close the plate: stop its renders and free its frames from the browser's memory" aria-label="Close the plate">×</button>
     <button id="menu-btn" class="quiet menu-btn" title="Every action, with its key (or right-click on the frame)" aria-label="Menu" aria-haspopup="menu">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
@@ -73,6 +74,7 @@
       <input id="prompt" autocomplete="off" spellcheck="false" aria-label="Describe the edit"
              placeholder="Describe what to paint, then paint it on the frame">
       <button id="generate" class="primary generate" type="button" disabled title="Generate (Enter): the edit on the first frame, then its shot. What is already made never runs again">Generate</button>
+      <button id="stop" class="stop" type="button" hidden title="Stop generating (Esc): what finished is kept, and Generate goes on from there">Stop</button>
       <button id="new-edit" class="new-edit" type="button" disabled title="New edit (N): this edit is done, the next strokes start a separate one">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span>New edit</span>
@@ -90,6 +92,7 @@
         <div class="op-bar"><div id="op-bar"></div></div>
         <p id="op-step" class="op-step"></p>
         <ol id="op-steps" class="op-steps"></ol>
+        <button id="op-cancel" type="button" class="op-cancel" title="Stop opening this plate (Esc)">Cancel</button>
       </div>
       <div id="empty" class="empty">
         <p>Open a plate to start: a video file, or a folder of EXR, PNG, TIFF or DPX frames. You can also drop it here.</p>
@@ -182,7 +185,8 @@
       <dt>Enter</dt><dd>Generate: the edit on the first frame, then its shot. Pressed again with nothing changed, nothing runs twice</dd>
       <dt>Ctrl+Enter</dt><dd>Try another seed on the selected edit, else the last one</dd>
       <dt>Click an edit</dt><dd>Select it: its words come back; retype them, paint more, rub strokes out or switch Whole object, then Generate. Esc deselects</dd>
-      <dt>Esc</dt><dd>Cancel the edit in progress, then deselect, then stop generating. What finished is kept, and Enter goes on from there</dd>
+      <dt>Esc</dt><dd>Cancel a plate that is opening; else cancel the edit in progress, then deselect, then stop generating (Stop, beside Generate, does the same). What finished is kept, and Enter goes on from there</dd>
+      <dt>× after the plate's name</dt><dd>Close the plate (also right-click > File > Close plate): every render stops and its frames leave the browser's memory</dd>
       <dt>Two fingers</dt><dd>On a touch screen: pan and zoom the frame. ☰ at the top holds every action</dd>
       <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo (Ctrl+Y redoes too): one step per stroke, per removal, per change of words or seed</dd>
       <dt>Hold O</dt><dd>See the plate</dd>

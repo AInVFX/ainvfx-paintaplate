@@ -330,3 +330,9 @@ dialog.open { width: min(900px, 94vw); }
 .scene.on { border-color: var(--gold); }
 .scene small { color: var(--muted); }
 .scenes a { color: var(--muted); font-size: 12px; }
+
+/* Stop beside Generate, Cancel while a plate opens, and the × that closes the plate */
+.stop { flex: none; min-width: 72px; }
+.op-cancel { margin-top: 12px; }
+.close-plate { flex: none; padding: 2px 9px; font-size: 16px; line-height: 1; }
+.stop[hidden], .close-plate[hidden] { display: none; }

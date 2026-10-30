@@ -75,8 +75,9 @@ export function objectInfo(cls) { // one request per class, however often it is 
   return infos.get(cls);
 }
 
-export function upload(blob, name, sub, onProgress) { // XMLHttpRequest, not fetch: it reports upload progress
+export function upload(blob, name, sub, onProgress, signal) { // XMLHttpRequest, not fetch: it reports upload progress; `signal` aborts it
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error("cancelled"));
     const form = new FormData();
     form.append("image", blob, name);
     form.append("subfolder", sub);
@@ -85,6 +86,8 @@ export function upload(blob, name, sub, onProgress) { // XMLHttpRequest, not fet
     x.open("POST", "/upload/image");
     x.upload.onprogress = (e) => onProgress?.(e.loaded);
     x.onerror = () => reject(new Error(`Upload failed: ${name}`));
+    x.onabort = () => reject(new Error("cancelled")); // Cancel on the opening screen
+    signal?.addEventListener("abort", () => x.abort(), { once: true });
     x.onload = () => { // an answer that is not ComfyUI's JSON (a proxy's error page) fails the upload, never hangs it
       let j = null;
       try { j = JSON.parse(x.responseText); } catch { /* reported below */ }

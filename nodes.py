@@ -293,22 +293,46 @@ class RelightTransfer(io.ComfyNode):
                 io.Combo.Input("shot_space", options=["linear", "sRGB"], default="linear", optional=True,
                                tooltip="How 'source' and 'relit' are encoded: sRGB, as the model saw and made them, is "
                                        "decoded here."),
+                io.Image.Input("anchor", optional=True,
+                               tooltip="The edited first frame, encoded as 'source'. When connected, every frame's light is "
+                                       "mapped onto its level, spread and colour, so the shot keeps the first frame's full "
+                                       "relight."),
+                io.Float.Input("hold", default=1.0, min=0.0, max=1.0, step=0.05, optional=True,
+                               tooltip="With an anchor: 1 also brings the shot's slow drifts of light back to the first "
+                                       "frame's; 0 corrects the whole shot by its first frame alone."),
             ],
             outputs=[io.Image.Output(display_name="image")],
         )
 
     @classmethod
-    def execute(cls, plate, source, relit, radius, strength, align, plate_space="linear", shot_space="linear") -> io.NodeOutput:
+    def execute(cls, plate, source, relit, radius, strength, align, plate_space="linear", shot_space="linear", anchor=None,
+                hold=1.0) -> io.NodeOutput:
         n = min(plate.shape[0], source.shape[0], relit.shape[0])
+        src, rel = list(frames_np(source[:n])), list(frames_np(relit[:n]))
+        maps = [None] * n
+        if anchor is not None:  # the edited first frame's light, held over the shot (mathops.anchor_maps)
+            width, r = int(plate.shape[2]), max(1, radius)
+            first = list(frames_np(anchor[:1]))[0]
+            if first.shape[:2] != src[0].shape[:2]:
+                first = mathops.resize_to(first, *src[0].shape[:2])
+            with ThreadPoolExecutor(WORKERS) as pool:
+                stats = list(pool.map(lambda sr: mathops.light_stats(*mathops.shot_pair(*sr, align, width, shot_space), r),
+                                      zip(src, rel)))
+            target = mathops.light_stats(*mathops.shot_pair(src[0], first, False, width, shot_space), r)
+            maps = mathops.anchor_maps(stats, target, hold)
+            logging.info("Paint a plate, Relight Transfer: the first frame's light held over %d frames (hold %.2f): brightness "
+                         "spread x%.2f to x%.2f, colour x%.2f to x%.2f", n, hold, min(m["b_gain"] for m in maps),
+                         max(m["b_gain"] for m in maps), min(m["c_gain"] for m in maps), max(m["c_gain"] for m in maps))
         bar = comfy.utils.ProgressBar(n)
 
         def one(args):
-            out = mathops.relight_frame(*args, radius, strength, align, plate_space, shot_space)
+            i, p = args
+            out = mathops.relight_frame(p, src[i], rel[i], radius, strength, align, plate_space, shot_space, maps[i])
             bar.update(1)
             return out
 
         with ThreadPoolExecutor(WORKERS) as pool:
-            out = list(pool.map(one, zip(frames_np(plate[:n]), frames_np(source[:n]), frames_np(relit[:n]))))
+            out = list(pool.map(one, enumerate(frames_np(plate[:n]))))
         return io.NodeOutput(to_image(out))
 
 
