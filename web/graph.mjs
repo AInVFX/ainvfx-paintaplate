@@ -168,11 +168,11 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
     { shot: made, ...(hdr ? { hdr } : {}), ...(a ? { matte_a: a, matte_b: paintMatte ?? erasedMatte } : {}) }));
   const files = `output/${render.prefix}`, n = edits.length, painting = edits.filter((e) => e.tool === "paint").length;
   const sections = [
-    ["readme", "How this graph works", [`AInVFX PaintAPlate${about.version ? ` ${about.version}` : ""}: the scene of ${about.name ?? plate.path}, as one ComfyUI workflow.`,
-      [`It makes ${n} edit${n === 1 ? "" : "s"} on frame 0, then renders them through the whole shot at full size, as PaintAPlate's Export does:`,
+    ["readme", "How this graph works", [`AInVFX Paint a plate${about.version ? ` ${about.version}` : ""}: the scene of ${about.name ?? plate.path}, as one ComfyUI workflow.`,
+      [`It makes ${n} edit${n === 1 ? "" : "s"} on frame 0, then renders them through the whole shot at full size, as Paint a plate's Export does:`,
         ...edits.map((e, k) => `- Edit ${k + 1}: ${TOOLS[e.tool]}${quoted(e.words)}, seed ${e.seed}.`)].join("\n"),
-      `To run it, press Run. It reads the plate, ${plate.path}, from ComfyUI's input folder, and each edit's mask and strokes from input/paintaplate/up, where PaintAPlate put them when it saved this graph. It writes the result in the plate's own format to ${files}/export, and its matte to ${files}/matte.`,
-      "To read it: each section takes a hundred node ids and opens with a README note like this one, and every node title starts with its section. Brackets list the values PaintAPlate set on a node. Model loaders sit in MODELS, shared by every step.",
+      `To run it, press Run. It reads the plate, ${plate.path}, from ComfyUI's input folder, and each edit's mask and strokes from input/paintaplate/up, where Paint a plate put them when it saved this graph. It writes the result in the plate's own format to ${files}/export, and its matte to ${files}/matte.`,
+      "To read it: each section takes a hundred node ids and opens with a README note like this one, and every node title starts with its section. Brackets list the values Paint a plate set on a node. Model loaders sit in MODELS, shared by every step.",
       "To change an edit: in its section, change the node marked [caption] or [seed], then Run. The edits after it, and the render, follow."].join("\n\n")],
     ["input", "INPUT", `The plate. Load Plate reads ${plate.path}${plate.frames ? `, ${plate.frames} frames` : ""}${plate.fps ? ` at ${plate.fps} fps` : ""}. Color Space turns it from ${plate.cs} into the sRGB the models work in. Frame 0, scaled to ${by(plate.work)}, is the frame the edits paint on.\n\nOut: the plate, every frame, and frame 0.`],
     ["models", "MODELS", "The models, each loaded once and shared by every step that uses it: FLUX 3 Image Klein, its text encoder and VAE for the edits; LTX 2.5, Gemma, its VAEs and IC-LoRAs for the passes; SAM 3.1 for the tracking."],

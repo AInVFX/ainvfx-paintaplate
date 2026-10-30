@@ -112,7 +112,7 @@ jobs:
           else
             git log -1 --format=%b > notes.md
           fi
-          args=(--target "$GITHUB_SHA" --title "AInVFX PaintAPlate $VERSION" --notes-file notes.md)
+          args=(--target "$GITHUB_SHA" --title "AInVFX Paint a plate $VERSION" --notes-file notes.md)
           if [ "${VERSION%%.*}" = "0" ]; then
             args+=(--prerelease)
           fi

@@ -42,7 +42,7 @@ except ImportError:  # imported as a plain module by the tests, outside the pack
 BLANK = "paintaplate/blank"  # the folder under the input folder that holds the black canvases of fluid shots
 FOUND_MAX = 60  # plates the Open dialog lists at a root from the folders below it, newest first
 FOUND_FOLDERS = 400  # folders read at most for them, breadth first: a root of thousands of folders still answers at once
-# PaintAPlate's own folders stay out of a root's plates: renders and the job index, uploaded masks, blank canvases
+# Paint a plate's own folders stay out of a root's plates: renders and the job index, uploaded masks, blank canvases
 FOUND_SKIP = {"output:paintaplate", "paintaplate/up", "paintaplate/blank", "paintaplate/warm"}
 
 
@@ -148,7 +148,7 @@ def browse(rel: str) -> dict:
 
 def plates_below(full: str, page: str) -> list:
     """At a root, the newest plates of the folders below it, so the Open dialog shows plates at once: FOUND_MAX of them,
-    from at most FOUND_FOLDERS folders read breadth first, PaintAPlate's own folders left out (FOUND_SKIP). Each carries
+    from at most FOUND_FOLDERS folders read breadth first, Paint a plate's own folders left out (FOUND_SKIP). Each carries
     its page path and its folder's. Like scan_folder, it opens no file and follows no link."""
     found, queue, read = [], [(full, page)], 0
     while queue and read < FOUND_FOLDERS:
@@ -446,7 +446,7 @@ def save_scene(name: str, body: bytes) -> None:
         raise ValueError("Scene too large")
     scene = json.loads(body)
     if not isinstance(scene, dict) or scene.get("format") != "paintaplate-scene":
-        raise ValueError("Not a PaintAPlate scene")
+        raise ValueError("Not a Paint a plate scene")
     path = scene_path(name)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = f"{path}.{uuid.uuid4().hex}.tmp"

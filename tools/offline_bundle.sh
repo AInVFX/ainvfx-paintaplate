@@ -24,4 +24,4 @@ get Lightricks/ComfyUI-LTXVideo "$LTX_REF" "$T/ComfyUI/custom_nodes/ComfyUI-LTXV
 mkdir -p "$T/ainvfx-paintaplate"
 git -C "$PACK" archive HEAD | tar x -C "$T/ainvfx-paintaplate"
 tar czf "$OUT" -C "$T" ComfyUI ainvfx-paintaplate
-echo "wrote $OUT ($(du -h "$OUT" | cut -f1)): ComfyUI $COMFY_REF, ComfyUI-LTXVideo $LTX_REF, $(git -C "$PACK" log -1 --format='PaintAPlate %h')"
+echo "wrote $OUT ($(du -h "$OUT" | cut -f1)): ComfyUI $COMFY_REF, ComfyUI-LTXVideo $LTX_REF, $(git -C "$PACK" log -1 --format='Paint a plate %h')"

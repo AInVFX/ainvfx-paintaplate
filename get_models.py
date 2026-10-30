@@ -1,4 +1,4 @@
-"""Download the models PaintAPlate's workflows load, at the tested revisions, into a ComfyUI models folder.
+"""Download the models Paint a plate's workflows load, at the tested revisions, into a ComfyUI models folder.
 
     python get_models.py [MODELS_FOLDER] [--no-fluid] [--no-hdr] [--list] [--only FILE ...]
 
@@ -71,7 +71,7 @@ def fetch(model, models: str) -> str:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Download the models PaintAPlate's workflows load, at the tested revisions.")
+    ap = argparse.ArgumentParser(description="Download the models Paint a plate's workflows load, at the tested revisions.")
     ap.add_argument("models", nargs="?", default=comfy_models(), help="ComfyUI's models folder (default: the one this pack is in)")
     ap.add_argument("--no-fluid", action="store_true", help="skip ainvfx-fluid: fluid shots from a blank plate switch off")
     ap.add_argument("--no-hdr", action="store_true", help="skip the SDR-to-HDR IC-LoRA (gated): SDR to HDR switches off")

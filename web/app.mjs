@@ -1,4 +1,4 @@
-// AInVFX PaintAPlate: one viewer to play a plate, paint edits on its first frame and watch the edited shot.
+// AInVFX Paint a plate: one viewer to play a plate, paint edits on its first frame and watch the edited shot.
 // The page runs on the ComfyUI server that serves it. Every step is a workflow from ./workflows, run by comfy.mjs;
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
@@ -2374,7 +2374,7 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
 
 async function openScene(text) { // the plate opens in its colour space, then every edit runs again with its own seed and words
   const scene = JSON.parse(text), o = scene.ocio;
-  if (scene.format !== SCENE.format || !(scene.version <= SCENE.version)) throw new Error("This file is not a PaintAPlate scene.");
+  if (scene.format !== SCENE.format || !(scene.version <= SCENE.version)) throw new Error("This file is not a Paint a plate scene.");
   if (o) { // its OCIO config and view, where this ComfyUI has them
     if (o.config && o.config !== S.ocio.config) await loadOcio(o.config).catch((err) => log(`${err.message}: the scene opens in the config in use`, "error"));
     const info = S.ocio.info;
@@ -2642,7 +2642,7 @@ addEventListener("blur", closeMenu);
 async function boot() { // the version, the workflows, the WebSocket, then what this ComfyUI lacks: nodes, then model files
   const { version = "" } = await fetch("/paintaplate/version").then((r) => r.json()).catch(() => ({})); // pyproject.toml's, on the server
   $("#version").textContent = S.version = version;
-  log(`AInVFX PaintAPlate ${version || "of an unknown version: restart ComfyUI after an update"}`);
+  log(`AInVFX Paint a plate ${version || "of an unknown version: restart ComfyUI after an update"}`);
   onNotice(status);
   onLog(log);
   const t0 = performance.now();

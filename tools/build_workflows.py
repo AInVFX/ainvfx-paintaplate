@@ -1,10 +1,10 @@
-"""Write the PaintAPlate workflows to web/workflows/*.json.
+"""Write the Paint a plate workflows to web/workflows/*.json.
 
 Each file is a plain ComfyUI workflow in API format, so ComfyUI opens it with Open or by drag
 and drop. The page fills some inputs before it posts a workflow: each node lists them in
 `_meta.slots` as {input name: slot name}, the outputs the page reads carry `_meta.output`, and
 the node whose progress stands for the whole workflow carries `_meta.progress`.
-Every node is a core node, a ComfyUI-LTXVideo node or one of the PaintAPlate nodes (nodes.py).
+Every node is a core node, a ComfyUI-LTXVideo node or one of the Paint a plate nodes (nodes.py).
 
     python tools/build_workflows.py
 """

@@ -491,7 +491,7 @@ export function plainError(message) {
     return `${part ? SAVED[part.replace(/_(\d+x\d+|full)$/, "")] : "the step before it"} saved no frames, so there was nothing to read.`;
   }
   if (/leaves the ComfyUI folders|outside the output folder|Absolute plate paths/i.test(m)) return "the file is outside ComfyUI's input and output folders.";
-  if (/Unsupported plate/i.test(m)) return "PaintAPlate cannot read this kind of file.";
+  if (/Unsupported plate/i.test(m)) return "Paint a plate cannot read this kind of file.";
   if (/value not in list|not found in list|failed validation|Missing nodes|does not exist in/i.test(m)) return "a model or a node it needs is missing.";
   if (/No such file|FileNotFound|not found/i.test(m)) return "a file it needs is missing.";
   if (/Upload failed/i.test(m)) return "the browser could not send a picture to ComfyUI.";

@@ -1,27 +1,27 @@
-# AInVFX PaintAPlate
+<h1 align="center"><img src="web/brand/title.png" alt="AInVFX Paint a plate" width="100%"></h1>
 
 **AInVFX's entry in Comfy's Open Source Higgsfield contest** (October 2026). #OpenSourceHiggsfield
 
 Paint on the first frame of a shot to erase, add or relight. The edit appears on that frame in seconds, then carries through the whole shot. You review the result at the plate's own quality, an EXR against its EXR, through OpenColorIO as in OpenRV. Export then writes it in the plate's own format: same file type, bit depth, frame numbers, colour tags, timecode, audio and EXR layers, with every untouched pixel identical to the plate.
 
-PaintAPlate is a ComfyUI node pack with its own page. Every step is a ComfyUI workflow from `web/workflows`, open weights only:
+Paint a plate is a ComfyUI node pack with its own page. Every step is a ComfyUI workflow from `web/workflows`, open weights only:
 
 - **FLUX 3 Image Klein** edits the first frame. Its own prompt upsampler, a Qwen 3.5 9B model from Black Forest Labs, writes each caption from your few words and the frame.
 - **LTX 2.5** carries the edit through the shot. Lightricks' in-outpainting IC-LoRA regenerates erased areas; WepeNerd's Ripple IC-LoRA carries paint and light.
 - **SAM 3.1** finds whole objects and follows every edit through the shot.
 - **ainvfx-fluid**, AInVFX's own IC-LoRA for LTX 2.5, trained on synthetic data (dataset `AInVFX/ainvfx-fluid`), turns flat painted keyframes into smoke, steam, fire, explosions, dust, fog or clouds, from a blank plate.
 
-**GPU.** PaintAPlate was tested on an NVIDIA RTX PRO 6000 with 96 GB of VRAM. Its models are large: an edit uses FLUX 3 Image Klein (5.8 GB), its text encoder (4.9 GB) and its prompt writer (6.7 GB), which the page loads as soon as it opens; a shot uses LTX 2.5 (21.5 GB) and its Gemma text encoder (15.4 GB), plus the memory of a full-size pass (up to 1920 x 1088 and 121 frames). On a 16 GB laptop GPU, the page ran out of memory as soon as it loaded its models. Cards between 16 and 96 GB have not been tested. On a smaller card or a Mac, run it on Runpod (option 3 below).
+**GPU.** Paint a plate was tested on an NVIDIA RTX PRO 6000 with 96 GB of VRAM. Its models are large: an edit uses FLUX 3 Image Klein (5.8 GB), its text encoder (4.9 GB) and its prompt writer (6.7 GB), which the page loads as soon as it opens; a shot uses LTX 2.5 (21.5 GB) and its Gemma text encoder (15.4 GB), plus the memory of a full-size pass (up to 1920 x 1088 and 121 frames). On a 16 GB laptop GPU, the page ran out of memory as soon as it loaded its models. Cards between 16 and 96 GB have not been tested. On a smaller card or a Mac, run it on Runpod (option 3 below).
 
 On Hugging Face: the 23 test plates, [AInVFX/ainvfx-paintaplate](https://huggingface.co/datasets/AInVFX/ainvfx-paintaplate) (synthetic, CC BY 4.0); the IC-LoRA [AInVFX/ainvfx-fluid](https://huggingface.co/AInVFX/ainvfx-fluid) and its synthetic training data, [AInVFX/ainvfx-fluid](https://huggingface.co/datasets/AInVFX/ainvfx-fluid) (dataset).
 
 ## Install it
 
-The steps are the same on Windows, macOS and Linux. PaintAPlate needs ComfyUI v0.43.0 or newer and [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo), and its models need a large NVIDIA GPU (see **GPU** above): on a Mac or a smaller card, run it on Runpod (option 3).
+The steps are the same on Windows, macOS and Linux. Paint a plate needs ComfyUI v0.43.0 or newer and [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo), and its models need a large NVIDIA GPU (see **GPU** above): on a Mac or a smaller card, run it on Runpod (option 3).
 
 ### 1. With ComfyUI Manager (recommended)
 
-1. In ComfyUI, open **Extensions > All Extensions** (ComfyUI's built-in Manager; with its legacy interface, **Manager > Custom Nodes Manager**), search for **PaintAPlate** and install **AInVFX PaintAPlate** ([its Registry page](https://registry.comfy.org/nodes/ainvfx-paintaplate)). Install **ComfyUI-LTXVideo** the same way, then restart ComfyUI. If there is no **Extensions** entry, the Manager is off: in ComfyUI's folder, run `pip install -r manager_requirements.txt`, then start ComfyUI with `--enable-manager` (Comfy Desktop starts with it). The Manager installs the pack's Python packages, OpenEXR and OpenColorIO, which have wheels for all three systems. With comfy-cli: `comfy node install ainvfx-paintaplate`.
+1. In ComfyUI, open **Extensions > All Extensions** (ComfyUI's built-in Manager; with its legacy interface, **Manager > Custom Nodes Manager**), search for **Paint a plate** and install **AInVFX Paint a plate** ([its Registry page](https://registry.comfy.org/nodes/ainvfx-paintaplate)). Install **ComfyUI-LTXVideo** the same way, then restart ComfyUI. If there is no **Extensions** entry, the Manager is off: in ComfyUI's folder, run `pip install -r manager_requirements.txt`, then start ComfyUI with `--enable-manager` (Comfy Desktop starts with it). The Manager installs the pack's Python packages, OpenEXR and OpenColorIO, which have wheels for all three systems. With comfy-cli: `comfy node install ainvfx-paintaplate`.
 2. Download the models, about 60 GB (next section).
 3. Start ComfyUI, then open this address in your browser:
 
@@ -129,7 +129,7 @@ Drag the line between the frame and History, or the top edge of the open log, to
 | `fluid` | ainvfx-fluid turns painted keyframes into a fluid shot |
 | `hdr` | SDR to HDR (off for now: its shots flicker) |
 
-The page fills each workflow's slots before posting it: every node lists them in `_meta.slots`, and `tools/build_workflows.py` writes the files. The twelve PaintAPlate nodes only do what core ComfyUI cannot: Load Plate, Save Plate, Color Space (OCIO), Save Frames, Save Movie, Fit to Plate, Relight Transfer, Follow Matte, Level Fill, Live Preview, Keyframe Video and HDR Match. Their file handling lives in `plateio.py`, their pixel maths in `mathops.py` and their colour in `ocio.py`, all tested without torch. A job made once is kept in a job index on disk, so the same edit on the same plate never runs twice, even in a later session. `ARCHITECTURE.md` maps the code; `TESTING.md` describes every test level.
+The page fills each workflow's slots before posting it: every node lists them in `_meta.slots`, and `tools/build_workflows.py` writes the files. The twelve Paint a plate nodes only do what core ComfyUI cannot: Load Plate, Save Plate, Color Space (OCIO), Save Frames, Save Movie, Fit to Plate, Relight Transfer, Follow Matte, Level Fill, Live Preview, Keyframe Video and HDR Match. Their file handling lives in `plateio.py`, their pixel maths in `mathops.py` and their colour in `ocio.py`, all tested without torch. A job made once is kept in a job index on disk, so the same edit on the same plate never runs twice, even in a later session. `ARCHITECTURE.md` maps the code; `TESTING.md` describes every test level.
 
 ## Change it
 
@@ -149,6 +149,6 @@ The page fills each workflow's slots before posting it: every node lists them in
 
 ## Licences and credits
 
-PaintAPlate's code is Apache 2.0. The models keep their own licences: read each model card before use. LTX 2.5 and its IC-LoRAs (Ripple, in-outpainting, ainvfx-fluid) are under the LTX-2.x Community License, which asks for a paid licence from 10 million USD of annual revenue. SAM 3.1 is under the SAM License. The tiny decoder comes from madebyollin/taehv (MIT). The upsampler's system prompts in `web/upsampler.json` are Black Forest Labs' own text (Apache 2.0). The test plates of `AInVFX/ainvfx-paintaplate` are synthetic, made with LTX 2.5, MOSS-Image and FLUX 3 Image Klein, and published under CC BY 4.0.
+Paint a plate's code is Apache 2.0. The models keep their own licences: read each model card before use. LTX 2.5 and its IC-LoRAs (Ripple, in-outpainting, ainvfx-fluid) are under the LTX-2.x Community License, which asks for a paid licence from 10 million USD of annual revenue. SAM 3.1 is under the SAM License. The tiny decoder comes from madebyollin/taehv (MIT). The upsampler's system prompts in `web/upsampler.json` are Black Forest Labs' own text (Apache 2.0). The test plates of `AInVFX/ainvfx-paintaplate` are synthetic, made with LTX 2.5, MOSS-Image and FLUX 3 Image Klein, and published under CC BY 4.0.
 
 Made by [AInVFX](https://ainvfx.com).

@@ -78,7 +78,7 @@ test("the graph reads by sections: numbered ids, a README note opening each, the
     assert.ok(n._meta.title.startsWith(`${section} · `), `${id}: ${n._meta.title} under ${section}`);
   }
   const overview = g[notes[0][0]].inputs.value;
-  for (const s of ["AInVFX PaintAPlate 1.0.0", "plates/shot.mp4", "output/paintaplate/x/graph/export", 'Edit 1: Erase "red umbrella", seed 1.'])
+  for (const s of ["AInVFX Paint a plate 1.0.0", "plates/shot.mp4", "output/paintaplate/x/graph/export", 'Edit 1: Erase "red umbrella", seed 1.'])
     assert.ok(overview.includes(s), s);
   const titled = (cls) => Object.values(g).filter((n) => n.class_type === cls).map((n) => n._meta.title);
   assert.ok(titled("UNETLoader").every((t) => t.startsWith("MODELS · UNETLoader · ")), "a loader serves every step, from MODELS");

@@ -1,4 +1,4 @@
-# Testing PaintAPlate
+# Testing Paint a plate
 
 One command runs the suite. A test whose package or tool is missing skips itself and says what to install. In CI (GitHub Actions sets `CI=true`) the same miss fails instead, so a broken install never passes as skipped.
 

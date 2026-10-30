@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Standalone setup of a PaintAPlate GPU machine (tested on a Runpod RTX PRO 6000).
+# Standalone setup of a Paint a plate GPU machine (tested on a Runpod RTX PRO 6000).
 #   HF_TOKEN=... [PLATES=1] bash tools/pod_setup.sh [comfyui_ref] [ltxvideo_ref]
 # PLATES=1 also downloads the AInVFX test plates into ComfyUI's input/plates folder (tools/get_plates.sh);
 # FLUID=0 skips AInVFX's ainvfx-fluid IC-LoRA (0.65 GB), which the blank plate's fluid shots need. The models and their
@@ -74,7 +74,7 @@ cd custom_nodes
   uv pip install -q -r requirements.txt
 )
 
-log "PaintAPlate"
+log "Paint a plate"
 dst="$W/ComfyUI/custom_nodes/ainvfx-paintaplate"
 if [ "$PACK" != "$dst" ]; then
   [ -L "$dst" ] || rm -rf "$dst"  # an older copy is replaced by a link to this repo

@@ -158,7 +158,7 @@ class PlateBrowser(unittest.TestCase):
                 routes.browse(bad)
 
     def test_a_root_lists_the_newest_plates_below_it(self):
-        """At the input or output root, the plates of the folders below, newest first, each with its folder; PaintAPlate's
+        """At the input or output root, the plates of the folders below, newest first, each with its folder; Paint a plate's
         own folders stay out. Inside a folder, only that folder."""
         import shutil
         import numpy as np, plateio

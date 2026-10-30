@@ -24,13 +24,13 @@ from fractions import Fraction
 
 import av
 
-COMMENT = ("AI-generated test plate for AInVFX PaintAPlate (github.com/AInVFX/ainvfx-paintaplate). Made in ComfyUI: "
+COMMENT = ("AI-generated test plate for AInVFX Paint a plate (github.com/AInVFX/ainvfx-paintaplate). Made in ComfyUI: "
            "LTX 2.5 (Lightricks) made the shot and its sound, from a first frame by MOSS-Image or FLUX 3 Image Klein, or "
            "from text alone. No real people, no real locations, no stock footage. CC BY 4.0, AInVFX: see the dataset card.")
 
 CARD = """---
 license: cc-by-4.0
-pretty_name: AInVFX PaintAPlate test plates
+pretty_name: AInVFX Paint a plate test plates
 task_categories:
 - image-to-video
 tags:

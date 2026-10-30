@@ -1,4 +1,4 @@
-"""AInVFX PaintAPlate: paint edits onto a moving plate, get the shot back in its own format.
+"""AInVFX Paint a plate: paint edits onto a moving plate, get the shot back in its own format.
 
 The app is a page served by ComfyUI from ./web: open it from the Extensions menu,
 or at /extensions/ainvfx-paintaplate/paintaplate.html. Every step runs as a
@@ -13,7 +13,7 @@ from . import routes
 from .nodes import NODES
 
 routes.setup(PromptServer.instance)  # the page's routes: download, plate list, thumbnails, blank plate
-logging.info("AInVFX PaintAPlate %s: open it from the Extensions menu, or at /extensions/ainvfx-paintaplate/paintaplate.html",
+logging.info("AInVFX Paint a plate %s: open it from the Extensions menu, or at /extensions/ainvfx-paintaplate/paintaplate.html",
              routes.VERSION)
 
 WEB_DIRECTORY = "./web"

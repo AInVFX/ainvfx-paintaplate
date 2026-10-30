@@ -1,8 +1,8 @@
-# AInVFX PaintAPlate: architecture
+# AInVFX Paint a plate: architecture
 
-This document explains what PaintAPlate does, how it is built and where each part lives, for anyone who maintains the code. It describes version 1.0.0. `TESTING.md` covers the tests.
+This document explains what Paint a plate does, how it is built and where each part lives, for anyone who maintains the code. It describes version 1.0.0. `TESTING.md` covers the tests.
 
-## 1. What PaintAPlate does
+## 1. What Paint a plate does
 
 A **plate** is the source footage of a shot: a video file (MP4, MOV, MKV, MXF, WebM, or an animated WebP or GIF) or an image sequence (a folder of EXR, PNG, TIFF or DPX frames, or one sequence in a folder named by its frame pattern, such as `shot.####.exr`). You paint on the plate's first frame, and the change carries through the whole shot. There are three tools:
 
@@ -67,7 +67,7 @@ COMFYUI SERVER
   core API ....... /prompt /ws /history /interrupt /queue /free /upload/image /view /object_info /system_stats
   routes.py ...... /paintaplate/browse  thumb  stat  frames  blank  jobs  scenes  ocio  ocio/shader  download  version
   web/workflows .. 14 API workflows, written by tools/build_workflows.py
-        |  core nodes, ComfyUI-LTXVideo nodes and the 12 PaintAPlate nodes
+        |  core nodes, ComfyUI-LTXVideo nodes and the 12 Paint a plate nodes
         v
 NODE PACK (Python)
   nodes.py ....... 12 thin nodes: they convert tensors, then call
@@ -85,7 +85,7 @@ MODELS (about 60 GB)
 
 These rules keep the code small and easy to change. Follow them in every change.
 
-1. **All GPU work is a ComfyUI workflow.** The page loads a workflow file, fills its slots and posts it. The 12 PaintAPlate nodes only do what core ComfyUI cannot. So the app runs on any ComfyUI, and a Comfy API deployment stays possible.
+1. **All GPU work is a ComfyUI workflow.** The page loads a workflow file, fills its slots and posts it. The 12 Paint a plate nodes only do what core ComfyUI cannot. So the app runs on any ComfyUI, and a Comfy API deployment stays possible.
 2. **Workflows are generated.** `tools/build_workflows.py` writes `web/workflows`. Nobody edits the JSON by hand: a test fails when the files and the generator disagree.
 3. **Each workflow describes itself.** In each node's `_meta`, `slots` maps the node's inputs to slot names, `output` names an output the page reads, and `progress` marks the node whose progress bar stands for the whole workflow.
 4. **Optional links.** Some links exist only when the page has something to send: a matte to composite with, words to search by, a relit frame, an image sequence's review frames. When their slots stay empty, the page drops the link and every node that fed it. The rule is written twice, as `OPTIONAL` in `logic.mjs` and in `build_workflows.py`, and a test keeps the two equal.
@@ -122,7 +122,7 @@ On cards with 24 GB or more, preview passes show a live preview: every second st
 1. **The config.** `ocio.py` loads `$OCIO` when it is set, else a built-in config; the page can switch among them (`/paintaplate/ocio` lists them). It never opens a path the page sends.
 2. **The viewer** (`display.mjs`). Each source is drawn through one WebGL2 program, in the order OpenRV chains its nodes under OCIO: `ocioIn` (the source's colour space to scene-linear, as OCIOFile), the colour tools in scene-linear (exposure, contrast, one matrix for hue, saturation and invert, then gamma, as RVColor), then `ocioOut` (the look, then the display and view, as OCIOLook and OCIODisplay), then the channel shown as grey, picked from the display values, as OCIODisplay floods a channel after its OCIO function. OCIO writes `ocioIn` and `ocioOut` as GLSL ES 3.0 on the server (`/paintaplate/ocio/shader`), with their lookup tables as float textures. A program is made once per colour space and view, so changing either applies at once, also while the shot plays. When the whole chain changes nothing (an 8-bit frame through an identity view, the colour tools at their defaults), the frame is drawn as it is.
 3. **What each source is in.** The plate's own frames, a video plate's proxy and its review: the file colour space. The first frame, the patches, the live previews, the preview composites, the shots and an image sequence's review movie: the model space. An image sequence and its review are read as RGB half floats (`DeepFrames`, `/paintaplate/frames`), around the playhead, as OpenRV's cache keeps an EXR's half floats.
-4. **The menu.** Right-click, then OCIO, with RV's labels: File Color Space (a tree by colour-space family), Look, Displays (each display with its views) and Change Config. RV binds no key for OCIO; neither does PaintAPlate. The display, the view, the look and the config are kept for the next session.
+4. **The menu.** Right-click, then OCIO, with RV's labels: File Color Space (a tree by colour-space family), Look, Displays (each display with its views) and Change Config. RV binds no key for OCIO; neither does Paint a plate. The display, the view, the look and the config are kept for the next session.
 5. **The workflows.** Color Space (OCIO) converts the plate to the model space as core ComfyUI's Convert Image Color Space made sRGB: values above 1.0 tone-mapped with the batch's peak, then a gamut compression (`ocio._into_model`). Out of the model space, values are decoded as they are. Relight Transfer works in `@linear`.
 
 **SDR to HDR** (off and hidden for now, as its shots flicker: `HDR_ON` in `app.mjs`, `?hdr=1` to test it). The `hdr` workflow is Lightricks' official LTX 2.5 SDR-to-HDR graph: the shot mapped from sRGB to ACEScct by core Convert Image Color Space as the IC-LoRA's guide, fixed scene embeddings for the prompt, CFG 1, 8 distilled steps, a float32 tiled decode, and `LTXVHDRDecodePostprocess` for ACEScg values, saved as half-float EXR in ACES2065-1 (the file rules' space for EXR). The page runs it after the full-size shot (`step(r, "hdr")`) when `logic.wantsHdr` says so: an EXR plate, the switch on, no light edit; the switch is part of the render key (`|sdr`), so each setting keeps its renders. `review` and `export` load its frames, convert them to the plate's colour space and fit them with HDR Match (`mathops.hdr_match`): one gain per channel, the median ratio to the plate's own values over the untouched mid-tones (plate luminance 1/64 to 0.71) of the whole shot. A gain changes no ratio, so the range SDR to HDR made above the plate's white stays for grading. Without HDR frames the `hdr_shot` link goes and HDR Match passes the SDR shot through. A 16-bit blank plate runs its fluid shot through `hdr`; the EXR frames become the plate under the edits.
@@ -141,7 +141,7 @@ Without `ainvfx-fluid.safetensors`, fluid shots switch off and the rest of the a
 
 ## 8. The Open dialog
 
-Open plate has one tab per source: **ComfyUI files**, **Upload**, **Scenes** and **Blank plate**. ComfyUI files browses the input and output folders and their subfolders through `/paintaplate/browse`, which reads names, sizes and times only (`plateio.scan_folder`): numbered images are grouped into sequences named by frame pattern, an image alone is counted but not listed, and videos, animated images and saved scenes appear as they are. The page sorts and filters the list (`logic.browseItems`), draws `BROWSE_PAGE` items at a time as the list scrolls, and asks for a thumbnail only when it shows; the server makes at most four thumbnails at once and keeps each one in ComfyUI's temp folder. One click reads the item's details and guessed colour space (`/paintaplate/stat`); a double click opens it. At the input or output root, the route also returns the newest plates of the folders below (`routes.plates_below`: 60 at most, from at most 400 folders, PaintAPlate's own folders left out), each listed with its folder.
+Open plate has one tab per source: **ComfyUI files**, **Upload**, **Scenes** and **Blank plate**. ComfyUI files browses the input and output folders and their subfolders through `/paintaplate/browse`, which reads names, sizes and times only (`plateio.scan_folder`): numbered images are grouped into sequences named by frame pattern, an image alone is counted but not listed, and videos, animated images and saved scenes appear as they are. The page sorts and filters the list (`logic.browseItems`), draws `BROWSE_PAGE` items at a time as the list scrolls, and asks for a thumbnail only when it shows; the server makes at most four thumbnails at once and keeps each one in ComfyUI's temp folder. One click reads the item's details and guessed colour space (`/paintaplate/stat`); a double click opens it. At the input or output root, the route also returns the newest plates of the folders below (`routes.plates_below`: 60 at most, from at most 400 folders, Paint a plate's own folders left out), each listed with its folder.
 
 ## 9. Where files go
 
@@ -187,7 +187,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | `frames.mjs` | `FrameCache`: decoded frames within a memory budget (384 MB by default), ranked by distance from the playhead. `DeepFrames`: the same for an image sequence's own values as RGB half floats (512 MB per cache), fetched from `/paintaplate/frames`, never for a frame the budget cannot keep. |
 | `canvas.mjs` | Canvas helpers; mask bounds as FLUX boxes (0 to 1000). |
 | `display.mjs` | `Display`: the viewer's colour, one WebGL2 program per colour space and view (section 6). |
-| `open.js` | « Open PaintAPlate » in ComfyUI's Extensions menu. It is the only `.js` file, because ComfyUI loads every `.js` file in `web/` into its graph editor; the page's own modules use `.mjs`. |
+| `open.js` | « Open Paint a plate » in ComfyUI's Extensions menu. It is the only `.js` file, because ComfyUI loads every `.js` file in `web/` into its graph editor; the page's own modules use `.mjs`. |
 | `app.css` | The dark, RV-like style, with its colours as tokens on `:root`. On a phone held upright, one column that scrolls; on a phone on its side, the tools down the left; the menu as a sheet along the bottom. |
 | `upsampler.json` | Black Forest Labs' two system prompts for the prompt writer (table and plain). |
 | `logo.png` | The logo, favicon and Registry icon. |

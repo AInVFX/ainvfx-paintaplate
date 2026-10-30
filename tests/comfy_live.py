@@ -186,7 +186,7 @@ def main():
             info, _ = http(f"{url}/object_info/{cls}")
             check(cls in info, f"node {cls} registered")
         page, ctype = http(f"{url}/extensions/ainvfx-paintaplate/paintaplate.html")
-        check(b"PaintAPlate" in page, "app page served")
+        check(b"Paint a plate" in page, "app page served")
         _, ctype = http(f"{url}/extensions/ainvfx-paintaplate/app.mjs")
         check("javascript" in ctype, f"app.mjs served as JavaScript ({ctype})")
         exts, _ = http(f"{url}/extensions")

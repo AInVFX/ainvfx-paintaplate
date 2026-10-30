@@ -33,7 +33,7 @@ def flow(page, port):
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=20000)
     version = page.text_content("#version") or ""
     first = page.eval_on_selector_all("#log li span", "els => els.slice(0, 3).map(e => e.textContent)")
-    check(version.count(".") == 2 and f"AInVFX PaintAPlate {version}" in first, f"the top bar shows the pack's version and the log names it first: {version} {first}")
+    check(version.count(".") == 2 and f"AInVFX Paint a plate {version}" in first, f"the top bar shows the pack's version and the log names it first: {version} {first}")
 
     page.click("#open-btn")
     page.wait_for_selector("#browse .item.video:has-text('desk.mp4')", timeout=10000)
@@ -142,7 +142,7 @@ def flow(page, port):
     notes = [n["_meta"]["title"] for _, n in sorted(graph.items(), key=lambda kv: int(kv[0])) if n["class_type"] == "PrimitiveStringMultiline"]
     overview = graph[min(graph, key=int)]["inputs"]["value"]
     check(notes[:3] == ["README · How this graph works", "README · INPUT", "README · MODELS"] and any(t.startswith("README · EDIT 1 · ") for t in notes)
-          and notes[-1] == "README · OUTPUT" and f"PaintAPlate {page.text_content('#version')}" in overview and "plates/desk.mp4" in overview,
+          and notes[-1] == "README · OUTPUT" and f"Paint a plate {page.text_content('#version')}" in overview and "plates/desk.mp4" in overview,
           f"the ComfyUI graph opens with README notes, one per section, in the order they run: {notes}")
     page.evaluate("document.activeElement.blur()")
     for _ in range(3):

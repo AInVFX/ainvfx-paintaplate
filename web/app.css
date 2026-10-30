@@ -1,4 +1,4 @@
-/* PaintAPlate. The picture leads; the chrome is neutral grey, as in RV. Gold marks what is live:
+/* Paint a plate. The picture leads; the chrome is neutral grey, as in RV. Gold marks what is live:
    the active tool, the playhead, the edit frame, progress, the main action. */
 :root {
   --surround: #1f1f1f; --panel: #272727; --raised: #2f2f2f; --line: #393939; --line-strong: #4a4a4a;
@@ -30,7 +30,7 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 /* Header */
 .top { grid-area: top; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .logo { height: 15px; width: auto; display: block; }
-.name { font: 600 14px Montserrat, Inter, system-ui, sans-serif; }
+.mark { height: 26px; width: auto; display: block; }
 .version { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 #view.picking { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 16 16'%3E%3Cpath d='M11.2 1.6a1.9 1.9 0 0 1 2.7 2.7l-1.6 1.6.7.7-1 1-.7-.7-5.6 5.6H3.6v-2.1l5.6-5.6-.7-.7 1-1 .7.7z' fill='%23fff' stroke='%23000' stroke-width='.8'/%3E%3C/svg%3E") 5 19, crosshair; }
 .sw.pick { display: grid; place-items: center; background: var(--panel-2, #2a2d33); color: var(--text, #e6e6e6); }
@@ -245,7 +245,7 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 @media (max-width: 900px) and (orientation: portrait), (max-width: 600px) {
   body { grid-template: "top" auto "tools" auto "stage" auto "side" auto "log" auto / minmax(0, 1fr); height: auto; min-height: 100dvh; overflow-x: hidden; overflow-y: auto; }
   .top { flex-wrap: wrap; gap: 4px 6px; padding: 5px 8px; }
-  .top .name, .top .version { display: none; }
+  .top .mark, .top .version { display: none; }
   .spec { order: 9; flex-basis: 100%; padding: 0 0 2px; font-size: 11px; }
   .top button { padding: 5px 9px; }
   .tools { flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 6px; padding: 6px 8px; border-right: 0; border-bottom: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; }
@@ -275,7 +275,7 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 @media (max-height: 520px) and (orientation: landscape) {
   body { grid-template: "top top" 38px "tools stage" calc(100dvh - 38px - 32px) "side side" auto "log log" auto / 64px minmax(0, 1fr); height: auto; min-height: 100dvh; overflow-y: auto; }
   .top { gap: 6px; padding: 0 8px; }
-  .top .name, .top .version { display: none; }
+  .top .mark, .top .version { display: none; }
   .top button { padding: 3px 9px; }
   .tools { gap: 5px; padding: 6px 5px; }
   .tools [data-tool] { padding: 4px 0 2px; font-size: 11px; }

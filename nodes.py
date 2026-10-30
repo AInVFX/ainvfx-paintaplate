@@ -1,4 +1,4 @@
-"""The twelve PaintAPlate nodes. Each one does what core ComfyUI cannot.
+"""The twelve Paint a plate nodes. Each one does what core ComfyUI cannot.
 
 Compositing, masks, Klein, LTX and SAM 3.1 stay in core nodes. These nodes load and save plates in their own format,
 convert colour with OpenColorIO, fit generated frames to the plate, transfer a new light onto it, keep a matte on what an
@@ -31,7 +31,7 @@ from . import folders, mathops, ocio, plateio
 
 Plate = io.Custom("PAINTAPLATE_PLATE")
 WORKERS = min(16, os.cpu_count() or 4)  # frames in parallel: numpy, scipy and PyAV release the GIL
-CATEGORY = "AInVFX/PaintAPlate"
+CATEGORY = "AInVFX/Paint a plate"
 
 
 
@@ -479,7 +479,7 @@ class LivePreview(io.ComfyNode):
                                 step, steps, context.prompt_id if context else server.last_prompt_id, server.client_id)
                 except Exception as exc:  # a preview never stops a shot: it switches itself off
                     state["off"] = True
-                    logging.warning("PaintAPlate Live Preview is off for this shot: %s", exc)
+                    logging.warning("Paint a plate Live Preview is off for this shot: %s", exc)
             return denoised
 
         patched = model.clone()
@@ -519,7 +519,7 @@ class LevelFill(io.ComfyNode):
         out = []
         for i, (fill, under) in enumerate(zip(frames_np(image), frames_np(resize(base[..., :3], h, w)))):
             levelled, moved = mathops.level_fill(fill, a[min(i, len(a) - 1)], under, p[min(i, len(p) - 1)])
-            logging.info("PaintAPlate Level Fill: the fill moved %.1f levels on average", moved)
+            logging.info("Paint a plate Level Fill: the fill moved %.1f levels on average", moved)
             out.append(levelled)
         return io.NodeOutput(to_image(out))
 

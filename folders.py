@@ -1,4 +1,4 @@
-"""Where PaintAPlate reads and writes: every path the page sends resolves under ComfyUI's input or output folder.
+"""Where Paint a plate reads and writes: every path the page sends resolves under ComfyUI's input or output folder.
 
 A path that starts with "output:" names something in the output folder; any other path names something in the input
 folder. A frame pattern (shot.####.exr, ComfyUI_#####_.png) names one image sequence in a folder. A symbolic link, or a

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start PaintAPlate on a Runpod pod: the setup, the models, then ComfyUI on port 8188.
+# Start Paint a plate on a Runpod pod: the setup, the models, then ComfyUI on port 8188.
 # In the pod's JupyterLab terminal:
 #   git clone https://github.com/AInVFX/ainvfx-paintaplate /workspace/ainvfx-paintaplate
 #   bash /workspace/ainvfx-paintaplate/tools/runpod_start.sh
@@ -13,7 +13,7 @@ set -uo pipefail
 W=${WORKDIR:-/workspace}; VENV=${VENV:-/opt/venv}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 APP="https://${RUNPOD_POD_ID:-<pod-id>}-8188.proxy.runpod.net/extensions/ainvfx-paintaplate/paintaplate.html"
-log() { echo "[$(date +%H:%M:%S)] PaintAPlate: $*"; }
+log() { echo "[$(date +%H:%M:%S)] Paint a plate: $*"; }
 main=0
 if [ $$ -eq 1 ]; then main=1; fi
 if [ "$main" = 1 ] && [ -x /start.sh ]; then  # JupyterLab and SSH, as in Runpod's own images
