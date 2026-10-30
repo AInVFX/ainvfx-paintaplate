@@ -2354,13 +2354,13 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
   if (!p || !active.length) return status("Make an edit first: the ComfyUI graph holds the edits and the render.");
   status("Writing the ComfyUI graph: each edit's mask and strokes go to ComfyUI's input folder");
   const edits = [];
-  for (const e of active) edits.push({ tool: e.tool, seed: e.seed, caption: e.caption?.text || templateCaption(e),
+  for (const e of active) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, caption: e.caption?.text || templateCaption(e),
     mask: await uploadCanvas(maskAt(e, p.work), `graph_e${e.id}_mask.png`),
     layer: e.tool === "erase" ? null : await uploadCanvas(snap(e.paint, p.work), `graph_e${e.id}_strokes.png`),
     quick: editSettings(e, p.prev, QUICK), full: editSettings(e, p.work, FULL) });
   const erase = active.some((e) => e.tool === "erase");
-  const graph = sceneGraph(WF, { edits,
-    plate: { path: p.path, cs: p.cs, frames: p.frames, fps: p.fps, work: p.work, prev: p.prev, track: p.track, trackErase: p.trackErase },
+  const graph = sceneGraph(WF, { edits, about: { version: S.version, name: p.name },
+    plate: { path: p.path, config: S.ocio.config, cs: p.cs, frames: p.frames, fps: p.fps, work: p.work, prev: p.prev, track: p.track, trackErase: p.trackErase },
     render: { prompt: shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt, hue: e.hue ?? hueOf(e.src ?? e) }))), seed: active[0].seed,
       erasePrompt: erasePrompt(active.filter((e) => e.tool === "erase").map((e) => e.caption?.text)),
       grow: grow(p.spec.width, erase), feather: feather(p.spec.width), prefix: `paintaplate/${p.id}/graph`,
@@ -2369,7 +2369,7 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
     href: URL.createObjectURL(new Blob([JSON.stringify(graph, null, 1)], { type: "application/json" })) });
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  status(`Saved ${a.download}: ${Object.keys(graph).length} nodes. Drop it on this ComfyUI to open it: it reads the plate and the strokes from the input folder.`);
+  status(`Saved ${a.download}: ${Object.keys(graph).length} nodes in numbered sections, each opening with a README note. Drop it on this ComfyUI to open it: it reads the plate and the strokes from the input folder.`);
 }
 
 async function openScene(text) { // the plate opens in its colour space, then every edit runs again with its own seed and words
@@ -2641,7 +2641,7 @@ addEventListener("blur", closeMenu);
 
 async function boot() { // the version, the workflows, the WebSocket, then what this ComfyUI lacks: nodes, then model files
   const { version = "" } = await fetch("/paintaplate/version").then((r) => r.json()).catch(() => ({})); // pyproject.toml's, on the server
-  $("#version").textContent = version;
+  $("#version").textContent = S.version = version;
   log(`AInVFX PaintAPlate ${version || "of an unknown version: restart ComfyUI after an update"}`);
   onNotice(status);
   onLog(log);

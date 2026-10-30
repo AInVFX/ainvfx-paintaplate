@@ -53,9 +53,35 @@ test("an erase renders at half size, then 2 steps at full size from it, with the
   const [, up] = node("Stage 1 at full size");
   assert.equal(g[up.inputs.image[0]].class_type, "VAEDecode", "stage 1's frames reach stage 2 by link");
   assert.equal(up.inputs.width[0] !== undefined ? g[up.inputs.width[0]].class_type : "", "GetImageSize");
-  const scaled = Object.values(g).filter((n) => n._meta.title.startsWith("erase pass at half size") && n.class_type === "ImageScale" && n.inputs.width === 640);
+  const scaled = Object.values(g).filter((n) => n._meta.title.startsWith("ERASE PASS · stage 1 at 640 x 352") && n.class_type === "ImageScale" && n.inputs.width === 640);
   assert.equal(scaled.length, 1, "stage 1 runs at half of 1280 x 704");
   const sigmas = Object.values(g).filter((n) => n.class_type === "ManualSigmas").map((n) => n.inputs.sigmas).sort();
   assert.deepEqual(sigmas, ["0.725, 0.421875, 0.0", "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"]);
   assert.equal(Object.values(g).filter((n) => n.class_type === "CLIPTextEncode" && n.inputs.text === "A wet street at night.").length, 1);
+});
+
+test("the graph reads by sections: numbered ids, a README note opening each, the section and the values set in every title", () => {
+  const g = sceneGraph(WF, { plate, edits: [{ ...edit("erase", 1), words: "red umbrella" }, edit("paint", 2), edit("light", 3)], render,
+    about: { version: "1.0.0", name: "shot" } });
+  linked(g);
+  const ids = Object.keys(g), notes = Object.entries(g).filter(([, n]) => n.class_type === "PrimitiveStringMultiline");
+  assert.ok(ids.every((id) => /^[1-9]\d*$/.test(id)), "numeric ids");
+  assert.deepEqual(notes.map(([id, n]) => [Number(id) % 100, n._meta.title]).slice(0, 4),
+    [[0, "README · How this graph works"], [0, "README · INPUT"], [0, "README · MODELS"], [0, 'README · EDIT 1 · Erase "red umbrella"']]);
+  assert.deepEqual(notes.map(([, n]) => n._meta.title).slice(4),
+    ["README · EDIT 2 · Paint", "README · EDIT 3 · Light", "README · ERASE TRACKING", "README · ERASE PASS", "README · SHOT", "README · PAINT TRACKING", "README · OUTPUT"]);
+  const read = new Set(Object.values(g).flatMap((n) => Object.values(n.inputs).filter(Array.isArray).map((v) => v[0])));
+  assert.ok(notes.every(([id]) => !read.has(id)), "no node reads a README note, so none runs");
+  let section = "";
+  for (const [id, n] of Object.entries(g)) { // in id order, every node sits under the README of its own section
+    if (n.class_type === "PrimitiveStringMultiline") { section = n._meta.title.slice("README · ".length); continue; }
+    assert.ok(n._meta.title.startsWith(`${section} · `), `${id}: ${n._meta.title} under ${section}`);
+  }
+  const overview = g[notes[0][0]].inputs.value;
+  for (const s of ["AInVFX PaintAPlate 1.0.0", "plates/shot.mp4", "output/paintaplate/x/graph/export", 'Edit 1: Erase "red umbrella", seed 1.'])
+    assert.ok(overview.includes(s), s);
+  const titled = (cls) => Object.values(g).filter((n) => n.class_type === cls).map((n) => n._meta.title);
+  assert.ok(titled("UNETLoader").every((t) => t.startsWith("MODELS · UNETLoader · ")), "a loader serves every step, from MODELS");
+  assert.ok(titled("CLIPTextEncode").some((t) => t.startsWith("SHOT · ") && t.endsWith("[prompt]")), "the shot's prompt is named");
+  assert.ok(titled("CLIPTextEncode").some((t) => t === 'EDIT 1 · Erase "red umbrella" · both passes · Caption [caption]'), "an edit's caption, one node for its two passes");
 });

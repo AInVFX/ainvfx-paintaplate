@@ -1,6 +1,6 @@
 # AInVFX PaintAPlate: architecture
 
-This document explains what PaintAPlate does, how it is built and where each part lives, for anyone who maintains the code. It describes version 0.5.0. `TESTING.md` covers the tests.
+This document explains what PaintAPlate does, how it is built and where each part lives, for anyone who maintains the code. It describes version 1.0.0. `TESTING.md` covers the tests.
 
 ## 1. What PaintAPlate does
 
@@ -66,11 +66,11 @@ BROWSER   web/paintaplate.html, served by ComfyUI at /extensions/ainvfx-paintapl
 COMFYUI SERVER
   core API ....... /prompt /ws /history /interrupt /queue /free /upload/image /view /object_info /system_stats
   routes.py ...... /paintaplate/browse  thumb  stat  frames  blank  jobs  scenes  ocio  ocio/shader  download  version
-  web/workflows .. 13 API workflows, written by tools/build_workflows.py
-        |  core nodes, ComfyUI-LTXVideo nodes and the 11 PaintAPlate nodes
+  web/workflows .. 14 API workflows, written by tools/build_workflows.py
+        |  core nodes, ComfyUI-LTXVideo nodes and the 12 PaintAPlate nodes
         v
 NODE PACK (Python)
-  nodes.py ....... 11 thin nodes: they convert tensors, then call
+  nodes.py ....... 12 thin nodes: they convert tensors, then call
   plateio.py ..... files: probe, read, write, scan a folder (numpy, PyAV and OpenEXR; no torch)
   mathops.py ..... pixels: fit, relight, mattes, keyframes (numpy and scipy; no torch)
   ocio.py ........ colour: the config, conversions, the viewer's GLSL (numpy and PyOpenColorIO; no torch)
@@ -85,7 +85,7 @@ MODELS (about 60 GB)
 
 These rules keep the code small and easy to change. Follow them in every change.
 
-1. **All GPU work is a ComfyUI workflow.** The page loads a workflow file, fills its slots and posts it. The 11 PaintAPlate nodes only do what core ComfyUI cannot. So the app runs on any ComfyUI, and a Comfy API deployment stays possible.
+1. **All GPU work is a ComfyUI workflow.** The page loads a workflow file, fills its slots and posts it. The 12 PaintAPlate nodes only do what core ComfyUI cannot. So the app runs on any ComfyUI, and a Comfy API deployment stays possible.
 2. **Workflows are generated.** `tools/build_workflows.py` writes `web/workflows`. Nobody edits the JSON by hand: a test fails when the files and the generator disagree.
 3. **Each workflow describes itself.** In each node's `_meta`, `slots` maps the node's inputs to slot names, `output` names an output the page reads, and `progress` marks the node whose progress bar stands for the whole workflow.
 4. **Optional links.** Some links exist only when the page has something to send: a matte to composite with, words to search by, a relit frame, an image sequence's review frames. When their slots stay empty, the page drops the link and every node that fed it. The rule is written twice, as `OPTIONAL` in `logic.mjs` and in `build_workflows.py`, and a test keeps the two equal.
@@ -162,7 +162,7 @@ Open plate has one tab per source: **ComfyUI files**, **Upload**, **Scenes** and
 
 | File | What it does |
 | --- | --- |
-| `__init__.py` | The entry point: registers the routes, serves `web/`, and exposes the 11 nodes (V3 schema, `comfy_api.v0_0_2`). |
+| `__init__.py` | The entry point: registers the routes, serves `web/`, and exposes the 12 nodes (V3 schema, `comfy_api.v0_0_2`). |
 | `nodes.py` | The 12 nodes. |
 | `folders.py` | Where paths from the page may point: `plate_path` (a file, a folder or a frame pattern under the input folder, or the output folder with `output:`), `output_folder`, `run_folder`. |
 | `plateio.py` | Files: sequences and frame patterns (a missing frame keeps its place, as in OpenRV), the plate spec and its colour guess, the folder scan of the plate browser, EXR writing that keeps every layer and header, still writers (PNG, TIFF, DPX, EXR), the review's half-float EXR frames, `VideoWriter` (the source codec, colour tags, timecode and audio), and the blank canvas. |
@@ -183,7 +183,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | `app.mjs` | The app (section 11). |
 | `comfy.mjs` | The ComfyUI client: loads the workflows, posts jobs, follows the WebSocket, cancels by job kind, and reads outputs once ComfyUI has recorded the prompt. Before it posts a job of an `INDEXED` workflow it asks the job index, and after a job finishes it records it there. After a job runs out of GPU memory, it asks ComfyUI to free its memory and waits until it is released (ComfyUI frees between prompts) before one retry. |
 | `logic.mjs` | Pure rules: filling workflows, sizes, captions, the prompt writer's request and `reconcile`, the shot prompt, the whole-object picker, dependencies, the frame ranking, colour maths, keyframe slots, edit targets, the OCIO menu tree (`ocioTree`), the plate browser's order and breadcrumbs (`browseItems`, `crumbs`) and frame patterns. |
-| `graph.mjs` | `sceneGraph`: the whole scene as one ComfyUI workflow, identical nodes shared (Export dialog > ComfyUI graph). |
+| `graph.mjs` | `sceneGraph`: the whole scene as one ComfyUI workflow, identical nodes shared (Export dialog > ComfyUI graph); `organise` lays it out for a person: a hundred ids per section in run order (README, INPUT, MODELS, each EDIT, ERASE TRACKING, ERASE PASS, SHOT, PAINT TRACKING, SDR TO HDR, OUTPUT), each opening with a README note (core Primitive String Multiline, read by no node, so it never runs), the section and the values the page set in every title. |
 | `frames.mjs` | `FrameCache`: decoded frames within a memory budget (384 MB by default), ranked by distance from the playhead. `DeepFrames`: the same for an image sequence's own values as RGB half floats (512 MB per cache), fetched from `/paintaplate/frames`, never for a frame the budget cannot keep. |
 | `canvas.mjs` | Canvas helpers; mask bounds as FLUX boxes (0 to 1000). |
 | `display.mjs` | `Display`: the viewer's colour, one WebGL2 program per colour space and view (section 6). |
@@ -211,7 +211,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | `fluid` | The ainvfx-fluid pass, saved as ProRes 4444 | `generateFluid` |
 | `hdr` | SDR to HDR: Lightricks' LTX 2.5 IC-LoRA makes a full-size shot again in scene-linear values, as half-float EXR in ACES2065-1. |  |
 
-### The 11 nodes, in `nodes.py`
+### The 12 nodes, in `nodes.py`
 
 | Node | What it does | Used by |
 | --- | --- | --- |
@@ -232,7 +232,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 
 | File | What it does |
 | --- | --- |
-| `build_workflows.py` | Writes the 13 workflows. It holds the model file names, the sampler settings, the Ripple sentence and the `OPTIONAL` rule. |
+| `build_workflows.py` | Writes the 14 workflows. It holds the model file names, the sampler settings, the Ripple sentence and the `OPTIONAL` rule. |
 | `check_workflows.py` | Checks every class and input against ComfyUI and ComfyUI-LTXVideo source. |
 | `placeholders.py` | Empty model files, so a CPU ComfyUI validates the workflows in CI. |
 | `pins.sh` | The tested ComfyUI and ComfyUI-LTXVideo commits, read by the three scripts below. |

@@ -135,6 +135,15 @@ def flow(page, port):
     lines = page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
     check(any(n.startswith("export/") for n in zipped) and any(n.startswith("matte/") for n in zipped) and any(line.startswith("Export v") for line in lines),
           f"Export writes the result and its matte when pressed, then the zip downloads: {sorted({n.split('/')[0] for n in zipped})}")
+    # The ComfyUI graph: the scene as one workflow, in numbered sections in the order they run, each opening with a README
+    with page.expect_download(timeout=60000) as dl:
+        page.click("#export-btn"); page.click("#x-graph")
+    graph = json.load(open(dl.value.path()))
+    notes = [n["_meta"]["title"] for _, n in sorted(graph.items(), key=lambda kv: int(kv[0])) if n["class_type"] == "PrimitiveStringMultiline"]
+    overview = graph[min(graph, key=int)]["inputs"]["value"]
+    check(notes[:3] == ["README · How this graph works", "README · INPUT", "README · MODELS"] and any(t.startswith("README · EDIT 1 · ") for t in notes)
+          and notes[-1] == "README · OUTPUT" and f"PaintAPlate {page.text_content('#version')}" in overview and "plates/desk.mp4" in overview,
+          f"the ComfyUI graph opens with README notes, one per section, in the order they run: {notes}")
     page.evaluate("document.activeElement.blur()")
     for _ in range(3):
         page.keyboard.press("ArrowRight")

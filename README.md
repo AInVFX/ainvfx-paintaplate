@@ -95,9 +95,9 @@ Type a few words, pick a tool, paint on the first frame, then **Generate** (or E
 
 - **Paint** adds what you describe where you paint. It may change the frame a little around your strokes, so a fire can light what it touches.
 - **Erase** removes the object under your stroke. With **Whole object**, SAM 3.1 finds all of it: name it ("red umbrella") and the stroke may even cross the background. A shadow outside the object stays: erase it with a second stroke, Whole object off.
-- **Light** relights the shot. Describe the light ("night time", "warm sunset from the left") and paint where it comes from.
+- **Light** relights the shot. Pick the light's colour from the swatches, paint where it comes from, and describe it if you like ("night time", "warm sunset from the left").
 
-The edit appears on the first frame, then the shot renders by itself: a quick preview first (Fast, 640, by default), with a small animation of the shot while LTX samples it, then the full size, then the **full-size composite** at the plate's quality, which the viewer plays from then on. For an EXR plate, the wipe (F6) compares the result's EXR frames with the plate's own, at full precision, so exposure and the other colour tools show what the export will hold. **Export** writes the result in the plate's format and its matte, only when you press it, then downloads them as one zip, with the review movie or the regenerated shot if you tick them. In the same dialog, **ComfyUI graph** saves the whole scene as one ComfyUI workflow.
+The edit appears on the first frame, then the shot renders by itself: a quick preview first (Fast, 640, by default), with a small animation of the shot while LTX samples it, then the full size, then the **full-size composite** at the plate's quality, which the viewer plays from then on. For an EXR plate, the wipe (F6) compares the result's EXR frames with the plate's own, at full precision, so exposure and the other colour tools show what the export will hold. **Export** writes the result in the plate's format and its matte, only when you press it, then downloads them as one zip, with the review movie or the regenerated shot if you tick them. In the same dialog, **ComfyUI graph** saves the whole scene as one ComfyUI workflow. The Export dialog's **ComfyUI graph** saves the whole scene as one ComfyUI workflow, to run and change in ComfyUI: numbered sections in the order they run (the plate, the models, each edit, the tracking, the erase pass, the shot, the export), each opening with a README note that says what it does, what goes in and what comes out.
 
 **Colour** follows OpenRV. Right-click the frame, then **OCIO**: **File Color Space** sets the plate's colour space (the viewer shows it at once, and the edits are made again in it), **Look** and **Displays** set what the viewer shows while the shot plays, and **Change Config** picks the OCIO config. The config is the one `$OCIO` names, as in RV, else OCIO's built-in ACES studio config. The plate's colour space is read from the file when it opens. Exposure (Shift+E), contrast (K), gamma (Y), saturation (Shift+S), hue (H) and the channels work as RV's.
 
@@ -127,8 +127,9 @@ Drag the line between the frame and History, or the top edge of the open log, to
 | `export` | The same composite, saved in the plate's format with its matte, on Export |
 | `warm` | Loads LTX 2.5 at start, on cards with 60 GB or more |
 | `fluid` | ainvfx-fluid turns painted keyframes into a fluid shot |
+| `hdr` | SDR to HDR (off for now: its shots flicker) |
 
-The page fills each workflow's slots before posting it: every node lists them in `_meta.slots`, and `tools/build_workflows.py` writes the files. The eleven PaintAPlate nodes only do what core ComfyUI cannot: Load Plate, Save Plate, Color Space (OCIO), Save Frames, Save Movie, Fit to Plate, Relight Transfer, Follow Matte, Level Fill, Live Preview and Keyframe Video. Their file handling lives in `plateio.py`, their pixel maths in `mathops.py` and their colour in `ocio.py`, all tested without torch. A job made once is kept in a job index on disk, so the same edit on the same plate never runs twice, even in a later session. `ARCHITECTURE.md` maps the code; `TESTING.md` describes every test level.
+The page fills each workflow's slots before posting it: every node lists them in `_meta.slots`, and `tools/build_workflows.py` writes the files. The twelve PaintAPlate nodes only do what core ComfyUI cannot: Load Plate, Save Plate, Color Space (OCIO), Save Frames, Save Movie, Fit to Plate, Relight Transfer, Follow Matte, Level Fill, Live Preview, Keyframe Video and HDR Match. Their file handling lives in `plateio.py`, their pixel maths in `mathops.py` and their colour in `ocio.py`, all tested without torch. A job made once is kept in a job index on disk, so the same edit on the same plate never runs twice, even in a later session. `ARCHITECTURE.md` maps the code; `TESTING.md` describes every test level.
 
 ## Change it
 
@@ -144,6 +145,7 @@ The page fills each workflow's slots before posting it: every node lists them in
 - An erased head comes back as a head: paint the new head over the old one instead.
 - An addition painted across a foreground object breaks up mid-shot: paint additions in open space.
 - Edits are painted on the first frame; shots up to 121 frames; edits at up to 1920 px on the long side.
+- The colour picker (I) picks anywhere on the screen in Chrome and Edge, which have an eyedropper; in Firefox and Safari it picks on the frame only.
 
 ## Licences and credits
 

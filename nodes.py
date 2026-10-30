@@ -431,12 +431,15 @@ class LivePreview(io.ComfyNode):
         latent_frames, state = (frames - 1) // 8 + 1, {"calls": 0, "busy": False}
 
         def where(args):  # this step and the pass's steps, from the sigmas CFGGuider puts in every model call's options
-            sigmas = args["model_options"].get("transformer_options", {}).get("sample_sigmas")
-            if sigmas is None or len(sigmas) < 2:  # a sampler without them: the calls counted, the total unknown
-                state["calls"] += 1
-                return state["calls"], 0
-            gap = (sigmas.float().cpu() - float(torch.as_tensor(args["sigma"]).flatten()[0])).abs()
-            return int(gap.argmin()) + 1, len(sigmas) - 1
+            try:
+                sigmas = args["model_options"].get("transformer_options", {}).get("sample_sigmas")
+                if sigmas is not None and len(sigmas) >= 2:
+                    gap = (sigmas.float().cpu() - float(torch.as_tensor(args["sigma"]).flatten()[0])).abs()
+                    return int(gap.argmin()) + 1, len(sigmas) - 1
+            except Exception:  # a preview never stops a shot: below, the calls are counted instead
+                pass
+            state["calls"] += 1  # a sampler without them: the calls counted, the total unknown
+            return state["calls"], 0
 
         def send(video, step, steps, prompt_id, client):  # a looping WebP in the temp folder, and a message telling the page where it is
             try:
