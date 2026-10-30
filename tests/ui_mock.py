@@ -40,6 +40,8 @@ def flow(page, port):
     below = page.text_content("#browse .item.video:has-text('desk.mp4') small") or ""
     check(below.startswith("plates"), f"the Input root lists the plates of the folders below it, each with its folder: {below}")
     page.click("#browse .item.folder:has-text('plates')")
+    # the root lists the plates found below it too, so a video shows at once: wait for the folder itself, by its breadcrumbs
+    page.wait_for_function("[...document.querySelectorAll('#crumbs button')].map((b) => b.textContent).join('/') === 'Input/plates'", timeout=10000)
     page.wait_for_selector("#browse .item.video", timeout=10000)
     names = page.eval_on_selector_all("#browse .item .name", "els => els.map(e => e.textContent)")
     trail = page.eval_on_selector_all("#crumbs button", "els => els.map(e => e.textContent)")
