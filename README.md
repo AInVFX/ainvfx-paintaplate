@@ -2,6 +2,8 @@
 
 **AInVFX's entry in Comfy's Open Source Higgsfield contest** (October 2026). #OpenSourceHiggsfield
 
+<p align="center"><a href="https://youtu.be/Kt9O3Aw46-g"><img src="web/brand/demo.png" alt="The demo of Paint a plate on YouTube" width="720"></a><br><a href="https://youtu.be/Kt9O3Aw46-g">Watch the 2-minute demo on YouTube</a></p>
+
 Paint on the first frame of a shot to erase, add or relight. The edit appears on that frame in seconds, then carries through the whole shot. You review the result at the plate's own quality, an EXR against its EXR, through OpenColorIO as in OpenRV. Export then writes it in the plate's own format: same file type, bit depth, frame numbers, colour tags, timecode, audio and EXR layers, with every untouched pixel identical to the plate.
 
 Paint a plate is a ComfyUI node pack with its own page. Every step is a ComfyUI workflow from `web/workflows`, open weights only:
