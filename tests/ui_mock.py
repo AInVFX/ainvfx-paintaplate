@@ -533,6 +533,52 @@ def ocio_flow(page):
     check(not errors, f"no page errors with OCIO: {errors}")
 
 
+def race_flow(page):
+    """Generate pressed while the render of the edit before it starts, before its first step. On a plate just opened, the
+    page's running step was a stale { phase } object, so preempt() threw, and the new edit was listed but never made
+    (from 0.4.10; the live CI job of 0.5.7). The mock holds the render's first upload for 4 s, so the press lands there.
+    It runs last, on a fresh page, so no other page's upload takes the hold."""
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    base = page.url.split("/extensions/")[0]
+    open_path(page, "plates/desk.mp4")
+    page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
+    page.wait_for_timeout(500)
+    passes = lambda: sum("Klein quick pass" in t for t in page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)"))  # noqa: E731
+
+    def edit(words, pts):
+        page.fill("#prompt", words)
+        page.locator("#prompt").blur()
+        box = page.locator("#view").bounding_box()
+        page.mouse.move(box["x"] + pts[0][0] * box["width"], box["y"] + pts[0][1] * box["height"])
+        page.mouse.down()
+        for x, y in pts[1:]:
+            page.mouse.move(box["x"] + x * box["width"], box["y"] + y * box["height"], steps=5)
+        page.mouse.up()
+        page.keyboard.press("Enter")
+
+    made = passes()
+    edit("a blue lamp", [(0.62, 0.3), (0.7, 0.34)])
+    page.wait_for_function(DONE.format(n=1), timeout=120000)
+    since = time.time()
+    urllib.request.urlopen(urllib.request.Request(f"{base}/mock/slow", json.dumps({"seconds": 4, "times": 1}).encode(),
+                                                  {"Content-Type": "application/json"}))
+    for _ in range(50):  # the render of edit 1 starts 0.3 s after it, with its first upload, which the mock holds
+        if any(e[0] == "slow upload" and e[1] >= since for e in json.loads(urllib.request.urlopen(f"{base}/mock/events").read())):
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError("the render's first upload never reached the mock: the race was not set up")
+    page.keyboard.press("n")
+    edit("a green bottle", [(0.2, 0.7), (0.28, 0.74)])
+    page.wait_for_timeout(1000)
+    check(not errors, f"Generate while the render before it starts, before its first step: no page error {errors}")
+    page.wait_for_function(DONE.format(n=2), timeout=120000)
+    page.wait_for_function(f"[...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('Klein quick pass')).length >= {made + 2}",
+                           timeout=60000)
+    check(passes() == made + 2, f"and the new edit is made, as the one before: {passes() - made} Klein passes")
+
+
 def oom_flow(page):
     """The GPU runs out of memory once (the mock's /mock/oom): the page frees ComfyUI's memory, waits until it is released,
     then runs the fluid shot again. Posted at once, the retry ran before ComfyUI freed anything and ran out again (29 Oct)."""
@@ -838,6 +884,11 @@ def main():
             fluid16_flow(page)
             layout_flow(page, a.port)
             phone(browser, a.port)
+            page.close()  # its renders ask for nothing more: the next upload the mock holds is the race page's own
+            race = browser.new_page(viewport={"width": 1400, "height": 900})
+            race.goto(f"http://127.0.0.1:{a.port}/extensions/ainvfx-paintaplate/paintaplate.html")
+            race.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
+            race_flow(race)
             browser.close()
     finally:
         mock.terminate()

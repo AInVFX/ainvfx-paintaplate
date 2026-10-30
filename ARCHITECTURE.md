@@ -304,7 +304,7 @@ Before and after any change: `python -m unittest discover -s tests -v` and `node
 - **ComfyUI v0.43.0** (`426f5eea`) and **ComfyUI-LTXVideo** `220e1d4`, in `tools/pins.sh`. `requires-comfyui` is `>=0.43.0`: the first release that contains what the pack was tested on.
 - **Models** at pinned Hugging Face revisions (`get_models.py`), about 60 GB in all. ainvfx-fluid (0.65 GB, revision `fd4855a`, trained on synthetic data) is optional.
 - **OpenColorIO** 2.4 or newer (`requirements.txt`); 2.6.0 was tested, with its built-in configs.
-- **Releases** run in CI: once the three test jobs pass on `main`, the `release` job of `tests.yml` publishes a new `version` to the Comfy Registry with comfy-cli 1.22.0 (pinned: it receives the Registry token), then tags it `v<version>` and makes its GitHub release, a pre-release before 1.0.0. Each step skips what is done already, so a re-run (Actions > tests > Run workflow) finishes a release that stopped half-way. The Registry lists a version once its automated security scan passes.
+- **Releases** run in CI: once the three test jobs pass on `main`, the `release` job of `tests.yml` publishes a new `version` to the Comfy Registry with comfy-cli 1.22.0 (pinned: it receives the Registry token), then tags it `v<version>` and makes its GitHub release from the commits since the last release, a pre-release before 1.0.0. Each step skips what is done already, so a re-run (Actions > tests > Run workflow) finishes a release that stopped half-way. The Registry lists a version once its automated security scan passes.
 
 ## 14. Known limits
 

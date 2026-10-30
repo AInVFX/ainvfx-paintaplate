@@ -65,8 +65,9 @@ jobs:
   release:
     name: Release (Comfy Registry, tag, GitHub release)
     # On main, once the three jobs pass: a new version in pyproject.toml is published to the Comfy Registry, then tagged
-    # v<version> with its GitHub release (a pre-release before 1.0.0). Each step skips what is done already, so a re-run
-    # (Actions > tests > Run workflow) finishes a release that stopped half-way.
+    # v<version> with its GitHub release (a pre-release before 1.0.0), its notes the commits since the last release.
+    # Each step skips what is done already, so a re-run (Actions > tests > Run workflow) finishes a release that stopped
+    # half-way.
     needs: [unit, page, comfyui]
     if: github.ref == 'refs/heads/main' && github.repository_owner == 'AInVFX' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -75,6 +76,8 @@ jobs:
     concurrency: release
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # the release notes read every commit since the last release
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -102,7 +105,13 @@ jobs:
             echo "v$VERSION is released already"
             exit 0
           fi
-          git log -1 --format=%b > notes.md
+          # every version since the last release: one that failed its tests is released with the next one that passes
+          last=$(git describe --tags --abbrev=0 --match 'v*' 2> /dev/null || true)
+          if [ -n "$last" ]; then
+            git log --format='## %s%n%n%b' "$last..HEAD" > notes.md
+          else
+            git log -1 --format=%b > notes.md
+          fi
           args=(--target "$GITHUB_SHA" --title "AInVFX PaintAPlate $VERSION" --notes-file notes.md)
           if [ "${VERSION%%.*}" = "0" ]; then
             args+=(--prerelease)

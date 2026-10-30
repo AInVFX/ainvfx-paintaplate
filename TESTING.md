@@ -35,6 +35,7 @@ Where the system Python refuses `pip` (Ubuntu, Debian), install into a virtual e
 - **A fluid shot** from a blank plate: keyframes painted, copied, pasted, dragged, deleted and undone, generated once for the same keyframes and words, then edit 1 under a paint edit, saved as a scene on the server and opened again with every job from the job index;
 - **A plate's scene** with a paint and a whole-object erase, saved and opened again with every job from the job index;
 - **OCIO**: from the right-click menu, another view applies at once, and back while the shot plays; another File Color Space shows at once and opens the plate again in it;
+- **Generate while a render starts**: the mock holds the render's first upload (`/mock/slow`), and Generate pressed in that window makes the new edit, with no page error;
 - **Keys**: every key the right-click menu shows is in the Keys dialog, and every documented key does what the dialog says;
 - **Out of memory**: the mock's `/mock/oom` makes the next fluid pass fail with ComfyUI's own message; the page asks ComfyUI to free its memory, waits until `/system_stats` shows it released, then makes the shot (posted at once, the retry ran before the free on a GPU, 29 Oct);
 - **Phones**, upright and on its side: the plate opened again from the job index, the frame, Generate, the transport, the status line, the log and the menu sheet fit the screen.
