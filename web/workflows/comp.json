@@ -162,37 +162,6 @@
   }
  },
  "12": {
-  "class_type": "LoadImage",
-  "inputs": {
-   "image": ""
-  },
-  "_meta": {
-   "title": "Edited first frame (the light to hold)",
-   "slots": {
-    "image": "anchor"
-   }
-  }
- },
- "13": {
-  "class_type": "ImageScale",
-  "inputs": {
-   "image": [
-    "12",
-    0
-   ],
-   "upscale_method": "area",
-   "width": 960,
-   "height": 544,
-   "crop": "disabled"
-  },
-  "_meta": {
-   "slots": {
-    "width": "width",
-    "height": "height"
-   }
-  }
- },
- "14": {
   "class_type": "ImageScaleBy",
   "inputs": {
    "image": [
@@ -203,7 +172,7 @@
    "scale_by": 0.5
   }
  },
- "15": {
+ "13": {
   "class_type": "ImageScaleBy",
   "inputs": {
    "image": [
@@ -214,18 +183,7 @@
    "scale_by": 0.5
   }
  },
- "16": {
-  "class_type": "ImageScaleBy",
-  "inputs": {
-   "image": [
-    "13",
-    0
-   ],
-   "upscale_method": "area",
-   "scale_by": 0.5
-  }
- },
- "17": {
+ "14": {
   "class_type": "PaintAPlate_RelightTransfer",
   "inputs": {
    "plate": [
@@ -233,34 +191,27 @@
     0
    ],
    "source": [
-    "14",
+    "12",
     0
    ],
    "relit": [
-    "15",
+    "13",
     0
    ],
    "plate_space": "sRGB",
    "shot_space": "sRGB",
-   "radius": 4,
+   "radius": 1,
    "strength": 1.0,
-   "align": true,
-   "anchor": [
-    "16",
-    0
-   ],
-   "hold": 1.0
+   "align": true
   },
   "_meta": {
    "slots": {
     "radius": "radius",
-    "strength": "strength",
-    "hold": "hold",
-    "anchor": "relight_anchor"
+    "strength": "strength"
    }
   }
  },
- "18": {
+ "15": {
   "class_type": "ComfySwitchNode",
   "inputs": {
    "switch": false,
@@ -269,7 +220,7 @@
     0
    ],
    "on_true": [
-    "17",
+    "14",
     0
    ]
   },
@@ -279,11 +230,11 @@
    }
   }
  },
- "19": {
+ "16": {
   "class_type": "PaintAPlate_FitToPlate",
   "inputs": {
    "plate": [
-    "18",
+    "15",
     0
    ],
    "image": [
@@ -313,22 +264,22 @@
    "progress": true
   }
  },
- "20": {
+ "17": {
   "class_type": "ImageCompositeMasked",
   "inputs": {
    "destination": [
-    "18",
+    "15",
     0
    ],
    "source": [
-    "19",
+    "16",
     0
    ],
    "x": 0,
    "y": 0,
    "resize_source": false,
    "mask": [
-    "19",
+    "16",
     1
    ]
   },
@@ -336,11 +287,11 @@
    "title": "Composite"
   }
  },
- "21": {
+ "18": {
   "class_type": "ImageFromBatch",
   "inputs": {
    "image": [
-    "20",
+    "17",
     0
    ],
    "batch_index": 0,
@@ -350,12 +301,12 @@
    ]
   }
  },
- "22": {
+ "19": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
    "filename_prefix": "paintaplate/plate/comp",
    "images": [
-    "21",
+    "18",
     0
    ],
    "fps": [

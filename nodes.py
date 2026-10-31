@@ -256,6 +256,8 @@ class FitToPlate(io.ComfyNode):
     def execute(cls, plate, image, align, max_shift, match_color, grain, grow, feather, mask=None,
                 steady=2) -> io.NodeOutput:
         n, h, w = min(plate.shape[0], image.shape[0]), plate.shape[1], plate.shape[2]
+        if mask is None or not bool(mask.any()):  # nothing to composite (a relight alone): the plate stands, nothing is fitted
+            return io.NodeOutput(plate[:n], torch.zeros((n, h, w), dtype=torch.float32))
         image = resize(image[:n], h, w)
         masks = np.zeros((1, 8, 8), np.float32) if mask is None else mask[:n].float().cpu().numpy()
         bar = comfy.utils.ProgressBar(2 * n)
@@ -281,11 +283,12 @@ class RelightTransfer(io.ComfyNode):
                 io.Image.Input("source", tooltip="The plate as the model saw it, in linear light. The light is "
                                "measured at this size: half the plate's size is plenty, light is smooth."),
                 io.Image.Input("relit", tooltip="The regenerated shot, same size as 'source', in linear light."),
-                io.Int.Input("radius", default=8, min=1, max=256,
-                             tooltip="Detail size kept from the plate, in pixels of 'source'. Lower lets sharper "
-                                     "new shadows through."),
+                io.Int.Input("radius", default=1, min=1, max=256,
+                             tooltip="The change of light is smoothed over this many pixels of 'source', its colour over "
+                                     "four times as many; finer detail stays the plate's. 1 at half the plate's size lets "
+                                     "the shot's light through almost pixel for pixel."),
                 io.Float.Input("strength", default=1.0, min=0.0, max=2.0, step=0.05),
-                io.Boolean.Input("align", default=True, tooltip="Remove a small shift of 'relit' first."),
+                io.Boolean.Input("align", default=True, tooltip="Realign 'relit' first, by one shift for the whole shot: the median of every frame's."),
                 io.Combo.Input("plate_space", options=["linear", "sRGB"], default="linear", optional=True,
                                tooltip="How 'plate' and the result are encoded. sRGB is decoded to linear light here, frame "
                                        "by frame in parallel, and the result encoded back: far cheaper than core colour "
@@ -293,41 +296,31 @@ class RelightTransfer(io.ComfyNode):
                 io.Combo.Input("shot_space", options=["linear", "sRGB"], default="linear", optional=True,
                                tooltip="How 'source' and 'relit' are encoded: sRGB, as the model saw and made them, is "
                                        "decoded here."),
-                io.Image.Input("anchor", optional=True,
-                               tooltip="The edited first frame, encoded as 'source'. When connected, every frame's light is "
-                                       "mapped onto its level, spread and colour, so the shot keeps the first frame's full "
-                                       "relight."),
-                io.Float.Input("hold", default=1.0, min=0.0, max=1.0, step=0.05, optional=True,
-                               tooltip="With an anchor: 1 also brings the shot's slow drifts of light back to the first "
-                                       "frame's; 0 corrects the whole shot by its first frame alone."),
+                io.Image.Input("light", optional=True,
+                               tooltip="A light edit's painted light, in display values on black. Where it is strong, the "
+                                       "result keeps at least the plate with that light added, as the brush showed it."),
             ],
             outputs=[io.Image.Output(display_name="image")],
         )
 
     @classmethod
-    def execute(cls, plate, source, relit, radius, strength, align, plate_space="linear", shot_space="linear", anchor=None,
-                hold=1.0) -> io.NodeOutput:
+    def execute(cls, plate, source, relit, radius, strength, align, plate_space="linear", shot_space="linear",
+                light=None) -> io.NodeOutput:
         n = min(plate.shape[0], source.shape[0], relit.shape[0])
         src, rel = list(frames_np(source[:n])), list(frames_np(relit[:n]))
-        maps = [None] * n
-        if anchor is not None:  # the edited first frame's light, held over the shot (mathops.anchor_maps)
-            width, r = int(plate.shape[2]), max(1, radius)
-            first = list(frames_np(anchor[:1]))[0]
-            if first.shape[:2] != src[0].shape[:2]:
-                first = mathops.resize_to(first, *src[0].shape[:2])
+        shift = (0.0, 0.0)
+        if align:  # one shift for the whole shot: a shift measured frame by frame moves with the light
+            width = int(plate.shape[2])
             with ThreadPoolExecutor(WORKERS) as pool:
-                stats = list(pool.map(lambda sr: mathops.light_stats(*mathops.shot_pair(*sr, align, width, shot_space), r),
-                                      zip(src, rel)))
-            target = mathops.light_stats(*mathops.shot_pair(src[0], first, False, width, shot_space), r)
-            maps = mathops.anchor_maps(stats, target, hold)
-            logging.info("Paint a plate, Relight Transfer: the first frame's light held over %d frames (hold %.2f): brightness "
-                         "spread x%.2f to x%.2f, colour x%.2f to x%.2f", n, hold, min(m["b_gain"] for m in maps),
-                         max(m["b_gain"] for m in maps), min(m["c_gain"] for m in maps), max(m["c_gain"] for m in maps))
+                shift = mathops.shot_shift(list(pool.map(lambda sr: mathops.frame_shift(*sr, width, shot_space), zip(src, rel))))
+            if shift != (0.0, 0.0):
+                logging.info("Paint a plate, Relight Transfer: the shot realigned by %.2f, %.2f px over %d frames", *shift, n)
+        painted = list(frames_np(light[:1]))[0] if light is not None else None
         bar = comfy.utils.ProgressBar(n)
 
         def one(args):
             i, p = args
-            out = mathops.relight_frame(p, src[i], rel[i], radius, strength, align, plate_space, shot_space, maps[i])
+            out = mathops.relight_frame(p, src[i], rel[i], radius, strength, shift, plate_space, shot_space, painted)
             bar.update(1)
             return out
 

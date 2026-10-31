@@ -7,7 +7,7 @@
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_element: ["seed"],
-  review_frames: ["frames_prefix"], hdr_shot: ["hdr"], relight_anchor: ["anchor"] };
+  review_frames: ["frames_prefix"], hdr_shot: ["hdr"], relight_light: ["light"] };
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
   const slots = {}, outputs = {}, progress = new Set();
@@ -29,7 +29,7 @@ export function fillWorkflow(wf, values) { // a copy with the slots set and the 
 }
 
 export function dropLink(wf, link, sources, extra) { // cut the input `link` names, and every node that only fed it
-  for (const [id, input] of wf.slots[link] ?? []) delete wf.prompt[id].inputs[input];
+  for (const [id, input] of wf.slots[link] ?? []) if (wf.prompt[id]) delete wf.prompt[id].inputs[input]; // a node another link took already
   const gone = new Set(sources.flatMap((k) => (wf.slots[k] ?? []).map(([id]) => id)));
   if (extra) gone.add(extra);
   for (let grew = true; grew;) {
@@ -117,7 +117,7 @@ export function caption({ tool, words, colors, color, bbox }) {
   const text = {
     erase: () => `Remove ${words ? `the ${words}` : "the object"} inside <obj_1> completely, with its shadow and its reflection. Show the surface and the background that continue behind it, with matching detail, light, shadows and focus. Add no new object. Keep everything else unchanged.`,
     paint: () => `Replace the rough coloured drawing inside <obj_1> with ${words || "a realistic object of that shape and colour"}, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.`,
-    light: () => `Relight the whole scene with ${lightColor(colors, color)} light${words ? ` (${words})` : ""} falling where the rough light pass in <obj_1> shows it, with physically consistent shadows and reflections and no glow, halo or visible lamp.${colors.some(dark) ? " The darkened areas show where shade falls: make every shadow agree with the light." : ""} Keep the content, framing and textures unchanged.`,
+    light: () => `Relight the whole scene with ${lightColor(colors, color)} light${words ? ` (${words})` : ""}: keep the painted light in <obj_1> as bright and as coloured as it is painted, and relight the rest of the scene so that it agrees with it, with physically consistent shadows and reflections and no other light source.${colors.some(dark) ? " The darkened areas show where shade falls: make every shadow agree with the light." : ""} Keep the content, framing and textures unchanged.`,
   }[tool]();
   const desc = { erase: words ? `${words} to remove` : "object to remove", paint: words || "the drawn object", light: "light source" }[tool];
   return `${text} ${JSON.stringify([{ id: "obj_1", bbox, desc }])}`;
@@ -133,13 +133,13 @@ export const KEEP_TOUCHED = " Where the drawing touches an object, the new eleme
 
 export function upsampleRequest({ tool, words, bbox, boxes = null, colors = [], color = "#ffd890" }) {
   if (tool === "light") { // the strokes' colour always counts: asked for warm light, an orange and a green light both came back orange (29 Oct)
-    // Klein and the prompt writer see the frame lit by the strokes (app.mjs relightGuide), never the strokes: shown the glowing
-    // strokes, Klein drew glowing spheres (30 Oct). The request asks for real light from that rough light pass, and no glow
+    // Klein and the prompt writer see the frame with the light painted on it, as the brush showed it (app.mjs relightGuide),
+    // and Relight Transfer keeps that light where it is strong: the request asks Klein to relight the rest to agree with it
     const shadows = colors.some(dark) ? " The darkened areas show where shade falls: make every shadow agree with the light." : "";
-    const ask = `Relight the whole photograph with ${lightColor(colors, color)} light${words ? `: ${words}` : ""}. The image carries a rough light pass: ` +
-      `the brighter, tinted area shows where this light falls.${shadows} Turn it into natural, physically consistent lighting: light on the ` +
-      "surfaces that face it, a soft falloff and real shadows, with no glow, halo, sphere or visible lamp. " +
-      "Keep every object, its position, shape, size and texture, the framing and the camera exactly as they are.";
+    const ask = `Relight the whole photograph with ${lightColor(colors, color)} light${words ? `: ${words}` : ""}. The painted light shows where ` +
+      `this light is and how bright it is: keep it as bright, and as coloured, where it is painted.${shadows} Relight the rest of the ` +
+      "photograph so that it agrees with it: light on the surfaces that face it, a natural falloff, real shadows, the sky and the reflections. " +
+      "Add no other light source. Keep every object, its position, shape, size and texture, the framing and the camera exactly as they are.";
     return { mode: "plain", locked: null,
       request: `Reference images follow in order (the first image, the second image, ...).\nUser request: ${ask}\nOutput the caption.` };
   }

@@ -379,6 +379,18 @@
   }
  },
  "27": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": ""
+  },
+  "_meta": {
+   "title": "Painted light (light edits)",
+   "slots": {
+    "image": "light"
+   }
+  }
+ },
+ "28": {
   "class_type": "PaintAPlate_RelightTransfer",
   "inputs": {
    "plate": [
@@ -393,24 +405,29 @@
     "26",
     0
    ],
-   "radius": 8,
+   "radius": 1,
    "strength": 0.0,
    "align": true,
    "plate_space": "sRGB",
-   "shot_space": "sRGB"
+   "shot_space": "sRGB",
+   "light": [
+    "27",
+    0
+   ]
   },
   "_meta": {
    "slots": {
     "strength": "relight",
-    "plate": "relit_frame"
+    "plate": "relit_frame",
+    "light": "relight_light"
    }
   }
  },
- "28": {
+ "29": {
   "class_type": "SaveImage",
   "inputs": {
    "images": [
-    "27",
+    "28",
     0
    ],
    "filename_prefix": "paintaplate/edits/edit"

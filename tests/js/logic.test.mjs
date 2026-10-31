@@ -96,7 +96,7 @@ test("captions name the object when given and build only the chosen tool", () =>
   const light = caption({ tool: "light", words: "", colors: ["#ffd890", "#000000"], color: "#ffd890", bbox });
   assert.match(light, /warm orange light/);
   assert.match(light, /darkened areas show where shade falls/);
-  assert.match(light, /no glow, halo or visible lamp/); // the strokes are a rough light pass, never a glowing object
+  assert.match(light, /keep the painted light in <obj_1> as bright and as coloured as it is painted/); // the brush's light is kept
   assert.ok(light.endsWith(JSON.stringify([{ id: "obj_1", bbox, desc: "light source" }])));
 });
 
@@ -152,10 +152,10 @@ test("the upsampler request locks one row in Klein's edit format, and a relight 
   assert.equal(upsampleRequest({ tool: "paint", words: "a fire", bbox: [1, 2, 3, 4] }).locked[0].from, "target");
   const light = upsampleRequest({ tool: "light", words: "night time", bbox: [0, 0, 1000, 1000], colors: ["#388e3c"], color: "#388e3c" });
   assert.equal(light.mode, "plain"); assert.equal(light.locked, null); assert.match(light.request, /night time/);
-  assert.match(light.request, /with green light: night time\. The image carries a rough light pass/);
-  assert.match(light.request, /no glow, halo, sphere or visible lamp/); // the strokes' colour counts, words or not
+  assert.match(light.request, /with green light: night time\. The painted light shows where this light is and how bright it is/);
+  assert.match(light.request, /Add no other light source/); // the strokes' colour counts, words or not
   const orange = upsampleRequest({ tool: "light", words: "", bbox: [0, 0, 1000, 1000], colors: ["#f57c00", "#000000"], color: "#f57c00" });
-  assert.match(orange.request, /with warm orange light\. The image carries a rough light pass: the brighter, tinted area shows where this light falls\. The darkened areas show where shade falls/);
+  assert.match(orange.request, /with warm orange light\. The painted light shows where this light is and how bright it is: keep it as bright, and as coloured, where it is painted\. The darkened areas show where shade falls/);
 });
 
 test("reconcile keeps the locked row, takes the upsampler's description and its cited rows, and survives a cut-off table", () => {
@@ -406,4 +406,20 @@ test("a bypass takes the frames of a render of more edits when the edits left ou
   assert.equal(donorFor([A], [r("ABD", [A, B, D], 5), r("AB", [A, B], 1)]), "AB"); // the fewest edits left out
   assert.equal(donorFor([A], [r("AB", [A, B], 1), r("AD", [A, D], 2)]), "AD"); // then the most recently shown
   assert.equal(donorFor([A], [r("AB", [A, { ...B, foot: null }])]), null); // no footprint: counted as near
+});
+
+import * as fsp from "node:fs";
+
+test("a light's painted light is an optional input of its edit, gone with the relight", () => {
+  const wf = parseWorkflow(JSON.parse(fsp.readFileSync(new URL("../../web/workflows/edit.json", import.meta.url))));
+  const find = (w, test) => Object.values(w.prompt).find(test);
+  const relit = (w) => find(w, (n) => n.class_type === "PaintAPlate_RelightTransfer");
+  const loader = (w) => find(w, (n) => n._meta?.title?.startsWith("Painted light"));
+  const plain = fillWorkflow(wf, { caption: "x", seed: 1 }); // not a light: no relight and no painted light, and no error
+  assert.equal(relit(plain), undefined);
+  assert.equal(loader(plain), undefined);
+  const lit = fillWorkflow(wf, { caption: "x", seed: 1, relight: 1, light: "l.png" });
+  assert.ok(Array.isArray(relit(lit).inputs.light));
+  const bare = fillWorkflow(wf, { caption: "x", seed: 1, relight: 1 }); // a relight without its painted light still runs
+  assert.ok(relit(bare) && !("light" in relit(bare).inputs) && !loader(bare));
 });

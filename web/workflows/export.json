@@ -190,37 +190,6 @@
   }
  },
  "14": {
-  "class_type": "LoadImage",
-  "inputs": {
-   "image": ""
-  },
-  "_meta": {
-   "title": "Edited first frame (the light to hold)",
-   "slots": {
-    "image": "anchor"
-   }
-  }
- },
- "15": {
-  "class_type": "ImageScale",
-  "inputs": {
-   "image": [
-    "14",
-    0
-   ],
-   "upscale_method": "area",
-   "width": [
-    "12",
-    0
-   ],
-   "height": [
-    "12",
-    1
-   ],
-   "crop": "disabled"
-  }
- },
- "16": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
@@ -238,7 +207,7 @@
    }
   }
  },
- "17": {
+ "15": {
   "class_type": "ImageScaleBy",
   "inputs": {
    "image": [
@@ -249,7 +218,7 @@
    "scale_by": 0.5
   }
  },
- "18": {
+ "16": {
   "class_type": "ImageScaleBy",
   "inputs": {
    "image": [
@@ -260,57 +229,39 @@
    "scale_by": 0.5
   }
  },
- "19": {
-  "class_type": "ImageScaleBy",
-  "inputs": {
-   "image": [
-    "15",
-    0
-   ],
-   "upscale_method": "area",
-   "scale_by": 0.5
-  }
- },
- "20": {
+ "17": {
   "class_type": "PaintAPlate_RelightTransfer",
   "inputs": {
    "plate": [
-    "16",
+    "14",
     0
    ],
    "source": [
-    "17",
+    "15",
     0
    ],
    "relit": [
-    "18",
+    "16",
     0
    ],
    "plate_space": "linear",
    "shot_space": "sRGB",
-   "radius": 8,
+   "radius": 1,
    "strength": 1.0,
-   "align": true,
-   "anchor": [
-    "19",
-    0
-   ],
-   "hold": 1.0
+   "align": true
   },
   "_meta": {
    "slots": {
     "radius": "radius",
-    "strength": "strength",
-    "hold": "hold",
-    "anchor": "relight_anchor"
+    "strength": "strength"
    }
   }
  },
- "21": {
+ "18": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
-    "20",
+    "17",
     0
    ],
    "config": "ocio://studio-config-latest",
@@ -324,7 +275,7 @@
    }
   }
  },
- "22": {
+ "19": {
   "class_type": "ComfySwitchNode",
   "inputs": {
    "switch": false,
@@ -333,7 +284,7 @@
     0
    ],
    "on_true": [
-    "21",
+    "18",
     0
    ]
   },
@@ -343,7 +294,7 @@
    }
   }
  },
- "23": {
+ "20": {
   "class_type": "PaintAPlate_LoadPlate",
   "inputs": {
    "path": "",
@@ -357,11 +308,11 @@
    }
   }
  },
- "24": {
+ "21": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
-    "23",
+    "20",
     0
    ],
    "config": "ocio://studio-config-latest",
@@ -376,7 +327,7 @@
    }
   }
  },
- "25": {
+ "22": {
   "class_type": "PaintAPlate_HDRMatch",
   "inputs": {
    "image": [
@@ -392,7 +343,7 @@
     0
    ],
    "hdr": [
-    "24",
+    "21",
     0
    ],
    "grow": 24.0
@@ -406,15 +357,15 @@
    }
   }
  },
- "26": {
+ "23": {
   "class_type": "PaintAPlate_FitToPlate",
   "inputs": {
    "plate": [
-    "22",
+    "19",
     0
    ],
    "image": [
-    "25",
+    "22",
     0
    ],
    "mask": [
@@ -440,22 +391,22 @@
    "progress": true
   }
  },
- "27": {
+ "24": {
   "class_type": "ImageCompositeMasked",
   "inputs": {
    "destination": [
-    "22",
+    "19",
     0
    ],
    "source": [
-    "26",
+    "23",
     0
    ],
    "x": 0,
    "y": 0,
    "resize_source": false,
    "mask": [
-    "26",
+    "23",
     1
    ]
   },
@@ -463,11 +414,11 @@
    "title": "Composite"
   }
  },
- "28": {
+ "25": {
   "class_type": "PaintAPlate_SavePlate",
   "inputs": {
    "images": [
-    "27",
+    "24",
     0
    ],
    "plate": [
@@ -477,7 +428,7 @@
    "filename_prefix": "paintaplate/plate/export",
    "keep_untouched": true,
    "changed": [
-    "26",
+    "23",
     1
    ]
   },
@@ -490,20 +441,20 @@
    "output": "export"
   }
  },
- "29": {
+ "26": {
   "class_type": "MaskToImage",
   "inputs": {
    "mask": [
-    "26",
+    "23",
     1
    ]
   }
  },
- "30": {
+ "27": {
   "class_type": "ImageFromBatch",
   "inputs": {
    "image": [
-    "29",
+    "26",
     0
    ],
    "batch_index": 0,
@@ -513,11 +464,11 @@
    ]
   }
  },
- "31": {
+ "28": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
-    "30",
+    "27",
     0
    ],
    "filename_prefix": "paintaplate/plate/matte/matte"

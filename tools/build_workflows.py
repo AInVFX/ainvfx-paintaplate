@@ -123,10 +123,10 @@ def load(name, folder=None):
 # (a relight alone: no matte to composite with or to save).
 # no words for an erase: no search by name; not a relight: no light transfer on the edited frame;
 # an erase matte: no plate under a shot to compare with, and no changed pixels to start from; a video plate's review:
-# no EXR frames, its movie is the plate's own quality; no SDR-to-HDR shot: the SDR shot goes on as it is; no light edit:
-# no edited first frame to hold the light of.
+# no EXR frames, its movie is the plate's own quality; no SDR-to-HDR shot: the SDR shot goes on as it is; not a light
+# edit: no painted light to keep.
 OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",),
-            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "hdr_shot": ("hdr",), "relight_anchor": ("anchor",)}
+            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "hdr_shot": ("hdr",), "relight_light": ("light",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -247,9 +247,11 @@ def edit():
     g("SaveImage", _title="Edit patch (RGBA)", _output="patch", images=patch, filename_prefix=Slot("prefix", EDIT_PREFIX))
     # a relight: the frame as the export will make it, light from Klein, detail from the plate (dropped otherwise).
     # Relight Transfer decodes the sRGB frames to linear light and encodes its result back itself
-    relit = g("PaintAPlate_RelightTransfer", plate=base, source=half(g, base), relit=half(g, result), radius=8,
-              strength=Slot("relight", 0.0), align=True, plate_space="sRGB", shot_space="sRGB")
+    relit = g("PaintAPlate_RelightTransfer", plate=base, source=half(g, base), relit=half(g, result), radius=1,
+              strength=Slot("relight", 0.0), align=True, plate_space="sRGB", shot_space="sRGB",
+              light=g("LoadImage", _title="Painted light (light edits)", image=Slot("light", "")))
     g.link_slot(relit, "plate", "relit_frame")
+    g.link_slot(relit, "light", "relight_light")  # the light as the brush painted it, kept where it is strong
     g("SaveImage", _title="Relit frame", _output="relit", images=relit, filename_prefix=Slot("prefix", EDIT_PREFIX))
     g.save("edit")
 
@@ -493,12 +495,8 @@ def comp():
               crop="disabled")
     gen = g("PaintAPlate_LoadPlate", _title="Generated shot", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
     union = mattes(g)
-    anchor = g("ImageScale", image=g("LoadImage", _title="Edited first frame (the light to hold)", image=Slot("anchor", "")),
-               upscale_method="area", width=Slot("width", 960), height=Slot("height", 544), crop="disabled")
     relit = g("PaintAPlate_RelightTransfer", plate=small, source=half(g, small), relit=half(g, gen),
-              plate_space="sRGB", shot_space="sRGB", radius=Slot("radius", 4), strength=Slot("strength", 1.0), align=True,
-              anchor=half(g, anchor), hold=Slot("hold", 1.0))
-    g.link_slot(relit, "anchor", "relight_anchor")
+              plate_space="sRGB", shot_space="sRGB", radius=Slot("radius", 1), strength=Slot("strength", 1.0), align=True)
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=small, on_true=relit)
     _, final = fitted(g, base, gen, union)
     real = g("ImageFromBatch", image=final, batch_index=0, length=load[4])
@@ -517,13 +515,9 @@ def composite(g):
     # it is the conversion every workflow makes, so ComfyUI has it cached.
     size = g("GetImageSize", image=gen)
     source = g("ImageScale", image=model, upscale_method="area", width=size[0], height=size[1], crop="disabled")
-    # its anchor: the edited first frame, whose light every frame keeps (dropped without a light edit)
-    anchor = g("ImageScale", image=g("LoadImage", _title="Edited first frame (the light to hold)", image=Slot("anchor", "")),
-               upscale_method="area", width=size[0], height=size[1], crop="disabled")
     relit = g("PaintAPlate_RelightTransfer", plate=colour(g, load[0], Slot("color_space", "@model"), "@linear"),
               source=half(g, source), relit=half(g, gen), plate_space="linear", shot_space="sRGB",
-              radius=Slot("radius", 8), strength=Slot("strength", 1.0), align=True, anchor=half(g, anchor), hold=Slot("hold", 1.0))
-    g.link_slot(relit, "anchor", "relight_anchor")
+              radius=Slot("radius", 1), strength=Slot("strength", 1.0), align=True)
     back = colour(g, relit, "@linear", Slot("color_space", "@model"))
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=load[0], on_true=back)
     # SDR to HDR: where the hdr workflow made the shot again in scene-linear values, those values, fitted to the plate's own

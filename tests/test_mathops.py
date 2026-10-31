@@ -42,11 +42,11 @@ class MathOps(unittest.TestCase):
     def test_relight_frame_aligns_first(self):
         source = base
         relit = ndimage.shift(base * 1.5, (1.4, -2.0, 0), order=3, mode="nearest")  # brighter and shifted
-        out = m.relight_frame(base, source, relit, radius=8, strength=1.0, align=True)
+        out = m.relight_frame(base, source, relit, radius=8, strength=1.0, shift=m.frame_shift(source, relit, base.shape[1]))
         ratio = out[20:-20, 20:-20] / base[20:-20, 20:-20]
         assert abs(np.median(ratio) - 1.5) < 0.05, np.median(ratio)
         half = lambda im: ndimage.zoom(im, (0.5, 0.5, 1), order=1)  # noqa: E731
-        small = m.relight_frame(base, half(source), half(relit), radius=4, strength=1.0, align=True)
+        small = m.relight_frame(base, half(source), half(relit), radius=4, strength=1.0, shift=m.frame_shift(half(source), half(relit), base.shape[1]))
         assert small.shape == base.shape  # measured at half size, applied at the plate's
         assert abs(np.median(small[20:-20, 20:-20] / base[20:-20, 20:-20]) - 1.5) < 0.05
         print(f"relight frame: ok (median ratio {np.median(ratio):.3f}, the same from half-size inputs)")
@@ -71,8 +71,8 @@ class MathOps(unittest.TestCase):
         plate = rng.uniform(0.05, 0.95, (64, 96, 3)).astype(np.float32)
         source = plate[::2, ::2].copy()
         relit = np.clip(source * np.array([1.3, 1.1, 0.8], np.float32), 0, 1)
-        lin = m.relight_frame(m.srgb_to_linear(plate), m.srgb_to_linear(source), m.srgb_to_linear(relit), 4, align=False)
-        enc = m.relight_frame(plate, source, relit, 4, align=False, plate_space="sRGB", shot_space="sRGB")
+        lin = m.relight_frame(m.srgb_to_linear(plate), m.srgb_to_linear(source), m.srgb_to_linear(relit), 4)
+        enc = m.relight_frame(plate, source, relit, 4, plate_space="sRGB", shot_space="sRGB")
         np.testing.assert_allclose(enc, m.linear_to_srgb(lin), atol=1e-5)
         np.testing.assert_allclose(m.linear_to_srgb(m.srgb_to_linear(plate)), plate, atol=1e-6)
         print("relight in sRGB: ok (the same frame as core's conversions around it)")
@@ -310,62 +310,56 @@ import mathops  # noqa: E402
 from scipy import ndimage  # noqa: E402
 
 
-class AnchoredRelight(unittest.TestCase):
-    """With the edited first frame as an anchor, a shot that carries less light, fading, keeps the first frame's light."""
+class RelightFromTheShot(unittest.TestCase):
+    """Relight Transfer takes a steady shot's light as it is: realigned once, the plate's fine detail kept, no flicker."""
 
-    def frames(self, n=24, h=64, w=96):
-        rng = np.random.default_rng(3)
-        tex = 0.12 + 0.3 * ndimage.gaussian_filter(rng.random((h, w + n)), 1.5)
-        x = np.arange(w + n)[None, :]
-        pool = np.exp(-(((x - 30) / 18.0) ** 2)) * np.ones((h, 1))  # a pool of light that pans with the scene
-        warm = np.array([1.25, 1.0, 0.75])
-        plates, lights = [], []
-        for t in range(n):
-            plates.append(np.repeat(tex[:, t:t + w, None], 3, -1).astype(np.float32))
-            lights.append(pool[:, t:t + w])
-        return plates, lights, warm
+    def plates(self, n=12, h=64, w=96, seed=3):
+        rng = np.random.default_rng(seed)
+        tex = 0.15 + 0.25 * ndimage.gaussian_filter(rng.random((h, w)), 1.0)
+        return [np.repeat((tex + 0.01 * rng.standard_normal((h, w)))[..., None], 3, -1).clip(0.001).astype(np.float32) for _ in range(n)], rng
 
-    def relit(self, plate, light, warm, strength, tint):  # brighter in the pool, darker around, warmer inside
-        b = np.exp(strength * (np.log(3.0) * light - np.log(1.6)))[..., None]
-        return (plate * b * warm[None, None] ** (tint * light[..., None])).astype(np.float32)
+    def test_the_shots_light_with_the_plates_detail(self):
+        (p,), _ = self.plates(n=1)
+        warm = np.array([1.8, 1.5, 1.1], np.float32)
+        shot = ndimage.gaussian_filter(p, (1.5, 1.5, 0)) * warm  # the model's softer copy of the plate, relit warm
+        out, inner = mathops.relight(p, p, shot, 1), (slice(8, -8), slice(8, -8))
+        np.testing.assert_allclose(out[inner].mean((0, 1)) / p[inner].mean((0, 1)), warm, rtol=0.05)  # the shot's light
+        detail = lambda x: (x - ndimage.gaussian_filter(x, (2, 2, 0)))[inner][..., 1].ravel()
+        self.assertGreater(np.corrcoef(detail(out), detail(p))[0, 1], 0.8)  # the plate's own texture
 
-    def spread(self, plate, out, light):
-        r = np.log(mathops.luma(out) / mathops.luma(plate))
-        return float(np.percentile(r, 90) - np.percentile(r, 10))
+    def test_a_steady_shot_gives_a_steady_result(self):  # the shot moves a little from frame to frame: the result no more
+        (p, *_), rng = self.plates()
+        shots = [p * 1.6 * (1 + 0.01 * rng.standard_normal(p.shape[:2]))[..., None] for _ in range(12)]
+        flicker = lambda frames: float(np.mean(np.abs(np.diff(np.stack(frames), axis=0))))
+        self.assertLess(flicker([mathops.relight(p, p, s, 1) for s in shots]), 1.1 * flicker(shots))
 
-    def test_anchor_keeps_the_first_frames_light(self):
-        plates, lights, warm = self.frames()
-        n, radius = len(plates), 2
-        anchor = self.relit(plates[0], lights[0], warm, 1.0, 1.0)
-        shots = [self.relit(p, l, warm, 0.45 - 0.2 * t / n, 0.35) for t, (p, l) in enumerate(zip(plates, lights))]
-        target = mathops.light_stats(plates[0], anchor, radius)
-        maps = mathops.anchor_maps([mathops.light_stats(p, s, radius) for p, s in zip(plates, shots)], target, 1.0)
-        want = self.spread(plates[0], mathops.relight(plates[0], plates[0], anchor, radius), lights[0])
-        for t in (0, n // 2, n - 1):
-            held = self.spread(plates[t], mathops.relight(plates[t], plates[t], shots[t], radius, 1.0, maps[t]), lights[t])
-            alone = self.spread(plates[t], mathops.relight(plates[t], plates[t], shots[t], radius), lights[t])
-            self.assertLess(abs(held - want) / want, 0.2, f"frame {t}: spread {held:.3f} against the first frame's {want:.3f}")
-            self.assertLess(alone / want, 0.6, f"frame {t}: without the anchor the shot keeps {alone / want:.2f} of the light")
-        warmth = lambda img, p: float(np.median(np.log(img[..., 0] / img[..., 2]) - np.log(p[..., 0] / p[..., 2])))
-        out = mathops.relight(plates[-1], plates[-1], shots[-1], radius, 1.0, maps[-1])
-        self.assertGreater(warmth(out, plates[-1]), 0.6 * warmth(anchor, plates[0]))
+    def test_a_bright_light_keeps_its_brightness(self):  # a sun 30 times the sky it covers is not cut down
+        sky = np.full((32, 32, 3), 0.05, np.float32)
+        sun = sky.copy()
+        sun[8:24, 8:24] = 1.5
+        self.assertGreater(mathops.relight(sky, sky, sun, 1)[14:18, 14:18].mean(), 1.3)
 
-    def test_maps_change_slowly(self):  # a noisy shot: its correction moves by little from one frame to the next
-        plates, lights, warm = self.frames()
-        rng = np.random.default_rng(5)
-        shots = [self.relit(p, l, warm, 0.4 + 0.08 * rng.standard_normal(), 0.4) for p, l in zip(plates, lights)]
-        target = mathops.light_stats(plates[0], self.relit(plates[0], lights[0], warm, 1.0, 1.0), 2)
-        maps = mathops.anchor_maps([mathops.light_stats(p, s, 2) for p, s in zip(plates, shots)], target, 1.0)
-        gains = np.array([m["b_gain"] for m in maps])
-        self.assertLess(np.abs(np.diff(gains)).max(), 0.05)
-        flat = mathops.anchor_maps([mathops.light_stats(p, s, 2) for p, s in zip(plates, shots)], target, 0.0)
-        self.assertEqual(len({round(m["b_gain"], 9) for m in flat}), 1)  # hold 0: one correction for the whole shot
+    def test_an_unchanged_shot_changes_nothing(self):  # values above 1.0 included
+        (p,), _ = self.plates(n=1)
+        np.testing.assert_allclose(mathops.relight(p * 6.0, p, p, 1), p * 6.0, rtol=1e-6)
 
-    def test_identity_map_changes_nothing(self):
-        plates, lights, warm = self.frames(n=1)
-        shot = self.relit(plates[0], lights[0], warm, 0.5, 0.5)
-        same = {"b_at": 0.0, "b_gain": 1.0, "b_to": 0.0, "c_at": np.zeros(3), "c_gain": 1.0, "c_to": np.zeros(3)}
-        np.testing.assert_allclose(mathops.light_ratio(plates[0], shot, 2, same), mathops.light_ratio(plates[0], shot, 2), rtol=1e-4)
+    def test_one_shift_for_the_whole_shot(self):
+        plates, _ = self.plates()
+        shots = [ndimage.shift(p, (2.0, -1.0, 0), order=1, mode="nearest") for p in plates]
+        dy, dx = mathops.shot_shift([mathops.frame_shift(p, s, p.shape[1]) for p, s in zip(plates, shots)])
+        back = ndimage.shift(shots[0], (dy, dx, 0), order=1, mode="nearest")
+        err = lambda x: float(np.abs(x - plates[0])[8:-8, 8:-8].mean())
+        self.assertLess(err(back), 0.4 * err(shots[0]))
+
+    def test_the_painted_light_is_kept_where_it_is_strong(self):
+        plate = np.full((16, 16, 3), 0.1, np.float32)
+        out = plate * 1.2  # Klein brightened it a little
+        light = np.zeros((16, 16, 3), np.float32)
+        light[4:12, 4:12] = [0.6, 0.5, 0.3]
+        kept = mathops.keep_light(out, plate, light)
+        want = mathops.srgb_to_linear(np.minimum(mathops.linear_to_srgb(plate) + light, 1.0))
+        np.testing.assert_allclose(kept[6:10, 6:10], want[6:10, 6:10], rtol=1e-4)
+        np.testing.assert_allclose(kept[:2, :2], out[:2, :2])  # no light painted there: the relit frame as it is
 
 
 if __name__ == "__main__":

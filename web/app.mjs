@@ -54,13 +54,6 @@ const RENDERS_WANTED = 6; // sets of edits whose renders go on in the background
 // at most LIGHT.flow of its colour (LIGHT.shade of darkness for a dark colour), so light builds up stroke by stroke and
 // mixed colours add up to white only after a few passes (30 Oct: one stroke of the earlier brush reached white at once).
 const LIGHT = { flow: 0.3, shade: 0.35, spread: 1.6, spacing: 0.25 };
-// What Klein sees for a light edit: the frame lit by its strokes, never the strokes (relightGuide). Light and shade spread
-// over GUIDE.blur of the width; light multiplies the frame by 1 + GUIDE.gain x light and adds GUIDE.lift of itself, so a
-// dark surface still shows its colour; shade multiplies the frame by 1 - GUIDE.depth x shade.
-const GUIDE = { blur: 1 / 16, gain: 2, lift: 0.12, depth: 0.6 };
-// Relight Transfer holds the edited first frame's light over the whole shot (its anchor). 1 also brings the shot's slow
-// drifts of level and colour back to the first frame's; 0 corrects the shot by its first frame alone
-const RELIGHT_HOLD = 1;
 const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid", "hdr"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "hdr", "review", "export"]; // the render's job kinds: Generate and a new plate stop them
 const UPSAMPLER = {}; // Black Forest Labs' system prompts for Klein's upsampler (upsampler.json): table and plain
@@ -134,7 +127,7 @@ const folderOf = (name, out, key) => { // the folder a workflow saved its frames
 
 // ---------- What Klein sees ----------
 
-function editImage(e, before, size) { // what Klein sees: the strokes over the frame; an erase, the frame itself; a light, the frame lit by it
+function editImage(e, before, size) { // what Klein sees: the strokes over the frame; an erase, the frame itself; a light, the frame with its light
   const c = snap(before, size);
   if (e.tool === "erase") return c; // told to remove the object, Klein cleans it; shown a filled hole, it drew a new object there
   if (e.tool === "light") return relightGuide(c, e);
@@ -142,35 +135,20 @@ function editImage(e, before, size) { // what Klein sees: the strokes over the f
   return c;
 }
 
-// A light edit's guide, for Klein and its prompt writer: a rough relight of the frame from the strokes. Shown the glowing
-// strokes over the frame, Klein drew them as glowing spheres (30 Oct). Light and shade spread wide (GUIDE.blur of the
-// width, at least the largest dab), then light multiplies the frame and shade darkens it: the guide says where light and
-// shade fall and in which colour, and Klein makes the real light and shadows from it.
+// What Klein and its prompt writer see for a light: the frame with its light and shade, as the brush showed them. Relight
+// Transfer then keeps that light where it is strong (`lightLayer`), and Klein relights the rest of the frame to agree with it.
 function relightGuide(frame, e) {
   const [w, h] = [frame.width, frame.height], x = frame.getContext("2d");
-  const reach = Math.max(w * GUIDE.blur, LIGHT.spread * Math.max(0, ...e.strokes.map((s) => s.size)) * (w / e.paint.width));
-  const light = blurWide(e.paint, [w, h], reach, "#000"), lit = snap(frame, [w, h]), l = lit.getContext("2d");
-  l.globalCompositeOperation = "multiply"; l.drawImage(light, 0, 0); // the frame times the light: a bright surface takes more of it
-  x.globalCompositeOperation = "lighter";
-  for (let k = GUIDE.gain; k > 0; k -= 1) { x.globalAlpha = Math.min(1, k); x.drawImage(lit, 0, 0); }
-  x.globalAlpha = GUIDE.lift; x.drawImage(light, 0, 0);
+  if (e.shade) x.drawImage(e.shade, 0, 0, w, h);
+  x.globalCompositeOperation = "lighter"; x.drawImage(e.paint, 0, 0, w, h);
   x.globalCompositeOperation = "source-over";
-  if (e.shade) { x.globalAlpha = GUIDE.depth; x.drawImage(blurWide(e.shade, [w, h], reach), 0, 0); }
-  x.globalAlpha = 1;
   return frame;
 }
 
-function blurWide(src, [w, h], reach, fill = null) { // a wide, smooth blur in every browser: down to a small canvas, then back up
-  const k = Math.max(1, reach / 3), small = [Math.max(2, Math.round(w / k)), Math.max(2, Math.round(h / k))];
-  let from = src;
-  for (const size of [[Math.max(small[0], Math.round(w / 4)), Math.max(small[1], Math.round(h / 4))], small, [w, h]]) {
-    const c = canvas(size), g = c.getContext("2d");
-    Object.assign(g, { imageSmoothingEnabled: true, imageSmoothingQuality: "high" });
-    if (fill) { g.fillStyle = fill; g.fillRect(0, 0, size[0], size[1]); }
-    g.drawImage(from, 0, 0, size[0], size[1]);
-    from = c;
-  }
-  return from;
+function lightLayer(e, size) { // a light edit's light on black, as the brush adds it to the frame: Relight Transfer keeps it
+  const c = snap(null, size, "#000");
+  c.getContext("2d").drawImage(e.paint, 0, 0, size[0], size[1]);
+  return c;
 }
 
 const maskAt = (e, size) => (e.tool === "light" ? snap(null, size, "#fff") : snap(e.mask, size, "#000"));
@@ -1510,7 +1488,7 @@ async function generate(edit) {
       // an erase refines the quick result, which has no object left: shown the original, Klein drew part of it back
       reference: edit.tool === "erase" ? startName : await uploadCanvas(editImage(edit, before, work), `${tag}_ref_full.png`),
       mask: await uploadCanvas(maskAt(edit, work), `${tag}_mask_full.png`), ...editSettings(edit, work, FULL),
-      relight: light ? 1 : 0, level: edit.tool === "erase" }, { kind: "edit", front: true, progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
+      relight: light ? 1 : 0, light: light ? await uploadCanvas(lightLayer(edit, work), `${tag}_light.png`) : "", level: edit.tool === "erase" }, { kind: "edit", front: true, progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
     if (!alive()) return;
     // a relight shows the frame as the export will make it: Klein's light on the plate's own detail
     edit.patch = await loadImage(viewUrl(outputFile("edit", full, light ? "relit" : "patch")));
@@ -2006,9 +1984,6 @@ function reused(r, store, id, take) { // a step that a render with the same eras
   log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: made by an earlier render with the same erases, used again`);
 }
 
-// The relight's anchor: the edited first frame, whose light Relight Transfer holds over the shot; none without a light edit
-const anchorOf = (relight, r) => (relight ? { anchor: r.hero, hold: RELIGHT_HOLD } : { anchor: "" });
-
 async function pipeline(r) { // a render's steps in order; a step made already is skipped, so a render resumes where it stopped
   const p = S.plate, key = r.key, active = r.active, here = () => key === S.heroKey; // here: the render on show
   cancel("warm");
@@ -2096,7 +2071,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   pv.mattes = mattesOf({ ...r.erased?.found, ...pv.painted?.found });
   await step(r, "comp", async (progress) => {
     const comp = await run("comp", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, width: sw, height: sh, shot: made,
-      ...pv.mattes.values, relight, ...anchorOf(relight, r), grow: grow(sw, erase), feather: feather(sw), grain: 0, video_prefix: `${base}/${sized}/comp` },
+      ...pv.mattes.values, relight, grow: grow(sw, erase), feather: feather(sw), grain: 0, video_prefix: `${base}/${sized}/comp` },
       { kind: "comp", progress }).done;
     pv.comp = viewUrl(outputFile("comp", comp, "video"));
   }, pv);
@@ -2122,7 +2097,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   });
   const hdr = { hdr: r.hdr ?? "", hdr_grow: grow(p.spec.width, erase) + feather(p.spec.width) }; // HDR Match leaves the composite's edge out
   await step(r, "review", async (progress) => { // the full-size composite at the plate's quality, which the viewer plays once made
-    const out = await run("review", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr, ...r.full.values, ...anchorOf(relight, r),
+    const out = await run("review", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr, ...r.full.values,
       relight, grow: grow(p.spec.width, erase), feather: feather(p.spec.width), movie_space: p.deep ? "@model" : p.cs,
       review_prefix: `${base}/review`, frames_prefix: p.deep ? `${base}/review/frames` : "" }, { kind: "review", progress }).done;
     const movie = outputFile("review", out, "review"), frame = p.deep ? outputFile("review", out, "frames") : null;
@@ -2135,7 +2110,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   stagesUI(); exportUI();
   if (!S.wantDownload) return status(`Composite, full size: the viewer plays it${p.deep ? ", its EXR frames at full precision as they load" : ""}. Export writes the result for compositing software.`);
   await step(r, "export", async (progress) => { // only when Export asks: the plate's own format, and the matte, beside the review
-    const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr, ...anchorOf(relight, r),
+    const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr,
       ...r.full.values, relight, keep_untouched: !relight, prefix: `${dir}/export`, matte_prefix: `${dir}/matte/matte`,
       grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
     const file = outputFile("export", done, "export"); // a job taken from the index keeps its own folder
@@ -2516,14 +2491,15 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
   const edits = [];
   for (const e of active) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, caption: e.caption?.text || templateCaption(e),
     mask: await uploadCanvas(maskAt(e, p.work), `graph_e${e.id}_mask.png`),
-    layer: e.tool === "erase" ? null : e.tool === "light" // a light: the frame lit by its strokes, as Klein saw it
+    layer: e.tool === "erase" ? null : e.tool === "light" // a light: the frame with its light, as Klein saw it
       ? await uploadCanvas(editImage(e, layered(S.edits.indexOf(e)), p.work), `graph_e${e.id}_guide.png`)
       : await uploadCanvas(snap(e.paint, p.work), `graph_e${e.id}_strokes.png`),
+    light: e.tool === "light" ? await uploadCanvas(lightLayer(e, p.work), `graph_e${e.id}_light.png`) : null,
     quick: editSettings(e, p.prev, QUICK), full: editSettings(e, p.work, FULL) });
   const erase = active.some((e) => e.tool === "erase");
   const graph = sceneGraph(WF, { edits, about: { version: S.version, name: p.name },
     plate: { path: p.path, config: S.ocio.config, cs: p.cs, frames: p.frames, fps: p.fps, work: p.work, prev: p.prev, track: p.track, trackErase: p.trackErase },
-    render: { hold: RELIGHT_HOLD, prompt: shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt, hue: e.hue ?? hueOf(e.src ?? e) }))), seed: active[0].seed,
+    render: { prompt: shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt, hue: e.hue ?? hueOf(e.src ?? e) }))), seed: active[0].seed,
       erasePrompt: erasePrompt(active.filter((e) => e.tool === "erase").map((e) => e.caption?.text)),
       grow: grow(p.spec.width, erase), feather: feather(p.spec.width), prefix: `paintaplate/${p.id}/graph`,
       hdr: S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), S.toHdr) } });
