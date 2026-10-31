@@ -387,3 +387,23 @@ test("one light stroke adds its flow on its centre line, whatever the spacing", 
   assert.equal(dabAlpha(1), 0);
   assert.ok(Math.abs(dabAlpha(0.375) - 0.675) < 1e-9);
 });
+
+import { donorFor } from "../../web/logic.mjs";
+
+test("a bypass takes the frames of a render of more edits when the edits left out are far away", () => {
+  const foot = (cells) => { const bits = new Uint8Array(16); for (const c of cells) bits[c] = 1; return { w: 4, h: 4, bits }; };
+  const A = { id: 1, version: 1, tool: "paint", foot: foot([0, 1]) }, B = { id: 2, version: 1, tool: "paint", foot: foot([14, 15]) };
+  const C = { id: 3, version: 1, tool: "erase", foot: foot([1, 2]) }, D = { id: 5, version: 1, tool: "paint", foot: foot([12]) };
+  const L = { id: 4, version: 1, tool: "light", foot: foot([...Array(16).keys()]) };
+  const r = (key, active, wanted = 1) => ({ key, active, wanted });
+  assert.equal(donorFor([A], [r("AB", [A, B])]), "AB"); // far apart: either one can be left out
+  assert.equal(donorFor([B], [r("AB", [A, B])]), "AB");
+  assert.equal(donorFor([A], [r("AC", [A, C])]), null); // touching: rendered again
+  assert.equal(donorFor([A], [r("AL", [A, L])]), null); // a light changes every pixel
+  assert.equal(donorFor([L], [r("AL", [A, L])]), null);
+  assert.equal(donorFor([A], [r("A", [A])]), null); // only a larger set
+  assert.equal(donorFor([A], [r("AB2", [A, { ...B, version: 2 }]), r("ABx", [{ ...A, version: 2 }, B])]), "AB2"); // the same result of A
+  assert.equal(donorFor([A], [r("ABD", [A, B, D], 5), r("AB", [A, B], 1)]), "AB"); // the fewest edits left out
+  assert.equal(donorFor([A], [r("AB", [A, B], 1), r("AD", [A, D], 2)]), "AD"); // then the most recently shown
+  assert.equal(donorFor([A], [r("AB", [A, { ...B, foot: null }])]), null); // no footprint: counted as near
+});

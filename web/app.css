@@ -336,3 +336,5 @@ dialog.open { width: min(900px, 94vw); }
 .op-cancel { margin-top: 12px; }
 .close-plate { flex: none; padding: 2px 9px; font-size: 16px; line-height: 1; }
 .stop[hidden], .close-plate[hidden] { display: none; }
+.render-full { margin-top: 10px; }
+.render-full[hidden] { display: none; }

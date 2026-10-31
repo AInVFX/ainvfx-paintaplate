@@ -7,7 +7,7 @@ import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onLog, onNotic
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
 import { sceneGraph } from "./graph.mjs";
-import { CHANNEL_NAMES, DAB_PROFILE, DISPLAY, FLUID, PARAMS, dabFlow, dabsAlong, blankSpec, caption, changedMask, lightColor, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
+import { CHANNEL_NAMES, DAB_PROFILE, DISPLAY, FLUID, PARAMS, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
   erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction } from "./logic.mjs";
 
@@ -1861,7 +1861,7 @@ const YIELD = new Error("yield"); // a render step gives way to an edit, or to a
 
 function freeze(e) { // what a render needs of an edit, as it is now: a later change to the edit never reaches the render
   return { src: e, id: e.id, version: e.version, tool: e.tool, prompt: e.prompt, seed: e.seed, caption: e.caption?.text ?? "",
-    hue: hueOf(e), patch: e.patch, mask: e.mask && snap(e.mask, S.plate.track) };
+    hue: hueOf(e), patch: e.patch, mask: e.mask && snap(e.mask, S.plate.track), foot: e.foot };
 }
 
 function want(key) { // the set of edits on show becomes the most recently shown render, made from what it is now
@@ -1876,6 +1876,28 @@ function want(key) { // the set of edits on show becomes the most recently shown
   }
   r.wanted = ++S.wants;
   return r;
+}
+
+// The render whose frames `r` can take at this size (logic.donorFor): an earlier render of more edits, with its own shot made
+function donorOf(r, final) {
+  if (r.own) return null; // Render in full asked for its own shot
+  const sized = S.plate.shot.join("x"), carry = r.active.some((e) => e.tool !== "erase");
+  const goal = final ? (carry ? "full" : "cleanfull") : carry ? "shot" : "clean";
+  const ready = (d) => { const st = final ? d : d.previews[sized]; return !!st?.[carry ? "shot" : "clean"] && st.done?.[goal] !== undefined; };
+  const key = donorFor(r.active, [...S.renders.values()].filter((d) => d !== r && !d.failed && !d.donor && ready(d))
+    .map((d) => ({ key: d.key, active: d.active, wanted: d.wanted })));
+  return key ? S.renders.get(key) : null;
+}
+
+function renderInFull() { // Render in full: the set on show made again with its own shot, the same edits and seeds
+  const r = S.renders.get(S.heroKey);
+  if (!r?.donor) return;
+  S.renders.delete(r.key);
+  const fresh = want(r.key);
+  fresh.own = true;
+  log(`Render v${fresh.v}: the edits of v${r.v} again, with their own shot (v${r.v} took the frames of v${r.donor})`);
+  S.halted = false;
+  stagesUI(); generateUI(); touch(0);
 }
 
 function nextClass(r) { // the class of a render's next step: "preview", "full" or "export"; null when it waits or is done
@@ -2020,8 +2042,24 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       { kind: "clean", progress, live: show ? showLive : null }).done;
     return Object.assign(kept, { clean: folderOf("clean", out, "frames"), raw: viewUrl(outputFile("clean", out, "video")) });
   };
+  const take = (store, d, final) => { // frames an earlier render of more edits made: the composite takes them inside these edits' mattes only
+    const from = final ? d : d.previews[sized];
+    for (const id of final ? ["cleanfull", "full"] : ["clean", "shot"]) {
+      if (r.skip.has(id) || store.done?.[id] !== undefined) continue;
+      (store.done ??= {})[id] = 0;
+      (store.taken ??= {})[id] = d.v;
+      log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: taken from render v${d.v}, whose other edits are far from these`);
+    }
+    Object.assign(store, { clean: from.clean, shot: from.shot, raw: from.raw });
+    r.donor = d.v;
+    return carry ? from.shot : from.clean;
+  };
+  const underOf = (st) => (st.clean ? { path: st.clean, cs: "@model" } : { path: p.path, cs: p.cs }); // the plate a shot was made over
   const passes = async (store, size, dir, final) => { // the erase pass makes a clean plate; Ripple carries paint and light over it
     const id = final ? "cleanfull" : "clean", kept = erase && (final ? E.full : E.sizes[`${size[0]}x${size[1]}`]);
+    const goal = final ? (carry ? "full" : "cleanfull") : carry ? "shot" : "clean"; // the step whose frames the composite takes
+    const donor = store.done?.[goal] === undefined && !(kept?.clean && !carry) ? donorOf(r, final) : null; // an exact erase pass comes first
+    if (donor) return take(store, donor, final);
     if (kept?.clean) reused(r, store, id, () => Object.assign(store, { clean: kept.clean, raw: kept.raw }));
     await step(r, id, async (progress) => {
       if (!final) return void Object.assign(store, await cleanAt(size, progress, true));
@@ -2049,12 +2087,12 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     return carry ? store.shot : store.clean;
   };
   const made = await passes(pv, p.shot, sized, false);
-  if (here() && !pv.comp && !r.review && S.shot?.url !== pv.raw) { // a rough look at once: the whole frame as the model made it, until the composite
+  if (here() && !pv.taken && !pv.comp && !r.review && S.shot?.url !== pv.raw) { // a rough look at once: the whole frame as the model made it, until the composite
     setShot(pv.raw, key, "@model");
     hud("Rough preview: Space plays it. The composite follows.", 2500);
   }
   await step(r, "track", async (progress) => { pv.painted = await track(active, made, base, `_${sized}`, progress, null, ["paint"],
-    erase ? { path: pv.clean, cs: "@model" } : { path: p.path, cs: p.cs }, r.heroFrame); }, pv);
+    underOf(pv), r.heroFrame); }, pv);
   pv.mattes = mattesOf({ ...r.erased?.found, ...pv.painted?.found });
   await step(r, "comp", async (progress) => {
     const comp = await run("comp", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, width: sw, height: sh, shot: made,
@@ -2069,13 +2107,13 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   }
   const onePass = sw === p.work[0] && sh === p.work[1];
   const final = onePass ? made : await passes(r, p.work, "full", true);
-  if (here() && !onePass && !r.review && r.raw && S.shot?.url !== r.raw) { // the full-size shot as LTX made it, until the full-size composite:
+  if (here() && !onePass && !r.taken && !r.review && r.raw && S.shot?.url !== r.raw) { // the full-size shot as LTX made it, until the full-size composite:
     setShot(r.raw, key, "@model"); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640, 28 Oct)
     hud("Shot, full size: Space plays it as LTX made it. The full-size composite follows.", 2500);
     log(`Render v${r.v}: the viewer plays the full-size shot until the full-size composite is ready`);
   }
   await step(r, "trackfull", async (progress) => { r.full = await track(active, final, base, "_full", progress, pv.mattes, ["paint"],
-    erase ? { path: onePass ? pv.clean : r.clean, cs: "@model" } : { path: p.path, cs: p.cs }, r.heroFrame); });
+    underOf(onePass ? pv : r), r.heroFrame); });
   r.full ??= pv.mattes;
   await step(r, "hdr", async (progress) => { // SDR to HDR: the full-size shot made again in scene-linear values; review fits it to the plate
     const out = await run("hdr", { path: final, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps),
@@ -2209,17 +2247,18 @@ function stagesUI() {
   hdrUI(); // the Render panel: every step, done, running or waiting, and the time left
   const list = $("#stages"), p = S.plate, r = S.renders.get(S.heroKey);
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
+  $("#render-full").hidden = !r?.donor; // a set that took another render's frames can still be made with its own shot
   $("#render").hidden = !p || keying();
   list.hidden = !active.length;
   if (!p || !active.length) { $("#render-left").textContent = ""; return timelineBar(); }
   const skip = r?.skip ?? plan({}, active).skip, later = (st) => st.onDemand && !S.wantDownload; // the export waits for Export
   list.replaceChildren(...STAGES.filter((st) => !skip.has(st.id)).map((st) => {
-    const li = document.createElement("li"), took = doneOf(r, st);
+    const li = document.createElement("li"), took = doneOf(r, st), from = (st.preview ? previewOf(r) : r)?.taken?.[st.id];
     const now = S.stage?.id === st.id && S.stage.key === S.heroKey;
     li.className = took !== undefined ? "done" : now ? "now" : later(st) ? "later" : "";
     li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time"></span>';
     li.children[1].textContent = st.label;
-    li.children[2].textContent = took !== undefined ? `${Math.round(took)} s` : now ? `${Math.round(S.stage.progress * 100)}%`
+    li.children[2].textContent = from ? `from v${from}` : took !== undefined ? `${Math.round(took)} s` : now ? `${Math.round(S.stage.progress * 100)}%`
       : later(st) ? "on Export" : `~${Math.round(estimate(st.id))} s`;
     return li;
   }));
@@ -2666,7 +2705,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
     ["Edit", [["Undo", "Ctrl+Z", undo, !S.past.length], ["Redo", "Ctrl+Shift+Z", redo, !S.future.length], "-",
       ["New edit", "N", nextEdit, !p || keying() || (!S.draft && !S.selected)], ["Generate", "Enter", () => enter(false), $("#generate").disabled], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
       ...(HDR_ON ? [["SDR to HDR", "", () => setHdr(!S.toHdr), !p || !hdrPlate(p.spec) || !S.hdrReady, !!p && hdrPlate(p.spec) && S.hdrReady && S.toHdr]] : []),
-      ["Stop generating", "Esc", stopGenerating, !generating()],
+      ["Render in full", "", renderInFull, !S.renders.get(S.heroKey)?.donor], ["Stop generating", "Esc", stopGenerating, !generating()],
       ["Deselect", "Esc", () => select(null), !S.selected]]],
     ["Tools", [["Paint", "B", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Erase", "E", () => pickTool("erase"), !p || (keying() && !S.fluid.result), S.tool === "erase" && !S.rub],
       ["Light", "L", () => pickTool("light"), !p || (keying() && !S.fluid.result), S.tool === "light" && !S.rub], ["Eraser", "X", () => setRub(!S.rub), !p, S.rub], ["Pick a colour", "I", () => pickColor(), !p, !!S.picking], "-",
@@ -2892,6 +2931,7 @@ $("#help-btn").onclick = () => $("#help").showModal();
 $("#stop").onclick = () => stopGenerating();
 $("#op-cancel").onclick = () => cancelOpen();
 $("#close-btn").onclick = () => closePlate();
+$("#render-full").onclick = () => renderInFull();
 $("#menu-btn").onclick = (e) => { // the same menu as a right-click, for touch screens
   if (!$("#ctx").hidden) return closeMenu();
   const r = e.currentTarget.getBoundingClientRect();

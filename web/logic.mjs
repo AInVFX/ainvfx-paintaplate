@@ -336,6 +336,28 @@ export function dependsOnChange(edit, before, basis) {
   return edit.tool === "light" || changed.some((c) => c.tool === "light" || overlap(c.foot, edit.foot));
 }
 
+// A render of fewer edits (after a bypass or a removal) can take the frames of an earlier render of more edits: its composite
+// then takes those frames only inside the mattes of the edits it keeps, and the plate everywhere else. That is exact when
+// every edit left out is far from every edit kept (their first-frame footprints apart; an edit without one counts as near)
+// and no light is involved, since a light changes every pixel. `want`: the new render's edits, as frozen; `renders`:
+// [{ key, active, wanted }], those whose frames exist. Returns the key of the one with the fewest edits left out, then the
+// most recently shown, or null.
+export function donorFor(want, renders) {
+  const key = (e) => `${e.id}.${e.version}`, mine = new Set(want.map(key));
+  const apart = (a, b) => !!a.foot && !!b.foot && !overlap(a.foot, b.foot);
+  if (!want.length || want.some((e) => e.tool === "light")) return null;
+  let best = null;
+  for (const r of renders) {
+    const have = new Set(r.active.map(key));
+    if (have.size <= mine.size || [...mine].some((k) => !have.has(k)) || r.active.some((e) => e.tool === "light")) continue;
+    const out = r.active.filter((e) => !mine.has(key(e)));
+    if (!out.every((o) => want.every((e) => apart(o, e)))) continue;
+    const wanted = r.wanted ?? 0;
+    if (!best || out.length < best.out || (out.length === best.out && wanted > best.wanted)) best = { key: r.key, out: out.length, wanted };
+  }
+  return best?.key ?? null;
+}
+
 // ---------- The frame cache's ranking, after OpenRV's FBCache ----------
 
 // How useful frame f is to keep: the frame on screen most, then by distance from it; a frame behind counts as
