@@ -25,7 +25,7 @@ REVISIONS = {  # the tested revision of each repository
     "Comfy-Org/sam3.1": "7bb8374780a725b4353ed31f3a9395c9742b5621",
     "Kijai/LTX2.3_comfy": "6d980fde0d330f2fed6ff8dfdfddb06d88a004e5",
     "Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR": "c7578ebddb54f4210e534e4d8cad698a5a520692",  # gated: accept its licence first
-    "AInVFX/ainvfx-fluid": "fd4855a18d879c551bf4c5f49b1a877874437cb6",  # version 2, trained on synthetic data
+    "AInVFX/ainvfx-fluid": "6102c50e9629ab4bf32a36d184e705b7a829e4f3",  # retrained on synthetic data (1 November 2026)
 }
 MODELS = [  # (repository, file in the repository, folder under models/)
     ("black-forest-labs/flux-3-image-klein-comfy", "diffusion_models/flux3-image-klein-int8-convrot.safetensors", "diffusion_models"),

@@ -85,7 +85,7 @@ The script finds the models folder of the ComfyUI it is installed in; name anoth
 | `LTX25_Ripple_v11.safetensors` | `loras/` | 0.7 GB | [WepeNerd/LTX-Ripple](https://huggingface.co/WepeNerd/LTX-Ripple) (`76abac5`) |
 | `sam3.1_multiplex_fp16.safetensors` | `checkpoints/` | 1.7 GB | [Comfy-Org/sam3.1](https://huggingface.co/Comfy-Org/sam3.1) (`7bb8374`) |
 | `taeltx2_3.safetensors` | `vae_approx/` | 0.02 GB | [Kijai/LTX2.3_comfy](https://huggingface.co/Kijai/LTX2.3_comfy) (`6d980fd`), from [madebyollin/taehv](https://github.com/madebyollin/taehv) (MIT) |
-| `ainvfx-fluid.safetensors` (optional: fluid shots) | `loras/` | 0.65 GB | [AInVFX/ainvfx-fluid](https://huggingface.co/AInVFX/ainvfx-fluid) (`fd4855a`), file `ltx-2.5/ainvfx-fluid.safetensors` |
+| `ainvfx-fluid.safetensors` (optional: fluid shots) | `loras/` | 0.65 GB | [AInVFX/ainvfx-fluid](https://huggingface.co/AInVFX/ainvfx-fluid) (`6102c50`), file `ltx-2.5/ainvfx-fluid.safetensors` |
 
 **SDR to HDR** (optional): Lightricks' LTX 2.5 SDR-to-HDR IC-LoRA, `ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors` (1.31 GB, `models/loras`), and its scene embeddings, `ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors` (12.6 MB, `models/embeddings`), from `Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR`. The repository is gated: accept its licence on Hugging Face first. `get_models.py` downloads both. Without them everything else works, and an EXR render ends with the SDR shot. For now the page keeps SDR to HDR off and hidden, as its shots flicker: `?hdr=1` at the end of the page's address turns it on to test it.
 
