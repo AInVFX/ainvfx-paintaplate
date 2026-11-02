@@ -29,7 +29,7 @@ def flow(page, port):
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
     page.on("response", lambda r: errors.append(f"{r.status}: {r.url}") if r.status >= 400 else None)
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=20000)
     version = page.text_content("#version") or ""
     first = page.eval_on_selector_all("#log li span", "els => els.slice(0, 3).map(e => e.textContent)")
@@ -362,6 +362,7 @@ def fluid_flow(page):
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
     page.click("#open-btn"); page.click("#open [data-tab=blank]")
+    page.select_option("#b-depth", "8")  # an 8-bit fluid shot: fluid16_flow covers 16-bit, the default once SDR to HDR is installed
     page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.select_option("#b-fps", "24"); page.fill("#b-frames", "33")
     page.dispatch_event("#b-frames", "input")
     note = page.text_content("#b-note")
@@ -610,6 +611,7 @@ def oom_flow(page):
     urllib.request.urlopen(urllib.request.Request(f"{base}/mock/oom", json.dumps({"workflow": "fluid", "times": 1}).encode(),
                                                   {"Content-Type": "application/json"}))
     page.click("#open-btn"); page.click("#open [data-tab=blank]")
+    page.select_option("#b-depth", "8")  # an 8-bit fluid shot: fluid16_flow covers 16-bit, the default once SDR to HDR is installed
     page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.select_option("#b-fps", "24"); page.fill("#b-frames", "33")
     page.dispatch_event("#b-frames", "input"); page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
@@ -673,6 +675,19 @@ def keys_flow(page):
     check(not failed, f"every documented key does what the Keys dialog says ({len(results)} presses): {failed or 'all'}")
 
 
+def start_flow(browser, port):
+    """With no plate open, the page opens a blank plate at start, at the Blank tab's settings, in 16-bit when SDR to HDR can
+    run, its keyframes ready to paint (?blank=0 starts empty, as every other flow does)."""
+    page = browser.new_page(viewport={"width": 1400, "height": 900})
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html")
+    page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
+    spec, log = page.text_content("#spec"), page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
+    check("960 × 512, 25 fps, 121 frames" in spec and page.input_value("#b-depth") == "16" and not page.is_hidden("#fluid")
+          and any(line.startswith("Blank plate: 960 x 512, 121 frames at 25 fps, 16-bit") for line in log),
+          f"a blank plate opens at start, 16-bit, its keyframes ready to paint: {spec}")
+    page.close()
+
+
 def make_hdr_plate(root):
     """An EXR plate with values above white for the SDR-to-HDR checks: 17 frames, a sun moving across a gradient."""
     import numpy as np, OpenEXR
@@ -716,15 +731,16 @@ def added_line(text):  # a JS test: a line added to the log since WATCH holds `t
 
 
 def hdr_flow(page, port):
-    """SDR to HDR is off by default, as its shots flicker (29 Oct): an EXR plate shows no switch, a blank plate no 16-bit.
-    With ?hdr=1: no switch for a video plate; on by default for an EXR plate, where it runs after the full-size shot and
+    """?hdr=0 turns SDR to HDR off: an EXR plate shows no switch, a blank plate no 16-bit. By default: no switch for a video plate; on by default for an EXR plate, where it runs after the full-size shot and
     before the full-size composite, with its live preview in a corner naming its step of the pass's steps; switched off,
     the next render leaves it out. Esc stops the render on its way and Enter goes on."""
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&hdr=0")
+    page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     open_path(page, "paintaplate/hdr_room")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
     check(page.is_hidden("#hdr-switch") and page.evaluate("document.querySelector('#b-depth').closest('label').style.display") == "none",
-          "SDR to HDR is off by default: no switch for an EXR plate, no 16-bit blank plate")
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?hdr=1")
+          "?hdr=0 turns SDR to HDR off: no switch for an EXR plate, no 16-bit blank plate")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     page.evaluate(WATCH)
     errors = []
@@ -749,6 +765,20 @@ def hdr_flow(page, port):
     at = lambda text: next((i for i, line in enumerate(new) if text in line), None)  # noqa: E731
     check(at("SDR to HDR took") is not None and at("SDR to HDR took") < at(REVIEWED),
           "the full-size shot goes through SDR to HDR before the full-size composite the viewer plays")
+    rows = lambda: page.eval_on_selector_all("#stages li.pick .name", "els => els.map(e => e.textContent)")  # noqa: E731
+    shown = lambda: page.eval_on_selector_all("#stages li.shown .name", "els => els.map(e => e.textContent)")  # noqa: E731
+    picture = lambda: page.evaluate("document.querySelector('canvas[data-picture]').dataset.picture")  # noqa: E731
+    check({"First frame", "Shot, preview", "SDR to HDR", "Composite, full size"} <= set(rows()) and shown() == ["Composite, full size"],
+          f"every finished pass with a picture is a row to click, the latest on show: {rows()}, {shown()}")
+    page.click("#stages li.pick:has-text('SDR to HDR')")
+    page.wait_for_timeout(400)
+    check(shown() == ["SDR to HDR"] and "on show" in (page.text_content("#hud") or ""), f"a click shows that pass in the viewer: {shown()}")
+    page.click("#stages li.pick:has-text('First frame')")
+    page.wait_for_timeout(400)
+    check(shown() == ["First frame"] and picture() == "hero", f"the First frame row shows the edit as Klein made it: {shown()}, {picture()}")
+    page.click("#stages li.pick:has-text('First frame')")
+    page.wait_for_timeout(400)
+    check(shown() == ["Composite, full size"], f"a second click goes back to the latest: {shown()}")
     page.evaluate(WATCH)
     page.click("#hdr-on")
     wait_log(page, added_line(REVIEWED), 240000, "full-size composite without SDR to HDR")
@@ -761,11 +791,11 @@ def hdr_flow(page, port):
     wait_log(page, "window.__lines.some((t) => /^Render v\\d+: .* \\(about \\d+ s\\)/.test(t))", 120000, "render step")
     page.keyboard.press("Escape")
     page.wait_for_timeout(400)
-    if not any(line.startswith("Stopped (Esc)") for line in lines()):  # Ctrl+Enter selected the edit: Esc deselects first
+    if not any(line.startswith("Stopped") for line in lines()):  # Ctrl+Enter selected the edit: Esc deselects first
         check("Esc again stops generating" in page.text_content("#hud"), "with an edit selected, Esc deselects first and says a second Esc stops generating")
         page.keyboard.press("Escape")
         page.wait_for_timeout(400)
-    check(any(line.startswith("Stopped (Esc)") for line in lines()) and not page.is_disabled("#generate"),
+    check(any(line.startswith("Stopped") for line in lines()) and not page.is_disabled("#generate"),
           "Esc stops the render step on its way, and Generate can go on")
     page.evaluate(WATCH)
     page.keyboard.press("Enter")
@@ -794,6 +824,24 @@ def fluid16_flow(page):
     check(any("16-bit" in line for line in new) and any("SDR to HDR took" in line for line in new),
           "16-bit: the fluid shot goes through SDR to HDR")
     check(page.is_checked("#hdr-on"), "the HDR fluid shot is an EXR plate: SDR to HDR is on for the edits on it")
+    check(not page.is_disabled("#export-btn"), "a fluid shot with no edit on it can be exported")
+    page.click("#export-btn")
+    fmt = page.text_content("#x-format") or ""
+    check("half-float EXR" in fmt and page.is_hidden("#x-matte"), f"its export is its HDR frames, without the render's options: {fmt}")
+    with page.expect_download() as dl:
+        page.click("#x-go")
+    import zipfile
+    names = zipfile.ZipFile(dl.value.path()).namelist()
+    check(any(n.startswith("hdr/") and n.endswith(".exr") for n in names) and any(n.startswith("plate/") for n in names),
+          f"the zip holds the HDR frames and the shot in the blank plate's format: {names[:3]}")
+    page.evaluate("""() => { const v = document.querySelector('canvas[data-precision]'); window.__prec = [];
+      new MutationObserver(() => window.__prec.push(v.dataset.precision)).observe(v, { attributes: true, attributeFilter: ['data-precision'] }); }""")
+    page.click("#play-btn"); page.wait_for_timeout(1500); page.click("#play-btn")
+    seen = page.evaluate("window.__prec")
+    flips = sum(1 for a, b in zip(seen, seen[1:]) if a != b)
+    check(flips <= 1, f"playing the HDR plate, its EXR frames and its 8-bit movie never alternate: {flips} changes in {len(seen)} draws")
+    page.wait_for_function("document.querySelector('canvas[data-precision]').dataset.precision === 'float'", timeout=30000)
+    check(True, "paused, the frame shows at full precision")
     check(not errors, f"no console errors in a 16-bit fluid shot: {errors}")
 
 
@@ -858,7 +906,7 @@ def phone(browser, port):
     """The page on a phone, upright and on its side: the frame, the transport, the menu and the log fit the screen."""
     for name, size in (("upright", {"width": 390, "height": 844}), ("sideways", {"width": 844, "height": 390})):
         page = browser.new_page(viewport=size, is_mobile=True, has_touch=True, device_scale_factor=3)
-        page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html")
+        page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
         page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=20000)
         page.click("#open-btn"); page.fill("#path", "plates/desk.mp4"); page.click("#open-go")
         page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
@@ -885,6 +933,20 @@ def phone(browser, port):
         page.screenshot(path=os.path.join(SHOTS, f"6_phone_{name}_log.png"))
         check(log, f"{name} phone: the open log fits the screen")
         page.close()
+
+
+def flow_modules():
+    """The flows of tests/flows/*.py, in name order, so each workstream adds its own file and the flows above stay as they
+    are: each module's run(browser, port, U) opens its own page, U being this module (check, WATCH, paint_once...)."""
+    import importlib.util
+    found, folder = [], os.path.join(HERE, "flows")
+    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        if name.endswith(".py") and not name.startswith("_"):
+            spec = importlib.util.spec_from_file_location(f"flows_{name[:-3]}", os.path.join(folder, name))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            found.append(module)
+    return found
 
 
 def main():
@@ -919,6 +981,7 @@ def main():
         with sync_playwright() as p:
             browser = p.chromium.launch(channel=os.environ.get("PLAYWRIGHT_CHANNEL") or None)
             page = browser.new_page(viewport={"width": 1400, "height": 900})
+            start_flow(browser, a.port)
             flow(page, a.port)
             fluid_flow(page)
             scene_flow(page)
@@ -930,9 +993,12 @@ def main():
             layout_flow(page, a.port)
             close_flow(page)
             phone(browser, a.port)
+            for extra in flow_modules():
+                print(f"== {extra.__name__}", flush=True)
+                extra.run(browser, a.port, sys.modules[__name__])
             page.close()  # its renders ask for nothing more: the next upload the mock holds is the race page's own
             race = browser.new_page(viewport={"width": 1400, "height": 900})
-            race.goto(f"http://127.0.0.1:{a.port}/extensions/ainvfx-paintaplate/paintaplate.html")
+            race.goto(f"http://127.0.0.1:{a.port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
             race.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
             race_flow(race)
             browser.close()

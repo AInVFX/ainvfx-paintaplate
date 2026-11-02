@@ -65,9 +65,9 @@ class Workflows(unittest.TestCase):
         """The page picks results by output name, not by position."""
         wanted = {"ingest": {"hero", "proxy", "spec"}, "prompt": {"text"}, "edit": {"patch", "relit", "result"},
                   "snap": {"named"} | {f"point_{k}" for k in range(5)}, "clean": {"frames", "video"}, "cleanup": {"frames", "video"}, "shot": {"frames", "video"},
-                  "matte": {"follow", "frames"}, "comp": {"video"}, "review": {"review", "frames"}, "export": {"export", "matte"},
+                  "matte": {"follow", "frames"}, "comp": {"video"}, "review": {"review", "frames", "view"}, "export": {"export", "matte"},
                   "warm": {"frame"},
-                  "fluid": {"plate", "video"}, "hdr": {"hdr"}}
+                  "fluid": {"plate", "video"}, "hdr": {"hdr", "movie"}}
         for name, keys in wanted.items():
             self.assertEqual(set(build_workflows.load(name, WORKFLOWS)[2]), keys, name)
 
@@ -97,3 +97,33 @@ class Workflows(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class ViewerMovies(unittest.TestCase):
+    """An image sequence plays 8-bit movies in log values (ACEScct): its review's viewer movie and its SDR-to-HDR movie."""
+
+    def test_review_viewer_movie_goes_with_the_nodes_that_fed_it(self):
+        _, _, outputs = build_workflows.load("review")
+        seq = build_workflows.fill("review", {"view_prefix": "p/v1/review/view", "view_space": "ACEScct", "frames_prefix": "p/v1/review/frames"})
+        video = build_workflows.fill("review", {"view_prefix": "", "frames_prefix": ""})
+        self.assertIn(outputs["view"], seq)
+        self.assertNotIn(outputs["view"], video)
+        used = {str(v[0]) for n in video.values() for v in n["inputs"].values() if isinstance(v, list)}
+        idle = [n["class_type"] for nid, n in video.items() if nid not in used and "output" not in n.get("_meta", {})]
+        self.assertEqual(idle, [], "a dropped link leaves no node that feeds nothing")
+        scale = seq[str(seq[outputs["view"]]["inputs"]["images"][0])]
+        self.assertEqual(seq[str(scale["inputs"]["image"][0])]["inputs"]["destination"], "ACEScct")
+
+    def test_hdr_writes_a_log_movie_beside_its_frames(self):
+        _, _, outputs = build_workflows.load("hdr")
+        wf = build_workflows.fill("hdr", {"view_space": "ACEScct", "video_prefix": "p/fluid_v1/hdr_movie", "movie_fps": 25.0})
+        movie = wf[outputs["movie"]]
+        self.assertEqual((movie["class_type"], movie["inputs"]["fps"]), ("PaintAPlate_SaveMovie", 25.0))
+        conv = wf[str(movie["inputs"]["images"][0])]
+        self.assertEqual((conv["inputs"]["source"], conv["inputs"]["destination"]), ("ACEScg", "ACEScct"))
+
+    def test_hdr_decodes_in_128_frame_temporal_tiles(self):
+        """64-frame temporal tiles with 8 of overlap made a 0.32-stop jump at frame 56 of a 121-frame HDR shot (2 Nov)."""
+        prompt, _, _ = build_workflows.load("hdr")
+        tiled = [n["inputs"] for n in prompt.values() if n["class_type"] == "VAEDecodeTiled"]
+        self.assertEqual([(t["temporal_size"], t["temporal_overlap"]) for t in tiled], [(128, 32)])

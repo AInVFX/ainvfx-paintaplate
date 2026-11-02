@@ -67,7 +67,9 @@ THUMBS_AT_ONCE = asyncio.Semaphore(4)  # a folder of thousands of outputs asks f
 PARTS = {"export": (["export"], None), "matte": (["matte"], None),
          "review": (["review_*.mp4", "*/comp_*.mp4", "comp_*.mp4"], "review.mp4"),
          "shot": (["full/raw_*.mp4", "full/clean_*.mp4", "*/raw_*.mp4", "*/clean_*.mp4", "full_*.mp4", "raw_*.mp4"],
-                  "regenerated_shot.mp4")}
+                  "regenerated_shot.mp4"),
+         # a fluid shot exported by itself: its HDR frames, the shot in the blank plate's format, its preview movie
+         "hdr": (["hdr"], None), "plate": (["plate"], None), "preview": (["preview_*.mp4"], "preview.mp4")}
 DEFAULT_PARTS = ["export", "matte"]
 
 
@@ -100,8 +102,10 @@ def collect(folder: str, parts: list[str]) -> list[tuple[str, str]]:
 def build_zip(folder: str, name: str, parts: list[str]) -> str:
     """The zip of `parts`, stored (EXR, PNG and video are already compressed) and reused while it is current."""
     files = collect(folder, parts)
-    if not any(arc.startswith("export/") for _, arc in files):
+    if "export" in parts and not any(arc.startswith("export/") for _, arc in files):
         raise FileNotFoundError("This run has no export yet")
+    if not files:  # a fluid shot's zip holds no export: its HDR frames, its plate and its preview
+        raise FileNotFoundError("Nothing to download in this run")
     target = os.path.join(folder, f"{name}__{'-'.join(p for p in PARTS if p in parts)}.zip")
     newest = max(os.path.getmtime(p) for p, _ in files)
     if os.path.exists(target) and os.path.getmtime(target) >= newest:

@@ -373,3 +373,21 @@ class JobIndex(unittest.TestCase):
         for bad in ("../x", "stat/none.mp4", "output:../../etc"):
             with self.assertRaises((FileNotFoundError, ValueError), msg=bad):
                 routes.plate_stat(bad)
+
+
+class FluidExport(unittest.TestCase):
+    def test_a_fluid_shot_zips_its_hdr_frames_its_plate_and_its_preview(self):
+        """A fluid shot exported by itself: the zip holds its HDR frames and its shot as folders, and its preview movie."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            for rel in ("hdr/f_00001_.exr", "hdr/f_00002_.exr", "plate/blank_960x512.mov", "preview_00001_.mp4", "hdr_movie_00001_.mp4"):
+                os.makedirs(os.path.join(d, os.path.dirname(rel)), exist_ok=True)
+                with open(os.path.join(d, rel), "wb") as f:
+                    f.write(b"x")
+            names = [name for _, name in routes.collect(d, ["hdr", "plate", "preview"])]
+            self.assertEqual(names, ["hdr/f_00001_.exr", "hdr/f_00002_.exr", "plate/blank_960x512.mov", "preview.mp4"])
+            import zipfile  # its zip needs no export folder (it answered 404 on 2 Nov, and the browser cancelled the download)
+            with zipfile.ZipFile(routes.build_zip(d, "fluid_v1", ["hdr", "plate", "preview"])) as z:
+                self.assertEqual(sorted(z.namelist()), sorted(names))
+            with self.assertRaises(FileNotFoundError):
+                routes.build_zip(d, "fluid_v1", ["export", "matte"])

@@ -134,7 +134,7 @@ test("optional links drop with what fed them when their slots are empty", () => 
 test("every workflow names the outputs and the progress node the page reads", () => {
   const wanted = { ingest: ["hero", "proxy", "spec"], prompt: ["text"], edit: ["patch", "relit", "result"],
     snap: ["named", "point_0", "point_1", "point_2", "point_3", "point_4"], clean: ["frames", "video"], shot: ["frames", "video"],
-    matte: ["follow", "frames"], comp: ["video"], review: ["frames", "review"], export: ["export", "matte"], warm: ["frame"] };
+    matte: ["follow", "frames"], comp: ["video"], review: ["frames", "review", "view"], export: ["export", "matte"], warm: ["frame"] };
   for (const [name, outs] of Object.entries(wanted)) {
     const wf = workflow(name);
     assert.deepEqual(Object.keys(wf.outputs).sort(), outs.sort(), name);
@@ -422,4 +422,46 @@ test("a light's painted light is an optional input of its edit, gone with the re
   assert.ok(Array.isArray(relit(lit).inputs.light));
   const bare = fillWorkflow(wf, { caption: "x", seed: 1, relight: 1 }); // a relight without its painted light still runs
   assert.ok(relit(bare) && !("light" in relit(bare).inputs) && !loader(bare));
+});
+
+import { viewerSpace, drawsDeep, fluidRun, passMovie, defaultDepth } from "../../web/logic.mjs";
+
+test("an image sequence's 8-bit movies hold log values; playing, one kind of frame", () => {
+  assert.equal(viewerSpace(["ACEScg", "ACEScct", "ACES2065-1"], "sRGB Encoded Rec.709 (sRGB)"), "ACEScct");
+  assert.equal(viewerSpace(["Linear Rec.709"], "sRGB"), "sRGB");
+  assert.equal(drawsDeep(false, false), true, "paused: the precise frame");
+  assert.equal(drawsDeep(true, false), false, "playing while the precise frames arrive: the movie only");
+  assert.equal(drawsDeep(true, true), true, "playing with every precise frame in: those only");
+});
+
+test("a fluid shot exports from its own folder; a blank plate is 16-bit when SDR to HDR can run", () => {
+  assert.equal(fluidRun("output:paintaplate/p1/fluid_v2/hdr"), "paintaplate/p1/fluid_v2");
+  assert.equal(fluidRun("paintaplate/p1/fluid_v2/plate/blank_960x512.mov"), "paintaplate/p1/fluid_v2");
+  assert.equal(defaultDepth(true), 16);
+  assert.equal(defaultDepth(false), 8);
+});
+
+test("the Render panel shows each finished pass that made a movie", () => {
+  const r = { raw: "full.mp4", cleanRaw: "cleanfull.mp4", hdrMovie: "hdr.mp4", play: "view.mp4", playSpace: "ACEScct", review: "review.mp4",
+    reviewFrames: "output:x/frames_#####_.exr" }, pv = { raw: "shot.mp4", comp: "comp.mp4", cleanRaw: "clean.mp4" };
+  assert.deepEqual(passMovie("comp", r, pv), { url: "comp.mp4", space: "@model", frames: null });
+  assert.deepEqual(passMovie("clean", r, pv), { url: "clean.mp4", space: "@model", frames: null });
+  assert.deepEqual(passMovie("review", r, pv), { url: "view.mp4", space: "ACEScct", frames: "output:x/frames_#####_.exr" });
+  assert.deepEqual(passMovie("review", { review: "review.mp4", reviewSpace: "Rec.1886" }, pv), { url: "review.mp4", space: "Rec.1886", frames: null });
+  assert.deepEqual(passMovie("hdr", r, pv, { log: "ACEScct" }), { url: "hdr.mp4", space: "ACEScct", frames: null });
+  assert.equal(passMovie("track", r, pv), null);
+  assert.equal(passMovie("full", {}, pv), null);
+});
+
+test("Esc takes a pass on show back to the latest, after the selection and before a stop", () => {
+  assert.equal(escapeAction({ editing: false, selected: false, pinned: true, generating: true }), "latest");
+  assert.equal(escapeAction({ editing: false, selected: true, pinned: true, generating: true }), "deselect");
+  assert.equal(escapeAction({ editing: false, selected: false, pinned: false, generating: true }), "stop");
+});
+
+test("a dropped link takes the nodes that only fed it: none is left feeding nothing", () => {
+  const wf = workflow("review"), out = fillWorkflow(wf, { view_prefix: "", frames_prefix: "" });
+  const used = new Set(Object.values(out.prompt).flatMap((n) => Object.values(n.inputs).filter(Array.isArray).map((v) => String(v[0]))));
+  assert.deepEqual(Object.entries(out.prompt).filter(([id, n]) => !used.has(id) && !n._meta?.output).map(([, n]) => n.class_type), []);
+  assert.ok(!out.prompt[wf.outputs.view] && fillWorkflow(wf, { view_prefix: "p/review/view" }).prompt[wf.outputs.view]);
 });

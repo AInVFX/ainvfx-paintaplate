@@ -346,8 +346,8 @@
    ],
    "tile_size": 512,
    "overlap": 64,
-   "temporal_size": 64,
-   "temporal_overlap": 8
+   "temporal_size": 128,
+   "temporal_overlap": 32
   }
  },
  "24": {
@@ -403,6 +403,45 @@
     "filename_prefix": "prefix"
    },
    "output": "hdr"
+  }
+ },
+ "27": {
+  "class_type": "PaintAPlate_ColorSpace",
+  "inputs": {
+   "image": [
+    "24",
+    1
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "ACEScg",
+   "destination": "ACEScct"
+  },
+  "_meta": {
+   "title": "HDR movie values",
+   "slots": {
+    "config": "config",
+    "destination": "view_space"
+   }
+  }
+ },
+ "28": {
+  "class_type": "PaintAPlate_SaveMovie",
+  "inputs": {
+   "fps": 24.0,
+   "crf": 12,
+   "images": [
+    "27",
+    0
+   ],
+   "filename_prefix": "paintaplate/plate/hdr_movie"
+  },
+  "_meta": {
+   "title": "HDR movie (log values: the look of the EXR frames)",
+   "slots": {
+    "fps": "movie_fps",
+    "filename_prefix": "video_prefix"
+   },
+   "output": "movie"
   }
  }
 }

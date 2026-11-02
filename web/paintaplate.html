@@ -148,6 +148,7 @@
       </label>
       <label id="hdr-switch" class="hdr-switch" hidden title="Lightricks' SDR-to-HDR IC-LoRA after the full-size shot: scene-linear values in the edited area"><input type="checkbox" id="hdr-on" checked> SDR to HDR</label>
       <ol id="stages"></ol>
+      <p class="hint render-hint">Click a finished step to show it on every frame; click it again, or Esc, for the latest.</p>
       <button id="render-full" type="button" class="quiet render-full" hidden title="These edits took the frames of an earlier render whose other edits are far away: only the tracking and the composites ran. Render them in full, with their own shot, the same edits and seeds">Render in full</button>
     </section>
   </aside>
@@ -187,7 +188,7 @@
       <dt>Enter</dt><dd>Generate: the edit on the first frame, then its shot. Pressed again with nothing changed, nothing runs twice</dd>
       <dt>Ctrl+Enter</dt><dd>Try another seed on the selected edit, else the last one</dd>
       <dt>Click an edit</dt><dd>Select it: its words come back; retype them, paint more, rub strokes out or switch Whole object, then Generate. Esc deselects</dd>
-      <dt>Esc</dt><dd>Cancel a plate that is opening; else cancel the edit in progress, then deselect, then stop generating (Stop, beside Generate, does the same). What finished is kept, and Enter goes on from there</dd>
+      <dt>Esc</dt><dd>Cancel a plate that is opening; else cancel the edit in progress, then deselect, then the latest result for a pass on show, then stop generating (Stop, beside Generate, does the same). What finished is kept, and Enter goes on from there</dd>
       <dt>× after the plate's name</dt><dd>Close the plate (also right-click > File > Close plate): every render stops and its frames leave the browser's memory</dd>
       <dt>Two fingers</dt><dd>On a touch screen: pan and zoom the frame. ☰ at the top holds every action</dd>
       <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo (Ctrl+Y redoes too): one step per stroke, per removal, per change of words or seed</dd>

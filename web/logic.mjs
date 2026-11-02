@@ -7,7 +7,7 @@
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_element: ["seed"],
-  review_frames: ["frames_prefix"], hdr_shot: ["hdr"], relight_light: ["light"] };
+  review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], relight_light: ["light"] };
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
   const slots = {}, outputs = {}, progress = new Set();
@@ -29,7 +29,8 @@ export function fillWorkflow(wf, values) { // a copy with the slots set and the 
 }
 
 export function dropLink(wf, link, sources, extra) { // cut the input `link` names, and every node that only fed it
-  for (const [id, input] of wf.slots[link] ?? []) if (wf.prompt[id]) delete wf.prompt[id].inputs[input]; // a node another link took already
+  const fed = new Set(), cut = (v) => { if (Array.isArray(v)) fed.add(String(v[0])); }; // what fed what goes
+  for (const [id, input] of wf.slots[link] ?? []) if (wf.prompt[id]) { cut(wf.prompt[id].inputs[input]); delete wf.prompt[id].inputs[input]; } // a node another link took already
   const gone = new Set(sources.flatMap((k) => (wf.slots[k] ?? []).map(([id]) => id)));
   if (extra) gone.add(extra);
   for (let grew = true; grew;) {
@@ -39,7 +40,18 @@ export function dropLink(wf, link, sources, extra) { // cut the input `link` nam
       gone.add(id); grew = true;
     }
   }
-  for (const id of gone) delete wf.prompt[id];
+  // what fed the cut input and the nodes that went goes too, once nothing else takes its outputs (an output always stays)
+  for (const id of gone) { for (const v of Object.values(wf.prompt[id]?.inputs ?? {})) cut(v); delete wf.prompt[id]; }
+  for (let grew = true; grew;) {
+    grew = false;
+    const used = new Set(Object.values(wf.prompt).flatMap((n) => Object.values(n.inputs).filter(Array.isArray).map((v) => String(v[0]))));
+    for (const id of [...fed].sort()) {
+      const node = wf.prompt[id];
+      if (!node || used.has(id) || node._meta?.output) continue;
+      for (const v of Object.values(node.inputs)) if (Array.isArray(v)) fed.add(String(v[0]));
+      delete wf.prompt[id]; grew = true;
+    }
+  }
 }
 
 // ---------- Sizes and time ----------
@@ -564,18 +576,26 @@ export function panelSize(kind, wanted, view, { least, stage, around }) {
 // Lightricks' LTX 2.5 SDR-to-HDR IC-LoRA makes 16-bit HDR from an SDR shot. It runs at full size for an EXR plate, unless
 // switched off; a video plate stays SDR. A relight keeps the plate's own values under a smooth light ratio, which stay HDR,
 // so a render with a light edit leaves it out. A blank plate asks its bit depth: 8-bit, or 16-bit half float, where its
-// fluid shot goes through it and becomes an EXR plate. The page keeps it off and hidden for now (HDR_ON in app.mjs): its
-// shots flicker (29 Oct).
+// fluid shot goes through it and becomes an EXR plate: 16-bit is the default once its files are found (?hdr=0 turns it off).
 export const HDR_DEPTH = 16;
 export const hdrPlate = (spec) => !!spec && spec.kind !== "video" && /^\.exr$/i.test(spec.ext ?? "");
 export const wantsHdr = (spec, tools, on) => !!on && hdrPlate(spec) && !tools.includes("light");
 export const hdrFps = (fps) => Math.min(30, +fps || 24); // the conditioning frame rate: at most 30, as in Lightricks' workflow
 export const blankDepth = (v) => (+v === HDR_DEPTH ? HDR_DEPTH : 8);
+export const defaultDepth = (hdrReady) => (hdrReady ? HDR_DEPTH : 8); // a blank plate: 16-bit whenever SDR to HDR can run
+// The 8-bit movies of an image sequence (its playback proxy, its review, its SDR-to-HDR pass) hold log values, ACEScct when
+// the config has it, so they show what its full-precision frames show; a config without it keeps the model space.
+export const viewerSpace = (names, model) => (names.includes("ACEScct") ? "ACEScct" : model);
+// While a shot plays, one source shows one kind of frame: its full-precision frames once all of them are in, else its 8-bit
+// movie. Mixed, the two alternated as the frames arrived, with two different tone mappings (one cause of the flicker of 29 Oct).
+export const drawsDeep = (playing, holdsAll) => !playing || holdsAll;
+// A fluid shot's folder, from its HDR frames or its shot in the blank plate's format: what its export zips.
+export const fluidRun = (path) => String(path ?? "").replace(/^output[:/]/, "").replace(/\/(hdr|plate)(\/[^/]*)?$/, "");
 
-// Esc, one thing at a time: the strokes or the edit in progress, then the selection, then everything that generates. A stop
+// Esc, one thing at a time: the strokes or the edit in progress, then the selection, then a pass on show (back to the latest), then everything that generates. A stop
 // keeps what finished, and Enter goes on from there. (Shift+Esc opens Chrome's Task Manager on Windows and Linux.)
-export const escapeAction = ({ opening = false, editing, selected, generating }) =>
-  (opening ? "cancelOpen" : editing ? "discard" : selected ? "deselect" : generating ? "stop" : null); // a plate opening comes first
+export const escapeAction = ({ opening = false, editing, selected, pinned = false, generating }) =>
+  (opening ? "cancelOpen" : editing ? "discard" : selected ? "deselect" : pinned ? "latest" : generating ? "stop" : null); // a plate opening comes first
 
 // The light brush lays soft dabs at a fixed spacing along a stroke, whatever the pointer's speed, so the light builds up
 // by stroke, never by how fast the hand moved. `points`: [x, y, radius]; `spacing(radius)`: the distance between dabs;
@@ -611,4 +631,17 @@ export function dabFlow(peak, spacingOverRadius) {
   let sum = 0;
   for (let k = -Math.ceil(1 / spacingOverRadius); k <= Math.ceil(1 / spacingOverRadius); k++) sum += dabAlpha(Math.abs(k * spacingOverRadius));
   return peak / sum;
+}
+
+// ---------- Passes on show ----------
+// Each finished step that made a picture shows on every frame from the Render panel, one render of the shot at a time:
+// where its movie sits, in the render (`r`) or in its preview size (`pv`). Tracking and the export make no movie.
+export const PASSES = { clean: ["pv", "cleanRaw"], shot: ["pv", "raw"], comp: ["pv", "comp"], cleanfull: ["r", "cleanRaw"], full: ["r", "raw"],
+  hdr: ["r", "hdrMovie"], review: ["r", "play"] };
+export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of a finished step, or null
+  const at = PASSES[id], store = at && (at[0] === "pv" ? pv : r);
+  const url = (at && store?.[at[1]]) ?? (id === "review" ? store?.review : null);
+  if (!url) return null;
+  if (id === "review") return { url, space: store.playSpace ?? store.reviewSpace ?? "@model", frames: store.reviewFrames ?? null };
+  return { url, space: id === "hdr" ? spaces.log ?? "@model" : "@model", frames: null };
 }

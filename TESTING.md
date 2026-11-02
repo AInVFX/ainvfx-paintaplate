@@ -40,7 +40,11 @@ Where the system Python refuses `pip` (Ubuntu, Debian), install into a virtual e
 - **Keys**: every key the right-click menu shows is in the Keys dialog, and every documented key does what the dialog says;
 - **Out of memory**: the mock's `/mock/oom` makes the next fluid pass fail with ComfyUI's own message; the page asks ComfyUI to free its memory, waits until `/system_stats` shows it released, then makes the shot (posted at once, the retry ran before the free on a GPU, 29 Oct);
 - **Phones**, upright and on its side: the plate opened again from the job index, the frame, Generate, the transport, the status line, the log and the menu sheet fit the screen.
-- SDR to HDR: off by default (no switch for an EXR plate, no 16-bit blank plate); with `?hdr=1`, no switch for a video plate; on by default for an EXR plate, where the step runs after the full-size shot and before the full-size composite; switched off, the next render leaves it out; a 16-bit blank plate's fluid shot goes through it and opens as an EXR plate.
+- SDR to HDR: `?hdr=0` turns it off (no switch for an EXR plate, no 16-bit blank plate); by default, no switch for a video plate; on by default for an EXR plate, where the step runs after the full-size shot and before the full-size composite; switched off, the next render leaves it out; a 16-bit blank plate's fluid shot goes through it and opens as an EXR plate.
+- Then every `tests/flows/*.py` module, in name order (`tests/flows/README.md`): one file per workstream, so `ui_mock.py` itself stays as it is.
+- The start: with no plate open, a blank plate opens at 960 × 512, 121 frames at 25 fps, in 16-bit (every other flow loads the page with `?blank=0`).
+- The Render panel: every finished pass with a picture is a row to click; a click shows it (SDR to HDR, the First frame), a second click the latest.
+- A 16-bit fluid shot exports by itself (a zip of its HDR frames and its shot), and playing its EXR plate never alternates between its EXR frames and its 8-bit movie.
 - While it generates: a full-size pass shows its live preview in a corner; Esc stops the render step on its way and Enter goes on; Shift+Home resets every colour change.
 - Close plate: the × after the plate's name empties the page, disables playback and says the frames are freed.
 - The layout: the side panel and the log resize from their dividers, the stage keeps its room, a new session keeps the sizes, a double-click gives the first sizes back.

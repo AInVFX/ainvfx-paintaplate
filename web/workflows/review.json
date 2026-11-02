@@ -499,5 +499,59 @@
    },
    "output": "frames"
   }
+ },
+ "30": {
+  "class_type": "PaintAPlate_ColorSpace",
+  "inputs": {
+   "image": [
+    "25",
+    0
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "ACEScct"
+  },
+  "_meta": {
+   "title": "Viewer movie values",
+   "slots": {
+    "config": "config",
+    "source": "color_space",
+    "destination": "view_space"
+   }
+  }
+ },
+ "31": {
+  "class_type": "ImageScaleToMaxDimension",
+  "inputs": {
+   "upscale_method": "lanczos",
+   "largest_size": 1920,
+   "image": [
+    "30",
+    0
+   ]
+  }
+ },
+ "32": {
+  "class_type": "PaintAPlate_SaveMovie",
+  "inputs": {
+   "images": [
+    "31",
+    0
+   ],
+   "fps": [
+    "1",
+    3
+   ],
+   "crf": 12,
+   "filename_prefix": ""
+  },
+  "_meta": {
+   "title": "Viewer movie (image sequences: log values, the look of the EXR frames)",
+   "slots": {
+    "filename_prefix": "view_prefix",
+    "images": "review_view"
+   },
+   "output": "view"
+  }
  }
 }

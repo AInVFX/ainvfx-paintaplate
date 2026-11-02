@@ -126,13 +126,17 @@ def load(name, folder=None):
 # no EXR frames, its movie is the plate's own quality; no SDR-to-HDR shot: the SDR shot goes on as it is; not a light
 # edit: no painted light to keep.
 OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",),
-            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "hdr_shot": ("hdr",), "relight_light": ("light",)}
+            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "relight_light": ("light",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
-    """Remove the input `link` names, the nodes its `sources` slots sit on, and every node fed only by them."""
+    """Remove the input `link` names, the nodes its `sources` slots sit on, every node fed only by them, then every node
+    that only fed what went (an output node always stays): no node is left that feeds nothing."""
+    fed = set()  # what fed the cut input and the nodes that go
     for nid, key in slots.get(link, []):
-        prompt[nid]["inputs"].pop(key, None)
+        v = prompt.get(nid, {}).get("inputs", {}).pop(key, None)
+        if isinstance(v, list):
+            fed.add(str(v[0]))
     gone = {nid for source in sources for nid, _ in slots.get(source, [])} | set(extra)
     grew = True
     while grew:
@@ -141,8 +145,20 @@ def drop_link(prompt, slots, link, sources, extra=()):
             if nid not in gone and any(isinstance(v, list) and str(v[0]) in gone for v in node["inputs"].values()):
                 gone.add(nid)
                 grew = True
+    fed |= {str(v[0]) for nid in gone for v in prompt.get(nid, {}).get("inputs", {}).values() if isinstance(v, list)}
     for nid in gone:
         prompt.pop(nid, None)
+    grew = True
+    while grew:
+        grew = False
+        used = {str(v[0]) for node in prompt.values() for v in node["inputs"].values() if isinstance(v, list)}
+        for nid in sorted(fed):
+            node = prompt.get(nid)
+            if node is None or nid in used or "output" in node.get("_meta", {}):
+                continue
+            fed |= {str(v[0]) for v in node["inputs"].values() if isinstance(v, list)}
+            prompt.pop(nid)
+            grew = True
 
 
 def fill(name, values, folder=None):
@@ -179,7 +195,8 @@ def ingest():
 
     The proxy keeps a video plate's own values, which the viewer converts with OCIO as it does the plate (the page sets
     `proxy_space` to the plate's colour space and `proxy_size` to the working size). An image sequence's proxy is in the
-    model space, at 960: the viewer reads its frames at full precision as they arrive.
+    log values (ACEScct, as the page sets `proxy_space`) at 960: they show what its full-precision frames show, which the
+    viewer reads as they arrive.
     """
     g = Graph()
     load, model = plate(g, pad=True, progress=True)  # same inputs as every other Load Plate: decoded once, then cached
@@ -548,6 +565,13 @@ def review():
     frames = g("PaintAPlate_SaveFrames", _title="Review frames (half-float EXR, image sequences only)", _output="frames",
                images=real, format="exr", filename_prefix=Slot("frames_prefix", ""))
     g.link_slot(frames, "images", "review_frames")  # dropped for a video plate
+    # What the viewer plays for an image sequence: log values (ACEScct, `view_space`), so the 8-bit movie shows what its EXR
+    # frames show at full precision. The review movie above stays in the model space, for the zip. Dropped for a video plate.
+    view = g("PaintAPlate_SaveMovie", _title="Viewer movie (image sequences: log values, the look of the EXR frames)", _output="view",
+             images=g("ImageScaleToMaxDimension", upscale_method="lanczos", largest_size=1920,
+                      image=colour(g, real, Slot("color_space", "@model"), Slot("view_space", "ACEScct"), "Viewer movie values")),
+             fps=load[3], crf=12, filename_prefix=Slot("view_prefix", ""))
+    g.link_slot(view, "images", "review_view")
     g.save("review")
 
 
@@ -635,7 +659,8 @@ def hdr():
     As Lightricks' official workflow (example_workflows/2.5/HDR_workflows/LTX-2.5_ICLoRA_SDR_to_HDR_Distilled.json in the
     pinned ComfyUI-LTXVideo): core Convert Image Color Space maps the shot from sRGB to ACEScct, the IC-LoRA's guide (not the
     creative SDR-to-HDR expand); fixed scene embeddings stand for the prompt, positive and negative, at CFG 1; the 8 distilled
-    sigmas with euler; the video VAE in float32 encodes the guide and decodes the result, tiled; LTXVHDRDecodePostprocess
+    sigmas with euler; the video VAE in float32 encodes the guide and decodes the result, tiled (128-frame temporal tiles, as
+    Lightricks' Tiled Fusion graph); LTXVHDRDecodePostprocess
     returns ACEScg scene-linear values (its own EXR writer stays off: Save Frames writes them). The conditioning frame rate is
     at most 30, as there. The page gives it shots at the working size, already a multiple of 32.
     """
@@ -660,12 +685,19 @@ def hdr():
                 sampler=g("KSamplerSelect", sampler_name="euler"), sigmas=g("ManualSigmas", sigmas=INPAINT_SIGMAS),
                 latent_image=g("LTXVConcatAVLatent", video_latent=guided[2], audio_latent=audio))
     video = g("LTXVCropGuides", positive=guided[0], negative=guided[1], latent=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])
-    decoded = g("VAEDecodeTiled", samples=video[2], vae=vae, tile_size=512, overlap=64, temporal_size=64, temporal_overlap=8)
+    # 128-frame temporal tiles with 32 frames of overlap, as Lightricks' Tiled Fusion SDR-to-HDR graph. The distilled graph's
+    # 64 with 8 made the HDR frames of a 121-frame fluid shot jump 0.32 stops at frame 56, where the second tile starts; with
+    # 128 and 32 the largest step was 0.07 stops, the SDR shot's own (RTX PRO 6000, 2 Nov 2026).
+    decoded = g("VAEDecodeTiled", samples=video[2], vae=vae, tile_size=512, overlap=64, temporal_size=128, temporal_overlap=32)
     linear = g("LTXVHDRDecodePostprocess", _title="ACEScct to ACEScg scene-linear", image=decoded, transfer="acescct", exposure=0.0,
                save_exr=False, exr_color_space="acescg", output_dir="paintaplate/hdr_unused", filename_prefix="frame",
                half_precision=True)
     g("PaintAPlate_SaveFrames", _title="HDR frames (half-float EXR, ACES2065-1)", _output="hdr", format="exr",
       images=colour(g, linear[1], "ACEScg", HDR_SPACE, "ACEScg to ACES2065-1"), filename_prefix=Slot("prefix", "paintaplate/plate/hdr/f"))
+    # the same frames as an 8-bit movie for the viewer, in log values (ACEScct, `view_space`): the look of the EXR frames
+    g("PaintAPlate_SaveMovie", _title="HDR movie (log values: the look of the EXR frames)", _output="movie", fps=Slot("movie_fps", 24.0),
+      crf=12, images=colour(g, linear[1], "ACEScg", Slot("view_space", "ACEScct"), "HDR movie values"),
+      filename_prefix=Slot("video_prefix", "paintaplate/plate/hdr_movie"))
     g.save("hdr")
 
 if __name__ == "__main__":

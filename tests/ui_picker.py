@@ -77,7 +77,7 @@ def main():
             page = context.new_page()
             errors = []
             page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
-            page.goto(f"{url}/extensions/ainvfx-paintaplate/paintaplate.html")
+            page.goto(f"{url}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
             page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=120000)
             open_path(page, a.path)
             page.wait_for_function("document.querySelector('#spec').textContent.includes('frames') && document.querySelector('#opening').hidden",

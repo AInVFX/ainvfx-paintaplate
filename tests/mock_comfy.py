@@ -128,6 +128,11 @@ def save_mp4(frames, prefix, fps=24.0):
     return {"filename": name, "subfolder": sub, "type": "output"}
 
 
+def acescct(x):  # ACEScct codes of linear values, primaries left as they are: the page's log movies of an image sequence
+    x = np.maximum(np.asarray(x, np.float32), 0)
+    return np.where(x <= 0.0078125, 10.5402377416545 * x + 0.0729055341958355, (np.log2(np.maximum(x, 1e-10)) + 9.72) / 17.52).astype(np.float32)
+
+
 # ---------- the fake workflows ----------
 
 def inputs_by_slot(prompt):
@@ -183,7 +188,8 @@ async def execute(pid, prompt):
         o[outs["hero"]] = {"images": [save_png(resize(frames[0], round(w * k), round(h * k)), "output", v["prefix"])]}
         k = min(1.0, v.get("proxy_size", 960) / max(w, h))
         pw, ph = round(w * k), round(h * k)
-        o[outs["proxy"]] = {"images": [save_mp4([resize(f, pw, ph) for f in frames[:n]], v["video_prefix"], spec["fps"])],
+        log = v.get("proxy_space") == "ACEScct"  # an image sequence: log values, the look of its EXR frames
+        o[outs["proxy"]] = {"images": [save_mp4([acescct(resize(f, pw, ph)) if log else resize(f, pw, ph) for f in frames[:n]], v["video_prefix"], spec["fps"])],
                             "animated": [True]}
         o[outs["spec"]] = {"text": [plateio.spec_json(spec)]}
         await steps(pid, 2, 0.4)
@@ -242,6 +248,9 @@ async def execute(pid, prompt):
             return (lin * (1 + 3 * lin ** 4)).astype(np.float32)  # white becomes 4.0
         plateio.write_exrs(lifted, [os.path.join(folder("output"), sub, f) for f in names])
         o[outs["hdr"]] = {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
+        if "movie" in outs:  # the same frames as a movie in log values, for the viewer
+            o[outs["movie"]] = {"images": [save_mp4([acescct(lifted(i)) for i in range(len(frames))], v["video_prefix"], v.get("movie_fps", 24.0))],
+                                "animated": [True]}
     elif "review" in outs:  # review: the composite at full size, as a movie, and as half-float EXR frames for an image sequence
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         n, (h, w) = spec["frames"], frames[0].shape[:2]
@@ -260,6 +269,8 @@ async def execute(pid, prompt):
             names = [f"{stem}_{i + 1:05d}_.exr" for i in range(n)]
             plateio.write_exrs(lambda i: out[i], [os.path.join(folder("output"), sub, f) for f in names])
             o[outs["frames"]] = {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
+        if "view" in outs:  # an image sequence: the composite as a movie in log values, which the viewer plays
+            o[outs["view"]] = {"images": [save_mp4([acescct(f) for f in out], v["view_prefix"], spec["fps"])], "animated": [True]}
     elif "frames" in outs and "video" in outs:  # shot: the edited first frame pasted on every frame
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         w, h = v["width"], v["height"]

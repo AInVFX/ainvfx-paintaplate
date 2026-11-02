@@ -185,7 +185,7 @@ def main():
                     "LTXAddVideoICLoRAGuide", "SAM3_VideoTrack", "ReferenceMultiLatent", "ImageColorSpace"]:
             info, _ = http(f"{url}/object_info/{cls}")
             check(cls in info, f"node {cls} registered")
-        page, ctype = http(f"{url}/extensions/ainvfx-paintaplate/paintaplate.html")
+        page, ctype = http(f"{url}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
         check(b"Paint a plate" in page, "app page served")
         _, ctype = http(f"{url}/extensions/ainvfx-paintaplate/app.mjs")
         check("javascript" in ctype, f"app.mjs served as JavaScript ({ctype})")

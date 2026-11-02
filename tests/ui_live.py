@@ -173,7 +173,7 @@ def main():
             page = browser.new_page(viewport={"width": 1280, "height": 800}, accept_downloads=True)
             page.on("console", lambda m: (m.type == "error" and errors.append(m.text), print("   [console]", m.type, m.text[:200])))
             page.on("pageerror", lambda e: errors.append(str(e)))
-            page.goto(f"{url}/extensions/ainvfx-paintaplate/paintaplate.html")
+            page.goto(f"{url}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
             page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=30000)
             page.screenshot(path=f"{SHOTS}/1_empty.png")
 
@@ -267,7 +267,7 @@ def remote(a):
         page.on("pageerror", lambda e: errors.append(str(e)))
         status = lambda: page.inner_text("#status")  # noqa: E731
         try:
-            page.goto(f"{a.url}/extensions/ainvfx-paintaplate/paintaplate.html")
+            page.goto(f"{a.url}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
             page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
             mark("page ready: " + status())
             if fluid:  # a fluid shot first: once made, it is the plate the strokes are painted on

@@ -338,3 +338,12 @@ dialog.open { width: min(900px, 94vw); }
 .stop[hidden], .close-plate[hidden] { display: none; }
 .render-full { margin-top: 10px; }
 .render-full[hidden] { display: none; }
+#stages li.pick { cursor: pointer; }
+#stages li.pick:hover .name { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+#stages li.shown .name { color: var(--gold); }
+#stages li.shown .dot { box-shadow: 0 0 0 2px var(--gold); }
+.render-hint { margin: 6px 0 0; font-size: 12px; }
+
+/* ---------- Viewer: colour, OCIO, the colour inspector (the viewer workstream adds its rules below) ---------- */
+
+/* ---------- Render, Deliver, passes (the pipeline workstream adds its rules below) ---------- */
