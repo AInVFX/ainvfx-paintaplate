@@ -672,6 +672,7 @@ function shotFrame() { // the shot at the playhead: a cached frame, the video wh
 function render() {
   if (!S.plate || !S.hero) return;
   if (keying()) return renderFluid();
+  $("#wipe .label.left").textContent = "Plate";
   wantDeep(); // once a colour value moves, the frames' own values load around the playhead, as OpenRV's cache does
   const W = view.width, H = view.height, still = !S.playing;
   const live = S.draft || stroke ? null : S.live; // while an edit is painted, the frame shows it, not the live preview of a render
@@ -735,10 +736,13 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
   const cached = caches.get(shotVid).get(S.frame), made = !!f.result && f.result.sig === fluidSig();
   const shot = () => ctx.drawImage(look.image(cached || shotVid, S.display, S.shot?.space ?? modelSpace()), 0, 0, W, H); // a decoded frame first: no seek shows
   if (S.live && f.busy) ctx.drawImage(look.image(S.live, S.display, modelSpace()), 0, 0, W, H);
-  else if (f.result && (S.playing ? made : f.view === "result") && !S.compare && (cached || shotReady())) { // playing a made shot: never the keyframes
-    if (S.wipe === null) shot();
-    else { keysLayer(W, H); ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip(); shot(); ctx.restore(); }
-  } else keysLayer(W, H);
+  else if (f.result && S.wipe !== null && !S.compare && (cached || shotReady())) { // the wipe: this frame's painted keyframe, or black, against the shot
+    const key = keyHere();
+    if (key) ctx.drawImage(key.canvas, 0, 0, W, H); // no onion skins: the left side shows what this frame was given
+    ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip(); shot(); ctx.restore();
+  } else if (f.result && (S.playing ? made : f.view === "result") && !S.compare && (cached || shotReady())) shot(); // playing a made shot: never the keyframes
+  else keysLayer(W, H);
+  $("#wipe .label.left").textContent = "Keyframe";
   inWork(drawCursor);
 }
 

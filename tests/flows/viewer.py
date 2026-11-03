@@ -115,6 +115,32 @@ def zoom_and_paint(page, U):
     page.keyboard.press("f")
 
 
+def fluid_wipe_and_models(page, U):
+    """The wipe on a fluid shot: the painted keyframe at this frame, or black, against the shot."""
+    page.click("#open-btn"); page.click("#open [data-tab=blank]")
+    page.select_option("#b-depth", "8"); page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.fill("#b-frames", "33")
+    page.dispatch_event("#b-frames", "input"); page.click("#open-go")
+    page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
+    page.click(".sw[data-color='#ffffff']")
+    box = page.eval_on_selector("#view", "e => { const r = e.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }")
+    spot = (box[0] + 0.2 * box[2], box[1] + 0.5 * box[3])
+    page.fill("#prompt", "white steam"); page.evaluate("document.activeElement.blur()")
+    page.mouse.move(spot[0] - 20, spot[1]); page.mouse.down(); page.mouse.move(spot[0] + 20, spot[1], steps=6); page.mouse.up()
+    page.keyboard.press("Enter")
+    page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
+      return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden; })()""", timeout=120000)
+    page.click('#history li[data-id="fluid"] .edit')  # the keyframes again: the fluid shot is the result
+    page.keyboard.press("Home"); page.keyboard.press("F6"); page.wait_for_timeout(800)
+    xy = page.evaluate(TO_CANVAS, list(spot))
+    key0 = page.evaluate(PIXEL, xy)
+    U.check(min(key0) > 200 and page.text_content("#wipe .label.left") == "Keyframe",
+            f"the wipe on a fluid shot shows the painted keyframe on its frame: {key0}, label {page.text_content('#wipe .label.left')!r}")
+    for _ in range(5): page.keyboard.press("ArrowRight")
+    page.wait_for_timeout(800)
+    U.check(page.evaluate(PIXEL, xy) == [0, 0, 0], f"and black on a frame with no keyframe: {page.evaluate(PIXEL, xy)}")
+    page.keyboard.press("Escape")
+
+
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
@@ -130,4 +156,5 @@ def run(browser, port, U):
     U.check(page.evaluate("window.__alive") == 1, "F5 is the page's: it does not reload")
     native_and_inspector(page, port, U)
     zoom_and_paint(page, U)
+    fluid_wipe_and_models(page, U)
     page.close()
