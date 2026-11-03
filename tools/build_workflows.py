@@ -126,7 +126,7 @@ def load(name, folder=None):
 # no EXR frames, its movie is the plate's own quality; no SDR-to-HDR shot: the SDR shot goes on as it is; not a light
 # edit: no painted light to keep.
 OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",),
-            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "relight_light": ("light",)}
+            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "edit_plan": ("plan",), "hdr_shot": ("hdr",), "relight_light": ("light",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -240,12 +240,15 @@ def edit():
     vae = g("VAELoader", vae_name=Slot("vae", KLEIN_VAE))
     base = g("LoadImage", _title="Frame before the edit", image=Slot("base", ""))
     reference = g("LoadImage", _title="Reference: the strokes", image=Slot("reference", ""))
+    # a relight's second reference: the light plan, its strokes alone on grey (dropped for paint and erase)
+    plan = g("LoadImage", _title="Light plan (light edits)", image=Slot("plan", ""))
     start = g("LoadImage", _title="Start image", image=Slot("start", ""))
     mask = g("LoadImageMask", _title="Edit mask", image=Slot("mask", ""), channel="red")
     positive = g("CLIPTextEncode", _title="Caption", text=Slot("caption", ""), clip=clip)
     negative = g("ConditioningZeroOut", conditioning=positive)
     ref = g("ReferenceMultiLatent", positive=positive, negative=negative, vae=vae,
-            resolution="keep resolution", images__image0=reference)
+            resolution="keep resolution", images__image0=reference, images__image1=plan)
+    g.link_slot(ref, "images.image1", "edit_plan")
     grown = g("GrowMask", mask=mask, expand=Slot("grow", 16), tapered_corners=True)
     latent = g("SetLatentNoiseMask", samples=g("VAEEncode", pixels=start, vae=vae), mask=grown)
     sampled = g("KSampler", _progress=True, model=model, seed=Slot("seed", 0), steps=Slot("steps", 8), cfg=1.0,

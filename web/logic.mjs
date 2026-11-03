@@ -7,7 +7,7 @@
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_element: ["seed"],
-  review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], relight_light: ["light"] };
+  review_frames: ["frames_prefix"], review_view: ["view_prefix"], edit_plan: ["plan"], hdr_shot: ["hdr"], relight_light: ["light"] };
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
   const slots = {}, outputs = {}, progress = new Set();
@@ -644,4 +644,23 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
   if (!url) return null;
   if (id === "review") return { url, space: store.playSpace ?? store.reviewSpace ?? "@model", frames: store.reviewFrames ?? null };
   return { url, space: id === "hdr" ? spaces.log ?? "@model" : "@model", frames: null };
+}
+
+// ---------- A relight's light plan (2 Nov test on an RTX PRO 6000, approved by Adrien) ----------
+// Klein gets two references: the frame, and the light plan, the light's strokes alone on grey (shade strokes in black). Shown
+// the frame with the light painted on it, Klein treated the strokes as paint; with the plan, it places the light where it is
+// painted, keeps its colours, and relights the rest of the frame to agree with it.
+export const PLAN_GREY = "#3a3a3a";
+export const lightColors = (colors, color) => {
+  const names = [...new Set(colors.filter((c) => !dark(c)).map(colorName))];
+  return names.length ? names.join(" and ") : colorName(color);
+};
+export function lightPlanCaption({ colors = [], color = "#ffd890", words = "" }) {
+  const shade = colors.some(dark) ? " The black strokes mark areas that must fall into deep shadow." : "";
+  const w = words.trim() ? ` ${words.trim()[0].toUpperCase()}${words.trim().slice(1)}${/[.!?]$/.test(words.trim()) ? "" : "."}` : "";
+  return "Relight the first image with the light planned in the second image. The second image is a light plan of the same frame: each coloured " +
+    `stroke marks a light source at that exact place, with that colour (${lightColors(colors, color)}).${shade}${w} Make the light source itself ` +
+    "visible where it is painted, as a real lamp, window, fire or glow that fits the scene. Light every surface that faces it with its colour and a " +
+    "natural falloff, cast new shadows away from it, and remove or soften the old highlights and shadows that disagree with it. Keep every object, " +
+    "face and texture, the framing and the camera exactly as in the first image: only the light changes. Do not draw any stroke.";
 }
