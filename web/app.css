@@ -359,6 +359,9 @@ dialog.open { width: min(900px, 94vw); }
 .models table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .models td { padding: 6px 8px; border-top: 1px solid rgba(128, 128, 128, 0.25); vertical-align: top; }
 .models small { opacity: 0.7; }
+#stages li.compared .dot { box-shadow: 0 0 0 2px #fff; }
+.xray { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
+#stages li.compared .name { text-decoration: underline dotted; text-underline-offset: 3px; }
 
 /* ---------- Render, Deliver, passes (the pipeline workstream adds its rules below) ---------- */
 .hdr-confirm { margin: 4px 0 8px; padding: 8px; border: 1px solid var(--line, #444); border-radius: 4px; font-size: 12px; }

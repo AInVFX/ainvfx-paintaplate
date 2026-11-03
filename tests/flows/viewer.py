@@ -233,6 +233,103 @@ def exposure_while_playing(browser, port, U):
     page.close()
 
 
+FRAC = """(([fx, fy]) => { const r = document.querySelector('#view').getBoundingClientRect(); return [r.left + fx * r.width, r.top + fy * r.height]; })"""
+SUM = """(([x0, x1]) => { const v = document.querySelector('#view'), a = Math.floor(x0 * v.width) + 3, w = Math.floor(x1 * v.width) - 3 - a;
+  const d = v.getContext('2d').getImageData(a, 0, w, v.height).data; let spread = 0, white = 0, sum = 0;
+  for (let i = 0; i < d.length; i += 4) { const hi = Math.max(d[i], d[i + 1], d[i + 2]), lo = Math.min(d[i], d[i + 1], d[i + 2]);
+    spread = Math.max(spread, hi - lo); if (lo > 200) white++; sum += d[i] + d[i + 1] + d[i + 2]; }
+  return { spread, white, sum }; })"""
+SEEN = "(() => { const i = document.querySelector('#inspector'); return [i.dataset.source, i.dataset.value, [...i.querySelectorAll('div')].map((d) => d.textContent)]; })()"
+
+
+def rendered(browser, port, U):
+    """desk.mp4 with a paint edit made to its full-size composite, nothing selected: the Render panel's rows to compare."""
+    page = browser.new_page(viewport={"width": 1400, "height": 900}, accept_downloads=True)
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
+    U.open_path(page, "plates/desk.mp4")
+    page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden", timeout=60000)
+    page.evaluate(U.WATCH)
+    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
+    U.wait_log(page, U.added_line(U.REVIEWED), 300000, "the full-size composite of the paint")
+    calm = 0
+    while calm < 3:  # Generate reads Generate for three seconds running: no step left
+        page.wait_for_timeout(1000); calm = calm + 1 if page.text_content("#generate").strip() == "Generate" else 0
+    page.keyboard.press("n"); page.keyboard.press("Home"); page.wait_for_timeout(800)  # New edit: nothing selected, so Esc reaches the wipe
+    return page
+
+
+def wipe_compare(page, U):
+    """Two passes in the wipe: Ctrl+click on a finished Render step puts that pass on the wipe's left side, against the pass
+    on show, both named; the inspector reads the side its point is on, a preview pass at its own size; a second
+    Ctrl+click, Esc or F6 ends it."""
+    row = "#stages li.pick:has-text('Track the paint, preview')"
+    names = lambda: [page.text_content("#wipe .label.left"), page.text_content("#wipe .label.right")]  # noqa: E731
+    before = page.evaluate(SUM, [0.5, 1.0])
+    page.click(row, modifiers=["Control"])
+    page.wait_for_function("document.querySelector('#view').dataset.compared === 'drawn'", timeout=30000)  # its own frame: the plate shows until then
+    U.check(page.is_visible("#wipe") and names() == ["Track the paint, preview", "Composite, full size"] and "compared" in page.get_attribute(row, "class"),
+            f"Ctrl+click on a finished step puts that pass on the wipe's left side, against the pass on show, both named: {names()}")
+    left, right = page.evaluate(SUM, [0.0, 0.5]), page.evaluate(SUM, [0.5, 1.0])
+    U.check(left["spread"] <= 12 and left["white"] > 0 and right["sum"] == before["sum"],
+            f"the left side shows the paint matte, grey with white where the edit is ({left}); the right side is the composite as before ({right['sum']} against {before['sum']})")
+    page.keyboard.press("F5")
+
+    def inspect(fx, fy, source):  # RV: Shift+click samples
+        page.keyboard.down("Shift"); page.mouse.click(*page.evaluate(FRAC, [fx, fy])); page.keyboard.up("Shift")
+        page.wait_for_function(f"(() => {{ const i = document.querySelector('#inspector'); return i.dataset.source === {json.dumps(source)} && (!!i.dataset.value || i.textContent.includes('Error')); }})()", timeout=20000)
+        return page.evaluate(SEEN)
+    left, right = inspect(0.2, 0.5, "Track the paint, preview"), inspect(0.8, 0.5, "Composite, full size")
+    U.check("Source" + "Track the paint, preview" in left[2] and "Source" + "Composite, full size" in right[2] and not any(r.startswith("Error") for r in left[2] + right[2]),
+            f"the inspector reads the side its point is on: {left[0]} at the left, {right[0]} at the right")
+    page.click("#stages li.pick:has-text('Shot, preview')"); page.wait_for_timeout(800)
+    pv = inspect(0.95, 0.95, "Shot, preview")
+    size = [r for r in pv[2] if r.startswith("Size")]
+    U.check(not any(r.startswith("Error") for r in pv[2]) and pv[1] and size,
+            f"a preview pass reads at its own size, in its own pixels, at the plate's point (1.7.0: « outside the 640 x 352 frame »): {size}, {pv[1]}")
+    page.keyboard.press("F5")
+    page.keyboard.press("Escape"); page.wait_for_timeout(400)
+    U.check(page.is_hidden("#wipe") and page.evaluate("document.querySelector('#view').dataset.compared") == "" and "compared" not in (page.get_attribute(row, "class") or ""),
+            "Esc ends the comparison first, and the wipe goes back off, as it was")
+    page.keyboard.press("Escape"); page.wait_for_timeout(400)  # then the latest result
+    page.click(row, modifiers=["Control"]); page.wait_for_timeout(300); page.click(row, modifiers=["Control"]); page.wait_for_timeout(300)
+    again = page.is_hidden("#wipe")
+    page.click(row, modifiers=["Control"]); page.wait_for_timeout(300); page.keyboard.press("F6"); page.wait_for_timeout(300)
+    U.check(again and page.is_hidden("#wipe") and page.evaluate("document.querySelector('#view').dataset.compared") == "",
+            "a second Ctrl+click ends it, and so does F6")
+
+
+XSTAT = """(() => { const x = document.querySelector('#xray'), d = x.getContext('2d').getImageData(0, 0, x.width, x.height).data;
+  let n = 0, sx = 0, sy = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) { const p = (i - 3) / 4; n++; sx += (p % x.width + 0.5) / x.width; sy += (Math.floor(p / x.width) + 0.5) / x.height; }
+  return { from: x.dataset.from, frame: x.dataset.frame, hidden: x.hidden, share: n / (d.length / 4), at: n ? [sx / n, sy / n] : null }; })()"""
+
+
+def xray_view(page, U):
+    """W tints, over the picture, where the edits on show change the plate: the tracking mattes of the size on show, then
+    the export's matte once Export made one; a light edit tints the whole frame. The canvas itself stays the picture."""
+    page.keyboard.press("Home"); pic = page.evaluate(SUM, [0.0, 1.0])
+    page.keyboard.press("w")
+    page.wait_for_function("(() => { const x = document.querySelector('#xray'); return !x.hidden && x.dataset.frame === '0'; })()", timeout=30000)
+    got = page.evaluate(XSTAT)
+    U.check(got["from"] == "full" and 0 < got["share"] < 0.5 and got["at"][0] < 0.5 and page.evaluate(SUM, [0.0, 1.0])["sum"] == pic["sum"],
+            f"W tints where the paint changes the plate, from the full-size tracking mattes, and leaves the canvas's picture as it was: {got}")
+    page.keyboard.press("ArrowRight")
+    page.wait_for_function("document.querySelector('#xray').dataset.frame === '1'", timeout=30000)
+    page.keyboard.press("Home")
+    page.click("#export-btn")
+    with page.expect_download(timeout=240000):
+        page.click("#x-go")
+    page.wait_for_function("(() => { const x = document.querySelector('#xray'); return x.dataset.from === 'export' && x.dataset.frame === '0'; })()", timeout=60000)
+    got = page.evaluate(XSTAT)
+    U.check(0 < got["share"] < 0.5, f"once Export has made its matte, the X-ray reads it: {got}")
+    page.keyboard.press("l"); U.paint_once(page, "warm sunset light", [(0.7, 0.3), (0.75, 0.35)]); page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('#xray').dataset.from === 'light'", timeout=120000)
+    got = page.evaluate(XSTAT)
+    U.check(got["share"] == 1 and not got["hidden"], f"with a light edit on show, the X-ray tints the whole frame: {got}")
+    page.keyboard.press("w")
+    U.check(page.is_hidden("#xray"), "W again hides the X-ray")
+
+
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
@@ -251,3 +348,7 @@ def run(browser, port, U):
     fluid_wipe_and_models(page, U)
     page.close()
     exposure_while_playing(browser, port, U)
+    page = rendered(browser, port, U)
+    wipe_compare(page, U)
+    xray_view(page, U)
+    page.close()

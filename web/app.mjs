@@ -6,9 +6,10 @@ import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
 import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onLog, onNotice, outputFile, outputFiles, outputText, post, run, setSalt, upload, viewUrl } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
+import { XRAY_SIDE, XRAY_TEXT, alphaFromBytes, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
 import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
-import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath } from "./inspector.mjs";
+import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { sceneGraph } from "./graph.mjs";
 import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
   erasePrompt, erasesPaint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
@@ -108,6 +109,10 @@ const S = {
 
 const view = $("#view"), ctx = view.getContext("2d");
 const plateVid = $("#plate-video"), shotVid = $("#shot-video");
+const followers = []; // videos that follow the playhead beside the plate's and the shot's: the pass compared in the wipe, the X-ray's mattes
+const cmpVid = follower("cmp-video");
+const xray = { el: $("#xray"), vids: [follower("xray-a"), follower("xray-b")], scratch: document.createElement("canvas"), got: new Map() }; // the X-ray (W): its overlay, its mattes' videos, their frames read paused
+S.xray = false;
 const fx = document.createElement("canvas"); // scratch layer for masked overlays
 const HISTORY_HELP = $("#history-empty").textContent;
 const FLUID_HELP = "A fluid shot: paint flat colour blobs (light grey smoke, white steam, orange and yellow fire) on frame 0 and on the " +
@@ -435,6 +440,15 @@ const clampFrame = (f) => Math.max(0, Math.min(S.plate.frames - 1, Math.round(f)
 const shotReady = () => !!S.shot?.url && shotVid.readyState >= 2;
 const stale = () => !!S.shot && S.shot.key !== S.heroKey;
 const master = () => (shotReady() ? shotVid : plateVid);
+const players = () => [plateVid, shotVid, ...followers];
+function follower(id) { // a video beside the shot's, at the playhead once loaded; a frame it reaches is drawn
+  const v = shotVid.cloneNode(false);
+  v.id = id; v.removeAttribute("src"); shotVid.after(v);
+  v.addEventListener("seeked", () => { if (!S.playing) render(); });
+  v.addEventListener("loadeddata", () => { v.currentTime = S.playing ? master().currentTime : time(S.frame); if (S.playing) v.play().catch(() => {}); });
+  followers.push(v);
+  return v;
+}
 
 function play() {
   if (!S.plate || S.playing) return;
@@ -442,7 +456,7 @@ function play() {
   S.playing = true;
   S.peek = null;
   $("#play-btn").classList.add("playing");
-  for (const v of [plateVid, shotVid]) if (v.getAttribute("src")) { v.currentTime = time(S.frame); v.play().catch(() => {}); }
+  for (const v of players()) if (v.getAttribute("src")) { v.currentTime = time(S.frame); v.play().catch(() => {}); }
   const left = renderLeft(), done = left ? `, the edited shot is ${secs(left)}` : "";
   if (S.edits.some((e) => e.on && e.patch)) {
     if (!S.shot) hud(`Playing the plate${done}`, 2500);
@@ -454,7 +468,7 @@ function play() {
 function pause() {
   if (!S.playing) return;
   S.playing = false;
-  for (const v of [plateVid, shotVid]) v.pause();
+  for (const v of players()) v.pause();
   $("#play-btn").classList.remove("playing");
   if (S.shot?.url && shotVid.readyState >= 2) keepFrame(shotVid); // shown while the video seeks to the exact frame
   seek(S.frame);
@@ -466,10 +480,11 @@ function tick() {
   const f = Math.floor(m.currentTime * fps + 1e-3);
   if (f > S.outPt || f < S.inPt || m.ended) { // loop between the in and out points
     S.frame = S.inPt;
-    for (const v of [plateVid, shotVid]) if (v.getAttribute("src")) { v.currentTime = time(S.inPt); v.play().catch(() => {}); }
+    for (const v of players()) if (v.getAttribute("src")) { v.currentTime = time(S.inPt); v.play().catch(() => {}); }
   } else {
     S.frame = Math.min(f, S.plate.frames - 1);
     if (m === shotVid && Math.abs(plateVid.currentTime - m.currentTime) > 0.5 / fps) plateVid.currentTime = m.currentTime;
+    for (const v of followers) if (v.getAttribute("src") && v.readyState >= 2 && !v.seeking && Math.abs(v.currentTime - m.currentTime) > 1.5 / fps) v.currentTime = m.currentTime;
   }
   render(); timelineUI();
   requestAnimationFrame(tick);
@@ -478,8 +493,8 @@ function tick() {
 function seek(f) {
   if (!S.plate) return;
   S.frame = clampFrame(f);
-  if (!S.playing) for (const v of [plateVid, shotVid]) {
-    if (v.getAttribute("src") && v.readyState && !caches.get(v).get(S.frame)) v.currentTime = time(S.frame);
+  if (!S.playing) for (const v of players()) {
+    if (v.getAttribute("src") && v.readyState && !caches.get(v)?.get(S.frame)) v.currentTime = time(S.frame);
   }
   render(); timelineUI();
 }
@@ -520,6 +535,7 @@ function fitView() { // the frame fills the viewport with the plate's own aspect
 function applyView() {
   const { w, h, x, y } = S.fit, z = S.zoom, px = (v) => Math.round(v * devicePixelRatio) / devicePixelRatio; // whole device pixels
   Object.assign(view.style, { width: `${w}px`, height: `${h}px`, transform: `translate(${px(x + z.x)}px, ${px(y + z.y)}px) scale(${z.k})` });
+  Object.assign(xray.el.style, { width: view.style.width, height: view.style.height, transform: view.style.transform }); // the X-ray on the picture
   view.classList.toggle("native", w * z.k * devicePixelRatio >= view.width - 0.5); // from 1:1, plate pixels show as squares
   placeWipe(); refreshInspector();
 }
@@ -540,7 +556,7 @@ function inWork(draw) {
 // Paused, the frame on show is read at native size and full precision from the frames route (an EXR's half floats, a
 // video's frame decoded with its own YUV matrix and range), one frame per source, the latest asked for: a 4K half-float
 // frame is about 50 MB. While a source plays, the movies and the 960 px cache stay.
-const sharp = { plate: null, shot: null };
+const sharp = { plate: null, shot: null, cmp: null }; // cmp: the pass compared in the wipe
 function sharpFrame(slot, path) {
   const want = `${path}#${S.frame}`, s = sharp[slot];
   if (s?.key === want) return s.img;
@@ -642,6 +658,117 @@ function choosePass(id) {
   stagesUI();
 }
 
+// ---------- Two passes in the wipe (Ctrl+click on a finished Render step) ----------
+// The wipe's left side shows a second pass of the edits on show, against the pass on show on its right, both named, so a
+// fault can be traced to the step it comes from: the shot against its composite, a matte against the picture, a preview
+// against the full size. Ctrl+click (Cmd+click on a Mac) puts a row there; the same again, Esc or F6 ends it. The left
+// side draws as the right does: paused, the frame at native size from the frames route; playing, its movie.
+S.cmp = null; // { id, label, url, space, frames, framesSpace, key, wiped }: the pass on the left, the edits it belongs to, and whether the wipe was on before
+function compareRow(li, id) { // in the Render panel's pick helper: Ctrl+click compares, a plain click shows the pass
+  const show = li.onclick;
+  li.onclick = (e) => (e.ctrlKey || e.metaKey ? comparePass(id) : show(e));
+  li.title += ". Ctrl+click (Cmd+click on a Mac) puts it on the wipe's left side, against the pass on show";
+  li.classList.toggle("compared", S.cmp?.id === id);
+  if (S.xray) xrayLater(); // the rows changed: a matte the X-ray reads may have come
+}
+const passSpaces = () => ({ log: logSpace(), data: matteSpace(), hdr: HDR_FRAMES });
+function passLabel(id) {
+  if (id === "first") return "First frame";
+  return STAGES.find((x) => x.id === id)?.label ?? fluidPasses(S.fluid?.result, passSpaces()).find((x) => x.id === id)?.label ?? id;
+}
+function shownLabel() { // the pass on show, by its row's name: the one clicked, else the latest result
+  if (S.pass) return passLabel(S.pass);
+  const r = S.renders.get(S.heroKey), pv = previewOf(r);
+  return STAGES.find((x) => S.shot?.url && passMovie(x.id, r, pv, passSpaces())?.url === S.shot.url)?.label ?? (S.shot ? "Result" : "Plate");
+}
+function comparePass(id) {
+  if (S.cmp?.id === id) return endCompare();
+  const r = S.renders.get(S.heroKey);
+  const m = id === "first" ? { url: null, space: modelSpace(), frames: null } : passMovie(id, r, previewOf(r), passSpaces());
+  if (!m) return;
+  S.cmp = { ...m, id, key: S.heroKey, label: passLabel(id), wiped: S.cmp ? S.cmp.wiped : S.wipe !== null };
+  sharp.cmp = null;
+  if (!m.url) { cmpVid.removeAttribute("src"); cmpVid.load(); }
+  else if (cmpVid.getAttribute("src") !== m.url) cmpVid.src = m.url;
+  S.wipe ??= 0.5;
+  $("#wipe-btn").setAttribute("aria-pressed", "true");
+  placeWipe(); render(); stagesUI();
+  hud(`Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right. Ctrl+click it again, Esc or F6 ends it`, 3500);
+  log(`Viewer: ${S.cmp.label} against ${shownLabel()} in the wipe`);
+}
+// ---------- The X-ray (W): where the edits on show change the plate, tinted over the picture (xray.mjs) ----------
+// The overlay sits on the canvas with its zoom and pan, so the inspector and the picker read the picture without the tint.
+// Paused, each matte's frame comes from the frames route at XRAY_SIDE, in any browser; playing, from its movie, which
+// follows the playhead. Until every matte has the frame, the last tint stays; data-frame names the frame it shows.
+function xrayNow() { // the mattes of the edits on show, at the size on show
+  const r = S.renders.get(S.heroKey), st = STAGES.find((x) => x.id === S.pass);
+  const full = st ? !!st.final : !!S.shot?.url && [r?.play, r?.review, r?.raw, r?.cleanRaw, r?.hdrMovie].includes(S.shot.url);
+  return xrayPlan({ tools: S.edits.filter((e) => e.on && e.patch && e.state === "done").map((e) => e.tool), r, pv: previewOf(r), full });
+}
+function setXray(on) {
+  S.xray = on && !!S.plate;
+  render();
+  hud(S.xray ? XRAY_TEXT[xrayNow().from] : "X-ray off", 3000);
+}
+function xrayLater() { // the Render panel changed (a step finished, Export made its matte): the X-ray follows
+  if (xrayLater.queued) return;
+  xrayLater.queued = true;
+  queueMicrotask(() => { xrayLater.queued = false; if (S.xray && !S.playing) drawXray(); });
+}
+function xrayFrame(url) { // paused: a matte's frame on show from the frames route, as its opacity; null while it loads
+  const path = sourcePath({ url }, null), key = `${path}#${S.frame}`;
+  if (xray.got.has(key)) return xray.got.get(key);
+  xray.got.set(key, null);
+  if (xray.got.size > 64) xray.got.delete(xray.got.keys().next().value);
+  fetch(`/paintaplate/frames?${new URLSearchParams({ path, first: S.frame, count: 1, side: XRAY_SIDE })}`).then(async (r) => {
+    if (!r.ok) throw new Error(await r.text());
+    const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number);
+    xray.got.set(key, { width, height, alpha: alphaFromHalfs(new Uint16Array(await r.arrayBuffer())) });
+    if (!S.playing) drawXray();
+  }).catch((err) => { xray.got.set(key, { failed: true }); log(`X-ray: the matte ${path} could not be read: ${err.message}`, "error"); });
+  return null;
+}
+function videoAlpha(v) { // playing: a matte's frame from its movie, at XRAY_SIDE
+  if (v.readyState < 2 || !v.videoWidth) return null;
+  const k = Math.min(1, XRAY_SIDE / Math.max(v.videoWidth, v.videoHeight)), w = Math.round(v.videoWidth * k), h = Math.round(v.videoHeight * k), c = xray.scratch;
+  if (c.width !== w || c.height !== h) [c.width, c.height] = [w, h];
+  const g = c.getContext("2d", { willReadFrequently: true });
+  g.drawImage(v, 0, 0, w, h);
+  return { width: w, height: h, alpha: alphaFromBytes(g.getImageData(0, 0, w, h).data) };
+}
+function drawXray() {
+  const el = xray.el, plan = S.xray && S.plate && !keying() ? xrayNow() : null, urls = plan?.urls ?? [];
+  xray.vids.forEach((v, k) => { // the mattes' movies follow the playhead only while the X-ray needs them
+    if (urls[k] && v.getAttribute("src") !== urls[k]) v.src = urls[k];
+    else if (!urls[k] && v.getAttribute("src")) { v.removeAttribute("src"); v.load(); }
+  });
+  el.hidden = !plan || plan.from === "none";
+  el.dataset.from = plan?.from ?? "";
+  if (el.hidden) return void (el.dataset.frame = "");
+  const x = el.getContext("2d");
+  if (plan.from === "light") { // a relight changes every pixel
+    [el.width, el.height] = [1, 1];
+    x.putImageData(new ImageData(tintPixels([new Uint8ClampedArray([255])], 1), 1, 1), 0, 0);
+    return void (el.dataset.frame = String(S.frame));
+  }
+  const layers = urls.map((url, k) => (S.playing ? videoAlpha(xray.vids[k]) : xrayFrame(url))).filter((l) => !l?.failed);
+  if (!layers.length || layers.some((l) => !l)) return; // the last tint stays until every matte has this frame
+  const { width, height } = layers[0];
+  if (el.width !== width || el.height !== height) [el.width, el.height] = [width, height];
+  x.putImageData(new ImageData(tintPixels(layers.filter((l) => l.width === width && l.height === height).map((l) => l.alpha), width * height), width, height), 0, 0);
+  el.dataset.frame = String(S.frame);
+}
+
+function endCompare(draw = true) { // the wipe goes back to the plate on its left, or off if it was off before
+  if (!S.cmp) return;
+  const { wiped, label } = S.cmp;
+  S.cmp = null; sharp.cmp = null;
+  cmpVid.removeAttribute("src"); cmpVid.load();
+  if (!wiped) { S.wipe = null; $("#wipe-btn").setAttribute("aria-pressed", "false"); }
+  placeWipe(); stagesUI();
+  if (draw) { render(); hud(`${label}: out of the wipe`, 1500); }
+}
+
 function showLive(d) { // the shot as LTX predicts it, from step 1: in the frame until a shot exists, then in a corner
   const img = new Image(), key = S.heroKey, label = STAGES.find((x) => x.id === S.stage?.id)?.label ?? (keying() ? "Fluid shot" : "Generating");
   const at = d.steps ? `step ${d.step} of ${d.steps}` : `step ${d.step}`, part = S.stage?.part ? `${S.stage.part}, ` : ""; // a pass in two stages names its stage
@@ -669,6 +796,7 @@ function escape() { // Esc: logic.escapeAction. A selection goes first; then the
   if (what === "cancelOpen") return cancelOpen();
   if (what === "discard") return discard();
   if (what === "deselect") { select(null); if (busy) hud("Deselected. Esc again stops generating", 2500); return; }
+  if (S.cmp) return endCompare(); // a comparison in the wipe ends before the pass on show
   if (what === "latest") return choosePass(S.pass); // a pass on show: back to the latest
   if (what === "stop") stopGenerating();
 }
@@ -717,9 +845,11 @@ function shotFrame() { // the shot at the playhead: a cached frame, the video wh
 }
 
 function render() {
-  if (!S.plate || !S.hero) return;
+  if (!S.plate || !S.hero) { xray.el.hidden = true; return; }
   if (keying()) return renderFluid();
-  $("#wipe .label.left").textContent = "Plate";
+  if (S.cmp && S.cmp.key !== S.heroKey) endCompare(false); // other edits on show: the pass compared was the old edits'
+  $("#wipe .label.left").textContent = S.cmp?.label ?? "Plate";
+  $("#wipe .label.right").textContent = S.cmp ? shownLabel() : "Result";
   wantDeep(); // once a colour value moves, the frames' own values load around the playhead, as OpenRV's cache does
   const W = view.width, H = view.height, still = !S.playing;
   const live = S.draft || stroke ? null : S.live; // while an edit is painted, the frame shows it, not the live preview of a render
@@ -763,11 +893,19 @@ function render() {
     drawPlate();
     return "plate";
   };
+  let compared = "waiting";
+  const drawCompared = () => { // the wipe's left side: the pass Ctrl+clicked in the Render panel, at this frame; the plate until it has one
+    const c = S.cmp, at = Math.abs(cmpVid.currentTime - time(S.frame)) < 0.5 / p.fps;
+    const ok = c.id === "first" ? draw(S.hero, model) // the First frame row: the edit as Klein made it
+      : (still && draw(sharpFrame("cmp", sourcePath(c, p.path)), c.frames ? c.framesSpace ?? p.cs : c.space)) // paused: native size
+        || (cmpVid.readyState >= 2 && !cmpVid.seeking && (S.playing || at) && draw(cmpVid, c.space));
+    if (ok) compared = "drawn"; else drawPlate();
+  };
   ctx.globalAlpha = 1;
   let shown = "plate";
   if (S.compare) drawPlate();
   else if (S.wipe !== null) {
-    drawPlate();
+    if (S.cmp) drawCompared(); else drawPlate();
     ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip();
     shown = drawEdited();
     ctx.restore();
@@ -775,8 +913,10 @@ function render() {
   view.dataset.picture = shown; // what the edited side shows: live, hero, shot, held or plate (tests/ui_mock.py reads it)
   view.dataset.precision = exact.length ? "float" : "8-bit"; // an image sequence's own values, or 8-bit frames
   view.dataset.native = String(native); // paused, the frame on show at the plate's own size
+  view.dataset.compared = S.cmp ? compared : ""; // the wipe's left side: drawn once the pass compared has this frame
   inWork(drawCursor);
   refreshInspector(); // RV redraws its inspector with the view: the frame, the source, the pass, zoom and pan
+  drawXray();
 }
 
 function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX predicts, or the generated shot (the wipe shows both)
@@ -793,9 +933,10 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
     ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip(); shot(); ctx.restore();
   } else if (f.result && (S.playing ? made : f.view === "result") && !S.compare && (cached || shotReady())) shot(); // playing a made shot: never the keyframes
   else keysLayer(W, H);
-  $("#wipe .label.left").textContent = "Keyframe";
+  $("#wipe .label.left").textContent = "Keyframe"; $("#wipe .label.right").textContent = "Result";
   inWork(drawCursor);
   refreshInspector();
+  drawXray(); // hidden: a fluid shot's keyframes have no matte
 }
 
 function keysLayer(W, H) { // the keyframe on this frame; between keyframes, the two around it faintly, as onion skins
@@ -880,6 +1021,7 @@ function placeWipe() {
 }
 
 function setWipe(on) {
+  if (!on && S.cmp) { S.cmp.wiped = false; endCompare(false); } // F6 ends a comparison with the wipe
   S.wipe = on ? S.wipe ?? 0.5 : null;
   $("#wipe-btn").setAttribute("aria-pressed", String(on));
   placeWipe(); render();
@@ -2433,6 +2575,7 @@ function stagesUI() {
     li.classList.add("pick");
     li.title = `Show ${label} in the viewer. Click it again, or Esc, for the latest`;
     li.onclick = () => choosePass(id);
+    compareRow(li, id); // the viewer's: Ctrl+click puts the pass on the wipe's left side
   };
   const first = document.createElement("li"); // the edit on the first frame, as Klein made it
   first.className = "done" + (S.pass === "first" ? " shown" : "");
@@ -2940,10 +3083,13 @@ function refreshInspector(force = false) { // on every redraw: place the box, re
 
 const inspectKey = () => `${inspectSource().path}#${S.frame}#${S.inspect.pt?.x},${S.inspect.pt?.y}`; // a read's file, frame and point
 
-function inspectSource() { // the file on show and what it holds: EXR frames in their own space, or a movie's codes
-  const sh = S.shot, frames = !!sh?.frames;
-  const space = sh ? (frames ? sh.framesSpace ?? S.plate.cs : sh.space) : S.plate.cs;
-  return { path: sourcePath(sh, S.plate.path), movie: !!sh && !frames, space: space === "@model" ? modelSpace() : space };
+function inspectSource() { // the file on show at the point, on its side of the wipe: EXR frames in their own space, or a movie's codes
+  const p = S.plate, pt = S.inspect.pt, left = !keying() && pt && wipeSide(pt.x, p.spec.width, S.wipe) === "left";
+  if (S.compare || (left && !S.cmp)) return { path: p.path, movie: false, space: p.cs, label: "Plate" }; // O held, or the wipe's plate side
+  const sh = left ? S.cmp : S.shot, label = left ? S.cmp.label : sh ? shownLabel() : "Plate";
+  if ((left ? S.cmp.id : S.pass) === "first") return { path: null, drawn: "First frame", label }; // Klein's edit: a picture, not a file
+  const frames = !!sh?.frames, space = sh ? (frames ? sh.framesSpace ?? p.cs : sh.space) : p.cs;
+  return { path: sourcePath(sh, p.path), movie: !!sh && !frames, space: space === "@model" ? modelSpace() : space, label };
 }
 
 async function readPixel() {
@@ -2954,12 +3100,13 @@ async function readPixel() {
   if (wait > 0) await new Promise((ok) => setTimeout(ok, wait));
   const pt = i.pt, frame = S.frame, src = inspectSource(), key = inspectKey();
   i.last = performance.now();
-  try {
-    const r = await fetch(`/paintaplate/pixel?${new URLSearchParams({ path: src.path, frame, x: pt.x, y: pt.y, size: INSPECT_SIZE })}`);
-    const got = await r.json();
-    if (!r.ok) throw new Error(got.error);
+  try { // the point in the plate's pixels (of): the route reads a pass with fewer pixels, such as a preview, at the same place
+    const { width, height } = S.plate.spec, q = { path: src.path, frame, x: pt.x, y: pt.y, size: INSPECT_SIZE, of: `${width}x${height}` };
+    const r = src.path ? await fetch(`/paintaplate/pixel?${new URLSearchParams(q)}`) : null; // a picture the page drew has no file
+    const got = r ? await r.json() : {};
+    if (r && !r.ok) throw new Error(got.error);
     i.got = { ...got, source: src, pt, frame, key };
-    if (i.sampling) i.avg = addSample(i.avg, got.value);
+    if (i.sampling && got.value) i.avg = addSample(i.avg, got.value);
     showInspector(pt, frame, i.got, key === inspectKey());
   } catch (err) { i.got = null; showInspector(pt, frame, { error: err.message }); }
   finally {
@@ -2980,6 +3127,7 @@ function showInspector(pt, frame, got, live = true) { // live: the point and fra
   box.dataset.pixel = pt ? `${pt.x},${pt.y}` : "";
   box.dataset.frame = String(frame);
   box.dataset.movie = String(!!got?.source?.movie);
+  box.dataset.source = got?.source?.label ?? ""; // the pass read, on its side of the wipe
 }
 
 { // the box moves the point with it, as RV's widget (storeDownPoint, drag)
@@ -3085,7 +3233,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
     ["View", [chan("rgb", "Shift+C"), chan("r", "Shift+R"), chan("g", "Shift+G"), chan("b", "Shift+B"), chan("l", "Shift+L"), "-",
       ["Fit", "F", () => zoomTo(1), !p], ["Frame width", "Ctrl+F", widthZoom, !p], ["1:1", "1", () => pixelZoom(1), !p],
       ["2:1", "2", () => pixelZoom(2), !p], ["4:1", "4", () => pixelZoom(4), !p], ["1:2", "Shift+2", () => pixelZoom(1 / 2), !p], ["1:4", "Shift+4", () => pixelZoom(1 / 4), !p],
-      ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["Full screen", "`", fullScreen],
+      ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["X-ray", "W", () => setXray(!S.xray), !p, S.xray], ["Full screen", "`", fullScreen],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
     ["Help", [["Getting started", "", () => showHelp("start")], ["Keys", "?", () => showHelp("keys")], ["Models and licences", "", showModels]]],
   ];
@@ -3458,6 +3606,7 @@ addEventListener("keydown", (e) => {
   else if (k === "]") setOut(S.frame);
   else if (k === "\\") clearRange();
   else if (k === "F6") setWipe(S.wipe === null);
+  else if (low === "w" && !mod && !e.altKey && !e.shiftKey) setXray(!S.xray); // free in RV's rvui.mu (0bd9675)
   else if (low === "f" && !mod && !e.altKey) zoomTo(1);
   else if (low === "f" && mod && !e.shiftKey) widthZoom(); // RV's Frame Width; the page takes Ctrl+F from the browser's find
   else if (/^Digit[1-8]$/.test(e.code) && !mod && !e.altKey) { const n = +e.code.slice(5); pixelZoom(e.shiftKey ? (n > 1 ? 1 / n : 1) : n); } // RV: 1 to 8 N:1, Ctrl+2 to 8 1:N

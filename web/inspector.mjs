@@ -26,6 +26,9 @@ export function sourcePath(shot, plate) {
   return plate;
 }
 
+// The side of the wipe a plate pixel falls on: left of the line shows the plate, or the pass compared with Ctrl+click.
+export const wipeSide = (x, width, wipe) => (wipe !== null && wipe !== undefined && (x + 0.5) / width < wipe ? "left" : "right");
+
 export const formatValue = (v) => (Number.isFinite(v) ? v.toFixed(6) : "nan"); // RV's "%f"
 
 export function addSample(avg, value) { // RV's running average while Shift is held
@@ -43,6 +46,7 @@ export function boxPlace(x, y, w, h, vw, vh, gap = 14) {
 // not the pass's values: the line says so.
 export function sourceLine(source, movie) {
   if (!source) return null;
+  if (source.drawn) return `${source.drawn}, as drawn: the final colour only`;
   if (!movie && !source.movie) return `${source.space}, as stored`;
   return `${movie?.bits ?? 8}-bit movie: ${source.space} codes${source.movie ? ", not the pass's own values" : ""}`;
 }
@@ -50,6 +54,7 @@ export function sourceLine(source, movie) {
 // The rows the inspector shows, top to bottom.
 export function inspectorRows({ x, y, inside = true, frame, value, final, average, error, width, height, source, movie }) {
   const rows = [["Native Pixel", inside ? `${x}, ${y}` : "outside the frame"], ["Frame", String(frame)]];
+  if (source?.label) rows.push(["Source", source.label]); // the pass read, on its side of the wipe
   if (width) rows.push(["Size", `${width} x ${height}`]);
   const line = sourceLine(source, movie);
   if (line) rows.push(["Values", line]);

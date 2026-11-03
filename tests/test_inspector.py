@@ -22,6 +22,20 @@ def exr(path, rgb):
 
 
 class Pixel(unittest.TestCase):
+    def test_a_plate_point_reads_a_smaller_pass_at_the_same_place(self):
+        """The inspector's point is in the plate's pixels, and a preview pass has fewer: 1.7.0 failed with « Pixel 358, 359
+        is outside the 640 x 352 frame ». With `of`, the plate's size, the route reads the pass's own pixel there."""
+        os.makedirs(os.path.join(INPUT, "pv_seq"), exist_ok=True)
+        rgb = np.zeros((32, 64, 3), np.float32)
+        rgb[16, 40] = [2.0, 0.5, 0.25]
+        for n in (1001, 1002):
+            exr(os.path.join(INPUT, "pv_seq", f"p.{n}.exr"), rgb)
+        got = routes.pixel("pv_seq", 0, 81, 33, of="128x64")  # (81.5 / 2, 33.5 / 2): pixel 40, 16 of the 64 x 32 frame
+        self.assertEqual((got["x"], got["y"], got["width"], got["height"], got["value"]), (40, 16, 64, 32, [2.0, 0.5, 0.25]))
+        self.assertEqual(routes.pixel("pv_seq", 0, 40, 16, of="64x32")["x"], 40)  # the same size: the same pixel
+        with self.assertRaises(ValueError):
+            routes.pixel("pv_seq", 0, 81, 33)  # without it, the plate's pixel numbers fall outside the pass
+
     def test_exr_values_as_stored_at_native_size(self):
         os.makedirs(os.path.join(INPUT, "seq"), exist_ok=True)
         for n in range(3):
