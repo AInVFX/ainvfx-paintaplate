@@ -528,8 +528,20 @@ def pixel(rel: str, frame: int, x: int, y: int, size: int = 1) -> dict:
         raise ValueError(f"Pixel {x}, {y} is outside the {w} x {h} frame")
     r = max(1, min(int(size), 64)) // 2
     block = rgb[max(0, y - r): y + r + 1, max(0, x - r): x + r + 1].reshape(-1, 3)
-    return {"width": w, "height": h, "x": x, "y": y, "frame": frame, "value": [float(v) for v in rgb[y, x]],
-            "mean": [float(v) for v in block.mean(0)], "size": 2 * r + 1}
+    out = {"width": w, "height": h, "x": x, "y": y, "frame": frame, "value": [float(v) for v in rgb[y, x]],
+           "mean": [float(v) for v in block.mean(0)], "size": 2 * r + 1}
+    if not (plateio.is_sequence(full) or full.lower().endswith(STILLS)):  # a movie: say what its samples are
+        out["movie"] = _movie_info(full, stamp)
+    return out
+
+
+@functools.lru_cache(maxsize=16)
+def _movie_info(full: str, mtime: float) -> dict:
+    with av.open(full) as c:
+        s = c.streams.video[0]
+        name = s.codec_context.format.name if s.codec_context.format else ""
+        m = re.search(r"p(\d+)(le|be)?$", name)
+        return {"codec": s.codec_context.name, "pix_fmt": name, "bits": int(m.group(1)) if m and int(m.group(1)) > 8 else 8}
 
 
 async def pixel_route(request):
