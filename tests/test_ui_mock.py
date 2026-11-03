@@ -13,7 +13,7 @@ from _env import ROOT
 @unittest.skipUnless(importlib.util.find_spec("playwright"), "pip install playwright && python -m playwright install chromium")
 class UIMock(unittest.TestCase):
     def test_page_flow_against_the_mock(self):
-        r = subprocess.run([sys.executable, os.path.join(ROOT, "tests", "ui_mock.py")], capture_output=True, text=True, timeout=900)
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "tests", "ui_mock.py")], capture_output=True, text=True, timeout=3600)  # the full suite: about 16 min on a 16 to 32 vCPU pod, longer on CI's runner (15 min timed out on 1.11.0)
         self.assertIn("UI MOCK PASSED", r.stdout, r.stdout[-3000:] + r.stderr[-2000:])
 
 
