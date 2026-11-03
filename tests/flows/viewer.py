@@ -299,6 +299,37 @@ def wipe_compare(page, U):
             "a second Ctrl+click ends it, and so does F6")
 
 
+XSTAT = """(() => { const x = document.querySelector('#xray'), d = x.getContext('2d').getImageData(0, 0, x.width, x.height).data;
+  let n = 0, sx = 0, sy = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) { const p = (i - 3) / 4; n++; sx += (p % x.width + 0.5) / x.width; sy += (Math.floor(p / x.width) + 0.5) / x.height; }
+  return { from: x.dataset.from, frame: x.dataset.frame, hidden: x.hidden, share: n / (d.length / 4), at: n ? [sx / n, sy / n] : null }; })()"""
+
+
+def xray_view(page, U):
+    """W tints, over the picture, where the edits on show change the plate: the tracking mattes of the size on show, then
+    the export's matte once Export made one; a light edit tints the whole frame. The canvas itself stays the picture."""
+    page.keyboard.press("Home"); pic = page.evaluate(SUM, [0.0, 1.0])
+    page.keyboard.press("w")
+    page.wait_for_function("(() => { const x = document.querySelector('#xray'); return !x.hidden && x.dataset.frame === '0'; })()", timeout=30000)
+    got = page.evaluate(XSTAT)
+    U.check(got["from"] == "full" and 0 < got["share"] < 0.5 and got["at"][0] < 0.5 and page.evaluate(SUM, [0.0, 1.0])["sum"] == pic["sum"],
+            f"W tints where the paint changes the plate, from the full-size tracking mattes, and leaves the canvas's picture as it was: {got}")
+    page.keyboard.press("ArrowRight")
+    page.wait_for_function("document.querySelector('#xray').dataset.frame === '1'", timeout=30000)
+    page.keyboard.press("Home")
+    page.click("#export-btn")
+    with page.expect_download(timeout=240000):
+        page.click("#x-go")
+    page.wait_for_function("(() => { const x = document.querySelector('#xray'); return x.dataset.from === 'export' && x.dataset.frame === '0'; })()", timeout=60000)
+    got = page.evaluate(XSTAT)
+    U.check(0 < got["share"] < 0.5, f"once Export has made its matte, the X-ray reads it: {got}")
+    page.keyboard.press("l"); U.paint_once(page, "warm sunset light", [(0.7, 0.3), (0.75, 0.35)]); page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('#xray').dataset.from === 'light'", timeout=120000)
+    got = page.evaluate(XSTAT)
+    U.check(got["share"] == 1 and not got["hidden"], f"with a light edit on show, the X-ray tints the whole frame: {got}")
+    page.keyboard.press("w")
+    U.check(page.is_hidden("#xray"), "W again hides the X-ray")
+
+
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
@@ -319,4 +350,5 @@ def run(browser, port, U):
     exposure_while_playing(browser, port, U)
     page = rendered(browser, port, U)
     wipe_compare(page, U)
+    xray_view(page, U)
     page.close()

@@ -83,6 +83,7 @@
     </div>
     <div id="viewport" class="viewport">
       <canvas id="view"></canvas>
+      <canvas id="xray" class="xray" hidden aria-hidden="true"></canvas>
       <figure id="live-inset" class="live-inset" hidden><img alt="Live preview of the pass in progress"><figcaption></figcaption></figure>
       <div id="wipe" class="wipe" hidden>
         <span class="label left">Plate</span><span class="label right">Result</span><span class="grip" title="Drag to compare"></span>
@@ -223,6 +224,7 @@
       <dt>Wheel</dt><dd>Step through frames</dd>
       <dt>F6</dt><dd>Wipe between the plate and the result</dd>
       <dt>Ctrl+click a Render step</dt><dd>Compare two passes: that pass on the wipe's left side, against the pass on show, both named (Cmd+click on a Mac). Ctrl+click it again, Esc or F6 ends it</dd>
+      <dt>W</dt><dd>X-ray: tint, over the picture, where the edits on show change the plate: from the export's matte once Export made one, else from the tracking mattes of the size on show. A light edit tints the whole frame</dd>
       <dt>Alt + drag, middle drag</dt><dd>Pan, as in RV. Add Shift to keep to one axis</dd>
       <dt>Ctrl + drag</dt><dd>Zoom about the point pressed, as RV: right to zoom in, left to zoom out. Alt with both buttons too</dd>
       <dt>f, Ctrl+F</dt><dd>Fit the frame; fit its width</dd>

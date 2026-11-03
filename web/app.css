@@ -360,6 +360,7 @@ dialog.open { width: min(900px, 94vw); }
 .models td { padding: 6px 8px; border-top: 1px solid rgba(128, 128, 128, 0.25); vertical-align: top; }
 .models small { opacity: 0.7; }
 #stages li.compared .dot { box-shadow: 0 0 0 2px #fff; }
+.xray { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
 #stages li.compared .name { text-decoration: underline dotted; text-underline-offset: 3px; }
 
 /* ---------- Render, Deliver, passes (the pipeline workstream adds its rules below) ---------- */
