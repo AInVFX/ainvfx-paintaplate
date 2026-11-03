@@ -24,6 +24,7 @@ const QUICK = { steps: 16, denoise: 1, feather: 6, sigma: 3 }; // 16: the offici
 const FULL = { steps: +Q.get("refine") || 8, denoise: 0.35, feather: 12, sigma: 6 };
 const CACHE_MB = +Q.get("cache") || 384; // decoded frames kept per video: about 180 frames at 960 x 544
 const DEEP_MB = +Q.get("deep") || 512; // per cache (the plate, an export): an image sequence in its own values, about 160 frames of RGB half floats at 960 x 540
+const NATIVE_SIDE = 4096; // the long side the viewer draws a plate at, at most: the frames route's limit and the pipeline's movies'
 const INSPECT_MS = 60; // the colour inspector reads at most one pixel per this many ms from /paintaplate/pixel
 const DEEP_SIDE = 960; // their long side, the playback video's
 const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-size edits, quick edits, SAM tracking
@@ -278,7 +279,8 @@ async function openPlate(list, typed, opts = {}) {
   S.uploads.clear(); S.renders.clear(); S.erases.clear();
   if (!opts.under) S.fluid = opts.fluid ? { keys: [], seed: (Math.random() * 2 ** 31) | 0, runs: 0, result: null, view: "keys", prompt: "", on: true, editing: true,
     ...opts.fluid, busy: null } : null;
-  [view.width, view.height] = S.plate.work;
+  [view.width, view.height] = colour.nativeSize(S.plate.spec.width, S.plate.spec.height, NATIVE_SIDE); // the plate at its own size
+  Object.assign(sharp, { plate: null, shot: null });
   view.classList.add("painting");
   plateVid.src = viewUrl(outputFile("ingest", out, "proxy"));
   plateVid.addEventListener("canplaythrough", () => { if (OPENING.at === "load") { OPENING.at = "done"; status("Ready to play. Describe the edit at the top, paint on the frame, then Generate."); } }, { once: true });
@@ -496,16 +498,48 @@ function fitView() { // the frame fills the viewport with the plate's own aspect
 }
 
 function applyView() {
-  const { w, h, x, y } = S.fit, z = S.zoom;
-  Object.assign(view.style, { width: `${w}px`, height: `${h}px`, transform: `translate(${x + z.x}px, ${y + z.y}px) scale(${z.k})` });
+  const { w, h, x, y } = S.fit, z = S.zoom, px = (v) => Math.round(v * devicePixelRatio) / devicePixelRatio; // whole device pixels
+  Object.assign(view.style, { width: `${w}px`, height: `${h}px`, transform: `translate(${px(x + z.x)}px, ${px(y + z.y)}px) scale(${z.k})` });
+  view.classList.toggle("native", w * z.k * devicePixelRatio >= view.width - 0.5); // from 1:1, plate pixels show as squares
   placeWipe();
 }
 addEventListener("resize", () => { layoutUI(); fitView(); });
 $("#viewport").addEventListener("pointermove", inspectAt);
 
 function frameAt(e) { // pointer position in frame pixels (working size); stays right under zoom and pan
-  const r = view.getBoundingClientRect();
-  return [((e.clientX - r.left) * view.width) / r.width, ((e.clientY - r.top) * view.height) / r.height];
+  const r = view.getBoundingClientRect(), [w, h] = S.plate.work;
+  return [((e.clientX - r.left) * w) / r.width, ((e.clientY - r.top) * h) / r.height];
+}
+
+// The canvas holds the plate at its own size (up to NATIVE_SIDE), as OpenRV shows a plate; strokes, edits and the brush
+// live at the working size, so they draw through this scale.
+const toView = () => [view.width / S.plate.work[0], view.height / S.plate.work[1]];
+function inWork(draw) {
+  const [kx, ky] = toView();
+  ctx.save(); ctx.setTransform(kx, 0, 0, ky, 0, 0); draw(...S.plate.work); ctx.restore();
+}
+
+// Paused, the frame on show is read at native size and full precision from the frames route (an EXR's half floats, a
+// video's frame decoded with its own YUV matrix and range), one frame per source, the latest asked for: a 4K half-float
+// frame is about 50 MB. While a source plays, the movies and the 960 px cache stay.
+const sharp = { plate: null, shot: null };
+function sharpFrame(slot, path) {
+  const want = `${path}#${S.frame}`, s = sharp[slot];
+  if (s?.key === want) return s.img;
+  if (s?.loading === want || s?.failed === path) return null;
+  sharp[slot] = { loading: want };
+  fetch(`/paintaplate/frames?${new URLSearchParams({ path, first: S.frame, count: 1, side: NATIVE_SIDE })}`).then(async (r) => {
+    if (!r.ok) throw new Error(await r.text());
+    const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number), data = new Uint16Array(await r.arrayBuffer());
+    if (sharp[slot]?.loading !== want) return;
+    sharp[slot] = { key: want, img: { width, height, data } };
+    if (!S.playing) render();
+  }).catch((err) => {
+    if (sharp[slot]?.loading !== want) return;
+    sharp[slot] = { failed: path };
+    log(`Native frames stopped for ${path}: ${err.message}. The viewer shows the cached frames.`);
+  });
+  return null;
 }
 
 function layered(upto = S.edits.length, keep = () => true) { // the first frame with the active edits before index `upto`
@@ -646,6 +680,7 @@ function render() {
   const pic = live || first || !S.shot?.url ? null : shotFrame();
   if (S.playing && S.shot?.url && !live && !pic) return; // the shot video catches up in a frame: the last frame stays on screen
   const p = S.plate, model = modelSpace(), exact = [];
+  let native = false; // the frame on show came at native size from the frames route
   const draw = (src, space) => { // through OCIO from the colour space its values are in; false when it cannot draw yet
     const img = src ? look.image(src, S.display, space) : null;
     if (img) { ctx.drawImage(img, 0, 0, W, H); if (src.data) exact.push(true); }
@@ -654,7 +689,8 @@ function render() {
   // the plate in its own values, so a new File Color Space shows at once: an image sequence's frames once they arrive,
   // else the playback video (a video plate's own values at the working size), else the first frame as ingested
   const drawPlate = () => {
-    if ((p.deep || still) && drawsDeep(S.playing, holds(deep)) && draw(deep.get(S.frame), p.cs)) return; // playing: its EXR frames only once all are in; a video plate's only paused
+    if (still && draw(sharpFrame("plate", p.path), p.cs)) return void (native = true); // paused: the frame on show at native size
+    if (p.deep && drawsDeep(S.playing, holds(deep)) && draw(deep.get(S.frame), p.cs)) return; // playing: its EXR frames only once all are in
     const cached = still && caches.get(plateVid).get(S.frame);
     if (cached) return void draw(cached, p.proxySpace);
     if (plateVid.readyState >= 2 && (!still || !plateVid.seeking)) return void draw(plateVid, p.proxySpace);
@@ -664,14 +700,15 @@ function render() {
     if (S.pass === "first") { draw(S.hero, model); return "hero"; } // the First frame row: the edit as Klein made it, on every frame
     if (live) { draw(live, model); return "live"; }
     if (pic) {
-      if (!(S.shot.frames && drawsDeep(S.playing, holds(deepShot)) && draw(deepShot.get(S.frame), p.cs))) draw(pic, S.shot.space); // the review's EXR frames: paused, or all in
+      if (still && draw(sharpFrame("shot", sourcePath(S.shot, p.path)), S.shot.frames ? p.cs : S.shot.space)) native = true; // paused: native size
+      else if (!(S.shot.frames && drawsDeep(S.playing, holds(deepShot)) && draw(deepShot.get(S.frame), p.cs))) draw(pic, S.shot.space); // the review's EXR frames: paused, or all in
       if (pic === held.canvas) return "held";
       if (still) keepFrame(pic);
       return "shot";
     }
     if (still && S.frame === 0) { // the first frame with its edits, in the model space; with none, the plate itself
       if (S.heroKey) draw(S.hero, model); else drawPlate();
-      overlays(W, H); return "hero";
+      inWork(overlays); return "hero";
     }
     drawPlate();
     return "plate";
@@ -687,7 +724,8 @@ function render() {
   } else shown = drawEdited();
   view.dataset.picture = shown; // what the edited side shows: live, hero, shot, held or plate (tests/ui_mock.py reads it)
   view.dataset.precision = exact.length ? "float" : "8-bit"; // an image sequence's own values, or 8-bit frames
-  drawCursor();
+  view.dataset.native = String(native); // paused, the frame on show at the plate's own size
+  inWork(drawCursor);
 }
 
 function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX predicts, or the generated shot (the wipe shows both)
@@ -702,7 +740,7 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
     if (S.wipe === null) shot();
     else { keysLayer(W, H); ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip(); shot(); ctx.restore(); }
   } else keysLayer(W, H);
-  drawCursor();
+  inWork(drawCursor);
 }
 
 function keysLayer(W, H) { // the keyframe on this frame; between keyframes, the two around it faintly, as onion skins
@@ -770,7 +808,7 @@ function softMask(e) { // the edit mask with a soft edge, close to what the work
 function drawCursor() { // the brush outline, at its real size on the frame
   if (S.picking) return; // the in-frame picker shows its own cursor, and reads the frame without the outline
   if (!S.cursor || stroke || S.playing || S.mode || view.classList.contains("near-wipe")) return;
-  ctx.lineWidth = Math.max(1.5, view.width / 900);
+  ctx.lineWidth = Math.max(1.5, S.plate.work[0] / 900);
   ctx.strokeStyle = S.rub ? "#ffffff" : S.tool === "erase" ? "#ff8070" : S.color === "#000000" ? "#d8d8d8" : S.color;
   if (S.rub) ctx.setLineDash([6, 5]);
   ctx.beginPath(); ctx.arc(S.cursor[0], S.cursor[1], S.size / 2, 0, 2 * Math.PI); ctx.stroke();
@@ -2642,11 +2680,8 @@ function fullScreen() { if (document.fullscreenElement) document.exitFullscreen(
 const holds = (cache) => { for (let f = S.inPt; f <= S.outPt; f++) if (!cache.frames.has(f)) return false; return true; }; // every frame in
 function wantDeep() { // an image sequence's own values around the playhead: the plate, and its review once it plays
   const p = S.plate;
-  if (!p || !look.ready) return;
-  // a video plate, paused: its source frames decoded on the server with the file's own YUV matrix and range, as OpenRV
-  // decodes the file; while it plays, the playback proxy stays
-  if (p.deep || !S.playing) fetchDeep(deep, p.path, p.name);
-  if (!p.deep) return;
+  if (!p?.deep || !look.ready) return;
+  fetchDeep(deep, p.path, p.name);
   if (S.shot?.frames) fetchDeep(deepShot, S.shot.frames, "the full-size composite");
 }
 
@@ -2657,9 +2692,8 @@ function fetchDeep(cache, path, what) { // frames as RGB half floats from the fr
       log(`Full-precision frames stopped for ${what}: ${await r.text()}. The viewer plays the 8-bit movie.`);
       throw new Error("frames");
     }
-    const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number), data = new Uint16Array(await r.arrayBuffer());
-    if (!S.playing) setTimeout(render, 0); // paused, the frame on show draws again once its own values are in
-    return { width, height, data };
+    const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number);
+    return { width, height, data: new Uint16Array(await r.arrayBuffer()) };
   }, path);
   if (fresh) log(`Full-precision frames: ${what} (${S.plate.cs}) at ${DEEP_SIDE} px on the long side, read in the background`);
 }
@@ -2836,7 +2870,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Invert", "Shift+I", () => setDisplay({ invert: !d.invert }), !p, d.invert], ["Reset all colour", "Shift+Home", resetDisplay, !colour.displayActive(d)]]],
     ...(S.ocio.info ? [["OCIO", ocioItems()]] : []),
     ["View", [chan("rgb", "Shift+C"), chan("r", "Shift+R"), chan("g", "Shift+G"), chan("b", "Shift+B"), chan("l", "Shift+L"), "-",
-      ["Fit", "F", () => zoomTo(1), !p], ["1:1", "1", () => zoomTo(S.plate.work[0] / S.fit.w), !p],
+      ["Fit", "F", () => zoomTo(1), !p], ["1:1", "1", () => zoomTo(colour.oneToOne(view.width, S.fit.w, devicePixelRatio)), !p],
       ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["Full screen", "`", fullScreen],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
     ["Help", [["Keys", "?", () => $("#help").showModal()]]],
@@ -3004,7 +3038,8 @@ function pickFrame(on) {
 function pickAt(e) { // the view's own pixels: the frame on show, through OCIO and the colour tools, without the brush outline
   const [x, y] = frameAt(e), n = PICK_SIDE;
   render();
-  const color = pickedColor(ctx.getImageData(Math.round(x) - (n >> 1), Math.round(y) - (n >> 1), n, n).data);
+  const [kx, ky] = toView(); // the canvas holds the plate at its own size
+  const color = pickedColor(ctx.getImageData(Math.round(x * kx) - (n >> 1), Math.round(y * ky) - (n >> 1), n, n).data);
   if (!color) return void hud("Click on the frame to pick a colour. Esc cancels.", 2000); // outside the frame: still picking
   pickFrame(false);
   takeColor(color);
@@ -3210,7 +3245,7 @@ addEventListener("keydown", (e) => {
   else if (k === "\\") clearRange();
   else if (k === "F6") setWipe(S.wipe === null);
   else if (low === "f" && !mod) zoomTo(1);
-  else if (k === "1" && !mod) zoomTo(S.plate.work[0] / S.fit.w);
+  else if (k === "1" && !mod) zoomTo(colour.oneToOne(view.width, S.fit.w, devicePixelRatio));
   else if (k === "`") fullScreen();
   else if (k === "?") $("#help").showModal();
   else if (TOOLS[low] && !mod) pickTool(TOOLS[low]);

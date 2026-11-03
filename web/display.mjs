@@ -9,6 +9,14 @@
 // OpenRV read at 0bd9675 (main, 2 Nov 2026): src/lib/ip/IPBaseNodes/ColorIPNode.cpp, src/lib/ip/OCIONodes/OCIOIPNode.cpp,
 // src/lib/ip/IPCore/glsl/ColorGamma.glsl and ColorMatrix.glsl.
 
+// ---------- The plate's own size on the canvas (OpenRV shows a plate at its resolution; key 1 is 1:1) ----------
+export function nativeSize(width, height, max) { // the canvas: the plate's size, at most `max` on the long side
+  const k = Math.min(1, max / Math.max(width, height));
+  return [Math.round(width * k), Math.round(height * k)];
+}
+// The zoom at which one canvas pixel covers one screen pixel: the frame fits at `fitWidth` CSS pixels
+export const oneToOne = (canvasWidth, fitWidth, dpr = 1) => canvasWidth / (fitWidth * dpr);
+
 // ---------- The colour tools, as RVColor (ColorIPNode.cpp): display only, the export never changes ----------
 // RV builds one 4 x 4 matrix C, each tool multiplied on the left, so it acts after the ones before it: invert, exposure
 // (2 to the stops), contrast ((1 + c) x - c / 2, about 0.5), hue (a rotation about the grey axis, sheared so that Rec. 709

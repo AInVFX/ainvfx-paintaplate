@@ -350,5 +350,6 @@ dialog.open { width: min(900px, 94vw); }
 .inspector div { display: flex; justify-content: space-between; gap: 16px; }
 .inspector div span:first-child { color: #a0a0a8; }
 #view.inspecting { cursor: crosshair; }
+#view.native { image-rendering: pixelated; }
 
 /* ---------- Render, Deliver, passes (the pipeline workstream adds its rules below) ---------- */
