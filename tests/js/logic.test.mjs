@@ -92,7 +92,7 @@ test("captions name the object when given and build only the chosen tool", () =>
   const bbox = [100, 200, 300, 400];
   assert.match(caption({ tool: "erase", words: "black umbrella", colors: [], color: "#000000", bbox }), /^Remove the black umbrella inside <obj_1>/);
   assert.match(caption({ tool: "erase", words: "", colors: [], color: "#000000", bbox }), /^Remove the object inside/);
-  assert.match(caption({ tool: "paint", words: "a cactus", colors: ["#3d7a35"], color: "#3d7a35", bbox }), /with a cactus, in exactly/);
+  assert.match(caption({ tool: "paint", words: "a cactus", colors: ["#3d7a35"], color: "#3d7a35", bbox }), /with a cactus, following the drawing's outline, pose and size, in exactly/); // a paint keeps the drawing's shape and the image's style
   const light = caption({ tool: "light", words: "", colors: ["#ffd890", "#000000"], color: "#ffd890", bbox });
   assert.match(light, /warm orange light/);
   assert.match(light, /darkened areas show where shade falls/);
