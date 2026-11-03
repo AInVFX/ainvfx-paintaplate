@@ -148,11 +148,16 @@
       <label class="preview-size">Preview size
         <select id="preview-size" title="The shot preview and its composite, in sizes this plate divides into. Smaller renders faster; the export stays at full size."></select>
       </label>
-      <label id="hdr-switch" class="hdr-switch" hidden title="Lightricks' SDR-to-HDR IC-LoRA after the full-size shot: scene-linear values in the edited area"><input type="checkbox" id="hdr-on" checked> SDR to HDR</label>
-      <div id="hdr-confirm" class="hdr-confirm" hidden><p>This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1.</p><button id="hdr-yes">Turn on</button> <button id="hdr-no">Cancel</button></div>
       <ol id="stages"></ol>
       <p class="hint render-hint">Click a finished step to show it on every frame; click it again, or Esc, for the latest.</p>
       <button id="render-full" type="button" class="quiet render-full" hidden title="These edits took the frames of an earlier render whose other edits are far away: only the tracking and the composites ran. Render them in full, with their own shot, the same edits and seeds">Render in full</button>
+    </section>
+    <section id="deliver" class="deliver" hidden>
+      <h2>Deliver</h2>
+      <p class="hint">Passes that run after the full-size composite, each on or off.</p>
+      <label id="deliver-hdr-row" title="Lightricks' SDR-to-HDR IC-LoRA on the new content of a plate whose format holds nothing above 1.0: the result becomes an EXR sequence"><input type="checkbox" id="deliver-hdr"> Bit depth: SDR to HDR, delivered as EXR</label>
+      <div id="deliver-confirm" class="hdr-confirm" hidden><p>This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1.</p><button id="deliver-yes">Turn on</button> <button id="deliver-no">Cancel</button></div>
+      <p id="deliver-auto" class="hint" hidden>This plate holds values above 1.0: its new content goes through SDR to HDR on its own.</p>
     </section>
   </aside>
 

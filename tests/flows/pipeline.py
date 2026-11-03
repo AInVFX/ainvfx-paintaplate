@@ -142,19 +142,20 @@ def pass_rows(page, U):
 
 
 def hdr_video(page, U):
-    """SDR to HDR on a video plate (Adrien, 2 Nov): off by default; turning it on asks first; once on, the result is an EXR
+    """SDR to HDR on a video plate, from Deliver's bit-depth pass (Adrien, 2 and 3 Nov): off by default; turning it on asks first; once on, the result is an EXR
     sequence that the player reads at full precision, and Export writes that sequence instead of a video file."""
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     U.open_path(page, "plates/desk.mp4")  # waits for desk's own spec: the plate before also says fps
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden", timeout=60000)
-    U.check(not page.is_hidden("#hdr-switch") and not page.is_checked("#hdr-on"), "a video plate: SDR to HDR shows, off by default")
-    page.click("#hdr-on")
-    U.check(not page.is_hidden("#hdr-confirm") and not page.is_checked("#hdr-on"), "turning it on asks first, and stays off until confirmed")
-    page.click("#hdr-no")
-    U.check(page.is_hidden("#hdr-confirm") and not page.is_checked("#hdr-on"), "Cancel leaves it off")
-    page.click("#hdr-on"); page.click("#hdr-yes")
-    U.check(page.is_hidden("#hdr-confirm") and page.is_checked("#hdr-on"), "Turn on turns it on")
+    U.check(not page.is_hidden("#deliver-hdr-row") and not page.is_checked("#deliver-hdr") and not page.query_selector("#hdr-switch"),
+            "a video plate: Deliver's bit-depth pass offers SDR to HDR, off; no switch near the render steps")
+    page.click("#deliver-hdr")
+    U.check(not page.is_hidden("#deliver-confirm") and not page.is_checked("#deliver-hdr"), "turning it on asks first, and stays off until confirmed")
+    page.click("#deliver-no")
+    U.check(page.is_hidden("#deliver-confirm") and not page.is_checked("#deliver-hdr"), "Cancel leaves it off")
+    page.click("#deliver-hdr"); page.click("#deliver-yes")
+    U.check(page.is_hidden("#deliver-confirm") and page.is_checked("#deliver-hdr"), "Turn on turns it on")
     page.evaluate("document.activeElement.blur()")
     page.evaluate(U.WATCH)
     page.keyboard.press("b"); U.paint_once(page, "a red lamp", [(0.3, 0.6), (0.36, 0.7)]); page.keyboard.press("Enter")

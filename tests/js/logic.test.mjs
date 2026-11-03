@@ -545,3 +545,13 @@ test("a render's record of its workflows (r.flows) names the models behind the r
   assert.ok(!resultFlows({ tools: ["paint"], render: ran("shot", "full", "review") }).includes("hdr"), "no SDR to HDR step ran: none listed");
   for (const id of Object.keys(STEP_FLOWS)) assert.ok(STEP_FLOWS[id].length > 0, id);
 });
+
+import { wantsHdrFor } from "../../web/logic.mjs";
+
+test("SDR to HDR: on its own for a plate that holds values above 1.0, else only from Deliver's bit-depth pass", () => {
+  const exr = { kind: "sequence", ext: ".exr", pix_fmt: "gbrpf16le" }, mp4 = { kind: "video", ext: ".mp4", pix_fmt: "yuv420p" };
+  assert.equal(wantsHdrFor(exr, 1, false), true, "an EXR plate: on its own, no switch");
+  assert.equal(wantsHdrFor(mp4, 100, false), true, "an HDR video (PQ): on its own");
+  assert.equal(wantsHdrFor(mp4, 1, false), false, "an SDR video: off");
+  assert.equal(wantsHdrFor(mp4, 1, true), true, "an SDR video with Deliver's bit-depth pass on");
+});
