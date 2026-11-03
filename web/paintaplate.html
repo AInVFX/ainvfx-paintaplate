@@ -174,9 +174,10 @@
       <dt>\</dt><dd>Clear the in and out points</dd>
       <dt>Wheel</dt><dd>Step through frames</dd>
       <dt>F6</dt><dd>Wipe between the plate and the result</dd>
-      <dt>Alt + drag</dt><dd>Pan</dd>
-      <dt>Ctrl + drag</dt><dd>Zoom</dd>
-      <dt>f, 1</dt><dd>Fit the frame; show it 1:1, one plate pixel per screen pixel, as in RV</dd>
+      <dt>Alt + drag, middle drag</dt><dd>Pan, as in RV. Add Shift to keep to one axis</dd>
+      <dt>Ctrl + drag</dt><dd>Zoom about the point pressed, as RV: right to zoom in, left to zoom out. Alt with both buttons too</dd>
+      <dt>f, Ctrl+F</dt><dd>Fit the frame; fit its width</dd>
+      <dt>1 to 8</dt><dd>1:1 to 8:1, plate pixels to screen pixels, as in RV. Shift+2 to Shift+8 give 1:2 to 1:8 (RV's Ctrl+2 to Ctrl+8: Chrome keeps those for its tabs)</dd>
       <dt>`</dt><dd>Full screen</dd>
     </dl>
     <h3>Painting</h3>
@@ -222,6 +223,15 @@
       <dt>Look, Displays</dt><dd>The look, then the display and its view: the viewer only, while the shot plays</dd>
       <dt>Change Config</dt><dd>The config named by $OCIO when it is set, as in RV, else OCIO's built-in configs</dd>
     </dl>
+    <form method="dialog"><button class="primary">Close</button></form>
+  </dialog>
+  <dialog id="models" class="help models">
+    <h2>Models and licences</h2>
+    <p class="hint">Each model keeps its own licence: the one its Hugging Face repository states at the revision Paint a plate downloads. The app code is Apache 2.0.</p>
+    <h3>Behind the result on show</h3>
+    <div id="models-shown"></div>
+    <h3>Every model</h3>
+    <div id="models-all"></div>
     <form method="dialog"><button class="primary">Close</button></form>
   </dialog>
 

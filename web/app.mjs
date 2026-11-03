@@ -7,6 +7,7 @@ import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onLog, onNotic
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
 import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor (logic.mjs keeps an older copy until the merge)
+import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, inspectorRows, sourcePixel, sourcePath } from "./inspector.mjs";
 import { sceneGraph } from "./graph.mjs";
 import { CHANNEL_NAMES, DAB_PROFILE, DISPLAY, FLUID, PARAMS, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
@@ -507,8 +508,7 @@ addEventListener("resize", () => { layoutUI(); fitView(); });
 $("#viewport").addEventListener("pointermove", inspectAt);
 
 function frameAt(e) { // pointer position in frame pixels (working size); stays right under zoom and pan
-  const r = view.getBoundingClientRect(), [w, h] = S.plate.work;
-  return [((e.clientX - r.left) * w) / r.width, ((e.clientY - r.top) * h) / r.height];
+  return colour.pointIn(view.getBoundingClientRect(), e.clientX, e.clientY, ...S.plate.work);
 }
 
 // The canvas holds the plate at its own size (up to NATIVE_SIDE), as OpenRV shows a plate; strokes, edits and the brush
@@ -673,6 +673,7 @@ function shotFrame() { // the shot at the playhead: a cached frame, the video wh
 function render() {
   if (!S.plate || !S.hero) return;
   if (keying()) return renderFluid();
+  $("#wipe .label.left").textContent = "Plate";
   wantDeep(); // once a colour value moves, the frames' own values load around the playhead, as OpenRV's cache does
   const W = view.width, H = view.height, still = !S.playing;
   const live = S.draft || stroke ? null : S.live; // while an edit is painted, the frame shows it, not the live preview of a render
@@ -681,6 +682,7 @@ function render() {
   if (S.playing && S.shot?.url && !live && !pic) return; // the shot video catches up in a frame: the last frame stays on screen
   const p = S.plate, model = modelSpace(), exact = [];
   let native = false; // the frame on show came at native size from the frames route
+  const exactOnly = colour.displayActive(S.display); // the colour tools moved: a source with EXR frames shows only those
   const draw = (src, space) => { // through OCIO from the colour space its values are in; false when it cannot draw yet
     const img = src ? look.image(src, S.display, space) : null;
     if (img) { ctx.drawImage(img, 0, 0, W, H); if (src.data) exact.push(true); }
@@ -691,6 +693,7 @@ function render() {
   const drawPlate = () => {
     if (still && draw(sharpFrame("plate", p.path), p.cs)) return void (native = true); // paused: the frame on show at native size
     if (p.deep && drawsDeep(S.playing, holds(deep)) && draw(deep.get(S.frame), p.cs)) return; // playing: its EXR frames only once all are in
+    if (p.deep && exactOnly && draw(deep.get(colour.exactFrame(deep.frames, S.frame)), p.cs)) return; // the colour tools moved: never the 8-bit movie
     const cached = still && caches.get(plateVid).get(S.frame);
     if (cached) return void draw(cached, p.proxySpace);
     if (plateVid.readyState >= 2 && (!still || !plateVid.seeking)) return void draw(plateVid, p.proxySpace);
@@ -701,7 +704,8 @@ function render() {
     if (live) { draw(live, model); return "live"; }
     if (pic) {
       if (still && draw(sharpFrame("shot", sourcePath(S.shot, p.path)), S.shot.frames ? p.cs : S.shot.space)) native = true; // paused: native size
-      else if (!(S.shot.frames && drawsDeep(S.playing, holds(deepShot)) && draw(deepShot.get(S.frame), p.cs))) draw(pic, S.shot.space); // the review's EXR frames: paused, or all in
+      else if (!(S.shot.frames && (drawsDeep(S.playing, holds(deepShot)) || exactOnly) &&
+                 draw(deepShot.get(exactOnly ? colour.exactFrame(deepShot.frames, S.frame) : S.frame), p.cs))) draw(pic, S.shot.space); // the review's EXR frames: paused, all in, or the colour tools moved
       if (pic === held.canvas) return "held";
       if (still) keepFrame(pic);
       return "shot";
@@ -736,10 +740,13 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
   const cached = caches.get(shotVid).get(S.frame), made = !!f.result && f.result.sig === fluidSig();
   const shot = () => ctx.drawImage(look.image(cached || shotVid, S.display, S.shot?.space ?? modelSpace()), 0, 0, W, H); // a decoded frame first: no seek shows
   if (S.live && f.busy) ctx.drawImage(look.image(S.live, S.display, modelSpace()), 0, 0, W, H);
-  else if (f.result && (S.playing ? made : f.view === "result") && !S.compare && (cached || shotReady())) { // playing a made shot: never the keyframes
-    if (S.wipe === null) shot();
-    else { keysLayer(W, H); ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip(); shot(); ctx.restore(); }
-  } else keysLayer(W, H);
+  else if (f.result && S.wipe !== null && !S.compare && (cached || shotReady())) { // the wipe: this frame's painted keyframe, or black, against the shot
+    const key = keyHere();
+    if (key) ctx.drawImage(key.canvas, 0, 0, W, H); // no onion skins: the left side shows what this frame was given
+    ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip(); shot(); ctx.restore();
+  } else if (f.result && (S.playing ? made : f.view === "result") && !S.compare && (cached || shotReady())) shot(); // playing a made shot: never the keyframes
+  else keysLayer(W, H);
+  $("#wipe .label.left").textContent = "Keyframe";
   inWork(drawCursor);
 }
 
@@ -1062,31 +1069,36 @@ function dropStroke() { // the stroke a finger began before the pinch goes, with
   render(); generateUI();
 }
 
-function navigate(e) { // RV: Alt or middle button drag pans, Ctrl drag zooms
+function navigate(e) { // RV: Alt or middle button drag pans (Shift locks the axis); Ctrl drag, or Alt with both buttons, zooms
   e.preventDefault();
   view.setPointerCapture(e.pointerId);
-  nav = { zoom: e.ctrlKey || e.metaKey, x: e.clientX, y: e.clientY, start: { ...S.zoom }, at: [e.clientX, e.clientY] };
+  const zoom = e.ctrlKey || e.metaKey || (e.altKey && (e.buttons & 5) === 5);
+  nav = { zoom, lock: e.shiftKey && !zoom, x: e.clientX, y: e.clientY, start: { ...S.zoom }, at: [e.clientX, e.clientY] };
   view.classList.add("panning");
 }
 
 function navigateMove(e) {
-  const dx = e.clientX - nav.x, dy = e.clientY - nav.y, s = nav.start;
-  if (!nav.zoom) S.zoom = { ...s, x: s.x + dx, y: s.y + dy };
-  else {
-    const k = Math.max(0.25, Math.min(16, s.k * Math.exp(dx / 200)));
-    const box = $("#viewport").getBoundingClientRect();
-    const ox = nav.at[0] - box.left - S.fit.x, oy = nav.at[1] - box.top - S.fit.y; // zoom about the press point
-    S.zoom = { k, x: ox - ((ox - s.x) * k) / s.k, y: oy - ((oy - s.y) * k) / s.k };
+  const s = nav.start;
+  let dx = e.clientX - nav.x, dy = e.clientY - nav.y;
+  if (!nav.zoom) {
+    if (nav.lock) [dx, dy] = colour.lockAxis(dx, dy);
+    S.zoom = { ...s, x: s.x + dx, y: s.y + dy };
+  } else {
+    const box = $("#viewport").getBoundingClientRect(), k = colour.dragZoomScale(s.k, dx, box.width); // RV's dragZoom
+    S.zoom = colour.zoomAbout(s, k, nav.at[0] - box.left - S.fit.x, nav.at[1] - box.top - S.fit.y); // about the press point
   }
   applyView(); render();
 }
 
-function zoomTo(k) {
-  const z = S.fit;
-  S.zoom = k === 1 ? { k: 1, x: 0, y: 0 } : { k, x: (z.w - z.w * k) / 2, y: (z.h - z.h * k) / 2 };
+function zoomTo(k, label = "Fit") { // about the viewport's centre, as RV's pixelRelativeScale
+  const z = S.fit, box = $("#viewport").getBoundingClientRect();
+  S.zoom = k === 1 ? { k: 1, x: 0, y: 0 } : colour.zoomAbout(S.zoom, colour.clampZoom(k), box.width / 2 - z.x, box.height / 2 - z.y);
   applyView(); render();
-  hud(k === 1 ? "Fit" : "1:1");
+  hud(label);
 }
+
+const pixelZoom = (n) => zoomTo(colour.pixelScale(n, view.width, S.fit.w, devicePixelRatio), n >= 1 ? `${n}:1` : `1:${Math.round(1 / n)}`);
+const widthZoom = () => { const box = $("#viewport").getBoundingClientRect(); zoomTo(box.width / S.fit.w, "Frame width"); }; // RV's Frame Width
 
 // ---------- A fluid shot on a blank plate: keyframes painted in flat colours, then ainvfx-fluid ----------
 
@@ -2736,6 +2748,35 @@ function modeKey(k, combo) { // the keys of an interactive edit, as RV's paramsc
 
 function resetDisplay() { leaveMode(); setDisplay({ ...colour.DISPLAY }); }
 
+// ---------- Models and licences (models.mjs, web/models.json) ----------
+// The models behind the result on show, from the workflows that made it, then every model the pack downloads.
+
+let registry = null;
+async function showModels() {
+  registry ??= await (await fetch(new URL("models.json", location.href), { cache: "no-store" })).json();
+  const edits = S.edits.filter((e) => e.on !== false && e.patch), fluid = !!S.fluid?.result && S.fluid.on !== false;
+  const flows = workflowsFor({ tools: edits.map((e) => e.tool), fluid, hdr: !!(S.toHdr && S.hdrReady) });
+  const behind = modelsBehind(registry, flows, (n) => WF[n]?.prompt);
+  const link = (text, href) => Object.assign(document.createElement("a"), { textContent: text, href, target: "_blank", rel: "noopener" });
+  const table = (rows, uses) => {
+    const t = document.createElement("table");
+    t.append(...rows.map((m) => {
+      const tr = document.createElement("tr"), cell = (...kids) => { const td = document.createElement("td"); td.append(...kids); tr.append(td); };
+      cell(link(m.name, m.source), document.createElement("br"), Object.assign(document.createElement("small"), { textContent: `${m.file} at ${m.revision.slice(0, 7)}` }));
+      cell(uses ? `${m.use} (${m.workflows.join(", ")})` : m.use);
+      cell(link(m.licence, m.licence_url), ...(m.upstream ? [document.createElement("br"), Object.assign(document.createElement("small"), { textContent: "original: " }), link(m.upstream.licence, m.upstream.source)] : []),
+        ...(m.gated ? [document.createElement("br"), Object.assign(document.createElement("small"), { textContent: "accept on Hugging Face first" })] : []));
+      return tr;
+    }));
+    return t;
+  };
+  const what = !S.plate ? "No plate is open." : behind.length ? `The result on show was made with ${behind.length} models:` : "The plate on show has no edits: no model made it.";
+  $("#models-shown").replaceChildren(Object.assign(document.createElement("p"), { textContent: what }), ...(behind.length ? [table(behind, true)] : []));
+  $("#models-all").replaceChildren(table(registry.models, false));
+  $("#models").dataset.shown = behind.map((m) => m.id).join(",");
+  $("#models").showModal();
+}
+
 // ---------- The colour inspector, as OpenRV's (F5; inspector.mjs) ----------
 // The pixel under the pointer, in the plate's own pixels, read at full precision and native size from the file on show
 // (/paintaplate/pixel), with the value drawn on screen. Shift held while the pointer moves averages the pixels it passes,
@@ -2870,10 +2911,11 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Invert", "Shift+I", () => setDisplay({ invert: !d.invert }), !p, d.invert], ["Reset all colour", "Shift+Home", resetDisplay, !colour.displayActive(d)]]],
     ...(S.ocio.info ? [["OCIO", ocioItems()]] : []),
     ["View", [chan("rgb", "Shift+C"), chan("r", "Shift+R"), chan("g", "Shift+G"), chan("b", "Shift+B"), chan("l", "Shift+L"), "-",
-      ["Fit", "F", () => zoomTo(1), !p], ["1:1", "1", () => zoomTo(colour.oneToOne(view.width, S.fit.w, devicePixelRatio)), !p],
+      ["Fit", "F", () => zoomTo(1), !p], ["Frame width", "Ctrl+F", widthZoom, !p], ["1:1", "1", () => pixelZoom(1), !p],
+      ["2:1", "2", () => pixelZoom(2), !p], ["4:1", "4", () => pixelZoom(4), !p], ["1:2", "Shift+2", () => pixelZoom(1 / 2), !p], ["1:4", "Shift+4", () => pixelZoom(1 / 4), !p],
       ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["Full screen", "`", fullScreen],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
-    ["Help", [["Keys", "?", () => $("#help").showModal()]]],
+    ["Help", [["Keys", "?", () => $("#help").showModal()], ["Models and licences", "", showModels]]],
   ];
   const f = S.fluid;
   if (f && keying()) groups.splice(2, 0, ["Fluid", [["Generate", "Enter", () => generateFluid().catch(quiet), !f.keys.length],
@@ -3244,8 +3286,9 @@ addEventListener("keydown", (e) => {
   else if (k === "]") setOut(S.frame);
   else if (k === "\\") clearRange();
   else if (k === "F6") setWipe(S.wipe === null);
-  else if (low === "f" && !mod) zoomTo(1);
-  else if (k === "1" && !mod) zoomTo(colour.oneToOne(view.width, S.fit.w, devicePixelRatio));
+  else if (low === "f" && !mod && !e.altKey) zoomTo(1);
+  else if (low === "f" && mod && !e.shiftKey) widthZoom(); // RV's Frame Width; the page takes Ctrl+F from the browser's find
+  else if (/^Digit[1-8]$/.test(e.code) && !mod && !e.altKey) { const n = +e.code.slice(5); pixelZoom(e.shiftKey ? (n > 1 ? 1 / n : 1) : n); } // RV: 1 to 8 N:1, Ctrl+2 to 8 1:N
   else if (k === "`") fullScreen();
   else if (k === "?") $("#help").showModal();
   else if (TOOLS[low] && !mod) pickTool(TOOLS[low]);

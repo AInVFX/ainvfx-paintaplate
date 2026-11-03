@@ -55,3 +55,36 @@ test("the canvas holds the plate at its own size, up to the frames route's 4096;
   assert.equal(oneToOne(3840, 960, 2), 2);
   assert.equal(oneToOne(1920, 1920, 1), 1);
 });
+
+import { dragZoomScale, lockAxis, pixelScale, pointIn, zoomAbout } from "../../web/display.mjs";
+
+test("zoom as RV: N:1 in device pixels, dragZoom's curve, the press point held, the pan locked to one axis", () => {
+  assert.equal(pixelScale(4, 3840, 960, 1), 16);
+  assert.equal(pixelScale(1 / 2, 1920, 960, 1), 1);
+  const w = 1000, m = (100 / w) * 1 * 2; // RV: m = |dx| / width * k * 2
+  assert.ok(Math.abs(dragZoomScale(1, 100, w) - (1 + 15 * m * m)) < 1e-12);
+  assert.ok(Math.abs(dragZoomScale(1, -100, w) - (1 - 0.75 * m)) < 1e-12);
+  const z = zoomAbout({ k: 1, x: 0, y: 0 }, 4, 300, 200); // the point at 300, 200 stays at 300, 200
+  assert.deepEqual([z.x + 300 * 4, z.y + 200 * 4], [300, 200]);
+  assert.deepEqual(lockAxis(10, -3), [10, 0]);
+  assert.deepEqual(lockAxis(2, -9), [0, -9]);
+});
+
+test("a point on screen maps to the same working-size pixel at any zoom", () => {
+  for (const k of [1 / 4, 1, 3.5, 16]) {
+    const rect = { left: 50 - 200 * k, top: 30, width: 960 * k, height: 540 * k }; // the view's box, laid out at zoom k
+    const [x, y] = pointIn(rect, rect.left + 480 * k, rect.top + 135 * k, 1920, 1088);
+    assert.ok(Math.abs(x - 960) < 1e-9 && Math.abs(y - 272) < 1e-9);
+  }
+});
+
+import { exactFrame } from "../../web/display.mjs";
+
+test("once the colour tools move, a playing source shows its EXR frame, else the nearest one before it, else after", () => {
+  const frames = new Map([[0, 1], [4, 1], [9, 1]]);
+  assert.equal(exactFrame(frames, 4), 4);
+  assert.equal(exactFrame(frames, 7), 4);
+  assert.equal(exactFrame(frames, 100), 9);
+  assert.equal(exactFrame(new Map([[5, 1]]), 2), 5);
+  assert.equal(exactFrame(new Map(), 2), null);
+});
