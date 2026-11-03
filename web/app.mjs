@@ -681,6 +681,7 @@ function render() {
   if (S.playing && S.shot?.url && !live && !pic) return; // the shot video catches up in a frame: the last frame stays on screen
   const p = S.plate, model = modelSpace(), exact = [];
   let native = false; // the frame on show came at native size from the frames route
+  const exactOnly = colour.displayActive(S.display); // the colour tools moved: a source with EXR frames shows only those
   const draw = (src, space) => { // through OCIO from the colour space its values are in; false when it cannot draw yet
     const img = src ? look.image(src, S.display, space) : null;
     if (img) { ctx.drawImage(img, 0, 0, W, H); if (src.data) exact.push(true); }
@@ -691,6 +692,7 @@ function render() {
   const drawPlate = () => {
     if (still && draw(sharpFrame("plate", p.path), p.cs)) return void (native = true); // paused: the frame on show at native size
     if (p.deep && drawsDeep(S.playing, holds(deep)) && draw(deep.get(S.frame), p.cs)) return; // playing: its EXR frames only once all are in
+    if (p.deep && exactOnly && draw(deep.get(colour.exactFrame(deep.frames, S.frame)), p.cs)) return; // the colour tools moved: never the 8-bit movie
     const cached = still && caches.get(plateVid).get(S.frame);
     if (cached) return void draw(cached, p.proxySpace);
     if (plateVid.readyState >= 2 && (!still || !plateVid.seeking)) return void draw(plateVid, p.proxySpace);
@@ -701,7 +703,8 @@ function render() {
     if (live) { draw(live, model); return "live"; }
     if (pic) {
       if (still && draw(sharpFrame("shot", sourcePath(S.shot, p.path)), S.shot.frames ? p.cs : S.shot.space)) native = true; // paused: native size
-      else if (!(S.shot.frames && drawsDeep(S.playing, holds(deepShot)) && draw(deepShot.get(S.frame), p.cs))) draw(pic, S.shot.space); // the review's EXR frames: paused, or all in
+      else if (!(S.shot.frames && (drawsDeep(S.playing, holds(deepShot)) || exactOnly) &&
+                 draw(deepShot.get(exactOnly ? colour.exactFrame(deepShot.frames, S.frame) : S.frame), p.cs))) draw(pic, S.shot.space); // the review's EXR frames: paused, all in, or the colour tools moved
       if (pic === held.canvas) return "held";
       if (still) keepFrame(pic);
       return "shot";

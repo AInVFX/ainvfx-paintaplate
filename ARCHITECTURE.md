@@ -141,6 +141,8 @@ On cards with 24 GB or more, preview passes show a live preview: every second st
 
 **The wipe on a fluid shot.** With the keyframes open and a shot made, the wipe shows this frame's painted keyframe on the left, or black where the frame has none (no onion skins), against the shot on the right; the left label reads « Keyframe ».
 
+**The colour tools while a source plays.** At rest a playing source shows its 8-bit movie until all its EXR frames are in. Once a colour tool moves, a source with EXR frames shows only those (`display.exactFrame`: the frame on show, else the nearest one in), as RV plays what it has decoded: four stops up, the 8-bit ACEScct movie of a fluid shot was 4 display levels off at the median and 24 at p99 in its dark background, with H.264's 8 px blocks.
+
 **Passes on show.** The Render panel's finished rows with a movie (`logic.PASSES`, `passMovie`) and a First frame row: `choosePass` sets `S.pass`, the viewer shows that pass on every frame, and the pipeline's own `setShot` calls wait until `S.pass` is null again (a second click, Esc after the selection, or other edits). The erase pass keeps its own movie as `cleanRaw`.
 
 **Start and the fluid export.** With no plate open, boot opens a blank plate at the Blank tab's settings (`BLANK_AT_START`, `openBlank({ atStart })`), 16-bit when SDR to HDR is ready (`logic.defaultDepth`). A fluid shot with no edit on it exports itself (`fluidOnly`, `downloadFluid`): the download route's parts `hdr`, `plate` and `preview` of its folder (`logic.fluidRun`).

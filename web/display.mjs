@@ -37,6 +37,22 @@ export const lockAxis = (dx, dy) => (Math.abs(dx) >= Math.abs(dy) ? [dx, 0] : [0
 // The point under a client position, in working-size pixels, whatever the zoom: the view's box as the browser lays it out
 export const pointIn = (rect, clientX, clientY, w, h) => [((clientX - rect.left) * w) / rect.width, ((clientY - rect.top) * h) / rect.height];
 
+// ---------- Which frame a playing source shows once the colour tools move ----------
+// At rest a playing source shows its 8-bit movie until all its EXR frames are in. That movie holds ACEScct codes in
+// H.264: pushed four stops up, a fluid shot's dark background moved by 4 display levels at the median and 24 at p99
+// against its EXR frames, with H.264's 8 px blocks visible (GPU check, 2 Nov). So once a colour tool moves, a source with
+// EXR frames shows only those, as RV plays only what it has decoded: the frame on show if it is in, else the nearest
+// one before it, else the nearest after (the cache keeps frames ahead of the playhead). Null when none is in.
+export function exactFrame(frames, f) {
+  if (frames.has(f)) return f;
+  let before = null, after = null;
+  for (const k of frames.keys()) {
+    if (k < f && (before === null || k > before)) before = k;
+    if (k > f && (after === null || k < after)) after = k;
+  }
+  return before ?? after;
+}
+
 // ---------- The colour tools, as RVColor (ColorIPNode.cpp): display only, the export never changes ----------
 // RV builds one 4 x 4 matrix C, each tool multiplied on the left, so it acts after the ones before it: invert, exposure
 // (2 to the stops), contrast ((1 + c) x - c / 2, about 0.5), hue (a rotation about the grey axis, sheared so that Rec. 709

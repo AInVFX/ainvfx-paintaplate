@@ -78,3 +78,13 @@ test("a point on screen maps to the same working-size pixel at any zoom", () => 
   }
 });
 
+import { exactFrame } from "../../web/display.mjs";
+
+test("once the colour tools move, a playing source shows its EXR frame, else the nearest one before it, else after", () => {
+  const frames = new Map([[0, 1], [4, 1], [9, 1]]);
+  assert.equal(exactFrame(frames, 4), 4);
+  assert.equal(exactFrame(frames, 7), 4);
+  assert.equal(exactFrame(frames, 100), 9);
+  assert.equal(exactFrame(new Map([[5, 1]]), 2), 5);
+  assert.equal(exactFrame(new Map(), 2), null);
+});

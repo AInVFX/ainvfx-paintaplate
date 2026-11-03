@@ -141,6 +141,29 @@ def fluid_wipe_and_models(page, U):
     page.keyboard.press("Escape")
 
 
+PREC = """() => { const v = document.querySelector('#view'); window.__prec = [];
+  new MutationObserver(() => window.__prec.push(v.dataset.precision)).observe(v, { attributes: true, attributeFilter: ['data-precision'] }); }"""
+
+
+def exposure_while_playing(browser, port, U):
+    """With a frame budget too small for every EXR frame (?deep=8: about 5 of 17), a playing EXR plate shows its 8-bit
+    movie at rest, and only its EXR frames once the exposure moves."""
+    page = browser.new_page(viewport={"width": 1400, "height": 900})
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&deep=8")
+    page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
+    U.open_path(page, "paintaplate/hdr_room")
+    page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
+    page.wait_for_timeout(3000)
+    seen = {}
+    for name, keys in (("at rest", []), ("at +2 stops", ["Shift+E"] + ["="] * 20 + ["Escape"])):
+        for k in keys: page.keyboard.press(k)
+        page.evaluate(PREC); page.keyboard.press("Space"); page.wait_for_timeout(2500); page.keyboard.press("Space")
+        seen[name] = sorted(set(page.evaluate("window.__prec")))
+    U.check("8-bit" in seen["at rest"] and seen["at +2 stops"] == ["float"],
+            f"playing, a source shows its 8-bit movie at rest and only its EXR frames once the exposure moves: {seen}")
+    page.close()
+
+
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
@@ -158,3 +181,4 @@ def run(browser, port, U):
     zoom_and_paint(page, U)
     fluid_wipe_and_models(page, U)
     page.close()
+    exposure_while_playing(browser, port, U)
