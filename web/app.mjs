@@ -2924,10 +2924,14 @@ function refreshInspector(force = false) { // on every redraw: place the box, re
   mark.hidden = false; Object.assign(mark.style, { left: `${sx}px`, top: `${sy}px` });
   const cx = Math.floor(((i.pt.x + 0.5) / width) * view.width), cy = Math.floor(((i.pt.y + 0.5) / height) * view.height);
   i.final = [...view.getContext("2d").getImageData(cx, cy, 1, 1).data.slice(0, 3)].map((v) => v / 255); // the final colour, as drawn
-  const src = inspectSource(), key = `${src.path}#${S.frame}#${i.pt.x},${i.pt.y}`;
+  const key = inspectKey();
   if (force || key !== i.key) { i.key = key; readPixel(); }
-  else if (i.got) showInspector(i.pt, S.frame, i.got);
+  // The last values with the point and frame they were read at: while a read is on its way, a redraw showed the new
+  // point with the old point's values, and CI's page test read them (3 Nov)
+  else if (i.got) showInspector(i.got.pt, i.got.frame, i.got, i.got.key === key);
 }
+
+const inspectKey = () => `${inspectSource().path}#${S.frame}#${S.inspect.pt?.x},${S.inspect.pt?.y}`; // a read's file, frame and point
 
 function inspectSource() { // the file on show and what it holds: EXR frames in their own space, or a movie's codes
   const sh = S.shot, frames = !!sh?.frames;
@@ -2941,25 +2945,25 @@ async function readPixel() {
   i.busy = true;
   const wait = INSPECT_MS - (performance.now() - i.last);
   if (wait > 0) await new Promise((ok) => setTimeout(ok, wait));
-  const pt = i.pt, frame = S.frame, src = inspectSource();
+  const pt = i.pt, frame = S.frame, src = inspectSource(), key = inspectKey();
   i.last = performance.now();
   try {
     const r = await fetch(`/paintaplate/pixel?${new URLSearchParams({ path: src.path, frame, x: pt.x, y: pt.y, size: INSPECT_SIZE })}`);
     const got = await r.json();
     if (!r.ok) throw new Error(got.error);
-    i.got = { ...got, source: src };
+    i.got = { ...got, source: src, pt, frame, key };
     if (i.sampling) i.avg = addSample(i.avg, got.value);
-    showInspector(pt, frame, i.got);
+    showInspector(pt, frame, i.got, key === inspectKey());
   } catch (err) { i.got = null; showInspector(pt, frame, { error: err.message }); }
   finally {
     i.busy = false;
-    if (i.again || `${inspectSource().path}#${S.frame}#${i.pt?.x},${i.pt?.y}` !== i.key) { i.again = false; i.key = null; refreshInspector(); }
+    if (i.again || inspectKey() !== i.key) { i.again = false; i.key = null; refreshInspector(); }
   }
 }
 
-function showInspector(pt, frame, got) {
+function showInspector(pt, frame, got, live = true) { // live: the point and frame on show now, so the final colour is theirs
   const box = $("#inspector"), i = S.inspect;
-  const rows = pt ? inspectorRows({ ...pt, ...(got ?? {}), final: i.final, frame: S.plate.first + frame, average: i.avg })
+  const rows = pt ? inspectorRows({ ...pt, ...(got ?? {}), final: live ? i.final : null, frame: S.plate.first + frame, average: i.avg })
     : [["Shift+click", "the frame to sample a pixel"]];
   box.replaceChildren(...rows.map(([k, v]) => {
     const row = document.createElement("div"), dt = document.createElement("span"), dd = document.createElement("span");
