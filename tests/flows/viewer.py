@@ -92,6 +92,87 @@ def native_and_inspector(page, port, U):
     page.keyboard.press("f")
 
 
+PIXEL = "(([x, y]) => [...document.querySelector('#view').getContext('2d').getImageData(x, y, 1, 1).data].slice(0, 3))"
+TO_CANVAS = """(([cx, cy]) => { const v = document.querySelector('#view'), r = v.getBoundingClientRect();
+  return [Math.floor((cx - r.left) / r.width * v.width), Math.floor((cy - r.top) / r.height * v.height)]; })"""
+
+
+def zoom_and_paint(page, U):
+    """RV's zoom keys, and a stroke lands under the pointer at 4:1 and at 1:2 (the plate on show is 4K, the edits 1920)."""
+    page.keyboard.press("Home"); page.keyboard.press("b"); page.click(".sw[data-color='#d32f2f']")
+    box = page.eval_on_selector("#viewport", "e => { const r = e.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }")
+    for key, n, at in (("4", 4, (0.5, 0.5)), ("Shift+2", 0.5, (0.45, 0.5))):
+        page.keyboard.press(key); page.wait_for_timeout(300)
+        dev = page.evaluate("document.querySelector('#view').getBoundingClientRect().width * devicePixelRatio")
+        U.check(abs(dev - 3840 * n) < 2, f"{key} shows {n}:1 as RV: 3840 plate pixels over {dev:.0f} device pixels")
+        cx, cy = box[0] + at[0] * box[2], box[1] + at[1] * box[3]
+        xy = page.evaluate(TO_CANVAS, [cx, cy]); before = page.evaluate(PIXEL, xy)
+        page.mouse.move(cx - 3, cy); page.mouse.down(); page.mouse.move(cx + 3, cy, steps=4); page.mouse.up(); page.wait_for_timeout(300)
+        after = page.evaluate(PIXEL, xy)
+        U.check(after[0] - after[1] > 60 and sum(abs(a - b) for a, b in zip(before, after)) > 60,
+                f"at {key}, the red stroke lands under the pointer: canvas {xy} goes from {before} to {after}")
+        page.keyboard.press("Control+z"); page.wait_for_timeout(200)
+    page.keyboard.press("f")
+
+
+def fluid_wipe_and_models(page, U):
+    """The wipe on a fluid shot: the painted keyframe at this frame, or black, against the shot; the models behind it."""
+    page.click("#open-btn"); page.click("#open [data-tab=blank]")
+    page.select_option("#b-depth", "8"); page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.fill("#b-frames", "33")
+    page.dispatch_event("#b-frames", "input"); page.click("#open-go")
+    page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
+    page.click(".sw[data-color='#ffffff']")
+    box = page.eval_on_selector("#view", "e => { const r = e.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }")
+    spot = (box[0] + 0.2 * box[2], box[1] + 0.5 * box[3])
+    page.fill("#prompt", "white steam"); page.evaluate("document.activeElement.blur()")
+    page.mouse.move(spot[0] - 20, spot[1]); page.mouse.down(); page.mouse.move(spot[0] + 20, spot[1], steps=6); page.mouse.up()
+    page.keyboard.press("Enter")
+    page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
+      return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden; })()""", timeout=120000)
+    page.click('#history li[data-id="fluid"] .edit')  # the keyframes again: the fluid shot is the result
+    page.keyboard.press("Home"); page.keyboard.press("F6"); page.wait_for_timeout(800)
+    xy = page.evaluate(TO_CANVAS, list(spot))
+    key0 = page.evaluate(PIXEL, xy)
+    U.check(min(key0) > 200 and page.text_content("#wipe .label.left") == "Keyframe",
+            f"the wipe on a fluid shot shows the painted keyframe on its frame: {key0}, label {page.text_content('#wipe .label.left')!r}")
+    for _ in range(5): page.keyboard.press("ArrowRight")
+    page.wait_for_timeout(800)
+    U.check(page.evaluate(PIXEL, xy) == [0, 0, 0], f"and black on a frame with no keyframe: {page.evaluate(PIXEL, xy)}")
+    page.keyboard.press("F6")
+    page.click("#view", button="right")
+    page.locator("#ctx li.group > span:first-child", has_text="Help").first.hover()
+    page.get_by_role("menuitem", name="Models and licences", exact=True).click()
+    page.wait_for_function("document.querySelector('#models').open", timeout=10000)
+    shown = page.get_attribute("#models", "data-shown").split(",")
+    rows = page.eval_on_selector_all("#models-all tr", "els => els.length")
+    U.check({"fluid", "ltx", "ltx-text", "ltx-vae"} <= set(shown) and "klein" not in shown and rows == 15,
+            f"Models and licences: the models behind the fluid shot, then every model: {shown}, {rows} rows")
+    page.keyboard.press("Escape")
+
+
+PREC = """() => { const v = document.querySelector('#view'); window.__prec = [];
+  new MutationObserver(() => window.__prec.push(v.dataset.precision)).observe(v, { attributes: true, attributeFilter: ['data-precision'] }); }"""
+
+
+def exposure_while_playing(browser, port, U):
+    """With a frame budget too small for every EXR frame (?deep=8: about 5 of 17), a playing EXR plate shows its 8-bit
+    movie at rest, and only its EXR frames once the exposure moves."""
+    page = browser.new_page(viewport={"width": 1400, "height": 900})
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&deep=8")
+    page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
+    U.open_path(page, "paintaplate/hdr_room")
+    page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
+    page.wait_for_timeout(3000)
+    seen = {}
+    for name, keys in (("at rest", []), ("at +2 stops", ["Shift+E"] + ["="] * 20 + ["Escape"])):
+        for k in keys: page.keyboard.press(k)
+        page.evaluate(PREC); page.keyboard.press("Space"); page.wait_for_timeout(2500); page.keyboard.press("Space")
+        seen[name] = sorted(set(page.evaluate("window.__prec")))
+    U.check("8-bit" in seen["at rest"] and seen["at +2 stops"] == ["float"],
+            f"playing, a source shows its 8-bit movie at rest and only its EXR frames once the exposure moves: {seen}")
+    page.close()
+
+
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
@@ -106,4 +187,7 @@ def run(browser, port, U):
     page.keyboard.press("F5")
     U.check(page.evaluate("window.__alive") == 1, "F5 is the page's: it does not reload")
     native_and_inspector(page, port, U)
+    zoom_and_paint(page, U)
+    fluid_wipe_and_models(page, U)
     page.close()
+    exposure_while_playing(browser, port, U)

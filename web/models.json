@@ -1,0 +1,201 @@
+{
+ "about": "Every model Paint a plate's workflows load: its licence (the one its Hugging Face repository states, read on 2 Nov 2026 at the revision pinned in get_models.py), its source and what it does here. upstream: the original model's licence when a repackaged file comes from another repository. tests/test_models.py checks it against get_models.py and the workflows.",
+ "checked": "2026-11-02",
+ "models": [
+  {
+   "id": "klein",
+   "name": "FLUX 3 Image Klein (int8)",
+   "file": "flux3-image-klein-int8-convrot.safetensors",
+   "repo": "black-forest-labs/flux-3-image-klein-comfy",
+   "source": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy",
+   "use": "Edits the first frame",
+   "licence": "FLUX Kommunity License v1.0",
+   "licence_url": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/blob/main/LICENSE.md",
+   "gated": true,
+   "revision": "feef60b0aaf63a4773ace96636ebbcf43b881312"
+  },
+  {
+   "id": "klein-text",
+   "name": "Qwen3-VL-4B-Instruct, FLUX 3 Image Klein's text encoder (int8)",
+   "file": "qwen3vl_4b_int8_convrot.safetensors",
+   "repo": "black-forest-labs/flux-3-image-klein-comfy",
+   "source": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy",
+   "use": "Reads the caption for FLUX 3 Image Klein",
+   "licence": "FLUX Kommunity License v1.0",
+   "licence_url": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/blob/main/LICENSE.md",
+   "upstream": {
+    "licence": "Apache-2.0",
+    "source": "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct"
+   },
+   "gated": true,
+   "revision": "feef60b0aaf63a4773ace96636ebbcf43b881312"
+  },
+  {
+   "id": "klein-upsampler",
+   "name": "FLUX 3 Image Klein prompt upsampler, Qwen 3.5 9B (w4a8)",
+   "file": "qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors",
+   "repo": "black-forest-labs/flux-3-image-klein-comfy",
+   "source": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy",
+   "use": "Writes every edit's caption",
+   "licence": "FLUX Kommunity License v1.0",
+   "licence_url": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/blob/main/LICENSE.md",
+   "upstream": {
+    "licence": "Apache-2.0",
+    "source": "https://huggingface.co/black-forest-labs/flux-3-image-klein-pup"
+   },
+   "gated": true,
+   "revision": "feef60b0aaf63a4773ace96636ebbcf43b881312"
+  },
+  {
+   "id": "klein-vae",
+   "name": "FLUX 2 VAE",
+   "file": "flux2-vae.safetensors",
+   "repo": "black-forest-labs/flux-3-image-klein-comfy",
+   "source": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy",
+   "use": "Encodes and decodes FLUX 3 Image Klein's images",
+   "licence": "FLUX Kommunity License v1.0",
+   "licence_url": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/blob/main/LICENSE.md",
+   "gated": true,
+   "revision": "feef60b0aaf63a4773ace96636ebbcf43b881312"
+  },
+  {
+   "id": "ltx",
+   "name": "LTX 2.5 22B distilled (int8)",
+   "file": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+   "repo": "Lightricks/LTX-2.5",
+   "source": "https://huggingface.co/Lightricks/LTX-2.5",
+   "use": "Carries every edit through the shot; makes fluid shots and SDR to HDR",
+   "licence": "LTX-2.x Community License",
+   "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
+   "gated": true,
+   "revision": "49b093a39c19169a8a81721dcc541e07e945232f"
+  },
+  {
+   "id": "ltx-text",
+   "name": "Gemma 4 12B text encoder with LTX 2.5 projections (int8)",
+   "file": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+   "repo": "Lightricks/LTX-2.5",
+   "source": "https://huggingface.co/Lightricks/LTX-2.5",
+   "use": "Reads LTX 2.5's prompts",
+   "licence": "LTX-2.x Community License",
+   "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
+   "upstream": {
+    "licence": "Apache-2.0 (Gemma 4)",
+    "source": "https://ai.google.dev/gemma/docs/gemma_4_license"
+   },
+   "gated": true,
+   "revision": "49b093a39c19169a8a81721dcc541e07e945232f"
+  },
+  {
+   "id": "ltx-vae",
+   "name": "LTX 2.5 video VAE (convolutional)",
+   "file": "ltx-2.5-video-vae-conv-bf16.safetensors",
+   "repo": "Lightricks/LTX-2.5",
+   "source": "https://huggingface.co/Lightricks/LTX-2.5",
+   "use": "Encodes and decodes LTX 2.5's video",
+   "licence": "LTX-2.x Community License",
+   "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
+   "gated": true,
+   "revision": "49b093a39c19169a8a81721dcc541e07e945232f"
+  },
+  {
+   "id": "ltx-audio-vae",
+   "name": "LTX 2.5 audio VAE",
+   "file": "ltx-2.5-audio-vae-bf16.safetensors",
+   "repo": "Lightricks/LTX-2.5",
+   "source": "https://huggingface.co/Lightricks/LTX-2.5",
+   "use": "LTX 2.5's audio latent, which its video samples with",
+   "licence": "LTX-2.x Community License",
+   "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
+   "gated": true,
+   "revision": "49b093a39c19169a8a81721dcc541e07e945232f"
+  },
+  {
+   "id": "ripple",
+   "name": "Ripple IC-LoRA v1.1 (WepeNerd)",
+   "file": "LTX25_Ripple_v11.safetensors",
+   "repo": "WepeNerd/LTX-Ripple",
+   "source": "https://huggingface.co/WepeNerd/LTX-Ripple",
+   "use": "Carries paint and light through the shot",
+   "licence": "LTX-2 Community License Agreement",
+   "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
+   "revision": "76abac5ede8a3415b9d1cd803843a38ecb351600"
+  },
+  {
+   "id": "inoutpaint",
+   "name": "LTX 2.3 in-outpainting IC-LoRA (Lightricks)",
+   "file": "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors",
+   "repo": "Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting",
+   "source": "https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting",
+   "use": "Makes the erase pass",
+   "licence": "LTX-2 Community License",
+   "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2",
+   "gated": true,
+   "revision": "8becd61405133263d9e580be41a92e8f827b01ed"
+  },
+  {
+   "id": "sam",
+   "name": "SAM 3.1 (Meta)",
+   "file": "sam3.1_multiplex_fp16.safetensors",
+   "repo": "Comfy-Org/sam3.1",
+   "source": "https://huggingface.co/Comfy-Org/sam3.1",
+   "use": "Finds and tracks the objects painted on",
+   "licence": "SAM License",
+   "licence_url": "https://huggingface.co/Comfy-Org/sam3.1/blob/main/LICENSE",
+   "revision": "7bb8374780a725b4353ed31f3a9395c9742b5621"
+  },
+  {
+   "id": "tiny",
+   "name": "TAEHV tiny LTX decoder (taeltx2_3)",
+   "file": "taeltx2_3.safetensors",
+   "repo": "Kijai/LTX2.3_comfy",
+   "source": "https://huggingface.co/Kijai/LTX2.3_comfy",
+   "use": "Decodes the live preview while a pass runs",
+   "licence": "LTX-2 Community License Agreement",
+   "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE",
+   "upstream": {
+    "licence": "MIT",
+    "source": "https://github.com/madebyollin/taehv"
+   },
+   "revision": "6d980fde0d330f2fed6ff8dfdfddb06d88a004e5"
+  },
+  {
+   "id": "hdr",
+   "name": "LTX 2.5 SDR-to-HDR IC-LoRA (Lightricks)",
+   "file": "ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors",
+   "repo": "Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR",
+   "source": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR",
+   "use": "Turns the SDR shot into scene-linear HDR",
+   "licence": "LTX-2.x Community License",
+   "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
+   "optional": true,
+   "gated": true,
+   "revision": "c7578ebddb54f4210e534e4d8cad698a5a520692"
+  },
+  {
+   "id": "hdr-scene",
+   "name": "Its fixed scene embeddings",
+   "file": "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors",
+   "repo": "Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR",
+   "source": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR",
+   "use": "The prompt SDR to HDR takes",
+   "licence": "LTX-2.x Community License",
+   "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
+   "optional": true,
+   "gated": true,
+   "revision": "c7578ebddb54f4210e534e4d8cad698a5a520692"
+  },
+  {
+   "id": "fluid",
+   "name": "ainvfx-fluid IC-LoRA (AInVFX)",
+   "file": "ainvfx-fluid.safetensors",
+   "repo": "AInVFX/ainvfx-fluid",
+   "source": "https://huggingface.co/AInVFX/ainvfx-fluid",
+   "use": "Turns painted keyframes on a blank plate into smoke, steam or fire",
+   "licence": "LTX-2.x Community License",
+   "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
+   "optional": true,
+   "revision": "6102c50e9629ab4bf32a36d184e705b7a829e4f3"
+  }
+ ]
+}
