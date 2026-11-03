@@ -42,6 +42,7 @@ Where the system Python refuses `pip` (Ubuntu, Debian), install into a virtual e
 - **Phones**, upright and on its side: the plate opened again from the job index, the frame, Generate, the transport, the status line, the log and the menu sheet fit the screen.
 - SDR to HDR: `?hdr=0` turns it off (no switch for an EXR plate, no 16-bit blank plate); by default, no switch for a video plate; on by default for an EXR plate, where the step runs after the full-size shot and before the full-size composite; switched off, the next render leaves it out; a 16-bit blank plate's fluid shot goes through it and opens as an EXR plate.
 - Then every `tests/flows/*.py` module, in name order (`tests/flows/README.md`): one file per workstream, so `ui_mock.py` itself stays as it is.
+- `tests/flows/pipeline.py`, the pipeline's checks: a 16-bit fluid shot with a paint edit, saved as a scene and opened again, takes every job back from the job index, its SDR to HDR included, and posts none.
 - The start: with no plate open, a blank plate opens at 960 × 512, 121 frames at 25 fps, in 16-bit (every other flow loads the page with `?blank=0`).
 - The Render panel: every finished pass with a picture is a row to click; a click shows it (SDR to HDR, the First frame), a second click the latest.
 - A 16-bit fluid shot exports by itself (a zip of its HDR frames and its shot), and playing its EXR plate never alternates between its EXR frames and its 8-bit movie.

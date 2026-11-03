@@ -2554,8 +2554,11 @@ const unpackStrokes = (saved, [W, H], from) => { // `from`: the scene's own work
 
 async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it again, or downloads it
   const work = S.plate.work, f = S.fluid, { config, display, view, look: lk } = S.ocio;
+  // a fluid scene keeps its blank plate, which opens in the model space (openBlank): the plate under its edits can be the
+  // HDR fluid shot's EXR frames, in ACES2065-1, and the blank plate reopened in that space made its jobs again (2 Nov)
+  const blank = f?.blankPath;
   const scene = { ...SCENE, saved: new Date().toISOString(), work, ocio: { config, display, view, look: lk },
-    plate: { path: S.fluid?.blankPath ?? S.plate.path, color_space: S.plate.cs, name: S.plate.name },
+    plate: { path: blank ?? S.plate.path, color_space: blank ? modelSpace() : S.plate.cs, name: S.plate.name },
     preview: S.previewCap, hdr: S.toHdr, in: S.inPt, out: S.outPt,
     edits: S.edits.map((e) => ({ tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on,
       caption: e.caption?.text ?? "", strokes: packStrokes(e.strokes) })),
@@ -2604,7 +2607,8 @@ async function openScene(text) { // the plate opens in its colour space, then ev
   if (scene.preview) setPreview(scene.preview);
   S.toHdr = scene.hdr !== false;
   const from = scene.version >= 2 && Array.isArray(scene.work) ? scene.work : null; // strokes in pixels of this working size
-  await openPlate([], scene.plate.path, { cs: scene.version >= 3 ? scene.plate.color_space : undefined, // older scenes: read from the file
+  await openPlate([], scene.plate.path, { cs: scene.fluid ? modelSpace() // a blank plate, as openBlank opens it (1.4.0 saved the space under its edits)
+    : scene.version >= 3 ? scene.plate.color_space : undefined, // older scenes: read from the file
     ...(scene.fluid ? { fluid: { blankPath: scene.plate.path, seed: scene.fluid.seed, prompt: scene.fluid.prompt ?? "", on: scene.fluid.on !== false, depth: blankDepth(scene.fluid.depth) } } : {}) });
   if (scene.fluid) { // the fluid shot first: its keyframes, then the shot itself, the plate the edits were painted on
     S.fluid.keys = scene.fluid.keys.map((k) => { const key = newKey(k.frame); key.strokes = unpackStrokes(k.strokes, S.plate.work, from); redrawKey(key); return key; });
