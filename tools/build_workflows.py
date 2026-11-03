@@ -128,7 +128,8 @@ def load(name, folder=None):
 # Render panel's rows show them; the ComfyUI graph of the Export dialog leaves them out).
 OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",),
             "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "relight_light": ("light",),
-            "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",)}
+            "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",),
+            "export_plate": ("prefix",), "export_exr": ("exr_prefix",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -594,9 +595,16 @@ def export():
     pixels exactly the source's), with the matte of where the plate changed."""
     g = Graph()
     load, fit, final = composite(g)
-    g("PaintAPlate_SavePlate", _title="Export", _output="export", images=final, plate=load[2],
-      filename_prefix=Slot("prefix", "paintaplate/plate/export"), keep_untouched=Slot("keep_untouched", True),
-      changed=fit[1])
+    plate_out = g("PaintAPlate_SavePlate", _title="Export", _output="export", images=final, plate=load[2],
+                  filename_prefix=Slot("prefix", "paintaplate/plate/export"), keep_untouched=Slot("keep_untouched", True),
+                  changed=fit[1])
+    g.link_slot(plate_out, "images", "export_plate")  # dropped for an EXR result: a video file cannot hold values above 1.0
+    # SDR to HDR on a plate whose format cannot hold values above 1.0 (a video, an integer sequence): Adrien, 2 Nov, the export
+    # is the result as half-float EXR frames, in ACES2065-1 as every HDR file here
+    exr = g("PaintAPlate_SaveFrames", _title="Export as half-float EXR frames (an HDR result of a video plate)", _output="exr", format="exr",
+            images=g("ImageFromBatch", image=colour(g, final, Slot("color_space", "@model"), HDR_SPACE, "The result in ACES2065-1"), batch_index=0, length=load[4]),
+            filename_prefix=Slot("exr_prefix", ""))
+    g.link_slot(exr, "images", "export_exr")
     matte_frames = g("ImageFromBatch", image=g("MaskToImage", mask=fit[1]), batch_index=0, length=load[4])
     g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed", _output="matte", images=matte_frames,
       filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))

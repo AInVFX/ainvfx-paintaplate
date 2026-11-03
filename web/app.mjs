@@ -13,7 +13,7 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
   erasePrompt, erasesPaint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
-import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey } from "./logic.mjs";
+import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -221,7 +221,7 @@ async function openPlate(list, typed, opts = {}) {
   const ctl = (openCtl = new AbortController()); // Cancel on the opening screen, or Esc, aborts it (cancelOpen)
   Object.assign(S, { plate: null, hero: null, original: null }); // nothing to draw while the new plate loads
   const id = Date.now().toString(36), sub = `paintaplate/${id}`;
-  let path = typed, out, cs;
+  let path = typed, out, cs, headroom = 1;
   const name = list.length ? list[0].name.replace(/[._]?\d*\.[^.]+$/, "") : typed.split("/").pop();
   opening(name, list.length > 0);
   try {
@@ -240,7 +240,8 @@ async function openPlate(list, typed, opts = {}) {
     }
     if (ctl.signal.aborted) throw new Error("cancelled");
     openStep("read", 0, "Decoding the frames");
-    const st = await fetch(`/paintaplate/stat?${new URLSearchParams({ path, config: S.ocio.config })}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const st = await fetch(`/paintaplate/stat?${new URLSearchParams({ path, config: S.ocio.config, cs: knownSpace(opts.cs) ?? "" })}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    headroom = st?.headroom ?? 1; // above 1.0 for a log encoding: an integer plate then holds SDR to HDR's values (logic.holdsHdr)
     setSalt(st ? JSON.stringify([path, st.files, st.size, st.mtime]) : null); // the plate's identity: job index keys change when it does
     cs = knownSpace(opts.cs) ?? st?.color_space ?? modelSpace(); // one colour space per plate: the viewer, the models and the export use it
     // a video plate's proxy keeps its own values at the working size, so the viewer converts it with OCIO as it does the plate
@@ -266,7 +267,7 @@ async function openPlate(list, typed, opts = {}) {
   const [w, h] = [spec.width, spec.height];
   const stem = (spec.kind === "video" ? spec.source : spec.first_file ?? spec.source ?? "plate").split(/[\\/]/).pop()
     .replace(/\.[^.]+$/, "").replace(/[._]?\d+$/, "") || "plate";
-  S.plate = { id, path, cs, spec, frames: spec.frames, fps: spec.fps || 24, name: stem, deep: spec.kind !== "video", // an image sequence: read at full precision
+  S.plate = { id, path, cs, headroom, spec, frames: spec.frames, fps: spec.fps || 24, name: stem, deep: spec.kind !== "video", // an image sequence: read at full precision
     proxySpace: spec.kind === "video" ? cs : logSpace(), // an image sequence's proxy holds log values
     first: spec.kind === "video" ? 1 : spec.first_frame ?? 1,
     work: fitSize(w, h, WORK_SIDE, 32), prev: fitSize(w, h, EDIT_SIDE, 16),
@@ -558,12 +559,23 @@ function hdrUI() { // the SDR-to-HDR switch shows for every plate when the model
 }
 function setHdr(on) { // off: renders end with the SDR shot; each setting keeps its own renders
   S.hdrSet = on;
-  const clips = on && !plateDepth(S.plate?.spec).float; // a video file or an integer image holds nothing above 1.0
-  log(`SDR to HDR ${on ? `on: the full-size shot is made again in scene-linear values, then fitted to the plate${clips ? ". This plate's format holds no value above 1.0: the export clips them" : ""}` : "off"}`);
+  const exr = on && !holdsHdr(S.plate?.spec, S.plate?.headroom); // a video file, or integers in a display or linear encoding
+  log(`SDR to HDR ${on ? `on: the full-size shot is made again in scene-linear values, then fitted to the plate${exr ? ". The result becomes an EXR sequence: the player shows its frames and Export writes them, half-float EXR in ACES2065-1" : ""}` : "off"}`);
   hud(`SDR to HDR ${on ? "on" : "off"}`, 1500);
   hdrUI(); recompose(); touch();
 }
-$("#hdr-on").addEventListener("change", () => setHdr($("#hdr-on").checked));
+// On a plate whose format cannot hold values above 1.0, SDR to HDR turns on only once confirmed (Adrien, 2 Nov): its result
+// is then an EXR sequence, in the player and in the export
+function askHdr(on) {
+  $("#hdr-confirm").hidden = true;
+  if (!on || holdsHdr(S.plate?.spec, S.plate?.headroom)) return setHdr(on);
+  $("#hdr-on").checked = hdrOn();
+  $("#hdr-confirm").hidden = false;
+  hud("SDR to HDR on this plate makes its result an EXR sequence: confirm under the switch", 3000);
+}
+$("#hdr-on").addEventListener("change", () => askHdr($("#hdr-on").checked));
+$("#hdr-yes").addEventListener("click", () => { $("#hdr-confirm").hidden = true; setHdr(true); });
+$("#hdr-no").addEventListener("click", () => { $("#hdr-confirm").hidden = true; hdrUI(); });
 
 function recompose() {
   S.hero = layered();
@@ -2198,28 +2210,33 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     r.hdrMovie = m ? viewUrl(m) : null; // the SDR to HDR row of the Render panel shows it
   });
   const hdr = { hdr: r.hdr ?? "", hdr_grow: grow(p.spec.width, erase) + feather(p.spec.width) }; // HDR Match leaves the composite's edge out
+  // an image sequence's review, and an HDR result of a video plate (logic.exrResult), are also EXR frames in the plate's colour
+  // space, values above 1.0 kept, which the viewer reads at full precision
+  const deep = p.deep || exrResult(p.spec, r.hdr, p.headroom);
   await step(r, "review", async (progress) => { // the full-size composite at the plate's quality, which the viewer plays once made
     const out = await run("review", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr, ...r.full.values,
-      relight, grow: grow(p.spec.width, erase), feather: feather(p.spec.width), movie_space: p.deep ? "@model" : p.cs, view_space: logSpace(),
-      review_prefix: `${base}/review`, frames_prefix: p.deep ? `${base}/review/frames` : "", view_prefix: p.deep ? `${base}/review/view` : "" },
+      relight, grow: grow(p.spec.width, erase), feather: feather(p.spec.width), movie_space: deep ? "@model" : p.cs, view_space: logSpace(),
+      review_prefix: `${base}/review`, frames_prefix: deep ? `${base}/review/frames` : "", view_prefix: deep ? `${base}/review/view` : "" },
       { kind: "review", progress }).done;
-    const movie = outputFile("review", out, "review"), frame = p.deep ? outputFile("review", out, "frames") : null;
-    const shown = p.deep ? outputFile("review", out, "view") : null; // an image sequence plays its log movie: the look of its EXR frames
-    Object.assign(r, { review: viewUrl(movie), reviewSpace: p.deep ? "@model" : p.cs, run: movie?.subfolder ?? base, // the render's folder,
+    const movie = outputFile("review", out, "review"), frame = deep ? outputFile("review", out, "frames") : null;
+    const shown = deep ? outputFile("review", out, "view") : null; // an image sequence plays its log movie: the look of its EXR frames
+    Object.assign(r, { review: viewUrl(movie), reviewSpace: deep ? "@model" : p.cs, run: movie?.subfolder ?? base, // the render's folder,
       reviewFrames: frame ? `output:${frame.subfolder}/${framePattern(frame.filename)}` : null, // wherever the job index took it from
-      play: viewUrl(shown ?? movie), playSpace: shown ? logSpace() : p.deep ? "@model" : p.cs });
+      play: viewUrl(shown ?? movie), playSpace: shown ? logSpace() : deep ? "@model" : p.cs });
   });
   if (!here()) return log(`Render v${r.v}: the full-size composite is ready, in the background`);
   if (!S.pass) setShot(r.play ?? r.review, key, r.playSpace ?? r.reviewSpace, r.reviewFrames);
   hud("Composite, full size: the viewer plays it", 2500);
   stagesUI(); exportUI();
-  if (!S.wantDownload) return status(`Composite, full size: the viewer plays it${p.deep ? ", its EXR frames at full precision as they load" : ""}. Export writes the result for compositing software.`);
+  if (!S.wantDownload) return status(`Composite, full size: the viewer plays it${deep ? ", its EXR frames at full precision as they load" : ""}. Export writes the result for compositing software.`);
   await step(r, "export", async (progress) => { // only when Export asks: the plate's own format, and the matte, beside the review
+    const exr = exrResult(p.spec, r.hdr, p.headroom); // the result as half-float EXR frames instead of the plate's format
     const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr,
-      ...r.full.values, relight, keep_untouched: !relight, prefix: `${dir}/export`, matte_prefix: `${dir}/matte/matte`,
+      ...r.full.values, relight, keep_untouched: !relight, prefix: exr ? "" : `${dir}/export`, exr_prefix: exr ? `${dir}/export/f` : "", matte_prefix: `${dir}/matte/matte`,
       matte_video_prefix: `${dir}/matte_movie/m`, grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
-    const file = outputFile("export", done, "export"), matte = outputFile("export", done, "matte_movie"); // a job taken from the index keeps its own folder
-    r.exported = { run: file ? file.subfolder.replace(/\/export$/, "") : dir, name: `${p.name}_paintaplate_v${r.v}`, text: outputText("export", done, "export") ?? "",
+    const file = outputFile("export", done, exr ? "exr" : "export"), matte = outputFile("export", done, "matte_movie"); // a job taken from the index keeps its own folder
+    r.exported = { run: file ? file.subfolder.replace(/\/export$/, "") : dir, name: `${p.name}_paintaplate_v${r.v}`,
+      text: exr ? `${p.frames} half-float EXR frames in ACES2065-1, in ${file?.subfolder ?? `${dir}/export`}` : outputText("export", done, "export") ?? "",
       matte: matte ? viewUrl(matte) : null }; // the Export row shows its matte
   });
   S.exported = r.exported;
@@ -2463,7 +2480,8 @@ function exportDialog() {
   for (const k of ["matte", "review", "shot"]) $(`#x-${k}`).closest("label").hidden = fluid; // a fluid shot alone: its own files
   if (fluid) return fluidExportDialog();
   const r = S.renders.get(S.heroKey), kind = S.plate.spec.kind;
-  $("#x-format").textContent = kind === "video" ? `${S.plate.spec.codec} movie` : `${S.plate.spec.ext.slice(1).toUpperCase()} ${kind}`;
+  $("#x-format").textContent = exrResult(S.plate.spec, r?.hdr ?? hdrOn(), S.plate.headroom) ? "half-float EXR frames, ACES2065-1" // an HDR result of a video plate
+    : kind === "video" ? `${S.plate.spec.codec} movie` : `${S.plate.spec.ext.slice(1).toUpperCase()} ${kind}`;
   $("#x-note").textContent = r?.exported ? "Written: the zip downloads at once."
     : r?.review ? "Export writes the result and its matte from the full-size composite, in seconds, then the zip downloads."
     : `The full-size composite finishes first, ${secs(renderLeft(true)) || "in a moment"}; then the export is written and the zip downloads.`;
@@ -2893,7 +2911,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["ComfyUI graph", "", () => saveGraph().catch(quiet), !edits], "-", ["Close plate", "", () => closePlate(), !p && !openCtl]]],
     ["Edit", [["Undo", "Ctrl+Z", undo, !S.past.length], ["Redo", "Ctrl+Shift+Z", redo, !S.future.length], "-",
       ["New edit", "N", nextEdit, !p || keying() || (!S.draft && !S.selected)], ["Generate", "Enter", () => enter(false), $("#generate").disabled], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
-      ...(HDR_ON ? [["SDR to HDR", "", () => setHdr(!hdrOn()), !p || !S.hdrReady, !!p && S.hdrReady && hdrOn()]] : []),
+      ...(HDR_ON ? [["SDR to HDR", "", () => askHdr(!hdrOn()), !p || !S.hdrReady, !!p && S.hdrReady && hdrOn()]] : []),
       ["Render in full", "", renderInFull, !S.renders.get(S.heroKey)?.donor], ["Stop generating", "Esc", stopGenerating, !generating()],
       ["Deselect", "Esc", () => select(null), !S.selected]]],
     ["Tools", [["Paint", "B", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Erase", "E", () => pickTool("erase"), !p || (keying() && !S.fluid.result), S.tool === "erase" && !S.rub],

@@ -192,6 +192,9 @@ class PlateBrowser(unittest.TestCase):
         info = routes.plate_info("plates/shot.mov")
         self.assertEqual((info["kind"], info["width"], info["color_space"]), ("video", 96, "sRGB Encoded Rec.709 (sRGB)"))
         self.assertEqual(routes.plate_info("output:ComfyUI_#####_.png")["frames"], 3)
+        # headroom: what code value 1.0 decodes to in scene-linear; above 1.0 a log encoding holds SDR to HDR's values
+        self.assertEqual(routes.plate_info("plates/shot.mov")["headroom"], 1.0)
+        self.assertGreater(routes.plate_info("plates/shot.mov", cs="ACEScct")["headroom"], 200)
 
     def test_scenes_saved_on_this_comfyui(self):
         import json

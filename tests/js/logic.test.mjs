@@ -108,7 +108,7 @@ test("optional links drop with what fed them when their slots are empty", () => 
 test("every workflow names the outputs and the progress node the page reads", () => {
   const wanted = { ingest: ["hero", "proxy", "spec"], prompt: ["text"], edit: ["patch", "relit", "result"],
     snap: ["named", "point_0", "point_1", "point_2", "point_3", "point_4"], clean: ["frames", "video"], shot: ["frames", "video"],
-    matte: ["follow", "frames", "movie"], comp: ["video"], review: ["frames", "review", "view"], export: ["export", "matte", "matte_movie"], warm: ["frame"],
+    matte: ["follow", "frames", "movie"], comp: ["video"], review: ["frames", "review", "view"], export: ["exr", "export", "matte", "matte_movie"], warm: ["frame"],
     fluid: ["control", "plate", "video"] };
   for (const [name, outs] of Object.entries(wanted)) {
     const wf = workflow(name);
@@ -479,6 +479,8 @@ test("new content at the plate's bit depth: one rule per kind of plate", () => {
     "16-bit TIFF with alpha": [{ kind: "sequence", ext: ".tif", pix_fmt: "rgba64le" }, 16, "png16", false],
     "10-bit DPX": [{ kind: "sequence", ext: ".dpx", pix_fmt: "gbrp10le" }, 10, "png16", false],
     "half EXR": [{ kind: "sequence", ext: ".exr", pix_fmt: "gbrpf16le" }, 16, "exr", true],
+    "float TIFF": [{ kind: "sequence", ext: ".tif", pix_fmt: "rgbf32le" }, 32, "exr", true],
+    "float DPX": [{ kind: "sequence", ext: ".dpx", pix_fmt: "gbrpf32le" }, 32, "exr", true],
     "float EXR": [{ kind: "sequence", ext: ".exr", pix_fmt: "gbrpf32le" }, 32, "exr", true] };
   for (const [name, [spec, bits, frames, hdr]] of Object.entries(kinds))
     assert.deepEqual(plateDepth(spec), { bits, float: hdr, frames, hdr }, name);
@@ -492,4 +494,20 @@ test("the SDR-to-HDR switch away from the plate's default makes another render k
   assert.equal(hdrKey("1.1", false, false), "1.1");
   assert.deepEqual(["1.1", "1.1|sdr", "1.1|hdr"].map((k) => hdrOfKey(k, true)), [true, false, true]);
   assert.deepEqual(["1.1", "1.1|sdr", "1.1|hdr"].map((k) => hdrOfKey(k, false)), [false, false, true]);
+});
+
+import { exrResult, holdsHdr } from "../../web/logic.mjs";
+
+test("SDR to HDR on a plate that cannot hold values above 1.0 makes its result an EXR sequence", () => {
+  const mp4 = { kind: "video", ext: ".mp4", pix_fmt: "yuv420p" }, png16 = { kind: "sequence", ext: ".png", pix_fmt: "rgb48be" };
+  const exr = { kind: "sequence", ext: ".exr", pix_fmt: "gbrpf16le" }, tif16 = { kind: "sequence", ext: ".tif", pix_fmt: "rgb48le" };
+  const tifF = { kind: "sequence", ext: ".tif", pix_fmt: "rgbf32le" }, dpx10 = { kind: "sequence", ext: ".dpx", pix_fmt: "gbrp10le" };
+  assert.deepEqual([exrResult(mp4, true), exrResult(png16, true), exrResult(exr, true), exrResult(mp4, false)], [true, true, false, false]);
+  assert.equal(holdsHdr(tifF), true, "a float TIFF holds them in its own format");
+  assert.equal(holdsHdr({ ...dpx10, pix_fmt: "gbrpf32le" }), true, "a float DPX too");
+  assert.equal(holdsHdr(dpx10, 16.3), true, "a 10-bit DPX in a log encoding holds them through its curve");
+  assert.equal(holdsHdr(tif16, 222.9), true, "a 16-bit TIFF in ACEScct too");
+  assert.equal(holdsHdr(tif16, 1), false, "a 16-bit TIFF in sRGB does not: its result becomes an EXR sequence");
+  assert.equal(holdsHdr(mp4, 100), false, "a video plate never, whatever its encoding (Adrien, 2 Nov)");
+  assert.deepEqual([exrResult(dpx10, true, 16.3), exrResult(tif16, true, 1)], [false, true]);
 });

@@ -135,10 +135,46 @@ def pass_rows(page, U):
     U.check(not errors, f"no console errors in the pass rows: {errors}")
 
 
+def hdr_video(page, U):
+    """SDR to HDR on a video plate (Adrien, 2 Nov): off by default; turning it on asks first; once on, the result is an EXR
+    sequence that the player reads at full precision, and Export writes that sequence instead of a video file."""
+    errors = []
+    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    U.open_path(page, "plates/desk.mp4")
+    page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
+    U.check(not page.is_hidden("#hdr-switch") and not page.is_checked("#hdr-on"), "a video plate: SDR to HDR shows, off by default")
+    page.click("#hdr-on")
+    U.check(not page.is_hidden("#hdr-confirm") and not page.is_checked("#hdr-on"), "turning it on asks first, and stays off until confirmed")
+    page.click("#hdr-no")
+    U.check(page.is_hidden("#hdr-confirm") and not page.is_checked("#hdr-on"), "Cancel leaves it off")
+    page.click("#hdr-on"); page.click("#hdr-yes")
+    U.check(page.is_hidden("#hdr-confirm") and page.is_checked("#hdr-on"), "Turn on turns it on")
+    page.evaluate("document.activeElement.blur()")
+    page.evaluate(U.WATCH)
+    page.keyboard.press("b"); U.paint_once(page, "a red lamp", [(0.3, 0.6), (0.36, 0.7)]); page.keyboard.press("Enter")
+    U.wait_log(page, U.added_line(U.REVIEWED), 240000, "the full-size composite with SDR to HDR")
+    lines = page.evaluate("window.__lines")
+    U.check(any("SDR to HDR took" in t for t in lines), "the full-size shot went through SDR to HDR")
+    settled(page)
+    page.keyboard.press("n")
+    page.wait_for_function("document.querySelector('canvas[data-precision]').dataset.precision === 'float'", timeout=60000)
+    U.check(True, "paused, the player shows the result's EXR frames at full precision")
+    page.click("#export-btn")
+    fmt = page.text_content("#x-format") or ""
+    with page.expect_download(timeout=240000) as dl:
+        page.click("#x-go")
+    import zipfile
+    names = zipfile.ZipFile(dl.value.path()).namelist()
+    U.check("half-float EXR" in fmt and any(n.startswith("export/") and n.endswith(".exr") for n in names) and not any(n.endswith((".mp4", ".webm")) and n.startswith("export/") for n in names),
+            f"Export writes the EXR sequence, not a video file: {fmt}, {[n for n in names if n.startswith('export/')][:3]}")
+    U.check(not errors, f"no console errors with SDR to HDR on a video plate: {errors}")
+
+
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900}, accept_downloads=True)
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     fluid16_scene(page, U)
     pass_rows(page, U)
+    hdr_video(page, U)
     page.close()

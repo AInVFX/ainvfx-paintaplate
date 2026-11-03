@@ -8,7 +8,8 @@
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_element: ["seed"],
   review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], relight_light: ["light"],
-  matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"] };
+  matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"],
+  export_plate: ["prefix"], export_exr: ["exr_prefix"] };
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
   const slots = {}, outputs = {}, progress = new Set();
@@ -531,18 +532,28 @@ export const HDR_DEPTH = 16;
 // shows for every plate:
 //   8-bit video or images: 8-bit PNG frames; SDR to HDR off by default.
 //   10-bit or 12-bit video (ProRes among them), 16-bit PNG and TIFF, 10-bit DPX: 16-bit PNG frames; off by default.
-//   Half and float EXR: half-float EXR frames; on by default (a light edit stays out while the relight is on hold).
+//   Half and float samples (EXR, and a float TIFF or DPX: FFmpeg's decoders read 32-bit float): half-float EXR frames; on by
+//   default (a light edit stays out while the relight is on hold).
 export function plateDepth(spec) {
   const fmt = String(spec?.pix_fmt ?? "").toLowerCase(), exr = !!spec && spec.kind !== "video" && /^\.exr$/i.test(spec.ext ?? "");
+  const float = exr || /f(16|32)(le|be)?$/.test(fmt);
   const bits = /f32/.test(fmt) ? 32 : exr || /f16/.test(fmt) ? 16 : /(rgba?|bgra?)64|(rgb|bgr)48|gray16|ya16/.test(fmt) ? 16
     : +(fmt.match(/p(\d+)(le|be)$/)?.[1] ?? 8);
-  return { bits, float: exr, frames: exr ? "exr" : bits > 8 ? "png16" : "png", hdr: exr };
+  return { bits, float, frames: float ? "exr" : bits > 8 ? "png16" : "png", hdr: float };
 }
+// Whether a plate's own format holds the values above 1.0 that SDR to HDR makes: float samples do, and so does an integer
+// image sequence in a log encoding (`headroom`, from the stat route: the scene-linear value code value 1.0 decodes to in
+// the plate's colour space; 222.9 for ACEScct, 1.0 for sRGB), such as a 10-bit Cineon DPX or a camera log TIFF. A video
+// plate's result is an EXR sequence whatever its encoding (Adrien, 2 Nov).
+export const holdsHdr = (spec, headroom = 1) => !!spec && spec.kind !== "video" && (plateDepth(spec).float || headroom > 1.001);
 export const hdrPlate = (spec) => plateDepth(spec).hdr; // SDR to HDR on by default for this plate
 export const wantsHdr = (spec, tools, on) => !!spec && !!on && !tools.includes("light");
 // The switch away from the plate's default makes another render, so each setting keeps its own: "|hdr" or "|sdr".
 export const hdrKey = (edits, dflt, on) => (on === dflt ? edits : `${edits}|${on ? "hdr" : "sdr"}`);
 export const hdrOfKey = (key, dflt) => (key?.endsWith("|hdr") ? true : key?.endsWith("|sdr") ? false : dflt);
+// SDR to HDR on a plate whose format cannot hold values above 1.0 (Adrien, 2 Nov): asked before it turns on, then the result is
+// an EXR sequence, which the player shows at full precision and the export writes.
+export const exrResult = (spec, hdrRan, headroom = 1) => !!hdrRan && !holdsHdr(spec, headroom);
 export const hdrFps = (fps) => Math.min(30, +fps || 24); // the conditioning frame rate: at most 30, as in Lightricks' workflow
 export const blankDepth = (v) => (+v === HDR_DEPTH ? HDR_DEPTH : 8);
 export const defaultDepth = (hdrReady) => (hdrReady ? HDR_DEPTH : 8); // a blank plate: 16-bit whenever SDR to HDR can run

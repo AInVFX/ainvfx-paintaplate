@@ -316,7 +316,7 @@ async def execute(pid, prompt):
             o[outs["control"]] = {"images": [save_mp4([at.get(i, np.zeros((h, w, 3), np.float32)) for i in range(len(frames))],
                                                        v["control_prefix"], spec["fps"])], "animated": [True]}
         o[outs["video"]] = {"images": [save_mp4(shot, v["video_prefix"], spec["fps"])], "animated": [True]}
-    elif "video" in outs or "export" in outs:  # comp and export: blend the shot over the plate through the matte
+    elif "video" in outs or "export" in outs or "exr" in outs:  # comp and export: blend the shot over the plate through the matte
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         n = spec["frames"]
         h, w = (v["height"], v["width"]) if "video" in outs else frames[0].shape[:2]
@@ -332,9 +332,10 @@ async def execute(pid, prompt):
         if "video" in outs:
             o[outs["video"]] = {"images": [save_mp4(out, v["video_prefix"], spec["fps"])], "animated": [True]}
         else:
-            d = os.path.join(folder("output"), v["prefix"])
+            d = os.path.join(folder("output"), v.get("prefix") or v.get("exr_prefix", "").rpartition("/")[0])
             os.makedirs(d, exist_ok=True)
-            save_mp4(out, f"{v['prefix']}/plate", spec["fps"])
+            if "export" in outs:  # Save Plate: dropped for an HDR result of a video plate, which writes EXR frames instead
+                save_mp4(out, f"{v['prefix']}/plate", spec["fps"])
             if "matte" in outs:
                 for i in range(n):
                     save_png(resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w)),
@@ -342,6 +343,14 @@ async def execute(pid, prompt):
             if "matte_movie" in outs:  # the export's matte as a grey movie, for the Export row
                 greys = [np.dstack([resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w), np.float32)] * 3) for i in range(n)]
                 o[outs["matte_movie"]] = {"images": [save_mp4(greys, v["matte_video_prefix"], spec["fps"])], "animated": [True]}
+            if "exr" in outs:  # an HDR result of a video plate: half-float EXR frames instead of the plate's format
+                sub = v["exr_prefix"].rpartition("/")[0]
+                os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
+                names = [f"f_{i + 1:05d}_.exr" for i in range(n)]
+                plateio.write_exrs(lambda i: out[i], [os.path.join(folder("output"), sub, f) for f in names])
+                o[outs["exr"]] = {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
+            if "export" not in outs:
+                return o
             o[outs["export"]] = {"text": [f"1 file(s) in {d}\nplate_00001_.webm"],
                                  "files": [{"filename": "plate_00001_.webm", "subfolder": v["prefix"], "type": "output"}]}
     else:

@@ -359,19 +359,31 @@ def plate_stat(rel: str) -> dict:
     return {"files": len(sts), "size": sum(s.st_size for s in sts), "mtime": max((s.st_mtime_ns for s in sts), default=0)}
 
 
-def plate_info(rel: str, config: str = "") -> dict:
-    """What the Open dialog says about a plate, and its file colour space guessed in `config`, for the viewer's OCIO."""
+def headroom(config: str, cs: str) -> float:
+    """The scene-linear value that code value 1.0 decodes to in colour space `cs`: 1.0 for sRGB, a display or a linear
+    space; above 1.0 for a log encoding (in the studio config, 2 Nov: ACEScct 222.9, ARRI LogC4 469.8, ADX16 65504), so
+    an integer plate in such a space still holds the values above 1.0 that SDR to HDR makes. 1.0 when it cannot be read."""
+    try:
+        return round(float(np.max(ocio.convert([np.ones((1, 1, 3), np.float32)], config, cs, "@linear")[0])), 3)
+    except Exception:
+        return 1.0
+
+
+def plate_info(rel: str, config: str = "", cs: str = "") -> dict:
+    """What the Open dialog says about a plate, its file colour space guessed in `config`, for the viewer's OCIO, and the
+    headroom of `cs` (else of that guess)."""
     full = folders.plate_path(rel)
     spec = plateio.probe_plate(full)
     first = spec["files"][0] if spec.get("files") else full
     keep = ("kind", "ext", "codec", "pix_fmt", "width", "height", "frames", "fps", "first_frame", "missing")
-    return {**plate_stat(rel), **{k: spec[k] for k in keep if k in spec},
-            "color_space": ocio.guess(config, plateio.guess_color_space(spec), first)}
+    guess = ocio.guess(config, plateio.guess_color_space(spec), first)
+    return {**plate_stat(rel), **{k: spec[k] for k in keep if k in spec}, "color_space": guess, "headroom": headroom(config, cs or guess)}
 
 
 async def stat(request: web.Request) -> web.Response:
     try:
-        return web.json_response(await asyncio.to_thread(plate_info, request.query.get("path", ""), request.query.get("config", "")))
+        return web.json_response(await asyncio.to_thread(plate_info, request.query.get("path", ""), request.query.get("config", ""),
+                                                         request.query.get("cs", "")))
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         return web.json_response({"error": str(exc)}, status=404)
 
