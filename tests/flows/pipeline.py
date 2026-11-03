@@ -180,10 +180,24 @@ def hdr_video(page, U):
     U.check(not errors, f"no console errors with SDR to HDR on a video plate: {errors}")
 
 
+def movie_name(page, U):
+    """A movie keeps its trailing digits in its name: desk_v2.mp4 is « desk_v2 », not « desk_v » (3 Nov: train_v2.mp4 showed
+    as « train_v »). Trailing digits are a frame number only in an image sequence."""
+    base = page.url.split("/extensions/")[0]
+    movie = page.request.get(f"{base}/view?filename=desk.mp4&subfolder=plates&type=input").body()
+    page.request.post(f"{base}/upload/image", multipart={"image": {"name": "desk_v2.mp4", "mimeType": "video/mp4", "buffer": movie},
+                                                         "subfolder": "plates", "overwrite": "true"})
+    U.open_path(page, "plates/desk_v2.mp4")
+    page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk_v') && document.querySelector('#opening').hidden", timeout=60000)
+    spec = page.text_content("#spec")
+    U.check(spec.startswith("desk_v2: "), f"a movie keeps its trailing digits in its name: {spec}")
+
+
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900}, accept_downloads=True)
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
+    movie_name(page, U)
     fluid16_scene(page, U)
     pass_rows(page, U)
     hdr_video(page, U)

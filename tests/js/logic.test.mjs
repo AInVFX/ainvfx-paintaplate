@@ -314,6 +314,17 @@ test("a divider's drag stays inside the window and never squeezes a panel or the
   assert.equal(panelSize("log", 10, view, log), 60);
 });
 
+import { plateStem } from "../../web/logic.mjs";
+
+test("a plate's name keeps a movie's trailing digits and drops only an image sequence's frame number", () => {
+  assert.equal(plateStem("plates/train_v2.mp4", false), "train_v2");
+  assert.equal(plateStem("chalet_v2.mp4", false), "chalet_v2");
+  assert.equal(plateStem("C:\\plates\\room.1001.exr", true), "room");
+  assert.equal(plateStem("shot_v3_0001.png", true), "shot_v3");
+  assert.equal(plateStem("still_2.png", false), "still_2"); // a single image: its digits are part of its name
+  assert.equal(plateStem("", false), "plate");
+});
+
 import { warmEnd } from "../../web/logic.mjs";
 
 test("the model warm-up's last line: on the status line only while the start's message is there, and never « every model loaded » after a cancel", () => {

@@ -520,6 +520,16 @@ export function panelSize(kind, wanted, view, { least, stage, around }) {
   return Math.round(Math.max(least, Math.min(wanted, room)));
 }
 
+// ---------- A plate's name ----------
+// The name the page, scenes and exports give a plate: its file name without the extension and, for an image sequence only,
+// without the frame number. Trailing digits are a frame number only in an image sequence: « train_v2.mp4 » is train_v2 and
+// « room.1001.exr » is room (3 Nov: train_v2.mp4 and chalet_v2.mp4 showed as « train_v » and « chalet_v », so two movies
+// could share a name in the page, in scenes and in exports).
+export function plateStem(file, sequence) {
+  const base = String(file ?? "").split(/[\\/]/).pop().replace(/\.[^.]+$/, "");
+  return (sequence ? base.replace(/[._]?\d+$/, "") : base) || "plate";
+}
+
 // ---------- The model warm-up ----------
 // warmAll's last line. It goes to the status line only while that line still says what the page said at start: once a plate
 // was opened or closed, the status line holds a newer message, and the log keeps this one. A warm-up job that an opening, an
