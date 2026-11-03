@@ -124,9 +124,11 @@ def load(name, folder=None):
 # no words for an erase: no search by name; not a relight: no light transfer on the edited frame;
 # an erase matte: no plate under a shot to compare with, and no changed pixels to start from; a video plate's review:
 # no EXR frames, its movie is the plate's own quality; no SDR-to-HDR shot: the SDR shot goes on as it is; not a light
-# edit: no painted light to keep.
+# edit: no painted light to keep; no movie asked of a matte, an export's matte or a fluid shot's control video (the
+# Render panel's rows show them; the ComfyUI graph of the Export dialog leaves them out).
 OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",),
-            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "relight_light": ("light",)}
+            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "relight_light": ("light",),
+            "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -451,7 +453,7 @@ def matte():
     track safe: one matte per frame even when SAM returns none, the last matte where SAM loses the object, and for
     paint every pixel the shot changed near the matte, compared with the plate the shot was made over (`base`)."""
     g = Graph()
-    _, model = plate(g, pad=True)
+    load, model = plate(g, pad=True)
     frames = g("ImageScale", image=model, upscale_method="area", width=Slot("width", 960),
                height=Slot("height", 544), crop="disabled")
     sam = g("CheckpointLoaderSimple", ckpt_name=Slot("sam", SAM))
@@ -468,8 +470,11 @@ def matte():
                zone=Slot("zone", 0.0625), threshold=Slot("threshold", 0.1))
     g.link_slot(follow, "base", "follow_base")  # dropped for an erase matte: no shot to compare
     g.link_slot(follow, "element", "follow_element")  # dropped for an erase matte: the object is the first-frame mask
-    g("PaintAPlate_SaveFrames", _title="Matte frames", _output="frames", images=g("MaskToImage", mask=follow[0]),
-      filename_prefix=Slot("prefix", "paintaplate/plate/matte/m"))
+    grey = g("MaskToImage", mask=follow[0])
+    g("PaintAPlate_SaveFrames", _title="Matte frames", _output="frames", images=grey, filename_prefix=Slot("prefix", "paintaplate/plate/matte/m"))
+    movie = g("PaintAPlate_SaveMovie", _title="Matte movie (grey): its row in the Render panel shows it", _output="movie", images=grey,
+              fps=load[3], crf=18, filename_prefix=Slot("video_prefix", ""))
+    g.link_slot(movie, "images", "matte_movie")
     g("PreviewAny", _title="How the matte followed", _output="follow", source=follow[1])
     g.save("matte")
 
@@ -587,6 +592,9 @@ def export():
     matte_frames = g("ImageFromBatch", image=g("MaskToImage", mask=fit[1]), batch_index=0, length=load[4])
     g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed", _output="matte", images=matte_frames,
       filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))
+    movie = g("PaintAPlate_SaveMovie", _title="Matte movie (grey): the Export row shows it", _output="matte_movie", images=matte_frames,
+              fps=load[3], crf=18, filename_prefix=Slot("matte_video_prefix", ""))
+    g.link_slot(movie, "images", "export_matte_movie")
     g.save("export")
 
 
@@ -623,6 +631,9 @@ def fluid():
     size = g("GetImageSize", image=model)
     control = g("PaintAPlate_KeyframeVideo", _title="Control video: the keyframes on black", width=size[0], height=size[1],
                 frames=size[2], keys=Slot("keys", "[]"))
+    shown = g("PaintAPlate_SaveMovie", _title="Control video as a movie: the Fluid: keyframes row shows it", _output="control",
+              images=control, fps=load[3], crf=18, filename_prefix=Slot("control_prefix", ""))
+    g.link_slot(shown, "images", "fluid_control")
     lora = g("LTXICLoRALoaderModelOnly", _title="ainvfx-fluid IC-LoRA (reads its downscale factor)",
              model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"), lora_name=Slot("fluid", FLUID),
              strength_model=Slot("strength", 1.0))

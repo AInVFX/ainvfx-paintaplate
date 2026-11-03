@@ -134,7 +134,8 @@ test("optional links drop with what fed them when their slots are empty", () => 
 test("every workflow names the outputs and the progress node the page reads", () => {
   const wanted = { ingest: ["hero", "proxy", "spec"], prompt: ["text"], edit: ["patch", "relit", "result"],
     snap: ["named", "point_0", "point_1", "point_2", "point_3", "point_4"], clean: ["frames", "video"], shot: ["frames", "video"],
-    matte: ["follow", "frames"], comp: ["video"], review: ["frames", "review", "view"], export: ["export", "matte"], warm: ["frame"] };
+    matte: ["follow", "frames", "movie"], comp: ["video"], review: ["frames", "review", "view"], export: ["export", "matte", "matte_movie"], warm: ["frame"],
+    fluid: ["control", "plate", "video"] };
   for (const [name, outs] of Object.entries(wanted)) {
     const wf = workflow(name);
     assert.deepEqual(Object.keys(wf.outputs).sort(), outs.sort(), name);
@@ -464,4 +465,30 @@ test("a dropped link takes the nodes that only fed it: none is left feeding noth
   const used = new Set(Object.values(out.prompt).flatMap((n) => Object.values(n.inputs).filter(Array.isArray).map((v) => String(v[0]))));
   assert.deepEqual(Object.entries(out.prompt).filter(([id, n]) => !used.has(id) && !n._meta?.output).map(([, n]) => n.class_type), []);
   assert.ok(!out.prompt[wf.outputs.view] && fillWorkflow(wf, { view_prefix: "p/review/view" }).prompt[wf.outputs.view]);
+});
+
+import { fluidPasses, dataSpace, MATTE_PASSES } from "../../web/logic.mjs";
+
+test("the tracking steps and the export show their matte, grey, through the config's data colour space", () => {
+  const r = { erased: { found: { movie_a: "erase.mp4" } }, full: { found: { movie_a: "erase.mp4", movie_b: "paint_full.mp4" } },
+    exported: { matte: "export_matte.mp4" } }, pv = { painted: { found: { movie_b: "paint_640.mp4" } } };
+  const spaces = { log: "ACEScct", data: "Raw" };
+  assert.deepEqual(passMovie("erase", r, pv, spaces), { url: "erase.mp4", space: "Raw", frames: null });
+  assert.deepEqual(passMovie("track", r, pv, spaces), { url: "paint_640.mp4", space: "Raw", frames: null });
+  assert.deepEqual(passMovie("trackfull", r, pv, spaces), { url: "paint_full.mp4", space: "Raw", frames: null });
+  assert.deepEqual(passMovie("export", r, pv, spaces), { url: "export_matte.mp4", space: "Raw", frames: null });
+  assert.equal(passMovie("trackfull", {}, pv, spaces), null, "no full-size paint matte yet: no row to click");
+  assert.equal(passMovie("erase", r, pv).space, "@model", "a config without a data space: the model space");
+  assert.deepEqual([...MATTE_PASSES].sort(), ["erase", "export", "track", "trackfull"]);
+  assert.equal(dataSpace([{ name: "ACEScg", data: false }, { name: "Raw", data: true }]), "Raw");
+  assert.equal(dataSpace([{ name: "sRGB", data: false }]), null);
+});
+
+test("a fluid shot's rows: its keyframes, its shot, and SDR to HDR for a 16-bit plate", () => {
+  const sdr = { control: "c.mp4", preview: "p.mp4", hdr: false, movie: null }, hdr = { ...sdr, hdr: true, movie: "h.mp4" };
+  assert.deepEqual(fluidPasses(sdr).map((x) => [x.id, x.label, x.url, x.space]),
+    [["fluid_keys", "Fluid: keyframes", "c.mp4", "@model"], ["fluid_shot", "Fluid: shot", "p.mp4", "@model"]]);
+  assert.deepEqual(fluidPasses(hdr, { log: "ACEScct" }).at(-1), { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: "h.mp4", space: "ACEScct" });
+  assert.deepEqual(fluidPasses(null), [], "no fluid shot made: no rows");
+  assert.deepEqual(fluidPasses({ preview: "p.mp4" }).map((x) => x.id), ["fluid_shot"], "a shot made before its control movie existed");
 });

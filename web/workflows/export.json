@@ -480,5 +480,28 @@
    },
    "output": "matte"
   }
+ },
+ "29": {
+  "class_type": "PaintAPlate_SaveMovie",
+  "inputs": {
+   "images": [
+    "27",
+    0
+   ],
+   "fps": [
+    "1",
+    3
+   ],
+   "crf": 18,
+   "filename_prefix": ""
+  },
+  "_meta": {
+   "title": "Matte movie (grey): the Export row shows it",
+   "slots": {
+    "filename_prefix": "matte_video_prefix",
+    "images": "export_matte_movie"
+   },
+   "output": "matte_movie"
+  }
  }
 }

@@ -65,9 +65,9 @@ class Workflows(unittest.TestCase):
         """The page picks results by output name, not by position."""
         wanted = {"ingest": {"hero", "proxy", "spec"}, "prompt": {"text"}, "edit": {"patch", "relit", "result"},
                   "snap": {"named"} | {f"point_{k}" for k in range(5)}, "clean": {"frames", "video"}, "cleanup": {"frames", "video"}, "shot": {"frames", "video"},
-                  "matte": {"follow", "frames"}, "comp": {"video"}, "review": {"review", "frames", "view"}, "export": {"export", "matte"},
-                  "warm": {"frame"},
-                  "fluid": {"plate", "video"}, "hdr": {"hdr", "movie"}}
+                  "matte": {"follow", "frames", "movie"}, "comp": {"video"}, "review": {"review", "frames", "view"},
+                  "export": {"export", "matte", "matte_movie"}, "warm": {"frame"},
+                  "fluid": {"plate", "video", "control"}, "hdr": {"hdr", "movie"}}
         for name, keys in wanted.items():
             self.assertEqual(set(build_workflows.load(name, WORKFLOWS)[2]), keys, name)
 

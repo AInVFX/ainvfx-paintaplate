@@ -7,7 +7,8 @@
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_element: ["seed"],
-  review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], relight_light: ["light"] };
+  review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], relight_light: ["light"],
+  matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"] };
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
   const slots = {}, outputs = {}, progress = new Set();
@@ -635,13 +636,27 @@ export function dabFlow(peak, spacingOverRadius) {
 
 // ---------- Passes on show ----------
 // Each finished step that made a picture shows on every frame from the Render panel, one render of the shot at a time:
-// where its movie sits, in the render (`r`) or in its preview size (`pv`). Tracking and the export make no movie.
-export const PASSES = { clean: ["pv", "cleanRaw"], shot: ["pv", "raw"], comp: ["pv", "comp"], cleanfull: ["r", "cleanRaw"], full: ["r", "raw"],
-  hdr: ["r", "hdrMovie"], review: ["r", "play"] };
+// where its movie sits, in the render (`r`) or in its preview size (`pv`), as a path of keys. The tracking steps and the
+// export show their matte as a grey movie, drawn through the config's data colour space (`spaces.data`): it shows its own
+// values, with no view's tone mapping.
+export const PASSES = { erase: ["r", "erased.found.movie_a"], clean: ["pv", "cleanRaw"], shot: ["pv", "raw"], track: ["pv", "painted.found.movie_b"],
+  comp: ["pv", "comp"], cleanfull: ["r", "cleanRaw"], full: ["r", "raw"], trackfull: ["r", "full.found.movie_b"], hdr: ["r", "hdrMovie"],
+  review: ["r", "play"], export: ["r", "exported.matte"] };
+export const MATTE_PASSES = new Set(["erase", "track", "trackfull", "export"]);
+const keyPath = (o, path) => path.split(".").reduce((x, k) => x?.[k], o);
 export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of a finished step, or null
   const at = PASSES[id], store = at && (at[0] === "pv" ? pv : r);
-  const url = (at && store?.[at[1]]) ?? (id === "review" ? store?.review : null);
+  const url = (at && keyPath(store, at[1])) ?? (id === "review" ? store?.review : null);
   if (!url) return null;
   if (id === "review") return { url, space: store.playSpace ?? store.reviewSpace ?? "@model", frames: store.reviewFrames ?? null };
-  return { url, space: id === "hdr" ? spaces.log ?? "@model" : "@model", frames: null };
+  return { url, space: MATTE_PASSES.has(id) ? spaces.data ?? "@model" : id === "hdr" ? spaces.log ?? "@model" : "@model", frames: null };
 }
+// A fluid shot's own passes, shown from the Render panel with its keyframes open or closed: the control video LTX was
+// guided by, the shot as LTX made it, and for a 16-bit plate its SDR-to-HDR frames as a movie in log values.
+export const fluidPasses = (result, spaces = {}) => (result ? [
+  result.control && { id: "fluid_keys", label: "Fluid: keyframes", url: result.control, space: "@model" },
+  result.preview && { id: "fluid_shot", label: "Fluid: shot", url: result.preview, space: "@model" },
+  result.hdr && result.movie && { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: result.movie, space: spaces.log ?? "@model" },
+].filter(Boolean) : []);
+// The config's data colour space (OCIO's isdata, such as the studio config's Raw), from the spaces /paintaplate/ocio lists
+export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? null;

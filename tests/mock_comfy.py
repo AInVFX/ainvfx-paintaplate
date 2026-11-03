@@ -288,6 +288,9 @@ async def execute(pid, prompt):
         m = resize(load_image(v["mask"], "L"), v["width"], v["height"])
         await steps(pid, 4, 1.0)
         o[outs["frames"]] = {"images": [save_png(m, "output", v["prefix"], i) for i in range(len(frames))][:1]}
+        if "movie" in outs:  # its grey movie, for its row in the Render panel
+            grey = np.dstack([np.asarray(m, np.float32).reshape(m.shape[:2])] * 3)
+            o[outs["movie"]] = {"images": [save_mp4([grey] * len(frames), v["video_prefix"], v.get("fps", 24.0))], "animated": [True]}
     elif "plate" in outs:  # fluid: each keyframe softened into a cloud, crossfaded to the next, written in the blank plate's format
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         h, w = frames[0].shape[:2]
@@ -308,6 +311,10 @@ async def execute(pid, prompt):
             writer.write(f)
         writer.close()
         o[outs["plate"]] = {"text": [f"1 file(s) in {d}\n{os.path.basename(writer.path)}"]}
+        if "control" in outs:  # the control video: black, each keyframe at its frame
+            at = {k["frame"]: np.asarray(Image.open(resolve(k["image"])).convert("RGB").resize((w, h)), np.float32) / 255 for k in keys}
+            o[outs["control"]] = {"images": [save_mp4([at.get(i, np.zeros((h, w, 3), np.float32)) for i in range(len(frames))],
+                                                       v["control_prefix"], spec["fps"])], "animated": [True]}
         o[outs["video"]] = {"images": [save_mp4(shot, v["video_prefix"], spec["fps"])], "animated": [True]}
     elif "video" in outs or "export" in outs:  # comp and export: blend the shot over the plate through the matte
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
@@ -332,6 +339,9 @@ async def execute(pid, prompt):
                 for i in range(n):
                     save_png(resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w)),
                              "output", v["matte_prefix"], i)
+            if "matte_movie" in outs:  # the export's matte as a grey movie, for the Export row
+                greys = [np.dstack([resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w), np.float32)] * 3) for i in range(n)]
+                o[outs["matte_movie"]] = {"images": [save_mp4(greys, v["matte_video_prefix"], spec["fps"])], "animated": [True]}
             o[outs["export"]] = {"text": [f"1 file(s) in {d}\nplate_00001_.webm"],
                                  "files": [{"filename": "plate_00001_.webm", "subfolder": v["prefix"], "type": "output"}]}
     else:

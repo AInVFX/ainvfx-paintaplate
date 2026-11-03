@@ -11,6 +11,7 @@ import { CHANNEL_NAMES, DAB_PROFILE, DISPLAY, FLUID, PARAMS, dabFlow, dabsAlong,
   erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
+import { dataSpace, fluidPasses } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -546,15 +547,21 @@ function showLatest() { // the latest result of the edits on show: the full-size
 // The Render panel's finished rows: a click shows that pass on every frame (the First frame row, the edit as Klein made it),
 // so a fault can be traced to the step that made it; the wipe compares it with the plate. A second click, or Esc, goes back
 // to the latest result, which the viewer follows again as steps finish.
+// A matte row shows the matte through the config's data colour space: its own values, with no view's tone mapping.
+const matteSpace = () => dataSpace(S.ocio.info?.spaces) ?? modelSpace();
+// A fluid shot's rows (logic.fluidPasses) show with its keyframes open or closed; open, the viewer leaves the keyframes for
+// the pass, and the latest is the fluid shot itself.
 function choosePass(id) {
-  const r = S.renders.get(S.heroKey), label = id === "first" ? "First frame" : STAGES.find((x) => x.id === id)?.label;
+  const r = S.renders.get(S.heroKey), fluid = fluidPasses(S.fluid?.result, { log: logSpace() }).find((x) => x.id === id);
+  const label = id === "first" ? "First frame" : fluid?.label ?? STAGES.find((x) => x.id === id)?.label;
   S.pass = S.pass === id ? null : id;
-  if (!S.pass) { showLatest(); hud("The latest result", 1500); return stagesUI(); }
+  if (!S.pass) { if (keying() && S.fluid.result) showFluid(); else showLatest(); hud("The latest result", 1500); return stagesUI(); }
   if (id === "first") { pause(); seek(0); render(); }
   else {
-    const m = passMovie(id, r, previewOf(r), { log: logSpace() });
+    const m = fluid ?? passMovie(id, r, previewOf(r), { log: logSpace(), data: matteSpace() });
     if (!m) { S.pass = null; return stagesUI(); }
-    setShot(m.url, S.heroKey, m.space, m.frames);
+    if (fluid && keying()) S.fluid.view = "result"; // the keyframes stay as painted; the viewer shows the pass
+    setShot(m.url, fluid && keying() ? "fluid" : S.heroKey, m.space, m.frames ?? null);
   }
   hud(`${label}: on show. Click it again, or Esc, for the latest`, 3000);
   log(`Viewer: ${label} on show`);
@@ -1208,7 +1215,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     if (f.busy?.sig === fluidSig()) return hud(`Fluid shot v${f.busy.v} is being made from these keyframes and words`, 2500);
     const made = f.made?.get(fluidSig());
     if (made) {
-      if (f.result !== made) { f.result = made; setShot(made.movie ?? made.preview, "fluid", made.movie ? logSpace() : "@model"); log(`Fluid v${made.v}: made before from these keyframes, words and seed: shown again, nothing runs`); }
+      if (f.result !== made) { f.result = made; showFluid(); log(`Fluid v${made.v}: made before from these keyframes, words and seed: shown again, nothing runs`); }
       f.view = "result"; fluidUI(); render();
       return hud(`Fluid shot v${made.v} is already made from these keyframes and words. Ctrl+Enter tries another seed.`, 3000);
     }
@@ -1227,7 +1234,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     log(`Fluid v${v}: ${keys.length} keyframe(s) at ${keys.map((k) => p.first + k.frame).join(", ")}, ${size.join(" x ")}, ${p.frames} frames at ${p.fps} fps, seed ${f.seed}, prompt "${prompt}"`);
     status(`Fluid shot v${v}: one LTX 2.5 pass with ainvfx-fluid`);
     const out = await run("fluid", { path: f.blankPath ?? p.path, config: S.ocio.config, color_space: "@model", max_frames: p.frames, keys: JSON.stringify(keys), prompt, seed: f.seed,
-      prefix: `${dir}/plate`, video_prefix: `${dir}/preview`, live: liveEvery() },
+      prefix: `${dir}/plate`, video_prefix: `${dir}/preview`, control_prefix: `${dir}/control/c`, live: liveEvery() },
       { kind: "fluid", progress: (x) => { if (f.busy) { f.busy.progress = x; fluidUI(); fluidProgress(); } }, live: showLive }).done;
     let path = `${folderOf("fluid", out, "video")}/plate/${(f.blankPath ?? p.spec.source).split(/[\\/]/).pop()}`;
     let movie = null; // an HDR fluid shot as an 8-bit movie in log values: the look of its EXR frames
@@ -1242,11 +1249,14 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
       movie = m ? viewUrl(m) : null;
       log(`Fluid v${v}: SDR to HDR took ${((performance.now() - t1) / 1000).toFixed(1)} s: half-float EXR frames in ${path}`);
     }
-    f.result = { v, sig, seed: f.seed, prompt, path, hdr, movie, run: fluidRun(path), preview: viewUrl(outputFile("fluid", out, "video")) };
+    const control = outputFile("fluid", out, "control"); // the control video, for the Fluid: keyframes row
+    f.result = { v, sig, seed: f.seed, prompt, path, hdr, movie, run: fluidRun(path), preview: viewUrl(outputFile("fluid", out, "video")),
+      control: control ? viewUrl(control) : null };
     (f.made ??= new Map()).set(sig, f.result);
     f.view = "result";
     f.busy = null;
-    setShot(f.result.movie ?? f.result.preview, "fluid", f.result.movie ? logSpace() : "@model");
+    if (S.pass?.startsWith("fluid_")) S.pass = null; // a new shot: the viewer shows it, not a pass of the one before
+    showFluid();
     log(`Fluid v${v}: done in ${((performance.now() - t0) / 1000).toFixed(1)} s: ${(outputText("fluid", out, "plate") ?? "").split("\n")[0]}`);
     f.editing = false; // the shot is made: it becomes the plate under the next edits, and the viewer plays it
     f.busy = null;
@@ -1260,11 +1270,13 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
   }
 }
 
+const showFluid = () => { const m = S.fluid.result; setShot(m.movie ?? m.preview, "fluid", m.movie ? logSpace() : "@model"); }; // the fluid shot as it plays with its keyframes open
+
 function editFluid() { // the fluid's keyframes and words again; the edits on its shot stay until a new shot is made
   const f = S.fluid;
   if (!f || keying()) return;
   if (S.draft) launch(S.draft);
-  Object.assign(S, { selected: null, peek: null });
+  Object.assign(S, { selected: null, peek: null, pass: null });
   f.editing = true;
   pause(); seek(0);
   enterFluid(); historyUI();
@@ -1272,6 +1284,7 @@ function editFluid() { // the fluid's keyframes and words again; the edits on it
 
 function leaveKeys() { // the keyframes close: the viewer shows the plate the fluid shot made, with the edits on it
   S.fluid.editing = false;
+  S.pass = null;
   S.heroKey = null; recompose(); // the shot of the edits on show, or none
   fluidUI(); historyUI(); render();
 }
@@ -2158,9 +2171,10 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   await step(r, "export", async (progress) => { // only when Export asks: the plate's own format, and the matte, beside the review
     const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr,
       ...r.full.values, relight, keep_untouched: !relight, prefix: `${dir}/export`, matte_prefix: `${dir}/matte/matte`,
-      grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
-    const file = outputFile("export", done, "export"); // a job taken from the index keeps its own folder
-    r.exported = { run: file ? file.subfolder.replace(/\/export$/, "") : dir, name: `${p.name}_paintaplate_v${r.v}`, text: outputText("export", done, "export") ?? "" };
+      matte_video_prefix: `${dir}/matte_movie/m`, grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
+    const file = outputFile("export", done, "export"), matte = outputFile("export", done, "matte_movie"); // a job taken from the index keeps its own folder
+    r.exported = { run: file ? file.subfolder.replace(/\/export$/, "") : dir, name: `${p.name}_paintaplate_v${r.v}`, text: outputText("export", done, "export") ?? "",
+      matte: matte ? viewUrl(matte) : null }; // the Export row shows its matte
   });
   S.exported = r.exported;
   stagesUI(); exportUI();
@@ -2193,8 +2207,11 @@ async function track(active, shotPath, base, suffix, progress, previous, tools, 
     const compare = tool === "paint" && under ? { base: under.path, base_color_space: under.cs } : {}; // the paint matte follows what the shot changed
     if (tool === "paint") compare.seed = await uploadCanvas(elementOf(union, size, hero), `seed${suffix}.png`); // from what the edits changed
     const out = await run("matte", { path, config: S.ocio.config, color_space: cs, max_frames: p.frames, width: sw, height: sh, prefix: `${base}/${key}${suffix}/m`,
-      mask: await uploadCanvas(union, `${key}${suffix}.png`), zone: FOLLOW.zone, threshold: FOLLOW.threshold, ...compare },
+      mask: await uploadCanvas(union, `${key}${suffix}.png`), zone: FOLLOW.zone, threshold: FOLLOW.threshold, ...compare,
+      fps: p.fps, video_prefix: `${base}/${key}${suffix}_movie/m` }, // its grey movie, for its row in the Render panel
       { kind: "matte", progress }).done;
+    const movie = outputFile("matte", out, "movie");
+    if (movie) found[key === "matte_a" ? "movie_a" : "movie_b"] = viewUrl(movie);
     const note = outputText("matte", out, "follow");
     if (note) log(`${tool === "erase" ? "Erase" : "Paint"} matte${suffix ? ` (${suffix.slice(1)})` : ""}: ${note}`);
     found[key] = folderOf("matte", out, "frames");
@@ -2269,10 +2286,22 @@ function stagesUI() {
   hdrUI(); // the Render panel: every step, done, running or waiting, and the time left
   const list = $("#stages"), p = S.plate, r = S.renders.get(S.heroKey);
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
-  $("#render-full").hidden = !r?.donor; // a set that took another render's frames can still be made with its own shot
-  $("#render").hidden = !p || keying();
-  list.hidden = !active.length;
-  if (!p || !active.length) { $("#render-left").textContent = ""; return timelineBar(); }
+  const fluid = p ? fluidPasses(S.fluid?.result, { log: logSpace() }) : []; // a made fluid shot's rows, keyframes open or closed
+  const edits = active.length && !keying(); // with the keyframes open, only the fluid shot's rows
+  $("#render-full").hidden = !r?.donor || !edits; // a set that took another render's frames can still be made with its own shot
+  $("#render").hidden = !p || (keying() && !fluid.length);
+  list.hidden = !edits && !fluid.length;
+  const fluidRows = fluid.map((x) => {
+    const li = document.createElement("li");
+    li.className = "done" + (S.pass === x.id ? " shown" : "");
+    li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time">fluid</span>';
+    li.children[1].textContent = x.label;
+    li.classList.add("pick");
+    li.title = `Show ${x.label.toLowerCase()} in the viewer. Click it again, or Esc, for the latest`;
+    li.onclick = () => choosePass(x.id);
+    return li;
+  });
+  if (!p || !edits) { list.replaceChildren(...fluidRows); $("#render-left").textContent = ""; return timelineBar(); }
   const skip = r?.skip ?? plan({}, active).skip, later = (st) => st.onDemand && !S.wantDownload; // the export waits for Export
   const pick = (li, id, label) => { // a finished pass with a picture: a click shows it on every frame, a second click the latest
     li.classList.add("pick");
@@ -2283,7 +2312,7 @@ function stagesUI() {
   first.className = "done" + (S.pass === "first" ? " shown" : "");
   first.innerHTML = '<span class="dot"></span><span class="name">First frame</span><span class="time">edit</span>';
   pick(first, "first", "the first frame");
-  list.replaceChildren(first, ...STAGES.filter((st) => !skip.has(st.id)).map((st) => {
+  list.replaceChildren(...fluidRows, first, ...STAGES.filter((st) => !skip.has(st.id)).map((st) => {
     const li = document.createElement("li"), took = doneOf(r, st), from = (st.preview ? previewOf(r) : r)?.taken?.[st.id];
     const now = S.stage?.id === st.id && S.stage.key === S.heroKey;
     li.className = took !== undefined ? "done" : now ? "now" : later(st) ? "later" : "";
@@ -2291,7 +2320,7 @@ function stagesUI() {
     li.children[1].textContent = st.label;
     li.children[2].textContent = from ? `from v${from}` : took !== undefined ? `${Math.round(took)} s` : now ? `${Math.round(S.stage.progress * 100)}%`
       : later(st) ? "on Export" : `~${Math.round(estimate(st.id))} s`;
-    const movie = took !== undefined ? passMovie(st.id, r, previewOf(r), { log: logSpace() }) : null;
+    const movie = took !== undefined ? passMovie(st.id, r, previewOf(r), { log: logSpace(), data: matteSpace() }) : null;
     if (movie) {
       pick(li, st.id, st.label.toLowerCase());
       if (S.pass ? S.pass === st.id : movie.url === S.shot?.url) li.classList.add("shown"); // the row on show
