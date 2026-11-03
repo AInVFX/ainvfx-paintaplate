@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayUniforms, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, escapeAction } from "../../web/logic.mjs";
+import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, stageOne, stopsForEdit, blankSpec, caption, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, escapeAction } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -35,32 +35,6 @@ test("preview sizes come from the plate's size: exact divisions of the working s
   for (const o of [...menu, ...previewSizes([1920, 1012], [1920, 1024]), ...previewSizes([720, 480], [672, 448])]) {
     assert.ok(o.size[0] % 32 === 0 && o.size[1] % 32 === 0, String(o.size));
   }
-});
-
-test("the viewer's colour: identity at rest, one channel as grey from the display values, invert, exposure in stops, contrast about 18% grey", () => {
-  const flat = (d) => displayUniforms(d).matrix.flat();
-  assert.deepEqual(flat(DISPLAY), [1, 0, 0, 0, 1, 0, 0, 0, 1]);
-  assert.deepEqual(displayUniforms(DISPLAY).offset, [0, 0, 0]);
-  // the channel is picked after the display and view, from the values shown, as OpenRV's OCIODisplay floods it
-  const pick = (d) => displayUniforms(d).pick.flat();
-  assert.deepEqual(pick(DISPLAY), [1, 0, 0, 0, 1, 0, 0, 0, 1]);
-  assert.deepEqual(flat({ ...DISPLAY, channel: "r" }), [1, 0, 0, 0, 1, 0, 0, 0, 1]); // nothing picked in scene-linear
-  assert.deepEqual(pick({ ...DISPLAY, channel: "r" }), [1, 0, 0, 1, 0, 0, 1, 0, 0]);
-  assert.deepEqual(pick({ ...DISPLAY, channel: "l" }), [0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722]);
-  assert.deepEqual(flat({ ...DISPLAY, saturation: 0, channel: "g" }).slice(0, 3), [0.2126, 0.7152, 0.0722]); // the tools still apply
-  assert.deepEqual(pick({ ...DISPLAY, invert: true, channel: "b" }), [0, 0, 1, 0, 0, 1, 0, 0, 1]);
-  assert.deepEqual(flat({ ...DISPLAY, invert: true }), [-1, 0, 0, 0, -1, 0, 0, 0, -1]);
-  assert.deepEqual(displayUniforms({ ...DISPLAY, invert: true }).offset, [1, 1, 1]);
-  assert.deepEqual(flat({ ...DISPLAY, saturation: 0 }).slice(0, 3), [0.2126, 0.7152, 0.0722]);
-  for (const row of displayUniforms({ ...DISPLAY, hue: 120 }).matrix) assert.ok(Math.abs(row[0] + row[1] + row[2] - 1) < 1e-3); // greys stay grey
-  assert.deepEqual(displayUniforms({ ...DISPLAY, exposure: -2 }).slope, 0.25); // exposure scales linear light, as OpenRV's matrix does
-  assert.deepEqual(displayTransfer({ exposure: 1, contrast: 1, gamma: 2 }), { slope: 2, intercept: 0, exponent: 0.5 });
-  const c = displayTransfer({ exposure: 0, contrast: 2, gamma: 1 });
-  assert.ok(Math.abs(c.slope * 0.18 + c.intercept - 0.18) < 1e-9); // 18% grey holds still
-  assert.equal(clampParam("exposure", 12), 10);
-  assert.equal(displayLabel({ ...DISPLAY, exposure: 1, gamma: 2.2, channel: "r" }), "E +1.0 · γ 2.20 · Red");
-  assert.equal(displayActive(DISPLAY), false);
-  assert.equal(displayActive({ ...DISPLAY, invert: true }), true);
 });
 
 test("a blank plate: sides in 64s up to 1920, 8k + 1 frames, a trained frame rate; keyframes on the LTX grid", () => {
@@ -131,7 +105,8 @@ test("optional links drop with what fed them when their slots are empty", () => 
 test("every workflow names the outputs and the progress node the page reads", () => {
   const wanted = { ingest: ["hero", "proxy", "spec"], prompt: ["text"], edit: ["patch", "relit", "result"],
     snap: ["named", "point_0", "point_1", "point_2", "point_3", "point_4"], clean: ["frames", "video"], shot: ["frames", "video"],
-    matte: ["follow", "frames"], comp: ["video"], review: ["frames", "review", "view"], export: ["export", "matte"], warm: ["frame"] };
+    matte: ["follow", "frames", "movie"], comp: ["video"], review: ["frames", "review", "view"], export: ["exr", "export", "matte", "matte_movie"], warm: ["frame"],
+    fluid: ["control", "plate", "video"] };
   for (const [name, outs] of Object.entries(wanted)) {
     const wf = workflow(name);
     assert.deepEqual(Object.keys(wf.outputs).sort(), outs.sort(), name);
@@ -333,7 +308,7 @@ test("a divider's drag stays inside the window and never squeezes a panel or the
   assert.equal(panelSize("log", 10, view, log), 60);
 });
 
-test("SDR to HDR: on for an EXR plate unless switched off or relit, never for a video; 16-bit blank plates; 30 fps at most", () => {
+test("SDR to HDR: on by default for an EXR plate, off for the others, its switch for every plate; relit, never; 16-bit blank plates; 30 fps at most", () => {
   const exr = { kind: "sequence", ext: ".EXR" }, png = { kind: "sequence", ext: ".png" }, mp4 = { kind: "video", ext: ".mp4" };
   assert.equal(hdrPlate(exr), true);
   assert.equal(hdrPlate(png), false);
@@ -341,7 +316,8 @@ test("SDR to HDR: on for an EXR plate unless switched off or relit, never for a 
   assert.equal(wantsHdr(exr, ["paint", "erase"], true), true);
   assert.equal(wantsHdr(exr, ["paint"], false), false);
   assert.equal(wantsHdr(exr, ["paint", "light"], true), false); // a relight keeps the plate's own values
-  assert.equal(wantsHdr(mp4, ["paint"], true), false);
+  assert.equal(wantsHdr(mp4, ["paint"], true), true, "switched on for a video plate, it runs");
+  assert.equal(wantsHdr(mp4, ["paint"], false), false);
   assert.deepEqual([blankDepth("16"), blankDepth("8"), blankDepth("32"), blankDepth(undefined)], [16, 8, 8, 8]);
   assert.deepEqual([hdrFps(24), hdrFps(50), hdrFps(0)], [24, 30, 24]);
 });
@@ -445,7 +421,7 @@ test("the Render panel shows each finished pass that made a movie", () => {
   assert.deepEqual(passMovie("clean", r, pv), { url: "clean.mp4", space: "@model", frames: null });
   assert.deepEqual(passMovie("review", r, pv), { url: "view.mp4", space: "ACEScct", frames: "output:x/frames_#####_.exr" });
   assert.deepEqual(passMovie("review", { review: "review.mp4", reviewSpace: "Rec.1886" }, pv), { url: "review.mp4", space: "Rec.1886", frames: null });
-  assert.deepEqual(passMovie("hdr", r, pv, { log: "ACEScct" }), { url: "hdr.mp4", space: "ACEScct", frames: null });
+  assert.deepEqual(passMovie("hdr", r, pv, { log: "ACEScct" }), { url: "hdr.mp4", space: "ACEScct", frames: null, framesSpace: null });
   assert.equal(passMovie("track", r, pv), null);
   assert.equal(passMovie("full", {}, pv), null);
 });
@@ -472,4 +448,95 @@ test("a relight's request: the light plan's colours and words, the shade only wh
   assert.doesNotMatch(warm, /deep shadow/);
   assert.match(lightPlanCaption({ colors: ["#ffa040", "#101010"], color: "#ffa040" }), /The black strokes mark areas that must fall into deep shadow\./);
   assert.equal(lightColors(["#ffa040", "#5aa0ff", "#ffa040"], "#ffd890").split(" and ").length, 2); // two colours, each named once
+});
+
+import { fluidPasses, dataSpace, MATTE_PASSES } from "../../web/logic.mjs";
+
+test("the tracking steps and the export show their matte, grey, through the config's data colour space", () => {
+  const r = { erased: { found: { movie_a: "erase.mp4" } }, full: { found: { movie_a: "erase.mp4", movie_b: "paint_full.mp4" } },
+    exported: { matte: "export_matte.mp4" } }, pv = { painted: { found: { movie_b: "paint_640.mp4" } } };
+  const spaces = { log: "ACEScct", data: "Raw" };
+  assert.deepEqual(passMovie("erase", r, pv, spaces), { url: "erase.mp4", space: "Raw", frames: null });
+  assert.deepEqual(passMovie("track", r, pv, spaces), { url: "paint_640.mp4", space: "Raw", frames: null });
+  assert.deepEqual(passMovie("trackfull", r, pv, spaces), { url: "paint_full.mp4", space: "Raw", frames: null });
+  assert.deepEqual(passMovie("export", r, pv, spaces), { url: "export_matte.mp4", space: "Raw", frames: null });
+  assert.equal(passMovie("trackfull", {}, pv, spaces), null, "no full-size paint matte yet: no row to click");
+  assert.equal(passMovie("erase", r, pv).space, "@model", "a config without a data space: the model space");
+  assert.deepEqual([...MATTE_PASSES].sort(), ["erase", "export", "track", "trackfull"]);
+  const h = { hdrMovie: "hdr.mp4", hdrFrames: "output:p/v1/full/hdr/f_#####_.exr" };
+  assert.deepEqual(passMovie("hdr", h, pv, { log: "ACEScct", hdr: "ACES2065-1" }),
+    { url: "hdr.mp4", space: "ACEScct", frames: "output:p/v1/full/hdr/f_#####_.exr", framesSpace: "ACES2065-1" }, "SDR to HDR's row: its EXR frames, as the review row has its own");
+  assert.equal(passMovie("hdr", { hdrMovie: "hdr.mp4" }, pv, { log: "ACEScct", hdr: "ACES2065-1" }).framesSpace, null, "no frames: no space");
+  assert.equal(dataSpace([{ name: "ACEScg", data: false }, { name: "Raw", data: true }]), "Raw");
+  assert.equal(dataSpace([{ name: "sRGB", data: false }]), null);
+});
+
+test("a fluid shot's rows: its keyframes, its shot, and SDR to HDR for a 16-bit plate", () => {
+  const sdr = { control: "c.mp4", preview: "p.mp4", hdr: false, movie: null }, hdr = { ...sdr, hdr: true, movie: "h.mp4" };
+  assert.deepEqual(fluidPasses(sdr).map((x) => [x.id, x.label, x.url, x.space]),
+    [["fluid_keys", "Fluid: keyframes", "c.mp4", "@model"], ["fluid_shot", "Fluid: shot", "p.mp4", "@model"]]);
+  assert.deepEqual(fluidPasses(hdr, { log: "ACEScct" }).at(-1), { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: "h.mp4", space: "ACEScct", frames: null, framesSpace: null });
+  assert.deepEqual(fluidPasses({ ...hdr, hdrFrames: "output:f/hdr/f_#####_.exr" }, { log: "ACEScct", hdr: "ACES2065-1" }).at(-1).framesSpace, "ACES2065-1",
+    "its EXR frames in their own space, for the viewer to draw and inspect");
+  assert.deepEqual(fluidPasses(null), [], "no fluid shot made: no rows");
+  assert.deepEqual(fluidPasses({ preview: "p.mp4" }).map((x) => x.id), ["fluid_shot"], "a shot made before its control movie existed");
+});
+
+import { plateDepth, hdrKey, hdrOfKey } from "../../web/logic.mjs";
+
+test("new content at the plate's bit depth: one rule per kind of plate", () => {
+  const kinds = { "8-bit MP4": [{ kind: "video", ext: ".mp4", pix_fmt: "yuv420p" }, 8, "png", false],
+    "10-bit ProRes": [{ kind: "video", ext: ".mov", pix_fmt: "yuv422p10le" }, 10, "png16", false],
+    "ProRes 4444": [{ kind: "video", ext: ".mov", pix_fmt: "yuv444p12le" }, 12, "png16", false],
+    "8-bit PNG": [{ kind: "sequence", ext: ".png", pix_fmt: "rgb24" }, 8, "png", false],
+    "16-bit PNG": [{ kind: "sequence", ext: ".png", pix_fmt: "rgb48be" }, 16, "png16", false],
+    "16-bit TIFF with alpha": [{ kind: "sequence", ext: ".tif", pix_fmt: "rgba64le" }, 16, "png16", false],
+    "10-bit DPX": [{ kind: "sequence", ext: ".dpx", pix_fmt: "gbrp10le" }, 10, "png16", false],
+    "half EXR": [{ kind: "sequence", ext: ".exr", pix_fmt: "gbrpf16le" }, 16, "exr", true],
+    "float TIFF": [{ kind: "sequence", ext: ".tif", pix_fmt: "rgbf32le" }, 32, "exr", true],
+    "float DPX": [{ kind: "sequence", ext: ".dpx", pix_fmt: "gbrpf32le" }, 32, "exr", true],
+    "float EXR": [{ kind: "sequence", ext: ".exr", pix_fmt: "gbrpf32le" }, 32, "exr", true] };
+  for (const [name, [spec, bits, frames, hdr]] of Object.entries(kinds))
+    assert.deepEqual(plateDepth(spec), { bits, float: hdr, frames, hdr }, name);
+  assert.deepEqual(plateDepth(null), { bits: 8, float: false, frames: "png", hdr: false }, "no plate: the 8-bit rule");
+});
+
+test("the SDR-to-HDR switch away from the plate's default makes another render key", () => {
+  assert.equal(hdrKey("1.1", true, true), "1.1");
+  assert.equal(hdrKey("1.1", true, false), "1.1|sdr", "an EXR plate switched off, as before");
+  assert.equal(hdrKey("1.1", false, true), "1.1|hdr", "a video plate switched on");
+  assert.equal(hdrKey("1.1", false, false), "1.1");
+  assert.deepEqual(["1.1", "1.1|sdr", "1.1|hdr"].map((k) => hdrOfKey(k, true)), [true, false, true]);
+  assert.deepEqual(["1.1", "1.1|sdr", "1.1|hdr"].map((k) => hdrOfKey(k, false)), [false, false, true]);
+});
+
+import { exrResult, holdsHdr } from "../../web/logic.mjs";
+
+test("SDR to HDR on a plate that cannot hold values above 1.0 makes its result an EXR sequence", () => {
+  const mp4 = { kind: "video", ext: ".mp4", pix_fmt: "yuv420p" }, png16 = { kind: "sequence", ext: ".png", pix_fmt: "rgb48be" };
+  const exr = { kind: "sequence", ext: ".exr", pix_fmt: "gbrpf16le" }, tif16 = { kind: "sequence", ext: ".tif", pix_fmt: "rgb48le" };
+  const tifF = { kind: "sequence", ext: ".tif", pix_fmt: "rgbf32le" }, dpx10 = { kind: "sequence", ext: ".dpx", pix_fmt: "gbrp10le" };
+  assert.deepEqual([exrResult(mp4, true), exrResult(png16, true), exrResult(exr, true), exrResult(mp4, false)], [true, true, false, false]);
+  assert.equal(holdsHdr(tifF), true, "a float TIFF holds them in its own format");
+  assert.equal(holdsHdr({ ...dpx10, pix_fmt: "gbrpf32le" }), true, "a float DPX too");
+  assert.equal(holdsHdr(dpx10, 16.3), true, "a 10-bit DPX in a log encoding holds them through its curve");
+  assert.equal(holdsHdr(tif16, 222.9), true, "a 16-bit TIFF in ACEScct too");
+  assert.equal(holdsHdr(tif16, 1), false, "a 16-bit TIFF in sRGB does not: its result becomes an EXR sequence");
+  assert.equal(holdsHdr(mp4, 100), true, "an HDR video (PQ) keeps them in its own file: no extra files (Adrien, 3 Nov)");
+  assert.equal(holdsHdr({ kind: "video", ext: ".mov", pix_fmt: "yuv444p12le" }, 55.1), true, "a log video (LogC) too");
+  assert.equal(holdsHdr(mp4, 1), false, "an SDR video does not: it warns first and delivers an EXR sequence");
+  assert.deepEqual([exrResult(dpx10, true, 16.3), exrResult(tif16, true, 1)], [false, true]);
+});
+
+import { bigPlateWarning } from "../../web/logic.mjs";
+
+test("a plate above 2K warns when it opens on a card under 48 GB", () => {
+  const uhd = { width: 3840, height: 2160 }, hd = { width: 1920, height: 1080 }, dci = { width: 2048, height: 1080 };
+  assert.match(bigPlateWarning(uhd, 32 * 2 ** 30), /3840 x 2160, above 2K, and this card has 32 GB/);
+  assert.equal(bigPlateWarning(uhd, 47.5 * 2 ** 30), null, "a 48 GB card: no warning");
+  assert.equal(bigPlateWarning(uhd, 95 * 2 ** 30), null, "a 96 GB card");
+  assert.equal(bigPlateWarning(hd, 24 * 2 ** 30), null, "1920 wide is not above 2K");
+  assert.equal(bigPlateWarning(dci, 24 * 2 ** 30), null, "2048 is 2K itself");
+  assert.equal(bigPlateWarning(uhd, 0), null, "the card's memory not yet known: no warning");
+  assert.match(bigPlateWarning({ width: 2160, height: 3840 }, 39.6 * 2 ** 30), /40 GB/, "a portrait 4K plate on a 40 GB card");
 });

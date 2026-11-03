@@ -364,3 +364,50 @@ class RelightFromTheShot(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class LanczosTest(unittest.TestCase):
+    """New content enlarged to a plate's native size (item 5): a float Lanczos-3, the same as PIL's LANCZOS, and Fit to
+    Plate enlarging only the window around the matte gives the frame it gives from a shot enlarged whole."""
+    def test_matches_pil_lanczos_and_keeps_values_above_one(self):
+        from PIL import Image
+        rng = np.random.default_rng(3)
+        img = rng.random((45, 80, 3)).astype(np.float32)
+        for h, w in ((90, 160), (135, 240), (30, 50)):
+            ours = mathops.resize_lanczos(img, h, w)
+            pil = np.stack([np.asarray(Image.fromarray(img[..., c], "F").resize((w, h), Image.LANCZOS)) for c in range(3)], -1)
+            r = int(np.ceil(3 * max(h / 45, 1))) + 2  # the kernel's reach in output pixels: there PIL truncates it, this code repeats the edge
+            inner = (slice(r, -r), slice(r, -r))
+            self.assertLess(np.abs(ours - pil)[inner].max(), 2e-3, (h, w))
+        part = mathops.resize_lanczos(img, 135, 240, (10, 70, 20, 200))
+        self.assertTrue(np.allclose(part, mathops.resize_lanczos(img, 135, 240)[10:70, 20:200], atol=1e-6), "a window equals the same part of the whole")
+        self.assertGreater(mathops.resize_lanczos(img * 4.0, 90, 160).max(), 3.0, "nothing clipped")
+        print("Lanczos-3: as PIL's within 0.002, a window exact, values above 1.0 kept")
+
+    def test_fit_to_plate_enlarges_only_the_matte_window(self):
+        rng = np.random.default_rng(4)
+        n, H, W = 3, 96, 160
+        plate = rng.random((n, H, W, 3)).astype(np.float32) * 0.5
+        gen = rng.random((n, 48, 80, 3)).astype(np.float32)
+        masks = np.zeros((n, H, W), np.float32); masks[:, 30:60, 50:110] = 1.0
+        kw = dict(align=False, match_color=False, grain=0, workers=2)
+        small, m1 = mathops.fit_to_plate(n, H, W, lambda i: plate[i], lambda i: gen[i], masks, **kw)
+        whole, m2 = mathops.fit_to_plate(n, H, W, lambda i: plate[i], lambda i: mathops.resize_lanczos(gen[i], H, W), masks, **kw)
+        for a, b, mk in zip(small, whole, m1):
+            inside = mk > 1.0 / 1024
+            self.assertLess(np.abs(a - b)[inside].max(), 1e-5)  # the window holds every pixel the matte reaches
+        print("Fit to Plate: a shot at half size enlarged in the matte's window only, the same pixels inside the matte")
+
+
+class KeepBlackTest(unittest.TestCase):
+    def test_black_where_the_sdr_shot_is_black(self):
+        """SDR to HDR's noise in the blacks gives way to the SDR shot's own black; elsewhere its values stay, above 1.0 too."""
+        rng = np.random.default_rng(6)
+        sdr = np.zeros((20, 40, 3), np.float32); sdr[:, 20:] = 0.5
+        hdr = rng.normal(6.6e-4, 4e-3, (20, 40, 3)).astype(np.float32); hdr[:, 20:] = 3.0
+        out = mathops.keep_black(hdr, sdr)
+        self.assertEqual(float(np.abs(out[:, :20]).max()), 0.0, "the black half takes the shot's black, no noise")
+        self.assertTrue(np.allclose(out[:, 20:], 3.0), "the lit half keeps SDR to HDR's values, above 1.0 included")
+        mid = mathops.keep_black(np.full((1, 1, 3), 1.0, np.float32), np.full((1, 1, 3), 0.0055, np.float32))
+        self.assertTrue(0.0055 < float(mid[0, 0, 0]) < 1.0, "between the thresholds, a blend")
+        print("Keep Black: the SDR shot's black where it is black, SDR to HDR's values elsewhere")

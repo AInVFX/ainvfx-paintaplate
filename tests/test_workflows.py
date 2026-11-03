@@ -65,11 +65,20 @@ class Workflows(unittest.TestCase):
         """The page picks results by output name, not by position."""
         wanted = {"ingest": {"hero", "proxy", "spec"}, "prompt": {"text"}, "edit": {"patch", "relit", "result"},
                   "snap": {"named"} | {f"point_{k}" for k in range(5)}, "clean": {"frames", "video"}, "cleanup": {"frames", "video"}, "shot": {"frames", "video"},
-                  "matte": {"follow", "frames"}, "comp": {"video"}, "review": {"review", "frames", "view"}, "export": {"export", "matte"},
-                  "warm": {"frame"},
-                  "fluid": {"plate", "video"}, "hdr": {"hdr", "movie"}}
+                  "matte": {"follow", "frames", "movie"}, "comp": {"video"}, "review": {"review", "frames", "view"},
+                  "export": {"export", "exr", "matte", "matte_movie"}, "warm": {"frame"},
+                  "fluid": {"plate", "video", "control"}, "hdr": {"hdr", "movie"}}
         for name, keys in wanted.items():
             self.assertEqual(set(build_workflows.load(name, WORKFLOWS)[2]), keys, name)
+
+    def test_every_movie_takes_the_native_size(self):
+        """Every movie the page plays has the movie_width and movie_height slots: the page sends the plate's native size."""
+        for name in build_workflows.NAMES:
+            prompt, slots, _ = build_workflows.load(name, WORKFLOWS)
+            movies = [k for k, n in prompt.items() if n["class_type"] == "PaintAPlate_SaveMovie"]
+            for k in movies:
+                self.assertIn([k, "width"], [list(t) for t in slots["movie_width"]], name)
+                self.assertIn([k, "height"], [list(t) for t in slots["movie_height"]], name)
 
     def test_setup_downloads_every_model_file(self):
         """get_models.py downloads every model file a workflow loads, at a pinned revision, and the pod setup runs it."""
@@ -111,8 +120,8 @@ class ViewerMovies(unittest.TestCase):
         used = {str(v[0]) for n in video.values() for v in n["inputs"].values() if isinstance(v, list)}
         idle = [n["class_type"] for nid, n in video.items() if nid not in used and "output" not in n.get("_meta", {})]
         self.assertEqual(idle, [], "a dropped link leaves no node that feeds nothing")
-        scale = seq[str(seq[outputs["view"]]["inputs"]["images"][0])]
-        self.assertEqual(seq[str(scale["inputs"]["image"][0])]["inputs"]["destination"], "ACEScct")
+        conv = seq[str(seq[outputs["view"]]["inputs"]["images"][0])]  # Save Movie scales it to the size the page sends
+        self.assertEqual(conv["inputs"]["destination"], "ACEScct")
 
     def test_hdr_writes_a_log_movie_beside_its_frames(self):
         _, _, outputs = build_workflows.load("hdr")

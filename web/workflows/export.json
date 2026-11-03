@@ -436,18 +436,29 @@
    "title": "Export",
    "slots": {
     "filename_prefix": "prefix",
-    "keep_untouched": "keep_untouched"
+    "keep_untouched": "keep_untouched",
+    "images": "export_plate"
    },
    "output": "export"
   }
  },
  "26": {
-  "class_type": "MaskToImage",
+  "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
-   "mask": [
-    "23",
-    1
-   ]
+   "image": [
+    "24",
+    0
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "ACES2065-1"
+  },
+  "_meta": {
+   "title": "The result in ACES2065-1",
+   "slots": {
+    "config": "config",
+    "source": "color_space"
+   }
   }
  },
  "27": {
@@ -467,8 +478,50 @@
  "28": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
+   "format": "exr",
    "images": [
     "27",
+    0
+   ],
+   "filename_prefix": ""
+  },
+  "_meta": {
+   "title": "Export as half-float EXR frames (an HDR result of a video plate)",
+   "slots": {
+    "filename_prefix": "exr_prefix",
+    "images": "export_exr"
+   },
+   "output": "exr"
+  }
+ },
+ "29": {
+  "class_type": "MaskToImage",
+  "inputs": {
+   "mask": [
+    "23",
+    1
+   ]
+  }
+ },
+ "30": {
+  "class_type": "ImageFromBatch",
+  "inputs": {
+   "image": [
+    "29",
+    0
+   ],
+   "batch_index": 0,
+   "length": [
+    "1",
+    4
+   ]
+  }
+ },
+ "31": {
+  "class_type": "PaintAPlate_SaveFrames",
+  "inputs": {
+   "images": [
+    "30",
     0
    ],
    "filename_prefix": "paintaplate/plate/matte/matte"
@@ -479,6 +532,33 @@
     "filename_prefix": "matte_prefix"
    },
    "output": "matte"
+  }
+ },
+ "32": {
+  "class_type": "PaintAPlate_SaveMovie",
+  "inputs": {
+   "width": 0,
+   "height": 0,
+   "images": [
+    "30",
+    0
+   ],
+   "fps": [
+    "1",
+    3
+   ],
+   "crf": 18,
+   "filename_prefix": ""
+  },
+  "_meta": {
+   "title": "Matte movie (grey): the Export row shows it",
+   "slots": {
+    "width": "movie_width",
+    "height": "movie_height",
+    "filename_prefix": "matte_video_prefix",
+    "images": "export_matte_movie"
+   },
+   "output": "matte_movie"
   }
  }
 }

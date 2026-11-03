@@ -6,15 +6,16 @@ import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
 import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onLog, onNotice, outputFile, outputFiles, outputText, post, run, setSalt, upload, viewUrl } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
-import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor (logic.mjs keeps an older copy until the merge)
+import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath } from "./inspector.mjs";
 import { sceneGraph } from "./graph.mjs";
-import { CHANNEL_NAMES, DAB_PROFILE, DISPLAY, FLUID, PARAMS, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
-  erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
+import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
+  erasePrompt, erasesPaint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
+import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -66,7 +67,7 @@ const LIGHT = { flow: 0.3, shade: 0.35, spread: 1.6, spacing: 0.25 };
 const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid", "hdr"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "hdr", "review", "export"]; // the render's job kinds: Generate and a new plate stop them
 const UPSAMPLER = {}; // Black Forest Labs' system prompts for Klein's upsampler (upsampler.json): table and plain
-const SCENE = { format: "paintaplate-scene", version: 4 }; // 3: the OCIO config, the plate's colour space by its OCIO name, the display and view; 4: the SDR-to-HDR switch, the blank plate's bit depth
+const SCENE = { format: "paintaplate-scene", version: 5 }; // 3: the OCIO config, the plate's colour space by its OCIO name, the display and view; 4: the SDR-to-HDR switch, the blank plate's bit depth; 5: the switch as set, null for the plate's default
 const OCIO_PREF = "paintaplate.ocio"; // the config, display, view and look, kept for the next session as RV keeps them
 const saved = (key) => { try { return JSON.parse(localStorage.getItem(key)) ?? {}; } catch { return {}; } };
 
@@ -97,7 +98,7 @@ const S = {
   shot: null, stage: null, run: 0, exported: null, wantDownload: null,
   ocio: { config: "", display: "", view: "", look: "", ...saved(OCIO_PREF), info: null }, // the OCIO config and the viewer's view, as in RV
   previewCap: (() => { try { return +localStorage.getItem("paintaplate.preview") || PREVIEW_CAP; } catch { return PREVIEW_CAP; } })(), // long side of the shot preview: Fast by default
-  toHdr: true, // SDR to HDR after the full-size shot of an EXR plate, until switched off (logic.wantsHdr)
+  hdrSet: null, // the SDR-to-HDR switch as set for this plate; null: its kind's default (logic.plateDepth)
   heroKey: "", renders: new Map(), // set of edits -> what has been rendered for it
   erases: new Map(), // set of erases -> their matte and clean plates, for every render that has the same erases
   peek: null, // the History row picked: frame 0 shows its strokes over the edited first frame
@@ -227,11 +228,12 @@ async function writeCaption(e, reference, key, kind) {
 async function openPlate(list, typed, opts = {}) {
   if (!list.length && !typed) return status("Choose files, or type a path in ComfyUI's input folder.");
   stopEverything();
+  if (!opts.under) S.hdrSet = null; // a new plate: SDR to HDR at its kind's default; the fluid shot under the edits keeps the switch
   if (openCtl) { openCtl.abort(); cancel("ingest"); } // a plate still opening gives way to this one
   const ctl = (openCtl = new AbortController()); // Cancel on the opening screen, or Esc, aborts it (cancelOpen)
   Object.assign(S, { plate: null, hero: null, original: null }); // nothing to draw while the new plate loads
   const id = Date.now().toString(36), sub = `paintaplate/${id}`;
-  let path = typed, out, cs;
+  let path = typed, out, cs, headroom = 1;
   const name = list.length ? list[0].name.replace(/[._]?\d*\.[^.]+$/, "") : typed.split("/").pop();
   opening(name, list.length > 0);
   try {
@@ -250,14 +252,16 @@ async function openPlate(list, typed, opts = {}) {
     }
     if (ctl.signal.aborted) throw new Error("cancelled");
     openStep("read", 0, "Decoding the frames");
-    const st = await fetch(`/paintaplate/stat?${new URLSearchParams({ path, config: S.ocio.config })}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const st = await fetch(`/paintaplate/stat?${new URLSearchParams({ path, config: S.ocio.config, cs: knownSpace(opts.cs) ?? "" })}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    headroom = st?.headroom ?? 1; // above 1.0 for a log encoding: an integer plate then holds SDR to HDR's values (logic.holdsHdr)
     setSalt(st ? JSON.stringify([path, st.files, st.size, st.mtime]) : null); // the plate's identity: job index keys change when it does
     cs = knownSpace(opts.cs) ?? st?.color_space ?? modelSpace(); // one colour space per plate: the viewer, the models and the export use it
     // a video plate's proxy keeps its own values at the working size, so the viewer converts it with OCIO as it does the plate
     const video = st?.kind === "video", work = st?.width ? fitSize(st.width, st.height, WORK_SIDE, 32) : null;
     const t0 = performance.now();
+    const native = st?.width ? colour.nativeSize(st.width, st.height, NATIVE_SIDE) : null; // the playback proxy at the viewer's canvas size
     out = await run("ingest", { path, config: S.ocio.config, color_space: cs, proxy_space: video ? cs : logSpace(),
-      proxy_size: video && work ? Math.max(...work) : DEEP_SIDE, prefix: `${sub}/hero`, video_prefix: `${sub}/proxy` }, {
+      proxy_size: native ? Math.max(...native) : video && work ? Math.max(...work) : DEEP_SIDE, ...(native ? movieDims(...native) : {}), prefix: `${sub}/hero`, video_prefix: `${sub}/proxy` }, {
       progress: (f) => openStep(OPENING.at, f, null, f > 0.02 ? ((performance.now() - t0) / 1000) * (1 - f) / f : null),
       step: (cls) => { const k = INGEST[cls]; if (k && OPENING.order.indexOf(k) >= OPENING.order.indexOf(OPENING.at)) openStep(k, 0); } }).done;
   } catch (err) {
@@ -276,7 +280,7 @@ async function openPlate(list, typed, opts = {}) {
   const [w, h] = [spec.width, spec.height];
   const stem = (spec.kind === "video" ? spec.source : spec.first_file ?? spec.source ?? "plate").split(/[\\/]/).pop()
     .replace(/\.[^.]+$/, "").replace(/[._]?\d+$/, "") || "plate";
-  S.plate = { id, path, cs, spec, frames: spec.frames, fps: spec.fps || 24, name: stem, deep: spec.kind !== "video", // an image sequence: read at full precision
+  S.plate = { id, path, cs, headroom, spec, frames: spec.frames, fps: spec.fps || 24, name: stem, deep: spec.kind !== "video", // an image sequence: read at full precision
     proxySpace: spec.kind === "video" ? cs : logSpace(), // an image sequence's proxy holds log values
     first: spec.kind === "video" ? 1 : spec.first_frame ?? 1,
     work: fitSize(w, h, WORK_SIDE, 32), prev: fitSize(w, h, EDIT_SIDE, 16),
@@ -309,6 +313,8 @@ async function openPlate(list, typed, opts = {}) {
 
   const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).map((n) => n).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
+  const big = bigPlateWarning(spec, S.vram); // above 2K on a card under 48 GB: renders may not finish (README, GPU)
+  if (big) { log(big); setTimeout(() => status(big), 80); }
   status(`${S.plate.name} in ${cs}${opts.cs ? "" : ", read from the file"} (right-click > OCIO > File Color Space changes it). Describe the edit at the top, paint on the frame, then Generate.`);
   if (keying()) enterFluid(); else fluidUI();
 }
@@ -558,23 +564,36 @@ function layered(upto = S.edits.length, keep = () => true) { // the first frame 
   return c;
 }
 
-function hdrUI() { // the SDR-to-HDR switch shows for an EXR plate, when the model is there
+const hdrOn = () => S.hdrSet ?? hdrPlate(S.plate?.spec); // the switch, else the plate's default: on for EXR only
+function hdrUI() { // the SDR-to-HDR switch shows for every plate when the model is there, set to the plate's default
   const p = S.plate;
-  $("#hdr-switch").hidden = !(p && hdrPlate(p.spec) && S.hdrReady);
-  $("#hdr-on").checked = S.toHdr;
+  $("#hdr-switch").hidden = !(p && S.hdrReady);
+  $("#hdr-on").checked = hdrOn();
 }
-function setHdr(on) { // off: renders end with the SDR shot, as for a video plate; each setting keeps its own renders
-  S.toHdr = on;
-  log(`SDR to HDR ${on ? "on: the full-size shot is made again in scene-linear values, then fitted to the plate" : "off"}`);
+function setHdr(on) { // off: renders end with the SDR shot; each setting keeps its own renders
+  S.hdrSet = on;
+  const exr = on && !holdsHdr(S.plate?.spec, S.plate?.headroom); // a format that holds nothing above 1.0: an SDR video, an sRGB or linear integer sequence
+  log(`SDR to HDR ${on ? `on: the full-size shot is made again in scene-linear values, then fitted to the plate${exr ? ". The result becomes an EXR sequence: the player shows its frames and Export writes them, half-float EXR in ACES2065-1" : ""}` : "off"}`);
   hud(`SDR to HDR ${on ? "on" : "off"}`, 1500);
   hdrUI(); recompose(); touch();
 }
-$("#hdr-on").addEventListener("change", () => setHdr($("#hdr-on").checked));
+// On a plate whose format cannot hold values above 1.0, SDR to HDR turns on only once confirmed (Adrien, 2 Nov): its result
+// is then an EXR sequence, in the player and in the export
+function askHdr(on) {
+  $("#hdr-confirm").hidden = true;
+  if (!on || holdsHdr(S.plate?.spec, S.plate?.headroom)) return setHdr(on);
+  $("#hdr-on").checked = hdrOn();
+  $("#hdr-confirm").hidden = false;
+  hud("SDR to HDR on this plate makes its result an EXR sequence: confirm under the switch", 3000);
+}
+$("#hdr-on").addEventListener("change", () => askHdr($("#hdr-on").checked));
+$("#hdr-yes").addEventListener("click", () => { $("#hdr-confirm").hidden = true; setHdr(true); });
+$("#hdr-no").addEventListener("click", () => { $("#hdr-confirm").hidden = true; hdrUI(); });
 
 function recompose() {
   S.hero = layered();
   const edits = S.edits.filter((e) => e.on && e.patch && e.state !== "generating").map((e) => `${e.id}.${e.version}`).join(",");
-  const key = edits && hdrPlate(S.plate?.spec) && !S.toHdr ? `${edits}|sdr` : edits; // SDR to HDR switched off: another render
+  const key = edits && hdrKey(edits, hdrPlate(S.plate?.spec), hdrOn()); // the switch away from the plate's default: another render
   if (key === S.heroKey) return;
   S.heroKey = key;
   const r = S.renders.get(key); // a set of edits seen before plays at once (a bypass turned back on, for example)
@@ -594,15 +613,25 @@ function showLatest() { // the latest result of the edits on show: the full-size
 // The Render panel's finished rows: a click shows that pass on every frame (the First frame row, the edit as Klein made it),
 // so a fault can be traced to the step that made it; the wipe compares it with the plate. A second click, or Esc, goes back
 // to the latest result, which the viewer follows again as steps finish.
+// Every movie the page plays comes at the plate's native size, up to NATIVE_SIDE on the long side, the size of the viewer's
+// canvas (contract 1 of the parallel work), even sides for H.264: Save Movie scales it with Lanczos while it encodes.
+const movieDims = (w, h) => ({ movie_width: w - (w % 2), movie_height: h - (h % 2) });
+const plateMovie = (p) => movieDims(...colour.nativeSize(p.spec.width, p.spec.height, NATIVE_SIDE));
+// A matte row shows the matte through the config's data colour space: its own values, with no view's tone mapping.
+const matteSpace = () => dataSpace(S.ocio.info?.spaces) ?? modelSpace();
+// A fluid shot's rows (logic.fluidPasses) show with its keyframes open or closed; open, the viewer leaves the keyframes for
+// the pass, and the latest is the fluid shot itself.
 function choosePass(id) {
-  const r = S.renders.get(S.heroKey), label = id === "first" ? "First frame" : STAGES.find((x) => x.id === id)?.label;
+  const r = S.renders.get(S.heroKey), fluid = fluidPasses(S.fluid?.result, { log: logSpace(), hdr: HDR_FRAMES }).find((x) => x.id === id);
+  const label = id === "first" ? "First frame" : fluid?.label ?? STAGES.find((x) => x.id === id)?.label;
   S.pass = S.pass === id ? null : id;
-  if (!S.pass) { showLatest(); hud("The latest result", 1500); return stagesUI(); }
+  if (!S.pass) { if (keying() && S.fluid.result) showFluid(); else showLatest(); hud("The latest result", 1500); return stagesUI(); }
   if (id === "first") { pause(); seek(0); render(); }
   else {
-    const m = passMovie(id, r, previewOf(r), { log: logSpace() });
+    const m = fluid ?? passMovie(id, r, previewOf(r), { log: logSpace(), data: matteSpace(), hdr: HDR_FRAMES });
     if (!m) { S.pass = null; return stagesUI(); }
-    setShot(m.url, S.heroKey, m.space, m.frames, { framesSpace: m.framesSpace }); // passMovie gives a pass's EXR frames and their space
+    if (fluid && keying()) S.fluid.view = "result"; // the keyframes stay as painted; the viewer shows the pass
+    setShot(m.url, fluid && keying() ? "fluid" : S.heroKey, m.space, m.frames ?? null, { framesSpace: m.framesSpace }); // a pass's EXR frames and their space (passMovie, fluidPasses)
   }
   hud(`${label}: on show. Click it again, or Esc, for the latest`, 3000);
   log(`Viewer: ${label} on show`);
@@ -1282,7 +1311,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     if (f.busy?.sig === fluidSig()) return hud(`Fluid shot v${f.busy.v} is being made from these keyframes and words`, 2500);
     const made = f.made?.get(fluidSig());
     if (made) {
-      if (f.result !== made) { f.result = made; setShot(made.movie ?? made.preview, "fluid", made.movie ? logSpace() : "@model"); log(`Fluid v${made.v}: made before from these keyframes, words and seed: shown again, nothing runs`); }
+      if (f.result !== made) { f.result = made; showFluid(); log(`Fluid v${made.v}: made before from these keyframes, words and seed: shown again, nothing runs`); }
       f.view = "result"; fluidUI(); render();
       return hud(`Fluid shot v${made.v} is already made from these keyframes and words. Ctrl+Enter tries another seed.`, 3000);
     }
@@ -1301,26 +1330,31 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     log(`Fluid v${v}: ${keys.length} keyframe(s) at ${keys.map((k) => p.first + k.frame).join(", ")}, ${size.join(" x ")}, ${p.frames} frames at ${p.fps} fps, seed ${f.seed}, prompt "${prompt}"`);
     status(`Fluid shot v${v}: one LTX 2.5 pass with ainvfx-fluid`);
     const out = await run("fluid", { path: f.blankPath ?? p.path, config: S.ocio.config, color_space: "@model", max_frames: p.frames, keys: JSON.stringify(keys), prompt, seed: f.seed,
-      prefix: `${dir}/plate`, video_prefix: `${dir}/preview`, live: liveEvery() },
+      prefix: `${dir}/plate`, video_prefix: `${dir}/preview`, control_prefix: `${dir}/control/c`, ...plateMovie(p), live: liveEvery() },
       { kind: "fluid", progress: (x) => { if (f.busy) { f.busy.progress = x; fluidUI(); fluidProgress(); } }, live: showLive }).done;
     let path = `${folderOf("fluid", out, "video")}/plate/${(f.blankPath ?? p.spec.source).split(/[\\/]/).pop()}`;
-    let movie = null; // an HDR fluid shot as an 8-bit movie in log values: the look of its EXR frames
+    let movie = null, hdrFrames = null; // an HDR fluid shot as an 8-bit movie in log values: the look of its EXR frames
     const hdr = f.depth === HDR_DEPTH && S.hdrReady; // a 16-bit scene opened while SDR to HDR is off makes an 8-bit shot
     if (hdr) { // 16-bit: SDR to HDR makes the fluid shot an EXR plate, so every edit on it renders in HDR too
       const t1 = performance.now();
       status(`Fluid shot v${v}: SDR to HDR, one LTX 2.5 pass with Lightricks' IC-LoRA`);
-      const made = await run("hdr", { path, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps), prefix: `${dir}/hdr/f`, video_prefix: `${dir}/hdr_movie`, view_space: logSpace(), movie_fps: p.fps, live: liveEvery() },
+      const made = await run("hdr", { path, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps), ...plateMovie(p), prefix: `${dir}/hdr/f`, video_prefix: `${dir}/hdr_movie`, view_space: logSpace(), movie_fps: p.fps, live: liveEvery() },
         { kind: "fluid", progress: (x) => { if (f.busy) { f.busy.progress = x; fluidUI(); fluidProgress(); } }, live: showLive }).done;
       path = folderOf("hdr", made, "hdr");
+      const hf = outputFile("hdr", made, "hdr");
+      hdrFrames = hf ? `output:${hf.subfolder}/${framePattern(hf.filename)}` : null; // for the Fluid: SDR to HDR row
       const m = outputFile("hdr", made, "movie");
       movie = m ? viewUrl(m) : null;
       log(`Fluid v${v}: SDR to HDR took ${((performance.now() - t1) / 1000).toFixed(1)} s: half-float EXR frames in ${path}`);
     }
-    f.result = { v, sig, seed: f.seed, prompt, path, hdr, movie, run: fluidRun(path), preview: viewUrl(outputFile("fluid", out, "video")) };
+    const control = outputFile("fluid", out, "control"); // the control video, for the Fluid: keyframes row
+    f.result = { v, sig, seed: f.seed, prompt, path, hdr, movie, run: fluidRun(path), preview: viewUrl(outputFile("fluid", out, "video")),
+      control: control ? viewUrl(control) : null, hdrFrames };
     (f.made ??= new Map()).set(sig, f.result);
     f.view = "result";
     f.busy = null;
-    setShot(f.result.movie ?? f.result.preview, "fluid", f.result.movie ? logSpace() : "@model");
+    if (S.pass?.startsWith("fluid_")) S.pass = null; // a new shot: the viewer shows it, not a pass of the one before
+    showFluid();
     log(`Fluid v${v}: done in ${((performance.now() - t0) / 1000).toFixed(1)} s: ${(outputText("fluid", out, "plate") ?? "").split("\n")[0]}`);
     f.editing = false; // the shot is made: it becomes the plate under the next edits, and the viewer plays it
     f.busy = null;
@@ -1334,11 +1368,13 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
   }
 }
 
+const showFluid = () => { const m = S.fluid.result; setShot(m.movie ?? m.preview, "fluid", m.movie ? logSpace() : "@model"); }; // the fluid shot as it plays with its keyframes open
+
 function editFluid() { // the fluid's keyframes and words again; the edits on its shot stay until a new shot is made
   const f = S.fluid;
   if (!f || keying()) return;
   if (S.draft) launch(S.draft);
-  Object.assign(S, { selected: null, peek: null });
+  Object.assign(S, { selected: null, peek: null, pass: null });
   f.editing = true;
   pause(); seek(0);
   enterFluid(); historyUI();
@@ -1346,6 +1382,7 @@ function editFluid() { // the fluid's keyframes and words again; the edits on it
 
 function leaveKeys() { // the keyframes close: the viewer shows the plate the fluid shot made, with the edits on it
   S.fluid.editing = false;
+  S.pass = null;
   S.heroKey = null; recompose(); // the shot of the edits on show, or none
   fluidUI(); historyUI(); render();
 }
@@ -2063,7 +2100,7 @@ function plan(r, active) { // the steps this set of edits needs: the erase pass 
   const erase = active.some((e) => e.tool === "erase"), paint = active.some((e) => e.tool === "paint"), carry = active.some((e) => e.tool !== "erase");
   r.skip = new Set([!erase && "erase", !erase && "clean", !carry && "shot", !paint && "track", (onePass || !erase) && "cleanfull",
     (onePass || !carry) && "full", (onePass || !paint) && "trackfull",
-    !(S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), !r.key?.endsWith("|sdr"))) && "hdr"].filter(Boolean)); // the switch is in the key
+    !(S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), hdrOfKey(r.key, hdrPlate(p.spec)))) && "hdr"].filter(Boolean)); // the switch is in the key
   return r;
 }
 
@@ -2113,7 +2150,9 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const E = erase ? S.erases.get(ekey) ?? S.erases.set(ekey, { sizes: {} }).get(ekey) : null;
   r.hero ??= await uploadCanvas(r.heroFrame, `hero_v${r.v}.png`);
   if (erase) r.clean0 ??= E.clean0 ??= await uploadCanvas(r.cleanFrame, `clean_v${r.v}.png`);
-  const common = { config: S.ocio.config, color_space: p.cs, max_frames: p.frames, seed: active[0].seed };
+  // frames_format: the shot's and the erase pass's frames at the plate's depth (logic.plateDepth): 8-bit PNG, 16-bit PNG or half-float EXR
+  const common = { config: S.ocio.config, color_space: p.cs, max_frames: p.frames, seed: active[0].seed, frames_format: plateDepth(p.spec).frames,
+    ...plateMovie(p) }; // every pass movie at the plate's native size (the viewer's contract 1)
   const prompt = shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt, hue: e.hue ?? hueOf(e.src ?? e) })));
   const scene = erase ? erasePrompt(erases.map((e) => e.caption)) : ""; // the scene as it stays, never the erased object
   if (!r.told) {
@@ -2187,7 +2226,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     underOf(pv), r.heroFrame); }, pv);
   pv.mattes = mattesOf({ ...r.erased?.found, ...pv.painted?.found });
   await step(r, "comp", async (progress) => {
-    const comp = await run("comp", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, width: sw, height: sh, shot: made,
+    const comp = await run("comp", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, width: sw, height: sh, shot: made, ...plateMovie(p),
       ...pv.mattes.values, relight, grow: grow(sw, erase), feather: feather(sw), grain: 0, video_prefix: `${base}/${sized}/comp` },
       { kind: "comp", progress }).done;
     pv.comp = viewUrl(outputFile("comp", comp, "video"));
@@ -2208,36 +2247,44 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     underOf(onePass ? pv : r), r.heroFrame); });
   r.full ??= pv.mattes;
   await step(r, "hdr", async (progress) => { // SDR to HDR: the full-size shot made again in scene-linear values; review fits it to the plate
-    const out = await run("hdr", { path: final, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps),
+    const out = await run("hdr", { path: final, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps), ...plateMovie(p),
       prefix: `${base}/full/hdr/f`, video_prefix: `${base}/full/hdr_movie`, view_space: logSpace(), movie_fps: p.fps, live: here() ? liveEvery() : 0 },
       { kind: "hdr", progress, live: here() ? showLive : null }).done;
     r.hdr = folderOf("hdr", out, "hdr");
+    const hf = outputFile("hdr", out, "hdr"); // its EXR frames, for its row: drawn and inspected in ACES2065-1
+    r.hdrFrames = hf ? `output:${hf.subfolder}/${framePattern(hf.filename)}` : null;
     const m = outputFile("hdr", out, "movie");
     r.hdrMovie = m ? viewUrl(m) : null; // the SDR to HDR row of the Render panel shows it
   });
   const hdr = { hdr: r.hdr ?? "", hdr_grow: grow(p.spec.width, erase) + feather(p.spec.width) }; // HDR Match leaves the composite's edge out
+  // an image sequence's review, and an HDR result of a video plate (logic.exrResult), are also EXR frames in the plate's colour
+  // space, values above 1.0 kept, which the viewer reads at full precision
+  const deep = p.deep || exrResult(p.spec, r.hdr, p.headroom);
   await step(r, "review", async (progress) => { // the full-size composite at the plate's quality, which the viewer plays once made
-    const out = await run("review", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr, ...r.full.values,
-      relight, grow: grow(p.spec.width, erase), feather: feather(p.spec.width), movie_space: p.deep ? "@model" : p.cs, view_space: logSpace(),
-      review_prefix: `${base}/review`, frames_prefix: p.deep ? `${base}/review/frames` : "", view_prefix: p.deep ? `${base}/review/view` : "" },
+    const out = await run("review", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr, ...r.full.values, ...plateMovie(p),
+      relight, grow: grow(p.spec.width, erase), feather: feather(p.spec.width), movie_space: deep ? "@model" : p.cs, view_space: logSpace(),
+      review_prefix: `${base}/review`, frames_prefix: deep ? `${base}/review/frames` : "", view_prefix: deep ? `${base}/review/view` : "" },
       { kind: "review", progress }).done;
-    const movie = outputFile("review", out, "review"), frame = p.deep ? outputFile("review", out, "frames") : null;
-    const shown = p.deep ? outputFile("review", out, "view") : null; // an image sequence plays its log movie: the look of its EXR frames
-    Object.assign(r, { review: viewUrl(movie), reviewSpace: p.deep ? "@model" : p.cs, run: movie?.subfolder ?? base, // the render's folder,
+    const movie = outputFile("review", out, "review"), frame = deep ? outputFile("review", out, "frames") : null;
+    const shown = deep ? outputFile("review", out, "view") : null; // an image sequence plays its log movie: the look of its EXR frames
+    Object.assign(r, { review: viewUrl(movie), reviewSpace: deep ? "@model" : p.cs, run: movie?.subfolder ?? base, // the render's folder,
       reviewFrames: frame ? `output:${frame.subfolder}/${framePattern(frame.filename)}` : null, // wherever the job index took it from
-      play: viewUrl(shown ?? movie), playSpace: shown ? logSpace() : p.deep ? "@model" : p.cs });
+      play: viewUrl(shown ?? movie), playSpace: shown ? logSpace() : deep ? "@model" : p.cs });
   });
   if (!here()) return log(`Render v${r.v}: the full-size composite is ready, in the background`);
   if (!S.pass) setShot(r.play ?? r.review, key, r.playSpace ?? r.reviewSpace, r.reviewFrames);
   hud("Composite, full size: the viewer plays it", 2500);
   stagesUI(); exportUI();
-  if (!S.wantDownload) return status(`Composite, full size: the viewer plays it${p.deep ? ", its EXR frames at full precision as they load" : ""}. Export writes the result for compositing software.`);
+  if (!S.wantDownload) return status(`Composite, full size: the viewer plays it${deep ? ", its EXR frames at full precision as they load" : ""}. Export writes the result for compositing software.`);
   await step(r, "export", async (progress) => { // only when Export asks: the plate's own format, and the matte, beside the review
+    const exr = exrResult(p.spec, r.hdr, p.headroom); // the result as half-float EXR frames instead of the plate's format
     const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr,
-      ...r.full.values, relight, keep_untouched: !relight, prefix: `${dir}/export`, matte_prefix: `${dir}/matte/matte`,
-      grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
-    const file = outputFile("export", done, "export"); // a job taken from the index keeps its own folder
-    r.exported = { run: file ? file.subfolder.replace(/\/export$/, "") : dir, name: `${p.name}_paintaplate_v${r.v}`, text: outputText("export", done, "export") ?? "" };
+      ...r.full.values, relight, keep_untouched: !relight, prefix: exr ? "" : `${dir}/export`, exr_prefix: exr ? `${dir}/export/f` : "", matte_prefix: `${dir}/matte/matte`,
+      matte_video_prefix: `${dir}/matte_movie/m`, ...plateMovie(p), grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
+    const file = outputFile("export", done, exr ? "exr" : "export"), matte = outputFile("export", done, "matte_movie"); // a job taken from the index keeps its own folder
+    r.exported = { run: file ? file.subfolder.replace(/\/export$/, "") : dir, name: `${p.name}_paintaplate_v${r.v}`,
+      text: exr ? `${p.frames} half-float EXR frames in ACES2065-1, in ${file?.subfolder ?? `${dir}/export`}` : outputText("export", done, "export") ?? "",
+      matte: matte ? viewUrl(matte) : null }; // the Export row shows its matte
   });
   S.exported = r.exported;
   stagesUI(); exportUI();
@@ -2270,8 +2317,11 @@ async function track(active, shotPath, base, suffix, progress, previous, tools, 
     const compare = tool === "paint" && under ? { base: under.path, base_color_space: under.cs } : {}; // the paint matte follows what the shot changed
     if (tool === "paint") compare.seed = await uploadCanvas(elementOf(union, size, hero), `seed${suffix}.png`); // from what the edits changed
     const out = await run("matte", { path, config: S.ocio.config, color_space: cs, max_frames: p.frames, width: sw, height: sh, prefix: `${base}/${key}${suffix}/m`,
-      mask: await uploadCanvas(union, `${key}${suffix}.png`), zone: FOLLOW.zone, threshold: FOLLOW.threshold, ...compare },
+      mask: await uploadCanvas(union, `${key}${suffix}.png`), zone: FOLLOW.zone, threshold: FOLLOW.threshold, ...compare,
+      fps: p.fps, video_prefix: `${base}/${key}${suffix}_movie/m`, ...plateMovie(p) }, // its grey movie, for its row in the Render panel
       { kind: "matte", progress }).done;
+    const movie = outputFile("matte", out, "movie");
+    if (movie) found[key === "matte_a" ? "movie_a" : "movie_b"] = viewUrl(movie);
     const note = outputText("matte", out, "follow");
     if (note) log(`${tool === "erase" ? "Erase" : "Paint"} matte${suffix ? ` (${suffix.slice(1)})` : ""}: ${note}`);
     found[key] = folderOf("matte", out, "frames");
@@ -2287,9 +2337,18 @@ function mattesOf(found) { // a missing matte is the other one again: the workfl
 const PARTS = { export: "the result in the plate's format", matte: "its matte", review: "a review movie", shot: "the regenerated shot",
   hdr: "the HDR frames", plate: "the fluid shot", preview: "its preview movie" };
 
-function download(parts = ["export", "matte"]) {
+// The models behind the result on show (models.workflowsFor, modelsBehind): Help > Models and licences shows them, and an
+// export's zip lists them in MODELS.md, which the download route writes from web/models.json
+async function modelsOnShow() {
+  registry ??= await (await fetch(new URL("models.json", location.href), { cache: "no-store" })).json();
+  const edits = S.edits.filter((e) => e.on !== false && e.patch), fluid = !!S.fluid?.result && S.fluid.on !== false;
+  const tools = edits.map((e) => e.tool), hdr = S.hdrReady && (fluid && !!S.fluid.result.hdr || (tools.length > 0 && wantsHdr(S.plate?.spec, tools, hdrOn())));
+  return modelsBehind(registry, workflowsFor({ tools, fluid, hdr }), (n) => WF[n]?.prompt);
+}
+async function download(parts = ["export", "matte"]) {
+  const models = (await modelsOnShow().catch(() => [])).map((m) => m.id).join(",");
   const a = Object.assign(document.createElement("a"), {
-    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, parts: parts.join(",") })}`,
+    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, parts: parts.join(","), models })}`,
     download: `${S.exported.name}.zip` });
   document.body.append(a); a.click(); a.remove();
   const what = parts.map((k) => PARTS[k]);
@@ -2346,10 +2405,22 @@ function stagesUI() {
   hdrUI(); // the Render panel: every step, done, running or waiting, and the time left
   const list = $("#stages"), p = S.plate, r = S.renders.get(S.heroKey);
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
-  $("#render-full").hidden = !r?.donor; // a set that took another render's frames can still be made with its own shot
-  $("#render").hidden = !p || keying();
-  list.hidden = !active.length;
-  if (!p || !active.length) { $("#render-left").textContent = ""; return timelineBar(); }
+  const fluid = p ? fluidPasses(S.fluid?.result, { log: logSpace() }) : []; // a made fluid shot's rows, keyframes open or closed
+  const edits = active.length && !keying(); // with the keyframes open, only the fluid shot's rows
+  $("#render-full").hidden = !r?.donor || !edits; // a set that took another render's frames can still be made with its own shot
+  $("#render").hidden = !p || (keying() && !fluid.length);
+  list.hidden = !edits && !fluid.length;
+  const fluidRows = fluid.map((x) => {
+    const li = document.createElement("li");
+    li.className = "done" + (S.pass === x.id ? " shown" : "");
+    li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time">fluid</span>';
+    li.children[1].textContent = x.label;
+    li.classList.add("pick");
+    li.title = `Show ${x.label.toLowerCase()} in the viewer. Click it again, or Esc, for the latest`;
+    li.onclick = () => choosePass(x.id);
+    return li;
+  });
+  if (!p || !edits) { list.replaceChildren(...fluidRows); $("#render-left").textContent = ""; return timelineBar(); }
   const skip = r?.skip ?? plan({}, active).skip, later = (st) => st.onDemand && !S.wantDownload; // the export waits for Export
   const pick = (li, id, label) => { // a finished pass with a picture: a click shows it on every frame, a second click the latest
     li.classList.add("pick");
@@ -2360,7 +2431,7 @@ function stagesUI() {
   first.className = "done" + (S.pass === "first" ? " shown" : "");
   first.innerHTML = '<span class="dot"></span><span class="name">First frame</span><span class="time">edit</span>';
   pick(first, "first", "the first frame");
-  list.replaceChildren(first, ...STAGES.filter((st) => !skip.has(st.id)).map((st) => {
+  list.replaceChildren(...fluidRows, first, ...STAGES.filter((st) => !skip.has(st.id)).map((st) => {
     const li = document.createElement("li"), took = doneOf(r, st), from = (st.preview ? previewOf(r) : r)?.taken?.[st.id];
     const now = S.stage?.id === st.id && S.stage.key === S.heroKey;
     li.className = took !== undefined ? "done" : now ? "now" : later(st) ? "later" : "";
@@ -2368,7 +2439,7 @@ function stagesUI() {
     li.children[1].textContent = st.label;
     li.children[2].textContent = from ? `from v${from}` : took !== undefined ? `${Math.round(took)} s` : now ? `${Math.round(S.stage.progress * 100)}%`
       : later(st) ? "on Export" : `~${Math.round(estimate(st.id))} s`;
-    const movie = took !== undefined ? passMovie(st.id, r, previewOf(r), { log: logSpace() }) : null;
+    const movie = took !== undefined ? passMovie(st.id, r, previewOf(r), { log: logSpace(), data: matteSpace() }) : null;
     if (movie) {
       pick(li, st.id, st.label.toLowerCase());
       if (S.pass ? S.pass === st.id : movie.url === S.shot?.url) li.classList.add("shown"); // the row on show
@@ -2465,7 +2536,8 @@ function exportDialog() {
   for (const k of ["matte", "review", "shot"]) $(`#x-${k}`).closest("label").hidden = fluid; // a fluid shot alone: its own files
   if (fluid) return fluidExportDialog();
   const r = S.renders.get(S.heroKey), kind = S.plate.spec.kind;
-  $("#x-format").textContent = kind === "video" ? `${S.plate.spec.codec} movie` : `${S.plate.spec.ext.slice(1).toUpperCase()} ${kind}`;
+  $("#x-format").textContent = exrResult(S.plate.spec, r?.hdr ?? hdrOn(), S.plate.headroom) ? "half-float EXR frames, ACES2065-1" // an HDR result of a video plate
+    : kind === "video" ? `${S.plate.spec.codec} movie` : `${S.plate.spec.ext.slice(1).toUpperCase()} ${kind}`;
   $("#x-note").textContent = r?.exported ? "Written: the zip downloads at once."
     : r?.review ? "Export writes the result and its matte from the full-size composite, in seconds, then the zip downloads."
     : `The full-size composite finishes first, ${secs(renderLeft(true)) || "in a moment"}; then the export is written and the zip downloads.`;
@@ -2631,9 +2703,12 @@ const unpackStrokes = (saved, [W, H], from) => { // `from`: the scene's own work
 
 async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it again, or downloads it
   const work = S.plate.work, f = S.fluid, { config, display, view, look: lk } = S.ocio;
+  // a fluid scene keeps its blank plate, which opens in the model space (openBlank): the plate under its edits can be the
+  // HDR fluid shot's EXR frames, in ACES2065-1, and the blank plate reopened in that space made its jobs again (2 Nov)
+  const blank = f?.blankPath;
   const scene = { ...SCENE, saved: new Date().toISOString(), work, ocio: { config, display, view, look: lk },
-    plate: { path: S.fluid?.blankPath ?? S.plate.path, color_space: S.plate.cs, name: S.plate.name },
-    preview: S.previewCap, hdr: S.toHdr, in: S.inPt, out: S.outPt,
+    plate: { path: blank ?? S.plate.path, color_space: blank ? modelSpace() : S.plate.cs, name: S.plate.name },
+    preview: S.previewCap, hdr: S.hdrSet, in: S.inPt, out: S.outPt,
     edits: S.edits.map((e) => ({ tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on,
       caption: e.caption?.text ?? "", strokes: packStrokes(e.strokes) })),
     ...(f ? { fluid: { prompt: keying() ? $("#prompt").value.trim() : f.prompt ?? "", seed: f.seed, depth: f.depth ?? 8, made: !!f.result, on: f.on !== false, keys: f.keys.map((k) => ({ frame: k.frame, strokes: packStrokes(k.strokes) })) } } : {}) };
@@ -2659,7 +2734,7 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
     render: { prompt: shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt, hue: e.hue ?? hueOf(e.src ?? e) }))), seed: active[0].seed,
       erasePrompt: erasePrompt(active.filter((e) => e.tool === "erase").map((e) => e.caption?.text)),
       grow: grow(p.spec.width, erase), feather: feather(p.spec.width), prefix: `paintaplate/${p.id}/graph`,
-      hdr: S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), S.toHdr) } });
+      hdr: S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), hdrOn()) } });
   const a = Object.assign(document.createElement("a"), { download: `${p.name}.comfyui.json`,
     href: URL.createObjectURL(new Blob([JSON.stringify(graph, null, 1)], { type: "application/json" })) });
   document.body.append(a); a.click(); a.remove();
@@ -2678,10 +2753,12 @@ async function openScene(text) { // the plate opens in its colour space, then ev
     look.setView(S.ocio); saveOcio();
   }
   if (scene.preview) setPreview(scene.preview);
-  S.toHdr = scene.hdr !== false;
+  const hdrSet = scene.version >= 5 ? scene.hdr ?? null : scene.hdr === false ? false : null; // before 5: true meant the default
   const from = scene.version >= 2 && Array.isArray(scene.work) ? scene.work : null; // strokes in pixels of this working size
-  await openPlate([], scene.plate.path, { cs: scene.version >= 3 ? scene.plate.color_space : undefined, // older scenes: read from the file
+  await openPlate([], scene.plate.path, { cs: scene.fluid ? modelSpace() // a blank plate, as openBlank opens it (1.4.0 saved the space under its edits)
+    : scene.version >= 3 ? scene.plate.color_space : undefined, // older scenes: read from the file
     ...(scene.fluid ? { fluid: { blankPath: scene.plate.path, seed: scene.fluid.seed, prompt: scene.fluid.prompt ?? "", on: scene.fluid.on !== false, depth: blankDepth(scene.fluid.depth) } } : {}) });
+  S.hdrSet = hdrSet; // openPlate set the plate's default
   if (scene.fluid) { // the fluid shot first: its keyframes, then the shot itself, the plate the edits were painted on
     S.fluid.keys = scene.fluid.keys.map((k) => { const key = newKey(k.frame); key.strokes = unpackStrokes(k.strokes, S.plate.work, from); redrawKey(key); return key; });
     fluidUI(); timelineUI(); historyUI(); render();
@@ -2784,10 +2861,7 @@ for (const b of $$("#help [role=tab]")) b.onclick = () => (b.dataset.help === "m
 
 let registry = null;
 async function showModels() {
-  registry ??= await (await fetch(new URL("models.json", location.href), { cache: "no-store" })).json();
-  const edits = S.edits.filter((e) => e.on !== false && e.patch), fluid = !!S.fluid?.result && S.fluid.on !== false;
-  const flows = workflowsFor({ tools: edits.map((e) => e.tool), fluid, hdr: !!(S.toHdr && S.hdrReady) });
-  const behind = modelsBehind(registry, flows, (n) => WF[n]?.prompt);
+  const behind = await modelsOnShow(); // the pipeline's rule, as the export's MODELS.md (S.toHdr became the plate's own rule in 1.7.0)
   const link = (text, href) => Object.assign(document.createElement("a"), { textContent: text, href, target: "_blank", rel: "noopener" });
   const table = (rows, uses) => {
     const t = document.createElement("table");
@@ -2983,7 +3057,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["ComfyUI graph", "", () => saveGraph().catch(quiet), !edits], "-", ["Close plate", "", () => closePlate(), !p && !openCtl]]],
     ["Edit", [["Undo", "Ctrl+Z", undo, !S.past.length], ["Redo", "Ctrl+Shift+Z", redo, !S.future.length], "-",
       ["New edit", "N", nextEdit, !p || keying() || (!S.draft && !S.selected)], ["Generate", "Enter", () => enter(false), $("#generate").disabled], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
-      ...(HDR_ON ? [["SDR to HDR", "", () => setHdr(!S.toHdr), !p || !hdrPlate(p.spec) || !S.hdrReady, !!p && hdrPlate(p.spec) && S.hdrReady && S.toHdr]] : []),
+      ...(HDR_ON ? [["SDR to HDR", "", () => askHdr(!hdrOn()), !p || !S.hdrReady, !!p && S.hdrReady && hdrOn()]] : []),
       ["Render in full", "", renderInFull, !S.renders.get(S.heroKey)?.donor], ["Stop generating", "Esc", stopGenerating, !generating()],
       ["Deselect", "Esc", () => select(null), !S.selected]]],
     ["Tools", [["Paint", "B", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Erase", "E", () => pickTool("erase"), !p || (keying() && !S.fluid.result), S.tool === "erase" && !S.rub],

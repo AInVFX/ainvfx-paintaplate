@@ -129,6 +129,8 @@
  "9": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
+   "width": 0,
+   "height": 0,
    "filename_prefix": "paintaplate/plate/proxy",
    "images": [
     "8",
@@ -143,6 +145,8 @@
   "_meta": {
    "title": "Playback proxy",
    "slots": {
+    "width": "movie_width",
+    "height": "movie_height",
     "filename_prefix": "video_prefix"
    },
    "output": "proxy"

@@ -304,6 +304,8 @@
  "19": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
+   "width": 0,
+   "height": 0,
    "filename_prefix": "paintaplate/plate/comp",
    "images": [
     "18",
@@ -317,6 +319,8 @@
   "_meta": {
    "title": "Composite preview",
    "slots": {
+    "width": "movie_width",
+    "height": "movie_height",
     "filename_prefix": "video_prefix"
    },
    "output": "video"

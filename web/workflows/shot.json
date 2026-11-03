@@ -438,8 +438,12 @@
   }
  },
  "29": {
-  "class_type": "VAEDecode",
+  "class_type": "VAEDecodeTiled",
   "inputs": {
+   "tile_size": 512,
+   "overlap": 64,
+   "temporal_size": 128,
+   "temporal_overlap": 32,
    "samples": [
     "28",
     2
@@ -457,11 +461,13 @@
     "29",
     0
    ],
+   "format": "png",
    "filename_prefix": "paintaplate/plate/shot/f"
   },
   "_meta": {
    "title": "Shot frames",
    "slots": {
+    "format": "frames_format",
     "filename_prefix": "prefix"
    },
    "output": "frames"
@@ -470,6 +476,8 @@
  "31": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
+   "width": 0,
+   "height": 0,
    "filename_prefix": "paintaplate/plate/shot",
    "images": [
     "29",
@@ -483,6 +491,8 @@
   "_meta": {
    "title": "Shot video (whole frame regenerated)",
    "slots": {
+    "width": "movie_width",
+    "height": "movie_height",
     "filename_prefix": "video_prefix"
    },
    "output": "video"

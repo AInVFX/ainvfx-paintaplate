@@ -19,7 +19,9 @@ const infos = new Map(); // class -> /object_info answer, asked once
 // The job index (routes.py): a finished job's outputs on disk, by the hash of its workflow, the plate and its values. A job
 // that matches takes them back instead of running, in this session or a later one on the same machine. Only workflows whose
 // outputs are saved files take part: the warm-up exists for its side effect, and SAM's object search keeps previews.
-const INDEXED = new Set(["ingest", "prompt", "edit", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "fluid"]);
+// SDR to HDR takes part too: run again, it rewrote a 16-bit fluid shot's EXR frames, the plate under its edits, so the
+// plate's time changed and every job on it missed the index when its scene was opened again (2 Nov).
+const INDEXED = new Set(["ingest", "prompt", "edit", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "fluid", "hdr"]);
 const hashes = {}; // workflow name -> hash of its file: a new workflow makes new keys
 let salt = null; // the plate's identity (path, size, time); null: no index, as when the plate could not be checked
 export const setSalt = (s) => { salt = s; };
