@@ -135,6 +135,13 @@ def pass_rows(page, U):
                     f"keyframes {state}, {label}: on show on every frame (frame 1 {'black' if black else 'lit'}): {shown(page)}, {second}")
             page.click(f"#stages li.pick:has-text('{label}')"); page.wait_for_timeout(500)
             U.check(shown(page) == [], f"keyframes {state}, {label}: a second click gives the fluid shot back: {shown(page)}")
+        page.keyboard.press("F6"); page.wait_for_timeout(300)  # the wipe on a fluid row: the step's input on the left, its output on the right
+        for label, left in (("Fluid: keyframes", "Blank plate"), ("Fluid: shot", "Fluid: keyframes"), ("Fluid: SDR to HDR", "Fluid: shot")):
+            page.click(f"#stages li.pick:has-text('{label}')"); page.wait_for_timeout(600)
+            sides = (page.text_content("#wipe .label.left"), page.text_content("#wipe .label.right"))
+            U.check(sides == (left, label), f"keyframes {state}, the wipe on {label}: {left} on the left, the pass on the right: {sides}")
+            page.click(f"#stages li.pick:has-text('{label}')"); page.wait_for_timeout(400)
+        page.keyboard.press("F6"); page.wait_for_timeout(300)
         page.click("#stages li.pick:has-text('Fluid: shot')"); page.wait_for_timeout(500)
         page.keyboard.press("Escape"); page.wait_for_timeout(500)
         U.check(shown(page) == [], f"keyframes {state}: Esc gives the fluid shot back: {shown(page)}")

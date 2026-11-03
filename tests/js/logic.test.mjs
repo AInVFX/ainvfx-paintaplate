@@ -308,6 +308,16 @@ test("a divider's drag stays inside the window and never squeezes a panel or the
   assert.equal(panelSize("log", 10, view, log), 60);
 });
 
+import { fluidWipeLeft } from "../../web/logic.mjs";
+
+test("the wipe on a fluid row shows the step's input on the left: black, the keyframes, the SDR shot", () => {
+  assert.equal(fluidWipeLeft("fluid_keys"), "black");
+  assert.equal(fluidWipeLeft("fluid_shot"), "fluid_keys");
+  assert.equal(fluidWipeLeft("fluid_hdr"), "fluid_shot");
+  assert.equal(fluidWipeLeft("full"), null);
+  assert.equal(fluidWipeLeft(null), null);
+});
+
 import { plateStem } from "../../web/logic.mjs";
 
 test("a plate's name keeps a movie's trailing digits and drops only an image sequence's frame number", () => {

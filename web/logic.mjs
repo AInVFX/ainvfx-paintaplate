@@ -669,6 +669,10 @@ export function lightPlanCaption({ colors = [], color = "#ffd890", words = "" })
 
 // A fluid shot's own passes, shown from the Render panel with its keyframes open or closed: the control video LTX was
 // guided by, the shot as LTX made it, and for a 16-bit plate its SDR-to-HDR frames as a movie in log values.
+// The wipe on a fluid row: the step's input on the left, its output on the right, so each step reads against what it was
+// given: the blank plate (black) before the keyframes, the keyframes before the shot, the SDR shot before SDR to HDR (Adrien,
+// 3 Nov: the left side showed the fluid shot, the plate under the edits, whatever the row).
+export const fluidWipeLeft = (id) => ({ fluid_keys: "black", fluid_shot: "fluid_keys", fluid_hdr: "fluid_shot" })[id] ?? null;
 export const fluidPasses = (result, spaces = {}) => (result ? [
   result.control && { id: "fluid_keys", label: "Fluid: keyframes", url: result.control, space: "@model" },
   result.preview && { id: "fluid_shot", label: "Fluid: shot", url: result.preview, space: "@model" },

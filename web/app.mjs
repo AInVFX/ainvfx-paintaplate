@@ -16,7 +16,7 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
-import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem } from "./logic.mjs";
+import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -645,7 +645,7 @@ function choosePass(id) {
   const r = S.renders.get(S.heroKey), fluid = fluidPasses(S.fluid?.result, { log: logSpace(), hdr: HDR_FRAMES }).find((x) => x.id === id);
   const label = id === "first" ? "First frame" : fluid?.label ?? STAGES.find((x) => x.id === id)?.label;
   S.pass = S.pass === id ? null : id;
-  if (!S.pass) { if (keying() && S.fluid.result) showFluid(); else showLatest(); hud("The latest result", 1500); return stagesUI(); }
+  if (!S.pass) { fluidInput(); if (keying() && S.fluid.result) showFluid(); else showLatest(); hud("The latest result", 1500); return stagesUI(); }
   if (id === "first") { pause(); seek(0); render(); }
   else {
     const m = fluid ?? passMovie(id, r, previewOf(r), { log: logSpace(), data: matteSpace(), hdr: HDR_FRAMES });
@@ -653,6 +653,7 @@ function choosePass(id) {
     if (fluid && keying()) S.fluid.view = "result"; // the keyframes stay as painted; the viewer shows the pass
     setShot(m.url, fluid && keying() ? "fluid" : S.heroKey, m.space, m.frames ?? null, { framesSpace: m.framesSpace }); // a pass's EXR frames and their space (passMovie, fluidPasses)
   }
+  fluidInput();
   hud(`${label}: on show. Click it again, or Esc, for the latest`, 3000);
   log(`Viewer: ${label} on show`);
   stagesUI();
@@ -680,6 +681,19 @@ function shownLabel() { // the pass on show, by its row's name: the one clicked,
   if (S.pass) return passLabel(S.pass);
   const r = S.renders.get(S.heroKey), pv = previewOf(r);
   return STAGES.find((x) => S.shot?.url && passMovie(x.id, r, pv, passSpaces())?.url === S.shot.url)?.label ?? (S.shot ? "Result" : "Plate");
+}
+// A fluid row on show with the wipe: its step's input on the wipe's left side (logic.fluidWipeLeft), as a comparison that
+// ends with the row or the wipe. A comparison picked by Ctrl+click stays as it is.
+function fluidInput() {
+  if (S.cmp && !S.cmp.auto) return;
+  const left = S.wipe !== null && fluidWipeLeft(S.pass);
+  const m = left === "black" ? { url: null, space: modelSpace(), frames: null, black: true, label: "Blank plate" }
+    : left && fluidPasses(S.fluid?.result, passSpaces()).find((x) => x.id === left);
+  if (!m) { if (S.cmp?.auto) endCompare(false); return; }
+  S.cmp = { ...m, id: left, key: S.heroKey, wiped: true, auto: true };
+  sharp.cmp = null;
+  if (!m.url) { cmpVid.removeAttribute("src"); cmpVid.load(); }
+  else if (cmpVid.getAttribute("src") !== m.url) cmpVid.src = m.url;
 }
 function comparePass(id) {
   if (S.cmp?.id === id) return endCompare();
@@ -896,6 +910,7 @@ function render() {
   let compared = "waiting";
   const drawCompared = () => { // the wipe's left side: the pass Ctrl+clicked in the Render panel, at this frame; the plate until it has one
     const c = S.cmp, at = Math.abs(cmpVid.currentTime - time(S.frame)) < 0.5 / p.fps;
+    if (c.black) { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, view.width, view.height); compared = "drawn"; return; } // a fluid shot's blank plate
     const ok = c.id === "first" ? draw(S.hero, model) // the First frame row: the edit as Klein made it
       : (still && draw(sharpFrame("cmp", sourcePath(c, p.path)), c.frames ? c.framesSpace ?? p.cs : c.space)) // paused: native size
         || (cmpVid.readyState >= 2 && !cmpVid.seeking && (S.playing || at) && draw(cmpVid, c.space));
@@ -929,11 +944,12 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
   if (S.live && f.busy) ctx.drawImage(look.image(S.live, S.display, modelSpace()), 0, 0, W, H);
   else if (f.result && S.wipe !== null && !S.compare && (cached || shotReady())) { // the wipe: this frame's painted keyframe, or black, against the shot
     const key = keyHere();
-    if (key) ctx.drawImage(key.canvas, 0, 0, W, H); // no onion skins: the left side shows what this frame was given
+    if (S.cmp) { if (!S.cmp.black && cmpVid.readyState >= 2) ctx.drawImage(look.image(cmpVid, S.display, S.cmp.space), 0, 0, W, H); } // a fluid row's input
+    else if (key) ctx.drawImage(key.canvas, 0, 0, W, H); // no onion skins: the left side shows what this frame was given
     ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip(); shot(); ctx.restore();
   } else if (f.result && (S.playing ? made : f.view === "result") && !S.compare && (cached || shotReady())) shot(); // playing a made shot: never the keyframes
   else keysLayer(W, H);
-  $("#wipe .label.left").textContent = "Keyframe"; $("#wipe .label.right").textContent = "Result";
+  $("#wipe .label.left").textContent = S.cmp?.label ?? "Keyframe"; $("#wipe .label.right").textContent = S.cmp ? shownLabel() : "Result";
   inWork(drawCursor);
   refreshInspector();
   drawXray(); // hidden: a fluid shot's keyframes have no matte
@@ -1024,8 +1040,9 @@ function setWipe(on) {
   if (!on && S.cmp) { S.cmp.wiped = false; endCompare(false); } // F6 ends a comparison with the wipe
   S.wipe = on ? S.wipe ?? 0.5 : null;
   $("#wipe-btn").setAttribute("aria-pressed", String(on));
+  fluidInput(); // a fluid row on show: its step's input on the left
   placeWipe(); render();
-  hud(on ? "Wipe: the plate on the left, the result on the right" : "Wipe off");
+  hud(!on ? "Wipe off" : S.cmp ? `Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right` : "Wipe: the plate on the left, the result on the right");
 }
 
 function nearWipe(e) { // a press this close to the wipe line moves the wipe: it never paints
@@ -3087,6 +3104,7 @@ function inspectSource() { // the file on show at the point, on its side of the 
   const p = S.plate, pt = S.inspect.pt, left = !keying() && pt && wipeSide(pt.x, p.spec.width, S.wipe) === "left";
   if (S.compare || (left && !S.cmp)) return { path: p.path, movie: false, space: p.cs, label: "Plate" }; // O held, or the wipe's plate side
   const sh = left ? S.cmp : S.shot, label = left ? S.cmp.label : sh ? shownLabel() : "Plate";
+  if (left && S.cmp.black) return { path: null, drawn: "Blank plate", label }; // a fluid shot's black blank plate: no file to read
   if ((left ? S.cmp.id : S.pass) === "first") return { path: null, drawn: "First frame", label }; // Klein's edit: a picture, not a file
   const frames = !!sh?.frames, space = sh ? (frames ? sh.framesSpace ?? p.cs : sh.space) : p.cs;
   return { path: sourcePath(sh, p.path), movie: !!sh && !frames, space: space === "@model" ? modelSpace() : space, label };
