@@ -417,6 +417,16 @@ def read_float(path: str) -> np.ndarray:
         return frame.to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
 
 
+MATTE_STEP = 1.0 / 255  # the export's matte is 8-bit PNG, scaled by 255 and truncated: below one step it reads 0
+
+
+def untouched(changed: np.ndarray) -> np.ndarray:
+    """The pixels the export copies from the source, exactly: those its delivered matte shows as 0. Until 3 Nov the
+    threshold was 1/1024, so the matte's faint edge (weights between 1/1024 and 1/255) was blended while the 8-bit matte
+    showed nothing: on a 4K EXR plate 1.2% of the pixels outside the matte differed from the source, by up to 0.012."""
+    return np.asarray(changed) < MATTE_STEP
+
+
 def write_pngs(frame_at, paths: list, workers: int = 8, level: int = 1, tick=None) -> None:
     """Write frame_at(i), an (H, W, 3 or 4) uint8 or uint16 array, to paths[i] as an 8 or 16-bit PNG, several frames at
     once: PyAV releases the GIL

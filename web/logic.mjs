@@ -509,6 +509,16 @@ export function panelSize(kind, wanted, view, { least, stage, around }) {
   return Math.round(Math.max(least, Math.min(wanted, room)));
 }
 
+// ---------- A plate's name ----------
+// The name the page, scenes and exports give a plate: its file name without the extension and, for an image sequence only,
+// without the frame number. Trailing digits are a frame number only in an image sequence: « train_v2.mp4 » is train_v2 and
+// « room.1001.exr » is room (3 Nov: train_v2.mp4 and chalet_v2.mp4 showed as « train_v » and « chalet_v », so two movies
+// could share a name in the page, in scenes and in exports).
+export function plateStem(file, sequence) {
+  const base = String(file ?? "").split(/[\\/]/).pop().replace(/\.[^.]+$/, "");
+  return (sequence ? base.replace(/[._]?\d+$/, "") : base) || "plate";
+}
+
 // ---------- The model warm-up ----------
 // warmAll's last line. It goes to the status line only while that line still says what the page said at start: once a plate
 // was opened or closed, the status line holds a newer message, and the log keeps this one. A warm-up job that an opening, an
@@ -555,6 +565,8 @@ export const hdrOfKey = (key, dflt) => (key?.endsWith("|hdr") ? true : key?.ends
 // SDR to HDR on a plate whose format cannot hold values above 1.0 (Adrien, 2 Nov): asked before it turns on, then the result is
 // an EXR sequence, which the player shows at full precision and the export writes.
 export const exrResult = (spec, hdrRan, headroom = 1) => !!hdrRan && !holdsHdr(spec, headroom);
+// SDR to HDR for a render: on its own when the plate holds values above 1.0, else when Deliver's bit-depth pass asks for it
+export const wantsHdrFor = (spec, headroom, deliverHdr) => holdsHdr(spec, headroom) || !!deliverHdr;
 // The 32 GB study, closed (Adrien, 3 Nov): every step finishes on a 32 GB card at 1920 x 1088 x 121, slower than on 96 GB,
 // but a 4K plate does not (its first erase still ran after 30 minutes on an RTX 5090). A plate above 2K on a card under
 // 48 GB warns when it opens: a 48 GB card reports about 47.5 GiB, a 40 GB one about 39.6.
@@ -663,5 +675,19 @@ export const fluidPasses = (result, spaces = {}) => (result ? [
   result.hdr && result.movie && { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: result.movie, space: spaces.log ?? "@model",
     frames: result.hdrFrames ?? null, framesSpace: result.hdrFrames ? spaces.hdr ?? null : null },
 ].filter(Boolean) : []);
+// The workflows each render step runs (a full-size erase pass runs two). A render keeps the record of the steps it ran or
+// took again (r.flows), so Models and licences, and an export's MODELS.md, name the models that made the result on show,
+// rather than guess them from its tools (viewer report 3, request 2).
+export const STEP_FLOWS = { erase: ["matte"], clean: ["clean"], shot: ["shot"], track: ["matte"], comp: ["comp"],
+  cleanfull: ["clean", "cleanup"], full: ["shot"], trackfull: ["matte"], hdr: ["hdr"], review: ["review"], export: ["export"] };
+// The workflows behind a result: its edits' own (the prompt writer and Klein, SAM's object search for an erase), the
+// render's record, and a fluid shot's (with its SDR to HDR)
+export function resultFlows({ tools = [], render = [], fluid = false, fluidHdr = false } = {}) {
+  const w = new Set(render);
+  if (tools.length) ["prompt", "edit"].forEach((n) => w.add(n));
+  if (tools.includes("erase")) w.add("snap");
+  if (fluid) { w.add("fluid"); if (fluidHdr) w.add("hdr"); }
+  return [...w];
+}
 // The config's data colour space (OCIO's isdata, such as the studio config's Raw), from the spaces /paintaplate/ocio lists
 export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? null;

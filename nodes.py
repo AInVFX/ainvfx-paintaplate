@@ -194,7 +194,7 @@ class SavePlate(io.ComfyNode):
             bar = comfy.utils.ProgressBar(count)
             src = plateio.SourceFrames(spec["source"], writer.pix_fmt) if keep_untouched and changed is not None else None
             for i, frame in enumerate(frames_np(images[:count])):
-                keep = None if src is None else changed[min(i, changed.shape[0] - 1)].float().cpu().numpy() <= 1.0 / 1024
+                keep = None if src is None else plateio.untouched(changed[min(i, changed.shape[0] - 1)].float().cpu().numpy())
                 writer.write(frame, keep=keep, source=None if src is None else src.next())
                 bar.update(1)
             if src is not None:
@@ -208,7 +208,7 @@ class SavePlate(io.ComfyNode):
                 a = alpha[i].float().cpu().numpy() if alpha is not None else None
                 keep = None
                 if keep_untouched and changed is not None:
-                    keep = changed[min(i, changed.shape[0] - 1)].float().cpu().numpy() <= 1.0 / 1024
+                    keep = plateio.untouched(changed[min(i, changed.shape[0] - 1)].float().cpu().numpy())  # what the matte shows as 0
                 written.append(plateio.write_still(spec, i, rgb, a, keep, out_dir))
             if spec["ext"] == ".exr" and plateio.OpenEXR is None:
                 notes.append("OpenEXR is not installed: extra EXR layers were not copied.")

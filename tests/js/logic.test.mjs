@@ -308,6 +308,17 @@ test("a divider's drag stays inside the window and never squeezes a panel or the
   assert.equal(panelSize("log", 10, view, log), 60);
 });
 
+import { plateStem } from "../../web/logic.mjs";
+
+test("a plate's name keeps a movie's trailing digits and drops only an image sequence's frame number", () => {
+  assert.equal(plateStem("plates/train_v2.mp4", false), "train_v2");
+  assert.equal(plateStem("chalet_v2.mp4", false), "chalet_v2");
+  assert.equal(plateStem("C:\\plates\\room.1001.exr", true), "room");
+  assert.equal(plateStem("shot_v3_0001.png", true), "shot_v3");
+  assert.equal(plateStem("still_2.png", false), "still_2"); // a single image: its digits are part of its name
+  assert.equal(plateStem("", false), "plate");
+});
+
 import { warmEnd } from "../../web/logic.mjs";
 
 test("the model warm-up's last line: on the status line only while the start's message is there, and never « every model loaded » after a cancel", () => {
@@ -550,4 +561,27 @@ test("a plate above 2K warns when it opens on a card under 48 GB", () => {
   assert.equal(bigPlateWarning(dci, 24 * 2 ** 30), null, "2048 is 2K itself");
   assert.equal(bigPlateWarning(uhd, 0), null, "the card's memory not yet known: no warning");
   assert.match(bigPlateWarning({ width: 2160, height: 3840 }, 39.6 * 2 ** 30), /40 GB/, "a portrait 4K plate on a 40 GB card");
+});
+
+import { STEP_FLOWS, resultFlows } from "../../web/logic.mjs";
+
+test("a render's record of its workflows (r.flows) names the models behind the result", () => {
+  const ran = (...ids) => [...new Set(ids.flatMap((id) => STEP_FLOWS[id]))];
+  assert.deepEqual(ran("erase", "clean", "comp", "cleanfull", "review"), ["matte", "clean", "comp", "cleanup", "review"]);
+  assert.deepEqual(resultFlows({ tools: ["paint"], render: ran("shot", "track", "comp", "full", "trackfull", "review") }).sort(),
+    ["comp", "edit", "matte", "prompt", "review", "shot"]);
+  assert.ok(resultFlows({ tools: ["erase"], render: [] }).includes("snap"), "an erase: SAM's object search");
+  assert.deepEqual(resultFlows({ fluid: true, fluidHdr: true }).sort(), ["fluid", "hdr"], "a fluid shot alone, through SDR to HDR");
+  assert.ok(!resultFlows({ tools: ["paint"], render: ran("shot", "full", "review") }).includes("hdr"), "no SDR to HDR step ran: none listed");
+  for (const id of Object.keys(STEP_FLOWS)) assert.ok(STEP_FLOWS[id].length > 0, id);
+});
+
+import { wantsHdrFor } from "../../web/logic.mjs";
+
+test("SDR to HDR: on its own for a plate that holds values above 1.0, else only from Deliver's bit-depth pass", () => {
+  const exr = { kind: "sequence", ext: ".exr", pix_fmt: "gbrpf16le" }, mp4 = { kind: "video", ext: ".mp4", pix_fmt: "yuv420p" };
+  assert.equal(wantsHdrFor(exr, 1, false), true, "an EXR plate: on its own, no switch");
+  assert.equal(wantsHdrFor(mp4, 100, false), true, "an HDR video (PQ): on its own");
+  assert.equal(wantsHdrFor(mp4, 1, false), false, "an SDR video: off");
+  assert.equal(wantsHdrFor(mp4, 1, true), true, "an SDR video with Deliver's bit-depth pass on");
 });

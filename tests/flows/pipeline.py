@@ -107,6 +107,12 @@ def pass_rows(page, U):
     U.check(shown(page) == ["Export"] and all(x["spread"] <= 12 and x["white"] > 0 for x in seen),
             f"after Export, its row shows the export's matte, grey, on every frame: {shown(page)}, {seen}")
     page.keyboard.press("Escape"); page.wait_for_timeout(500)
+    page.keyboard.press("?"); page.click("#help [role=tab][data-help=models]")  # Help > Models and licences
+    page.wait_for_function("!!document.querySelector('#models').dataset.shown", timeout=20000)
+    named = page.evaluate("document.querySelector('#models').dataset.shown").split(",")
+    U.check({"klein", "ltx", "sam", "ripple"} <= set(named) and "hdr" not in named and "fluid" not in named,
+            f"Models and licences names the models the render ran (r.flows): Klein, LTX, SAM, its paint IC-LoRA; no SDR to HDR, no fluid: {named}")
+    page.keyboard.press("Escape"); page.keyboard.press("Escape"); page.wait_for_timeout(300)
 
     page.click("#open-btn"); page.click("#open [data-tab=blank]")
     page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.select_option("#b-fps", "24"); page.fill("#b-frames", "17")
@@ -136,19 +142,20 @@ def pass_rows(page, U):
 
 
 def hdr_video(page, U):
-    """SDR to HDR on a video plate (Adrien, 2 Nov): off by default; turning it on asks first; once on, the result is an EXR
+    """SDR to HDR on a video plate, from Deliver's bit-depth pass (Adrien, 2 and 3 Nov): off by default; turning it on asks first; once on, the result is an EXR
     sequence that the player reads at full precision, and Export writes that sequence instead of a video file."""
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     U.open_path(page, "plates/desk.mp4")  # waits for desk's own spec: the plate before also says fps
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden", timeout=60000)
-    U.check(not page.is_hidden("#hdr-switch") and not page.is_checked("#hdr-on"), "a video plate: SDR to HDR shows, off by default")
-    page.click("#hdr-on")
-    U.check(not page.is_hidden("#hdr-confirm") and not page.is_checked("#hdr-on"), "turning it on asks first, and stays off until confirmed")
-    page.click("#hdr-no")
-    U.check(page.is_hidden("#hdr-confirm") and not page.is_checked("#hdr-on"), "Cancel leaves it off")
-    page.click("#hdr-on"); page.click("#hdr-yes")
-    U.check(page.is_hidden("#hdr-confirm") and page.is_checked("#hdr-on"), "Turn on turns it on")
+    U.check(not page.is_hidden("#deliver-hdr-row") and not page.is_checked("#deliver-hdr") and not page.query_selector("#hdr-switch"),
+            "a video plate: Deliver's bit-depth pass offers SDR to HDR, off; no switch near the render steps")
+    page.click("#deliver-hdr")
+    U.check(not page.is_hidden("#deliver-confirm") and not page.is_checked("#deliver-hdr"), "turning it on asks first, and stays off until confirmed")
+    page.click("#deliver-no")
+    U.check(page.is_hidden("#deliver-confirm") and not page.is_checked("#deliver-hdr"), "Cancel leaves it off")
+    page.click("#deliver-hdr"); page.click("#deliver-yes")
+    U.check(page.is_hidden("#deliver-confirm") and page.is_checked("#deliver-hdr"), "Turn on turns it on")
     page.evaluate("document.activeElement.blur()")
     page.evaluate(U.WATCH)
     page.keyboard.press("b"); U.paint_once(page, "a red lamp", [(0.3, 0.6), (0.36, 0.7)]); page.keyboard.press("Enter")
@@ -173,10 +180,24 @@ def hdr_video(page, U):
     U.check(not errors, f"no console errors with SDR to HDR on a video plate: {errors}")
 
 
+def movie_name(page, U):
+    """A movie keeps its trailing digits in its name: desk_v2.mp4 is « desk_v2 », not « desk_v » (3 Nov: train_v2.mp4 showed
+    as « train_v »). Trailing digits are a frame number only in an image sequence."""
+    base = page.url.split("/extensions/")[0]
+    movie = page.request.get(f"{base}/view?filename=desk.mp4&subfolder=plates&type=input").body()
+    page.request.post(f"{base}/upload/image", multipart={"image": {"name": "desk_v2.mp4", "mimeType": "video/mp4", "buffer": movie},
+                                                         "subfolder": "plates", "overwrite": "true"})
+    U.open_path(page, "plates/desk_v2.mp4")
+    page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk_v') && document.querySelector('#opening').hidden", timeout=60000)
+    spec = page.text_content("#spec")
+    U.check(spec.startswith("desk_v2: "), f"a movie keeps its trailing digits in its name: {spec}")
+
+
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900}, accept_downloads=True)
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
+    movie_name(page, U)
     fluid16_scene(page, U)
     pass_rows(page, U)
     hdr_video(page, U)

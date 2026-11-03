@@ -754,8 +754,8 @@ def hdr_flow(page, port):
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     open_path(page, "paintaplate/hdr_room")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
-    check(page.is_hidden("#hdr-switch") and page.evaluate("document.querySelector('#b-depth').closest('label').style.display") == "none",
-          "?hdr=0 turns SDR to HDR off: no switch for an EXR plate, no 16-bit blank plate")
+    check(page.is_hidden("#deliver-hdr-row") and page.is_hidden("#deliver-auto") and page.evaluate("document.querySelector('#b-depth').closest('label').style.display") == "none",
+          "?hdr=0 turns SDR to HDR off: Deliver offers no bit-depth pass, no 16-bit blank plate")
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     page.evaluate(WATCH)
@@ -764,10 +764,10 @@ def hdr_flow(page, port):
     lines = lambda: page.evaluate("window.__lines")  # noqa: E731
     open_path(page, "plates/desk.mp4")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
-    check(not page.is_hidden("#hdr-switch") and not page.is_checked("#hdr-on"), "a video plate: the SDR-to-HDR switch shows, off by default")
+    check(not page.is_hidden("#deliver-hdr-row") and not page.is_checked("#deliver-hdr"), "a video plate: Deliver offers SDR to HDR, off")
     open_path(page, "paintaplate/hdr_room")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
-    check(not page.is_hidden("#hdr-switch") and page.is_checked("#hdr-on"), "an EXR plate: SDR to HDR is on by default")
+    check(page.is_hidden("#deliver-hdr-row") and not page.is_hidden("#deliver-auto"), "an EXR plate: SDR to HDR runs on its own, with no switch")
     page.evaluate(WATCH)
     page.keyboard.press("b")
     paint_once(page, "a red lamp", [(0.3, 0.6), (0.36, 0.7)])
@@ -795,13 +795,6 @@ def hdr_flow(page, port):
     page.click("#stages li.pick:has-text('First frame')")
     page.wait_for_timeout(400)
     check(shown() == ["Composite, full size"], f"a second click goes back to the latest: {shown()}")
-    page.evaluate(WATCH)
-    page.click("#hdr-on")
-    wait_log(page, added_line(REVIEWED), 240000, "full-size composite without SDR to HDR")
-    check(not any("SDR to HDR took" in line for line in lines()) and not page.is_checked("#hdr-on"),
-          "switched off, the next render ends with the SDR shot: no SDR-to-HDR step")
-    page.click("#hdr-on")
-    page.evaluate("document.activeElement.blur()")  # the switch keeps the focus, and a focused input takes the keys
     page.evaluate(WATCH)
     page.keyboard.press("Control+Enter")  # another seed: a new edit pass, then a new render
     wait_log(page, "window.__lines.some((t) => /^Render v\\d+: .* \\(about \\d+ s\\)/.test(t))", 120000, "render step")
@@ -835,11 +828,11 @@ def fluid16_flow(page):
     paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)])
     page.keyboard.press("Enter")
     wait_log(page, added_line("under the edits: the fluid shot v"), 240000, "the HDR fluid shot under the edits")
-    page.wait_for_function("!document.querySelector('#hdr-switch').hidden", timeout=60000)
+    page.wait_for_function("!document.querySelector('#deliver-auto').hidden", timeout=60000)
     new = page.evaluate("window.__lines")
     check(any("16-bit" in line for line in new) and any("SDR to HDR took" in line for line in new),
           "16-bit: the fluid shot goes through SDR to HDR")
-    check(page.is_checked("#hdr-on"), "the HDR fluid shot is an EXR plate: SDR to HDR is on for the edits on it")
+    check(not page.is_hidden("#deliver-auto"), "the HDR fluid shot is an EXR plate: SDR to HDR runs on its own for the edits on it")
     check(not page.is_disabled("#export-btn"), "a fluid shot with no edit on it can be exported")
     page.click("#export-btn")
     fmt = page.text_content("#x-format") or ""

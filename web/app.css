@@ -363,3 +363,4 @@ dialog.open { width: min(900px, 94vw); }
 /* ---------- Render, Deliver, passes (the pipeline workstream adds its rules below) ---------- */
 .hdr-confirm { margin: 4px 0 8px; padding: 8px; border: 1px solid var(--line, #444); border-radius: 4px; font-size: 12px; }
 .hdr-confirm p { margin: 0 0 6px; }
+.deliver label { display: block; margin: 6px 0; }
