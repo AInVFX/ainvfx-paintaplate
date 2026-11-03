@@ -401,7 +401,10 @@ def cleanup():
                 guider=g("CFGGuider", model=live(g, model, size, load), positive=cond[0], negative=cond[1], cfg=1.0),
                 sampler=g("KSamplerSelect", sampler_name="euler"), sigmas=g("ManualSigmas", sigmas=REFINE_SIGMAS),
                 latent_image=g("LTXVConcatAVLatent", video_latent=latent, audio_latent=audio))
-    decoded = g("VAEDecode", vae=vae, samples=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])
+    # Tiled as the hdr workflow (128-frame temporal tiles, 32 of overlap), on every card: on a 32 GB card a whole 1920 x 1088
+    # x 121 decode ran out of memory and ComfyUI retried with its own default tiles (2 Nov), whose 64-frame tiles made SDR to
+    # HDR's frames jump at frame 56
+    decoded = g("VAEDecodeTiled", tile_size=512, overlap=64, temporal_size=128, temporal_overlap=32, vae=vae, samples=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])
     g("PaintAPlate_SaveFrames", _title="Clean frames", _output="frames", images=decoded, format=Slot("frames_format", "png"),
       filename_prefix=Slot("prefix", "paintaplate/plate/full/clean/f"))
     g("PaintAPlate_SaveMovie", _title="Clean shot at full size", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/full/clean"), images=decoded, fps=load[3])
@@ -443,7 +446,10 @@ def shot():
                 latent_image=g("LTXVConcatAVLatent", video_latent=guide[2], audio_latent=audio))
     video_latent = g("LTXVSeparateAVLatent", av_latent=sampled[0])
     cropped = g("LTXVCropGuides", positive=guide[0], negative=guide[1], latent=video_latent[0])
-    decoded = g("VAEDecode", samples=cropped[2], vae=vae)
+    # Tiled as the hdr workflow (128-frame temporal tiles, 32 of overlap), on every card: on a 32 GB card a whole 1920 x 1088
+    # x 121 decode ran out of memory and ComfyUI retried with its own default tiles (2 Nov), whose 64-frame tiles made SDR to
+    # HDR's frames jump at frame 56
+    decoded = g("VAEDecodeTiled", tile_size=512, overlap=64, temporal_size=128, temporal_overlap=32, samples=cropped[2], vae=vae)
     g("PaintAPlate_SaveFrames", _title="Shot frames", _output="frames", images=decoded, format=Slot("frames_format", "png"),
       filename_prefix=Slot("prefix", "paintaplate/plate/shot/f"))
     g("PaintAPlate_SaveMovie", _title="Shot video (whole frame regenerated)", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/shot"), images=decoded, fps=load[3])
@@ -654,7 +660,10 @@ def fluid():
                 guider=g("CFGGuider", model=model, positive=guide[0], negative=guide[1], cfg=1.0),
                 sampler=g("KSamplerSelect", sampler_name="euler_ancestral"), sigmas=g("ManualSigmas", sigmas=INPAINT_SIGMAS),
                 latent_image=g("LTXVConcatAVLatent", video_latent=guide[2], audio_latent=audio))
-    decoded = g("VAEDecode", vae=vae, samples=g("LTXVCropGuides", positive=guide[0], negative=guide[1],
+    # Tiled as the hdr workflow (128-frame temporal tiles, 32 of overlap), on every card: on a 32 GB card a whole 1920 x 1088
+    # x 121 decode ran out of memory and ComfyUI retried with its own default tiles (2 Nov), whose 64-frame tiles made SDR to
+    # HDR's frames jump at frame 56
+    decoded = g("VAEDecodeTiled", tile_size=512, overlap=64, temporal_size=128, temporal_overlap=32, vae=vae, samples=g("LTXVCropGuides", positive=guide[0], negative=guide[1],
                                                  latent=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])[2])
     g("PaintAPlate_SavePlate", _title="The fluid plate, in the blank plate's format", _output="plate", images=decoded,
       plate=load[2], filename_prefix=Slot("prefix", "paintaplate/fluid/plate"), keep_untouched=False)

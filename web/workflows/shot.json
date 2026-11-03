@@ -438,8 +438,12 @@
   }
  },
  "29": {
-  "class_type": "VAEDecode",
+  "class_type": "VAEDecodeTiled",
   "inputs": {
+   "tile_size": 512,
+   "overlap": 64,
+   "temporal_size": 128,
+   "temporal_overlap": 32,
    "samples": [
     "28",
     2

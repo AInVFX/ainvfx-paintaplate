@@ -56,6 +56,8 @@ else
   flags=(--listen 0.0.0.0 --port 8188 --preview-method latent2rgb)
   vram=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n 1)
   if [ "${vram:-0}" -ge 80000 ]; then flags+=(--highvram); fi  # every model stays loaded on a 96 GB card
+  read -r -a extra <<< "${COMFY_ARGS:-}"  # more ComfyUI flags, such as COMFY_ARGS=--disable-dynamic-vram
+  flags+=("${extra[@]}")
   cd "$W/ComfyUI" || exit 1
   log "starting ComfyUI (log: $W/comfyui.log)"
   nohup "$VENV/bin/python" main.py "${flags[@]}" > "$W/comfyui.log" 2>&1 &
