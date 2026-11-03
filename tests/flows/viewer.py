@@ -1,4 +1,5 @@
-"""The viewer workstream's page checks: the colour on the canvas against OpenRV (tests/test_rv_parity.py). Each colour check draws fixed half-float pixels through the real shader (display.mjs) and reads the canvas:
+"""The viewer workstream's page checks: the colour on the canvas against OpenRV (tests/test_rv_parity.py), and the colour
+inspector. Each colour check draws fixed half-float pixels through the real shader (display.mjs) and reads the canvas:
 a pixel sampled from a playing shot depends on the browser."""
 import json
 import sys
@@ -49,4 +50,8 @@ def run(browser, port, U):
     bad = [(r["case"], r["max_diff"]) for r in rows if r["max_diff"] is None or r["max_diff"] > 1]
     print(f"parity: {len(rows)} cases x {len(P.PIXELS)} pixels, largest difference {max(r['max_diff'] or 0 for r in rows)} code values")
     assert not bad, f"the canvas differs from OpenRV by more than 1 code value: {bad}"
+    # F5 shows the Color Inspector and the browser does not reload
+    page.evaluate("window.__alive = 1")
+    page.keyboard.press("F5")
+    assert page.evaluate("window.__alive") == 1, "F5 reloaded the page"
     page.close()

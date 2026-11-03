@@ -7,6 +7,7 @@
                                                       a plate's size and time (job index keys change with them), its spec
                                                       and its guessed file colour space in that OCIO config
     GET  /paintaplate/frames?path=...&first=0&count=4&side=960   frames of an image sequence or a video as RGB half floats
+    GET  /paintaplate/pixel?path=...&frame=0&x=0&y=0&size=1      one pixel at full precision and native size (colour inspector)
     POST /paintaplate/blank {width, height, fps, frames}         a black ProRes 4444 plate for a fluid shot
     GET  /paintaplate/jobs/<key>, POST /paintaplate/jobs/<key>   the job index: a finished job's outputs by the hash of its inputs
     GET  /paintaplate/scenes, GET|POST /paintaplate/scenes/<name>  scenes saved on this ComfyUI (output/paintaplate/scenes)
@@ -22,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import glob
 import hashlib
 import json
@@ -476,6 +478,36 @@ def deep_frames(rel: str, first: int, count: int, side: int) -> tuple[bytes, int
     return data.tobytes(), data.shape[2], data.shape[1]
 
 
+@functools.lru_cache(maxsize=2)  # the inspector reads many pixels of the frame on show
+def _frame_cached(full: str, index: int, mtime: float) -> np.ndarray:
+    return frame_rgb(full, index)
+
+
+def pixel(rel: str, frame: int, x: int, y: int, size: int = 1) -> dict:
+    """The colour inspector's read: the pixel at (x, y) of a frame, at native size, in the file's own values (an EXR's
+    half floats as stored, above 1.0 and below 0), and the mean of the `size` x `size` pixels around it."""
+    full = folders.plate_path(rel)
+    stamp = os.path.getmtime(full if os.path.exists(full) else os.path.dirname(full))
+    rgb = _frame_cached(full, max(0, frame), stamp)
+    h, w = rgb.shape[:2]
+    if not (0 <= x < w and 0 <= y < h):
+        raise ValueError(f"Pixel {x}, {y} is outside the {w} x {h} frame")
+    r = max(1, min(int(size), 64)) // 2
+    block = rgb[max(0, y - r): y + r + 1, max(0, x - r): x + r + 1].reshape(-1, 3)
+    return {"width": w, "height": h, "x": x, "y": y, "frame": frame, "value": [float(v) for v in rgb[y, x]],
+            "mean": [float(v) for v in block.mean(0)], "size": 2 * r + 1}
+
+
+async def pixel_route(request):
+    q = request.rel_url.query
+    try:
+        out = await asyncio.to_thread(pixel, q.get("path", ""), int(q.get("frame", 0)), int(q.get("x", 0)), int(q.get("y", 0)),
+                                      int(q.get("size", 1)))
+    except (FileNotFoundError, ValueError) as e:
+        return web.json_response({"error": str(e)}, status=404, headers={"Cache-Control": "no-store"})
+    return web.json_response(out, headers={"Cache-Control": "no-store"})
+
+
 async def frames(request):
     q = request.rel_url.query
     try:
@@ -581,6 +613,7 @@ def setup(server) -> None:
     server.routes.post("/paintaplate/jobs/{key}")(job_post)
     server.routes.get("/paintaplate/stat")(stat)
     server.routes.get("/paintaplate/frames")(frames)
+    server.routes.get("/paintaplate/pixel")(pixel_route)
     server.routes.get("/paintaplate/scenes")(scenes)
     server.routes.get("/paintaplate/scenes/{name}")(scene_get)
     server.routes.post("/paintaplate/scenes/{name}")(scene_post)

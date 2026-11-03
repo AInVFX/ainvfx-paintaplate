@@ -7,6 +7,7 @@ import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onLog, onNotic
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
 import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor (logic.mjs keeps an older copy until the merge)
+import { INSPECT_SIZE, addSample, inspectorRows, sourcePixel, sourcePath } from "./inspector.mjs";
 import { sceneGraph } from "./graph.mjs";
 import { CHANNEL_NAMES, DAB_PROFILE, DISPLAY, FLUID, PARAMS, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
   erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
@@ -23,6 +24,7 @@ const QUICK = { steps: 16, denoise: 1, feather: 6, sigma: 3 }; // 16: the offici
 const FULL = { steps: +Q.get("refine") || 8, denoise: 0.35, feather: 12, sigma: 6 };
 const CACHE_MB = +Q.get("cache") || 384; // decoded frames kept per video: about 180 frames at 960 x 544
 const DEEP_MB = +Q.get("deep") || 512; // per cache (the plate, an export): an image sequence in its own values, about 160 frames of RGB half floats at 960 x 540
+const INSPECT_MS = 60; // the colour inspector reads at most one pixel per this many ms from /paintaplate/pixel
 const DEEP_SIDE = 960; // their long side, the playback video's
 const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-size edits, quick edits, SAM tracking
 // the erase matte only places the erase pass's box, grown by 1/24 of the width: 640 is enough, at half the time of 960
@@ -87,7 +89,7 @@ const S = {
   get color() { return this.colors[this.tool] ?? "#000000"; },
   frame: 0, playing: false, inPt: 0, outPt: 0, wipe: null, compare: false,
   fit: { w: 0, h: 0, x: 0, y: 0 }, zoom: { k: 1, x: 0, y: 0 },
-  display: { ...colour.DISPLAY }, mode: null, scrub: null, // the viewer's colour (display only), and its interactive edit as in RV
+  display: { ...colour.DISPLAY }, mode: null, scrub: null, inspect: { on: false, at: null, avg: null, busy: false, last: 0 }, // the viewer's colour (display only), and its interactive edit as in RV
   fluid: null, clip: null, fluidReady: true, // a fluid shot on a blank plate, the last one, a copied keyframe
   shot: null, stage: null, run: 0, exported: null, wantDownload: null,
   ocio: { config: "", display: "", view: "", look: "", ...saved(OCIO_PREF), info: null }, // the OCIO config and the viewer's view, as in RV
@@ -499,6 +501,7 @@ function applyView() {
   placeWipe();
 }
 addEventListener("resize", () => { layoutUI(); fitView(); });
+$("#viewport").addEventListener("pointermove", inspectAt);
 
 function frameAt(e) { // pointer position in frame pixels (working size); stays right under zoom and pan
   const r = view.getBoundingClientRect();
@@ -2699,6 +2702,57 @@ function modeKey(k, combo) { // the keys of an interactive edit, as RV's paramsc
 
 function resetDisplay() { leaveMode(); setDisplay({ ...colour.DISPLAY }); }
 
+// ---------- The colour inspector, as OpenRV's (F5; inspector.mjs) ----------
+// The pixel under the pointer, in the plate's own pixels, read at full precision and native size from the file on show
+// (/paintaplate/pixel), with the value drawn on screen. Shift held while the pointer moves averages the pixels it passes,
+// as RV's shift-drag; a move without Shift starts again.
+
+function toggleInspector() {
+  const i = S.inspect;
+  i.on = !i.on; i.avg = null;
+  $("#inspector").hidden = !i.on;
+  view.classList.toggle("inspecting", i.on);
+  hud(i.on ? "Color Inspector: the pixel under the pointer. Hold Shift while moving to average. F5 hides it" : "Color Inspector hidden");
+}
+
+function inspectAt(e) {
+  const i = S.inspect;
+  if (!i.on || !S.plate) return;
+  const r = view.getBoundingClientRect(), { width, height } = S.plate.spec, fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+  i.at = { ...sourcePixel(fx, fy, width, height), shift: e.shiftKey, cx: Math.floor(fx * view.width), cy: Math.floor(fy * view.height) };
+  readPixel();
+}
+
+async function readPixel() {
+  const i = S.inspect;
+  if (i.busy || !i.at) return;
+  i.busy = true;
+  const wait = INSPECT_MS - (performance.now() - i.last);
+  if (wait > 0) await new Promise((ok) => setTimeout(ok, wait));
+  const at = i.at, frame = S.frame;
+  i.last = performance.now();
+  try {
+    if (!at.inside) { showInspector(at, frame, null); return; }
+    const r = await fetch(`/paintaplate/pixel?${new URLSearchParams({ path: sourcePath(S.shot, S.plate.path), frame, x: at.x, y: at.y, size: INSPECT_SIZE })}`);
+    const got = await r.json();
+    if (!r.ok) throw new Error(got.error);
+    const [fr, fg, fb] = view.getContext("2d").getImageData(at.cx, at.cy, 1, 1).data; // the final colour, as drawn on screen
+    i.avg = at.shift ? addSample(i.avg, got.value) : null;
+    showInspector(at, frame, { ...got, final: [fr, fg, fb].map((v) => v / 255) });
+  } catch (err) { showInspector(at, frame, { error: err.message }); }
+  finally { i.busy = false; if (i.at !== at) readPixel(); }
+}
+
+function showInspector(at, frame, got) {
+  const box = $("#inspector");
+  box.replaceChildren(...inspectorRows({ ...at, ...(got ?? {}), frame: S.plate.first + frame, average: S.inspect.avg }).map(([k, v]) => {
+    const row = document.createElement("div"), dt = document.createElement("span"), dd = document.createElement("span");
+    dt.textContent = k; dd.textContent = v; row.append(dt, dd); return row;
+  }));
+  box.dataset.value = got?.value ? got.value.join(",") : "";
+  box.dataset.pixel = `${at.x},${at.y}`;
+}
+
 // ---------- OCIO, as in RV: the plate's File Color Space, the look, the display and view, the config ----------
 
 function saveOcio() { try { const { config, display, view, look: lk } = S.ocio; localStorage.setItem(OCIO_PREF, JSON.stringify({ config, display, view, look: lk })); } catch { /* this session only */ } }
@@ -2783,7 +2837,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
     ...(S.ocio.info ? [["OCIO", ocioItems()]] : []),
     ["View", [chan("rgb", "Shift+C"), chan("r", "Shift+R"), chan("g", "Shift+G"), chan("b", "Shift+B"), chan("l", "Shift+L"), "-",
       ["Fit", "F", () => zoomTo(1), !p], ["1:1", "1", () => zoomTo(S.plate.work[0] / S.fit.w), !p],
-      ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["Full screen", "`", fullScreen],
+      ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["Full screen", "`", fullScreen],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
     ["Help", [["Keys", "?", () => $("#help").showModal()]]],
   ];
@@ -3125,6 +3179,7 @@ document.addEventListener("drop", (e) => {
 });
 
 addEventListener("keydown", (e) => {
+  if (e.key === "F5" && !e.ctrlKey && !e.metaKey && !e.altKey) { if (S.plate) toggleInspector(); return e.preventDefault(); } // RV's Color Inspector; the page takes F5 from the browser's reload
   if (e.target.matches("input, select, textarea")) {
     if (e.key === "Enter" && e.target.id === "prompt") { enter(e.ctrlKey || e.metaKey); e.target.blur(); e.preventDefault(); }
     else if (e.key === "Escape") e.target.blur();
