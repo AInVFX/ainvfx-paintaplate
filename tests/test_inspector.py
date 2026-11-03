@@ -61,6 +61,8 @@ class Pixel(unittest.TestCase):
             return [r, (y - 0.2126 * r - 0.0722 * b) / 0.7152, b]
         for i in (0, 5, 10, 11):
             np.testing.assert_allclose(routes.pixel("clip.mp4", i, 30, 20)["value"], bt709(*codes[i]), atol=1e-5, err_msg=f"frame {i}")
+        self.assertEqual(routes.pixel("clip.mp4", 0, 30, 20)["movie"], {"codec": "h264", "pix_fmt": "yuv444p", "bits": 8})
+        self.assertNotIn("movie", routes.pixel("seq/p.####.exr", 0, 20, 10))
         frames = routes.video_frames(path, 6, 8)  # past the end, the last frame holds
         self.assertEqual(len(frames), 8)
         np.testing.assert_allclose(frames[-1][0, 0], bt709(*codes[-1]), atol=1e-5)

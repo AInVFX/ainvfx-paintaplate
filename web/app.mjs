@@ -8,7 +8,7 @@ import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
 import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor (logic.mjs keeps an older copy until the merge)
 import { modelsBehind, workflowsFor } from "./models.mjs";
-import { INSPECT_SIZE, addSample, inspectorRows, sourcePixel, sourcePath } from "./inspector.mjs";
+import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath } from "./inspector.mjs";
 import { sceneGraph } from "./graph.mjs";
 import { CHANNEL_NAMES, DAB_PROFILE, DISPLAY, FLUID, PARAMS, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
   erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
@@ -91,7 +91,7 @@ const S = {
   get color() { return this.colors[this.tool] ?? "#000000"; },
   frame: 0, playing: false, inPt: 0, outPt: 0, wipe: null, compare: false,
   fit: { w: 0, h: 0, x: 0, y: 0 }, zoom: { k: 1, x: 0, y: 0 },
-  display: { ...colour.DISPLAY }, mode: null, scrub: null, inspect: { on: false, at: null, avg: null, busy: false, last: 0 }, // the viewer's colour (display only), and its interactive edit as in RV
+  display: { ...colour.DISPLAY }, mode: null, scrub: null, inspect: { on: false, pt: null, avg: null, busy: false, last: 0, key: null, got: null, final: null, sampling: false }, // the viewer's colour (display only), and its interactive edit as in RV
   fluid: null, clip: null, fluidReady: true, // a fluid shot on a blank plate, the last one, a copied keyframe
   shot: null, stage: null, run: 0, exported: null, wantDownload: null,
   ocio: { config: "", display: "", view: "", look: "", ...saved(OCIO_PREF), info: null }, // the OCIO config and the viewer's view, as in RV
@@ -502,10 +502,9 @@ function applyView() {
   const { w, h, x, y } = S.fit, z = S.zoom, px = (v) => Math.round(v * devicePixelRatio) / devicePixelRatio; // whole device pixels
   Object.assign(view.style, { width: `${w}px`, height: `${h}px`, transform: `translate(${px(x + z.x)}px, ${px(y + z.y)}px) scale(${z.k})` });
   view.classList.toggle("native", w * z.k * devicePixelRatio >= view.width - 0.5); // from 1:1, plate pixels show as squares
-  placeWipe();
+  placeWipe(); refreshInspector();
 }
 addEventListener("resize", () => { layoutUI(); fitView(); });
-$("#viewport").addEventListener("pointermove", inspectAt);
 
 function frameAt(e) { // pointer position in frame pixels (working size); stays right under zoom and pan
   return colour.pointIn(view.getBoundingClientRect(), e.clientX, e.clientY, ...S.plate.work);
@@ -592,7 +591,7 @@ function choosePass(id) {
   else {
     const m = passMovie(id, r, previewOf(r), { log: logSpace() });
     if (!m) { S.pass = null; return stagesUI(); }
-    setShot(m.url, S.heroKey, m.space, m.frames);
+    setShot(m.url, S.heroKey, m.space, m.frames, { framesSpace: m.framesSpace }); // passMovie gives a pass's EXR frames and their space
   }
   hud(`${label}: on show. Click it again, or Esc, for the latest`, 3000);
   log(`Viewer: ${label} on show`);
@@ -641,10 +640,13 @@ function stopGenerating() { // everything that generates stops where it is: what
   stagesUI(); generateUI();
 }
 
-function setShot(src, key, space = "@model", frames = null) { // the shot on show, the colour space of its values, its EXR frames
+// The shot on show: its movie and the colour space of the movie's values, its EXR frames, and (the contract's fifth
+// argument) options: framesSpace, the colour space the EXR frames are stored in, when it is not the plate's (the SDR-to-HDR
+// pass writes ACES2065-1). The viewer draws and inspects the frames in that space.
+function setShot(src, key, space = "@model", frames = null, { framesSpace = null } = {}) {
   hideLive();
   S.live = null; // the shot itself, rough or composited, replaces the live preview
-  S.shot = src ? { url: src, key, space, frames } : null;
+  S.shot = src ? { url: src, key, space, frames, framesSpace } : null;
   if (src) { if (shotVid.getAttribute("src") !== src) shotVid.src = src; }
   else { shotVid.removeAttribute("src"); shotVid.load(); }
   render(); timelineUI();
@@ -703,9 +705,9 @@ function render() {
     if (S.pass === "first") { draw(S.hero, model); return "hero"; } // the First frame row: the edit as Klein made it, on every frame
     if (live) { draw(live, model); return "live"; }
     if (pic) {
-      if (still && draw(sharpFrame("shot", sourcePath(S.shot, p.path)), S.shot.frames ? p.cs : S.shot.space)) native = true; // paused: native size
+      if (still && draw(sharpFrame("shot", sourcePath(S.shot, p.path)), S.shot.frames ? S.shot.framesSpace ?? p.cs : S.shot.space)) native = true; // paused: native size
       else if (!(S.shot.frames && (drawsDeep(S.playing, holds(deepShot)) || exactOnly) &&
-                 draw(deepShot.get(exactOnly ? colour.exactFrame(deepShot.frames, S.frame) : S.frame), p.cs))) draw(pic, S.shot.space); // the review's EXR frames: paused, all in, or the colour tools moved
+                 draw(deepShot.get(exactOnly ? colour.exactFrame(deepShot.frames, S.frame) : S.frame), S.shot.framesSpace ?? p.cs))) draw(pic, S.shot.space); // the review's EXR frames: paused, all in, or the colour tools moved
       if (pic === held.canvas) return "held";
       if (still) keepFrame(pic);
       return "shot";
@@ -730,6 +732,7 @@ function render() {
   view.dataset.precision = exact.length ? "float" : "8-bit"; // an image sequence's own values, or 8-bit frames
   view.dataset.native = String(native); // paused, the frame on show at the plate's own size
   inWork(drawCursor);
+  refreshInspector(); // RV redraws its inspector with the view: the frame, the source, the pass, zoom and pan
 }
 
 function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX predicts, or the generated shot (the wipe shows both)
@@ -748,6 +751,7 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
   else keysLayer(W, H);
   $("#wipe .label.left").textContent = "Keyframe";
   inWork(drawCursor);
+  refreshInspector();
 }
 
 function keysLayer(W, H) { // the keyframe on this frame; between keyframes, the two around it faintly, as onion skins
@@ -868,12 +872,15 @@ function hud(text, ms = 1600) {
 
 // ---------- Painting: the strokes wait for Generate (Enter), which makes the edit, then its shot ----------
 
-let stroke = null, nav = null, pinch = null;
+let stroke = null, nav = null, pinch = null, inspectDrag = false;
 const touches = new Map(); // fingers on the frame: two pan and zoom it, as Alt and Ctrl drags do with a mouse
 
 view.addEventListener("pointerdown", (e) => {
   if (!S.plate) return;
   if (S.picking && e.button === 0) { e.preventDefault(); return pickAt(e); } // the in-frame picker takes the click, on any frame
+  if (e.button === 0 && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && e.pointerType !== "touch") { // RV: Shift+click samples, the brush keeps the plain click
+    e.preventDefault(); view.setPointerCapture(e.pointerId); inspectDrag = true; return inspectSample(e, true);
+  }
   if (e.pointerType === "touch") {
     touches.set(e.pointerId, [e.clientX, e.clientY]);
     if (touches.size === 2) return pinchStart();
@@ -907,6 +914,7 @@ view.addEventListener("pointerdown", (e) => {
 });
 
 view.addEventListener("pointermove", (e) => {
+  if (inspectDrag) return inspectSample(e, false); // Shift+drag: RV's sampleAtPoint, averaging
   if (touches.has(e.pointerId)) touches.set(e.pointerId, [e.clientX, e.clientY]);
   if (pinch) return pinchMove();
   if (S.scrub) return setDisplay({ [S.mode]: colour.clampParam(S.mode, S.scrub.start + (e.clientX - S.scrub.x) * colour.PARAMS[S.mode].drag) });
@@ -920,6 +928,7 @@ view.addEventListener("pointermove", (e) => {
 view.addEventListener("pointerleave", () => { S.cursor = null; if (!S.playing) requestAnimationFrame(render); });
 view.addEventListener("pointercancel", (e) => view.dispatchEvent(new PointerEvent("pointerup", e))); // the browser took the touch: end as a lift
 view.addEventListener("pointerup", (e) => {
+  if (inspectDrag) { inspectDrag = false; S.inspect.sampling = false; return; }
   touches.delete(e.pointerId);
   if (pinch) { if (touches.size < 2) pinch = null; return; }
   if (S.scrub) { S.scrub = null; return leaveMode(); } // RV leaves the edit when the drag ends
@@ -2748,6 +2757,15 @@ function modeKey(k, combo) { // the keys of an interactive edit, as RV's paramsc
 
 function resetDisplay() { leaveMode(); setDisplay({ ...colour.DISPLAY }); }
 
+// ---------- Help, in tabs: Getting started, Tools, Keys, Viewer and colour, Render and export, Models and licences ----------
+
+function showHelp(tab = "keys") {
+  for (const b of $$("#help [role=tab]")) b.setAttribute("aria-selected", String(b.dataset.help === tab));
+  for (const s of $$("#help .help-tab")) s.hidden = s.dataset.help !== tab;
+  if (!$("#help").open) $("#help").showModal();
+}
+for (const b of $$("#help [role=tab]")) b.onclick = () => (b.dataset.help === "models" ? showModels() : showHelp(b.dataset.help));
+
 // ---------- Models and licences (models.mjs, web/models.json) ----------
 // The models behind the result on show, from the workflows that made it, then every model the pack downloads.
 
@@ -2774,58 +2792,114 @@ async function showModels() {
   $("#models-shown").replaceChildren(Object.assign(document.createElement("p"), { textContent: what }), ...(behind.length ? [table(behind, true)] : []));
   $("#models-all").replaceChildren(table(registry.models, false));
   $("#models").dataset.shown = behind.map((m) => m.id).join(",");
-  $("#models").showModal();
+  showHelp("models");
 }
 
 // ---------- The colour inspector, as OpenRV's (F5; inspector.mjs) ----------
-// The pixel under the pointer, in the plate's own pixels, read at full precision and native size from the file on show
-// (/paintaplate/pixel), with the value drawn on screen. Shift held while the pointer moves averages the pixels it passes,
-// as RV's shift-drag; a move without Shift starts again.
+// As RV's inspector.mu and its annotate mode: the inspector and the brush are both active at once. A click or a drag on
+// the frame paints; Shift+click samples a pixel and Shift+drag averages the pixels it passes (RV's pointer-1--shift
+// binds, which annotate mode passes on). The box sits beside the sampled point, and dragging the box moves the point
+// with it, as RV's widget does. The point stays in the plate's own pixels: every redraw reads it again, so the values
+// follow the frame, the source and the pass on show, and the box follows zoom and pan.
 
-function toggleInspector() {
+function toggleInspector(on = !S.inspect.on) {
   const i = S.inspect;
-  i.on = !i.on; i.avg = null;
-  $("#inspector").hidden = !i.on;
-  view.classList.toggle("inspecting", i.on);
-  hud(i.on ? "Color Inspector: the pixel under the pointer. Hold Shift while moving to average. F5 hides it" : "Color Inspector hidden");
+  i.on = on; i.avg = null;
+  $("#inspector").hidden = $("#inspector-mark").hidden = !on;
+  if (on) refreshInspector(true);
+  hud(on ? (i.pt ? "Color Inspector: Shift+click samples a pixel, Shift+drag averages, drag the box to move it. F5 hides it"
+    : "Color Inspector: Shift+click the frame to sample a pixel. F5 hides it") : "Color Inspector hidden");
 }
 
-function inspectAt(e) {
+function inspectPoint(e) { // the plate pixel under a pointer event, and whether it falls on the frame
+  const { width, height } = S.plate.spec, r = view.getBoundingClientRect();
+  return sourcePixel((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height, width, height);
+}
+
+function inspectSample(e, start) { // Shift+click, Shift+drag: RV's beginSampling and sampleAtPoint
+  const i = S.inspect, at = inspectPoint(e);
+  if (!at.inside) return;
+  if (!i.on) toggleInspector(true);
+  if (start) i.avg = null;
+  i.sampling = true; i.pt = { x: at.x, y: at.y };
+  refreshInspector(true);
+}
+
+function refreshInspector(force = false) { // on every redraw: place the box, read the final colour, read the source again
   const i = S.inspect;
   if (!i.on || !S.plate) return;
-  const r = view.getBoundingClientRect(), { width, height } = S.plate.spec, fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
-  i.at = { ...sourcePixel(fx, fy, width, height), shift: e.shiftKey, cx: Math.floor(fx * view.width), cy: Math.floor(fy * view.height) };
-  readPixel();
+  const box = $("#inspector"), mark = $("#inspector-mark");
+  if (!i.pt) { showInspector(null, S.frame, null); mark.hidden = true; return; }
+  const { width, height } = S.plate.spec, vr = view.getBoundingClientRect(), pr = $("#viewport").getBoundingClientRect();
+  const sx = vr.left - pr.left + ((i.pt.x + 0.5) / width) * vr.width, sy = vr.top - pr.top + ((i.pt.y + 0.5) / height) * vr.height;
+  const [bx, by] = boxPlace(sx, sy, box.offsetWidth, box.offsetHeight, pr.width, pr.height);
+  Object.assign(box.style, { left: `${bx}px`, top: `${by}px` });
+  mark.hidden = false; Object.assign(mark.style, { left: `${sx}px`, top: `${sy}px` });
+  const cx = Math.floor(((i.pt.x + 0.5) / width) * view.width), cy = Math.floor(((i.pt.y + 0.5) / height) * view.height);
+  i.final = [...view.getContext("2d").getImageData(cx, cy, 1, 1).data.slice(0, 3)].map((v) => v / 255); // the final colour, as drawn
+  const src = inspectSource(), key = `${src.path}#${S.frame}#${i.pt.x},${i.pt.y}`;
+  if (force || key !== i.key) { i.key = key; readPixel(); }
+  else if (i.got) showInspector(i.pt, S.frame, i.got);
+}
+
+function inspectSource() { // the file on show and what it holds: EXR frames in their own space, or a movie's codes
+  const sh = S.shot, frames = !!sh?.frames;
+  const space = sh ? (frames ? sh.framesSpace ?? S.plate.cs : sh.space) : S.plate.cs;
+  return { path: sourcePath(sh, S.plate.path), movie: !!sh && !frames, space: space === "@model" ? modelSpace() : space };
 }
 
 async function readPixel() {
   const i = S.inspect;
-  if (i.busy || !i.at) return;
+  if (i.busy) { i.again = true; return; }
   i.busy = true;
   const wait = INSPECT_MS - (performance.now() - i.last);
   if (wait > 0) await new Promise((ok) => setTimeout(ok, wait));
-  const at = i.at, frame = S.frame;
+  const pt = i.pt, frame = S.frame, src = inspectSource();
   i.last = performance.now();
   try {
-    if (!at.inside) { showInspector(at, frame, null); return; }
-    const r = await fetch(`/paintaplate/pixel?${new URLSearchParams({ path: sourcePath(S.shot, S.plate.path), frame, x: at.x, y: at.y, size: INSPECT_SIZE })}`);
+    const r = await fetch(`/paintaplate/pixel?${new URLSearchParams({ path: src.path, frame, x: pt.x, y: pt.y, size: INSPECT_SIZE })}`);
     const got = await r.json();
     if (!r.ok) throw new Error(got.error);
-    const [fr, fg, fb] = view.getContext("2d").getImageData(at.cx, at.cy, 1, 1).data; // the final colour, as drawn on screen
-    i.avg = at.shift ? addSample(i.avg, got.value) : null;
-    showInspector(at, frame, { ...got, final: [fr, fg, fb].map((v) => v / 255) });
-  } catch (err) { showInspector(at, frame, { error: err.message }); }
-  finally { i.busy = false; if (i.at !== at) readPixel(); }
+    i.got = { ...got, source: src };
+    if (i.sampling) i.avg = addSample(i.avg, got.value);
+    showInspector(pt, frame, i.got);
+  } catch (err) { i.got = null; showInspector(pt, frame, { error: err.message }); }
+  finally {
+    i.busy = false;
+    if (i.again || `${inspectSource().path}#${S.frame}#${i.pt?.x},${i.pt?.y}` !== i.key) { i.again = false; i.key = null; refreshInspector(); }
+  }
 }
 
-function showInspector(at, frame, got) {
-  const box = $("#inspector");
-  box.replaceChildren(...inspectorRows({ ...at, ...(got ?? {}), frame: S.plate.first + frame, average: S.inspect.avg }).map(([k, v]) => {
+function showInspector(pt, frame, got) {
+  const box = $("#inspector"), i = S.inspect;
+  const rows = pt ? inspectorRows({ ...pt, ...(got ?? {}), final: i.final, frame: S.plate.first + frame, average: i.avg })
+    : [["Shift+click", "the frame to sample a pixel"]];
+  box.replaceChildren(...rows.map(([k, v]) => {
     const row = document.createElement("div"), dt = document.createElement("span"), dd = document.createElement("span");
     dt.textContent = k; dd.textContent = v; row.append(dt, dd); return row;
   }));
   box.dataset.value = got?.value ? got.value.join(",") : "";
-  box.dataset.pixel = `${at.x},${at.y}`;
+  box.dataset.pixel = pt ? `${pt.x},${pt.y}` : "";
+  box.dataset.frame = String(frame);
+  box.dataset.movie = String(!!got?.source?.movie);
+}
+
+{ // the box moves the point with it, as RV's widget (storeDownPoint, drag)
+  const box = $("#inspector");
+  let grab = null;
+  box.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || !S.inspect.pt) return;
+    e.preventDefault(); e.stopPropagation(); box.setPointerCapture(e.pointerId);
+    const vr = view.getBoundingClientRect(), { width, height } = S.plate.spec, pt = S.inspect.pt;
+    grab = [vr.left + ((pt.x + 0.5) / width) * vr.width - e.clientX, vr.top + ((pt.y + 0.5) / height) * vr.height - e.clientY];
+    S.inspect.sampling = false; S.inspect.avg = null;
+  });
+  box.addEventListener("pointermove", (e) => {
+    if (!grab) return;
+    const at = inspectPoint({ clientX: e.clientX + grab[0], clientY: e.clientY + grab[1] });
+    if (at.inside) { S.inspect.pt = { x: at.x, y: at.y }; refreshInspector(); }
+  });
+  for (const t of ["pointerup", "pointercancel"]) box.addEventListener(t, () => { grab = null; });
 }
 
 // ---------- OCIO, as in RV: the plate's File Color Space, the look, the display and view, the config ----------
@@ -2915,7 +2989,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["2:1", "2", () => pixelZoom(2), !p], ["4:1", "4", () => pixelZoom(4), !p], ["1:2", "Shift+2", () => pixelZoom(1 / 2), !p], ["1:4", "Shift+4", () => pixelZoom(1 / 4), !p],
       ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["Full screen", "`", fullScreen],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
-    ["Help", [["Keys", "?", () => $("#help").showModal()], ["Models and licences", "", showModels]]],
+    ["Help", [["Getting started", "", () => showHelp("start")], ["Keys", "?", () => showHelp("keys")], ["Models and licences", "", showModels]]],
   ];
   const f = S.fluid;
   if (f && keying()) groups.splice(2, 0, ["Fluid", [["Generate", "Enter", () => generateFluid().catch(quiet), !f.keys.length],
@@ -3123,7 +3197,7 @@ $("#redo-btn").onclick = () => redo();
 $("#save-btn").onclick = () => S.plate && saveScene().catch(quiet);
 $("#x-graph").onclick = () => saveGraph().catch(quiet);
 $("#open-btn").onclick = $("#empty-open").onclick = openDialog;
-$("#help-btn").onclick = () => $("#help").showModal();
+$("#help-btn").onclick = () => showHelp("start");
 $("#stop").onclick = () => stopGenerating();
 $("#op-cancel").onclick = () => cancelOpen();
 $("#close-btn").onclick = () => closePlate();
@@ -3290,7 +3364,7 @@ addEventListener("keydown", (e) => {
   else if (low === "f" && mod && !e.shiftKey) widthZoom(); // RV's Frame Width; the page takes Ctrl+F from the browser's find
   else if (/^Digit[1-8]$/.test(e.code) && !mod && !e.altKey) { const n = +e.code.slice(5); pixelZoom(e.shiftKey ? (n > 1 ? 1 / n : 1) : n); } // RV: 1 to 8 N:1, Ctrl+2 to 8 1:N
   else if (k === "`") fullScreen();
-  else if (k === "?") $("#help").showModal();
+  else if (k === "?") showHelp("keys");
   else if (TOOLS[low] && !mod) pickTool(TOOLS[low]);
   else if (low === "n" && !mod) nextEdit();
   else if (low === "x" && !mod) setRub(!S.rub);

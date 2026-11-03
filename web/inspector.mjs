@@ -1,5 +1,5 @@
 // The colour inspector, as OpenRV's (src/lib/app/mu_rvui/inspector.mu at 0bd9675, read 2 Nov 2026): F5 shows it, as
-// toggleColorInspector in rvui.mu. RV lists the pixel in the image's own pixels (Native Pixel), its values as "%f", and
+// toggleColorInspector in rvui.mu; Shift+click samples, Shift+drag averages, the box drags the point with it. RV lists the pixel in the image's own pixels (Native Pixel), its values as "%f", and
 // the average of the pixels sampled with Shift held. RV shows either the source colour or the final colour; this
 // inspector shows both: the source values at full precision and native size, read on the server from the file on show
 // (/paintaplate/pixel), and the values drawn on screen, as 0 to 1 like RV's framebuffer read. Pure functions, tested in
@@ -32,10 +32,27 @@ export function addSample(avg, value) { // RV's running average while Shift is h
   return avg ? { sum: avg.sum.map((s, i) => s + value[i]), n: avg.n + 1 } : { sum: [...value], n: 1 };
 }
 
+// Where the box goes: beside the point, below and to the right, flipped to stay inside the viewport
+export function boxPlace(x, y, w, h, vw, vh, gap = 14) {
+  const bx = x + gap + w <= vw ? x + gap : Math.max(0, x - gap - w);
+  const by = y + gap + h <= vh ? y + gap : Math.max(0, y - gap - h);
+  return [Math.round(bx), Math.round(by)];
+}
+
+// What the values are: a file's own values, or a movie's codes. A pass shown by its movie, without its EXR frames, is
+// not the pass's values: the line says so.
+export function sourceLine(source, movie) {
+  if (!source) return null;
+  if (!movie && !source.movie) return `${source.space}, as stored`;
+  return `${movie?.bits ?? 8}-bit movie: ${source.space} codes${source.movie ? ", not the pass's own values" : ""}`;
+}
+
 // The rows the inspector shows, top to bottom.
-export function inspectorRows({ x, y, inside = true, frame, value, final, average, error, width, height }) {
+export function inspectorRows({ x, y, inside = true, frame, value, final, average, error, width, height, source, movie }) {
   const rows = [["Native Pixel", inside ? `${x}, ${y}` : "outside the frame"], ["Frame", String(frame)]];
   if (width) rows.push(["Size", `${width} x ${height}`]);
+  const line = sourceLine(source, movie);
+  if (line) rows.push(["Values", line]);
   if (error) return [...rows, ["Error", error]];
   const rgb = (label, v) => [[label, ""], ...["Red", "Green", "Blue", "Alpha"].slice(0, v.length).map((n, i) => [n, formatValue(v[i])])];
   if (value) rows.push(...rgb("Source Color", value));

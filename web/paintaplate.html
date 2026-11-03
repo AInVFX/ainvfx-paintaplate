@@ -87,7 +87,8 @@
       <div id="wipe" class="wipe" hidden>
         <span class="label left">Plate</span><span class="label right">Result</span><span class="grip" title="Drag to compare"></span>
       </div>
-      <div id="inspector" class="inspector" hidden aria-live="polite"></div>
+      <div id="inspector-mark" class="inspector-mark" hidden></div>
+      <div id="inspector" class="inspector" hidden aria-live="polite" title="Drag to move the point it reads"></div>
       <p id="hud" class="hud" aria-live="polite"></p>
       <div id="opening" class="opening" hidden>
         <p id="op-title" class="op-title">Opening the plate</p>
@@ -137,7 +138,7 @@
     <p id="history-empty" class="history-empty">Your edits appear here. Describe, paint on the frame, then Generate. Click an edit to change its words or strokes.</p>
     <section id="fluid" class="render fluid" hidden>
       <h2>Fluid shot <span id="fluid-state"></span></h2>
-      <p class="hint">AInVFX's ainvfx-fluid IC-LoRA turns the painted blobs into smoke, steam or fire in one LTX 2.5 pass: Generate, at the top. The shot then opens as a plate, for every edit.</p>
+      <p class="hint">Paint smoke, steam or fire on the keyframes, describe it, then Generate.</p>
       <div class="fluid-actions">
         <button id="fluid-again" type="button" title="Generate with another seed (Ctrl+Enter)">Another seed</button>
       </div>
@@ -164,22 +165,25 @@
 
   <ul id="ctx" class="ctx" role="menu" aria-label="All actions" hidden></ul>
   <dialog id="help" class="help">
-    <h2>Keys</h2>
-    <h3>Playback, as in RV</h3>
-    <dl>
-      <dt>Space, Down</dt><dd>Play or pause</dd>
-      <dt>Left, Right</dt><dd>Step one frame</dd>
-      <dt>Home, End</dt><dd>Go to the in point, the out point</dd>
-      <dt>[ and ]</dt><dd>Set the in point, the out point</dd>
-      <dt>\</dt><dd>Clear the in and out points</dd>
-      <dt>Wheel</dt><dd>Step through frames</dd>
-      <dt>F6</dt><dd>Wipe between the plate and the result</dd>
-      <dt>Alt + drag, middle drag</dt><dd>Pan, as in RV. Add Shift to keep to one axis</dd>
-      <dt>Ctrl + drag</dt><dd>Zoom about the point pressed, as RV: right to zoom in, left to zoom out. Alt with both buttons too</dd>
-      <dt>f, Ctrl+F</dt><dd>Fit the frame; fit its width</dd>
-      <dt>1 to 8</dt><dd>1:1 to 8:1, plate pixels to screen pixels, as in RV. Shift+2 to Shift+8 give 1:2 to 1:8 (RV's Ctrl+2 to Ctrl+8: Chrome keeps those for its tabs)</dd>
-      <dt>`</dt><dd>Full screen</dd>
-    </dl>
+    <h2>Help</h2>
+    <div class="tabs" role="tablist" aria-label="Help">
+      <button type="button" role="tab" data-help="start" aria-selected="false">Getting started</button>
+      <button type="button" role="tab" data-help="tools" aria-selected="false">Tools</button>
+      <button type="button" role="tab" data-help="keys" aria-selected="true">Keys</button>
+      <button type="button" role="tab" data-help="colour" aria-selected="false">Viewer and colour</button>
+      <button type="button" role="tab" data-help="render" aria-selected="false">Render and export</button>
+      <button type="button" role="tab" data-help="models" aria-selected="false">Models and licences</button>
+    </div>
+    <section class="help-tab" data-help="start" role="tabpanel" hidden>
+      <ol class="help-steps">
+        <li>Open a plate: Open, then ComfyUI files, Upload, Scenes or Blank plate. A blank plate starts a fluid shot.</li>
+        <li>Pick a tool (Paint, Erase or Light: B, E, L), describe the change, then paint it on the first frame.</li>
+        <li>Generate (Enter): the edit on the first frame, then its shot through the whole plate.</li>
+        <li>Play it, compare it with the plate in the wipe (F6), then Export.</li>
+      </ol>
+      <p class="hint">Every action is in the right-click menu, with its key. ? shows the keys.</p>
+    </section>
+    <section class="help-tab" data-help="tools" role="tabpanel" hidden>
     <h3>Painting</h3>
     <dl>
       <dt>B, E, L</dt><dd>Paint, Erase, Light. Another tool starts a new edit</dd>
@@ -206,6 +210,25 @@
       <dt>Alt+Left, Alt+Right</dt><dd>Previous, next keyframe</dd>
       <dt>Enter, Ctrl+Enter</dt><dd>Generate the fluid shot, then with another seed</dd>
     </dl>
+    </section>
+    <section class="help-tab" data-help="keys" role="tabpanel">
+    <h3>Playback, as in RV</h3>
+    <dl>
+      <dt>Space, Down</dt><dd>Play or pause</dd>
+      <dt>Left, Right</dt><dd>Step one frame</dd>
+      <dt>Home, End</dt><dd>Go to the in point, the out point</dd>
+      <dt>[ and ]</dt><dd>Set the in point, the out point</dd>
+      <dt>\</dt><dd>Clear the in and out points</dd>
+      <dt>Wheel</dt><dd>Step through frames</dd>
+      <dt>F6</dt><dd>Wipe between the plate and the result</dd>
+      <dt>Alt + drag, middle drag</dt><dd>Pan, as in RV. Add Shift to keep to one axis</dd>
+      <dt>Ctrl + drag</dt><dd>Zoom about the point pressed, as RV: right to zoom in, left to zoom out. Alt with both buttons too</dd>
+      <dt>f, Ctrl+F</dt><dd>Fit the frame; fit its width</dd>
+      <dt>1 to 8</dt><dd>1:1 to 8:1, plate pixels to screen pixels, as in RV. Shift+2 to Shift+8 give 1:2 to 1:8 (RV's Ctrl+2 to Ctrl+8: Chrome keeps those for its tabs)</dd>
+      <dt>`</dt><dd>Full screen</dd>
+    </dl>
+    </section>
+    <section class="help-tab" data-help="colour" role="tabpanel" hidden>
     <h3>Colour, as in RV: the viewer only, the export never changes</h3>
     <dl>
       <dt>Shift+E, K, Y</dt><dd>Exposure, contrast, gamma: then drag on the frame, or use the wheel, - and =</dd>
@@ -213,7 +236,7 @@
       <dt>Shift+S, H</dt><dd>Saturation, hue, the same way. Backspace resets the one you edit, Esc leaves</dd>
       <dt>Shift+C, R, G, B, L</dt><dd>All channels, red, green, blue, luminance</dd>
       <dt>Shift+I</dt><dd>Invert</dd>
-      <dt>F5</dt><dd>Color Inspector, as in RV: the pixel under the pointer in the plate's own pixels, its values as stored, and the values on screen. Hold Shift while moving to average. The page takes F5, so it does not reload</dd>
+      <dt>F5</dt><dd>Color Inspector, as in RV: Shift+click a pixel to read it, Shift+drag to average; drag the box to move its point. It reads the plate's own pixels and values, and the values on screen, on every frame. The brush still paints with a plain click. The page takes F5, so it does not reload</dd>
       <dt>Right-click</dt><dd>Every action, by menu, with its key</dd>
     </dl>
     <p class="hint">RV uses E, C, R, G, B and L without Shift. Here E, B and L pick the tools. The values are RV's: contrast is 0 at rest and turns about 0.5, gamma acts before the other tools, invert before exposure.</p>
@@ -223,15 +246,22 @@
       <dt>Look, Displays</dt><dd>The look, then the display and its view: the viewer only, while the shot plays</dd>
       <dt>Change Config</dt><dd>The config named by $OCIO when it is set, as in RV, else OCIO's built-in configs</dd>
     </dl>
-    <form method="dialog"><button class="primary">Close</button></form>
-  </dialog>
-  <dialog id="models" class="help models">
-    <h2>Models and licences</h2>
-    <p class="hint">Each model keeps its own licence: the one its Hugging Face repository states at the revision Paint a plate downloads. The app code is Apache 2.0.</p>
-    <h3>Behind the result on show</h3>
-    <div id="models-shown"></div>
-    <h3>Every model</h3>
-    <div id="models-all"></div>
+    </section>
+    <section class="help-tab" data-help="render" role="tabpanel" hidden>
+      <dl>
+        <dt>Enter</dt><dd>Generate: the edit on the first frame, then its shot through the plate. The steps show beside the edits as they run</dd>
+        <dt>A finished step</dt><dd>Click its row to show that pass alone; click it again to come back to the result</dd>
+        <dt>Esc</dt><dd>Stop what generates</dd>
+        <dt>Export</dt><dd>Writes the result in the plate's own format, with its matte, in ComfyUI's output folder, then downloads one zip</dd>
+      </dl>
+    </section>
+    <section id="models" class="help-tab models" data-help="models" role="tabpanel" hidden>
+      <p class="hint">Each model keeps its own licence: the one its Hugging Face repository states at the revision Paint a plate downloads. The app code is Apache 2.0.</p>
+      <h3>Behind the result on show</h3>
+      <div id="models-shown"></div>
+      <h3>Every model</h3>
+      <div id="models-all"></div>
+    </section>
     <form method="dialog"><button class="primary">Close</button></form>
   </dialog>
 

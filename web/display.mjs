@@ -4,8 +4,9 @@
 // after its OCIO function (OCIOIPNode.cpp). OpenColorIO writes the two OCIO functions as GLSL ES 3.0 on the server
 // (ocio.py), with their lookup tables, from the same GPU processor OpenRV asks for (OPTIMIZATION_DEFAULT). A program is
 // made once per colour space and view: changing the plate's colour space, the display or the view swaps it, so it applies
-// while the shot plays. Frames of an image sequence, and a paused video plate's source frame, arrive as RGB half floats
-// (DeepFrames in frames.mjs), so values above 1.0 reach the shader; video frames and canvases are 8 bits.
+// while the shot plays. Frames of an image sequence (DeepFrames in frames.mjs, 960 px) and the paused frame on show at
+// native size (sharpFrame in app.mjs) arrive as RGB half floats, so values above 1.0 reach the shader; video frames and
+// canvases are 8 bits.
 // OpenRV read at 0bd9675 (main, 2 Nov 2026): src/lib/ip/IPBaseNodes/ColorIPNode.cpp, src/lib/ip/OCIONodes/OCIOIPNode.cpp,
 // src/lib/ip/IPCore/glsl/ColorGamma.glsl and ColorMatrix.glsl.
 
