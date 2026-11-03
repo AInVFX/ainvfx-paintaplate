@@ -7,7 +7,7 @@
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_element: ["seed"],
-  review_frames: ["frames_prefix"], review_view: ["view_prefix"], edit_plan: ["plan"], hdr_shot: ["hdr"], relight_light: ["light"] };
+  review_frames: ["frames_prefix"], review_view: ["view_prefix"], edit_plan: ["plan"], hdr_shot: ["hdr"], relight_shade: ["shade"] };
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
   const slots = {}, outputs = {}, progress = new Set();
@@ -126,12 +126,12 @@ export const lightColor = (colors, color) => colorName(colors.find((c) => !dark(
 // tool: paint, erase or light; words: the prompt; colors: of the painted strokes; color: the tool's colour;
 // bbox: [y_min, x_min, y_max, x_max] on 0..1000. Only the chosen tool's text is built.
 export function caption({ tool, words, colors, color, bbox }) {
+  if (tool === "light") return lightPlanCaption({ colors, color, words }); // a relight's request is the page's own
   const text = {
     erase: () => `Remove ${words ? `the ${words}` : "the object"} inside <obj_1> completely, with its shadow and its reflection. Show the surface and the background that continue behind it, with matching detail, light, shadows and focus. Add no new object. Keep everything else unchanged.`,
     paint: () => `Replace the rough coloured drawing inside <obj_1> with ${words || "an object of that shape and colour"}, following the drawing's outline, pose and size, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.`,
-    light: () => `Relight the whole scene with ${lightColor(colors, color)} light${words ? ` (${words})` : ""}: keep the painted light in <obj_1> as bright and as coloured as it is painted, and relight the rest of the scene so that it agrees with it, with physically consistent shadows and reflections and no other light source.${colors.some(dark) ? " The darkened areas show where shade falls: make every shadow agree with the light." : ""} Keep the content, framing and textures unchanged.`,
   }[tool]();
-  const desc = { erase: words ? `${words} to remove` : "object to remove", paint: words || "the drawn object", light: "light source" }[tool];
+  const desc = { erase: words ? `${words} to remove` : "object to remove", paint: words || "the drawn object" }[tool];
   return `${text} ${JSON.stringify([{ id: "obj_1", bbox, desc }])}`;
 }
 
@@ -144,17 +144,7 @@ export const KEEP_TOUCHED = " Where the drawing touches an object, the new eleme
   "wets it or lights it); add no props, fuel or supports that were not asked for."; // a fire on a towel came with logs without it
 
 export function upsampleRequest({ tool, words, bbox, boxes = null, colors = [], color = "#ffd890" }) {
-  if (tool === "light") { // the strokes' colour always counts: asked for warm light, an orange and a green light both came back orange (29 Oct)
-    // Klein and the prompt writer see the frame with the light painted on it, as the brush showed it (app.mjs relightGuide),
-    // and Relight Transfer keeps that light where it is strong: the request asks Klein to relight the rest to agree with it
-    const shadows = colors.some(dark) ? " The darkened areas show where shade falls: make every shadow agree with the light." : "";
-    const ask = `Relight the whole photograph with ${lightColor(colors, color)} light${words ? `: ${words}` : ""}. The painted light shows where ` +
-      `this light is and how bright it is: keep it as bright, and as coloured, where it is painted.${shadows} Relight the rest of the ` +
-      "photograph so that it agrees with it: light on the surfaces that face it, a natural falloff, real shadows, the sky and the reflections. " +
-      "Add no other light source. Keep every object, its position, shape, size and texture, the framing and the camera exactly as they are.";
-    return { mode: "plain", locked: null,
-      request: `Reference images follow in order (the first image, the second image, ...).\nUser request: ${ask}\nOutput the caption.` };
-  }
+  if (tool === "light") return { mode: "plain", locked: null, request: lightPlanCaption({ colors, color, words }) }; // no prompt writer: the light plan says it
   const parts = tool === "erase" && boxes?.length > 1 ? boxes : null; // several painted parts: one locked row each
   const rows = parts ? parts.map((b, i) => ({ id: `obj_${i + 1}`, from: "ref_image_0", src_bbox: b, tgt_bbox: null, desc: words || "an object to remove" }))
     : [tool === "erase" ? { id: "obj_1", from: "ref_image_0", src_bbox: boxes?.[0] ?? bbox, tgt_bbox: null, desc: words || "the object to remove" }

@@ -405,9 +405,9 @@
    "image": ""
   },
   "_meta": {
-   "title": "Painted light (light edits)",
+   "title": "Painted shade (light edits)",
    "slots": {
-    "image": "light"
+    "image": "shade"
    }
   }
  },
@@ -431,7 +431,7 @@
    "align": true,
    "plate_space": "sRGB",
    "shot_space": "sRGB",
-   "light": [
+   "shade": [
     "28",
     0
    ]
@@ -440,7 +440,7 @@
    "slots": {
     "strength": "relight",
     "plate": "relit_frame",
-    "light": "relight_light"
+    "shade": "relight_shade"
    }
   }
  },

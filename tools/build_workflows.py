@@ -126,7 +126,7 @@ def load(name, folder=None):
 # no EXR frames, its movie is the plate's own quality; no SDR-to-HDR shot: the SDR shot goes on as it is; not a light
 # edit: no painted light to keep.
 OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",),
-            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "edit_plan": ("plan",), "hdr_shot": ("hdr",), "relight_light": ("light",)}
+            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "edit_plan": ("plan",), "hdr_shot": ("hdr",), "relight_shade": ("shade",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -269,9 +269,9 @@ def edit():
     # Relight Transfer decodes the sRGB frames to linear light and encodes its result back itself
     relit = g("PaintAPlate_RelightTransfer", plate=base, source=half(g, base), relit=half(g, result), radius=1,
               strength=Slot("relight", 0.0), align=True, plate_space="sRGB", shot_space="sRGB",
-              light=g("LoadImage", _title="Painted light (light edits)", image=Slot("light", "")))
+              shade=g("LoadImage", _title="Painted shade (light edits)", image=Slot("shade", "")))
     g.link_slot(relit, "plate", "relit_frame")
-    g.link_slot(relit, "light", "relight_light")  # the light as the brush painted it, kept where it is strong
+    g.link_slot(relit, "shade", "relight_shade")  # a light edit's shade strokes: Relight Transfer darkens the frame there
     g("SaveImage", _title="Relit frame", _output="relit", images=relit, filename_prefix=Slot("prefix", EDIT_PREFIX))
     g.save("edit")
 

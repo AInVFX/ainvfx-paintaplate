@@ -299,13 +299,18 @@ class RelightTransfer(io.ComfyNode):
                 io.Image.Input("light", optional=True,
                                tooltip="A light edit's painted light, in display values on black. Where it is strong, the "
                                        "result keeps at least the plate with that light added, as the brush showed it."),
+                io.Image.Input("shade", optional=True,
+                               tooltip="A light edit's shade strokes, white where the shadow is full: the result is darkened "
+                                       "there, in linear light, by 'shade_density'. Klein ignores a painted shadow."),
+                io.Float.Input("shade_density", default=0.7, min=0.0, max=1.0, step=0.05, optional=True,
+                               tooltip="How much light the painted shade takes away where it is full."),
             ],
             outputs=[io.Image.Output(display_name="image")],
         )
 
     @classmethod
     def execute(cls, plate, source, relit, radius, strength, align, plate_space="linear", shot_space="linear",
-                light=None) -> io.NodeOutput:
+                light=None, shade=None, shade_density=0.7) -> io.NodeOutput:
         n = min(plate.shape[0], source.shape[0], relit.shape[0])
         src, rel = list(frames_np(source[:n])), list(frames_np(relit[:n]))
         shift = (0.0, 0.0)
@@ -316,11 +321,14 @@ class RelightTransfer(io.ComfyNode):
             if shift != (0.0, 0.0):
                 logging.info("Paint a plate, Relight Transfer: the shot realigned by %.2f, %.2f px over %d frames", *shift, n)
         painted = list(frames_np(light[:1]))[0] if light is not None else None
+        shaded = list(frames_np(shade[:1]))[0] if shade is not None else None
         bar = comfy.utils.ProgressBar(n)
 
         def one(args):
             i, p = args
             out = mathops.relight_frame(p, src[i], rel[i], radius, strength, shift, plate_space, shot_space, painted)
+            if shaded is not None:
+                out = mathops.shade_frame(out, shaded, shade_density, plate_space)
             bar.update(1)
             return out
 
