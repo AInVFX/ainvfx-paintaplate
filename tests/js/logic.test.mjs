@@ -314,6 +314,17 @@ test("a divider's drag stays inside the window and never squeezes a panel or the
   assert.equal(panelSize("log", 10, view, log), 60);
 });
 
+import { warmEnd } from "../../web/logic.mjs";
+
+test("the model warm-up's last line: on the status line only while the start's message is there, and never « every model loaded » after a cancel", () => {
+  assert.deepEqual(warmEnd(12.4, 0, true), { status: true, text: "Ready: every model loaded in 12 s, so the first edit starts at once. Open a plate." });
+  assert.deepEqual(warmEnd(12.4, 0, false), { status: false, text: "Model warm-up done in 12 s: every model loaded." }); // a plate opened or closed since
+  const stopped = warmEnd(3, 1, true); // a close cancelled one job: its model is not loaded
+  assert.equal(stopped.status, false);
+  assert.match(stopped.text, /1 of its jobs did not finish/);
+  assert.doesNotMatch(stopped.text, /every model loaded/);
+});
+
 test("SDR to HDR: on by default for an EXR plate, off for the others, its switch for every plate; relit, never; 16-bit blank plates; 30 fps at most", () => {
   const exr = { kind: "sequence", ext: ".EXR" }, png = { kind: "sequence", ext: ".png" }, mp4 = { kind: "video", ext: ".mp4" };
   assert.equal(hdrPlate(exr), true);

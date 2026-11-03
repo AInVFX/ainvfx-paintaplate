@@ -898,18 +898,42 @@ def layout_flow(page, port):
     check((width(), height()) == (288, 180), f"a double-click gives the first sizes back: {width()} and {height()} px")
 
 
-def close_flow(page):  # the × after the plate's name closes it: its renders stop, its frames leave memory, the page is empty
-    if page.is_hidden("#close-btn"):  # a plate first, by its path
-        page.click("#open-btn")
-        page.click("#open .tabs [data-tab='files']")
-        page.fill("#path", "plates/desk.mp4")
-        page.click("#open-go")
-        page.wait_for_selector("#close-btn", state="visible", timeout=20000)
+def page_state(page):  # what a failed check prints: the status line, the plate's spec and the log's last lines
+    lines = "\n    ".join(log_lines(page)[-15:])
+    return f"\n  status: {page.text_content('#status')!r}\n  spec: {page.text_content('#spec')!r}\n  log's last lines:\n    {lines}"
+
+
+def close_flow(page):
+    """The × after the plate's name closes it: its renders stop, its frames leave memory, the page is empty and says so, also
+    when the model warm-up ends after the close (3 Nov: the warm-up's « Ready: every model loaded » replaced « Plate closed »
+    on most full runs, since layout_flow's reload starts a new warm-up just before this flow). The mock holds the warm-up's
+    first upload until the plate is closed, so the close lands inside the warm-up every time, on any machine. A failed check
+    prints the page's state."""
+    base = page.url.split("/extensions/")[0]
+    page.goto("about:blank")  # the page before stops here: none of its uploads can take the hold
+    urllib.request.urlopen(urllib.request.Request(f"{base}/mock/slow", json.dumps({"seconds": 120, "times": 1}).encode(),
+                                                  {"Content-Type": "application/json"}))
+    page.goto(f"{base}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")  # a new warm-up, its first upload held
+    page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
+    page.evaluate(WATCH)
+    page.click("#open-btn")
+    page.click("#open .tabs [data-tab='files']")
+    page.fill("#path", "plates/desk.mp4")
+    page.click("#open-go")
+    page.wait_for_selector("#close-btn", state="visible", timeout=20000)
     page.click("#close-btn")
     page.wait_for_function("!document.querySelector('#empty').hidden", timeout=5000)
-    check(page.is_hidden("#close-btn") and not page.text_content("#spec") and "Plate closed" in page.text_content("#status")
-          and page.is_disabled("#play-btn"), "the × after the plate's name closes it: the page is empty again and says the frames are freed")
-
+    ok = (page.is_hidden("#close-btn") and not page.text_content("#spec") and "Plate closed" in page.text_content("#status")
+          and page.is_disabled("#play-btn"))
+    check(ok, "the × after the plate's name closes it: the page is empty again and says the frames are freed" + ("" if ok else page_state(page)))
+    urllib.request.urlopen(urllib.request.Request(f"{base}/mock/release", b"{}", {"Content-Type": "application/json"}))
+    end = "/every model loaded|Model warm-up done/.test(t)"  # the warm-up's last line: on the status line, or in the log only
+    wait_log(page, f"window.__lines.some((t) => {end})", 30000, "end of the model warm-up")
+    after = page.evaluate(f"""(() => {{ const l = window.__lines, c = l.findIndex((t) => t.includes('closed: renders stopped'));
+      return c >= 0 && l.findIndex((t) => {end}) > c; }})()""")
+    ok = after and "Plate closed" in page.text_content("#status")
+    check(ok, "the model warm-up ends after the close: « Plate closed » stays on the status line, the warm-up's line goes to the log"
+          + ("" if ok else page_state(page)))
 
 def phone(browser, port):
     """The page on a phone, upright and on its side: the frame, the transport, the menu and the log fit the screen."""

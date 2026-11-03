@@ -48,7 +48,7 @@ Where the system Python refuses `pip` (Ubuntu, Debian), install into a virtual e
 - The Color Inspector (`tests/flows/viewer.py`): a 4K EXR plate's half floats as stored, a new frame and a dragged box read again, and a read held on its way never shows the new point with the old point's values.
 - A 16-bit fluid shot exports by itself (a zip of its HDR frames and its shot), and playing its EXR plate never alternates between its EXR frames and its 8-bit movie.
 - While it generates: a full-size pass shows its live preview in a corner; Esc stops the render step on its way and Enter goes on; Shift+Home resets every colour change.
-- Close plate: the × after the plate's name empties the page, disables playback and says the frames are freed.
+- Close plate: the × after the plate's name empties the page, disables playback and says the frames are freed, and the status line keeps saying so when the model warm-up ends after the close (the mock holds the warm-up's first upload).
 - The layout: the side panel and the log resize from their dividers, the stage keeps its room, a new session keeps the sizes, a double-click gives the first sizes back.
 
 ## CI
