@@ -748,7 +748,7 @@ def hdr_flow(page, port):
     lines = lambda: page.evaluate("window.__lines")  # noqa: E731
     open_path(page, "plates/desk.mp4")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
-    check(page.is_hidden("#hdr-switch"), "a video plate stays SDR: no SDR-to-HDR switch")
+    check(not page.is_hidden("#hdr-switch") and not page.is_checked("#hdr-on"), "a video plate: the SDR-to-HDR switch shows, off by default")
     open_path(page, "paintaplate/hdr_room")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
     check(not page.is_hidden("#hdr-switch") and page.is_checked("#hdr-on"), "an EXR plate: SDR to HDR is on by default")

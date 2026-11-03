@@ -11,7 +11,7 @@ import { CHANNEL_NAMES, DAB_PROFILE, DISPLAY, FLUID, PARAMS, dabFlow, dabsAlong,
   erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
-import { dataSpace, fluidPasses } from "./logic.mjs";
+import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -61,7 +61,7 @@ const LIGHT = { flow: 0.3, shade: 0.35, spread: 1.6, spacing: 0.25 };
 const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid", "hdr"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "hdr", "review", "export"]; // the render's job kinds: Generate and a new plate stop them
 const UPSAMPLER = {}; // Black Forest Labs' system prompts for Klein's upsampler (upsampler.json): table and plain
-const SCENE = { format: "paintaplate-scene", version: 4 }; // 3: the OCIO config, the plate's colour space by its OCIO name, the display and view; 4: the SDR-to-HDR switch, the blank plate's bit depth
+const SCENE = { format: "paintaplate-scene", version: 5 }; // 3: the OCIO config, the plate's colour space by its OCIO name, the display and view; 4: the SDR-to-HDR switch, the blank plate's bit depth; 5: the switch as set, null for the plate's default
 const OCIO_PREF = "paintaplate.ocio"; // the config, display, view and look, kept for the next session as RV keeps them
 const saved = (key) => { try { return JSON.parse(localStorage.getItem(key)) ?? {}; } catch { return {}; } };
 
@@ -92,7 +92,7 @@ const S = {
   shot: null, stage: null, run: 0, exported: null, wantDownload: null,
   ocio: { config: "", display: "", view: "", look: "", ...saved(OCIO_PREF), info: null }, // the OCIO config and the viewer's view, as in RV
   previewCap: (() => { try { return +localStorage.getItem("paintaplate.preview") || PREVIEW_CAP; } catch { return PREVIEW_CAP; } })(), // long side of the shot preview: Fast by default
-  toHdr: true, // SDR to HDR after the full-size shot of an EXR plate, until switched off (logic.wantsHdr)
+  hdrSet: null, // the SDR-to-HDR switch as set for this plate; null: its kind's default (logic.plateDepth)
   heroKey: "", renders: new Map(), // set of edits -> what has been rendered for it
   erases: new Map(), // set of erases -> their matte and clean plates, for every render that has the same erases
   peek: null, // the History row picked: frame 0 shows its strokes over the edited first frame
@@ -212,6 +212,7 @@ async function writeCaption(e, reference, key, kind) {
 async function openPlate(list, typed, opts = {}) {
   if (!list.length && !typed) return status("Choose files, or type a path in ComfyUI's input folder.");
   stopEverything();
+  if (!opts.under) S.hdrSet = null; // a new plate: SDR to HDR at its kind's default; the fluid shot under the edits keeps the switch
   if (openCtl) { openCtl.abort(); cancel("ingest"); } // a plate still opening gives way to this one
   const ctl = (openCtl = new AbortController()); // Cancel on the opening screen, or Esc, aborts it (cancelOpen)
   Object.assign(S, { plate: null, hero: null, original: null }); // nothing to draw while the new plate loads
@@ -511,14 +512,16 @@ function layered(upto = S.edits.length, keep = () => true) { // the first frame 
   return c;
 }
 
-function hdrUI() { // the SDR-to-HDR switch shows for an EXR plate, when the model is there
+const hdrOn = () => S.hdrSet ?? hdrPlate(S.plate?.spec); // the switch, else the plate's default: on for EXR only
+function hdrUI() { // the SDR-to-HDR switch shows for every plate when the model is there, set to the plate's default
   const p = S.plate;
-  $("#hdr-switch").hidden = !(p && hdrPlate(p.spec) && S.hdrReady);
-  $("#hdr-on").checked = S.toHdr;
+  $("#hdr-switch").hidden = !(p && S.hdrReady);
+  $("#hdr-on").checked = hdrOn();
 }
-function setHdr(on) { // off: renders end with the SDR shot, as for a video plate; each setting keeps its own renders
-  S.toHdr = on;
-  log(`SDR to HDR ${on ? "on: the full-size shot is made again in scene-linear values, then fitted to the plate" : "off"}`);
+function setHdr(on) { // off: renders end with the SDR shot; each setting keeps its own renders
+  S.hdrSet = on;
+  const clips = on && !plateDepth(S.plate?.spec).float; // a video file or an integer image holds nothing above 1.0
+  log(`SDR to HDR ${on ? `on: the full-size shot is made again in scene-linear values, then fitted to the plate${clips ? ". This plate's format holds no value above 1.0: the export clips them" : ""}` : "off"}`);
   hud(`SDR to HDR ${on ? "on" : "off"}`, 1500);
   hdrUI(); recompose(); touch();
 }
@@ -527,7 +530,7 @@ $("#hdr-on").addEventListener("change", () => setHdr($("#hdr-on").checked));
 function recompose() {
   S.hero = layered();
   const edits = S.edits.filter((e) => e.on && e.patch && e.state !== "generating").map((e) => `${e.id}.${e.version}`).join(",");
-  const key = edits && hdrPlate(S.plate?.spec) && !S.toHdr ? `${edits}|sdr` : edits; // SDR to HDR switched off: another render
+  const key = edits && hdrKey(edits, hdrPlate(S.plate?.spec), hdrOn()); // the switch away from the plate's default: another render
   if (key === S.heroKey) return;
   S.heroKey = key;
   const r = S.renders.get(key); // a set of edits seen before plays at once (a bypass turned back on, for example)
@@ -1999,7 +2002,7 @@ function plan(r, active) { // the steps this set of edits needs: the erase pass 
   const erase = active.some((e) => e.tool === "erase"), paint = active.some((e) => e.tool === "paint"), carry = active.some((e) => e.tool !== "erase");
   r.skip = new Set([!erase && "erase", !erase && "clean", !carry && "shot", !paint && "track", (onePass || !erase) && "cleanfull",
     (onePass || !carry) && "full", (onePass || !paint) && "trackfull",
-    !(S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), !r.key?.endsWith("|sdr"))) && "hdr"].filter(Boolean)); // the switch is in the key
+    !(S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), hdrOfKey(r.key, hdrPlate(p.spec)))) && "hdr"].filter(Boolean)); // the switch is in the key
   return r;
 }
 
@@ -2049,7 +2052,8 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const E = erase ? S.erases.get(ekey) ?? S.erases.set(ekey, { sizes: {} }).get(ekey) : null;
   r.hero ??= await uploadCanvas(r.heroFrame, `hero_v${r.v}.png`);
   if (erase) r.clean0 ??= E.clean0 ??= await uploadCanvas(r.cleanFrame, `clean_v${r.v}.png`);
-  const common = { config: S.ocio.config, color_space: p.cs, max_frames: p.frames, seed: active[0].seed };
+  // frames_format: the shot's and the erase pass's frames at the plate's depth (logic.plateDepth): 8-bit PNG, 16-bit PNG or half-float EXR
+  const common = { config: S.ocio.config, color_space: p.cs, max_frames: p.frames, seed: active[0].seed, frames_format: plateDepth(p.spec).frames };
   const prompt = shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt, hue: e.hue ?? hueOf(e.src ?? e) })));
   const scene = erase ? erasePrompt(erases.map((e) => e.caption)) : ""; // the scene as it stays, never the erased object
   if (!r.told) {
@@ -2588,7 +2592,7 @@ async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it ag
   const blank = f?.blankPath;
   const scene = { ...SCENE, saved: new Date().toISOString(), work, ocio: { config, display, view, look: lk },
     plate: { path: blank ?? S.plate.path, color_space: blank ? modelSpace() : S.plate.cs, name: S.plate.name },
-    preview: S.previewCap, hdr: S.toHdr, in: S.inPt, out: S.outPt,
+    preview: S.previewCap, hdr: S.hdrSet, in: S.inPt, out: S.outPt,
     edits: S.edits.map((e) => ({ tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on,
       caption: e.caption?.text ?? "", strokes: packStrokes(e.strokes) })),
     ...(f ? { fluid: { prompt: keying() ? $("#prompt").value.trim() : f.prompt ?? "", seed: f.seed, depth: f.depth ?? 8, made: !!f.result, on: f.on !== false, keys: f.keys.map((k) => ({ frame: k.frame, strokes: packStrokes(k.strokes) })) } } : {}) };
@@ -2615,7 +2619,7 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
     render: { prompt: shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt, hue: e.hue ?? hueOf(e.src ?? e) }))), seed: active[0].seed,
       erasePrompt: erasePrompt(active.filter((e) => e.tool === "erase").map((e) => e.caption?.text)),
       grow: grow(p.spec.width, erase), feather: feather(p.spec.width), prefix: `paintaplate/${p.id}/graph`,
-      hdr: S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), S.toHdr) } });
+      hdr: S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), hdrOn()) } });
   const a = Object.assign(document.createElement("a"), { download: `${p.name}.comfyui.json`,
     href: URL.createObjectURL(new Blob([JSON.stringify(graph, null, 1)], { type: "application/json" })) });
   document.body.append(a); a.click(); a.remove();
@@ -2634,11 +2638,12 @@ async function openScene(text) { // the plate opens in its colour space, then ev
     look.setView(S.ocio); saveOcio();
   }
   if (scene.preview) setPreview(scene.preview);
-  S.toHdr = scene.hdr !== false;
+  const hdrSet = scene.version >= 5 ? scene.hdr ?? null : scene.hdr === false ? false : null; // before 5: true meant the default
   const from = scene.version >= 2 && Array.isArray(scene.work) ? scene.work : null; // strokes in pixels of this working size
   await openPlate([], scene.plate.path, { cs: scene.fluid ? modelSpace() // a blank plate, as openBlank opens it (1.4.0 saved the space under its edits)
     : scene.version >= 3 ? scene.plate.color_space : undefined, // older scenes: read from the file
     ...(scene.fluid ? { fluid: { blankPath: scene.plate.path, seed: scene.fluid.seed, prompt: scene.fluid.prompt ?? "", on: scene.fluid.on !== false, depth: blankDepth(scene.fluid.depth) } } : {}) });
+  S.hdrSet = hdrSet; // openPlate set the plate's default
   if (scene.fluid) { // the fluid shot first: its keyframes, then the shot itself, the plate the edits were painted on
     S.fluid.keys = scene.fluid.keys.map((k) => { const key = newKey(k.frame); key.strokes = unpackStrokes(k.strokes, S.plate.work, from); redrawKey(key); return key; });
     fluidUI(); timelineUI(); historyUI(); render();
@@ -2795,7 +2800,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["ComfyUI graph", "", () => saveGraph().catch(quiet), !edits], "-", ["Close plate", "", () => closePlate(), !p && !openCtl]]],
     ["Edit", [["Undo", "Ctrl+Z", undo, !S.past.length], ["Redo", "Ctrl+Shift+Z", redo, !S.future.length], "-",
       ["New edit", "N", nextEdit, !p || keying() || (!S.draft && !S.selected)], ["Generate", "Enter", () => enter(false), $("#generate").disabled], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
-      ...(HDR_ON ? [["SDR to HDR", "", () => setHdr(!S.toHdr), !p || !hdrPlate(p.spec) || !S.hdrReady, !!p && hdrPlate(p.spec) && S.hdrReady && S.toHdr]] : []),
+      ...(HDR_ON ? [["SDR to HDR", "", () => setHdr(!hdrOn()), !p || !S.hdrReady, !!p && S.hdrReady && hdrOn()]] : []),
       ["Render in full", "", renderInFull, !S.renders.get(S.heroKey)?.donor], ["Stop generating", "Esc", stopGenerating, !generating()],
       ["Deselect", "Esc", () => select(null), !S.selected]]],
     ["Tools", [["Paint", "B", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Erase", "E", () => pickTool("erase"), !p || (keying() && !S.fluid.result), S.tool === "erase" && !S.rub],

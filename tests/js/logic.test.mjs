@@ -340,7 +340,7 @@ test("a divider's drag stays inside the window and never squeezes a panel or the
   assert.equal(panelSize("log", 10, view, log), 60);
 });
 
-test("SDR to HDR: on for an EXR plate unless switched off or relit, never for a video; 16-bit blank plates; 30 fps at most", () => {
+test("SDR to HDR: on by default for an EXR plate, off for the others, its switch for every plate; relit, never; 16-bit blank plates; 30 fps at most", () => {
   const exr = { kind: "sequence", ext: ".EXR" }, png = { kind: "sequence", ext: ".png" }, mp4 = { kind: "video", ext: ".mp4" };
   assert.equal(hdrPlate(exr), true);
   assert.equal(hdrPlate(png), false);
@@ -348,7 +348,8 @@ test("SDR to HDR: on for an EXR plate unless switched off or relit, never for a 
   assert.equal(wantsHdr(exr, ["paint", "erase"], true), true);
   assert.equal(wantsHdr(exr, ["paint"], false), false);
   assert.equal(wantsHdr(exr, ["paint", "light"], true), false); // a relight keeps the plate's own values
-  assert.equal(wantsHdr(mp4, ["paint"], true), false);
+  assert.equal(wantsHdr(mp4, ["paint"], true), true, "switched on for a video plate, it runs");
+  assert.equal(wantsHdr(mp4, ["paint"], false), false);
   assert.deepEqual([blankDepth("16"), blankDepth("8"), blankDepth("32"), blankDepth(undefined)], [16, 8, 8, 8]);
   assert.deepEqual([hdrFps(24), hdrFps(50), hdrFps(0)], [24, 30, 24]);
 });
@@ -491,4 +492,30 @@ test("a fluid shot's rows: its keyframes, its shot, and SDR to HDR for a 16-bit 
   assert.deepEqual(fluidPasses(hdr, { log: "ACEScct" }).at(-1), { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: "h.mp4", space: "ACEScct" });
   assert.deepEqual(fluidPasses(null), [], "no fluid shot made: no rows");
   assert.deepEqual(fluidPasses({ preview: "p.mp4" }).map((x) => x.id), ["fluid_shot"], "a shot made before its control movie existed");
+});
+
+import { plateDepth, hdrKey, hdrOfKey } from "../../web/logic.mjs";
+
+test("new content at the plate's bit depth: one rule per kind of plate", () => {
+  const kinds = { "8-bit MP4": [{ kind: "video", ext: ".mp4", pix_fmt: "yuv420p" }, 8, "png", false],
+    "10-bit ProRes": [{ kind: "video", ext: ".mov", pix_fmt: "yuv422p10le" }, 10, "png16", false],
+    "ProRes 4444": [{ kind: "video", ext: ".mov", pix_fmt: "yuv444p12le" }, 12, "png16", false],
+    "8-bit PNG": [{ kind: "sequence", ext: ".png", pix_fmt: "rgb24" }, 8, "png", false],
+    "16-bit PNG": [{ kind: "sequence", ext: ".png", pix_fmt: "rgb48be" }, 16, "png16", false],
+    "16-bit TIFF with alpha": [{ kind: "sequence", ext: ".tif", pix_fmt: "rgba64le" }, 16, "png16", false],
+    "10-bit DPX": [{ kind: "sequence", ext: ".dpx", pix_fmt: "gbrp10le" }, 10, "png16", false],
+    "half EXR": [{ kind: "sequence", ext: ".exr", pix_fmt: "gbrpf16le" }, 16, "exr", true],
+    "float EXR": [{ kind: "sequence", ext: ".exr", pix_fmt: "gbrpf32le" }, 32, "exr", true] };
+  for (const [name, [spec, bits, frames, hdr]] of Object.entries(kinds))
+    assert.deepEqual(plateDepth(spec), { bits, float: hdr, frames, hdr }, name);
+  assert.deepEqual(plateDepth(null), { bits: 8, float: false, frames: "png", hdr: false }, "no plate: the 8-bit rule");
+});
+
+test("the SDR-to-HDR switch away from the plate's default makes another render key", () => {
+  assert.equal(hdrKey("1.1", true, true), "1.1");
+  assert.equal(hdrKey("1.1", true, false), "1.1|sdr", "an EXR plate switched off, as before");
+  assert.equal(hdrKey("1.1", false, true), "1.1|hdr", "a video plate switched on");
+  assert.equal(hdrKey("1.1", false, false), "1.1");
+  assert.deepEqual(["1.1", "1.1|sdr", "1.1|hdr"].map((k) => hdrOfKey(k, true)), [true, false, true]);
+  assert.deepEqual(["1.1", "1.1|sdr", "1.1|hdr"].map((k) => hdrOfKey(k, false)), [false, false, true]);
 });

@@ -357,7 +357,8 @@ def clean():
                 latent_image=g("LTXVConcatAVLatent", video_latent=guide[2], audio_latent=audio))
     decoded = g("VAEDecode", vae=vae, samples=g("LTXVCropGuides", positive=guide[0], negative=guide[1],
                                                  latent=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])[2])
-    g("PaintAPlate_SaveFrames", _title="Clean frames", _output="frames", images=decoded, filename_prefix=Slot("prefix", "paintaplate/plate/clean/f"))
+    g("PaintAPlate_SaveFrames", _title="Clean frames", _output="frames", images=decoded, format=Slot("frames_format", "png"),
+      filename_prefix=Slot("prefix", "paintaplate/plate/clean/f"))
     g("PaintAPlate_SaveMovie", _title="Clean shot (erased areas regenerated)", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/clean"), images=decoded, fps=load[3])
     g.save("clean")
 
@@ -401,7 +402,8 @@ def cleanup():
                 sampler=g("KSamplerSelect", sampler_name="euler"), sigmas=g("ManualSigmas", sigmas=REFINE_SIGMAS),
                 latent_image=g("LTXVConcatAVLatent", video_latent=latent, audio_latent=audio))
     decoded = g("VAEDecode", vae=vae, samples=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])
-    g("PaintAPlate_SaveFrames", _title="Clean frames", _output="frames", images=decoded, filename_prefix=Slot("prefix", "paintaplate/plate/full/clean/f"))
+    g("PaintAPlate_SaveFrames", _title="Clean frames", _output="frames", images=decoded, format=Slot("frames_format", "png"),
+      filename_prefix=Slot("prefix", "paintaplate/plate/full/clean/f"))
     g("PaintAPlate_SaveMovie", _title="Clean shot at full size", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/full/clean"), images=decoded, fps=load[3])
     g.save("cleanup")
 
@@ -442,7 +444,7 @@ def shot():
     video_latent = g("LTXVSeparateAVLatent", av_latent=sampled[0])
     cropped = g("LTXVCropGuides", positive=guide[0], negative=guide[1], latent=video_latent[0])
     decoded = g("VAEDecode", samples=cropped[2], vae=vae)
-    g("PaintAPlate_SaveFrames", _title="Shot frames", _output="frames", images=decoded,
+    g("PaintAPlate_SaveFrames", _title="Shot frames", _output="frames", images=decoded, format=Slot("frames_format", "png"),
       filename_prefix=Slot("prefix", "paintaplate/plate/shot/f"))
     g("PaintAPlate_SaveMovie", _title="Shot video (whole frame regenerated)", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/shot"), images=decoded, fps=load[3])
     g.save("shot")

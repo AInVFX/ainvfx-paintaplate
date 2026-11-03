@@ -579,8 +579,24 @@ export function panelSize(kind, wanted, view, { least, stage, around }) {
 // so a render with a light edit leaves it out. A blank plate asks its bit depth: 8-bit, or 16-bit half float, where its
 // fluid shot goes through it and becomes an EXR plate: 16-bit is the default once its files are found (?hdr=0 turns it off).
 export const HDR_DEPTH = 16;
-export const hdrPlate = (spec) => !!spec && spec.kind !== "video" && /^\.exr$/i.test(spec.ext ?? "");
-export const wantsHdr = (spec, tools, on) => !!on && hdrPlate(spec) && !tools.includes("light");
+// New content at the plate's bit depth (Adrien, 2 Nov): a clean plate or a new element matches the plate. One rule per
+// kind of plate, read from its pixel format: `bits` (16 for half float, 32 for float), `frames`, the Save Frames format
+// a shot's frames pass through on their way to the export, and `hdr`, whether SDR to HDR is on by default. Its switch
+// shows for every plate:
+//   8-bit video or images: 8-bit PNG frames; SDR to HDR off by default.
+//   10-bit or 12-bit video (ProRes among them), 16-bit PNG and TIFF, 10-bit DPX: 16-bit PNG frames; off by default.
+//   Half and float EXR: half-float EXR frames; on by default (a light edit stays out while the relight is on hold).
+export function plateDepth(spec) {
+  const fmt = String(spec?.pix_fmt ?? "").toLowerCase(), exr = !!spec && spec.kind !== "video" && /^\.exr$/i.test(spec.ext ?? "");
+  const bits = /f32/.test(fmt) ? 32 : exr || /f16/.test(fmt) ? 16 : /(rgba?|bgra?)64|(rgb|bgr)48|gray16|ya16/.test(fmt) ? 16
+    : +(fmt.match(/p(\d+)(le|be)$/)?.[1] ?? 8);
+  return { bits, float: exr, frames: exr ? "exr" : bits > 8 ? "png16" : "png", hdr: exr };
+}
+export const hdrPlate = (spec) => plateDepth(spec).hdr; // SDR to HDR on by default for this plate
+export const wantsHdr = (spec, tools, on) => !!spec && !!on && !tools.includes("light");
+// The switch away from the plate's default makes another render, so each setting keeps its own: "|hdr" or "|sdr".
+export const hdrKey = (edits, dflt, on) => (on === dflt ? edits : `${edits}|${on ? "hdr" : "sdr"}`);
+export const hdrOfKey = (key, dflt) => (key?.endsWith("|hdr") ? true : key?.endsWith("|sdr") ? false : dflt);
 export const hdrFps = (fps) => Math.min(30, +fps || 24); // the conditioning frame rate: at most 30, as in Lightricks' workflow
 export const blankDepth = (v) => (+v === HDR_DEPTH ? HDR_DEPTH : 8);
 export const defaultDepth = (hdrReady) => (hdrReady ? HDR_DEPTH : 8); // a blank plate: 16-bit whenever SDR to HDR can run

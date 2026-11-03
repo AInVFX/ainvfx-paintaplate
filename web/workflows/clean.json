@@ -579,11 +579,13 @@
     "38",
     0
    ],
+   "format": "png",
    "filename_prefix": "paintaplate/plate/clean/f"
   },
   "_meta": {
    "title": "Clean frames",
    "slots": {
+    "format": "frames_format",
     "filename_prefix": "prefix"
    },
    "output": "frames"

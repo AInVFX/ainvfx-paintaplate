@@ -457,11 +457,13 @@
     "29",
     0
    ],
+   "format": "png",
    "filename_prefix": "paintaplate/plate/shot/f"
   },
   "_meta": {
    "title": "Shot frames",
    "slots": {
+    "format": "frames_format",
     "filename_prefix": "prefix"
    },
    "output": "frames"

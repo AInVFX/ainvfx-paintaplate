@@ -457,3 +457,80 @@ class RawVideoNoteTest(unittest.TestCase):
         self.assertEqual((edit, untouched), (0, 0))
         self.assertNotIn("Untouched pixels are the source's own YUV samples.", notes)
         print("export note: untouched YUV samples named only when copied")
+
+
+class DepthTest(unittest.TestCase):
+    """New content at the plate's bit depth: the export writes each kind of plate at its own depth, and a gradient of new
+    content keeps more than 256 levels on every plate deeper than 8 bits."""
+    W, H, N = 1024, 8, 3
+
+    def gradient(self):  # the new content: a grey ramp from 0 to 1 across 1024 pixels
+        return np.repeat(np.repeat(np.linspace(0.0, 1.0, self.W, dtype=np.float32)[None, :, None], self.H, 0), 3, 2)
+
+    def video(self, path, codec, pix_fmt, rate=24):
+        out = av.open(path, "w")
+        vs = out.add_stream(codec, rate=rate)
+        vs.width, vs.height, vs.pix_fmt = self.W, self.H, pix_fmt
+        if codec == "prores_ks":
+            vs.codec_context.options = {"profile": "3"}
+        for i in range(self.N):
+            fr = av.VideoFrame.from_ndarray(np.zeros((self.H, self.W, 3), np.uint8), format="rgb24").reformat(format=pix_fmt)
+            fr.pts = i
+            for pk in vs.encode(fr): out.mux(pk)
+        for pk in vs.encode(None): out.mux(pk)
+        out.close()
+        return path
+
+    def test_png16_frames_keep_every_value(self):
+        rng = np.random.default_rng(7)
+        frames = [rng.integers(0, 65536, (24, 40, 3), np.uint16), rng.integers(0, 65536, (24, 40, 4), np.uint16)]
+        with tempfile.TemporaryDirectory() as d:
+            paths = [os.path.join(d, f"f_{i + 1:05}_.png") for i in range(2)]
+            plateio.write_pngs(lambda i: frames[i], paths, workers=2)
+            back = [plateio.read_native(paths[0], False), plateio.read_native(paths[1], True)]
+        self.assertTrue(all(b.dtype == np.uint16 and np.array_equal(a, b) for a, b in zip(frames, back)))
+        print("16-bit PNG frames: ok (RGB and RGBA, every 16-bit value exact)")
+
+    def test_export_keeps_each_kind_at_its_depth(self):
+        d, grad, row = tempfile.mkdtemp(), self.gradient(), lambda a: len(np.unique(a[self.H // 2, :, 1]))
+        found = {}
+        for name, codec, fmt in (("8-bit MP4", "libx264", "yuv420p"), ("10-bit ProRes", "prores_ks", "yuv422p10le")):
+            spec = plateio.probe_plate(self.video(os.path.join(d, name.replace(" ", "_") + (".mp4" if "MP4" in name else ".mov")), codec, fmt))
+            writer = plateio.VideoWriter(spec, os.path.join(d, "out_" + os.path.basename(spec["source"])))
+            for _ in range(self.N):
+                writer.write(grad)
+            writer.close()
+            back = plateio.probe_plate(writer.path)
+            with av.open(writer.path) as c:
+                first = next(c.decode(video=0)).to_ndarray(format="rgb48le")
+            found[name] = (spec["pix_fmt"], back["pix_fmt"], row(first))
+        for name, ext, write in (("16-bit PNG", ".png", "png16"), ("half EXR", ".exr", np.float16), ("float EXR", ".exr", np.float32)):
+            src = os.path.join(d, name.replace(" ", "_")); os.makedirs(src)
+            for i in range(self.N):
+                path = os.path.join(src, f"shot.{1001 + i}{ext}")
+                if write == "png16":
+                    plateio.write_pngs(lambda _: np.zeros((self.H, self.W, 3), np.uint16), [path], workers=1)
+                else:
+                    z = np.zeros((self.H, self.W), write)
+                    OpenEXR.File({"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}, {"R": z, "G": z, "B": z}).write(path)
+            spec = plateio.probe_plate(src)
+            out = os.path.join(d, "out_" + os.path.basename(src)); os.makedirs(out)
+            written = plateio.write_still(spec, 0, grad, None, None, out)
+            if ext == ".png":
+                again = plateio.probe_plate(out)["pix_fmt"]
+                levels = row(plateio.read_native(written, False))
+            else:
+                with OpenEXR.File(written) as f:
+                    ch = f.channels()
+                    g = ch["RGB"].pixels[..., 1] if "RGB" in ch else ch["G"].pixels
+                again, levels = str(g.dtype), len(np.unique(g[self.H // 2]))
+            found[name] = (spec["pix_fmt"], again, levels)
+        print("export depth per kind (plate, export, levels of the new content):", found)
+        self.assertEqual(found["8-bit MP4"][:2], ("yuv420p", "yuv420p"))
+        self.assertLessEqual(found["8-bit MP4"][2], 256)
+        self.assertEqual(found["10-bit ProRes"][:2], ("yuv422p10le", "yuv422p10le"))
+        self.assertEqual(found["16-bit PNG"][:2], ("rgb48be", "rgb48be"))
+        self.assertEqual(found["half EXR"][1], "float16")
+        self.assertEqual(found["float EXR"][1], "float32")
+        for name in ("10-bit ProRes", "16-bit PNG", "half EXR", "float EXR"):
+            self.assertGreater(found[name][2], 256, name)

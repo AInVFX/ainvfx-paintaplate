@@ -418,13 +418,15 @@ def read_float(path: str) -> np.ndarray:
 
 
 def write_pngs(frame_at, paths: list, workers: int = 8, level: int = 1, tick=None) -> None:
-    """Write frame_at(i), an (H, W, 3 or 4) uint8 array, to paths[i] as PNG, several frames at once: PyAV releases the GIL
+    """Write frame_at(i), an (H, W, 3 or 4) uint8 or uint16 array, to paths[i] as an 8 or 16-bit PNG, several frames at
+    once: PyAV releases the GIL
     while it compresses. Core Save Image writes one frame after another at zlib level 4: 35.3 s for 121 frames at
     1920 x 1088 on an RTX PRO 6000 pod (28 Oct). Level 1 compresses 3.5 times faster for files about 11% larger
     (one such frame: 111 ms against 392 ms, 3.08 MB against 2.78 MB)."""
     def one(i):
         a = np.ascontiguousarray(frame_at(i))
-        fmt = "rgba" if a.shape[2] == 4 else "rgb24"
+        deep = a.dtype == np.uint16  # PNG stores 16-bit samples big-endian
+        fmt = ("rgba64be" if a.shape[2] == 4 else "rgb48be") if deep else ("rgba" if a.shape[2] == 4 else "rgb24")
         c = av.CodecContext.create("png", "w")
         c.width, c.height, c.pix_fmt = a.shape[1], a.shape[0], fmt
         c.options = {"compression_level": str(level)}
