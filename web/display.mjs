@@ -1,14 +1,90 @@
-// The viewer's colour on the GPU, as OpenRV chains its nodes when OCIO manages colour (ocio_source_setup): the file values
-// to the config's scene-linear space (OCIOFile), the colour tools there (RVColor: exposure and contrast, one matrix for hue,
-// saturation and invert, then gamma; ColorIPNode.cpp, read 28 Oct 2026), then the look and the display and view
-// (OCIOLook, OCIODisplay), then the channel shown as grey, picked from the display values: OCIODisplay floods a channel
-// after its OCIO function (OCIOIPNode.cpp, read 29 Oct 2026). OpenColorIO writes the two OCIO functions as GLSL ES 3.0 on
-// the server (ocio.py), with
-// their lookup tables. A program is made once per colour space and view: changing the plate's colour space, the display
-// or the view swaps it, so it applies while the shot plays. Frames of an image sequence arrive as RGB half floats
+// The viewer's colour on the GPU, as OpenRV chains its nodes when OCIO manages colour (ocio_source_setup.py): the file
+// values to the config's scene-linear space (OCIOFile), the colour tools there (RVColor), then the look and the display and
+// view (OCIOLook, OCIODisplay), then the channel shown as grey, picked from the display values: OCIODisplay floods a channel
+// after its OCIO function (OCIOIPNode.cpp). OpenColorIO writes the two OCIO functions as GLSL ES 3.0 on the server
+// (ocio.py), with their lookup tables, from the same GPU processor OpenRV asks for (OPTIMIZATION_DEFAULT). A program is
+// made once per colour space and view: changing the plate's colour space, the display or the view swaps it, so it applies
+// while the shot plays. Frames of an image sequence, and a paused video plate's source frame, arrive as RGB half floats
 // (DeepFrames in frames.mjs), so values above 1.0 reach the shader; video frames and canvases are 8 bits.
+// OpenRV read at 0bd9675 (main, 2 Nov 2026): src/lib/ip/IPBaseNodes/ColorIPNode.cpp, src/lib/ip/OCIONodes/OCIOIPNode.cpp,
+// src/lib/ip/IPCore/glsl/ColorGamma.glsl and ColorMatrix.glsl.
 
-import { displayActive, displayUniforms } from "./logic.mjs";
+// ---------- The colour tools, as RVColor (ColorIPNode.cpp): display only, the export never changes ----------
+// RV builds one 4 x 4 matrix C, each tool multiplied on the left, so it acts after the ones before it: invert, exposure
+// (2 to the stops), contrast ((1 + c) x - c / 2, about 0.5), hue (a rotation about the grey axis, sheared so that Rec. 709
+// luma holds), saturation (Rec. 709 weights). Its shader applies gamma first (pow of max(x, 0) by 1 / gamma, only when
+// gamma is not 1), then C: ColorMatrix(ColorGamma(source)). RV's invert matrix has (1, 1, 1, 0) as its last row, so after
+// an invert the homogeneous coordinate holds r + g + b, and a later contrast scales its offset by it: kept, for the same
+// values as RV.
+export const DISPLAY = { exposure: 0, contrast: 0, gamma: 1, saturation: 1, hue: 0, channel: "rgb", invert: false };
+export const PARAMS = { // the interactive edits: label, step for - and = and the wheel, change per pixel dragged, limits
+  exposure: { label: "Exposure", step: 0.1, drag: 0.01, min: -10, max: 10 }, // stops: one per 100 px dragged
+  contrast: { label: "Contrast", step: 0.05, drag: 0.005, min: -1, max: 4 }, // RV's color.contrast, 0 at rest
+  gamma: { label: "Gamma", step: 0.05, drag: 0.005, min: 0.1, max: 8 },
+  saturation: { label: "Saturation", step: 0.05, drag: 0.005, min: 0, max: 4 },
+  hue: { label: "Hue", step: 5, drag: 0.5, min: -180, max: 180 }, // degrees; RV's color.hue holds radians
+};
+export const CHANNEL_NAMES = { rgb: "All channels", r: "Red", g: "Green", b: "Blue", l: "Luminance" };
+export const clampParam = (name, v) => +Math.min(PARAMS[name].max, Math.max(PARAMS[name].min, v)).toFixed(3);
+export const displayActive = (d) => Object.keys(DISPLAY).some((k) => d[k] !== DISPLAY[k]);
+
+export function formatParam(name, v) {
+  if (name === "exposure") return `${v > 0 ? "+" : ""}${v.toFixed(1)} stop${Math.abs(v) === 1 ? "" : "s"}`;
+  if (name === "contrast") return `${v > 0 ? "+" : ""}${v.toFixed(2)}`;
+  return name === "hue" ? `${Math.round(v)}°` : v.toFixed(2);
+}
+
+export function displayLabel(d) { // the transport's reminder of what the viewer changes: "E +1.0 · γ 2.20 · Red"
+  const parts = [];
+  if (d.exposure) parts.push(`E ${d.exposure > 0 ? "+" : ""}${d.exposure.toFixed(1)}`);
+  if (d.contrast) parts.push(`C ${formatParam("contrast", d.contrast)}`);
+  if (d.gamma !== 1) parts.push(`γ ${d.gamma.toFixed(2)}`);
+  if (d.saturation !== 1) parts.push(`Sat ${d.saturation.toFixed(2)}`);
+  if (d.hue) parts.push(`Hue ${Math.round(d.hue)}°`);
+  if (d.channel !== "rgb") parts.push(CHANNEL_NAMES[d.channel]);
+  if (d.invert) parts.push("Inverted");
+  return parts.join(" · ");
+}
+
+export const LUMA = [0.2126, 0.7152, 0.0722]; // Rec. 709, the first row of RV's Rec709FullRangeRGBToYUV8
+const PICK = { r: [1, 0, 0], g: [0, 1, 0], b: [0, 0, 1], l: LUMA }; // OCIODisplay's flood rows
+const ID4 = () => [0, 1, 2, 3].map((i) => [0, 1, 2, 3].map((j) => +(i === j)));
+const mul = (A, B) => A.map((row) => B[0].map((_, j) => row.reduce((a, v, k) => a + v * B[k][j], 0)));
+const embed = (m) => [[...m[0], 0], [...m[1], 0], [...m[2], 0], [0, 0, 0, 1]];
+function rotation(axis, angle) { // Rodrigues, for column vectors (TwkMath's makeRotation)
+  const n = Math.hypot(...axis), [x, y, z] = axis.map((v) => v / n), c = Math.cos(angle), s = Math.sin(angle), t = 1 - c;
+  return embed([[t * x * x + c, t * x * y - s * z, t * x * z + s * y], [t * x * y + s * z, t * y * y + c, t * y * z - s * x],
+    [t * x * z - s * y, t * y * z + s * x, t * z * z + c]]);
+}
+const inverse = (R) => embed([0, 1, 2].map((i) => [0, 1, 2].map((j) => R[j][i]))); // a rotation's inverse is its transpose
+
+export function hueMatrix(radians) { // iR * iZsh * Rz * Zsh * R, as ColorIPNode.cpp
+  const R = rotation([1, -1, 0], Math.acos(1 / Math.sqrt(3))), l = mul(R, [[LUMA[0]], [LUMA[1]], [LUMA[2]], [0]]).map((r) => r[0]);
+  const xz = l[0] / l[2], yz = l[1] / l[2];
+  const Zsh = [[1, 0, 0, 0], [0, 1, 0, 0], [xz, yz, 1, 0], [0, 0, 0, 1]], iZsh = [[1, 0, 0, 0], [0, 1, 0, 0], [-xz, -yz, 1, 0], [0, 0, 0, 1]];
+  return [inverse(R), iZsh, rotation([0, 0, 1], radians), Zsh, R].reduce((a, b) => mul(a, b));
+}
+
+export function colorMatrix({ exposure = 0, contrast = 0, saturation = 1, hue = 0, invert = false }) { // RV's C, 4 x 4
+  let C = ID4();
+  if (invert) C = mul([[-1, 0, 0, 1], [0, -1, 0, 1], [0, 0, -1, 1], [1, 1, 1, 0]], C);
+  if (exposure) { const e = 2 ** exposure; C = mul(embed([[e, 0, 0], [0, e, 0], [0, 0, e]]), C); }
+  if (contrast) { const s = 1 + contrast, o = -contrast / 2; C = mul([[s, 0, 0, o], [0, s, 0, o], [0, 0, s, o], [0, 0, 0, 1]], C); }
+  if (hue) C = mul(hueMatrix((hue * Math.PI) / 180), C);
+  if (saturation !== 1) {
+    const s = saturation;
+    C = mul(embed([0, 1, 2].map((i) => [0, 1, 2].map((j) => (1 - s) * LUMA[j] + (i === j ? s : 0)))), C);
+  }
+  return C;
+}
+
+// The shader's values. Before the display: gamma's exponent, then the colour matrix as its 3 x 3 part and its offset (the
+// source's homogeneous coordinate is 1). After it: `pick`, the channel shown as grey, else the identity.
+export function displayUniforms(d) {
+  const { gamma = 1, channel = "rgb" } = d, C = colorMatrix(d), one = PICK[channel];
+  return { exponent: gamma !== 1 ? 1 / gamma : 1, matrix: C.slice(0, 3).map((r) => r.slice(0, 3)), offset: C.slice(0, 3).map((r) => r[3]),
+           pick: one ? [[...one], [...one], [...one]] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]] };
+}
 
 const VERTEX = `#version 300 es
 in vec2 corner;
@@ -22,15 +98,15 @@ precision highp sampler3D;
 in vec2 uv;
 out vec4 color;
 uniform sampler2D frame;
-uniform float slope, intercept, exponent;
+uniform float exponent;
 uniform mat3 mixing, pick;
 uniform vec3 offset;
 ${fin}
 ${fout}
 void main() {
   vec3 c = ocioIn(vec4(texture(frame, uv).rgb, 1.0)).rgb;
-  c = mixing * (c * slope + intercept) + offset;
-  if (exponent != 1.0) c = pow(max(c, 0.0), vec3(exponent));
+  if (exponent != 1.0) c = pow(max(c, 0.0), vec3(exponent)); // ColorGamma, then ColorMatrix: RV's order
+  c = mixing * c + offset;
   color = vec4(pick * ocioOut(vec4(c, 1.0)).rgb, 1.0);
 }`;
 
@@ -104,7 +180,7 @@ export class Display {
       return { unit, target, tex, at: gl.getUniformLocation(program, t.sampler) };
     });
     gl.activeTexture(gl.TEXTURE0);
-    const at = Object.fromEntries(["frame", "slope", "intercept", "exponent", "mixing", "offset", "pick", "corner"].map((n) =>
+    const at = Object.fromEntries(["frame", "exponent", "mixing", "offset", "pick", "corner"].map((n) =>
       [n, n === "corner" ? gl.getAttribLocation(program, n) : gl.getUniformLocation(program, n)]));
     return { program, at, tables };
   }
@@ -133,8 +209,6 @@ export class Display {
     if (exact) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB16F, w, h, 0, gl.RGB, gl.HALF_FLOAT, src.data);
     else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
     const u = displayUniforms(d);
-    gl.uniform1f(p.at.slope, u.slope);
-    gl.uniform1f(p.at.intercept, u.intercept);
     gl.uniform1f(p.at.exponent, u.exponent);
     gl.uniformMatrix3fv(p.at.mixing, true, u.matrix.flat());
     gl.uniform3fv(p.at.offset, u.offset);

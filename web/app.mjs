@@ -6,6 +6,7 @@ import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
 import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onLog, onNotice, outputFile, outputFiles, outputText, post, run, setSalt, upload, viewUrl } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
+import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor (logic.mjs keeps an older copy until the merge)
 import { sceneGraph } from "./graph.mjs";
 import { CHANNEL_NAMES, DAB_PROFILE, DISPLAY, FLUID, PARAMS, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
   erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
@@ -86,7 +87,7 @@ const S = {
   get color() { return this.colors[this.tool] ?? "#000000"; },
   frame: 0, playing: false, inPt: 0, outPt: 0, wipe: null, compare: false,
   fit: { w: 0, h: 0, x: 0, y: 0 }, zoom: { k: 1, x: 0, y: 0 },
-  display: { ...DISPLAY }, mode: null, scrub: null, // the viewer's colour (display only), and its interactive edit as in RV
+  display: { ...colour.DISPLAY }, mode: null, scrub: null, // the viewer's colour (display only), and its interactive edit as in RV
   fluid: null, clip: null, fluidReady: true, // a fluid shot on a blank plate, the last one, a copied keyframe
   shot: null, stage: null, run: 0, exported: null, wantDownload: null,
   ocio: { config: "", display: "", view: "", look: "", ...saved(OCIO_PREF), info: null }, // the OCIO config and the viewer's view, as in RV
@@ -650,7 +651,7 @@ function render() {
   // the plate in its own values, so a new File Color Space shows at once: an image sequence's frames once they arrive,
   // else the playback video (a video plate's own values at the working size), else the first frame as ingested
   const drawPlate = () => {
-    if (p.deep && drawsDeep(S.playing, holds(deep)) && draw(deep.get(S.frame), p.cs)) return; // playing: its EXR frames only once all are in
+    if ((p.deep || still) && drawsDeep(S.playing, holds(deep)) && draw(deep.get(S.frame), p.cs)) return; // playing: its EXR frames only once all are in; a video plate's only paused
     const cached = still && caches.get(plateVid).get(S.frame);
     if (cached) return void draw(cached, p.proxySpace);
     if (plateVid.readyState >= 2 && (!still || !plateVid.seeking)) return void draw(plateVid, p.proxySpace);
@@ -860,7 +861,7 @@ view.addEventListener("pointerdown", (e) => {
 view.addEventListener("pointermove", (e) => {
   if (touches.has(e.pointerId)) touches.set(e.pointerId, [e.clientX, e.clientY]);
   if (pinch) return pinchMove();
-  if (S.scrub) return setDisplay({ [S.mode]: clampParam(S.mode, S.scrub.start + (e.clientX - S.scrub.x) * PARAMS[S.mode].drag) });
+  if (S.scrub) return setDisplay({ [S.mode]: colour.clampParam(S.mode, S.scrub.start + (e.clientX - S.scrub.x) * colour.PARAMS[S.mode].drag) });
   if (nav) return navigateMove(e);
   if (stroke && S.keyDraft) return addKeyPoint(S.keyDraft, e);
   if (stroke && S.draft) return addPoint(S.draft, e);
@@ -2638,8 +2639,11 @@ function fullScreen() { if (document.fullscreenElement) document.exitFullscreen(
 const holds = (cache) => { for (let f = S.inPt; f <= S.outPt; f++) if (!cache.frames.has(f)) return false; return true; }; // every frame in
 function wantDeep() { // an image sequence's own values around the playhead: the plate, and its review once it plays
   const p = S.plate;
-  if (!p?.deep || !look.ready) return;
-  fetchDeep(deep, p.path, p.name);
+  if (!p || !look.ready) return;
+  // a video plate, paused: its source frames decoded on the server with the file's own YUV matrix and range, as OpenRV
+  // decodes the file; while it plays, the playback proxy stays
+  if (p.deep || !S.playing) fetchDeep(deep, p.path, p.name);
+  if (!p.deep) return;
   if (S.shot?.frames) fetchDeep(deepShot, S.shot.frames, "the full-size composite");
 }
 
@@ -2650,18 +2654,19 @@ function fetchDeep(cache, path, what) { // frames as RGB half floats from the fr
       log(`Full-precision frames stopped for ${what}: ${await r.text()}. The viewer plays the 8-bit movie.`);
       throw new Error("frames");
     }
-    const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number);
-    return { width, height, data: new Uint16Array(await r.arrayBuffer()) };
+    const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number), data = new Uint16Array(await r.arrayBuffer());
+    if (!S.playing) setTimeout(render, 0); // paused, the frame on show draws again once its own values are in
+    return { width, height, data };
   }, path);
   if (fresh) log(`Full-precision frames: ${what} (${S.plate.cs}) at ${DEEP_SIDE} px on the long side, read in the background`);
 }
 
 function setDisplay(change) {
   Object.assign(S.display, change);
-  const d = S.display, on = displayActive(d);
+  const d = S.display, on = colour.displayActive(d);
   $("#display-state").hidden = !on;
-  $("#display-state").textContent = displayLabel(d);
-  hud(S.mode ? `${PARAMS[S.mode].label} ${formatParam(S.mode, d[S.mode])}` : on ? displayLabel(d) : "Colour as shot", 1400);
+  $("#display-state").textContent = colour.displayLabel(d);
+  hud(S.mode ? `${colour.PARAMS[S.mode].label} ${colour.formatParam(S.mode, d[S.mode])}` : on ? colour.displayLabel(d) : "Colour as shot", 1400);
   render();
 }
 
@@ -2669,7 +2674,7 @@ function colorMode(name) { // RV's interactive edit: drag on the frame, or the w
   if (S.mode === name) return leaveMode();
   S.mode = name;
   view.classList.add("scrub");
-  hud(`${PARAMS[name].label} ${formatParam(name, S.display[name])}: drag on the frame, or the wheel, - and =. Backspace resets, Esc leaves.`, 4000);
+  hud(`${colour.PARAMS[name].label} ${colour.formatParam(name, S.display[name])}: drag on the frame, or the wheel, - and =. Backspace resets, Esc leaves.`, 4000);
   render();
 }
 
@@ -2678,21 +2683,21 @@ function leaveMode() {
   const name = S.mode;
   S.mode = S.scrub = null;
   view.classList.remove("scrub");
-  hud(displayActive(S.display) ? displayLabel(S.display) : `${PARAMS[name].label} as shot`);
+  hud(colour.displayActive(S.display) ? colour.displayLabel(S.display) : `${colour.PARAMS[name].label} as shot`);
 }
 
-const stepColor = (name, dir) => setDisplay({ [name]: clampParam(name, S.display[name] + dir * PARAMS[name].step) });
+const stepColor = (name, dir) => setDisplay({ [name]: colour.clampParam(name, S.display[name] + dir * colour.PARAMS[name].step) });
 
 function modeKey(k, combo) { // the keys of an interactive edit, as RV's paramscrub table; any other key leaves it, then acts
   if (k === "-" || k === "_") stepColor(S.mode, -1);
   else if (k === "=" || k === "+") stepColor(S.mode, 1);
-  else if (k === "Backspace" || k === "Delete" || combo === "Shift+r") setDisplay({ [S.mode]: DISPLAY[S.mode] });
+  else if (k === "Backspace" || k === "Delete" || combo === "Shift+r") setDisplay({ [S.mode]: colour.DISPLAY[S.mode] });
   else if (k === "Escape" || k === "Enter" || COLOR_KEYS[combo] === S.mode) leaveMode();
   else { leaveMode(); return false; }
   return true;
 }
 
-function resetDisplay() { leaveMode(); setDisplay({ ...DISPLAY }); }
+function resetDisplay() { leaveMode(); setDisplay({ ...colour.DISPLAY }); }
 
 // ---------- OCIO, as in RV: the plate's File Color Space, the look, the display and view, the config ----------
 
@@ -2753,8 +2758,8 @@ function ocioItems() { // RV's OCIO menu (ocio_source_setup.py): the File Color 
 
 function menuItems() { // [group, [[label, key, action, disabled, checked] or "-", ...]]
   const p = !!S.plate, d = S.display, edits = S.edits.some((e) => e.on && e.patch);
-  const chan = (c, key) => [CHANNEL_NAMES[c], key, () => setDisplay({ channel: c }), !p, d.channel === c];
-  const param = (name, key) => [`${PARAMS[name].label}…`, key, () => colorMode(name), !p, S.mode === name];
+  const chan = (c, key) => [colour.CHANNEL_NAMES[c], key, () => setDisplay({ channel: c }), !p, d.channel === c];
+  const param = (name, key) => [`${colour.PARAMS[name].label}…`, key, () => colorMode(name), !p, S.mode === name];
   const step = (by) => () => { pause(); seek(S.frame + by); };
   const groups = [
     ["File", [["Open plate…", "", openDialog], ["Fluid keyframes", "", editFluid, !S.fluid || keying()],
@@ -2774,7 +2779,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Go to the out point", "End", () => { pause(); seek(S.outPt); }, !p], ["Set the in point", "[", () => setIn(S.frame), !p],
       ["Set the out point", "]", () => setOut(S.frame), !p], ["Clear in and out", "\\", clearRange, !p]]],
     ["Colour", [param("exposure", "Shift+E"), param("contrast", "K"), param("gamma", "Y"), param("saturation", "Shift+S"), param("hue", "H"), "-",
-      ["Invert", "Shift+I", () => setDisplay({ invert: !d.invert }), !p, d.invert], ["Reset all colour", "Shift+Home", resetDisplay, !displayActive(d)]]],
+      ["Invert", "Shift+I", () => setDisplay({ invert: !d.invert }), !p, d.invert], ["Reset all colour", "Shift+Home", resetDisplay, !colour.displayActive(d)]]],
     ...(S.ocio.info ? [["OCIO", ocioItems()]] : []),
     ["View", [chan("rgb", "Shift+C"), chan("r", "Shift+R"), chan("g", "Shift+G"), chan("b", "Shift+B"), chan("l", "Shift+L"), "-",
       ["Fit", "F", () => zoomTo(1), !p], ["1:1", "1", () => zoomTo(S.plate.work[0] / S.fit.w), !p],

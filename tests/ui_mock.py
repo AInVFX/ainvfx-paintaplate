@@ -533,6 +533,8 @@ def ocio_flow(page):
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
     page.wait_for_timeout(1000)
     pixel = lambda: page.evaluate("(() => { const c = document.querySelector('#view'); return [...c.getContext('2d').getImageData(c.width >> 1, c.height >> 1, 1, 1).data.slice(0, 3)]; })()")  # noqa: E731
+    exact = "document.querySelector('#view').dataset.precision === 'float'"  # paused, a video plate shows its source frame
+    page.wait_for_function(exact, timeout=30000)
     before = pixel()
     page.evaluate(WATCH)
     menu(page, "OCIO", "Displays", "sRGB - Display", "ACES 2.0 - SDR 100 nits (Rec.709)")
@@ -545,6 +547,7 @@ def ocio_flow(page):
     page.keyboard.press("Space")
     page.keyboard.press("Home")
     page.wait_for_timeout(700)
+    page.wait_for_function(exact, timeout=30000)
     check(max(abs(a - b) for a, b in zip(pixel(), before)) <= 2, "back to Un-tone-mapped while it plays, the frame looks as it did")
     menu(page, "OCIO", "File Color Space", "Utility", "Linear Rec.709 (sRGB)")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('Linear Rec.709 (sRGB)') && document.querySelector('#opening').hidden", timeout=60000)

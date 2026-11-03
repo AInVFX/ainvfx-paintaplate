@@ -6,7 +6,7 @@
     GET  /paintaplate/stat?path=plates/boat.mp4&config=ocio://studio-config-latest
                                                       a plate's size and time (job index keys change with them), its spec
                                                       and its guessed file colour space in that OCIO config
-    GET  /paintaplate/frames?path=...&first=0&count=4&side=960   frames of an image sequence as RGB half floats
+    GET  /paintaplate/frames?path=...&first=0&count=4&side=960   frames of an image sequence or a video as RGB half floats
     POST /paintaplate/blank {width, height, fps, frames}         a black ProRes 4444 plate for a fluid shot
     GET  /paintaplate/jobs/<key>, POST /paintaplate/jobs/<key>   the job index: a finished job's outputs by the hash of its inputs
     GET  /paintaplate/scenes, GET|POST /paintaplate/scenes/<name>  scenes saved on this ComfyUI (output/paintaplate/scenes)
@@ -32,6 +32,7 @@ import zipfile
 
 import folder_paths
 from aiohttp import web
+import av
 import numpy as np
 
 try:
@@ -377,27 +378,97 @@ DEEP_FRAMES_MAX = 16  # frames per request
 STILLS = (".exr", ".png", ".tif", ".tiff", ".dpx")
 
 
-def deep_frames(rel: str, first: int, count: int, side: int) -> tuple[bytes, int, int]:
-    """Frames `first` to `first + count - 1` of an image sequence (a plate, or a render's review frames), at most `side` px
-    on the long side, as RGB half floats.
+# YUV to RGB weights (Kr, Kb) by the file's colorspace tag, as ITU-T H.273 numbers them: BT.709, BT.601 (470BG and
+# SMPTE 170M), BT.2020. An untagged file takes BT.709 from 720 rows up, else BT.601, the usual players' rule.
+YUV_WEIGHTS = {1: (0.2126, 0.0722), 5: (0.299, 0.114), 6: (0.299, 0.114), 9: (0.2627, 0.0593), 10: (0.2627, 0.0593)}
+PLANAR_YUV = re.compile(r"^yuva?4(20|22|44)p(\d+)?(le)?$")
 
-    The viewer's colour tools read these, as OpenRV's cache keeps an EXR's half floats: values above 1.0 and below 0
-    stay as stored, and nothing passes through an 8-bit video. A missing frame holds the one before (plateio), and a
-    frame past the end holds the last, as Load Plate pads a shot.
-    """
-    full = folders.plate_path(rel)  # a plate, or a render's review frames
+
+def _video_rgb(frame) -> np.ndarray:
+    """A decoded video frame as float32 RGB, in its own values (0 to 1, or beyond for out-of-range codes). Planar YUV goes
+    through the file's own matrix and range in float, from its samples at their bit depth, as OpenRV converts a source's
+    YUV in its shader; swscale's 16-bit output was 0.77 of an 8-bit level off on a BT.709 red (2 Nov). Chroma is repeated
+    over the pixels it covers. Other formats (RGB, NV12) go through swscale at 16 bits."""
+    m = PLANAR_YUV.match(frame.format.name)
+    if not m:
+        return frame.to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
+    bits = int(m.group(2) or 8)
+    dtype = np.uint16 if bits > 8 else np.uint8
+    h, w = frame.height, frame.width
+    planes = []
+    for p in frame.planes[:3]:
+        a = np.frombuffer(p, dtype)
+        ph = a.size // (p.line_size // a.itemsize)
+        a = a.reshape(ph, -1)[:, : p.width].astype(np.float32)
+        planes.append(np.repeat(np.repeat(a, h // ph, 0), w // a.shape[1], 1)[:h, :w])
+    y, cb, cr = planes
+    k = float(1 << (bits - 8))
+    if (frame.color_range or 1) == 2:  # full (JPEG) range
+        top = float((1 << bits) - 1)
+        y, cb, cr = y / top, (cb - 128 * k) / top, (cr - 128 * k) / top
+    else:  # limited (MPEG) range, the default
+        y, cb, cr = (y - 16 * k) / (219 * k), (cb - 128 * k) / (224 * k), (cr - 128 * k) / (224 * k)
+    kr, kb = YUV_WEIGHTS.get(frame.colorspace, YUV_WEIGHTS[1] if h >= 720 else YUV_WEIGHTS[5])
+    kg = 1 - kr - kb
+    r = y + 2 * (1 - kr) * cr
+    b = y + 2 * (1 - kb) * cb
+    g = (y - kr * r - kb * b) / kg
+    return np.stack([r, g, b], -1)
+
+
+def video_frames(path: str, first: int, count: int) -> list[np.ndarray]:
+    """Frames `first` to `first + count - 1` of a video at native size: a seek to the key frame before, then a decode up
+    to them. A frame past the end holds the last, as Load Plate pads a shot."""
+    out, last = [], None
+    with av.open(path) as c:
+        s = c.streams.video[0]
+        s.thread_type = "AUTO"
+        rate, tb, start = s.average_rate or s.guessed_rate, s.time_base, s.start_time or 0
+        if first and rate and tb:
+            c.seek(start + int(first / rate / tb), stream=s, backward=True)
+        n = None
+        for f in c.decode(s):
+            n = round(float((f.pts - start) * tb * rate)) if f.pts is not None and rate and tb else (0 if n is None else n + 1)
+            last = f
+            if n >= first:
+                out.append(_video_rgb(f))
+                if len(out) == count:
+                    break
+        if last is None:
+            raise ValueError("No frames in this video")
+    return out + [out[-1] if out else _video_rgb(last)] * (count - len(out))
+
+
+def frame_rgb(full: str, index: int) -> np.ndarray:
+    """One frame of a plate, a review or a pass at native size and full precision: an image sequence's or a still's own
+    values (an EXR's half floats as stored), a video's decoded with its own YUV matrix and range."""
     if plateio.is_sequence(full):
         files = plateio.sequence_frames(full)[0]
-    elif full.lower().endswith(STILLS):
-        files = [full]
-    else:
-        raise ValueError("A video plate: the viewer reads its playback video")
-    if not files:
-        raise ValueError("No frames in this plate")
+        if not files:
+            raise ValueError("No frames in this plate")
+        return plateio.read_float(files[min(max(0, index), len(files) - 1)])
+    if full.lower().endswith(STILLS):
+        return plateio.read_float(full)
+    return video_frames(full, max(0, index), 1)[0]
+
+
+def deep_frames(rel: str, first: int, count: int, side: int) -> tuple[bytes, int, int]:
+    """Frames `first` to `first + count - 1` of an image sequence (a plate, or a render's review frames) or of a video
+    plate, at most `side` px on the long side, as RGB half floats.
+
+    The viewer's colour tools read these, as OpenRV's cache keeps an EXR's half floats: values above 1.0 and below 0
+    stay as stored, and nothing passes through an 8-bit video. A video plate's frames are its source file's, decoded at
+    full precision, for the frame on show while paused. A missing frame holds the one before (plateio), and a frame past
+    the end holds the last, as Load Plate pads a shot.
+    """
+    full = folders.plate_path(rel)  # a plate, or a render's review frames
     first, count, side = max(0, first), min(max(1, count), DEEP_FRAMES_MAX), min(max(64, side), 4096)
+    if plateio.is_sequence(full) or full.lower().endswith(STILLS):
+        frames = [frame_rgb(full, i) for i in range(first, first + count)]
+    else:
+        frames = video_frames(full, first, count)
     out = []
-    for i in range(first, first + count):
-        rgb = plateio.read_float(files[min(i, len(files) - 1)])
+    for rgb in frames:
         h, w = rgb.shape[:2]
         k = min(1.0, side / max(h, w))
         out.append(mathops.resize_to(rgb, max(1, round(h * k)), max(1, round(w * k))) if k < 1.0 else rgb)
