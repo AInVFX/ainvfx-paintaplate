@@ -39,10 +39,20 @@ export function boxPlace(x, y, w, h, vw, vh, gap = 14) {
   return [Math.round(bx), Math.round(by)];
 }
 
+// What the values are: a file's own values, or a movie's codes. A pass shown by its movie, without its EXR frames, is
+// not the pass's values: the line says so.
+export function sourceLine(source, movie) {
+  if (!source) return null;
+  if (!movie && !source.movie) return `${source.space}, as stored`;
+  return `${movie?.bits ?? 8}-bit movie: ${source.space} codes${source.movie ? ", not the pass's own values" : ""}`;
+}
+
 // The rows the inspector shows, top to bottom.
-export function inspectorRows({ x, y, inside = true, frame, value, final, average, error, width, height }) {
+export function inspectorRows({ x, y, inside = true, frame, value, final, average, error, width, height, source, movie }) {
   const rows = [["Native Pixel", inside ? `${x}, ${y}` : "outside the frame"], ["Frame", String(frame)]];
   if (width) rows.push(["Size", `${width} x ${height}`]);
+  const line = sourceLine(source, movie);
+  if (line) rows.push(["Values", line]);
   if (error) return [...rows, ["Error", error]];
   const rgb = (label, v) => [[label, ""], ...["Red", "Green", "Blue", "Alpha"].slice(0, v.length).map((n, i) => [n, formatValue(v[i])])];
   if (value) rows.push(...rgb("Source Color", value));

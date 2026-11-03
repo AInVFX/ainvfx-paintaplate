@@ -591,7 +591,7 @@ function choosePass(id) {
   else {
     const m = passMovie(id, r, previewOf(r), { log: logSpace() });
     if (!m) { S.pass = null; return stagesUI(); }
-    setShot(m.url, S.heroKey, m.space, m.frames);
+    setShot(m.url, S.heroKey, m.space, m.frames, { framesSpace: m.framesSpace }); // passMovie gives a pass's EXR frames and their space
   }
   hud(`${label}: on show. Click it again, or Esc, for the latest`, 3000);
   log(`Viewer: ${label} on show`);
@@ -640,10 +640,13 @@ function stopGenerating() { // everything that generates stops where it is: what
   stagesUI(); generateUI();
 }
 
-function setShot(src, key, space = "@model", frames = null) { // the shot on show, the colour space of its values, its EXR frames
+// The shot on show: its movie and the colour space of the movie's values, its EXR frames, and (the contract's fifth
+// argument) options: framesSpace, the colour space the EXR frames are stored in, when it is not the plate's (the SDR-to-HDR
+// pass writes ACES2065-1). The viewer draws and inspects the frames in that space.
+function setShot(src, key, space = "@model", frames = null, { framesSpace = null } = {}) {
   hideLive();
   S.live = null; // the shot itself, rough or composited, replaces the live preview
-  S.shot = src ? { url: src, key, space, frames } : null;
+  S.shot = src ? { url: src, key, space, frames, framesSpace } : null;
   if (src) { if (shotVid.getAttribute("src") !== src) shotVid.src = src; }
   else { shotVid.removeAttribute("src"); shotVid.load(); }
   render(); timelineUI();
@@ -702,9 +705,9 @@ function render() {
     if (S.pass === "first") { draw(S.hero, model); return "hero"; } // the First frame row: the edit as Klein made it, on every frame
     if (live) { draw(live, model); return "live"; }
     if (pic) {
-      if (still && draw(sharpFrame("shot", sourcePath(S.shot, p.path)), S.shot.frames ? p.cs : S.shot.space)) native = true; // paused: native size
+      if (still && draw(sharpFrame("shot", sourcePath(S.shot, p.path)), S.shot.frames ? S.shot.framesSpace ?? p.cs : S.shot.space)) native = true; // paused: native size
       else if (!(S.shot.frames && (drawsDeep(S.playing, holds(deepShot)) || exactOnly) &&
-                 draw(deepShot.get(exactOnly ? colour.exactFrame(deepShot.frames, S.frame) : S.frame), p.cs))) draw(pic, S.shot.space); // the review's EXR frames: paused, all in, or the colour tools moved
+                 draw(deepShot.get(exactOnly ? colour.exactFrame(deepShot.frames, S.frame) : S.frame), S.shot.framesSpace ?? p.cs))) draw(pic, S.shot.space); // the review's EXR frames: paused, all in, or the colour tools moved
       if (pic === held.canvas) return "held";
       if (still) keepFrame(pic);
       return "shot";
@@ -2832,7 +2835,7 @@ function refreshInspector(force = false) { // on every redraw: place the box, re
 
 function inspectSource() { // the file on show and what it holds: EXR frames in their own space, or a movie's codes
   const sh = S.shot, frames = !!sh?.frames;
-  const space = sh ? (frames ? S.plate.cs : sh.space) : S.plate.cs;
+  const space = sh ? (frames ? sh.framesSpace ?? S.plate.cs : sh.space) : S.plate.cs;
   return { path: sourcePath(sh, S.plate.path), movie: !!sh && !frames, space: space === "@model" ? modelSpace() : space };
 }
 
