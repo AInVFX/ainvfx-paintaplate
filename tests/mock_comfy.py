@@ -419,10 +419,14 @@ async def view_route(request):
 
 async def upload_route(request):
     slow = STATE.get("slow")
-    if slow and slow[1] > 0:  # armed by /mock/slow: this upload waits, as on a slow link
+    if slow and slow[1] > 0:  # armed by /mock/slow: this upload waits, as on a slow link, `seconds` or until /mock/release
         slow[1] -= 1
         EVENTS.append(("slow upload", time.time()))
-        await asyncio.sleep(slow[0])
+        STATE["release"] = asyncio.Event()
+        try:
+            await asyncio.wait_for(STATE["release"].wait(), slow[0])
+        except asyncio.TimeoutError:
+            pass
     data = await request.post()
     f, sub = data["image"], data.get("subfolder", "")
     d = os.path.join(folder("input"), sub)
@@ -471,6 +475,12 @@ async def free_route(request):  # ComfyUI releases memory between prompts: here,
 async def slow_route(request):  # mock only: the next `times` uploads wait `seconds` before they are read
     body = await request.json()
     STATE["slow"] = [float(body.get("seconds", 3)), int(body.get("times", 1))]
+    return web.json_response({})
+
+
+async def release_route(request):  # mock only: the upload /mock/slow holds goes on now
+    if STATE.get("release"):
+        STATE["release"].set()
     return web.json_response({})
 
 
@@ -526,6 +536,7 @@ async def start():
     app.router.add_post("/free", free_route)
     app.router.add_post("/mock/oom", oom_route)
     app.router.add_post("/mock/slow", slow_route)
+    app.router.add_post("/mock/release", release_route)
     app.router.add_get("/mock/events", lambda r: web.json_response(EVENTS))
     app.router.add_get("/ws", ws_route)
     app.router.add_routes(download_routes())

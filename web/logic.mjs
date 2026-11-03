@@ -509,6 +509,18 @@ export function panelSize(kind, wanted, view, { least, stage, around }) {
   return Math.round(Math.max(least, Math.min(wanted, room)));
 }
 
+// ---------- The model warm-up ----------
+// warmAll's last line. It goes to the status line only while that line still says what the page said at start: once a plate
+// was opened or closed, the status line holds a newer message, and the log keeps this one. A warm-up job that an opening, an
+// edit or a close cancelled (stopEverything) has not loaded its model, so the line then says so, never « every model loaded ».
+// 3 Nov: a close that cancelled the warm-up's last job showed « Ready: every model loaded » in place of « Plate closed ».
+export function warmEnd(seconds, missed, startShown) {
+  const s = Math.round(seconds);
+  if (missed) return { status: false, text: `Model warm-up done in ${s} s: ${missed} of its jobs did not finish, so the first edit loads their models.` };
+  if (startShown) return { status: true, text: `Ready: every model loaded in ${s} s, so the first edit starts at once. Open a plate.` };
+  return { status: false, text: `Model warm-up done in ${s} s: every model loaded.` };
+}
+
 // ---------- SDR to HDR ----------
 // Lightricks' LTX 2.5 SDR-to-HDR IC-LoRA makes 16-bit HDR from an SDR shot. It runs at full size for an EXR plate, unless
 // switched off; a video plate stays SDR. A relight keeps the plate's own values under a smooth light ratio, which stay HDR,
