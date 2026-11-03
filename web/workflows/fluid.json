@@ -69,6 +69,8 @@
  "5": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
+   "width": 0,
+   "height": 0,
    "images": [
     "4",
     0
@@ -83,6 +85,8 @@
   "_meta": {
    "title": "Control video as a movie: the Fluid: keyframes row shows it",
    "slots": {
+    "width": "movie_width",
+    "height": "movie_height",
     "filename_prefix": "control_prefix",
     "images": "fluid_control"
    },

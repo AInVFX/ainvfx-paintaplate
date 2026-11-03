@@ -258,7 +258,7 @@ class FitToPlate(io.ComfyNode):
         n, h, w = min(plate.shape[0], image.shape[0]), plate.shape[1], plate.shape[2]
         if mask is None or not bool(mask.any()):  # nothing to composite (a relight alone): the plate stands, nothing is fitted
             return io.NodeOutput(plate[:n], torch.zeros((n, h, w), dtype=torch.float32))
-        image = resize(image[:n], h, w)
+        image = image[:n]  # at its own size: Fit to Plate enlarges only the window around the matte, with a Lanczos-3
         masks = np.zeros((1, 8, 8), np.float32) if mask is None else mask[:n].float().cpu().numpy()
         bar = comfy.utils.ProgressBar(2 * n)
         images, out = mathops.fit_to_plate(
@@ -599,12 +599,15 @@ class SaveMovie(io.ComfyNode):
                 io.Int.Input("crf", default=18, min=0, max=51, optional=True,
                              tooltip="x264's quality: 18 as core Save Video, lower is closer to the frames. The playback "
                                      "proxy and the review use 12."),
+                io.Int.Input("width", default=0, min=0, max=8192, optional=True,
+                             tooltip="The movie's width: 0 keeps the frames' size. Scaled with Lanczos while it converts."),
+                io.Int.Input("height", default=0, min=0, max=8192, optional=True, tooltip="The movie's height: 0 keeps the frames' size."),
             ],
             is_output_node=True,
         )
 
     @classmethod
-    def execute(cls, images, fps, filename_prefix, crf=18) -> io.NodeOutput:
+    def execute(cls, images, fps, filename_prefix, crf=18, width=0, height=0) -> io.NodeOutput:
         n, h, w = images.shape[0], images.shape[1], images.shape[2]
         folder, name, counter, sub, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory(), w, h)
         file = f"{name}_{counter:05}_.mp4"
@@ -613,7 +616,8 @@ class SaveMovie(io.ComfyNode):
         def frame(i):  # as core Save Video: scaled by 255 and clipped, not rounded
             return np.clip(255.0 * images[i].float().cpu().numpy(), 0, 255).astype(np.uint8)
 
-        plateio.write_movie(frame, n, os.path.join(folder, file), fps, workers=WORKERS, crf=crf, tick=lambda: bar.update(1))
+        plateio.write_movie(frame, n, os.path.join(folder, file), fps, workers=WORKERS, crf=crf, tick=lambda: bar.update(1),
+                            size=(width, height))
         return io.NodeOutput(ui={"images": [{"filename": file, "subfolder": sub, "type": "output"}], "animated": [True]})
 
 

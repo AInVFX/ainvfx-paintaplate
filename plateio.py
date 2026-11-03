@@ -493,12 +493,14 @@ def scan_folder(folder: str) -> dict:
 
 
 def write_movie(frame_at, n: int, path: str, fps: float, workers: int = 8, crf: int = 18, preset: str = "veryfast",
-                tick=None) -> None:
+                tick=None, size: tuple | None = None) -> None:
     """An H.264 movie for the page to play, as core Save Video makes it (crf 18, yuv420p, BT.709 matrix and primaries, the
     sRGB transfer tag, limited range), only faster: the frames convert to YUV several at once and x264 runs at preset
     veryfast with its own threads. Core took 8.3 s for 121 frames at 1920 x 1088 on an RTX PRO 6000 pod (28 Oct)."""
     first = np.ascontiguousarray(frame_at(0))
     h, w = first.shape[:2]
+    if size and all(size):  # (width, height): scaled with swscale's Lanczos while converting, as the viewer's canvas wants it
+        w, h = size[0] - size[0] % 2, size[1] - size[1] % 2
     with av.open(path, "w") as out:
         st = out.add_stream("libx264", rate=Fraction(fps).limit_denominator(1001))
         st.width, st.height, st.pix_fmt = w, h, "yuv420p"
@@ -509,7 +511,8 @@ def write_movie(frame_at, n: int, path: str, fps: float, workers: int = 8, crf: 
 
         def yuv(i):  # swscale with the BT.709 matrix, full-range RGB in and limited range out, as core converts
             a = first if i == 0 else np.ascontiguousarray(frame_at(i))
-            f = av.VideoFrame.from_ndarray(a, format="rgb24").reformat(format="yuv420p", dst_colorspace=1)
+            f = av.VideoFrame.from_ndarray(a, format="rgb24").reformat(width=w, height=h, format="yuv420p", dst_colorspace=1,
+                                                                        interpolation="LANCZOS")
             if tick:
                 tick()
             return f

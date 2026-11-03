@@ -107,7 +107,12 @@ def save_png(img, kind, prefix, i=None):
     return {"filename": name, "subfolder": sub, "type": kind}
 
 
+MOVIE = [0, 0]  # the movie size the job asks for (movie_width, movie_height), as Save Movie takes it; 0: the frames' own
+
+
 def save_mp4(frames, prefix, fps=24.0):
+    if all(MOVIE) and frames[0].shape[:2] != (MOVIE[1], MOVIE[0]):
+        frames = [np.asarray(Image.fromarray((np.clip(f, 0, 1) * 255).astype(np.uint8)).resize(tuple(MOVIE), Image.LANCZOS), np.float32) / 255 for f in frames]
     sub, _, stem = prefix.rpartition("/")
     d = os.path.join(folder("output"), sub)
     os.makedirs(d, exist_ok=True)
@@ -179,6 +184,7 @@ async def execute(pid, prompt):
         await steps(pid, 1, 0.2)
         raise RuntimeError("Allocation on device 0 would exceed allowed memory. (out of memory)")
     v = inputs_by_slot(prompt)
+    MOVIE[:] = [int(v.get('movie_width') or 0), int(v.get('movie_height') or 0)]  # as Save Movie takes them
     o = {}
     if "spec" in outs:  # ingest
         frames, spec = read_plate(v["path"], v.get("max_frames", 121), pad=True)

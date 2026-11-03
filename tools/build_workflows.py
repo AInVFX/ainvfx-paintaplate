@@ -210,7 +210,7 @@ def ingest():
     real = g("ImageFromBatch", _title="Real frames (no padding)", image=load[0], batch_index=0, length=load[4])
     shown = colour(g, real, Slot("color_space", "@model"), Slot("proxy_space", "@model"), "Proxy values")
     proxy = g("ImageScaleToMaxDimension", image=shown, upscale_method="area", largest_size=Slot("proxy_size", 960))
-    g("PaintAPlate_SaveMovie", _title="Playback proxy", _output="proxy", filename_prefix=Slot("video_prefix", "paintaplate/plate/proxy"),
+    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Playback proxy", _output="proxy", filename_prefix=Slot("video_prefix", "paintaplate/plate/proxy"),
       images=proxy, fps=load[3], crf=12)
     g("PreviewAny", _title="Plate spec", _output="spec", source=load[5])
     g.save("ingest")
@@ -360,7 +360,7 @@ def clean():
                                                  latent=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])[2])
     g("PaintAPlate_SaveFrames", _title="Clean frames", _output="frames", images=decoded, format=Slot("frames_format", "png"),
       filename_prefix=Slot("prefix", "paintaplate/plate/clean/f"))
-    g("PaintAPlate_SaveMovie", _title="Clean shot (erased areas regenerated)", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/clean"), images=decoded, fps=load[3])
+    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Clean shot (erased areas regenerated)", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/clean"), images=decoded, fps=load[3])
     g.save("clean")
 
 
@@ -408,7 +408,7 @@ def cleanup():
     decoded = g("VAEDecodeTiled", tile_size=512, overlap=64, temporal_size=128, temporal_overlap=32, vae=vae, samples=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])
     g("PaintAPlate_SaveFrames", _title="Clean frames", _output="frames", images=decoded, format=Slot("frames_format", "png"),
       filename_prefix=Slot("prefix", "paintaplate/plate/full/clean/f"))
-    g("PaintAPlate_SaveMovie", _title="Clean shot at full size", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/full/clean"), images=decoded, fps=load[3])
+    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Clean shot at full size", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/full/clean"), images=decoded, fps=load[3])
     g.save("cleanup")
 
 
@@ -453,7 +453,7 @@ def shot():
     decoded = g("VAEDecodeTiled", tile_size=512, overlap=64, temporal_size=128, temporal_overlap=32, samples=cropped[2], vae=vae)
     g("PaintAPlate_SaveFrames", _title="Shot frames", _output="frames", images=decoded, format=Slot("frames_format", "png"),
       filename_prefix=Slot("prefix", "paintaplate/plate/shot/f"))
-    g("PaintAPlate_SaveMovie", _title="Shot video (whole frame regenerated)", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/shot"), images=decoded, fps=load[3])
+    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Shot video (whole frame regenerated)", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/shot"), images=decoded, fps=load[3])
     g.save("shot")
 
 
@@ -481,7 +481,7 @@ def matte():
     g.link_slot(follow, "element", "follow_element")  # dropped for an erase matte: the object is the first-frame mask
     grey = g("MaskToImage", mask=follow[0])
     g("PaintAPlate_SaveFrames", _title="Matte frames", _output="frames", images=grey, filename_prefix=Slot("prefix", "paintaplate/plate/matte/m"))
-    movie = g("PaintAPlate_SaveMovie", _title="Matte movie (grey): its row in the Render panel shows it", _output="movie", images=grey,
+    movie = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Matte movie (grey): its row in the Render panel shows it", _output="movie", images=grey,
               fps=load[3], crf=18, filename_prefix=Slot("video_prefix", ""))
     g.link_slot(movie, "images", "matte_movie")
     g("PreviewAny", _title="How the matte followed", _output="follow", source=follow[1])
@@ -531,7 +531,7 @@ def comp():
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=small, on_true=relit)
     _, final = fitted(g, base, gen, union)
     real = g("ImageFromBatch", image=final, batch_index=0, length=load[4])
-    g("PaintAPlate_SaveMovie", _title="Composite preview", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/comp"), images=real, fps=load[3])
+    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Composite preview", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/comp"), images=real, fps=load[3])
     g.save("comp")
 
 
@@ -572,18 +572,16 @@ def review():
     g = Graph()
     load, _, final = composite(g)
     real = g("ImageFromBatch", image=final, batch_index=0, length=load[4])
-    movie = g("ImageScaleToMaxDimension", upscale_method="lanczos", largest_size=1920,
-              image=colour(g, real, Slot("color_space", "@model"), Slot("movie_space", "@model"), "Movie values"))
-    g("PaintAPlate_SaveMovie", _title="Review movie (full-size composite, H.264)", _output="review", images=movie, fps=load[3], crf=12,
+    movie = colour(g, real, Slot("color_space", "@model"), Slot("movie_space", "@model"), "Movie values")  # Save Movie scales it
+    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Review movie (full-size composite, H.264)", _output="review", images=movie, fps=load[3], crf=12,
       filename_prefix=Slot("review_prefix", "paintaplate/plate/review"))
     frames = g("PaintAPlate_SaveFrames", _title="Review frames (half-float EXR, image sequences only)", _output="frames",
                images=real, format="exr", filename_prefix=Slot("frames_prefix", ""))
     g.link_slot(frames, "images", "review_frames")  # dropped for a video plate
     # What the viewer plays for an image sequence: log values (ACEScct, `view_space`), so the 8-bit movie shows what its EXR
     # frames show at full precision. The review movie above stays in the model space, for the zip. Dropped for a video plate.
-    view = g("PaintAPlate_SaveMovie", _title="Viewer movie (image sequences: log values, the look of the EXR frames)", _output="view",
-             images=g("ImageScaleToMaxDimension", upscale_method="lanczos", largest_size=1920,
-                      image=colour(g, real, Slot("color_space", "@model"), Slot("view_space", "ACEScct"), "Viewer movie values")),
+    view = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Viewer movie (image sequences: log values, the look of the EXR frames)", _output="view",
+             images=colour(g, real, Slot("color_space", "@model"), Slot("view_space", "ACEScct"), "Viewer movie values"),
              fps=load[3], crf=12, filename_prefix=Slot("view_prefix", ""))
     g.link_slot(view, "images", "review_view")
     g.save("review")
@@ -608,7 +606,7 @@ def export():
     matte_frames = g("ImageFromBatch", image=g("MaskToImage", mask=fit[1]), batch_index=0, length=load[4])
     g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed", _output="matte", images=matte_frames,
       filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))
-    movie = g("PaintAPlate_SaveMovie", _title="Matte movie (grey): the Export row shows it", _output="matte_movie", images=matte_frames,
+    movie = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Matte movie (grey): the Export row shows it", _output="matte_movie", images=matte_frames,
               fps=load[3], crf=18, filename_prefix=Slot("matte_video_prefix", ""))
     g.link_slot(movie, "images", "export_matte_movie")
     g.save("export")
@@ -647,7 +645,7 @@ def fluid():
     size = g("GetImageSize", image=model)
     control = g("PaintAPlate_KeyframeVideo", _title="Control video: the keyframes on black", width=size[0], height=size[1],
                 frames=size[2], keys=Slot("keys", "[]"))
-    shown = g("PaintAPlate_SaveMovie", _title="Control video as a movie: the Fluid: keyframes row shows it", _output="control",
+    shown = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Control video as a movie: the Fluid: keyframes row shows it", _output="control",
               images=control, fps=load[3], crf=18, filename_prefix=Slot("control_prefix", ""))
     g.link_slot(shown, "images", "fluid_control")
     lora = g("LTXICLoRALoaderModelOnly", _title="ainvfx-fluid IC-LoRA (reads its downscale factor)",
@@ -725,7 +723,7 @@ def hdr():
     g("PaintAPlate_SaveFrames", _title="HDR frames (half-float EXR, ACES2065-1)", _output="hdr", format="exr",
       images=colour(g, linear[1], "ACEScg", HDR_SPACE, "ACEScg to ACES2065-1"), filename_prefix=Slot("prefix", "paintaplate/plate/hdr/f"))
     # the same frames as an 8-bit movie for the viewer, in log values (ACEScct, `view_space`): the look of the EXR frames
-    g("PaintAPlate_SaveMovie", _title="HDR movie (log values: the look of the EXR frames)", _output="movie", fps=Slot("movie_fps", 24.0),
+    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="HDR movie (log values: the look of the EXR frames)", _output="movie", fps=Slot("movie_fps", 24.0),
       crf=12, images=colour(g, linear[1], "ACEScg", Slot("view_space", "ACEScct"), "HDR movie values"),
       filename_prefix=Slot("video_prefix", "paintaplate/plate/hdr_movie"))
     g.save("hdr")

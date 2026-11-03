@@ -238,6 +238,8 @@
  "15": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
+   "width": 0,
+   "height": 0,
    "images": [
     "13",
     0
@@ -252,6 +254,8 @@
   "_meta": {
    "title": "Matte movie (grey): its row in the Render panel shows it",
    "slots": {
+    "width": "movie_width",
+    "height": "movie_height",
     "filename_prefix": "video_prefix",
     "images": "matte_movie"
    },

@@ -427,6 +427,8 @@
  "28": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
+   "width": 0,
+   "height": 0,
    "fps": 24.0,
    "crf": 12,
    "images": [
@@ -438,6 +440,8 @@
   "_meta": {
    "title": "HDR movie (log values: the look of the EXR frames)",
    "slots": {
+    "width": "movie_width",
+    "height": "movie_height",
     "fps": "movie_fps",
     "filename_prefix": "video_prefix"
    },

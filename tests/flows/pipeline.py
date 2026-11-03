@@ -77,8 +77,8 @@ def pass_rows(page, U):
     and open. A second click, or Esc, gives the latest result back."""
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-    U.open_path(page, "plates/desk.mp4")
-    page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
+    U.open_path(page, "plates/desk.mp4")  # waits for desk's own spec: the plate before also says fps
+    page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden", timeout=60000)
     page.evaluate(U.WATCH)
     page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(U.REVIEWED), 240000, "the full-size composite of the paint")
@@ -140,8 +140,8 @@ def hdr_video(page, U):
     sequence that the player reads at full precision, and Export writes that sequence instead of a video file."""
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-    U.open_path(page, "plates/desk.mp4")
-    page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
+    U.open_path(page, "plates/desk.mp4")  # waits for desk's own spec: the plate before also says fps
+    page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden", timeout=60000)
     U.check(not page.is_hidden("#hdr-switch") and not page.is_checked("#hdr-on"), "a video plate: SDR to HDR shows, off by default")
     page.click("#hdr-on")
     U.check(not page.is_hidden("#hdr-confirm") and not page.is_checked("#hdr-on"), "turning it on asks first, and stays off until confirmed")

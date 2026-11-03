@@ -534,3 +534,18 @@ class DepthTest(unittest.TestCase):
         self.assertEqual(found["float EXR"][1], "float32")
         for name in ("10-bit ProRes", "16-bit PNG", "half EXR", "float EXR"):
             self.assertGreater(found[name][2], 256, name)
+
+
+class NativeMovieTest(unittest.TestCase):
+    def test_a_movie_comes_at_the_size_asked(self):
+        """Save Movie's size: every movie the page plays at the plate's native size, scaled with Lanczos while it encodes."""
+        rng = np.random.default_rng(9)
+        frames = [rng.integers(0, 256, (36, 64, 3), np.uint8) for _ in range(3)]
+        with tempfile.TemporaryDirectory() as d:
+            for size, want in ((None, (64, 36)), ((128, 72), (128, 72)), ((129, 73), (128, 72))):
+                path = os.path.join(d, "m.mp4")
+                plateio.write_movie(lambda i: frames[i], 3, path, 24.0, workers=2, size=size)
+                with av.open(path) as c:
+                    st = c.streams.video[0]
+                    self.assertEqual((st.width, st.height), want)
+        print("movies at the size asked: as the frames, 2x, and odd sides rounded to even for H.264")
