@@ -289,7 +289,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | --- | --- |
 | Tuning | The tuning block. |
 | What Klein sees | `editImage`, `maskAt`, and `captionFor` (the prompt writer). |
-| Plate | `openPlate`, `warmAll` (models load at page open), the opening steps. |
+| Plate | `openPlate`, `warmAll` (models load at page open; `logic.warmEnd` words its last line, on the status line only while the start's message is there), the opening steps. |
 | Decoded frames | The frame caches and the green stripe of cached frames. |
 | Playback, as in RV | Play, pause, seek, in and out points. |
 | The picture | `render`, `renderFluid`, the overlays (strokes, live previews, wipe). Every source is drawn through OCIO from the colour space its values are in. Once the shot of the current edits exists, it shows on every frame, paused or playing; the plate shows only in the wipe or while O is held. `#view` names what it shows in `data-picture`, and whether it drew full-precision frames in `data-precision`. |

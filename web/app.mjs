@@ -14,7 +14,7 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
   erasePrompt, erasesPaint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
-import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning } from "./logic.mjs";
+import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, warmEnd } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -355,7 +355,8 @@ function closePlate(message = "Plate closed: its frames left the browser's memor
 }
 
 async function warmAll() { // every model loads while the person looks at the page: the first edit and the first shot start at once
-  const t0 = performance.now(), vram = (S.vram = (await (await fetch("/system_stats")).json()).devices?.[0]?.vram_total ?? 0);
+  const t0 = performance.now(), start = $("#status").textContent; // what the page said at start: the warm-up's line replaces only that
+  const vram = (S.vram = (await (await fetch("/system_stats")).json()).devices?.[0]?.vram_total ?? 0);
   // ComfyUI keeps its history in memory until it restarts: a model that a prompt in it used is still loaded
   const history = Object.values(await (await fetch("/history?max_items=200")).json());
   const used = new Set(history.flatMap((h) => Object.values(h.prompt?.[2] ?? {}).map((n) => n.class_type)));
@@ -364,8 +365,10 @@ async function warmAll() { // every model loads while the person looks at the pa
   const jobs = [["edit", "ReferenceMultiLatent", { base: tiny, reference: tiny, start: tiny, mask, caption: "warm up", seed: 0, steps: 1, denoise: 1,
     grow: 0, feather: 1, sigma: 1 }], ["prompt", "TextGenerate", { image: tiny, request: "Say yes.", system: "Answer with one word.", max_length: 4 }]];
   if (vram >= WARM_ALL_VRAM) jobs.push(["warm", "LTXVConditioning", {}]); // on a smaller card LTX would push the edit models out
-  for (const [name, cls, values] of jobs) if (!used.has(cls)) await run(name, values, { kind: "warm" }).done.catch(() => {}); // SAM loads in a second
-  if (!S.plate) status(`Ready: every model loaded in ${Math.round((performance.now() - t0) / 1000)} s, so the first edit starts at once. Open a plate.`);
+  let missed = 0; // jobs an opening, an edit or a close cancelled (stopEverything), or that failed: their models are not loaded
+  for (const [name, cls, values] of jobs) if (!used.has(cls)) await run(name, values, { kind: "warm" }).done.catch(() => { missed += 1; }); // SAM loads in a second
+  const end = warmEnd((performance.now() - t0) / 1000, missed, !S.plate && $("#status").textContent === start);
+  if (end.status) status(end.text); else log(end.text);
 }
 
 // What opening a plate does, in order. Ingest's nodes tell the page which step runs.
