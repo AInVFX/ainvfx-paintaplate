@@ -352,6 +352,10 @@ dialog.open { width: min(900px, 94vw); }
 .inspector-mark { position: absolute; z-index: 6; width: 13px; height: 13px; margin: -7px 0 0 -7px; pointer-events: none;
   border: 1px solid #fff; box-shadow: 0 0 0 1px #000; border-radius: 2px; }
 #view.native { image-rendering: pixelated; }
+#help { width: min(680px, 94vw); }
+#help .tabs { flex-wrap: wrap; }
+.help-steps { margin: 0; padding-left: 20px; color: var(--muted); }
+.help-steps li { margin: 0 0 8px; }
 .models table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .models td { padding: 6px 8px; border-top: 1px solid rgba(128, 128, 128, 0.25); vertical-align: top; }
 .models small { opacity: 0.7; }

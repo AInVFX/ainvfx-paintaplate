@@ -2757,6 +2757,15 @@ function modeKey(k, combo) { // the keys of an interactive edit, as RV's paramsc
 
 function resetDisplay() { leaveMode(); setDisplay({ ...colour.DISPLAY }); }
 
+// ---------- Help, in tabs: Getting started, Tools, Keys, Viewer and colour, Render and export, Models and licences ----------
+
+function showHelp(tab = "keys") {
+  for (const b of $$("#help [role=tab]")) b.setAttribute("aria-selected", String(b.dataset.help === tab));
+  for (const s of $$("#help .help-tab")) s.hidden = s.dataset.help !== tab;
+  if (!$("#help").open) $("#help").showModal();
+}
+for (const b of $$("#help [role=tab]")) b.onclick = () => (b.dataset.help === "models" ? showModels() : showHelp(b.dataset.help));
+
 // ---------- Models and licences (models.mjs, web/models.json) ----------
 // The models behind the result on show, from the workflows that made it, then every model the pack downloads.
 
@@ -2783,7 +2792,7 @@ async function showModels() {
   $("#models-shown").replaceChildren(Object.assign(document.createElement("p"), { textContent: what }), ...(behind.length ? [table(behind, true)] : []));
   $("#models-all").replaceChildren(table(registry.models, false));
   $("#models").dataset.shown = behind.map((m) => m.id).join(",");
-  $("#models").showModal();
+  showHelp("models");
 }
 
 // ---------- The colour inspector, as OpenRV's (F5; inspector.mjs) ----------
@@ -2980,7 +2989,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["2:1", "2", () => pixelZoom(2), !p], ["4:1", "4", () => pixelZoom(4), !p], ["1:2", "Shift+2", () => pixelZoom(1 / 2), !p], ["1:4", "Shift+4", () => pixelZoom(1 / 4), !p],
       ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["Full screen", "`", fullScreen],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
-    ["Help", [["Keys", "?", () => $("#help").showModal()], ["Models and licences", "", showModels]]],
+    ["Help", [["Getting started", "", () => showHelp("start")], ["Keys", "?", () => showHelp("keys")], ["Models and licences", "", showModels]]],
   ];
   const f = S.fluid;
   if (f && keying()) groups.splice(2, 0, ["Fluid", [["Generate", "Enter", () => generateFluid().catch(quiet), !f.keys.length],
@@ -3188,7 +3197,7 @@ $("#redo-btn").onclick = () => redo();
 $("#save-btn").onclick = () => S.plate && saveScene().catch(quiet);
 $("#x-graph").onclick = () => saveGraph().catch(quiet);
 $("#open-btn").onclick = $("#empty-open").onclick = openDialog;
-$("#help-btn").onclick = () => $("#help").showModal();
+$("#help-btn").onclick = () => showHelp("start");
 $("#stop").onclick = () => stopGenerating();
 $("#op-cancel").onclick = () => cancelOpen();
 $("#close-btn").onclick = () => closePlate();
@@ -3355,7 +3364,7 @@ addEventListener("keydown", (e) => {
   else if (low === "f" && mod && !e.shiftKey) widthZoom(); // RV's Frame Width; the page takes Ctrl+F from the browser's find
   else if (/^Digit[1-8]$/.test(e.code) && !mod && !e.altKey) { const n = +e.code.slice(5); pixelZoom(e.shiftKey ? (n > 1 ? 1 / n : 1) : n); } // RV: 1 to 8 N:1, Ctrl+2 to 8 1:N
   else if (k === "`") fullScreen();
-  else if (k === "?") $("#help").showModal();
+  else if (k === "?") showHelp("keys");
   else if (TOOLS[low] && !mod) pickTool(TOOLS[low]);
   else if (low === "n" && !mod) nextEdit();
   else if (low === "x" && !mod) setRub(!S.rub);

@@ -177,11 +177,19 @@ def fluid_wipe_and_models(page, U):
     page.click("#view", button="right")
     page.locator("#ctx li.group > span:first-child", has_text="Help").first.hover()
     page.get_by_role("menuitem", name="Models and licences", exact=True).click()
-    page.wait_for_function("document.querySelector('#models').open", timeout=10000)
+    page.wait_for_function("document.querySelector('#help').open && !document.querySelector('#models').hidden", timeout=10000)
     shown = page.get_attribute("#models", "data-shown").split(",")
     rows = page.eval_on_selector_all("#models-all tr", "els => els.length")
     U.check({"fluid", "ltx", "ltx-text", "ltx-vae"} <= set(shown) and "klein" not in shown and rows == 15,
             f"Models and licences: the models behind the fluid shot, then every model: {shown}, {rows} rows")
+    page.keyboard.press("Escape")
+    page.keyboard.press("?")
+    shown = page.evaluate("[...document.querySelectorAll('#help .help-tab')].filter((t) => !t.hidden).map((t) => t.dataset.help)")
+    page.click("#help [role=tab][data-help=start]")
+    start = page.evaluate("[...document.querySelectorAll('#help .help-tab')].filter((t) => !t.hidden).map((t) => t.dataset.help)")
+    tabs = page.eval_on_selector_all("#help [role=tab]", "els => els.map((e) => e.textContent)")
+    U.check(shown == ["keys"] and start == ["start"] and len(tabs) == 6,
+            f"Help is in tabs: ? opens Keys, a tab shows its part alone: {shown}, {start}, {tabs}")
     page.keyboard.press("Escape")
 
 
