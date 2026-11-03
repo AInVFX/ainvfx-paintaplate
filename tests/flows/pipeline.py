@@ -167,6 +167,9 @@ def hdr_video(page, U):
     names = zipfile.ZipFile(dl.value.path()).namelist()
     U.check("half-float EXR" in fmt and any(n.startswith("export/") and n.endswith(".exr") for n in names) and not any(n.endswith((".mp4", ".webm")) and n.startswith("export/") for n in names),
             f"Export writes the EXR sequence, not a video file: {fmt}, {[n for n in names if n.startswith('export/')][:3]}")
+    listed = zipfile.ZipFile(dl.value.path()).read("MODELS.md").decode() if "MODELS.md" in names else ""
+    U.check("FLUX 3 Image Klein" in listed and listed.count("\n| ") >= 4,
+            f"the zip lists the models behind the result, with their licences (MODELS.md): {listed.splitlines()[6:9]}")
     U.check(not errors, f"no console errors with SDR to HDR on a video plate: {errors}")
 
 

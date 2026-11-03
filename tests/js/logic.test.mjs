@@ -424,7 +424,7 @@ test("the Render panel shows each finished pass that made a movie", () => {
   assert.deepEqual(passMovie("clean", r, pv), { url: "clean.mp4", space: "@model", frames: null });
   assert.deepEqual(passMovie("review", r, pv), { url: "view.mp4", space: "ACEScct", frames: "output:x/frames_#####_.exr" });
   assert.deepEqual(passMovie("review", { review: "review.mp4", reviewSpace: "Rec.1886" }, pv), { url: "review.mp4", space: "Rec.1886", frames: null });
-  assert.deepEqual(passMovie("hdr", r, pv, { log: "ACEScct" }), { url: "hdr.mp4", space: "ACEScct", frames: null });
+  assert.deepEqual(passMovie("hdr", r, pv, { log: "ACEScct" }), { url: "hdr.mp4", space: "ACEScct", frames: null, framesSpace: null });
   assert.equal(passMovie("track", r, pv), null);
   assert.equal(passMovie("full", {}, pv), null);
 });
@@ -455,6 +455,10 @@ test("the tracking steps and the export show their matte, grey, through the conf
   assert.equal(passMovie("trackfull", {}, pv, spaces), null, "no full-size paint matte yet: no row to click");
   assert.equal(passMovie("erase", r, pv).space, "@model", "a config without a data space: the model space");
   assert.deepEqual([...MATTE_PASSES].sort(), ["erase", "export", "track", "trackfull"]);
+  const h = { hdrMovie: "hdr.mp4", hdrFrames: "output:p/v1/full/hdr/f_#####_.exr" };
+  assert.deepEqual(passMovie("hdr", h, pv, { log: "ACEScct", hdr: "ACES2065-1" }),
+    { url: "hdr.mp4", space: "ACEScct", frames: "output:p/v1/full/hdr/f_#####_.exr", framesSpace: "ACES2065-1" }, "SDR to HDR's row: its EXR frames, as the review row has its own");
+  assert.equal(passMovie("hdr", { hdrMovie: "hdr.mp4" }, pv, { log: "ACEScct", hdr: "ACES2065-1" }).framesSpace, null, "no frames: no space");
   assert.equal(dataSpace([{ name: "ACEScg", data: false }, { name: "Raw", data: true }]), "Raw");
   assert.equal(dataSpace([{ name: "sRGB", data: false }]), null);
 });
@@ -463,7 +467,9 @@ test("a fluid shot's rows: its keyframes, its shot, and SDR to HDR for a 16-bit 
   const sdr = { control: "c.mp4", preview: "p.mp4", hdr: false, movie: null }, hdr = { ...sdr, hdr: true, movie: "h.mp4" };
   assert.deepEqual(fluidPasses(sdr).map((x) => [x.id, x.label, x.url, x.space]),
     [["fluid_keys", "Fluid: keyframes", "c.mp4", "@model"], ["fluid_shot", "Fluid: shot", "p.mp4", "@model"]]);
-  assert.deepEqual(fluidPasses(hdr, { log: "ACEScct" }).at(-1), { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: "h.mp4", space: "ACEScct" });
+  assert.deepEqual(fluidPasses(hdr, { log: "ACEScct" }).at(-1), { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: "h.mp4", space: "ACEScct", frames: null, framesSpace: null });
+  assert.deepEqual(fluidPasses({ ...hdr, hdrFrames: "output:f/hdr/f_#####_.exr" }, { log: "ACEScct", hdr: "ACES2065-1" }).at(-1).framesSpace, "ACES2065-1",
+    "its EXR frames in their own space, for the viewer to draw and inspect");
   assert.deepEqual(fluidPasses(null), [], "no fluid shot made: no rows");
   assert.deepEqual(fluidPasses({ preview: "p.mp4" }).map((x) => x.id), ["fluid_shot"], "a shot made before its control movie existed");
 });

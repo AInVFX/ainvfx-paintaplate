@@ -682,5 +682,29 @@ class VAEFloat32(io.ComfyNode):
         return io.NodeOutput(vae)
 
 
+class KeepBlack(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_KeepBlack",
+            display_name="Keep Black",
+            category=CATEGORY,
+            description="Where the SDR shot is black, its own black instead of SDR to HDR's noise (mathops.keep_black): below "
+                        "`low` of luminance the SDR values, above `high` the HDR ones, a smooth step between. Both in ACEScg.",
+            inputs=[io.Image.Input("hdr", tooltip="SDR to HDR's frames, ACEScg scene-linear."),
+                    io.Image.Input("sdr", tooltip="The SDR shot they were made from, in ACEScg."),
+                    io.Float.Input("low", default=0.001, min=0.0, max=1.0, step=0.0001),
+                    io.Float.Input("high", default=0.01, min=0.0, max=1.0, step=0.0001)],
+            outputs=[io.Image.Output(display_name="image")],
+        )
+
+    @classmethod
+    def execute(cls, hdr, sdr, low, high) -> io.NodeOutput:
+        n = min(hdr.shape[0], sdr.shape[0])
+        with ThreadPoolExecutor(WORKERS) as pool:
+            out = list(pool.map(lambda i: mathops.keep_black(hdr[i].float().cpu().numpy(), sdr[i].float().cpu().numpy(), low, high), range(n)))
+        return io.NodeOutput(torch.from_numpy(np.stack(out)))
+
+
 NODES = [LoadPlate, SavePlate, ColorSpace, SaveFrames, SaveMovie, FitToPlate, RelightTransfer, FollowMatte, LevelFill, LivePreview,
-         KeyframeVideo, HDRMatch, VAEFloat32]
+         KeyframeVideo, HDRMatch, VAEFloat32, KeepBlack]

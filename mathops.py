@@ -98,6 +98,23 @@ def _axis_taps(n_in: int, n_out: int) -> tuple[np.ndarray, np.ndarray, np.ndarra
     return i0, np.minimum(i0 + 1, n_in - 1), (src - i0).astype(np.float32)
 
 
+AP1_LUMA = np.array([0.2722287168, 0.6740817658, 0.0536895174], np.float32)  # ACEScg's luminance weights
+
+
+def keep_black(hdr: np.ndarray, sdr: np.ndarray, low: float = 0.001, high: float = 0.01) -> np.ndarray:
+    """Where the SDR shot is black, its own black instead of SDR to HDR's: the IC-LoRA's frames carry noise there (a
+    16-bit fluid shot on a blank plate, 2 Nov: 67% of its pixels below 0.01, median 6.6e-4, its channels spread by 41%
+    of the luminance), while the shot they come from holds the plate's black. `hdr` and `sdr` in ACEScg, scene-linear:
+    below `low` (the SDR shot's luminance) the frame takes the SDR values, above `high` SDR to HDR's, a smooth step
+    between; values above 1.0 stay wherever the shot is not black."""
+    y = np.asarray(sdr[..., :3], np.float32) @ AP1_LUMA
+    t = np.clip((y - low) / max(high - low, 1e-9), 0.0, 1.0)
+    w = (t * t * (3.0 - 2.0 * t))[..., None]
+    out = np.array(hdr, np.float32, copy=True)
+    out[..., :3] = sdr[..., :3] * (1.0 - w) + out[..., :3] * w
+    return out
+
+
 def lanczos_taps(n_out: int, n_in: int, start: int = 0, count: int | None = None, a: int = 3):
     """Lanczos-`a` taps for output samples start..start+count of a resize from n_in to n_out samples, pixel centres
     aligned: (indices, weights), each (count, taps), the weights of a row summing to 1, edges repeated. Shrinking widens

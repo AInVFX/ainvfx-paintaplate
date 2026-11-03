@@ -722,11 +722,14 @@ def hdr():
     linear = g("LTXVHDRDecodePostprocess", _title="ACEScct to ACEScg scene-linear", image=decoded, transfer="acescct", exposure=0.0,
                save_exr=False, exr_color_space="acescg", output_dir="paintaplate/hdr_unused", filename_prefix="frame",
                half_precision=True)
+    # where the SDR shot is black, its own black: the IC-LoRA's frames are noisy there (the viewer measured a 16-bit fluid
+    # shot, 2 Nov: 67% of pixels below 0.01, its channels spread by 41% of the luminance)
+    linear = g("PaintAPlate_KeepBlack", hdr=linear[1], sdr=colour(g, load[0], "@model", "ACEScg", "The SDR shot in ACEScg"), low=0.001, high=0.01)
     g("PaintAPlate_SaveFrames", _title="HDR frames (half-float EXR, ACES2065-1)", _output="hdr", format="exr",
-      images=colour(g, linear[1], "ACEScg", HDR_SPACE, "ACEScg to ACES2065-1"), filename_prefix=Slot("prefix", "paintaplate/plate/hdr/f"))
+      images=colour(g, linear, "ACEScg", HDR_SPACE, "ACEScg to ACES2065-1"), filename_prefix=Slot("prefix", "paintaplate/plate/hdr/f"))
     # the same frames as an 8-bit movie for the viewer, in log values (ACEScct, `view_space`): the look of the EXR frames
     g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="HDR movie (log values: the look of the EXR frames)", _output="movie", fps=Slot("movie_fps", 24.0),
-      crf=12, images=colour(g, linear[1], "ACEScg", Slot("view_space", "ACEScct"), "HDR movie values"),
+      crf=12, images=colour(g, linear, "ACEScg", Slot("view_space", "ACEScct"), "HDR movie values"),
       filename_prefix=Slot("video_prefix", "paintaplate/plate/hdr_movie"))
     g.save("hdr")
 

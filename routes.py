@@ -102,14 +102,33 @@ def collect(folder: str, parts: list[str]) -> list[tuple[str, str]]:
     return files
 
 
-def build_zip(folder: str, name: str, parts: list[str]) -> str:
-    """The zip of `parts`, stored (EXR, PNG and video are already compressed) and reused while it is current."""
+MODELS_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "models.json")
+
+
+def models_md(ids: list[str]) -> str:
+    """MODELS.md for an export's zip: the models behind the result, which the page names (models.modelsBehind), each with
+    its licence and source as web/models.json states them, in the registry's order. Unknown ids are left out."""
+    with open(MODELS_JSON) as f:
+        reg = json.load(f)
+    rows = [m for m in reg["models"] if m["id"] in set(ids)]
+    out = ["# Models behind this export", "", f"Made with AInVFX Paint a plate. Each model keeps its own licence, as its Hugging Face "
+           f"repository states it at the pinned revision (read {reg.get('checked', '')}).", "",
+           "| Model | File | What it did | Licence | Source |", "| --- | --- | --- | --- | --- |"]
+    for m in rows:
+        out.append(f"| {m['name']} | `{m['file']}` at `{m.get('revision', '')[:7]}` | {m.get('use', '')} | [{m.get('licence', '')}]({m.get('licence_url', '')}) | {m.get('source', '')} |")
+    return "\n".join(out) + "\n"
+
+
+def build_zip(folder: str, name: str, parts: list[str], models: list[str] | None = None) -> str:
+    """The zip of `parts`, stored (EXR, PNG and video are already compressed) and reused while it is current, with
+    MODELS.md when the page names the models behind the result."""
     files = collect(folder, parts)
     if "export" in parts and not any(arc.startswith("export/") for _, arc in files):
         raise FileNotFoundError("This run has no export yet")
     if not files:  # a fluid shot's zip holds no export: its HDR frames, its plate and its preview
         raise FileNotFoundError("Nothing to download in this run")
-    target = os.path.join(folder, f"{name}__{'-'.join(p for p in PARTS if p in parts)}.zip")
+    mark = f"__m{hashlib.sha1(','.join(models).encode()).hexdigest()[:8]}" if models else ""  # another list of models, another zip
+    target = os.path.join(folder, f"{name}__{'-'.join(p for p in PARTS if p in parts)}{mark}.zip")
     newest = max(os.path.getmtime(p) for p, _ in files)
     if os.path.exists(target) and os.path.getmtime(target) >= newest:
         return target
@@ -118,6 +137,8 @@ def build_zip(folder: str, name: str, parts: list[str]) -> str:
         with zipfile.ZipFile(part, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
             for path, arc in sorted(files, key=lambda f: f[1]):
                 z.write(path, arc)
+            if models:
+                z.writestr("MODELS.md", models_md(models))
         os.replace(part, target)
     finally:
         if os.path.exists(part):
@@ -130,7 +151,8 @@ async def download(request: web.Request) -> web.StreamResponse:
     try:
         folder = folders.run_folder(request.query.get("run", ""))
         name = zip_name(request.query.get("name", ""), folder)
-        path = await asyncio.to_thread(build_zip, folder, name, asked)
+        models = [m for m in request.query.get("models", "").split(",") if m]
+        path = await asyncio.to_thread(build_zip, folder, name, asked, models)
     except FileNotFoundError as exc:
         raise web.HTTPNotFound(text=str(exc)) from exc
     return web.FileResponse(path, headers={"Content-Disposition": f'attachment; filename="{name}.zip"'})

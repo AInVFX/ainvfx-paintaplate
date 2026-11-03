@@ -397,3 +397,17 @@ class LanczosTest(unittest.TestCase):
             inside = mk > 1.0 / 1024
             self.assertLess(np.abs(a - b)[inside].max(), 1e-5)  # the window holds every pixel the matte reaches
         print("Fit to Plate: a shot at half size enlarged in the matte's window only, the same pixels inside the matte")
+
+
+class KeepBlackTest(unittest.TestCase):
+    def test_black_where_the_sdr_shot_is_black(self):
+        """SDR to HDR's noise in the blacks gives way to the SDR shot's own black; elsewhere its values stay, above 1.0 too."""
+        rng = np.random.default_rng(6)
+        sdr = np.zeros((20, 40, 3), np.float32); sdr[:, 20:] = 0.5
+        hdr = rng.normal(6.6e-4, 4e-3, (20, 40, 3)).astype(np.float32); hdr[:, 20:] = 3.0
+        out = mathops.keep_black(hdr, sdr)
+        self.assertEqual(float(np.abs(out[:, :20]).max()), 0.0, "the black half takes the shot's black, no noise")
+        self.assertTrue(np.allclose(out[:, 20:], 3.0), "the lit half keeps SDR to HDR's values, above 1.0 included")
+        mid = mathops.keep_black(np.full((1, 1, 3), 1.0, np.float32), np.full((1, 1, 3), 0.0055, np.float32))
+        self.assertTrue(0.0055 < float(mid[0, 0, 0]) < 1.0, "between the thresholds, a blend")
+        print("Keep Black: the SDR shot's black where it is black, SDR to HDR's values elsewhere")

@@ -622,6 +622,9 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
   const url = (at && keyPath(store, at[1])) ?? (id === "review" ? store?.review : null);
   if (!url) return null;
   if (id === "review") return { url, space: store.playSpace ?? store.reviewSpace ?? "@model", frames: store.reviewFrames ?? null };
+  // SDR to HDR: its 8-bit movie in log values, and its EXR frames in their own space (ACES2065-1, `spaces.hdr`), for the viewer
+  // to draw and inspect them as they are (setShot's fifth argument, framesSpace)
+  if (id === "hdr") return { url, space: spaces.log ?? "@model", frames: store.hdrFrames ?? null, framesSpace: store.hdrFrames ? spaces.hdr ?? null : null };
   return { url, space: MATTE_PASSES.has(id) ? spaces.data ?? "@model" : id === "hdr" ? spaces.log ?? "@model" : "@model", frames: null };
 }
 // A fluid shot's own passes, shown from the Render panel with its keyframes open or closed: the control video LTX was
@@ -629,7 +632,8 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
 export const fluidPasses = (result, spaces = {}) => (result ? [
   result.control && { id: "fluid_keys", label: "Fluid: keyframes", url: result.control, space: "@model" },
   result.preview && { id: "fluid_shot", label: "Fluid: shot", url: result.preview, space: "@model" },
-  result.hdr && result.movie && { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: result.movie, space: spaces.log ?? "@model" },
+  result.hdr && result.movie && { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: result.movie, space: spaces.log ?? "@model",
+    frames: result.hdrFrames ?? null, framesSpace: result.hdrFrames ? spaces.hdr ?? null : null },
 ].filter(Boolean) : []);
 // The config's data colour space (OCIO's isdata, such as the studio config's Raw), from the spaces /paintaplate/ocio lists
 export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? null;

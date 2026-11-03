@@ -610,16 +610,16 @@ const matteSpace = () => dataSpace(S.ocio.info?.spaces) ?? modelSpace();
 // A fluid shot's rows (logic.fluidPasses) show with its keyframes open or closed; open, the viewer leaves the keyframes for
 // the pass, and the latest is the fluid shot itself.
 function choosePass(id) {
-  const r = S.renders.get(S.heroKey), fluid = fluidPasses(S.fluid?.result, { log: logSpace() }).find((x) => x.id === id);
+  const r = S.renders.get(S.heroKey), fluid = fluidPasses(S.fluid?.result, { log: logSpace(), hdr: HDR_FRAMES }).find((x) => x.id === id);
   const label = id === "first" ? "First frame" : fluid?.label ?? STAGES.find((x) => x.id === id)?.label;
   S.pass = S.pass === id ? null : id;
   if (!S.pass) { if (keying() && S.fluid.result) showFluid(); else showLatest(); hud("The latest result", 1500); return stagesUI(); }
   if (id === "first") { pause(); seek(0); render(); }
   else {
-    const m = fluid ?? passMovie(id, r, previewOf(r), { log: logSpace(), data: matteSpace() });
+    const m = fluid ?? passMovie(id, r, previewOf(r), { log: logSpace(), data: matteSpace(), hdr: HDR_FRAMES });
     if (!m) { S.pass = null; return stagesUI(); }
     if (fluid && keying()) S.fluid.view = "result"; // the keyframes stay as painted; the viewer shows the pass
-    setShot(m.url, fluid && keying() ? "fluid" : S.heroKey, m.space, m.frames ?? null);
+    setShot(m.url, fluid && keying() ? "fluid" : S.heroKey, m.space, m.frames ?? null, m.framesSpace ? { framesSpace: m.framesSpace } : undefined);
   }
   hud(`${label}: on show. Click it again, or Esc, for the latest`, 3000);
   log(`Viewer: ${label} on show`);
@@ -1311,7 +1311,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
       prefix: `${dir}/plate`, video_prefix: `${dir}/preview`, control_prefix: `${dir}/control/c`, ...plateMovie(p), live: liveEvery() },
       { kind: "fluid", progress: (x) => { if (f.busy) { f.busy.progress = x; fluidUI(); fluidProgress(); } }, live: showLive }).done;
     let path = `${folderOf("fluid", out, "video")}/plate/${(f.blankPath ?? p.spec.source).split(/[\\/]/).pop()}`;
-    let movie = null; // an HDR fluid shot as an 8-bit movie in log values: the look of its EXR frames
+    let movie = null, hdrFrames = null; // an HDR fluid shot as an 8-bit movie in log values: the look of its EXR frames
     const hdr = f.depth === HDR_DEPTH && S.hdrReady; // a 16-bit scene opened while SDR to HDR is off makes an 8-bit shot
     if (hdr) { // 16-bit: SDR to HDR makes the fluid shot an EXR plate, so every edit on it renders in HDR too
       const t1 = performance.now();
@@ -1319,13 +1319,15 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
       const made = await run("hdr", { path, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps), ...plateMovie(p), prefix: `${dir}/hdr/f`, video_prefix: `${dir}/hdr_movie`, view_space: logSpace(), movie_fps: p.fps, live: liveEvery() },
         { kind: "fluid", progress: (x) => { if (f.busy) { f.busy.progress = x; fluidUI(); fluidProgress(); } }, live: showLive }).done;
       path = folderOf("hdr", made, "hdr");
+      const hf = outputFile("hdr", made, "hdr");
+      hdrFrames = hf ? `output:${hf.subfolder}/${framePattern(hf.filename)}` : null; // for the Fluid: SDR to HDR row
       const m = outputFile("hdr", made, "movie");
       movie = m ? viewUrl(m) : null;
       log(`Fluid v${v}: SDR to HDR took ${((performance.now() - t1) / 1000).toFixed(1)} s: half-float EXR frames in ${path}`);
     }
     const control = outputFile("fluid", out, "control"); // the control video, for the Fluid: keyframes row
     f.result = { v, sig, seed: f.seed, prompt, path, hdr, movie, run: fluidRun(path), preview: viewUrl(outputFile("fluid", out, "video")),
-      control: control ? viewUrl(control) : null };
+      control: control ? viewUrl(control) : null, hdrFrames };
     (f.made ??= new Map()).set(sig, f.result);
     f.view = "result";
     f.busy = null;
@@ -2224,6 +2226,8 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       prefix: `${base}/full/hdr/f`, video_prefix: `${base}/full/hdr_movie`, view_space: logSpace(), movie_fps: p.fps, live: here() ? liveEvery() : 0 },
       { kind: "hdr", progress, live: here() ? showLive : null }).done;
     r.hdr = folderOf("hdr", out, "hdr");
+    const hf = outputFile("hdr", out, "hdr"); // its EXR frames, for its row: drawn and inspected in ACES2065-1
+    r.hdrFrames = hf ? `output:${hf.subfolder}/${framePattern(hf.filename)}` : null;
     const m = outputFile("hdr", out, "movie");
     r.hdrMovie = m ? viewUrl(m) : null; // the SDR to HDR row of the Render panel shows it
   });
@@ -2308,9 +2312,18 @@ function mattesOf(found) { // a missing matte is the other one again: the workfl
 const PARTS = { export: "the result in the plate's format", matte: "its matte", review: "a review movie", shot: "the regenerated shot",
   hdr: "the HDR frames", plate: "the fluid shot", preview: "its preview movie" };
 
-function download(parts = ["export", "matte"]) {
+// The models behind the result on show (models.workflowsFor, modelsBehind): Help > Models and licences shows them, and an
+// export's zip lists them in MODELS.md, which the download route writes from web/models.json
+async function modelsOnShow() {
+  registry ??= await (await fetch(new URL("models.json", location.href), { cache: "no-store" })).json();
+  const edits = S.edits.filter((e) => e.on !== false && e.patch), fluid = !!S.fluid?.result && S.fluid.on !== false;
+  const tools = edits.map((e) => e.tool), hdr = S.hdrReady && (fluid && !!S.fluid.result.hdr || (tools.length > 0 && wantsHdr(S.plate?.spec, tools, hdrOn())));
+  return modelsBehind(registry, workflowsFor({ tools, fluid, hdr }), (n) => WF[n]?.prompt);
+}
+async function download(parts = ["export", "matte"]) {
+  const models = (await modelsOnShow().catch(() => [])).map((m) => m.id).join(",");
   const a = Object.assign(document.createElement("a"), {
-    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, parts: parts.join(",") })}`,
+    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, parts: parts.join(","), models })}`,
     download: `${S.exported.name}.zip` });
   document.body.append(a); a.click(); a.remove();
   const what = parts.map((k) => PARTS[k]);
@@ -2815,10 +2828,7 @@ function resetDisplay() { leaveMode(); setDisplay({ ...colour.DISPLAY }); }
 
 let registry = null;
 async function showModels() {
-  registry ??= await (await fetch(new URL("models.json", location.href), { cache: "no-store" })).json();
-  const edits = S.edits.filter((e) => e.on !== false && e.patch), fluid = !!S.fluid?.result && S.fluid.on !== false;
-  const flows = workflowsFor({ tools: edits.map((e) => e.tool), fluid, hdr: !!(S.toHdr && S.hdrReady) });
-  const behind = modelsBehind(registry, flows, (n) => WF[n]?.prompt);
+  const behind = await modelsOnShow(); // the pipeline's rule, as the export's MODELS.md (S.toHdr became the plate's own rule in 1.7.0)
   const link = (text, href) => Object.assign(document.createElement("a"), { textContent: text, href, target: "_blank", rel: "noopener" });
   const table = (rows, uses) => {
     const t = document.createElement("table");

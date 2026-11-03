@@ -362,8 +362,41 @@
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
+    "1",
+    0
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "ACEScg"
+  },
+  "_meta": {
+   "title": "The SDR shot in ACEScg",
+   "slots": {
+    "config": "config"
+   }
+  }
+ },
+ "25": {
+  "class_type": "PaintAPlate_KeepBlack",
+  "inputs": {
+   "hdr": [
     "23",
     1
+   ],
+   "sdr": [
+    "24",
+    0
+   ],
+   "low": 0.001,
+   "high": 0.01
+  }
+ },
+ "26": {
+  "class_type": "PaintAPlate_ColorSpace",
+  "inputs": {
+   "image": [
+    "25",
+    0
    ],
    "config": "ocio://studio-config-latest",
    "source": "ACEScg",
@@ -376,12 +409,12 @@
    }
   }
  },
- "25": {
+ "27": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "format": "exr",
    "images": [
-    "24",
+    "26",
     0
    ],
    "filename_prefix": "paintaplate/plate/hdr/f"
@@ -394,12 +427,12 @@
    "output": "hdr"
   }
  },
- "26": {
+ "28": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
-    "23",
-    1
+    "25",
+    0
    ],
    "config": "ocio://studio-config-latest",
    "source": "ACEScg",
@@ -413,7 +446,7 @@
    }
   }
  },
- "27": {
+ "29": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
    "width": 0,
@@ -421,7 +454,7 @@
    "fps": 24.0,
    "crf": 12,
    "images": [
-    "26",
+    "28",
     0
    ],
    "filename_prefix": "paintaplate/plate/hdr_movie"

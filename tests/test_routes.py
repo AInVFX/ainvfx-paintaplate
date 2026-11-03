@@ -394,3 +394,21 @@ class FluidExport(unittest.TestCase):
                 self.assertEqual(sorted(z.namelist()), sorted(names))
             with self.assertRaises(FileNotFoundError):
                 routes.build_zip(d, "fluid_v1", ["export", "matte"])
+
+
+class ModelsZipTest(unittest.TestCase):
+    def test_models_md_lists_the_models_behind_an_export(self):
+        """MODELS.md in an export's zip: the models the page names, with their licences from web/models.json."""
+        text = routes.models_md(["klein", "ltx", "nothing-like-this"])
+        self.assertIn("FLUX 3 Image Klein", text)
+        self.assertIn("FLUX Kommunity License", text)
+        self.assertNotIn("nothing-like-this", text)
+        self.assertEqual(text.count("\n| "), 4, "a header row, its rule and two models")  # the table's lines
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "export"))
+            open(os.path.join(d, "export", "plate.mp4"), "wb").write(b"0")
+            path = routes.build_zip(d, "shot", ["export"], ["klein"])
+            names = zipfile.ZipFile(path).namelist()
+            self.assertIn("MODELS.md", names)
+            self.assertNotEqual(path, routes.build_zip(d, "shot", ["export"], ["klein", "ltx"]), "another list, another zip")
+        print("MODELS.md: the models behind an export with their licences, in its zip")
