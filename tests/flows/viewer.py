@@ -85,10 +85,25 @@ def native_and_inspector(page, port, U):
         page.keyboard.down("Shift"); page.mouse.click(*client(x, y)); page.keyboard.up("Shift")
         page.wait_for_function(f"document.querySelector('#inspector').dataset.pixel === '{x},{y}' && !!document.querySelector('#inspector').dataset.value", timeout=20000)
         return [float(v) for v in page.evaluate(ATTR)[1].split(",")]
+    def inspect_held(x, y):  # the same, with the read held open while the frame redraws: the race CI met on 3 Nov
+        hold = {"on": True, "routes": []}
+        page.route("**/paintaplate/pixel?*", lambda r: hold["routes"].append(r) if hold["on"] else r.continue_())
+        page.evaluate(PAIRS)
+        page.keyboard.down("Shift"); page.mouse.click(*client(x, y)); page.keyboard.up("Shift")
+        for k in range(8):  # each move redraws the frame, and each redraw refreshes the box
+            page.mouse.move(*client(x - 200 - 40 * k, y - 200)); page.wait_for_timeout(50)
+        hold["on"] = False
+        for r in hold["routes"]: r.continue_()
+        page.wait_for_function(f"document.querySelector('#inspector').dataset.pixel === '{x},{y}' && !!document.querySelector('#inspector').dataset.value", timeout=20000)
+        page.unroute("**/paintaplate/pixel?*")
+        value = page.evaluate(ATTR)[1]
+        stale = [p for p in page.evaluate("window.__pairs") if p[0] == f"{x},{y}" and p[1] and p[1] != value]
+        return [float(v) for v in value.split(",")], stale, len(hold["routes"])
     got = inspect(20, 10)
     U.check(got == [4.0, 0.5, float(np.float16(-0.1))], f"Shift+click: the inspector reads the EXR's half floats as stored, at native pixel 20, 10: {got}")
-    got = inspect(3800, 2000)
+    got, stale, held = inspect_held(3800, 2000)
     U.check(got == [0.25, 0.75, 16.0], f"and at 3800, 2000, values above 1.0: {got}")
+    U.check(held and not stale, f"while that read is held on its way ({held} held), redraws never show the new point with another point's values: {stale[:2]}")
     hover = page.evaluate(ATTR)[0]; page.mouse.move(*client(1000, 1000)); page.wait_for_timeout(400)
     U.check(page.evaluate(ATTR)[0] == hover == "3800,2000", "the sampled point stays where it was clicked, as in RV: moving the pointer does not change it")
     page.keyboard.press("ArrowRight"); page.wait_for_function("document.querySelector('#inspector').dataset.frame === '1'", timeout=20000)
@@ -121,6 +136,8 @@ def native_and_inspector(page, port, U):
     page.keyboard.press("f")
 
 
+PAIRS = """() => { const i = document.querySelector('#inspector'); window.__pairs = [];
+  new MutationObserver(() => window.__pairs.push([i.dataset.pixel, i.dataset.value])).observe(i, { attributes: true, attributeFilter: ['data-pixel', 'data-value'] }); }"""
 PIXEL = "(([x, y]) => [...document.querySelector('#view').getContext('2d').getImageData(x, y, 1, 1).data].slice(0, 3))"
 TO_CANVAS = """(([cx, cy]) => { const v = document.querySelector('#view'), r = v.getBoundingClientRect();
   return [Math.floor((cx - r.left) / r.width * v.width), Math.floor((cy - r.top) / r.height * v.height)]; })"""
