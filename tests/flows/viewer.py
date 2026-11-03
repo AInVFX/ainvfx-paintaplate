@@ -44,13 +44,14 @@ def parity_table(page):
 
 def upload_4k(port):
     """A 3840 x 2160 EXR plate of 3 frames with known values: [4.0, 0.5, -0.1] at (20, 10), [0.25, 0.75, 16.0] at
-    (3800, 2000), a one-pixel checker of 4.0 and 0.0 at (100, 100) to (131, 131), 0.18 elsewhere."""
+    (3800, 2000) on frame 0 (its green grows by 1 a frame), a one-pixel checker of 4.0 and 0.0 at (100, 100) to (131, 131), 0.18 elsewhere."""
     import OpenEXR
     img = np.full((2160, 3840, 3), 0.18, np.float32)
     img[10, 20], img[2000, 3800] = [4.0, 0.5, -0.1], [0.25, 0.75, 16.0]
     yy, xx = np.mgrid[100:132, 100:132]
     img[100:132, 100:132] = (((yy + xx) % 2) * 4.0)[..., None]
     for n in range(3):
+        img[2000, 3800, 1] = 0.75 + n  # the frames differ at 3800, 2000: the inspector must follow the frame
         path = f"/tmp/native4k.{1001 + n}.exr"
         OpenEXR.File({"compression": OpenEXR.PIZ_COMPRESSION, "type": OpenEXR.scanlineimage}, {"RGB": img.astype(np.float16)}).write(path)
         b = uuid.uuid4().hex
@@ -74,16 +75,44 @@ def native_and_inspector(page, port, U):
             f"one source pixel per canvas pixel: a one-pixel checker of 4.0 and 0.0 alternates on the canvas: {checker[:8]}")
     page.keyboard.press("F5")
     U.check(page.is_visible("#inspector"), "F5 shows the Color Inspector")
+    ATTR = "(() => { const i = document.querySelector('#inspector'); return [i.dataset.pixel, i.dataset.value, i.dataset.frame]; })()"
 
-    def inspect(x, y):
+    def client(x, y):
         r = page.evaluate("(() => { const r = document.querySelector('#view').getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; })()")
-        page.mouse.move(r[0] + (x + 0.5) / 3840 * r[2], r[1] + (y + 0.5) / 2160 * r[3])
+        return r[0] + (x + 0.5) / 3840 * r[2], r[1] + (y + 0.5) / 2160 * r[3]
+
+    def inspect(x, y):  # RV: Shift+click samples
+        page.keyboard.down("Shift"); page.mouse.click(*client(x, y)); page.keyboard.up("Shift")
         page.wait_for_function(f"document.querySelector('#inspector').dataset.pixel === '{x},{y}' && !!document.querySelector('#inspector').dataset.value", timeout=20000)
-        return [float(v) for v in page.evaluate("document.querySelector('#inspector').dataset.value").split(",")]
+        return [float(v) for v in page.evaluate(ATTR)[1].split(",")]
     got = inspect(20, 10)
-    U.check(got == [4.0, 0.5, float(np.float16(-0.1))], f"the inspector reads the EXR's half floats as stored, at native pixel 20, 10: {got}")
+    U.check(got == [4.0, 0.5, float(np.float16(-0.1))], f"Shift+click: the inspector reads the EXR's half floats as stored, at native pixel 20, 10: {got}")
     got = inspect(3800, 2000)
     U.check(got == [0.25, 0.75, 16.0], f"and at 3800, 2000, values above 1.0: {got}")
+    hover = page.evaluate(ATTR)[0]; page.mouse.move(*client(1000, 1000)); page.wait_for_timeout(400)
+    U.check(page.evaluate(ATTR)[0] == hover == "3800,2000", "the sampled point stays where it was clicked, as in RV: moving the pointer does not change it")
+    page.keyboard.press("ArrowRight"); page.wait_for_function("document.querySelector('#inspector').dataset.frame === '1'", timeout=20000)
+    U.check(page.evaluate(ATTR)[1] == "0.25,1.75,16", f"a new frame reads the same point again: {page.evaluate(ATTR)}")
+    page.keyboard.press("Home")
+    box = page.eval_on_selector("#inspector", "e => { const r = e.getBoundingClientRect(); return [r.left + 20, r.top + 10]; }")
+    start = client(3800, 2000)
+    page.mouse.move(*box); page.mouse.down(); page.mouse.move(box[0] - 300, box[1] - 200, steps=6); page.mouse.up(); page.wait_for_timeout(500)
+    moved = page.evaluate(ATTR)[0]
+    U.check(moved != "3800,2000", f"dragging the box moves the point it reads, as RV's widget: 3800,2000 to {moved}")
+    mark = page.eval_on_selector("#inspector-mark", "e => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }")
+    U.check(abs(mark[0] - (start[0] - 300)) < 3 and abs(mark[1] - (start[1] - 200)) < 3, f"the point moves with the box: {mark}")
+    inspect(20, 10)
+    page.keyboard.press("4"); page.wait_for_timeout(500)
+    mark = page.eval_on_selector("#inspector-mark", "e => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }")
+    want = client(20, 10)
+    U.check(abs(mark[0] - want[0]) < 3 and abs(mark[1] - want[1]) < 3, f"zoomed, the inspector's point follows the frame: {mark} against {want}")
+    page.keyboard.press("f")
+    page.keyboard.press("b")
+    cx, cy = client(1920, 1080); xy = page.evaluate(TO_CANVAS, [cx, cy]); before = page.evaluate(PIXEL, xy)
+    page.mouse.move(cx - 3, cy); page.mouse.down(); page.mouse.move(cx + 3, cy, steps=4); page.mouse.up(); page.wait_for_timeout(300)
+    U.check(page.evaluate(PIXEL, xy) != before and page.evaluate(ATTR)[0] == "20,10",
+            "with the inspector on, a plain click paints and leaves the sampled point alone, as RV's annotate mode with its inspector")
+    page.keyboard.press("Control+z")
     page.keyboard.press("F5")
     page.keyboard.press("1")
     page.wait_for_timeout(300)

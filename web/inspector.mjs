@@ -1,5 +1,5 @@
 // The colour inspector, as OpenRV's (src/lib/app/mu_rvui/inspector.mu at 0bd9675, read 2 Nov 2026): F5 shows it, as
-// toggleColorInspector in rvui.mu. RV lists the pixel in the image's own pixels (Native Pixel), its values as "%f", and
+// toggleColorInspector in rvui.mu; Shift+click samples, Shift+drag averages, the box drags the point with it. RV lists the pixel in the image's own pixels (Native Pixel), its values as "%f", and
 // the average of the pixels sampled with Shift held. RV shows either the source colour or the final colour; this
 // inspector shows both: the source values at full precision and native size, read on the server from the file on show
 // (/paintaplate/pixel), and the values drawn on screen, as 0 to 1 like RV's framebuffer read. Pure functions, tested in
@@ -30,6 +30,13 @@ export const formatValue = (v) => (Number.isFinite(v) ? v.toFixed(6) : "nan"); /
 
 export function addSample(avg, value) { // RV's running average while Shift is held
   return avg ? { sum: avg.sum.map((s, i) => s + value[i]), n: avg.n + 1 } : { sum: [...value], n: 1 };
+}
+
+// Where the box goes: beside the point, below and to the right, flipped to stay inside the viewport
+export function boxPlace(x, y, w, h, vw, vh, gap = 14) {
+  const bx = x + gap + w <= vw ? x + gap : Math.max(0, x - gap - w);
+  const by = y + gap + h <= vh ? y + gap : Math.max(0, y - gap - h);
+  return [Math.round(bx), Math.round(by)];
 }
 
 // The rows the inspector shows, top to bottom.

@@ -87,7 +87,8 @@
       <div id="wipe" class="wipe" hidden>
         <span class="label left">Plate</span><span class="label right">Result</span><span class="grip" title="Drag to compare"></span>
       </div>
-      <div id="inspector" class="inspector" hidden aria-live="polite"></div>
+      <div id="inspector-mark" class="inspector-mark" hidden></div>
+      <div id="inspector" class="inspector" hidden aria-live="polite" title="Drag to move the point it reads"></div>
       <p id="hud" class="hud" aria-live="polite"></p>
       <div id="opening" class="opening" hidden>
         <p id="op-title" class="op-title">Opening the plate</p>
@@ -213,7 +214,7 @@
       <dt>Shift+S, H</dt><dd>Saturation, hue, the same way. Backspace resets the one you edit, Esc leaves</dd>
       <dt>Shift+C, R, G, B, L</dt><dd>All channels, red, green, blue, luminance</dd>
       <dt>Shift+I</dt><dd>Invert</dd>
-      <dt>F5</dt><dd>Color Inspector, as in RV: the pixel under the pointer in the plate's own pixels, its values as stored, and the values on screen. Hold Shift while moving to average. The page takes F5, so it does not reload</dd>
+      <dt>F5</dt><dd>Color Inspector, as in RV: Shift+click a pixel to read it, Shift+drag to average; drag the box to move its point. It reads the plate's own pixels and values, and the values on screen, on every frame. The brush still paints with a plain click. The page takes F5, so it does not reload</dd>
       <dt>Right-click</dt><dd>Every action, by menu, with its key</dd>
     </dl>
     <p class="hint">RV uses E, C, R, G, B and L without Shift. Here E, B and L pick the tools. The values are RV's: contrast is 0 at rest and turns about 0.5, gamma acts before the other tools, invert before exposure.</p>

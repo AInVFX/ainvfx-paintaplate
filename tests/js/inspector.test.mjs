@@ -24,3 +24,10 @@ test("values as RV prints them, above 1.0 and below 0, and the running average",
   assert.ok(rows.some((r) => r[0] === "Average of 2"));
   assert.equal(rows.at(-3)[1], "2.000000");
 });
+
+import { boxPlace } from "../../web/inspector.mjs";
+
+test("the box sits beside the point and stays inside the viewport", () => {
+  assert.deepEqual(boxPlace(100, 100, 220, 120, 1000, 600), [114, 114]);
+  assert.deepEqual(boxPlace(900, 550, 220, 120, 1000, 600), [666, 416]);
+});
