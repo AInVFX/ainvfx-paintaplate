@@ -67,35 +67,24 @@
   }
  },
  "6": {
-  "class_type": "VAELoader",
+  "class_type": "PaintAPlate_VAEFloat32",
   "inputs": {
    "vae_name": "ltx-2.5-video-vae-conv-bf16.safetensors"
   },
   "_meta": {
+   "title": "Video VAE in float32",
    "slots": {
     "vae_name": "video_vae"
    }
   }
  },
  "7": {
-  "class_type": "LTXVVAEForceFloat32",
-  "inputs": {
-   "vae": [
-    "6",
-    0
-   ]
-  },
-  "_meta": {
-   "title": "Video VAE in float32"
-  }
- },
- "8": {
   "class_type": "VAELoader",
   "inputs": {
    "vae_name": "ltx-2.5-audio-vae-bf16.safetensors"
   }
  },
- "9": {
+ "8": {
   "class_type": "LTXVLoadConditioning",
   "inputs": {
    "file_name": "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors",
@@ -108,15 +97,15 @@
    }
   }
  },
- "10": {
+ "9": {
   "class_type": "LTXVConditioning",
   "inputs": {
    "positive": [
-    "9",
+    "8",
     0
    ],
    "negative": [
-    "9",
+    "8",
     0
    ],
    "frame_rate": 24.0
@@ -127,7 +116,7 @@
    }
   }
  },
- "11": {
+ "10": {
   "class_type": "EmptyLTXVLatentVideo",
   "inputs": {
    "width": [
@@ -145,23 +134,23 @@
    "batch_size": 1
   }
  },
- "12": {
+ "11": {
   "class_type": "LTXAddVideoICLoRAGuide",
   "inputs": {
    "positive": [
-    "10",
+    "9",
     0
    ],
    "negative": [
-    "10",
+    "9",
     1
    ],
    "vae": [
-    "7",
+    "6",
     0
    ],
    "latent": [
-    "11",
+    "10",
     0
    ],
    "image": [
@@ -182,11 +171,11 @@
    "tile_frames": 97
   }
  },
- "13": {
+ "12": {
   "class_type": "LTXVEmptyLatentAudio",
   "inputs": {
    "audio_vae": [
-    "8",
+    "7",
     0
    ],
    "frames_number": [
@@ -202,13 +191,13 @@
    }
   }
  },
- "14": {
+ "13": {
   "class_type": "RandomNoise",
   "inputs": {
    "noise_seed": 42
   }
  },
- "15": {
+ "14": {
   "class_type": "PaintAPlate_LivePreview",
   "inputs": {
    "model": [
@@ -236,70 +225,70 @@
    }
   }
  },
- "16": {
+ "15": {
   "class_type": "CFGGuider",
   "inputs": {
    "model": [
-    "15",
+    "14",
     0
    ],
    "positive": [
-    "12",
+    "11",
     0
    ],
    "negative": [
-    "12",
+    "11",
     1
    ],
    "cfg": 1.0
   }
  },
- "17": {
+ "16": {
   "class_type": "KSamplerSelect",
   "inputs": {
    "sampler_name": "euler"
   }
  },
- "18": {
+ "17": {
   "class_type": "ManualSigmas",
   "inputs": {
    "sigmas": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
   }
  },
- "19": {
+ "18": {
   "class_type": "LTXVConcatAVLatent",
   "inputs": {
    "video_latent": [
-    "12",
+    "11",
     2
    ],
    "audio_latent": [
-    "13",
+    "12",
     0
    ]
   }
  },
- "20": {
+ "19": {
   "class_type": "SamplerCustomAdvanced",
   "inputs": {
    "noise": [
-    "14",
+    "13",
     0
    ],
    "guider": [
-    "16",
+    "15",
     0
    ],
    "sampler": [
-    "17",
+    "16",
     0
    ],
    "sigmas": [
-    "18",
+    "17",
     0
    ],
    "latent_image": [
-    "19",
+    "18",
     0
    ]
   },
@@ -307,41 +296,41 @@
    "progress": true
   }
  },
- "21": {
+ "20": {
   "class_type": "LTXVSeparateAVLatent",
   "inputs": {
    "av_latent": [
+    "19",
+    0
+   ]
+  }
+ },
+ "21": {
+  "class_type": "LTXVCropGuides",
+  "inputs": {
+   "positive": [
+    "11",
+    0
+   ],
+   "negative": [
+    "11",
+    1
+   ],
+   "latent": [
     "20",
     0
    ]
   }
  },
  "22": {
-  "class_type": "LTXVCropGuides",
-  "inputs": {
-   "positive": [
-    "12",
-    0
-   ],
-   "negative": [
-    "12",
-    1
-   ],
-   "latent": [
-    "21",
-    0
-   ]
-  }
- },
- "23": {
   "class_type": "VAEDecodeTiled",
   "inputs": {
    "samples": [
-    "22",
+    "21",
     2
    ],
    "vae": [
-    "7",
+    "6",
     0
    ],
    "tile_size": 512,
@@ -350,11 +339,11 @@
    "temporal_overlap": 32
   }
  },
- "24": {
+ "23": {
   "class_type": "LTXVHDRDecodePostprocess",
   "inputs": {
    "image": [
-    "23",
+    "22",
     0
    ],
    "transfer": "acescct",
@@ -369,12 +358,45 @@
    "title": "ACEScct to ACEScg scene-linear"
   }
  },
- "25": {
+ "24": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
-    "24",
+    "1",
+    0
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "ACEScg"
+  },
+  "_meta": {
+   "title": "The SDR shot in ACEScg",
+   "slots": {
+    "config": "config"
+   }
+  }
+ },
+ "25": {
+  "class_type": "PaintAPlate_KeepBlack",
+  "inputs": {
+   "hdr": [
+    "23",
     1
+   ],
+   "sdr": [
+    "24",
+    0
+   ],
+   "low": 0.001,
+   "high": 0.01
+  }
+ },
+ "26": {
+  "class_type": "PaintAPlate_ColorSpace",
+  "inputs": {
+   "image": [
+    "25",
+    0
    ],
    "config": "ocio://studio-config-latest",
    "source": "ACEScg",
@@ -387,12 +409,12 @@
    }
   }
  },
- "26": {
+ "27": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "format": "exr",
    "images": [
-    "25",
+    "26",
     0
    ],
    "filename_prefix": "paintaplate/plate/hdr/f"
@@ -405,12 +427,12 @@
    "output": "hdr"
   }
  },
- "27": {
+ "28": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
-    "24",
-    1
+    "25",
+    0
    ],
    "config": "ocio://studio-config-latest",
    "source": "ACEScg",
@@ -424,13 +446,15 @@
    }
   }
  },
- "28": {
+ "29": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
+   "width": 0,
+   "height": 0,
    "fps": 24.0,
    "crf": 12,
    "images": [
-    "27",
+    "28",
     0
    ],
    "filename_prefix": "paintaplate/plate/hdr_movie"
@@ -438,6 +462,8 @@
   "_meta": {
    "title": "HDR movie (log values: the look of the EXR frames)",
    "slots": {
+    "width": "movie_width",
+    "height": "movie_height",
     "fps": "movie_fps",
     "filename_prefix": "video_prefix"
    },

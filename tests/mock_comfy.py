@@ -107,7 +107,12 @@ def save_png(img, kind, prefix, i=None):
     return {"filename": name, "subfolder": sub, "type": kind}
 
 
+MOVIE = [0, 0]  # the movie size the job asks for (movie_width, movie_height), as Save Movie takes it; 0: the frames' own
+
+
 def save_mp4(frames, prefix, fps=24.0):
+    if all(MOVIE) and frames[0].shape[:2] != (MOVIE[1], MOVIE[0]):
+        frames = [np.asarray(Image.fromarray((np.clip(f, 0, 1) * 255).astype(np.uint8)).resize(tuple(MOVIE), Image.LANCZOS), np.float32) / 255 for f in frames]
     sub, _, stem = prefix.rpartition("/")
     d = os.path.join(folder("output"), sub)
     os.makedirs(d, exist_ok=True)
@@ -179,6 +184,7 @@ async def execute(pid, prompt):
         await steps(pid, 1, 0.2)
         raise RuntimeError("Allocation on device 0 would exceed allowed memory. (out of memory)")
     v = inputs_by_slot(prompt)
+    MOVIE[:] = [int(v.get('movie_width') or 0), int(v.get('movie_height') or 0)]  # as Save Movie takes them
     o = {}
     if "spec" in outs:  # ingest
         frames, spec = read_plate(v["path"], v.get("max_frames", 121), pad=True)
@@ -288,6 +294,9 @@ async def execute(pid, prompt):
         m = resize(load_image(v["mask"], "L"), v["width"], v["height"])
         await steps(pid, 4, 1.0)
         o[outs["frames"]] = {"images": [save_png(m, "output", v["prefix"], i) for i in range(len(frames))][:1]}
+        if "movie" in outs:  # its grey movie, for its row in the Render panel
+            grey = np.dstack([np.asarray(m, np.float32).reshape(m.shape[:2])] * 3)
+            o[outs["movie"]] = {"images": [save_mp4([grey] * len(frames), v["video_prefix"], v.get("fps", 24.0))], "animated": [True]}
     elif "plate" in outs:  # fluid: each keyframe softened into a cloud, crossfaded to the next, written in the blank plate's format
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         h, w = frames[0].shape[:2]
@@ -308,8 +317,12 @@ async def execute(pid, prompt):
             writer.write(f)
         writer.close()
         o[outs["plate"]] = {"text": [f"1 file(s) in {d}\n{os.path.basename(writer.path)}"]}
+        if "control" in outs:  # the control video: black, each keyframe at its frame
+            at = {k["frame"]: np.asarray(Image.open(resolve(k["image"])).convert("RGB").resize((w, h)), np.float32) / 255 for k in keys}
+            o[outs["control"]] = {"images": [save_mp4([at.get(i, np.zeros((h, w, 3), np.float32)) for i in range(len(frames))],
+                                                       v["control_prefix"], spec["fps"])], "animated": [True]}
         o[outs["video"]] = {"images": [save_mp4(shot, v["video_prefix"], spec["fps"])], "animated": [True]}
-    elif "video" in outs or "export" in outs:  # comp and export: blend the shot over the plate through the matte
+    elif "video" in outs or "export" in outs or "exr" in outs:  # comp and export: blend the shot over the plate through the matte
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         n = spec["frames"]
         h, w = (v["height"], v["width"]) if "video" in outs else frames[0].shape[:2]
@@ -325,13 +338,25 @@ async def execute(pid, prompt):
         if "video" in outs:
             o[outs["video"]] = {"images": [save_mp4(out, v["video_prefix"], spec["fps"])], "animated": [True]}
         else:
-            d = os.path.join(folder("output"), v["prefix"])
+            d = os.path.join(folder("output"), v.get("prefix") or v.get("exr_prefix", "").rpartition("/")[0])
             os.makedirs(d, exist_ok=True)
-            save_mp4(out, f"{v['prefix']}/plate", spec["fps"])
+            if "export" in outs:  # Save Plate: dropped for an HDR result of a video plate, which writes EXR frames instead
+                save_mp4(out, f"{v['prefix']}/plate", spec["fps"])
             if "matte" in outs:
                 for i in range(n):
                     save_png(resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w)),
                              "output", v["matte_prefix"], i)
+            if "matte_movie" in outs:  # the export's matte as a grey movie, for the Export row
+                greys = [np.dstack([resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w), np.float32)] * 3) for i in range(n)]
+                o[outs["matte_movie"]] = {"images": [save_mp4(greys, v["matte_video_prefix"], spec["fps"])], "animated": [True]}
+            if "exr" in outs:  # an HDR result of a video plate: half-float EXR frames instead of the plate's format
+                sub = v["exr_prefix"].rpartition("/")[0]
+                os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
+                names = [f"f_{i + 1:05d}_.exr" for i in range(n)]
+                plateio.write_exrs(lambda i: out[i], [os.path.join(folder("output"), sub, f) for f in names])
+                o[outs["exr"]] = {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
+            if "export" not in outs:
+                return o
             o[outs["export"]] = {"text": [f"1 file(s) in {d}\nplate_00001_.webm"],
                                  "files": [{"filename": "plate_00001_.webm", "subfolder": v["prefix"], "type": "output"}]}
     else:

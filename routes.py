@@ -102,14 +102,33 @@ def collect(folder: str, parts: list[str]) -> list[tuple[str, str]]:
     return files
 
 
-def build_zip(folder: str, name: str, parts: list[str]) -> str:
-    """The zip of `parts`, stored (EXR, PNG and video are already compressed) and reused while it is current."""
+MODELS_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "models.json")
+
+
+def models_md(ids: list[str]) -> str:
+    """MODELS.md for an export's zip: the models behind the result, which the page names (models.modelsBehind), each with
+    its licence and source as web/models.json states them, in the registry's order. Unknown ids are left out."""
+    with open(MODELS_JSON) as f:
+        reg = json.load(f)
+    rows = [m for m in reg["models"] if m["id"] in set(ids)]
+    out = ["# Models behind this export", "", f"Made with AInVFX Paint a plate. Each model keeps its own licence, as its Hugging Face "
+           f"repository states it at the pinned revision (read {reg.get('checked', '')}).", "",
+           "| Model | File | What it did | Licence | Source |", "| --- | --- | --- | --- | --- |"]
+    for m in rows:
+        out.append(f"| {m['name']} | `{m['file']}` at `{m.get('revision', '')[:7]}` | {m.get('use', '')} | [{m.get('licence', '')}]({m.get('licence_url', '')}) | {m.get('source', '')} |")
+    return "\n".join(out) + "\n"
+
+
+def build_zip(folder: str, name: str, parts: list[str], models: list[str] | None = None) -> str:
+    """The zip of `parts`, stored (EXR, PNG and video are already compressed) and reused while it is current, with
+    MODELS.md when the page names the models behind the result."""
     files = collect(folder, parts)
     if "export" in parts and not any(arc.startswith("export/") for _, arc in files):
         raise FileNotFoundError("This run has no export yet")
     if not files:  # a fluid shot's zip holds no export: its HDR frames, its plate and its preview
         raise FileNotFoundError("Nothing to download in this run")
-    target = os.path.join(folder, f"{name}__{'-'.join(p for p in PARTS if p in parts)}.zip")
+    mark = f"__m{hashlib.sha1(','.join(models).encode()).hexdigest()[:8]}" if models else ""  # another list of models, another zip
+    target = os.path.join(folder, f"{name}__{'-'.join(p for p in PARTS if p in parts)}{mark}.zip")
     newest = max(os.path.getmtime(p) for p, _ in files)
     if os.path.exists(target) and os.path.getmtime(target) >= newest:
         return target
@@ -118,6 +137,8 @@ def build_zip(folder: str, name: str, parts: list[str]) -> str:
         with zipfile.ZipFile(part, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
             for path, arc in sorted(files, key=lambda f: f[1]):
                 z.write(path, arc)
+            if models:
+                z.writestr("MODELS.md", models_md(models))
         os.replace(part, target)
     finally:
         if os.path.exists(part):
@@ -130,7 +151,8 @@ async def download(request: web.Request) -> web.StreamResponse:
     try:
         folder = folders.run_folder(request.query.get("run", ""))
         name = zip_name(request.query.get("name", ""), folder)
-        path = await asyncio.to_thread(build_zip, folder, name, asked)
+        models = [m for m in request.query.get("models", "").split(",") if m]
+        path = await asyncio.to_thread(build_zip, folder, name, asked, models)
     except FileNotFoundError as exc:
         raise web.HTTPNotFound(text=str(exc)) from exc
     return web.FileResponse(path, headers={"Content-Disposition": f'attachment; filename="{name}.zip"'})
@@ -359,19 +381,31 @@ def plate_stat(rel: str) -> dict:
     return {"files": len(sts), "size": sum(s.st_size for s in sts), "mtime": max((s.st_mtime_ns for s in sts), default=0)}
 
 
-def plate_info(rel: str, config: str = "") -> dict:
-    """What the Open dialog says about a plate, and its file colour space guessed in `config`, for the viewer's OCIO."""
+def headroom(config: str, cs: str) -> float:
+    """The scene-linear value that code value 1.0 decodes to in colour space `cs`: 1.0 for sRGB, a display or a linear
+    space; above 1.0 for a log encoding (in the studio config, 2 Nov: ACEScct 222.9, ARRI LogC4 469.8, ADX16 65504), so
+    an integer plate in such a space still holds the values above 1.0 that SDR to HDR makes. 1.0 when it cannot be read."""
+    try:
+        return round(float(np.max(ocio.convert([np.ones((1, 1, 3), np.float32)], config, cs, "@linear")[0])), 3)
+    except Exception:
+        return 1.0
+
+
+def plate_info(rel: str, config: str = "", cs: str = "") -> dict:
+    """What the Open dialog says about a plate, its file colour space guessed in `config`, for the viewer's OCIO, and the
+    headroom of `cs` (else of that guess)."""
     full = folders.plate_path(rel)
     spec = plateio.probe_plate(full)
     first = spec["files"][0] if spec.get("files") else full
     keep = ("kind", "ext", "codec", "pix_fmt", "width", "height", "frames", "fps", "first_frame", "missing")
-    return {**plate_stat(rel), **{k: spec[k] for k in keep if k in spec},
-            "color_space": ocio.guess(config, plateio.guess_color_space(spec), first)}
+    guess = ocio.guess(config, plateio.guess_color_space(spec), first)
+    return {**plate_stat(rel), **{k: spec[k] for k in keep if k in spec}, "color_space": guess, "headroom": headroom(config, cs or guess)}
 
 
 async def stat(request: web.Request) -> web.Response:
     try:
-        return web.json_response(await asyncio.to_thread(plate_info, request.query.get("path", ""), request.query.get("config", "")))
+        return web.json_response(await asyncio.to_thread(plate_info, request.query.get("path", ""), request.query.get("config", ""),
+                                                         request.query.get("cs", "")))
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         return web.json_response({"error": str(exc)}, status=404)
 

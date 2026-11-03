@@ -98,6 +98,54 @@ def _axis_taps(n_in: int, n_out: int) -> tuple[np.ndarray, np.ndarray, np.ndarra
     return i0, np.minimum(i0 + 1, n_in - 1), (src - i0).astype(np.float32)
 
 
+AP1_LUMA = np.array([0.2722287168, 0.6740817658, 0.0536895174], np.float32)  # ACEScg's luminance weights
+
+
+def keep_black(hdr: np.ndarray, sdr: np.ndarray, low: float = 0.001, high: float = 0.01) -> np.ndarray:
+    """Where the SDR shot is black, its own black instead of SDR to HDR's: the IC-LoRA's frames carry noise there (a
+    16-bit fluid shot on a blank plate, 2 Nov: 67% of its pixels below 0.01, median 6.6e-4, its channels spread by 41%
+    of the luminance), while the shot they come from holds the plate's black. `hdr` and `sdr` in ACEScg, scene-linear:
+    below `low` (the SDR shot's luminance) the frame takes the SDR values, above `high` SDR to HDR's, a smooth step
+    between; values above 1.0 stay wherever the shot is not black."""
+    y = np.asarray(sdr[..., :3], np.float32) @ AP1_LUMA
+    t = np.clip((y - low) / max(high - low, 1e-9), 0.0, 1.0)
+    w = (t * t * (3.0 - 2.0 * t))[..., None]
+    out = np.array(hdr, np.float32, copy=True)
+    out[..., :3] = sdr[..., :3] * (1.0 - w) + out[..., :3] * w
+    return out
+
+
+def lanczos_taps(n_out: int, n_in: int, start: int = 0, count: int | None = None, a: int = 3):
+    """Lanczos-`a` taps for output samples start..start+count of a resize from n_in to n_out samples, pixel centres
+    aligned: (indices, weights), each (count, taps), the weights of a row summing to 1, edges repeated. Shrinking widens
+    the kernel by the scale, so it also filters (antialiasing), as PIL's LANCZOS does."""
+    count = n_out - start if count is None else count
+    scale = n_in / n_out
+    support = a * max(scale, 1.0)
+    centre = (np.arange(start, start + count) + 0.5) * scale - 0.5
+    first = np.floor(centre - support).astype(np.int64) + 1
+    k = first[:, None] + np.arange(int(np.ceil(2 * support)) + 1)[None, :]
+    x = (k - centre[:, None]) / max(scale, 1.0)
+    wts = np.where(np.abs(x) < a, np.sinc(x) * np.sinc(x / a), 0.0)
+    wts /= np.maximum(wts.sum(1, keepdims=True), 1e-12)
+    return np.clip(k, 0, n_in - 1), wts.astype(np.float32)
+
+
+def resize_lanczos(img: np.ndarray, h: int, w: int, window: tuple | None = None) -> np.ndarray:
+    """(H, W[, C]) float to (h, w[, C]) with a separable Lanczos-3, or only the output rows y0:y1 and columns x0:x1 of
+    `window`, reading just the source pixels they need. The floor for new content enlarged to a plate's native size
+    (Adrien's handover, item 5): no clipping, so values above 1.0 and below 0 stay."""
+    y0, y1, x0, x1 = window or (0, h, 0, w)
+    iy, wy = lanczos_taps(h, img.shape[0], y0, y1 - y0)
+    ix, wx = lanczos_taps(w, img.shape[1], x0, x1 - x0)
+    src = np.asarray(img, np.float32)[iy.min():iy.max() + 1, ix.min():ix.max() + 1]
+    iy, ix = iy - iy.min(), ix - ix.min()
+    shape = (-1,) + (1,) * (src.ndim - 1)
+    rows = sum(wy[:, t].reshape(shape) * src[iy[:, t]] for t in range(iy.shape[1]))
+    shape = (1, -1) + (1,) * (src.ndim - 2)
+    return sum(wx[:, t].reshape(shape) * rows[:, ix[:, t]] for t in range(ix.shape[1])).astype(np.float32)
+
+
 def resize_to(img: np.ndarray, h: int, w: int) -> np.ndarray:
     """Resample the first two axes to exactly (h, w): separable bilinear, pixel centres aligned, edges clamped.
 
@@ -295,12 +343,16 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
                  grow=8, feather=12, steady=2, workers=8, progress=None):
     """Fit `n` generated frames to the plate they are composited onto. Returns (images, masks), full size.
 
-    `plate_at(i)` and `gen_at(i)` give frame i as (h, w, C) float arrays of the same size; `masks` is
-    (N or 1, any height, any width). The mask edge, the shift and the colour match are smoothed over
+    `plate_at(i)` gives frame i as an (h, w, C) float array; `gen_at(i)` gives it at the plate's size or smaller (a shot
+    made at the working size of a 4K plate): then only the window around the matte is enlarged, with a Lanczos-3
+    (`resize_lanczos`), frame by frame. `masks` is (N or 1, any height, any width). The mask edge, the shift and the colour match are smoothed over
     `steady` frames on each side, so nothing in the composite changes from one frame to the next unless
     the shot does. Masks and colour fields are computed at about 480 px, alignment at about 512 px.
     """
     tick = progress or (lambda: None)
+
+    def full(g):  # a frame at the plate's size
+        return g if g.shape[:2] == (h, w) else resize_lanczos(g, h, w)
     lo = max(1, round(max(h, w) / MASK_SIDE))
     al = max(1, round(max(h, w) / ALIGN_SIDE))
     hl, wl = max(1, h // lo), max(1, w // lo)
@@ -312,16 +364,19 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
     band = max(4.0, (grow + feather) / lo)
     ha, wa = max(1, h // al), max(1, w // al)
 
+    def low(g, factor, hh, ww):  # a frame at low resolution: shrunk if it has the plate's size, else resized from its own
+        return shrink(g, factor) if g.shape[:2] == (h, w) else resize_lanczos(g, hh, ww)
+
     def measure(i):  # pass 1: the shift and the colour field of one frame, at low resolution
         p, g = plate_at(i), gen_at(i)
         dy = dx = 0.0
         if align:
             keep = 1.0 - resize_to(small[i], ha, wa)
-            dy, dx = phase_shift(structure(shrink(p, al)) * keep, structure(shrink(g, al)) * keep, max_shift / al)
+            dy, dx = phase_shift(structure(shrink(p, al)) * keep, structure(low(g, al, ha, wa)) * keep, max_shift / al)
             dy, dx = dy * al, dx * al
         field = None
         if match_color and small[i].max() > 0.02:
-            gl = shrink(g, lo)
+            gl = low(g, lo, hl, wl)
             if dy or dx:
                 gl = ndimage.shift(gl, (dy / lo, dx / lo, 0), order=1, mode="nearest")
             field = seam_field(shrink(p, lo), gl, small[i], band)
@@ -339,16 +394,24 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
     if grain > 0:  # one grain level for the whole shot: the plate's grain minus what the generation already has
         picks = list(range(0, n, max(1, n // 3)))[:3]
         target = np.median([noise_sigma(plate_at(i)) for i in picks], 0)
-        own = np.median([noise_sigma(gen_at(i)) for i in picks], 0)
+        own = np.median([noise_sigma(full(gen_at(i))) for i in picks], 0)
         level = np.sqrt(np.maximum(target ** 2 - own ** 2, 0.0)) * grain
 
     def apply(i):  # pass 2: full size, only around the edit
         g = gen_at(i)
         dy, dx = shifts[i]
-        if abs(dy) > 0.05 or abs(dx) > 0.05:
-            g = ndimage.shift(g, (dy, dx, 0), order=1, mode="nearest")
         m = resize_to(small[i], h, w)
         ys, xs = np.nonzero(m > 1.0 / 1024)
+        if g.shape[:2] != (h, w):  # smaller: the window around the matte enlarged, the rest left black (the composite takes the plate there)
+            pad = int(np.ceil(max(abs(dy), abs(dx)))) + 2
+            big = np.zeros((h, w, g.shape[2]), np.float32)
+            if len(ys):
+                wy0, wy1 = max(0, ys.min() - pad), min(h, ys.max() + 1 + pad)
+                wx0, wx1 = max(0, xs.min() - pad), min(w, xs.max() + 1 + pad)
+                big[wy0:wy1, wx0:wx1] = resize_lanczos(g, h, w, (wy0, wy1, wx0, wx1))
+            g = big
+        if abs(dy) > 0.05 or abs(dx) > 0.05:
+            g = ndimage.shift(g, (dy, dx, 0), order=1, mode="nearest")
         g = np.array(g, np.float32, copy=True)
         if len(ys):
             y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1

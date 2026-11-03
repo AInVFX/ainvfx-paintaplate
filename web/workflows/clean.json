@@ -579,11 +579,13 @@
     "38",
     0
    ],
+   "format": "png",
    "filename_prefix": "paintaplate/plate/clean/f"
   },
   "_meta": {
    "title": "Clean frames",
    "slots": {
+    "format": "frames_format",
     "filename_prefix": "prefix"
    },
    "output": "frames"
@@ -592,6 +594,8 @@
  "40": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
+   "width": 0,
+   "height": 0,
    "filename_prefix": "paintaplate/plate/clean",
    "images": [
     "38",
@@ -605,6 +609,8 @@
   "_meta": {
    "title": "Clean shot (erased areas regenerated)",
    "slots": {
+    "width": "movie_width",
+    "height": "movie_height",
     "filename_prefix": "video_prefix"
    },
    "output": "video"

@@ -258,7 +258,7 @@ class FitToPlate(io.ComfyNode):
         n, h, w = min(plate.shape[0], image.shape[0]), plate.shape[1], plate.shape[2]
         if mask is None or not bool(mask.any()):  # nothing to composite (a relight alone): the plate stands, nothing is fitted
             return io.NodeOutput(plate[:n], torch.zeros((n, h, w), dtype=torch.float32))
-        image = resize(image[:n], h, w)
+        image = image[:n]  # at its own size: Fit to Plate enlarges only the window around the matte, with a Lanczos-3
         masks = np.zeros((1, 8, 8), np.float32) if mask is None else mask[:n].float().cpu().numpy()
         bar = comfy.utils.ProgressBar(2 * n)
         images, out = mathops.fit_to_plate(
@@ -556,8 +556,9 @@ class SaveFrames(io.ComfyNode):
                 io.Image.Input("images"),
                 io.String.Input("filename_prefix", default="paintaplate/frames/f",
                                 tooltip="As in Save Image: a folder under the output folder, then the file name."),
-                io.Combo.Input("format", options=["png", "exr"], default="png", optional=True,
-                               tooltip="png: 8 bits, as core Save Image. exr: half float, every value as it is."),
+                io.Combo.Input("format", options=["png", "png16", "exr"], default="png", optional=True,
+                               tooltip="png: 8 bits, as core Save Image. png16: 16 bits, for a plate deeper than 8 bits. "
+                                       "exr: half float, every value as it is."),
             ],
             is_output_node=True,
         )
@@ -566,13 +567,15 @@ class SaveFrames(io.ComfyNode):
     def execute(cls, images, filename_prefix, format="png") -> io.NodeOutput:
         n, h, w = images.shape[0], images.shape[1], images.shape[2]
         folder, name, counter, sub, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory(), w, h)
-        names = [f"{name}_{counter + i:05}_.{format}" for i in range(n)]
+        names = [f"{name}_{counter + i:05}_.{'png' if format == 'png16' else format}" for i in range(n)]
         paths, bar = [os.path.join(folder, f) for f in names], comfy.utils.ProgressBar(n)
         if format == "exr":
             plateio.write_exrs(lambda i: images[i].float().cpu().numpy(), paths, workers=WORKERS, tick=lambda: bar.update(1))
             return io.NodeOutput(ui={"images": [{"filename": f, "subfolder": sub, "type": "output"} for f in names]})
 
         def frame(i):  # as core Save Image: scaled by 255 and clipped, not rounded, so every pixel matches what it wrote
+            if format == "png16":  # new content at a deep plate's depth: 65536 levels, rounded
+                return np.round(np.clip(images[i].float().cpu().numpy(), 0, 1) * 65535.0).astype(np.uint16)
             return np.clip(255.0 * images[i].float().cpu().numpy(), 0, 255).astype(np.uint8)
         plateio.write_pngs(frame, paths, workers=WORKERS, tick=lambda: bar.update(1))
         return io.NodeOutput(ui={"images": [{"filename": f, "subfolder": sub, "type": "output"} for f in names]})
@@ -596,12 +599,15 @@ class SaveMovie(io.ComfyNode):
                 io.Int.Input("crf", default=18, min=0, max=51, optional=True,
                              tooltip="x264's quality: 18 as core Save Video, lower is closer to the frames. The playback "
                                      "proxy and the review use 12."),
+                io.Int.Input("width", default=0, min=0, max=8192, optional=True,
+                             tooltip="The movie's width: 0 keeps the frames' size. Scaled with Lanczos while it converts."),
+                io.Int.Input("height", default=0, min=0, max=8192, optional=True, tooltip="The movie's height: 0 keeps the frames' size."),
             ],
             is_output_node=True,
         )
 
     @classmethod
-    def execute(cls, images, fps, filename_prefix, crf=18) -> io.NodeOutput:
+    def execute(cls, images, fps, filename_prefix, crf=18, width=0, height=0) -> io.NodeOutput:
         n, h, w = images.shape[0], images.shape[1], images.shape[2]
         folder, name, counter, sub, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory(), w, h)
         file = f"{name}_{counter:05}_.mp4"
@@ -610,7 +616,8 @@ class SaveMovie(io.ComfyNode):
         def frame(i):  # as core Save Video: scaled by 255 and clipped, not rounded
             return np.clip(255.0 * images[i].float().cpu().numpy(), 0, 255).astype(np.uint8)
 
-        plateio.write_movie(frame, n, os.path.join(folder, file), fps, workers=WORKERS, crf=crf, tick=lambda: bar.update(1))
+        plateio.write_movie(frame, n, os.path.join(folder, file), fps, workers=WORKERS, crf=crf, tick=lambda: bar.update(1),
+                            size=(width, height))
         return io.NodeOutput(ui={"images": [{"filename": file, "subfolder": sub, "type": "output"}], "animated": [True]})
 
 
@@ -652,5 +659,52 @@ class HDRMatch(io.ComfyNode):
         return io.NodeOutput(to_image(frames))
 
 
+class VAEFloat32(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_VAEFloat32",
+            display_name="Load VAE (float32)",
+            category=CATEGORY,
+            description="Loads a VAE in float32 from the start, as SDR to HDR's float32 encode and decode need. Core's VAE "
+                        "Loader builds it in bf16, and LTXVVAEForceFloat32 then casts it in place: under ComfyUI's dynamic "
+                        "VRAM, its default without --highvram, the buffers stay sized for bf16 and the HDR pass failed on a "
+                        "32 GB card with « Buffer too small » (2 Nov 2026).",
+            inputs=[io.Combo.Input("vae_name", options=folder_paths.get_filename_list("vae"))],
+            outputs=[io.Vae.Output(display_name="VAE")],
+        )
+
+    @classmethod
+    def execute(cls, vae_name) -> io.NodeOutput:  # as core's VAE Loader for a VAE file, with its dtype set at load
+        sd, metadata = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("vae", vae_name), return_metadata=True)
+        vae = comfy.sd.VAE(sd=sd, metadata=metadata, dtype=torch.float32)
+        vae.throw_exception_if_invalid()
+        return io.NodeOutput(vae)
+
+
+class KeepBlack(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_KeepBlack",
+            display_name="Keep Black",
+            category=CATEGORY,
+            description="Where the SDR shot is black, its own black instead of SDR to HDR's noise (mathops.keep_black): below "
+                        "`low` of luminance the SDR values, above `high` the HDR ones, a smooth step between. Both in ACEScg.",
+            inputs=[io.Image.Input("hdr", tooltip="SDR to HDR's frames, ACEScg scene-linear."),
+                    io.Image.Input("sdr", tooltip="The SDR shot they were made from, in ACEScg."),
+                    io.Float.Input("low", default=0.001, min=0.0, max=1.0, step=0.0001),
+                    io.Float.Input("high", default=0.01, min=0.0, max=1.0, step=0.0001)],
+            outputs=[io.Image.Output(display_name="image")],
+        )
+
+    @classmethod
+    def execute(cls, hdr, sdr, low, high) -> io.NodeOutput:
+        n = min(hdr.shape[0], sdr.shape[0])
+        with ThreadPoolExecutor(WORKERS) as pool:
+            out = list(pool.map(lambda i: mathops.keep_black(hdr[i].float().cpu().numpy(), sdr[i].float().cpu().numpy(), low, high), range(n)))
+        return io.NodeOutput(torch.from_numpy(np.stack(out)))
+
+
 NODES = [LoadPlate, SavePlate, ColorSpace, SaveFrames, SaveMovie, FitToPlate, RelightTransfer, FollowMatte, LevelFill, LivePreview,
-         KeyframeVideo, HDRMatch]
+         KeyframeVideo, HDRMatch, VAEFloat32, KeepBlack]

@@ -7,7 +7,9 @@
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_element: ["seed"],
-  review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], relight_light: ["light"] };
+  review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], relight_light: ["light"],
+  matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"],
+  export_plate: ["prefix"], export_exr: ["exr_prefix"] };
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
   const slots = {}, outputs = {}, progress = new Set();
@@ -382,67 +384,13 @@ export function frameUse(f, { frame, inPt, outPt }, behind = 3) {
   return 1 / (1 + Math.min(ahead, back * behind));
 }
 
-// ---------- The viewer's colour, as in RV's Color menu: display only, the export never changes ----------
-// In OpenRV's order under OCIO (display.mjs): in the config's scene-linear space, exposure and contrast (about 18% grey),
-// one matrix for saturation, hue and invert, then gamma, as RVColor; then the look, display and view; then the channel
-// shown as grey, picked from the display values, as RV's OCIODisplay floods a channel (OCIOIPNode.cpp, read 29 Oct 2026).
-export const DISPLAY = { exposure: 0, contrast: 1, gamma: 1, saturation: 1, hue: 0, channel: "rgb", invert: false };
-export const PARAMS = { // the interactive edits: label, step for - and = and the wheel, change per pixel dragged, limits
-  exposure: { label: "Exposure", step: 0.1, drag: 0.01, min: -10, max: 10 }, // stops: one per 100 px dragged
-  contrast: { label: "Contrast", step: 0.05, drag: 0.005, min: 0, max: 4 },
-  gamma: { label: "Gamma", step: 0.05, drag: 0.005, min: 0.1, max: 8 },
-  saturation: { label: "Saturation", step: 0.05, drag: 0.005, min: 0, max: 4 },
-  hue: { label: "Hue", step: 5, drag: 0.5, min: -180, max: 180 }, // degrees
-};
-export const CHANNEL_NAMES = { rgb: "All channels", r: "Red", g: "Green", b: "Blue", l: "Luminance" };
-export const clampParam = (name, v) => +Math.min(PARAMS[name].max, Math.max(PARAMS[name].min, v)).toFixed(3);
+// ---------- The colour picker ----------
 // The in-frame colour picker (Firefox, Safari): the average of the pixels under the click as #rrggbb, for the brush. `data`
 // holds RGBA bytes, as getImageData returns them; transparent pixels, outside the frame, do not count.
 export function pickedColor(data) {
   let r = 0, g = 0, b = 0, n = 0;
   for (let i = 0; i < data.length; i += 4) if (data[i + 3] > 0) { r += data[i]; g += data[i + 1]; b += data[i + 2]; n++; }
   return n ? `#${[r, g, b].map((v) => Math.round(v / n).toString(16).padStart(2, "0")).join("")}` : null;
-}
-
-export const displayActive = (d) => Object.keys(DISPLAY).some((k) => d[k] !== DISPLAY[k]);
-
-export function formatParam(name, v) {
-  if (name === "exposure") return `${v > 0 ? "+" : ""}${v.toFixed(1)} stop${Math.abs(v) === 1 ? "" : "s"}`;
-  return name === "hue" ? `${Math.round(v)}°` : v.toFixed(2);
-}
-
-export function displayLabel(d) { // the transport's reminder of what the viewer changes: "E +1.0 · γ 2.20 · Red"
-  const parts = [];
-  if (d.exposure) parts.push(`E ${d.exposure > 0 ? "+" : ""}${d.exposure.toFixed(1)}`);
-  if (d.contrast !== 1) parts.push(`C ${d.contrast.toFixed(2)}`);
-  if (d.gamma !== 1) parts.push(`γ ${d.gamma.toFixed(2)}`);
-  if (d.saturation !== 1) parts.push(`Sat ${d.saturation.toFixed(2)}`);
-  if (d.hue) parts.push(`Hue ${Math.round(d.hue)}°`);
-  if (d.channel !== "rgb") parts.push(CHANNEL_NAMES[d.channel]);
-  if (d.invert) parts.push("Inverted");
-  return parts.join(" · ");
-}
-
-// The two transfer functions: slope and intercept in linear light (exposure, then contrast about 18% grey), then gamma.
-export const displayTransfer = ({ exposure = 0, contrast = 1, gamma = 1 }) =>
-  ({ slope: contrast * 2 ** exposure, intercept: 0.18 * (1 - contrast), exponent: 1 / gamma });
-
-const LUMA = [0.2126, 0.7152, 0.0722];
-const PICK = { r: [1, 0, 0], g: [0, 1, 0], b: [0, 0, 1], l: LUMA };
-const times = (A, B) => A.map((row) => B[0].map((_, j) => row.reduce((a, v, k) => a + v * B[k][j], 0)));
-
-// The shader's values (display.mjs). Before the display: exposure and contrast, a 3 x 3 matrix and its offset, gamma.
-// After it: `pick`, the channel shown as grey (rows of Rec. 709 weights for luminance, as RV's flood), else the identity.
-export function displayUniforms(d) {
-  const { saturation = 1, hue = 0, channel = "rgb", invert = false } = d;
-  const s = saturation, t = (hue * Math.PI) / 180, c = Math.cos(t), n = Math.sin(t);
-  const sat = [0, 1, 2].map((i) => [0, 1, 2].map((j) => LUMA[j] * (1 - s) + (i === j ? s : 0)));
-  const rot = [[0.213 + c * 0.787 - n * 0.213, 0.715 - c * 0.715 - n * 0.715, 0.072 - c * 0.072 + n * 0.928], // SVG's hueRotate
-    [0.213 - c * 0.213 + n * 0.143, 0.715 + c * 0.285 + n * 0.14, 0.072 - c * 0.072 - n * 0.283],
-    [0.213 - c * 0.213 - n * 0.787, 0.715 - c * 0.715 + n * 0.715, 0.072 + c * 0.928 + n * 0.072]];
-  const m = times(sat, rot), sign = invert ? -1 : 1, one = PICK[channel];
-  return { ...displayTransfer(d), matrix: m.map((row) => row.map((v) => +(sign * v).toFixed(5) + 0)), offset: [0, 1, 2].map(() => (invert ? 1 : 0)),
-           pick: one ? [[...one], [...one], [...one]] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]] };
 }
 
 // ---------- A fluid shot on a blank plate: AInVFX's ainvfx-fluid IC-LoRA (its model card, read 28 Oct 2026) ----------
@@ -578,8 +526,41 @@ export function panelSize(kind, wanted, view, { least, stage, around }) {
 // so a render with a light edit leaves it out. A blank plate asks its bit depth: 8-bit, or 16-bit half float, where its
 // fluid shot goes through it and becomes an EXR plate: 16-bit is the default once its files are found (?hdr=0 turns it off).
 export const HDR_DEPTH = 16;
-export const hdrPlate = (spec) => !!spec && spec.kind !== "video" && /^\.exr$/i.test(spec.ext ?? "");
-export const wantsHdr = (spec, tools, on) => !!on && hdrPlate(spec) && !tools.includes("light");
+// New content at the plate's bit depth (Adrien, 2 Nov): a clean plate or a new element matches the plate. One rule per
+// kind of plate, read from its pixel format: `bits` (16 for half float, 32 for float), `frames`, the Save Frames format
+// a shot's frames pass through on their way to the export, and `hdr`, whether SDR to HDR is on by default. Its switch
+// shows for every plate:
+//   8-bit video or images: 8-bit PNG frames; SDR to HDR off by default.
+//   10-bit or 12-bit video (ProRes among them), 16-bit PNG and TIFF, 10-bit DPX: 16-bit PNG frames; off by default.
+//   Half and float samples (EXR, and a float TIFF or DPX: FFmpeg's decoders read 32-bit float): half-float EXR frames; on by
+//   default (a light edit stays out while the relight is on hold).
+export function plateDepth(spec) {
+  const fmt = String(spec?.pix_fmt ?? "").toLowerCase(), exr = !!spec && spec.kind !== "video" && /^\.exr$/i.test(spec.ext ?? "");
+  const float = exr || /f(16|32)(le|be)?$/.test(fmt);
+  const bits = /f32/.test(fmt) ? 32 : exr || /f16/.test(fmt) ? 16 : /(rgba?|bgra?)64|(rgb|bgr)48|gray16|ya16/.test(fmt) ? 16
+    : +(fmt.match(/p(\d+)(le|be)$/)?.[1] ?? 8);
+  return { bits, float, frames: float ? "exr" : bits > 8 ? "png16" : "png", hdr: float };
+}
+// Whether a plate's own format holds the values above 1.0 that SDR to HDR makes: float samples do, and so does a plate whose
+// colour space decodes code value 1.0 above 1.0 (`headroom`, from the stat route: 222.9 for ACEScct, 100 for PQ, 1.0 for
+// sRGB), video or not: an HDR video in PQ or HLG, a log video, a 10-bit Cineon DPX, a camera log TIFF. Such a plate exports
+// in its own format with no extra files; only the others warn first and deliver an EXR sequence (Adrien, 3 Nov).
+export const holdsHdr = (spec, headroom = 1) => !!spec && (plateDepth(spec).float || headroom > 1.001);
+export const hdrPlate = (spec) => plateDepth(spec).hdr; // SDR to HDR on by default for this plate
+export const wantsHdr = (spec, tools, on) => !!spec && !!on && !tools.includes("light");
+// The switch away from the plate's default makes another render, so each setting keeps its own: "|hdr" or "|sdr".
+export const hdrKey = (edits, dflt, on) => (on === dflt ? edits : `${edits}|${on ? "hdr" : "sdr"}`);
+export const hdrOfKey = (key, dflt) => (key?.endsWith("|hdr") ? true : key?.endsWith("|sdr") ? false : dflt);
+// SDR to HDR on a plate whose format cannot hold values above 1.0 (Adrien, 2 Nov): asked before it turns on, then the result is
+// an EXR sequence, which the player shows at full precision and the export writes.
+export const exrResult = (spec, hdrRan, headroom = 1) => !!hdrRan && !holdsHdr(spec, headroom);
+// The 32 GB study, closed (Adrien, 3 Nov): every step finishes on a 32 GB card at 1920 x 1088 x 121, slower than on 96 GB,
+// but a 4K plate does not (its first erase still ran after 30 minutes on an RTX 5090). A plate above 2K on a card under
+// 48 GB warns when it opens: a 48 GB card reports about 47.5 GiB, a 40 GB one about 39.6.
+export const BIG_PLATE = { side: 2048, vram: 46 * 2 ** 30 };
+export const bigPlateWarning = (spec, vram) => (spec && vram > 0 && Math.max(spec.width, spec.height) > BIG_PLATE.side && vram < BIG_PLATE.vram
+  ? `This plate is ${spec.width} x ${spec.height}, above 2K, and this card has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB card for now: its renders may not finish here.`
+  : null);
 export const hdrFps = (fps) => Math.min(30, +fps || 24); // the conditioning frame rate: at most 30, as in Lightricks' workflow
 export const blankDepth = (v) => (+v === HDR_DEPTH ? HDR_DEPTH : 8);
 export const defaultDepth = (hdrReady) => (hdrReady ? HDR_DEPTH : 8); // a blank plate: 16-bit whenever SDR to HDR can run
@@ -635,13 +616,31 @@ export function dabFlow(peak, spacingOverRadius) {
 
 // ---------- Passes on show ----------
 // Each finished step that made a picture shows on every frame from the Render panel, one render of the shot at a time:
-// where its movie sits, in the render (`r`) or in its preview size (`pv`). Tracking and the export make no movie.
-export const PASSES = { clean: ["pv", "cleanRaw"], shot: ["pv", "raw"], comp: ["pv", "comp"], cleanfull: ["r", "cleanRaw"], full: ["r", "raw"],
-  hdr: ["r", "hdrMovie"], review: ["r", "play"] };
+// where its movie sits, in the render (`r`) or in its preview size (`pv`), as a path of keys. The tracking steps and the
+// export show their matte as a grey movie, drawn through the config's data colour space (`spaces.data`): it shows its own
+// values, with no view's tone mapping.
+export const PASSES = { erase: ["r", "erased.found.movie_a"], clean: ["pv", "cleanRaw"], shot: ["pv", "raw"], track: ["pv", "painted.found.movie_b"],
+  comp: ["pv", "comp"], cleanfull: ["r", "cleanRaw"], full: ["r", "raw"], trackfull: ["r", "full.found.movie_b"], hdr: ["r", "hdrMovie"],
+  review: ["r", "play"], export: ["r", "exported.matte"] };
+export const MATTE_PASSES = new Set(["erase", "track", "trackfull", "export"]);
+const keyPath = (o, path) => path.split(".").reduce((x, k) => x?.[k], o);
 export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of a finished step, or null
   const at = PASSES[id], store = at && (at[0] === "pv" ? pv : r);
-  const url = (at && store?.[at[1]]) ?? (id === "review" ? store?.review : null);
+  const url = (at && keyPath(store, at[1])) ?? (id === "review" ? store?.review : null);
   if (!url) return null;
   if (id === "review") return { url, space: store.playSpace ?? store.reviewSpace ?? "@model", frames: store.reviewFrames ?? null };
-  return { url, space: id === "hdr" ? spaces.log ?? "@model" : "@model", frames: null };
+  // SDR to HDR: its 8-bit movie in log values, and its EXR frames in their own space (ACES2065-1, `spaces.hdr`), for the viewer
+  // to draw and inspect them as they are (setShot's fifth argument, framesSpace)
+  if (id === "hdr") return { url, space: spaces.log ?? "@model", frames: store.hdrFrames ?? null, framesSpace: store.hdrFrames ? spaces.hdr ?? null : null };
+  return { url, space: MATTE_PASSES.has(id) ? spaces.data ?? "@model" : id === "hdr" ? spaces.log ?? "@model" : "@model", frames: null };
 }
+// A fluid shot's own passes, shown from the Render panel with its keyframes open or closed: the control video LTX was
+// guided by, the shot as LTX made it, and for a 16-bit plate its SDR-to-HDR frames as a movie in log values.
+export const fluidPasses = (result, spaces = {}) => (result ? [
+  result.control && { id: "fluid_keys", label: "Fluid: keyframes", url: result.control, space: "@model" },
+  result.preview && { id: "fluid_shot", label: "Fluid: shot", url: result.preview, space: "@model" },
+  result.hdr && result.movie && { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: result.movie, space: spaces.log ?? "@model",
+    frames: result.hdrFrames ?? null, framesSpace: result.hdrFrames ? spaces.hdr ?? null : null },
+].filter(Boolean) : []);
+// The config's data colour space (OCIO's isdata, such as the studio config's Raw), from the spaces /paintaplate/ocio lists
+export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? null;

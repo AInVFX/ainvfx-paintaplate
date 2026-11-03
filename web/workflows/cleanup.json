@@ -584,8 +584,12 @@
   }
  },
  "40": {
-  "class_type": "VAEDecode",
+  "class_type": "VAEDecodeTiled",
   "inputs": {
+   "tile_size": 512,
+   "overlap": 64,
+   "temporal_size": 128,
+   "temporal_overlap": 32,
    "vae": [
     "22",
     0
@@ -603,11 +607,13 @@
     "40",
     0
    ],
+   "format": "png",
    "filename_prefix": "paintaplate/plate/full/clean/f"
   },
   "_meta": {
    "title": "Clean frames",
    "slots": {
+    "format": "frames_format",
     "filename_prefix": "prefix"
    },
    "output": "frames"
@@ -616,6 +622,8 @@
  "42": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
+   "width": 0,
+   "height": 0,
    "filename_prefix": "paintaplate/plate/full/clean",
    "images": [
     "40",
@@ -629,6 +637,8 @@
   "_meta": {
    "title": "Clean shot at full size",
    "slots": {
+    "width": "movie_width",
+    "height": "movie_height",
     "filename_prefix": "video_prefix"
    },
    "output": "video"

@@ -449,21 +449,12 @@
   }
  },
  "27": {
-  "class_type": "ImageScaleToMaxDimension",
-  "inputs": {
-   "upscale_method": "lanczos",
-   "largest_size": 1920,
-   "image": [
-    "26",
-    0
-   ]
-  }
- },
- "28": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
+   "width": 0,
+   "height": 0,
    "images": [
-    "27",
+    "26",
     0
    ],
    "fps": [
@@ -476,12 +467,14 @@
   "_meta": {
    "title": "Review movie (full-size composite, H.264)",
    "slots": {
+    "width": "movie_width",
+    "height": "movie_height",
     "filename_prefix": "review_prefix"
    },
    "output": "review"
   }
  },
- "29": {
+ "28": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
@@ -500,7 +493,7 @@
    "output": "frames"
   }
  },
- "30": {
+ "29": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
@@ -520,22 +513,13 @@
    }
   }
  },
- "31": {
-  "class_type": "ImageScaleToMaxDimension",
-  "inputs": {
-   "upscale_method": "lanczos",
-   "largest_size": 1920,
-   "image": [
-    "30",
-    0
-   ]
-  }
- },
- "32": {
+ "30": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
+   "width": 0,
+   "height": 0,
    "images": [
-    "31",
+    "29",
     0
    ],
    "fps": [
@@ -548,6 +532,8 @@
   "_meta": {
    "title": "Viewer movie (image sequences: log values, the look of the EXR frames)",
    "slots": {
+    "width": "movie_width",
+    "height": "movie_height",
     "filename_prefix": "view_prefix",
     "images": "review_view"
    },
