@@ -6,6 +6,8 @@ import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
 import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onLog, onNotice, outputFile, outputFiles, outputText, post, run, setSalt, upload, viewUrl } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
+import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor (logic.mjs keeps an older copy until the merge)
+import { INSPECT_SIZE, addSample, inspectorRows, sourcePixel, sourcePath } from "./inspector.mjs";
 import { sceneGraph } from "./graph.mjs";
 import { CHANNEL_NAMES, DAB_PROFILE, DISPLAY, FLUID, PARAMS, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
   erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
@@ -23,6 +25,8 @@ const QUICK = { steps: 16, denoise: 1, feather: 6, sigma: 3 }; // 16: the offici
 const FULL = { steps: +Q.get("refine") || 8, denoise: 0.35, feather: 12, sigma: 6 };
 const CACHE_MB = +Q.get("cache") || 384; // decoded frames kept per video: about 180 frames at 960 x 544
 const DEEP_MB = +Q.get("deep") || 512; // per cache (the plate, an export): an image sequence in its own values, about 160 frames of RGB half floats at 960 x 540
+const NATIVE_SIDE = 4096; // the long side the viewer draws a plate at, at most: the frames route's limit and the pipeline's movies'
+const INSPECT_MS = 60; // the colour inspector reads at most one pixel per this many ms from /paintaplate/pixel
 const DEEP_SIDE = 960; // their long side, the playback video's
 const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-size edits, quick edits, SAM tracking
 // the erase matte only places the erase pass's box, grown by 1/24 of the width: 640 is enough, at half the time of 960
@@ -87,7 +91,7 @@ const S = {
   get color() { return this.colors[this.tool] ?? "#000000"; },
   frame: 0, playing: false, inPt: 0, outPt: 0, wipe: null, compare: false,
   fit: { w: 0, h: 0, x: 0, y: 0 }, zoom: { k: 1, x: 0, y: 0 },
-  display: { ...DISPLAY }, mode: null, scrub: null, // the viewer's colour (display only), and its interactive edit as in RV
+  display: { ...colour.DISPLAY }, mode: null, scrub: null, inspect: { on: false, at: null, avg: null, busy: false, last: 0 }, // the viewer's colour (display only), and its interactive edit as in RV
   fluid: null, clip: null, fluidReady: true, // a fluid shot on a blank plate, the last one, a copied keyframe
   shot: null, stage: null, run: 0, exported: null, wantDownload: null,
   ocio: { config: "", display: "", view: "", look: "", ...saved(OCIO_PREF), info: null }, // the OCIO config and the viewer's view, as in RV
@@ -277,7 +281,8 @@ async function openPlate(list, typed, opts = {}) {
   S.uploads.clear(); S.renders.clear(); S.erases.clear();
   if (!opts.under) S.fluid = opts.fluid ? { keys: [], seed: (Math.random() * 2 ** 31) | 0, runs: 0, result: null, view: "keys", prompt: "", on: true, editing: true,
     ...opts.fluid, busy: null } : null;
-  [view.width, view.height] = S.plate.work;
+  [view.width, view.height] = colour.nativeSize(S.plate.spec.width, S.plate.spec.height, NATIVE_SIDE); // the plate at its own size
+  Object.assign(sharp, { plate: null, shot: null });
   view.classList.add("painting");
   plateVid.src = viewUrl(outputFile("ingest", out, "proxy"));
   plateVid.addEventListener("canplaythrough", () => { if (OPENING.at === "load") { OPENING.at = "done"; status("Ready to play. Describe the edit at the top, paint on the frame, then Generate."); } }, { once: true });
@@ -495,15 +500,48 @@ function fitView() { // the frame fills the viewport with the plate's own aspect
 }
 
 function applyView() {
-  const { w, h, x, y } = S.fit, z = S.zoom;
-  Object.assign(view.style, { width: `${w}px`, height: `${h}px`, transform: `translate(${x + z.x}px, ${y + z.y}px) scale(${z.k})` });
+  const { w, h, x, y } = S.fit, z = S.zoom, px = (v) => Math.round(v * devicePixelRatio) / devicePixelRatio; // whole device pixels
+  Object.assign(view.style, { width: `${w}px`, height: `${h}px`, transform: `translate(${px(x + z.x)}px, ${px(y + z.y)}px) scale(${z.k})` });
+  view.classList.toggle("native", w * z.k * devicePixelRatio >= view.width - 0.5); // from 1:1, plate pixels show as squares
   placeWipe();
 }
 addEventListener("resize", () => { layoutUI(); fitView(); });
+$("#viewport").addEventListener("pointermove", inspectAt);
 
 function frameAt(e) { // pointer position in frame pixels (working size); stays right under zoom and pan
-  const r = view.getBoundingClientRect();
-  return [((e.clientX - r.left) * view.width) / r.width, ((e.clientY - r.top) * view.height) / r.height];
+  const r = view.getBoundingClientRect(), [w, h] = S.plate.work;
+  return [((e.clientX - r.left) * w) / r.width, ((e.clientY - r.top) * h) / r.height];
+}
+
+// The canvas holds the plate at its own size (up to NATIVE_SIDE), as OpenRV shows a plate; strokes, edits and the brush
+// live at the working size, so they draw through this scale.
+const toView = () => [view.width / S.plate.work[0], view.height / S.plate.work[1]];
+function inWork(draw) {
+  const [kx, ky] = toView();
+  ctx.save(); ctx.setTransform(kx, 0, 0, ky, 0, 0); draw(...S.plate.work); ctx.restore();
+}
+
+// Paused, the frame on show is read at native size and full precision from the frames route (an EXR's half floats, a
+// video's frame decoded with its own YUV matrix and range), one frame per source, the latest asked for: a 4K half-float
+// frame is about 50 MB. While a source plays, the movies and the 960 px cache stay.
+const sharp = { plate: null, shot: null };
+function sharpFrame(slot, path) {
+  const want = `${path}#${S.frame}`, s = sharp[slot];
+  if (s?.key === want) return s.img;
+  if (s?.loading === want || s?.failed === path) return null;
+  sharp[slot] = { loading: want };
+  fetch(`/paintaplate/frames?${new URLSearchParams({ path, first: S.frame, count: 1, side: NATIVE_SIDE })}`).then(async (r) => {
+    if (!r.ok) throw new Error(await r.text());
+    const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number), data = new Uint16Array(await r.arrayBuffer());
+    if (sharp[slot]?.loading !== want) return;
+    sharp[slot] = { key: want, img: { width, height, data } };
+    if (!S.playing) render();
+  }).catch((err) => {
+    if (sharp[slot]?.loading !== want) return;
+    sharp[slot] = { failed: path };
+    log(`Native frames stopped for ${path}: ${err.message}. The viewer shows the cached frames.`);
+  });
+  return null;
 }
 
 function layered(upto = S.edits.length, keep = () => true) { // the first frame with the active edits before index `upto`
@@ -652,6 +690,7 @@ function render() {
   const pic = live || first || !S.shot?.url ? null : shotFrame();
   if (S.playing && S.shot?.url && !live && !pic) return; // the shot video catches up in a frame: the last frame stays on screen
   const p = S.plate, model = modelSpace(), exact = [];
+  let native = false; // the frame on show came at native size from the frames route
   const draw = (src, space) => { // through OCIO from the colour space its values are in; false when it cannot draw yet
     const img = src ? look.image(src, S.display, space) : null;
     if (img) { ctx.drawImage(img, 0, 0, W, H); if (src.data) exact.push(true); }
@@ -660,6 +699,7 @@ function render() {
   // the plate in its own values, so a new File Color Space shows at once: an image sequence's frames once they arrive,
   // else the playback video (a video plate's own values at the working size), else the first frame as ingested
   const drawPlate = () => {
+    if (still && draw(sharpFrame("plate", p.path), p.cs)) return void (native = true); // paused: the frame on show at native size
     if (p.deep && drawsDeep(S.playing, holds(deep)) && draw(deep.get(S.frame), p.cs)) return; // playing: its EXR frames only once all are in
     const cached = still && caches.get(plateVid).get(S.frame);
     if (cached) return void draw(cached, p.proxySpace);
@@ -670,14 +710,15 @@ function render() {
     if (S.pass === "first") { draw(S.hero, model); return "hero"; } // the First frame row: the edit as Klein made it, on every frame
     if (live) { draw(live, model); return "live"; }
     if (pic) {
-      if (!(S.shot.frames && drawsDeep(S.playing, holds(deepShot)) && draw(deepShot.get(S.frame), p.cs))) draw(pic, S.shot.space); // the review's EXR frames: paused, or all in
+      if (still && draw(sharpFrame("shot", sourcePath(S.shot, p.path)), S.shot.frames ? p.cs : S.shot.space)) native = true; // paused: native size
+      else if (!(S.shot.frames && drawsDeep(S.playing, holds(deepShot)) && draw(deepShot.get(S.frame), p.cs))) draw(pic, S.shot.space); // the review's EXR frames: paused, or all in
       if (pic === held.canvas) return "held";
       if (still) keepFrame(pic);
       return "shot";
     }
     if (still && S.frame === 0) { // the first frame with its edits, in the model space; with none, the plate itself
       if (S.heroKey) draw(S.hero, model); else drawPlate();
-      overlays(W, H); return "hero";
+      inWork(overlays); return "hero";
     }
     drawPlate();
     return "plate";
@@ -693,7 +734,8 @@ function render() {
   } else shown = drawEdited();
   view.dataset.picture = shown; // what the edited side shows: live, hero, shot, held or plate (tests/ui_mock.py reads it)
   view.dataset.precision = exact.length ? "float" : "8-bit"; // an image sequence's own values, or 8-bit frames
-  drawCursor();
+  view.dataset.native = String(native); // paused, the frame on show at the plate's own size
+  inWork(drawCursor);
 }
 
 function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX predicts, or the generated shot (the wipe shows both)
@@ -708,7 +750,7 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
     if (S.wipe === null) shot();
     else { keysLayer(W, H); ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip(); shot(); ctx.restore(); }
   } else keysLayer(W, H);
-  drawCursor();
+  inWork(drawCursor);
 }
 
 function keysLayer(W, H) { // the keyframe on this frame; between keyframes, the two around it faintly, as onion skins
@@ -776,7 +818,7 @@ function softMask(e) { // the edit mask with a soft edge, close to what the work
 function drawCursor() { // the brush outline, at its real size on the frame
   if (S.picking) return; // the in-frame picker shows its own cursor, and reads the frame without the outline
   if (!S.cursor || stroke || S.playing || S.mode || view.classList.contains("near-wipe")) return;
-  ctx.lineWidth = Math.max(1.5, view.width / 900);
+  ctx.lineWidth = Math.max(1.5, S.plate.work[0] / 900);
   ctx.strokeStyle = S.rub ? "#ffffff" : S.tool === "erase" ? "#ff8070" : S.color === "#000000" ? "#d8d8d8" : S.color;
   if (S.rub) ctx.setLineDash([6, 5]);
   ctx.beginPath(); ctx.arc(S.cursor[0], S.cursor[1], S.size / 2, 0, 2 * Math.PI); ctx.stroke();
@@ -870,7 +912,7 @@ view.addEventListener("pointerdown", (e) => {
 view.addEventListener("pointermove", (e) => {
   if (touches.has(e.pointerId)) touches.set(e.pointerId, [e.clientX, e.clientY]);
   if (pinch) return pinchMove();
-  if (S.scrub) return setDisplay({ [S.mode]: clampParam(S.mode, S.scrub.start + (e.clientX - S.scrub.x) * PARAMS[S.mode].drag) });
+  if (S.scrub) return setDisplay({ [S.mode]: colour.clampParam(S.mode, S.scrub.start + (e.clientX - S.scrub.x) * colour.PARAMS[S.mode].drag) });
   if (nav) return navigateMove(e);
   if (stroke && S.keyDraft) return addKeyPoint(S.keyDraft, e);
   if (stroke && S.draft) return addPoint(S.draft, e);
@@ -2696,10 +2738,10 @@ function fetchDeep(cache, path, what) { // frames as RGB half floats from the fr
 
 function setDisplay(change) {
   Object.assign(S.display, change);
-  const d = S.display, on = displayActive(d);
+  const d = S.display, on = colour.displayActive(d);
   $("#display-state").hidden = !on;
-  $("#display-state").textContent = displayLabel(d);
-  hud(S.mode ? `${PARAMS[S.mode].label} ${formatParam(S.mode, d[S.mode])}` : on ? displayLabel(d) : "Colour as shot", 1400);
+  $("#display-state").textContent = colour.displayLabel(d);
+  hud(S.mode ? `${colour.PARAMS[S.mode].label} ${colour.formatParam(S.mode, d[S.mode])}` : on ? colour.displayLabel(d) : "Colour as shot", 1400);
   render();
 }
 
@@ -2707,7 +2749,7 @@ function colorMode(name) { // RV's interactive edit: drag on the frame, or the w
   if (S.mode === name) return leaveMode();
   S.mode = name;
   view.classList.add("scrub");
-  hud(`${PARAMS[name].label} ${formatParam(name, S.display[name])}: drag on the frame, or the wheel, - and =. Backspace resets, Esc leaves.`, 4000);
+  hud(`${colour.PARAMS[name].label} ${colour.formatParam(name, S.display[name])}: drag on the frame, or the wheel, - and =. Backspace resets, Esc leaves.`, 4000);
   render();
 }
 
@@ -2716,21 +2758,72 @@ function leaveMode() {
   const name = S.mode;
   S.mode = S.scrub = null;
   view.classList.remove("scrub");
-  hud(displayActive(S.display) ? displayLabel(S.display) : `${PARAMS[name].label} as shot`);
+  hud(colour.displayActive(S.display) ? colour.displayLabel(S.display) : `${colour.PARAMS[name].label} as shot`);
 }
 
-const stepColor = (name, dir) => setDisplay({ [name]: clampParam(name, S.display[name] + dir * PARAMS[name].step) });
+const stepColor = (name, dir) => setDisplay({ [name]: colour.clampParam(name, S.display[name] + dir * colour.PARAMS[name].step) });
 
 function modeKey(k, combo) { // the keys of an interactive edit, as RV's paramscrub table; any other key leaves it, then acts
   if (k === "-" || k === "_") stepColor(S.mode, -1);
   else if (k === "=" || k === "+") stepColor(S.mode, 1);
-  else if (k === "Backspace" || k === "Delete" || combo === "Shift+r") setDisplay({ [S.mode]: DISPLAY[S.mode] });
+  else if (k === "Backspace" || k === "Delete" || combo === "Shift+r") setDisplay({ [S.mode]: colour.DISPLAY[S.mode] });
   else if (k === "Escape" || k === "Enter" || COLOR_KEYS[combo] === S.mode) leaveMode();
   else { leaveMode(); return false; }
   return true;
 }
 
-function resetDisplay() { leaveMode(); setDisplay({ ...DISPLAY }); }
+function resetDisplay() { leaveMode(); setDisplay({ ...colour.DISPLAY }); }
+
+// ---------- The colour inspector, as OpenRV's (F5; inspector.mjs) ----------
+// The pixel under the pointer, in the plate's own pixels, read at full precision and native size from the file on show
+// (/paintaplate/pixel), with the value drawn on screen. Shift held while the pointer moves averages the pixels it passes,
+// as RV's shift-drag; a move without Shift starts again.
+
+function toggleInspector() {
+  const i = S.inspect;
+  i.on = !i.on; i.avg = null;
+  $("#inspector").hidden = !i.on;
+  view.classList.toggle("inspecting", i.on);
+  hud(i.on ? "Color Inspector: the pixel under the pointer. Hold Shift while moving to average. F5 hides it" : "Color Inspector hidden");
+}
+
+function inspectAt(e) {
+  const i = S.inspect;
+  if (!i.on || !S.plate) return;
+  const r = view.getBoundingClientRect(), { width, height } = S.plate.spec, fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+  i.at = { ...sourcePixel(fx, fy, width, height), shift: e.shiftKey, cx: Math.floor(fx * view.width), cy: Math.floor(fy * view.height) };
+  readPixel();
+}
+
+async function readPixel() {
+  const i = S.inspect;
+  if (i.busy || !i.at) return;
+  i.busy = true;
+  const wait = INSPECT_MS - (performance.now() - i.last);
+  if (wait > 0) await new Promise((ok) => setTimeout(ok, wait));
+  const at = i.at, frame = S.frame;
+  i.last = performance.now();
+  try {
+    if (!at.inside) { showInspector(at, frame, null); return; }
+    const r = await fetch(`/paintaplate/pixel?${new URLSearchParams({ path: sourcePath(S.shot, S.plate.path), frame, x: at.x, y: at.y, size: INSPECT_SIZE })}`);
+    const got = await r.json();
+    if (!r.ok) throw new Error(got.error);
+    const [fr, fg, fb] = view.getContext("2d").getImageData(at.cx, at.cy, 1, 1).data; // the final colour, as drawn on screen
+    i.avg = at.shift ? addSample(i.avg, got.value) : null;
+    showInspector(at, frame, { ...got, final: [fr, fg, fb].map((v) => v / 255) });
+  } catch (err) { showInspector(at, frame, { error: err.message }); }
+  finally { i.busy = false; if (i.at !== at) readPixel(); }
+}
+
+function showInspector(at, frame, got) {
+  const box = $("#inspector");
+  box.replaceChildren(...inspectorRows({ ...at, ...(got ?? {}), frame: S.plate.first + frame, average: S.inspect.avg }).map(([k, v]) => {
+    const row = document.createElement("div"), dt = document.createElement("span"), dd = document.createElement("span");
+    dt.textContent = k; dd.textContent = v; row.append(dt, dd); return row;
+  }));
+  box.dataset.value = got?.value ? got.value.join(",") : "";
+  box.dataset.pixel = `${at.x},${at.y}`;
+}
 
 // ---------- OCIO, as in RV: the plate's File Color Space, the look, the display and view, the config ----------
 
@@ -2791,8 +2884,8 @@ function ocioItems() { // RV's OCIO menu (ocio_source_setup.py): the File Color 
 
 function menuItems() { // [group, [[label, key, action, disabled, checked] or "-", ...]]
   const p = !!S.plate, d = S.display, edits = S.edits.some((e) => e.on && e.patch);
-  const chan = (c, key) => [CHANNEL_NAMES[c], key, () => setDisplay({ channel: c }), !p, d.channel === c];
-  const param = (name, key) => [`${PARAMS[name].label}…`, key, () => colorMode(name), !p, S.mode === name];
+  const chan = (c, key) => [colour.CHANNEL_NAMES[c], key, () => setDisplay({ channel: c }), !p, d.channel === c];
+  const param = (name, key) => [`${colour.PARAMS[name].label}…`, key, () => colorMode(name), !p, S.mode === name];
   const step = (by) => () => { pause(); seek(S.frame + by); };
   const groups = [
     ["File", [["Open plate…", "", openDialog], ["Fluid keyframes", "", editFluid, !S.fluid || keying()],
@@ -2812,11 +2905,11 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Go to the out point", "End", () => { pause(); seek(S.outPt); }, !p], ["Set the in point", "[", () => setIn(S.frame), !p],
       ["Set the out point", "]", () => setOut(S.frame), !p], ["Clear in and out", "\\", clearRange, !p]]],
     ["Colour", [param("exposure", "Shift+E"), param("contrast", "K"), param("gamma", "Y"), param("saturation", "Shift+S"), param("hue", "H"), "-",
-      ["Invert", "Shift+I", () => setDisplay({ invert: !d.invert }), !p, d.invert], ["Reset all colour", "Shift+Home", resetDisplay, !displayActive(d)]]],
+      ["Invert", "Shift+I", () => setDisplay({ invert: !d.invert }), !p, d.invert], ["Reset all colour", "Shift+Home", resetDisplay, !colour.displayActive(d)]]],
     ...(S.ocio.info ? [["OCIO", ocioItems()]] : []),
     ["View", [chan("rgb", "Shift+C"), chan("r", "Shift+R"), chan("g", "Shift+G"), chan("b", "Shift+B"), chan("l", "Shift+L"), "-",
-      ["Fit", "F", () => zoomTo(1), !p], ["1:1", "1", () => zoomTo(S.plate.work[0] / S.fit.w), !p],
-      ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["Full screen", "`", fullScreen],
+      ["Fit", "F", () => zoomTo(1), !p], ["1:1", "1", () => zoomTo(colour.oneToOne(view.width, S.fit.w, devicePixelRatio)), !p],
+      ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["Full screen", "`", fullScreen],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
     ["Help", [["Keys", "?", () => $("#help").showModal()]]],
   ];
@@ -2983,7 +3076,8 @@ function pickFrame(on) {
 function pickAt(e) { // the view's own pixels: the frame on show, through OCIO and the colour tools, without the brush outline
   const [x, y] = frameAt(e), n = PICK_SIDE;
   render();
-  const color = pickedColor(ctx.getImageData(Math.round(x) - (n >> 1), Math.round(y) - (n >> 1), n, n).data);
+  const [kx, ky] = toView(); // the canvas holds the plate at its own size
+  const color = pickedColor(ctx.getImageData(Math.round(x * kx) - (n >> 1), Math.round(y * ky) - (n >> 1), n, n).data);
   if (!color) return void hud("Click on the frame to pick a colour. Esc cancels.", 2000); // outside the frame: still picking
   pickFrame(false);
   takeColor(color);
@@ -3158,6 +3252,7 @@ document.addEventListener("drop", (e) => {
 });
 
 addEventListener("keydown", (e) => {
+  if (e.key === "F5" && !e.ctrlKey && !e.metaKey && !e.altKey) { if (S.plate) toggleInspector(); return e.preventDefault(); } // RV's Color Inspector; the page takes F5 from the browser's reload
   if (e.target.matches("input, select, textarea")) {
     if (e.key === "Enter" && e.target.id === "prompt") { enter(e.ctrlKey || e.metaKey); e.target.blur(); e.preventDefault(); }
     else if (e.key === "Escape") e.target.blur();
@@ -3188,7 +3283,7 @@ addEventListener("keydown", (e) => {
   else if (k === "\\") clearRange();
   else if (k === "F6") setWipe(S.wipe === null);
   else if (low === "f" && !mod) zoomTo(1);
-  else if (k === "1" && !mod) zoomTo(S.plate.work[0] / S.fit.w);
+  else if (k === "1" && !mod) zoomTo(colour.oneToOne(view.width, S.fit.w, devicePixelRatio));
   else if (k === "`") fullScreen();
   else if (k === "?") $("#help").showModal();
   else if (TOOLS[low] && !mod) pickTool(TOOLS[low]);

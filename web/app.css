@@ -345,5 +345,11 @@ dialog.open { width: min(900px, 94vw); }
 .render-hint { margin: 6px 0 0; font-size: 12px; }
 
 /* ---------- Viewer: colour, OCIO, the colour inspector (the viewer workstream adds its rules below) ---------- */
+.inspector { position: absolute; left: 12px; top: 12px; z-index: 6; min-width: 220px; padding: 8px 10px; border-radius: 6px;
+  background: rgba(10, 10, 12, 0.82); color: #e8e8e8; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; pointer-events: none; }
+.inspector div { display: flex; justify-content: space-between; gap: 16px; }
+.inspector div span:first-child { color: #a0a0a8; }
+#view.inspecting { cursor: crosshair; }
+#view.native { image-rendering: pixelated; }
 
 /* ---------- Render, Deliver, passes (the pipeline workstream adds its rules below) ---------- */
