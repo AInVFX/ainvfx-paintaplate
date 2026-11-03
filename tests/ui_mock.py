@@ -57,7 +57,7 @@ def flow(page, port):
         shown[t] = page.evaluate("[...document.querySelectorAll('#open .tab')].filter((s) => !s.hidden).map((s) => s.dataset.tab).join()")
     check(all(v == k for k, v in shown.items()), f"one tab per source: ComfyUI files, Upload, Scenes, Blank plate: {shown}")
     hdr = page.evaluate("""async () => { // an EXR through the frame route and the viewer's shader, as the colour tools see it
-      const [{ Display }, { DISPLAY }] = await Promise.all(["display.mjs", "logic.mjs"].map((m) => import(new URL(m, location.href).href)));
+      const { Display, DISPLAY } = await import(new URL("display.mjs", location.href).href); // the colour model lives in display.mjs since 1.5.0
       const r = await fetch("/paintaplate/frames?path=paintaplate/hdr_test&first=0&count=1&side=64");
       const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number), out = document.createElement("canvas");
       const frame = { width, height, data: new Uint16Array(await r.arrayBuffer()) }, space = "Linear Rec.709 (sRGB)";
