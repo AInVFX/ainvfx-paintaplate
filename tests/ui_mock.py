@@ -631,9 +631,19 @@ def oom_flow(page):
           f"{[(e[0], round(e[1] - ev[0][1], 2)) for e in ev]}")
 
 
+def key_ranges(doc):
+    """The Keys dialog's ranges spelled out, key by key: « 1 to 8 » gives 1, 2, ... 8, « Shift+2 to Shift+8 » gives
+    Shift+2, Shift+3, ... Shift+8. A range's two ends carry the same modifiers."""
+    def spell(m):
+        a, i, b, j = m.group(1), m.group(2), m.group(3), m.group(4)
+        if a != b or i > j or i.isdigit() != j.isdigit(): return m.group(0)
+        return ", ".join(f"{a}{chr(c)}" for c in range(ord(i), ord(j) + 1))
+    return re.sub(r"(?<![\w+])((?:[A-Za-z]+\+)*)([0-9]|[A-Z]) to ((?:[A-Za-z]+\+)*)([0-9]|[A-Z])(?![\w])", spell, doc)
+
+
 def keys_flow(page):
     """Every key the Keys dialog documents does what it says, and every key the menu shows is in the Keys dialog."""
-    doc = page.evaluate("[...document.querySelectorAll('#help dt')].map((e) => e.textContent).join(' | ')")  # the keys column
+    doc = key_ranges(page.evaluate("[...document.querySelectorAll('#help dt')].map((e) => e.textContent).join(' | ')"))  # the keys column
     page.click("#view", button="right")
     keys = page.evaluate("[...new Set([...document.querySelectorAll('#ctx kbd')].map((k) => k.textContent).filter(Boolean))]")
     page.keyboard.press("Escape")
@@ -645,9 +655,12 @@ def keys_flow(page):
     frame = lambda: int(text("#frame-now"))  # noqa: E731
     results = {}
 
-    def key(k, test, *, hold=0):
+    def key(k, test, *, hold=0):  # a key's effect within 1.5 s: a busy page (a fluid shot just made) answers later than 60 ms
         page.keyboard.press(k)
         page.wait_for_timeout(hold or 60)
+        for _ in range(29):
+            if test(): break
+            page.wait_for_timeout(50)
         results[k] = bool(test())
     page.keyboard.press("Home"); start = frame()
     key("ArrowRight", lambda: frame() == start + 1); key("ArrowLeft", lambda: frame() == start)
