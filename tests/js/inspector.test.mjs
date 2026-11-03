@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addSample, formatValue, inspectorRows, sourcePath, sourcePixel } from "../../web/inspector.mjs";
+import { addSample, formatValue, inspectorRows, sourcePath, sourcePixel, wipeSide } from "../../web/inspector.mjs";
 
 test("a point of the view gives the plate's own pixel, from the top left", () => {
   assert.deepEqual(sourcePixel(0, 0, 3840, 2160), { x: 0, y: 0, inside: true });
@@ -37,4 +37,16 @@ test("the inspector says when its values are a movie's codes", () => {
   assert.equal(sourceLine({ space: "ACEScct", movie: true }, { bits: 8 }), "8-bit movie: ACEScct codes, not the pass's own values");
   assert.equal(sourceLine({ space: "sRGB Encoded Rec.709 (sRGB)", movie: false }, { bits: 10 }), "10-bit movie: sRGB Encoded Rec.709 (sRGB) codes");
   assert.equal(sourceLine(null, null), null);
+});
+
+test("the side of the wipe a plate pixel falls on: left of the line, the plate or the pass compared", () => {
+  assert.equal(wipeSide(959, 1920, 0.5), "left");
+  assert.equal(wipeSide(960, 1920, 0.5), "right");
+  assert.equal(wipeSide(10, 1920, null), "right"); // no wipe: the pass on show everywhere
+});
+
+test("the rows name the pass read; a picture the page drew is read as drawn", () => {
+  const rows = inspectorRows({ x: 1, y: 2, frame: 1001, source: { label: "Shot, preview", space: "ACEScg", movie: true }, value: [0.5, 0.5, 0.5] });
+  assert.deepEqual(rows.slice(0, 3), [["Native Pixel", "1, 2"], ["Frame", "1001"], ["Source", "Shot, preview"]]);
+  assert.equal(sourceLine({ drawn: "First frame", label: "First frame" }), "First frame, as drawn: the final colour only");
 });

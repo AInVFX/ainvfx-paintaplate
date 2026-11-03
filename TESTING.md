@@ -46,6 +46,7 @@ Where the system Python refuses `pip` (Ubuntu, Debian), install into a virtual e
 - The start: with no plate open, a blank plate opens at 960 × 512, 121 frames at 25 fps, in 16-bit (every other flow loads the page with `?blank=0`).
 - The Render panel: every finished pass with a picture is a row to click; a click shows it (SDR to HDR, the First frame), a second click the latest.
 - The Color Inspector (`tests/flows/viewer.py`): a 4K EXR plate's half floats as stored, a new frame and a dragged box read again, and a read held on its way never shows the new point with the old point's values.
+- Two passes in the wipe (`tests/flows/viewer.py`): Ctrl+click puts a paint matte on the left side against the full-size composite, both named; the inspector reads each side, and a preview pass at its own size; Esc, a second Ctrl+click and F6 end it.
 - A 16-bit fluid shot exports by itself (a zip of its HDR frames and its shot), and playing its EXR plate never alternates between its EXR frames and its 8-bit movie.
 - While it generates: a full-size pass shows its live preview in a corner; Esc stops the render step on its way and Enter goes on; Shift+Home resets every colour change.
 - Close plate: the × after the plate's name empties the page, disables playback and says the frames are freed.

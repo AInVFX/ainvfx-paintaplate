@@ -517,13 +517,21 @@ def _frame_cached(full: str, index: int, mtime: float) -> np.ndarray:
     return frame_rgb(full, index)
 
 
-def pixel(rel: str, frame: int, x: int, y: int, size: int = 1) -> dict:
+def pixel(rel: str, frame: int, x: int, y: int, size: int = 1, of: str = "") -> dict:
     """The colour inspector's read: the pixel at (x, y) of a frame, at native size, in the file's own values (an EXR's
-    half floats as stored, above 1.0 and below 0), and the mean of the `size` x `size` pixels around it."""
+    half floats as stored, above 1.0 and below 0), and the mean of the `size` x `size` pixels around it.
+
+    `of` is the size of the grid (x, y) is in, as "3840x2160": the plate's. A frame of another size, such as a preview
+    pass, is read at the same place of the picture in its own pixels, which the reply names (1.7.0 read the plate's
+    pixel numbers in a 640 x 352 preview and failed)."""
     full = folders.plate_path(rel)
     stamp = os.path.getmtime(full if os.path.exists(full) else os.path.dirname(full))
     rgb = _frame_cached(full, max(0, frame), stamp)
     h, w = rgb.shape[:2]
+    if of:
+        ow, oh = (int(v) for v in of.lower().split("x"))
+        if ow > 0 and oh > 0 and (ow, oh) != (w, h):
+            x, y = int((x + 0.5) * w / ow), int((y + 0.5) * h / oh)
     if not (0 <= x < w and 0 <= y < h):
         raise ValueError(f"Pixel {x}, {y} is outside the {w} x {h} frame")
     r = max(1, min(int(size), 64)) // 2
@@ -548,7 +556,7 @@ async def pixel_route(request):
     q = request.rel_url.query
     try:
         out = await asyncio.to_thread(pixel, q.get("path", ""), int(q.get("frame", 0)), int(q.get("x", 0)), int(q.get("y", 0)),
-                                      int(q.get("size", 1)))
+                                      int(q.get("size", 1)), q.get("of", ""))
     except (FileNotFoundError, ValueError) as e:
         return web.json_response({"error": str(e)}, status=404, headers={"Cache-Control": "no-store"})
     return web.json_response(out, headers={"Cache-Control": "no-store"})
