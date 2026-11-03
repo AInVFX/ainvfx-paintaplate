@@ -560,7 +560,7 @@ function hdrUI() { // the SDR-to-HDR switch shows for every plate when the model
 }
 function setHdr(on) { // off: renders end with the SDR shot; each setting keeps its own renders
   S.hdrSet = on;
-  const exr = on && !holdsHdr(S.plate?.spec, S.plate?.headroom); // a video file, or integers in a display or linear encoding
+  const exr = on && !holdsHdr(S.plate?.spec, S.plate?.headroom); // a format that holds nothing above 1.0: an SDR video, an sRGB or linear integer sequence
   log(`SDR to HDR ${on ? `on: the full-size shot is made again in scene-linear values, then fitted to the plate${exr ? ". The result becomes an EXR sequence: the player shows its frames and Export writes them, half-float EXR in ACES2065-1" : ""}` : "off"}`);
   hud(`SDR to HDR ${on ? "on" : "off"}`, 1500);
   hdrUI(); recompose(); touch();

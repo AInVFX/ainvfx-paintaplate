@@ -541,11 +541,11 @@ export function plateDepth(spec) {
     : +(fmt.match(/p(\d+)(le|be)$/)?.[1] ?? 8);
   return { bits, float, frames: float ? "exr" : bits > 8 ? "png16" : "png", hdr: float };
 }
-// Whether a plate's own format holds the values above 1.0 that SDR to HDR makes: float samples do, and so does an integer
-// image sequence in a log encoding (`headroom`, from the stat route: the scene-linear value code value 1.0 decodes to in
-// the plate's colour space; 222.9 for ACEScct, 1.0 for sRGB), such as a 10-bit Cineon DPX or a camera log TIFF. A video
-// plate's result is an EXR sequence whatever its encoding (Adrien, 2 Nov).
-export const holdsHdr = (spec, headroom = 1) => !!spec && spec.kind !== "video" && (plateDepth(spec).float || headroom > 1.001);
+// Whether a plate's own format holds the values above 1.0 that SDR to HDR makes: float samples do, and so does a plate whose
+// colour space decodes code value 1.0 above 1.0 (`headroom`, from the stat route: 222.9 for ACEScct, 100 for PQ, 1.0 for
+// sRGB), video or not: an HDR video in PQ or HLG, a log video, a 10-bit Cineon DPX, a camera log TIFF. Such a plate exports
+// in its own format with no extra files; only the others warn first and deliver an EXR sequence (Adrien, 3 Nov).
+export const holdsHdr = (spec, headroom = 1) => !!spec && (plateDepth(spec).float || headroom > 1.001);
 export const hdrPlate = (spec) => plateDepth(spec).hdr; // SDR to HDR on by default for this plate
 export const wantsHdr = (spec, tools, on) => !!spec && !!on && !tools.includes("light");
 // The switch away from the plate's default makes another render, so each setting keeps its own: "|hdr" or "|sdr".

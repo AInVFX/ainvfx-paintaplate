@@ -508,6 +508,8 @@ test("SDR to HDR on a plate that cannot hold values above 1.0 makes its result a
   assert.equal(holdsHdr(dpx10, 16.3), true, "a 10-bit DPX in a log encoding holds them through its curve");
   assert.equal(holdsHdr(tif16, 222.9), true, "a 16-bit TIFF in ACEScct too");
   assert.equal(holdsHdr(tif16, 1), false, "a 16-bit TIFF in sRGB does not: its result becomes an EXR sequence");
-  assert.equal(holdsHdr(mp4, 100), false, "a video plate never, whatever its encoding (Adrien, 2 Nov)");
+  assert.equal(holdsHdr(mp4, 100), true, "an HDR video (PQ) keeps them in its own file: no extra files (Adrien, 3 Nov)");
+  assert.equal(holdsHdr({ kind: "video", ext: ".mov", pix_fmt: "yuv444p12le" }, 55.1), true, "a log video (LogC) too");
+  assert.equal(holdsHdr(mp4, 1), false, "an SDR video does not: it warns first and delivers an EXR sequence");
   assert.deepEqual([exrResult(dpx10, true, 16.3), exrResult(tif16, true, 1)], [false, true]);
 });
