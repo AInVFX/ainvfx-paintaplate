@@ -14,6 +14,7 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
   erasePrompt, erasesPaint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
+import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
@@ -140,26 +141,31 @@ const folderOf = (name, out, key) => { // the folder a workflow saved its frames
 function editImage(e, before, size) { // what Klein sees: the strokes over the frame; an erase, the frame itself; a light, the frame with its light
   const c = snap(before, size);
   if (e.tool === "erase") return c; // told to remove the object, Klein cleans it; shown a filled hole, it drew a new object there
-  if (e.tool === "light") return relightGuide(c, e);
+  if (e.tool === "light") return c; // a relight: the frame as it is; the light plan is Klein's second reference (lightPlan)
   c.getContext("2d").drawImage(e.paint, 0, 0, size[0], size[1]);
   return c;
 }
 
-// What Klein and its prompt writer see for a light: the frame with its light and shade, as the brush showed them. Relight
-// Transfer then keeps that light where it is strong (`lightLayer`), and Klein relights the rest of the frame to agree with it.
-function relightGuide(frame, e) {
-  const [w, h] = [frame.width, frame.height], x = frame.getContext("2d");
-  if (e.shade) x.drawImage(e.shade, 0, 0, w, h);
-  x.globalCompositeOperation = "lighter"; x.drawImage(e.paint, 0, 0, w, h);
-  x.globalCompositeOperation = "source-over";
-  return frame;
-}
-
-function lightLayer(e, size) { // a light edit's light on black, as the brush adds it to the frame: Relight Transfer keeps it
-  const c = snap(null, size, "#000");
-  c.getContext("2d").drawImage(e.paint, 0, 0, size[0], size[1]);
+// A relight's second reference (2 Nov test, approved): the light's strokes alone on grey, its shade strokes in black, drawn
+// solid. Shown the frame with the light painted on it, Klein treated the strokes as paint; with the plan beside the clean
+// frame, it places a light source where it is painted, keeps its colours, and relights the rest to agree with it.
+function lightPlan(e, size) {
+  const c = snap(null, size, PLAN_GREY), x = c.getContext("2d");
+  if (e.shade) { x.filter = "brightness(0)"; for (let i = 0; i < 6; i++) x.drawImage(e.shade, 0, 0, size[0], size[1]); x.filter = "none"; }
+  for (let i = 0; i < 6; i++) x.drawImage(e.paint, 0, 0, size[0], size[1]); // the brush lays light at a low flow: six coats make it solid
   return c;
 }
+
+// A light edit's shade strokes, white on black and softened: Relight Transfer darkens the frame there, in linear light, as a
+// compositor multiplies a shadow. Klein ignores a painted shadow (3 Nov test), so the shade is applied as painted.
+function shadeMask(e, size) {
+  const c = snap(null, size, "#000"), x = c.getContext("2d");
+  x.filter = `brightness(0) invert(1) blur(${Math.max(1, Math.round(size[0] / 400))}px)`;
+  for (let i = 0; i < 3; i++) x.drawImage(e.shade, 0, 0, size[0], size[1]); // the brush lays shade at a low flow: three coats
+  x.filter = "none";
+  return c;
+}
+const shaded = (e) => e.tool === "light" && !!e.shade && colorsOf(e).some(dark);
 
 const maskAt = (e, size) => (e.tool === "light" ? snap(null, size, "#fff") : snap(e.mask, size, "#000"));
 
@@ -189,6 +195,11 @@ async function captionFor(e, reference, key, kind = "edit") { // Klein's own ups
 }
 
 async function writeCaption(e, reference, key, kind) {
+  if (e.tool === "light") { // a relight's request is the page's own: the light plan says where the light is and its colour (logic.lightPlanCaption)
+    e.caption = { key, text: lightPlanCaption({ colors: colorsOf(e), color: e.color, words: e.prompt }) };
+    log(`Edit ${num(e)}: relight request, with the light plan as Klein's second reference: ${e.caption.text}`);
+    return e.caption.text;
+  }
   const paint = e.tool === "erase" ? paintGrid(e) : null; // an erase locks one box per painted part
   const ask = upsampleRequest({ tool: e.tool, words: e.prompt, bbox: bounds(e.mask), boxes: paint && paintBoxes(paint),
     colors: colorsOf(e), color: e.color });
@@ -1610,6 +1621,7 @@ async function generate(edit) {
     // 1. A quick pass at preview size: its steps appear live inside the strokes. Paint may change a zone around them.
     status(`Edit ${num(edit)}: ${NAME[edit.tool].toLowerCase()}, first look`);
     const size = p.prev, values = { base, reference, start: light ? base : reference, caption: cap, seed: edit.seed,
+      plan: light ? await uploadCanvas(lightPlan(edit, size), `${tag}_plan.png`) : "",
       mask: await uploadCanvas(maskAt(edit, size), `${tag}_mask.png`), ...editSettings(edit, size, QUICK), prefix: `paintaplate/${p.id}/edits/e${edit.id}` };
     log(`Edit ${num(edit)}: Klein quick pass at ${size.join(" x ")}, ${QUICK.steps} steps`);
     const quick = await run("edit", values, { kind: "edit", front: true, preview: show, progress: (f) => editProgress(edit, f / 2) }).done;
@@ -1625,9 +1637,11 @@ async function generate(edit) {
     const startName = await uploadCanvas(start, `${tag}_start.png`);
     const full = await run("edit", { ...values, base: await baseUpload(below, before, work), start: startName,
       // an erase refines the quick result, which has no object left: shown the original, Klein drew part of it back
-      reference: edit.tool === "erase" ? startName : await uploadCanvas(editImage(edit, before, work), `${tag}_ref_full.png`),
+      // a relight refines its quick result, beside its light plan at full size
+      reference: edit.tool === "erase" || light ? startName : await uploadCanvas(editImage(edit, before, work), `${tag}_ref_full.png`),
       mask: await uploadCanvas(maskAt(edit, work), `${tag}_mask_full.png`), ...editSettings(edit, work, FULL),
-      relight: light ? 1 : 0, light: light ? await uploadCanvas(lightLayer(edit, work), `${tag}_light.png`) : "", level: edit.tool === "erase" }, { kind: "edit", front: true, progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
+      relight: light ? 1 : 0, plan: light ? await uploadCanvas(lightPlan(edit, work), `${tag}_plan_full.png`) : "",
+      shade: shaded(edit) ? await uploadCanvas(shadeMask(edit, work), `${tag}_shade.png`) : "", level: edit.tool === "erase" }, { kind: "edit", front: true, progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
     if (!alive()) return;
     // a relight shows the frame as the export will make it: Klein's light on the plate's own detail
     edit.patch = await loadImage(viewUrl(outputFile("edit", full, light ? "relit" : "patch")));
@@ -2710,10 +2724,9 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
   const edits = [];
   for (const e of active) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, caption: e.caption?.text || templateCaption(e),
     mask: await uploadCanvas(maskAt(e, p.work), `graph_e${e.id}_mask.png`),
-    layer: e.tool === "erase" ? null : e.tool === "light" // a light: the frame with its light, as Klein saw it
-      ? await uploadCanvas(editImage(e, layered(S.edits.indexOf(e)), p.work), `graph_e${e.id}_guide.png`)
-      : await uploadCanvas(snap(e.paint, p.work), `graph_e${e.id}_strokes.png`),
-    light: e.tool === "light" ? await uploadCanvas(lightLayer(e, p.work), `graph_e${e.id}_light.png`) : null,
+    layer: e.tool === "paint" ? await uploadCanvas(snap(e.paint, p.work), `graph_e${e.id}_strokes.png`) : null,
+    plan: e.tool === "light" ? await uploadCanvas(lightPlan(e, p.work), `graph_e${e.id}_plan.png`) : null, // a relight's second reference
+    shade: shaded(e) ? await uploadCanvas(shadeMask(e, p.work), `graph_e${e.id}_shade.png`) : null,
     quick: editSettings(e, p.prev, QUICK), full: editSettings(e, p.work, FULL) });
   const erase = active.some((e) => e.tool === "erase");
   const graph = sceneGraph(WF, { edits, about: { version: S.version, name: p.name },

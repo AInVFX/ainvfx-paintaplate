@@ -526,6 +526,21 @@ def shot_shift(shifts) -> tuple:
     return (float(np.median(s[:, 0])), float(np.median(s[:, 1]))) if len(s) else (0.0, 0.0)
 
 
+def shade_frame(img: np.ndarray, shade: np.ndarray, density: float = 0.7, space: str = "linear") -> np.ndarray:
+    """Darkens a frame where its shade is painted, in linear light, as a compositor multiplies a shadow: `shade` is white
+    where the shadow is full (its soft edge as painted), `density` how much light it takes away there. Klein ignores a
+    painted shadow (3 Nov test), so a light edit's shade strokes come through here, exactly where they are painted."""
+    m = np.asarray(shade, np.float32)
+    m = m.mean(-1) if m.ndim == 3 else m
+    if m.shape != img.shape[:2]:
+        from PIL import Image
+        m = np.asarray(Image.fromarray(np.clip(m * 255, 0, 255).astype(np.uint8)).resize((img.shape[1], img.shape[0]), Image.BILINEAR), np.float32) / 255
+    k = (1 - np.clip(density, 0, 1) * np.clip(m, 0, 1))[..., None]
+    rgb = img[..., :3]
+    out = linear_to_srgb(srgb_to_linear(rgb) * k) if space == "sRGB" else rgb * k
+    return np.concatenate([out, img[..., 3:]], -1) if img.shape[-1] > 3 else out
+
+
 def relight_frame(plate: np.ndarray, source: np.ndarray, relit: np.ndarray, radius: float, strength: float = 1.0,
                   shift=(0.0, 0.0), plate_space: str = "linear", shot_space: str = "linear", light=None) -> np.ndarray:
     """One frame of Relight Transfer: `relit` moved by `shift` onto `source`, then its light moved onto `plate`, and with

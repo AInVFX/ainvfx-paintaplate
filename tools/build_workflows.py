@@ -127,7 +127,7 @@ def load(name, folder=None):
 # edit: no painted light to keep; no movie asked of a matte, an export's matte or a fluid shot's control video (the
 # Render panel's rows show them; the ComfyUI graph of the Export dialog leaves them out).
 OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",),
-            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "relight_light": ("light",),
+            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "edit_plan": ("plan",), "hdr_shot": ("hdr",), "relight_shade": ("shade",),
             "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",),
             "export_plate": ("prefix",), "export_exr": ("exr_prefix",)}
 
@@ -243,12 +243,15 @@ def edit():
     vae = g("VAELoader", vae_name=Slot("vae", KLEIN_VAE))
     base = g("LoadImage", _title="Frame before the edit", image=Slot("base", ""))
     reference = g("LoadImage", _title="Reference: the strokes", image=Slot("reference", ""))
+    # a relight's second reference: the light plan, its strokes alone on grey (dropped for paint and erase)
+    plan = g("LoadImage", _title="Light plan (light edits)", image=Slot("plan", ""))
     start = g("LoadImage", _title="Start image", image=Slot("start", ""))
     mask = g("LoadImageMask", _title="Edit mask", image=Slot("mask", ""), channel="red")
     positive = g("CLIPTextEncode", _title="Caption", text=Slot("caption", ""), clip=clip)
     negative = g("ConditioningZeroOut", conditioning=positive)
     ref = g("ReferenceMultiLatent", positive=positive, negative=negative, vae=vae,
-            resolution="keep resolution", images__image0=reference)
+            resolution="keep resolution", images__image0=reference, images__image1=plan)
+    g.link_slot(ref, "images.image1", "edit_plan")
     grown = g("GrowMask", mask=mask, expand=Slot("grow", 16), tapered_corners=True)
     latent = g("SetLatentNoiseMask", samples=g("VAEEncode", pixels=start, vae=vae), mask=grown)
     sampled = g("KSampler", _progress=True, model=model, seed=Slot("seed", 0), steps=Slot("steps", 8), cfg=1.0,
@@ -269,9 +272,9 @@ def edit():
     # Relight Transfer decodes the sRGB frames to linear light and encodes its result back itself
     relit = g("PaintAPlate_RelightTransfer", plate=base, source=half(g, base), relit=half(g, result), radius=1,
               strength=Slot("relight", 0.0), align=True, plate_space="sRGB", shot_space="sRGB",
-              light=g("LoadImage", _title="Painted light (light edits)", image=Slot("light", "")))
+              shade=g("LoadImage", _title="Painted shade (light edits)", image=Slot("shade", "")))
     g.link_slot(relit, "plate", "relit_frame")
-    g.link_slot(relit, "light", "relight_light")  # the light as the brush painted it, kept where it is strong
+    g.link_slot(relit, "shade", "relight_shade")  # a light edit's shade strokes: Relight Transfer darkens the frame there
     g("SaveImage", _title="Relit frame", _output="relit", images=relit, filename_prefix=Slot("prefix", EDIT_PREFIX))
     g.save("edit")
 

@@ -7,7 +7,7 @@
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_element: ["seed"],
-  review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], relight_light: ["light"],
+  review_frames: ["frames_prefix"], review_view: ["view_prefix"], edit_plan: ["plan"], hdr_shot: ["hdr"], relight_shade: ["shade"],
   matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"],
   export_plate: ["prefix"], export_exr: ["exr_prefix"] };
 
@@ -128,12 +128,12 @@ export const lightColor = (colors, color) => colorName(colors.find((c) => !dark(
 // tool: paint, erase or light; words: the prompt; colors: of the painted strokes; color: the tool's colour;
 // bbox: [y_min, x_min, y_max, x_max] on 0..1000. Only the chosen tool's text is built.
 export function caption({ tool, words, colors, color, bbox }) {
+  if (tool === "light") return lightPlanCaption({ colors, color, words }); // a relight's request is the page's own
   const text = {
     erase: () => `Remove ${words ? `the ${words}` : "the object"} inside <obj_1> completely, with its shadow and its reflection. Show the surface and the background that continue behind it, with matching detail, light, shadows and focus. Add no new object. Keep everything else unchanged.`,
-    paint: () => `Replace the rough coloured drawing inside <obj_1> with ${words || "a realistic object of that shape and colour"}, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.`,
-    light: () => `Relight the whole scene with ${lightColor(colors, color)} light${words ? ` (${words})` : ""}: keep the painted light in <obj_1> as bright and as coloured as it is painted, and relight the rest of the scene so that it agrees with it, with physically consistent shadows and reflections and no other light source.${colors.some(dark) ? " The darkened areas show where shade falls: make every shadow agree with the light." : ""} Keep the content, framing and textures unchanged.`,
+    paint: () => `Replace the rough coloured drawing inside <obj_1> with ${words || "an object of that shape and colour"}, following the drawing's outline, pose and size, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.`,
   }[tool]();
-  const desc = { erase: words ? `${words} to remove` : "object to remove", paint: words || "the drawn object", light: "light source" }[tool];
+  const desc = { erase: words ? `${words} to remove` : "object to remove", paint: words || "the drawn object" }[tool];
   return `${text} ${JSON.stringify([{ id: "obj_1", bbox, desc }])}`;
 }
 
@@ -146,27 +146,16 @@ export const KEEP_TOUCHED = " Where the drawing touches an object, the new eleme
   "wets it or lights it); add no props, fuel or supports that were not asked for."; // a fire on a towel came with logs without it
 
 export function upsampleRequest({ tool, words, bbox, boxes = null, colors = [], color = "#ffd890" }) {
-  if (tool === "light") { // the strokes' colour always counts: asked for warm light, an orange and a green light both came back orange (29 Oct)
-    // Klein and the prompt writer see the frame with the light painted on it, as the brush showed it (app.mjs relightGuide),
-    // and Relight Transfer keeps that light where it is strong: the request asks Klein to relight the rest to agree with it
-    const shadows = colors.some(dark) ? " The darkened areas show where shade falls: make every shadow agree with the light." : "";
-    const ask = `Relight the whole photograph with ${lightColor(colors, color)} light${words ? `: ${words}` : ""}. The painted light shows where ` +
-      `this light is and how bright it is: keep it as bright, and as coloured, where it is painted.${shadows} Relight the rest of the ` +
-      "photograph so that it agrees with it: light on the surfaces that face it, a natural falloff, real shadows, the sky and the reflections. " +
-      "Add no other light source. Keep every object, its position, shape, size and texture, the framing and the camera exactly as they are.";
-    return { mode: "plain", locked: null,
-      request: `Reference images follow in order (the first image, the second image, ...).\nUser request: ${ask}\nOutput the caption.` };
-  }
+  if (tool === "light") return { mode: "plain", locked: null, request: lightPlanCaption({ colors, color, words }) }; // no prompt writer: the light plan says it
   const parts = tool === "erase" && boxes?.length > 1 ? boxes : null; // several painted parts: one locked row each
   const rows = parts ? parts.map((b, i) => ({ id: `obj_${i + 1}`, from: "ref_image_0", src_bbox: b, tgt_bbox: null, desc: words || "an object to remove" }))
     : [tool === "erase" ? { id: "obj_1", from: "ref_image_0", src_bbox: boxes?.[0] ?? bbox, tgt_bbox: null, desc: words || "the object to remove" }
-      : { id: "obj_1", from: "target", src_bbox: null, tgt_bbox: bbox, desc: words || "a realistic object of the drawing's shape and colour" }];
+      : { id: "obj_1", from: "target", src_bbox: null, tgt_bbox: bbox, desc: words || "an object of the drawing's shape and colour, in the image's own style" }];
   const cites = rows.map((r) => `<${r.id}>`), list = cites.length > 1 ? `${cites.slice(0, -1).join(", ")} and ${cites.at(-1)}` : cites[0];
   const ask = tool === "erase"
     ? parts ? `Remove the ${words || "objects"} ${list} completely, with their shadows and their reflections, and continue the background behind them. Remove nothing else.`
       : `Remove the ${words || "object"} <obj_1> completely, with its shadow and its reflection, and continue the background behind it. Remove nothing else.`
-    : `Replace the rough coloured drawing at <obj_1> with ${words || "a realistic object of the same shape and colour"}, photographed in the ` +
-      `same light, perspective, focus and grain as the scene, casting its own light and shadows on what is around it.${KEEP_TOUCHED}`;
+    : `Replace the rough coloured drawing at <obj_1> with ${words || "an object of the same shape and colour"}: follow the drawing's outline, pose, size and colours, and draw it in exactly the style of the rest of the image (a photograph, a painting or an illustration: whichever it is), in the same light, perspective, focus and grain, casting its own light and shadows on what is around it.${KEEP_TOUCHED}`;
   const instruction = `ORIGINAL PROMPT:\n${ask}\n\nLOCKED BOUNDING-BOX ANNOTATIONS ([y_min, x_min, y_max, x_max] on a 0-1000 canvas, with ` +
     "(0, 0) at the top-left). This is an authoritative JSON list of dictionaries; preserve every supplied identity, provenance value, " +
     `null, and coordinate exactly:\n${pyJSON(rows)}`;
@@ -634,6 +623,26 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
   if (id === "hdr") return { url, space: spaces.log ?? "@model", frames: store.hdrFrames ?? null, framesSpace: store.hdrFrames ? spaces.hdr ?? null : null };
   return { url, space: MATTE_PASSES.has(id) ? spaces.data ?? "@model" : id === "hdr" ? spaces.log ?? "@model" : "@model", frames: null };
 }
+
+// ---------- A relight's light plan (2 Nov test on an RTX PRO 6000, approved by Adrien) ----------
+// Klein gets two references: the frame, and the light plan, the light's strokes alone on grey (shade strokes in black). Shown
+// the frame with the light painted on it, Klein treated the strokes as paint; with the plan, it places the light where it is
+// painted, keeps its colours, and relights the rest of the frame to agree with it.
+export const PLAN_GREY = "#3a3a3a";
+export const lightColors = (colors, color) => {
+  const names = [...new Set(colors.filter((c) => !dark(c)).map(colorName))];
+  return names.length ? names.join(" and ") : colorName(color);
+};
+export function lightPlanCaption({ colors = [], color = "#ffd890", words = "" }) {
+  const shade = colors.some(dark) ? " The black strokes mark areas that must fall into deep shadow." : "";
+  const w = words.trim() ? ` ${words.trim()[0].toUpperCase()}${words.trim().slice(1)}${/[.!?]$/.test(words.trim()) ? "" : "."}` : "";
+  return "Relight the first image with the light planned in the second image. The second image is a light plan of the same frame: each coloured " +
+    `stroke marks a light source at that exact place, with that colour (${lightColors(colors, color)}).${shade}${w} Make the light source itself ` +
+    "visible where it is painted, as a real lamp, window, fire or glow that fits the scene. Light every surface that faces it with its colour and a " +
+    "natural falloff, cast new shadows away from it, and remove or soften the old highlights and shadows that disagree with it. Keep every object, " +
+    "face and texture, the framing and the camera exactly as in the first image: only the light changes. Do not draw any stroke.";
+}
+
 // A fluid shot's own passes, shown from the Render panel with its keyframes open or closed: the control video LTX was
 // guided by, the shot as LTX made it, and for a 16-bit plate its SDR-to-HDR frames as a movie in log values.
 export const fluidPasses = (result, spaces = {}) => (result ? [

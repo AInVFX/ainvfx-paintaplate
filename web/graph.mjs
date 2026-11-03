@@ -122,12 +122,15 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
     const ref = e.layer ? over(`${t} reference`, frame, node(`${t} strokes`, "LoadImage", { image: e.layer }),
       node(`${t} strokes alpha`, "InvertMask", { mask: [`${t} strokes`, 1] })) : frame;
     const qBase = scale(`${t} base at 768`, frame, plate.prev), qRef = e.layer ? scale(`${t} reference at 768`, ref, plate.prev) : qBase;
+    const plan = e.plan ? node(`${t} light plan`, "LoadImage", { image: e.plan }) : null; // a relight's second reference
     const quick = add(instantiate(WF.edit, `${t} quick`, { caption: e.caption, seed: e.seed, ...e.quick },
-      { base: qBase, reference: qRef, start: e.tool === "light" ? qBase : qRef, mask: scaleMask(`${t} mask at 768`, mask, plate.prev) }, { drop: EDIT_OUT }),
+      { base: qBase, reference: qRef, start: e.tool === "light" ? qBase : qRef, mask: scaleMask(`${t} mask at 768`, mask, plate.prev),
+        ...(plan ? { plan: scale(`${t} light plan at 768`, plan, plate.prev) } : {}) }, { drop: EDIT_OUT }),
       `quick pass at ${by(plate.prev)} · `);
     const start = scale(`${t} start`, quick.result, plate.work);
     const full = add(instantiate(WF.edit, `${t} full`, { caption: e.caption, seed: e.seed, ...e.full, relight: e.tool === "light" ? 1 : 0,
-      ...(e.light ? { light: e.light } : {}), level: e.tool === "erase" }, { base: frame, reference: e.tool === "erase" ? start : ref, start, mask }, { drop: EDIT_OUT }),
+      ...(e.shade ? { shade: e.shade } : {}), level: e.tool === "erase" },
+      { base: frame, reference: e.tool === "erase" || e.tool === "light" ? start : ref, start, mask, ...(plan ? { plan } : {}) }, { drop: EDIT_OUT }),
       `full size at ${by(plate.work)} · `);
     frame = e.tool === "light" ? full.relit : full.result;
     if (e.tool === "light") return;
