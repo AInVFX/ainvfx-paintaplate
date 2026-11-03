@@ -14,7 +14,7 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
   erasePrompt, erasesPaint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
-import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning } from "./logic.mjs";
+import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows } from "./logic.mjs";
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -2110,6 +2110,7 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   hideLive();
   const dt = (performance.now() - t0) / 1000;
   (store.done ??= {})[id] = dt;
+  for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
   S.took[id] = dt;
   S.stage = null;
   log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label} took ${dt.toFixed(1)} s`);
@@ -2120,6 +2121,7 @@ function reused(r, store, id, take) { // a step that a render with the same eras
   if (store.done?.[id] !== undefined) return;
   take();
   (store.done ??= {})[id] = 0;
+  for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // taken again: its workflows made it
   log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: made by an earlier render with the same erases, used again`);
 }
 
@@ -2328,8 +2330,9 @@ const PARTS = { export: "the result in the plate's format", matte: "its matte", 
 async function modelsOnShow() {
   registry ??= await (await fetch(new URL("models.json", location.href), { cache: "no-store" })).json();
   const edits = S.edits.filter((e) => e.on !== false && e.patch), fluid = !!S.fluid?.result && S.fluid.on !== false;
-  const tools = edits.map((e) => e.tool), hdr = S.hdrReady && (fluid && !!S.fluid.result.hdr || (tools.length > 0 && wantsHdr(S.plate?.spec, tools, hdrOn())));
-  return modelsBehind(registry, workflowsFor({ tools, fluid, hdr }), (n) => WF[n]?.prompt);
+  const r = S.renders.get(S.heroKey); // the render on show, with its record of the workflows it ran (r.flows)
+  const flows = resultFlows({ tools: edits.map((e) => e.tool), render: [...(r?.flows ?? [])], fluid, fluidHdr: fluid && !!S.fluid.result.hdr });
+  return modelsBehind(registry, flows, (n) => WF[n]?.prompt);
 }
 async function download(parts = ["export", "matte"]) {
   const models = (await modelsOnShow().catch(() => [])).map((m) => m.id).join(",");

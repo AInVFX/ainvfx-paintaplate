@@ -107,6 +107,12 @@ def pass_rows(page, U):
     U.check(shown(page) == ["Export"] and all(x["spread"] <= 12 and x["white"] > 0 for x in seen),
             f"after Export, its row shows the export's matte, grey, on every frame: {shown(page)}, {seen}")
     page.keyboard.press("Escape"); page.wait_for_timeout(500)
+    page.keyboard.press("?"); page.click("#help [role=tab][data-help=models]")  # Help > Models and licences
+    page.wait_for_function("!!document.querySelector('#models').dataset.shown", timeout=20000)
+    named = page.evaluate("document.querySelector('#models').dataset.shown").split(",")
+    U.check({"klein", "ltx", "sam", "ripple"} <= set(named) and "hdr" not in named and "fluid" not in named,
+            f"Models and licences names the models the render ran (r.flows): Klein, LTX, SAM, its paint IC-LoRA; no SDR to HDR, no fluid: {named}")
+    page.keyboard.press("Escape"); page.keyboard.press("Escape"); page.wait_for_timeout(300)
 
     page.click("#open-btn"); page.click("#open [data-tab=blank]")
     page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.select_option("#b-fps", "24"); page.fill("#b-frames", "17")

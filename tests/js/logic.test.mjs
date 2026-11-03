@@ -532,3 +532,16 @@ test("a plate above 2K warns when it opens on a card under 48 GB", () => {
   assert.equal(bigPlateWarning(uhd, 0), null, "the card's memory not yet known: no warning");
   assert.match(bigPlateWarning({ width: 2160, height: 3840 }, 39.6 * 2 ** 30), /40 GB/, "a portrait 4K plate on a 40 GB card");
 });
+
+import { STEP_FLOWS, resultFlows } from "../../web/logic.mjs";
+
+test("a render's record of its workflows (r.flows) names the models behind the result", () => {
+  const ran = (...ids) => [...new Set(ids.flatMap((id) => STEP_FLOWS[id]))];
+  assert.deepEqual(ran("erase", "clean", "comp", "cleanfull", "review"), ["matte", "clean", "comp", "cleanup", "review"]);
+  assert.deepEqual(resultFlows({ tools: ["paint"], render: ran("shot", "track", "comp", "full", "trackfull", "review") }).sort(),
+    ["comp", "edit", "matte", "prompt", "review", "shot"]);
+  assert.ok(resultFlows({ tools: ["erase"], render: [] }).includes("snap"), "an erase: SAM's object search");
+  assert.deepEqual(resultFlows({ fluid: true, fluidHdr: true }).sort(), ["fluid", "hdr"], "a fluid shot alone, through SDR to HDR");
+  assert.ok(!resultFlows({ tools: ["paint"], render: ran("shot", "full", "review") }).includes("hdr"), "no SDR to HDR step ran: none listed");
+  for (const id of Object.keys(STEP_FLOWS)) assert.ok(STEP_FLOWS[id].length > 0, id);
+});
