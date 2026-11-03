@@ -116,7 +116,7 @@ def zoom_and_paint(page, U):
 
 
 def fluid_wipe_and_models(page, U):
-    """The wipe on a fluid shot: the painted keyframe at this frame, or black, against the shot."""
+    """The wipe on a fluid shot: the painted keyframe at this frame, or black, against the shot; the models behind it."""
     page.click("#open-btn"); page.click("#open [data-tab=blank]")
     page.select_option("#b-depth", "8"); page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.fill("#b-frames", "33")
     page.dispatch_event("#b-frames", "input"); page.click("#open-go")
@@ -138,6 +138,15 @@ def fluid_wipe_and_models(page, U):
     for _ in range(5): page.keyboard.press("ArrowRight")
     page.wait_for_timeout(800)
     U.check(page.evaluate(PIXEL, xy) == [0, 0, 0], f"and black on a frame with no keyframe: {page.evaluate(PIXEL, xy)}")
+    page.keyboard.press("F6")
+    page.click("#view", button="right")
+    page.locator("#ctx li.group > span:first-child", has_text="Help").first.hover()
+    page.get_by_role("menuitem", name="Models and licences", exact=True).click()
+    page.wait_for_function("document.querySelector('#models').open", timeout=10000)
+    shown = page.get_attribute("#models", "data-shown").split(",")
+    rows = page.eval_on_selector_all("#models-all tr", "els => els.length")
+    U.check({"fluid", "ltx", "ltx-text", "ltx-vae"} <= set(shown) and "klein" not in shown and rows == 15,
+            f"Models and licences: the models behind the fluid shot, then every model: {shown}, {rows} rows")
     page.keyboard.press("Escape")
 
 

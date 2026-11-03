@@ -351,5 +351,8 @@ dialog.open { width: min(900px, 94vw); }
 .inspector div span:first-child { color: #a0a0a8; }
 #view.inspecting { cursor: crosshair; }
 #view.native { image-rendering: pixelated; }
+.models table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.models td { padding: 6px 8px; border-top: 1px solid rgba(128, 128, 128, 0.25); vertical-align: top; }
+.models small { opacity: 0.7; }
 
 /* ---------- Render, Deliver, passes (the pipeline workstream adds its rules below) ---------- */

@@ -7,6 +7,7 @@ import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onLog, onNotic
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
 import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor (logic.mjs keeps an older copy until the merge)
+import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, inspectorRows, sourcePixel, sourcePath } from "./inspector.mjs";
 import { sceneGraph } from "./graph.mjs";
 import { CHANNEL_NAMES, DAB_PROFILE, DISPLAY, FLUID, PARAMS, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
@@ -2747,6 +2748,35 @@ function modeKey(k, combo) { // the keys of an interactive edit, as RV's paramsc
 
 function resetDisplay() { leaveMode(); setDisplay({ ...colour.DISPLAY }); }
 
+// ---------- Models and licences (models.mjs, web/models.json) ----------
+// The models behind the result on show, from the workflows that made it, then every model the pack downloads.
+
+let registry = null;
+async function showModels() {
+  registry ??= await (await fetch(new URL("models.json", location.href), { cache: "no-store" })).json();
+  const edits = S.edits.filter((e) => e.on !== false && e.patch), fluid = !!S.fluid?.result && S.fluid.on !== false;
+  const flows = workflowsFor({ tools: edits.map((e) => e.tool), fluid, hdr: !!(S.toHdr && S.hdrReady) });
+  const behind = modelsBehind(registry, flows, (n) => WF[n]?.prompt);
+  const link = (text, href) => Object.assign(document.createElement("a"), { textContent: text, href, target: "_blank", rel: "noopener" });
+  const table = (rows, uses) => {
+    const t = document.createElement("table");
+    t.append(...rows.map((m) => {
+      const tr = document.createElement("tr"), cell = (...kids) => { const td = document.createElement("td"); td.append(...kids); tr.append(td); };
+      cell(link(m.name, m.source), document.createElement("br"), Object.assign(document.createElement("small"), { textContent: `${m.file} at ${m.revision.slice(0, 7)}` }));
+      cell(uses ? `${m.use} (${m.workflows.join(", ")})` : m.use);
+      cell(link(m.licence, m.licence_url), ...(m.upstream ? [document.createElement("br"), Object.assign(document.createElement("small"), { textContent: "original: " }), link(m.upstream.licence, m.upstream.source)] : []),
+        ...(m.gated ? [document.createElement("br"), Object.assign(document.createElement("small"), { textContent: "accept on Hugging Face first" })] : []));
+      return tr;
+    }));
+    return t;
+  };
+  const what = !S.plate ? "No plate is open." : behind.length ? `The result on show was made with ${behind.length} models:` : "The plate on show has no edits: no model made it.";
+  $("#models-shown").replaceChildren(Object.assign(document.createElement("p"), { textContent: what }), ...(behind.length ? [table(behind, true)] : []));
+  $("#models-all").replaceChildren(table(registry.models, false));
+  $("#models").dataset.shown = behind.map((m) => m.id).join(",");
+  $("#models").showModal();
+}
+
 // ---------- The colour inspector, as OpenRV's (F5; inspector.mjs) ----------
 // The pixel under the pointer, in the plate's own pixels, read at full precision and native size from the file on show
 // (/paintaplate/pixel), with the value drawn on screen. Shift held while the pointer moves averages the pixels it passes,
@@ -2885,7 +2915,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["2:1", "2", () => pixelZoom(2), !p], ["4:1", "4", () => pixelZoom(4), !p], ["1:2", "Shift+2", () => pixelZoom(1 / 2), !p], ["1:4", "Shift+4", () => pixelZoom(1 / 4), !p],
       ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["Full screen", "`", fullScreen],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
-    ["Help", [["Keys", "?", () => $("#help").showModal()]]],
+    ["Help", [["Keys", "?", () => $("#help").showModal()], ["Models and licences", "", showModels]]],
   ];
   const f = S.fluid;
   if (f && keying()) groups.splice(2, 0, ["Fluid", [["Generate", "Enter", () => generateFluid().catch(quiet), !f.keys.length],
