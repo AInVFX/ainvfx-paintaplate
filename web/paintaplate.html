@@ -87,6 +87,7 @@
       <div id="wipe" class="wipe" hidden>
         <span class="label left">Plate</span><span class="label right">Result</span><span class="grip" title="Drag to compare"></span>
       </div>
+      <div id="inspector" class="inspector" hidden aria-live="polite"></div>
       <p id="hud" class="hud" aria-live="polite"></p>
       <div id="opening" class="opening" hidden>
         <p id="op-title" class="op-title">Opening the plate</p>
@@ -175,7 +176,7 @@
       <dt>F6</dt><dd>Wipe between the plate and the result</dd>
       <dt>Alt + drag</dt><dd>Pan</dd>
       <dt>Ctrl + drag</dt><dd>Zoom</dd>
-      <dt>f, 1</dt><dd>Fit the frame, show it 1:1</dd>
+      <dt>f, 1</dt><dd>Fit the frame; show it 1:1, one plate pixel per screen pixel, as in RV</dd>
       <dt>`</dt><dd>Full screen</dd>
     </dl>
     <h3>Painting</h3>
@@ -211,9 +212,10 @@
       <dt>Shift+S, H</dt><dd>Saturation, hue, the same way. Backspace resets the one you edit, Esc leaves</dd>
       <dt>Shift+C, R, G, B, L</dt><dd>All channels, red, green, blue, luminance</dd>
       <dt>Shift+I</dt><dd>Invert</dd>
+      <dt>F5</dt><dd>Color Inspector, as in RV: the pixel under the pointer in the plate's own pixels, its values as stored, and the values on screen. Hold Shift while moving to average. The page takes F5, so it does not reload</dd>
       <dt>Right-click</dt><dd>Every action, by menu, with its key</dd>
     </dl>
-    <p class="hint">RV uses E, C, R, G, B and L without Shift. Here E, B and L pick the tools.</p>
+    <p class="hint">RV uses E, C, R, G, B and L without Shift. Here E, B and L pick the tools. The values are RV's: contrast is 0 at rest and turns about 0.5, gamma acts before the other tools, invert before exposure.</p>
     <h3>OCIO, as in RV: right-click, then OCIO</h3>
     <dl>
       <dt>File Color Space</dt><dd>The plate's colour space, by family. The viewer shows it at once; the models and the export use it too, so the edits are made again in it</dd>
