@@ -507,8 +507,7 @@ addEventListener("resize", () => { layoutUI(); fitView(); });
 $("#viewport").addEventListener("pointermove", inspectAt);
 
 function frameAt(e) { // pointer position in frame pixels (working size); stays right under zoom and pan
-  const r = view.getBoundingClientRect(), [w, h] = S.plate.work;
-  return [((e.clientX - r.left) * w) / r.width, ((e.clientY - r.top) * h) / r.height];
+  return colour.pointIn(view.getBoundingClientRect(), e.clientX, e.clientY, ...S.plate.work);
 }
 
 // The canvas holds the plate at its own size (up to NATIVE_SIDE), as OpenRV shows a plate; strokes, edits and the brush
@@ -1062,31 +1061,36 @@ function dropStroke() { // the stroke a finger began before the pinch goes, with
   render(); generateUI();
 }
 
-function navigate(e) { // RV: Alt or middle button drag pans, Ctrl drag zooms
+function navigate(e) { // RV: Alt or middle button drag pans (Shift locks the axis); Ctrl drag, or Alt with both buttons, zooms
   e.preventDefault();
   view.setPointerCapture(e.pointerId);
-  nav = { zoom: e.ctrlKey || e.metaKey, x: e.clientX, y: e.clientY, start: { ...S.zoom }, at: [e.clientX, e.clientY] };
+  const zoom = e.ctrlKey || e.metaKey || (e.altKey && (e.buttons & 5) === 5);
+  nav = { zoom, lock: e.shiftKey && !zoom, x: e.clientX, y: e.clientY, start: { ...S.zoom }, at: [e.clientX, e.clientY] };
   view.classList.add("panning");
 }
 
 function navigateMove(e) {
-  const dx = e.clientX - nav.x, dy = e.clientY - nav.y, s = nav.start;
-  if (!nav.zoom) S.zoom = { ...s, x: s.x + dx, y: s.y + dy };
-  else {
-    const k = Math.max(0.25, Math.min(16, s.k * Math.exp(dx / 200)));
-    const box = $("#viewport").getBoundingClientRect();
-    const ox = nav.at[0] - box.left - S.fit.x, oy = nav.at[1] - box.top - S.fit.y; // zoom about the press point
-    S.zoom = { k, x: ox - ((ox - s.x) * k) / s.k, y: oy - ((oy - s.y) * k) / s.k };
+  const s = nav.start;
+  let dx = e.clientX - nav.x, dy = e.clientY - nav.y;
+  if (!nav.zoom) {
+    if (nav.lock) [dx, dy] = colour.lockAxis(dx, dy);
+    S.zoom = { ...s, x: s.x + dx, y: s.y + dy };
+  } else {
+    const box = $("#viewport").getBoundingClientRect(), k = colour.dragZoomScale(s.k, dx, box.width); // RV's dragZoom
+    S.zoom = colour.zoomAbout(s, k, nav.at[0] - box.left - S.fit.x, nav.at[1] - box.top - S.fit.y); // about the press point
   }
   applyView(); render();
 }
 
-function zoomTo(k) {
-  const z = S.fit;
-  S.zoom = k === 1 ? { k: 1, x: 0, y: 0 } : { k, x: (z.w - z.w * k) / 2, y: (z.h - z.h * k) / 2 };
+function zoomTo(k, label = "Fit") { // about the viewport's centre, as RV's pixelRelativeScale
+  const z = S.fit, box = $("#viewport").getBoundingClientRect();
+  S.zoom = k === 1 ? { k: 1, x: 0, y: 0 } : colour.zoomAbout(S.zoom, colour.clampZoom(k), box.width / 2 - z.x, box.height / 2 - z.y);
   applyView(); render();
-  hud(k === 1 ? "Fit" : "1:1");
+  hud(label);
 }
+
+const pixelZoom = (n) => zoomTo(colour.pixelScale(n, view.width, S.fit.w, devicePixelRatio), n >= 1 ? `${n}:1` : `1:${Math.round(1 / n)}`);
+const widthZoom = () => { const box = $("#viewport").getBoundingClientRect(); zoomTo(box.width / S.fit.w, "Frame width"); }; // RV's Frame Width
 
 // ---------- A fluid shot on a blank plate: keyframes painted in flat colours, then ainvfx-fluid ----------
 
@@ -2870,7 +2874,8 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Invert", "Shift+I", () => setDisplay({ invert: !d.invert }), !p, d.invert], ["Reset all colour", "Shift+Home", resetDisplay, !colour.displayActive(d)]]],
     ...(S.ocio.info ? [["OCIO", ocioItems()]] : []),
     ["View", [chan("rgb", "Shift+C"), chan("r", "Shift+R"), chan("g", "Shift+G"), chan("b", "Shift+B"), chan("l", "Shift+L"), "-",
-      ["Fit", "F", () => zoomTo(1), !p], ["1:1", "1", () => zoomTo(colour.oneToOne(view.width, S.fit.w, devicePixelRatio)), !p],
+      ["Fit", "F", () => zoomTo(1), !p], ["Frame width", "Ctrl+F", widthZoom, !p], ["1:1", "1", () => pixelZoom(1), !p],
+      ["2:1", "2", () => pixelZoom(2), !p], ["4:1", "4", () => pixelZoom(4), !p], ["1:2", "Shift+2", () => pixelZoom(1 / 2), !p], ["1:4", "Shift+4", () => pixelZoom(1 / 4), !p],
       ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["Full screen", "`", fullScreen],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
     ["Help", [["Keys", "?", () => $("#help").showModal()]]],
@@ -3244,8 +3249,9 @@ addEventListener("keydown", (e) => {
   else if (k === "]") setOut(S.frame);
   else if (k === "\\") clearRange();
   else if (k === "F6") setWipe(S.wipe === null);
-  else if (low === "f" && !mod) zoomTo(1);
-  else if (k === "1" && !mod) zoomTo(colour.oneToOne(view.width, S.fit.w, devicePixelRatio));
+  else if (low === "f" && !mod && !e.altKey) zoomTo(1);
+  else if (low === "f" && mod && !e.shiftKey) widthZoom(); // RV's Frame Width; the page takes Ctrl+F from the browser's find
+  else if (/^Digit[1-8]$/.test(e.code) && !mod && !e.altKey) { const n = +e.code.slice(5); pixelZoom(e.shiftKey ? (n > 1 ? 1 / n : 1) : n); } // RV: 1 to 8 N:1, Ctrl+2 to 8 1:N
   else if (k === "`") fullScreen();
   else if (k === "?") $("#help").showModal();
   else if (TOOLS[low] && !mod) pickTool(TOOLS[low]);

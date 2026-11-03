@@ -92,6 +92,29 @@ def native_and_inspector(page, port, U):
     page.keyboard.press("f")
 
 
+PIXEL = "(([x, y]) => [...document.querySelector('#view').getContext('2d').getImageData(x, y, 1, 1).data].slice(0, 3))"
+TO_CANVAS = """(([cx, cy]) => { const v = document.querySelector('#view'), r = v.getBoundingClientRect();
+  return [Math.floor((cx - r.left) / r.width * v.width), Math.floor((cy - r.top) / r.height * v.height)]; })"""
+
+
+def zoom_and_paint(page, U):
+    """RV's zoom keys, and a stroke lands under the pointer at 4:1 and at 1:2 (the plate on show is 4K, the edits 1920)."""
+    page.keyboard.press("Home"); page.keyboard.press("b"); page.click(".sw[data-color='#d32f2f']")
+    box = page.eval_on_selector("#viewport", "e => { const r = e.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }")
+    for key, n, at in (("4", 4, (0.5, 0.5)), ("Shift+2", 0.5, (0.45, 0.5))):
+        page.keyboard.press(key); page.wait_for_timeout(300)
+        dev = page.evaluate("document.querySelector('#view').getBoundingClientRect().width * devicePixelRatio")
+        U.check(abs(dev - 3840 * n) < 2, f"{key} shows {n}:1 as RV: 3840 plate pixels over {dev:.0f} device pixels")
+        cx, cy = box[0] + at[0] * box[2], box[1] + at[1] * box[3]
+        xy = page.evaluate(TO_CANVAS, [cx, cy]); before = page.evaluate(PIXEL, xy)
+        page.mouse.move(cx - 3, cy); page.mouse.down(); page.mouse.move(cx + 3, cy, steps=4); page.mouse.up(); page.wait_for_timeout(300)
+        after = page.evaluate(PIXEL, xy)
+        U.check(after[0] - after[1] > 60 and sum(abs(a - b) for a, b in zip(before, after)) > 60,
+                f"at {key}, the red stroke lands under the pointer: canvas {xy} goes from {before} to {after}")
+        page.keyboard.press("Control+z"); page.wait_for_timeout(200)
+    page.keyboard.press("f")
+
+
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
@@ -106,4 +129,5 @@ def run(browser, port, U):
     page.keyboard.press("F5")
     U.check(page.evaluate("window.__alive") == 1, "F5 is the page's: it does not reload")
     native_and_inspector(page, port, U)
+    zoom_and_paint(page, U)
     page.close()
