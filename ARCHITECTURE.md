@@ -67,10 +67,10 @@ COMFYUI SERVER
   core API ....... /prompt /ws /history /interrupt /queue /free /upload/image /view /object_info /system_stats
   routes.py ...... /paintaplate/browse  thumb  stat  frames  blank  jobs  scenes  ocio  ocio/shader  download  version
   web/workflows .. 14 API workflows, written by tools/build_workflows.py
-        |  core nodes, ComfyUI-LTXVideo nodes and the 12 Paint a plate nodes
+        |  core nodes, ComfyUI-LTXVideo nodes and the 13 Paint a plate nodes
         v
 NODE PACK (Python)
-  nodes.py ....... 12 thin nodes: they convert tensors, then call
+  nodes.py ....... 13 thin nodes: they convert tensors, then call
   plateio.py ..... files: probe, read, write, scan a folder (numpy, PyAV and OpenEXR; no torch)
   mathops.py ..... pixels: fit, relight, mattes, keyframes (numpy and scipy; no torch)
   ocio.py ........ colour: the config, conversions, the viewer's GLSL (numpy and PyOpenColorIO; no torch)
@@ -85,7 +85,7 @@ MODELS (about 60 GB)
 
 These rules keep the code small and easy to change. Follow them in every change.
 
-1. **All GPU work is a ComfyUI workflow.** The page loads a workflow file, fills its slots and posts it. The 12 Paint a plate nodes only do what core ComfyUI cannot. So the app runs on any ComfyUI, and a Comfy API deployment stays possible.
+1. **All GPU work is a ComfyUI workflow.** The page loads a workflow file, fills its slots and posts it. The 13 Paint a plate nodes only do what core ComfyUI cannot. So the app runs on any ComfyUI, and a Comfy API deployment stays possible.
 2. **Workflows are generated.** `tools/build_workflows.py` writes `web/workflows`. Nobody edits the JSON by hand: a test fails when the files and the generator disagree.
 3. **Each workflow describes itself.** In each node's `_meta`, `slots` maps the node's inputs to slot names, `output` names an output the page reads, and `progress` marks the node whose progress bar stands for the whole workflow.
 4. **Optional links.** Some links exist only when the page has something to send: a matte to composite with, words to search by, a relit frame, an image sequence's review frames. When their slots stay empty, the page drops the link and every node that fed it. The rule is written twice, as `OPTIONAL` in `logic.mjs` and in `build_workflows.py`, and a test keeps the two equal.
@@ -180,8 +180,8 @@ Open plate has one tab per source: **ComfyUI files**, **Upload**, **Scenes** and
 
 | File | What it does |
 | --- | --- |
-| `__init__.py` | The entry point: registers the routes, serves `web/`, and exposes the 12 nodes (V3 schema, `comfy_api.v0_0_2`). |
-| `nodes.py` | The 12 nodes. |
+| `__init__.py` | The entry point: registers the routes, serves `web/`, and exposes the 13 nodes (V3 schema, `comfy_api.v0_0_2`). |
+| `nodes.py` | The 13 nodes. |
 | `folders.py` | Where paths from the page may point: `plate_path` (a file, a folder or a frame pattern under the input folder, or the output folder with `output:`), `output_folder`, `run_folder`. |
 | `plateio.py` | Files: sequences and frame patterns (a missing frame keeps its place, as in OpenRV), the plate spec and its colour guess, the folder scan of the plate browser, EXR writing that keeps every layer and header, still writers (PNG, TIFF, DPX, EXR), the review's half-float EXR frames, `VideoWriter` (the source codec, colour tags, timecode and audio), and the blank canvas. |
 | `mathops.py` | Pixels: phase-correlation alignment, grain level, the colour seam field, push-pull fill, steady masks, `fit_to_plate`, `relight`, `follow_matte`, `level_fill`, `keyframe_video`, and the fast bilinear `resize_to`. |
@@ -229,7 +229,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | `fluid` | The ainvfx-fluid pass, saved as ProRes 4444 | `generateFluid` |
 | `hdr` | SDR to HDR: Lightricks' LTX 2.5 IC-LoRA makes a full-size shot again in scene-linear values, as half-float EXR in ACES2065-1, and an 8-bit movie in ACEScct for the viewer. |  |
 
-### The 12 nodes, in `nodes.py`
+### The 13 nodes, in `nodes.py`
 
 | Node | What it does | Used by |
 | --- | --- | --- |
@@ -245,6 +245,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | Live Preview | A sampler hook: a tiny-decoder WebP every N steps; it switches itself off on any error | `clean`, `shot`, `fluid` |
 | Keyframe Video | Black frames with each keyframe at its frame | `fluid` |
 | HDR Match | Sets an HDR shot's level to the plate's: one gain per channel, measured on the untouched mid-tones (`mathops.hdr_match`). |  |
+| Load VAE (float32) | A VAE built in float32 at load, so ComfyUI's dynamic VRAM sizes its buffers for float32 weights (LTXVVAEForceFloat32 casts a bf16 VAE in place, which failed on a 32 GB card) | `hdr` |
 
 ### Tools, in `tools/`
 

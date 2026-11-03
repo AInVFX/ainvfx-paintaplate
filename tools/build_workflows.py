@@ -699,7 +699,9 @@ def hdr():
     lora = g("LTXICLoRALoaderModelOnly", _title="SDR-to-HDR IC-LoRA (reads its downscale factor)",
              model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"), lora_name=Slot("hdr_lora", HDR_LORA),
              strength_model=1.0)
-    vae = g("LTXVVAEForceFloat32", _title="Video VAE in float32", vae=g("VAELoader", vae_name=Slot("video_vae", LTX_VAE)))
+    # float32 from the start (Load VAE (float32)): LTXVVAEForceFloat32 casts a bf16 VAE in place, which ComfyUI's dynamic VRAM,
+    # its default below --highvram, does not follow: the pass failed with « Buffer too small » on a 32 GB card (2 Nov)
+    vae = g("PaintAPlate_VAEFloat32", _title="Video VAE in float32", vae_name=Slot("video_vae", LTX_VAE))
     audio_vae = g("VAELoader", vae_name=LTX_AUDIO_VAE)
     scene = g("LTXVLoadConditioning", _title="Scene embeddings: the fixed prompt", file_name=Slot("hdr_scene", HDR_SCENE), device="cpu")
     cond = g("LTXVConditioning", positive=scene, negative=scene, frame_rate=Slot("cond_fps", 24.0))
