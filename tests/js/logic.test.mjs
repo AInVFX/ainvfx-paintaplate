@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, stageOne, stopsForEdit, DISPLAY, blankSpec, caption, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, displayActive, displayLabel, displayUniforms, displayTransfer, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, escapeAction } from "../../web/logic.mjs";
+import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, stageOne, stopsForEdit, blankSpec, caption, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, escapeAction } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -35,32 +35,6 @@ test("preview sizes come from the plate's size: exact divisions of the working s
   for (const o of [...menu, ...previewSizes([1920, 1012], [1920, 1024]), ...previewSizes([720, 480], [672, 448])]) {
     assert.ok(o.size[0] % 32 === 0 && o.size[1] % 32 === 0, String(o.size));
   }
-});
-
-test("the viewer's colour: identity at rest, one channel as grey from the display values, invert, exposure in stops, contrast about 18% grey", () => {
-  const flat = (d) => displayUniforms(d).matrix.flat();
-  assert.deepEqual(flat(DISPLAY), [1, 0, 0, 0, 1, 0, 0, 0, 1]);
-  assert.deepEqual(displayUniforms(DISPLAY).offset, [0, 0, 0]);
-  // the channel is picked after the display and view, from the values shown, as OpenRV's OCIODisplay floods it
-  const pick = (d) => displayUniforms(d).pick.flat();
-  assert.deepEqual(pick(DISPLAY), [1, 0, 0, 0, 1, 0, 0, 0, 1]);
-  assert.deepEqual(flat({ ...DISPLAY, channel: "r" }), [1, 0, 0, 0, 1, 0, 0, 0, 1]); // nothing picked in scene-linear
-  assert.deepEqual(pick({ ...DISPLAY, channel: "r" }), [1, 0, 0, 1, 0, 0, 1, 0, 0]);
-  assert.deepEqual(pick({ ...DISPLAY, channel: "l" }), [0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722]);
-  assert.deepEqual(flat({ ...DISPLAY, saturation: 0, channel: "g" }).slice(0, 3), [0.2126, 0.7152, 0.0722]); // the tools still apply
-  assert.deepEqual(pick({ ...DISPLAY, invert: true, channel: "b" }), [0, 0, 1, 0, 0, 1, 0, 0, 1]);
-  assert.deepEqual(flat({ ...DISPLAY, invert: true }), [-1, 0, 0, 0, -1, 0, 0, 0, -1]);
-  assert.deepEqual(displayUniforms({ ...DISPLAY, invert: true }).offset, [1, 1, 1]);
-  assert.deepEqual(flat({ ...DISPLAY, saturation: 0 }).slice(0, 3), [0.2126, 0.7152, 0.0722]);
-  for (const row of displayUniforms({ ...DISPLAY, hue: 120 }).matrix) assert.ok(Math.abs(row[0] + row[1] + row[2] - 1) < 1e-3); // greys stay grey
-  assert.deepEqual(displayUniforms({ ...DISPLAY, exposure: -2 }).slope, 0.25); // exposure scales linear light, as OpenRV's matrix does
-  assert.deepEqual(displayTransfer({ exposure: 1, contrast: 1, gamma: 2 }), { slope: 2, intercept: 0, exponent: 0.5 });
-  const c = displayTransfer({ exposure: 0, contrast: 2, gamma: 1 });
-  assert.ok(Math.abs(c.slope * 0.18 + c.intercept - 0.18) < 1e-9); // 18% grey holds still
-  assert.equal(clampParam("exposure", 12), 10);
-  assert.equal(displayLabel({ ...DISPLAY, exposure: 1, gamma: 2.2, channel: "r" }), "E +1.0 · γ 2.20 · Red");
-  assert.equal(displayActive(DISPLAY), false);
-  assert.equal(displayActive({ ...DISPLAY, invert: true }), true);
 });
 
 test("a blank plate: sides in 64s up to 1920, 8k + 1 frames, a trained frame rate; keyframes on the LTX grid", () => {

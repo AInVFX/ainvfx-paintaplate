@@ -383,67 +383,13 @@ export function frameUse(f, { frame, inPt, outPt }, behind = 3) {
   return 1 / (1 + Math.min(ahead, back * behind));
 }
 
-// ---------- The viewer's colour, as in RV's Color menu: display only, the export never changes ----------
-// In OpenRV's order under OCIO (display.mjs): in the config's scene-linear space, exposure and contrast (about 18% grey),
-// one matrix for saturation, hue and invert, then gamma, as RVColor; then the look, display and view; then the channel
-// shown as grey, picked from the display values, as RV's OCIODisplay floods a channel (OCIOIPNode.cpp, read 29 Oct 2026).
-export const DISPLAY = { exposure: 0, contrast: 1, gamma: 1, saturation: 1, hue: 0, channel: "rgb", invert: false };
-export const PARAMS = { // the interactive edits: label, step for - and = and the wheel, change per pixel dragged, limits
-  exposure: { label: "Exposure", step: 0.1, drag: 0.01, min: -10, max: 10 }, // stops: one per 100 px dragged
-  contrast: { label: "Contrast", step: 0.05, drag: 0.005, min: 0, max: 4 },
-  gamma: { label: "Gamma", step: 0.05, drag: 0.005, min: 0.1, max: 8 },
-  saturation: { label: "Saturation", step: 0.05, drag: 0.005, min: 0, max: 4 },
-  hue: { label: "Hue", step: 5, drag: 0.5, min: -180, max: 180 }, // degrees
-};
-export const CHANNEL_NAMES = { rgb: "All channels", r: "Red", g: "Green", b: "Blue", l: "Luminance" };
-export const clampParam = (name, v) => +Math.min(PARAMS[name].max, Math.max(PARAMS[name].min, v)).toFixed(3);
+// ---------- The colour picker ----------
 // The in-frame colour picker (Firefox, Safari): the average of the pixels under the click as #rrggbb, for the brush. `data`
 // holds RGBA bytes, as getImageData returns them; transparent pixels, outside the frame, do not count.
 export function pickedColor(data) {
   let r = 0, g = 0, b = 0, n = 0;
   for (let i = 0; i < data.length; i += 4) if (data[i + 3] > 0) { r += data[i]; g += data[i + 1]; b += data[i + 2]; n++; }
   return n ? `#${[r, g, b].map((v) => Math.round(v / n).toString(16).padStart(2, "0")).join("")}` : null;
-}
-
-export const displayActive = (d) => Object.keys(DISPLAY).some((k) => d[k] !== DISPLAY[k]);
-
-export function formatParam(name, v) {
-  if (name === "exposure") return `${v > 0 ? "+" : ""}${v.toFixed(1)} stop${Math.abs(v) === 1 ? "" : "s"}`;
-  return name === "hue" ? `${Math.round(v)}°` : v.toFixed(2);
-}
-
-export function displayLabel(d) { // the transport's reminder of what the viewer changes: "E +1.0 · γ 2.20 · Red"
-  const parts = [];
-  if (d.exposure) parts.push(`E ${d.exposure > 0 ? "+" : ""}${d.exposure.toFixed(1)}`);
-  if (d.contrast !== 1) parts.push(`C ${d.contrast.toFixed(2)}`);
-  if (d.gamma !== 1) parts.push(`γ ${d.gamma.toFixed(2)}`);
-  if (d.saturation !== 1) parts.push(`Sat ${d.saturation.toFixed(2)}`);
-  if (d.hue) parts.push(`Hue ${Math.round(d.hue)}°`);
-  if (d.channel !== "rgb") parts.push(CHANNEL_NAMES[d.channel]);
-  if (d.invert) parts.push("Inverted");
-  return parts.join(" · ");
-}
-
-// The two transfer functions: slope and intercept in linear light (exposure, then contrast about 18% grey), then gamma.
-export const displayTransfer = ({ exposure = 0, contrast = 1, gamma = 1 }) =>
-  ({ slope: contrast * 2 ** exposure, intercept: 0.18 * (1 - contrast), exponent: 1 / gamma });
-
-const LUMA = [0.2126, 0.7152, 0.0722];
-const PICK = { r: [1, 0, 0], g: [0, 1, 0], b: [0, 0, 1], l: LUMA };
-const times = (A, B) => A.map((row) => B[0].map((_, j) => row.reduce((a, v, k) => a + v * B[k][j], 0)));
-
-// The shader's values (display.mjs). Before the display: exposure and contrast, a 3 x 3 matrix and its offset, gamma.
-// After it: `pick`, the channel shown as grey (rows of Rec. 709 weights for luminance, as RV's flood), else the identity.
-export function displayUniforms(d) {
-  const { saturation = 1, hue = 0, channel = "rgb", invert = false } = d;
-  const s = saturation, t = (hue * Math.PI) / 180, c = Math.cos(t), n = Math.sin(t);
-  const sat = [0, 1, 2].map((i) => [0, 1, 2].map((j) => LUMA[j] * (1 - s) + (i === j ? s : 0)));
-  const rot = [[0.213 + c * 0.787 - n * 0.213, 0.715 - c * 0.715 - n * 0.715, 0.072 - c * 0.072 + n * 0.928], // SVG's hueRotate
-    [0.213 - c * 0.213 + n * 0.143, 0.715 + c * 0.285 + n * 0.14, 0.072 - c * 0.072 - n * 0.283],
-    [0.213 - c * 0.213 - n * 0.787, 0.715 - c * 0.715 + n * 0.715, 0.072 + c * 0.928 + n * 0.072]];
-  const m = times(sat, rot), sign = invert ? -1 : 1, one = PICK[channel];
-  return { ...displayTransfer(d), matrix: m.map((row) => row.map((v) => +(sign * v).toFixed(5) + 0)), offset: [0, 1, 2].map(() => (invert ? 1 : 0)),
-           pick: one ? [[...one], [...one], [...one]] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]] };
 }
 
 // ---------- A fluid shot on a blank plate: AInVFX's ainvfx-fluid IC-LoRA (its model card, read 28 Oct 2026) ----------

@@ -6,11 +6,11 @@ import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
 import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onLog, onNotice, outputFile, outputFiles, outputText, post, run, setSalt, upload, viewUrl } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
-import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor (logic.mjs keeps an older copy until the merge)
+import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { INSPECT_SIZE, addSample, inspectorRows, sourcePixel, sourcePath } from "./inspector.mjs";
 import { sceneGraph } from "./graph.mjs";
-import { CHANNEL_NAMES, DAB_PROFILE, DISPLAY, FLUID, PARAMS, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, clampParam, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, displayActive, displayLabel, fitSize,
-  erasePrompt, erasesPaint, formatParam, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
+import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
+  erasePrompt, erasesPaint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey } from "./logic.mjs";
