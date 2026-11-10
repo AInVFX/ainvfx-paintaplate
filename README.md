@@ -1,8 +1,15 @@
 <h1 align="center"><img src="web/brand/title.png" alt="AInVFX Paint a plate" width="100%"></h1>
 
-**AInVFX's entry in Comfy's Open Source Higgsfield contest** (October 2026). #OpenSourceHiggsfield
+**Winner of the Open Weights Only category and of the « VFX Workflow Built with LTX » bonus in Comfy's [Open Source Higgsfield](https://comfy.org/open-source-higgsfield/) contest** (November 2026). #OpenSourceHiggsfield
 
 <p align="center"><a href="https://youtu.be/Kt9O3Aw46-g"><img src="web/brand/demo.png" alt="The demo of Paint a plate on YouTube" width="720"></a><br><a href="https://youtu.be/Kt9O3Aw46-g">Watch the 2-minute demo on YouTube</a></p>
+
+**Videos and articles**
+
+- **The contest result**: [article](https://www.ainvfx.com/blog/paint-a-plate-wins-open-weights-only-at-open-source-higgsfield-the-comfyui-contest/) · [Comfy's winners page](https://comfy.org/open-source-higgsfield/)
+- **The showcase**, four minutes of shots made with the app: [video](https://youtu.be/EsL3O7WvBr4) · [article](https://www.ainvfx.com/blog/paint-a-plate-in-action-a-showcase-new-features-and-an-open-dataset-for-ainvfx-fluid/), with what changed up to version 1.11
+- **The first release**: [2-minute demo](https://youtu.be/Kt9O3Aw46-g) · [article](https://www.ainvfx.com/blog/paint-a-plate-open-source-vfx-edits-in-comfyui-our-open-source-higgsfield-entry/), with every install step
+- **ainvfx-fluid**, the model behind every fluid shot: [45-minute deep dive](https://youtu.be/Ho4tmJzEkIs) · [article](https://www.ainvfx.com/blog/paint-your-fluid-simulations-a-free-ltx-2-5-ic-lora-for-smoke-and-fire-in-comfyui/)
 
 Paint on the first frame of a shot to erase, add or relight. The edit appears on that frame in seconds, then carries through the whole shot. You review the result at the plate's own quality, an EXR against its EXR, through OpenColorIO as in OpenRV. Export then writes it in the plate's own format: same file type, bit depth, frame numbers, colour tags, timecode, audio and EXR layers, with every untouched pixel identical to the plate.
 
