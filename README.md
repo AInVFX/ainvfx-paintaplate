@@ -2,14 +2,19 @@
 
 **Winner of the Open Weights Only category and of the « VFX Workflow Built with LTX » bonus in Comfy's [Open Source Higgsfield](https://comfy.org/open-source-higgsfield/) contest** (November 2026). #OpenSourceHiggsfield
 
-<p align="center"><a href="https://youtu.be/Kt9O3Aw46-g"><img src="web/brand/demo.png" alt="The demo of Paint a plate on YouTube" width="720"></a><br><a href="https://youtu.be/Kt9O3Aw46-g">Watch the 2-minute demo on YouTube</a></p>
+<table>
+<tr>
+<td align="center" width="50%"><a href="https://youtu.be/EsL3O7WvBr4"><img src="https://img.youtube.com/vi/EsL3O7WvBr4/maxresdefault.jpg" alt="The showcase of Paint a plate on YouTube: painted fire, smoke and water, a set extension, a green screen, a relight" width="100%"></a><br><b><a href="https://youtu.be/EsL3O7WvBr4">▶ Watch the showcase (4 minutes)</a></b><br>Shots made live with the app</td>
+<td align="center" width="50%"><a href="https://youtu.be/Kt9O3Aw46-g"><img src="https://img.youtube.com/vi/Kt9O3Aw46-g/maxresdefault.jpg" alt="The demo of Paint a plate on YouTube: erase, add and relight on the first frame of a shot" width="100%"></a><br><b><a href="https://youtu.be/Kt9O3Aw46-g">▶ Watch the demo (2 minutes)</a></b><br>How the app works</td>
+</tr>
+</table>
 
-**Videos and articles**
+**Read more**
 
-- **The contest result**: [article](https://www.ainvfx.com/blog/paint-a-plate-wins-open-weights-only-at-open-source-higgsfield-the-comfyui-contest/) · [Comfy's winners page](https://comfy.org/open-source-higgsfield/)
-- **The showcase**, four minutes of shots made with the app: [video](https://youtu.be/EsL3O7WvBr4) · [article](https://www.ainvfx.com/blog/paint-a-plate-in-action-a-showcase-new-features-and-an-open-dataset-for-ainvfx-fluid/), with what changed up to version 1.11
-- **The first release**: [2-minute demo](https://youtu.be/Kt9O3Aw46-g) · [article](https://www.ainvfx.com/blog/paint-a-plate-open-source-vfx-edits-in-comfyui-our-open-source-higgsfield-entry/), with every install step
-- **ainvfx-fluid**, the model behind every fluid shot: [45-minute deep dive](https://youtu.be/Ho4tmJzEkIs) · [article](https://www.ainvfx.com/blog/paint-your-fluid-simulations-a-free-ltx-2-5-ic-lora-for-smoke-and-fire-in-comfyui/)
+- The contest result: [article](https://www.ainvfx.com/blog/paint-a-plate-wins-open-weights-only-at-open-source-higgsfield-the-comfyui-contest/) · [Comfy's winners page](https://comfy.org/open-source-higgsfield/)
+- The showcase, with what changed up to version 1.11: [article](https://www.ainvfx.com/blog/paint-a-plate-in-action-a-showcase-new-features-and-an-open-dataset-for-ainvfx-fluid/)
+- The first release, with every install step: [article](https://www.ainvfx.com/blog/paint-a-plate-open-source-vfx-edits-in-comfyui-our-open-source-higgsfield-entry/)
+- ainvfx-fluid, the model behind every fluid shot: [45-minute deep dive](https://youtu.be/Ho4tmJzEkIs) · [article](https://www.ainvfx.com/blog/paint-your-fluid-simulations-a-free-ltx-2-5-ic-lora-for-smoke-and-fire-in-comfyui/)
 
 Paint on the first frame of a shot to erase, add or relight. The edit appears on that frame in seconds, then carries through the whole shot. You review the result at the plate's own quality, an EXR against its EXR, through OpenColorIO as in OpenRV. Export then writes it in the plate's own format: same file type, bit depth, frame numbers, colour tags, timecode, audio and EXR layers, with every untouched pixel identical to the plate.
 
