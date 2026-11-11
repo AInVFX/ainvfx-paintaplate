@@ -1,12 +1,11 @@
 {
- "note": "The strokes of tests/gpu_matrix.py, x and y from 0 to 1 on the frame, as ui_live.py's --strokes and --fluid. The places on horse.mp4 are a first guess, written before the plate was seen: each case saves 1_open.png, the first frame, so move them where the cow belongs (just behind the fence, close to it).",
- "horse_cow": {"path": "plates/horse.mp4", "strokes": [["b", "a brown and white cow standing just behind the fence, close to it", [[0.30, 0.50], [0.36, 0.48], [0.42, 0.50], [0.42, 0.58], [0.36, 0.60], [0.30, 0.58], [0.33, 0.54], [0.39, 0.54]], 48]]},
- "horse_erase": {"path": "plates/horse.mp4", "strokes": [["e", "", [[0.10, 0.84], [0.14, 0.86], [0.18, 0.84], [0.14, 0.88]], 48, {"whole": false}]]},
+ "note": "The strokes of tests/gpu_matrix.py, x and y from 0 to 1 on the frame, as ui_live.py's --strokes and --fluid. A colour is one of the page's swatches. The places on horse.mp4 are a first guess, written before the plate was seen: each case saves 1_open.png, the first frame, so move them where the cow belongs (just behind the fence, close to it).",
+ "horse_cow": {"path": "plates/horse.mp4", "strokes": [["b", "a brown and white cow standing just behind the fence, close to it", [[0.3, 0.5], [0.36, 0.48], [0.42, 0.5], [0.42, 0.58], [0.36, 0.6], [0.3, 0.58], [0.33, 0.54], [0.39, 0.54]], 48, {"color": "#6d4c41"}]]},
+ "horse_erase": {"path": "plates/horse.mp4", "strokes": [["e", "", [[0.1, 0.84], [0.14, 0.86], [0.18, 0.84], [0.14, 0.88]], 48, {"whole": false}]]},
  "horse_light": {"path": "plates/horse.mp4", "strokes": [["l", "warm low sun from the right", [[0.92, 0.18], [0.95, 0.28], [0.92, 0.38]], 64]]},
- "fluid_720": {"fluid": {"size": [1280, 704], "fps": 24, "frames": 121, "words": "a wild fire, flames rising", "keys": [[0, "#d32f2f", [[0.45, 0.82], [0.50, 0.74], [0.55, 0.82]], 64], [-1, "#d32f2f", [[0.40, 0.60], [0.50, 0.36], [0.60, 0.60]], 96]]}},
- "uhd_cow": {"path": "plates/horse_3840x2160_50fps.mp4", "strokes": [["b", "a brown and white cow standing just behind the fence, close to it", [[0.30, 0.50], [0.36, 0.48], [0.42, 0.50], [0.42, 0.58], [0.36, 0.60], [0.30, 0.58], [0.33, 0.54], [0.39, 0.54]], 48]]},
- "uhd_erase": {"path": "plates/horse_3840x2160_50fps.mp4", "strokes": [["e", "", [[0.10, 0.84], [0.14, 0.86], [0.18, 0.84], [0.14, 0.88]], 48, {"whole": false}]]},
+ "fluid_720": {"fluid": {"size": [1280, 704], "fps": 24, "frames": 121, "words": "a wild fire, flames rising", "keys": [[0, "#f57c00", [[0.45, 0.82], [0.5, 0.74], [0.55, 0.82]], 64], [-1, "#f57c00", [[0.4, 0.6], [0.5, 0.36], [0.6, 0.6]], 96]]}},
+ "uhd_cow": {"path": "plates/horse_3840x2160_50fps.mp4", "strokes": [["b", "a brown and white cow standing just behind the fence, close to it", [[0.3, 0.5], [0.36, 0.48], [0.42, 0.5], [0.42, 0.58], [0.36, 0.6], [0.3, 0.58], [0.33, 0.54], [0.39, 0.54]], 48, {"color": "#6d4c41"}]]},
+ "uhd_erase": {"path": "plates/horse_3840x2160_50fps.mp4", "strokes": [["e", "", [[0.1, 0.84], [0.14, 0.86], [0.18, 0.84], [0.14, 0.88]], 48, {"whole": false}]]},
  "uhd_light": {"path": "plates/horse_3840x2160_50fps.mp4", "strokes": [["l", "warm low sun from the right", [[0.92, 0.18], [0.95, 0.28], [0.92, 0.38]], 64]]},
- "fluid_1080_edit": {"fluid": {"size": [1920, 1088], "fps": 50, "frames": 121, "words": "a wild fire, flames rising", "keys": [[0, "#d32f2f", [[0.45, 0.82], [0.50, 0.74], [0.55, 0.82]], 64], [-1, "#d32f2f", [[0.40, 0.60], [0.50, 0.36], [0.60, 0.60]], 96]]},
-  "strokes": [["b", "a lantern standing on the ground", [[0.20, 0.80], [0.23, 0.84]], 48]]}
+ "fluid_1080_edit": {"fluid": {"size": [1920, 1088], "fps": 50, "frames": 121, "words": "a wild fire, flames rising", "keys": [[0, "#f57c00", [[0.45, 0.82], [0.5, 0.74], [0.55, 0.82]], 64], [-1, "#f57c00", [[0.4, 0.6], [0.5, 0.36], [0.6, 0.6]], 96]]}, "strokes": [["b", "a lantern standing on the ground", [[0.2, 0.8], [0.23, 0.84]], 48]]}
 }
