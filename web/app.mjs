@@ -3561,7 +3561,7 @@ async function boot() { // the version, the workflows, the WebSocket, then what 
   log(`Page ready in ${Math.round(performance.now() - t0)} ms: ${WORKFLOWS.length} workflows, ${classes.length} node classes and ${models.size} model files checked`);
   log(`OCIO: ${S.ocio.info.label}, viewed on ${S.ocio.display} through ${S.ocio.view}${S.ocio.config === "$OCIO" ? " ($OCIO)" : ""}`);
   status("Ready. Open a plate to start. The models load in the background.");
-  if (!S.plate && BLANK_AT_START && S.fluidReady) await openBlank({ atStart: true }).catch(quiet); // a canvas for a fluid shot, at the Blank tab's settings
+  if (!S.plate && BLANK_AT_START && S.fluidReady) await openBlank().catch(quiet); // a canvas for a fluid shot, at the Blank tab's settings
   warmAll().catch(() => {}); // a ComfyUI that reports no GPU details simply skips it
 }
 
