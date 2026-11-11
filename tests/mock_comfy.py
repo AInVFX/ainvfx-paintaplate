@@ -1,13 +1,15 @@
 """A stand-in ComfyUI for working on the page without a GPU: the same HTTP and WebSocket API, fake models.
 
-    python tests/mock_comfy.py --root /tmp/mock --port 8199 [--plate]
+    python tests/mock_comfy.py --root /tmp/mock --port 8199 [--plate] [--speed 8]
 
 It serves web/ at /extensions/ainvfx-paintaplate/, answers /object_info, /upload/image, /prompt, /history,
 /view, /queue, /interrupt and /ws, and runs each workflow with numpy instead of models: an edit tints and
 blurs the reference inside the mask and streams step previews, the shot pastes the edited first frame over
 every frame, the matte repeats the first mask, the composite and the export blend through the matte. The
 download route and the plate browser are the pack's own routes.py. --plate writes a 1280 x 704 test plate to input/plates/desk.mp4.
-Each job waits a little, so the page's progress, cancelling and ordering behave as they do on a GPU.
+Each job waits a little, so the page's progress, cancelling and ordering behave as they do on a GPU. --speed divides
+these waits (the page suite runs with it). The windows a check holds open keep their own time: /mock/slow, /mock/oom
+and the second after /free.
 """
 import argparse, asyncio, importlib, io, json, os, struct, sys, time, types, uuid
 from fractions import Fraction
@@ -103,7 +105,8 @@ def save_png(img, kind, prefix, i=None):
     os.makedirs(d, exist_ok=True)
     name = f"{stem}_{(i or 0) + 1:05d}_.png"
     mode = "L" if img.ndim == 2 else ("RGBA" if img.shape[2] == 4 else "RGB")
-    Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8), mode).save(os.path.join(d, name))
+    # the fastest compression: a PNG keeps every pixel at any level, and level 6, the default, was a third of a page flow's time
+    Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8), mode).save(os.path.join(d, name), compress_level=1)
     return {"filename": name, "subfolder": sub, "type": kind}
 
 
@@ -154,7 +157,7 @@ async def steps(pid, total, seconds, preview=None, live=None):
     for k in range(total):
         if STATE["interrupt"]:
             raise asyncio.CancelledError()
-        await asyncio.sleep(seconds / total)
+        await asyncio.sleep(seconds / total / A.speed)
         await send({"type": "progress", "data": {"prompt_id": pid, "value": k + 1, "max": total}})
         if every and k % every == 0:  # as Live Preview: the first at step 1, then every few steps, a WebP in the temp folder
             name = f"{pid}_{k + 1:03d}.webp"
@@ -379,6 +382,7 @@ async def worker():
         pid, prompt = JOBS.pop(0)
         STATE.update(running=pid, interrupt=False)
         await send({"type": "execution_start", "data": {"prompt_id": pid}})
+        t0 = time.time()
         try:
             outputs = await execute(pid, prompt)
             HISTORY[pid] = {"outputs": outputs, "status": {"completed": True, "status_str": "success", "messages": []}}
@@ -392,6 +396,7 @@ async def worker():
             HISTORY[pid] = {"outputs": {}, "status": {"completed": False, "status_str": "error", "messages": []}}
             await send({"type": "execution_error", "data": {"prompt_id": pid, "node_type": "Mock", "exception_message": str(exc)}})
         STATE["running"] = None
+        print(f"{pid[:8]} {'+'.join(sorted(outputs_of(prompt))) or 'no output'}: {time.time() - t0:.2f} s", flush=True)  # each job, by its outputs, and its time
 
 
 async def prompt_route(request):
@@ -450,9 +455,6 @@ async def interrupt_route(request):
     return web.json_response({})
 
 
-
-
-
 async def object_info_route(request):
     cls = request.match_info["cls"]
     models = {}
@@ -462,7 +464,6 @@ async def object_info_route(request):
                 if isinstance(val, str) and val.endswith(".safetensors"):
                     models.setdefault(node["class_type"], {}).setdefault(k, []).append(val)
     required = {k: [opts] for k, opts in models.get(cls, {}).items()}
-
     return web.json_response({cls: {"input": {"required": required}}})
 
 
@@ -553,10 +554,10 @@ if __name__ == "__main__":
     ap.add_argument("--root", default="/tmp/mock_comfy")
     ap.add_argument("--port", type=int, default=8199)
     ap.add_argument("--plate", action="store_true")
+    ap.add_argument("--speed", type=float, default=1.0)
     A = ap.parse_args()
     for k in ("input", "output", "temp"):
         os.makedirs(folder(k), exist_ok=True)
     if A.plate:
         make_plate(os.path.join(folder("input"), "plates", "desk.mp4"))
-    t0 = time.time()
     asyncio.run(start())

@@ -4,6 +4,7 @@
     python tests/ui_mock.py --list              the flows' names
     python tests/ui_mock.py --only keys,scene   the flows named
     python tests/ui_mock.py --jobs 4            four flows side by side (default: one per CPU)
+    python tests/ui_mock.py --speed 1           the mock's jobs at their full simulated time (default: 8 times shorter)
 
 A flow is one subject of the page: the Open dialog, a first edit and its render, a fluid shot, the keys. Each flow runs in
 its own process, against its own mock ComfyUI (its own port and folders) and its own browser. So a flow starts from its own
@@ -103,6 +104,50 @@ def log_lines(page):
 
 def klein_passes(page):  # Klein passes run so far: a result used again adds none
     return sum("Klein quick pass" in line for line in log_lines(page))
+
+
+# ---------- Waiting: on what the page shows, never on the clock ----------
+
+QUIET_MS = 600  # the one wait on the clock, for a check that nothing starts: longer than the page's own delays after an input (PREFETCH_MS 500, IDLE_MS 300 in app.mjs)
+SETTLED = """() => { const calm = document.querySelector('#stop').hidden && !document.querySelector('#history li.busy');
+  if (!calm) return void (window.__calm = 0);
+  return performance.now() - (window.__calm ||= performance.now()) >= 700; }"""
+
+
+def until(page, js, timeout=10000, arg=None):
+    """Whether the page reaches a state in time (page.wait_for_function), for a check that then says what was missing."""
+    try:
+        page.wait_for_function(js, arg=arg, timeout=timeout)
+        return True
+    except Exception as exc:
+        if type(exc).__name__ != "TimeoutError":
+            raise
+        return False
+
+
+def poll(page, test, seconds=5):
+    """Whether `test`, a Python function, comes true within `seconds`. The page goes on while it waits."""
+    end = time.time() + seconds
+    while not test():
+        if time.time() > end:
+            return False
+        page.wait_for_timeout(25)
+    return True
+
+
+def settled(page, timeout=180000):
+    """No edit and no render step left: nothing generates for 700 ms running. A render starts 300 ms after a change (IDLE_MS
+    in app.mjs), so a shorter calm can be the gap before the next step."""
+    page.evaluate("window.__calm = 0")
+    page.wait_for_function(SETTLED, timeout=timeout)
+
+
+def rested(page, seen):
+    """The strokes have rested since the log's line `seen`: for an erase stroke, SAM 3.1 has found the object under it and
+    Klein's prompt writer has written its caption. The page asks both as the stroke ends, before Generate."""
+    lines = "[...document.querySelectorAll('#log li span')].slice(%d).map((e) => e.textContent)" % seen
+    wait_log(page, f"['under the stroke', 'caption from the prompt writer'].every((text) => {lines}.some((line) => line.includes(text)))",
+             30000, "answer from SAM and the prompt writer for the stroke")
 
 
 
@@ -328,7 +373,7 @@ def generate_flow(browser, port):
     stroke(page, [(0.3, 0.5), (0.4, 0.52), (0.5, 0.5)])
     stroke(page, [(0.3, 0.6), (0.5, 0.62)])
     check(not page.is_disabled("#undo-btn"), "undo is live after a stroke")
-    page.wait_for_timeout(2500)
+    page.wait_for_timeout(QUIET_MS)
     check(row_titles(page) == [] and not page.is_disabled("#generate"), f"the strokes wait for Generate: nothing starts by itself {row_titles(page)}")
     page.keyboard.press("Enter")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
@@ -363,10 +408,9 @@ def generate_flow(browser, port):
     check(page.get_attribute("#view", "data-picture") == "shot", "paused, on frame 3 and on frame 0, the viewer shows the shot, not the plate")
     made, renders = klein_passes(page), page.locator("#log li:has-text('Render v')").count()
     page.keyboard.press("Enter")
-    page.wait_for_timeout(800)
+    until(page, "document.querySelector('#hud').textContent.includes('Nothing changed')")
     check(klein_passes(page) == made and page.locator("#log li:has-text('Render v')").count() == renders and "Nothing changed" in page.text_content("#hud"),
           "Enter again with nothing changed runs nothing twice: no Klein pass, no render step")
-    page.wait_for_timeout(2500)
     log = log_lines(page)
     for key in ("posted as", "prompt writer", "Klein quick pass", "ComfyUI started it"):
         check(any(key in line for line in log), f"the log says what happens under the hood: {key}")
@@ -391,7 +435,7 @@ def history_flow(browser, port):
     page.click("[data-tool=erase]")
     page.fill("#prompt", "")
     stroke(page, [(0.7, 0.3), (0.75, 0.35)])
-    page.wait_for_timeout(1500)  # SAM runs while the strokes rest
+    rested(page, seen)  # SAM runs while the strokes rest
     page.click("#generate")
     page.wait_for_function(DONE.format(n=2), timeout=120000)
     check(row_titles(page) == ["2. Erase", "1. Paint"], f"two edits, numbered from the bottom: {row_titles(page)}")
@@ -451,8 +495,9 @@ def history_flow(browser, port):
     page.keyboard.press("Escape")
     made = klein_passes(page)
     for _ in range(3):
+        was = page.text_content("#status")
         page.keyboard.press("Control+z")
-        page.wait_for_timeout(300)
+        page.wait_for_function("(was) => document.querySelector('#status').textContent !== was", arg=was, timeout=5000)  # « Undone. 2 steps further back »
     page.wait_for_function("!document.querySelector('#history li.busy')", timeout=180000)
     check(row_titles(page) == ["2. Erase", "1. Paint"] and row_words(page) == ["Whole object", "a red fire"],
           f"three undos go back through the seed, the words and the removal: {row_titles(page)} {row_words(page)}")
@@ -564,7 +609,7 @@ def fluid_flow(browser, port):
     page.click('#history li[data-id="fluid"] .edit')
     check(not page.is_hidden("#fluid"), "the pencil on the fluid row brings its keyframes back")
     page.keyboard.press("Enter")
-    page.wait_for_timeout(800)
+    until(page, "document.querySelector('#hud').textContent.includes('already made')")
     log = log_lines(page)
     check(not any(line.startswith("Fluid v2") for line in log) and "already made" in page.text_content("#hud"),
           "Enter again on the same keyframes and words makes nothing twice")
@@ -614,12 +659,6 @@ def scene_flow(browser, port):
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
     open_plate(page)
 
-    def settled(limit=180):  # Generate says Generate again for three seconds running: no edit, no render step left
-        calm, t0 = 0, time.time()
-        while calm < 3 and time.time() - t0 < limit:
-            page.wait_for_timeout(1000)
-            calm = calm + 1 if page.text_content("#generate").strip() == "Generate" else 0
-
     def reviews(n):  # the full-size composite of the edits on show, the last step Generate starts
         page.wait_for_function(f"window.__lines.filter((t) => t.includes('{REVIEWED}')).length >= {n}", timeout=180000)
 
@@ -632,14 +671,15 @@ def scene_flow(browser, port):
       return t.join() === '1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
     reviews(1)  # each set of edits renders to its export before the next edit, so the scene's every step is made once
     page.keyboard.press("e")
+    seen = len(log_lines(page))
     page.fill("#prompt", "the cup"); page.evaluate("document.activeElement.blur()")
     stroke(page, [(0.6, 0.4), (0.62, 0.45)])
-    page.wait_for_timeout(1500)
+    rested(page, seen)
     page.keyboard.press("Enter")
     page.wait_for_function("""(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
       return t.join() === '2. Erase,1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
     reviews(2)
-    settled()
+    settled(page)
     name, _ = save_scene(page)
     page.evaluate(WATCH)
     open_scene(page, name)
@@ -647,7 +687,7 @@ def scene_flow(browser, port):
     page.wait_for_function("""(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
       return t.join() === '2. Erase,1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
     page.wait_for_function("window.__lines.some((t) => t.startsWith('review: made before') || t.startsWith('review: posted'))", timeout=180000)
-    settled()
+    settled(page)
     grew = added(page, ("ingest", "prompt", "edit", "clean", "cleanup", "shot", "matte", "comp", "review"))
     posted = {k: v for k, v in grew.items() if k.endswith("posted") and v}
     check(not posted and grew["edit: made before"] >= 2 and grew["review: made before"] >= 1,
@@ -663,27 +703,29 @@ def ocio_flow(browser, port):
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
     open_path(page, "plates/desk.mp4")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
-    page.wait_for_timeout(1000)
-    pixel = lambda: page.evaluate("(() => { const c = document.querySelector('#view'); return [...c.getContext('2d').getImageData(c.width >> 1, c.height >> 1, 1, 1).data.slice(0, 3)]; })()")  # noqa: E731
+    centre = "(() => { const c = document.querySelector('#view'); return [...c.getContext('2d').getImageData(c.width >> 1, c.height >> 1, 1, 1).data.slice(0, 3)]; })()"
+    pixel = lambda: page.evaluate(centre)  # noqa: E731
+    differs, same = f"(was) => {centre}.some((v, i) => v !== was[i])", f"(was) => {centre}.every((v, i) => Math.abs(v - was[i]) <= 2)"  # the centre pixel against an earlier read
     exact = "document.querySelector('#view').dataset.precision === 'float'"  # paused, a video plate shows its source frame
     page.wait_for_function(exact, timeout=30000)
     before = pixel()
     page.evaluate(WATCH)
     menu(page, "OCIO", "Displays", "sRGB - Display", "ACES 2.0 - SDR 100 nits (Rec.709)")
     page.wait_for_function("window.__lines.some((t) => t.startsWith('OCIO view: sRGB - Display: ACES 2.0'))", timeout=10000)
-    page.wait_for_timeout(500)
+    until(page, differs, arg=before)
     aces = pixel()
     check(aces != before, f"another view applies at once: the same frame through ACES 2.0 SDR, {before} becomes {aces}")
     page.keyboard.press("Space")  # while it plays
     menu(page, "OCIO", "Displays", "sRGB - Display", "Un-tone-mapped")
     page.keyboard.press("Space")
     page.keyboard.press("Home")
-    page.wait_for_timeout(700)
     page.wait_for_function(exact, timeout=30000)
+    until(page, same, arg=before)
     check(max(abs(a - b) for a, b in zip(pixel(), before)) <= 2, "back to Un-tone-mapped while it plays, the frame looks as it did")
     menu(page, "OCIO", "File Color Space", "Utility", "Linear Rec.709 (sRGB)")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('Linear Rec.709 (sRGB)') && document.querySelector('#opening').hidden", timeout=60000)
-    page.wait_for_timeout(700)
+    until(page, differs, arg=before)
+    until(page, "window.__lines.some((t) => t.startsWith('ingest: posted'))")
     lines, linear = page.evaluate("window.__lines"), pixel()
     said = [t for t in lines if t.startswith("File Color Space") or t.startswith("ingest:")]
     check(any(t.startswith("File Color Space: Linear Rec.709 (sRGB)") for t in said) and any(t.startswith("ingest: posted") for t in said) and linear != before,
@@ -703,9 +745,7 @@ def race_flow(browser, port):
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     base = page.url.split("/extensions/")[0]
-    open_path(page, "plates/desk.mp4")
-    page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
-    page.wait_for_timeout(500)
+    open_plate(page)
 
     def edit(words, pts):
         paint_once(page, words, pts)
@@ -725,7 +765,7 @@ def race_flow(browser, port):
         raise AssertionError("the render's first upload never reached the mock: the race was not set up")
     page.keyboard.press("n")
     edit("a green bottle", [(0.2, 0.7), (0.28, 0.74)])
-    page.wait_for_timeout(1000)
+    poll(page, lambda: errors or klein_passes(page) >= made + 2, 60)  # the new edit's Klein pass, or the page error the old code threw
     check(not errors, f"Generate while the render before it starts, before its first step: no page error {errors}")
     page.wait_for_function(DONE.format(n=2), timeout=120000)
     page.wait_for_function(f"[...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('Klein quick pass')).length >= {made + 2}",
@@ -785,13 +825,9 @@ def keys_flow(browser, port):
     frame = lambda: int(text("#frame-now"))  # noqa: E731
     results = {}
 
-    def key(k, test, *, hold=0):  # a key's effect within 1.5 s: a busy page (a fluid shot just made) answers later than 60 ms
+    def key(k, test):  # a key's effect, within 1.5 s: a busy page answers later than at once
         page.keyboard.press(k)
-        page.wait_for_timeout(hold or 60)
-        for _ in range(29):
-            if test(): break
-            page.wait_for_timeout(50)
-        results[k] = bool(test())
+        results[k] = poll(page, test, 1.5)
     page.keyboard.press("Home"); start = frame()
     key("ArrowRight", lambda: frame() == start + 1); key("ArrowLeft", lambda: frame() == start)
     key("End", lambda: frame() == int(text("#frame-total").strip("/ "))); key("Home", lambda: frame() == start)
@@ -815,7 +851,7 @@ def keys_flow(browser, port):
         key(k, lambda name=name: text("#display-state") == name)
     key("Shift+C", lambda: page.is_hidden("#display-state"))
     key("Shift+I", lambda: text("#display-state") == "Inverted"); page.keyboard.press("Shift+I")
-    page.keyboard.down("o"); page.wait_for_timeout(60); results["hold O"] = text("#hud") == "Plate"; page.keyboard.up("o")
+    page.keyboard.down("o"); results["hold O"] = poll(page, lambda: text("#hud") == "Plate", 1.5); page.keyboard.up("o")
     key("?", lambda: page.evaluate("document.querySelector('#help').open")); key("?", lambda: not page.evaluate("document.querySelector('#help').open"))
     failed = [k for k, ok in results.items() if not ok]
     check(not failed, f"every documented key does what the Keys dialog says ({len(results)} presses): {failed or 'all'}")
@@ -823,9 +859,10 @@ def keys_flow(browser, port):
 
 
 def hdr_flow(browser, port):
-    """?hdr=0 turns SDR to HDR off: an EXR plate shows no switch, a blank plate no 16-bit. By default: no switch for a video plate; on by default for an EXR plate, where it runs after the full-size shot and
-    before the full-size composite, with its live preview in a corner naming its step of the pass's steps; switched off,
-    the next render leaves it out. Esc stops the render on its way and Enter goes on."""
+    """SDR to HDR in Deliver. ?hdr=0 turns it off: an EXR plate offers no bit-depth pass, a blank plate no 16-bit. By default
+    a video plate offers it, switched off, and an EXR plate runs it on its own, with no switch: after the full-size shot
+    and before the full-size composite, its live preview in a corner naming its step of the pass's steps. Every finished
+    pass with a picture is a row to click. Esc stops the render on its way and Enter goes on."""
     page = load(browser, port, "?blank=0&hdr=0")
     open_path(page, "paintaplate/hdr_room")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
@@ -862,24 +899,24 @@ def hdr_flow(browser, port):
     check({"First frame", "Shot, preview", "SDR to HDR", "Composite, full size"} <= set(rows()) and shown() == ["Composite, full size"],
           f"every finished pass with a picture is a row to click, the latest on show: {rows()}, {shown()}")
     page.click("#stages li.pick:has-text('SDR to HDR')")
-    page.wait_for_timeout(400)
+    poll(page, lambda: shown() == ["SDR to HDR"])
     check(shown() == ["SDR to HDR"] and "on show" in (page.text_content("#hud") or ""), f"a click shows that pass in the viewer: {shown()}")
     page.click("#stages li.pick:has-text('First frame')")
-    page.wait_for_timeout(400)
+    poll(page, lambda: shown() == ["First frame"] and picture() == "hero")
     check(shown() == ["First frame"] and picture() == "hero", f"the First frame row shows the edit as Klein made it: {shown()}, {picture()}")
     page.click("#stages li.pick:has-text('First frame')")
-    page.wait_for_timeout(400)
+    poll(page, lambda: shown() == ["Composite, full size"])
     check(shown() == ["Composite, full size"], f"a second click goes back to the latest: {shown()}")
     page.evaluate(WATCH)
     page.keyboard.press("Control+Enter")  # another seed: a new edit pass, then a new render
     wait_log(page, "window.__lines.some((t) => /^Render v\\d+: .* \\(about \\d+ s\\)/.test(t))", 120000, "render step")
+    stopped = lambda: any(line.startswith("Stopped") for line in lines())  # noqa: E731
     page.keyboard.press("Escape")
-    page.wait_for_timeout(400)
-    if not any(line.startswith("Stopped") for line in lines()):  # Ctrl+Enter selected the edit: Esc deselects first
+    poll(page, lambda: stopped() or "Esc again" in (page.text_content("#hud") or ""))
+    if not stopped():  # Ctrl+Enter selected the edit: Esc deselects first
         check("Esc again stops generating" in page.text_content("#hud"), "with an edit selected, Esc deselects first and says a second Esc stops generating")
         page.keyboard.press("Escape")
-        page.wait_for_timeout(400)
-    check(any(line.startswith("Stopped") for line in lines()) and not page.is_disabled("#generate"),
+    check(poll(page, lambda: stopped() and not page.is_disabled("#generate")),
           "Esc stops the render step on its way, and Generate can go on")
     page.evaluate(WATCH)
     page.keyboard.press("Enter")
@@ -921,7 +958,7 @@ def fluid16_flow(browser, port):
           f"the zip holds the HDR frames and the shot in the blank plate's format: {names[:3]}")
     page.evaluate("""() => { const v = document.querySelector('canvas[data-precision]'); window.__prec = [];
       new MutationObserver(() => window.__prec.push(v.dataset.precision)).observe(v, { attributes: true, attributeFilter: ['data-precision'] }); }""")
-    page.click("#play-btn"); page.wait_for_timeout(1500); page.click("#play-btn")
+    page.click("#play-btn"); page.wait_for_function("window.__prec.length >= 34", timeout=30000); page.click("#play-btn")  # two rounds of its 17 frames
     seen = page.evaluate("window.__prec")
     flips = sum(1 for a, b in zip(seen, seen[1:]) if a != b)
     check(flips <= 1, f"playing the HDR plate, its EXR frames and its 8-bit movie never alternate: {flips} changes in {len(seen)} draws")
@@ -1007,14 +1044,13 @@ def phone_flow(browser, port):
     """The page on a phone, upright and on its side: the frame, the transport, the menu and the log fit the screen."""
     first = load(browser, port)  # a first session opens the plate, so each phone's session finds its ingest in the job index
     open_plate(first)
-    first.close()
     for name, size in (("upright", {"width": 390, "height": 844}), ("sideways", {"width": 844, "height": 390})):
         page = browser.new_page(viewport=size, is_mobile=True, has_touch=True, device_scale_factor=3)
         page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
         page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=20000)
         page.click("#open-btn"); page.fill("#path", "plates/desk.mp4"); page.click("#open-go")
         page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
-        page.wait_for_timeout(500)
+        until(page, "[...document.querySelectorAll('#log li span')].some((e) => e.textContent.includes('ingest: made before'))")
         logged = log_lines(page)
         check(any("ingest: made before with the same inputs, taken from the job index" in line for line in logged),
               f"{name} phone: the plate opened again in a new session comes from the job index, with no new ingest")
@@ -1037,6 +1073,7 @@ def phone_flow(browser, port):
         page.screenshot(path=os.path.join(SHOTS, f"6_phone_{name}_log.png"))
         check(log, f"{name} phone: the open log fits the screen")
         page.close()
+    first.close()
 
 
 FLOWS = {"start": start_flow, "open": open_flow, "colour": colour_flow, "generate": generate_flow, "history": history_flow,
@@ -1096,14 +1133,14 @@ def make_plates(root):
 
 # ---------- The run: one process per flow, then the table ----------
 
-def run_flow(name, port, root, plates):
+def run_flow(name, port, root, plates, speed):
     """--flow: one flow in this process, against its own mock ComfyUI and its own browser."""
     from playwright.sync_api import sync_playwright
     shutil.rmtree(root, ignore_errors=True)
     shutil.copytree(os.path.join(plates, "input"), os.path.join(root, "input"))
     os.makedirs(SHOTS, exist_ok=True)
     with open(os.path.join(SHOTS, f"mock_{name}.log"), "w") as log:
-        mock = subprocess.Popen([sys.executable, os.path.join(HERE, "mock_comfy.py"), "--port", str(port), "--root", root], stdout=log, stderr=subprocess.STDOUT)
+        mock = subprocess.Popen([sys.executable, os.path.join(HERE, "mock_comfy.py"), "--port", str(port), "--root", root, "--speed", str(speed)], stdout=log, stderr=subprocess.STDOUT)
     try:
         for _ in range(120):
             try:
@@ -1129,7 +1166,7 @@ def stop(proc, stopped):
 
 def run_child(name, port, a, plates, live, printing):
     """One flow in its own process. Alone, its lines print as they come; side by side with others, together at its end."""
-    cmd = [sys.executable, os.path.abspath(__file__), "--flow", name, "--port", str(port), "--root", os.path.join(a.root, name), "--plates", plates]
+    cmd = [sys.executable, os.path.abspath(__file__), "--flow", name, "--port", str(port), "--root", os.path.join(a.root, name), "--plates", plates, "--speed", str(a.speed)]
     t0, lines, stopped = time.time(), [], []
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
     timer = threading.Timer(a.limit, stop, [proc, stopped])
@@ -1172,6 +1209,7 @@ def main():
     ap.add_argument("--only", default="", help="run these flows only: names from --list, separated by commas")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="how many flows run side by side (default: one per CPU)")
     ap.add_argument("--limit", type=int, default=600, help="seconds a flow may take before it is stopped and counted as failed")
+    ap.add_argument("--speed", type=float, default=8, help="divide the simulated time of the mock's jobs by this (1: as mock_comfy.py runs alone)")
     ap.add_argument("--port", type=int, default=8199, help="the first mock's port; flows side by side take the next ones")
     ap.add_argument("--root", default="/tmp/paintaplate_mock_ui", help="where the mocks keep their folders, one per flow")
     ap.add_argument("--flow", help=argparse.SUPPRESS)  # the runner's own: one flow in this process
@@ -1179,7 +1217,7 @@ def main():
     a = ap.parse_args()
     if a.flow:
         try:
-            run_flow(a.flow, a.port, a.root, a.plates)
+            run_flow(a.flow, a.port, a.root, a.plates, a.speed)
         except Exception as exc:
             if CHECKS["failed"] is None:  # not a failed check: a wait that ran out, a page that closed
                 traceback.print_exc()
