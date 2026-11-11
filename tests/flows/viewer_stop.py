@@ -40,6 +40,16 @@ def run(browser, port, U):
     U.check(states() == ["Waits for Enter", "Drawing"] and page.input_value("#prompt") == "a green lamp" and page.text_content("#editing").startswith("Editing 1"),
             f"History says what waits ({states()}), and the stopped edit is the current edit with its own words in the prompt bar ({page.input_value('#prompt')!r})")
 
+    # A scene saved under the stop holds both edits and no mark of the stop; an undo step and its redo leave the edit waiting
+    _, scene = U.save_scene(page)
+    U.check(len(scene["edits"]) == 2 and not any("waits" in e or "state" in e for e in scene["edits"]), f"a scene saved under a stop holds both edits and nothing of the stop: {[sorted(e) for e in scene['edits']]}")
+    page.keyboard.press("Control+z"); page.wait_for_timeout(300)
+    page.keyboard.press("Control+Shift+Z")
+    if not U.until(page, "document.querySelectorAll('#history li').length === 2", 2000):
+        page.keyboard.press("Control+y")
+    page.wait_for_timeout(500)
+    U.check(states() == ["Waits for Enter", "Drawing"] and posts(port) == before, f"an undo step and its redo under the stop post nothing, and the edit still waits: {states()}, {posts(port) - before} posts")
+
     # 2. A stroke on the stopped edit asks for nothing: SAM and the prompt writer wait for Enter too
     U.stroke(page, [(0.22, 0.80), (0.28, 0.80)]); page.wait_for_timeout(1500)
     U.check(posts(port) == before, f"a stroke painted after the stop posts no job: {posts(port) - before} more")
@@ -72,4 +82,37 @@ def run(browser, port, U):
     page.keyboard.press("Enter")
     U.check(U.until(page, U.DONE.format(n=3), 60000) and U.row_words(page)[0] == "a blue vase",
             f"Enter with no edit in progress runs the edit that waited: History {U.row_words(page)}, {states()}")
+
+    # 6. Try another on a History row under a stop: it waits for Enter, then runs after the stopped edit
+    hold(port, output="patch", seconds=30)
+    page.keyboard.press("n"); page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.70, 0.75), (0.80, 0.75)]); page.keyboard.press("Enter")
+    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
+    page.keyboard.press("Escape"); page.wait_for_timeout(300)
+    before = posts(port)
+    page.click("#history li:last-child .again"); page.mouse.move(5, 5); page.wait_for_timeout(1500)
+    U.check(posts(port) == before and status().endswith("It waits for Enter.") and states() == ["Drawing", "Waits for Enter"],
+            f"Try another under a stop posts nothing and says that it waits: {status()} History {states()}")
+    page.evaluate(U.WATCH)
+    page.keyboard.press("Enter")
+    page.wait_for_function(U.DONE.format(n=4), timeout=120000)
+    order = [m.group(1) for line in page.evaluate("window.__lines") for m in [re.match(r"Edit (\d): Paint ", line)] if m]
+    U.check(order == ["4", "1"], f"Enter runs the stopped edit, then the other try that waited: passes of edits {order}")
+    page.close()
+
+    # 7. No result yet, a stop, then Esc drops the stopped edit: the Generate button stays live for the edit that waits
+    page = browser.new_page(viewport={"width": 1400, "height": 900})
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.wait_for_function(f"{STATUS}.startsWith('Ready')", timeout=60000)
+    U.open_path(page, "plates/desk.mp4")
+    page.wait_for_function(OPEN, timeout=60000)
+    hold(port, output="patch", seconds=30)
+    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.20, 0.75), (0.30, 0.75)]); page.keyboard.press("Enter")
+    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
+    page.keyboard.press("n"); U.paint_once(page, "a blue vase", [(0.45, 0.20), (0.55, 0.20)]); page.keyboard.press("n")
+    page.wait_for_function("document.querySelectorAll('#history li').length === 2", timeout=10000)
+    page.keyboard.press("Escape"); page.wait_for_timeout(300); page.keyboard.press("Escape")
+    U.check(U.until(page, "document.querySelectorAll('#history li').length === 1 && !document.querySelector('#generate').disabled", 5000),
+            f"with no result yet, the Generate button stays live while an edit waits: disabled {page.is_disabled('#generate')}")
+    page.click("#generate")
+    U.check(U.until(page, U.DONE.format(n=1), 60000) and U.row_words(page) == ["a blue vase"], f"and Generate runs it: History {U.row_words(page)}")
     page.close()

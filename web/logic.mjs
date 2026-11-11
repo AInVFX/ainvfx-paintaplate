@@ -623,6 +623,23 @@ export function stopHint({ edit = null, waits = [] } = {}) {
     : `Stopped. Edit ${edit} keeps its strokes, words and seed.${wait} Enter generates again, Ctrl+Enter tries another seed, Esc drops the strokes.`;
 }
 
+// Edits are layers, after Generate (Adrien, 11 Nov). An edit above an edit that is made again stays hidden until its own
+// pass ends when it depends on that edit (dependsOnChange): it is generated again, over the new result. An edit that does
+// not depend on it stays on the frame and is not generated again. `edits`: History from the bottom, each { id, version,
+// tool, foot, basis, on, made, pending } (made: it has a result; pending: it waits for its turn or is being generated).
+// Returns the places of the edits that wait for their own pass.
+export function awaitingPass(edits) {
+  const soon = [], waits = []; // the edits under each edit, as they will be once what is pending is made
+  edits.forEach((e, i) => {
+    if (!e.on) return;
+    const again = !e.pending && e.made && dependsOnChange(e, soon, e.basis ?? []);
+    if (again) waits.push(i);
+    if (e.pending || again) soon.push({ ...e, version: `${e.version}+` }); // it will have another version
+    else if (e.made) soon.push(e);
+  });
+  return waits;
+}
+
 // The light brush lays soft dabs at a fixed spacing along a stroke, whatever the pointer's speed, so the light builds up
 // by stroke, never by how fast the hand moved. `points`: [x, y, radius]; `spacing(radius)`: the distance between dabs;
 // `carry`: the distance walked since the last dab, kept between calls, so drawing a stroke as it arrives gives the same
