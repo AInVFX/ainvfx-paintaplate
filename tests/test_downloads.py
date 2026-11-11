@@ -16,6 +16,9 @@ import get_plates  # noqa: E402
 
 KLEIN, LTX, HDR = "black-forest-labs/flux-3-image-klein-comfy", "Lightricks/LTX-2.5", "Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR"
 PLATES = {"horse.mp4": 6_500_000, "tea.mp4": 5_000_000}
+N = len(get_models.MODELS)  # the counts below follow the list: a model that another workstream adds changes nothing here
+LOCKED = sum(repo in (KLEIN, LTX) for repo, _, _ in get_models.MODELS)  # the files of the two repositories that one test refuses
+TOTAL = sum(get_models.SIZES[os.path.basename(path)] for _, path, _ in get_models.MODELS)
 
 
 class Refused(Exception):  # as huggingface_hub's HTTP errors: the answer's status code on .response
@@ -64,14 +67,14 @@ class Models(unittest.TestCase):
     def test_every_file_lands_in_its_folder_once(self):
         hub = Hub()
         code, lines = run(get_models, [self.models], hub)
-        self.assertEqual((code, lines[-1]), (0, f"15 of 15 model files in {self.models}: 15 downloaded, 0 already there"))
+        self.assertEqual((code, lines[-1]), (0, f"{N} of {N} model files in {self.models}: {N} downloaded, 0 already there"))
         for repo, path, folder in get_models.MODELS:
             self.assertTrue(os.path.isfile(os.path.join(self.models, folder, os.path.basename(path))), path)
             self.assertIn((repo, path, get_models.REVISIONS[repo], "model"), hub.calls, "each file at its tested revision")
         self.assertEqual(sorted(os.listdir(self.models)), sorted({folder for _, _, folder in get_models.MODELS}), "the staging folder is gone")
         again = Hub()
         code, lines = run(get_models, [self.models], again)
-        self.assertEqual((code, lines[-1], again.calls), (0, f"15 of 15 model files in {self.models}: 0 downloaded, 15 already there", []))
+        self.assertEqual((code, lines[-1], again.calls), (0, f"{N} of {N} model files in {self.models}: 0 downloaded, {N} already there", []))
 
     def test_a_refusal_names_the_page_to_open(self):
         code, lines = run(get_models, [self.models], Hub({KLEIN: 401, LTX: 403}))
@@ -80,14 +83,15 @@ class Models(unittest.TestCase):
         self.assertTrue(no_token and all(f"https://huggingface.co/{KLEIN}" in line and "set HF_TOKEN" in line and get_models.TOKENS in line for line in no_token), no_token)
         no_licence = [line for line in lines if line.startswith("MISSING: vae/ltx-2.5-video-vae")]
         self.assertTrue(no_licence and all(f"open https://huggingface.co/{LTX} and accept it" in line for line in no_licence), no_licence)
-        self.assertTrue(lines[-1].startswith(f"7 of 15 model files in {self.models}: 7 downloaded, 0 already there, 8 missing."), lines[-1])
+        self.assertTrue(lines[-1].startswith(f"{N - LOCKED} of {N} model files in {self.models}: {N - LOCKED} downloaded, 0 already there, {LOCKED} missing."), lines[-1])
         self.assertFalse(any("second line" in line for line in lines), "one sentence per file")
 
     def test_an_optional_file_missing_leaves_the_rest_working(self):
         code, lines = run(get_models, [self.models], Hub({HDR: 403}))
         self.assertEqual((code, lines[-1]), (0, "Off while their files are missing: SDR to HDR. The rest works without them."))
         code, lines = run(get_models, [self.models, "--no-hdr"], Hub())
-        self.assertEqual((code, lines[-1]), (0, f"13 of 13 model files in {self.models}: 0 downloaded, 13 already there"))
+        kept = N - len(get_models.HDR)
+        self.assertEqual((code, lines[-1]), (0, f"{kept} of {kept} model files in {self.models}: 0 downloaded, {kept} already there"))
 
     def test_list_prints_sizes_and_what_is_in_place_without_the_hub(self):
         os.makedirs(os.path.join(self.models, "vae"))
@@ -95,10 +99,10 @@ class Models(unittest.TestCase):
             fh.write(b"model")
         hub = Hub()
         code, lines = run(get_models, [self.models, "--list"], hub)
-        self.assertEqual((code, len(lines), hub.calls), (1, 16, []))
+        self.assertEqual((code, len(lines), hub.calls), (1, N + 1, []))
         self.assertIn(f"in place    336 MB  vae/flux2-vae.safetensors  ({KLEIN} at feef60b)", lines)
         self.assertIn(f"missing    21.5 GB  diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors  ({LTX} at 49b093a)", lines)
-        self.assertEqual(lines[-1], f"1 of 15 model files in place in {self.models}: 61.8 GB to download")
+        self.assertEqual(lines[-1], f"1 of {N} model files in place in {self.models}: {get_models.size(TOTAL - get_models.SIZES['flux2-vae.safetensors'])} to download")
         code, lines = run(get_models, [self.models, "--list", "--only", "flux2-vae.safetensors"], hub)
         self.assertEqual((code, lines[-1]), (0, f"1 of 1 model files in place in {self.models}"))
 
