@@ -22,48 +22,64 @@ Where the system Python refuses `pip` (Ubuntu, Debian), install into a virtual e
 | `ui_picker.py` | The colour picker in one browser (`--browser chromium`, `firefox` or `webkit`), against the mock ComfyUI or a real one (`--url`): with the browser's eyedropper, the pipette hides and I opens it; without it (Firefox, Safari, or `--no-eyedropper`), a click on the frame picks the colour on show there. |
 | `test_lint` | pyflakes on all Python, shellcheck on the scripts | `tests/requirements.txt` (it brings both) |
 | `test_registry` | The Registry metadata in `pyproject.toml`: the dependencies as `requirements.txt` lists them, no accelerator classifier, a semantic version | Python 3.11 or newer (`tomllib`) |
-| `test_ui_mock` | The page in headless Chromium or Chrome against `tests/mock_comfy.py` (next section) | `playwright` with a browser (skipped without it) |
+| `test_ui_mock` | One test per flow of `tests/ui_mock.py`: the page in headless Chromium or Chrome against `tests/mock_comfy.py` (next section). The flows run side by side, one per CPU | `playwright` with a browser (skipped without it; in CI the page job runs it) |
 | `test_live` | A real ComfyUI loads the pack and serves the page; every workflow validates; EXR, ProRes and 16-bit PNG plates ingest, composite, review and export: the review of an image sequence writes one half-float EXR frame per frame whose untouched pixels are the plate's own values, a video plate's review writes none; the export keeps untouched pixels and extra layers bit-identical, with a matte per frame and a zip with the parts asked for; headless Chromium opens a plate, plays it, paints, erases and relights, bypasses an edit, waits for the full-size composite, wipes, then exports and downloads the zip | `COMFYUI_DIR`, `playwright` |
 
 `node --test tests/js/*.test.mjs` runs the JavaScript tests alone. To run one Python module, work from `tests/`: `python -m unittest -v test_ocio`.
 
 ## The page against the mock ComfyUI
 
-`tests/mock_comfy.py --plate` serves the page with a stand-in ComfyUI: the same HTTP and WebSocket API, numpy instead of models, step previews, progress and interrupts, and the pack's own routes (the browser, thumbnails, scenes, OCIO, the job index, the download). `--plate` writes a 1280 x 704 test plate to `input/plates/desk.mp4`. The stand-in writes VP9 previews, because Playwright's Chromium cannot decode H.264; Chrome, Edge, Safari and Firefox can. `python tests/ui_mock.py` runs the page's whole behaviour against it in a few minutes (set `PLAYWRIGHT_CHANNEL=chrome` to drive Google Chrome). It checks, in order:
+`tests/mock_comfy.py --plate` serves the page with a stand-in ComfyUI: the same HTTP and WebSocket API, numpy instead of models, step previews, progress and interrupts, and the pack's own routes (the browser, thumbnails, scenes, OCIO, the job index, the download). `--plate` writes a 1280 x 704 test plate to `input/plates/desk.mp4`. The stand-in writes VP9 previews, because Playwright's Chromium cannot decode H.264; Chrome, Edge, Safari and Firefox can. Each job waits a little, as on a GPU, and `--speed 8` divides those waits by 8. Its log names each job and its time.
 
-- **The Open dialog**: the Input root lists the plates of the folders below it, the plate browser opens input/plates with its breadcrumbs, one click reads the plate and its colour space, the four tabs show one source each;
-- **Colour**: an EXR through the frame route and the viewer's OCIO program, 4.0 still white two stops down, 0.5 from 188 to 99; a saturated red, [179, 30, 27], through the sRGB program shows its red channel as 179 and its luminance as 61, picked from the display values as RV does;
-- **Edits and renders**: strokes that wait for Generate, Enter again with nothing changed running nothing, Generate making the full-size composite and nothing for compositing software, then Export writing the result and its matte and downloading the zip; the shot on paused frames, frame 0 included; the erase's matte and clean plate used again when the paint under it is removed; a removal that stops no render step; the preview of the edits on show before any full-size step; undo taking kept results back; numbering, selecting and retyping an edit; Ctrl+Enter; the preview menu; the viewer's colour and the right-click menu; the log; a whole-object erase; one edit at a time;
-- **A fluid shot** from a blank plate: keyframes painted, copied, pasted, dragged, deleted and undone, generated once for the same keyframes and words, then edit 1 under a paint edit, saved as a scene on the server and opened again with every job from the job index;
-- **A plate's scene** with a paint and a whole-object erase, saved and opened again with every job from the job index;
-- **OCIO**: from the right-click menu, another view applies at once, and back while the shot plays; another File Color Space shows at once and opens the plate again in it;
-- **Generate while a render starts**: the mock holds the render's first upload (`/mock/slow`), and Generate pressed in that window makes the new edit, with no page error;
-- **Keys**: every key the right-click menu shows is in the Keys dialog, and every documented key does what the dialog says;
-- **Out of memory**: the mock's `/mock/oom` makes the next fluid pass fail with ComfyUI's own message; the page asks ComfyUI to free its memory, waits until `/system_stats` shows it released, then makes the shot (posted at once, the retry ran before the free on a GPU, 29 Oct);
-- **Phones**, upright and on its side: the plate opened again from the job index, the frame, Generate, the transport, the status line, the log and the menu sheet fit the screen.
-- SDR to HDR: `?hdr=0` turns it off (no switch for an EXR plate, no 16-bit blank plate); by default, no switch for a video plate; on by default for an EXR plate, where the step runs after the full-size shot and before the full-size composite; switched off, the next render leaves it out; a 16-bit blank plate's fluid shot goes through it and opens as an EXR plate.
-- Then every `tests/flows/*.py` module, in name order (`tests/flows/README.md`): one file per workstream, so `ui_mock.py` itself stays as it is.
-- `tests/flows/pipeline.py`, the pipeline's checks: a 16-bit fluid shot with a paint edit, saved as a scene and opened again, takes every job back from the job index, its SDR to HDR included, and posts none; the Render panel's rows: each matte (the erase's, the paint's at the preview and at full size, the export's) shows grey on the first frame, the next and the last, and a fluid shot's keyframes, shot and SDR to HDR show with its keyframes closed and open; a second click and Esc give the latest back; Help > Models and licences names the models the render ran (Klein, LTX, SAM, the paint's IC-LoRA) and no SDR to HDR on an SDR plate; SDR to HDR on a video plate: off by default, asked before it turns on (Cancel leaves it off), then the player reads the result's EXR frames at full precision and the export zip holds half-float EXR frames, no video file.
-- The start: with no plate open, a blank plate opens at 960 × 512, 121 frames at 25 fps, in 16-bit (every other flow loads the page with `?blank=0`).
-- The Render panel: every finished pass with a picture is a row to click; a click shows it (SDR to HDR, the First frame), a second click the latest.
-- The Color Inspector (`tests/flows/viewer.py`): a 4K EXR plate's half floats as stored, a new frame and a dragged box read again, and a read held on its way never shows the new point with the old point's values.
-- Two passes in the wipe (`tests/flows/viewer.py`): Ctrl+click puts a paint matte on the left side against the full-size composite, both named; the inspector reads each side, and a preview pass at its own size; Esc, a second Ctrl+click and F6 end it.
-- The X-ray (`tests/flows/viewer.py`): W tints where the paint changes the plate from the full-size tracking mattes, then from the export's matte once Export made one, and the whole frame once a light edit is on show.
-- A 16-bit fluid shot exports by itself (a zip of its HDR frames and its shot), and playing its EXR plate never alternates between its EXR frames and its 8-bit movie.
-- While it generates: a full-size pass shows its live preview in a corner; Esc stops the render step on its way and Enter goes on; Shift+Home resets every colour change.
-- Close plate: the × after the plate's name empties the page, disables playback and says the frames are freed, and the status line keeps saying so when the model warm-up ends after the close (the mock holds the warm-up's first upload).
-- The layout: the side panel and the log resize from their dividers, the stage keeps its room, a new session keeps the sizes, a double-click gives the first sizes back.
+`python tests/ui_mock.py` runs the page's whole behaviour against it, flow by flow (set `PLAYWRIGHT_CHANNEL=chrome` to drive Google Chrome). A flow is one subject of the page. It runs in its own process, with its own mock ComfyUI and its own browser. So a flow starts from its own page load, a failure ends that flow only, and flows run side by side.
+
+| Command | What it does |
+| --- | --- |
+| `python tests/ui_mock.py` | Every flow, one per CPU at a time, then a table: flow, checks, time, first failure. The exit code is 1 when a flow failed |
+| `--list` | Names the flows |
+| `--only keys,scene` | Runs the flows named. With `--jobs 1` their lines print as they come |
+| `--jobs 4` | Four flows side by side (default: the number of CPUs). Each takes its own port, from `--port` up |
+| `--speed 1` | The mock's jobs at their full simulated time (default: 8 times shorter) |
+| `--limit 600` | The seconds a flow may take before it is stopped and counted as failed |
+| `--shard 2/4` | The second of four parts of the flows, for machines side by side |
+| `--json results.json` | Every flow's result in a file, which `test_ui_mock` reads |
+
+The flows wait on what the page shows (an element's state, a line of the log), never on the clock. One wait of 0.6 s is left, for the check that nothing starts by itself. The windows the mock holds open for the race checks keep their own time at any `--speed`: `/mock/slow`, `/mock/oom` and the second after `/free`.
+
+| Flow | What it proves |
+| --- | --- |
+| `start` | With no plate open, a blank plate opens at 960 × 512, 121 frames at 25 fps, in 16-bit (every other flow loads the page with `?blank=0`) |
+| `open` | The Open dialog: the Input root lists the plates of the folders below it, the plate browser opens input/plates with its breadcrumbs, one click reads the plate and its colour space, the four tabs show one source each; the preview menu comes from the plate |
+| `colour` | An EXR through the frame route and the viewer's OCIO program, 4.0 still white two stops down, 0.5 from 188 to 99; a saturated red, [179, 30, 27], through the sRGB program shows its red channel as 179 and its luminance as 61, picked from the display values as RV does; on a plate, a channel in grey, an exposure drag that paints nothing, the right-click menu, Reset all colour, and the colour picker with the browser's eyedropper and without it |
+| `generate` | Strokes that wait for Generate; Generate making the full-size composite and nothing for compositing software; Export writing the result and its matte and downloading the zip; the scene as one ComfyUI graph; the shot on paused frames, frame 0 included; Enter again with nothing changed running nothing; the log |
+| `history` | A whole-object erase as the second edit; the erase's matte and clean plate used again when the paint under it is removed; a removal that stops no render step; the preview of the edits on show before any full-size step; undo and redo of the removal; numbering, selecting and retyping an edit; Ctrl+Enter; three undos taking kept results back; the preview menu |
+| `one_edit` | One edit at a time: new words and more strokes change the edit just made; New edit (N, the button, the right-click menu) or another tool starts a new one |
+| `fluid` | A fluid shot from a blank plate: keyframes painted, copied, pasted, dragged, deleted and undone, generated once for the same keyframes and words, then edit 1 under a paint edit, saved as a scene on the server and opened again with every job from the job index |
+| `scene` | A plate's scene with a paint and a whole-object erase, saved and opened again with every job from the job index |
+| `ocio` | From the right-click menu, another view applies at once, and back while the shot plays; another File Color Space shows at once and opens the plate again in it |
+| `race` | Generate while a render starts: the mock holds the render's first upload (`/mock/slow`), and Generate pressed in that window makes the new edit, with no page error |
+| `keys` | Every key the right-click menu shows is in the Keys dialog, and every documented key does what the dialog says, Shift+Home (reset every colour change) included |
+| `oom` | Out of memory: the mock's `/mock/oom` makes the next fluid pass fail with ComfyUI's own message; the page asks ComfyUI to free its memory, waits until `/system_stats` shows it released, then makes the shot (posted at once, the retry ran before the free on a GPU, 29 Oct) |
+| `hdr` | SDR to HDR in Deliver: `?hdr=0` turns it off (no bit-depth pass for an EXR plate, no 16-bit blank plate); by default a video plate offers it, switched off, and an EXR plate runs it on its own, after the full-size shot and before the full-size composite. The Render panel: every finished pass with a picture is a row to click; a click shows it (SDR to HDR, the First frame), a second click the latest. While it generates: a full-size pass shows its live preview in a corner; Esc stops the render step on its way and Enter goes on |
+| `fluid16` | A 16-bit blank plate's fluid shot goes through SDR to HDR and opens as an EXR plate; it exports by itself (a zip of its HDR frames and its shot), and playing its EXR plate never alternates between its EXR frames and its 8-bit movie |
+| `layout` | The side panel and the log resize from their dividers, the stage keeps its room, a new session keeps the sizes, a double-click gives the first sizes back |
+| `close` | Close plate: the × after the plate's name empties the page, disables playback and says the frames are freed, and the status line keeps saying so when the model warm-up ends after the close (the mock holds the warm-up's first upload) |
+| `phone` | Phones, upright and on its side: the plate opened again from the job index, the frame, Generate, the transport, the status line, the log and the menu sheet fit the screen |
+| `pipeline` | `tests/flows/pipeline.py`, the pipeline's checks: a 16-bit fluid shot with a paint edit, saved as a scene and opened again, takes every job back from the job index, its SDR to HDR included, and posts none; the Render panel's rows: each matte (the erase's, the paint's at the preview and at full size, the export's) shows grey on the first frame, the next and the last, and a fluid shot's keyframes, shot and SDR to HDR show with its keyframes closed and open; a second click and Esc give the latest back; Help > Models and licences names the models the render ran (Klein, LTX, SAM, the paint's IC-LoRA) and no SDR to HDR on an SDR plate; SDR to HDR on a video plate: off by default, asked before it turns on (Cancel leaves it off), then the player reads the result's EXR frames at full precision and the export zip holds half-float EXR frames, no video file. |
+| `viewer` | `tests/flows/viewer.py`. The Color Inspector: a 4K EXR plate's half floats as stored, a new frame and a dragged box read again, and a read held on its way never shows the new point with the old point's values. Two passes in the wipe: Ctrl+click puts a paint matte on the left side against the full-size composite, both named; the inspector reads each side, and a preview pass at its own size; Esc, a second Ctrl+click and F6 end it. The X-ray: W tints where the paint changes the plate from the full-size tracking mattes, then from the export's matte once Export made one, and the whole frame once a light edit is on show |
+
+Every other module of `tests/flows` is a flow too, named after its file (`tests/flows/README.md`).
 
 ## CI
 
-`.github/workflows/tests.yml` runs three jobs side by side on every push, none repeating another's tests, then a release job on `main`:
+`.github/workflows/tests.yml` runs three kinds of job side by side on every push, none repeating another's tests, then a release job on `main`:
 
 | Job | What it runs |
 | --- | --- |
 | Unit tests | The whole suite with no browser and no ComfyUI: the Python modules, the Node tests and the linters. |
-| Page tests | `test_ui_mock`: the page against the mock ComfyUI. |
+| Page tests | `test_ui_mock`: the page against the mock ComfyUI, in four shards on four machines (`PAGE_SHARD`). Each shard runs its part of the flows, one per CPU. A failed shard leaves the others running. |
 | Live tests | `tools/ci_comfyui.sh` builds ComfyUI and ComfyUI-LTXVideo at the pins on CPU, with empty model files from `tools/placeholders.py`; then `test_live` and the source check of `test_workflows`. No model runs: model workflows are cancelled once ComfyUI has validated them, and the browser test swaps them for stand-ins made of core nodes. |
-| Release | On `main` only, once the three jobs pass: a new `version` in `pyproject.toml` gets its Comfy Registry publish, its tag `v<version>` and its GitHub release (a pre-release before 1.0.0). Each step skips what is done already. |
+| Release | On `main` only, once every job passes, each page shard included: a new `version` in `pyproject.toml` gets its Comfy Registry publish, its tag `v<version>` and its GitHub release (a pre-release before 1.0.0). Each step skips what is done already. |
 
 pip downloads are cached, and the browser jobs drive the runner's own Google Chrome when it has one, so no browser is downloaded.
 

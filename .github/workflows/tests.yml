@@ -5,8 +5,8 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Three jobs side by side, none repeating another's tests: the Python and Node level, the page against the mock ComfyUI,
-# and a real ComfyUI on CPU. The page jobs drive the runner's own Google Chrome when it has one (no browser download, no
+# Three kinds of job side by side, none repeating another's tests: the Python and Node level, the page against the mock
+# ComfyUI in four shards, and a real ComfyUI on CPU. The page jobs drive the runner's own Google Chrome when it has one (no browser download, no
 # system packages, and it plays H.264); else Playwright's Chromium is installed. Then, on main, the release job.
 jobs:
   unit:
@@ -23,8 +23,14 @@ jobs:
       - run: python -m unittest discover -s tests -v
 
   page:
-    name: Page tests (headless browser, mock ComfyUI)
+    name: Page tests (shard ${{ matrix.shard }} of ${{ strategy.job-total }}; headless browser, mock ComfyUI)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false  # a failed shard leaves the others running, so every flow reports
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      PAGE_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}  # tests/test_ui_mock.py runs this part of the flows, one flow per CPU
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -64,7 +70,7 @@ jobs:
 
   release:
     name: Release (Comfy Registry, tag, GitHub release)
-    # On main, once the three jobs pass: a new version in pyproject.toml is published to the Comfy Registry, then tagged
+    # On main, once every job passes, each page shard included: a new version in pyproject.toml is published to the Comfy Registry, then tagged
     # v<version> with its GitHub release (a pre-release before 1.0.0), its notes the commits since the last release.
     # Each step skips what is done already, so a re-run (Actions > tests > Run workflow) finishes a release that stopped
     # half-way.
