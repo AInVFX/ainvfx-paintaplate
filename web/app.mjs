@@ -17,6 +17,7 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
+import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -783,11 +784,19 @@ function endCompare(draw = true) { // the wipe goes back to the plate on its lef
   if (draw) { render(); hud(`${label}: out of the wipe`, 1500); }
 }
 
-function showLive(d) { // the shot as LTX predicts it, from step 1: in the frame until a shot exists, then in a corner
-  const img = new Image(), key = S.heroKey, label = STAGES.find((x) => x.id === S.stage?.id)?.label ?? (keying() ? "Fluid shot" : "Generating");
+// A live preview belongs to the render that sent it (S.stage.key, "fluid" for a fluid shot). It shows only while those
+// edits are on show: in the frame until they have a shot, then in a corner. A stop, a failure or other edits leave
+// nothing of it on screen. It is drawn when it arrives, not on every animation frame.
+S.liveKey = null;
+const onShow = () => (keying() ? "fluid" : S.heroKey); // what the viewer shows: a fluid shot's keyframes, or a set of edits
+const liveNow = () => (S.live && S.liveKey === onShow() ? S.live : null);
+function showLive(d) {
+  const key = S.stage ? S.stage.key : S.fluid?.busy ? "fluid" : null;
+  if (key === null || S.halted) return; // no pass runs, or a stop: nothing of it shows
+  const img = new Image(), label = STAGES.find((x) => x.id === S.stage?.id)?.label ?? (keying() ? "Fluid shot" : "Generating");
   const at = d.steps ? `step ${d.step} of ${d.steps}` : `step ${d.step}`, part = S.stage?.part ? `${S.stage.part}, ` : ""; // a pass in two stages names its stage
   img.onload = () => {
-    if (key !== S.heroKey) return;
+    if (S.halted || key !== onShow()) return;
     if (S.shot?.key === key) { // a preview or a full-size shot already plays: the pass on its way shows as an inset over it
       const box = $("#live-inset");
       box.querySelector("img").src = img.src;
@@ -795,20 +804,27 @@ function showLive(d) { // the shot as LTX predicts it, from step 1: in the frame
       box.hidden = false;
       return;
     }
-    S.live = img;
+    Object.assign(S, { live: img, liveKey: key });
     hud(`Live preview, ${at}: the shot follows`, 2000);
-    if (!showLive.on) { showLive.on = true; const tick = () => { if (!S.live) { showLive.on = false; return; } render(); requestAnimationFrame(tick); }; tick(); }
+    render();
   };
   img.src = viewUrl(d.image);
 }
 
-function hideLive() { $("#live-inset").hidden = true; } // the pass that sent it ended
+function hideLive() { $("#live-inset").hidden = true; if (!S.piping) dropLive(); } // the pass that sent it ended; once no render runs (it finished, stopped or failed), the preview in the frame goes too
+function dropLive() { // nothing of a pass that stopped or failed stays on screen
+  $("#live-inset").hidden = true;
+  if (!S.live) return;
+  S.live = null;
+  render();
+}
 
 function generating() { return !!(S.queued || S.piping || S.fluid?.busy); }
-function escape() { // Esc: logic.escapeAction. A selection goes first; then the HUD says a second Esc stops what generates
-  const busy = generating(), what = escapeAction({ opening: !!openCtl, editing: !!(S.draft || S.running), selected: !!S.selected, pinned: !!S.pass, generating: busy });
+function escape() { // Esc: logic.escapeAction. The edit being generated stops and keeps its strokes; a selection goes before what else generates
+  const busy = generating(), what = escapeAction({ opening: !!openCtl, editing: !!S.draft, running: !!S.running, selected: !!S.selected, pinned: !!S.pass, generating: busy });
   if (what === "cancelOpen") return cancelOpen();
   if (what === "discard") return discard();
+  if (what === "reopen") return stopPass(S.running);
   if (what === "deselect") { select(null); if (busy) hud("Deselected. Esc again stops generating", 2500); return; }
   if (S.cmp) return endCompare(); // a comparison in the wipe ends before the pass on show
   if (what === "latest") return choosePass(S.pass); // a pass on show: back to the latest
@@ -817,12 +833,18 @@ function escape() { // Esc: logic.escapeAction. A selection goes first; then the
 function stopGenerating() { // everything that generates stops where it is: what finished is kept, and Enter goes on from there
   if (!generating()) return;
   S.halted = true;
-  if (S.running) discard();
+  const edit = S.running;
+  if (edit) stopPass(edit, false); // it stays the current edit, with its strokes
   cancel("fluid", ...BACKGROUND);
-  hideLive();
-  log("Stopped: what finished is kept. Enter goes on from where it stopped");
-  hud("Stopped. Enter goes on from where it stopped", 3000);
-  status("Stopped. Enter goes on from where it stopped.");
+  dropLive();
+  if (edit) {
+    const said = `Stopped. Edit ${num(edit)} keeps its strokes, words and seed: Enter generates it again, Ctrl+Enter tries another seed`;
+    hud(said, 4500); status(`${said}.`);
+  } else {
+    log("Stopped: what finished is kept. Enter goes on from where it stopped");
+    hud("Stopped. Enter goes on from where it stopped", 3000);
+    status("Stopped. Enter goes on from where it stopped.");
+  }
   stagesUI(); generateUI();
 }
 
@@ -830,8 +852,8 @@ function stopGenerating() { // everything that generates stops where it is: what
 // argument) options: framesSpace, the colour space the EXR frames are stored in, when it is not the plate's (the SDR-to-HDR
 // pass writes ACES2065-1). The viewer draws and inspects the frames in that space.
 function setShot(src, key, space = "@model", frames = null, { framesSpace = null } = {}) {
-  hideLive();
   S.live = null; // the shot itself, rough or composited, replaces the live preview
+  hideLive();
   S.shot = src ? { url: src, key, space, frames, framesSpace } : null;
   if (src) { if (shotVid.getAttribute("src") !== src) shotVid.src = src; }
   else { shotVid.removeAttribute("src"); shotVid.load(); }
@@ -843,6 +865,17 @@ function setShot(src, key, space = "@model", frames = null, { framesSpace = null
 // whenever the shot video had no frame ready, and frame 0 kept showing Klein's still (28 Oct).
 const held = { canvas: canvas([1, 1]), url: "" }; // the last shot frame drawn while paused: shown while the shot video seeks
 const editingFirst = () => !!(S.draft || stroke || S.running || S.queued || S.hover || S.peek);
+
+// While a made edit is changed, the first frame shows the other edits and its strokes without its own old result, so a
+// rubbed stroke leaves no generated paint behind. The shot on show keeps that result on the other frames until Generate.
+const under = { key: "", canvas: null };
+function firstFrame() {
+  const d = S.draft;
+  if (!d?.patch || !d.on || !S.edits.includes(d)) return S.hero;
+  const key = `${S.plate.id}|${d.id}|${S.heroKey}`;
+  if (under.key !== key) Object.assign(under, { key, canvas: layered(S.edits.length, (e) => e !== d) });
+  return under.canvas;
+}
 
 function keepFrame(src) {
   const [W, H] = [view.width, view.height], c = held.canvas;
@@ -866,7 +899,7 @@ function render() {
   $("#wipe .label.right").textContent = S.cmp ? shownLabel() : "Result";
   wantDeep(); // once a colour value moves, the frames' own values load around the playhead, as OpenRV's cache does
   const W = view.width, H = view.height, still = !S.playing;
-  const live = S.draft || stroke ? null : S.live; // while an edit is painted, the frame shows it, not the live preview of a render
+  const live = S.draft || stroke ? null : liveNow(); // while an edit is painted, the frame shows it, not the live preview of a render
   const first = still && S.frame === 0 && (!S.shot?.url || stale() || editingFirst());
   const pic = live || first || !S.shot?.url ? null : shotFrame();
   if (S.playing && S.shot?.url && !live && !pic) return; // the shot video catches up in a frame: the last frame stays on screen
@@ -901,7 +934,7 @@ function render() {
       return "shot";
     }
     if (still && S.frame === 0) { // the first frame with its edits, in the model space; with none, the plate itself
-      if (S.heroKey) draw(S.hero, model); else drawPlate();
+      if (S.heroKey) draw(firstFrame(), model); else drawPlate();
       inWork(overlays); return "hero";
     }
     drawPlate();
@@ -941,7 +974,7 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
   ctx.fillRect(0, 0, W, H);
   const cached = caches.get(shotVid).get(S.frame), made = !!f.result && f.result.sig === fluidSig();
   const shot = () => ctx.drawImage(look.image(cached || shotVid, S.display, S.shot?.space ?? modelSpace()), 0, 0, W, H); // a decoded frame first: no seek shows
-  if (S.live && f.busy) ctx.drawImage(look.image(S.live, S.display, modelSpace()), 0, 0, W, H);
+  if (liveNow() && f.busy) ctx.drawImage(look.image(S.live, S.display, modelSpace()), 0, 0, W, H);
   else if (f.result && S.wipe !== null && !S.compare && (cached || shotReady())) { // the wipe: this frame's painted keyframe, or black, against the shot
     const key = keyHere();
     if (S.cmp) { if (!S.cmp.black && cmpVid.readyState >= 2) ctx.drawImage(look.image(cmpVid, S.display, S.cmp.space), 0, 0, W, H); } // a fluid row's input
@@ -1193,18 +1226,18 @@ function addPoint(d, e) {
   render();
 }
 
+function rubStroke(layers, s, from = 0) { // an eraser stroke, taken out of every layer given
+  for (const c of layers) c.globalCompositeOperation = "destination-out";
+  for (let i = from; i < s.points.length; i++) {
+    const [x, y, p] = s.points[i], [px, py] = s.points[Math.max(i - 1, 0)], r = (s.size * (0.5 + p)) / 2;
+    for (const c of layers) line(c, px, py, x, y, r, "#fff");
+  }
+  for (const c of layers) c.globalCompositeOperation = "source-over";
+}
+
 function drawStroke(d, s, from = 0) {
   const pc = d.paint.getContext("2d"), mc = d.mask.getContext("2d");
-  if (s.tool === "rub") { // the eraser takes strokes away, whatever drew them: paint, light or shade
-    const cs = [pc, mc, d.shade?.getContext("2d")].filter(Boolean);
-    for (const c of cs) c.globalCompositeOperation = "destination-out";
-    for (let i = from; i < s.points.length; i++) {
-      const [x, y, p] = s.points[i], [px, py] = s.points[Math.max(i - 1, 0)], r = (s.size * (0.5 + p)) / 2;
-      for (const c of cs) line(c, px, py, x, y, r, "#fff");
-    }
-    for (const c of cs) c.globalCompositeOperation = "source-over";
-    return;
-  }
+  if (s.tool === "rub") return rubStroke([pc, mc, d.shade?.getContext("2d")].filter(Boolean), s, from); // the eraser takes strokes away, whatever drew them: paint, light or shade
   for (let i = from; i < s.points.length; i++) {
     const [x, y, p] = s.points[i], [px, py] = s.points[Math.max(i - 1, 0)], r = (s.size * (0.5 + p)) / 2;
     line(mc, px, py, x, y, r, "#fff");
@@ -1242,11 +1275,14 @@ function line(c, x0, y0, x1, y1, r, color) {
   c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
 }
 
-function redrawStrokes(d) { // painted strokes, then SAM's object, then the eraser strokes on top of both
+function redrawStrokes(d) { // the strokes in the order they were made (logic.replayOrder), then SAM's object, cut by every rub
   for (const c of [d.paint, d.mask, d.shade]) c?.getContext("2d").clearRect(0, 0, c.width, c.height);
-  for (const s of d.strokes) if (s.tool !== "rub") drawStroke(d, s);
-  if (d.sam) d.mask.getContext("2d").drawImage(d.sam, 0, 0);
-  for (const s of d.strokes) if (s.tool === "rub") drawStroke(d, s);
+  for (const step of replayOrder(d.strokes, !!d.sam)) {
+    if (step.stroke) { drawStroke(d, step.stroke); continue; }
+    const object = snap(d.sam, [d.mask.width, d.mask.height]);
+    for (const s of step.cuts) rubStroke([object.getContext("2d")], s);
+    d.mask.getContext("2d").drawImage(object, 0, 0);
+  }
   d.soft = null;
 }
 
@@ -1657,11 +1693,13 @@ function queue(fn) {
   S.chain = S.chain.then(fn).catch(quiet).finally(() => { S.queued--; touch(); });
 }
 
-function launch(edit) { // Generate: the edit on the first frame, then its shot. A result it already has is used again
+function launch(edit, another = false) { // Generate: the edit on the first frame, then its shot. A result it already has is used again. `another`: an edit already in History starts again with another seed
   if (S.draft === edit) S.draft = null;
   clearTimeout(S.prefetchTimer);
   if (!edit.strokes.length) return generateUI();
+  S.halted = false; // a stop lasts until the next Generate: this edit runs, then its render
   takeInputs(edit);
+  if (another && S.edits.includes(edit)) edit.seed = (Math.random() * 2 ** 31) | 0;
   if (!S.edits.includes(edit)) S.edits.push(edit);
   edit.launched = performance.now();
   S.selected = edit; // it stays the current edit: new words, more strokes or the switch change it, until New edit or another tool
@@ -1742,9 +1780,19 @@ function reopen(edit) { // the edit being generated, or waiting for its turn, ch
   edit.token = (edit.token ?? 0) + 1;
   if (S.running === edit) { cancel("edit", "snap", "prefetch"); S.running = null; }
   edit.state = "drawing"; edit.preview = edit.latent = null;
-  edit.kept = edit.strokes.length;
+  edit.kept ??= edit.strokes.length; // the strokes its last result was made from: a second Esc goes back to them
   historyUI();
   return (S.draft = edit);
+}
+
+function stopPass(edit, say = true) { // Esc or Stop on the edit being generated: its pass stops, and it stays the current edit with its strokes, words and seed
+  clearTimeout(S.prefetchTimer);
+  reopen(edit);
+  S.selected = edit;
+  recompose(); editingUI(); render();
+  if (!say) return;
+  const said = `Edit ${num(edit)} stopped. It keeps its strokes, words and seed: Enter generates it again, Ctrl+Enter tries another seed, Esc drops the strokes`;
+  hud(said, 4500); status(`${said}.`);
 }
 
 function activeBefore(edit) {
@@ -2039,9 +2087,9 @@ function undoUI() {
   $("#redo-btn").disabled = !S.future.length;
 }
 
-function discard() { // Esc: drop the strokes in progress, or stop the edit being generated
+function discard() { // Esc: drop the strokes in progress. An edit with a result goes back to it; an edit without one goes
   clearTimeout(S.prefetchTimer);
-  const d = S.draft ?? S.running;
+  const d = S.draft;
   if (!d) return S.selected && select(null);
   mark();
   stopEdit(d);

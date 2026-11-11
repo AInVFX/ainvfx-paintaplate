@@ -586,10 +586,19 @@ export const drawsDeep = (playing, holdsAll) => !playing || holdsAll;
 // A fluid shot's folder, from its HDR frames or its shot in the blank plate's format: what its export zips.
 export const fluidRun = (path) => String(path ?? "").replace(/^output[:/]/, "").replace(/\/(hdr|plate)(\/[^/]*)?$/, "");
 
-// Esc, one thing at a time: the strokes or the edit in progress, then the selection, then a pass on show (back to the latest), then everything that generates. A stop
-// keeps what finished, and Enter goes on from there. (Shift+Esc opens Chrome's Task Manager on Windows and Linux.)
-export const escapeAction = ({ opening = false, editing, selected, pinned = false, generating }) =>
-  (opening ? "cancelOpen" : editing ? "discard" : selected ? "deselect" : pinned ? "latest" : generating ? "stop" : null); // a plate opening comes first
+// Esc, by what the page is doing. A plate that opens stops opening. The strokes in progress are dropped. The edit being
+// generated stops and stays the current edit, with its strokes, words and seed ("reopen"). Then the selection goes, then a
+// pass on show gives way to the latest result, and last everything that generates stops.
+export const escapeAction = ({ opening = false, editing, running = false, selected, pinned = false, generating }) =>
+  (opening ? "cancelOpen" : editing ? "discard" : running ? "reopen" : selected ? "deselect" : pinned ? "latest" : generating ? "stop" : null);
+
+// The order an edit's strokes are replayed in: as they were made, so a rub removes only what was painted before it, and a
+// stroke painted later over the rubbed place stays. SAM's object comes last, cut by every rub.
+export function replayOrder(strokes, sam = false) {
+  const steps = strokes.map((stroke) => ({ stroke }));
+  if (sam) steps.push({ sam: true, cuts: strokes.filter((s) => s.tool === "rub") });
+  return steps;
+}
 
 // The light brush lays soft dabs at a fixed spacing along a stroke, whatever the pointer's speed, so the light builds up
 // by stroke, never by how fast the hand moved. `points`: [x, y, radius]; `spacing(radius)`: the distance between dabs;
