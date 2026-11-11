@@ -4,20 +4,27 @@
 
 Each case runs tests/ui_live.py on a running ComfyUI (the real page, in Google Chrome). This script then reads what the
 case left behind and writes <out>/report.md: the machine, then per case the time of each step (the page's log times
-every step), peak VRAM and RAM (ComfyUI's /system_stats, every second), out-of-memory retries, the memory profile, the
-paint matte's area on every frame against the first frame's, the previews received, pass or fail, then the log of each
-failure. The report is written again after every case, so a run that is stopped still leaves one.
+every step), each job with its seconds, its peak VRAM and RAM, the nodes ComfyUI took from its cache and the previews
+the page received, out-of-memory retries, the memory profile, the paint matte's area on every frame against the first
+frame's, pass or fail, then the log of each failure. The report is written again after every case, so a run that is
+stopped still leaves one.
 
-quick: on plates/horse.mp4 (tools/get_plates.sh) a cow painted behind the fence, one erase, one light, then a fluid shot
-at 1280 x 704 x 121. all adds a 3840 x 2160 plate at 50 fps, made here from horse.mp4 (paint, erase, light), and a fluid
-shot at 1920 x 1088 at 50 fps with one edit on it. --cases also takes case names, with commas. The strokes are in
-gpu_matrix.json beside this file. Every run moves them by a fraction of a pixel, so no job comes back from the job index
-and every time is a real one; --exact keeps them as written. --memory small, medium or large asks the page for that memory
-profile (logic.memoryProfile) in place of the one the card gives: the same case under two profiles shows what a profile costs.
+Memory is read once a second. VRAM comes from ComfyUI's /system_stats. RAM is what ComfyUI's own process holds (VmRSS in
+/proc/<pid>/status, as tests/open_probe.py reads it), and of it the part that no file backs (RssAnon and RssShmem): a
+memory cap can take back the pages of a model file, never that part. A job's peak is the highest reading between its
+start and its end in ComfyUI's /history.
+
+quick: on plates/horse.mp4 (python get_plates.py) a cow painted behind the fence, one erase, one light, then a fluid shot
+at 1280 x 704 x 121. all adds a 3840 x 2160 plate at 50 fps, made here from horse.mp4 (paint, erase, light), a fluid
+shot at 1920 x 1088 at 50 fps with one edit on it, then the same 3840 x 2160 plate at 25 fps. --cases also takes case
+names, with commas. The strokes are in gpu_matrix.json beside this file. Every run moves them by a fraction of a pixel,
+so no job comes back from the job index and every time is a real one; --exact keeps them as written. --memory small,
+medium or large asks the page for that memory profile (logic.memoryProfile) in place of the one the card gives: the same
+case under two profiles shows what a profile costs.
 
 It needs Playwright with Google Chrome: Playwright's own Chromium cannot play H.264. Run it on the machine that runs
-ComfyUI, with a Python that has Pillow and numpy (ComfyUI's own has both): it reads the mattes and the live previews in
-ComfyUI's output and temp folders.
+ComfyUI, with a Python that has Pillow and numpy (ComfyUI's own has both): it reads ComfyUI's process, and the mattes and
+the live previews in ComfyUI's output and temp folders.
 """
 import argparse
 import glob
@@ -33,13 +40,21 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+try:  # ComfyUI's process, read as the plate's probe reads it; where it cannot be read, the system's RAM in use serves
+    from open_probe import local_pid, status_bytes  # noqa: E402
+except ImportError:
+    local_pid = status_bytes = None
+
 QUICK = ("horse_cow", "horse_erase", "horse_light", "fluid_720")
-ALL = QUICK + ("uhd_cow", "uhd_erase", "uhd_light", "fluid_1080_edit")
-UHD = {"file": "horse_3840x2160_50fps.mp4", "size": (3840, 2160), "fps": 50, "frames": 121}  # « 4K at 50 fps »: every tool runs on it
+ALL = QUICK + ("uhd_cow", "uhd_erase", "uhd_light", "fluid_1080_edit", "uhd25_cow", "uhd25_erase", "uhd25_light")
+UHD = {"horse_3840x2160_50fps.mp4": 50, "horse_3840x2160_25fps.mp4": 25}  # « 4K at 50 fps », and at 25: every tool runs on a 3840 x 2160 plate
+UHD_SIZE, UHD_FRAMES = (3840, 2160), 121
 STEP = re.compile(r"Render v(\d+): (.+?) took ([\d.]+) s")  # the page's log: one line per render step
-# and one line per finished job: its seconds, its nodes, those ComfyUI took from its cache (a model loader among them is a
-# model not loaded again) and the previews the page received. A line starts with its time, with no space after it
-JOB = re.compile(r"([a-z]+) [0-9a-f?]{1,8}: done in ([\d.]+) s \((\d+) nodes?(?:, (\d+) from ComfyUI's cache)?(?:, (\d+) previews?)?")
+# and one line per finished job: its id, its seconds, its nodes, those ComfyUI took from its cache (a model loader among
+# them is a model not loaded again) and the previews the page received. A line starts with its time, with no space after it
+JOB = re.compile(r"([a-z]+) ([0-9a-f?]{1,8}): done in ([\d.]+) s \((\d+) nodes?(?:, (\d+) from ComfyUI's cache)?(?:, (\d+) previews?)?")
+ENDED = re.compile(r"([a-z]+ [0-9a-f?]{1,8}: (?:failed|stopped) after [^\n]*)")  # a job that did not finish says so in one line
 GB = 2 ** 30
 
 
@@ -55,27 +70,62 @@ def get(url):
 
 
 class Memory(threading.Thread):
-    """Peak VRAM and RAM in use while a case runs: ComfyUI's /system_stats every second, and in a container its own count
-    (/sys/fs/cgroup/memory.current), since /system_stats reports the host's RAM there."""
+    """VRAM and RAM in use while a case runs, read once a second (the top of this file says from where). `samples` keeps
+    every reading with its time: (time, VRAM, RAM, RAM that no file backs). In a container, `container` is its own count
+    (/sys/fs/cgroup/memory.current), which holds the page cache too."""
     CGROUP = "/sys/fs/cgroup/memory.current"
 
     def __init__(self, url):
         super().__init__(daemon=True)
-        self.url, self.vram, self.ram, self.container, self.on = url, 0, 0, 0, True
+        self.url, self.on, self.samples, self.container = url, True, [], 0
+        try:
+            self.pid = local_pid(url) if local_pid else None
+        except Exception:
+            self.pid = None  # no /proc, or ComfyUI runs on another machine
+
+    def held(self, *fields):
+        try:
+            return sum(status_bytes(self.pid, field) or 0 for field in fields)
+        except Exception:
+            return 0
 
     def run(self):
+        vram = 0
         while self.on:
+            ram = own = 0
             try:
                 stats = get(self.url + "/system_stats")
                 gpu = (stats.get("devices") or [{}])[0]
-                self.vram = max(self.vram, gpu.get("vram_total", 0) - gpu.get("vram_free", 0))
-                self.ram = max(self.ram, stats["system"].get("ram_total", 0) - stats["system"].get("ram_free", 0))
-                if os.path.exists(self.CGROUP):
-                    with open(self.CGROUP) as f:
-                        self.container = max(self.container, int(f.read()))
+                vram = gpu.get("vram_total", 0) - gpu.get("vram_free", 0)
+                ram = own = stats["system"].get("ram_total", 0) - stats["system"].get("ram_free", 0)
             except (OSError, ValueError, KeyError):
-                pass  # ComfyUI is busy or restarting: the next second asks again
+                pass  # ComfyUI is busy or restarting: the last VRAM reading holds, and the next second asks again
+            if self.pid:
+                ram, own = self.held("VmRSS"), self.held("RssAnon", "RssShmem")
+            self.samples.append((time.time(), vram, ram, own))
+            try:
+                with open(self.CGROUP) as f:
+                    self.container = max(self.container, int(f.read()))
+            except (OSError, ValueError):
+                pass  # not a container
             time.sleep(1)
+
+    def peak(self, t0=0.0, t1=float("inf")):
+        """The most VRAM, RAM and RAM that no file backs between two times. A job shorter than a second may hold no
+        reading: then the reading nearest to its end."""
+        inside = [s for s in self.samples if t0 <= s[0] <= t1] or sorted(self.samples, key=lambda s: abs(s[0] - t1))[:1]
+        return [max(s[k] for s in inside) for k in (1, 2, 3)] if inside else [0, 0, 0]
+
+
+def job_spans(history):
+    """When ComfyUI ran each job of its /history: {the id's first 8 characters: (start, end)}, in seconds."""
+    spans = {}
+    for prompt_id, entry in history.items():
+        stamps = {kind: data.get("timestamp") for kind, data in (entry.get("status") or {}).get("messages", []) if isinstance(data, dict)}
+        end = stamps.get("execution_success") or stamps.get("execution_error") or stamps.get("execution_interrupted")
+        if stamps.get("execution_start") and end:
+            spans[prompt_id[:8]] = (stamps["execution_start"] / 1000, end / 1000)
+    return spans
 
 
 def browser_ready(channel):
@@ -91,8 +141,8 @@ def browser_ready(channel):
              "so the page's player never runs in it.")
 
 
-def make_uhd(source, target, spec=UHD):
-    """The 3840 x 2160 plate at 50 fps: horse.mp4's first 121 frames, enlarged with Lanczos by the pack's own movie writer."""
+def make_uhd(source, target, fps):
+    """A 3840 x 2160 plate at `fps`: horse.mp4's first 121 frames, enlarged with Lanczos by the pack's own movie writer."""
     try:
         import av
     except ImportError:
@@ -100,8 +150,8 @@ def make_uhd(source, target, spec=UHD):
     sys.path.insert(0, REPO)
     import plateio
     with av.open(source) as src:
-        frames = [f.to_ndarray(format="rgb24") for _, f in zip(range(spec["frames"]), src.decode(video=0))]
-    plateio.write_movie(lambda i: frames[i], len(frames), target, spec["fps"], crf=14, preset="medium", size=spec["size"])
+        frames = [f.to_ndarray(format="rgb24") for _, f in zip(range(UHD_FRAMES), src.decode(video=0))]
+    plateio.write_movie(lambda i: frames[i], len(frames), target, fps, crf=14, preset="medium", size=UHD_SIZE)
 
 
 def moved(strokes, exact):
@@ -131,14 +181,16 @@ def matte_areas(comfy, since):
 
 def read_log(text):
     """What a case's page log says: the render steps and the jobs with their seconds, and the counts the report shows."""
-    profile, jobs = re.search(r"Memory profile (\w+): ([^\n]*)", text), JOB.findall(text)
+    profile = re.search(r"Memory profile (\w+): ([^\n]*)", text)
+    jobs = [{"name": name, "id": job, "seconds": float(s), "nodes": int(n), "cached": int(k or 0), "previews": int(p or 0)}
+            for name, job, s, n, k, p in JOB.findall(text)]
     return {
         "steps": [(f"v{v} {label}", float(s)) for v, label, s in STEP.findall(text)],
-        "jobs": [(name, float(s)) for name, s, *_ in jobs],
-        "cached": [(name, int(k or 0), int(n)) for name, _, n, k, _ in jobs],
+        "jobs": jobs,
+        "ended": ENDED.findall(text),
         "indexed": text.count("taken from the job index"),
         "oom": text.count("ran out of memory"),
-        "previews": sum(int(n or 0) for *_, n in jobs),
+        "previews": sum(j["previews"] for j in jobs),
         "live_off": re.findall(r"Live preview is off: ([^\n]*)", text),
         "profile": f"{profile.group(1)} ({profile.group(2)})" if profile else "not in the log's last 400 lines",
         "mattes": re.findall(r"((?:Paint|Erase) matte[^\n]*largest matte is [^\n]*)", text),
@@ -159,12 +211,22 @@ def run_case(a, name, case, folder):
     print(f"--- {name}", flush=True)
     subprocess.run(cmd)
     memory.on = False
-    result = {"name": name, "seconds": time.time() - t0, "vram": memory.vram, "ram": memory.ram, "container": memory.container, "folder": folder}
+    memory.join(3)
+    vram, ram, own = memory.peak()
+    result = {"name": name, "seconds": time.time() - t0, "vram": vram, "ram": ram, "own": own, "container": memory.container, "folder": folder}
     log_file, marks_file = os.path.join(folder, "page_log.txt"), os.path.join(folder, "timings.json")
     result["log"] = open(log_file, encoding="utf-8").read() if os.path.exists(log_file) else ""
     marks = json.load(open(marks_file)).get("marks", []) if os.path.exists(marks_file) else []
     result["marks"] = [what for _, what in marks]
     result.update(read_log(result["log"]))
+    try:
+        spans = job_spans(get(a.url + "/history?max_items=400"))
+    except (OSError, ValueError):
+        spans = {}
+    for job in result["jobs"]:  # when ComfyUI ran it, and the most memory held between those two times
+        span = spans.get(job["id"])
+        job["run"] = span[1] - span[0] if span else None
+        job["vram"], job["ram"], job["own"] = memory.peak(*span) if span else [0, 0, 0]
     failed = [m for m in result["marks"] if m.startswith("FAILED")] or ([] if marks else ["ui_live.py wrote no marks"])
     done = any(m.startswith("downloaded") for m in result["marks"]) or not case.get("strokes")  # a fluid shot alone has no export
     result["passed"], result["why"] = not failed and done, (failed[0] if failed else "" if done else "the full-size composite was not reached: " + (result["marks"] or ["?"])[-1])
@@ -177,36 +239,40 @@ def run_case(a, name, case, folder):
 def report(a, machine, results):
     gpu, system = (machine.get("devices") or [{}])[0], machine.get("system", {})
     git = lambda *args: subprocess.run(["git", "-C", REPO, *args], capture_output=True, text=True).stdout.strip() or "unknown"  # noqa: E731
+    gb = lambda n: f"{n / GB:.1f} GB"  # noqa: E731
     lines = ["# Paint a plate · GPU test report", "", "| | |", "| --- | --- |",
              f"| Written | {time.strftime('%d %B %Y, %H:%M')} (this machine's time) |",
-             f"| GPU | {gpu.get('name', 'unknown')}, {gpu.get('vram_total', 0) / GB:.1f} GB of VRAM |",
-             f"| RAM | {system.get('ram_total', 0) / GB:.1f} GB |",
+             f"| GPU | {gpu.get('name', 'unknown')}, {gb(gpu.get('vram_total', 0))} of VRAM |",
+             f"| RAM | {gb(system.get('ram_total', 0))} |",
              f"| ComfyUI | {system.get('comfyui_version', 'unknown')}, started with `{' '.join(system.get('argv', [])[1:]) or 'no flag'}` |",
              f"| PyTorch | {system.get('pytorch_version', 'unknown')} |",
              f"| Paint a plate | commit {git('rev-parse', '--short', 'HEAD')} on {git('rev-parse', '--abbrev-ref', 'HEAD')} |",
              f"| Cases | {a.cases}: {', '.join(r['name'] for r in results)} |",
-             f"| Memory profile asked for | {a.memory or 'none: the card decides'} |", "",
-             "| Case | Result | Seconds | Peak VRAM | Peak RAM | Memory stops retried | Previews received |", "| --- | --- | --- | --- | --- | --- | --- |"]
+             f"| Memory profile asked for | {a.memory or 'none: the card decides'} |",
+             f"| RAM read from | {a.source} |", "",
+             "Peak RAM is the most that was held; « no file » is the part of it that no file backs, which a memory cap cannot take back. "
+             "In a job's row, Seconds runs from the page's request to the job's end, and In ComfyUI from its start to its end in "
+             "ComfyUI's history. A job's peaks are the highest readings, once a second, between those two times.", "",
+             "| Case | Result | Seconds | Peak VRAM | Peak RAM | No file | Memory stops retried | Previews received |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
     for r in results:
-        lines.append(f"| {r['name']} | {'passed' if r['passed'] else 'FAILED'} | {r['seconds']:.0f} | {r['vram'] / GB:.1f} GB | {r['ram'] / GB:.1f} GB | {r['oom']} | {r['previews']} |")
+        lines.append(f"| {r['name']} | {'passed' if r['passed'] else 'FAILED'} | {r['seconds']:.0f} | {gb(r['vram'])} | {gb(r['ram'])} | {gb(r['own'])} | {r['oom']} | {r['previews']} |")
     for r in results:
         lines += ["", f"## {r['name']} · {'passed' if r['passed'] else 'FAILED'} in {r['seconds']:.0f} s", ""]
         if r["why"]:
             lines += [r["why"], ""]
         lines += ["| Step | Seconds |", "| --- | --- |", *[f"| {label} | {s:.1f} |" for label, s in r["steps"]]]
-        per = {}
-        for name, s in r["jobs"]:
-            per.setdefault(name, []).append(s)
-        cached = {}
-        for name, k, n in r["cached"]:
-            cached.setdefault(name, []).append(f"{k} of {n}")
-        lines += ["", "| Workflow | Jobs | Seconds in all | Each job's seconds | Nodes from ComfyUI's cache, per job |", "| --- | --- | --- | --- | --- |",
-                  *[f"| {n} | {len(v)} | {sum(v):.1f} | {', '.join(f'{s:.1f}' for s in v)} | {', '.join(cached.get(n, [])) or 'none'} |" for n, v in per.items()], ""]
-        lines += [f"- Memory profile: {r['profile']}.",
-                  f"- Peak VRAM {r['vram'] / GB:.1f} GB, peak RAM {r['ram'] / GB:.1f} GB" + (f" (this container: {r['container'] / GB:.1f} GB)" if r["container"] else "") + ".",
+        lines += ["", "| Job | Seconds | In ComfyUI | Peak VRAM | Peak RAM | No file | Nodes from ComfyUI's cache | Previews |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+        for j in r["jobs"]:
+            ran = "" if j["run"] is None else f"{j['run']:.1f}"
+            peaks = " | | " if j["run"] is None else f"{gb(j['vram'])} | {gb(j['ram'])} | {gb(j['own'])}"
+            lines.append(f"| {j['name']} {j['id']} | {j['seconds']:.1f} | {ran} | {peaks} | {j['cached']} of {j['nodes']} | {j['previews']} |")
+        lines += ["", f"- Memory profile: {r['profile']}.",
+                  f"- Peak VRAM {gb(r['vram'])}. Peak RAM {gb(r['ram'])}, of which {gb(r['own'])} that no file backs"
+                  + (f"; this container's own count, page cache included: {gb(r['container'])}" if r["container"] else "") + ".",
                   f"- Out-of-memory retries: {r['oom']}. Jobs taken from the job index, so not timed: {r['indexed']}.",
                   f"- Previews received by the page: {r['previews']}. Live previews written by the node: {r['live_files']}."
                   + ("".join(f" Live preview off: {why}." for why in r["live_off"]))]
+        lines += [f"- Did not finish: {line}" for line in r["ended"]]
         lines += [f"- {m}" for m in r["mattes"]]
         if r["matte"]:
             folder, areas = r["matte"]
@@ -239,6 +305,9 @@ def main():
     a.url, a.comfy, a.out = a.url.rstrip("/"), os.path.abspath(a.comfy), os.path.abspath(a.out)
     with open(os.path.join(HERE, "gpu_matrix.json"), encoding="utf-8") as f:
         cases = json.load(f)
+    for case in cases.values():
+        if isinstance(case, dict) and "like" in case:  # another case's strokes, the brush scaled to this plate
+            case["strokes"] = [[*s[:3], round(s[3] * case.get("scale", 1)), *s[4:]] for s in cases[case["like"]]["strokes"]]
     names = QUICK if a.cases == "quick" else ALL if a.cases == "all" else tuple(a.cases.split(","))
     unknown = [n for n in names if not isinstance(cases.get(n), dict)]
     if unknown:
@@ -248,12 +317,15 @@ def main():
         machine = get(a.url + "/system_stats")
     except OSError:
         stop(f"No ComfyUI answers at {a.url}: start it, then run this again.")
+    pid = Memory(a.url).pid
+    a.source = f"ComfyUI's process, {pid} (/proc/{pid}/status)" if pid else "the system's RAM in use (/system_stats): ComfyUI's process cannot be read from here"
     plates = os.path.join(a.comfy, "input", "plates")
     if any("path" in cases[n] for n in names) and not os.path.exists(os.path.join(plates, "horse.mp4")):
-        stop(f"The test plate is missing: run `bash tools/get_plates.sh {a.comfy}`, which puts horse.mp4 in input/plates.")
-    if any(cases[n].get("path", "").endswith(UHD["file"]) for n in names) and not os.path.exists(os.path.join(plates, UHD["file"])):
-        print(f"making {UHD['file']} from horse.mp4", flush=True)
-        make_uhd(os.path.join(plates, "horse.mp4"), os.path.join(plates, UHD["file"]))
+        stop("The test plate is missing: run `python get_plates.py` in the pack's folder, which puts horse.mp4 in ComfyUI's input/plates.")
+    for file, fps in UHD.items():
+        if any(cases[n].get("path", "").endswith(file) for n in names) and not os.path.exists(os.path.join(plates, file)):
+            print(f"making {file} from horse.mp4", flush=True)
+            make_uhd(os.path.join(plates, "horse.mp4"), os.path.join(plates, file), fps)
     os.makedirs(a.out, exist_ok=True)
     results = []
     for name in names:
