@@ -35,7 +35,7 @@ const DEEP_SIDE = 960; // their long side, the playback video's
 const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-size edits, quick edits, SAM tracking
 // the erase matte only places the erase pass's box, grown by 1/24 of the width: 640 is enough, at half the time of 960
 const ERASE_TRACK_SIDE = 640;
-const LIVE = { every: 2, vram: 24e9 }; // the live preview while LTX samples: from step 1, every other step, on cards with room for its tiny decoder
+const LIVE = { every: 2 }; // the live preview while LTX samples, on every card: from step 1, every other step
 const HDR_ON = Q.get("hdr") !== "0"; // SDR to HDR runs whenever its files and nodes are present; ?hdr=0 in the address turns it off
 const HDR_FRAMES = "ACES2065-1"; // the colour space of the SDR-to-HDR frames (HDR_SPACE in tools/build_workflows.py)
 const BLANK_AT_START = Q.get("blank") !== "0"; // with no plate open, a blank plate opens at start, ready for a fluid shot; ?blank=0 starts empty
@@ -1494,7 +1494,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     log(`Fluid v${v}: ${keys.length} keyframe(s) at ${keys.map((k) => p.first + k.frame).join(", ")}, ${size.join(" x ")}, ${p.frames} frames at ${p.fps} fps, seed ${f.seed}, prompt "${prompt}"`);
     status(`Fluid shot v${v}: one LTX 2.5 pass with ainvfx-fluid`);
     const out = await run("fluid", { path: f.blankPath ?? p.path, config: S.ocio.config, color_space: "@model", max_frames: p.frames, keys: JSON.stringify(keys), prompt, seed: f.seed,
-      prefix: `${dir}/plate`, video_prefix: `${dir}/preview`, control_prefix: `${dir}/control/c`, ...plateMovie(p), live: liveEvery() },
+      prefix: `${dir}/plate`, video_prefix: `${dir}/preview`, control_prefix: `${dir}/control/c`, ...plateMovie(p), live: LIVE.every },
       { kind: "fluid", progress: (x) => { if (f.busy) { f.busy.progress = x; fluidUI(); fluidProgress(); } }, live: showLive }).done;
     let path = `${folderOf("fluid", out, "video")}/plate/${(f.blankPath ?? p.spec.source).split(/[\\/]/).pop()}`;
     let movie = null, hdrFrames = null; // an HDR fluid shot as an 8-bit movie in log values: the look of its EXR frames
@@ -1502,7 +1502,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     if (hdr) { // 16-bit: SDR to HDR makes the fluid shot an EXR plate, so every edit on it renders in HDR too
       const t1 = performance.now();
       status(`Fluid shot v${v}: SDR to HDR, one LTX 2.5 pass with Lightricks' IC-LoRA`);
-      const made = await run("hdr", { path, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps), ...plateMovie(p), prefix: `${dir}/hdr/f`, video_prefix: `${dir}/hdr_movie`, view_space: logSpace(), movie_fps: p.fps, live: liveEvery() },
+      const made = await run("hdr", { path, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps), ...plateMovie(p), prefix: `${dir}/hdr/f`, video_prefix: `${dir}/hdr_movie`, view_space: logSpace(), movie_fps: p.fps, live: LIVE.every },
         { kind: "fluid", progress: (x) => { if (f.busy) { f.busy.progress = x; fluidUI(); fluidProgress(); } }, live: showLive }).done;
       path = folderOf("hdr", made, "hdr");
       const hf = outputFile("hdr", made, "hdr");
@@ -2239,7 +2239,9 @@ function idle() { // one render step at a time, from the render queue; the edits
   }).finally(() => { S.piping = null; S.stage = null; hideLive(); stagesUI(); exportUI(); generateUI(); touch(); });
 }
 
-const liveEvery = () => (S.vram >= LIVE.vram ? LIVE.every : 0); // steps between live previews, 0 for none
+// Every LTX pass asks for its live previews (LIVE.every): what computes always shows. The viewer's showLive gets a preview
+// only while its render is on show, asked when the preview arrives: a render that comes on show while its step runs shows too.
+const liveFor = (shown) => (d) => { if (shown()) showLive(d); };
 const grow = (w, erase) => Math.max(4, Math.round(w / (erase ? COMPOSITE_GROW.erase : COMPOSITE_GROW.other))); // pixels at width w
 const feather = (w) => Math.max(6, Math.round(w / COMPOSITE_FEATHER));
 
@@ -2331,11 +2333,11 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   if (E?.erased) reused(r, r, "erase", () => { r.erased = E.erased; });
   await step(r, "erase", async (progress) => { r.erased = E.erased = await track(active, null, base, "", progress, null, ["erase"]); });
   const cleanAt = async (size, progress, live) => { // the erase pass at `size`, kept by the erases: a preview, or the full size's first stage
-    const at = `${size[0]}x${size[1]}`, kept = (E.sizes[at] ??= {}), show = live && here();
+    const at = `${size[0]}x${size[1]}`, kept = (E.sizes[at] ??= {});
     if (kept.clean) return kept;
     const out = await run("clean", { ...common, seed: erases[0].seed, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, prompt: scene,
-      width: size[0], height: size[1], prefix: `${base}/${at}/clean/f`, video_prefix: `${base}/${at}/clean`, live: show ? liveEvery() : 0 },
-      { kind: "clean", progress, live: show ? showLive : null }).done;
+      width: size[0], height: size[1], prefix: `${base}/${at}/clean/f`, video_prefix: `${base}/${at}/clean`, live: LIVE.every },
+      { kind: "clean", progress, live: liveFor(() => live && here()) }).done;
     return Object.assign(kept, { clean: folderOf("clean", out, "frames"), raw: viewUrl(outputFile("clean", out, "video")) });
   };
   const take = (store, d, final) => { // frames an earlier render of more edits made: the composite takes them inside these edits' mattes only
@@ -2367,17 +2369,17 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       if (S.stage) S.stage.part = `stage 2 of 2, upscaled to ${size.join(" × ")}`;
       log(`Render v${r.v}: Erase pass, full size: stage 2 of 2, 2 steps at ${size.join(" x ")} from stage 1 at ${low.join(" x ")}`);
       const out = await run("cleanup", { ...common, seed: erases[0].seed, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, prompt: scene,
-        low: first.clean, width: size[0], height: size[1], prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean`, live: here() ? liveEvery() : 0 },
-        { kind: "clean", progress: (f) => progress(0.5 + f / 2), live: here() ? showLive : null }).done;
+        low: first.clean, width: size[0], height: size[1], prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean`, live: LIVE.every },
+        { kind: "clean", progress: (f) => progress(0.5 + f / 2), live: liveFor(here) }).done;
       E.full = { clean: folderOf("cleanup", out, "frames"), raw: viewUrl(outputFile("cleanup", out, "video")) };
       Object.assign(store, E.full);
     }, store);
     if (erase && store.cleanRaw === undefined) store.cleanRaw = store.raw; // the erase pass's own movie: Ripple's shot takes `raw` next
     await step(r, final ? "full" : "shot", async (progress) => {
-      const plate = erase ? { path: store.clean, color_space: "@model" } : { path: p.path }, show = here();
+      const plate = erase ? { path: store.clean, color_space: "@model" } : { path: p.path };
       const out = await run("shot", { ...common, ...plate, hero: r.hero, prompt, width: size[0], height: size[1],
-        prefix: `${base}/${dir}/shot/f`, video_prefix: `${base}/${dir}/raw`, live: show ? liveEvery() : 0 },
-        { kind: "shot", progress, live: show ? showLive : null }).done;
+        prefix: `${base}/${dir}/shot/f`, video_prefix: `${base}/${dir}/raw`, live: LIVE.every },
+        { kind: "shot", progress, live: liveFor(here) }).done;
       store.shot = folderOf("shot", out, "frames");
       store.raw = viewUrl(outputFile("shot", out, "video"));
     }, store);
@@ -2414,8 +2416,8 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   r.full ??= pv.mattes;
   await step(r, "hdr", async (progress) => { // SDR to HDR: the full-size shot made again in scene-linear values; review fits it to the plate
     const out = await run("hdr", { path: final, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps), ...plateMovie(p),
-      prefix: `${base}/full/hdr/f`, video_prefix: `${base}/full/hdr_movie`, view_space: logSpace(), movie_fps: p.fps, live: here() ? liveEvery() : 0 },
-      { kind: "hdr", progress, live: here() ? showLive : null }).done;
+      prefix: `${base}/full/hdr/f`, video_prefix: `${base}/full/hdr_movie`, view_space: logSpace(), movie_fps: p.fps, live: LIVE.every },
+      { kind: "hdr", progress, live: liveFor(here) }).done;
     r.hdr = folderOf("hdr", out, "hdr");
     const hf = outputFile("hdr", out, "hdr"); // its EXR frames, for its row: drawn and inspected in ACES2065-1
     r.hdrFrames = hf ? `output:${hf.subfolder}/${framePattern(hf.filename)}` : null;

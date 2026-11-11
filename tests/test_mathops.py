@@ -494,3 +494,18 @@ class FollowMatteKeepsThePlate(unittest.TestCase):
         element[30:36, 20:30] = 1  # what the edit changed: 60 px
         _, summary = m.follow_matte(np.zeros((0, h, w), np.float32), n, first, element=element)
         self.assertRegex(summary, r"largest matte is 60\.0 times the object, on frame 0 \(warning: above 3")
+
+
+class StoppedFollowMatte(unittest.TestCase):
+    def test_the_frame_loop_stops_when_its_check_raises(self):  # nodes.py passes ComfyUI's interrupt check as `tick`
+        calls = []
+
+        def tick():
+            calls.append(1)
+            if len(calls) == 4:
+                raise RuntimeError("stopped")
+        first = np.zeros((40, 60), np.float32)
+        first[10:20, 10:20] = 1
+        with self.assertRaises(RuntimeError):
+            m.follow_matte(np.repeat(first[None], 48, 0), 48, first, tick=tick)
+        self.assertEqual(len(calls), 4)  # no frame after the stop

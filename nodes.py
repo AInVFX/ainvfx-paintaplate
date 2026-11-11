@@ -38,8 +38,38 @@ CATEGORY = "AInVFX/Paint a plate"
 resolve, output_folder = folders.plate_path, folders.output_folder
 
 
+class Stop:
+    """ComfyUI's interrupt check for a frame loop, called before each frame: it raises as soon as the person stops the job.
+    ComfyUI clears its flag when the check raises, and frames are made in worker threads: the first raise is remembered,
+    so every later call raises too and the frames still queued end at once."""
+
+    def __init__(self):
+        self.stopped = False
+
+    def __call__(self):
+        if self.stopped:
+            raise mm.InterruptProcessingException()
+        try:
+            mm.throw_exception_if_processing_interrupted()
+        except mm.InterruptProcessingException:
+            self.stopped = True
+            raise
+
+
+def stoppable(at):
+    """`at(i)`, the frame function of a loop that plateio or mathops runs, with the interrupt check before each frame."""
+    stop = Stop()
+
+    def frame(i):
+        stop()
+        return at(i)
+    return frame
+
+
 def frames_np(images: torch.Tensor):
+    stop = Stop()
     for frame in images:
+        stop()
         yield frame.float().cpu().numpy()
 
 
@@ -105,7 +135,10 @@ class LoadPlate(io.ComfyNode):
             files = spec["files"][:max_frames]
             bar = comfy.utils.ProgressBar(len(files))
 
+            stop = Stop()
+
             def read(f):
+                stop()
                 part = InputImpl.VideoFromFile(f).get_components()
                 bar.update(1)
                 return part
@@ -193,12 +226,21 @@ class SavePlate(io.ComfyNode):
                                          audio_source=spec["source"])
             bar = comfy.utils.ProgressBar(count)
             src = plateio.SourceFrames(spec["source"], writer.pix_fmt) if keep_untouched and changed is not None else None
-            for i, frame in enumerate(frames_np(images[:count])):
-                keep = None if src is None else plateio.untouched(changed[min(i, changed.shape[0] - 1)].float().cpu().numpy())
-                writer.write(frame, keep=keep, source=None if src is None else src.next())
-                bar.update(1)
-            if src is not None:
-                src.close()
+            try:
+                for i, frame in enumerate(frames_np(images[:count])):
+                    keep = None if src is None else plateio.untouched(changed[min(i, changed.shape[0] - 1)].float().cpu().numpy())
+                    writer.write(frame, keep=keep, source=None if src is None else src.next())
+                    bar.update(1)
+            except BaseException:  # stopped or failed: no half-written plate stays in the export folder
+                try:
+                    writer.close()
+                finally:
+                    if os.path.exists(writer.path):
+                        os.remove(writer.path)
+                raise
+            finally:
+                if src is not None:
+                    src.close()
             writer.close()
             written, notes = [writer.path], writer.notes
         else:
@@ -262,7 +304,7 @@ class FitToPlate(io.ComfyNode):
         masks = np.zeros((1, 8, 8), np.float32) if mask is None else mask[:n].float().cpu().numpy()
         bar = comfy.utils.ProgressBar(2 * n)
         images, out = mathops.fit_to_plate(
-            n, h, w, lambda i: plate[i].float().cpu().numpy(), lambda i: image[i].float().cpu().numpy(), masks,
+            n, h, w, stoppable(lambda i: plate[i].float().cpu().numpy()), lambda i: image[i].float().cpu().numpy(), masks,
             align=align, max_shift=max_shift, match_color=match_color, grain=grain, grow=grow, feather=feather,
             steady=steady, workers=WORKERS, progress=lambda: bar.update(1))
         return io.NodeOutput(to_image(images), to_image(out))
@@ -322,9 +364,10 @@ class RelightTransfer(io.ComfyNode):
                 logging.info("Paint a plate, Relight Transfer: the shot realigned by %.2f, %.2f px over %d frames", *shift, n)
         painted = list(frames_np(light[:1]))[0] if light is not None else None
         shaded = list(frames_np(shade[:1]))[0] if shade is not None else None
-        bar = comfy.utils.ProgressBar(n)
+        bar, stop = comfy.utils.ProgressBar(n), Stop()
 
         def one(args):
+            stop()
             i, p = args
             out = mathops.relight_frame(p, src[i], rel[i], radius, strength, shift, plate_space, shot_space, painted)
             if shaded is not None:
@@ -371,7 +414,7 @@ class FollowMatte(io.ComfyNode):
         shot = frames[..., :3].float().cpu().numpy()
         plate = base[..., :3].float().cpu().numpy() if base is not None else None
         out, summary = mathops.follow_matte(masks.float().cpu().numpy(), len(shot), first.float().cpu().numpy(),
-                                            shot if plate is not None else None, plate, zone=zone, threshold=threshold,
+                                            shot if plate is not None else None, plate, zone=zone, threshold=threshold, tick=Stop(),
                                             element=element.float().cpu().numpy() if element is not None else None)
         return io.NodeOutput(torch.from_numpy(out).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()), summary)
 
@@ -430,7 +473,8 @@ class LivePreview(io.ComfyNode):
             display_name="Live Preview",
             category=CATEGORY,
             description="Shows a shot while the video model samples it: from the first step, every few steps, a tiny decoder turns the predicted "
-                        "frames into a small looping animation for the page. The model itself is unchanged.",
+                        "frames into a small looping animation for the page. The model itself is unchanged. When it cannot make "
+                        "a preview, it tells the page why, once, and the shot still renders.",
             inputs=[
                 io.Model.Input("model"),
                 io.String.Input("decoder", default="taeltx2_3.safetensors",
@@ -449,12 +493,26 @@ class LivePreview(io.ComfyNode):
 
     @classmethod
     def execute(cls, model, decoder, frames, fps, every, size, transfer="sRGB") -> io.NodeOutput:
-        path = folder_paths.get_full_path("vae_approx", decoder) if every > 0 else None
-        if not path:
+        if every <= 0:
             return io.NodeOutput(model)
-        if path not in _TINY:
-            _TINY[path] = comfy.sd.VAE(sd=comfy.utils.load_torch_file(path))
-        tiny, server = _TINY[path], PromptServer.instance
+        server, context = PromptServer.instance, get_executing_context()
+        running = context.prompt_id if context else server.last_prompt_id
+
+        def off(reason, prompt_id=running):  # never silent: the page's log says once why this pass shows no preview
+            logging.warning("Paint a plate Live Preview is off for this shot: %s", reason)
+            server.send_sync("paintaplate.live", {"prompt_id": prompt_id, "off": str(reason)}, server.client_id)
+
+        path = folder_paths.get_full_path("vae_approx", decoder)
+        if not path:
+            off(f"its decoder, {decoder}, is not in models/vae_approx (python get_models.py downloads it)")
+            return io.NodeOutput(model)
+        try:
+            if path not in _TINY:
+                _TINY[path] = comfy.sd.VAE(sd=comfy.utils.load_torch_file(path))
+        except Exception as exc:  # a preview never stops a shot
+            off(f"its decoder, {decoder}, did not load: {exc}")
+            return io.NodeOutput(model)
+        tiny = _TINY[path]
         latent_frames, state = (frames - 1) // 8 + 1, {"calls": 0, "busy": False}
 
         def where(args):  # this step and the pass's steps, from the sigmas CFGGuider puts in every model call's options
@@ -482,6 +540,9 @@ class LivePreview(io.ComfyNode):
                                loop=0, quality=55, method=0)
                 server.send_sync("paintaplate.live", {"prompt_id": prompt_id, "step": step, "steps": steps,
                                                       "image": {"filename": name, "subfolder": "paintaplate_live", "type": "temp"}}, client)
+            except Exception as exc:  # a preview never stops a shot: it switches itself off, and says why
+                state["off"] = True
+                off(exc, prompt_id)
             finally:
                 state["busy"] = False
 
@@ -506,7 +567,7 @@ class LivePreview(io.ComfyNode):
                                 step, steps, context.prompt_id if context else server.last_prompt_id, server.client_id)
                 except Exception as exc:  # a preview never stops a shot: it switches itself off
                     state["off"] = True
-                    logging.warning("Paint a plate Live Preview is off for this shot: %s", exc)
+                    off(exc)
             return denoised
 
         patched = model.clone()
@@ -580,14 +641,14 @@ class SaveFrames(io.ComfyNode):
         names = [f"{name}_{counter + i:05}_.{'png' if format == 'png16' else format}" for i in range(n)]
         paths, bar = [os.path.join(folder, f) for f in names], comfy.utils.ProgressBar(n)
         if format == "exr":
-            plateio.write_exrs(lambda i: images[i].float().cpu().numpy(), paths, workers=WORKERS, tick=lambda: bar.update(1))
+            plateio.write_exrs(stoppable(lambda i: images[i].float().cpu().numpy()), paths, workers=WORKERS, tick=lambda: bar.update(1))
             return io.NodeOutput(ui={"images": [{"filename": f, "subfolder": sub, "type": "output"} for f in names]})
 
         def frame(i):  # as core Save Image: scaled by 255 and clipped, not rounded, so every pixel matches what it wrote
             if format == "png16":  # new content at a deep plate's depth: 65536 levels, rounded
                 return np.round(np.clip(images[i].float().cpu().numpy(), 0, 1) * 65535.0).astype(np.uint16)
             return np.clip(255.0 * images[i].float().cpu().numpy(), 0, 255).astype(np.uint8)
-        plateio.write_pngs(frame, paths, workers=WORKERS, tick=lambda: bar.update(1))
+        plateio.write_pngs(stoppable(frame), paths, workers=WORKERS, tick=lambda: bar.update(1))
         return io.NodeOutput(ui={"images": [{"filename": f, "subfolder": sub, "type": "output"} for f in names]})
 
 
@@ -626,7 +687,7 @@ class SaveMovie(io.ComfyNode):
         def frame(i):  # as core Save Video: scaled by 255 and clipped, not rounded
             return np.clip(255.0 * images[i].float().cpu().numpy(), 0, 255).astype(np.uint8)
 
-        plateio.write_movie(frame, n, os.path.join(folder, file), fps, workers=WORKERS, crf=crf, tick=lambda: bar.update(1),
+        plateio.write_movie(stoppable(frame), n, os.path.join(folder, file), fps, workers=WORKERS, crf=crf, tick=lambda: bar.update(1),
                             size=(width, height))
         return io.NodeOutput(ui={"images": [{"filename": file, "subfolder": sub, "type": "output"}], "animated": [True]})
 
@@ -663,7 +724,7 @@ class HDRMatch(io.ComfyNode):
             return io.NodeOutput(hdr)
         m = (mask if mask.ndim == 3 else mask[None]).float().cpu().numpy()
         n, k = hdr.shape[0], plate.shape[0]
-        frames, report = mathops.hdr_match(n, lambda i: hdr[i].float().cpu().numpy(), lambda i: plate[min(i, k - 1)].float().cpu().numpy(),
+        frames, report = mathops.hdr_match(n, stoppable(lambda i: hdr[i].float().cpu().numpy()), lambda i: plate[min(i, k - 1)].float().cpu().numpy(),
                                            lambda i: m[min(i, len(m) - 1)], grow=grow, workers=WORKERS)
         logging.info("PaintAPlate HDR Match: %s", report["text"])
         return io.NodeOutput(to_image(frames))
@@ -712,7 +773,7 @@ class KeepBlack(io.ComfyNode):
     def execute(cls, hdr, sdr, low, high) -> io.NodeOutput:
         n = min(hdr.shape[0], sdr.shape[0])
         with ThreadPoolExecutor(WORKERS) as pool:
-            out = list(pool.map(lambda i: mathops.keep_black(hdr[i].float().cpu().numpy(), sdr[i].float().cpu().numpy(), low, high), range(n)))
+            out = list(pool.map(stoppable(lambda i: mathops.keep_black(hdr[i].float().cpu().numpy(), sdr[i].float().cpu().numpy(), low, high)), range(n)))
         return io.NodeOutput(torch.from_numpy(np.stack(out)))
 
 

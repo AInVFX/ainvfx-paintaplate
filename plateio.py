@@ -511,28 +511,33 @@ def write_movie(frame_at, n: int, path: str, fps: float, workers: int = 8, crf: 
     h, w = first.shape[:2]
     if size and all(size):  # (width, height): scaled with swscale's Lanczos while converting, as the viewer's canvas wants it
         w, h = size[0] - size[0] % 2, size[1] - size[1] % 2
-    with av.open(path, "w") as out:
-        st = out.add_stream("libx264", rate=Fraction(fps).limit_denominator(1001))
-        st.width, st.height, st.pix_fmt = w, h, "yuv420p"
-        st.options = {"crf": str(crf), "preset": preset}
-        cc = st.codec_context
-        cc.thread_count = 0  # x264 picks its threads
-        cc.color_primaries, cc.color_trc, cc.colorspace, cc.color_range = 1, 13, 1, 1  # BT.709, sRGB, BT.709, limited
+    try:
+        with av.open(path, "w") as out:
+            st = out.add_stream("libx264", rate=Fraction(fps).limit_denominator(1001))
+            st.width, st.height, st.pix_fmt = w, h, "yuv420p"
+            st.options = {"crf": str(crf), "preset": preset}
+            cc = st.codec_context
+            cc.thread_count = 0  # x264 picks its threads
+            cc.color_primaries, cc.color_trc, cc.colorspace, cc.color_range = 1, 13, 1, 1  # BT.709, sRGB, BT.709, limited
 
-        def yuv(i):  # swscale with the BT.709 matrix, full-range RGB in and limited range out, as core converts
-            a = first if i == 0 else np.ascontiguousarray(frame_at(i))
-            f = av.VideoFrame.from_ndarray(a, format="rgb24").reformat(width=w, height=h, format="yuv420p", dst_colorspace=1,
-                                                                        interpolation="LANCZOS")
-            if tick:
-                tick()
-            return f
-        with ThreadPoolExecutor(max(1, workers)) as pool:
-            for i, f in enumerate(pool.map(yuv, range(n))):
-                f.pts = i
-                for p in st.encode(f):
-                    out.mux(p)
-        for p in st.encode(None):
-            out.mux(p)
+            def yuv(i):  # swscale with the BT.709 matrix, full-range RGB in and limited range out, as core converts
+                a = first if i == 0 else np.ascontiguousarray(frame_at(i))
+                f = av.VideoFrame.from_ndarray(a, format="rgb24").reformat(width=w, height=h, format="yuv420p", dst_colorspace=1,
+                                                                            interpolation="LANCZOS")
+                if tick:
+                    tick()
+                return f
+            with ThreadPoolExecutor(max(1, workers)) as pool:
+                for i, f in enumerate(pool.map(yuv, range(n))):
+                    f.pts = i
+                    for p in st.encode(f):
+                        out.mux(p)
+            for p in st.encode(None):
+                out.mux(p)
+    except BaseException:  # stopped (nodes.py asks ComfyUI before each frame) or failed: no half-written movie stays
+        if os.path.exists(path):
+            os.remove(path)
+        raise
 
 
 def plane_array(plane, itemsize: int) -> np.ndarray:
