@@ -1,4 +1,4 @@
-"""Publish test plates to a Hugging Face dataset, with clean metadata and a card.
+"""Publish example plates to a Hugging Face dataset, with clean metadata and a card.
 
     HF_TOKEN=hf_... python tools/plates_to_hf.py [--repo AInVFX/ainvfx-paintaplate] --src <folder of MP4 plates> [--dry-run]
 
@@ -24,13 +24,13 @@ from fractions import Fraction
 
 import av
 
-COMMENT = ("AI-generated test plate for AInVFX Paint a plate (github.com/AInVFX/ainvfx-paintaplate). Made in ComfyUI: "
+COMMENT = ("AI-generated example plate for AInVFX Paint a plate (github.com/AInVFX/ainvfx-paintaplate). Made in ComfyUI: "
            "LTX 2.5 (Lightricks) made the shot and its sound, from a first frame by MOSS-Image or FLUX 3 Image Klein, or "
            "from text alone. No real people, no real locations, no stock footage. CC BY 4.0, AInVFX: see the dataset card.")
 
 CARD = """---
 license: cc-by-4.0
-pretty_name: AInVFX Paint a plate test plates
+pretty_name: AInVFX Paint a plate example plates
 task_categories:
 - image-to-video
 tags:
@@ -43,7 +43,7 @@ size_categories:
 - n<1K
 ---
 
-# AInVFX PaintAPlate test plates
+# AInVFX PaintAPlate example plates
 
 **Work in progress.** The plates of [AInVFX PaintAPlate](https://github.com/AInVFX/ainvfx-paintaplate), the ComfyUI
 node pack and page that lets you paint on the first frame of a shot to erase, add or relight, and get the shot back in
@@ -55,7 +55,7 @@ locations, no stock footage. All are AI-generated: please say so when you show t
 
 ## Use them with PaintAPlate
 
-On a Runpod pod: `PLATES=1 bash tools/runpod_start.sh`, or `bash tools/get_plates.sh` once ComfyUI runs. Either
+On a Runpod pod: `PLATES=1 bash tools/runpod_start.sh`, or `python get_plates.py` once ComfyUI runs. Either
 puts them in ComfyUI's `input/plates` folder, and the Open plate dialog lists them with a thumbnail. On your own machine:
 
 ```sh
@@ -143,7 +143,7 @@ def main() -> int:
     url = api.create_repo(a.repo, repo_type="dataset", private=a.private, exist_ok=True)
     print(f"Repository: {url}")
     api.upload_folder(folder_path=work, repo_id=a.repo, repo_type="dataset",
-                      commit_message=f"PaintAPlate test plates: {len(names)} synthetic shots, metadata replaced, WIP card")
+                      commit_message=f"PaintAPlate example plates: {len(names)} synthetic shots, metadata replaced, WIP card")
     arrived = sorted(f for f in api.list_repo_files(a.repo, repo_type="dataset") if f.endswith(".mp4"))
     missing = sorted(set(names) - set(arrived))
     print(f"Uploaded: {len(arrived)} plates at https://huggingface.co/datasets/{a.repo}")
@@ -152,7 +152,7 @@ def main() -> int:
         return 1
     shutil.rmtree(work, ignore_errors=True)
     print("\nNow take the plates out of git, from the repository root:\n"
-          "  git rm -r --quiet tests/plates && git commit -m \"Test plates moved to Hugging Face\"")
+          "  git rm -r --quiet tests/plates && git commit -m \"Example plates moved to Hugging Face\"")
     return 0
 
 

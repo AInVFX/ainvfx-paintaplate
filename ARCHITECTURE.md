@@ -183,7 +183,7 @@ Open plate has one tab per source: **ComfyUI files**, **Upload**, **Scenes** and
 
 | Folder | What it holds |
 | --- | --- |
-| `input/plates` | Plates such as the test plates from `tools/get_plates.sh` |
+| `input/plates` | Plates such as the example plates that `get_plates.py` downloads |
 | `input/paintaplate/<plate id>/` | Files uploaded from the Upload tab |
 | `input/paintaplate/up/` | Images the page uploads (first frames, masks, keyframes), named by the hash of their pixels |
 | `input/paintaplate/blank/` | Blank canvases for fluid shots |
@@ -209,7 +209,7 @@ Open plate has one tab per source: **ComfyUI files**, **Upload**, **Scenes** and
 | `requirements.txt` | The runtime packages beyond ComfyUI's own: OpenEXR and OpenColorIO. |
 | `get_models.py` | Every model file the workflows load, with its repository, its tested revision and its folder, downloaded with ComfyUI's own Python on Windows, macOS or Linux. The pod setup runs it. |
 
-Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), `.gitignore` (the test plates included: they live on Hugging Face) and `.comfyignore` (what the Registry package leaves out). `.github/workflows/tests.yml` runs three jobs side by side on every push: the unit tests, the page against the mock ComfyUI, and a CPU ComfyUI with a headless browser. `.github/workflows/publish.yml` publishes to the Comfy Registry when run by hand, with its action pinned to a commit.
+Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), `.gitignore` (the example plates included: they live on Hugging Face) and `.comfyignore` (what the Registry package leaves out). `.github/workflows/tests.yml` runs three jobs side by side on every push: the unit tests, the page against the mock ComfyUI, and a CPU ComfyUI with a headless browser. `.github/workflows/publish.yml` publishes to the Comfy Registry when run by hand, with its action pinned to a commit.
 
 ### The page, in `web/`
 
@@ -277,9 +277,8 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | `placeholders.py` | Empty model files, so a CPU ComfyUI validates the workflows in CI. |
 | `pins.sh` | The tested ComfyUI and ComfyUI-LTXVideo commits, read by the three scripts below. |
 | `ci_comfyui.sh` | Builds the CPU ComfyUI of the live tests, at the pins. |
-| `pod_setup.sh` | GPU machine setup: PyTorch for CUDA 13.0, the pinned ComfyUI and ComfyUI-LTXVideo, the pack's requirements, and the models through `get_models.py`. `FLUID=0` skips ainvfx-fluid; `PLATES=1` adds the test plates. |
+| `pod_setup.sh` | GPU machine setup: PyTorch for CUDA 13.0, the pinned ComfyUI and ComfyUI-LTXVideo, the pack's requirements, and the models through `get_models.py`. `FLUID=0` skips ainvfx-fluid; `PLATES=1` adds the example plates. |
 | `runpod_start.sh` | One command on a Runpod pod: the setup with its progress, then ComfyUI on port 8188 (`--highvram` from 80 GB of VRAM), and the app's address. `--restart` after an update. |
-| `get_plates.sh` | The test plates, from the Hugging Face dataset `AInVFX/ainvfx-paintaplate` into `input/plates`. |
 | `plates_to_hf.py` | Publishes plates: re-muxed with the ComfyUI metadata replaced, a card, one upload. |
 | `offline_bundle.sh` | A tarball for a pod that cannot reach GitHub. |
 

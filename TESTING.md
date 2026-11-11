@@ -29,7 +29,7 @@ Where the system Python refuses `pip` (Ubuntu, Debian), install into a virtual e
 
 ## The page against the mock ComfyUI
 
-`tests/mock_comfy.py --plate` serves the page with a stand-in ComfyUI: the same HTTP and WebSocket API, numpy instead of models, step previews, progress and interrupts, and the pack's own routes (the browser, thumbnails, scenes, OCIO, the job index, the download). `--plate` writes a 1280 x 704 test plate to `input/plates/desk.mp4`. The stand-in writes VP9 previews, because Playwright's Chromium cannot decode H.264; Chrome, Edge, Safari and Firefox can. Each job waits a little, as on a GPU, and `--speed 8` divides those waits by 8. Its log names each job and its time.
+`tests/mock_comfy.py --plate` serves the page with a stand-in ComfyUI: the same HTTP and WebSocket API, numpy instead of models, step previews, progress and interrupts, and the pack's own routes (the browser, thumbnails, scenes, OCIO, the job index, the download). `--plate` writes a 1280 x 704 example plate to `input/plates/desk.mp4`. The stand-in writes VP9 previews, because Playwright's Chromium cannot decode H.264; Chrome, Edge, Safari and Firefox can. Each job waits a little, as on a GPU, and `--speed 8` divides those waits by 8. Its log names each job and its time.
 
 `python tests/ui_mock.py` runs the page's whole behaviour against it, flow by flow (set `PLAYWRIGHT_CHANNEL=chrome` to drive Google Chrome). A flow is one subject of the page. It runs in its own process, with its own mock ComfyUI and its own browser. So a flow starts from its own page load, a failure ends that flow only, and flows run side by side.
 
@@ -85,7 +85,7 @@ pip downloads are cached, and the browser jobs drive the runner's own Google Chr
 
 ## On a GPU machine
 
-These run the real models; `tools/runpod_start.sh` sets up a Runpod pod and starts ComfyUI, and with `PLATES=1` adds the test plates from the Hugging Face dataset `AInVFX/ainvfx-paintaplate` (`tools/get_plates.sh` does it alone).
+These run the real models; `tools/runpod_start.sh` sets up a Runpod pod and starts ComfyUI, and with `PLATES=1` adds the example plates from the Hugging Face dataset `AInVFX/ainvfx-paintaplate` (`tools/get_plates.sh` does it alone).
 
 - `tests/ui_live.py --url http://127.0.0.1:8188 --path plates/<shot> --think 8 --out <folder> --strokes '<json>' --channel chrome` drives the real page and records a timed mark for every stage, screenshots, the page's log and the downloaded zip. Each stroke is `[key, words, [[x, y], ...], brush size, options]`, with x and y from 0 to 1 on the frame; the options are `{"whole": false}` (an erase painted as is) and `{"color": "#d32f2f"}` (a swatch). `--fluid '<json>'` makes a fluid shot from a blank plate instead of opening a plate: `{"size": [1280, 704], "fps": 24, "frames": 121, "words": "...", "keys": [[frame, colour, [[x, y], ...], brush size], ...]}`, where a frame is 0, -1 for the last frame, or 8k + 1. Several strokes on one frame build one keyframe, so flat zones for sky and ground can sit under the fluid. With `--strokes`, the shot then becomes the plate and takes them. Playwright's own Chromium cannot play H.264: install Google Chrome with `python -m playwright install chrome` and pass `--channel chrome`.
-- `tests/gpu_bench.py` times single steps: `edit` (Klein previews and refine, `REFINE_STEPS`), `shot` (Ripple, replace against prepend), `export`, `mp4` (an H.264 copy of an EXR plate) and `anime` (a test plate made with FLUX 3 Image Klein and LTX 2.5).
+- `tests/gpu_bench.py` times single steps: `edit` (Klein previews and refine, `REFINE_STEPS`), `shot` (Ripple, replace against prepend), `export`, `mp4` (an H.264 copy of an EXR plate) and `anime` (a example plate made with FLUX 3 Image Klein and LTX 2.5).

@@ -16,15 +16,14 @@ import argparse
 import os
 import sys
 
-from get_models import comfy_folder, download, listing, why
+from get_models import comfy_folder, download, hub, listing, why
 
 REPO = "AInVFX/ainvfx-paintaplate"  # a Hugging Face dataset
 
 
 def plates(revision: str) -> dict[str, int]:
     """The dataset's MP4 files at `revision`, each with its size in bytes."""
-    from huggingface_hub import HfApi
-    return {f.path: f.size for f in HfApi().list_repo_tree(REPO, repo_type="dataset", revision=revision) if f.path.endswith(".mp4")}
+    return {f.path: f.size for f in hub().HfApi().list_repo_tree(REPO, repo_type="dataset", revision=revision) if f.path.endswith(".mp4")}
 
 
 def main(argv=None) -> int:

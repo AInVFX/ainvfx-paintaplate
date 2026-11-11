@@ -10,7 +10,7 @@ First accept the licences of FLUX 3 Image Klein, LTX 2.5, the in-outpainting IC-
 Hugging Face, then set the HF_TOKEN environment variable to a read token. A file already in place is skipped, and
 several files download at once: about 62 GB in all, ainvfx-fluid 0.65 GB and SDR to HDR 1.32 GB of it. The last line
 says how many files were downloaded, were already there and are missing; the exit code is 1 while a file the workflows
-need is missing. tools/pod_setup.sh runs this script on a pod, so every model file, its size and its revision have one
+need is missing, 2 when the folder or huggingface_hub is not found. tools/pod_setup.sh runs this script on a pod, so every model file, its size and its revision have one
 home: here. get_plates.py, beside this file, downloads the example plates with the same code.
 """
 from __future__ import annotations
@@ -43,7 +43,7 @@ MODELS = [  # (repository, file in the repository, folder under models/)
     ("WepeNerd/LTX-Ripple", "LTX25_Ripple_v11.safetensors", "loras"),
     ("Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting", "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors", "loras"),
     ("Comfy-Org/sam3.1", "checkpoints/sam3.1_multiplex_fp16.safetensors", "checkpoints"),
-    ("Kijai/LTX2.3_comfy", "vae/taeltx2_3.safetensors", "vae_approx"),  # the live preview's tiny decoder (MIT, madebyollin/taehv)
+    ("Kijai/LTX2.3_comfy", "vae/taeltx2_3.safetensors", "vae_approx"),  # the live preview's tiny decoder: madebyollin/taehv (MIT), from a repository whose card names the LTX-2 Community License Agreement
     ("Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR", "ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors", "loras"),  # SDR to HDR
     ("Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR", "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors", "embeddings"),  # its prompt
     ("AInVFX/ainvfx-fluid", "ltx-2.5/ainvfx-fluid.safetensors", "loras"),  # optional: fluid shots from a blank plate
@@ -72,6 +72,8 @@ SIZES = {  # bytes of each file at its revision (Hugging Face, read 11 November 
 }
 STAGING = ".paintaplate_downloads"  # inside the destination folder, so a finished file moves into place without a copy
 TOKENS = "https://huggingface.co/settings/tokens"
+NO_HUB = ("This Python has no huggingface_hub package. Run this command with the Python that runs ComfyUI (activate its virtual "
+          "environment first), or install the package: python -m pip install huggingface_hub")
 
 
 # ---------- Shared with get_plates.py ----------
@@ -80,6 +82,16 @@ def comfy_folder(name: str) -> str | None:
     """A folder of the ComfyUI this file is installed in: ComfyUI/custom_nodes/<pack>/<this file>."""
     folder = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", name))
     return folder if os.path.isdir(folder) else None
+
+
+def hub():
+    """huggingface_hub, or one sentence that says what to do: the system's Python rarely has the package, ComfyUI's does."""
+    try:
+        import huggingface_hub
+    except ImportError:
+        print(NO_HUB, file=sys.stderr)
+        raise SystemExit(2) from None
+    return huggingface_hub
 
 
 def in_place(target: str) -> bool:
@@ -104,7 +116,7 @@ def download(files, folder: str, noun: str, repo_type: str = "model") -> list[st
     """Each file of `files`, (repository, path in it, revision, path under `folder`), put in place: six at once, each
     downloaded beside its place and moved there when complete, so a download that stops leaves no partial file. One
     line per file, then one closing line. Returns the files that are still missing."""
-    from huggingface_hub import hf_hub_download
+    hf_hub_download = hub().hf_hub_download
     staging = os.path.join(folder, STAGING)
     site = "https://huggingface.co/" + ("datasets/" if repo_type == "dataset" else "")
 
