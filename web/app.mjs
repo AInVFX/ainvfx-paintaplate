@@ -3432,6 +3432,8 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Fit", "F", () => zoomTo(1), !p], ["Frame width", "Ctrl+F", widthZoom, !p], ["1:1", "1", () => pixelZoom(1), !p],
       ["2:1", "2", () => pixelZoom(2), !p], ["4:1", "4", () => pixelZoom(4), !p], ["1:2", "Shift+2", () => pixelZoom(1 / 2), !p], ["1:4", "Shift+4", () => pixelZoom(1 / 4), !p],
       ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["X-ray", "W", () => setXray(!S.xray), !p, S.xray], ["Full screen", "`", fullScreen],
+      ["Cache memory", "", [["Auto", "", () => setCache(0), false, !S.cache], ...CACHE_CHOICES.filter(Boolean).map((b) => [memoryText(b), "", () => setCache(b), false, S.cache === b])], !!CACHE_MB],
+      ["Playback statistics", "", toggleStats, false, S.stats],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
     ["Help", [["Getting started", "", () => showHelp("start")], ["Keys", "?", () => showHelp("keys")], ["Models and licences", "", showModels]]],
   ];
