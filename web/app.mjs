@@ -3696,7 +3696,7 @@ function enter(another) { // Generate (Enter): the edit in progress, then its sh
   const resumed = S.halted;
   S.halted = false; // a stop (Esc) lasts until Enter
   if (keying()) return void generateFluid(another).catch(quiet); // a fluid shot: generate it, Ctrl+Enter with another seed
-  if (S.draft) return launch(S.draft);
+  if (S.draft) return launch(S.draft, another); // Ctrl+Enter on a stopped or reopened edit: another seed
   if (another) { const target = S.selected ?? S.edits.at(-1); if (target) again(target); return; }
   if (resumed || renderPending()) { // a stopped or failed render goes on
     const r = S.renders.get(S.heroKey); if (r) r.failed = null; touch(0); return hud(resumed ? "Generating again from where it stopped" : "The shot renders now", 2000);
