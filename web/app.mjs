@@ -39,7 +39,7 @@ const DEEP_SIDE = 960; // their long side, the playback video's
 const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-size edits, quick edits, SAM tracking
 // the erase matte only places the erase pass's box, grown by 1/24 of the width: 640 is enough, at half the time of 960
 const ERASE_TRACK_SIDE = 640;
-const LIVE = { every: 2 }; // the live preview while LTX samples, on every card: from step 1, every other step
+const LIVE = { every: 2 }; // the live preview while LTX samples, on every card: from step 1, every other step. Every pass hands its previews to showLive, which alone decides what shows
 const HDR_ON = Q.get("hdr") !== "0"; // SDR to HDR runs whenever its files and nodes are present; ?hdr=0 in the address turns it off
 const HDR_FRAMES = "ACES2065-1"; // the colour space of the SDR-to-HDR frames (HDR_SPACE in tools/build_workflows.py)
 const BLANK_AT_START = Q.get("blank") !== "0"; // with no plate open, a blank plate opens at start, ready for a fluid shot; ?blank=0 starts empty
@@ -383,11 +383,8 @@ async function warmAll() { // every model loads while the person looks at the pa
   const stats = await (await fetch("/system_stats")).json();
   S.vram = stats.devices?.[0]?.vram_total ?? 0;
   S.memoryProfile = memoryProfile({ vram: S.vram, ram: stats.system?.ram_total ?? 0, force: MEMORY_ASKED });
-  log(`Memory profile ${S.memoryProfile.name}: ${S.memoryProfile.why}. ${S.memoryProfile.does}`);
-  if (!S.memoryProfile.warm.length) { // a small card: said in one sentence, before the person waits for a first step
-    if (!S.plate && $("#status").textContent === start) status(`Ready. ${S.memoryProfile.note}`); else log(S.memoryProfile.note);
-    return;
-  }
+  log(`Memory profile ${S.memoryProfile.name}: ${S.memoryProfile.why}. ${S.memoryProfile.does}`); // the profile's one line: the card, then what the page does on it
+  if (!S.memoryProfile.warm.length) return; // a small card: no model loads before an action needs it
   // ComfyUI keeps its history in memory until it restarts: a model that a prompt in it used is still loaded
   const history = Object.values(await (await fetch("/history?max_items=200")).json());
   const used = new Set(history.flatMap((h) => Object.values(h.prompt?.[2] ?? {}).map((n) => n.class_type)));
@@ -1514,7 +1511,7 @@ function enterFluid() { // a blank plate opens as a fluid shot: the paint tool i
   $("#prompt").value = f.prompt ?? "";
   if (f.result) { f.view = "result"; setShot(f.result.preview, "fluid"); }
   fluidUI(); timelineUI(); render();
-  status("Fluid shot: paint flat colour blobs on frame 0 and on the last frame, describe the fluid, then Enter. Keyframes snap to the 8-frame grid.");
+  status("Paint a fluid keyframe, describe it at the top, then Generate.", "hint");
 }
 
 function paintKey(e, rub) { // strokes go to the keyframe on the playhead's slot of the 8-frame grid
@@ -1656,7 +1653,7 @@ function keysUI(force = false) { // the keyframe diamonds on the timeline, over 
 async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-fluid: the keyframes become smoke, steam or fire
   const p = S.plate, f = S.fluid;
   if (!S.fluidReady) return status(FLUID_MISSING);
-  if (!f.keys.length) return status("Paint a keyframe first: flat colour blobs on frame 0 and on the last frame.");
+  if (!f.keys.length) return status("Paint a keyframe first: flat colour blobs on frame 0 and on the last frame.", "hint");
   if (another) f.seed = (Math.random() * 2 ** 31) | 0;
   else { // Enter again: a shot being made, or already made, from these keyframes, words and seed is not made twice
     if (f.busy?.sig === fluidSig()) return hud(`Fluid shot v${f.busy.v} is being made from these keyframes and words`, 2500);
@@ -1710,7 +1707,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     f.editing = false; // the shot is made: it becomes the plate under the next edits, and the viewer plays it
     f.busy = null;
     await rebase();
-    status(`Fluid shot v${v} is the plate under the next edits: Space plays it. Paint, erase or relight on it; the pencil on its History row returns to the keyframes.`);
+    status(`Fluid shot v${v} is the plate under the next edits: Space plays it. Paint, erase or relight on it; the pencil on its History row returns to the keyframes.`, "hint");
   } catch (err) {
     if (err?.message !== "cancelled") quiet(err);
   } finally {
@@ -1810,7 +1807,7 @@ function blankNote() { // what the blank plate will be, snapped to what LTX and 
   openGoUI();
 }
 
-async function openBlank(opts = {}) { // a black canvas LTX and ainvfx-fluid take, then a fluid shot on it (atStart: the page's own, at boot)
+async function openBlank() { // a black canvas LTX and ainvfx-fluid take, then a fluid shot on it
   if (!S.fluidReady) return status(FLUID_MISSING);
   const spec = blankForm(), depth = blankDepth($("#b-depth").value);
   if (depth === HDR_DEPTH && !S.hdrReady) return status(HDR_MISSING);
@@ -1818,9 +1815,7 @@ async function openBlank(opts = {}) { // a black canvas LTX and ainvfx-fluid tak
   if (!r.ok) throw new Error(await r.text());
   const { path } = await r.json();
   $("#open").close();
-  log(`Blank plate: ${spec.width} x ${spec.height}, ${spec.frames} frames at ${spec.fps} fps, ${depth}-bit (${path})`);
   await openPlate([], path, { fluid: { blankPath: path, depth }, cs: modelSpace() });
-  if (opts.atStart === true) status(`A blank plate is open, ${spec.width} × ${spec.height}, ${spec.frames} frames, ${depth}-bit: paint a fluid keyframe, describe it at the top, then Generate. Open loads a plate or another blank plate.`);
 }
 
 function fluidUI() { // the panel, the tools and the help of a fluid shot; none of it outside one
@@ -2461,9 +2456,6 @@ function idle() { // one render step at a time, from the render queue; the edits
   }).finally(() => { S.piping = null; S.stage = null; hideLive(); stagesUI(); exportUI(); generateUI(); touch(); });
 }
 
-// Every LTX pass asks for its live previews (LIVE.every): what computes always shows. The viewer's showLive gets a preview
-// only while its render is on show, asked when the preview arrives: a render that comes on show while its step runs shows too.
-const liveFor = (shown) => (d) => { if (shown()) showLive(d); };
 const grow = (w, erase) => Math.max(4, Math.round(w / (erase ? COMPOSITE_GROW.erase : COMPOSITE_GROW.other))); // pixels at width w
 const feather = (w) => Math.max(6, Math.round(w / COMPOSITE_FEATHER));
 
@@ -2554,12 +2546,12 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   // the erase is tracked on the plate first: the erase pass regenerates its areas, the composite keeps them
   if (E?.erased) reused(r, r, "erase", () => { r.erased = E.erased; });
   await step(r, "erase", async (progress) => { r.erased = E.erased = await track(active, null, base, "", progress, null, ["erase"]); });
-  const cleanAt = async (size, progress, live) => { // the erase pass at `size`, kept by the erases: a preview, or the full size's first stage
+  const cleanAt = async (size, progress) => { // the erase pass at `size`, kept by the erases: a preview, or the full size's first stage
     const at = `${size[0]}x${size[1]}`, kept = (E.sizes[at] ??= {});
     if (kept.clean) return kept;
     const out = await run("clean", { ...common, seed: erases[0].seed, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, prompt: scene,
       width: size[0], height: size[1], prefix: `${base}/${at}/clean/f`, video_prefix: `${base}/${at}/clean`, live: LIVE.every },
-      { kind: "clean", progress, live: liveFor(() => live && here()) }).done;
+      { kind: "clean", progress, live: showLive }).done;
     return Object.assign(kept, { clean: folderOf("clean", out, "frames"), raw: viewUrl(outputFile("clean", out, "video")) });
   };
   const take = (store, d, final) => { // frames an earlier render of more edits made: the composite takes them inside these edits' mattes only
@@ -2582,17 +2574,17 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     if (donor) return take(store, donor, final);
     if (kept?.clean) reused(r, store, id, () => Object.assign(store, { clean: kept.clean, raw: kept.raw }));
     await step(r, id, async (progress) => {
-      if (!final) return void Object.assign(store, await cleanAt(size, progress, true));
+      if (!final) return void Object.assign(store, await cleanAt(size, progress));
       // at full size, Lightricks' two stages: the erase pass at half the working size (the preview's own when it is that size),
       // then 2 steps at full size from it, without the reference video. 8 steps at full size took 181 s on a 1080p plate (28 Oct)
       const low = stageOne(p.work);
       if (S.stage) S.stage.part = `stage 1 of 2 at ${low.join(" × ")}`; // the live preview names the stage: each starts at step 1
-      const first = await cleanAt(low, (f) => progress(f / 2), true);
+      const first = await cleanAt(low, (f) => progress(f / 2));
       if (S.stage) S.stage.part = `stage 2 of 2, upscaled to ${size.join(" × ")}`;
       log(`Render v${r.v}: Erase pass, full size: stage 2 of 2, 2 steps at ${size.join(" x ")} from stage 1 at ${low.join(" x ")}`);
       const out = await run("cleanup", { ...common, seed: erases[0].seed, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, prompt: scene,
         low: first.clean, width: size[0], height: size[1], prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean`, live: LIVE.every },
-        { kind: "clean", progress: (f) => progress(0.5 + f / 2), live: liveFor(here) }).done;
+        { kind: "clean", progress: (f) => progress(0.5 + f / 2), live: showLive }).done;
       E.full = { clean: folderOf("cleanup", out, "frames"), raw: viewUrl(outputFile("cleanup", out, "video")) };
       Object.assign(store, E.full);
     }, store);
@@ -2601,7 +2593,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       const plate = erase ? { path: store.clean, color_space: "@model" } : { path: p.path };
       const out = await run("shot", { ...common, ...plate, hero: r.hero, prompt, width: size[0], height: size[1],
         prefix: `${base}/${dir}/shot/f`, video_prefix: `${base}/${dir}/raw`, live: LIVE.every },
-        { kind: "shot", progress, live: liveFor(here) }).done;
+        { kind: "shot", progress, live: showLive }).done;
       store.shot = folderOf("shot", out, "frames");
       store.raw = viewUrl(outputFile("shot", out, "video"));
     }, store);
@@ -2624,7 +2616,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   if (here() && !S.pass && !r.review && S.shot?.url !== pv.comp) {
     setShot(pv.comp, key, "@model");
     hud("The preview is ready: Space plays it. The full-size composite follows.", 2500);
-    status("The preview is ready. The full-size passes and their composite follow; Export writes the result when you need it.");
+    status("The preview is ready. The full-size passes and their composite follow; Export writes the result when you need it.", "hint");
   }
   const onePass = sw === p.work[0] && sh === p.work[1];
   const final = onePass ? made : await passes(r, p.work, "full", true);
@@ -2639,7 +2631,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   await step(r, "hdr", async (progress) => { // SDR to HDR: the full-size shot made again in scene-linear values; review fits it to the plate
     const out = await run("hdr", { ...S.memoryProfile.slots, path: final, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps), ...plateMovie(p),
       prefix: `${base}/full/hdr/f`, video_prefix: `${base}/full/hdr_movie`, view_space: logSpace(), movie_fps: p.fps, live: LIVE.every },
-      { kind: "hdr", progress, live: liveFor(here) }).done;
+      { kind: "hdr", progress, live: showLive }).done;
     r.hdr = folderOf("hdr", out, "hdr");
     const hf = outputFile("hdr", out, "hdr"); // its EXR frames, for its row: drawn and inspected in ACES2065-1
     r.hdrFrames = hf ? `output:${hf.subfolder}/${framePattern(hf.filename)}` : null;
@@ -2665,7 +2657,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   if (!S.pass) setShot(r.play ?? r.review, key, r.playSpace ?? r.reviewSpace, r.reviewFrames);
   hud("Composite, full size: the viewer plays it", 2500);
   stagesUI(); exportUI();
-  if (!S.wantDownload) return status(`Composite, full size: the viewer plays it${deep ? ", its EXR frames at full precision as they load" : ""}. Export writes the result for compositing software.`);
+  if (!S.wantDownload) return status(`Composite, full size: the viewer plays it${deep ? ", its EXR frames at full precision as they load" : ""}. Export writes the result for compositing software.`, "hint");
   await step(r, "export", async (progress) => { // only when Export asks: the plate's own format, and the matte, beside the review
     const exr = exrResult(p.spec, r.hdr, p.headroom); // the result as half-float EXR frames instead of the plate's format
     const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr,
@@ -3610,7 +3602,7 @@ async function boot() { // the version, the workflows, the WebSocket, then what 
   log(`Page ready in ${Math.round(performance.now() - t0)} ms: ${WORKFLOWS.length} workflows, ${classes.length} node classes and ${models.size} model files checked`);
   log(`OCIO: ${S.ocio.info.label}, viewed on ${S.ocio.display} through ${S.ocio.view}${S.ocio.config === "$OCIO" ? " ($OCIO)" : ""}`);
   status("Ready. Open a plate to start.", "hint");
-  if (!S.plate && BLANK_AT_START && S.fluidReady) await openBlank({ atStart: true }).catch(quiet); // a canvas for a fluid shot, at the Blank tab's settings
+  if (!S.plate && BLANK_AT_START && S.fluidReady) await openBlank().catch(quiet); // a canvas for a fluid shot, at the Blank tab's settings
   warmAll().catch(() => {}); // a ComfyUI that reports no GPU details simply skips it
 }
 

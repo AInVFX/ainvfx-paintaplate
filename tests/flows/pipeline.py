@@ -39,7 +39,7 @@ def fluid16_scene(page, U):
     U.open_scene(page, name)
     page.wait_for_function("window.__lines.some((t) => t.startsWith('Scene opened'))", timeout=240000)
     page.wait_for_function(rows, timeout=240000)
-    U.wait_log(page, "window.__lines.some((t) => t.startsWith('review: made before') || t.startsWith('review: posted'))", 300000, "the review")
+    U.wait_log(page, "window.__lines.some((t) => t.startsWith('review: made before') || t.startsWith('review '))", 300000, "the review")
     settled(page)
     grew = U.added(page, ("ingest", "fluid", "hdr", "edit", "shot", "matte", "comp", "review"))
     posted = {k: v for k, v in grew.items() if k.endswith("posted") and v}

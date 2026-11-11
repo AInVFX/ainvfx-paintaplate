@@ -638,13 +638,15 @@ test("the memory profile: small under 24 GB, medium from 24 GB, large from 60 GB
   assert.equal(memoryProfile({}).name, "small", "no VRAM size: nothing loads early");
   assert.deepEqual(memoryProfile({ vram: 16 * gib }).warm, [], "small: no model loads before an action needs it");
   assert.deepEqual(memoryProfile({ vram: 16 * gib }).slots, { tile: 256, guide_tiled: true });
-  assert.match(memoryProfile({ vram: 16 * gib, ram: 64 * gib }).why, /16 GB of VRAM and 64 GB of RAM/);
-  assert.ok(memoryProfile({ vram: 16 * gib }).note, "what a small card cannot do as fast is said in one sentence");
+  assert.match(memoryProfile({ vram: 16 * gib, ram: 64 * gib }).why, /16 GB of VRAM, 64 GB of RAM/);
+  assert.match(memoryProfile({ vram: 16 * gib }).does, /^Models load one at a time and LTX works in 256 px tiles, so each step takes longer/, "what a small card cannot do as fast is said in one sentence, in the profile's own line");
+  assert.equal(memoryProfile({ vram: 17.2e9, ram: 65.5e9 }).why, "16 GB of VRAM, 61 GB of RAM", "bytes / 2**30, rounded: a 16 GB card reads 16 GB");
+  assert.equal(memoryProfile({ vram: 32e9 }).why, "30 GB of VRAM", "no RAM size from ComfyUI: none is written");
   assert.deepEqual(memoryProfile({ vram: 32 * gib }).warm, ["edit", "prompt"]);
   assert.deepEqual(memoryProfile({ vram: 96 * gib }).warm, ["edit", "prompt", "warm"]);
   const forced = memoryProfile({ vram: 96 * gib, ram: 256 * gib, force: "small" });
   assert.equal(forced.name, "small");
-  assert.match(forced.why, /asked for; with 96 GB of VRAM and 256 GB of RAM, the page would choose large/);
+  assert.match(forced.why, /asked for; with 96 GB of VRAM, 256 GB of RAM, the page would choose large/);
   assert.equal(memoryProfile({ vram: 96 * gib, force: "huge" }).name, "large", "an unknown name is not a profile");
   assert.equal(memoryProfile({ vram: 96 * gib, force: "toString" }).name, "large");
 });

@@ -159,8 +159,9 @@ WATCH = """() => { window.__lines = []; if (window.__watch) window.__watch.disco
 
 
 def added(page, steps):  # how many jobs of each step were taken from the job index, and how many were posted, since WATCH
-    lines = page.evaluate("window.__lines")
-    return {f"{s}: {w}": sum(1 for line in lines if line.startswith(f"{s}: {w}")) for s in steps for w in ("made before", "posted")}
+    lines = page.evaluate("window.__lines")  # a posted job's lines start with its step and its id: "ingest ef88a8f3: done in 2.0 s (10 nodes)"
+    return {**{f"{s}: made before": sum(line.startswith(f"{s}: made before") for line in lines) for s in steps},
+            **{f"{s}: posted": len({line.split(":")[0] for line in lines if line.startswith(f"{s} ")}) for s in steps}}
 
 
 def added_line(text):  # a JS test: a line added to the log since WATCH holds `text` (the log keeps its last 400 lines only)
@@ -221,9 +222,8 @@ def start_flow(browser, port):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
-    spec, log = page.text_content("#spec"), log_lines(page)
-    check("960 × 512, 25 fps, 121 frames" in spec and page.input_value("#b-depth") == "16" and not page.is_hidden("#fluid")
-          and any(line.startswith("Blank plate: 960 x 512, 121 frames at 25 fps, 16-bit") for line in log),
+    spec = page.text_content("#spec")
+    check("960 × 512, 25 fps, 121 frames" in spec and page.input_value("#b-depth") == "16" and not page.is_hidden("#fluid"),
           f"a blank plate opens at start, 16-bit, its keyframes ready to paint: {spec}")
     page.close()
 
@@ -413,7 +413,7 @@ def generate_flow(browser, port):
     check(klein_passes(page) == made and page.locator("#log li:has-text('Render v')").count() == renders and "Nothing changed" in page.text_content("#hud"),
           "Enter again with nothing changed runs nothing twice: no Klein pass, no render step")
     log = log_lines(page)
-    for key in ("posted as", "prompt writer", "Klein quick pass", "ComfyUI started it"):
+    for key in (": done in", "prompt writer", "Klein quick pass"):
         check(any(key in line for line in log), f"the log says what happens under the hood: {key}")
     no_errors(errors, "in a first edit and its render")
     page.close()
@@ -644,7 +644,7 @@ def fluid_flow(browser, port):
     open_scene(page, name)
     page.wait_for_function("window.__lines.some((t) => t.startsWith('Scene opened'))", timeout=120000)
     page.wait_for_function(rows_done, timeout=120000)
-    page.wait_for_function("window.__lines.some((t) => t.startsWith('review: made before') || t.startsWith('review: posted'))", timeout=120000)
+    page.wait_for_function("window.__lines.some((t) => t.startsWith('review: made before') || t.startsWith('review '))", timeout=120000)
     grew = added(page, ("ingest", "fluid", "edit", "shot", "matte", "comp", "review"))
     posted = {k: v for k, v in grew.items() if k.endswith("posted") and v}
     check(not posted and all(grew[f"{s}: made before"] >= 1 for s in ("fluid", "edit", "shot", "review")),
@@ -687,7 +687,7 @@ def scene_flow(browser, port):
     page.wait_for_function("window.__lines.some((t) => t.startsWith('Scene opened'))", timeout=120000)
     page.wait_for_function("""(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
       return t.join() === '2. Erase,1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
-    page.wait_for_function("window.__lines.some((t) => t.startsWith('review: made before') || t.startsWith('review: posted'))", timeout=180000)
+    page.wait_for_function("window.__lines.some((t) => t.startsWith('review: made before') || t.startsWith('review '))", timeout=180000)
     settled(page)
     grew = added(page, ("ingest", "prompt", "edit", "clean", "cleanup", "shot", "matte", "comp", "review"))
     posted = {k: v for k, v in grew.items() if k.endswith("posted") and v}
@@ -726,10 +726,10 @@ def ocio_flow(browser, port):
     menu(page, "OCIO", "File Color Space", "Utility", "Linear Rec.709 (sRGB)")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('Linear Rec.709 (sRGB)') && document.querySelector('#opening').hidden", timeout=60000)
     until(page, differs, arg=before)
-    until(page, "window.__lines.some((t) => t.startsWith('ingest: posted'))")
+    until(page, "window.__lines.some((t) => t.startsWith('ingest '))")
     lines, linear = page.evaluate("window.__lines"), pixel()
-    said = [t for t in lines if t.startswith("File Color Space") or t.startswith("ingest:")]
-    check(any(t.startswith("File Color Space: Linear Rec.709 (sRGB)") for t in said) and any(t.startswith("ingest: posted") for t in said) and linear != before,
+    said = [t for t in lines if t.startswith("File Color Space") or t.startswith("ingest ")]
+    check(any(t.startswith("File Color Space: Linear Rec.709 (sRGB)") for t in said) and any(t.startswith("ingest ") for t in said) and linear != before,
           f"another File Color Space: the viewer shows it, and the plate opens again in it for the models and the export: {before} becomes {linear}; {said}")
     menu(page, "OCIO", "File Color Space", "Utility", "sRGB Encoded Rec.709 (sRGB)")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('sRGB Encoded Rec.709 (sRGB)') && document.querySelector('#opening').hidden", timeout=60000)

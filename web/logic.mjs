@@ -749,14 +749,13 @@ export function matteLargest(summary) {
 // `slots` are workflow slot values (tile, guide_tiled): one set of workflows serves every profile.
 export const MEMORY_FROM = { medium: 24e9, large: 60e9 }; // bytes of VRAM: a 24 GB card reports about 25.7e9, a 16 GB one about 17.2e9
 export const MEMORY = {
-  small: { warm: [], slots: { tile: 256, guide_tiled: true }, does: "No model loads before an action needs it, and LTX encodes and decodes in 256 px tiles",
-    note: "This card has less than 24 GB of VRAM: models load one at a time and LTX works in tiles, so every step takes longer than on a larger card." },
-  medium: { warm: ["edit", "prompt"], slots: { tile: 512, guide_tiled: false }, does: "The edit models load now, LTX with the first shot", note: null },
-  large: { warm: ["edit", "prompt", "warm"], slots: { tile: 512, guide_tiled: false }, does: "Every model loads now and stays loaded", note: null },
+  small: { warm: [], slots: { tile: 256, guide_tiled: true }, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger card" },
+  medium: { warm: ["edit", "prompt"], slots: { tile: 512, guide_tiled: false }, does: "The edit models load now, LTX with the first shot" },
+  large: { warm: ["edit", "prompt", "warm"], slots: { tile: 512, guide_tiled: false }, does: "Every model loads now and stays loaded" },
 };
 export function memoryProfile({ vram = 0, ram = 0, force = null } = {}) { // `force`: a profile's name, from ?memory= or the paintaplate.memory setting
   const auto = vram >= MEMORY_FROM.large ? "large" : vram >= MEMORY_FROM.medium ? "medium" : "small";
   const forced = Object.hasOwn(MEMORY, force ?? ""), name = forced ? force : auto, gib = (n) => Math.round(n / 2 ** 30);
-  const card = vram > 0 ? `${gib(vram)} GB of VRAM and ${gib(ram)} GB of RAM` : "ComfyUI gave no VRAM size";
+  const card = vram > 0 ? `${gib(vram)} GB of VRAM${ram > 0 ? `, ${gib(ram)} GB of RAM` : ""}` : "ComfyUI gave no VRAM size";
   return { name, why: forced ? `asked for; with ${card}, the page would choose ${auto}` : card, ...MEMORY[name] };
 }
