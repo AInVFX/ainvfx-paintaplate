@@ -8,7 +8,7 @@ CPU: open a plate, play it, paint, erase and light, start each edit with Generat
 an edit, let the idle time render the shot, the composite and the export, wipe, then download the zip.
 `ingest`, `comp` and `export` are the real workflows. Screenshots go to /tmp/paintaplate_ui.
 """
-import argparse, glob, json, os, shutil, subprocess, sys, time, zipfile
+import argparse, glob, json, os, shutil, subprocess, sys, time, urllib.request, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -121,6 +121,16 @@ def flow(page, url, open_plate, shots, wait_s=120):
     names = zipfile.ZipFile(path).namelist()
     print("zip:", len(names), "files;", sorted({n.split("/")[0] for n in names}))
     return final, names
+
+
+def answers(url):
+    """Whether the ComfyUI at `url` still answers. On 11 Nov a memory cap stopped ComfyUI during a render, twice: the page
+    waited, this script with it, and no report was written."""
+    try:
+        urllib.request.urlopen(url + "/system_stats", timeout=5).close()
+        return True
+    except Exception:
+        return False
 
 
 def main():
@@ -294,7 +304,7 @@ def remote(a):
                     page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)
                     page.wait_for_function(DONE.format(n=i + 1), timeout=max(300, 2 * a.timeout) * 1000)  # a small card loads its models in turn
                     mark(f"{key} edit on the first frame | {status()}"); page.screenshot(path=f"{shots}/2_{key}_done.png")
-                seen = set()
+                seen, silent, asked = set(), 0, time.time()
                 deadline = time.time() + a.timeout * 8
                 while time.time() < deadline:
                     note = page.inner_text("#render-left")
@@ -303,6 +313,11 @@ def remote(a):
                         seen.add(tag); mark("stage: " + (note or status()))
                     if note == "full size ready" or "Error" in status() or status().startswith("Missing"):
                         break
+                    if time.time() - asked >= 10:  # a ComfyUI stopped for its memory leaves the page waiting: the case ends here, with what it has
+                        asked, silent = time.time(), 0 if answers(a.url) else silent + 1
+                        if silent >= 3:
+                            mark(f"FAILED: ComfyUI stopped answering during « {note or status()[:60]} »")
+                            break
                     time.sleep(1)
                 mark("final: " + status())
                 page.keyboard.press("F6"); page.keyboard.press("End"); time.sleep(1); page.screenshot(path=f"{shots}/3_wipe.png")
