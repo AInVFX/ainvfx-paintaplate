@@ -55,3 +55,33 @@ test("every job asks ComfyUI for the step previews it wants in its own post, so 
   assert.deepEqual(promptBody({}).extra_data, { preview_method: "none" }, "any other job: ComfyUI makes no preview for it");
   assert.equal(promptBody({}).front, false);
 });
+
+// ---------- Render: a job's lines in the log ----------
+import { QUEUE_SAID_MS, jobDone, jobFailed, jobStopped, jobWaited } from "../../web/comfy.mjs";
+
+test("a job writes one line when it ends, with its nodes, ComfyUI's cache and its previews folded in", () => {
+  const job = { name: "ingest", id: "ef88a8f3-4a51-4c0e-9d0b-2f6f6f0f1a11", posted: 1000, sent: 1000, nodes: 10, cached: 3, previews: 8 };
+  assert.equal(jobDone(job, 3000), "ingest ef88a8f3: done in 2.0 s (10 nodes, 3 from ComfyUI's cache, 8 previews)");
+  assert.equal(jobDone({ ...job, cached: 0, previews: 1 }, 3000), "ingest ef88a8f3: done in 2.0 s (10 nodes, 1 preview)");
+  assert.equal(jobDone({ ...job, nodes: 1, cached: 0, previews: 0 }, 1040), "ingest ef88a8f3: done in 0.0 s (1 node)");
+  assert.equal(jobDone({ ...job, cached: 10, previews: 0 }, 1100, false), "ingest ef88a8f3: done in 0.1 s (10 nodes, 10 from ComfyUI's cache, outputs as it made them before)");
+});
+
+test("a job says that it waited only when it starts over a second after its post", () => {
+  const job = { name: "shot", id: "0a1b2c3d-0000", posted: 0, sent: 5000, nodes: 24, number: 7, front: false };
+  assert.equal(QUEUE_SAID_MS, 1000);
+  assert.equal(jobWaited(job, 5000 + QUEUE_SAID_MS), null, "a second or less: no line, and the wait counts from the last post");
+  assert.equal(jobWaited(job, 8200), "shot 0a1b2c3d: started after 3.2 s in ComfyUI's queue (number 7)");
+  assert.equal(jobWaited({ ...job, front: true, number: undefined }, 8200), "shot 0a1b2c3d: started after 3.2 s in ComfyUI's queue (posted at the front)");
+});
+
+test("a job that failed or was stopped says it in one line; a stopped job says where it was", () => {
+  const job = { name: "shot", id: "0a1b2c3d-0000", posted: 0, sent: 0, nodes: 24, cached: 20, previews: 3, started: 400, at: "SamplerCustomAdvanced" };
+  assert.equal(jobFailed(job, 12000, "SamplerCustomAdvanced: Allocation on device"),
+    "shot 0a1b2c3d: failed after 12.0 s (24 nodes, 20 from ComfyUI's cache, 3 previews): SamplerCustomAdvanced: Allocation on device");
+  assert.equal(jobStopped(job, 12000), "shot 0a1b2c3d: stopped after 12.0 s in SamplerCustomAdvanced (24 nodes, 20 from ComfyUI's cache, 3 previews)");
+  const queued = { ...job, cached: 0, previews: 0, started: null, at: null };
+  assert.equal(jobStopped(queued, 2500), "shot 0a1b2c3d: stopped after 2.5 s in ComfyUI's queue (24 nodes)");
+  assert.equal(jobStopped(queued, 2500, false), "shot 0a1b2c3d: stopped after 2.5 s (24 nodes)", "no WebSocket: the page does not know whether the job had started");
+  assert.equal(jobStopped({ ...queued, id: undefined }, 100), "shot ?: stopped after 0.1 s before ComfyUI answered its post (24 nodes)");
+});

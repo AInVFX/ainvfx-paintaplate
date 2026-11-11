@@ -48,9 +48,31 @@ async function released(limit = 15000) {
     if (!gpu?.vram_total || gpu.vram_free > gpu.vram_total / 2) return;
   }
 } // what the client has to tell the person (a retry, for example)
-export const onLog = (fn) => { log = fn; }; // every job posted, started, finished, failed or cancelled, with its timing
+export const onLog = (fn) => { log = fn; }; // a job's lines (below), and why a live preview could not be made
+
+// ---------- A job's lines in the log ----------
+// The log says each fact once. A job writes one line when it ends, with what matters folded in: its nodes, those ComfyUI
+// took from its cache, the previews the page received. It writes one line more only when it starts after more than
+// QUEUE_SAID_MS in ComfyUI's queue. A job that was stopped says in its line where it was: in the queue, or in which node.
+export const QUEUE_SAID_MS = 1000;
 const short = (id) => (id ? String(id).slice(0, 8) : "?");
-const took = (job) => `${((Date.now() - job.posted) / 1000).toFixed(1)} s`;
+const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
+const count = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const head = (job) => `${job.name} ${short(job.id)}`;
+const folded = (job, more = "") => [count(job.nodes, "node"), job.cached ? `${job.cached} from ComfyUI's cache` : "",
+  job.previews ? count(job.previews, "preview") : "", more].filter(Boolean).join(", ");
+export function jobWaited(job, now) { // null for a job that starts within QUEUE_SAID_MS of its post
+  if (!(now - job.sent > QUEUE_SAID_MS)) return null;
+  const how = [job.number != null ? `number ${job.number}` : "", job.front ? "posted at the front" : ""].filter(Boolean).join(", ");
+  return `${head(job)}: started after ${secs(now - job.sent)} in ComfyUI's queue${how ? ` (${how})` : ""}`;
+}
+// `fresh` false: ComfyUI ran nothing and listed no output, so the page took the outputs this prompt gave before
+export const jobDone = (job, now, fresh = true) => `${head(job)}: done in ${secs(now - job.posted)} (${folded(job, fresh ? "" : "outputs as it made them before")})`;
+export const jobFailed = (job, now, error) => `${head(job)}: failed after ${secs(now - job.posted)} (${folded(job)}): ${error}`; // ComfyUI's error names the node
+export function jobStopped(job, now, heard = true) { // `heard` false: the WebSocket is closed, so the page does not know whether the job had started
+  const where = !job.id ? " before ComfyUI answered its post" : job.started != null ? (job.at ? ` in ${job.at}` : "") : heard ? " in ComfyUI's queue" : "";
+  return `${head(job)}: stopped after ${secs(now - job.posted)}${where} (${folded(job)})`;
+}
 
 // A server's answer as JSON, whatever its status (ComfyUI explains a refused job in JSON). An error page, such as a proxy's
 // HTML while ComfyUI restarts, or an empty answer, says so plainly instead of the browser's "Unexpected token '<'" (29 Oct)
@@ -121,18 +143,21 @@ export function upload(blob, name, sub, onProgress, signal) { // XMLHttpRequest,
 // `live` receives the live previews of a shot.
 export function run(name, values, { kind = name, preview, progress, step, live: onLive, front = false } = {}) {
   const wf = fillWorkflow(WF[name], values);
-  const job = { kind, name, preview, progress, live: onLive, retries: 1, key: JSON.stringify(wf.prompt), main: wf.progress, posted: Date.now(),
+  const job = { kind, name, preview, progress, live: onLive, retries: 1, key: JSON.stringify(wf.prompt), main: wf.progress, posted: Date.now(), front, nodes: Object.keys(wf.prompt).length,
     step: step && ((id) => step(wf.prompt[id]?.class_type)), classes: Object.fromEntries(Object.entries(wf.prompt).map(([id, n]) => [id, n.class_type])) };
   job.done = new Promise((resolve, reject) => Object.assign(job, { resolve, reject }));
-  job.submit = () => post("/prompt", promptBody(wf.prompt, { front, preview: !!preview })).then(answer).then((j) => {
-    if (!j.prompt_id) throw new Error(rejection(j));
-    job.id = j.prompt_id;
-    job.heard = Date.now();
-    log(`${name}: posted as ${short(job.id)} (${Object.keys(wf.prompt).length} nodes${front ? ", front of the queue" : ""}${j.number != null ? `, number ${j.number}` : ""})`);
-    if (job.cancelled) return void drop(job); // cancelled while it was being posted
-    byId.set(job.id, job);
-    if (early.has(job.id)) finish(job.id, early.get(job.id));
-  }).catch((e) => job.reject(e));
+  job.submit = () => { // each post counts for itself: a job is posted again after a stray interrupt or a memory stop
+    Object.assign(job, { sent: Date.now(), started: null, at: null, cached: 0, previews: 0, inMain: false });
+    return post("/prompt", promptBody(wf.prompt, { front, preview: !!preview })).then(answer).then((j) => {
+      if (!j.prompt_id) throw new Error(rejection(j));
+      job.id = j.prompt_id;
+      job.number = j.number;
+      job.heard = Date.now();
+      if (job.cancelled) return void drop(job); // cancelled while it was being posted
+      byId.set(job.id, job);
+      if (early.has(job.id)) finish(job.id, early.get(job.id));
+    }).catch((e) => job.reject(e));
+  };
   live.add(job);
   indexKey(name, values).then(async (key) => { // the job index first: a job made before with the same inputs is not run again
     job.index = key;
@@ -169,14 +194,13 @@ async function finish(id, error) {
     return job.submit();
   }
   live.delete(job);
-  if (error) { log(`${job.name} ${short(id)}: failed after ${took(job)}: ${error}`, "error"); return job.reject(new Error(error)); }
-  if (job.previews) log(`${job.name} ${short(id)}: ${job.previews} preview(s) received`); // step previews or live previews: what computed was sent
+  if (error) { log(jobFailed(job, Date.now(), error), "error"); return job.reject(new Error(error)); }
   let out = (await historyRecord(id))?.outputs ?? {};
   const fresh = files(out).length || Object.values(out).some((o) => o.text?.length);
   if (fresh) memo.set(job.key, out);
   else out = memo.get(job.key) ?? out;
   if (memo.size > MEMO_MAX) memo.delete(memo.keys().next().value);
-  log(`${job.name} ${short(id)}: done in ${took(job)}${fresh ? "" : " (served from ComfyUI's cache)"}`);
+  log(jobDone(job, Date.now(), !!fresh));
   if (job.index && (files(out).length || Object.values(out).some((o) => o.text?.length))) // recorded for later sessions
     if (recordable(out)) post(`/paintaplate/jobs/${job.index}`, { workflow: job.name, outputs: out }).catch(() => {});
   job.resolve(out);
@@ -207,7 +231,7 @@ export function cancel(...kinds) {
     live.delete(job);
     byId.delete(job.id);
     job.reject(new Error("cancelled"));
-    log(`${job.name} ${short(job.id)}: cancelled after ${took(job)}`);
+    log(jobStopped(job, Date.now(), socket));
     drop(job);
   }
 }
@@ -219,21 +243,22 @@ function message({ data }) {
     const n = v.getUint32(4);
     const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(data, 8, n)));
     const shown = byId.get(meta.prompt_id);
-    if (shown?.preview) { shown.previews = (shown.previews ?? 0) + 1; shown.preview(new Blob([new Uint8Array(data, 8 + n)], { type: meta.image_type })); }
+    if (shown?.preview) { shown.previews += 1; shown.preview(new Blob([new Uint8Array(data, 8 + n)], { type: meta.image_type })); }
     return;
   }
   const { type, data: d } = JSON.parse(data);
   const job = byId.get(d?.prompt_id);
   if (job) job.heard = Date.now();
-  if (type === "execution_start") { running = d.prompt_id; job?.progress?.(0); if (job) log(`${job.name} ${short(d.prompt_id)}: ComfyUI started it ${took(job)} after the post`); }
-  else if (type === "execution_cached" && job && d.nodes?.length) log(`${job.name} ${short(d.prompt_id)}: ${d.nodes.length} of ${Object.keys(job.classes).length} nodes from ComfyUI's cache`);
+  if (type === "execution_start") { running = d.prompt_id; job?.progress?.(0); if (job) { job.started = Date.now(); const waited = jobWaited(job, job.started); if (waited) log(waited); } }
+  else if (type === "execution_cached" && job) job.cached = d.nodes?.length ?? 0; // folded into the job's line when it ends
   else if (type === "executing" && d.node) {
     job?.step?.(d.node);
-    if (job?.main.has(String(d.node))) { if (!job.inMain) log(`${job.name} ${short(d.prompt_id)}: ${job.classes[String(d.node)]} is running`); job.inMain = true; }
+    if (job) job.at = job.classes[String(d.node)] ?? job.at; // the node that runs: a stopped job's line names it
+    if (job?.main.has(String(d.node))) job.inMain = true;
     else if (job?.inMain) job.progress?.(0.97); // the main node is done; saving remains
   } else if (type === "progress") {
     if (job && (!job.main.size || job.main.has(String(d.node)))) job.progress?.(0.02 + (0.93 * d.value) / d.max);
-  } else if (type === "paintaplate.live") { if (d.off) liveOff(d.off); else if (job?.live) { job.previews = (job.previews ?? 0) + 1; job.live(d); } } // a live preview of a shot being sampled, or why there is none (nodes.py, Live Preview)
+  } else if (type === "paintaplate.live") { if (d.off) liveOff(d.off); else if (job) { job.previews += 1; job.live?.(d); } } // a live preview of a shot being sampled, or why there is none (nodes.py, Live Preview)
   else if (type === "execution_success") finish(d.prompt_id);
   else if (type === "execution_error") finish(d.prompt_id, `${d.node_type}: ${d.exception_message}`);
   else if (type === "execution_interrupted") finish(d.prompt_id, "cancelled");

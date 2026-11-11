@@ -37,8 +37,9 @@ QUICK = ("horse_cow", "horse_erase", "horse_light", "fluid_720")
 ALL = QUICK + ("uhd_cow", "uhd_erase", "uhd_light", "fluid_1080_edit")
 UHD = {"file": "horse_3840x2160_50fps.mp4", "size": (3840, 2160), "fps": 50, "frames": 121}  # « 4K at 50 fps »: every tool runs on it
 STEP = re.compile(r"Render v(\d+): (.+?) took ([\d.]+) s")  # the page's log: one line per render step
-JOB = re.compile(r"([a-z]+) [0-9a-f?]{1,8}: done in ([\d.]+) s")  # and one per finished job; a line starts with its time, with no space after it
-CACHED = re.compile(r"([a-z]+) [0-9a-f?]{1,8}: (\d+) of (\d+) nodes from ComfyUI's cache")  # a model loader among them is a model not loaded again
+# and one line per finished job: its seconds, its nodes, those ComfyUI took from its cache (a model loader among them is a
+# model not loaded again) and the previews the page received. A line starts with its time, with no space after it
+JOB = re.compile(r"([a-z]+) [0-9a-f?]{1,8}: done in ([\d.]+) s \((\d+) nodes?(?:, (\d+) from ComfyUI's cache)?(?:, (\d+) previews?)?")
 GB = 2 ** 30
 
 
@@ -130,14 +131,14 @@ def matte_areas(comfy, since):
 
 def read_log(text):
     """What a case's page log says: the render steps and the jobs with their seconds, and the counts the report shows."""
-    profile = re.search(r"Memory profile (\w+): ([^\n]*)", text)
+    profile, jobs = re.search(r"Memory profile (\w+): ([^\n]*)", text), JOB.findall(text)
     return {
         "steps": [(f"v{v} {label}", float(s)) for v, label, s in STEP.findall(text)],
-        "jobs": [(name, float(s)) for name, s in JOB.findall(text)],
-        "cached": [(name, int(k), int(n)) for name, k, n in CACHED.findall(text)],
+        "jobs": [(name, float(s)) for name, s, *_ in jobs],
+        "cached": [(name, int(k or 0), int(n)) for name, _, n, k, _ in jobs],
         "indexed": text.count("taken from the job index"),
         "oom": text.count("ran out of memory"),
-        "previews": sum(int(n) for n in re.findall(r"(\d+) preview\(s\) received", text)),
+        "previews": sum(int(n or 0) for *_, n in jobs),
         "live_off": re.findall(r"Live preview is off: ([^\n]*)", text),
         "profile": f"{profile.group(1)} ({profile.group(2)})" if profile else "not in the log's last 400 lines",
         "mattes": re.findall(r"((?:Paint|Erase) matte[^\n]*largest matte is [^\n]*)", text),

@@ -36,7 +36,8 @@ def run(browser, port, U):
     page.wait_for_function(READY, timeout=60000)
     line = logged(page, "Memory profile small:")
     U.check(line.startswith("Memory profile small: asked for") and "would choose medium" in line, f"the log names the memory profile and why: {line}")
-    U.check("less than 24 GB" in page.text_content("#status"), "a small card: the page says what it means in one sentence, at open")
+    U.check(line.endswith("Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger card"),
+            "a small card: the same line says what it means, in one sentence")
     page.wait_for_timeout(3000)
     U.check(len(posts(port)) == before, "a small card: no model loads at page open (no job is posted)")
     page.close()
@@ -54,7 +55,7 @@ def run(browser, port, U):
     page.keyboard.press("b")
     U.paint_once(page, "a lantern", [(0.3, 0.5), (0.34, 0.56)])
     page.keyboard.press("Enter")
-    U.wait_log(page, U.added_line("preview(s) received"), 120000, "the previews a job received, in the log")
+    U.wait_log(page, r"window.__lines.some((t) => /: done in [\d.]+ s \(.*\d+ previews?\)$/.test(t))", 120000, "the previews a job received, in its line of the log")
     asked = [p["extra_data"] for p in posts(port)[before + 2:] if "patch" in p["outputs"]]
     U.check({"preview_method": "latent2rgb"} in asked, f"a Klein pass asks ComfyUI for its step previews in its own post: {asked}")
     others = [p for p in posts(port)[before + 2:] if "patch" not in p["outputs"]]
