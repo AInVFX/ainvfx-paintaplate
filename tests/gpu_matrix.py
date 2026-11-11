@@ -12,7 +12,8 @@ quick: on plates/horse.mp4 (tools/get_plates.sh) a cow painted behind the fence,
 at 1280 x 704 x 121. all adds a 3840 x 2160 plate at 50 fps, made here from horse.mp4 (paint, erase, light), and a fluid
 shot at 1920 x 1088 at 50 fps with one edit on it. --cases also takes case names, with commas. The strokes are in
 gpu_matrix.json beside this file. Every run moves them by a fraction of a pixel, so no job comes back from the job index
-and every time is a real one; --exact keeps them as written.
+and every time is a real one; --exact keeps them as written. --memory small, medium or large asks the page for that memory
+profile (logic.memoryProfile) in place of the one the card gives: the same case under two profiles shows what a profile costs.
 
 It needs Playwright with Google Chrome: Playwright's own Chromium cannot play H.264. Run it on the machine that runs
 ComfyUI, with a Python that has Pillow and numpy (ComfyUI's own has both): it reads the mattes and the live previews in
@@ -145,7 +146,7 @@ def read_log(text):
 
 def run_case(a, name, case, folder):
     cmd = [sys.executable, os.path.join(HERE, "ui_live.py"), "--url", a.url, "--comfy", a.comfy, "--out", folder,
-           "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2"]
+           "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2", *(["--memory", a.memory] if a.memory else [])]
     if "fluid" in case:
         cmd += ["--fluid", json.dumps({**case["fluid"], "keys": moved(case["fluid"]["keys"], a.exact)})]
     else:
@@ -182,7 +183,8 @@ def report(a, machine, results):
              f"| ComfyUI | {system.get('comfyui_version', 'unknown')}, started with `{' '.join(system.get('argv', [])[1:]) or 'no flag'}` |",
              f"| PyTorch | {system.get('pytorch_version', 'unknown')} |",
              f"| Paint a plate | commit {git('rev-parse', '--short', 'HEAD')} on {git('rev-parse', '--abbrev-ref', 'HEAD')} |",
-             f"| Cases | {a.cases}: {', '.join(r['name'] for r in results)} |", "",
+             f"| Cases | {a.cases}: {', '.join(r['name'] for r in results)} |",
+             f"| Memory profile asked for | {a.memory or 'none: the card decides'} |", "",
              "| Case | Result | Seconds | Peak VRAM | Peak RAM | Memory stops retried | Previews received |", "| --- | --- | --- | --- | --- | --- | --- |"]
     for r in results:
         lines.append(f"| {r['name']} | {'passed' if r['passed'] else 'FAILED'} | {r['seconds']:.0f} | {r['vram'] / GB:.1f} GB | {r['ram'] / GB:.1f} GB | {r['oom']} | {r['previews']} |")
@@ -229,7 +231,8 @@ def main():
     ap.add_argument("--out", required=True, help="a folder for the report and each case's files")
     ap.add_argument("--cases", default="quick", help="quick, all, or case names with commas: " + ", ".join(ALL))
     ap.add_argument("--channel", default="chrome", help="the browser channel: Google Chrome plays H.264")
-    ap.add_argument("--timeout", type=int, default=450, help="ui_live.py's --timeout: it waits 8 times this many seconds for a render")
+    ap.add_argument("--timeout", type=int, default=900, help="ui_live.py's --timeout: it waits 8 times this many seconds for a render, 4 times for a fluid shot, twice for an edit")
+    ap.add_argument("--memory", default="", choices=("", "small", "medium", "large"), help="ask the page for this memory profile; by default the card decides")
     ap.add_argument("--exact", action="store_true", help="the strokes as written: jobs made before come back from the job index")
     a = ap.parse_args()
     a.url, a.comfy, a.out = a.url.rstrip("/"), os.path.abspath(a.comfy), os.path.abspath(a.out)
