@@ -291,7 +291,7 @@ def remote(a):
                     stroke(page, box, pts); mark(f"{key} stroke")
                     page.keyboard.press("Enter")  # Generate
                     page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)
-                    page.wait_for_function(DONE.format(n=i + 1), timeout=300000)
+                    page.wait_for_function(DONE.format(n=i + 1), timeout=max(300, 2 * a.timeout) * 1000)  # a small card loads its models in turn
                     mark(f"{key} edit on the first frame | {status()}"); page.screenshot(path=f"{shots}/2_{key}_done.png")
                 seen = set()
                 deadline = time.time() + a.timeout * 8
