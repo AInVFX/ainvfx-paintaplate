@@ -151,6 +151,7 @@ def inputs_by_slot(prompt):
 
 async def steps(pid, total, seconds, preview=None, live=None):
     every, frame = live or (0, None)
+    seconds = STATE.get("held", {}).get(pid, seconds)  # a job /mock/hold keeps open
     for k in range(total):
         if STATE["interrupt"]:
             raise asyncio.CancelledError()
@@ -184,6 +185,10 @@ async def execute(pid, prompt):
         await steps(pid, 1, 0.2)
         raise RuntimeError("Allocation on device 0 would exceed allowed memory. (out of memory)")
     v = inputs_by_slot(prompt)
+    hold = STATE.get("hold")  # armed by /mock/hold: this job's steps last `seconds`, so a page check meets the pass it stops
+    if hold and hold["times"] > 0 and (hold["output"] in outs or v.get(hold["slot"])):
+        hold["times"] -= 1
+        STATE.setdefault("held", {})[pid] = hold["seconds"]
     MOVIE[:] = [int(v.get('movie_width') or 0), int(v.get('movie_height') or 0)]  # as Save Movie takes them
     o = {}
     if "spec" in outs:  # ingest
@@ -478,6 +483,12 @@ async def slow_route(request):  # mock only: the next `times` uploads wait `seco
     return web.json_response({})
 
 
+async def hold_route(request):  # mock only: the next `times` jobs that write `output`, or fill `slot`, last `seconds` each; an interrupt still ends them
+    body = await request.json()
+    STATE["hold"] = {"output": body.get("output", ""), "slot": body.get("slot", ""), "seconds": float(body.get("seconds", 20)), "times": int(body.get("times", 1))}
+    return web.json_response({})
+
+
 async def release_route(request):  # mock only: the upload /mock/slow holds goes on now
     if STATE.get("release"):
         STATE["release"].set()
@@ -536,6 +547,7 @@ async def start():
     app.router.add_post("/free", free_route)
     app.router.add_post("/mock/oom", oom_route)
     app.router.add_post("/mock/slow", slow_route)
+    app.router.add_post("/mock/hold", hold_route)
     app.router.add_post("/mock/release", release_route)
     app.router.add_get("/mock/events", lambda r: web.json_response(EVENTS))
     app.router.add_get("/ws", ws_route)
