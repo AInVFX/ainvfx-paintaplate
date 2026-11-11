@@ -348,7 +348,9 @@ class FollowMatte(io.ComfyNode):
             description="One matte per frame from SAM 3.1's track, safe for the composite. It follows the object's own region "
                         "from the first-frame mask: objects SAM finds by itself elsewhere are left out; where the object is not "
                         "seen, the last matte holds (with no mask, the first-frame mask); with the plate the shot was made over, "
-                        "the matte also takes what the shot changed near the object, so a generated element is never dropped.",
+                        "the matte also takes the generated pixels connected to the object, so a generated element is never "
+                        "dropped. A frame that differs from the plate everywhere adds nothing. The summary ends with the "
+                        "largest matte against the object's area, and its frame.",
             inputs=[
                 io.Mask.Input("masks", tooltip="SAM 3.1's masks, one per frame it tracked. It may return fewer, or none."),
                 io.Mask.Input("first", tooltip="The area on the first frame that SAM was asked to follow."),
@@ -359,7 +361,7 @@ class FollowMatte(io.ComfyNode):
                 io.Float.Input("zone", default=0.0625, min=0.0, max=0.5, step=0.005,
                                tooltip="How far from the object's region SAM's mask may move and a change still joins, as a fraction of the width."),
                 io.Float.Input("threshold", default=0.1, min=0.01, max=1.0, step=0.01,
-                               tooltip="How much a pixel must change, from 0 to 1, to join the matte."),
+                               tooltip="How much more a pixel must change than its frame changes around the object, from 0 to 1, to join the matte."),
             ],
             outputs=[io.Mask.Output(display_name="mask"), io.String.Output(display_name="summary")],
         )

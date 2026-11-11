@@ -595,3 +595,12 @@ test("SDR to HDR: on its own for a plate that holds values above 1.0, else only 
   assert.equal(wantsHdrFor(mp4, 1, false), false, "an SDR video: off");
   assert.equal(wantsHdrFor(mp4, 1, true), true, "an SDR video with Deliver's bit-depth pass on");
 });
+
+import { matteLargest } from "../../web/logic.mjs";
+
+test("the paint matte's report: its largest size against the object, the frame, and a warning above 3 times", () => {
+  assert.deepEqual(matteLargest("SAM 3.1 found the object on 121 of 121 frames; the largest matte is 1.2 times the object, on frame 31"), { ratio: 1.2, frame: 31, warn: false });
+  assert.deepEqual(matteLargest("SAM 3.1 returned no mask: the first-frame mask holds on every frame; the largest matte is 60.0 times the object, on frame 0 (warning: above 3, check the composite on that frame)"), { ratio: 60, frame: 0, warn: true });
+  assert.equal(matteLargest("SAM 3.1 found the object on 6 of 12 frames"), null, "a summary without the report");
+  assert.equal(matteLargest(undefined), null);
+});

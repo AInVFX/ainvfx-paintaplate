@@ -225,6 +225,7 @@ body.resizing, body.resizing * { user-select: none; }
 #log li { display: flex; gap: 12px; }
 #log time { color: #6e7681; flex: none; }
 #log li.error span { color: #ff7b72; }
+#log li.warn span { color: #e3b341; }
 
 /* Dialogs */
 dialog { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; width: min(460px, 92vw); }

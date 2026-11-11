@@ -695,3 +695,13 @@ export function resultFlows({ tools = [], render = [], fluid = false, fluidHdr =
 }
 // The config's data colour space (OCIO's isdata, such as the studio config's Raw), from the spaces /paintaplate/ocio lists
 export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? null;
+
+// ---------- Pipeline: the paint matte's report ----------
+// Follow Matte ends its summary with "the largest matte is 1.2 times the object, on frame 31": how far the matte went
+// beyond the tracked object, and on which frame. Above MATTE_WARN times, the page's log shows the line as a warning:
+// the composite takes regenerated pixels there that the edit did not ask for.
+export const MATTE_WARN = 3;
+export function matteLargest(summary) {
+  const m = /largest matte is ([\d.]+) times the object, on frame (\d+)/.exec(summary ?? "");
+  return m ? { ratio: +m[1], frame: +m[2], warn: +m[1] > MATTE_WARN } : null;
+}
