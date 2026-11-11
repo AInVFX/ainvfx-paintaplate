@@ -402,8 +402,7 @@ async function warmAll() { // every model loads while the person looks at the pa
 const OPENING = { order: ["upload", "read", "convert", "first", "proxy", "load", "done"], at: "upload",
   label: { upload: "Upload the files", read: "Read the frames", convert: "Convert the colours", first: "Save the first frame",
     proxy: "Encode the playback video", load: "Load it in the browser" } };
-const INGEST = { PaintAPlate_LoadPlate: "read", ImageColorSpace: "convert", ImageScaleToMaxDimension: "first", SaveImage: "first",
-  CreateVideo: "proxy", SaveVideo: "proxy" };
+const INGEST = { PaintAPlate_LoadPlate: "read", PaintAPlate_ColorSpace: "convert", ImageScaleToMaxDimension: "first", SaveImage: "first", PaintAPlate_SaveMovie: "proxy" };
 function opening(name, uploading) {
   $("#empty").hidden = true;
   $("#opening").hidden = false;
