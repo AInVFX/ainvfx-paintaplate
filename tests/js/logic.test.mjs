@@ -689,3 +689,18 @@ test("layersHint and stopHint: the status line names the edits hidden, stopped a
   assert.equal(stopHint({ waits: [3, 4] }), "Stopped. Edits 3 and 4 wait. Enter goes on from where it stopped.");
   assert.equal(stopHint(), "Stopped. Enter goes on from where it stopped.");
 });
+
+// ---------- Viewer, round 1, second pass, turn 2: after Generate, an edit above waits for its own pass ----------
+import { awaitingPass } from "../../web/logic.mjs";
+
+test("awaitingPass: an edit above an edit made again waits for its own pass when it depends on it", () => {
+  const foot = (...cells) => ({ w: 4, h: 1, bits: Uint8Array.from([0, 1, 2, 3].map((i) => (cells.includes(i) ? 1 : 0))) });
+  const edit = (id, cells, more = {}) => ({ id, version: 1, tool: "paint", foot: foot(...cells), on: true, made: true, pending: false, basis: [], ...more });
+  const a = edit(1, [0, 1]), b = edit(2, [1, 2], { basis: [a] }), c = edit(3, [3], { basis: [a, b] }), d = edit(4, [2], { basis: [a, b, c] });
+  assert.deepEqual(awaitingPass([a, b, c, d]), []); // nothing is made again: every edit shows
+  assert.deepEqual(awaitingPass([{ ...a, pending: true }, b, c]), [1]); // b overlaps a; c is far from both, so it stays
+  assert.deepEqual(awaitingPass([{ ...a, pending: true }, b, c, d]), [1, 3]); // d overlaps b, which waits: it waits too
+  assert.deepEqual(awaitingPass([{ ...a, version: 2 }, b, c]), [1]); // a has its new result: b waits until its own pass ends
+  const light = edit(5, [3], { tool: "light", basis: [a, b, c, d] });
+  assert.deepEqual(awaitingPass([a, b, { ...c, pending: true }, d, light]), [4]); // a light depends on every edit under it
+});

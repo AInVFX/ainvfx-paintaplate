@@ -215,14 +215,20 @@ export const CACHE_FLOOR = 960; // px on the long side: frames are never kept sm
 const LOCAL = ["localhost", "127.0.0.1", "::1", "[::1]"];
 export const sameMachine = (host) => LOCAL.includes(host); // ComfyUI serves the page: this host is its machine
 
-// The budget when the setting is Auto. With ComfyUI on this machine: 1 GB, as RV's look-ahead cache, and 512 MB when its
-// card has under 24 GB or is not known yet, because the models need that memory. With ComfyUI on another machine: a
+// The budget when the setting is Auto. With ComfyUI on this machine: 1 GB, as RV's look-ahead cache, and 512 MB on the
+// small memory profile (its borders live in logic.MEMORY_FROM; the page starts on it until the card is known), because the
+// models need that memory. With ComfyUI on another machine: a
 // quarter of the device's memory as the browser reports it (navigator.deviceMemory, 8 GB at most), from 512 MB to 2 GB;
 // 1 GB where the browser does not say (Firefox, Safari).
-export function autoBudget({ host = "", vram = 0, deviceMemory = 0 }) {
-  if (sameMachine(host)) return vram >= 24e9 ? 1e9 : 512e6;
+export function autoBudget({ host = "", profile = "small", deviceMemory = 0 }) {
+  if (sameMachine(host)) return profile === "small" ? 512e6 : 1e9;
   return deviceMemory ? Math.min(2e9, Math.max(512e6, (deviceMemory * 1e9) / 4)) : 1e9;
 }
+
+// The frame cache's line of the log: the budget and where it comes from, then what fits. A size appears once, and one
+// source needs no name. `sources`: [{ name, fits, frames, width, height }].
+export const cacheLine = (budget, why, sources) =>
+  `Frame cache: ${budget} (${why}), ${sources.map((s) => `${s.fits} of ${s.frames} frames${sources.length > 1 ? ` of ${s.name}` : ""} at ${s.width} x ${s.height}`).join("; ")}`;
 
 // The size a source's frames are kept at, and how many fit. `movie`: the movie's own size; `fit`: the size the frame is
 // shown at, in device pixels; `bytes`: per pixel (4 for an ImageBitmap). Frames are kept at the size on show (its width

@@ -18,9 +18,9 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
 import { matteLargest, memoryProfile } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
-import { editList, hiddenAbove, layersHint, stopHint } from "./logic.mjs";
+import { awaitingPass, editList, hiddenAbove, layersHint, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
-import { CACHE_CHOICES, PlayStats, autoBudget, cachePlan, sameMachine, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
+import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
 import { readBack } from "./canvas.mjs"; // the viewer: a few pixels of the view, read without moving it off the GPU
 
 const $ = (q) => document.querySelector(q);
@@ -436,7 +436,7 @@ const look = new Display({ onready: () => render(), onerror: (m) => log(m, "erro
 const CACHE_PREF = "paintaplate.cache";
 S.cache = (() => { try { const v = +localStorage.getItem(CACHE_PREF); return CACHE_CHOICES.includes(v) ? v : 0; } catch { return 0; } })(); // bytes; 0: Auto
 const memoryText = (b) => (b >= 1e9 ? `${Math.round(b / 1e8) / 10} GB` : `${Math.round(b / 1e6)} MB`);
-const cacheBudget = () => (CACHE_MB ? CACHE_MB * 1e6 : S.cache || autoBudget({ host: location.hostname, vram: S.vram, deviceMemory: navigator.deviceMemory }));
+const cacheBudget = () => (CACHE_MB ? CACHE_MB * 1e6 : S.cache || autoBudget({ host: location.hostname, profile: S.memoryProfile.name, deviceMemory: navigator.deviceMemory }));
 const planned = { key: "", said: "", timer: 0 };
 function planCaches() { // each cache's share and frame size, when the budget, the frame's size, the sources on show or the in and out points change
   const p = S.plate, fit = [S.fit.w, S.fit.h].map((v) => Math.round(v * devicePixelRatio));
@@ -456,9 +456,8 @@ function planCaches() { // each cache's share and frame size, when the budget, t
   const shares = cachePlan({ budget, frames, fit, sources });
   for (const s of sources) if (!s.show) s.cache.stopReader(); // the sources on show read first
   for (const s of sources.sort((a, b) => Number(!!b.show) - Number(!!a.show))) s.cache.plan(shares[s.id].budget, s.bytes ? null : [shares[s.id].width, shares[s.id].height]);
-  const why = CACHE_MB ? "set in the address" : S.cache ? "set in View > Cache memory"
-    : `Auto: ComfyUI on ${sameMachine(location.hostname) ? "this machine" : "another machine"}${S.vram ? `, a ${Math.round(S.vram / 1e9)} GB card` : ""}`;
-  const said = `Frame cache: ${memoryText(budget)} (${why}). ${sources.map((s) => `${shares[s.id].fits} of ${frames} frames of ${s.name} fit at ${shares[s.id].width} x ${shares[s.id].height}`).join("; ")}`;
+  const why = CACHE_MB ? "set in the address" : S.cache ? "set in View > Cache memory" : "Auto"; // the memory profile's line names the card
+  const said = cacheLine(memoryText(budget), why, sources.map((s) => ({ name: s.name, frames, ...shares[s.id] })));
   if (said !== planned.said) log((planned.said = said));
   cacheUI();
 }
@@ -971,6 +970,7 @@ function escape() { // Esc: logic.escapeAction. On the edit being generated it s
 function stopGenerating() { // Esc on the edit being generated, or Stop: everything that generates stops where it is, and no job is posted until Enter. What finished is kept, the edit being generated keeps its strokes, and an edit that waited for its turn stays queued
   if (!generating()) return;
   S.halted = true;
+  S.viewStopped = true; S.viewEpoch++; // what was queued is void: Enter runs it again, in order (queueWaiting)
   const edit = S.running;
   if (edit) stopPass(edit);
   cancel("fluid", "snap", "prefetch", ...BACKGROUND);
@@ -1011,14 +1011,23 @@ const editingFirst = () => !!(S.draft || stroke || S.running || S.queued || S.ho
 // it, which is likely to be generated again. The shot on show keeps them on the other frames until Generate.
 const under = { key: "", canvas: null };
 S.viewHidden = ""; // what the status line last said about hidden edits
+S.viewEpoch = 0; // moves at a stop and at the Enter that lifts it: what was queued before is void (queue)
+S.viewStopped = false; // a stop waits for Enter to run what waited (queueWaiting)
 const changing = () => (S.draft?.on ? S.edits.indexOf(S.draft) : -1); // the place in History of the edit being changed: -1 for a new edit, or none
 const hiddenEdits = () => hiddenAbove(S.edits.map((e) => ({ on: e.on, made: !!e.patch })), changing()).map((i) => S.edits[i]);
 const hiddenNote = () => layersHint(num(S.draft), hiddenEdits().map(num));
+// After Generate (logic.awaitingPass): an edit above the edit made again waits for its own pass when it depends on it, and
+// stays hidden until that pass ends. Only while a pass is on its way or a stop holds it: else nothing would bring it back.
+const pendingPass = (e) => e.on && (e.state === "queued" || e.state === "generating");
+function awaiting() {
+  if (changing() >= 0 || !(S.queued || S.running || S.halted || S.edits.some(pendingPass))) return [];
+  return awaitingPass(S.edits.map((e) => ({ ...record(e), basis: e.basis, on: e.on, made: !!e.patch, pending: pendingPass(e) }))).map((i) => S.edits[i]);
+}
 function firstFrame() {
-  const at = changing();
-  if (at < 0) return S.hero;
-  const key = `${S.plate.id}|${S.draft.id}|${at}|${S.heroKey}`;
-  if (under.key !== key) Object.assign(under, { key, canvas: layered(at) });
+  const at = changing(), wait = awaiting();
+  if (at < 0 && !wait.length) return S.hero;
+  const key = `${S.plate.id}|${S.draft?.id ?? ""}|${at}|${S.heroKey}|${wait.map((e) => e.id)}`;
+  if (under.key !== key) Object.assign(under, { key, canvas: layered(at < 0 ? S.edits.length : at, (e) => !wait.includes(e)) });
   return under.canvas;
 }
 
@@ -1835,9 +1844,10 @@ function fluidUI() { // the panel, the tools and the help of a fluid shot; none 
 
 // ---------- Edits: generate, keep, bypass, remove ----------
 
-function queue(fn) {
+function queue(fn) { // one edit at a time, in order. A stop, and the Enter that lifts it, void what was queued before (S.viewEpoch): queueWaiting runs it again, by its state
+  const epoch = S.viewEpoch;
   S.queued++;
-  S.chain = S.chain.then(fn).catch(quiet).finally(() => { S.queued--; touch(); });
+  S.chain = S.chain.then(() => (epoch === S.viewEpoch ? fn() : undefined)).catch(quiet).finally(() => { S.queued--; touch(); });
 }
 
 function launch(edit, another = false) { // Generate: the edit on the first frame, then its shot. A result it already has is used again. `another`: an edit already in History starts again with another seed
@@ -1854,17 +1864,15 @@ function launch(edit, another = false) { // Generate: the edit on the first fram
     log(`Edit ${num(edit)}: unchanged since a result it already has, so nothing runs again`);
     hud(`Edit ${num(edit)} has not changed: its result stays. Ctrl+Enter tries another seed.`, 3000);
     recompose(); historyUI(); render(); timelineUI();
-    queue(regenerateDependents);
-    if (!S.halted) queueWaiting();
+    queueWaiting(() => queue(regenerateDependents));
     return;
   }
   preempt(); // Generate: a full-size or export step in its first half stops for this edit, and runs again later
   edit.state = "queued";
   edit.thumb ??= strokesThumb(edit);
   historyUI(); render();
-  queue(() => generate(edit));
-  queue(regenerateDependents); // the edits above it that saw it run again
-  if (S.halted) stoppedUI(); else queueWaiting(); // under a stop it waits for Enter; after one, what waited follows it
+  queueWaiting(() => { queue(() => generate(edit)); queue(regenerateDependents); }); // the edit, then the edits above it that depend on it; after a stop, what waited follows
+  if (S.halted) stoppedUI(); // under a stop it waits for Enter
 }
 
 function reuse(edit) { // a result made from the same strokes, words, seed and switch comes back without a pass
@@ -1882,19 +1890,27 @@ function keep(edit) { // the result just made, kept by what made it
   while (m.size > RESULTS_KEPT) m.delete(m.keys().next().value);
 }
 
-async function regenerateDependents() {
-  for (const e of [...S.edits]) if (e.on && e.state === "done" && needsRegen(e) && !reuse(e)) await generate(e); // a result made on this plate comes back
+async function regenerateDependents() { // after an edit ran: the edits above it that depend on it run again (needsRegen, as rebuild does)
+  for (const e of [...S.edits]) {
+    if (!e.on || e.state !== "done" || !needsRegen(e)) continue;
+    if (e.base !== S.plate?.path && reuse(e) && !needsRegen(e)) continue; // made on another plate: a result made on this one comes back
+    await generate(e);
+  }
   recompose(); historyUI(); render(); timelineUI();
 }
 
-function queueWaiting() { // Enter after a stop: the edits that waited for their turn run, in History's order, after what Enter started
-  const waited = S.edits.filter((e) => e.waits);
-  for (const e of waited) e.waits = false;
-  if (!waited.length) return;
+// Enter after a stop lifts it. What was queued before Enter is void (queue), so the order never depends on how long a
+// stopped pass takes to end: `first` is what Enter itself starts, then every edit that waited for its turn runs, in
+// History's order, found by its state. With no stop to lift, only `first` runs.
+function queueWaiting(first = null) {
+  const lifted = !S.halted && S.viewStopped;
+  if (lifted) { S.viewStopped = false; S.viewEpoch++; }
+  first?.();
+  if (!lifted) return;
   queue(async () => {
-    for (const e of waited) {
-      if (!S.edits.includes(e) || !e.on || e.state === "drawing" || e.state === "generating") continue;
-      if (e.state === "queued" || !e.patch || e.force || needsRegen(e)) await generate(e); // made in between: nothing runs twice
+    for (const e of [...S.edits]) {
+      if (!e.on || e.state === "drawing" || e === S.running) continue;
+      if (e.state === "queued" || !e.patch || e.force || needsRegen(e)) await generate(e); // what Enter started is made by now: nothing runs twice
     }
     recompose(); historyUI(); render(); timelineUI();
   });
@@ -1966,7 +1982,7 @@ async function baseUpload(below, before, size) { // the frame under an edit, upl
 
 async function generate(edit) {
   if (!S.edits.includes(edit) || !edit.on || edit.state === "drawing") return; // changed since it was queued: it waits for Generate
-  if (S.halted) return void (edit.waits = true); // a stop: no job is posted until Enter, and this edit keeps its turn (queueWaiting)
+  if (S.halted) return; // a stop: no job is posted until Enter, which runs what waits, by its state (queueWaiting)
   const token = (edit.token = (edit.token ?? 0) + 1);
   const alive = () => edit.token === token && S.edits.includes(edit) && edit.on;
   const p = S.plate, light = edit.tool === "light", tag = `e${edit.id}_${token}`;
@@ -2164,7 +2180,8 @@ function again(edit) { // a new seed for one edit; the edits above it follow if 
   mark();
   Object.assign(edit, { seed: (Math.random() * 2 ** 31) | 0, on: true, force: true, launched: performance.now() });
   preempt(); // another try is a Generate: a full-size or export step in its first half stops for it
-  status(`Edit ${num(edit)}: another try, seed ${edit.seed}.`);
+  const said = `Edit ${num(edit)}: another try, seed ${edit.seed}`;
+  if (S.halted) told(said, "It waits for Enter."); else status(`${said}.`);
   rebuild();
 }
 
@@ -2313,14 +2330,14 @@ function hiddenUI() { // edits are layers: the status line says once which edits
 
 function historyUI() {
   editingUI();
-  const list = $("#history"), hidden = new Set(hiddenEdits());
+  const list = $("#history"), hidden = new Set(hiddenEdits()), awaits = new Set(awaiting());
   const fluid = S.fluid && (S.fluid.keys.length || S.fluid.result) ? [fluidRow()] : [];
   $("#history-empty").hidden = S.edits.length > 0 || fluid.length > 0;
   list.replaceChildren(...[...S.edits].reverse().map((e) => {
     const li = document.createElement("li");
     li.dataset.id = e.id;
     li.className = [e.on ? "" : "off", e.state === "generating" || e.state === "queued" || e.state === "drawing" ? "busy" : "",
-      e.state === "failed" ? "failed" : "", S.selected === e ? "selected" : "", hidden.has(e) ? "hidden-above" : ""].join(" ").trim();
+      e.state === "failed" ? "failed" : "", S.selected === e ? "selected" : "", hidden.has(e) || awaits.has(e) ? "hidden-above" : ""].join(" ").trim();
     li.innerHTML = `<img class="thumb" alt=""><div class="what"><span class="title"></span><small></small></div>
       <div class="acts"><button class="edit" title="Edit: its strokes and words come back on the first frame">${ICON.edit}</button><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
       <button class="again" title="Try another">${ICON.again}</button><button class="del" title="Remove this edit">${ICON.del}</button></div>`;
@@ -2330,11 +2347,13 @@ function historyUI() {
     li.querySelector(".title").textContent = `${num(e)}. ${NAME[e.tool]}`;
     const what = e.tool === "erase" ? (e.whole ? "Whole object" : "Painted area") : e.prompt || (e.tool === "light" ? "From the strokes" : "No words");
     const small = li.querySelector("small");
+    const forEnter = S.halted && e.on && e !== S.draft && (e.state === "queued" || e.force || (e.state === "generating" && e !== S.running)); // under a stop its turn comes at Enter: launched, another try, or marked by an undo step
     if (hidden.has(e)) small.textContent = `Hidden until edit ${num(S.draft)} is generated`;
-    else if (STATE[e.state] && e.on) {
+    else if (forEnter || (STATE[e.state] && e.on)) {
       small.innerHTML = '<span class="state"></span>';
-      small.firstChild.textContent = S.halted && e.state === "queued" ? "Waits for Enter" : STATE[e.state];
-    } else small.textContent = e.on ? what : `Bypassed: ${what}`;
+      small.firstChild.textContent = forEnter ? "Waits for Enter" : STATE[e.state];
+    } else if (awaits.has(e)) small.textContent = "Waits to be generated again";
+    else small.textContent = e.on ? what : `Bypassed: ${what}`;
     small.title = e.caption?.text ? `What Klein received: ${e.caption.text}` : what;
     li.querySelector(".edit").onclick = () => { if (keying()) leaveKeys(); pause(); seek(0); select(e); };
     li.querySelector(".eye").onclick = () => toggle(e);
@@ -2353,7 +2372,7 @@ function historyUI() {
 
 function editProgress(edit, f) { // the state line of one History row, without rebuilding the list
   const el = $(`#history li[data-id="${edit.id}"] .state`);
-  if (el) el.textContent = `Generating ${Math.round(f * 100)}%`;
+  if (el && edit.state === "generating") el.textContent = `Generating ${Math.round(f * 100)}%`; // a late message of a stopped pass writes nothing
 }
 
 // ---------- In idle time: the shot, its mattes, the composite to play, then the export ----------

@@ -1,3 +1,5 @@
+import urllib.request
+import json
 """The viewer's checks on playback. The frame cache fills inside one memory budget, at the size the frame is shown. Once
 every frame between the in and out points is in memory, the plate and the shot play from memory, on a clock, with the
 videos paused. A pause writes one line of statistics. A budget too small for the range keeps a window of frames, and the
@@ -41,7 +43,7 @@ def run(browser, port, U):
     cached, frames, size = page.evaluate(CACHE)
     w, h = (int(v) for v in size.split("x"))
     said = plan_line(page)
-    U.check(cached == frames and 960 <= w <= 1280 and "1 GB (Auto: ComfyUI on this machine, a 32 GB card)" in said and f"{frames} of {frames} frames of the plate fit at {w} x {h}" in said,
+    U.check(cached == frames and 960 <= w <= 1280 and "1 GB (Auto), " in said and f"{frames} of {frames} frames at {w} x {h}" in said,
             f"the stripe fills: {cached} of {frames} frames in memory at {w} x {h}, the size the frame is shown, inside the Auto budget ({said[:60]})")
 
     # 2. With every frame in memory the plate plays from memory: the videos stay paused, a clock moves the playhead
@@ -78,7 +80,7 @@ def run(browser, port, U):
         small.wait_for_timeout(500); seen.append(small.evaluate(CACHE)[0])
     cached, frames, size = small.evaluate(CACHE)
     said = plan_line(small)
-    U.check(0 < max(seen) <= 3 and size == "960x528" and "8 MB (set in the address)" in said and f"3 of {frames} frames of the plate fit at 960 x 528" in said,
+    U.check(0 < max(seen) <= 3 and size == "960x528" and "8 MB (set in the address)" in said and f"3 of {frames} frames at 960 x 528" in said,
             f"a budget of 8 MB holds: at most {max(seen)} frames in memory at {size} ({said[:60]})")
     space(small)
     small.wait_for_function(f"{VIEW}.play === 'video'", timeout=15000)
@@ -90,7 +92,7 @@ def run(browser, port, U):
     before = sum("Frame cache: " in line for line in lines(small))
     U.open_path(small, "plates/desk.mp4")
     U.wait_log(small, f"[...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('Frame cache: ')).length > {before}", 60000, "cache plan of the plate opened again")
-    U.check(plan_line(small).count("frames of the plate fit") == 1, f"a plate that opens logs its cache's plan, the same plate again too: {plan_line(small)[:70]}")
+    U.check(plan_line(small).count(" frames at ") == 1, f"a plate that opens logs its cache's plan, the same plate again too: {plan_line(small)[:70]}")
     small.close()
 
     # 6. A shot on show: once its frames are in memory it plays from memory too
@@ -99,6 +101,14 @@ def run(browser, port, U):
     space(page)
     U.wait_log(page, f"{VIEW}.play === 'memory' && {VIEW}.picture === 'shot'", 150000, "shot playing from memory")
     said = plan_line(page)
-    U.check("frames of the shot fit" in said and page.evaluate(PAUSED), f"the shot of the edits plays from memory once its frames are in ({said[-62:]})")
+    U.check("frames of the shot at" in said and page.evaluate(PAUSED), f"the shot of the edits plays from memory once its frames are in ({said[-62:]})")
     space(page)
     page.close()
+
+    # The reference laptop's card, 16 GB of VRAM: the small memory profile gives 512 MB, and the line names no card
+    urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/mock/card", json.dumps({"vram": 17.2e9, "ram": 65.5e9}).encode(), {"Content-Type": "application/json"}), timeout=5).read()
+    laptop = opened(browser, port, U)
+    U.wait_log(laptop, FULL, 150000, "frame cache with every frame of the plate, on the small memory profile")
+    said = plan_line(laptop)
+    U.check(re.fullmatch(r"Frame cache: 512 MB \(Auto\), (\d+) of \1 frames at \d+ x \d+", said) is not None, f"on a 16 GB card beside ComfyUI the Auto budget is 512 MB, and the line names no card: {said}")
+    laptop.close()
