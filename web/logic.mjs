@@ -766,10 +766,17 @@ export function matteLargest(summary) {
 // `slots` are workflow slot values (tile, guide_tiled): one set of workflows serves every profile.
 export const MEMORY_FROM = { medium: 24e9, large: 60e9 }; // bytes of VRAM: a 24 GB card reports about 25.7e9, a 16 GB one about 17.2e9
 export const MEMORY = {
-  small: { warm: [], slots: { tile: 256, guide_tiled: true }, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger card" },
-  medium: { warm: ["edit", "prompt"], slots: { tile: 512, guide_tiled: false }, does: "The edit models load now, LTX with the first shot" },
-  large: { warm: ["edit", "prompt", "warm"], slots: { tile: 512, guide_tiled: false }, does: "Every model loads now and stays loaded" },
+  small: { warm: [], frees: true, slots: { tile: 256, guide_tiled: true }, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger card" },
+  medium: { warm: ["edit", "prompt"], frees: false, slots: { tile: 512, guide_tiled: false }, does: "The edit models load now, LTX with the first shot" },
+  large: { warm: ["edit", "prompt", "warm"], frees: false, slots: { tile: 512, guide_tiled: false }, does: "Every model loads now and stays loaded" },
 };
+// ComfyUI keeps the models of the jobs it has run in memory, ready for the next job. With 16 GB of VRAM under a cap of
+// 52 GB of RAM, a full-size shot left LTX and its text encoder there, 35 GB, and the tracking job after it took the rest:
+// the system stopped ComfyUI (11 Nov). A profile that `frees` holds one family of models at a time: the page asks
+// ComfyUI to free its memory before a job whose family is not that of the job posted before it.
+export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", clean: "ltx", cleanup: "ltx", fluid: "ltx", hdr: "ltx", warm: "ltx",
+  matte: "sam", snap: "sam", ingest: "frames", comp: "frames", review: "frames", export: "frames" }; // by workflow: the models it loads, or frames only
+export const freesBefore = (profile, last, name) => !!profile?.frees && !!last && FAMILY[name] !== FAMILY[last];
 export function memoryProfile({ vram = 0, ram = 0, force = null } = {}) { // `force`: a profile's name, from ?memory= or the paintaplate.memory setting
   const auto = vram >= MEMORY_FROM.large ? "large" : vram >= MEMORY_FROM.medium ? "medium" : "small";
   const forced = Object.hasOwn(MEMORY, force ?? ""), name = forced ? force : auto, gib = (n) => Math.round(n / 2 ** 30);

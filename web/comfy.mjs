@@ -40,6 +40,9 @@ async function indexed(key) { // the outputs a finished job with this key made, 
 }
 
 export const onNotice = (fn) => { notice = fn; };
+let freeFirst = () => false, lastPosted = null; // the page's rule (logic.freesBefore on the memory profile), and the workflow of the last job posted
+export const onFree = (fn) => { freeFirst = fn; };
+const FREE_SETTLE_MS = 600; // ComfyUI's worker applies a free when it wakes: a job posted in the same instant would run first
 // Until ComfyUI has released its models after /free: half of the GPU free, or `limit` ms. Its prompt worker applies a free
 // between prompts, so the retry of a job that ran out of memory waits for it.
 async function released(limit = 15000) {
@@ -146,7 +149,16 @@ export function run(name, values, { kind = name, preview, progress, step, live: 
   const job = { kind, name, preview, progress, live: onLive, retries: 1, key: JSON.stringify(wf.prompt), main: wf.progress, posted: Date.now(), front, nodes: Object.keys(wf.prompt).length,
     step: step && ((id) => step(wf.prompt[id]?.class_type)), classes: Object.fromEntries(Object.entries(wf.prompt).map(([id, n]) => [id, n.class_type])) };
   job.done = new Promise((resolve, reject) => Object.assign(job, { resolve, reject }));
-  job.submit = () => { // each post counts for itself: a job is posted again after a stray interrupt or a memory stop
+  job.submit = async () => { // each post counts for itself: a job is posted again after a stray interrupt or a memory stop
+    const before = lastPosted;
+    lastPosted = name;
+    if (freeFirst(before, name)) { // one family of models in memory at a time: those of the job before leave first
+      await post("/free", { unload_models: true, free_memory: true }).catch(() => {}); // unanswered, the job still runs
+      await new Promise((ok) => setTimeout(ok, FREE_SETTLE_MS));
+      await released();
+      log(`${name}: ComfyUI's memory freed first, the models of ${before} are not this job's`);
+      if (job.cancelled) return; // cancelled while the memory was freed: nothing was posted
+    }
     Object.assign(job, { sent: Date.now(), started: null, at: null, cached: 0, previews: 0, inMain: false });
     return post("/prompt", promptBody(wf.prompt, { front, preview: !!preview })).then(answer).then((j) => {
       if (!j.prompt_id) throw new Error(rejection(j));

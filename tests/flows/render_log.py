@@ -59,4 +59,13 @@ def run(browser, port, U):
     done = [t.split(":")[0] for t in jobs if ": done in" in t]
     U.check(len(done) >= 3 and len(set(done)) == len(done) and all(LINE.match(t) for t in jobs),
             f"through an edit and its preview shot, a job that ended wrote one line: {jobs}")
+
+    # One family of models in memory at a time on a card under 24 GB: ComfyUI's memory is freed before the shot, whose
+    # models are not the edit's, and again before the tracking job that follows it
+    U.wait_log(page, r"window.__lines.some((t) => /^matte [0-9a-f]{8}: done in /.test(t))", 120000, "the line of the tracking job that follows the preview shot")
+    lines = page.evaluate("window.__lines")
+    freed = [t.split(":")[0] for t in lines if "ComfyUI's memory freed first" in t]
+    at = lambda start: next((i for i, t in enumerate(lines) if t.startswith(start)), -1)  # noqa: E731
+    U.check(freed.count("shot") == 1 and freed.count("matte") == 1 and 0 <= at("shot: ComfyUI's memory freed") < at("shot ") < at("matte: ComfyUI's memory freed") < at("matte "),
+            f"a card under 24 GB holds one family of models at a time: memory freed before {freed}")
     page.close()

@@ -3,7 +3,7 @@
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
-import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onLog, onNotice, outputFile, outputFiles, outputText, post, run, setSalt, upload, viewUrl } from "./comfy.mjs";
+import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onFree, onLog, onNotice, outputFile, outputFiles, outputText, post, run, setSalt, upload, viewUrl } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromBytes, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
@@ -16,7 +16,7 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
-import { matteLargest, memoryProfile } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
+import { matteLargest, freesBefore, memoryProfile } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, hiddenAbove, layersHint, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
@@ -378,6 +378,7 @@ function closePlate(message = "Plate closed: its frames left the browser's memor
 }
 
 S.memoryProfile = memoryProfile({ force: MEMORY_ASKED }); // until /system_stats answers: nothing loads early, and LTX works in small tiles
+onFree((last, name) => freesBefore(S.memoryProfile, last, name)); // the small profile: one family of models in memory at a time
 
 async function warmAll() { // every model loads while the person looks at the page: the first edit and the first shot start at once
   const t0 = performance.now(), start = $("#status").textContent; // what the page said at start: the warm-up's line replaces only that

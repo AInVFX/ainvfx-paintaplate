@@ -704,3 +704,18 @@ test("awaitingPass: an edit above an edit made again waits for its own pass when
   const light = edit(5, [3], { tool: "light", basis: [a, b, c, d] });
   assert.deepEqual(awaitingPass([a, b, { ...c, pending: true }, d, light]), [4]); // a light depends on every edit under it
 });
+
+// ---------- The orchestrator, 11 Nov: one family of models in memory at a time on the small profile ----------
+test("every workflow has a family, and the small profile frees ComfyUI's memory when the family changes", async () => {
+  const { FAMILY, freesBefore, memoryProfile } = await import("../../web/logic.mjs");
+  const { readdirSync } = await import("node:fs");
+  const names = readdirSync(new URL("../../web/workflows/", import.meta.url)).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -5));
+  assert.deepEqual(names.filter((n) => !FAMILY[n]), []);
+  const small = memoryProfile({ vram: 17.2e9 }), large = memoryProfile({ vram: 100e9 });
+  assert.equal(freesBefore(small, "shot", "matte"), true); // LTX and its text encoder leave before SAM tracks the paint
+  assert.equal(freesBefore(small, "ingest", "prompt"), true); // the open's frames leave before the edit models load
+  assert.equal(freesBefore(small, "prompt", "edit"), false); // the same family
+  assert.equal(freesBefore(small, "clean", "cleanup"), false);
+  assert.equal(freesBefore(small, null, "ingest"), false); // the first job: nothing to free
+  assert.equal(freesBefore(large, "shot", "matte"), false);
+});
