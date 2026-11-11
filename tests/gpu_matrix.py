@@ -36,7 +36,8 @@ QUICK = ("horse_cow", "horse_erase", "horse_light", "fluid_720")
 ALL = QUICK + ("uhd_cow", "uhd_erase", "uhd_light", "fluid_1080_edit")
 UHD = {"file": "horse_3840x2160_50fps.mp4", "size": (3840, 2160), "fps": 50, "frames": 121}  # « 4K at 50 fps »: every tool runs on it
 STEP = re.compile(r"Render v(\d+): (.+?) took ([\d.]+) s")  # the page's log: one line per render step
-JOB = re.compile(r"(\w+) [0-9a-f?]{1,8}: done in ([\d.]+) s")  # and one per finished job
+JOB = re.compile(r"([a-z]+) [0-9a-f?]{1,8}: done in ([\d.]+) s")  # and one per finished job; a line starts with its time, with no space after it
+CACHED = re.compile(r"([a-z]+) [0-9a-f?]{1,8}: (\d+) of (\d+) nodes from ComfyUI's cache")  # a model loader among them is a model not loaded again
 GB = 2 ** 30
 
 
@@ -132,6 +133,7 @@ def read_log(text):
     return {
         "steps": [(f"v{v} {label}", float(s)) for v, label, s in STEP.findall(text)],
         "jobs": [(name, float(s)) for name, s in JOB.findall(text)],
+        "cached": [(name, int(k), int(n)) for name, k, n in CACHED.findall(text)],
         "indexed": text.count("taken from the job index"),
         "oom": text.count("ran out of memory"),
         "previews": sum(int(n) for n in re.findall(r"(\d+) preview\(s\) received", text)),
@@ -192,7 +194,11 @@ def report(a, machine, results):
         per = {}
         for name, s in r["jobs"]:
             per.setdefault(name, []).append(s)
-        lines += ["", "| Workflow | Jobs | Seconds in all |", "| --- | --- | --- |", *[f"| {n} | {len(v)} | {sum(v):.1f} |" for n, v in per.items()], ""]
+        cached = {}
+        for name, k, n in r["cached"]:
+            cached.setdefault(name, []).append(f"{k} of {n}")
+        lines += ["", "| Workflow | Jobs | Seconds in all | Each job's seconds | Nodes from ComfyUI's cache, per job |", "| --- | --- | --- | --- | --- |",
+                  *[f"| {n} | {len(v)} | {sum(v):.1f} | {', '.join(f'{s:.1f}' for s in v)} | {', '.join(cached.get(n, [])) or 'none'} |" for n, v in per.items()], ""]
         lines += [f"- Memory profile: {r['profile']}.",
                   f"- Peak VRAM {r['vram'] / GB:.1f} GB, peak RAM {r['ram'] / GB:.1f} GB" + (f" (this container: {r['container'] / GB:.1f} GB)" if r["container"] else "") + ".",
                   f"- Out-of-memory retries: {r['oom']}. Jobs taken from the job index, so not timed: {r['indexed']}.",
