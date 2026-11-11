@@ -6,8 +6,8 @@
 # After updating the code on a pod where ComfyUI already runs, --restart stops it first, so the new
 # nodes load:  cd /workspace/ainvfx-paintaplate && git pull && bash tools/runpod_start.sh --restart
 # When the pod cannot reach GitHub, upload the offline bundle instead (tools/offline_bundle.sh).
-# PLATES=1 adds the AInVFX test plates to ComfyUI's input/plates folder, where the Open plate dialog lists them:
-#   PLATES=1 bash tools/runpod_start.sh         (or, on a pod that is already running: bash tools/get_plates.sh)
+# PLATES=1 adds the example plates to ComfyUI's input/plates folder, where the Open plate dialog lists them:
+#   PLATES=1 bash tools/runpod_start.sh         (or, on a pod that is already running: python get_plates.py)
 # As a container's start command (process 1), it also starts Runpod's services and keeps the pod running.
 set -uo pipefail
 W=${WORKDIR:-/workspace}; VENV=${VENV:-/opt/venv}
@@ -27,9 +27,9 @@ fi
 
 if curl -s -m 3 -o /dev/null http://127.0.0.1:8188/system_stats; then
   log "ComfyUI is already running: $APP"
-  if [ "${PLATES:-0}" != 0 ]; then bash "$HERE/tools/get_plates.sh" "$W/ComfyUI" || log "the test plates did not download"; fi
+  if [ "${PLATES:-0}" != 0 ]; then "$VENV/bin/python" "$HERE/get_plates.py" "$W/ComfyUI/input/plates" || log "example plates missing"; fi
 else
-  log "setup: ComfyUI, ComfyUI-LTXVideo, this pack and 60 GB of models (log: $W/setup.log)"
+  log "setup: ComfyUI, ComfyUI-LTXVideo, this pack and 62 GB of models (log: $W/setup.log)"
   bash "$HERE/tools/pod_setup.sh" > "$W/setup.log" 2>&1 &
   setup=$!
   shown=0; last=0
@@ -38,7 +38,7 @@ else
     if [ "$n" -gt "$shown" ]; then sed -n "$((shown + 1)),${n}p" "$W/setup.log" | sed 's/^/    /'; shown=$n; fi
     if [ $((SECONDS - last)) -ge 15 ] && ! grep -q "models done" "$W/models.log" 2>/dev/null; then
       last=$SECONDS
-      log "models: $(du -sb "$W/models" 2>/dev/null | awk '{printf "%.1f", $1 / 1e9}') of 60 GB"
+      log "models: $(du -sb "$W/models" 2>/dev/null | awk '{printf "%.1f", $1 / 1e9}') of 62 GB"
     fi
   }
   while kill -0 "$setup" 2>/dev/null; do report; sleep 2; done
