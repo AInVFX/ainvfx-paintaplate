@@ -61,7 +61,7 @@ def run(browser, port, U):
     page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.30, 0.60), (0.40, 0.60)]); page.keyboard.press("Enter")
     page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
     page.keyboard.press("Escape"); away()
-    U.check(rows() == 1 and status().startswith("Edit 1 stopped") and "Ctrl+Enter" in status() and not page.is_disabled("#generate"),
+    U.check(rows() == 1 and status().startswith("Stopped. Edit 1 keeps") and "Ctrl+Enter" in status() and not page.is_disabled("#generate"),
             f"Esc during the first Klein pass keeps the edit: {rows()} row in History, Generate is live, and the status line says what Enter and Ctrl+Enter do ({status()[:60]})")
     U.check(page.text_content("#editing").startswith("Editing 1") and np.abs(pixel(kept) - plate).sum() > 60,
             f"the stopped edit stays the current edit, and its strokes stay on the frame: {pixel(kept).tolist()} on a plate of {plate.tolist()}")
@@ -110,7 +110,7 @@ def run(browser, port, U):
     page.keyboard.press("Control+Enter")
     page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
     page.keyboard.press("Escape")
-    U.check(rows() == 2 and status().startswith("Edit 2 stopped"), f"Esc on an edit made again keeps it and its strokes: {status()[:40]}")
+    U.check(rows() == 2 and status().startswith("Stopped. Edit 2 keeps"), f"Esc on an edit made again keeps it and its strokes: {status()[:40]}")
     page.keyboard.press("Control+Enter")
     page.wait_for_function(U.DONE.format(n=2), timeout=120000)
     seeds = [int(m.group(1)) for line in U.log_lines(page) for m in [re.search(r'Edit 2: Paint .* seed (\d+)', line)] if m]

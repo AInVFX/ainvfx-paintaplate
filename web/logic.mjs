@@ -587,8 +587,9 @@ export const drawsDeep = (playing, holdsAll) => !playing || holdsAll;
 export const fluidRun = (path) => String(path ?? "").replace(/^output[:/]/, "").replace(/\/(hdr|plate)(\/[^/]*)?$/, "");
 
 // Esc, by what the page is doing. A plate that opens stops opening. The strokes in progress are dropped. The edit being
-// generated stops and stays the current edit, with its strokes, words and seed ("reopen"). Then the selection goes, then a
-// pass on show gives way to the latest result, and last everything that generates stops.
+// generated stops and stays the current edit, with its strokes, words and seed ("reopen"): everything else that generates
+// stops with it, and nothing starts until Enter. Then the selection goes, then a pass on show gives way to the latest
+// result, and last everything that generates stops ("stop").
 export const escapeAction = ({ opening = false, editing, running = false, selected, pinned = false, generating }) =>
   (opening ? "cancelOpen" : editing ? "discard" : running ? "reopen" : selected ? "deselect" : pinned ? "latest" : generating ? "stop" : null);
 
@@ -598,6 +599,28 @@ export function replayOrder(strokes, sam = false) {
   const steps = strokes.map((stroke) => ({ stroke }));
   if (sam) steps.push({ sam: true, cuts: strokes.filter((s) => s.tool === "rub") });
   return steps;
+}
+
+// Edits are layers. While an edit of History is changed, the first frame shows the edits under it and its strokes: its own
+// old result and every edit above it are hidden, since they are likely to be generated again. `edits`: History from the
+// bottom, each { on, made } (made: it has a result); `at`: the place of the edit being changed, -1 for a new edit or none.
+// Returns the places of the edits above it whose result is hidden.
+export const hiddenAbove = (edits, at) => (edits[at]?.on ? edits.flatMap((e, i) => (i > at && e.on && e.made ? [i] : [])) : []);
+
+// Edit numbers in a sentence: "edit 3", "edits 3 and 4", "edits 3, 4 and 5".
+export const editList = (nums) => (nums.length === 1 ? `edit ${nums[0]}` : `edits ${nums.slice(0, -1).join(", ")} and ${nums.at(-1)}`);
+
+// The status line while edits are hidden: "Edit 2 is being changed: edits 3 and 4 are hidden until it is generated."
+export const layersHint = (n, hidden) =>
+  (hidden.length ? `Edit ${n} is being changed: ${editList(hidden)} ${hidden.length > 1 ? "are" : "is"} hidden until it is generated.` : "");
+
+// The status line after a stop: nothing starts until Enter. The edit that was being generated keeps its strokes, and the
+// edits that waited for their turn stay queued. `edit`: the stopped edit's number, null when no edit was being generated.
+export function stopHint({ edit = null, waits = [] } = {}) {
+  const list = waits.length ? editList(waits) : "";
+  const wait = list ? ` ${list[0].toUpperCase()}${list.slice(1)} ${waits.length > 1 ? "wait" : "waits"}.` : "";
+  return edit === null ? `Stopped.${wait} Enter goes on from where it stopped.`
+    : `Stopped. Edit ${edit} keeps its strokes, words and seed.${wait} Enter generates again, Ctrl+Enter tries another seed, Esc drops the strokes.`;
 }
 
 // The light brush lays soft dabs at a fixed spacing along a stroke, whatever the pointer's speed, so the light builds up

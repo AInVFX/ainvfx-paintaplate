@@ -18,6 +18,7 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
 import { matteLargest, memoryProfile } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
+import { editList, hiddenAbove, layersHint, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { CACHE_CHOICES, PlayStats, autoBudget, cachePlan, sameMachine, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
 import { readBack } from "./canvas.mjs"; // the viewer: a few pixels of the view, read without moving it off the GPU
@@ -960,32 +961,34 @@ function dropLive() { // nothing of a pass that stopped or failed stays on scree
 }
 
 function generating() { return !!(S.queued || S.piping || S.fluid?.busy); }
-function escape() { // Esc: logic.escapeAction. The edit being generated stops and keeps its strokes; a selection goes before what else generates
+function escape() { // Esc: logic.escapeAction. On the edit being generated it stops everything, and that edit keeps its strokes; a selection goes before what else generates
   const busy = generating(), what = escapeAction({ opening: !!openCtl, editing: !!S.draft, running: !!S.running, selected: !!S.selected, pinned: !!S.pass, generating: busy });
   if (what === "cancelOpen") return cancelOpen();
   if (what === "discard") return discard();
-  if (what === "reopen") return stopPass(S.running);
+  if (what === "reopen") return stopGenerating();
   if (what === "deselect") { select(null); if (busy) hud("Deselected. Esc again stops generating", 2500); return; }
   if (S.cmp) return endCompare(); // a comparison in the wipe ends before the pass on show
   if (what === "latest") return choosePass(S.pass); // a pass on show: back to the latest
   if (what === "stop") stopGenerating();
 }
-function stopGenerating() { // everything that generates stops where it is: what finished is kept, and Enter goes on from there
+function stopGenerating() { // Esc on the edit being generated, or Stop: everything that generates stops where it is, and no job is posted until Enter. What finished is kept, the edit being generated keeps its strokes, and an edit that waited for its turn stays queued
   if (!generating()) return;
   S.halted = true;
   const edit = S.running;
-  if (edit) stopPass(edit, false); // it stays the current edit, with its strokes
-  cancel("fluid", ...BACKGROUND);
+  if (edit) stopPass(edit);
+  cancel("fluid", "snap", "prefetch", ...BACKGROUND);
   dropLive();
-  if (edit) {
-    const said = `Stopped. Edit ${num(edit)} keeps its strokes, words and seed: Enter generates it again, Ctrl+Enter tries another seed`;
-    hud(said, 4500); status(`${said}.`);
-  } else {
-    log("Stopped: what finished is kept. Enter goes on from where it stopped");
-    hud("Stopped. Enter goes on from where it stopped", 3000);
-    status("Stopped. Enter goes on from where it stopped.");
-  }
+  const waits = S.edits.filter((e) => e.state === "queued").map(num);
+  log(`Stopped: ${edit ? `edit ${num(edit)} keeps its strokes, words and seed` : "what finished is kept"}${waits.length ? `, ${editList(waits)} ${waits.length > 1 ? "wait" : "waits"}` : ""}. Nothing starts until Enter`);
+  hud(edit ? `Stopped. Enter generates edit ${num(edit)} again` : "Stopped. Enter goes on from where it stopped", 4000);
+  historyUI(); // before the status line: a waiting row says so, and the stop's sentence comes last
+  stoppedUI(edit);
   stagesUI(); generateUI();
+}
+
+function stoppedUI(edit = null) { // the status line under a stop (logic.stopHint): what keeps its strokes, what waits and what Enter does, then what is hidden
+  const waits = S.edits.filter((e) => e.state === "queued").map(num);
+  status([stopHint({ edit: edit && num(edit), waits }), hiddenNote()].filter(Boolean).join(" "), "hint");
 }
 
 // The shot on show: its movie and the colour space of the movie's values, its EXR frames, and (the contract's fifth
@@ -1006,14 +1009,19 @@ function setShot(src, key, space = "@model", frames = null, { framesSpace = null
 const held = { canvas: canvas([1, 1]), url: "" }; // the last shot frame drawn while paused: shown while the shot video seeks
 const editingFirst = () => !!(S.draft || stroke || S.running || S.queued || S.hover || S.peek);
 
-// While a made edit is changed, the first frame shows the other edits and its strokes without its own old result, so a
-// rubbed stroke leaves no generated paint behind. The shot on show keeps that result on the other frames until Generate.
+// Edits are layers (logic.hiddenAbove). While an edit of History is changed, the first frame shows the edits under it and
+// its strokes. Its own old result is hidden, so a rubbed stroke leaves no generated paint behind, and so is every edit above
+// it, which is likely to be generated again. The shot on show keeps them on the other frames until Generate.
 const under = { key: "", canvas: null };
+S.viewHidden = ""; // what the status line last said about hidden edits
+const changing = () => (S.draft?.on ? S.edits.indexOf(S.draft) : -1); // the place in History of the edit being changed: -1 for a new edit, or none
+const hiddenEdits = () => hiddenAbove(S.edits.map((e) => ({ on: e.on, made: !!e.patch })), changing()).map((i) => S.edits[i]);
+const hiddenNote = () => layersHint(num(S.draft), hiddenEdits().map(num));
 function firstFrame() {
-  const d = S.draft;
-  if (!d?.patch || !d.on || !S.edits.includes(d)) return S.hero;
-  const key = `${S.plate.id}|${d.id}|${S.heroKey}`;
-  if (under.key !== key) Object.assign(under, { key, canvas: layered(S.edits.length, (e) => e !== d) });
+  const at = changing();
+  if (at < 0) return S.hero;
+  const key = `${S.plate.id}|${S.draft.id}|${at}|${S.heroKey}`;
+  if (under.key !== key) Object.assign(under, { key, canvas: layered(at) });
   return under.canvas;
 }
 
@@ -1338,8 +1346,9 @@ const busy = (e) => e === S.running || e.state === "queued"; // an edit being ge
 function reopenDone(edit) { // a finished edit changes (strokes, words, the switch): strokes again until Generate; renders go on
   edit.kept = edit.strokes.length;
   edit.state = "drawing";
+  S.draft = edit; // before History is drawn: its rows and the status line say what this edit hides
   historyUI();
-  return (S.draft = edit);
+  return edit;
 }
 
 function takeInputs(edit) { // the words and the Whole object switch belong to the edit being drawn, as they change
@@ -1840,7 +1849,6 @@ function launch(edit, another = false) { // Generate: the edit on the first fram
   if (S.draft === edit) S.draft = null;
   clearTimeout(S.prefetchTimer);
   if (!edit.strokes.length) return generateUI();
-  S.halted = false; // a stop lasts until the next Generate: this edit runs, then its render
   takeInputs(edit);
   if (another && S.edits.includes(edit)) edit.seed = (Math.random() * 2 ** 31) | 0;
   if (!S.edits.includes(edit)) S.edits.push(edit);
@@ -1852,6 +1860,7 @@ function launch(edit, another = false) { // Generate: the edit on the first fram
     hud(`Edit ${num(edit)} has not changed: its result stays. Ctrl+Enter tries another seed.`, 3000);
     recompose(); historyUI(); render(); timelineUI();
     queue(regenerateDependents);
+    if (!S.halted) queueWaiting();
     return;
   }
   preempt(); // Generate: a full-size or export step in its first half stops for this edit, and runs again later
@@ -1860,6 +1869,7 @@ function launch(edit, another = false) { // Generate: the edit on the first fram
   historyUI(); render();
   queue(() => generate(edit));
   queue(regenerateDependents); // the edits above it that saw it run again
+  if (S.halted) stoppedUI(); else queueWaiting(); // under a stop it waits for Enter; after one, what waited follows it
 }
 
 function reuse(edit) { // a result made from the same strokes, words, seed and switch comes back without a pass
@@ -1880,6 +1890,19 @@ function keep(edit) { // the result just made, kept by what made it
 async function regenerateDependents() {
   for (const e of [...S.edits]) if (e.on && e.state === "done" && needsRegen(e) && !reuse(e)) await generate(e); // a result made on this plate comes back
   recompose(); historyUI(); render(); timelineUI();
+}
+
+function queueWaiting() { // Enter after a stop: the edits that waited for their turn run, in History's order, after what Enter started
+  const waited = S.edits.filter((e) => e.waits);
+  for (const e of waited) e.waits = false;
+  if (!waited.length) return;
+  queue(async () => {
+    for (const e of waited) {
+      if (!S.edits.includes(e) || !e.on || e.state === "drawing" || e.state === "generating") continue;
+      if (e.state === "queued" || !e.patch || e.force || needsRegen(e)) await generate(e); // made in between: nothing runs twice
+    }
+    recompose(); historyUI(); render(); timelineUI();
+  });
 }
 
 function select(edit) { // a History row becomes the current edit: its words in the prompt field, its strokes on the frame
@@ -1924,18 +1947,16 @@ function reopen(edit) { // the edit being generated, or waiting for its turn, ch
   if (S.running === edit) { cancel("edit", "snap", "prefetch"); S.running = null; }
   edit.state = "drawing"; edit.preview = edit.latent = null;
   edit.kept ??= edit.strokes.length; // the strokes its last result was made from: a second Esc goes back to them
+  S.draft = edit; // before History is drawn, as in reopenDone
   historyUI();
-  return (S.draft = edit);
+  return edit;
 }
 
-function stopPass(edit, say = true) { // Esc or Stop on the edit being generated: its pass stops, and it stays the current edit with its strokes, words and seed
+function stopPass(edit) { // the edit being generated stops, and it stays the current edit with its strokes, words and seed
   clearTimeout(S.prefetchTimer);
+  select(edit); // its words, its tool and its switch come back to the prompt bar; strokes in progress on another edit join History first
   reopen(edit);
-  S.selected = edit;
   recompose(); editingUI(); render();
-  if (!say) return;
-  const said = `Edit ${num(edit)} stopped. It keeps its strokes, words and seed: Enter generates it again, Ctrl+Enter tries another seed, Esc drops the strokes`;
-  hud(said, 4500); status(`${said}.`);
 }
 
 function activeBefore(edit) {
@@ -1950,6 +1971,7 @@ async function baseUpload(below, before, size) { // the frame under an edit, upl
 
 async function generate(edit) {
   if (!S.edits.includes(edit) || !edit.on || edit.state === "drawing") return; // changed since it was queued: it waits for Generate
+  if (S.halted) return void (edit.waits = true); // a stop: no job is posted until Enter, and this edit keeps its turn (queueWaiting)
   const token = (edit.token = (edit.token ?? 0) + 1);
   const alive = () => edit.token === token && S.edits.includes(edit) && edit.on;
   const p = S.plate, light = edit.tool === "light", tag = `e${edit.id}_${token}`;
@@ -2049,7 +2071,7 @@ const strokesSig = (strokes) => strokes.map((s) => `${s.tool}:${s.color ?? ""}:$
 const recordOf = (e) => JSON.stringify({ base: S.plate?.path, strokes: strokesSig(e.strokes), tool: e.tool, prompt: e.prompt, seed: e.seed, whole: !!e.whole });
 
 function prefetch(edit) { // the snap and the prompt writer start as the strokes stop: by the time the edit starts, they are often done
-  if (!edit || !painted(edit) || !S.plate) return;
+  if (!edit || !painted(edit) || !S.plate || S.halted) return; // under a stop no job is posted: Generate prepares the edit
   cancel("warm", "prefetch");
   edit.preparing = prepare(edit, S.edits.indexOf(edit), "prefetch").catch(() => {});
 }
@@ -2089,6 +2111,7 @@ async function findWhole(edit, before, kind) { // SAM 3.1 finds the whole object
   edit.sam = snap(sam, [edit.mask.width, edit.mask.height]);
   redrawStrokes(edit);
   render();
+  status(`Found the ${edit.prompt || "object"} under the stroke: the erase takes the whole object.`, "hint");
 }
 
 function footprint(edit) { // where the edit changed the frame, on a coarse grid, one cell wider
@@ -2286,16 +2309,23 @@ function strokesThumb(edit) { // the frame with the strokes, until the edit has 
   return t.toDataURL("image/jpeg", 0.8);
 }
 
+function hiddenUI() { // edits are layers: the status line says once which edits the edit being changed hides (firstFrame)
+  const note = hiddenNote();
+  if (note === S.viewHidden) return;
+  S.viewHidden = note;
+  if (note) status(note, "hint");
+}
+
 function historyUI() {
   editingUI();
-  const list = $("#history");
+  const list = $("#history"), hidden = new Set(hiddenEdits());
   const fluid = S.fluid && (S.fluid.keys.length || S.fluid.result) ? [fluidRow()] : [];
   $("#history-empty").hidden = S.edits.length > 0 || fluid.length > 0;
   list.replaceChildren(...[...S.edits].reverse().map((e) => {
     const li = document.createElement("li");
     li.dataset.id = e.id;
     li.className = [e.on ? "" : "off", e.state === "generating" || e.state === "queued" || e.state === "drawing" ? "busy" : "",
-      e.state === "failed" ? "failed" : "", S.selected === e ? "selected" : ""].join(" ").trim();
+      e.state === "failed" ? "failed" : "", S.selected === e ? "selected" : "", hidden.has(e) ? "hidden-above" : ""].join(" ").trim();
     li.innerHTML = `<img class="thumb" alt=""><div class="what"><span class="title"></span><small></small></div>
       <div class="acts"><button class="edit" title="Edit: its strokes and words come back on the first frame">${ICON.edit}</button><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
       <button class="again" title="Try another">${ICON.again}</button><button class="del" title="Remove this edit">${ICON.del}</button></div>`;
@@ -2305,9 +2335,10 @@ function historyUI() {
     li.querySelector(".title").textContent = `${num(e)}. ${NAME[e.tool]}`;
     const what = e.tool === "erase" ? (e.whole ? "Whole object" : "Painted area") : e.prompt || (e.tool === "light" ? "From the strokes" : "No words");
     const small = li.querySelector("small");
-    if (STATE[e.state] && e.on) {
+    if (hidden.has(e)) small.textContent = `Hidden until edit ${num(S.draft)} is generated`;
+    else if (STATE[e.state] && e.on) {
       small.innerHTML = '<span class="state"></span>';
-      small.firstChild.textContent = STATE[e.state];
+      small.firstChild.textContent = S.halted && e.state === "queued" ? "Waits for Enter" : STATE[e.state];
     } else small.textContent = e.on ? what : `Bypassed: ${what}`;
     small.title = e.caption?.text ? `What Klein received: ${e.caption.text}` : what;
     li.querySelector(".edit").onclick = () => { if (keying()) leaveKeys(); pause(); seek(0); select(e); };
@@ -2320,6 +2351,7 @@ function historyUI() {
     li.onclick = (ev) => { if (!ev.target.closest("button")) { if (keying()) leaveKeys(); pause(); seek(0); select(S.selected === e ? null : e); } };
     return li;
   }), ...fluid);
+  hiddenUI();
   undoUI();
   exportUI(); timelineUI();
 }

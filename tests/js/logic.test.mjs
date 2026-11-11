@@ -663,3 +663,27 @@ test("a memory profile changes slot values only: one set of workflows, tiles of 
   }
   for (const n of nodes(fillFor(flow("cleanup"), { ...MEMORY.small.slots }), "VAEEncodeTiled")) assert.equal(n.inputs.tile_size, 256);
 });
+
+// ---------- Viewer, round 1, second pass: edits are layers, and a stop stops everything ----------
+import { editList, hiddenAbove, layersHint, stopHint } from "../../web/logic.mjs";
+
+test("hiddenAbove: while an edit of History is changed, the made edits above it are hidden", () => {
+  const made = { on: true, made: true }, off = { on: false, made: true }, fresh = { on: true, made: false };
+  assert.deepEqual(hiddenAbove([made, made, made, made], 1), [2, 3]);
+  assert.deepEqual(hiddenAbove([made, made, off, fresh, made], 1), [4]); // a bypassed edit and an edit without a result have nothing to hide
+  assert.deepEqual(hiddenAbove([made, made, made], 2), []); // the edit on top hides nothing
+  assert.deepEqual(hiddenAbove([made, made], -1), []); // a new edit, or none: every edit shows
+  assert.deepEqual(hiddenAbove([made, off, made], 1), []); // a bypassed edit being changed hides nothing
+});
+
+test("layersHint and stopHint: the status line names the edits hidden, stopped and waiting", () => {
+  assert.equal(editList([3]), "edit 3");
+  assert.equal(editList([3, 4]), "edits 3 and 4");
+  assert.equal(editList([3, 4, 5]), "edits 3, 4 and 5");
+  assert.equal(layersHint(2, [3, 4]), "Edit 2 is being changed: edits 3 and 4 are hidden until it is generated.");
+  assert.equal(layersHint(2, [3]), "Edit 2 is being changed: edit 3 is hidden until it is generated.");
+  assert.equal(layersHint(2, []), "");
+  assert.equal(stopHint({ edit: 2, waits: [3] }), "Stopped. Edit 2 keeps its strokes, words and seed. Edit 3 waits. Enter generates again, Ctrl+Enter tries another seed, Esc drops the strokes.");
+  assert.equal(stopHint({ waits: [3, 4] }), "Stopped. Edits 3 and 4 wait. Enter goes on from where it stopped.");
+  assert.equal(stopHint(), "Stopped. Enter goes on from where it stopped.");
+});
