@@ -3906,6 +3906,7 @@ function enter(another) { // Generate (Enter): the edit in progress, then its sh
 
 function renderPending() { // the render of the edits on show failed, or never started: Generate starts it again
   const r = S.renders.get(S.heroKey);
+  if (S.halted && S.edits.some((e) => e.on && e.state === "queued")) return true; // the viewer: under a stop an edit waits for its turn, and Generate runs it (queueWaiting)
   return !!S.plate && !keying() && !!S.heroKey && !S.running && !S.queued && (S.halted || (r ? !!r.failed : !S.piping));
 }
 

@@ -98,3 +98,21 @@ def run(browser, port, U):
     order = [m.group(1) for line in page.evaluate("window.__lines") for m in [re.match(r"Edit (\d): Paint ", line)] if m]
     U.check(order == ["4", "1"], f"Enter runs the stopped edit, then the other try that waited: passes of edits {order}")
     page.close()
+
+    # 7. No result yet, a stop, then Esc drops the stopped edit: the Generate button stays live for the edit that waits
+    page = browser.new_page(viewport={"width": 1400, "height": 900})
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.wait_for_function(f"{STATUS}.startsWith('Ready')", timeout=60000)
+    U.open_path(page, "plates/desk.mp4")
+    page.wait_for_function(OPEN, timeout=60000)
+    hold(port, output="patch", seconds=30)
+    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.20, 0.75), (0.30, 0.75)]); page.keyboard.press("Enter")
+    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
+    page.keyboard.press("n"); U.paint_once(page, "a blue vase", [(0.45, 0.20), (0.55, 0.20)]); page.keyboard.press("n")
+    page.wait_for_function("document.querySelectorAll('#history li').length === 2", timeout=10000)
+    page.keyboard.press("Escape"); page.wait_for_timeout(300); page.keyboard.press("Escape")
+    U.check(U.until(page, "document.querySelectorAll('#history li').length === 1 && !document.querySelector('#generate').disabled", 5000),
+            f"with no result yet, the Generate button stays live while an edit waits: disabled {page.is_disabled('#generate')}")
+    page.click("#generate")
+    U.check(U.until(page, U.DONE.format(n=1), 60000) and U.row_words(page) == ["a blue vase"], f"and Generate runs it: History {U.row_words(page)}")
+    page.close()
