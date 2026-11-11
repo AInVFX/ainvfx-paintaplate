@@ -8,8 +8,8 @@ blurs the reference inside the mask and streams step previews, the shot pastes t
 every frame, the matte repeats the first mask, the composite and the export blend through the matte. The
 download route and the plate browser are the pack's own routes.py. --plate writes a 1280 x 704 test plate to input/plates/desk.mp4.
 Each job waits a little, so the page's progress, cancelling and ordering behave as they do on a GPU. --speed divides
-these waits (the page suite runs with it). The windows a check holds open keep their own time: /mock/slow, /mock/oom
-and the second after /free.
+these waits (the page suite runs with it). The windows a check holds open keep their own time: /mock/slow, /mock/oom,
+/mock/hold and the second after /free.
 """
 import argparse, asyncio, importlib, io, json, os, struct, sys, time, types, uuid
 from fractions import Fraction
@@ -154,11 +154,12 @@ def inputs_by_slot(prompt):
 
 async def steps(pid, total, seconds, preview=None, live=None):
     every, frame = live or (0, None)
-    seconds = STATE.get("held", {}).get(pid, seconds)  # a job /mock/hold keeps open
+    held = STATE.get("held", {}).get(pid)  # a job /mock/hold keeps open lasts the seconds asked for: --speed leaves it alone
+    wait = seconds / total / A.speed if held is None else held / total
     for k in range(total):
         if STATE["interrupt"]:
             raise asyncio.CancelledError()
-        await asyncio.sleep(seconds / total / A.speed)
+        await asyncio.sleep(wait)
         await send({"type": "progress", "data": {"prompt_id": pid, "value": k + 1, "max": total}})
         if every and k % every == 0:  # as Live Preview: the first at step 1, then every few steps, a WebP in the temp folder
             name = f"{pid}_{k + 1:03d}.webp"
