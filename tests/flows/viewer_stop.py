@@ -58,4 +58,18 @@ def run(browser, port, U):
         page.check("#whole")
     U.paint_once(page, "cup", [(0.6, 0.4), (0.62, 0.45)])
     U.check(U.until(page, f"{STATUS}.startsWith('Found the cup under the stroke')", 30000), f"once SAM's masks are kept the status line says the object is found: {status()}")
+
+    # 5. The stopped edit dropped by a second Esc, then Enter: the edit that waited still runs
+    page.keyboard.press("Escape")  # the erase strokes of check 4 go
+    hold(port, output="patch", seconds=30)
+    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.70, 0.75), (0.80, 0.75)]); page.keyboard.press("Enter")
+    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
+    page.keyboard.press("n"); U.paint_once(page, "a blue vase", [(0.70, 0.25), (0.80, 0.25)]); page.keyboard.press("n")
+    page.wait_for_function("document.querySelectorAll('#history li').length === 4", timeout=10000)
+    page.keyboard.press("Escape"); page.wait_for_timeout(300); page.keyboard.press("Escape")
+    U.check(U.until(page, "document.querySelectorAll('#history li').length === 3", 5000) and states() == ["Waits for Enter"],
+            f"a second Esc drops the stopped edit, and the other edit still waits: {states()}")
+    page.keyboard.press("Enter")
+    U.check(U.until(page, U.DONE.format(n=3), 60000) and U.row_words(page)[0] == "a blue vase",
+            f"Enter with no edit in progress runs the edit that waited: History {U.row_words(page)}, {states()}")
     page.close()
