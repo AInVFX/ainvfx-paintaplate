@@ -170,6 +170,7 @@ async function finish(id, error) {
   }
   live.delete(job);
   if (error) { log(`${job.name} ${short(id)}: failed after ${took(job)}: ${error}`, "error"); return job.reject(new Error(error)); }
+  if (job.previews) log(`${job.name} ${short(id)}: ${job.previews} preview(s) received`); // step previews or live previews: what computed was sent
   let out = (await historyRecord(id))?.outputs ?? {};
   const fresh = files(out).length || Object.values(out).some((o) => o.text?.length);
   if (fresh) memo.set(job.key, out);
@@ -217,7 +218,8 @@ function message({ data }) {
     if (v.getUint32(0) !== 4) return;
     const n = v.getUint32(4);
     const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(data, 8, n)));
-    byId.get(meta.prompt_id)?.preview?.(new Blob([new Uint8Array(data, 8 + n)], { type: meta.image_type }));
+    const shown = byId.get(meta.prompt_id);
+    if (shown?.preview) { shown.previews = (shown.previews ?? 0) + 1; shown.preview(new Blob([new Uint8Array(data, 8 + n)], { type: meta.image_type })); }
     return;
   }
   const { type, data: d } = JSON.parse(data);
@@ -231,7 +233,7 @@ function message({ data }) {
     else if (job?.inMain) job.progress?.(0.97); // the main node is done; saving remains
   } else if (type === "progress") {
     if (job && (!job.main.size || job.main.has(String(d.node)))) job.progress?.(0.02 + (0.93 * d.value) / d.max);
-  } else if (type === "paintaplate.live") { if (d.off) liveOff(d.off); else job?.live?.(d); } // a live preview of a shot being sampled, or why there is none (nodes.py, Live Preview)
+  } else if (type === "paintaplate.live") { if (d.off) liveOff(d.off); else if (job?.live) { job.previews = (job.previews ?? 0) + 1; job.live(d); } } // a live preview of a shot being sampled, or why there is none (nodes.py, Live Preview)
   else if (type === "execution_success") finish(d.prompt_id);
   else if (type === "execution_error") finish(d.prompt_id, `${d.node_type}: ${d.exception_message}`);
   else if (type === "execution_interrupted") finish(d.prompt_id, "cancelled");
