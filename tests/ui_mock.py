@@ -5,6 +5,7 @@
     python tests/ui_mock.py --only keys,scene   the flows named
     python tests/ui_mock.py --jobs 4            four flows side by side (default: one per CPU)
     python tests/ui_mock.py --speed 1           the mock's jobs at their full simulated time (default: 8 times shorter)
+    python tests/ui_mock.py --shard 2/4         the second of four parts of the flows, for machines side by side (the CI)
 
 A flow is one subject of the page: the Open dialog, a first edit and its render, a fluid shot, the keys. Each flow runs in
 its own process, against its own mock ComfyUI (its own port and folders) and its own browser. So a flow starts from its own
@@ -1090,14 +1091,21 @@ def module_flow(name):
     return lambda browser, port: module.run(browser, port, sys.modules[__name__])
 
 
-def flow_names():
-    """Every flow, in the order of a run: the flows of this file, then one per module of tests/flows, by name."""
+def flow_names(shard=""):
+    """Every flow, in the order of a run: the flows of this file, then one per module of tests/flows, by name. A shard,
+    "2/4", is every fourth flow from the second: the parts hold different flows and, together, all of them."""
     folder = os.path.join(HERE, "flows")
     extra = sorted(n[:-3] for n in os.listdir(folder) if n.endswith(".py") and not n.startswith("_")) if os.path.isdir(folder) else []
     twice = sorted(set(extra) & set(FLOWS))
     if twice:
         raise SystemExit(f"tests/flows: {', '.join(twice)} is also the name of a flow of ui_mock.py; rename the file")
-    return [*FLOWS, *extra]
+    names = [*FLOWS, *extra]
+    if shard:
+        part, parts = (int(n) if n.isdigit() else 0 for n in (shard.split("/") + ["", ""])[:2])
+        if not 1 <= part <= parts:
+            raise SystemExit(f'a shard reads "2/4", the second of four parts: {shard}')
+        names = names[part - 1::parts]
+    return names
 
 
 # ---------- The plates, made once for a run and copied into each flow's folders ----------
@@ -1189,7 +1197,7 @@ def run_child(name, port, a, plates, live, printing):
         if not live:
             print("\n".join([f"== {name}", *lines]))
         print(f"== {name}: {checks} checks in {seconds:.0f} s, {'FAILED' if failure else 'passed'}", flush=True)
-    return {"flow": name, "checks": checks, "seconds": round(seconds, 1), "failure": failure}
+    return {"flow": name, "checks": checks, "seconds": round(seconds, 1), "failure": failure, "lines": lines}
 
 
 def table(results, wall, jobs):
@@ -1208,6 +1216,8 @@ def main():
     ap.add_argument("--list", action="store_true", help="name the flows and stop")
     ap.add_argument("--only", default="", help="run these flows only: names from --list, separated by commas")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="how many flows run side by side (default: one per CPU)")
+    ap.add_argument("--shard", default="", help='one part of the flows, as "2/4": the second of four parts')
+    ap.add_argument("--json", help="write every flow's result to this file: its checks, its time, its failure, its lines")
     ap.add_argument("--limit", type=int, default=600, help="seconds a flow may take before it is stopped and counted as failed")
     ap.add_argument("--speed", type=float, default=8, help="divide the simulated time of the mock's jobs by this (1: as mock_comfy.py runs alone)")
     ap.add_argument("--port", type=int, default=8199, help="the first mock's port; flows side by side take the next ones")
@@ -1224,12 +1234,12 @@ def main():
                 print(f"  FAIL {type(exc).__name__}: {(str(exc).strip() or 'no message').splitlines()[0]}", flush=True)
             sys.exit(1)
         return
-    names = flow_names()
+    names = flow_names(a.shard)
     if a.list:
         return print("\n".join(names))
     if a.only:
         picked = [n.strip() for n in a.only.split(",") if n.strip()]
-        unknown = [n for n in picked if n not in names]
+        unknown = [n for n in picked if n not in flow_names()]
         if unknown:
             ap.error(f"no flow named {', '.join(unknown)}; --list names them")
         names = picked
@@ -1252,6 +1262,9 @@ def main():
     with ThreadPoolExecutor(jobs) as pool:
         results = list(pool.map(one, names))
     table(results, time.time() - t0, jobs)
+    if a.json:
+        with open(a.json, "w") as f:
+            json.dump(results, f, indent=1)
     sys.exit(1 if any(r["failure"] for r in results) else 0)
 
 
