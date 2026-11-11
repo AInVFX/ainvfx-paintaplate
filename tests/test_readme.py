@@ -38,6 +38,11 @@ class Readme(unittest.TestCase):
         for path in named:
             self.assertTrue(os.path.exists(os.path.join(ROOT, path)), path)
 
+    def test_the_trace_it_names_is_in_the_code(self):
+        with open(os.path.join(ROOT, "routes.py"), encoding="utf-8") as fh:
+            self.assertIn('os.environ.get("PAINTAPLATE_TRACE") == "1"', fh.read())
+        self.assertIn("`PAINTAPLATE_TRACE=1`", self.text)
+
     def test_its_words(self):
         self.assertNotIn("\u2014", self.text, "no em dash")
         self.assertNotIn("RunPod", self.text, "Runpod")

@@ -23,21 +23,22 @@ Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com
 | **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers) with its matte, as one zip. **ComfyUI graph** saves the whole scene as one ComfyUI workflow |
 | **Deliver** | Readies a shot for delivery. Its bit-depth pass turns an SDR result into half-float EXR frames |
 
-The limits that matter: edits are painted on the first frame only; a shot holds up to 121 frames; edits are made at up to 1920 px on the long side; a plate can be up to 3840 x 2160.
+The limits that matter today: edits are painted on the first frame only; shots are tested up to 121 frames; edits are made at up to 1920 px on the long side; a plate can be up to 3840 x 2160.
+
+Planned next, and not there yet: shots up to 20 seconds, plates at LTX 2.5's largest size (3840 x 2176), and every tool proven at up to 50 fps. Lightricks documents LTX 2.5 at up to 20 seconds for 24 or 25 fps and up to 1080p, and at up to 10 seconds for 48 or 50 fps or for larger sizes.
 
 ## What it needs
 
 - **ComfyUI** v0.43.0 or newer, with [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo). It is tested on ComfyUI v0.44.2: `tools/pins.sh` names the tested commits.
-- **An NVIDIA GPU with 32 GB of VRAM or more.** This is what is tested. On 32 GB every step finishes at 1920 x 1088 and 121 frames: an erase takes about 11 minutes on an RTX 5090, against about 4 minutes on a 96 GB card. A plate above 2K needs 96 GB: on an RTX PRO 6000, a 3840 x 2160 plate of 121 frames took 341 s to erase and 367 s to paint.
-- **A 16 GB card is being tested.** The page then loads one model at a time and runs LTX in tiles, so each step takes longer.
-- **RAM.** On 11 November 2026, opening a 1920 x 1080 plate of 121 frames took more than 54 GB of RAM. We are fixing this.
-- **Disk.** 62 GB for the models.
+- **An NVIDIA GPU with 16 GB of VRAM at least; 32 GB or more recommended.** Under 24 GB the models load one at a time and LTX works in tiles, so each step takes longer. From 32 GB every step finishes at 1920 x 1088 and 121 frames. A 96 GB card is the fastest and takes plates above 2K.
+- **64 GB of RAM.** This is what is tested.
+- **62 GB of disk** for the models.
 
 On a Mac or a smaller card, run it on Runpod (install option 3).
 
 ## Install
 
-The steps are the same on Windows, macOS and Linux.
+The steps are the same on Windows, macOS and Linux. **Run every command of this page with the Python that runs ComfyUI**: activate its virtual environment first, or call its own `python` (the table under "Get the models" names it for each setup). The system's Python does not have ComfyUI's packages.
 
 ### 1. With ComfyUI Manager (recommended)
 
@@ -53,7 +54,7 @@ If ComfyUI has no **Extensions** entry, its Manager is off: in ComfyUI's folder,
 
 ### 2. By hand
 
-From your ComfyUI folder, with the Python that runs ComfyUI:
+From your ComfyUI folder:
 
 ```sh
 cd custom_nodes
@@ -79,7 +80,7 @@ The script installs the tested ComfyUI and ComfyUI-LTXVideo, links this pack, ru
 
 ## Get the models
 
-One command downloads them, on a local machine and on a pod. Run it in the pack's folder, `custom_nodes/ainvfx-paintaplate`, with the Python that runs ComfyUI.
+One command downloads them, on a local machine and on a pod. Run it in the pack's folder, `custom_nodes/ainvfx-paintaplate`.
 
 1. On Hugging Face, accept the licence of [FLUX 3 Image Klein](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy), of [LTX 2.5](https://huggingface.co/Lightricks/LTX-2.5), of the [in-outpainting IC-LoRA](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting) and, for SDR to HDR, of the [SDR-to-HDR IC-LoRA](https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR). Then create a [read token](https://huggingface.co/settings/tokens).
 2. Set the token: `export HF_TOKEN=hf_...` on Linux and macOS, `$env:HF_TOKEN = "hf_..."` in PowerShell on Windows.
@@ -131,6 +132,7 @@ Good to know:
 - **The log.** The **Log** button opens it. It records what happened, one line per fact, and the button is highlighted when an error arrives.
 - **The memory profile.** Its line in the log says how the page uses your card. Small, under 24 GB of VRAM: models load one at a time and LTX runs in tiles. Medium: the edit models load when the page opens. Large, from 60 GB: LTX 2.5 loads at start too.
 - **Stop.** Esc, or **Stop** beside Generate, stops what generates. What finished is kept, and Enter goes on from there.
+- **ComfyUI's memory grows, or the page waits and nothing runs.** Start ComfyUI with `PAINTAPLATE_TRACE=1` in its environment. Every request then writes a line in ComfyUI's terminal when it starts and when it ends, with the memory the process holds. Add these lines to your report.
 - **A model or a node is missing.** The page names it at start. `python get_models.py --list` shows what is in place.
 - **Report a fault** in the [issues](https://github.com/AInVFX/ainvfx-paintaplate/issues), with the log's lines, your GPU and your ComfyUI version.
 
@@ -165,7 +167,7 @@ Paint a plate builds on the work of others:
 | [LTX 2.5 SDR-to-HDR IC-LoRA (Lightricks), Its fixed scene embeddings](https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR) | Turns the SDR shot into scene-linear HDR. The prompt SDR to HDR takes | [LTX-2.x Community License](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x) |
 | [ainvfx-fluid IC-LoRA (AInVFX)](https://huggingface.co/AInVFX/ainvfx-fluid) | Turns painted keyframes on a blank plate into smoke, steam or fire | [LTX-2.x Community License](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x) |
 
-The LTX-2.x Community License asks for a paid licence from 10 million USD of annual revenue. The tiny decoder comes from [madebyollin/taehv](https://github.com/madebyollin/taehv). The upsampler's system prompts in `web/upsampler.json` are Black Forest Labs' own text (Apache 2.0). The example plates are synthetic, made with LTX 2.5, MOSS-Image and FLUX 3 Image Klein, and published under CC BY 4.0. Paint a plate's own code is under the Apache 2.0 licence.
+Two of these licences set a revenue threshold. The LTX-2.x Community License asks a company with annual revenues of 10 million USD or more to buy a licence from Lightricks for any use other than testing, evaluation and non-commercial research. The FLUX Kommunity License allows commercial use for free under 5 million USD of annual revenue, affiliates included; above it, Black Forest Labs sells a licence. The tiny decoder is [TAEHV](https://github.com/madebyollin/taehv) by madebyollin, under the MIT licence; Paint a plate downloads it from a repository whose card names the LTX-2 Community License Agreement. The upsampler's system prompts in `web/upsampler.json` are Black Forest Labs' own text (Apache 2.0). The example plates are synthetic, made with LTX 2.5, MOSS-Image and FLUX 3 Image Klein, and published under CC BY 4.0. Paint a plate's own code is under the Apache 2.0 licence.
 
 ## Links
 
@@ -174,6 +176,7 @@ The LTX-2.x Community License asks for a paid licence from 10 million USD of ann
 - The showcase, with what changed up to version 1.11: [article](https://www.ainvfx.com/blog/paint-a-plate-in-action-a-showcase-new-features-and-an-open-dataset-for-ainvfx-fluid/)
 - ainvfx-fluid: [45-minute deep dive](https://youtu.be/Ho4tmJzEkIs) · [article](https://www.ainvfx.com/blog/paint-your-fluid-simulations-a-free-ltx-2-5-ic-lora-for-smoke-and-fire-in-comfyui/)
 - Training: the [Generative AI Bootcamp for Film and TV](https://www.ainvfx.com/bootcamp/) and the [masterclass series](https://www.ainvfx.com/masterclass/)
+- YouTube: the [AInVFX channel](https://www.youtube.com/@AInVFX) · the [showcase](https://youtu.be/EsL3O7WvBr4) · the [demo](https://youtu.be/Kt9O3Aw46-g)
 - Community: the [AInVFX Discord](https://discord.gg/6CKSa3b5ks)
 
 Made by [AInVFX](https://www.ainvfx.com).

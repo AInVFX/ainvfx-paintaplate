@@ -1,6 +1,6 @@
 # AInVFX Paint a plate: architecture
 
-This document explains what Paint a plate does, how it is built and where each part lives, for anyone who maintains the code. It describes version 1.0.0. `TESTING.md` covers the tests.
+This document explains what Paint a plate does, how it is built and where each part lives, for anyone who maintains the code. It describes version 1.11.2. `TESTING.md` covers the tests.
 
 ## 1. What Paint a plate does
 
@@ -22,7 +22,7 @@ A **fluid shot** starts from a blank plate instead. You paint flat colour keyfra
 
 | Word | Meaning |
 | --- | --- |
-| Plate | The source footage of a shot. |
+| Plate | The source footage of a shot. `warmAll` reads the card from `/system_stats`, sets `S.memoryProfile` and loads what that profile names (section 15). |
 | First frame | Frame 0 of the plate, where every edit is painted. In the code, `S.original` is the plate's first frame in the model space, and `S.hero` is the first frame with every active edit stacked on it. |
 | OCIO config | The OpenColorIO config in use: `$OCIO`, else a built-in config (`ocio://studio-config-latest` by default). `S.ocio.config` names it. |
 | File colour space | The colour space a plate's values are in, by its name in the OCIO config (`S.plate.cs`). RV calls it File Color Space. The viewer, the models and the export all use it. |
@@ -48,6 +48,11 @@ A **fluid shot** starts from a blank plate instead. You paint flat colour keyfra
 | Workflow | A ComfyUI graph in API format, in `web/workflows`. The page runs every step of its work as one. |
 | Slot | A named input of a workflow that the page fills before it posts it: a path, a seed, a caption, a colour space. |
 | Job kind | The group a posted workflow belongs to: `edit`, `snap`, `prefetch`, `warm`, `fluid`, and the render's kinds `clean`, `shot`, `matte`, `comp`, `review` and `export`. A cancel stops jobs by kind. |
+| Hint | A sentence of the status line that says what to do next: `status(text, "hint")`. It never goes to the log (design rule 12). |
+| Stop | Esc, or Stop beside Generate: what generates stops, and no job is posted until Enter (`S.halted`, design rule 13). |
+| Layer | An edit, in History's order. While an edit is changed, the frame shows it and the edits under it (design rule 14). |
+| Memory profile | What the page does on the card it runs on: `small` under 24 GB of VRAM, `medium`, `large` from 60 GB (`S.memoryProfile`, section 15). |
+| Example plates | The synthetic plates of the Hugging Face dataset `AInVFX/ainvfx-paintaplate`, which `get_plates.py` downloads into `input/plates`. |
 
 ## 3. The big picture
 
@@ -89,14 +94,17 @@ These rules keep the code small and easy to change. Follow them in every change.
 2. **Workflows are generated.** `tools/build_workflows.py` writes `web/workflows`. Nobody edits the JSON by hand: a test fails when the files and the generator disagree.
 3. **Each workflow describes itself.** In each node's `_meta`, `slots` maps the node's inputs to slot names, `output` names an output the page reads, and `progress` marks the node whose progress bar stands for the whole workflow.
 4. **Optional links.** Some links exist only when the page has something to send: a matte to composite with, words to search by, a relit frame, an image sequence's review frames. When their slots stay empty, the page drops the link and every node that fed it. The rule is written twice, as `OPTIONAL` in `logic.mjs` and in `build_workflows.py`, and a test keeps the two equal.
-5. **Pure code is tested without heavy dependencies.** `plateio.py`, `mathops.py` and `ocio.py` need neither torch nor ComfyUI. `logic.mjs`, `graph.mjs` and `frames.mjs` run in Node. `nodes.py` only converts tensors and calls them; `routes.py` is plain functions plus `setup()`.
+5. **Pure code is tested without heavy dependencies.** `plateio.py`, `mathops.py` and `ocio.py` need neither torch nor ComfyUI. Every module of `web/` except `app.mjs` and `canvas.mjs` runs in Node, with its tests in `tests/js`. `nodes.py` only converts tensors and calls them; `routes.py` is plain functions plus `setup()`.
 6. **One edit at a time.** A stroke goes to the draft, else to the current edit if it has the same tool, else to a new edit (`strokeTarget` in `logic.mjs`). Another tool, or New edit, closes the current edit (`toolEndsEdit`). Undo keeps the current edit while it exists.
 7. **Nothing made is lost, and nothing is made twice.** Changing the edit being generated (strokes, words, the switch) stops its Klein pass. No render stops for that, nor for a bypass, an undo, a removal or a new edit: renders go on, and what they make stays. Results are kept per set of edits and per preview size (`S.renders`, keyed by `S.heroKey`), and what the erases make per set of erases (`S.erases`). Every finished job is also recorded in the job index on disk (`routes.py`, `output/paintaplate/jobs`), by the hash of its workflow file, the plate (path, size and time) and its values. A job with the same hash takes those files back instead of running, in this session or a later one on the same machine. A job is recorded only when every file it made is in the output folder (`recordable` in `comfy.mjs`, the rule `routes.write_job` enforces). A render of fewer edits, after a bypass or a removal, takes the frames of an earlier render of more edits when every edit left out is far from those kept and no light is involved (`logic.donorFor`, `donorOf`): only its tracking and composites run, and the Render panel shows the steps taken as "from v<n>". Render in full makes its own shot, with the same edits and seeds.
 8. **One colour space per plate.** The plate's file colour space is a name in the OCIO config. The viewer converts from it, the workflows convert from it to the model space, and the export converts the edited pixels back to it. Changing it makes the first frame and the edits again in it; the job index keeps the earlier results, so switching back takes them at once.
 9. **Previews may trade quality for speed. The review matches the plate, and the export never trades.** The review of a video plate is a movie of its own values at the working size; the review of an image sequence is also its half-float EXR frames, which the viewer compares with the plate's own frames at full precision.
 10. **Paths stay inside ComfyUI.** Every path from the page resolves under ComfyUI's input or output folder (`folders.plate_path`), symbolic links are refused, and absolute paths need `PAINTAPLATE_ALLOW_ABSOLUTE=1`.
 11. **One home per value.** Sizes, delays and budgets: the tuning block at the top of `app.mjs`. Model files: the constants at the top of `build_workflows.py`. Tested ComfyUI and ComfyUI-LTXVideo commits: `tools/pins.sh`. Model files and revisions: `get_models.py`.
-12. **A log line for every wait.** Each step a person waits for writes one line in the page's log: what runs, with which values, and how long it took.
+12. **The log says each fact once, and the status line says what to do next.** The log records what happened, one line per fact: a size, a frame count, a memory figure or a file name appears in one line only. A job writes one line when it ends, with how long it took; it writes more only when it waits over a second in the queue, fails or is stopped. A sentence that tells the person what to do is a hint, `status(text, "hint")`: it shows in the status line and stays out of the log. `told(fact, next)` writes the fact to the log once and shows it in the status line with what to do next; `stopped(fact, next)` does the same for a page that cannot start, as an error. Memory is written in GB as bytes / 2**30, rounded: a 16 GB card reads « 16 GB » everywhere.
+13. **A stop stops everything.** After Esc or Stop, nothing else starts until Enter (`S.halted`): an edit that waited keeps its turn, a stroke asks for nothing, and what finished is kept.
+14. **Edits are layers.** While an edit is changed, the frame shows that edit and the edits under it (`layered`, `logic.hiddenAbove`). The edits above it are hidden and History dims their rows: they are likely to be generated again.
+15. **One set of workflows for every card.** The memory profile only fills slots and decides what loads at start (`MEMORY` in `logic.mjs`, section 15).
 
 ## 5. The life of an edit
 
@@ -183,7 +191,7 @@ Open plate has one tab per source: **ComfyUI files**, **Upload**, **Scenes** and
 
 | Folder | What it holds |
 | --- | --- |
-| `input/plates` | Plates such as the test plates from `tools/get_plates.sh` |
+| `input/plates` | Plates such as the example plates that `get_plates.py` downloads |
 | `input/paintaplate/<plate id>/` | Files uploaded from the Upload tab |
 | `input/paintaplate/up/` | Images the page uploads (first frames, masks, keyframes), named by the hash of their pixels |
 | `input/paintaplate/blank/` | Blank canvases for fluid shots |
@@ -204,12 +212,13 @@ Open plate has one tab per source: **ComfyUI files**, **Upload**, **Scenes** and
 | `plateio.py` | Files: sequences and frame patterns (a missing frame keeps its place, as in OpenRV), the plate spec and its colour guess, the folder scan of the plate browser, EXR writing that keeps every layer and header, still writers (PNG, TIFF, DPX, EXR), the review's half-float EXR frames, `VideoWriter` (the source codec, colour tags, timecode and audio), and the blank canvas. |
 | `mathops.py` | Pixels: phase-correlation alignment, grain level, the colour seam field, push-pull fill, steady masks, `fit_to_plate`, `relight`, `follow_matte`, `level_fill`, `keyframe_video`, and the fast bilinear `resize_to`. |
 | `ocio.py` | Colour: the configs, the menu's description of one, the plate's colour space guess, conversions into and out of the model space, and the viewer's GLSL with its lookup tables. |
-| `routes.py` | The routes: the plate browser and its thumbnails, a plate's size, time, spec and colour space (`stat`), the frames of an image sequence as RGB half floats (`frames`), the blank plate, the job index (`jobs`), scenes, OCIO and its shaders, and the zip download. |
+| `routes.py` | The routes: the plate browser and its thumbnails, a plate's size, time, spec and colour space (`stat`), the frames of an image sequence as RGB half floats (`frames`), the blank plate, the job index (`jobs`), scenes, OCIO and its shaders, the zip download and, with `PAINTAPLATE_TRACE=1` in ComfyUI's environment, a trace of every request (section 15). |
 | `pyproject.toml` | Package and Registry metadata: the version, `PublisherId` `ainvfx`, `requires-comfyui`, the dependencies as `requirements.txt` lists them (the Registry reads only this static list), and no accelerator classifier, since the nodes run on a CPU. |
 | `requirements.txt` | The runtime packages beyond ComfyUI's own: OpenEXR and OpenColorIO. |
-| `get_models.py` | Every model file the workflows load, with its repository, its tested revision and its folder, downloaded with ComfyUI's own Python on Windows, macOS or Linux. The pod setup runs it. |
+| `get_models.py` | Every model file the workflows load, with its repository, its tested revision, its folder and its size. `python get_models.py` downloads what is missing, with ComfyUI's own Python on Windows, macOS or Linux; `--list` says what is in place. The pod setup runs it. It also holds what `get_plates.py` shares: `download`, `listing`, `hub`. |
+| `get_plates.py` | The example plates: the MP4 files of the dataset `AInVFX/ainvfx-paintaplate`, into `input/plates`, with the same options and closing line as `get_models.py`. |
 
-Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), `.gitignore` (the test plates included: they live on Hugging Face) and `.comfyignore` (what the Registry package leaves out). `.github/workflows/tests.yml` runs three jobs side by side on every push: the unit tests, the page against the mock ComfyUI, and a CPU ComfyUI with a headless browser. `.github/workflows/publish.yml` publishes to the Comfy Registry when run by hand, with its action pinned to a commit.
+Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), `.gitignore` (the example plates included: they live on Hugging Face) and `.comfyignore` (what the Registry package leaves out). `.github/workflows/tests.yml` runs three kinds of job side by side on every push: the unit tests, the page against the mock ComfyUI in four shards, and a CPU ComfyUI with a headless browser. Its `release` job publishes a new version from `main` (section 13).
 
 ### The page, in `web/`
 
@@ -220,15 +229,17 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | `comfy.mjs` | The ComfyUI client: loads the workflows, posts jobs, follows the WebSocket, cancels by job kind, and reads outputs once ComfyUI has recorded the prompt. Before it posts a job of an `INDEXED` workflow it asks the job index, and after a job finishes it records it there. After a job runs out of GPU memory, it asks ComfyUI to free its memory and waits until it is released (ComfyUI frees between prompts) before one retry. |
 | `logic.mjs` | Pure rules: filling workflows, sizes, captions, the prompt writer's request and `reconcile`, the shot prompt, the whole-object picker, dependencies, the frame ranking, the colour picker's average, keyframe slots, edit targets, the OCIO menu tree (`ocioTree`), the plate browser's order and breadcrumbs (`browseItems`, `crumbs`) and frame patterns. |
 | `graph.mjs` | `sceneGraph`: the whole scene as one ComfyUI workflow, identical nodes shared (Export dialog > ComfyUI graph); `organise` lays it out for a person: a hundred ids per section in run order (README, INPUT, MODELS, each EDIT, ERASE TRACKING, ERASE PASS, SHOT, PAINT TRACKING, SDR TO HDR, OUTPUT), each opening with a README note (core Primitive String Multiline, read by no node, so it never runs), the section and the values the page set in every title. |
-| `frames.mjs` | `FrameCache`: decoded frames within a memory budget (384 MB by default), ranked by distance from the playhead. `DeepFrames`: the same for an image sequence's own values as RGB half floats (512 MB per cache), fetched from `/paintaplate/frames`, never for a frame the budget cannot keep. |
+| `frames.mjs` | `FrameCache`: decoded frames within a memory budget, ranked by distance from the playhead. `DeepFrames`: the same for an image sequence's own values as RGB half floats, fetched from `/paintaplate/frames`, never for a frame the budget cannot keep. Also the budget's rules (`autoBudget`, `cachePlan`, `CACHE_CHOICES`) and `PlayStats`, what a stretch of playback achieved (section 15). |
 | `canvas.mjs` | Canvas helpers; mask bounds as FLUX boxes (0 to 1000). |
 | `display.mjs` | `Display`: the viewer's colour, one WebGL2 program per colour space and view (section 6). |
 | `inspector.mjs` | The Color Inspector's rules: the plate pixel under a point, the file on show, the side of the wipe it reads, its rows (section 6). |
 | `xray.mjs` | The X-ray's rules: which mattes, and a grey matte as the tint's opacity (section 6). |
+| `models.mjs`, `models.json` | The registry of every model file with its source, licence and revision (`models.json`), and the rules that name the models behind a result from the workflows that made it (`models.mjs`): the Models and licences dialog and an export's `MODELS.md`. |
 | `open.js` | « Open Paint a plate » in ComfyUI's Extensions menu. It is the only `.js` file, because ComfyUI loads every `.js` file in `web/` into its graph editor; the page's own modules use `.mjs`. |
 | `app.css` | The dark, RV-like style, with its colours as tokens on `:root`. On a phone held upright, one column that scrolls; on a phone on its side, the tools down the left; the menu as a sheet along the bottom. |
 | `upsampler.json` | Black Forest Labs' two system prompts for the prompt writer (table and plain). |
 | `logo.png` | The logo, favicon and Registry icon. |
+| `brand/` | The README's title, the Registry's icon and banner, the favicon and the touch icon. |
 
 ### The 14 workflows, in `web/workflows`
 
@@ -277,15 +288,15 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | `placeholders.py` | Empty model files, so a CPU ComfyUI validates the workflows in CI. |
 | `pins.sh` | The tested ComfyUI and ComfyUI-LTXVideo commits, read by the three scripts below. |
 | `ci_comfyui.sh` | Builds the CPU ComfyUI of the live tests, at the pins. |
-| `pod_setup.sh` | GPU machine setup: PyTorch for CUDA 13.0, the pinned ComfyUI and ComfyUI-LTXVideo, the pack's requirements, and the models through `get_models.py`. `FLUID=0` skips ainvfx-fluid; `PLATES=1` adds the test plates. |
+| `pod_setup.sh` | GPU machine setup: PyTorch for CUDA 13.0, the pinned ComfyUI and ComfyUI-LTXVideo, the pack's requirements, and the models through `get_models.py`. `FLUID=0` skips ainvfx-fluid; `PLATES=1` adds the example plates. |
 | `runpod_start.sh` | One command on a Runpod pod: the setup with its progress, then ComfyUI on port 8188 (`--highvram` from 80 GB of VRAM), and the app's address. `--restart` after an update. |
-| `get_plates.sh` | The test plates, from the Hugging Face dataset `AInVFX/ainvfx-paintaplate` into `input/plates`. |
 | `plates_to_hf.py` | Publishes plates: re-muxed with the ComfyUI metadata replaced, a card, one upload. |
+| `brand_icons.py` | The page's icons, drawn from the Paint a plate logo in web/brand/title.png: its gold brush and its letter P, on the dark ground of the Registry icon. |
 | `offline_bundle.sh` | A tarball for a pod that cannot reach GitHub. |
 
 ### Tests, in `tests/`
 
-`TESTING.md` describes every level. In short: unit tests (`test_plateio`, `test_mathops`, `test_ocio`, `test_routes`, `test_workflows`, `test_web`, `test_lint`), the Node tests in `tests/js`, the mock ComfyUI (`mock_comfy.py`) with the page test `ui_mock.py`, the live CPU level (`comfy_live.py`, `ui_live.py`), and the GPU drivers (`ui_live.py --url`, `gpu_bench.py`).
+`TESTING.md` describes every level. In short: the unit tests (the `test_*.py` modules: files, pixels, colour, routes, workflows, the page's modules, the linters, the Registry metadata, the download tools, the README and these docs), the Node tests in `tests/js`, the mock ComfyUI (`mock_comfy.py`) with the page suite (`ui_mock.py`, and one flow per file of `tests/flows`), the live CPU level (`comfy_live.py`, `ui_live.py`), and the GPU scripts (`gpu_matrix.py`, `gpu_bench.py`, `open_probe.py`).
 
 ## 11. Inside `app.mjs`
 
@@ -300,19 +311,25 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | Tuning | The tuning block. |
 | What Klein sees | `editImage`, `maskAt`, and `captionFor` (the prompt writer). |
 | Plate | `openPlate`, `warmAll` (models load at page open; `logic.warmEnd` words its last line, on the status line only while the start's message is there), the opening steps. |
-| Decoded frames | The frame caches and the green stripe of cached frames. |
-| Playback, as in RV | Play, pause, seek, in and out points. |
+| Decoded frames | The frame caches, `planCaches` (one budget shared by the caches of the sources on show) and the green stripe of cached frames. |
+| Playback, as in RV | Play, pause, seek, in and out points; from memory once every frame is there, else from the videos (`S.memory`, section 15). |
 | The picture | `render`, `renderFluid`, the overlays (strokes, live previews, wipe). Every source is drawn through OCIO from the colour space its values are in. Once the shot of the current edits exists, it shows on every frame, paused or playing; the plate shows only in the wipe or while O is held. `#view` names what it shows in `data-picture`, and whether it drew full-precision frames in `data-precision`. |
+| Two passes in the wipe | Ctrl+click on a finished Render step puts that pass on the wipe's left side, against the pass on show. |
+| The X-ray | W tints where the edits on show change the plate (`xray.mjs`). The section also holds `showLive`, which alone decides which live preview shows, and the stop: `escape` and `stopGenerating`. |
 | Painting | The pointer handlers, `rubOut`, `takeInputs`, `prepareSoon` (the prefetch), pan and zoom, with two fingers on a touch screen. |
 | A fluid shot | `enterFluid`, `paintKey`, keyframe drag, copy and paste, `generateFluid`, `openBlank`. |
 | Edits | `launch` (with `reuse` and `keep`), `select`, `editingUI`, `nextEdit`, `pickTool`, `generate` (the two Klein passes), `prepare` and `prefetch`, `snapErase`, `rebuild`. |
 | Undo and redo | `snapshot`, `mark`, `restore`. |
 | History | `historyUI`: the list, bypass and removal. |
-| In idle time | The render queue, `pipeline`, `plan`, the render steps, the download. |
-| Interface | Status, messages (`explained`: what failed, why in plain words from `plainError`, and what to do), the log, the Render panel, the size menu, the Export dialog. |
+| In idle time | What starts when nothing is typed or painted: the shot, its mattes, the composite to play, then the export. |
+| The render queue | `pipeline`, `plan`, the render steps, the download. It publishes the step that runs in `S.stage` and its render in `S.piping`. |
+| Interface | `status` (a hint stays out of the log), `told` and `stopped` (design rule 12), messages (`explained`: what failed, why in plain words from `plainError`, and what to do), the log, the Render panel, the size menu, the Export dialog. |
 | The Open dialog | The four tabs, the plate browser, the scenes list, the upload. |
 | Scenes | Saving on this ComfyUI and opening a scene; `saveGraph` (the scene as one ComfyUI workflow). |
 | The viewer's colour | The full-precision frames (`wantDeep`), and exposure, contrast, gamma, saturation, hue, channels and invert, as RV's interactive edits. |
+| Help | The Help dialog, in tabs: Getting started, Tools, Keys, Viewer and colour, Render and export, Models and licences. |
+| Models and licences | The models behind the result on show, and every model with its licence (`models.mjs`). |
+| The colour inspector | F5, as OpenRV's: the values under the pointer (`inspector.mjs`). |
 | OCIO | `loadOcio`, `setOcio` (display, view, look), `setPlateSpace` (the file colour space), `setConfig`, and the menu's OCIO group. |
 | The right-click menu | Every action with its key, also behind the menu button for touch screens, submenus within submenus; then `boot()`, the keyboard handler and `enter` (Generate). |
 
@@ -326,10 +343,11 @@ At load, `boot()` loads the OCIO config, then checks that every node class and m
 | To change | Edit | Then |
 | --- | --- | --- |
 | A workflow | `tools/build_workflows.py` | Run it, and commit the JSON with it |
-| A model file | Its constant at the top of `build_workflows.py`, plus its line in `MODELS` and its revision in `get_models.py` | Regenerate; `test_workflows` checks that `get_models.py` downloads every file the workflows load |
+| A model file | Its constant at the top of `build_workflows.py`, plus its line in `MODELS`, its revision and its bytes in `SIZES` in `get_models.py`, its entry in `web/models.json` and its row in the README's credits | Regenerate; `test_workflows`, `test_models`, `test_downloads` and `test_readme` each check their part |
 | A size, delay or budget | The tuning block of `app.mjs` | |
 | A rule of the page | `logic.mjs`, with its test in `tests/js/logic.test.mjs` | `node --test tests/js/*.test.mjs` |
-| What the page does | `app.mjs`, with a check in `tests/ui_mock.py` | `python tests/ui_mock.py` |
+| What the page does | `app.mjs`, with a check in a flow: a file of `tests/flows`, or `tests/ui_mock.py` | `python tests/ui_mock.py --only <flow>` |
+| A sentence of the status line or the log | Design rule 12: a fact to the log once, what to do next as a hint | A check in a flow, as `tests/flows/codebase_log.py` has |
 | File or pixel behaviour | `plateio.py` or `mathops.py`, with its test | `nodes.py` only converts |
 | Colour | `ocio.py`, with its test in `tests/test_ocio.py` | The viewer reads the GLSL `ocio.shader` writes |
 | A node | A class in `nodes.py`, added to the `NODES` list | Restart ComfyUI |
@@ -337,12 +355,12 @@ At load, `boot()` loads the OCIO config, then checks that every node class and m
 | A pinned commit | `tools/pins.sh` | The source check (`COMFYUI_DIR` and `LTXVIDEO_DIR`), then a GPU run |
 | A release | `version` in `pyproject.toml`; one commit whose message says what changed and why, author `AInVFX <hello@ainvfx.com>`; pushed to `main`, CI releases it once the tests pass (below) | The whole suite; the patch and the bundle checked on a fresh clone |
 
-Before and after any change: `python -m unittest discover -s tests -v` and `node --test tests/js/*.test.mjs`.
+Before and after any change: `python -m unittest discover -s tests -v` and `node --test tests/js/*.test.mjs`. Outside CI, `discover` also runs the whole page suite (`test_ui_mock`): `TESTING.md` says how to run the unit tests alone.
 
 ## 13. Pins and versions
 
-- **ComfyUI v0.43.0** (`426f5eea`) and **ComfyUI-LTXVideo** `220e1d4`, in `tools/pins.sh`. `requires-comfyui` is `>=0.43.0`: the first release that contains what the pack was tested on.
-- **Models** at pinned Hugging Face revisions (`get_models.py`), about 60 GB in all. ainvfx-fluid (0.65 GB, revision `6102c50`, retrained on synthetic data on 1 November 2026) is optional.
+- **ComfyUI v0.44.2** (`e6515b16`) and **ComfyUI-LTXVideo** `220e1d4`, in `tools/pins.sh`. `requires-comfyui` is `>=0.43.0`, the oldest release the pack was tested on.
+- **Models** at pinned Hugging Face revisions (`get_models.py`), 62 GB in all (its `SIZES`). ainvfx-fluid (0.65 GB, revision `6102c50`, retrained on synthetic data on 1 November 2026) is optional.
 - **OpenColorIO** 2.4 or newer (`requirements.txt`); 2.6.0 was tested, with its built-in configs.
 - **Releases** run in CI: once the three test jobs pass on `main`, the `release` job of `tests.yml` publishes a new `version` to the Comfy Registry with comfy-cli 1.22.0 (pinned: it receives the Registry token), then tags it `v<version>` and makes its GitHub release from the commits since the last release, a pre-release before 1.0.0. Each step skips what is done already, so a re-run (Actions > tests > Run workflow) finishes a release that stopped half-way. The Registry lists a version once its automated security scan passes.
 
@@ -361,3 +379,27 @@ These come from GPU tests on an RTX PRO 6000 in October 2026.
 - Model inputs come from the plate in the model space: values above 1.0 are tone-mapped into it, and edited pixels come back within 0 to 1 of it, as with core's conversion.
 
 **The light brush and its light plan.** Light strokes are soft dabs at a fixed spacing (`logic.dabsAlong`), each stroke adding at most `LIGHT.flow` of its colour (`dabFlow`); shade strokes (a dark colour) go to their own layer, `d.shade`. A relight gives Klein two references: the frame as it is, and the light plan (`lightPlan`), the light's strokes alone on grey (RGB 58, `logic.PLAN_GREY`) with the shade strokes in black, drawn solid, on the `edit` workflow's optional second reference (`edit_plan`). Its request is the page's own (`logic.lightPlanCaption`), so a light needs no prompt writer. Klein ignores a painted shadow, so the shade strokes go to Relight Transfer as a soft white mask (`shadeMask`), which darkens the frame there in linear light (`mathops.shade_frame`, density 0.7, optional link `relight_shade`). The ComfyUI graph uploads the same plan and shade.
+
+Found on 11 November 2026, on the 16 GB reference laptop (62.7 GB of RAM):
+
+- Opening a plate takes far more RAM than its frames. A 1920 x 1080 plate of 121 frames took 23.5 GB at its peak, and ComfyUI kept 17.9 GB after it; one float32 copy of that plate is 3.0 GB. `tests/open_probe.py` names the node that takes it.
+- The page sets no limit on a plate's frames: every workflow gets the plate's own count. 121 frames is what is tested; a blank plate takes 9 to 321.
+- The times of a 16 GB card, under the small memory profile, are not measured yet (`tests/gpu_matrix.py`).
+
+## 15. Memory: the card, the frame caches and the trace
+
+**The memory profile.** At page open, `warmAll` reads the card's VRAM and RAM from ComfyUI's `/system_stats` and sets `S.memoryProfile`: `{ name, why, does, warm, slots }` (`logic.memoryProfile`). The log says it in one line.
+
+| Profile | VRAM | What loads at start | LTX's tiles |
+| --- | --- | --- | --- |
+| `small` | Under 24 GB (`MEMORY_FROM.medium`, 24e9 bytes: a 16 GB card reports about 17.2e9) | Nothing. Each model loads when an action needs it, so the prompt writer, Klein and LTX take turns | 256 px, and the guide is encoded in tiles |
+| `medium` | From 24 GB (a 24 GB card reports about 25.7e9) | The edit models; LTX with the first shot | 512 px |
+| `large` | From 60 GB (`MEMORY_FROM.large`) | Every model, and they stay loaded | 512 px |
+
+One set of workflows serves every profile: `slots` fills the `tile` and `guide_tiled` slots, and `warm` names the workflows `warmAll` posts. `?memory=small` (or `medium`, `large`) in the address, or the `paintaplate.memory` setting, asks for a profile in place of the card's. The borders move with measurements: `tests/gpu_matrix.py` writes each case's peak VRAM and RAM.
+
+**The frame caches.** `FrameCache` (decoded frames) and `DeepFrames` (an image sequence's half floats) share one budget, set in View > Cache memory and kept in `localStorage` as `paintaplate.cache`. It is Auto by default, and `?cache=<MB>` sets it for a test. `planCaches` gives each cache of the sources on show its share and its frame size, again whenever the budget, the frame's size, the sources or the in and out points change (`frames.cachePlan`).
+
+**Playback from memory.** Once every frame between the in and out points is in memory for each source the picture draws (`memoryReady`), playback runs on a clock, from memory. Until then it follows the videos. `S.memory` is that path: `true` from memory, `false` from the videos, `null` when nothing plays. `?stats=1`, or View > Playback statistics, writes one log line for each stretch played (`PlayStats`).
+
+**The trace.** With `PAINTAPLATE_TRACE=1` in ComfyUI's environment, a middleware in `routes.py` (`trace`) writes one line when a request starts and one when it ends: its method and address, the seconds, and the memory the process holds. `TESTING.md` says how to read it.

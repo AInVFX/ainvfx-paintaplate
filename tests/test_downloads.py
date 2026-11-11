@@ -54,7 +54,10 @@ class Hub(types.ModuleType):
 def run(tool, argv, hub):
     out = io.StringIO()
     with mock.patch.dict(sys.modules, {"huggingface_hub": hub}), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-        code = tool.main(argv)
+        try:
+            code = tool.main(argv)
+        except SystemExit as stop:  # a Python without huggingface_hub: the tool says so and stops
+            code = stop.code
     return code, out.getvalue().splitlines()
 
 
@@ -112,6 +115,15 @@ class Models(unittest.TestCase):
         total = sum(get_models.SIZES[os.path.basename(path)] for _, path, _ in get_models.MODELS)
         self.assertIn(f"about {total / 1e9:.0f} GB in all", " ".join(get_models.__doc__.split()))
 
+    def test_a_python_without_the_hub_says_what_to_do(self):
+        for tool, argv in ((get_models, [self.models]), (get_plates, [os.path.join(self.models, "plates")]), (get_plates, [self.models, "--list"])):
+            code, lines = run(tool, argv, None)  # None in sys.modules: the import fails, as with the system's Python
+            self.assertEqual((code, lines), (2, [get_models.NO_HUB]), tool.__name__)
+        self.assertIn("the Python that runs ComfyUI", get_models.NO_HUB)
+        self.assertIn("python -m pip install huggingface_hub", get_models.NO_HUB)
+        code, lines = run(get_models, [self.models, "--list"], None)
+        self.assertEqual((code, len(lines)), (1, N + 1), "the list of models needs no hub")
+
     def test_no_models_folder_is_said(self):
         code, lines = run(get_models, [os.path.join(self.models, "absent")], Hub())
         self.assertEqual((code, lines), (2, ["Name ComfyUI's models folder: python get_models.py path/to/ComfyUI/models"]))
@@ -160,8 +172,8 @@ class Plates(unittest.TestCase):
         self.assertEqual((code, lines), (1, [f"The list of plates did not come from huggingface.co/datasets/{get_plates.REPO}: Name or service not known"]))
 
     def test_the_pod_scripts_call_the_same_tool(self):
-        for script, call in (("pod_setup.sh", 'python "$PACK/get_plates.py" "$W/ComfyUI/input/plates"'), ("runpod_start.sh", '"$HERE/get_plates.py" "$W/ComfyUI/input/plates"'),
-                             ("get_plates.sh", '/../get_plates.py"')):
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "tools", "get_plates.sh")), "one tool, get_plates.py")
+        for script, call in (("pod_setup.sh", 'python "$PACK/get_plates.py" "$W/ComfyUI/input/plates"'), ("runpod_start.sh", '"$HERE/get_plates.py" "$W/ComfyUI/input/plates"')):
             with open(os.path.join(ROOT, "tools", script), encoding="utf-8") as fh:
                 self.assertIn(call, fh.read(), script)
 
