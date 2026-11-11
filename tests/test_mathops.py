@@ -362,6 +362,46 @@ class RelightFromTheShot(unittest.TestCase):
         np.testing.assert_allclose(kept[:2, :2], out[:2, :2])  # no light painted there: the relit frame as it is
 
 
+class FollowMatteThroughAnOcclusion(unittest.TestCase):
+    """An object that passes behind another under a camera move comes out far from where it went in."""
+
+    def masks(self, back=52):
+        n, h, w = 80, 135, 480  # the search reaches 30 px a frame, 120 px at most
+        masks = np.zeros((n, h, w), np.float32)
+        for t in range(n):
+            if t < 12 or t >= back:  # seen for 12 frames, hidden for 40, then seen again 160 px from where it went in
+                masks[t, 50:90, 400 - 4 * t:440 - 4 * t] = 1.0
+        return masks, n
+
+    def test_an_object_hidden_during_a_pan_is_followed_again_where_it_comes_out(self):
+        masks, n = self.masks()
+        out, summary = mathops.follow_matte(masks, n, masks[0])
+        for t in (52, 60, 79):
+            self.assertGreater(float((out[t] * masks[t]).sum()), 0.9 * float(masks[t].sum()), f"frame {t}: {summary}")
+        self.assertIn("came out far from where it was last seen", summary)
+        self.assertNotIn("further than the object can move", summary)
+
+    def test_a_far_mask_that_is_not_the_object_s_size_is_left_out(self):
+        masks, n = self.masks()
+        masks[30:40, 10:18, 20:28] = 1.0  # 64 px, far away, while the object (1600 px) is hidden
+        out, summary = mathops.follow_matte(masks, n, masks[0])
+        self.assertEqual(float(out[30:40, 10:18, 20:28].sum()), 0.0)
+        self.assertIn("further than the object can move", summary)
+        self.assertGreater(float((out[60] * masks[60]).sum()), 0.9 * float(masks[60].sum()))
+
+    def test_for_paint_a_far_lookalike_that_the_plate_already_holds_is_left_out(self):
+        masks, n = self.masks()
+        masks[30:40, 10:50, 20:60] = 1.0  # the object's size, far away, while the object is hidden
+        base = np.full((n,) + masks.shape[1:] + (3,), 0.2, np.float32)
+        base[:, 10:50, 20:60] = 0.8  # the plate holds it: the shot does not differ there
+        shot = base.copy()
+        shot[masks > 0.5] = 0.9  # the painted object is the shot's own
+        shot[30:40, 10:50, 20:60] = 0.8
+        out, summary = mathops.follow_matte(masks, n, masks[0], shot=shot, base=base)
+        self.assertEqual(float(out[30:40, 10:50, 20:60].sum()), 0.0, summary)
+        self.assertGreater(float((out[60] * masks[60]).sum()), 0.9 * float(masks[60].sum()), summary)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
