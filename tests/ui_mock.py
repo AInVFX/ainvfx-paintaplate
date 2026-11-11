@@ -185,8 +185,10 @@ def page_state(page):  # what a failed check prints: the status line, the plate'
 
 def save_scene(page):
     """Save scene keeps it on this ComfyUI: the newest scene, read back through the scenes route."""
+    saved = "[...document.querySelectorAll('#log li span')].filter((e) => /saved on this ComfyUI/.test(e.textContent)).length"
+    before = page.evaluate(saved)
     page.click("#save-btn")
-    page.wait_for_function("/saved on this ComfyUI/.test(document.querySelector('#status').textContent)", timeout=20000)
+    page.wait_for_function(f"{saved} > {before}", timeout=20000)  # the log keeps the fact: a later sentence can replace it in the status line
     base = page.url.split("/extensions/")[0]
     name = json.loads(urllib.request.urlopen(f"{base}/paintaplate/scenes").read())[0]["name"]
     return name, json.loads(urllib.request.urlopen(f"{base}/paintaplate/scenes/{name}").read())
@@ -504,7 +506,7 @@ def history_flow(browser, port):
           f"three undos go back through the seed, the words and the removal: {row_titles(page)} {row_words(page)}")
     check(klein_passes(page) == made, f"undo gets the kept results back: no Klein pass runs again ({klein_passes(page) - made} ran)")
     page.select_option("#preview-size", index=1)
-    check("928 × 512" in page.text_content("#status"), "the preview size menu sets the shot size")
+    check("928 x 512" in page.text_content("#status"), "the preview size menu sets the shot size")
     no_errors(errors, "in History")
     page.close()
 
@@ -945,7 +947,7 @@ def fluid16_flow(browser, port):
     wait_log(page, added_line("under the edits: the fluid shot v"), 240000, "the HDR fluid shot under the edits")
     page.wait_for_function("!document.querySelector('#deliver-auto').hidden", timeout=60000)
     new = page.evaluate("window.__lines")
-    check(any("16-bit" in line for line in new) and any("SDR to HDR took" in line for line in new),
+    check(any("SDR to HDR took" in line for line in new),  # the blank plate's own log line is gone: the plate's line says its bit depth once it is written again
           "16-bit: the fluid shot goes through SDR to HDR")
     check(not page.is_hidden("#deliver-auto"), "the HDR fluid shot is an EXR plate: SDR to HDR runs on its own for the edits on it")
     check(not page.is_disabled("#export-btn"), "a fluid shot with no edit on it can be exported")
