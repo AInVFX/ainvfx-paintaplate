@@ -1193,7 +1193,14 @@ function strokes(e, alpha) {
     if (e.shade) { ctx.globalAlpha = alpha; ctx.drawImage(e.shade, 0, 0); }
     ctx.globalAlpha = alpha; ctx.globalCompositeOperation = "lighter"; ctx.drawImage(e.paint, 0, 0);
     ctx.globalCompositeOperation = "source-over";
-  } else { ctx.globalAlpha = 0.9 * alpha; ctx.drawImage(e.paint, 0, 0); }
+  } else { // paint, at its own colour: through OCIO and the colour tools as the picture is, then cut by the strokes' own alpha
+    const W = e.paint.width, H = e.paint.height, t = fx.getContext("2d");
+    [fx.width, fx.height] = [W, H];
+    t.globalCompositeOperation = "copy"; t.drawImage(look.image(e.paint, S.display, modelSpace()) ?? e.paint, 0, 0, W, H);
+    t.globalCompositeOperation = "destination-in"; t.drawImage(e.paint, 0, 0);
+    t.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = alpha; ctx.drawImage(fx, 0, 0);
+  }
   ctx.globalAlpha = 1;
 }
 
@@ -3643,20 +3650,12 @@ function colorUI() {
 }
 $$(".swatches .sw[data-color]").forEach((b) => (b.onclick = () => setColor(b.dataset.color)));
 $("#color").oninput = (e) => setColor(e.target.value);
-// The colour picker (I, the pipette by the swatches, or Tools > Pick a colour). Chrome and Edge: the browser's own eyedropper,
-// the one of the colour dialog, anywhere on the screen (the EyeDropper API, on https or localhost). Firefox and Safari have
-// none: the next click on the frame takes the colour the viewer shows there, averaged over 5 x 5 pixels, as an eyedropper
-// would see it. The brush then paints with it; with Erase, which has no colour, the tool becomes Paint. Esc cancels.
+// The colour picker (I, the pipette by the swatches, or Tools > Pick a colour): the next click on the frame takes its colour,
+// averaged over 5 x 5 pixels. One way in every browser: the browser's own eyedropper reads the screen, so it was dropped (11 Nov).
 const PICK_SIDE = 5;
-const eyedropper = () => window.isSecureContext && "EyeDropper" in window;
-$("#pick").hidden = eyedropper(); // where the browser has its own, the colour dialog's eyedropper is the same: one is enough
+const pickCtx = Object.assign(document.createElement("canvas"), { width: PICK_SIDE, height: PICK_SIDE }).getContext("2d", { willReadFrequently: true });
 $("#pick").onclick = () => pickColor();
-async function pickColor() {
-  if (S.picking || !eyedropper()) return pickFrame(!S.picking);
-  let got;
-  try { got = await new window.EyeDropper().open(); } catch { return; } // Esc: nothing changes
-  takeColor(got.sRGBHex);
-}
+function pickColor() { pickFrame(!S.picking); } // the pipette, or I: the next click on the frame takes its colour. The browser's own eyedropper reads the screen, never the frame's values
 function pickFrame(on) {
   S.picking = on && !!S.plate;
   view.classList.toggle("picking", S.picking);
@@ -3664,19 +3663,33 @@ function pickFrame(on) {
   if (S.picking) hud("Pick a colour: click the frame. Esc cancels.", 4000);
   render();
 }
-function pickAt(e) { // the view's own pixels: the frame on show, through OCIO and the colour tools, without the brush outline
-  const [x, y] = frameAt(e), n = PICK_SIDE;
+// On the first frame a pick reads the frame's own values under the pointer, the ones Klein reads, with the paint in progress
+// over them. The brush paints with these values and a paint stroke shows through OCIO and the colour tools as the picture
+// does (strokes), so a stroke of a picked colour cannot be told from the picture where it was picked, in any view. On another
+// frame the pick reads the pixels on show, through OCIO and the colour tools, and says so.
+function pickAt(e) {
+  const [x, y] = frameAt(e), n = PICK_SIDE, half = n >> 1;
   render();
-  const [kx, ky] = toView(); // the canvas holds the plate at its own size
-  const color = pickedColor(readBack(view, Math.round(x * kx) - (n >> 1), Math.round(y * ky) - (n >> 1), n, n));
+  const own = !S.playing && S.frame === 0 && !!S.original;
+  let color;
+  if (own) {
+    const sx = Math.round(x) - half, sy = Math.round(y) - half;
+    pickCtx.clearRect(0, 0, n, n);
+    pickCtx.drawImage(S.heroKey ? firstFrame() : S.original, -sx, -sy);
+    if (S.draft?.tool === "paint") pickCtx.drawImage(S.draft.paint, -sx, -sy);
+    color = pickedColor(pickCtx.getImageData(0, 0, n, n).data);
+  } else {
+    const [kx, ky] = toView(); // the canvas holds the plate at its own size
+    color = pickedColor(readBack(view, Math.round(x * kx) - half, Math.round(y * ky) - half, n, n));
+  }
   if (!color) return void hud("Click on the frame to pick a colour. Esc cancels.", 2000); // outside the frame: still picking
   pickFrame(false);
-  takeColor(color);
+  takeColor(color, own ? "" : ", as the viewer shows it on this frame");
 }
-function takeColor(hex) {
+function takeColor(hex, how = "") {
   if (S.tool === "erase") pickTool("paint");
   setColor(hex.toLowerCase());
-  hud(`${S.tool === "light" ? "Light" : "Paint"} colour ${S.color}`, 2000);
+  hud(`${S.tool === "light" ? "Light" : "Paint"} colour ${S.color}${how}`, 2000);
 }
 function setRub(on) {
   S.rub = on;

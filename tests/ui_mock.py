@@ -25,8 +25,6 @@ PAGE = "http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html{q
 VIEWPORT = {"width": 1400, "height": 900}
 DONE = "document.querySelectorAll('#history li').length === {n} && !document.querySelector('#history li.busy')"
 REVIEWED = "Composite, full size took"  # a render's full-size composite in the log: "Render v2: Composite, full size took 3.1 s"
-EYEDROPPER = """() => { window.__drops = 0;
-  window.EyeDropper = class { open() { window.__drops++; return Promise.resolve({ sRGBHex: "#2E7D32" }); } }; }"""  # a stand-in for the browser's eyedropper: it counts its openings and picks one green
 CHECKS = {"passed": 0, "failed": None}  # this process's checks: how many passed, and the sentence of the one that failed
 
 
@@ -276,7 +274,7 @@ def open_flow(browser, port):
 def colour_flow(browser, port):
     """Colour: an EXR keeps its range through the frame route and the viewer's OCIO program, and a channel comes from the
     values the view shows. Then on a plate, as in RV: a channel in grey, an exposure drag that paints nothing, the
-    right-click menu and its Reset all colour, and the colour picker with the browser's eyedropper and without it."""
+    right-click menu and its Reset all colour, and the colour picker."""
     errors = []
     page = load(browser, port, errors=errors)
     hdr = page.evaluate("""async () => { // an EXR through the frame route and the viewer's shader, as the colour tools see it
@@ -343,23 +341,16 @@ def colour_flow(browser, port):
     back = pixel(*spot)
     check(page.is_hidden("#display-state") and page.is_hidden("#ctx") and all(abs(p - q) < 3 for p, q in zip(back, before)),
           "Reset colour in the menu brings the pixels back and closes the menu")
-    # The colour picker: I opens the browser's own eyedropper (a stand-in here), which picks anywhere on the screen
+    # The colour picker: I arms the in-frame picker, and a click gives the brush the frame's own colour there
     color = page.input_value("#color")
-    page.evaluate(EYEDROPPER)
     page.keyboard.press("i")
-    page.wait_for_function("document.querySelector('#color').value === '#2e7d32'", timeout=5000)
-    check(page.evaluate("window.__drops") == 1, "I opens the browser's eyedropper and the brush takes its colour")
-    # Without an eyedropper (Firefox, Safari), I arms the in-frame picker: a click gives the brush the colour on show there
-    page.evaluate("() => { window.__ED = window.EyeDropper; delete window.EyeDropper; }")
-    page.keyboard.press("i")
-    check(page.evaluate("document.querySelector('#view').classList.contains('picking')"), "without an eyedropper, I arms the in-frame picker")
+    check(page.evaluate("document.querySelector('#view').classList.contains('picking')"), "I arms the in-frame picker")
     want = pixel(0.9, 0.1)
     page.mouse.click(box["x"] + box["w"] * 0.9, box["y"] + box["h"] * 0.1)
     got = page.input_value("#color")
     rgb = [int(got[i:i + 2], 16) for i in (1, 3, 5)]
-    check(all(abs(p - q) <= 6 for p, q in zip(rgb, want)) and not page.evaluate("document.querySelector('#view').classList.contains('picking')"),
-          f"a click on the frame picks the colour on show there: {got} against the frame's {[round(v) for v in want]}")
-    page.evaluate("() => { window.EyeDropper = window.__ED; }")
+    check(got != color and all(abs(p - q) <= 6 for p, q in zip(rgb, want)) and not page.evaluate("document.querySelector('#view').classList.contains('picking')"),
+          f"a click on the frame picks the frame's colour there: {got} against the frame's {[round(v) for v in want]}")
     page.fill("#color", color)
     no_errors(errors, "with the viewer's colour")
     page.close()
@@ -815,7 +806,6 @@ def keys_flow(browser, port):
     """Every key the Keys dialog documents does what it says, and every key the menu shows is in the Keys dialog."""
     page = load(browser, port)
     open_plate(page)
-    page.evaluate(EYEDROPPER)
     doc = key_ranges(page.evaluate("[...document.querySelectorAll('#help dt')].map((e) => e.textContent).join(' | ')"))  # the keys column
     page.click("#view", button="right")
     keys = page.evaluate("[...new Set([...document.querySelectorAll('#ctx kbd')].map((k) => k.textContent).filter(Boolean))]")
@@ -843,7 +833,7 @@ def keys_flow(browser, port):
     key("b", lambda: "on" in attr("[data-tool=paint]", "class"))
     size = int(text("#size-out")); key("=", lambda: int(text("#size-out")) > size); key("-", lambda: int(text("#size-out")) == size)
     key("x", lambda: attr("#rub-btn", "aria-pressed") == "true"); page.keyboard.press("x")
-    key("i", lambda: page.evaluate("window.__drops") >= 1)  # the browser's eyedropper, a stand-in here
+    key("i", lambda: page.evaluate("document.querySelector('#view').classList.contains('picking')")); page.keyboard.press("Escape")  # the in-frame picker
     for k, name in (("Shift+E", "Exposure"), ("k", "Contrast"), ("y", "Gamma"), ("Shift+S", "Saturation"), ("h", "Hue")):
         key(k, lambda name=name: text("#hud").startswith(name)); page.keyboard.press("Escape")
     key("Shift+E", lambda: True); key("=", lambda: text("#display-state").startswith("E +0.1")); key("Backspace", lambda: page.is_hidden("#display-state"))

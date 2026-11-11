@@ -63,7 +63,7 @@
       <button class="sw" data-color="#1976d2" style="--c:#1976d2" title="Blue" aria-label="Blue"></button>
       <button class="sw" data-color="#6d4c41" style="--c:#6d4c41" title="Brown" aria-label="Brown"></button>
       <button class="sw" data-color="#ffd890" style="--c:#ffd890" title="Warm light" aria-label="Warm light"></button>
-      <button class="sw pick" id="pick" hidden title="Pick a colour from the frame (I)" aria-label="Pick a colour from the frame" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.2 1.6a1.9 1.9 0 0 1 2.7 2.7l-1.6 1.6.7.7-1 1-.7-.7-5.6 5.6H3.6v-2.1l5.6-5.6-.7-.7 1-1 .7.7z"/></svg></button>
+      <button class="sw pick" id="pick" title="Pick a colour from the frame (I)" aria-label="Pick a colour from the frame" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.2 1.6a1.9 1.9 0 0 1 2.7 2.7l-1.6 1.6.7.7-1 1-.7-.7-5.6 5.6H3.6v-2.1l5.6-5.6-.7-.7 1-1 .7.7z"/></svg></button>
       <label class="sw custom" title="Any colour"><input id="color" type="color" value="#000000" aria-label="Any colour"></label>
     </div>
   </nav>
@@ -197,7 +197,7 @@
       <dt>N</dt><dd>New edit: the next strokes start a separate edit</dd>
       <dt>- and =</dt><dd>Brush size</dd>
       <dt>X</dt><dd>Eraser: rub out the strokes you just painted</dd>
-      <dt>I</dt><dd>Pick a colour: in Chrome and Edge, the browser's eyedropper, anywhere on the screen; in Firefox and Safari, click the frame. Then paint with it. Esc cancels</dd>
+      <dt>I</dt><dd>Pick a colour: click the frame. On the first frame the brush takes the frame's own colour there, so a stroke of it shows as the picture does. Esc cancels.</dd>
       <dt>Enter</dt><dd>Generate: the edit on the first frame, then its shot. Pressed again with nothing changed, nothing runs twice</dd>
       <dt>Ctrl+Enter</dt><dd>Try another seed on the selected edit, else the last one</dd>
       <dt>Click an edit</dt><dd>Select it: its words come back; retype them, paint more, rub strokes out or switch Whole object, then Generate. Esc deselects</dd>

@@ -1,18 +1,18 @@
 """The colour picker in one browser, against the mock ComfyUI or a real one.
 
-    python tests/ui_picker.py [--browser chromium|firefox|webkit] [--no-eyedropper] [--url http://127.0.0.1:8188 --path plates/lighthouse.mp4]
+    python tests/ui_picker.py [--browser chromium|firefox|webkit] [--url http://127.0.0.1:8188 --path plates/lighthouse.mp4]
 
-Chrome and Edge have the browser's eyedropper (the EyeDropper API): the pipette by the swatches stays hidden and I opens it
-(a stand-in here: automation cannot drive the browser's own). Firefox and Safari have none, nor has a page loaded with
---no-eyedropper: the pipette shows, it or I arms the in-frame picker, a click on the frame gives the brush the colour the
-viewer shows there, and Esc leaves the picker. The plate opens with no page error. Without --url the mock ComfyUI starts
-with its test plate.
+The pipette by the swatches, or I, arms the in-frame picker in every browser. A click on the first frame gives the brush the
+frame's own colour there, and Esc leaves the picker. A stroke shows its own colour, through OCIO and the colour tools as the
+picture does: the picked colour painted elsewhere reads as that colour, and with the exposure up one stop the pick still
+gives the frame's own value and a dab of it there shows as the picture did. The plate opens with no page error. Without
+--url the mock ComfyUI starts with its test plate.
 """
 import argparse, os, subprocess, sys, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from ui_mock import check, open_path  # noqa: E402
+from ui_mock import check, open_path, stroke  # noqa: E402
 
 SPOT = (0.5, 0.5)  # where the frame is clicked, as fractions of its width and height
 AVERAGE = """([fx, fy]) => { const v = document.querySelector('#view'), n = 5;  // the 5 x 5 pixels the page averages
@@ -23,34 +23,59 @@ AVERAGE = """([fx, fy]) => { const v = document.querySelector('#view'), n = 5;  
 
 def picker(page, name):
     picking = lambda: page.evaluate("document.querySelector('#view').classList.contains('picking')")  # noqa: E731
-    if page.evaluate("window.isSecureContext && 'EyeDropper' in window"):
-        check(page.is_hidden("#pick"), f"{name}: the browser's eyedropper is there, so the pipette stays hidden")
-        page.evaluate("() => { window.EyeDropper = class { open() { return Promise.resolve({ sRGBHex: '#2E7D32' }); } }; }")
+    box = page.locator("#view").bounding_box()
+    at = lambda f: (box["x"] + box["width"] * f[0], box["y"] + box["height"] * f[1])  # noqa: E731
+    seen = lambda f: page.evaluate(AVERAGE, list(f))  # noqa: E731
+    hexed = lambda: [int(page.input_value("#color")[i:i + 2], 16) for i in (1, 3, 5)]  # noqa: E731
+    near = lambda p, q, by: all(abs(a - b) <= by for a, b in zip(p, q))  # noqa: E731
+
+    def pick(f):
         page.keyboard.press("i")
-        page.wait_for_function("document.querySelector('#color').value === '#2e7d32'", timeout=5000)
-        check(True, f"{name}: I opens the eyedropper (a stand-in) and the brush takes its colour")
-        return
-    check(page.is_visible("#pick"), f"{name}: no eyedropper, so the pipette shows by the swatches")
+        page.mouse.click(*at(f))
+        return hexed()
+
+    def dab(f):  # one dot of the brush, then the pointer away, so the brush outline is not read
+        stroke(page, [f, (f[0] + 0.01, f[1])])
+        page.mouse.move(box["x"] + 4, box["y"] + 4)
+        page.wait_for_timeout(300)
+        return seen(f)
+
+    check(page.is_visible("#pick"), f"{name}: the pipette shows by the swatches")
     page.click("#pick")
     check(picking(), f"{name}: the pipette arms the in-frame picker")
-    want = page.evaluate(AVERAGE, list(SPOT))
-    box = page.locator("#view").bounding_box()
-    page.mouse.click(box["x"] + box["width"] * SPOT[0], box["y"] + box["height"] * SPOT[1])
-    got = page.input_value("#color")
-    rgb = [int(got[i:i + 2], 16) for i in (1, 3, 5)]
-    check(all(abs(p - q) <= 6 for p, q in zip(rgb, want)) and not picking(),
-          f"{name}: a click on the frame picks the colour on show there: {got} against {want}")
+    want = seen(SPOT)
+    page.mouse.click(*at(SPOT))
+    own = hexed()
+    check(near(own, want, 6) and not picking(), f"{name}: a click on the frame picks the frame's colour there: {own} against {want}")
     page.keyboard.press("i")
     armed = picking()
     page.keyboard.press("Escape")
     check(armed and not picking(), f"{name}: I arms the picker again, and Esc leaves it")
+
+    # A stroke shows its own colour: the picked colour painted over the place that differs most from it reads as that colour
+    grid = [(x / 10, y / 10) for x in range(1, 10) for y in range(1, 10) if abs(x / 10 - SPOT[0]) + abs(y / 10 - SPOT[1]) >= 0.3]
+    far = max(grid, key=lambda f: sum(abs(a - b) for a, b in zip(seen(f), own)))
+    under = seen(far)
+    page.keyboard.press("b")
+    over = dab(far)
+    check(near(over, own, 2) and not near(under, own, 20), f"{name}: a stroke shows its own colour: {own} painted over {under} reads {over}")
+
+    # With the exposure up one stop, the pick still gives the frame's own value, and a dab of it there shows as the picture did
+    page.evaluate("document.activeElement.blur()")
+    page.mouse.move(*at((0.5, 0.9)))
+    page.keyboard.press("Shift+E")
+    page.mouse.down(); page.mouse.move(at((0.5, 0.9))[0] + 100, at((0.5, 0.9))[1], steps=5); page.mouse.up()
+    label, lit = page.text_content("#display-state"), seen(SPOT)
+    again = pick(SPOT)
+    there = dab(SPOT)
+    check(label.startswith("E +1.0") and not near(lit, want, 3) and near(again, own, 1) and near(there, lit, 2),
+          f"{name}: under {label}, the pick gives the frame's own {again} (first {own}), and a dab of it shows as the picture did: {there} against {lit}")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--browser", default="chromium", choices=["chromium", "firefox", "webkit"])
     ap.add_argument("--channel", default="", help="a browser channel, such as chrome")
-    ap.add_argument("--no-eyedropper", action="store_true", help="remove the EyeDropper API before the page loads")
     ap.add_argument("--url", default="", help="a running ComfyUI; without it, the mock ComfyUI starts")
     ap.add_argument("--path", default="plates/desk.mp4", help="the plate to open, in that ComfyUI's input folder")
     ap.add_argument("--port", type=int, default=8196)
@@ -67,13 +92,11 @@ def main():
                 break
             except Exception:
                 time.sleep(0.5)
-    name = a.channel or a.browser + (" without an eyedropper" if a.no_eyedropper else "")
+    name = a.channel or a.browser
     try:
         with sync_playwright() as p:
             browser = getattr(p, a.browser).launch(channel=a.channel or None)
             context = browser.new_context(viewport={"width": 1400, "height": 900})
-            if a.no_eyedropper:
-                context.add_init_script("delete window.EyeDropper;")
             page = context.new_page()
             errors = []
             page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
