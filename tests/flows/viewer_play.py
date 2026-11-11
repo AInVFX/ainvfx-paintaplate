@@ -100,6 +100,8 @@ def run(browser, port, U):
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
     space(page)
     U.wait_log(page, f"{VIEW}.play === 'memory' && {VIEW}.picture === 'shot'", 150000, "shot playing from memory")
+    U.wait_log(page, "[...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('Frame cache: ')).pop()?.textContent.includes('frames of the shot at')",
+               30000, "cache plan that names the shot")  # the plan is logged again each time the shot's movie changes: read it once it names the shot
     said = plan_line(page)
     U.check("frames of the shot at" in said and page.evaluate(PAUSED), f"the shot of the edits plays from memory once its frames are in ({said[-62:]})")
     space(page)
