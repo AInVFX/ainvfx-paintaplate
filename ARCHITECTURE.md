@@ -385,6 +385,7 @@ Found on 11 November 2026, on the 16 GB reference laptop (62.7 GB of RAM):
 - Opening a plate takes far more RAM than its frames. A 1920 x 1080 plate of 121 frames took 23.5 GB at its peak, and ComfyUI kept 17.9 GB after it; one float32 copy of that plate is 3.0 GB. `tests/open_probe.py` names the node that takes it.
 - The page sets no limit on a plate's frames: every workflow gets the plate's own count. 121 frames is what is tested; a blank plate takes 9 to 321.
 - The times of a 16 GB card, under the small memory profile, are not measured yet (`tests/gpu_matrix.py`).
+- **Numbers too far apart are not frames.** A group of numbered images is a frame sequence when at least one of every 100 numbers between its first and its last exists (`plateio.SPARSEST`). Sparser, the numbers count files: one frame per file. ComfyUI's mask editor names its files by the millisecond (`clipspace-mask-1791816680123.png`): until 1.11.4 the Open dialog's thumbnail of such a group took all of ComfyUI's memory.
 
 ## 15. Memory: the card, the frame caches and the trace
 

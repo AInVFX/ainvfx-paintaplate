@@ -138,6 +138,26 @@ class PlateBrowser(unittest.TestCase):
         frames = [Image.new("RGB", (96, 48), (40 * k, 0, 0)) for k in range(4)]
         frames[0].save(os.path.join(OUT, "anim_00001_.webp"), save_all=True, append_images=frames[1:], duration=40)
 
+    def test_a_thumbnail_of_files_named_by_the_millisecond(self):
+        """ComfyUI's clipspace files in the input folder: the Open dialog lists them as one pattern, the plate has as many
+        frames as files, and its thumbnail is the first file's picture. On 11 Nov this request took ComfyUI's memory."""
+        import numpy as np
+        from PIL import Image
+        stamps = (1791816680123, 1791819680130, 1791821680123)
+        paths = [os.path.join(INPUT, f"clipspace-mask-{n}.png") for n in stamps]
+        for k, path in enumerate(paths):
+            Image.new("RGB", (96, 48), (220, 0, 0) if k == 0 else (0, 0, 220)).save(path)
+        try:
+            item = next(i for i in routes.browse("")["items"] if i["name"].startswith("clipspace-mask-"))
+            self.assertEqual(item["kind"], "sequence")
+            self.assertEqual(routes.plate_info(item["path"])["frames"], 3)
+            thumb = np.asarray(Image.open(routes.thumbnail(item["path"])).convert("RGB"), np.float32)
+            self.assertGreater(thumb[..., 0].mean(), 150)
+            self.assertLess(thumb[..., 2].mean(), 60)
+        finally:
+            for path in paths:
+                os.remove(path)
+
     def test_browse_lists_folders_without_opening_files(self):
         """input and output, subfolders, videos, frame patterns; no text file, no link, nothing outside."""
         got = routes.browse("plates")

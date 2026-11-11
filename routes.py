@@ -199,12 +199,12 @@ def plates_below(full: str, page: str) -> list:
     return sorted(found, key=lambda i: -i["mtime"])[:FOUND_MAX]
 
 
-def first_frame(full: str) -> np.ndarray:
-    """The first frame of a plate as float RGB: an image sequence's first file, a video's or an animated image's first
-    frame. Float formats keep their values (plateio.read_float); 8-bit ones come back from 0 to 1."""
-    if plateio.is_sequence(full):
-        return plateio.read_float(plateio.find_sequence(full)[0])
-    with plateio.av.open(full) as c:
+def first_frame(first: str, still: bool) -> np.ndarray:
+    """The first frame of a plate as float RGB: `first` is an image sequence's first file (`still`), or a video or an
+    animated image. Float formats keep their values (plateio.read_float); 8-bit ones come back from 0 to 1."""
+    if still:
+        return plateio.read_float(first)
+    with plateio.av.open(first) as c:
         return next(c.decode(video=0)).to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
 
 
@@ -214,14 +214,15 @@ def thumbnail(rel: str, width: int = THUMB_WIDTH) -> str:
     from PIL import Image
 
     full = folders.plate_path(rel)
-    first = plateio.find_sequence(full)[0] if plateio.is_sequence(full) else full
+    still = plateio.is_sequence(full)
+    first = plateio.find_sequence(full)[0] if still else full  # the folder is listed once
     folder = os.path.join(folder_paths.get_temp_directory(), "paintaplate_thumbs")
     os.makedirs(folder, exist_ok=True)
     key = hashlib.sha1(f"{full}|{os.path.getmtime(first)}|{width}".encode()).hexdigest()[:20]
     target = os.path.join(folder, f"{key}.jpg")
     if os.path.exists(target):
         return target
-    rgb = first_frame(full)
+    rgb = first_frame(first, still)
     h, w = rgb.shape[:2]
     k = min(1.0, width / max(h, w))
     small = mathops.resize_to(rgb, max(1, round(h * k)), max(1, round(w * k))) if k < 1.0 else rgb

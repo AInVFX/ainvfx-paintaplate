@@ -91,6 +91,13 @@ def pattern_of(prefix: str, suffix: str, ext: str, digits: int) -> str:
     return f"{prefix}{'#' * max(1, digits)}{suffix}{ext}"
 
 
+# A group of numbered images is a frame sequence when at least one of every SPARSEST numbers between its first and its
+# last exists. Sparser than that, the numbers are not frames: ComfyUI's mask editor names its files by the millisecond
+# (clipspace-mask-1791816680123.png), and a walk from the first number to the last made billions of entries, 1.3 GB a
+# second, until ComfyUI's memory was gone (11 Nov). Such numbers count files: one frame per file, nothing missing.
+SPARSEST = 100
+
+
 def find_sequence(folder: str) -> list[str]:
     """Numbered frames of the largest image sequence in a folder, in order, a missing frame held from the one before."""
     return sequence_frames(folder)[0]
@@ -134,6 +141,8 @@ def sequence_frames(folder: str) -> tuple[list[str], int, list[int]]:
     for a, b in zip(nums, nums[1:]):
         step = math.gcd(step, b - a)
     step = step or 1
+    if (nums[-1] - nums[0]) // step + 1 > SPARSEST * len(nums):  # numbers too far apart to be frames: they count files
+        return [found[num] for num in nums], 1, []
     files, missing, last = [], [], found[nums[0]]
     for num in range(nums[0], nums[-1] + 1, step):
         if num in found:

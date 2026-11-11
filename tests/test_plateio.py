@@ -135,6 +135,27 @@ class PlateIO(unittest.TestCase):
 
 
 class Sequences(unittest.TestCase):
+    def test_numbers_too_far_apart_count_files(self):
+        """ComfyUI's mask editor names its files by the millisecond. Three of them, 50 and 33 minutes apart, are three frames.
+        A walk over every number from the first to the last made 5,000,001 entries here, and billions on a real folder."""
+        import tracemalloc
+        stamps = (1791816680123, 1791819680130, 1791821680123)  # 3,000,007 then 1,999,993 apart: no common step
+        with tempfile.TemporaryDirectory() as d:
+            for n in stamps:
+                Image.fromarray(np.zeros((4, 4, 3), np.uint8)).save(os.path.join(d, f"clipspace-mask-{n}.png"))
+            tracemalloc.start()
+            files, step, missing = plateio.sequence_frames(d)
+            peak = tracemalloc.get_traced_memory()[1]
+            tracemalloc.stop()
+            self.assertEqual(([os.path.basename(f) for f in files], step, missing), ([f"clipspace-mask-{n}.png" for n in stamps], 1, []))
+            self.assertLess(peak, 1 << 20)
+            self.assertEqual(plateio.probe_plate(d)["frames"], 3)
+        with tempfile.TemporaryDirectory() as d:  # 147 frames missing of 150 is still a sequence: every number keeps its place
+            for n in (1, 100, 150):
+                Image.fromarray(np.zeros((4, 4, 3), np.uint8)).save(os.path.join(d, f"shot.{n:04d}.png"))
+            files, step, missing = plateio.sequence_frames(d)
+            self.assertEqual((len(files), step, len(missing)), (150, 1, 147))
+
     def test_missing_frames_keep_their_numbers(self):
         """As in OpenRV: a missing frame holds the one before, later frames keep their numbers, frames on twos stay on twos."""
         with tempfile.TemporaryDirectory() as d:
