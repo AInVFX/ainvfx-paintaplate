@@ -16,4 +16,4 @@ Each flow runs in its own process, against its own mock ComfyUI and its own brow
 
 The mock runs its jobs 8 times shorter than their simulated time (`--speed`). Wait on what the page shows, not on the clock: `U.wait_log` for a line of the log, `U.until` for a state of the page, `U.poll` for a test written in Python, `U.settled` for the end of every edit and render step, `U.rested` for SAM's answer and the caption after an erase stroke. A long file splits by topic into several, so its parts run side by side.
 
-Today: `viewer.py` (the viewer, its colour and the colour inspector) and `pipeline.py` (renders, passes, Deliver, bit depth). `codebase_log.py` checks the rule of the log: a hint shows in the status line only, and a fact is written to the log once. Each check states what it proves, as the flows of `ui_mock.py` do.
+`TESTING.md` has one row per flow: what it proves. Each check states what it proves, as the flows of `ui_mock.py` do.
