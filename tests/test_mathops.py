@@ -411,3 +411,101 @@ class KeepBlackTest(unittest.TestCase):
         mid = mathops.keep_black(np.full((1, 1, 3), 1.0, np.float32), np.full((1, 1, 3), 0.0055, np.float32))
         self.assertTrue(0.0055 < float(mid[0, 0, 0]) < 1.0, "between the thresholds, a blend")
         print("Keep Black: the SDR shot's black where it is black, SDR to HDR's values elsewhere")
+
+
+class FollowMatteKeepsThePlate(unittest.TestCase):
+    """The paint matte over a shot that LTX regenerated everywhere (the review of 10 Nov 2026): only the object and the
+    generated pixels connected to it join the matte. A plate that pans one pixel a frame, an object of 60 x 40 px
+    regenerated, the tracker's mask on the object on every frame."""
+    N, H, W = 48, 270, 480
+
+    def follow(self, change=None, tracker=True):
+        rng = np.random.default_rng(7)
+        n, h, w = self.N, self.H, self.W
+        tex = ndimage.gaussian_filter(rng.random((h, w, 3)).astype(np.float32), (3, 3, 0)) * 0.6 + 0.2
+        base = np.stack([np.roll(tex, t, axis=1) for t in range(n)])
+        obj = np.zeros((h, w), bool)
+        obj[120:160, 220:280] = True
+        shot = base.copy()
+        shot[:, 120:160, 220:280] = 0.9
+        if change:
+            shot = change(shot, rng)
+        masks = np.repeat(obj[None].astype(np.float32), n, 0) if tracker else np.zeros((0, h, w), np.float32)
+        out, summary = m.follow_matte(masks, n, obj.astype(np.float32), shot=shot, base=base, zone=1 / 16, threshold=0.1,
+                                      element=obj.astype(np.float32))
+        area = out.reshape(n, -1).sum(1) / obj.sum()
+        beyond = ndimage.distance_transform_edt(~obj)
+        return area, max(float(beyond[o > 0.5].max()) for o in out), summary
+
+    @staticmethod
+    def noisy(shot, rng, sigma=0.03):
+        return np.clip(shot + rng.normal(0, sigma, shot.shape).astype(np.float32), 0, 1)
+
+    def check(self, area, far, most=1.5, reach=4.0):
+        self.assertLessEqual(float(area.max()), most, f"largest matte {area.max():.1f} times the object, on frame {int(area.argmax())}")
+        self.assertLessEqual(far, reach, f"a matte pixel {far:.0f} px beyond the object")
+
+    def test_1_the_shot_is_the_plate_with_the_object(self):
+        self.check(*self.follow()[:2])
+
+    def test_2_noise_on_every_frame(self):
+        self.check(*self.follow(self.noisy)[:2])
+
+    def test_3_three_frames_come_out_brighter(self):  # at d95292c: 5.0 times the object on those frames, 42 px beyond it
+        def brighter(shot, rng):
+            shot = self.noisy(shot, rng)
+            shot[[9, 20, 31]] = np.clip(shot[[9, 20, 31]] + 0.14, 0, 1)
+            return shot
+        area, far, summary = self.follow(brighter)
+        self.check(area, far)
+        self.assertLess(float(area[[9, 20, 31]].max()), 1.25 * float(np.median(area)))  # those frames as their neighbours
+        self.assertRegex(summary, r"largest matte is 1\.\d times the object, on frame \d+$")  # reported, with no warning
+
+    def test_4_the_shot_is_softer_than_the_plate(self):
+        self.check(*self.follow(lambda shot, rng: self.noisy(ndimage.gaussian_filter(shot, (0, 1.5, 1.5, 0)), rng))[:2])
+
+    def test_5_the_shot_is_shifted_by_two_pixels(self):
+        self.check(*self.follow(lambda shot, rng: np.roll(shot, 2, axis=2))[:2])
+
+    def test_a_flash_around_the_object_on_one_frame_is_brought_back(self):  # the area changes smoothly
+        def flash(shot, rng):
+            shot[20, 100:180, 200:300] = np.clip(shot[20, 100:180, 200:300] + 0.5, 0, 1)
+            return shot
+        area, far, summary = self.follow(flash)
+        self.check(area, far)
+        self.assertIn("brought back", summary)
+
+    def test_a_shot_that_differs_everywhere_with_no_tracker_adds_nothing(self):
+        area, far, _ = self.follow(lambda shot, rng: np.clip(self.noisy(shot, rng) + 0.14, 0, 1), tracker=False)
+        self.check(area, far)
+
+    def test_an_empty_region_searches_nothing(self):
+        n, h, w = 6, 60, 120
+        shot, stray = np.full((n, h, w, 3), 0.8, np.float32), np.zeros((n, h, w), np.float32)
+        stray[:, 10:20, 30:50] = 1  # what the tracker found by itself, from an empty first-frame mask
+        out, summary = m.follow_matte(stray, n, np.zeros((h, w), np.float32), shot=shot, base=np.zeros_like(shot))
+        self.assertEqual(float(out.max()), 0.0)
+        self.assertIn("left out", summary)
+
+    def test_a_large_matte_is_reported_with_a_warning(self):
+        n, h, w = 6, 60, 120
+        first, element = np.zeros((h, w), np.float32), np.zeros((h, w), np.float32)
+        first[10:50, 10:100] = 1  # the whole paint zone, which holds when the tracker returns nothing
+        element[30:36, 20:30] = 1  # what the edit changed: 60 px
+        _, summary = m.follow_matte(np.zeros((0, h, w), np.float32), n, first, element=element)
+        self.assertRegex(summary, r"largest matte is 60\.0 times the object, on frame 0 \(warning: above 3")
+
+
+class StoppedFollowMatte(unittest.TestCase):
+    def test_the_frame_loop_stops_when_its_check_raises(self):  # nodes.py passes ComfyUI's interrupt check as `tick`
+        calls = []
+
+        def tick():
+            calls.append(1)
+            if len(calls) == 4:
+                raise RuntimeError("stopped")
+        first = np.zeros((40, 60), np.float32)
+        first[10:20, 10:20] = 1
+        with self.assertRaises(RuntimeError):
+            m.follow_matte(np.repeat(first[None], 48, 0), 48, first, tick=tick)
+        self.assertEqual(len(calls), 4)  # no frame after the stop

@@ -53,7 +53,7 @@ else
     report; sleep 5
   done
   log "models ready: $(du -sb "$W/models" 2>/dev/null | awk '{printf "%.1f", $1 / 1e9}') GB"
-  flags=(--listen 0.0.0.0 --port 8188 --preview-method latent2rgb)
+  flags=(--listen 0.0.0.0 --port 8188)
   vram=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n 1)
   if [ "${vram:-0}" -ge 80000 ]; then flags+=(--highvram); fi  # every model stays loaded on a 96 GB card
   read -r -a extra <<< "${COMFY_ARGS:-}"  # more ComfyUI flags, such as COMFY_ARGS=--disable-dynamic-vram

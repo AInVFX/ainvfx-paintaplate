@@ -43,3 +43,15 @@ test("an upload answered by an error page fails instead of waiting forever", asy
   };
   await assert.rejects(upload(new Blob(["x"]), "a.png", "paintaplate/up"), /Upload failed: a\.png/);
 });
+
+import { promptBody, PREVIEW_METHOD } from "../../web/comfy.mjs";
+
+test("every job asks ComfyUI for the step previews it wants in its own post, so no start flag is needed", () => {
+  const shown = promptBody({ 1: {} }, { front: true, preview: true });
+  assert.deepEqual(shown.extra_data, { preview_method: PREVIEW_METHOD }, "a job that shows its steps, such as a Klein pass");
+  assert.equal(PREVIEW_METHOD, "latent2rgb");
+  assert.equal(shown.front, true);
+  assert.deepEqual(shown.prompt, { 1: {} });
+  assert.deepEqual(promptBody({}).extra_data, { preview_method: "none" }, "any other job: ComfyUI makes no preview for it");
+  assert.equal(promptBody({}).front, false);
+});

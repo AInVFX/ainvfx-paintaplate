@@ -573,3 +573,28 @@ class UntouchedTest(unittest.TestCase):
         self.assertTrue(np.array_equal(got[:, :12], plate[:, :12]), "the faint edge, below one 8-bit step: the source's own half floats")
         self.assertTrue(np.all(got[:, 12:] == 3.0), "the edit where the matte shows it")
         print("untouched: every pixel the 8-bit matte shows as 0 is the source's own, its faint edge included")
+
+
+class StoppedWriters(unittest.TestCase):
+    """nodes.py asks ComfyUI before each frame and raises when the person stopped the job: the writers stop there."""
+
+    @staticmethod
+    def frames(stop_at):
+        def at(i):
+            if i >= stop_at:
+                raise RuntimeError("stopped")
+            return np.full((32, 48, 3), 40 + i, np.uint8)
+        return at
+
+    def test_frames_stop_and_a_stopped_movie_leaves_no_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            paths = [os.path.join(d, f"f_{i:05}_.png") for i in range(12)]
+            with self.assertRaises(RuntimeError):
+                plateio.write_pngs(self.frames(3), paths, workers=2)
+            self.assertEqual(sorted(os.listdir(d)), [os.path.basename(p) for p in paths[:3]])  # the frames before the stop, none after
+            movie = os.path.join(d, "m.mp4")
+            with self.assertRaises(RuntimeError):
+                plateio.write_movie(self.frames(3), 12, movie, 24.0, workers=2)
+            self.assertFalse(os.path.exists(movie))  # no half-written movie stays in the output folder
+            plateio.write_movie(self.frames(99), 12, movie, 24.0, workers=2)
+            self.assertGreater(os.path.getsize(movie), 0)  # a movie that finishes is kept

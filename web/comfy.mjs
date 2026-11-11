@@ -61,6 +61,22 @@ export async function answer(r) {
   throw new Error(`No answer from ComfyUI (HTTP ${r.status}${what}): it may be restarting, or the connection dropped`);
 }
 
+// ComfyUI sends a sampler's step previews only when it was started with --preview-method, and by default it sends none.
+// So every job says what it wants in its own post (extra_data.preview_method, read by ComfyUI's execution.py): for a job
+// that shows its steps, latent2rgb, which needs no decoder file (taesd needs one in models/vae_approx, which the pack
+// does not download), costs one small matrix product per step, and is what the pod script asked for until now; for every
+// other job, none, so an LTX pass, which has its own Live Preview node, never pays for ComfyUI's previews as well.
+export const PREVIEW_METHOD = "latent2rgb";
+export const promptBody = (prompt, { front = false, preview = false } = {}) =>
+  ({ prompt, client_id: CLIENT, front, extra_data: { preview_method: preview ? PREVIEW_METHOD : "none" } });
+
+const unseen = new Set(); // why a live preview could not be made (nodes.py, Live Preview): each reason is said once
+function liveOff(reason) {
+  if (unseen.has(reason)) return;
+  unseen.add(reason);
+  log(`Live preview is off: ${reason}`, "warn");
+}
+
 export const post = (path, body) =>
   fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
@@ -108,7 +124,7 @@ export function run(name, values, { kind = name, preview, progress, step, live: 
   const job = { kind, name, preview, progress, live: onLive, retries: 1, key: JSON.stringify(wf.prompt), main: wf.progress, posted: Date.now(),
     step: step && ((id) => step(wf.prompt[id]?.class_type)), classes: Object.fromEntries(Object.entries(wf.prompt).map(([id, n]) => [id, n.class_type])) };
   job.done = new Promise((resolve, reject) => Object.assign(job, { resolve, reject }));
-  job.submit = () => post("/prompt", { prompt: wf.prompt, client_id: CLIENT, front }).then(answer).then((j) => {
+  job.submit = () => post("/prompt", promptBody(wf.prompt, { front, preview: !!preview })).then(answer).then((j) => {
     if (!j.prompt_id) throw new Error(rejection(j));
     job.id = j.prompt_id;
     job.heard = Date.now();
@@ -154,6 +170,7 @@ async function finish(id, error) {
   }
   live.delete(job);
   if (error) { log(`${job.name} ${short(id)}: failed after ${took(job)}: ${error}`, "error"); return job.reject(new Error(error)); }
+  if (job.previews) log(`${job.name} ${short(id)}: ${job.previews} preview(s) received`); // step previews or live previews: what computed was sent
   let out = (await historyRecord(id))?.outputs ?? {};
   const fresh = files(out).length || Object.values(out).some((o) => o.text?.length);
   if (fresh) memo.set(job.key, out);
@@ -201,7 +218,8 @@ function message({ data }) {
     if (v.getUint32(0) !== 4) return;
     const n = v.getUint32(4);
     const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(data, 8, n)));
-    byId.get(meta.prompt_id)?.preview?.(new Blob([new Uint8Array(data, 8 + n)], { type: meta.image_type }));
+    const shown = byId.get(meta.prompt_id);
+    if (shown?.preview) { shown.previews = (shown.previews ?? 0) + 1; shown.preview(new Blob([new Uint8Array(data, 8 + n)], { type: meta.image_type })); }
     return;
   }
   const { type, data: d } = JSON.parse(data);
@@ -215,7 +233,7 @@ function message({ data }) {
     else if (job?.inMain) job.progress?.(0.97); // the main node is done; saving remains
   } else if (type === "progress") {
     if (job && (!job.main.size || job.main.has(String(d.node)))) job.progress?.(0.02 + (0.93 * d.value) / d.max);
-  } else if (type === "paintaplate.live") job?.live?.(d); // a live preview of a shot being sampled (nodes.py, Live Preview)
+  } else if (type === "paintaplate.live") { if (d.off) liveOff(d.off); else if (job?.live) { job.previews = (job.previews ?? 0) + 1; job.live(d); } } // a live preview of a shot being sampled, or why there is none (nodes.py, Live Preview)
   else if (type === "execution_success") finish(d.prompt_id);
   else if (type === "execution_error") finish(d.prompt_id, `${d.node_type}: ${d.exception_message}`);
   else if (type === "execution_interrupted") finish(d.prompt_id, "cancelled");

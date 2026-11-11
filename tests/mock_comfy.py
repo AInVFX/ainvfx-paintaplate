@@ -404,8 +404,12 @@ async def worker():
         print(f"{pid[:8]} {'+'.join(sorted(outputs_of(prompt))) or 'no output'}: {time.time() - t0:.2f} s", flush=True)  # each job, by its outputs, and its time
 
 
+POSTS = []
+
+
 async def prompt_route(request):
     body = await request.json()
+    POSTS.append({"outputs": sorted(outputs_of(body["prompt"])), "extra_data": body.get("extra_data")})  # mock only: what each post asked for
     pid = str(uuid.uuid4())
     if "plate" in outputs_of(body["prompt"]):
         EVENTS.append(("prompt", time.time(), "fluid"))
@@ -551,6 +555,7 @@ async def start():
     app.router.add_post("/mock/hold", hold_route)
     app.router.add_post("/mock/release", release_route)
     app.router.add_get("/mock/events", lambda r: web.json_response(EVENTS))
+    app.router.add_get("/mock/posts", lambda r: web.json_response(POSTS))
     app.router.add_get("/ws", ws_route)
     app.router.add_routes(download_routes())
     app.router.add_static("/extensions/ainvfx-paintaplate/", os.path.join(REPO, "web"))

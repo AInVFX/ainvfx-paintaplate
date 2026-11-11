@@ -614,3 +614,52 @@ test("strokes replay in the order they were made; SAM's object comes last, cut b
   assert.deepEqual(viewerRules.replayOrder([a, r, b, r2], true), [{ stroke: a }, { stroke: r }, { stroke: b }, { stroke: r2 }, { sam: true, cuts: [r, r2] }]);
   assert.deepEqual(viewerRules.replayOrder([], true), [{ sam: true, cuts: [] }]);
 });
+
+// ---------- The pipeline, round 1: the paint matte's report, the memory profile ----------
+import { matteLargest } from "../../web/logic.mjs";
+
+test("the paint matte's report: its largest size against the object, the frame, and a warning above 3 times", () => {
+  assert.deepEqual(matteLargest("SAM 3.1 found the object on 121 of 121 frames; the largest matte is 1.2 times the object, on frame 31"), { ratio: 1.2, frame: 31, warn: false });
+  assert.deepEqual(matteLargest("SAM 3.1 returned no mask: the first-frame mask holds on every frame; the largest matte is 60.0 times the object, on frame 0 (warning: above 3, check the composite on that frame)"), { ratio: 60, frame: 0, warn: true });
+  assert.equal(matteLargest("SAM 3.1 found the object on 6 of 12 frames"), null, "a summary without the report");
+  assert.equal(matteLargest(undefined), null);
+});
+
+import { readFileSync as readFlow } from "node:fs";
+import { MEMORY, memoryProfile, fillWorkflow as fillFor, parseWorkflow as parseFor } from "../../web/logic.mjs";
+
+test("the memory profile: small under 24 GB, medium from 24 GB, large from 60 GB, or the one asked for", () => {
+  const gib = 2 ** 30;
+  assert.equal(memoryProfile({ vram: 16 * gib, ram: 64 * gib }).name, "small", "the reference laptop, an RTX 4090 Laptop with 16 GB");
+  assert.equal(memoryProfile({ vram: 23.99 * gib }).name, "medium", "a 24 GB card reports about 25.7e9 bytes");
+  assert.equal(memoryProfile({ vram: 20e9 }).name, "small");
+  assert.equal(memoryProfile({ vram: 32 * gib }).name, "medium");
+  assert.equal(memoryProfile({ vram: 96 * gib }).name, "large");
+  assert.equal(memoryProfile({}).name, "small", "no VRAM size: nothing loads early");
+  assert.deepEqual(memoryProfile({ vram: 16 * gib }).warm, [], "small: no model loads before an action needs it");
+  assert.deepEqual(memoryProfile({ vram: 16 * gib }).slots, { tile: 256, guide_tiled: true });
+  assert.match(memoryProfile({ vram: 16 * gib, ram: 64 * gib }).why, /16 GB of VRAM and 64 GB of RAM/);
+  assert.ok(memoryProfile({ vram: 16 * gib }).note, "what a small card cannot do as fast is said in one sentence");
+  assert.deepEqual(memoryProfile({ vram: 32 * gib }).warm, ["edit", "prompt"]);
+  assert.deepEqual(memoryProfile({ vram: 96 * gib }).warm, ["edit", "prompt", "warm"]);
+  const forced = memoryProfile({ vram: 96 * gib, ram: 256 * gib, force: "small" });
+  assert.equal(forced.name, "small");
+  assert.match(forced.why, /asked for; with 96 GB of VRAM and 256 GB of RAM, the page would choose large/);
+  assert.equal(memoryProfile({ vram: 96 * gib, force: "huge" }).name, "large", "an unknown name is not a profile");
+  assert.equal(memoryProfile({ vram: 96 * gib, force: "toString" }).name, "large");
+});
+
+test("a memory profile changes slot values only: one set of workflows, tiles of 256 px and a tiled guide on a small card", () => {
+  const flow = (name) => parseFor(JSON.parse(readFlow(new URL(`../../web/workflows/${name}.json`, import.meta.url), "utf8")));
+  const nodes = (wf, cls) => Object.values(wf.prompt).filter((n) => n.class_type === cls);
+  for (const name of ["clean", "cleanup", "shot", "fluid", "hdr"]) {
+    const large = fillFor(flow(name), { ...MEMORY.large.slots }), small = fillFor(flow(name), { ...MEMORY.small.slots });
+    assert.deepEqual(Object.keys(small.prompt), Object.keys(large.prompt), `${name}: the same nodes on every card`);
+    for (const n of nodes(large, "VAEDecodeTiled")) assert.equal(n.inputs.tile_size, 512, name);
+    for (const n of nodes(small, "VAEDecodeTiled")) assert.equal(n.inputs.tile_size, 256, name);
+    for (const n of nodes(large, "LTXAddVideoICLoRAGuide")) assert.equal(n.inputs.use_tiled_encode, false, name);
+    for (const n of nodes(small, "LTXAddVideoICLoRAGuide")) assert.equal(n.inputs.use_tiled_encode, true, name);
+    assert.ok(nodes(small, "VAEDecodeTiled").length + nodes(small, "LTXAddVideoICLoRAGuide").length > 0, `${name} has a slot of the profile`);
+  }
+  for (const n of nodes(fillFor(flow("cleanup"), { ...MEMORY.small.slots }), "VAEEncodeTiled")) assert.equal(n.inputs.tile_size, 256);
+});

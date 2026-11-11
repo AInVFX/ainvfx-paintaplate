@@ -29,7 +29,9 @@ class Models(unittest.TestCase):
     def test_every_file_a_workflow_loads_is_registered(self):
         files = {m["file"] for m in REGISTRY["models"]}
         for path in glob.glob(os.path.join(ROOT, "web", "workflows", "*.json")):
-            for node in json.load(open(path, encoding="utf-8")).values():
+            with open(path, encoding="utf-8") as f:
+                nodes = json.load(f).values()
+            for node in nodes:
                 for v in (node.get("inputs") or {}).values():
                     if isinstance(v, str) and v.endswith(".safetensors"):
                         self.assertIn(os.path.basename(v), files, f"{os.path.basename(path)} loads {v}")

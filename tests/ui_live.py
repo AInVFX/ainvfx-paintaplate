@@ -137,6 +137,7 @@ def main():
     ap.add_argument("--out", default=SHOTS, help="folder for screenshots and timings")
     ap.add_argument("--think", type=float, default=0, help="seconds between opening the plate and the first stroke")
     ap.add_argument("--graph", action="store_true", help="after the export, also save the scene's ComfyUI graph")
+    ap.add_argument("--memory", default="", help="with --url: the page's memory profile, small, medium or large (by default the card decides)")
     ap.add_argument("--channel", default="", help="a browser channel, such as chrome (it plays H.264; Playwright's Chromium does not)")
     a = ap.parse_args()
     if a.url:
@@ -207,7 +208,7 @@ def main():
     return 0 if passed else 1
 
 
-def fluid_shot(page, spec, shots, mark):
+def fluid_shot(page, spec, shots, mark, wait_s=900):
     """A fluid shot from a blank plate: the keyframes painted stroke by stroke, then one ainvfx-fluid pass.
 
     `spec`: {"size": [w, h], "fps": 24, "frames": 121, "words": "...", "keys": [[frame, colour, [[x, y], ...], brush], ...]}.
@@ -247,7 +248,7 @@ def fluid_shot(page, spec, shots, mark):
     mark("fluid: generating")
     page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
       return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden && document.querySelector('#opening').hidden; })()""",
-                           timeout=900000)  # made: the first edit, and the plate under the next ones
+                           timeout=wait_s * 1000)  # made: the first edit, and the plate under the next ones; a small card needs longer
     mark("fluid: shot ready | " + page.inner_text("#status"))
 
 
@@ -267,11 +268,11 @@ def remote(a):
         page.on("pageerror", lambda e: errors.append(str(e)))
         status = lambda: page.inner_text("#status")  # noqa: E731
         try:
-            page.goto(f"{a.url}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+            page.goto(f"{a.url}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0" + (f"&memory={a.memory}" if a.memory else ""))
             page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
             mark("page ready: " + status())
             if fluid:  # a fluid shot first: once made, it is the plate the strokes are painted on
-                fluid_shot(page, fluid, shots, mark)
+                fluid_shot(page, fluid, shots, mark, wait_s=max(900, 4 * a.timeout))
             else:
                 page.click("#open-btn"); page.click("#open [data-tab=files]"); page.fill("#path", a.path); page.click("#open-go")
                 page.wait_for_function("document.querySelector('#spec').textContent && document.querySelector('#opening').hidden", timeout=300000)
@@ -291,7 +292,7 @@ def remote(a):
                     stroke(page, box, pts); mark(f"{key} stroke")
                     page.keyboard.press("Enter")  # Generate
                     page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)
-                    page.wait_for_function(DONE.format(n=i + 1), timeout=300000)
+                    page.wait_for_function(DONE.format(n=i + 1), timeout=max(300, 2 * a.timeout) * 1000)  # a small card loads its models in turn
                     mark(f"{key} edit on the first frame | {status()}"); page.screenshot(path=f"{shots}/2_{key}_done.png")
                 seen = set()
                 deadline = time.time() + a.timeout * 8

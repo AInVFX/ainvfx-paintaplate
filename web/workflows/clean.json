@@ -431,6 +431,11 @@
    "tile_overlap": 64,
    "use_streaming": false,
    "tile_frames": 97
+  },
+  "_meta": {
+   "slots": {
+    "use_tiled_encode": "guide_tiled"
+   }
   }
  },
  "29": {

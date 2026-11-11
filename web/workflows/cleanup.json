@@ -426,6 +426,11 @@
    "overlap": 64,
    "temporal_size": 500,
    "temporal_overlap": 64
+  },
+  "_meta": {
+   "slots": {
+    "tile_size": "tile"
+   }
   }
  },
  "30": {
@@ -598,6 +603,11 @@
     "39",
     0
    ]
+  },
+  "_meta": {
+   "slots": {
+    "tile_size": "tile"
+   }
   }
  },
  "41": {

@@ -136,3 +136,34 @@ class ViewerMovies(unittest.TestCase):
         prompt, _, _ = build_workflows.load("hdr")
         tiled = [n["inputs"] for n in prompt.values() if n["class_type"] == "VAEDecodeTiled"]
         self.assertEqual([(t["temporal_size"], t["temporal_overlap"]) for t in tiled], [(128, 32)])
+
+
+class MemorySlots(unittest.TestCase):
+    def test_the_memory_profile_slots_default_to_the_large_cards_values(self):
+        """`tile` and `guide_tiled` (logic.memoryProfile on the page): unfilled, a workflow runs as on a large card."""
+        import json
+        folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web", "workflows")
+        for name, tiles, guides in (("clean", 0, 1), ("cleanup", 2, 0), ("shot", 1, 1), ("fluid", 1, 1), ("hdr", 1, 1)):
+            with open(os.path.join(folder, f"{name}.json")) as f:
+                prompt = json.load(f)
+            slots = {slot: (node["class_type"], node["inputs"][key]) for node in prompt.values() for key, slot in node.get("_meta", {}).get("slots", {}).items()}
+            tile = [n for n in prompt.values() if n.get("_meta", {}).get("slots", {}).get("tile_size") == "tile"]
+            guide = [n for n in prompt.values() if n.get("_meta", {}).get("slots", {}).get("use_tiled_encode") == "guide_tiled"]
+            self.assertEqual((len(tile), len(guide)), (tiles, guides), name)
+            self.assertTrue(all(n["inputs"]["tile_size"] == 512 for n in tile), name)
+            self.assertTrue(all(n["inputs"]["use_tiled_encode"] is False for n in guide), name)
+            self.assertEqual("tile" in slots, bool(tiles), name)
+
+
+class OpeningSteps(unittest.TestCase):
+    def test_every_class_the_opening_screen_waits_for_is_in_the_ingest_workflow(self):
+        """INGEST in web/app.mjs maps ingest's node classes to the opening screen's steps: a class the workflow no longer
+        runs never arrives, and its step never shows (ImageColorSpace, CreateVideo and SaveVideo stayed there until 1.11.1)."""
+        import json, re
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web")
+        with open(os.path.join(root, "app.mjs"), encoding="utf-8") as f:
+            named = re.findall(r"(\w+): \"", re.search(r"const INGEST = \{(.*?)\};", f.read(), re.S).group(1))
+        with open(os.path.join(root, "workflows", "ingest.json")) as f:
+            classes = {node["class_type"] for node in json.load(f).values()}
+        self.assertTrue(named)
+        self.assertEqual([c for c in named if c not in classes], [])
