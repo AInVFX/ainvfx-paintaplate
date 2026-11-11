@@ -2723,12 +2723,21 @@ function explained(err, what) { // ComfyUI's own message goes to the log; the st
   return new Error(`${what} failed: ${plainError(raw)} Generate tries again.`);
 }
 
-function status(text, level = "") { // the status line, and a line in the log
+function status(text, level = "") { // the status line. A fact also goes to the log; a hint, a sentence that says what to do next, shows here only
   $("#status").textContent = text;
-  log(text, level);
+  if (level !== "hint") log(text, level);
 }
 
-function log(text, level = "") { // the log panel only: what happens under the hood, with the time
+function told(fact, next, level = "") { // what happened goes to the log, once; the status line shows it with what to do next
+  log(fact, level);
+  status(`${fact}. ${next}`, "hint");
+}
+
+function stopped(fact, next) { // the page cannot go on: the fact is an error in the log, and the status line says how to repair it
+  told(fact, next, "error");
+}
+
+function log(text, level = "") { // the log panel only: what happened, one line per fact, with the time
   const li = document.createElement("li");
   li.className = level;
   li.innerHTML = "<time></time><span></span>";
@@ -2854,7 +2863,7 @@ function setPreview(cap) { // a smaller shot preview renders faster; the export 
   S.plate.shot = previewSize([S.plate.spec.width, S.plate.spec.height], S.plate.work, cap);
   previewUI();
   S.heroKey = ""; recompose(); // what this size made already plays at once; the full size and its export never depend on it
-  status(`Previews at ${S.plate.shot[0]} × ${S.plate.shot[1]}. The export stays at full size.`);
+  status(`Previews at ${S.plate.shot[0]} x ${S.plate.shot[1]}. The export stays at full size.`);
   stagesUI(); exportUI(); touch();
 }
 
@@ -3074,12 +3083,12 @@ async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it ag
     ...(f ? { fluid: { prompt: keying() ? $("#prompt").value.trim() : f.prompt ?? "", seed: f.seed, depth: f.depth ?? 8, made: !!f.result, on: f.on !== false, keys: f.keys.map((k) => ({ frame: k.frame, strokes: packStrokes(k.strokes) })) } } : {}) };
   const name = (S.plate.name || "scene").replace(/[^\w.-]/g, "_").slice(0, 100), r = await post(`/paintaplate/scenes/${encodeURIComponent(name)}`, scene);
   if (!r.ok) throw new Error(`The scene was not saved: ${await r.text()}`);
-  status(`Scene ${name} saved on this ComfyUI: Open plate > Scenes opens it again, or downloads it.`);
+  told(`Scene ${name} saved on this ComfyUI`, "Open plate > Scenes opens it again, or downloads it.");
 }
 
 async function saveGraph() { // the whole scene as one ComfyUI workflow, to open in ComfyUI and keep editing there
   const p = S.plate, active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
-  if (!p || !active.length) return status("Make an edit first: the ComfyUI graph holds the edits and the render.");
+  if (!p || !active.length) return status("Make an edit first: the ComfyUI graph holds the edits and the render.", "hint");
   status("Writing the ComfyUI graph: each edit's mask and strokes go to ComfyUI's input folder");
   const edits = [];
   for (const e of active) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, caption: e.caption?.text || templateCaption(e),
@@ -3099,7 +3108,7 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
     href: URL.createObjectURL(new Blob([JSON.stringify(graph, null, 1)], { type: "application/json" })) });
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  status(`Saved ${a.download}: ${Object.keys(graph).length} nodes in numbered sections, each opening with a README note. Drop it on this ComfyUI to open it: it reads the plate and the strokes from the input folder.`);
+  told(`Saved ${a.download}: ${Object.keys(graph).length} nodes in numbered sections, each opening with a README note`, "Drop it on this ComfyUI to open it: it reads the plate and the strokes from the input folder.");
 }
 
 async function openScene(text) { // the plate opens in its colour space, then every edit runs again with its own seed and words
@@ -3123,7 +3132,7 @@ async function openScene(text) { // the plate opens in its colour space, then ev
     S.fluid.keys = scene.fluid.keys.map((k) => { const key = newKey(k.frame); key.strokes = unpackStrokes(k.strokes, S.plate.work, from); redrawKey(key); return key; });
     fluidUI(); timelineUI(); historyUI(); render();
     if (scene.fluid.made && S.fluid.keys.length) await generateFluid(); // the machine that made it takes it back from the job index
-    else if (!scene.edits.length) return status(`Scene opened: a fluid shot with ${S.fluid.keys.length} keyframe${S.fluid.keys.length === 1 ? "" : "s"}. Enter generates it.`);
+    else if (!scene.edits.length) return told(`Scene opened: a fluid shot with ${S.fluid.keys.length} keyframe${S.fluid.keys.length === 1 ? "" : "s"}`, "Enter generates it.");
   }
   for (const saved of scene.edits) {
     const e = Object.assign(newEdit(), { tool: saved.tool, color: saved.color, prompt: saved.prompt ?? "", seed: saved.seed,
@@ -3551,7 +3560,7 @@ async function boot() { // the version, the workflows, the WebSocket, then what 
   const classes = [...new Set([...Object.keys(needs), ...[...models.values()].map(([cls]) => cls), "PaintAPlate_KeyframeVideo", ...HDR_NODES])];
   const info = Object.fromEntries(await Promise.all(classes.map(async (cls) => [cls, await objectInfo(cls)]))); // one round trip for all
   const missing = Object.entries(needs).filter(([cls]) => !info[cls]).map(([cls, from]) => `${cls} (${from})`);
-  if (missing.length) return status(`Missing nodes: ${missing.join(", ")}. Install them, then reload this page.`);
+  if (missing.length) return stopped(`Missing nodes: ${missing.join(", ")}`, "Install them, then reload this page.");
   const absent = []; // only lists count: a file named in a text input is optional (the live preview's decoder)
   for (const [file, [cls, input]] of models) { const options = combo(info[cls]?.input.required[input]); if (options.length && !options.includes(file)) absent.push(file); }
   const fluidFiles = new Set(Object.values(WF.fluid.prompt).flatMap((n) => Object.values(n.inputs)).filter((v) => typeof v === "string" && v.endsWith(".safetensors")));
@@ -3565,10 +3574,10 @@ async function boot() { // the version, the workflows, the WebSocket, then what 
   else if (!S.hdrReady) log(`SDR to HDR is off: ${absent.filter(onlyHdr).join(", ") || "update ComfyUI and ComfyUI-LTXVideo"}. ${HDR_MISSING}`);
   depthUI();
   const missingFiles = absent.filter((file) => !only(file) && !onlyHdr(file));
-  if (missingFiles.length) return status(`Missing model files: ${missingFiles.join(", ")}. tools/pod_setup.sh lists each one with its models folder and downloads it.`);
+  if (missingFiles.length) return stopped(`Missing model files: ${missingFiles.join(", ")}`, "Run python get_models.py in this pack's folder, then reload this page.");
   log(`Page ready in ${Math.round(performance.now() - t0)} ms: ${WORKFLOWS.length} workflows, ${classes.length} node classes and ${models.size} model files checked`);
   log(`OCIO: ${S.ocio.info.label}, viewed on ${S.ocio.display} through ${S.ocio.view}${S.ocio.config === "$OCIO" ? " ($OCIO)" : ""}`);
-  status("Ready. Open a plate to start. The models load in the background.");
+  status("Ready. Open a plate to start.", "hint");
   if (!S.plate && BLANK_AT_START && S.fluidReady) await openBlank({ atStart: true }).catch(quiet); // a canvas for a fluid shot, at the Blank tab's settings
   warmAll().catch(() => {}); // a ComfyUI that reports no GPU details simply skips it
 }
