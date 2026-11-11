@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Standalone setup of a Paint a plate GPU machine (tested on a Runpod RTX PRO 6000).
 #   HF_TOKEN=... [PLATES=1] bash tools/pod_setup.sh [comfyui_ref] [ltxvideo_ref]
-# PLATES=1 also downloads the AInVFX test plates into ComfyUI's input/plates folder (tools/get_plates.sh);
+# PLATES=1 also downloads the example plates into ComfyUI's input/plates folder (get_plates.py, at the root of the pack);
 # FLUID=0 skips AInVFX's ainvfx-fluid IC-LoRA (0.65 GB), which the blank plate's fluid shots need. The models and their
 # revisions are in get_models.py, at the root of the pack.
 # The refs default to the tested commits, in tools/pins.sh. The pack is the repo this script lives in.
@@ -81,8 +81,8 @@ if [ "$PACK" != "$dst" ]; then
   ln -sfn "$PACK" "$dst"
 fi
 uv pip install -q -r "$PACK/requirements.txt"
-if [ "${PLATES:-0}" != 0 ]; then  # the AInVFX test plates into input/plates, where the Open plate dialog lists them
-  log "test plates from Hugging Face"
-  bash "$PACK/tools/get_plates.sh" "$W/ComfyUI" || log "the test plates did not download: run bash tools/get_plates.sh later"
+if [ "${PLATES:-0}" != 0 ]; then  # the example plates into input/plates, where the Open plate dialog lists them
+  log "example plates from Hugging Face"
+  python "$PACK/get_plates.py" "$W/ComfyUI/input/plates" || log "example plates missing: run python get_plates.py later"
 fi
 cat "$W/pins.txt"; log "setup done"
