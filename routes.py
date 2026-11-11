@@ -27,8 +27,10 @@ import functools
 import glob
 import hashlib
 import json
+import logging
 import os
 import re
+import time
 import uuid
 import zipfile
 
@@ -657,8 +659,60 @@ async def ocio_shader(request: web.Request) -> web.Response:
     return web.json_response(out, headers={"Cache-Control": "no-store"})  # a new $OCIO or an updated pack shows at once
 
 
+# ---------- A trace of every request, for the day ComfyUI's memory grows and no job runs ----------
+
+TRACE = os.environ.get("PAINTAPLATE_TRACE") == "1"
+TRACE_QUIET = (".js", ".mjs", ".css", ".map", ".svg", ".png", ".ico", ".woff", ".woff2", ".ttf", ".html", ".json")  # the front ends' own files
+
+
+def held() -> float:
+    """What this process holds now, in GB (VmRSS): 0.0 where /proc is not there."""
+    try:
+        with open("/proc/self/status") as f:
+            return next(int(line.split()[1]) for line in f if line.startswith("VmRSS")) / 2**20
+    except (OSError, StopIteration, ValueError):
+        return 0.0
+
+
+@web.middleware
+async def trace(request: web.Request, handler):
+    """One line in ComfyUI's log when a request starts and one when it ends: its method and address, the seconds, and the
+    memory the process holds. Every request to ComfyUI passes here, the pack's routes and the others. A request that
+    starts and never ends is one that ran when ComfyUI stopped. A front end's own file is said only when it is slow or
+    heavy. On with PAINTAPLATE_TRACE=1 in ComfyUI's environment (11 Nov: ComfyUI reached a 40 GB cap with the page open
+    and no job posted, and nothing in its log said which request had run)."""
+    what, t0, before = f"{request.method} {request.path_qs[:240]}", time.perf_counter(), held()
+    quiet = request.method == "GET" and request.path.endswith(TRACE_QUIET) and not request.path.startswith("/paintaplate/")
+    if not quiet:
+        logging.info("Paint a plate trace: starts %s, at %.1f GB", what, before)
+    try:
+        return await handler(request)
+    finally:
+        seconds, after = time.perf_counter() - t0, held()
+        if not quiet or seconds >= 0.5 or after - before >= 0.1:
+            logging.info("Paint a plate trace: ends %s after %.2f s, at %.1f GB", what, seconds, after)
+
+
+async def _pulse(app) -> None:
+    """With the trace on: one line each time the memory has moved by half a GB, so growth between two requests shows."""
+    async def watch():
+        last = held()
+        while True:
+            await asyncio.sleep(1)
+            now = held()
+            if abs(now - last) >= 0.5:
+                logging.info("Paint a plate trace: the process holds %.1f GB", now)
+                last = now
+    app["paintaplate_pulse"] = asyncio.create_task(watch())
+
+
 def setup(server) -> None:
     """Add the routes to ComfyUI's server (or to anything with an aiohttp RouteTableDef as `routes`)."""
+    app = getattr(server, "app", None)
+    if TRACE and app is not None:
+        app.middlewares.append(trace)
+        app.on_startup.append(_pulse)
+        logging.info("Paint a plate trace: on. Every request to ComfyUI writes a line when it starts and when it ends")
     server.routes.get("/paintaplate/download")(download)
     server.routes.get("/paintaplate/browse")(browse_route)
     server.routes.get("/paintaplate/thumb")(thumb)

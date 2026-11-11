@@ -1,5 +1,6 @@
 """The download route: which folders it reads, what each zip holds, and that it stays inside output/paintaplate."""
 import asyncio
+import logging
 import os
 import sys
 import tempfile
@@ -412,3 +413,39 @@ class ModelsZipTest(unittest.TestCase):
             self.assertIn("MODELS.md", names)
             self.assertNotEqual(path, routes.build_zip(d, "shot", ["export"], ["klein", "ltx"]), "another list, another zip")
         print("MODELS.md: the models behind an export with their licences, in its zip")
+
+
+class TraceTest(unittest.TestCase):
+    """PAINTAPLATE_TRACE=1: every request says when it starts and when it ends, with what the process holds."""
+
+    def call(self, method, path_qs, seconds=0.0):
+        async def handler(request):
+            await asyncio.sleep(seconds)
+            return "answer"
+        request = types.SimpleNamespace(method=method, path_qs=path_qs, path=path_qs.split("?")[0])
+        return asyncio.run(routes.trace(request, handler))
+
+    def test_a_request_says_when_it_starts_and_when_it_ends(self):
+        with self.assertLogs(level="INFO") as said:
+            self.assertEqual(self.call("GET", "/paintaplate/thumb?path=plates/horse.mp4"), "answer")
+        lines = [r.getMessage() for r in said.records]
+        self.assertEqual(len(lines), 2)
+        self.assertRegex(lines[0], r"^Paint a plate trace: starts GET /paintaplate/thumb\?path=plates/horse\.mp4, at \d+\.\d GB$")
+        self.assertRegex(lines[1], r"^Paint a plate trace: ends GET /paintaplate/thumb\?path=plates/horse\.mp4 after \d+\.\d\d s, at \d+\.\d GB$")
+
+    def test_a_front_end_file_is_said_only_when_it_is_slow(self):
+        with self.assertLogs(level="INFO") as said:
+            logging.getLogger().info("so that assertLogs has a line")
+            self.call("GET", "/extensions/ainvfx-paintaplate/app.mjs")
+        self.assertEqual(len(said.records), 1)
+        with self.assertLogs(level="INFO") as said:
+            self.call("GET", "/extensions/ainvfx-paintaplate/app.mjs", seconds=0.6)
+        self.assertIn("ends GET /extensions/ainvfx-paintaplate/app.mjs after 0.6", said.records[0].getMessage())
+
+    def test_a_request_that_fails_still_says_that_it_ended(self):
+        async def handler(request):
+            raise web.HTTPNotFound(text="No thumbnail")
+        request = types.SimpleNamespace(method="GET", path_qs="/paintaplate/thumb?path=x", path="/paintaplate/thumb")
+        with self.assertLogs(level="INFO") as said, self.assertRaises(web.HTTPNotFound):
+            asyncio.run(routes.trace(request, handler))
+        self.assertIn("ends GET /paintaplate/thumb?path=x", said.records[-1].getMessage())
