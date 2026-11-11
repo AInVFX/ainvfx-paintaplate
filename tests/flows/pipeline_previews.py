@@ -20,12 +20,12 @@ def posted(port, count, page, limit=30):  # the posts, once there are `count` of
     return posts(port)
 
 
-def logged(page, U, start):  # the log line that starts with `start`, once it is written: the page says Ready before /system_stats answers
+def logged(page, start):  # the log line that starts with `start`, once it is written: the page says Ready before /system_stats answers
     try:
         page.wait_for_function(LOGGED, arg=start, timeout=20000)
     except Exception:
         return ""
-    return next(t for t in U.log_lines(page) if t.startswith(start))
+    return next(t for t in page.eval_on_selector_all("#log li span", "els => els.map((e) => e.textContent)") if t.startswith(start))
 
 
 def run(browser, port, U):
@@ -34,7 +34,7 @@ def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(address + "&memory=small")  # a small card, asked for: the mock's card has 32 GB
     page.wait_for_function(READY, timeout=60000)
-    line = logged(page, U, "Memory profile small:")
+    line = logged(page, "Memory profile small:")
     U.check(line.startswith("Memory profile small: asked for") and "would choose medium" in line, f"the log names the memory profile and why: {line}")
     U.check("less than 24 GB" in page.text_content("#status"), "a small card: the page says what it means in one sentence, at open")
     page.wait_for_timeout(3000)
@@ -44,7 +44,7 @@ def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(address)
     page.wait_for_function(READY, timeout=60000)
-    U.check(logged(page, U, "Memory profile medium:") != "", "the mock's 32 GB card: the medium profile")
+    U.check(logged(page, "Memory profile medium:") != "", "the mock's 32 GB card: the medium profile")
     warm = posted(port, before + 2, page)[before:]
     U.check(len(warm) == 2 and all(p["extra_data"] == {"preview_method": "none"} for p in warm),
             f"medium: the two edit models load at page open, and a warm-up asks for no preview: {warm}")
