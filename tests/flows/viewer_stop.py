@@ -115,4 +115,15 @@ def run(browser, port, U):
             f"with no result yet, the Generate button stays live while an edit waits: disabled {page.is_disabled('#generate')}")
     page.click("#generate")
     U.check(U.until(page, U.DONE.format(n=1), 60000) and U.row_words(page) == ["a blue vase"], f"and Generate runs it: History {U.row_words(page)}")
+
+    # 8. A stop in force ends when another plate opens: the new plate's first edit runs without Enter
+    hold(port, output="patch", seconds=30)
+    page.keyboard.press("n"); U.paint_once(page, "a red fire", [(0.20, 0.75), (0.30, 0.75)]); page.keyboard.press("Enter")
+    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
+    page.keyboard.press("Escape")
+    page.wait_for_function(f"{STATUS}.startsWith('Stopped')", timeout=10000)
+    U.open_path(page, "plates/desk.mp4")
+    page.wait_for_function(OPEN, timeout=60000)
+    page.keyboard.press("b"); U.paint_once(page, "a green lamp", [(0.60, 0.40), (0.70, 0.40)]); page.keyboard.press("n")
+    U.check(U.until(page, U.DONE.format(n=1), 60000) and U.row_words(page) == ["a green lamp"], f"a stop ends when another plate opens, and its first edit runs without Enter: History {U.row_words(page)}")
     page.close()

@@ -240,6 +240,7 @@ async function writeCaption(e, reference, key, kind) {
 async function openPlate(list, typed, opts = {}) {
   if (!list.length && !typed) return status("Choose files, or type a path in ComfyUI's input folder.");
   stopEverything();
+  if (!opts.under) { S.halted = false; S.viewStopped = false; S.viewEpoch++; } // another plate, or a scene: what generates stops, a stop in force ends, and what waited for it is void
   if (!opts.under) S.deliver = { hdr: false }; // a new plate: Deliver's passes off; the fluid shot under the edits keeps them
   if (openCtl) { openCtl.abort(); cancel("ingest"); } // a plate still opening gives way to this one
   const ctl = (openCtl = new AbortController()); // Cancel on the opening screen, or Esc, aborts it (cancelOpen)
@@ -2428,6 +2429,7 @@ function renderInFull() { // Render in full: the set on show made again with its
   fresh.own = true;
   log(`Render v${fresh.v}: the edits of v${r.v} again, with their own shot (v${r.v} took the frames of v${r.donor})`);
   S.halted = false;
+  queueWaiting(); // under a stop, Render in full lifts it as Enter does: the edits that waited run too
   stagesUI(); generateUI(); touch(0);
 }
 
