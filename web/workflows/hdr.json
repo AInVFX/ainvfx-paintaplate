@@ -169,6 +169,11 @@
    "tile_overlap": 64,
    "use_streaming": false,
    "tile_frames": 97
+  },
+  "_meta": {
+   "slots": {
+    "use_tiled_encode": "guide_tiled"
+   }
   }
  },
  "12": {
@@ -337,6 +342,11 @@
    "overlap": 64,
    "temporal_size": 128,
    "temporal_overlap": 32
+  },
+  "_meta": {
+   "slots": {
+    "tile_size": "tile"
+   }
   }
  },
  "23": {

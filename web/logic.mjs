@@ -705,3 +705,26 @@ export function matteLargest(summary) {
   const m = /largest matte is ([\d.]+) times the object, on frame (\d+)/.exec(summary ?? "");
   return m ? { ratio: +m[1], frame: +m[2], warn: +m[1] > MATTE_WARN } : null;
 }
+
+// ---------- Pipeline: the memory profile ----------
+// What the page does on the card it runs on, from the VRAM and RAM in ComfyUI's /system_stats. Three profiles to start from;
+// the borders move with measurements (tests/gpu_matrix.py writes each case's peak VRAM and RAM).
+// - small, under 24 GB of VRAM (the reference is an RTX 4090 Laptop with 16 GB): no model loads before an action needs it,
+//   so the prompt writer, Klein and LTX take turns; every LTX pass encodes its guide in tiles and decodes in 256 px tiles
+//   (in the SDR-to-HDR decode, 512 px tiles ran out of memory on 16 GB).
+// - medium, from 24 GB: the edit models load at start, LTX with the first shot; 512 px tiles.
+// - large, from 60 GB: every model loads at start and stays loaded.
+// `slots` are workflow slot values (tile, guide_tiled): one set of workflows serves every profile.
+export const MEMORY_FROM = { medium: 24e9, large: 60e9 }; // bytes of VRAM: a 24 GB card reports about 25.7e9, a 16 GB one about 17.2e9
+export const MEMORY = {
+  small: { warm: [], slots: { tile: 256, guide_tiled: true }, does: "No model loads before an action needs it, and LTX encodes and decodes in 256 px tiles",
+    note: "This card has less than 24 GB of VRAM: models load one at a time and LTX works in tiles, so every step takes longer than on a larger card." },
+  medium: { warm: ["edit", "prompt"], slots: { tile: 512, guide_tiled: false }, does: "The edit models load now, LTX with the first shot", note: null },
+  large: { warm: ["edit", "prompt", "warm"], slots: { tile: 512, guide_tiled: false }, does: "Every model loads now and stays loaded", note: null },
+};
+export function memoryProfile({ vram = 0, ram = 0, force = null } = {}) { // `force`: a profile's name, from ?memory= or the paintaplate.memory setting
+  const auto = vram >= MEMORY_FROM.large ? "large" : vram >= MEMORY_FROM.medium ? "medium" : "small";
+  const forced = Object.hasOwn(MEMORY, force ?? ""), name = forced ? force : auto, gib = (n) => Math.round(n / 2 ** 30);
+  const card = vram > 0 ? `${gib(vram)} GB of VRAM and ${gib(ram)} GB of RAM` : "ComfyUI gave no VRAM size";
+  return { name, why: forced ? `asked for; with ${card}, the page would choose ${auto}` : card, ...MEMORY[name] };
+}
