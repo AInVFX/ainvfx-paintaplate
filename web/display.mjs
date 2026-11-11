@@ -164,7 +164,7 @@ export class Display {
   constructor({ onready = () => {}, onerror = () => {} } = {}) {
     Object.assign(this, { onready, onerror, programs: new Map(), view: null });
     this.canvas = document.createElement("canvas");
-    const gl = (this.gl = this.canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, premultipliedAlpha: false, preserveDrawingBuffer: true }));
+    const gl = (this.gl = this.canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, premultipliedAlpha: false })); // every frame drawn here is copied in the same task, so the drawing buffer is not preserved
     if (!gl) return;
     this.linearFloats = !!gl.getExtension("OES_texture_float_linear"); // else filtered tables go in half floats
     gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
