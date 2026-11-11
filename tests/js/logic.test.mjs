@@ -595,3 +595,22 @@ test("SDR to HDR: on its own for a plate that holds values above 1.0, else only 
   assert.equal(wantsHdrFor(mp4, 1, false), false, "an SDR video: off");
   assert.equal(wantsHdrFor(mp4, 1, true), true, "an SDR video with Deliver's bit-depth pass on");
 });
+
+// ---------- The viewer, round 1: a stop keeps the strokes ----------
+import * as viewerRules from "../../web/logic.mjs";
+
+test("Esc drops the strokes in progress first, then stops the edit being generated, which keeps its strokes", () => {
+  const esc = viewerRules.escapeAction;
+  assert.equal(esc({ running: true, editing: false, selected: true, generating: true }), "reopen");
+  assert.equal(esc({ running: true, editing: true, selected: true, generating: true }), "discard"); // a new draft beside it goes first
+  assert.equal(esc({ opening: true, running: true, editing: true, generating: true }), "cancelOpen");
+  assert.equal(esc({ editing: false, selected: true, generating: true }), "deselect");
+  assert.equal(esc({ editing: false, selected: false, generating: true }), "stop");
+});
+
+test("strokes replay in the order they were made; SAM's object comes last, cut by every rub", () => {
+  const a = { tool: "paint" }, r = { tool: "rub" }, b = { tool: "paint" }, r2 = { tool: "rub" };
+  assert.deepEqual(viewerRules.replayOrder([a, r, b]), [{ stroke: a }, { stroke: r }, { stroke: b }]); // b, painted over the rubbed place, stays
+  assert.deepEqual(viewerRules.replayOrder([a, r, b, r2], true), [{ stroke: a }, { stroke: r }, { stroke: b }, { stroke: r2 }, { sam: true, cuts: [r, r2] }]);
+  assert.deepEqual(viewerRules.replayOrder([], true), [{ sam: true, cuts: [] }]);
+});

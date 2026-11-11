@@ -17,6 +17,9 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
+import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
+import { CACHE_CHOICES, PlayStats, autoBudget, cachePlan, sameMachine, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
+import { readBack } from "./canvas.mjs"; // the viewer: a few pixels of the view, read without moving it off the GPU
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -26,8 +29,8 @@ const Q = new URLSearchParams(location.search);
 // FLUX 3 Image Klein: a quick pass at EDIT_SIDE, then a full-size pass that refines it with a light denoise
 const QUICK = { steps: 16, denoise: 1, feather: 6, sigma: 3 }; // 16: the official distilled setting, 1.8 s at 768 on an RTX PRO 6000
 const FULL = { steps: +Q.get("refine") || 8, denoise: 0.35, feather: 12, sigma: 6 };
-const CACHE_MB = +Q.get("cache") || 384; // decoded frames kept per video: about 180 frames at 960 x 544
-const DEEP_MB = +Q.get("deep") || 512; // per cache (the plate, an export): an image sequence in its own values, about 160 frames of RGB half floats at 960 x 540
+const CACHE_MB = +Q.get("cache") || 0; // ?cache=<MB>, for the tests: the memory budget of the frame caches. Without it, View > Cache memory decides (Auto by default)
+const DEEP_MB = +Q.get("deep") || 0; // ?deep=<MB>, for the tests: each full-precision cache's own budget (an image sequence in its own values, 3 MB a frame at 960 x 540). Without it, a share of the cache budget
 const NATIVE_SIDE = 4096; // the long side the viewer draws a plate at, at most: the frames route's limit and the pipeline's movies'
 const INSPECT_MS = 60; // the colour inspector reads at most one pixel per this many ms from /paintaplate/pixel
 const DEEP_SIDE = 960; // their long side, the playback video's
@@ -413,10 +416,50 @@ function openStep(id, f = 0, text = null, left = null) { // one step of opening,
 // ---------- Decoded frames (frames.mjs), and RV's green stripe of cached frames ----------
 
 const playhead = () => (S.plate ? { fps: S.plate.fps, frame: S.frame, inPt: S.inPt, outPt: S.outPt } : null);
-const caches = new Map([plateVid, shotVid].map((v) => [v, new FrameCache(v, { view: playhead, changed: () => cacheUI(), budget: CACHE_MB * 1e6 })]));
-const deepOf = (v) => new DeepFrames(v, { view: playhead, changed: () => cacheUI(), budget: DEEP_MB * 1e6 });
+const caches = new Map([plateVid, shotVid].map((v) => [v, new FrameCache(v, { view: playhead, changed: () => cacheUI(), budget: (CACHE_MB || 512) * 1e6 })])); // until planCaches gives each its share
+const deepOf = (v) => new DeepFrames(v, { view: playhead, changed: () => cacheUI(), budget: (DEEP_MB || 512) * 1e6 });
 const deep = deepOf(plateVid), deepShot = deepOf(shotVid); // full precision: an image-sequence plate, and its full-size composite (the review)
 const look = new Display({ onready: () => render(), onerror: (m) => log(m, "error") }); // the viewer's OCIO, as in RV
+
+// One memory budget for every cache of decoded frames, as RV's look-ahead cache has one (frames.mjs: autoBudget, cachePlan).
+// View > Cache memory sets it and the next session keeps it; Auto by default. The caches of the sources on show share it
+// first, each at the size the frame is shown, so the frames between the in and out points fit and the shot plays from memory.
+const CACHE_PREF = "paintaplate.cache";
+S.cache = (() => { try { const v = +localStorage.getItem(CACHE_PREF); return CACHE_CHOICES.includes(v) ? v : 0; } catch { return 0; } })(); // bytes; 0: Auto
+const memoryText = (b) => (b >= 1e9 ? `${Math.round(b / 1e8) / 10} GB` : `${Math.round(b / 1e6)} MB`);
+const cacheBudget = () => (CACHE_MB ? CACHE_MB * 1e6 : S.cache || autoBudget({ host: location.hostname, vram: S.vram, deviceMemory: navigator.deviceMemory }));
+const planned = { key: "", said: "", timer: 0 };
+function planCaches() { // each cache's share and frame size, when the budget, the frame's size, the sources on show or the in and out points change
+  const p = S.plate, fit = [S.fit.w, S.fit.h].map((v) => Math.round(v * devicePixelRatio));
+  if (!p || !fit[0] || !fit[1]) return;
+  const budget = cacheBudget(), frames = S.outPt - S.inPt + 1, shot = !!S.shot?.url, plateOn = !shot || S.wipe !== null;
+  const exact = colour.nativeSize(p.spec.width, p.spec.height, DEEP_SIDE), size = (v) => [v.videoWidth, v.videoHeight];
+  const sources = [
+    plateVid.videoWidth && { id: "plate", name: "the plate", cache: caches.get(plateVid), movie: size(plateVid), show: plateOn && !p.deep },
+    shot && shotVid.videoWidth && { id: "shot", name: "the shot", cache: caches.get(shotVid), movie: size(shotVid), show: !S.shot.frames },
+    p.deep && !DEEP_MB && { id: "deep", name: "the plate's EXR frames", cache: deep, movie: exact, show: plateOn, bytes: 6 },
+    S.shot?.frames && !DEEP_MB && { id: "deepShot", name: "the shot's EXR frames", cache: deepShot, movie: exact, show: true, bytes: 6 },
+  ].filter(Boolean);
+  if (!sources.length) return; // no movie has loaded yet
+  const key = JSON.stringify([budget, frames, fit, sources.map((s) => [s.id, s.movie, s.show])]);
+  if (key === planned.key) return;
+  planned.key = key;
+  const shares = cachePlan({ budget, frames, fit, sources });
+  for (const s of sources) if (!s.show) s.cache.stopReader(); // the sources on show read first
+  for (const s of sources.sort((a, b) => Number(!!b.show) - Number(!!a.show))) s.cache.plan(shares[s.id].budget, s.bytes ? null : [shares[s.id].width, shares[s.id].height]);
+  const why = CACHE_MB ? "set in the address" : S.cache ? "set in View > Cache memory"
+    : `Auto: ComfyUI on ${sameMachine(location.hostname) ? "this machine" : "another machine"}${S.vram ? `, a ${Math.round(S.vram / 1e9)} GB card` : ""}`;
+  const said = `Frame cache: ${memoryText(budget)} (${why}). ${sources.map((s) => `${shares[s.id].fits} of ${frames} frames of ${s.name} fit at ${shares[s.id].width} x ${shares[s.id].height}`).join("; ")}`;
+  if (said !== planned.said) log((planned.said = said));
+  cacheUI();
+}
+function planSoon() { if (!planned.timer) planned.timer = setTimeout(() => { planned.timer = 0; planCaches(); }, 300); }
+function setCache(bytes) { // View > Cache memory; 0 is Auto
+  S.cache = bytes;
+  try { localStorage.setItem(CACHE_PREF, String(bytes)); } catch { /* private browsing: the setting lasts for this session */ }
+  planCaches();
+  hud(`Cache memory: ${bytes ? memoryText(bytes) : `Auto, ${memoryText(cacheBudget())}`}`, 2500);
+}
 
 function cacheUI() { // the green stripe along the top of the timeline: frames that draw at once
   if (cacheUI.queued) return;
@@ -424,12 +467,15 @@ function cacheUI() { // the green stripe along the top of the timeline: frames t
     cacheUI.queued = 0;
     const c = $("#tl-cache"), p = S.plate;
     if (!p) return;
+    planSoon();
     const w = (c.width = Math.max(1, Math.round(c.clientWidth * devicePixelRatio))), x = c.getContext("2d");
     c.height = 4;
     x.clearRect(0, 0, w, 4);
     const cache = caches.get(S.shot?.url ? shotVid : plateVid);
     x.fillStyle = "#4caf6a";
-    for (const f of cache.frames.keys()) x.fillRect(Math.floor((f / p.frames) * w), 0, Math.ceil(w / p.frames), 4);
+    let inRange = 0;
+    for (const f of cache.frames.keys()) { x.fillRect(Math.floor((f / p.frames) * w), 0, Math.ceil(w / p.frames), 4); if (f >= S.inPt && f <= S.outPt) inRange++; }
+    Object.assign(c.dataset, { cached: inRange, frames: S.outPt - S.inPt + 1, size: cache.size?.join("x") ?? "" }); // the frames in memory between the in and out points, and their size
   });
 }
 
@@ -450,13 +496,70 @@ function follower(id) { // a video beside the shot's, at the playhead once loade
   return v;
 }
 
+// Playing from memory, as RV plays from its cache. When every frame between the in and out points is in memory for the
+// sources the picture draws, a clock at the plate's frame rate picks the frame and the videos stay paused. Otherwise the
+// videos play, and each frame they present is drawn once. A second video that follows the playhead (the pass compared
+// in the wipe, the X-ray's mattes) keeps the videos playing. #view names the path in data-play.
+S.memory = null; // while playing: true from memory, false from the videos
+S.stats = Q.get("stats") === "1"; // playback statistics: one log line for each stretch played (View > Playback statistics)
+const RVFC = "requestVideoFrameCallback" in HTMLVideoElement.prototype;
+const clock = { t0: 0, f0: 0 }, presented = { fresh: true, at: 0 }, watched = new Set();
+let drew = false, playStats = null; // render() drew a picture; the stretch of playback being measured
+
+function watch(v) { // each frame a playing video presents asks for one draw
+  if (!RVFC || watched.has(v)) return;
+  watched.add(v);
+  const on = () => { presented.fresh = true; if (S.playing && !S.memory) v.requestVideoFrameCallback(on); else watched.delete(v); };
+  v.requestVideoFrameCallback(on);
+}
+
+const inMemory = (v, exact) => (!!exact && holds(exact)) || (!!v.getAttribute("src") && caches.get(v).src === v.getAttribute("src") && holds(caches.get(v)));
+function memoryReady() { // every frame between the in and out points is in memory for each source the picture draws
+  if (followers.some((v) => v.getAttribute("src"))) return false;
+  if (keying()) return inMemory(S.shot?.url ? shotVid : plateVid);
+  const shot = !!S.shot?.url && !S.compare, plate = !shot || S.wipe !== null;
+  return (!plate || inMemory(plateVid, S.plate.deep && deep)) && (!shot || inMemory(shotVid, S.shot.frames && deepShot));
+}
+
+function setPath(memory, now) { // onto the frames in memory, or back onto the videos, from the frame on show
+  endStats();
+  S.memory = memory;
+  if (memory) { for (const v of players()) v.pause(); Object.assign(clock, { t0: now, f0: S.frame }); }
+  else {
+    for (const v of players()) if (v.getAttribute("src")) { v.currentTime = time(S.frame); v.play().catch(() => {}); }
+    watch(plateVid); watch(shotVid);
+    presented.fresh = true;
+  }
+  view.dataset.play = memory ? "memory" : "video";
+  if (S.stats) playStats = new PlayStats(S.plate.fps, memory ? "memory" : "video");
+}
+
+const timed = (part, fn) => { // what a part of a playing frame costs on the main thread, for the statistics
+  if (!playStats || !S.playing) return fn();
+  const t = performance.now();
+  fn();
+  playStats.time(part, performance.now() - t);
+};
+function endStats() { // one line in the log for the stretch just played along one path
+  const st = playStats;
+  playStats = null;
+  if (!st || st.drawn < 2) return;
+  const cache = caches.get(S.shot?.url ? shotVid : plateVid), line = statsLine(st.report(), st.path === "memory" && cache.size ? cache.size.join(" x ") : "");
+  view.dataset.stats = line;
+  log(line); hud(line, 8000);
+}
+function toggleStats() {
+  S.stats = !S.stats;
+  hud(S.stats ? "Playback statistics on: play, then pause. The log keeps the line" : "Playback statistics off", 3500);
+}
+
 function play() {
   if (!S.plate || S.playing) return;
   if (S.frame >= S.outPt) S.frame = S.inPt;
   S.playing = true;
   S.peek = null;
+  S.memory = null; // tick picks the path at its first frame: the frames in memory, or the videos
   $("#play-btn").classList.add("playing");
-  for (const v of players()) if (v.getAttribute("src")) { v.currentTime = time(S.frame); v.play().catch(() => {}); }
   const left = renderLeft(), done = left ? `, the edited shot is ${secs(left)}` : "";
   if (S.edits.some((e) => e.on && e.patch)) {
     if (!S.shot) hud(`Playing the plate${done}`, 2500);
@@ -470,23 +573,46 @@ function pause() {
   S.playing = false;
   for (const v of players()) v.pause();
   $("#play-btn").classList.remove("playing");
-  if (S.shot?.url && shotVid.readyState >= 2) keepFrame(shotVid); // shown while the video seeks to the exact frame
+  if (!S.memory && S.shot?.url && shotVid.readyState >= 2) keepFrame(shotVid); // shown while the video seeks to the exact frame
+  endStats();
+  S.memory = null;
+  view.dataset.play = "";
   seek(S.frame);
 }
 
-function tick() {
+function tick(now) {
   if (!S.playing) return;
-  const m = master(), fps = S.plate.fps;
-  const f = Math.floor(m.currentTime * fps + 1e-3);
-  if (f > S.outPt || f < S.inPt || m.ended) { // loop between the in and out points
-    S.frame = S.inPt;
-    for (const v of players()) if (v.getAttribute("src")) { v.currentTime = time(S.inPt); v.play().catch(() => {}); }
-  } else {
-    S.frame = Math.min(f, S.plate.frames - 1);
-    if (m === shotVid && Math.abs(plateVid.currentTime - m.currentTime) > 0.5 / fps) plateVid.currentTime = m.currentTime;
-    for (const v of followers) if (v.getAttribute("src") && v.readyState >= 2 && !v.seeking && Math.abs(v.currentTime - m.currentTime) > 1.5 / fps) v.currentTime = m.currentTime;
+  const fps = S.plate.fps, span = S.outPt - S.inPt + 1, memory = memoryReady();
+  if (memory !== S.memory) setPath(memory, now);
+  playStats?.tick(now);
+  let f;
+  if (memory) f = S.inPt + ((((clock.f0 - S.inPt + Math.floor(((now - clock.t0) * fps) / 1000 + 1e-3)) % span) + span) % span); // loops between the in and out points
+  else {
+    const m = master();
+    f = Math.floor(m.currentTime * fps + 1e-3);
+    if (f > S.outPt || f < S.inPt || m.ended) { // loop between the in and out points
+      f = S.inPt;
+      for (const v of players()) if (v.getAttribute("src")) { v.currentTime = time(S.inPt); v.play().catch(() => {}); }
+    } else {
+      f = Math.min(f, S.plate.frames - 1);
+      if (m === shotVid && Math.abs(plateVid.currentTime - m.currentTime) > 0.5 / fps) plateVid.currentTime = m.currentTime;
+      for (const v of followers) if (v.getAttribute("src") && v.readyState >= 2 && !v.seeking && Math.abs(v.currentTime - m.currentTime) > 1.5 / fps) v.currentTime = m.currentTime;
+    }
   }
-  render(); timelineUI();
+  const moved = f !== S.frame;
+  S.frame = f;
+  // From memory, a new frame number is a new picture. From the videos, each frame they present is one; where the browser
+  // cannot say when (no requestVideoFrameCallback), or says nothing for 100 ms, the frame number decides
+  if (memory ? moved : presented.fresh || !RVFC || (moved && now - presented.at > 100)) {
+    const t = performance.now();
+    drew = false;
+    render();
+    if (drew) {
+      Object.assign(presented, { fresh: false, at: now });
+      if (playStats) { playStats.time("draw", performance.now() - t); playStats.shown(f, now, span); }
+    }
+  }
+  if (moved) timed("timeline", timelineUI);
   requestAnimationFrame(tick);
 }
 
@@ -495,13 +621,17 @@ function seek(f) {
   S.frame = clampFrame(f);
   if (!S.playing) for (const v of players()) {
     if (v.getAttribute("src") && v.readyState && !caches.get(v)?.get(S.frame)) v.currentTime = time(S.frame);
-  }
+  } else if (S.memory) Object.assign(clock, { t0: performance.now(), f0: S.frame }); // the clock goes on from the new frame
   render(); timelineUI();
 }
 
 for (const v of [plateVid, shotVid]) {
   v.addEventListener("seeked", () => { if (!S.playing) { render(); caches.get(v).grab(v, S.frame); } });
-  v.addEventListener("loadeddata", () => { caches.get(v).reset(); caches.get(v).fill(); if (v === plateVid || v === shotVid) wantDeep(); });
+  v.addEventListener("loadeddata", () => { // a plate that opens plans its caches again, and logs the plan
+    caches.get(v).reset();
+    if (v === plateVid) Object.assign(planned, { key: "", said: "" });
+    planCaches(); caches.get(v).fill(); wantDeep();
+  });
   v.addEventListener("error", () => v.getAttribute("src") &&
     status(`This browser cannot play the ${v === plateVid ? "plate" : "shot"} preview (H.264 MP4). Chrome, Edge, Safari and Firefox can.`));
 }
@@ -783,11 +913,19 @@ function endCompare(draw = true) { // the wipe goes back to the plate on its lef
   if (draw) { render(); hud(`${label}: out of the wipe`, 1500); }
 }
 
-function showLive(d) { // the shot as LTX predicts it, from step 1: in the frame until a shot exists, then in a corner
-  const img = new Image(), key = S.heroKey, label = STAGES.find((x) => x.id === S.stage?.id)?.label ?? (keying() ? "Fluid shot" : "Generating");
+// A live preview belongs to the render that sent it (S.stage.key, "fluid" for a fluid shot). It shows only while those
+// edits are on show: in the frame until they have a shot, then in a corner. A stop, a failure or other edits leave
+// nothing of it on screen. It is drawn when it arrives, not on every animation frame.
+S.liveKey = null;
+const onShow = () => (keying() ? "fluid" : S.heroKey); // what the viewer shows: a fluid shot's keyframes, or a set of edits
+const liveNow = () => (S.live && S.liveKey === onShow() ? S.live : null);
+function showLive(d) {
+  const key = S.stage ? S.stage.key : S.fluid?.busy ? "fluid" : null;
+  if (key === null || S.halted) return; // no pass runs, or a stop: nothing of it shows
+  const img = new Image(), label = STAGES.find((x) => x.id === S.stage?.id)?.label ?? (keying() ? "Fluid shot" : "Generating");
   const at = d.steps ? `step ${d.step} of ${d.steps}` : `step ${d.step}`, part = S.stage?.part ? `${S.stage.part}, ` : ""; // a pass in two stages names its stage
   img.onload = () => {
-    if (key !== S.heroKey) return;
+    if (S.halted || key !== onShow()) return;
     if (S.shot?.key === key) { // a preview or a full-size shot already plays: the pass on its way shows as an inset over it
       const box = $("#live-inset");
       box.querySelector("img").src = img.src;
@@ -795,20 +933,27 @@ function showLive(d) { // the shot as LTX predicts it, from step 1: in the frame
       box.hidden = false;
       return;
     }
-    S.live = img;
+    Object.assign(S, { live: img, liveKey: key });
     hud(`Live preview, ${at}: the shot follows`, 2000);
-    if (!showLive.on) { showLive.on = true; const tick = () => { if (!S.live) { showLive.on = false; return; } render(); requestAnimationFrame(tick); }; tick(); }
+    render();
   };
   img.src = viewUrl(d.image);
 }
 
-function hideLive() { $("#live-inset").hidden = true; } // the pass that sent it ended
+function hideLive() { $("#live-inset").hidden = true; if (!S.piping) dropLive(); } // the pass that sent it ended; once no render runs (it finished, stopped or failed), the preview in the frame goes too
+function dropLive() { // nothing of a pass that stopped or failed stays on screen
+  $("#live-inset").hidden = true;
+  if (!S.live) return;
+  S.live = null;
+  render();
+}
 
 function generating() { return !!(S.queued || S.piping || S.fluid?.busy); }
-function escape() { // Esc: logic.escapeAction. A selection goes first; then the HUD says a second Esc stops what generates
-  const busy = generating(), what = escapeAction({ opening: !!openCtl, editing: !!(S.draft || S.running), selected: !!S.selected, pinned: !!S.pass, generating: busy });
+function escape() { // Esc: logic.escapeAction. The edit being generated stops and keeps its strokes; a selection goes before what else generates
+  const busy = generating(), what = escapeAction({ opening: !!openCtl, editing: !!S.draft, running: !!S.running, selected: !!S.selected, pinned: !!S.pass, generating: busy });
   if (what === "cancelOpen") return cancelOpen();
   if (what === "discard") return discard();
+  if (what === "reopen") return stopPass(S.running);
   if (what === "deselect") { select(null); if (busy) hud("Deselected. Esc again stops generating", 2500); return; }
   if (S.cmp) return endCompare(); // a comparison in the wipe ends before the pass on show
   if (what === "latest") return choosePass(S.pass); // a pass on show: back to the latest
@@ -817,12 +962,18 @@ function escape() { // Esc: logic.escapeAction. A selection goes first; then the
 function stopGenerating() { // everything that generates stops where it is: what finished is kept, and Enter goes on from there
   if (!generating()) return;
   S.halted = true;
-  if (S.running) discard();
+  const edit = S.running;
+  if (edit) stopPass(edit, false); // it stays the current edit, with its strokes
   cancel("fluid", ...BACKGROUND);
-  hideLive();
-  log("Stopped: what finished is kept. Enter goes on from where it stopped");
-  hud("Stopped. Enter goes on from where it stopped", 3000);
-  status("Stopped. Enter goes on from where it stopped.");
+  dropLive();
+  if (edit) {
+    const said = `Stopped. Edit ${num(edit)} keeps its strokes, words and seed: Enter generates it again, Ctrl+Enter tries another seed`;
+    hud(said, 4500); status(`${said}.`);
+  } else {
+    log("Stopped: what finished is kept. Enter goes on from where it stopped");
+    hud("Stopped. Enter goes on from where it stopped", 3000);
+    status("Stopped. Enter goes on from where it stopped.");
+  }
   stagesUI(); generateUI();
 }
 
@@ -830,8 +981,8 @@ function stopGenerating() { // everything that generates stops where it is: what
 // argument) options: framesSpace, the colour space the EXR frames are stored in, when it is not the plate's (the SDR-to-HDR
 // pass writes ACES2065-1). The viewer draws and inspects the frames in that space.
 function setShot(src, key, space = "@model", frames = null, { framesSpace = null } = {}) {
-  hideLive();
   S.live = null; // the shot itself, rough or composited, replaces the live preview
+  hideLive();
   S.shot = src ? { url: src, key, space, frames, framesSpace } : null;
   if (src) { if (shotVid.getAttribute("src") !== src) shotVid.src = src; }
   else { shotVid.removeAttribute("src"); shotVid.load(); }
@@ -844,6 +995,17 @@ function setShot(src, key, space = "@model", frames = null, { framesSpace = null
 const held = { canvas: canvas([1, 1]), url: "" }; // the last shot frame drawn while paused: shown while the shot video seeks
 const editingFirst = () => !!(S.draft || stroke || S.running || S.queued || S.hover || S.peek);
 
+// While a made edit is changed, the first frame shows the other edits and its strokes without its own old result, so a
+// rubbed stroke leaves no generated paint behind. The shot on show keeps that result on the other frames until Generate.
+const under = { key: "", canvas: null };
+function firstFrame() {
+  const d = S.draft;
+  if (!d?.patch || !d.on || !S.edits.includes(d)) return S.hero;
+  const key = `${S.plate.id}|${d.id}|${S.heroKey}`;
+  if (under.key !== key) Object.assign(under, { key, canvas: layered(S.edits.length, (e) => e !== d) });
+  return under.canvas;
+}
+
 function keepFrame(src) {
   const [W, H] = [view.width, view.height], c = held.canvas;
   if (c.width !== W || c.height !== H) [c.width, c.height] = [W, H];
@@ -852,7 +1014,7 @@ function keepFrame(src) {
 }
 
 function shotFrame() { // the shot at the playhead: a cached frame, the video when it shows that frame, or the frame held
-  const cached = !S.playing && caches.get(shotVid).get(S.frame);
+  const cached = (!S.playing || S.memory) && caches.get(shotVid).get(S.frame);
   if (cached) return cached;
   if (shotVid.readyState >= 2 && (S.playing || !shotVid.seeking)) return shotVid;
   return !S.playing && held.url === S.shot.url ? held.canvas : null;
@@ -866,7 +1028,7 @@ function render() {
   $("#wipe .label.right").textContent = S.cmp ? shownLabel() : "Result";
   wantDeep(); // once a colour value moves, the frames' own values load around the playhead, as OpenRV's cache does
   const W = view.width, H = view.height, still = !S.playing;
-  const live = S.draft || stroke ? null : S.live; // while an edit is painted, the frame shows it, not the live preview of a render
+  const live = S.draft || stroke ? null : liveNow(); // while an edit is painted, the frame shows it, not the live preview of a render
   const first = still && S.frame === 0 && (!S.shot?.url || stale() || editingFirst());
   const pic = live || first || !S.shot?.url ? null : shotFrame();
   if (S.playing && S.shot?.url && !live && !pic) return; // the shot video catches up in a frame: the last frame stays on screen
@@ -874,8 +1036,9 @@ function render() {
   let native = false; // the frame on show came at native size from the frames route
   const exactOnly = colour.displayActive(S.display); // the colour tools moved: a source with EXR frames shows only those
   const draw = (src, space) => { // through OCIO from the colour space its values are in; false when it cannot draw yet
-    const img = src ? look.image(src, S.display, space) : null;
+    const t0 = playStats ? performance.now() : 0, img = src ? look.image(src, S.display, space) : null, t1 = playStats ? performance.now() : 0;
     if (img) { ctx.drawImage(img, 0, 0, W, H); if (src.data) exact.push(true); }
+    if (playStats && img && S.playing) { playStats.time("look", t1 - t0); playStats.time("copy", performance.now() - t1); } // main-thread time: the GPU's own shows as late frames
     return !!img;
   };
   // the plate in its own values, so a new File Color Space shows at once: an image sequence's frames once they arrive,
@@ -884,7 +1047,7 @@ function render() {
     if (still && draw(sharpFrame("plate", p.path), p.cs)) return void (native = true); // paused: the frame on show at native size
     if (p.deep && drawsDeep(S.playing, holds(deep)) && draw(deep.get(S.frame), p.cs)) return; // playing: its EXR frames only once all are in
     if (p.deep && exactOnly && draw(deep.get(colour.exactFrame(deep.frames, S.frame)), p.cs)) return; // the colour tools moved: never the 8-bit movie
-    const cached = still && caches.get(plateVid).get(S.frame);
+    const cached = (still || S.memory) && caches.get(plateVid).get(S.frame); // paused, or playing from memory
     if (cached) return void draw(cached, p.proxySpace);
     if (plateVid.readyState >= 2 && (!still || !plateVid.seeking)) return void draw(plateVid, p.proxySpace);
     if (S.frame === 0) draw(S.original, model);
@@ -901,7 +1064,7 @@ function render() {
       return "shot";
     }
     if (still && S.frame === 0) { // the first frame with its edits, in the model space; with none, the plate itself
-      if (S.heroKey) draw(S.hero, model); else drawPlate();
+      if (S.heroKey) draw(firstFrame(), model); else drawPlate();
       inWork(overlays); return "hero";
     }
     drawPlate();
@@ -930,8 +1093,9 @@ function render() {
   view.dataset.native = String(native); // paused, the frame on show at the plate's own size
   view.dataset.compared = S.cmp ? compared : ""; // the wipe's left side: drawn once the pass compared has this frame
   inWork(drawCursor);
-  refreshInspector(); // RV redraws its inspector with the view: the frame, the source, the pass, zoom and pan
-  drawXray();
+  if (S.inspect.on) timed("inspector", refreshInspector); // RV redraws its inspector with the view: the frame, the source, the pass, zoom and pan
+  if (S.xray || !xray.el.hidden || xray.vids.some((v) => v.getAttribute("src"))) timed("X-ray", drawXray); // on, or still to hide
+  drew = true;
 }
 
 function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX predicts, or the generated shot (the wipe shows both)
@@ -941,7 +1105,7 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
   ctx.fillRect(0, 0, W, H);
   const cached = caches.get(shotVid).get(S.frame), made = !!f.result && f.result.sig === fluidSig();
   const shot = () => ctx.drawImage(look.image(cached || shotVid, S.display, S.shot?.space ?? modelSpace()), 0, 0, W, H); // a decoded frame first: no seek shows
-  if (S.live && f.busy) ctx.drawImage(look.image(S.live, S.display, modelSpace()), 0, 0, W, H);
+  if (liveNow() && f.busy) ctx.drawImage(look.image(S.live, S.display, modelSpace()), 0, 0, W, H);
   else if (f.result && S.wipe !== null && !S.compare && (cached || shotReady())) { // the wipe: this frame's painted keyframe, or black, against the shot
     const key = keyHere();
     if (S.cmp) { if (!S.cmp.black && cmpVid.readyState >= 2) ctx.drawImage(look.image(cmpVid, S.display, S.cmp.space), 0, 0, W, H); } // a fluid row's input
@@ -951,8 +1115,9 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
   else keysLayer(W, H);
   $("#wipe .label.left").textContent = S.cmp?.label ?? "Keyframe"; $("#wipe .label.right").textContent = S.cmp ? shownLabel() : "Result";
   inWork(drawCursor);
-  refreshInspector();
-  drawXray(); // hidden: a fluid shot's keyframes have no matte
+  if (S.inspect.on) refreshInspector();
+  if (!xray.el.hidden || xray.vids.some((v) => v.getAttribute("src"))) drawXray(); // it hides: a fluid shot's keyframes have no matte
+  drew = true;
 }
 
 function keysLayer(W, H) { // the keyframe on this frame; between keyframes, the two around it faintly, as onion skins
@@ -1193,18 +1358,18 @@ function addPoint(d, e) {
   render();
 }
 
+function rubStroke(layers, s, from = 0) { // an eraser stroke, taken out of every layer given
+  for (const c of layers) c.globalCompositeOperation = "destination-out";
+  for (let i = from; i < s.points.length; i++) {
+    const [x, y, p] = s.points[i], [px, py] = s.points[Math.max(i - 1, 0)], r = (s.size * (0.5 + p)) / 2;
+    for (const c of layers) line(c, px, py, x, y, r, "#fff");
+  }
+  for (const c of layers) c.globalCompositeOperation = "source-over";
+}
+
 function drawStroke(d, s, from = 0) {
   const pc = d.paint.getContext("2d"), mc = d.mask.getContext("2d");
-  if (s.tool === "rub") { // the eraser takes strokes away, whatever drew them: paint, light or shade
-    const cs = [pc, mc, d.shade?.getContext("2d")].filter(Boolean);
-    for (const c of cs) c.globalCompositeOperation = "destination-out";
-    for (let i = from; i < s.points.length; i++) {
-      const [x, y, p] = s.points[i], [px, py] = s.points[Math.max(i - 1, 0)], r = (s.size * (0.5 + p)) / 2;
-      for (const c of cs) line(c, px, py, x, y, r, "#fff");
-    }
-    for (const c of cs) c.globalCompositeOperation = "source-over";
-    return;
-  }
+  if (s.tool === "rub") return rubStroke([pc, mc, d.shade?.getContext("2d")].filter(Boolean), s, from); // the eraser takes strokes away, whatever drew them: paint, light or shade
   for (let i = from; i < s.points.length; i++) {
     const [x, y, p] = s.points[i], [px, py] = s.points[Math.max(i - 1, 0)], r = (s.size * (0.5 + p)) / 2;
     line(mc, px, py, x, y, r, "#fff");
@@ -1242,11 +1407,14 @@ function line(c, x0, y0, x1, y1, r, color) {
   c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
 }
 
-function redrawStrokes(d) { // painted strokes, then SAM's object, then the eraser strokes on top of both
+function redrawStrokes(d) { // the strokes in the order they were made (logic.replayOrder), then SAM's object, cut by every rub
   for (const c of [d.paint, d.mask, d.shade]) c?.getContext("2d").clearRect(0, 0, c.width, c.height);
-  for (const s of d.strokes) if (s.tool !== "rub") drawStroke(d, s);
-  if (d.sam) d.mask.getContext("2d").drawImage(d.sam, 0, 0);
-  for (const s of d.strokes) if (s.tool === "rub") drawStroke(d, s);
+  for (const step of replayOrder(d.strokes, !!d.sam)) {
+    if (step.stroke) { drawStroke(d, step.stroke); continue; }
+    const object = snap(d.sam, [d.mask.width, d.mask.height]);
+    for (const s of step.cuts) rubStroke([object.getContext("2d")], s);
+    d.mask.getContext("2d").drawImage(object, 0, 0);
+  }
   d.soft = null;
 }
 
@@ -1657,11 +1825,13 @@ function queue(fn) {
   S.chain = S.chain.then(fn).catch(quiet).finally(() => { S.queued--; touch(); });
 }
 
-function launch(edit) { // Generate: the edit on the first frame, then its shot. A result it already has is used again
+function launch(edit, another = false) { // Generate: the edit on the first frame, then its shot. A result it already has is used again. `another`: an edit already in History starts again with another seed
   if (S.draft === edit) S.draft = null;
   clearTimeout(S.prefetchTimer);
   if (!edit.strokes.length) return generateUI();
+  S.halted = false; // a stop lasts until the next Generate: this edit runs, then its render
   takeInputs(edit);
+  if (another && S.edits.includes(edit)) edit.seed = (Math.random() * 2 ** 31) | 0;
   if (!S.edits.includes(edit)) S.edits.push(edit);
   edit.launched = performance.now();
   S.selected = edit; // it stays the current edit: new words, more strokes or the switch change it, until New edit or another tool
@@ -1742,9 +1912,19 @@ function reopen(edit) { // the edit being generated, or waiting for its turn, ch
   edit.token = (edit.token ?? 0) + 1;
   if (S.running === edit) { cancel("edit", "snap", "prefetch"); S.running = null; }
   edit.state = "drawing"; edit.preview = edit.latent = null;
-  edit.kept = edit.strokes.length;
+  edit.kept ??= edit.strokes.length; // the strokes its last result was made from: a second Esc goes back to them
   historyUI();
   return (S.draft = edit);
+}
+
+function stopPass(edit, say = true) { // Esc or Stop on the edit being generated: its pass stops, and it stays the current edit with its strokes, words and seed
+  clearTimeout(S.prefetchTimer);
+  reopen(edit);
+  S.selected = edit;
+  recompose(); editingUI(); render();
+  if (!say) return;
+  const said = `Edit ${num(edit)} stopped. It keeps its strokes, words and seed: Enter generates it again, Ctrl+Enter tries another seed, Esc drops the strokes`;
+  hud(said, 4500); status(`${said}.`);
 }
 
 function activeBefore(edit) {
@@ -2039,9 +2219,9 @@ function undoUI() {
   $("#redo-btn").disabled = !S.future.length;
 }
 
-function discard() { // Esc: drop the strokes in progress, or stop the edit being generated
+function discard() { // Esc: drop the strokes in progress. An edit with a result goes back to it; an edit without one goes
   clearTimeout(S.prefetchTimer);
-  const d = S.draft ?? S.running;
+  const d = S.draft;
   if (!d) return S.selected && select(null);
   mark();
   stopEdit(d);
@@ -3090,7 +3270,7 @@ function refreshInspector(force = false) { // on every redraw: place the box, re
   Object.assign(box.style, { left: `${bx}px`, top: `${by}px` });
   mark.hidden = false; Object.assign(mark.style, { left: `${sx}px`, top: `${sy}px` });
   const cx = Math.floor(((i.pt.x + 0.5) / width) * view.width), cy = Math.floor(((i.pt.y + 0.5) / height) * view.height);
-  i.final = [...view.getContext("2d").getImageData(cx, cy, 1, 1).data.slice(0, 3)].map((v) => v / 255); // the final colour, as drawn
+  i.final = [...readBack(view, cx, cy).slice(0, 3)].map((v) => v / 255); // the final colour, as drawn
   const key = inspectKey();
   if (force || key !== i.key) { i.key = key; readPixel(); }
   // The last values with the point and frame they were read at: while a read is on its way, a redraw showed the new
@@ -3252,6 +3432,8 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Fit", "F", () => zoomTo(1), !p], ["Frame width", "Ctrl+F", widthZoom, !p], ["1:1", "1", () => pixelZoom(1), !p],
       ["2:1", "2", () => pixelZoom(2), !p], ["4:1", "4", () => pixelZoom(4), !p], ["1:2", "Shift+2", () => pixelZoom(1 / 2), !p], ["1:4", "Shift+4", () => pixelZoom(1 / 4), !p],
       ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["X-ray", "W", () => setXray(!S.xray), !p, S.xray], ["Full screen", "`", fullScreen],
+      ["Cache memory", "", [["Auto", "", () => setCache(0), false, !S.cache], ...CACHE_CHOICES.filter(Boolean).map((b) => [memoryText(b), "", () => setCache(b), false, S.cache === b])], !!CACHE_MB],
+      ["Playback statistics", "", toggleStats, false, S.stats],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
     ["Help", [["Getting started", "", () => showHelp("start")], ["Keys", "?", () => showHelp("keys")], ["Models and licences", "", showModels]]],
   ];
@@ -3419,7 +3601,7 @@ function pickAt(e) { // the view's own pixels: the frame on show, through OCIO a
   const [x, y] = frameAt(e), n = PICK_SIDE;
   render();
   const [kx, ky] = toView(); // the canvas holds the plate at its own size
-  const color = pickedColor(ctx.getImageData(Math.round(x * kx) - (n >> 1), Math.round(y * ky) - (n >> 1), n, n).data);
+  const color = pickedColor(readBack(view, Math.round(x * kx) - (n >> 1), Math.round(y * ky) - (n >> 1), n, n));
   if (!color) return void hud("Click on the frame to pick a colour. Esc cancels.", 2000); // outside the frame: still picking
   pickFrame(false);
   takeColor(color);
@@ -3648,7 +3830,7 @@ function enter(another) { // Generate (Enter): the edit in progress, then its sh
   const resumed = S.halted;
   S.halted = false; // a stop (Esc) lasts until Enter
   if (keying()) return void generateFluid(another).catch(quiet); // a fluid shot: generate it, Ctrl+Enter with another seed
-  if (S.draft) return launch(S.draft);
+  if (S.draft) return launch(S.draft, another); // Ctrl+Enter on a stopped or reopened edit: another seed
   if (another) { const target = S.selected ?? S.edits.at(-1); if (target) again(target); return; }
   if (resumed || renderPending()) { // a stopped or failed render goes on
     const r = S.renders.get(S.heroKey); if (r) r.failed = null; touch(0); return hud(resumed ? "Generating again from where it stopped" : "The shot renders now", 2000);
