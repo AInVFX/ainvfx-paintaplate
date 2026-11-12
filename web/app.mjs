@@ -16,7 +16,7 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
-import { matteLargest, freesBefore, memoryProfile } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
+import { FAMILY, framesNeed, matteLargest, freesBefore, memoryProfile, remember, slower, stepLeft, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, hiddenAbove, layersHint, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
@@ -378,7 +378,15 @@ function closePlate(message = "Plate closed: its frames left the browser's memor
 }
 
 S.memoryProfile = memoryProfile({ force: MEMORY_ASKED }); // until /system_stats answers: nothing loads early, and LTX works in small tiles
-onFree((last, name) => freesBefore(S.memoryProfile, last, name)); // the small profile: one family of models in memory at a time
+onFree(async (last, name) => { // why ComfyUI's memory is freed before this job, or null: speed first where there is room
+  if (freesBefore(S.memoryProfile, last, name)) return `the models of ${last} are not this job's, and this card holds one family at a time`;
+  const p = S.plate;
+  if (!p || !last || FAMILY[name] === FAMILY[last]) return null;
+  const sys = (await fetch("/system_stats").then((r) => r.json()).catch(() => null))?.system; // a larger card: only when RAM is short for this job's frames
+  const room = sys?.ram_free ? { free: sys.ram_free, need: framesNeed(p.spec.width ?? p.work[0], p.spec.height ?? p.work[1], p.frames) } : null;
+  const gib = (n) => Math.round(n / 2 ** 30);
+  return freesBefore(S.memoryProfile, last, name, room) ? `${gib(room.free)} GB of RAM are free, and this job's frames can take ${gib(room.need)} GB` : null;
+});
 
 async function warmAll() { // every model loads while the person looks at the page: the first edit and the first shot start at once
   const t0 = performance.now(), start = $("#status").textContent; // what the page said at start: the warm-up's line replaces only that
@@ -2493,10 +2501,10 @@ const feather = (w) => Math.max(6, Math.round(w / COMPOSITE_FEATHER));
 // The export (`onDemand`) writes the result for compositing software, only when Export asks for it.
 const STAGES = [
   { id: "erase", label: "Track the erase", ref: 6 }, { id: "clean", label: "Erase pass, preview", ref: 10, preview: true },
-  { id: "shot", label: "Shot, preview", ref: 20, preview: true }, { id: "track", label: "Track the paint, preview", ref: 5, preview: true },
+  { id: "shot", label: "Shot, preview", ref: 20, preview: true }, { id: "track", label: "Track the paint, preview", ref: 16, preview: true },
   { id: "comp", label: "Composite, preview", ref: 14, preview: true },
   { id: "cleanfull", label: "Erase pass, full size", ref: 32, final: true }, { id: "full", label: "Shot, full size", ref: 45, final: true },
-  { id: "trackfull", label: "Track the paint, full size", ref: 5, final: true }, { id: "hdr", label: "SDR to HDR", ref: 45, final: true },
+  { id: "trackfull", label: "Track the paint, full size", ref: 16, final: true }, { id: "hdr", label: "SDR to HDR", ref: 45, final: true },
   { id: "review", label: "Composite, full size", ref: 12, final: true },
   { id: "export", label: "Export", ref: 10, final: true, onDemand: true },
 ];
@@ -2513,25 +2521,42 @@ function plan(r, active) { // the steps this set of edits needs: the erase pass 
   return r;
 }
 
-function estimate(id) { // seconds: what this step took last time, or a measured reference scaled to this plate
+// What each step took on this machine, kept between sessions (logic.remember): its total, its lead before the sampler's
+// first step and its tail after the last, per size, frame count and memory profile.
+const TIMES_KEY = "paintaplate.times";
+let TIMES = {};
+try { TIMES = JSON.parse(localStorage.getItem(TIMES_KEY) ?? "{}") ?? {}; } catch { TIMES = {}; }
+const BIG = ["full", "cleanfull", "hdr", "review", "export"];
+const stepSize = (id) => (BIG.includes(id) ? S.plate.work : ["erase", "track", "trackfull"].includes(id) ? S.plate.track : S.plate.shot);
+const stepKey = (id) => timeKey(id, stepSize(id), S.plate.frames, S.memoryProfile.name);
+
+function estimate(id) { // seconds: what this step took last time on this plate, else on this machine at this size, else a measured reference scaled to this plate and this card
   if (S.took[id]) return S.took[id];
-  const p = S.plate, ref = 928 * 512 * 97;
-  const big = ["full", "cleanfull", "hdr", "review", "export"].includes(id);
-  const size = big ? p.work : ["erase", "track", "trackfull"].includes(id) ? p.track : p.shot;
-  const scale = (size[0] * size[1] * p.frames) / ref * (big ? 0.73 : 1);
-  return STAGES.find((x) => x.id === id).ref * Math.max(0.25, scale);
+  const known = TIMES[stepKey(id)];
+  if (known?.total) return known.total;
+  const p = S.plate, ref = 928 * 512 * 97, size = stepSize(id);
+  const scale = (size[0] * size[1] * p.frames) / ref * (BIG.includes(id) ? 0.73 : 1);
+  return STAGES.find((x) => x.id === id).ref * Math.max(0.25, scale) * slower(S.memoryProfile.name, id);
 }
 
 async function step(r, id, work, store = r) { // run one step of a render, timed and shown; preview steps keep their result per size
   if (store.done?.[id] !== undefined || r.skip?.has(id)) return;
   if (S.running || S.queued || pickRender() !== r) throw YIELD; // an edit, or a step of a more urgent render, goes first
   const t0 = performance.now(), behind = r.key === S.heroKey ? "" : ", in the background";
-  S.stage = { key: r.key, id, progress: 0, t0 };
+  S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step
   stagesUI();
   log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label} (about ${Math.round(estimate(id))} s)${behind}`);
-  await work((f) => { if (S.stage?.id === id) { S.stage.progress = f; stagesUI(); } });
+  const stage = S.stage;
+  await work((f) => {
+    if (S.stage !== stage) return;
+    if (f > (stage.last?.[1] ?? 0)) { stage.last = [(performance.now() - t0) / 1000, f]; stage.first ??= stage.last; }
+    stage.progress = f;
+    stagesUI();
+  });
   hideLive();
   const dt = (performance.now() - t0) / 1000;
+  TIMES = remember(TIMES, stepKey(id), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
+  try { localStorage.setItem(TIMES_KEY, JSON.stringify(TIMES)); } catch { /* a private window: the session's own times still serve */ }
   (store.done ??= {})[id] = dt;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
   S.took[id] = dt;
@@ -2814,8 +2839,7 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
     if (skip.has(st.id) || doneOf(r, st) !== undefined || (st.onDemand && !exporting)) continue;
     const est = estimate(st.id);
     if (S.stage?.id === st.id && S.stage.key === S.heroKey) {
-      const run = (performance.now() - S.stage.t0) / 1000, f = S.stage.progress;
-      t += f > 0.05 ? Math.max(0, run * (1 - f) / f) : Math.max(est - run, est * 0.2);
+      t += stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(st.id)]?.tail ?? null });
     } else t += est;
   }
   return t;

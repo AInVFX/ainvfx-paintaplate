@@ -726,3 +726,35 @@ test("a ComfyUI that stopped is said in plain words, with what to do", async () 
   assert.equal(plainError("Upload failed: patch.png: No answer from ComfyUI"), "ComfyUI did not answer: it may be restarting, or the connection dropped.");
   assert.equal(plainError("Upload failed: patch.png"), "the browser could not send a picture to ComfyUI."); // ComfyUI answered, and refused the file
 });
+
+test("a larger card keeps its models, and frees ComfyUI's memory only when RAM is short for the job's frames", async () => {
+  const { freesBefore, framesNeed, memoryProfile } = await import("../../web/logic.mjs");
+  const large = memoryProfile({ vram: 100e9 }), need = framesNeed(1920, 1080, 121);
+  assert.equal(Math.round(need / 2 ** 30), 26); // 8 copies of 2.8 GB, and 4 GB to work in
+  assert.equal(freesBefore(large, "shot", "matte", { free: 120 * 2 ** 30, need }), false); // speed first
+  assert.equal(freesBefore(large, "shot", "matte", { free: 10 * 2 ** 30, need }), true);
+  assert.equal(freesBefore(large, "shot", "shot", { free: 1, need }), false); // the same family: its models are the job's
+  assert.equal(freesBefore(memoryProfile({ vram: 17.2e9 }), "shot", "matte", { free: 120 * 2 ** 30, need }), true); // under 24 GB: always
+});
+
+test("the time left in a step follows the sampler's own pace, not the time the models took to load", async () => {
+  const { stepLeft, remember, slower, timeKey } = await import("../../web/logic.mjs");
+  // the laptop's preview shot of 11 Nov: 57.6 s in all, the sampler's first step of 8 ended 37 s in, then one step every 2 s
+  assert.equal(stepLeft({ est: 42, run: 20 }), 22); // before the sampler starts: what is expected, less what has run
+  assert.equal(stepLeft({ est: 42, run: 37, first: [37, 0.125], last: [37, 0.125] }), 5); // one step: no pace yet (the old rule said 259 s)
+  const mid = stepLeft({ est: 42, run: 43, first: [37, 0.125], last: [43, 0.5], tail: 6 }); // 4 steps to go at 2 s, then the tail
+  assert.ok(Math.abs(mid - 14) < 0.01, String(mid));
+  assert.equal(stepLeft({ est: 42, run: 53, first: [37, 0.125], last: [51, 1], tail: 6 }), 4); // the sampling over: what is left of the tail
+  assert.equal(stepLeft({ est: 42, run: 80, first: [37, 0.125], last: [51, 1], tail: 6 }), 1); // never less than a second
+  assert.equal(stepLeft({ est: 42, run: 60 }), 4.2); // a step with no progress, past its estimate: a tenth of it
+  assert.equal(slower("small", "full"), 3.5);
+  assert.equal(slower("large", "full"), 1);
+  const key = timeKey("shot", [640, 352], 121, "small");
+  assert.equal(key, "shot|640x352x121|small");
+  let times = remember({}, key, { total: 57.6, lead: 37, tail: 6, at: 1 });
+  times = remember(times, key, { total: 20, lead: 4, tail: 5, at: 2 }); // a second render, the models warm
+  assert.deepEqual(times[key], { total: 38.8, lead: 20.5, tail: 5.5, at: 2 });
+  for (let i = 0; i < 100; i++) times = remember(times, `k${i}`, { total: 1, lead: 1, tail: 0, at: 3 + i });
+  assert.equal(Object.keys(times).length, 80); // the newest are kept
+  assert.equal(times[key], undefined);
+});

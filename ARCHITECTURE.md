@@ -386,6 +386,8 @@ Found on 11 November 2026, on the 16 GB reference laptop (62.7 GB of RAM):
 - The page sets no limit on a plate's frames: every workflow gets the plate's own count. 121 frames is what is tested; a blank plate takes 9 to 321.
 - The times of a 16 GB card, under the small memory profile, are not measured yet (`tests/gpu_matrix.py`).
 - **Numbers too far apart are not frames.** A group of numbered images is a frame sequence when at least one of every 100 numbers between its first and its last exists (`plateio.SPARSEST`). Sparser, the numbers count files: one frame per file. ComfyUI's mask editor names its files by the millisecond (`clipspace-mask-1791816680123.png`): until 1.11.4 the Open dialog's thumbnail of such a group took all of ComfyUI's memory.
+- **The cow behind the horse.** A painted object that passes behind a moving one under a camera move is lost by the matte when it comes out: SAM 3.1 returns the object in front instead, and what it finds further than the object can move is left out. `PAINTAPLATE_RECORD=<folder>` in ComfyUI's environment makes Follow Matte write what it was given (`mathops.record`), and `mathops.follow_matte(**mathops.replay(file))` runs it again without a GPU.
+- **Time estimates learn.** The Render panel's estimates come from what each step took the last time on this machine (`paintaplate.times` in the browser's storage, per step, size, frame count and memory profile), else from references measured on a 96 GB card, times `logic.SLOWER` under 24 GB. The first render on a machine can be off by half.
 
 ## 15. Memory: the card, the frame caches and the trace
 

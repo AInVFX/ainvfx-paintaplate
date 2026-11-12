@@ -777,7 +777,42 @@ export const MEMORY = {
 // ComfyUI to free its memory before a job whose family is not that of the job posted before it.
 export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", clean: "ltx", cleanup: "ltx", fluid: "ltx", hdr: "ltx", warm: "ltx",
   matte: "sam", snap: "sam", ingest: "frames", comp: "frames", review: "frames", export: "frames" }; // by workflow: the models it loads, or frames only
-export const freesBefore = (profile, last, name) => !!profile?.frees && !!last && FAMILY[name] !== FAMILY[last];
+// Speed first where there is room (Adrien, 11 Nov). Under 24 GB of VRAM the card cannot hold two families of models, so a
+// change of family frees ComfyUI's memory. On a larger card the models stay loaded, and the memory is freed only when
+// RAM is short for the next job's frames: a job that reads the plate can hold RAM_COPIES float32 copies of it (the
+// ingest held 8, measured on 11 Nov). A GPU that runs out of memory is retried once after a free, on every card (comfy.mjs).
+export const RAM_COPIES = 8;
+export const framesNeed = (width, height, frames) => RAM_COPIES * width * height * frames * 12 + 4 * 2 ** 30; // bytes of RAM: the copies, and 4 GB to work in
+export function freesBefore(profile, last, name, room = null) { // room: { free, need } in bytes of RAM, where ComfyUI gives it
+  if (!last || FAMILY[name] === FAMILY[last]) return false;
+  return !!profile?.frees || (!!room && room.free < room.need);
+}
+
+// ---------- How long a render step takes ----------
+// A step's time has three parts: a lead before the sampler's first step (models load, frames are read), the sampling,
+// whose progress the page receives, and a tail after it (the decode, the frames, the movie). Until 11 Nov the time left
+// was the time run so far, scaled by the progress: 37 s into a preview shot whose first step of 8 had just ended, the
+// page said « 4 min 10 s » for a pass that ended 20 s later. Now the sampling is timed by its own pace, between its
+// first and its latest step, and the rest comes from what the step took the last time on this machine (the page keeps
+// each step's total, lead and tail per size, frame count and memory profile, in paintaplate.times).
+export const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
+export const SLOWER = { small: { ltx: 3.5, sam: 1.4, frames: 1 } }; // against the references of a 96 GB card: a 16 GB card, measured on 11 Nov
+export const slower = (profile, id) => SLOWER[profile]?.[STEP_FAMILY[id]] ?? 1;
+export function stepLeft({ est, run, first = null, last = null, tail = null }) { // seconds left in the step that runs; first and last: [seconds since its start, progress]
+  const after = tail ?? est * 0.15;
+  if (first && last && last[1] - first[1] >= 0.2 && last[0] > first[0]) { // the sampler's own pace, over a fifth of its steps or more
+    const pace = (last[0] - first[0]) / (last[1] - first[1]), since = run - last[0];
+    const sampling = Math.max(0, (1 - last[1]) * pace - (last[1] < 1 ? since : 0));
+    return Math.max(1, sampling + (last[1] >= 1 ? Math.max(0, after - since) : after));
+  }
+  return Math.max(est - run, est * 0.1, 1); // before the pace is known: what the step is expected to take, less what has run
+}
+export const timeKey = (id, size, frames, profile) => `${id}|${size[0]}x${size[1]}x${frames}|${profile}`;
+export function remember(times, key, sample, keep = 80) { // times: { key: { total, lead, tail, at } }; the mean of what was kept and the new sample
+  const old = times[key], mix = (a, b) => Math.round((a == null ? b : (a + b) / 2) * 10) / 10;
+  const next = { ...times, [key]: { total: mix(old?.total, sample.total), lead: mix(old?.lead, sample.lead), tail: mix(old?.tail, sample.tail), at: sample.at } };
+  return Object.fromEntries(Object.keys(next).sort((a, b) => next[b].at - next[a].at).slice(0, keep).map((k) => [k, next[k]]));
+}
 export function memoryProfile({ vram = 0, ram = 0, force = null } = {}) { // `force`: a profile's name, from ?memory= or the paintaplate.memory setting
   const auto = vram >= MEMORY_FROM.large ? "large" : vram >= MEMORY_FROM.medium ? "medium" : "small";
   const forced = Object.hasOwn(MEMORY, force ?? ""), name = forced ? force : auto, gib = (n) => Math.round(n / 2 ** 30);
