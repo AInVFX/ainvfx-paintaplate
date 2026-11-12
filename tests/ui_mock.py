@@ -945,8 +945,8 @@ def fluid16_flow(browser, port):
     wait_log(page, added_line("under the edits: the fluid shot v"), 240000, "the HDR fluid shot under the edits")
     page.wait_for_function("!document.querySelector('#deliver-auto').hidden", timeout=60000)
     new = page.evaluate("window.__lines")
-    check(any("SDR to HDR took" in line for line in new),  # the blank plate's own log line is gone: the plate's line says its bit depth once it is written again
-          "16-bit: the fluid shot goes through SDR to HDR")
+    check(any(line.startswith("Plate ") and "16-bit" in line for line in new) and any("SDR to HDR took" in line for line in new),
+          "16-bit: the plate's line says so, and the fluid shot goes through SDR to HDR")
     check(not page.is_hidden("#deliver-auto"), "the HDR fluid shot is an EXR plate: SDR to HDR runs on its own for the edits on it")
     check(not page.is_disabled("#export-btn"), "a fluid shot with no edit on it can be exported")
     page.click("#export-btn")
