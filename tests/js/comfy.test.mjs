@@ -85,3 +85,20 @@ test("a job that failed or was stopped says it in one line; a stopped job says w
   assert.equal(jobStopped(queued, 2500, false), "shot 0a1b2c3d: stopped after 2.5 s (24 nodes)", "no WebSocket: the page does not know whether the job had started");
   assert.equal(jobStopped({ ...queued, id: undefined }, 100), "shot ?: stopped after 0.1 s before ComfyUI answered its post (24 nodes)");
 });
+
+// ---------- A stop: a job asked for under it is not posted ----------
+import { WF, onStop, run } from "../../web/comfy.mjs";
+
+test("under a stop, a job of a kind the stop ends is not posted: it ends as a cancelled job", async () => {
+  WF.probe = { prompt: { 1: { class_type: "Probe", inputs: {} } }, slots: {}, outputs: {}, progress: null };
+  const asked = [];
+  globalThis.fetch = async (url) => { asked.push(String(url)); return { ok: false, json: async () => ({}) }; };
+  onStop((kind) => kind === "matte"); // the page's rule: a stop is in force for the tracking jobs
+  try {
+    await assert.rejects(run("probe", {}, { kind: "matte" }).done, /^Error: cancelled$/);
+    assert.deepEqual(asked, []); // neither the job index nor /prompt was asked
+  } finally {
+    onStop(() => false);
+    delete WF.probe;
+  }
+});

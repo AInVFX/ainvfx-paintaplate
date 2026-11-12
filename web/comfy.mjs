@@ -42,6 +42,8 @@ async function indexed(key) { // the outputs a finished job with this key made, 
 export const onNotice = (fn) => { notice = fn; };
 let freeFirst = () => null, lastPosted = null; // the page's rule (logic.freesBefore): why ComfyUI's memory is freed before this job, or null; and the workflow of the last job posted
 export const onFree = (fn) => { freeFirst = fn; };
+let stopped = () => false; // the page's rule (design rule 13): whether a stop is in force for a job of this kind. Such a job is not posted
+export const onStop = (fn) => { stopped = fn; };
 const FREE_SETTLE_MS = 600; // ComfyUI's worker applies a free when it wakes: a job posted in the same instant would run first
 // Until ComfyUI has released its models after /free: half of the GPU free, or `limit` ms. Its prompt worker applies a free
 // between prompts, so the retry of a job that ran out of memory waits for it.
@@ -149,6 +151,11 @@ export function run(name, values, { kind = name, preview, progress, step, live: 
   const job = { kind, name, preview, progress, live: onLive, retries: 1, key: JSON.stringify(wf.prompt), main: wf.progress, posted: Date.now(), front, nodes: Object.keys(wf.prompt).length,
     step: step && ((id) => step(wf.prompt[id]?.class_type)), classes: Object.fromEntries(Object.entries(wf.prompt).map(([id, n]) => [id, n.class_type])) };
   job.done = new Promise((resolve, reject) => Object.assign(job, { resolve, reject }));
+  if (stopped(kind)) { // work that was between two jobs when the stop came (an upload, a read) asks for its next job: it ends as a cancelled job, and nothing is posted
+    job.cancelled = true;
+    job.reject(new Error("cancelled"));
+    return job;
+  }
   job.submit = async () => { // each post counts for itself: a job is posted again after a stray interrupt or a memory stop
     const before = lastPosted;
     lastPosted = name;
@@ -158,8 +165,8 @@ export function run(name, values, { kind = name, preview, progress, step, live: 
       await new Promise((ok) => setTimeout(ok, FREE_SETTLE_MS));
       await released();
       log(`${name}: ComfyUI's memory freed first: ${why}`);
-      if (job.cancelled) return; // cancelled while the memory was freed: nothing was posted
     }
+    if (job.cancelled) return; // cancelled while the page read ComfyUI's free RAM, or while the memory was freed: nothing is posted
     Object.assign(job, { sent: Date.now(), started: null, at: null, cached: 0, previews: 0, inMain: false });
     return post("/prompt", promptBody(wf.prompt, { front, preview: !!preview })).then(answer).then((j) => {
       if (!j.prompt_id) throw new Error(rejection(j));
