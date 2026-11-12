@@ -1,11 +1,14 @@
 """tests/gpu_matrix.py: what it reads from a case's page log and from ComfyUI's history. tools/runpod_start.sh: what a
 start keeps. No GPU and no browser."""
+import contextlib
+import io
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gpu_matrix  # noqa: E402
@@ -50,6 +53,46 @@ class Report(unittest.TestCase):
         self.assertEqual(memory.peak(*spans["ef88a8f3"]), [70, 9, 3])
         self.assertEqual(memory.peak(*spans["0a1b2c3d"]), [40, 4, 4], "a job shorter than a second: the reading nearest to its end")
         self.assertEqual(memory.peak(), [99, 99, 99], "a whole case")
+
+
+class Run(unittest.TestCase):
+    """gpu_matrix.main with stand-ins for the browser, ComfyUI and the cases."""
+
+    def matrix(self, cases, alive, *more):
+        """main() on `cases`: what was called, in order, the exit code and the report. `alive` holds ComfyUI's answer after
+        each case."""
+        calls, alive = [], iter(alive)
+
+        def case(a, name, case, folder):
+            calls.append(name)
+            return {"name": name, "seconds": 255.0, "vram": 0, "ram": 0, "own": 0, "container": 0, "folder": folder, "log": "", "marks": [],
+                    **gpu_matrix.read_log(""), "passed": True, "why": "", "matte": None, "live_files": 0}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "input", "plates"))
+            open(os.path.join(tmp, "input", "plates", "horse.mp4"), "w").close()
+            argv = ["gpu_matrix.py", "--comfy", tmp, "--out", os.path.join(tmp, "out"), "--cases", cases, *more]
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(gpu_matrix, "browser_ready", lambda channel: None), \
+                    mock.patch.object(gpu_matrix, "get", lambda url: {}), mock.patch.object(gpu_matrix, "Memory", lambda url: mock.Mock(pid=None)), \
+                    mock.patch.object(gpu_matrix, "run_case", case), mock.patch.object(gpu_matrix, "answers", lambda url: next(alive)), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                code = gpu_matrix.main()
+            with open(os.path.join(tmp, "out", "report.md"), encoding="utf-8") as f:
+                return calls, code, f.read()
+
+    def test_a_run_stops_when_comfyui_has_stopped(self):
+        """On the laptop (12 Nov) ComfyUI stopped in horse_erase, and the two cases left each failed in 31 s with a traceback."""
+        calls, code, report = self.matrix("horse_cow,horse_erase,horse_light,fluid_720", [True, False])
+        self.assertEqual((calls, code), (["horse_cow", "horse_erase"], 1))
+        for name in ("horse_light", "fluid_720"):
+            self.assertIn(f"| {name} | not run: ComfyUI had stopped |", report)
+            self.assertNotIn(f"## {name}", report)
+        self.assertIn("## horse_erase · passed in 255 s", report)
+
+    def test_a_run_goes_to_its_end_while_comfyui_answers(self):
+        calls, code, report = self.matrix("horse_cow,horse_erase", [True])
+        self.assertEqual((calls, code), (["horse_cow", "horse_erase"], 0))
+        self.assertNotIn("not run", report)
 
 
 @unittest.skipUnless(shutil.which("bash"), "tools/runpod_start.sh is a bash script")

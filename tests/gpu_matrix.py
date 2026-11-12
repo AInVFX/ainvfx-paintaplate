@@ -70,6 +70,15 @@ def get(url):
         return json.load(r)
 
 
+def answers(url):
+    """Whether ComfyUI still answers."""
+    try:
+        get(url + "/system_stats")
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 class Memory(threading.Thread):
     """VRAM and RAM in use while a case runs, read once a second (the top of this file says from where). `samples` keeps
     every reading with its time: (time, VRAM, RAM, RAM that no file backs). In a container, `container` is its own count
@@ -255,9 +264,11 @@ def report(a, machine, results):
              "In a job's row, Seconds runs from the page's request to the job's end, and In ComfyUI from its start to its end in "
              "ComfyUI's history. A job's peaks are the highest readings, once a second, between those two times.", "",
              "| Case | Result | Seconds | Peak VRAM | Peak RAM | No file | Memory stops retried | Previews received |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    ran = [r for r in results if not r.get("skipped")]  # the others were not started: ComfyUI had stopped
     for r in results:
-        lines.append(f"| {r['name']} | {'passed' if r['passed'] else 'FAILED'} | {r['seconds']:.0f} | {gb(r['vram'])} | {gb(r['ram'])} | {gb(r['own'])} | {r['oom']} | {r['previews']} |")
-    for r in results:
+        lines.append(f"| {r['name']} | not run: ComfyUI had stopped | | | | | | |" if r.get("skipped") else
+                     f"| {r['name']} | {'passed' if r['passed'] else 'FAILED'} | {r['seconds']:.0f} | {gb(r['vram'])} | {gb(r['ram'])} | {gb(r['own'])} | {r['oom']} | {r['previews']} |")
+    for r in ran:
         lines += ["", f"## {r['name']} · {'passed' if r['passed'] else 'FAILED'} in {r['seconds']:.0f} s", ""]
         if r["why"]:
             lines += [r["why"], ""]
@@ -283,7 +294,7 @@ def report(a, machine, results):
                       f"Against the first frame, the area goes from {min(ratios):.2f} to {max(ratios):.2f} times; the furthest frame is {worst}, at {ratios[worst]:.2f} times.",
                       "- Every frame, against the first: " + " ".join(f"{x:.2f}" for x in ratios)]
         lines += [f"- Marks, screenshots, the page's log and the zip: `{os.path.relpath(r['folder'], a.out)}`."]
-    failures = [r for r in results if not r["passed"]]
+    failures = [r for r in ran if not r["passed"]]
     if failures:
         lines += ["", "## The log of each failure", ""]
         for r in failures:
@@ -328,11 +339,16 @@ def main():
             print(f"making {file} from horse.mp4", flush=True)
             make_uhd(os.path.join(plates, "horse.mp4"), os.path.join(plates, file), fps)
     os.makedirs(a.out, exist_ok=True)
-    results = []
-    for name in names:
+    results, left = [], list(names)
+    while left:
+        name = left.pop(0)
         results.append(run_case(a, name, cases[name], os.path.join(a.out, name)))
-        report(a, machine, results)
         print(f"{name}: {'passed' if results[-1]['passed'] else 'FAILED'} in {results[-1]['seconds']:.0f} s", flush=True)
+        if left and not answers(a.url):  # each case left would fail in 31 s with a traceback (the laptop, 12 Nov)
+            print(f"ComfyUI has stopped. Not run: {', '.join(left)}", flush=True)
+            results += [{"name": n, "passed": False, "skipped": True} for n in left]
+            left = []
+        report(a, machine, results)
     print(f"report: {os.path.join(a.out, 'report.md')}")
     return 0 if all(r["passed"] for r in results) else 1
 
