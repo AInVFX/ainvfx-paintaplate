@@ -8,7 +8,8 @@
    Model files may be empty placeholders: model workflows are cancelled right after validation.
 4. Runs `ingest`, `comp` and `export` end to end on an EXR sequence with extra layers, a ProRes MOV
    with audio and timecode, and a 16-bit PNG sequence, then checks the files on disk and the zip.
-   The open's first frame and playback proxy hold the pixels of the whole plate converted as one batch.
+   The open's first frame and playback proxy hold the pixels of the whole plate converted as one batch: both ways
+   write the proxy without loss for this, because x264 does not always make the same movie from the same frames.
 """
 import argparse, io, json, os, shutil, subprocess, sys, time, urllib.request, uuid, zipfile
 import numpy as np
@@ -165,10 +166,39 @@ def pixels(source):
         return [f.to_ndarray() for f in c.decode(video=0)]
 
 
+def differences(a, b):
+    """How the decoded frames of two files differ: (frames that differ, frames in the longer file, the largest difference
+    in levels, the first sample that differs with its level in each file). A frame one file lacks counts as one that
+    differs. A sample is named by its place in the decoded array: (row, column, channel) of a PNG, (row, column) of a
+    movie's Y, U and V planes one under the other."""
+    a, b = pixels(a), pixels(b)
+    count, largest, first = abs(len(a) - len(b)), 0, ""
+    for i, (x, y) in enumerate(zip(a, b)):
+        if x.shape != y.shape:
+            count, first = count + 1, first or f"frame {i} is {x.shape} and {y.shape}"
+            continue
+        d = np.abs(x.astype(np.int64) - y.astype(np.int64))
+        if d.any():
+            at = tuple(int(v) for v in np.argwhere(d)[0])
+            count, largest = count + 1, max(largest, int(d.max()))
+            first = first or f"frame {i}, sample {at}: {int(x[at])} and {int(y[at])}"
+    return count, max(len(a), len(b)), largest, first or "a frame is missing"
+
+
 def frames_apart(a, b):
     """How many frames of two files differ in their decoded pixels. A frame one file lacks counts."""
-    a, b = pixels(a), pixels(b)
-    return sum(x.shape != y.shape or not np.array_equal(x, y) for x, y in zip(a, b)) + abs(len(a) - len(b))
+    return differences(a, b)[0]
+
+
+def lossless(prompt):
+    """The same workflow with its movies written without loss (crf 0): their decoded pixels are then the frames Save Movie
+    was handed. With loss, x264 does not always make the same movie from the same frames (its MB-tree, in assembly: up to
+    7 different movies in 12 from 17 frames of 960 x 540 at crf 12, on 12 Nov), so two such movies cannot be compared
+    pixel for pixel."""
+    for node in prompt.values():
+        if node["class_type"] == "PaintAPlate_SaveMovie":
+            node["inputs"]["crf"] = 0
+    return prompt
 
 
 def saved(entry, output_dir):
@@ -179,7 +209,8 @@ def saved(entry, output_dir):
 
 def whole_plate_open(path, cs, prefix):
     """The open as 1.11.8 made it: the whole plate converted as one batch, then its first frame taken; the real frames
-    copied, converted and sized as batches. The pictures the lighter `ingest` must make."""
+    copied, converted and sized as batches. The pictures the lighter `ingest` must make, with the proxy written without
+    loss (see `lossless`)."""
     g = Graph()
     load = g("PaintAPlate_LoadPlate", path=path, max_frames=121, pad_8n1=True)
     space = {"config": OCIO_CONFIG, "source": cs, "destination": "@model"}
@@ -188,7 +219,7 @@ def whole_plate_open(path, cs, prefix):
       filename_prefix=f"{prefix}/hero")
     real = g("ImageFromBatch", image=load[0], batch_index=0, length=load[4])
     proxy = g("ImageScaleToMaxDimension", image=g("PaintAPlate_ColorSpace", image=real, **space), upscale_method="area", largest_size=960)
-    g("PaintAPlate_SaveMovie", images=proxy, fps=load[3], crf=12, filename_prefix=f"{prefix}/proxy")
+    g("PaintAPlate_SaveMovie", images=proxy, fps=load[3], crf=0, filename_prefix=f"{prefix}/proxy")
     return g.prompt
 
 
@@ -295,12 +326,18 @@ def main():
                 texts = [t for o in outs.values() for t in o.get("text", [])]
                 spec = json.loads(texts[0]) if texts else {}
                 check(spec.get("frames") == N and spec.get("width") == W, f"ingest {kind}: spec {spec.get('kind')}, {spec.get('width')}x{spec.get('height')}, {spec.get('frames')} frames, guess {spec.get('color_space_guess')}")
-                again = submit(url, whole_plate_open(path, cs, f"paintaplate_test/{kind}/whole"))
-                whole, _ = wait(url, again["prompt_id"]) if "prompt_id" in again else (None, 0)
-                mine, theirs = saved(entry, output_dir), saved(whole, output_dir) if whole and not error_of(whole) else {}
+                exact = lossless(fill("ingest", {**values["ingest"], "path": path, "color_space": cs, "prefix": f"paintaplate_test/{kind}/exact/hero",
+                                                 "video_prefix": f"paintaplate_test/{kind}/exact/proxy"}))
+                files = []  # the open's files with the proxy written without loss, then the whole plate's
+                for prompt in (exact, whole_plate_open(path, cs, f"paintaplate_test/{kind}/whole")):
+                    res = submit(url, prompt)
+                    done = wait(url, res["prompt_id"])[0] if "prompt_id" in res else None
+                    files.append(saved(done, output_dir) if done and not error_of(done) else {})
                 for ext, what in ((".png", "first frame"), (".mp4", "playback proxy")):
-                    check(ext in mine and ext in theirs and frames_apart(mine[ext], theirs[ext]) == 0,
-                          f"ingest {kind}: the {what} holds the pixels of the whole plate converted")
+                    both = ext in files[0] and ext in files[1]
+                    count, of, largest, first = differences(files[0][ext], files[1][ext]) if both else (1, 1, 0, "a job saved no such file")
+                    check(not count, f"ingest {kind}: the {what} holds the pixels of the whole plate converted"
+                          + (f": {count} of {of} frames differ, by {largest} levels at most; {first}" if count else ""))
             for relight in (False, True) if kind == "exr" else (False,):
                 run = f"{kind}_r{int(relight)}"
                 shot = fake_shot_and_matte(output_dir, run)

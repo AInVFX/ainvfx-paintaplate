@@ -133,6 +133,23 @@ class PlateIO(unittest.TestCase):
         assert [plateio.pad_count_8n1(n) for n in (1, 2, 9, 10, 97, 100, 121)] == [1, 9, 9, 17, 97, 105, 121]
         print("8n+1 padding: ok")
 
+    def test_a_movie_without_loss_holds_the_frames_it_was_given(self):
+        """At crf 0 a movie's decoded pixels are the YUV frames the encoder was given, whatever x264 decided. The live
+        tests compare the open's two ways on such movies: with loss, x264 does not always make the same movie from the
+        same frames (its MB-tree, in assembly), and two equal batches could give two different movies."""
+        rng = np.random.default_rng(3)
+        frames = [np.repeat(np.repeat(rng.integers(0, 256, (27, 48, 3), dtype=np.uint8), 4, 0), 4, 1) for _ in range(9)]
+        given = [av.VideoFrame.from_ndarray(f, format="rgb24").reformat(width=192, height=108, format="yuv420p", dst_colorspace=1,
+                                                                        interpolation="LANCZOS").to_ndarray() for f in frames]
+        with tempfile.TemporaryDirectory() as folder:
+            for run in range(3):
+                path = os.path.join(folder, f"{run}.mp4")
+                plateio.write_movie(lambda i: frames[i].copy(), len(frames), path, 24.0, workers=2, crf=0)
+                with av.open(path) as c:
+                    decoded = [f.to_ndarray() for f in c.decode(video=0)]
+                assert len(decoded) == len(given) and all(np.array_equal(a, b) for a, b in zip(decoded, given)), run
+        print("a movie at crf 0 holds the frames it was given: ok")
+
     def test_largest_side(self):
         """Save Movie sizes a frame as core's Scale Image to Max Dimension would: the same width and height."""
         sizes = [((1920, 1080), 1920), ((3840, 2160), 1920), ((1080, 1920), 960), ((2048, 858), 960), ((192, 108), 960),
