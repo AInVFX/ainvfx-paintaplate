@@ -344,7 +344,7 @@ def remote(a):
                         with page.expect_download(timeout=120000) as dl:
                             page.click("#x-graph")
                         dl.value.save_as(f"{shots}/scene.comfyui.json")
-                        mark(f"ComfyUI graph saved: {len(json.load(open(f'{shots}/scene.comfyui.json')))} nodes")
+                        mark(f"ComfyUI graph saved: {len(json.load(open(f'{shots}/scene.comfyui.json'))['nodes'])} nodes and notes")
         except Exception as exc:
             mark(f"FAILED: {type(exc).__name__}: {str(exc).splitlines()[0][:160]} | status: {status()}")
             page.screenshot(path=f"{shots}/fail.png")

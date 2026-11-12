@@ -10,7 +10,7 @@ import { XRAY_SIDE, XRAY_TEXT, alphaFromBytes, alphaFromHalfs, tintPixels, xrayP
 import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
-import { sceneGraph } from "./graph.mjs";
+import { editorGraph, sceneGraph } from "./graph.mjs";
 import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
   erasePrompt, erasesPaint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
@@ -3193,11 +3193,15 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
       erasePrompt: erasePrompt(active.filter((e) => e.tool === "erase").map((e) => e.caption?.text)),
       grow: grow(p.spec.width, erase), feather: feather(p.spec.width), prefix: `paintaplate/${p.id}/graph`,
       hdr: S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), hdrWanted()) } });
+  const classes = [...new Set(Object.values(graph).map((n) => n.class_type))], specs = await Promise.all(classes.map(objectInfo)); // what this ComfyUI says of each node class: its widgets, in the editor's order
+  const unknown = classes.filter((c, i) => !specs[i]?.input);
+  if (unknown.length) return stopped(`The ComfyUI graph was not written: this ComfyUI does not describe ${unknown.join(", ")}`, "Install the missing nodes, restart ComfyUI, then export again.");
+  const file = editorGraph(graph, Object.fromEntries(classes.map((c, i) => [c, specs[i]]))); // the editor's own format: groups, notes, places and links
   const a = Object.assign(document.createElement("a"), { download: `${p.name}.comfyui.json`,
-    href: URL.createObjectURL(new Blob([JSON.stringify(graph, null, 1)], { type: "application/json" })) });
+    href: URL.createObjectURL(new Blob([JSON.stringify(file, null, 1)], { type: "application/json" })) });
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  told(`Saved ${a.download}: ${Object.keys(graph).length} nodes in numbered sections, each opening with a README note`, "Drop it on this ComfyUI to open it: it reads the plate and the strokes from the input folder.");
+  told(`Saved ${a.download}: ${file.nodes.length - file.groups.length} nodes in ${file.groups.length} groups, each opening with its note`, "Drop it on ComfyUI's canvas to open it: it reads the plate and the strokes from the input folder.");
 }
 
 async function openScene(text) { // the plate opens in its colour space, then every edit runs again with its own seed and words

@@ -467,6 +467,9 @@ async def interrupt_route(request):
     return web.json_response({})
 
 
+SPECS = json.load(open(os.path.join(REPO, "tests", "js", "object_info.scene.json")))["nodes"]
+
+
 async def object_info_route(request):
     cls = request.match_info["cls"]
     models = {}
@@ -475,8 +478,10 @@ async def object_info_route(request):
             for k, val in node["inputs"].items():
                 if isinstance(val, str) and val.endswith(".safetensors"):
                     models.setdefault(node["class_type"], {}).setdefault(k, []).append(val)
-    required = {k: [opts] for k, opts in models.get(cls, {}).items()}
-    return web.json_response({cls: {"input": {"required": required}}})
+    spec = json.loads(json.dumps(SPECS.get(cls, {"input": {"required": {}}})))  # the copy of /object_info, for the classes it holds
+    for k, opts in models.get(cls, {}).items():  # with the model files the workflows name, as the choices of their input
+        spec["input"].setdefault("optional" if k in spec["input"].get("optional", {}) else "required", {})[k] = [opts]
+    return web.json_response({cls: spec})
 
 
 async def quit_route(request):  # the mock stops at once, as a ComfyUI that the system stopped for its memory: nothing answers any more
