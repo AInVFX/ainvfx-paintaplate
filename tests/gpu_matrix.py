@@ -79,6 +79,15 @@ def answers(url):
         return False
 
 
+def free(url):
+    """ComfyUI unloads its models and drops its cached results, as the page's own free asks. It does so at its next
+    idle moment: 5 s leave it the time."""
+    body = json.dumps({"unload_models": True, "free_memory": True}).encode()
+    request = urllib.request.Request(url + "/free", data=body, headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Paint a plate gpu_matrix)"})
+    urllib.request.urlopen(request, timeout=30).close()
+    time.sleep(5)
+
+
 class Memory(threading.Thread):
     """VRAM and RAM in use while a case runs, read once a second (the top of this file says from where). `samples` keeps
     every reading with its time: (time, VRAM, RAM, RAM that no file backs). In a container, `container` is its own count
@@ -259,6 +268,7 @@ def report(a, machine, results):
              f"| Paint a plate | commit {git('rev-parse', '--short', 'HEAD')} on {git('rev-parse', '--abbrev-ref', 'HEAD')} |",
              f"| Cases | {a.cases}: {', '.join(r['name'] for r in results)} |",
              f"| Memory profile asked for | {a.memory or 'none: the card decides'} |",
+             f"| Before each case | {'ComfyUI is freed (--fresh)' if a.fresh else 'ComfyUI stays as the case before left it'} |",
              f"| RAM read from | {a.source} |", "",
              "Peak RAM is the most that was held; « no file » is the part of it that no file backs, which a memory cap cannot take back. "
              "In a job's row, Seconds runs from the page's request to the job's end, and In ComfyUI from its start to its end in "
@@ -313,6 +323,7 @@ def main():
     ap.add_argument("--timeout", type=int, default=900, help="ui_live.py's --timeout: it waits 8 times this many seconds for a render, 4 times for a fluid shot, twice for an edit")
     ap.add_argument("--memory", default="", choices=("", "small", "medium", "large"), help="ask the page for this memory profile; by default the card decides")
     ap.add_argument("--exact", action="store_true", help="the strokes as written: jobs made before come back from the job index")
+    ap.add_argument("--fresh", action="store_true", help="free ComfyUI's memory before each case, so a case's peak RAM is its own; its first job then loads its models again")
     a = ap.parse_args()
     a.url, a.comfy, a.out = a.url.rstrip("/"), os.path.abspath(a.comfy), os.path.abspath(a.out)
     with open(os.path.join(HERE, "gpu_matrix.json"), encoding="utf-8") as f:
@@ -342,6 +353,8 @@ def main():
     results, left = [], list(names)
     while left:
         name = left.pop(0)
+        if a.fresh:
+            free(a.url)
         results.append(run_case(a, name, cases[name], os.path.join(a.out, name)))
         print(f"{name}: {'passed' if results[-1]['passed'] else 'FAILED'} in {results[-1]['seconds']:.0f} s", flush=True)
         if left and not answers(a.url):  # each case left would fail in 31 s with a traceback (the laptop, 12 Nov)

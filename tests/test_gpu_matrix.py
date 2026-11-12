@@ -3,6 +3,7 @@ start keeps. No GPU and no browser."""
 import contextlib
 import importlib.util
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -76,7 +77,7 @@ class Run(unittest.TestCase):
             with mock.patch.object(sys, "argv", argv), mock.patch.object(gpu_matrix, "browser_ready", lambda channel: None), \
                     mock.patch.object(gpu_matrix, "get", lambda url: {}), mock.patch.object(gpu_matrix, "Memory", lambda url: mock.Mock(pid=None)), \
                     mock.patch.object(gpu_matrix, "run_case", case), mock.patch.object(gpu_matrix, "answers", lambda url: next(alive)), \
-                    contextlib.redirect_stdout(io.StringIO()):
+                    mock.patch.object(gpu_matrix, "free", lambda url: calls.append("free")), contextlib.redirect_stdout(io.StringIO()):
                 code = gpu_matrix.main()
             with open(os.path.join(tmp, "out", "report.md"), encoding="utf-8") as f:
                 return calls, code, f.read()
@@ -94,6 +95,26 @@ class Run(unittest.TestCase):
         calls, code, report = self.matrix("horse_cow,horse_erase", [True])
         self.assertEqual((calls, code), (["horse_cow", "horse_erase"], 0))
         self.assertNotIn("not run", report)
+
+    def test_fresh_frees_comfyui_before_each_case(self):
+        """On the pod of 11 Nov a case's first job read the 138 GB that the case before it had left."""
+        calls, _, report = self.matrix("horse_cow,horse_erase", [True], "--fresh")
+        self.assertEqual(calls, ["free", "horse_cow", "free", "horse_erase"])
+        self.assertIn("| Before each case | ComfyUI is freed (--fresh) |", report)
+        calls, _, report = self.matrix("horse_cow,horse_erase", [True])
+        self.assertEqual(calls, ["horse_cow", "horse_erase"])
+        self.assertIn("| Before each case | ComfyUI stays as the case before left it |", report)
+
+    def test_free_posts_what_the_page_posts(self):
+        sent = []
+
+        def urlopen(request, timeout=None):
+            sent.append((request.full_url, request.get_method(), json.loads(request.data)))
+            return io.BytesIO()
+
+        with mock.patch.object(gpu_matrix.urllib.request, "urlopen", urlopen), mock.patch.object(gpu_matrix.time, "sleep", lambda seconds: None):
+            gpu_matrix.free("http://127.0.0.1:8188")
+        self.assertEqual(sent, [("http://127.0.0.1:8188/free", "POST", {"unload_models": True, "free_memory": True})])
 
 
 @unittest.skipUnless(importlib.util.find_spec("playwright"), "tests/ui_live.py imports Playwright")
