@@ -682,6 +682,13 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       covered counts only in that margin, and only when a quarter of the area at most is covered. So the matte is empty while the object is hidden, takes it again where it
       comes out, and leaves out what stands in front. An object that moves in the scene over its first frames is
       followed as before;
+    - with `base` and no `shot`, the matte is an erase's: the frames the tracker read are the plate, and the object is
+      the plate's own (12 Nov 2026: an erased barn passed behind the horse; the matte held its last 30 px at one place
+      of the frame for 65 frames, and left the barn out as too far when the tracker found it again). The plate is
+      asked as above for an object that stands still: the region and a held matte move with the background, a held
+      matte drops what the plate covers, and a tracker's mask that lies mostly on covered places is left out. The
+      tracker's mask is taken wherever it goes: when it is the matte of the frame before, whole, on places that
+      changed, the object moves by itself, and the plate is not asked again;
     - changes larger than 3 times the object's largest area keep only what lies at the tracker's own mask, and the
       region does not follow them. A matte more than FOLLOW_SPIKE times the median of the 7 frames around it, when the
       tracker's own mask did not grow as much, keeps only what those frames hold too. So the matte's area changes
@@ -704,6 +711,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     eight = np.ones((3, 3), bool)
 
     compare = shot is not None and base is not None
+    real = shot is None and base is not None  # an erase: the frames the tracker read are the plate, and the object is the plate's own
 
     def differ(t):  # how far the shot is from the plate under it, per pixel, without one-pixel edges from a small shift
         b = base[min(t, len(base) - 1)]
@@ -728,7 +736,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
         out = np.zeros_like(m)
         out[box] = np.isin(parts, keep[keep > 0])
         return out
-    k = max(1, w // FOLLOW_SIDE)  # the plate is read small
+    k = max(1, -(-w // FOLLOW_SIDE))  # the plate is read small, at the pixels that `record` keeps
     soft = (max(1.0, zone * (w // k) / 4), max(1.0, (w // k) / 160))  # two blurs: a quarter of a zone says that something large stands there, 1/160 of the width says where it ends
 
     def plate(t):  # the plate, small: its luma, to measure its move, and its colours at the two blurs, to compare places and not their texture
@@ -774,6 +782,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     ground = learnt = before = past = home = None  # the scene's map (the softened colours each place first showed, and which places it holds), the frame before's luma and colours, the first matte moved with the background
     rim = int(np.ceil(2.5 * soft[0]))  # as far as the large blur reads
     gone = moved = 0  # frames where a piece that left the object's place was left out; the frame where the object was seen to move in the scene
+    inside = np.ones((h, w), bool)  # the places that frame 0 showed, moved with the background: an object cut by the frame's edge shows more of itself as the plate moves, and that is not a move
     seat = np.zeros(2)  # the background's move at the frame before, in whole small pixels
     open0 = line  # where the object stood on frame 0, moved with the background: frame 0 showed these places in view, so the plate knows what covers them
     place, rest = np.zeros(2), np.zeros(2)  # the background's move since frame 0 (small pixels), and what is left of it under a whole pixel
@@ -782,7 +791,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     with ThreadPoolExecutor(max(1, workers)) as pool:  # numpy and scipy release the GIL; a chunk at a time, so the differences of a long shot never sit in memory together
         for start in range(0, n, chunk):
             block = list(pool.map(differ, range(start, min(n, start + chunk)))) if compare else None
-            plates = list(pool.map(plate, range(start, min(n, start + chunk)))) if compare and still is not False else None
+            plates = list(pool.map(plate, range(start, min(n, start + chunk)))) if base is not None and still is not False else None
             for t in range(start, min(n, start + chunk)):
                 if tick:
                     tick()
@@ -802,7 +811,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                         rest += (dy * k, dx * k)
                         step = np.rint(rest).astype(int)
                         rest -= step
-                        open0 = carry(open0, int(step[0]), int(step[1]))
+                        open0, inside = carry(open0, int(step[0]), int(step[1])), carry(inside, int(step[0]), int(step[1]))
                         if still is None:
                             home = carry(home, int(step[0]), int(step[1]))
                         else:  # the region and a held matte move with the background
@@ -814,10 +823,13 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                 core = s & near  # SAM's mask near the region: what lies further away is left out, even joined to it
                 strays += bool((s & ~near).any())
                 here = grow(open0, reach / 2) if hide is not None else None  # the object's place of frame 0, with a margin of half a zone
-                if hide is not None and 2 * int((core & hide).sum()) > int(core.sum()):  # most of the tracker's mask lies on covered places: it is what stands in front
-                    core, blocked = np.zeros((h, w), bool), True
-                elif hide is not None:
-                    core = core & ~(hide & ~here)  # beyond the object's place, the tracker's mask counts only in view
+                if hide is not None and 2 * int((core & hide).sum()) > int(core.sum()):  # most of the tracker's mask lies on covered places
+                    if real and 4 * int((core & prev).sum()) >= 3 * max(int(core.sum()), int(prev.sum())) and 4 * int(core.sum()) >= int(line.sum()):
+                        still, hide, moved = False, None, t  # an erased object is the plate's own: the matte of the frame before, whole, on places that changed, is the object moving by itself
+                    else:
+                        core, blocked = np.zeros((h, w), bool), True  # it is what stands in front
+                elif hide is not None and not real:
+                    core = core & ~(hide & ~here)  # beyond a painted object's place, the tracker's mask counts only in view
                 peak = max(peak, int(core.sum()))
                 found, follows = core, True
                 if block is not None and (core.any() or line.any()):
@@ -844,7 +856,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                         added += 1
                         most = max(most, float((core | gain).sum()) / max(int(core.sum()), 1))
                     found = core | gain
-                if hide is not None and found.any():  # it stands still: a piece that has left its place, with what stands in front or alone, is not the object
+                if hide is not None and not real and found.any():  # a painted object that stands still: a piece that has left its place, with what stands in front or alone, is not the object
                     whole = found
                     if 4 * int((found & here).sum()) >= int(open0.sum()):  # the object is seen at its place: what is joined to it there counts
                         found = touching(found, here)
@@ -875,7 +887,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     home = f
                 elif plates is not None and still is None:
                     body = bulk(found)  # without thin lines: a changed area that a thin line joins to the object is not the object moving
-                    if body.any() and bulk(touching(body, grow(home, thin)) & ~grow(home, reach / 2)).any():
+                    if body.any() and bulk(touching(body, grow(home, thin)) & ~grow(home, reach / 2) & inside).any():
                         still, moved = False, t  # it moves in the scene: followed as before
                     elif t >= min(FOLLOW_STILL, n - 1):
                         still = True
