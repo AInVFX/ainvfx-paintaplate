@@ -3,7 +3,7 @@
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
-import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onFree, onLog, onNotice, outputFile, outputFiles, outputText, post, run, setSalt, upload, viewUrl } from "./comfy.mjs";
+import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setSalt, upload, viewUrl } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromBytes, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
@@ -74,6 +74,7 @@ const RENDERS_WANTED = 6; // sets of edits whose renders go on in the background
 const LIGHT = { flow: 0.3, shade: 0.35, spread: 1.6, spacing: 0.25 };
 const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid", "hdr"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "hdr", "review", "export"]; // the render's job kinds: Generate and a new plate stop them
+const STOPPED = ["edit", "fluid", "snap", "prefetch", ...BACKGROUND]; // the job kinds a stop ends: none of them is posted until Enter (design rule 13)
 const UPSAMPLER = {}; // Black Forest Labs' system prompts for Klein's upsampler (upsampler.json): table and plain
 const SCENE = { format: "paintaplate-scene", version: 6 }; // 3: the OCIO config, the plate's colour space by its OCIO name, the display and view; 4: the SDR-to-HDR switch, the blank plate's bit depth; 5: the switch as set, null for the plate's default; 6: Deliver's passes, the switch gone
 const OCIO_PREF = "paintaplate.ocio"; // the config, display, view and look, kept for the next session as RV keeps them
@@ -239,6 +240,7 @@ async function writeCaption(e, reference, key, kind) {
 // the same edits on another plate, or on the same plate in another colour space
 async function openPlate(list, typed, opts = {}) {
   if (!list.length && !typed) return status("Choose files, or type a path in ComfyUI's input folder.");
+  const began = performance.now();
   stopEverything();
   if (!opts.under) { S.halted = false; S.viewStopped = false; S.viewEpoch++; } // another plate, or a scene: what generates stops, a stop in force ends, and what waited for it is void
   if (!opts.under) S.deliver = { hdr: false }; // a new plate: Deliver's passes off; the fluid shot under the edits keeps them
@@ -311,7 +313,6 @@ async function openPlate(list, typed, opts = {}) {
   Object.assign(sharp, { plate: null, shot: null });
   view.classList.add("painting");
   plateVid.src = viewUrl(outputFile("ingest", out, "proxy"));
-  plateVid.addEventListener("canplaythrough", () => { if (OPENING.at === "load") { OPENING.at = "done"; status("Ready to play. Describe the edit at the top, paint on the frame, then Generate."); } }, { once: true });
   shotVid.removeAttribute("src"); shotVid.load();
   for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = false;
   const kind = spec.kind === "video" ? spec.codec : `${spec.ext.slice(1).toUpperCase()} ${spec.kind}`;
@@ -321,14 +322,24 @@ async function openPlate(list, typed, opts = {}) {
   $("#close-btn").hidden = false;
   if (opts.under) recompose(); // the edits' patches on the new first frame, until they are made again on it
   previewUI(); fitView(); historyUI(); timelineUI(); stagesUI(); exportUI(); render();
-  log(`Plate ${S.plate.name}: ${w} x ${h}, ${spec.frames} frames; edits at ${S.plate.work.join(" x ")}, quick passes at ${S.plate.prev.join(" x ")}, preview at ${S.plate.shot.join(" x ")}, tracking at ${S.plate.track.join(" x ")}`);
+  // The plate's two lines in the log (design rule 12): what it is, then the sizes the page works at. What to do next is a hint, below
+  const depth = opts.fluid?.depth ? { bits: opts.fluid.depth, float: false } : plateDepth(spec); // a blank plate: the depth asked for its fluid shot
+  log(`Plate ${S.plate.name} opened in ${((performance.now() - began) / 1000).toFixed(1)} s: ${w} x ${h}, ${spec.frames} frames, ${depth.float ? "float" : `${depth.bits}-bit`}, ${cs}${opts.cs ? "" : " (read from the file)"}`);
+  log(`Working sizes: edits at ${S.plate.work.join(" x ")}, quick passes at ${S.plate.prev.join(" x ")}, preview at ${S.plate.shot.join(" x ")}, tracking at ${S.plate.track.join(" x ")}`);
 
   const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).map((n) => n).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
   const big = bigPlateWarning(spec, S.vram); // above 2K on a card under 48 GB: renders may not finish (README, GPU)
   if (big) { log(big); setTimeout(() => status(big), 80); }
-  status(`${S.plate.name} in ${cs}${opts.cs ? "" : ", read from the file"} (right-click > OCIO > File Color Space changes it). Describe the edit at the top, paint on the frame, then Generate.`);
+  const next = "Describe the edit at the top, paint on the frame, then Generate.", plate = S.plate;
+  const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", read from the file"} (right-click > OCIO > File Color Space changes it). ${next}`;
+  status(opened, "hint");
   if (keying()) enterFluid(); else fluidUI();
+  plateVid.addEventListener("canplaythrough", () => { // the playback video is loaded. It says so only while the open's own sentence is on show: a blank plate keeps its fluid hint
+    if (S.plate !== plate || OPENING.at !== "load") return; // another plate has opened since
+    OPENING.at = "done";
+    if ($("#status").textContent === opened) status(`Ready to play. ${next}`, "hint");
+  }, { once: true });
 }
 
 function stopEverything() {
@@ -387,6 +398,7 @@ onFree(async (last, name) => { // why ComfyUI's memory is freed before this job,
   const gib = (n) => Math.round(n / 2 ** 30);
   return freesBefore(S.memoryProfile, last, name, room) ? `${gib(room.free)} GB of RAM are free, and this job's frames can take ${gib(room.need)} GB` : null;
 });
+onStop((kind) => S.halted && STOPPED.includes(kind)); // a stop stops everything: a render step that was uploading its images when the stop came posts no job after it
 
 async function warmAll() { // every model loads while the person looks at the page: the first edit and the first shot start at once
   const t0 = performance.now(), start = $("#status").textContent; // what the page said at start: the warm-up's line replaces only that
@@ -983,7 +995,7 @@ function stopGenerating() { // Esc on the edit being generated, or Stop: everyth
   S.viewStopped = true; S.viewEpoch++; // what was queued is void: Enter runs it again, in order (queueWaiting)
   const edit = S.running;
   if (edit) stopPass(edit);
-  cancel("fluid", "snap", "prefetch", ...BACKGROUND);
+  cancel(...STOPPED);
   dropLive();
   const waits = S.edits.filter((e) => e.state === "queued").map(num);
   log(`Stopped: ${edit ? `edit ${num(edit)} keeps its strokes, words and seed` : "what finished is kept"}${waits.length ? `, ${editList(waits)} ${waits.length > 1 ? "wait" : "waits"}` : ""}. Nothing starts until Enter`);

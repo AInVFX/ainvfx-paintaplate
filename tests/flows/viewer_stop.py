@@ -8,7 +8,7 @@ import sys
 import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from viewer_edit import OPEN, STATUS, hold  # noqa: E402
+from viewer_edit import OPEN, STATUS, enter_held  # noqa: E402
 
 
 def posts(port):  # how many jobs the page has posted to the mock ComfyUI
@@ -41,9 +41,8 @@ def run(browser, port, U):
     states = lambda: page.eval_on_selector_all("#history li .state", "els => els.map((e) => e.textContent)")
 
     # 1. The first Klein pass of edit 1 is held, edit 2 waits for its turn, then Esc: nothing is posted
-    hold(port, output="patch", seconds=30)
-    page.keyboard.press("b"); U.paint_once(page, "a green lamp", [(0.20, 0.75), (0.30, 0.75)]); page.keyboard.press("Enter")
-    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
+    page.keyboard.press("b"); U.paint_once(page, "a green lamp", [(0.20, 0.75), (0.30, 0.75)])
+    enter_held(page, port, U)
     page.keyboard.press("n"); U.paint_once(page, "a white cup", [(0.45, 0.20), (0.55, 0.20)]); page.keyboard.press("n")
     page.wait_for_function("document.querySelectorAll('#history li').length === 2", timeout=10000)
     page.wait_for_timeout(1500)  # what edit 2 asked for as its strokes rested is posted by now
@@ -86,9 +85,8 @@ def run(browser, port, U):
 
     # 5. The stopped edit dropped by a second Esc, then Enter: the edit that waited still runs
     page.keyboard.press("Escape")  # the erase strokes of check 4 go
-    hold(port, output="patch", seconds=30)
-    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.70, 0.75), (0.80, 0.75)]); page.keyboard.press("Enter")
-    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
+    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.70, 0.75), (0.80, 0.75)])
+    enter_held(page, port, U)
     page.keyboard.press("n"); U.paint_once(page, "a blue vase", [(0.70, 0.25), (0.80, 0.25)]); page.keyboard.press("n")
     page.wait_for_function("document.querySelectorAll('#history li').length === 4", timeout=10000)
     page.keyboard.press("Escape"); page.wait_for_timeout(300); page.keyboard.press("Escape")
@@ -99,9 +97,8 @@ def run(browser, port, U):
             f"Enter with no edit in progress runs the edit that waited: History {U.row_words(page)}, {states()}")
 
     # 6. Try another on a History row under a stop: it waits for Enter, then runs after the stopped edit
-    hold(port, output="patch", seconds=30)
-    page.keyboard.press("n"); page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.70, 0.75), (0.80, 0.75)]); page.keyboard.press("Enter")
-    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
+    page.keyboard.press("n"); page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.70, 0.75), (0.80, 0.75)])
+    enter_held(page, port, U)
     page.keyboard.press("Escape")
     before = quiet(page, port)  # a job already on its way when Esc was pressed can still arrive: count once none has for a second
     page.click("#history li:last-child .again"); page.mouse.move(5, 5); page.wait_for_timeout(1500)
@@ -120,9 +117,8 @@ def run(browser, port, U):
     page.wait_for_function(f"{STATUS}.startsWith('Ready')", timeout=60000)
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function(OPEN, timeout=60000)
-    hold(port, output="patch", seconds=30)
-    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.20, 0.75), (0.30, 0.75)]); page.keyboard.press("Enter")
-    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
+    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.20, 0.75), (0.30, 0.75)])
+    enter_held(page, port, U)
     page.keyboard.press("n"); U.paint_once(page, "a blue vase", [(0.45, 0.20), (0.55, 0.20)]); page.keyboard.press("n")
     page.wait_for_function("document.querySelectorAll('#history li').length === 2", timeout=10000)
     page.keyboard.press("Escape"); page.wait_for_timeout(300); page.keyboard.press("Escape")
@@ -132,9 +128,8 @@ def run(browser, port, U):
     U.check(U.until(page, U.DONE.format(n=1), 60000) and U.row_words(page) == ["a blue vase"], f"and Generate runs it: History {U.row_words(page)}")
 
     # 8. A stop in force ends when another plate opens: the new plate's first edit runs without Enter
-    hold(port, output="patch", seconds=30)
-    page.keyboard.press("n"); U.paint_once(page, "a red fire", [(0.20, 0.75), (0.30, 0.75)]); page.keyboard.press("Enter")
-    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
+    page.keyboard.press("n"); U.paint_once(page, "a red fire", [(0.20, 0.75), (0.30, 0.75)])
+    enter_held(page, port, U)
     page.keyboard.press("Escape")
     page.wait_for_function(f"{STATUS}.startsWith('Stopped')", timeout=10000)
     opened = "[...document.querySelectorAll('#log li span')].filter((e) => e.textContent.startsWith('Plate desk')).length"

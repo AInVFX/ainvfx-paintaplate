@@ -1,10 +1,10 @@
 # Page flows by workstream
 
-`tests/ui_mock.py` runs its own flows, then one flow per `tests/flows/*.py` module, named after its file. So a workstream adds a file here instead of editing `ui_mock.py`: `viewer_<topic>.py`, `pipeline_<topic>.py`, `codebase_<topic>.py`. A file whose name starts with `_` is not a flow. A module defines one function:
+`tests/ui_mock.py` runs its own flows, then one flow per `tests/flows/*.py` module, named after its file. So a workstream adds a file here instead of editing `ui_mock.py`: `viewer_<topic>.py`, `pipeline_<topic>.py`, `render_<topic>.py`, `codebase_<topic>.py`, `page_<topic>.py`. A file whose name starts with `_` is not a flow. A module defines one function:
 
 ```python
 def run(browser, port, U):
-    """U is tests/ui_mock.py itself: U.check, U.WATCH, U.added_line, U.wait_log, U.paint_once, U.open_path and the rest."""
+    """U is tests/ui_mock.py itself: U.check, U.WATCH, U.added_line, U.wait_log, U.paint_once, U.open_path, U.mock_route and the rest."""
     page = browser.new_page(viewport={"width": 1400, "height": 900}, accept_downloads=True)
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)

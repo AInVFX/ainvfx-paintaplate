@@ -30,6 +30,20 @@ def hold(port, **what):  # the mock keeps the next job that writes `output`, or 
     urllib.request.urlopen(req, timeout=5).read()
 
 
+def enter_held(page, port, U, seconds=30, key="Enter"):
+    """Generate, with the edit's first Klein pass kept open by the mock for `seconds`; `key` is Enter, or Control+Enter for
+    another try. Returns once the mock runs that pass. The status line says « first look » before the pass is posted: a
+    stop pressed in that gap cancels a pass that was never posted, and the hold stays armed for the next edit's pass,
+    which then lasts `seconds`."""
+    running = lambda: sum(e[0] == "held" for e in U.mock_route(port, "/mock/events"))  # noqa: E731
+    before = running()
+    hold(port, output="patch", seconds=seconds)
+    page.keyboard.press(key)
+    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
+    if not U.poll(page, lambda: running() > before, 30):
+        raise AssertionError("the mock did not start the edit's first Klein pass within 30 s of Enter")
+
+
 def masks(page):  # the black and white images among the uploads: the edit masks, as arrays
     out = []
     masks.seen = []
@@ -57,9 +71,8 @@ def run(browser, port, U):
     plate, plate_gone = pixel(kept), pixel(gone)
 
     # 1. Esc during the first Klein pass: the edit stays, with its strokes, as the strokes in progress
-    hold(port, output="patch", seconds=30)
-    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.30, 0.60), (0.40, 0.60)]); page.keyboard.press("Enter")
-    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
+    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.30, 0.60), (0.40, 0.60)])
+    enter_held(page, port, U)
     page.keyboard.press("Escape"); away()
     U.check(rows() == 1 and status().startswith("Stopped. Edit 1 keeps") and "Ctrl+Enter" in status() and not page.is_disabled("#generate"),
             f"Esc during the first Klein pass keeps the edit: {rows()} row in History, Generate is live, and the status line says what Enter and Ctrl+Enter do ({status()[:60]})")
@@ -106,9 +119,7 @@ def run(browser, port, U):
     U.check(len(got) >= 2 and min(last) > 200, f"a stroke painted after a rub, over the rubbed place, is in the {len(got)} masks Klein receives: {last} (uploads: {masks.seen})")
 
     # 6. Ctrl+Enter after a stop: the edit runs again with another seed
-    hold(port, output="patch", seconds=30)
-    page.keyboard.press("Control+Enter")
-    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
+    enter_held(page, port, U, key="Control+Enter")
     page.keyboard.press("Escape")
     U.check(rows() == 2 and status().startswith("Stopped. Edit 2 keeps"), f"Esc on an edit made again keeps it and its strokes: {status()[:40]}")
     page.keyboard.press("Control+Enter")
