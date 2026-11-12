@@ -20,7 +20,7 @@ Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com
 | **Light** | Relights the shot. Paint where the light comes from, in its colour. Paint in black to darken an area |
 | **A fluid shot** | Starts from a blank plate. Paint flat colour blobs on a few keyframes: ainvfx-fluid turns them into smoke, steam, fire, explosions, dust, fog or clouds. The shot becomes the plate for every edit |
 | **Review** | The viewer follows OpenRV: colour through OpenColorIO, the same keys, a wipe against the plate, the Color Inspector. |
-| **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers) with its matte, as one zip. **ComfyUI graph** saves the whole scene as one ComfyUI workflow |
+| **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers) with its matte, as one zip. **ComfyUI graph** saves the whole scene as one ComfyUI workflow in the editor's own format: one group per step, each with a note, to drop on ComfyUI's canvas |
 | **Deliver** | Readies a shot for delivery. Its bit-depth pass turns an SDR result into half-float EXR frames |
 
 The limits that matter today: edits are painted on the first frame only; shots are tested up to 121 frames; edits are made at up to 1920 px on the long side; a plate can be up to 3840 x 2160.
@@ -76,7 +76,7 @@ Then follow steps 2 and 3 above.
    PLATES=1 bash /workspace/ainvfx-paintaplate/tools/runpod_start.sh
    ```
 
-The script installs the tested ComfyUI and ComfyUI-LTXVideo, links this pack, runs the two download commands below and starts ComfyUI. It then prints the page's address. After a `git pull`, `bash tools/runpod_start.sh --restart` loads the new code. Port 8188 has no password: anyone with the pod's address can use it.
+The script installs the tested ComfyUI and ComfyUI-LTXVideo, links this pack, runs the two download commands below and starts ComfyUI. It then prints the page's address. After a `git pull`, `bash tools/runpod_start.sh --restart` loads the new code. After an update, a scene opened again makes each of its jobs again once: a result made by another version is not taken back. Port 8188 has no password: anyone with the pod's address can use it.
 
 ## Get the models
 
