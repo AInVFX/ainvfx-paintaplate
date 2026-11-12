@@ -392,15 +392,17 @@ def generate_flow(browser, port):
     lines = log_lines(page)
     check(any(n.startswith("export/") for n in zipped) and any(n.startswith("matte/") for n in zipped) and any(line.startswith("Export v") for line in lines),
           f"Export writes the result and its matte when pressed, then the zip downloads: {sorted({n.split('/')[0] for n in zipped})}")
-    # The ComfyUI graph: the scene as one workflow, in numbered sections in the order they run, each opening with a README
+    # The ComfyUI graph: the scene in the editor's own format, one group per section in the order they run, each opening with its note
     with page.expect_download(timeout=60000) as dl:
         page.click("#export-btn"); page.click("#x-graph")
     graph = json.load(open(dl.value.path()))
-    notes = [n["_meta"]["title"] for _, n in sorted(graph.items(), key=lambda kv: int(kv[0])) if n["class_type"] == "PrimitiveStringMultiline"]
-    overview = graph[min(graph, key=int)]["inputs"]["value"]
-    check(notes[:3] == ["README · How this graph works", "README · INPUT", "README · MODELS"] and any(t.startswith("README · EDIT 1 · ") for t in notes)
-          and notes[-1] == "README · OUTPUT" and f"Paint a plate {page.text_content('#version')}" in overview and "plates/desk.mp4" in overview,
-          f"the ComfyUI graph opens with README notes, one per section, in the order they run: {notes}")
+    groups, notes = [g["title"] for g in graph["groups"]], [n for n in graph["nodes"] if n["type"] == "MarkdownNote"]
+    overview = notes[0]["widgets_values"][0]
+    rects = [(n["pos"][0], n["pos"][1] - 30, n["pos"][0] + n["size"][0], n["pos"][1] + n["size"][1]) for n in graph["nodes"]]  # each with its title bar
+    over = sum(min(a[2], b[2]) > max(a[0], b[0]) and min(a[3], b[3]) > max(a[1], b[1]) for i, a in enumerate(rects) for b in rects[i + 1:])
+    check(graph.get("version") == 0.4 and groups[:3] == ["README", "INPUT", "MODELS"] and any(t.startswith("EDIT 1 · ") for t in groups) and groups[-1] == "OUTPUT"
+          and len(notes) == len(groups) and over == 0 and len(graph["links"]) > 100 and f"Paint a plate {page.text_content('#version')}" in overview and "plates/desk.mp4" in overview,
+          f"the ComfyUI graph is in the editor's own format: a group per section in the order they run, each with its note, {len(graph['nodes'])} nodes with none over another, {len(graph['links'])} links: {groups}")
     page.evaluate("document.activeElement.blur()")
     for _ in range(3):
         page.keyboard.press("ArrowRight")

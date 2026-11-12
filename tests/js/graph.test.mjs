@@ -85,3 +85,93 @@ test("the graph reads by sections: numbered ids, a README note opening each, the
   assert.ok(titled("CLIPTextEncode").some((t) => t.startsWith("SHOT · ") && t.endsWith("[prompt]")), "the shot's prompt is named");
   assert.ok(titled("CLIPTextEncode").some((t) => t === 'EDIT 1 · Erase "red umbrella" · both passes · Caption [caption]'), "an edit's caption, one node for its two passes");
 });
+
+// ---------- The page workstream, wave 3: the scene in the editor's own format ----------
+import { editorGraph, widgetsOf } from "../../web/graph.mjs";
+
+const INFO = JSON.parse(readFileSync(new URL("./object_info.scene.json", import.meta.url))).nodes; // what /object_info says: tests/js/object_info.scene.json
+const WF_HDR = { ...WF, hdr: parseWorkflow(JSON.parse(readFileSync(new URL("../../web/workflows/hdr.json", import.meta.url)))) };
+const scene = (hdr = false) => sceneGraph(WF_HDR, { plate: { ...plate, fps: 24 }, edits: [edit("erase", 1), edit("paint", 2), edit("light", 3)], render: { ...render, hdr }, about: { version: "1.11.9", name: "shot" } });
+const rect = (n) => [n.pos[0], n.pos[1] - 30, n.pos[0] + n.size[0], n.pos[1] + n.size[1]]; // with its title bar
+const cut = (a, b) => Math.min(a[2], b[2]) > Math.max(a[0], b[0]) && Math.min(a[3], b[3]) > Math.max(a[1], b[1]);
+const inside = (a, b) => a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3];
+const box = (g) => [g.bounding[0], g.bounding[1], g.bounding[0] + g.bounding[2], g.bounding[1] + g.bounding[3]];
+
+function posted(file) { // what the editor's Run posts: a widget's value by its name, a link by its input's name; a note is no node of a prompt
+  const link = new Map(file.links.map((l) => [l[0], l])), out = {};
+  for (const n of file.nodes) {
+    if (n.type === "MarkdownNote") continue;
+    const inputs = {};
+    widgetsOf(INFO[n.type]).forEach((w, i) => { if (w.name !== undefined) inputs[w.name] = n.widgets_values[i]; });
+    for (const i of n.inputs) if (i.link !== null) inputs[i.name] = [String(link.get(i.link)[1]), link.get(i.link)[2]];
+    out[n.id] = { class_type: n.type, inputs };
+  }
+  return out;
+}
+
+test("the editor's format: one group per section in run order, a note at the head of each, every node of the scene", () => {
+  const api = scene(), file = editorGraph(api, INFO);
+  assert.equal(file.version, 0.4);
+  const readmes = Object.values(api).filter((n) => n.class_type === "PrimitiveStringMultiline");
+  assert.deepEqual(file.groups.map((g) => g.title), ["README", ...readmes.slice(1).map((n) => n._meta.title.slice(9))]);
+  assert.deepEqual(file.groups.map((g) => g.title).filter((t) => !t.startsWith("EDIT ")), ["README", "INPUT", "MODELS", "ERASE TRACKING", "ERASE PASS", "SHOT", "PAINT TRACKING", "OUTPUT"]);
+  const notes = file.nodes.filter((n) => n.type === "MarkdownNote");
+  assert.equal(notes.length, file.groups.length);
+  assert.equal(file.nodes.length, Object.keys(api).length); // each README is a note, every other node is itself
+  assert.ok(file.nodes.every((n) => n.type === "MarkdownNote" || (n.type === api[n.id].class_type && n.title === api[n.id]._meta.title)), "the titles are kept");
+  assert.match(notes[0].widgets_values[0], /AInVFX Paint a plate 1\.11\.9: the scene of shot/);
+  const edit1 = notes.find((n) => n.title === "README · EDIT 1 · Erase").widgets_values[0];
+  assert.match(edit1, /\*\*Values the page set\*\*/);
+  assert.match(edit1, /- both passes · Caption: text "erase caption"/); // the note names the value, the node's title its slot
+  assert.equal(file.last_node_id, Math.max(...file.nodes.map((n) => n.id)));
+});
+
+for (const hdr of [false, true]) test(`the editor's format${hdr ? ", with SDR to HDR" : ""}: no node over another, every node inside its group, and in a group the links run from left to right`, () => {
+  const api = scene(hdr), file = editorGraph(api, INFO), groups = file.groups.map(box);
+  assert.equal(file.groups.some((g) => g.title === "SDR TO HDR"), hdr);
+  const home = (n) => groups.findIndex((g) => inside(g, rect(n)));
+  for (let i = 0; i < file.nodes.length; i++) {
+    assert.ok(home(file.nodes[i]) >= 0, `${file.nodes[i].title} lies in a group`);
+    for (let j = i + 1; j < file.nodes.length; j++) assert.ok(!cut(rect(file.nodes[i]), rect(file.nodes[j])), `${file.nodes[i].title} over ${file.nodes[j].title}`);
+  }
+  for (let i = 1; i < groups.length; i++) assert.ok(groups[i][1] > groups[i - 1][3], "the groups follow each other from top to bottom, apart");
+  const byId = new Map(file.nodes.map((n) => [n.id, n]));
+  for (const n of file.nodes.filter((x) => x.type === "MarkdownNote")) // the note is the first thing of its group, at its left
+    assert.ok(file.nodes.every((o) => o === n || home(o) !== home(n) || o.pos[0] > n.pos[0] + n.size[0]), `${n.title} opens its group`);
+  for (const [, from, , to] of file.links) if (home(byId.get(from)) === home(byId.get(to)))
+    assert.ok(byId.get(from).pos[0] + byId.get(from).size[0] < byId.get(to).pos[0], `${byId.get(from).title} feeds ${byId.get(to).title} from its left`);
+});
+
+for (const hdr of [false, true]) test(`the editor's format${hdr ? ", with SDR to HDR" : ""}: the links are whole, and Run posts the nodes of the API graph, value for value`, () => {
+  const api = scene(hdr), file = editorGraph(api, INFO), byId = new Map(file.nodes.map((n) => [n.id, n]));
+  assert.equal(file.last_link_id, file.links.length);
+  for (const [id, from, slot, to, input, type] of file.links) {
+    assert.ok(byId.get(from).outputs[slot].links.includes(id), `link ${id} leaves ${byId.get(from).title}`);
+    assert.equal(byId.get(to).inputs[input].link, id, `link ${id} enters ${byId.get(to).title}`);
+    assert.equal(byId.get(from).outputs[slot].type, type);
+  }
+  const back = posted(file), extra = new Set();
+  for (const [id, n] of Object.entries(api)) {
+    if (n.class_type === "PrimitiveStringMultiline") { assert.equal(back[id], undefined); continue; }
+    assert.equal(back[id].class_type, n.class_type);
+    for (const [k, v] of Object.entries(n.inputs)) assert.deepEqual(back[id].inputs[k], v, `${n._meta.title}: ${k}`);
+    for (const k of Object.keys(back[id].inputs)) if (!(k in n.inputs)) extra.add(`${n.class_type}.${k}`);
+  }
+  // the editor also posts the optional inputs the API graph leaves to the node, at their default: these, and no other
+  const LEFT = ["PaintAPlate_LivePreview.transfer", "PaintAPlate_RelightTransfer.shade_density", "PaintAPlate_SaveFrames.format", "PaintAPlate_SaveMovie.config", "PaintAPlate_SaveMovie.crf",
+    "PaintAPlate_SaveMovie.destination", "PaintAPlate_SaveMovie.frames", "PaintAPlate_SaveMovie.largest_size", "PaintAPlate_SaveMovie.source"];
+  assert.deepEqual([...extra].filter((k) => !LEFT.includes(k)), []);
+});
+
+test("a node's widgets: a seed keeps its control, an image upload its button, a widget a link feeds keeps its place", () => {
+  assert.deepEqual(widgetsOf(INFO.KSampler).map((w) => w.name ?? w.value), ["seed", "fixed", "steps", "cfg", "sampler_name", "scheduler", "denoise"]);
+  assert.deepEqual(widgetsOf(INFO.RandomNoise).map((w) => w.name ?? w.value), ["noise_seed", "fixed"]);
+  assert.deepEqual(widgetsOf(INFO.LoadImage).map((w) => w.name ?? w.value), ["image", "image"]); // the file, then the upload button
+  assert.deepEqual(widgetsOf(INFO.LoadImageMask).map((w) => w.name ?? w.value), ["image", "channel", "image"]); // the button comes after the required inputs
+  const dynamic = { input: { required: { video: ["VIDEO", {}], filename_prefix: ["STRING", {}], format: ["COMFY_DYNAMICCOMBO_V3", {}] } } }; // a V3 combo that brings an input of its own
+  assert.deepEqual(widgetsOf(dynamic, { filename_prefix: "v", format: "mp4", "format.codec": "h264" }).map((w) => w.name ?? w.value), ["filename_prefix", "format", "format.codec"]);
+  const api = scene(), file = editorGraph(api, INFO);
+  const linked = file.nodes.find((n) => n.type === "ImageScale" && n.inputs.some((i) => i.widget)); // its width comes by link
+  assert.ok(linked && linked.widgets_values.length === 4 && linked.inputs.filter((i) => i.widget).every((i) => i.link !== null), "a linked widget keeps a value in its place, and its link");
+  assert.throws(() => editorGraph(api, { ...INFO, KSamplerSelect: undefined }), /ComfyUI does not know the node KSamplerSelect/);
+});
