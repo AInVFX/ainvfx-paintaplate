@@ -87,7 +87,7 @@ test("a job that failed or was stopped says it in one line; a stopped job says w
 });
 
 // ---------- A stop: a job asked for under it is not posted ----------
-import { WF, onStop, run } from "../../web/comfy.mjs";
+import { WF, cancel, onFree, onStop, run } from "../../web/comfy.mjs";
 
 test("under a stop, a job of a kind the stop ends is not posted: it ends as a cancelled job", async () => {
   WF.probe = { prompt: { 1: { class_type: "Probe", inputs: {} } }, slots: {}, outputs: {}, progress: null };
@@ -99,6 +99,28 @@ test("under a stop, a job of a kind the stop ends is not posted: it ends as a ca
     assert.deepEqual(asked, []); // neither the job index nor /prompt was asked
   } finally {
     onStop(() => false);
+    delete WF.probe;
+  }
+});
+
+test("a job cancelled while the page reads ComfyUI's free RAM is not posted", async () => {
+  WF.probe = { prompt: { 1: { class_type: "Probe", inputs: {} } }, slots: {}, outputs: {}, progress: null };
+  const asked = [];
+  globalThis.fetch = async (url) => { asked.push(String(url)); return { ok: true, status: 200, text: async () => "{}", json: async () => ({}) }; };
+  let reached, release; // the page's rule, held open as a slow /system_stats holds it
+  const reading = new Promise((ok) => { reached = ok; }), answered = new Promise((ok) => { release = ok; });
+  onFree(async () => { reached(); await answered; return null; });
+  try {
+    const job = run("probe", {}, { kind: "probe" });
+    const ended = assert.rejects(job.done, /^Error: cancelled$/);
+    await reading; // the job waits for the rule's answer, and nothing is posted yet
+    cancel("probe");
+    release();
+    await ended;
+    await new Promise((ok) => setImmediate(ok)); // the submit has gone on from the rule's answer
+    assert.deepEqual(asked.filter((url) => url.endsWith("/prompt")), []);
+  } finally {
+    onFree(() => null);
     delete WF.probe;
   }
 });
