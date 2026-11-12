@@ -522,6 +522,52 @@ class FollowMatteKeepsThePlate(unittest.TestCase):
         self.assertRegex(summary, r"largest matte is 60\.0 times the object, on frame 0 \(warning: above 3")
 
 
+class FollowMatteBehindThePlate(unittest.TestCase):
+    """The cow behind the horse (11 Nov 2026), as a scene written here with the numbers measured on the real shot at
+    320 px. The background moves 2 px a frame. A painted object of 86 x 20 px stands still in the scene. An object of
+    the plate, 124 px wide (39% of the width), stays in the frame: the painted one goes behind it, is hidden from frame
+    58 to frame 76 (19 frames) and comes out on its other side. The first mask is 4.9 times the element. The tracker
+    returns that zone for 11 frames, then the object where it shows, then nothing from frame 50. From frame 40 the
+    shot also changes the object in front, where the painted one went behind it."""
+    N, H, W = 121, 182, 320
+    FRONT = (slice(30, 170), slice(60, 184))
+
+    def scene(self):
+        rng = np.random.default_rng(11)
+        n, h, w = self.N, self.H, self.W
+        land = ndimage.gaussian_filter(rng.random((h, w + 2 * n, 3)).astype(np.float32), (2, 2, 0))
+        land = np.clip(0.5 + 3 * (land - land.mean()), 0, 1)
+        base = np.stack([land[:, 2 * t:2 * t + w] for t in range(n)])
+        base[(slice(None),) + self.FRONT] = (0.55, 0.25, 0.10)
+        shot, sam, shown = base.copy(), np.zeros((n, h, w), np.float32), np.zeros((n, h, w), bool)
+        for t in range(n):
+            x = 213 - 2 * t  # the painted object moves with the background
+            shown[t, 96:116, max(x, 0):max(x + 86, 0)] = True
+            shown[(t,) + self.FRONT] = False  # behind what stands in front
+            shot[t][shown[t]] = (0.9, 0.85, 0.8)
+            if t < 11:
+                sam[t, 63:149, 207 - 2 * t:305 - 2 * t] = 1  # the zone it was given, 98 x 86 px
+            elif t < 50:
+                sam[t] = shown[t]
+        shot[40:, 90:122, 150:184] = (0.3, 0.2, 0.15)
+        return sam, shown, shot, base
+
+    def test_the_object_leaves_the_matte_while_hidden_and_comes_back_into_it(self):
+        sam, shown, shot, base = self.scene()
+        self.assertEqual((int(sam[0].sum()), int(shown[0].sum())), (8428, 1720))  # 4.9 times
+        self.assertEqual([t for t in range(self.N) if not shown[t].any()], list(range(58, 77)))
+        out, summary = m.follow_matte(sam, self.N, sam[0], shot=shot, base=base, zone=1 / 16, threshold=0.1, element=shown[0].astype(np.float32))
+        matte = out > 0.5
+        self.assertEqual(int(matte[58:77].sum()), 0)  # hidden: nothing in the matte (at 16f5990 the last matte held, on what stands in front)
+        self.assertEqual(int(matte[(slice(None),) + self.FRONT].sum()), 0)  # what stands in front never enters it, changed by the shot or not
+        for t in range(80, self.N):  # back on the other side with no mask from the tracker: from the fourth frame after it comes out (86% there), then nine tenths (91% from frame 82)
+            self.assertGreaterEqual(int((matte[t] & shown[t]).sum()), (0.9 if t >= 94 else 0.5) * int(shown[t].sum()), f"frame {t}")
+        near = m.dilate(shown.astype(np.uint8), 2) > 0
+        self.assertEqual(int((matte[11:] & ~near[11:]).sum()), 0)  # and nothing further than 2 px from the object, once the tracker is on it
+        self.assertIn("stood in front", summary)
+        self.assertRegex(summary, r"largest matte is \d\.\d times the object, on frame \d+$")  # reported, with no warning
+
+
 class StoppedFollowMatte(unittest.TestCase):
     def test_the_frame_loop_stops_when_its_check_raises(self):  # nodes.py passes ComfyUI's interrupt check as `tick`
         calls = []
