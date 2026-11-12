@@ -154,6 +154,53 @@ class Timeline(unittest.TestCase):
             self.assertIn(f'names.includes("{p.LOG_SPACE}")', f.read(), "the log space logic.viewerSpace picks")
 
 
+class HeldOnce(unittest.TestCase):
+    def test_no_node_of_the_open_makes_a_second_batch_of_the_plate(self):
+        """Load Plate's frames go to three inputs: the first frame's ImageFromBatch, which copies one frame; Color Space's
+        `peak_of`, which reads them; Save Movie's `images`, which takes one frame at a time. At 1.11.8 they went to a
+        whole-plate Color Space and to an ImageFromBatch of every frame: 2.80 GB each for 1920 x 1080 x 121."""
+        from build_workflows import load
+        prompt = load("ingest")[0]
+        plate = next(k for k, node in prompt.items() if node["class_type"] == "PaintAPlate_LoadPlate")
+        takers = sorted((node["class_type"], key) for node in prompt.values() for key, v in node["inputs"].items() if v == [plate, 0])
+        self.assertEqual(takers, [("ImageFromBatch", "image"), ("PaintAPlate_ColorSpace", "peak_of"), ("PaintAPlate_SaveMovie", "images")])
+        self.assertEqual([node["inputs"]["length"] for node in prompt.values() if node["class_type"] == "ImageFromBatch"], [1])
+        movie = next(node["inputs"] for node in prompt.values() if node["class_type"] == "PaintAPlate_SaveMovie")
+        self.assertEqual(movie["frames"], [plate, 4], "the real frames, without the 8k+1 padding")
+
+
+class Pictures(unittest.TestCase):
+    def test_two_files_are_compared_by_their_pixels(self):
+        probe()
+        import numpy as np
+        from PIL import Image, PngImagePlugin
+        import comfy_live
+        import plateio
+        rng = np.random.default_rng(2)
+        frames = [(rng.random((36, 64, 3)) * 255).astype(np.uint8) for _ in range(4)]
+
+        def png(a, note):
+            info, out = PngImagePlugin.PngInfo(), io.BytesIO()
+            info.add_text("workflow", note)
+            Image.fromarray(a).save(out, "PNG", pnginfo=info)
+            return out.getvalue()
+        one, other = png(frames[0], "a"), png(frames[0], "b" * 500)
+        self.assertNotEqual(one, other)  # the bytes differ: each PNG carries its workflow
+        self.assertEqual(comfy_live.frames_apart(one, other), 0)
+        touched = frames[0].copy()
+        touched[3, 5, 1] ^= 1
+        self.assertEqual(comfy_live.frames_apart(one, png(touched, "a")), 1)
+        folder = tempfile.mkdtemp()
+        try:
+            paths = [os.path.join(folder, f"{name}.mp4") for name in "abc"]
+            for path, n in zip(paths, (4, 4, 3)):
+                plateio.write_movie(lambda i: frames[i], n, path, 24.0, workers=2)
+            self.assertEqual(comfy_live.frames_apart(paths[0], paths[1]), 0)
+            self.assertEqual(comfy_live.frames_apart(paths[0], paths[2]), 1)  # a frame one movie lacks counts
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+
 class AgainstTheMock(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -202,6 +249,20 @@ class AgainstTheMock(unittest.TestCase):
             rows = f.read().splitlines()
         self.assertEqual(rows[0], "seconds,bytes,cgroup_bytes,node")
         self.assertGreater(len(rows), 4)
+
+    def test_the_same_pictures_as_an_earlier_open(self):
+        code, text = self.run_probe("plates/desk.mp4")
+        self.assertEqual(code, 0, text)
+        earlier = re.search(r"under (paintaplate/probe_\d+)\n", text).group(1)
+        code, text = self.run_probe("plates/desk.mp4", "--same", earlier)
+        self.assertEqual(code, 0, text)
+        self.assertRegex(text, rf"The same pictures as under {earlier}, by their decoded pixels: hero\S+ and proxy\S+\n")
+        code, text = self.run_probe("plates/desk.mp4", "--max-frames", "9", "--same", earlier)
+        self.assertEqual(code, 1, text)
+        self.assertRegex(text, rf"Not the same pictures as under {earlier}: \d+ frames differ in proxy\S+\n")
+        code, text = self.run_probe("plates/desk.mp4", "--same", "paintaplate/probe_0")
+        self.assertEqual(code, 1, text)
+        self.assertIn("Not compared with paintaplate/probe_0: ", text)
 
     def test_a_plate_that_is_not_there(self):
         code, text = self.run_probe("plates/none.mp4")

@@ -8,6 +8,7 @@
    Model files may be empty placeholders: model workflows are cancelled right after validation.
 4. Runs `ingest`, `comp` and `export` end to end on an EXR sequence with extra layers, a ProRes MOV
    with audio and timecode, and a 16-bit PNG sequence, then checks the files on disk and the zip.
+   The open's first frame and playback proxy hold the pixels of the whole plate converted as one batch.
 """
 import argparse, io, json, os, shutil, subprocess, sys, time, urllib.request, uuid, zipfile
 import numpy as np
@@ -19,7 +20,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 import plateio  # noqa: E402
 import test_plateio  # noqa: E402
 import OpenEXR  # noqa: E402
-from build_workflows import fill  # noqa: E402
+import av  # noqa: E402
+from build_workflows import OCIO_CONFIG, Graph, fill  # noqa: E402
 
 N, W, H = 17, 192, 108
 FAILS = []
@@ -156,6 +158,40 @@ def verify_export(kind, plate_dir, out_dir, relight):
         check(len(files) == N, f"png16: {N} frames")
 
 
+def pixels(source):
+    """The decoded frames of a PNG or of a movie, from its path or its bytes, one array per frame. A PNG's bytes also hold
+    its workflow, so two files are compared by their pixels."""
+    with av.open(io.BytesIO(source) if isinstance(source, bytes) else source) as c:
+        return [f.to_ndarray() for f in c.decode(video=0)]
+
+
+def frames_apart(a, b):
+    """How many frames of two files differ in their decoded pixels. A frame one file lacks counts."""
+    a, b = pixels(a), pixels(b)
+    return sum(x.shape != y.shape or not np.array_equal(x, y) for x, y in zip(a, b)) + abs(len(a) - len(b))
+
+
+def saved(entry, output_dir):
+    """{extension: path} of the pictures a job saved, from its history entry."""
+    return {os.path.splitext(f["filename"])[1]: os.path.join(output_dir, f["subfolder"], f["filename"])
+            for o in entry["outputs"].values() for key in ("images", "gifs", "video") for f in o.get(key, [])}
+
+
+def whole_plate_open(path, cs, prefix):
+    """The open as 1.11.8 made it: the whole plate converted as one batch, then its first frame taken; the real frames
+    copied, converted and sized as batches. The pictures the lighter `ingest` must make."""
+    g = Graph()
+    load = g("PaintAPlate_LoadPlate", path=path, max_frames=121, pad_8n1=True)
+    space = {"config": OCIO_CONFIG, "source": cs, "destination": "@model"}
+    first = g("ImageFromBatch", image=g("PaintAPlate_ColorSpace", image=load[0], **space), batch_index=0, length=1)
+    g("SaveImage", images=g("ImageScaleToMaxDimension", image=first, upscale_method="lanczos", largest_size=1920),
+      filename_prefix=f"{prefix}/hero")
+    real = g("ImageFromBatch", image=load[0], batch_index=0, length=load[4])
+    proxy = g("ImageScaleToMaxDimension", image=g("PaintAPlate_ColorSpace", image=real, **space), upscale_method="area", largest_size=960)
+    g("PaintAPlate_SaveMovie", images=proxy, fps=load[3], crf=12, filename_prefix=f"{prefix}/proxy")
+    return g.prompt
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--comfy", required=True); ap.add_argument("--python", default=sys.executable)
@@ -259,6 +295,12 @@ def main():
                 texts = [t for o in outs.values() for t in o.get("text", [])]
                 spec = json.loads(texts[0]) if texts else {}
                 check(spec.get("frames") == N and spec.get("width") == W, f"ingest {kind}: spec {spec.get('kind')}, {spec.get('width')}x{spec.get('height')}, {spec.get('frames')} frames, guess {spec.get('color_space_guess')}")
+                again = submit(url, whole_plate_open(path, cs, f"paintaplate_test/{kind}/whole"))
+                whole, _ = wait(url, again["prompt_id"]) if "prompt_id" in again else (None, 0)
+                mine, theirs = saved(entry, output_dir), saved(whole, output_dir) if whole and not error_of(whole) else {}
+                for ext, what in ((".png", "first frame"), (".mp4", "playback proxy")):
+                    check(ext in mine and ext in theirs and frames_apart(mine[ext], theirs[ext]) == 0,
+                          f"ingest {kind}: the {what} holds the pixels of the whole plate converted")
             for relight in (False, True) if kind == "exr" else (False,):
                 run = f"{kind}_r{int(relight)}"
                 shot = fake_shot_and_matte(output_dir, run)

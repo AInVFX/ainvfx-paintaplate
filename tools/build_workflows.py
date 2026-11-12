@@ -178,25 +178,35 @@ def fill(name, values, folder=None):
     return prompt
 
 
-def colour(g, image, source, destination, title=None):
-    """Color Space (OCIO) in the config the page names (Slot config)."""
+def colour(g, image, source, destination, title=None, peak_of=None):
+    """Color Space (OCIO) in the config the page names (Slot config). `peak_of` is the batch `image` is a part of: the
+    tone mapping into @model then takes that batch's peak."""
+    part = {} if peak_of is None else {"peak_of": peak_of}
     return g("PaintAPlate_ColorSpace", _title=title, image=image, config=Slot("config", OCIO_CONFIG), source=source,
-             destination=destination)
+             destination=destination, **part)
 
 
-def plate(g, pad, path="path", progress=False):
+def plate(g, pad, path="path", progress=False, first=False):
     """The plate in the model space: Load Plate, then Color Space (OCIO) from the plate's file colour space to @model.
 
-    Every workflow converts the same whole plate: the tone mapping of values above 1.0 shares one peak per batch, as
-    core's did, so a different batch could change the exposure of an HDR plate between steps.
+    The tone mapping of values above 1.0 shares one peak per batch, as core's did, so a different batch could change the
+    exposure of an HDR plate between steps: every workflow converts the same whole plate. With `first`, the first frame
+    alone is converted, with the whole plate's peak: it has the values it has in the whole plate converted, and no second
+    copy of the plate is made.
     """
     load = g("PaintAPlate_LoadPlate", _title="Plate", _progress=progress, path=Slot(path, ""),
              max_frames=Slot("max_frames", 121), pad_8n1=pad)
-    return load, colour(g, load[0], Slot("color_space", "@model"), "@model", "Plate in the model space")
+    if not first:
+        return load, colour(g, load[0], Slot("color_space", "@model"), "@model", "Plate in the model space")
+    frame = g("ImageFromBatch", _title="First frame of the plate", image=load[0], batch_index=0, length=1)
+    return load, colour(g, frame, Slot("color_space", "@model"), "@model", "First frame in the model space", peak_of=load[0])
 
 
 def ingest():
     """The first frame at working size in the model space, a playback proxy of the real frames, and the plate spec.
+
+    The plate is held once: the first frame alone is converted, and Save Movie leaves the 8k+1 padding out, then converts
+    and sizes the proxy's frames one at a time. No node makes a second batch of the plate.
 
     The proxy keeps a video plate's own values, which the viewer converts with OCIO as it does the plate (the page sets
     `proxy_space` to the plate's colour space and `proxy_size` to the working size). An image sequence's proxy is in the
@@ -204,16 +214,14 @@ def ingest():
     viewer reads as they arrive.
     """
     g = Graph()
-    load, model = plate(g, pad=True, progress=True)  # same inputs as every other Load Plate: decoded once, then cached
-    first = g("ImageFromBatch", image=model, batch_index=0, length=1)
-    hero = g("ImageScaleToMaxDimension", image=first, upscale_method="lanczos", largest_size=1920)
+    load, model = plate(g, pad=True, progress=True, first=True)  # same inputs as every other Load Plate: decoded once, then cached
+    hero = g("ImageScaleToMaxDimension", image=model, upscale_method="lanczos", largest_size=1920)
     g("SaveImage", _title="First frame", _output="hero", images=hero,
       filename_prefix=Slot("prefix", "paintaplate/plate/hero"))
-    real = g("ImageFromBatch", _title="Real frames (no padding)", image=load[0], batch_index=0, length=load[4])
-    shown = colour(g, real, Slot("color_space", "@model"), Slot("proxy_space", "@model"), "Proxy values")
-    proxy = g("ImageScaleToMaxDimension", image=shown, upscale_method="area", largest_size=Slot("proxy_size", 960))
-    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Playback proxy", _output="proxy", filename_prefix=Slot("video_prefix", "paintaplate/plate/proxy"),
-      images=proxy, fps=load[3], crf=12)
+    g("PaintAPlate_SaveMovie", _title="Playback proxy", _output="proxy", images=load[0], frames=load[4], fps=load[3], crf=12,
+      config=Slot("config", OCIO_CONFIG), source=Slot("color_space", "@model"), destination=Slot("proxy_space", "@model"),
+      largest_size=Slot("proxy_size", 960), width=Slot("movie_width", 0), height=Slot("movie_height", 0),
+      filename_prefix=Slot("video_prefix", "paintaplate/plate/proxy"))
     g("PreviewAny", _title="Plate spec", _output="spec", source=load[5])
     g.save("ingest")
 

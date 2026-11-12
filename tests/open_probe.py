@@ -1,6 +1,6 @@
 """Opens one plate through the page's own `ingest` workflow on a running ComfyUI, and says what each node takes in memory.
 
-    python tests/open_probe.py horse.mp4 [--url http://127.0.0.1:8188] [--fresh] [--csv readings.csv]
+    python tests/open_probe.py horse.mp4 [--url http://127.0.0.1:8188] [--fresh] [--csv readings.csv] [--same <folder>]
 
 `plate` is the path the page sends: a video or a folder of frames under ComfyUI's input folder, or `output:<path>` under its
 output folder. Run it with ComfyUI's own Python, or after `pip install -r tests/requirements.txt`.
@@ -12,6 +12,9 @@ output folder. Run it with ComfyUI's own Python, or after `pip install -r tests/
 3. It listens to ComfyUI's websocket for the node that runs, and prints one row per node: the memory at its start, its
    peak, the memory at its end, its seconds. While the job runs, a line every five seconds says where the memory is and in
    which node: when ComfyUI is killed for its memory, the lines already printed name the node.
+4. With --same and the folder of an earlier probe (paintaplate/probe_<time>, which each probe prints), it says whether
+   this open made the same pictures: the first frame and every frame of the playback movie, by their decoded pixels.
+   A change to the open is measured at both versions, and must leave the pictures as they were.
 
 The frame and the movie it makes land in ComfyUI's output folder, under paintaplate/probe_<time>: delete them freely.
 """
@@ -24,6 +27,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import urllib.request
 
 import aiohttp
 import av
@@ -32,7 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 from build_workflows import fill  # noqa: E402
-from comfy_live import http  # noqa: E402
+from comfy_live import frames_apart, http  # noqa: E402
 
 GB = 2 ** 30
 RATE = 4  # readings of the memory a second
@@ -229,6 +233,32 @@ def page_values(path, st, run, config="", color_space="", proxy_space=""):
             "prefix": f"{run}/hero", "video_prefix": f"{run}/proxy"}
 
 
+def view(url, folder, name):
+    """One file of ComfyUI's output folder, as bytes."""
+    query = urllib.parse.urlencode({"filename": name, "subfolder": folder, "type": "output"})
+    with urllib.request.urlopen(f"{url}/view?{query}", timeout=300) as r:
+        return r.read()
+
+
+def same_pictures(url, job, other):
+    """(whether the pictures of a job are the ones under `other`, the folder of an earlier probe; the line that says so).
+    Each file the job saved is compared with the file of the same name there, by their decoded pixels: a PNG's bytes
+    also hold its workflow."""
+    entry = (http(f"{url}/history/{job}")[0] or {}).get(job) or {}
+    names = [(f["subfolder"], f["filename"]) for o in (entry.get("outputs") or {}).values() for f in o.get("images", [])]
+    if not names:
+        return False, f"Not compared with {other}: ComfyUI lists no picture for this job"
+    apart = {}
+    for folder, name in names:
+        try:
+            apart[name] = frames_apart(view(url, folder, name), view(url, other, name))
+        except (OSError, ValueError, av.error.FFmpegError) as exc:  # no such file there, or one that does not decode
+            return False, f"Not compared with {other}: {name} cannot be read ({type(exc).__name__}: {exc})"
+    if any(apart.values()):
+        return False, f"Not the same pictures as under {other}: " + ", ".join(f"{n} frames differ in {name}" for name, n in apart.items() if n)
+    return True, f"The same pictures as under {other}, by their decoded pixels: {' and '.join(apart)}"
+
+
 def versions(stats):
     system, devices = stats.get("system") or {}, stats.get("devices") or []
     names = (("ComfyUI", "comfyui_version"), ("Python", "python_version"), ("PyTorch", "pytorch_version"))
@@ -288,6 +318,7 @@ def main(argv=None):
     ap.add_argument("--settle", type=float, default=5, help="seconds of readings after the job, for what stays (default 5)")
     ap.add_argument("--limit", type=float, default=1800, help="seconds before the probe stops waiting (default 1800)")
     ap.add_argument("--csv", help="write every reading to this file: seconds, bytes, cgroup bytes, node")
+    ap.add_argument("--same", help="the folder of an earlier probe (paintaplate/probe_<time>): say whether this open made the same pictures")
     a = ap.parse_args(argv)
     url = a.url.rstrip("/")
     try:
@@ -299,7 +330,8 @@ def main(argv=None):
     if not isinstance(st, dict) or "width" not in st:
         say(f"ComfyUI cannot read {a.plate}: {st.get('error') if isinstance(st, dict) else 'nothing answers at /paintaplate/stat'}")
         return 1
-    values = page_values(a.plate, st, f"paintaplate/probe_{int(time.time())}", a.config, a.color_space, a.proxy_space)
+    run = f"paintaplate/probe_{int(time.time())}"
+    values = page_values(a.plate, st, run, a.config, a.color_space, a.proxy_space)
     if a.max_frames:
         values["max_frames"] = a.max_frames
     prompt = fill("ingest", values)
@@ -373,6 +405,11 @@ def main(argv=None):
         say(f"The job did not finish: {job.error or 'ComfyUI stopped answering'}, {t1 - job.posted:.1f} s after the post, in "
             f"{job.node_at(t1) or 'the queue'}. The table holds what was read until then")
         return 1
+    say(f"Its first frame and its movie are in ComfyUI's output folder, under {run}")
+    if a.same:
+        same, line = same_pictures(url, job.id, a.same.strip("/"))
+        say(line)
+        return 0 if same else 1
     return 0
 
 
