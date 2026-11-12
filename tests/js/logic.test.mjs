@@ -737,6 +737,17 @@ test("a larger card keeps its models, and frees ComfyUI's memory only when RAM i
   assert.equal(freesBefore(memoryProfile({ vram: 17.2e9 }), "shot", "matte", { free: 120 * 2 ** 30, need }), true); // under 24 GB: always
 });
 
+test("the open counts 3 copies of the plate, and every other job 8", async () => {
+  const { framesNeed, freesBefore, memoryProfile } = await import("../../web/logic.mjs");
+  // 1.11.9 on 12 Nov: the open of horse.mp4 holds 2.8 copies of the plate at its peak on the laptop (9.1 GB), 1.9 on a pod
+  const open = framesNeed(1920, 1080, 121, "ingest"), other = framesNeed(1920, 1080, 121, "review");
+  assert.equal(Math.round(open / 2 ** 30), 12); // 3 copies of 2.8 GB, and 4 GB to work in
+  assert.equal(other, framesNeed(1920, 1080, 121)); // 8 copies, as for a job without a name
+  const large = memoryProfile({ vram: 100e9 }), free = 20 * 2 ** 30;
+  assert.equal(freesBefore(large, "shot", "ingest", { free, need: open }), false); // 20 GB free: the open has room, nothing is freed
+  assert.equal(freesBefore(large, "shot", "review", { free, need: other }), true);
+});
+
 test("the time left in a step follows the sampler's own pace, not the time the models took to load", async () => {
   const { stepLeft, remember, slower, timeKey } = await import("../../web/logic.mjs");
   // the laptop's preview shot of 11 Nov: 57.6 s in all, the sampler's first step of 8 ended 37 s in, then one step every 2 s

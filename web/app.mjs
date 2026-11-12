@@ -394,7 +394,7 @@ onFree(async (last, name) => { // why ComfyUI's memory is freed before this job,
   const p = S.plate;
   if (!p || !last || FAMILY[name] === FAMILY[last]) return null;
   const sys = (await fetch("/system_stats").then((r) => r.json()).catch(() => null))?.system; // a larger card: only when RAM is short for this job's frames
-  const room = sys?.ram_free ? { free: sys.ram_free, need: framesNeed(p.spec.width ?? p.work[0], p.spec.height ?? p.work[1], p.frames) } : null;
+  const room = sys?.ram_free ? { free: sys.ram_free, need: framesNeed(p.spec.width ?? p.work[0], p.spec.height ?? p.work[1], p.frames, name) } : null;
   const gib = (n) => Math.round(n / 2 ** 30);
   return freesBefore(S.memoryProfile, last, name, room) ? `${gib(room.free)} GB of RAM are free, and this job's frames can take ${gib(room.need)} GB` : null;
 });

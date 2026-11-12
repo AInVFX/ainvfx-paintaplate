@@ -388,6 +388,21 @@ class FollowMatteRecord(unittest.TestCase):
             self.assertAlmostEqual(float(small[t].mean()), float(out[t].mean()), delta=0.01)
 
 
+class Composite(unittest.TestCase):
+    """mathops.composite: the arithmetic of core's Image Composite Masked, one frame at a time."""
+
+    def test_the_source_inside_the_mask_and_the_destination_around_it(self):
+        rng = np.random.default_rng(7)
+        destination, source = rng.random((6, 8, 3), dtype=np.float32), rng.random((6, 8, 3), dtype=np.float32)
+        mask = np.zeros((6, 8), np.float32)
+        mask[:, 3], mask[:, 4:] = 0.25, 1.0
+        out = mathops.composite(destination, source, mask)
+        self.assertEqual((out.dtype, out.shape), (np.float32, (6, 8, 3)))
+        np.testing.assert_array_equal(out[:, :3], destination[:, :3])
+        np.testing.assert_array_equal(out[:, 4:], source[:, 4:])
+        np.testing.assert_array_equal(out[:, 3], np.float32(0.25) * source[:, 3] + np.float32(0.75) * destination[:, 3])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 

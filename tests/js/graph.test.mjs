@@ -49,10 +49,10 @@ test("an erase alone needs no Ripple pass, a relight alone no tracking and no ma
 test("an erase renders at half size, then 2 steps at full size from it, with the scene's prompt", () => {
   const g = sceneGraph(WF, { plate, edits: [edit("erase", 1)], render: { ...render, erasePrompt: "A wet street at night." } });
   linked(g);
-  const node = (title) => Object.entries(g).find(([, n]) => n._meta.title.endsWith(title));
-  const [, up] = node("Stage 1 at full size");
-  assert.equal(g[up.inputs.image[0]].class_type, "VAEDecode", "stage 1's frames reach stage 2 by link");
-  assert.equal(up.inputs.width[0] !== undefined ? g[up.inputs.width[0]].class_type : "", "GetImageSize");
+  const start = Object.values(g).find((n) => n.class_type === "PaintAPlate_CompositeFrames"); // stage 2's start, made one frame at a time
+  assert.match(start._meta.title, /Stage 1 inside the blocks, the plate around them/);
+  assert.equal(g[start.inputs.source[0]].class_type, "VAEDecode", "stage 1's frames reach stage 2 by link");
+  assert.deepEqual([start.inputs.width, start.inputs.height], plate.work, "stage 2 starts at the working size");
   const scaled = Object.values(g).filter((n) => n._meta.title.startsWith("ERASE PASS · stage 1 at 640 x 352") && n.class_type === "ImageScale" && n.inputs.width === 640);
   assert.equal(scaled.length, 1, "stage 1 runs at half of 1280 x 704");
   const sigmas = Object.values(g).filter((n) => n.class_type === "ManualSigmas").map((n) => n.inputs.sigmas).sort();

@@ -1,11 +1,16 @@
 """tests/gpu_matrix.py: what it reads from a case's page log and from ComfyUI's history. tools/runpod_start.sh: what a
 start keeps. No GPU and no browser."""
+import contextlib
+import importlib.util
+import io
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gpu_matrix  # noqa: E402
@@ -19,6 +24,16 @@ LOG = """15:02:31ingest ef88a8f3: done in 2.0 s (10 nodes, 3 from ComfyUI's cach
 
 
 class Report(unittest.TestCase):
+    def test_a_retry_is_counted_by_its_own_line(self):
+        """The laptop's erase of 12 Nov showed one out-of-memory retry where none happened: ComfyUI had stopped, and the
+        page's message for a stop also says « ran out of memory »."""
+        stopped = ("09:14:58Erase pass, full size failed: ComfyUI stopped answering. Its terminal says why: most often the machine "
+                   "ran out of memory. Start ComfyUI again. Generate tries again.\n")
+        self.assertEqual(gpu_matrix.read_log(stopped)["oom"], 0)
+        self.assertEqual(gpu_matrix.read_log(stopped + "09:15:00" + gpu_matrix.RETRY + ".\n")["oom"], 1)
+        with open(os.path.join(gpu_matrix.REPO, "web", "comfy.mjs"), encoding="utf-8") as f:
+            self.assertIn(gpu_matrix.RETRY, f.read(), "the page's own words for a retry")
+
     def test_a_job_is_read_from_its_one_line(self):
         r = gpu_matrix.read_log(LOG)
         self.assertEqual([(j["name"], j["id"], j["seconds"], j["nodes"], j["cached"], j["previews"]) for j in r["jobs"]],
@@ -40,6 +55,84 @@ class Report(unittest.TestCase):
         self.assertEqual(memory.peak(*spans["ef88a8f3"]), [70, 9, 3])
         self.assertEqual(memory.peak(*spans["0a1b2c3d"]), [40, 4, 4], "a job shorter than a second: the reading nearest to its end")
         self.assertEqual(memory.peak(), [99, 99, 99], "a whole case")
+
+
+class Run(unittest.TestCase):
+    """gpu_matrix.main with stand-ins for the browser, ComfyUI and the cases."""
+
+    def matrix(self, cases, alive, *more):
+        """main() on `cases`: what was called, in order, the exit code and the report. `alive` holds ComfyUI's answer after
+        each case."""
+        calls, alive = [], iter(alive)
+
+        def case(a, name, case, folder):
+            calls.append(name)
+            return {"name": name, "seconds": 255.0, "vram": 0, "ram": 0, "own": 0, "container": 0, "folder": folder, "log": "", "marks": [],
+                    **gpu_matrix.read_log(""), "passed": True, "why": "", "matte": None, "live_files": 0}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "input", "plates"))
+            open(os.path.join(tmp, "input", "plates", "horse.mp4"), "w").close()
+            argv = ["gpu_matrix.py", "--comfy", tmp, "--out", os.path.join(tmp, "out"), "--cases", cases, *more]
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(gpu_matrix, "browser_ready", lambda channel: None), \
+                    mock.patch.object(gpu_matrix, "get", lambda url: {}), mock.patch.object(gpu_matrix, "Memory", lambda url: mock.Mock(pid=None)), \
+                    mock.patch.object(gpu_matrix, "run_case", case), mock.patch.object(gpu_matrix, "answers", lambda url: next(alive)), \
+                    mock.patch.object(gpu_matrix, "free", lambda url: calls.append("free")), contextlib.redirect_stdout(io.StringIO()):
+                code = gpu_matrix.main()
+            with open(os.path.join(tmp, "out", "report.md"), encoding="utf-8") as f:
+                return calls, code, f.read()
+
+    def test_a_run_stops_when_comfyui_has_stopped(self):
+        """On the laptop (12 Nov) ComfyUI stopped in horse_erase, and the two cases left each failed in 31 s with a traceback."""
+        calls, code, report = self.matrix("horse_cow,horse_erase,horse_light,fluid_720", [True, False])
+        self.assertEqual((calls, code), (["horse_cow", "horse_erase"], 1))
+        for name in ("horse_light", "fluid_720"):
+            self.assertIn(f"| {name} | not run: ComfyUI had stopped |", report)
+            self.assertNotIn(f"## {name}", report)
+        self.assertIn("## horse_erase · passed in 255 s", report)
+
+    def test_a_run_goes_to_its_end_while_comfyui_answers(self):
+        calls, code, report = self.matrix("horse_cow,horse_erase", [True])
+        self.assertEqual((calls, code), (["horse_cow", "horse_erase"], 0))
+        self.assertNotIn("not run", report)
+
+    def test_fresh_frees_comfyui_before_each_case(self):
+        """On the pod of 11 Nov a case's first job read the 138 GB that the case before it had left."""
+        calls, _, report = self.matrix("horse_cow,horse_erase", [True], "--fresh")
+        self.assertEqual(calls, ["free", "horse_cow", "free", "horse_erase"])
+        self.assertIn("| Before each case | ComfyUI is freed (--fresh) |", report)
+        calls, _, report = self.matrix("horse_cow,horse_erase", [True])
+        self.assertEqual(calls, ["horse_cow", "horse_erase"])
+        self.assertIn("| Before each case | ComfyUI stays as the case before left it |", report)
+
+    def test_free_posts_what_the_page_posts(self):
+        sent = []
+
+        def urlopen(request, timeout=None):
+            sent.append((request.full_url, request.get_method(), json.loads(request.data)))
+            return io.BytesIO()
+
+        with mock.patch.object(gpu_matrix.urllib.request, "urlopen", urlopen), mock.patch.object(gpu_matrix.time, "sleep", lambda seconds: None):
+            gpu_matrix.free("http://127.0.0.1:8188")
+        self.assertEqual(sent, [("http://127.0.0.1:8188/free", "POST", {"unload_models": True, "free_memory": True})])
+
+
+@unittest.skipUnless(importlib.util.find_spec("playwright"), "tests/ui_live.py imports Playwright")
+class Live(unittest.TestCase):
+    """tests/ui_live.py: the two rules that read the page's History and its render note."""
+
+    def test_a_fluid_shot_has_its_own_history_row(self):
+        """fluid_1080_edit waited 600 s for one row after its first edit, and History held two (pod, 11 Nov)."""
+        import ui_live
+        self.assertEqual([ui_live.rows(0, None), ui_live.rows(1, None)], [1, 2])
+        self.assertEqual(ui_live.rows(0, {"size": [1920, 1088]}), 2)
+
+    def test_a_stage_is_marked_once(self):
+        """The laptop's horse_cow of 12 Nov wrote 61 marks for two stages: the estimate in the note changes every second."""
+        import ui_live
+        notes = ["preview about 14 s left", "preview about 3 s left", "preview almost ready", "full size about 8 min 20 s left",
+                 "full size about 2 min 50 s left", "full size ready"]
+        self.assertEqual([ui_live.stage(note) for note in notes], ["preview"] * 3 + ["full size"] * 2 + ["full size ready"])
 
 
 @unittest.skipUnless(shutil.which("bash"), "tools/runpod_start.sh is a bash script")

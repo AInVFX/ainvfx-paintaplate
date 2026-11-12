@@ -315,8 +315,9 @@ def live(g, model, size, load, transfer="sRGB"):
              every=Slot("live", 0), size=320)
 
 
-def erased_blocks(g, matte, size):
-    """The erase matte as blocks of LTX's 32 px grid, grown by one block: (the blocks at `size`, the grid of blocks).
+def erased_grid(g, matte):
+    """The erase matte as blocks of LTX's 32 px grid, grown by one block: (the grid as a mask, the grid as an image).
+    `matte` is at the size LTX works at.
 
     Blocks hide the object's outline: shown its own outline moving, LTX drew a car back where the van had been. They keep the
     background around the object in view, so LTX continues it. One grown box per frame also hid the outline, but around a
@@ -326,7 +327,12 @@ def erased_blocks(g, matte, size):
               mask=g("ThresholdMask", _title="Every block the matte touches", value=0.02,
                      mask=g("ImageToMask", channel="red", image=g("ImageScaleBy", _title="Erase matte on LTX's 32 px grid", image=matte,
                                                                 upscale_method="area", scale_by=1 / 32))))
-    grid = g("MaskToImage", mask=cells)
+    return cells, g("MaskToImage", mask=cells)
+
+
+def erased_blocks(g, matte, size):
+    """The blocks of `erased_grid` at `size`, where LTX's reference is painted green: (the blocks at `size`, the grid of blocks)."""
+    _, grid = erased_grid(g, matte)
     blocks = g("ImageToMask", channel="red", image=g("ImageScale", image=grid, upscale_method="nearest-exact", width=size[0],
                                                      height=size[1], crop="disabled"))
     return blocks, grid
@@ -384,21 +390,21 @@ def cleanup():
     over the plate at full size, and LTX refines them in 2 steps from sigma 0.725, with the IC-LoRA and without the reference
     video, as the official workflow does. The erased first frame is kept as it is (strength 1). 8 steps at full size took
     181 s on a 1080p plate, this stage 82.8 s, 30.1 s of it saving the frames (28 Oct).
+
+    Composite Frames makes that start one frame at a time and holds it once: 2.8 GB for 121 frames at 1920 x 1088. Image
+    Scale and Image Composite Masked made the same pictures from the whole shot: the plate, the first stage and the blocks
+    at full size (9.4 GB), then six copies of the result at the composite's peak (16.9 GB). On a 16 GB card with 52 GB of
+    RAM, ComfyUI stopped there, 16.5 GB above the 32.0 GB it held after the first stage (12 Nov).
     """
     g = Graph()
     load, model = plate(g, pad=True)
-    frames = g("ImageScale", _title="Plate at full size", image=model, upscale_method="bilinear", width=Slot("width", 1920),
-               height=Slot("height", 1088), crop="disabled")
-    size = g("GetImageSize", image=frames)
     matte = g("ImageScale", image=g("PaintAPlate_LoadPlate", _title="Erase matte", path=Slot("hole", ""), max_frames=1024, pad_8n1=False),
-              upscale_method="area", width=size[0], height=size[1], crop="disabled")
-    _, grid = erased_blocks(g, matte, size)
-    soft = g("ImageToMask", channel="red", image=g("ImageScale", _title="The blocks with a soft edge", image=grid, upscale_method="bilinear",
-                                                   width=size[0], height=size[1], crop="disabled"))
-    low = g("ImageScale", _title="Stage 1 at full size", upscale_method="bilinear", width=size[0], height=size[1], crop="disabled",
-            image=g("PaintAPlate_LoadPlate", _title="Erase pass at half size", path=Slot("low", ""), max_frames=1024, pad_8n1=False))
-    start = g("ImageCompositeMasked", _title="Stage 1 inside the blocks, the plate around them", destination=frames, source=low, x=0, y=0,
-              resize_source=False, mask=soft)
+              upscale_method="area", width=Slot("width", 1920), height=Slot("height", 1088), crop="disabled")
+    cells, _ = erased_grid(g, matte)
+    start = g("PaintAPlate_CompositeFrames", _title="Stage 1 inside the blocks, the plate around them", destination=model,
+              source=g("PaintAPlate_LoadPlate", _title="Erase pass at half size", path=Slot("low", ""), max_frames=1024, pad_8n1=False),
+              mask=cells, width=Slot("width", 1920), height=Slot("height", 1088))
+    size = g("GetImageSize", image=start)
     model = g("LoraLoaderModelOnly", _title="In-outpainting IC-LoRA", model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"),
               lora_name=Slot("inoutpaint", INOUTPAINT), strength_model=1.0)
     clip = g("CLIPLoader", clip_name=Slot("gemma", GEMMA), type="ltxv", device="default")

@@ -55,6 +55,7 @@ STEP = re.compile(r"Render v(\d+): (.+?) took ([\d.]+) s")  # the page's log: on
 # them is a model not loaded again) and the previews the page received. A line starts with its time, with no space after it
 JOB = re.compile(r"([a-z]+) ([0-9a-f?]{1,8}): done in ([\d.]+) s \((\d+) nodes?(?:, (\d+) from ComfyUI's cache)?(?:, (\d+) previews?)?")
 ENDED = re.compile(r"([a-z]+ [0-9a-f?]{1,8}: (?:failed|stopped) after [^\n]*)")  # a job that did not finish says so in one line
+RETRY = "The GPU ran out of memory: freeing ComfyUI's memory, then trying once more"  # the page's one line for a retry (web/comfy.mjs)
 GB = 2 ** 30
 
 
@@ -67,6 +68,24 @@ def get(url):
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Paint a plate gpu_matrix)"})  # Runpod's proxy refuses urllib's own
     with urllib.request.urlopen(request, timeout=10) as r:
         return json.load(r)
+
+
+def answers(url):
+    """Whether ComfyUI still answers."""
+    try:
+        get(url + "/system_stats")
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def free(url):
+    """ComfyUI unloads its models and drops its cached results, as the page's own free asks. It does so at its next
+    idle moment: 5 s leave it the time."""
+    body = json.dumps({"unload_models": True, "free_memory": True}).encode()
+    request = urllib.request.Request(url + "/free", data=body, headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Paint a plate gpu_matrix)"})
+    urllib.request.urlopen(request, timeout=30).close()
+    time.sleep(5)
 
 
 class Memory(threading.Thread):
@@ -189,7 +208,7 @@ def read_log(text):
         "jobs": jobs,
         "ended": ENDED.findall(text),
         "indexed": text.count("taken from the job index"),
-        "oom": text.count("ran out of memory"),
+        "oom": text.count(RETRY),
         "previews": sum(j["previews"] for j in jobs),
         "live_off": re.findall(r"Live preview is off: ([^\n]*)", text),
         "profile": f"{profile.group(1)} ({profile.group(2)})" if profile else "not in the log's last 400 lines",
@@ -249,14 +268,17 @@ def report(a, machine, results):
              f"| Paint a plate | commit {git('rev-parse', '--short', 'HEAD')} on {git('rev-parse', '--abbrev-ref', 'HEAD')} |",
              f"| Cases | {a.cases}: {', '.join(r['name'] for r in results)} |",
              f"| Memory profile asked for | {a.memory or 'none: the card decides'} |",
+             f"| Before each case | {'ComfyUI is freed (--fresh)' if a.fresh else 'ComfyUI stays as the case before left it'} |",
              f"| RAM read from | {a.source} |", "",
              "Peak RAM is the most that was held; « no file » is the part of it that no file backs, which a memory cap cannot take back. "
              "In a job's row, Seconds runs from the page's request to the job's end, and In ComfyUI from its start to its end in "
              "ComfyUI's history. A job's peaks are the highest readings, once a second, between those two times.", "",
              "| Case | Result | Seconds | Peak VRAM | Peak RAM | No file | Memory stops retried | Previews received |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    ran = [r for r in results if not r.get("skipped")]  # the others were not started: ComfyUI had stopped
     for r in results:
-        lines.append(f"| {r['name']} | {'passed' if r['passed'] else 'FAILED'} | {r['seconds']:.0f} | {gb(r['vram'])} | {gb(r['ram'])} | {gb(r['own'])} | {r['oom']} | {r['previews']} |")
-    for r in results:
+        lines.append(f"| {r['name']} | not run: ComfyUI had stopped | | | | | | |" if r.get("skipped") else
+                     f"| {r['name']} | {'passed' if r['passed'] else 'FAILED'} | {r['seconds']:.0f} | {gb(r['vram'])} | {gb(r['ram'])} | {gb(r['own'])} | {r['oom']} | {r['previews']} |")
+    for r in ran:
         lines += ["", f"## {r['name']} · {'passed' if r['passed'] else 'FAILED'} in {r['seconds']:.0f} s", ""]
         if r["why"]:
             lines += [r["why"], ""]
@@ -282,7 +304,7 @@ def report(a, machine, results):
                       f"Against the first frame, the area goes from {min(ratios):.2f} to {max(ratios):.2f} times; the furthest frame is {worst}, at {ratios[worst]:.2f} times.",
                       "- Every frame, against the first: " + " ".join(f"{x:.2f}" for x in ratios)]
         lines += [f"- Marks, screenshots, the page's log and the zip: `{os.path.relpath(r['folder'], a.out)}`."]
-    failures = [r for r in results if not r["passed"]]
+    failures = [r for r in ran if not r["passed"]]
     if failures:
         lines += ["", "## The log of each failure", ""]
         for r in failures:
@@ -301,6 +323,7 @@ def main():
     ap.add_argument("--timeout", type=int, default=900, help="ui_live.py's --timeout: it waits 8 times this many seconds for a render, 4 times for a fluid shot, twice for an edit")
     ap.add_argument("--memory", default="", choices=("", "small", "medium", "large"), help="ask the page for this memory profile; by default the card decides")
     ap.add_argument("--exact", action="store_true", help="the strokes as written: jobs made before come back from the job index")
+    ap.add_argument("--fresh", action="store_true", help="free ComfyUI's memory before each case, so a case's peak RAM is its own; its first job then loads its models again")
     a = ap.parse_args()
     a.url, a.comfy, a.out = a.url.rstrip("/"), os.path.abspath(a.comfy), os.path.abspath(a.out)
     with open(os.path.join(HERE, "gpu_matrix.json"), encoding="utf-8") as f:
@@ -327,11 +350,18 @@ def main():
             print(f"making {file} from horse.mp4", flush=True)
             make_uhd(os.path.join(plates, "horse.mp4"), os.path.join(plates, file), fps)
     os.makedirs(a.out, exist_ok=True)
-    results = []
-    for name in names:
+    results, left = [], list(names)
+    while left:
+        name = left.pop(0)
+        if a.fresh:
+            free(a.url)
         results.append(run_case(a, name, cases[name], os.path.join(a.out, name)))
-        report(a, machine, results)
         print(f"{name}: {'passed' if results[-1]['passed'] else 'FAILED'} in {results[-1]['seconds']:.0f} s", flush=True)
+        if left and not answers(a.url):  # each case left would fail in 31 s with a traceback (the laptop, 12 Nov)
+            print(f"ComfyUI has stopped. Not run: {', '.join(left)}", flush=True)
+            results += [{"name": n, "passed": False, "skipped": True} for n in left]
+            left = []
+        report(a, machine, results)
     print(f"report: {os.path.join(a.out, 'report.md')}")
     return 0 if all(r["passed"] for r in results) else 1
 
