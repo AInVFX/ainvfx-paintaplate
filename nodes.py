@@ -392,7 +392,9 @@ class FollowMatte(io.ComfyNode):
                         "from the first-frame mask: objects SAM finds by itself elsewhere are left out; where the object is not "
                         "seen, the last matte holds (with no mask, the first-frame mask); with the plate the shot was made over, "
                         "the matte also takes the generated pixels connected to the object, so a generated element is never "
-                        "dropped. A frame that differs from the plate everywhere adds nothing. The summary ends with the "
+                        "dropped. A frame that differs from the plate everywhere adds nothing. An object that stands still in "
+                        "the scene and passes behind something the plate holds leaves the matte while it is hidden, and comes "
+                        "back into it where it comes out: what stands in front is left out. The summary ends with the "
                         "largest matte against the object's area, and its frame.",
             inputs=[
                 io.Mask.Input("masks", tooltip="SAM 3.1's masks, one per frame it tracked. It may return fewer, or none."),
