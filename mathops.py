@@ -580,12 +580,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     - the tracker's mask within `zone` of the width of that region is the object; the rest is left out, even where a
       thin line joins it to the object (SAM's paint matte traced a smoke plume's edges, joined to a painted car). After
       frames where the object was not seen, the search grows by `zone` per frame, up to four times, so an object that
-      comes back nearby is found again. An object that passes behind another under a camera move comes out far from
-      where it went in (a cow behind a fence, hidden by a horse for 60 frames of a pan, came out 900 px away and was
-      left out, 11 Nov). So once the search is at its widest and still finds nothing, the tracker's largest mask
-      anywhere is the object again when it has the object's size (a fifth to two and a half times its largest area)
-      and, for paint, when the shot differs from the plate there: the object is the shot's own, and a lookalike that
-      the plate already holds is not. The region keeps only the object's thick parts (an opening of 1/240 of the
+      comes back nearby is found again. The region keeps only the object's thick parts (an opening of 1/240 of the
       width), so it never creeps along a thin line; the matte itself keeps the thin parts near the object. An empty
       region searches nothing;
     - a frame where the object is not seen keeps the previous matte (with no mask at all, the first-frame mask holds);
@@ -625,7 +620,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     line = el if el is not None and el.any() else seed  # the object's own region
     out, cores, prev, peak = np.zeros((n, h, w), np.float32), np.zeros((n, h, w), bool), seed, int(seed.sum())
     size, last = np.ones(n, np.int64), max(int(line.sum()), 1)  # the object's area on each frame
-    seen = strays = held = added = lost = guarded = smoothed = back = 0
+    seen = strays = held = added = lost = guarded = smoothed = 0
     most, chunk = 1.0, 2 * max(1, workers)
     with ThreadPoolExecutor(max(1, workers)) as pool:  # numpy and scipy release the GIL; a chunk at a time, so the differences of a long shot never sit in memory together
         for start in range(0, n, chunk):
@@ -636,14 +631,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                 s = tracked(t)
                 near = grow(line, reach * min(1 + lost, 4)) if line.any() else np.zeros((h, w), bool)
                 core = s & near  # SAM's mask near the region: what lies further away is left out, even joined to it
-                if lost >= 4 and not core.any() and (s & ~near).any():  # the search is at its widest: the object may have come out far away
-                    labels, count = ndimage.label(s & ~near, structure=eight)
-                    areas = np.bincount(labels.ravel())[1:]
-                    far = labels == int(np.argmax(areas)) + 1
-                    own = block is None or float(np.median(block[t - start][far])) > threshold  # paint: the shot's own pixels, not the plate's
-                    if 0.2 * peak <= int(far.sum()) <= 2.5 * peak and own:
-                        core, back = far, back + 1
-                strays += bool((s & ~near & ~core).any())
+                strays += bool((s & ~near).any())
                 peak = max(peak, int(core.sum()))
                 found, follows = core, True
                 if block is not None and (core.any() or line.any()):
@@ -692,8 +680,6 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
             summary += f"; what it found further than the object can move, on {strays} frame(s), is left out"
         if held:
             summary += f"; the last matte held on {held} frame(s) where the object was not seen"
-        if back:
-            summary += f"; {back} time(s) it came out far from where it was last seen, and was followed again"
         if added:
             summary += f"; the shot's changes connected to the object added area on {added} frame(s), up to {most:.1f} times SAM's mask"
     if guarded:
