@@ -66,6 +66,22 @@ class Convert(unittest.TestCase):
                 np.testing.assert_allclose(a, b, atol=2e-5)
         self.assertAlmostEqual(float(ocio.decode(ocio.convert(self.hdr, "", LIN709, ocio.MODEL)[1][2, 3]) @ ocio.REC709_LUMA), 1.0, 4)
 
+    def test_a_part_of_a_batch_with_the_batch_peak_has_the_values_of_the_whole(self):
+        """The open converts the plate's first frame alone. With the whole plate's peak it is, bit for bit, the first frame
+        of the whole plate converted. Without it, a frame beside a highlight keeps its own exposure, and differs."""
+        for frames in (self.sdr, self.hdr):
+            for src in (LIN709, "ACEScg", MODEL, ocio.LINEAR):
+                whole = ocio.convert(frames, "", src, ocio.MODEL)
+                peak = ocio.batch_peak(iter(frames), "", src)  # a generator, as the nodes hand frames over
+                for i, f in enumerate(frames):
+                    self.assertTrue(np.array_equal(ocio.convert([f], "", src, ocio.MODEL, peak)[0], whole[i]), (src, i))
+        self.assertEqual(ocio.batch_peak(self.sdr, "", LIN709), 1.0)  # nothing above 1.0: no tone mapping, as core
+        self.assertAlmostEqual(ocio.batch_peak(self.hdr, "", LIN709), float(np.float32([6.0, 5.0, 4.0]) @ ocio.REC709_LUMA), 5)
+        self.assertEqual(ocio.batch_peak(self.hdr, "", ocio.MODEL), 1.0)  # nothing converts from @model into @model
+        self.assertEqual(ocio.batch_peak([], "", LIN709), 1.0)
+        whole = ocio.convert(self.hdr, "", LIN709, ocio.MODEL)
+        self.assertFalse(np.array_equal(ocio.convert(self.hdr[:1], "", LIN709, ocio.MODEL)[0], whole[0]))
+
     def test_out_of_the_model_space_and_through_linear_light(self):
         plate = [f * 3.0 - 0.1 for f in self.sdr]  # ACEScg with values above 1.0 and below 0
         lin = ocio.convert(plate, "", "ACEScg", ocio.LINEAR)

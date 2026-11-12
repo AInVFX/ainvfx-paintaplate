@@ -168,20 +168,64 @@ def _rgb(fn):
     return one
 
 
-def _ocio(name, src, dst, frames):
+def _ocio(name, src, dst):
+    """One frame from `src` to `dst` through the config's processor. None when they are one space: nothing to do."""
     if src == dst:
-        return list(frames)
+        return None
     cpu = _cpu(name, src, dst)
 
     def apply(rgb):
         cpu.applyRGB(rgb)
         return rgb
-    return _each(_rgb(apply), frames)
+    return _rgb(apply)
 
 
-def _into_model(frames):
-    """Core's linear Rec.709 to sRGB for SDR output: tone mapping with the batch's peak, gamut compression, encoding."""
-    peak = max(1.0, max((float(np.max(f[..., :3] @ REC709_LUMA, initial=0.0)) for f in frames), default=1.0))
+def _route(name: str, src: str, dst: str):
+    """(one frame's way from `src` to `dst`, whether core's tone mapping follows it). Into @model the way ends in linear
+    Rec.709: the config's own when it has one, else the model space decoded. The tone mapping needs the batch's peak, so
+    it is not a step of the way: convert and batch_peak share the way, and so agree bit for bit."""
+    cfg = config(name)
+    lin = find(cfg, FAMILIAR["linear"])
+
+    def where(n):  # (the config's name, whether the values are the model space decoded to linear light)
+        if n == LINEAR:
+            return (lin, False) if lin else (model_space(cfg), True)
+        return real(cfg, n), False
+    (rs, s_dec), (rd, d_dec) = where(src), where(dst)
+    tone = dst == MODEL and src != MODEL
+    if tone:
+        steps = (_ocio(name, rs, lin),) if lin else (_ocio(name, rs, model_space(cfg)), _rgb(decode))
+    else:
+        steps = (_ocio(name, rs, rd), _rgb(decode) if d_dec else None)
+    steps = [step for step in (_rgb(encode) if s_dec else None, *steps) if step]
+
+    def one(f):
+        for step in steps:
+            f = step(f)
+        return f
+    return one, tone
+
+
+def _brightest(f) -> float:
+    """The highest luminance of a frame in linear Rec.709."""
+    return float(np.max(f[..., :3] @ REC709_LUMA, initial=0.0))
+
+
+def batch_peak(frames, name: str, src: str) -> float:
+    """The peak core's tone mapping takes for a batch on its way from `src` into @model: its highest luminance in linear
+    Rec.709, and 1.0 at least. Each frame is converted, measured and dropped, so a whole plate is read without a second
+    copy of it. `convert(part, name, src, MODEL, peak)` then gives a part of the batch the values it has in the whole."""
+    if src == MODEL:
+        return 1.0
+    one, _ = _route(name, src, MODEL)
+    return max(1.0, max(_POOL.map(lambda f: _brightest(one(f)), frames), default=1.0))
+
+
+def _into_model(frames, peak=None):
+    """Core's linear Rec.709 to sRGB for SDR output: tone mapping with the batch's peak (`peak` when the frames are a part
+    of a larger batch), gamut compression, encoding."""
+    if peak is None:
+        peak = max(1.0, max(map(_brightest, frames), default=1.0))
 
     def one(rgb):
         if peak > 1.0001:  # core allows transfer-function roundoff at SDR white without tone mapping
@@ -197,27 +241,17 @@ def _into_model(frames):
     return _each(_rgb(one), frames)
 
 
-def convert(frames, name: str, src: str, dst: str) -> list[np.ndarray]:
+def convert(frames, name: str, src: str, dst: str, peak: float | None = None) -> list[np.ndarray]:
     """Each frame's RGB from `src` to `dst` in config `name`, frames in parallel; alpha untouched. Either may be @model or
     @linear. @linear is the config's Linear Rec.709 when it has one (a matrix from ACEScg, nothing clipped), else the model
-    space decoded; into @model, frames pass through it, then core's tone mapping and gamut compression."""
+    space decoded; into @model, frames pass through it, then core's tone mapping and gamut compression. The tone mapping
+    takes the peak of these frames, or `peak`: the peak of the batch they are a part of (batch_peak)."""
     frames = list(frames)
     if src == dst or not frames:
         return frames
-    cfg = config(name)
-    lin = find(cfg, FAMILIAR["linear"])
-
-    def where(n):  # (the config's name, whether the values are the model space decoded to linear light)
-        if n == LINEAR:
-            return (lin, False) if lin else (model_space(cfg), True)
-        return real(cfg, n), False
-    (rs, s_dec), (rd, d_dec) = where(src), where(dst)
-    if s_dec:
-        frames = _each(_rgb(encode), frames)
-    if dst == MODEL and src != MODEL:
-        return _into_model(_ocio(name, rs, lin, frames) if lin else _each(_rgb(decode), _ocio(name, rs, model_space(cfg), frames)))
-    out = _ocio(name, rs, rd, frames)
-    return _each(_rgb(decode), out) if d_dec else out
+    one, tone = _route(name, src, dst)
+    out = _each(one, frames)
+    return _into_model(out, peak) if tone else out
 
 
 # ---------- The viewer's shader ----------
