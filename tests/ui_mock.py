@@ -57,6 +57,14 @@ def no_errors(errors, where):
 
 
 
+def mock_route(port, path, body=None):
+    """A route of the mock ComfyUI: a GET, or a POST of `body`. Returns its answer, read as JSON."""
+    data = None if body is None else json.dumps(body).encode()
+    request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=5) as r:
+        return json.load(r)
+
+
 def open_path(page, path):
     """Open plate, ComfyUI files: a path typed into the dialog, then Open."""
     page.click("#open-btn"); page.click("#open [data-tab=files]"); page.fill("#path", path); page.click("#open-go")

@@ -514,7 +514,7 @@ async def oom_route(request):  # mock only: the next `times` jobs of `workflow` 
     return web.json_response({})
 
 
-async def card_route(request):  # mock only: the card /system_stats reports from now on, in bytes: {"vram": 17.2e9, "ram": 65.5e9} is a 16 GB card with 61 GB of RAM
+async def card_route(request):  # mock only: the card /system_stats reports from now on, in bytes: {"vram": 17.2e9, "ram": 65.5e9} is a 16 GB card with 61 GB of RAM; "ram_free" is the RAM it reports as free
     STATE["card"] = await request.json()
     return web.json_response({})
 
@@ -525,7 +525,8 @@ async def system_stats_route(request):  # once armed, the GPU's memory: nearly f
         return web.json_response({"system": {}, "devices": [{"name": "mock", "vram_total": 96e9, "vram_free": 2e9 if low else 90e9}]})
     card = STATE.get("card", {})  # set by /mock/card; else a 32 GB card: the medium profile, no LTX warm-up
     vram = float(card.get("vram", 32e9))
-    return web.json_response({"system": {"ram_total": float(card["ram"])} if "ram" in card else {}, "devices": [{"name": "mock", "vram_total": vram, "vram_free": vram - 2e9}]})
+    system = {name: float(card[key]) for key, name in (("ram", "ram_total"), ("ram_free", "ram_free")) if key in card}  # under ComfyUI's own names
+    return web.json_response({"system": system, "devices": [{"name": "mock", "vram_total": vram, "vram_free": vram - 2e9}]})
 
 
 async def ws_route(request):
