@@ -193,6 +193,7 @@ async def execute(pid, prompt):
     if hold and hold["times"] > 0 and (hold["output"] in outs or v.get(hold["slot"])):
         hold["times"] -= 1
         STATE.setdefault("held", {})[pid] = hold["seconds"]
+        EVENTS.append(("held", time.time()))  # a check waits for it: the job it holds open now runs
     MOVIE[:] = [int(v.get('movie_width') or 0), int(v.get('movie_height') or 0)]  # as Save Movie takes them
     o = {}
     if "spec" in outs:  # ingest
