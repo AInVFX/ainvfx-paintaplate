@@ -5,6 +5,8 @@ torch or ComfyUI, so every function is tested in plain Python (tests/test_mathop
 """
 from __future__ import annotations
 
+import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -568,6 +570,38 @@ FOLLOW_SPIKE = 2.0  # a matte more than this many times the median of the 7 fram
 FOLLOW_WARN = 3.0  # the largest matte against the object's area: above it, the summary warns
 
 
+RECORD_SIDE = 320  # PAINTAPLATE_RECORD keeps what Follow Matte was given at this width at most
+
+
+def record(folder: str, masks, n: int, first, shot, base, zone: float, threshold: float, element) -> str:
+    """With PAINTAPLATE_RECORD=<folder> in ComfyUI's environment, what Follow Matte was given, as one .npz file: the
+    tracker's masks, the first-frame mask, the element, the shot and the plate, every k-th pixel so the width is
+    RECORD_SIDE at most, in 8 bits. SAM and LTX need a GPU; this file does not: follow_matte(**replay(file)) runs the
+    matte again anywhere, so a rule is tried on the real shot that showed its fault. Returns the file's path."""
+    def small(a, after=0):  # `after`: the axes that follow the width (1 for an image's channels)
+        if a is None or not np.size(a):
+            return np.zeros((0,), np.uint8)
+        a = np.asarray(a)
+        k = max(1, -(-a.shape[a.ndim - 1 - after] // RECORD_SIDE))
+        cut = a[..., ::k, ::k, :3] if after else a[..., ::k, ::k]
+        return (np.clip(cut, 0, 1) * 255 + 0.5).astype(np.uint8)
+
+    os.makedirs(folder, exist_ok=True)
+    h, w = np.shape(shot)[1:3] if shot is not None else np.shape(masks)[-2:]
+    path = os.path.join(folder, f"follow_matte_{w}x{h}_{n}f_{time.strftime('%Y%m%d_%H%M%S')}.npz")
+    np.savez_compressed(path, masks=small(masks), first=small(first), element=small(element), shot=small(shot, 1), base=small(base, 1),
+                        n=n, zone=zone, threshold=threshold)
+    return path
+
+
+def replay(path: str) -> dict:
+    """follow_matte's arguments from a file that PAINTAPLATE_RECORD wrote: follow_matte(**replay(path))."""
+    d = np.load(path)
+    back = lambda k: d[k].astype(np.float32) / 255 if d[k].size else None  # noqa: E731
+    return {"masks": back("masks") if d["masks"].size else np.zeros((0, 1, 1), np.float32), "n": int(d["n"]), "first": back("first"),
+            "shot": back("shot"), "base": back("base"), "zone": float(d["zone"]), "threshold": float(d["threshold"]), "element": back("element")}
+
+
 def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=None, zone: float = 1 / 16,
                  threshold: float = 0.1, workers: int = 8, element=None, tick=None):
     """One matte per frame from a tracker's masks, made safe for the composite. Returns (mattes (n, H, W), summary).
@@ -599,6 +633,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     The summary ends with the largest matte against the object's area (the tracker's mask on that frame, or where it
     was last seen) and its frame, with a warning above FOLLOW_WARN.
     """
+    if os.environ.get("PAINTAPLATE_RECORD"):
+        record(os.environ["PAINTAPLATE_RECORD"], masks, n, first, shot, base, zone, threshold, element)
     masks = np.asarray(masks, np.float32).reshape((-1,) + np.shape(masks)[-2:]) if np.size(masks) else np.zeros((0, 1, 1), np.float32)
     first = np.asarray(first, np.float32)
     first = first[0] if first.ndim == 3 else first
