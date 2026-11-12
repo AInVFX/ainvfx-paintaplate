@@ -354,6 +354,7 @@ def main():
                     frames = plateio.probe_video(os.path.join(output_dir, vids[0]["subfolder"], vids[0]["filename"]))["frames"] if ok else -1
                     check(ok and frames in (N, 0), f"comp {run}: composite MP4 in {dt:.1f} s, {frames} frames" + (f" -> {err}" if err else ""))
                 seq = kind != "mov"  # the review of an image sequence also writes half-float EXR frames for the viewer
+                shutil.rmtree(os.path.join(output_dir, shot, "review"), ignore_errors=True)  # a second run on the same ComfyUI counts its own frames
                 res = submit(url, fill("review", {"path": path, "color_space": cs, "max_frames": N, "shot": f"output:{shot}/shot",
                                                   "matte_a": f"output:{shot}/matte_a", "matte_b": f"output:{shot}/matte_a",
                                                   "relight": relight, "grow": 4, "feather": 6, "movie_space": "@model" if seq else cs,
