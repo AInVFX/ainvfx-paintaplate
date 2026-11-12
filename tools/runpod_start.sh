@@ -8,6 +8,7 @@
 # When the pod cannot reach GitHub, upload the offline bundle instead (tools/offline_bundle.sh).
 # PLATES=1 adds the example plates to ComfyUI's input/plates folder, where the Open plate dialog lists them:
 #   PLATES=1 bash tools/runpod_start.sh         (or, on a pod that is already running: python get_plates.py)
+# Each start keeps the log of the ComfyUI that ran before, as comfyui.<date>-<time>.log: after a stop, it holds what ran.
 # As a container's start command (process 1), it also starts Runpod's services and keeps the pod running.
 set -uo pipefail
 W=${WORKDIR:-/workspace}; VENV=${VENV:-/opt/venv}
@@ -59,6 +60,10 @@ else
   read -r -a extra <<< "${COMFY_ARGS:-}"  # more ComfyUI flags, such as COMFY_ARGS=--disable-dynamic-vram
   flags+=("${extra[@]}")
   cd "$W/ComfyUI" || exit 1
+  if [ -s "$W/comfyui.log" ]; then  # a ComfyUI that stopped left its last lines there, and its trace: the log is kept
+    kept="$W/comfyui.$(date +%Y%m%d-%H%M%S).log"
+    mv "$W/comfyui.log" "$kept" && log "the log of the ComfyUI that ran before is kept: $kept"
+  fi
   log "starting ComfyUI (log: $W/comfyui.log)"
   nohup "$VENV/bin/python" main.py "${flags[@]}" > "$W/comfyui.log" 2>&1 &
   t0=$SECONDS
