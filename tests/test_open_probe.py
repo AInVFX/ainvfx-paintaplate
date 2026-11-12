@@ -250,6 +250,20 @@ class AgainstTheMock(unittest.TestCase):
         self.assertEqual(rows[0], "seconds,bytes,cgroup_bytes,node")
         self.assertGreater(len(rows), 4)
 
+    def test_the_same_pictures_as_an_earlier_open(self):
+        code, text = self.run_probe("plates/desk.mp4")
+        self.assertEqual(code, 0, text)
+        earlier = re.search(r"under (paintaplate/probe_\d+)\n", text).group(1)
+        code, text = self.run_probe("plates/desk.mp4", "--same", earlier)
+        self.assertEqual(code, 0, text)
+        self.assertRegex(text, rf"The same pictures as under {earlier}, by their decoded pixels: hero\S+ and proxy\S+\n")
+        code, text = self.run_probe("plates/desk.mp4", "--max-frames", "9", "--same", earlier)
+        self.assertEqual(code, 1, text)
+        self.assertRegex(text, rf"Not the same pictures as under {earlier}: \d+ frames differ in proxy\S+\n")
+        code, text = self.run_probe("plates/desk.mp4", "--same", "paintaplate/probe_0")
+        self.assertEqual(code, 1, text)
+        self.assertIn("Not compared with paintaplate/probe_0: ", text)
+
     def test_a_plate_that_is_not_there(self):
         code, text = self.run_probe("plates/none.mp4")
         self.assertEqual(code, 1)
