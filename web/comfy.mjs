@@ -25,6 +25,8 @@ const INDEXED = new Set(["ingest", "prompt", "edit", "clean", "cleanup", "shot",
 const hashes = {}; // workflow name -> hash of its file: a new workflow makes new keys
 let salt = null; // the plate's identity (path, size, time); null: no index, as when the plate could not be checked
 export const setSalt = (s) => { salt = s; };
+let pack = ""; // the pack's version, as the server gives it (/paintaplate/version); "": not known, so no index
+export const setPack = (version) => { pack = version || ""; };
 
 export async function hashHex(data) { // SHA-256 of a string or a Blob, in hex; null where the page has no WebCrypto (plain http)
   if (!globalThis.crypto?.subtle) return null;
@@ -32,8 +34,16 @@ export async function hashHex(data) { // SHA-256 of a string or a Blob, in hex; 
   return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-const indexKey = async (name, values) => (INDEXED.has(name) && salt !== null && hashes[name]
-  ? hashHex(JSON.stringify([hashes[name], salt, indexValues(values)])) : null);
+// What a job index key is made of: the pack's version, the workflow file's hash, the plate's identity and the job's values.
+// The version is part of it, because a new version can change what a node makes from the same workflow file and the same
+// values: 1.11.9's matte rule did. So a result made by another version never comes back as this version's. null: no index
+// for this job (the version is not known, the workflow has no hash, or the plate could not be checked).
+export const indexParts = (version, workflow, plate, values) =>
+  (version && workflow && plate !== null ? JSON.stringify([version, workflow, plate, indexValues(values)]) : null);
+const indexKey = async (name, values) => {
+  const parts = INDEXED.has(name) ? indexParts(pack, hashes[name], salt, values) : null;
+  return parts === null ? null : hashHex(parts);
+};
 
 async function indexed(key) { // the outputs a finished job with this key made, if its files are all still there
   try { const r = await fetch(`/paintaplate/jobs/${key}`); return r.ok ? (await r.json()).outputs : null; } catch { return null; }

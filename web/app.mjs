@@ -3,7 +3,7 @@
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
-import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setSalt, upload, viewUrl } from "./comfy.mjs";
+import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setPack, setSalt, upload, viewUrl } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromBytes, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
@@ -3627,6 +3627,7 @@ addEventListener("blur", closeMenu);
 
 async function boot() { // the version, the workflows, the WebSocket, then what this ComfyUI lacks: nodes, then model files
   const { version = "" } = await fetch("/paintaplate/version").then((r) => r.json()).catch(() => ({})); // pyproject.toml's, on the server
+  setPack(version); // a part of every job index key: a result made by another version is not taken back (comfy.mjs)
   $("#version").textContent = S.version = version;
   log(`AInVFX Paint a plate ${version || "of an unknown version: restart ComfyUI after an update"}`);
   onNotice(status);
