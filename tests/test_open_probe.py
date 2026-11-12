@@ -190,6 +190,9 @@ class Pictures(unittest.TestCase):
         touched = frames[0].copy()
         touched[3, 5, 1] ^= 1
         self.assertEqual(comfy_live.frames_apart(one, png(touched, "a")), 1)
+        level = int(frames[0][3, 5, 1])  # what a failed check says: how many frames, by how much, and where first
+        self.assertEqual(comfy_live.differences(one, png(touched, "a")), (1, 1, 1, f"frame 0, sample (3, 5, 1): {level} and {level ^ 1}"))
+        self.assertEqual(comfy_live.differences(one, other), (0, 1, 0, "a frame is missing"))
         folder = tempfile.mkdtemp()
         try:
             paths = [os.path.join(folder, f"{name}.mp4") for name in "abc"]
@@ -197,8 +200,22 @@ class Pictures(unittest.TestCase):
                 plateio.write_movie(lambda i: frames[i], n, path, 24.0, workers=2)
             self.assertEqual(comfy_live.frames_apart(paths[0], paths[1]), 0)
             self.assertEqual(comfy_live.frames_apart(paths[0], paths[2]), 1)  # a frame one movie lacks counts
+            self.assertEqual(comfy_live.differences(paths[0], paths[2])[:2], (1, 4))
         finally:
             shutil.rmtree(folder, ignore_errors=True)
+
+    def test_the_live_tests_compare_the_open_on_movies_without_loss(self):
+        """x264 does not always make the same movie from the same frames, so the live tests fill `ingest`, then set its
+        Save Movie to crf 0: nothing else of the workflow changes."""
+        probe()
+        import comfy_live
+        from build_workflows import fill
+        values = {"path": "plates/horse.mp4", "prefix": "a/hero", "video_prefix": "a/proxy"}
+        usual, exact = fill("ingest", values), comfy_live.lossless(fill("ingest", values))
+        movie = next(k for k, node in usual.items() if node["class_type"] == "PaintAPlate_SaveMovie")
+        self.assertEqual((usual[movie]["inputs"]["crf"], exact[movie]["inputs"]["crf"]), (12, 0))
+        exact[movie]["inputs"]["crf"] = 12
+        self.assertEqual(exact, usual)
 
 
 class AgainstTheMock(unittest.TestCase):
