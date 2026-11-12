@@ -133,6 +133,17 @@ def lanczos_taps(n_out: int, n_in: int, start: int = 0, count: int | None = None
     return np.clip(k, 0, n_in - 1), wts.astype(np.float32)
 
 
+def composite(destination: np.ndarray, source: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """`source` inside `mask` and `destination` around it: one frame, (H, W, C) float32, with a mask (H, W) in 0 to 1.
+
+    The arithmetic of core's Image Composite Masked (mask * source + (1 - mask) * destination), so a node that calls it
+    frame by frame makes that node's pictures. Core works on the whole batch and holds six copies of the result at its
+    peak: 16.9 GB for 121 frames at 1920 x 1088 (12 Nov).
+    """
+    m = mask[..., None].astype(np.float32)
+    return m * source + (np.float32(1) - m) * destination
+
+
 def resize_lanczos(img: np.ndarray, h: int, w: int, window: tuple | None = None) -> np.ndarray:
     """(H, W[, C]) float to (h, w[, C]) with a separable Lanczos-3, or only the output rows y0:y1 and columns x0:x1 of
     `window`, reading just the source pixels they need. The floor for new content enlarged to a plate's native size

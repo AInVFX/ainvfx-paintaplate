@@ -318,6 +318,47 @@ class FitToPlate(io.ComfyNode):
         return io.NodeOutput(to_image(images), to_image(out))
 
 
+class CompositeFrames(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_CompositeFrames",
+            display_name="Composite Frames",
+            category=CATEGORY,
+            description="The source inside the mask and the destination around it, at the size given, one frame at a "
+                        "time. Each input is sized with a bilinear filter. The pictures are those of Image Scale then "
+                        "Image Composite Masked, which hold the whole shot at that size nine times while they work. "
+                        "This node holds the result once.",
+            inputs=[
+                io.Image.Input("destination", tooltip="The frames around the mask, any size."),
+                io.Image.Input("source", tooltip="The frames inside the mask, any size."),
+                io.Mask.Input("mask", tooltip="Where the source goes, any size: 1 is the source, 0 the destination."),
+                io.Int.Input("width", default=1920, min=16, max=16384, tooltip="Width of the result."),
+                io.Int.Input("height", default=1088, min=16, max=16384, tooltip="Height of the result."),
+            ],
+            outputs=[io.Image.Output(display_name="image")],
+        )
+
+    @classmethod
+    def execute(cls, destination, source, mask, width, height) -> io.NodeOutput:
+        def sized(t):  # one frame (H, W, C) or one mask (H, W) at the result's size, as Image Scale's bilinear filter makes it
+            x = (t[..., :3] if t.ndim == 3 else t.unsqueeze(-1)).float().movedim(-1, 0).unsqueeze(0)
+            if x.shape[2:] != (height, width):
+                x = comfy.utils.common_upscale(x, width, height, "bilinear", "disabled")
+            x = x[0].movedim(0, -1).cpu().numpy()
+            return x if t.ndim == 3 else x[..., 0]
+
+        n, stop = destination.shape[0], Stop()
+        bar = comfy.utils.ProgressBar(n)
+        out = torch.empty((n, height, width, 3), dtype=torch.float32)
+        for i in range(n):  # a shorter source or mask repeats, as in core's composite
+            stop()
+            out[i] = torch.from_numpy(mathops.composite(sized(destination[i]), sized(source[i % source.shape[0]]),
+                                                        sized(mask[i % mask.shape[0]])))
+            bar.update(1)
+        return io.NodeOutput(out.to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()))
+
+
 class RelightTransfer(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -809,5 +850,5 @@ class KeepBlack(io.ComfyNode):
         return io.NodeOutput(torch.from_numpy(np.stack(out)))
 
 
-NODES = [LoadPlate, SavePlate, ColorSpace, SaveFrames, SaveMovie, FitToPlate, RelightTransfer, FollowMatte, LevelFill, LivePreview,
+NODES = [LoadPlate, SavePlate, ColorSpace, SaveFrames, SaveMovie, FitToPlate, CompositeFrames, RelightTransfer, FollowMatte, LevelFill, LivePreview,
          KeyframeVideo, HDRMatch, VAEFloat32, KeepBlack]

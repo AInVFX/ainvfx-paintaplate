@@ -154,6 +154,23 @@ class MemorySlots(unittest.TestCase):
             self.assertTrue(all(n["inputs"]["use_tiled_encode"] is False for n in guide), name)
             self.assertEqual("tile" in slots, bool(tiles), name)
 
+    def test_cleanup_makes_its_start_one_frame_at_a_time(self):
+        """The second stage of the erase pass stopped ComfyUI on a 52 GB machine (12 Nov): Image Scale and Image Composite
+        Masked held the whole shot at full size nine times before LTX started. Composite Frames takes the plate, the first
+        stage and the blocks at their own sizes."""
+        with open(os.path.join(WORKFLOWS, "cleanup.json")) as f:
+            prompt = json.load(f)
+        title = lambda link: prompt[link[0]].get("_meta", {}).get("title")  # noqa: E731
+        self.assertNotIn("ImageCompositeMasked", [node["class_type"] for node in prompt.values()])
+        (composite,) = [node for node in prompt.values() if node["class_type"] == "PaintAPlate_CompositeFrames"]
+        inputs = composite["inputs"]
+        self.assertEqual((title(inputs["destination"]), title(inputs["source"])), ("Plate in the model space", "Erase pass at half size"))
+        self.assertEqual(prompt[inputs["source"][0]]["class_type"], "PaintAPlate_LoadPlate")
+        self.assertEqual(prompt[inputs["mask"][0]]["class_type"], "GrowMask", "the blocks on LTX's grid, at the grid's size")
+        self.assertEqual(composite["_meta"]["slots"], {"width": "width", "height": "height"})
+        sized = sorted(prompt[node["inputs"]["image"][0]]["class_type"] for node in prompt.values() if node["class_type"] == "ImageScale")
+        self.assertEqual(sized, ["LoadImage", "PaintAPlate_LoadPlate"], "only the erased first frame and the erase matte are sized as a batch")
+
 
 class OpeningSteps(unittest.TestCase):
     def test_every_class_the_opening_screen_waits_for_is_in_the_ingest_workflow(self):
