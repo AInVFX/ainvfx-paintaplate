@@ -568,6 +568,47 @@ class FollowMatteBehindThePlate(unittest.TestCase):
         self.assertRegex(summary, r"largest matte is \d\.\d times the object, on frame \d+$")  # reported, with no warning
 
 
+class FollowMatteLeftItsPlace(unittest.TestCase):
+    """The cow that walks away with the horse (12 Nov 2026, the laptop's preview), as a scene written here at 320 px.
+    The background moves 2 px a frame. A painted object of 86 x 20 px stands still in the scene for 28 frames. An
+    object of the plate, 124 px wide, stays in the frame and comes within 4 px of it on frame 28. From there the shot
+    draws the painted object beside it, moving with it, and the tracker returns it on every frame. From frame 70 the
+    shot also changes the object in front. The object's own place goes on with the background: by frame 80 the piece
+    has left it, margin of half a zone included."""
+    N, H, W = 121, 182, 320
+    FRONT = (slice(30, 170), slice(29, 153))
+
+    def scene(self):
+        rng = np.random.default_rng(12)
+        n, h, w = self.N, self.H, self.W
+        land = ndimage.gaussian_filter(rng.random((h, w + 2 * n, 3)).astype(np.float32), (2, 2, 0))
+        land = np.clip(0.5 + 3 * (land - land.mean()), 0, 1)
+        base = np.stack([land[:, 2 * t:2 * t + w] for t in range(n)])
+        base[(slice(None),) + self.FRONT] = (0.55, 0.25, 0.10)
+        shot, sam, shown = base.copy(), np.zeros((n, h, w), np.float32), np.zeros((n, h, w), bool)
+        for t in range(n):
+            x = 213 - 2 * min(t, 28)  # with the background for 28 frames, then with the object in front
+            shown[t, 96:116, x:x + 86] = True
+            shot[t][shown[t]] = (0.9, 0.85, 0.8)
+            if t < 11:
+                sam[t, 63:149, 207 - 2 * t:305 - 2 * t] = 1  # the zone it was given
+            else:
+                sam[t] = shown[t]
+        shot[70:, 90:122, 120:153] = (0.3, 0.2, 0.15)
+        return sam, shown, shot, base
+
+    def test_a_piece_that_leaves_the_objects_place_with_what_stands_in_front_is_left_out(self):
+        sam, shown, shot, base = self.scene()
+        out, summary = m.follow_matte(sam, self.N, sam[0], shot=shot, base=base, zone=1 / 16, threshold=0.1, element=shown[0].astype(np.float32))
+        matte = out > 0.5
+        for t in range(12, 28):  # in its place, it is followed as before
+            self.assertGreaterEqual(int((matte[t] & shown[t]).sum()), 0.9 * int(shown[t].sum()), f"frame {t}")
+        self.assertEqual(int(matte[80:].sum()), 0)  # once it has left its place, nothing: the plate shows there (at 9aa332a the matte went with it to the last frame)
+        self.assertEqual(int(matte[(slice(None),) + self.FRONT].sum()), 0)  # and never what stands in front
+        self.assertIn("what left the object's place", summary)
+        self.assertRegex(summary, r"largest matte is \d\.\d times the object, on frame \d+$")
+
+
 class StoppedFollowMatte(unittest.TestCase):
     def test_the_frame_loop_stops_when_its_check_raises(self):  # nodes.py passes ComfyUI's interrupt check as `tick`
         calls = []

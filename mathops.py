@@ -664,7 +664,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       nothing in one run and the horse in another, and LTX made the horse again where the cow went behind it). The
       plate's background moves from frame to frame by the median shift of its tiles (plate_move). A place is covered
       where the plate's colours, at two blurs (a quarter of `zone` for what is large, 1/160 of the width for where it
-      ends), differ from frame 0's colours at the same place of the scene by `threshold` more than the places in view
+      ends), differ from the colours it first showed at the same place of the scene by `threshold` more than the places in view
       do; or where they differ as much from the frame before, moved with the background (what moves in the plate: a
       dark leg over a dark rail reads as the rail), unless frame 0 said covered there on the frame before (what stood
       there has just left). At the object's own place, slits and holes under a quarter of a
@@ -675,8 +675,11 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       and touches, in view, the tracker's mask or, with a thick part, the region (a thin line of changes runs along
       the outline of what stands in front); at the places where the object stood on frame 0, which frame 0 showed in
       view, what is covered never counts. A tracker's mask that lies mostly on covered places is what stands in
-      front, and is left out. When it is the matte of the frame before, whole, the object rides something that moves,
-      and the plate is not asked again. So the matte is empty while the object is hidden, takes it again where it
+      front, and is left out. What is found counts only at the object's place of
+      frame 0, with a margin of half a zone, and where it is joined to it there while a quarter of the place holds
+      the object: a piece that leaves the place, with what stands in front or alone, is not the object (12 Nov
+      2026: LTX drew the cow walking away with the horse, then gave the horse its head). Of a changed area, what is
+      covered counts only in that margin, and only when a quarter of the area at most is covered. So the matte is empty while the object is hidden, takes it again where it
       comes out, and leaves out what stands in front. An object that moves in the scene over its first frames is
       followed as before;
     - changes larger than 3 times the object's largest area keep only what lies at the tracker's own mask, and the
@@ -716,6 +719,15 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
         out = np.zeros_like(m)
         out[box] = grow(~grow(~m[box], thin), thin)
         return out
+
+    def touching(m, to):  # the connected parts of a mask that touch another one, worked out in the mask's own box
+        ys, xs = np.flatnonzero(m.any(1)), np.flatnonzero(m.any(0))
+        box = (slice(ys[0], ys[-1] + 1), slice(xs[0], xs[-1] + 1))
+        parts, _ = ndimage.label(m[box], structure=eight)
+        keep = np.unique(parts[m[box] & to[box]])
+        out = np.zeros_like(m)
+        out[box] = np.isin(parts, keep[keep > 0])
+        return out
     k = max(1, w // FOLLOW_SIDE)  # the plate is read small
     soft = (max(1.0, zone * (w // k) / 4), max(1.0, (w // k) / 160))  # two blurs: a quarter of a zone says that something large stands there, 1/160 of the width says where it ends
 
@@ -724,21 +736,26 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
         b = (b if b.shape[:2] == (h, w) else resize_to(b, h, w))[::k, ::k, :3]  # every k-th pixel, as `record` keeps them: a replay reads the same plate
         return luma(b), [ndimage.gaussian_filter(b, (r, r, 0), truncate=2.5) for r in soft]
 
-    def front(colours, at, was, levels, stood, past, by, far):  # where the plate covers what frame 0 showed at this place of the scene (small), the levels of the places in view, and what frame 0 alone says
+    def front(colours, at, was, levels, stood, past, by, far):  # where the plate covers what it first showed at this place of the scene (small), the levels of the places in view, and what that first look alone says
         hs, ws = colours[0].shape[:2]
         oy, ox = int(at[0]), int(at[1])
-        if abs(oy) >= hs or abs(ox) >= ws:  # a place that frame 0 did not show is not known to be covered
+        if abs(oy) > hs or abs(ox) > ws:  # the scene's map holds one frame on each side of frame 0: further away, no place is known to be covered
             return np.zeros((hs, ws), bool), levels, np.zeros((hs, ws), bool)
-        here = (slice(max(oy, 0), hs + min(oy, 0)), slice(max(ox, 0), ws + min(ox, 0)))
-        there = (slice(max(-oy, 0), hs - max(oy, 0)), slice(max(-ox, 0), ws - max(ox, 0)))
-        calm, covered, levels = ~was[here], np.zeros((hs, ws), bool), list(levels)
-        both = np.ones(calm.shape, bool)
+        there = (slice(hs - oy, 2 * hs - oy), slice(ws - ox, 2 * ws - ox))  # this frame, in the scene's map
+        known, levels = learnt[there] > 0, list(levels)
+        calm = (learnt[there] == 1) & ~was  # the level comes from the places of frame 0 while 64 of them are in view, then from every known place
+        calm = calm if int(calm.sum()) >= 64 else known & ~was
+        covered = known.copy()
         for i in (0, 1):
-            apart = np.abs(colours[i][here] - ground[i][there]).max(axis=-1)
+            apart = np.abs(colours[i] - ground[i][there]).max(axis=-1)
             levels[i] = float(np.median(apart[calm])) if int(calm.sum()) >= 64 else levels[i]
-            both &= apart > threshold + levels[i]
-        covered[here] = both
-        against = covered.copy()  # covered, by frame 0 alone
+            covered &= apart > threshold + levels[i]
+        new = ~known  # the map learns a place the first time the plate shows it, away from the frame's edge where a blur reads the frame's own border
+        new[:rim], new[hs - rim:], new[:, :rim], new[:, ws - rim:] = False, False, False, False
+        for i in (0, 1):
+            ground[i][there][new] = colours[i][new]
+        learnt[there][new] = 2
+        against = covered.copy()  # covered, by that first look alone
         oy, ox = int(by[0]), int(by[1])  # what moves in the plate stands in front too: a dark leg over a dark rail reads as the rail, and differs from the frame before
         here = (slice(max(oy, 0), hs + min(oy, 0)), slice(max(ox, 0), ws + min(ox, 0)))
         there = (slice(max(-oy, 0), hs - max(oy, 0)), slice(max(-ox, 0), ws - max(ox, 0)))
@@ -754,7 +771,9 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     seen = strays = held = added = lost = guarded = smoothed = fronts = 0
     most, chunk = 1.0, 2 * max(1, workers)
     still = None  # does the object keep its place in the scene? Not known before frame FOLLOW_STILL
-    ground = before = past = home = None  # frame 0's softened colours, the frame before's luma and colours, the first matte moved with the background
+    ground = learnt = before = past = home = None  # the scene's map (the softened colours each place first showed, and which places it holds), the frame before's luma and colours, the first matte moved with the background
+    rim = int(np.ceil(2.5 * soft[0]))  # as far as the large blur reads
+    gone = moved = 0  # frames where a piece that left the object's place was left out; the frame where the object was seen to move in the scene
     seat = np.zeros(2)  # the background's move at the frame before, in whole small pixels
     open0 = line  # where the object stood on frame 0, moved with the background: frame 0 showed these places in view, so the plate knows what covers them
     place, rest = np.zeros(2), np.zeros(2)  # the background's move since frame 0 (small pixels), and what is left of it under a whole pixel
@@ -771,8 +790,12 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                 hide, blocked = None, False  # where the plate stands in front of the object's place; whether the tracker's mask was left out for it
                 if plates is not None and still is not False:
                     lum, colours = plates[t - start]
-                    if t == 0:
-                        ground = colours
+                    if t == 0:  # frame 0 in the middle of the scene's map, with room for one frame on each side
+                        hs, ws = lum.shape
+                        ground, learnt = [np.zeros((3 * hs, 3 * ws, 3), np.float32) for _ in colours], np.zeros((3 * hs, 3 * ws), np.uint8)
+                        for i in (0, 1):
+                            ground[i][hs:2 * hs, ws:2 * ws] = colours[i]
+                        learnt[hs:2 * hs, ws:2 * ws] = 1
                     else:
                         dy, dx = plate_move(before, lum)
                         place += (dy, dx)
@@ -790,11 +813,11 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                 near = grow(line, reach * min(1 + lost, 4)) if line.any() else np.zeros((h, w), bool)
                 core = s & near  # SAM's mask near the region: what lies further away is left out, even joined to it
                 strays += bool((s & ~near).any())
-                if hide is not None and 2 * int((core & hide).sum()) > int(core.sum()):  # most of the tracker's mask lies on covered places
-                    if 4 * int((core & prev).sum()) >= 3 * max(int(core.sum()), int(prev.sum())) and 2 * int(core.sum()) >= int(line.sum()):
-                        still, hide = False, None  # it is the matte of the frame before, whole: the object rides something that moves, and the plate is not asked again
-                    else:
-                        core, blocked = np.zeros((h, w), bool), True  # it is what stands in front
+                here = grow(open0, reach / 2) if hide is not None else None  # the object's place of frame 0, with a margin of half a zone
+                if hide is not None and 2 * int((core & hide).sum()) > int(core.sum()):  # most of the tracker's mask lies on covered places: it is what stands in front
+                    core, blocked = np.zeros((h, w), bool), True
+                elif hide is not None:
+                    core = core & ~(hide & ~here)  # beyond the object's place, the tracker's mask counts only in view
                 peak = max(peak, int(core.sum()))
                 found, follows = core, True
                 if block is not None and (core.any() or line.any()):
@@ -812,7 +835,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                         joined = np.unique(labels[(shown & grow(core, thin)) | (bulk(shown) & grow(line & ~hide, thin))])
                         joined = joined[joined > 0]
                         areas, covered = np.bincount(labels[changed]), np.bincount(labels[changed & hide], minlength=int(labels.max()) + 1)
-                        gain = np.isin(labels, joined[2 * covered[joined] <= areas[joined]]) & ~(hide & open0)
+                        gain = np.isin(labels, joined[2 * covered[joined] <= areas[joined]]) & ~hide  # of an area that lies mostly in view, what is in view
+                        gain |= np.isin(labels, joined[4 * covered[joined] <= areas[joined]]) & hide & here & ~open0  # and, when a quarter of it at most is covered, its covered part in the margin around the place: there the plate may have first shown something that has left
                     if int(gain.sum()) > 3 * max(peak, 1):  # never a runaway: changes far beyond the object's size stay out
                         gain, follows = (gain & grow(core, reach) if core.any() else np.zeros_like(core)), False
                         guarded += 1
@@ -820,6 +844,14 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                         added += 1
                         most = max(most, float((core | gain).sum()) / max(int(core.sum()), 1))
                     found = core | gain
+                if hide is not None and found.any():  # it stands still: a piece that has left its place, with what stands in front or alone, is not the object
+                    whole = found
+                    if 4 * int((found & here).sum()) >= int(open0.sum()):  # the object is seen at its place: what is joined to it there counts
+                        found = touching(found, here)
+                    else:  # it is not: beyond its place, nothing can be told from what passes there
+                        found = found & here
+                    core = core & found
+                    gone += bool(bulk(whole & ~found).any())
                 seen += bool(core.any())
                 hidden = int((line & hide).sum()) if hide is not None else 0  # the part of the object's place that the plate covers
                 last = int(core.sum()) + hidden if core.any() else last
@@ -842,8 +874,9 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                 if plates is not None and t == 0:
                     home = f
                 elif plates is not None and still is None:
-                    if found.any() and bulk(found & ~grow(home, reach / 2)).any():
-                        still = False  # it moves in the scene: followed as before
+                    body = bulk(found)  # without thin lines: a changed area that a thin line joins to the object is not the object moving
+                    if body.any() and bulk(touching(body, grow(home, thin)) & ~grow(home, reach / 2)).any():
+                        still, moved = False, t  # it moves in the scene: followed as before
                     elif t >= min(FOLLOW_STILL, n - 1):
                         still = True
     areas, solid = out.reshape(n, -1).sum(1), cores.reshape(n, -1).sum(1)
@@ -871,8 +904,12 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
         summary += f"; on {guarded} frame(s) the changes were far larger than the object, and only those at SAM's mask were kept"
     if smoothed:
         summary += f"; {smoothed} frame(s) larger than {FOLLOW_SPIKE:g} times the frames around them were brought back to what those frames hold"
+    if moved:
+        summary += f"; the object moved in the scene on frame {moved}, so the plate is not asked what stands in front of it"
     if fronts:
         summary += f"; the plate stood in front of the object's place on {fronts} frame(s), and what stood there is left out"
+    if gone:
+        summary += f"; what left the object's place, on {gone} frame(s), is left out"
     if n:
         ratio = out.reshape(n, -1).sum(1) / size
         worst = int(ratio.argmax())
