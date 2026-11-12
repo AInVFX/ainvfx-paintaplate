@@ -16,6 +16,21 @@ def posts(port):  # how many jobs the page has posted to the mock ComfyUI
         return len(json.loads(r.read()))
 
 
+def quiet(page, port, still=1000):  # how many jobs are posted once none has arrived for `still` ms
+    count = posts(port)
+    while True:
+        page.wait_for_timeout(still)
+        now = posts(port)
+        if now == count:
+            return count
+        count = now
+
+
+def posted(port):  # what each job posted so far writes, in order: a failed check names the job that should not have been posted
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/mock/posts", timeout=5) as r:
+        return [p["outputs"] for p in json.load(r)]
+
+
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
@@ -87,11 +102,11 @@ def run(browser, port, U):
     hold(port, output="patch", seconds=30)
     page.keyboard.press("n"); page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.70, 0.75), (0.80, 0.75)]); page.keyboard.press("Enter")
     page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
-    page.keyboard.press("Escape"); page.wait_for_timeout(300)
-    before = posts(port)
+    page.keyboard.press("Escape")
+    before = quiet(page, port)  # a job already on its way when Esc was pressed can still arrive: count once none has for a second
     page.click("#history li:last-child .again"); page.mouse.move(5, 5); page.wait_for_timeout(1500)
     U.check(posts(port) == before and status().endswith("It waits for Enter.") and states() == ["Drawing", "Waits for Enter"],
-            f"Try another under a stop posts nothing and says that it waits: {status()} History {states()}")
+            f"Try another under a stop posts nothing and says that it waits: {status()} History {states()}, posted since: {posted(port)[before:]}")
     page.evaluate(U.WATCH)
     page.keyboard.press("Enter")
     page.wait_for_function(U.DONE.format(n=4), timeout=120000)
@@ -122,8 +137,10 @@ def run(browser, port, U):
     page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
     page.keyboard.press("Escape")
     page.wait_for_function(f"{STATUS}.startsWith('Stopped')", timeout=10000)
-    U.open_path(page, "plates/desk.mp4")
-    page.wait_for_function(OPEN, timeout=60000)
+    opened = "[...document.querySelectorAll('#log li span')].filter((e) => e.textContent.startsWith('Plate desk')).length"
+    before = page.evaluate(opened)
+    U.open_path(page, "plates/desk.mp4")  # the same plate again: OPEN holds before the open has begun, so wait for the open's own line and an empty History
+    page.wait_for_function(f"{opened} > {before} && document.querySelector('#opening').hidden && document.querySelectorAll('#history li').length === 0", timeout=60000)
     page.keyboard.press("b"); U.paint_once(page, "a green lamp", [(0.60, 0.40), (0.70, 0.40)]); page.keyboard.press("n")
     U.check(U.until(page, U.DONE.format(n=1), 60000) and U.row_words(page) == ["a green lamp"], f"a stop ends when another plate opens, and its first edit runs without Enter: History {U.row_words(page)}")
     page.close()
