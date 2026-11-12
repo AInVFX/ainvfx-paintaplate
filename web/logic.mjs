@@ -780,9 +780,12 @@ export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", clean: "ltx
 // Speed first where there is room (Adrien, 11 Nov). Under 24 GB of VRAM the card cannot hold two families of models, so a
 // change of family frees ComfyUI's memory. On a larger card the models stay loaded, and the memory is freed only when
 // RAM is short for the next job's frames: a job that reads the plate can hold RAM_COPIES float32 copies of it (the
-// ingest held 8, measured on 11 Nov). A GPU that runs out of memory is retried once after a free, on every card (comfy.mjs).
-export const RAM_COPIES = 8;
-export const framesNeed = (width, height, frames) => RAM_COPIES * width * height * frames * 12 + 4 * 2 ** 30; // bytes of RAM: the copies, and 4 GB to work in
+// open of 1.11.8 held 8, measured on 11 Nov). The open itself holds the plate once since 1.11.9: 2.8 copies at its peak
+// on the laptop and 1.9 on a pod (12 Nov), so `ingest` counts RAM_COPIES_OPEN. A GPU that runs out of memory is retried
+// once after a free, on every card (comfy.mjs).
+export const RAM_COPIES = 8, RAM_COPIES_OPEN = 3;
+export const framesNeed = (width, height, frames, name = "") => // bytes of RAM for the job `name`: the copies, and 4 GB to work in
+  (name === "ingest" ? RAM_COPIES_OPEN : RAM_COPIES) * width * height * frames * 12 + 4 * 2 ** 30;
 export function freesBefore(profile, last, name, room = null) { // room: { free, need } in bytes of RAM, where ComfyUI gives it
   if (!last || FAMILY[name] === FAMILY[last]) return false;
   return !!profile?.frees || (!!room && room.free < room.need);
