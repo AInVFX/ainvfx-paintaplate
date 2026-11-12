@@ -133,6 +133,14 @@ class PlateIO(unittest.TestCase):
         assert [plateio.pad_count_8n1(n) for n in (1, 2, 9, 10, 97, 100, 121)] == [1, 9, 9, 17, 97, 105, 121]
         print("8n+1 padding: ok")
 
+    def test_largest_side(self):
+        """Save Movie sizes a frame as core's Scale Image to Max Dimension would: the same width and height."""
+        sizes = [((1920, 1080), 1920), ((3840, 2160), 1920), ((1080, 1920), 960), ((2048, 858), 960), ((192, 108), 960),
+                 ((64, 64), 32), ((5120, 2701), 4096), ((1920, 1080), 0)]
+        assert [plateio.largest_side(w, h, n) for (w, h), n in sizes] == [
+            (1920, 1080), (1920, 1080), (540, 960), (960, 402), (960, 540), (32, 32), (4096, 2161), (1920, 1080)]
+        print("the longer side at a size, as core rounds it: ok")
+
 
 class Sequences(unittest.TestCase):
     def test_numbers_too_far_apart_count_files(self):

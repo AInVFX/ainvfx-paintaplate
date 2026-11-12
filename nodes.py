@@ -144,16 +144,20 @@ class LoadPlate(io.ComfyNode):
                 return part
             with ThreadPoolExecutor(WORKERS) as pool:
                 parts = list(pool.map(read, files))
-        images = torch.cat([p.images for p in parts])[:max_frames]
-        if parts[0].alpha is not None:
-            alpha = torch.cat([p.alpha[..., -1] for p in parts])[:max_frames]
-        else:
-            alpha = torch.ones(images.shape[:3], dtype=images.dtype, device=images.device)
+        def whole(tensors):  # a video is one part: its decoded frames are the plate, held once
+            return (tensors[0] if len(tensors) == 1 else torch.cat(tensors))[:max_frames]
+        images = whole([p.images for p in parts])
         count = images.shape[0]
+        extra = plateio.pad_count_8n1(count) - count if pad_8n1 else 0
+        if parts[0].alpha is not None:
+            alpha = whole([p.alpha[..., -1] for p in parts])
+            if extra:
+                alpha = torch.cat([alpha, alpha[-1:].expand(extra, -1, -1)])
+        else:  # an opaque plate: one frame of ones stands for every frame, and takes one frame of memory
+            alpha = torch.ones((1, *images.shape[1:3]), dtype=images.dtype, device=images.device).expand(count + extra, -1, -1)
         spec.update(frames=count, color_space_guess=plateio.guess_color_space(spec))
-        if pad_8n1 and (extra := plateio.pad_count_8n1(count) - count):
+        if extra:
             images = torch.cat([images, images[-1:].expand(extra, -1, -1, -1)])
-            alpha = torch.cat([alpha, alpha[-1:].expand(extra, -1, -1)])
         device, dtype = mm.intermediate_device(), mm.intermediate_dtype()
         return io.NodeOutput(images.to(device=device, dtype=dtype), alpha.to(device=device, dtype=dtype),
                              spec, float(spec["fps"]), count, plateio.spec_json(spec))
@@ -178,15 +182,19 @@ class ColorSpace(io.ComfyNode):
                 io.String.Input("source", default="@model", tooltip="A colour space of the config (a name, an alias or a "
                                 "role such as scene_linear), or @model or @linear."),
                 io.String.Input("destination", default="@model", tooltip="The same, for the result."),
+                io.Image.Input("peak_of", optional=True,
+                               tooltip="The batch these frames are a part of. Into @model, the tone mapping takes that batch's "
+                                       "peak: a frame converted alone has the values it has in the whole batch converted."),
             ],
             outputs=[io.Image.Output(display_name="image")],
         )
 
     @classmethod
-    def execute(cls, image, config, source, destination) -> io.NodeOutput:
+    def execute(cls, image, config, source, destination, peak_of=None) -> io.NodeOutput:
         if source == destination:
             return io.NodeOutput(image)
-        return io.NodeOutput(to_image(ocio.convert(frames_np(image), config, source, destination)))
+        peak = ocio.batch_peak(frames_np(peak_of), config, source) if peak_of is not None and destination == ocio.MODEL else None
+        return io.NodeOutput(to_image(ocio.convert(frames_np(image), config, source, destination, peak)))
 
 
 class SavePlate(io.ComfyNode):
@@ -661,7 +669,8 @@ class SaveMovie(io.ComfyNode):
             category=CATEGORY,
             description="Saves a batch as an H.264 movie for the page, as core Save Video makes it (crf 18, BT.709, "
                         "limited range), with the frames converted several at once and x264 at preset veryfast: core "
-                        "took 8.3 s for 121 frames at 1920 x 1088.",
+                        "took 8.3 s for 121 frames at 1920 x 1088. With 'destination' or 'largest_size', each frame is "
+                        "converted and sized as it is saved: no second batch of the frames is held in memory.",
             inputs=[
                 io.Image.Input("images"),
                 io.Float.Input("fps", default=24.0, min=1.0, max=240.0),
@@ -673,19 +682,40 @@ class SaveMovie(io.ComfyNode):
                 io.Int.Input("width", default=0, min=0, max=8192, optional=True,
                              tooltip="The movie's width: 0 keeps the frames' size. Scaled with Lanczos while it converts."),
                 io.Int.Input("height", default=0, min=0, max=8192, optional=True, tooltip="The movie's height: 0 keeps the frames' size."),
+                io.Int.Input("frames", default=0, min=0, max=4096, optional=True,
+                             tooltip="The frames to save, from the first: 0 saves them all. Load Plate's 'frames' leaves its "
+                                     "8k+1 padding out."),
+                io.String.Input("config", default=ocio.BUILTIN, optional=True,
+                                tooltip="The OpenColorIO config of 'source' and 'destination', as in Color Space (OCIO)."),
+                io.String.Input("source", default="@model", optional=True, tooltip="The frames' colour space."),
+                io.String.Input("destination", default="@model", optional=True,
+                                tooltip="The movie's colour space. Each frame is converted as it is saved, to the values "
+                                        "Color Space (OCIO) gives the whole batch."),
+                io.Int.Input("largest_size", default=0, min=0, max=8192, optional=True,
+                             tooltip="The frames' longer side before the movie is made, by area averaging as core's Scale "
+                                     "Image to Max Dimension: 0 keeps their size. Each frame is sized as it is saved."),
             ],
             is_output_node=True,
         )
 
     @classmethod
-    def execute(cls, images, fps, filename_prefix, crf=18, width=0, height=0) -> io.NodeOutput:
-        n, h, w = images.shape[0], images.shape[1], images.shape[2]
+    def execute(cls, images, fps, filename_prefix, crf=18, width=0, height=0, frames=0, config=ocio.BUILTIN, source="@model",
+                destination="@model", largest_size=0) -> io.NodeOutput:
+        n = min(frames, images.shape[0]) if frames else images.shape[0]
+        w, h = plateio.largest_side(images.shape[2], images.shape[1], largest_size)
+        converts = source != destination
+        peak = ocio.batch_peak(frames_np(images[:n]), config, source) if converts and destination == ocio.MODEL else None
         folder, name, counter, sub, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory(), w, h)
         file = f"{name}_{counter:05}_.mp4"
         bar = comfy.utils.ProgressBar(n)
 
-        def frame(i):  # as core Save Video: scaled by 255 and clipped, not rounded
-            return np.clip(255.0 * images[i].float().cpu().numpy(), 0, 255).astype(np.uint8)
+        def frame(i):  # one frame at a time, so no second batch is made: converted, sized with area, then as core Save Video
+            x = images[i:i + 1]
+            if converts:
+                x = to_image(ocio.convert([x[0].float().cpu().numpy()], config, source, destination, peak))
+            if x.shape[1:3] != (h, w):
+                x = comfy.utils.common_upscale(x.movedim(-1, 1), w, h, "area", "disabled").movedim(1, -1)
+            return np.clip(255.0 * x[0].float().cpu().numpy(), 0, 255).astype(np.uint8)  # scaled by 255 and clipped, not rounded
 
         plateio.write_movie(stoppable(frame), n, os.path.join(folder, file), fps, workers=WORKERS, crf=crf, tick=lambda: bar.update(1),
                             size=(width, height))
