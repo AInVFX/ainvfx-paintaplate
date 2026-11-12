@@ -123,6 +123,16 @@ def flow(page, url, open_plate, shots, wait_s=120):
     return final, names
 
 
+def rows(i, fluid):
+    """History's rows once edit `i` (from 0) is made: a fluid shot has a row of its own."""
+    return i + 1 + bool(fluid)
+
+
+def stage(note):
+    """The stage that a note of the render names: « preview about 14 s left » and « preview almost ready » are « preview »."""
+    return note.split(" about ")[0].split(" almost ")[0]
+
+
 def answers(url):
     """Whether the ComfyUI at `url` still answers. On 11 Nov a memory cap stopped ComfyUI during a render, twice: the page
     waited, this script with it, and no report was written."""
@@ -302,13 +312,13 @@ def remote(a):
                     stroke(page, box, pts); mark(f"{key} stroke")
                     page.keyboard.press("Enter")  # Generate
                     page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)
-                    page.wait_for_function(DONE.format(n=i + 1), timeout=max(300, 2 * a.timeout) * 1000)  # a small card loads its models in turn
+                    page.wait_for_function(DONE.format(n=rows(i, fluid)), timeout=max(300, 2 * a.timeout) * 1000)  # a small card loads its models in turn
                     mark(f"{key} edit on the first frame | {status()}"); page.screenshot(path=f"{shots}/2_{key}_done.png")
                 seen, silent, asked = set(), 0, time.time()
                 deadline = time.time() + a.timeout * 8
                 while time.time() < deadline:
                     note = page.inner_text("#render-left")
-                    tag = note.rsplit(" ", 1)[0] if note else status()[:40]
+                    tag = stage(note) if note else status()[:40]
                     if tag not in seen:
                         seen.add(tag); mark("stage: " + (note or status()))
                     if note == "full size ready" or "Error" in status() or status().startswith("Missing"):

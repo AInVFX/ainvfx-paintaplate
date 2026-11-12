@@ -1,6 +1,7 @@
 """tests/gpu_matrix.py: what it reads from a case's page log and from ComfyUI's history. tools/runpod_start.sh: what a
 start keeps. No GPU and no browser."""
 import contextlib
+import importlib.util
 import io
 import os
 import shutil
@@ -93,6 +94,24 @@ class Run(unittest.TestCase):
         calls, code, report = self.matrix("horse_cow,horse_erase", [True])
         self.assertEqual((calls, code), (["horse_cow", "horse_erase"], 0))
         self.assertNotIn("not run", report)
+
+
+@unittest.skipUnless(importlib.util.find_spec("playwright"), "tests/ui_live.py imports Playwright")
+class Live(unittest.TestCase):
+    """tests/ui_live.py: the two rules that read the page's History and its render note."""
+
+    def test_a_fluid_shot_has_its_own_history_row(self):
+        """fluid_1080_edit waited 600 s for one row after its first edit, and History held two (pod, 11 Nov)."""
+        import ui_live
+        self.assertEqual([ui_live.rows(0, None), ui_live.rows(1, None)], [1, 2])
+        self.assertEqual(ui_live.rows(0, {"size": [1920, 1088]}), 2)
+
+    def test_a_stage_is_marked_once(self):
+        """The laptop's horse_cow of 12 Nov wrote 61 marks for two stages: the estimate in the note changes every second."""
+        import ui_live
+        notes = ["preview about 14 s left", "preview about 3 s left", "preview almost ready", "full size about 8 min 20 s left",
+                 "full size about 2 min 50 s left", "full size ready"]
+        self.assertEqual([ui_live.stage(note) for note in notes], ["preview"] * 3 + ["full size"] * 2 + ["full size ready"])
 
 
 @unittest.skipUnless(shutil.which("bash"), "tools/runpod_start.sh is a bash script")
