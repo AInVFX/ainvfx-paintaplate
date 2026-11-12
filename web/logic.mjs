@@ -459,6 +459,7 @@ export const framePattern = (name) => name.replace(/(\d+)(\D*)$/, (_, d, rest) =
 export function plainError(message) {
   const m = String(message ?? "");
   if (/out of memory|allocation on device/i.test(m)) return "the GPU ran out of memory.";
+  if (/ComfyUI stopped answering/i.test(m)) return "ComfyUI stopped answering. Its terminal says why: most often the machine ran out of memory. Start ComfyUI again.";
   if (/No answer from ComfyUI|is not valid JSON|Unexpected end of JSON input|Failed to fetch|NetworkError/i.test(m)) return "ComfyUI did not answer: it may be restarting, or the connection dropped.";
   const empty = m.match(/No image frames found in (\S+)/);
   if (empty) {

@@ -128,7 +128,7 @@ export function upload(blob, name, sub, onProgress, signal) { // XMLHttpRequest,
     const x = new XMLHttpRequest();
     x.open("POST", "/upload/image");
     x.upload.onprogress = (e) => onProgress?.(e.loaded);
-    x.onerror = () => reject(new Error(`Upload failed: ${name}`));
+    x.onerror = () => reject(new Error(`Upload failed: ${name}: No answer from ComfyUI`)); // the request never arrived: ComfyUI is not there
     x.onabort = () => reject(new Error("cancelled")); // Cancel on the opening screen
     signal?.addEventListener("abort", () => x.abort(), { once: true });
     x.onload = () => { // an answer that is not ComfyUI's JSON (a proxy's error page) fails the upload, never hangs it
@@ -276,17 +276,29 @@ function message({ data }) {
   else if (type === "execution_interrupted") finish(d.prompt_id, "cancelled");
 }
 
+// ComfyUI can stop while a job runs: a memory limit, a crash, a closed terminal. Its socket closes and it answers nothing,
+// so a job would wait for ever and the page with it (11 Nov, twice, on a 16 GB card under a memory cap). After GONE_POLLS
+// polls in a row with the socket closed and no answer, every job ComfyUI held fails, with what to do in its error.
+export const GONE = "ComfyUI stopped answering"; // logic.plainError says what to do
+const GONE_POLLS = 10; // 15 s
+let unanswered = 0;
 async function poll() { // some networks block WebSockets: then, and for prompts gone quiet, ask /history
+  let missed = false;
   for (const job of [...byId.values()]) {
     if (socket && Date.now() - job.heard < QUIET_MS) continue;
     let st;
-    try { st = (await (await fetch(`/history/${job.id}`)).json())[job.id]?.status; } catch { continue; }
+    try { st = (await (await fetch(`/history/${job.id}`)).json())[job.id]?.status; } catch { missed = true; continue; }
     if (!st || !byId.has(job.id)) continue;
     job.heard = Date.now();
     const err = st.messages?.find((m) => m[0] === "execution_error")?.[1];
     if (st.status_str === "error") finish(job.id, st.messages?.some((m) => m[0] === "execution_interrupted") ? "cancelled"
       : err ? `${err.node_type}: ${err.exception_message}` : "The workflow failed");
     else if (st.completed) finish(job.id);
+  }
+  unanswered = missed && !socket ? unanswered + 1 : 0;
+  if (unanswered >= GONE_POLLS) {
+    unanswered = 0;
+    for (const id of [...byId.keys()]) finish(id, GONE);
   }
 }
 

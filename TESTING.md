@@ -63,6 +63,7 @@ The mock's own routes, for the checks that need a window held open or a look at 
 | `POST /mock/hold` | The next `times` jobs that write `output`, or fill `slot`, last `seconds` each, at any `--speed`. An interrupt still ends them |
 | `POST /mock/oom` | The next `times` jobs of `workflow` run out of GPU memory, with ComfyUI's own message |
 | `POST /mock/card` | The card `/system_stats` reports from now on, in bytes: `{"vram": 17.2e9, "ram": 65.5e9}` is a 16 GB card with 61 GB of RAM. The memory profile's checks use it |
+| `POST /mock/quit` | The mock stops at once, as a ComfyUI that the system stopped for its memory: nothing answers any more |
 | `GET /mock/posts` | What each post asked for: its outputs, its `extra_data` (the previews it wants), and whether it sends a live preview |
 | `GET /mock/events` | The out-of-memory check's timeline: the failure, `/free`, every fluid job posted |
 
@@ -89,6 +90,7 @@ The mock's own routes, for the checks that need a window held open or a look at 
 | `viewer` | `tests/flows/viewer.py`. The Color Inspector: a 4K EXR plate's half floats as stored, a new frame and a dragged box read again, and a read held on its way never shows the new point with the old point's values. Two passes in the wipe: Ctrl+click puts a paint matte on the left side against the full-size composite, both named; the inspector reads each side, and a preview pass at its own size; Esc, a second Ctrl+click and F6 end it. The X-ray: W tints where the paint changes the plate from the full-size tracking mattes, then from the export's matte once Export made one, and the whole frame once a light edit is on show |
 | `codebase_log` | `tests/flows/codebase_log.py`. The codebase workstream's page checks for the log. The status line says what to do next and the log records what happened: a hint shows in the status line only, and a fact is written to the log once. |
 | `pipeline_previews` | `tests/flows/pipeline_previews.py`. The pipeline workstream's page checks for memory and previews: the memory profile at page open, and what each post asks ComfyUI for. The mock ComfyUI lists the posts at /mock/posts. |
+| `render_gone` | `tests/flows/render_gone.py`. ComfyUI stops while an edit is generated (the mock stops at `/mock/quit`): the page says that ComfyUI does not answer, and nothing stays busy. |
 | `render_log` | `tests/flows/render_log.py`. The render workstream's page checks for the log. The log says each fact once: the memory profile is one line, a job writes one line when it ends, and a blank plate writes no line of its own. On a card under 24 GB every LTX pass still asks for its live previews. The mock ComfyUI takes the card's size at /mock/card and lists the posts at /mock/posts. |
 | `viewer_depends` | `tests/flows/viewer_depends.py`. After Generate, an edit above that depends on the changed edit runs again. Until its own pass ends it is off the first frame, and its History row reads « Waits to be generated again ». An edit that does not depend on the change stays on the frame and is not generated again. |
 | `viewer_edit` | `tests/flows/viewer_edit.py`. The viewer's checks on a stop and what follows it. Esc or Stop on the edit being generated keeps the edit and its strokes; nothing of a stopped pass stays in the frame; an edit being changed shows without its old result; strokes replay in the order they were made. The mock holds a job open (/mock/hold), so every check meets the pass it stops. |
@@ -96,7 +98,7 @@ The mock's own routes, for the checks that need a window held open or a look at 
 | `viewer_play` | `tests/flows/viewer_play.py`. The viewer's checks on playback. The frame cache fills inside one memory budget, at the size the frame is shown. Once every frame between the in and out points is in memory, the plate and the shot play from memory, on a clock, with the videos paused. A pause writes one line of statistics. A budget too small for the range keeps a window of frames, and the videos play. The mock serves VP9 and the sandbox draws WebGL in software: these checks prove the logic, a GPU the speed. |
 | `viewer_stop` | `tests/flows/viewer_stop.py`. A stop stops everything. After Esc on the edit being generated, no job is posted until Enter: an edit that waited for its turn stays queued, a stroke asks for nothing, and Enter runs the stopped edit with its own words, then what waited. Then: once SAM has found the object under an erase stroke, the status line says so. |
 
-Every module of `tests/flows` is a flow, named after its file (`tests/flows/README.md`). On 11 November 2026 the suite had 27 flows and 270 checks.
+Every module of `tests/flows` is a flow, named after its file (`tests/flows/README.md`). On 11 November 2026 the suite had 28 flows and 272 checks.
 
 ## CI
 

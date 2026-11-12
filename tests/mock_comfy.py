@@ -478,6 +478,11 @@ async def object_info_route(request):
     return web.json_response({cls: {"input": {"required": required}}})
 
 
+async def quit_route(request):  # the mock stops at once, as a ComfyUI that the system stopped for its memory: nothing answers any more
+    asyncio.get_running_loop().call_later(0.2, os._exit, 0)
+    return web.json_response({})
+
+
 async def free_route(request):  # ComfyUI releases memory between prompts: here, one second after /free
     EVENTS.append(("free", time.time()))
     STATE["release_at"] = time.time() + 1.0
@@ -559,6 +564,7 @@ async def start():
     app.router.add_get("/object_info/{cls}", object_info_route)
     app.router.add_get("/system_stats", system_stats_route)
     app.router.add_post("/free", free_route)
+    app.router.add_post("/mock/quit", quit_route)
     app.router.add_post("/mock/oom", oom_route)
     app.router.add_post("/mock/slow", slow_route)
     app.router.add_post("/mock/hold", hold_route)

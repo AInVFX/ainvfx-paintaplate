@@ -719,3 +719,10 @@ test("every workflow has a family, and the small profile frees ComfyUI's memory 
   assert.equal(freesBefore(small, null, "ingest"), false); // the first job: nothing to free
   assert.equal(freesBefore(large, "shot", "matte"), false);
 });
+
+test("a ComfyUI that stopped is said in plain words, with what to do", async () => {
+  const { plainError } = await import("../../web/logic.mjs");
+  assert.equal(plainError("ComfyUI stopped answering"), "ComfyUI stopped answering. Its terminal says why: most often the machine ran out of memory. Start ComfyUI again.");
+  assert.equal(plainError("Upload failed: patch.png: No answer from ComfyUI"), "ComfyUI did not answer: it may be restarting, or the connection dropped.");
+  assert.equal(plainError("Upload failed: patch.png"), "the browser could not send a picture to ComfyUI."); // ComfyUI answered, and refused the file
+});
