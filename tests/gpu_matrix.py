@@ -55,6 +55,7 @@ STEP = re.compile(r"Render v(\d+): (.+?) took ([\d.]+) s")  # the page's log: on
 # them is a model not loaded again) and the previews the page received. A line starts with its time, with no space after it
 JOB = re.compile(r"([a-z]+) ([0-9a-f?]{1,8}): done in ([\d.]+) s \((\d+) nodes?(?:, (\d+) from ComfyUI's cache)?(?:, (\d+) previews?)?")
 ENDED = re.compile(r"([a-z]+ [0-9a-f?]{1,8}: (?:failed|stopped) after [^\n]*)")  # a job that did not finish says so in one line
+RETRY = "The GPU ran out of memory: freeing ComfyUI's memory, then trying once more"  # the page's one line for a retry (web/comfy.mjs)
 GB = 2 ** 30
 
 
@@ -189,7 +190,7 @@ def read_log(text):
         "jobs": jobs,
         "ended": ENDED.findall(text),
         "indexed": text.count("taken from the job index"),
-        "oom": text.count("ran out of memory"),
+        "oom": text.count(RETRY),
         "previews": sum(j["previews"] for j in jobs),
         "live_off": re.findall(r"Live preview is off: ([^\n]*)", text),
         "profile": f"{profile.group(1)} ({profile.group(2)})" if profile else "not in the log's last 400 lines",

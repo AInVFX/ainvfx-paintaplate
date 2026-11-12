@@ -19,6 +19,16 @@ LOG = """15:02:31ingest ef88a8f3: done in 2.0 s (10 nodes, 3 from ComfyUI's cach
 
 
 class Report(unittest.TestCase):
+    def test_a_retry_is_counted_by_its_own_line(self):
+        """The laptop's erase of 12 Nov showed one out-of-memory retry where none happened: ComfyUI had stopped, and the
+        page's message for a stop also says « ran out of memory »."""
+        stopped = ("09:14:58Erase pass, full size failed: ComfyUI stopped answering. Its terminal says why: most often the machine "
+                   "ran out of memory. Start ComfyUI again. Generate tries again.\n")
+        self.assertEqual(gpu_matrix.read_log(stopped)["oom"], 0)
+        self.assertEqual(gpu_matrix.read_log(stopped + "09:15:00" + gpu_matrix.RETRY + ".\n")["oom"], 1)
+        with open(os.path.join(gpu_matrix.REPO, "web", "comfy.mjs"), encoding="utf-8") as f:
+            self.assertIn(gpu_matrix.RETRY, f.read(), "the page's own words for a retry")
+
     def test_a_job_is_read_from_its_one_line(self):
         r = gpu_matrix.read_log(LOG)
         self.assertEqual([(j["name"], j["id"], j["seconds"], j["nodes"], j["cached"], j["previews"]) for j in r["jobs"]],
