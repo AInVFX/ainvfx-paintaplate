@@ -568,6 +568,92 @@ class FollowMatteBehindThePlate(unittest.TestCase):
         self.assertRegex(summary, r"largest matte is \d\.\d times the object, on frame \d+$")  # reported, with no warning
 
 
+class FollowMatteLeftItsPlace(unittest.TestCase):
+    """The cow that walks away with the horse (12 Nov 2026, the laptop's preview), as a scene written here at 320 px.
+    The background moves 2 px a frame. A painted object of 86 x 20 px stands still in the scene for 28 frames. An
+    object of the plate, 124 px wide, stays in the frame and comes within 4 px of it on frame 28. From there the shot
+    draws the painted object beside it, moving with it, and the tracker returns it on every frame. From frame 70 the
+    shot also changes the object in front. The object's own place goes on with the background: by frame 80 the piece
+    has left it, margin of half a zone included."""
+    N, H, W = 121, 182, 320
+    FRONT = (slice(30, 170), slice(29, 153))
+
+    def scene(self):
+        rng = np.random.default_rng(12)
+        n, h, w = self.N, self.H, self.W
+        land = ndimage.gaussian_filter(rng.random((h, w + 2 * n, 3)).astype(np.float32), (2, 2, 0))
+        land = np.clip(0.5 + 3 * (land - land.mean()), 0, 1)
+        base = np.stack([land[:, 2 * t:2 * t + w] for t in range(n)])
+        base[(slice(None),) + self.FRONT] = (0.55, 0.25, 0.10)
+        shot, sam, shown = base.copy(), np.zeros((n, h, w), np.float32), np.zeros((n, h, w), bool)
+        for t in range(n):
+            x = 213 - 2 * min(t, 28)  # with the background for 28 frames, then with the object in front
+            shown[t, 96:116, x:x + 86] = True
+            shot[t][shown[t]] = (0.9, 0.85, 0.8)
+            if t < 11:
+                sam[t, 63:149, 207 - 2 * t:305 - 2 * t] = 1  # the zone it was given
+            else:
+                sam[t] = shown[t]
+        shot[70:, 90:122, 120:153] = (0.3, 0.2, 0.15)
+        return sam, shown, shot, base
+
+    def test_a_piece_that_leaves_the_objects_place_with_what_stands_in_front_is_left_out(self):
+        sam, shown, shot, base = self.scene()
+        out, summary = m.follow_matte(sam, self.N, sam[0], shot=shot, base=base, zone=1 / 16, threshold=0.1, element=shown[0].astype(np.float32))
+        matte = out > 0.5
+        for t in range(12, 28):  # in its place, it is followed as before
+            self.assertGreaterEqual(int((matte[t] & shown[t]).sum()), 0.9 * int(shown[t].sum()), f"frame {t}")
+        self.assertEqual(int(matte[80:].sum()), 0)  # once it has left its place, nothing: the plate shows there (at 9aa332a the matte went with it to the last frame)
+        self.assertEqual(int(matte[(slice(None),) + self.FRONT].sum()), 0)  # and never what stands in front
+        self.assertIn("what left the object's place", summary)
+        self.assertRegex(summary, r"largest matte is \d\.\d times the object, on frame \d+$")
+
+
+class FollowMatteErasedBehindThePlate(unittest.TestCase):
+    """An erase: the object is the plate's own, and the frames the tracker read are the plate (12 Nov 2026: an erased
+    barn passed behind the horse, the matte held its last 30 px at one place of the frame for 65 frames, and left the
+    barn out as too far when the tracker found it again)."""
+
+    def test_the_matte_is_empty_while_hidden_and_takes_the_trackers_mask_again(self):
+        _, shown, _, base = FollowMatteBehindThePlate().scene()  # the same scene, with the object in the plate: hidden on frames 58 to 76
+        n = len(shown)
+        plate = base.copy()
+        plate[shown] = (0.9, 0.85, 0.8)
+        sam = shown.astype(np.float32)
+        sam[56:80] = 0  # the tracker loses it two frames before it is hidden, and finds it again three frames after it comes out
+        out, summary = m.follow_matte(sam, n, sam[0], base=plate, zone=1 / 16)
+        matte = out > 0.5
+        self.assertEqual(int(matte[58:80].sum()), 0)  # hidden, then not found: nothing held at a place of the frame (at 9aa332a the last matte stayed there to the last frame)
+        for t in list(range(1, 56)) + list(range(80, n)):  # the tracker's mask before, and again from the frame it comes back, 39% of the width away
+            self.assertTrue(np.array_equal(matte[t], shown[t]), f"frame {t}")
+        self.assertIn("stood in front", summary)
+
+    def test_an_erased_object_that_moves_by_itself_is_followed(self):
+        rng = np.random.default_rng(13)
+        n, h, w = 80, 120, 320
+        land = np.clip(0.5 + 3 * (ndimage.gaussian_filter(rng.random((h, w, 3)).astype(np.float32), (2, 2, 0)) - 0.5), 0, 1)
+        plate, sam = np.repeat(land[None], n, 0), np.zeros((n, h, w), np.float32)
+        for t in range(n):
+            x = 40 + 2 * max(0, t - 12)  # it stands for 12 frames, then moves 2 px a frame
+            sam[t, 50:70, x:x + 86] = 1
+            plate[t, 50:70, x:x + 86] = (0.9, 0.85, 0.8)
+        out, summary = m.follow_matte(sam, n, sam[0], base=plate, zone=1 / 16)
+        for t in range(n):  # the plate changes where it goes, and it is still the object
+            self.assertGreaterEqual(int(((out[t] > 0.5) & (sam[t] > 0.5)).sum()), 0.9 * int(sam[t].sum()), f"frame {t}")
+        self.assertIn("moved in the scene", summary)
+
+    def test_a_recording_keeps_the_frames_of_an_erase(self):
+        import tempfile
+        from unittest import mock
+        masks, plate = np.zeros((3, 40, 64), np.float32), np.full((3, 40, 64, 3), 0.25, np.float32)
+        masks[:, 10:20, 20:30] = 1
+        with tempfile.TemporaryDirectory() as folder, mock.patch.dict(os.environ, {"PAINTAPLATE_RECORD": folder}):
+            m.follow_matte(masks, 3, masks[0], base=plate)
+            again = m.replay(os.path.join(folder, os.listdir(folder)[0]))
+        self.assertIsNone(again["shot"])
+        self.assertEqual(again["base"].shape, (3, 40, 64, 3))  # the next recording of an erase replays alone
+
+
 class StoppedFollowMatte(unittest.TestCase):
     def test_the_frame_loop_stops_when_its_check_raises(self):  # nodes.py passes ComfyUI's interrupt check as `tick`
         calls = []

@@ -407,7 +407,7 @@ class FollowMatte(io.ComfyNode):
             inputs=[
                 io.Mask.Input("masks", tooltip="SAM 3.1's masks, one per frame it tracked. It may return fewer, or none."),
                 io.Mask.Input("first", tooltip="The area on the first frame that SAM was asked to follow."),
-                io.Image.Input("frames", tooltip="The frames SAM tracked: their count sets the matte's length. For paint, the shot."),
+                io.Image.Input("frames", tooltip="The frames SAM tracked: their count sets the matte's length. For paint, the shot. For an erase, the plate: Follow Matte asks it what passes in front of the object."),
                 io.Image.Input("base", optional=True, tooltip="The plate the shot was made over, at the same size."),
                 io.Mask.Input("element", optional=True,
                               tooltip="Where the edit changed the first frame: the object's region starts here instead of at first."),
@@ -424,7 +424,8 @@ class FollowMatte(io.ComfyNode):
         shot = frames[..., :3].float().cpu().numpy()
         plate = base[..., :3].float().cpu().numpy() if base is not None else None
         out, summary = mathops.follow_matte(masks.float().cpu().numpy(), len(shot), first.float().cpu().numpy(),
-                                            shot if plate is not None else None, plate, zone=zone, threshold=threshold, tick=Stop(),
+                                            shot if plate is not None else None, plate if plate is not None else shot,  # an erase: the tracked frames are the plate
+                                            zone=zone, threshold=threshold, tick=Stop(),
                                             element=element.float().cpu().numpy() if element is not None else None)
         return io.NodeOutput(torch.from_numpy(out).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()), summary)
 
