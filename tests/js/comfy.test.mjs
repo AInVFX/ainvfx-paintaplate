@@ -124,3 +124,16 @@ test("a job cancelled while the page reads ComfyUI's free RAM is not posted", as
     delete WF.probe;
   }
 });
+
+// ---------- The page workstream, wave 3: the job index key holds the pack's version ----------
+import { indexParts, hashHex } from "../../web/comfy.mjs";
+
+test("the job index key holds the pack's version: a result made by another version never comes back", async () => {
+  const values = { seed: 7, caption: "a red fire" }, key = (version) => indexParts(version, "wf-hash", "plate-id", values);
+  assert.equal(key("1.11.9"), key("1.11.9")); // the same version, workflow file, plate and values: the same key
+  assert.notEqual(key("1.11.9"), key("1.11.10")); // 1.11.9's results are not 1.11.10's
+  assert.notEqual(await hashHex(key("1.11.9")), await hashHex(key("1.11.10")));
+  assert.equal(key(""), null); // the version is not known: no index, so nothing of another version can come back
+  assert.equal(indexParts("1.11.9", undefined, "plate-id", values), null); // a workflow without a hash
+  assert.equal(indexParts("1.11.9", "wf-hash", null, values), null); // a plate that could not be checked
+});

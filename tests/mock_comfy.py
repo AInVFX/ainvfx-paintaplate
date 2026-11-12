@@ -515,6 +515,11 @@ async def oom_route(request):  # mock only: the next `times` jobs of `workflow` 
     return web.json_response({})
 
 
+async def pack_version_route(request):  # mock only: the version /paintaplate/version answers from now on, as a ComfyUI restarted after an update of the pack would
+    sys.modules["routes"].VERSION = (await request.json())["version"]
+    return web.json_response({})
+
+
 async def card_route(request):  # mock only: the card /system_stats reports from now on, in bytes: {"vram": 17.2e9, "ram": 65.5e9} is a 16 GB card with 61 GB of RAM; "ram_free" is the RAM it reports as free
     STATE["card"] = await request.json()
     return web.json_response({})
@@ -572,6 +577,7 @@ async def start():
     app.router.add_post("/mock/hold", hold_route)
     app.router.add_post("/mock/release", release_route)
     app.router.add_post("/mock/card", card_route)
+    app.router.add_post("/mock/version", pack_version_route)
     app.router.add_get("/mock/events", lambda r: web.json_response(EVENTS))
     app.router.add_get("/mock/posts", lambda r: web.json_response(POSTS))
     app.router.add_get("/ws", ws_route)
