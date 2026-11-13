@@ -1,6 +1,6 @@
 # AInVFX Paint a plate: architecture
 
-This document explains what Paint a plate does, how it is built and where each part lives, for anyone who maintains the code. It describes version 1.11.12. `TESTING.md` covers the tests.
+This document explains what Paint a plate does, how it is built and where each part lives, for anyone who maintains the code. It describes version 1.11.13. `TESTING.md` covers the tests.
 
 ## 1. What Paint a plate does
 
