@@ -258,6 +258,11 @@ export function erasesPaint(text, locked, paint, share = 0.5) {
   return painted > 0 && inside / painted >= share;
 }
 
+// An erase with no words whose prompt writer took the stroke for another object (erasesPaint refused its answer) asks for
+// the object's name before Klein runs. On 12 November 2026 the page's own caption went to Klein instead, Klein left the barn,
+// and the shot rendered. With words, the page's own caption carries them, and Klein runs.
+export const asksName = (tool, words) => tool === "erase" && !String(words ?? "").trim();
+
 // The erase pass's prompt: the scene as it stays, in the upsampler's own words for what it kept (rows with a box in the
 // result). People and text stay out (a pose in words fights the plate's own motion), and the erased object is never named
 // (named, the umbrella came back). Nothing kept: no prompt, as LTX's inpainting guide recommends.
