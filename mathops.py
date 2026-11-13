@@ -814,7 +814,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     zoned = line is el and 2 * int(el.sum()) <= given  # a paint zone at least twice the object: the tracker returns the zone first
     out, cores, prev, peak = np.zeros((n, h, w), np.float32), np.zeros((n, h, w), bool), seed, int(seed.sum())
     size, last = np.ones(n, np.int64), max(int(line.sum()), 1)  # the object's area on each frame
-    seen = strays = held = added = lost = guarded = smoothed = fronts = zones = 0
+    seen = strays = held = added = alone = lost = guarded = smoothed = fronts = zones = 0
     most, chunk = 1.0, 2 * max(1, workers)
     still = None  # does the object keep its place in the scene? Not known before frame FOLLOW_STILL
     waiting = []  # the zone's frames before it is known whether the object stands still, each with the object's place
@@ -899,7 +899,10 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                         guarded += 1
                     if int((gain & ~core).sum()) > 0.25 * int(core.sum()) + 16:
                         added += 1
-                        most = max(most, float((core | gain).sum()) / max(int(core.sum()), 1))
+                        if core.any():
+                            most = max(most, float((core | gain).sum()) / int(core.sum()))
+                        else:
+                            alone += 1  # SAM returned nothing here: no ratio to SAM's mask
                     found = core | gain
                 left = False  # whether all that was found has left the object's place
                 if hide is not None and not real and found.any():  # a painted object that stands still: a piece that has left its place, with what stands in front or alone, is not the object
@@ -975,6 +978,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
             summary += f"; the last matte held on {held} frame(s) where the object was not seen"
         if added:
             summary += f"; the shot's changes connected to the object added area on {added} frame(s), up to {most:.1f} times SAM's mask"
+            if alone:
+                summary += f" ({alone} of them with no mask from SAM)"
     if guarded:
         summary += f"; on {guarded} frame(s) the changes were far larger than the object, and only those at SAM's mask were kept"
     if smoothed:
