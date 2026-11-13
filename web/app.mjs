@@ -11,8 +11,8 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { asksName, coreBox, writerBoxes, DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
-  erasePrompt, erasesPaint, erasedShare, eraseLeft, leftHint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
+import { asksName, eraseCheck, coreBox, writerBoxes, DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
+  erasePrompt, erasesPaint, leftHint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
@@ -2078,18 +2078,19 @@ async function generate(edit) {
     if (!alive()) return;
     // a relight shows the frame as the export will make it: Klein's light on the plate's own detail
     edit.patch = await loadImage(viewUrl(outputFile("edit", full, light ? "relit" : "patch")));
-    if (edit.tool === "erase") { // an erase that left its object says so, and its shot does not render (logic.erasedShare)
+    if (edit.tool === "erase") { // an erase that left its object says so, and its shot does not render (logic.eraseCheck)
       const at = p.prev, after = snap(before, at), px = (c) => c.getContext("2d").getImageData(0, 0, at[0], at[1]).data;
       after.getContext("2d").drawImage(edit.patch, 0, 0, at[0], at[1]);
-      const share = erasedShare(px(after), px(snap(before, at)), px(maskAt(edit, at)), at[0], at[1]);
-      const said = share === null ? "" : `${Math.round(share * 100)}% of it changed`;
-      if (eraseLeft(share)) { // it has no result: Generate runs it again once its words, its strokes or its seed change
+      const check = eraseCheck(px(after), px(snap(before, at)), px(maskAt(edit, at)), at[0], at[1]);
+      const said = check.changed === null ? "" : `${Math.round(check.changed * 100)}% of it changed`; // tests/gpu_matrix.py reads « (N% of it changed) »
+      const held = check.edges === null ? "" : `, its edges held at ${check.edges.toFixed(2)}`;
+      if (check.left) { // it has no result: Generate runs it again once its words, its strokes or its seed change
         Object.assign(edit, { patch: null, preview: null, latent: null, state: "failed", left: true, force: false });
         S.running = null;
         recompose(); historyUI(); render(); timelineUI();
-        return told(`Edit ${num(edit)} removed nothing: the object is still on the first frame (${said}). Its shot does not render`, leftHint(edit.prompt), "error");
+        return told(`Edit ${num(edit)} removed nothing: the object is still on the first frame (${said})${held}. Its shot does not render`, leftHint(edit.prompt), "error");
       }
-      if (said) log(`Edit ${num(edit)}: the object left the first frame (${said})`);
+      if (said) log(`Edit ${num(edit)}: the object left the first frame (${said})${held}`);
     }
     Object.assign(edit, { preview: null, latent: null, state: "done", version: ++S.vers, force: false, kept: undefined }); // versions are unique: a kept result never meets a new one
     edit.foot = footprint(edit);

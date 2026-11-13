@@ -574,6 +574,37 @@ export function erasedShare(after, before, mask, w, h, { cell = 4, levels = 12 }
 // The object is still there when less than `least` of it changed. With no mask there is nothing to judge.
 export const eraseLeft = (share, least = 0.02) => share !== null && share < least;
 
+// Whether an erase removed its object, as the page judges it (eraseCheck). The rule above (eraseLeft: under 2% at 12 levels)
+// let through a barn that Klein had only recoloured: 59% of its cells moved (12 Nov 2026). On the probe's 21 results of 13 Nov,
+// what went had 53 to 78% of its cells moved by more than 24 levels and its edges at -0.03 to 0.75 (a fence in front of the
+// barn kept some); what stayed had 0 to 1% and 0.93 to 0.98; a tree half changed had 17% and 0.62. So an object is left when
+// under 30% of it changed, or when its edges held above 0.85. A null figure: nothing to judge by it.
+export const objectLeft = ({ changed, edges }) => changed !== null && (changed < 0.3 || (edges !== null && edges > 0.85));
+
+// The correlation of the gradient's size inside the mask, before and after: 1, the same edges; near 0, none of them. Gray is the
+// mean of red, green and blue; the gradient takes the next pixel across and below (none past the last). null: under 16
+// pixels, or a flat image.
+export function edgesHeld(after, before, mask, w, h) {
+  const gray = (a, k) => (a[k] + a[k + 1] + a[k + 2]) / 3;
+  const grad = (a, x, y, j) => Math.hypot(x + 1 < w ? gray(a, j + 4) - gray(a, j) : 0, y + 1 < h ? gray(a, j + 4 * w) - gray(a, j) : 0);
+  let n = 0, sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const j = (y * w + x) * 4;
+    if (mask[j] < 128) continue;
+    const a = grad(after, x, y, j), b = grad(before, x, y, j);
+    n++; sa += a; sb += b; saa += a * a; sbb += b * b; sab += a * b;
+  }
+  const va = saa - (sa * sa) / n, vb = sbb - (sb * sb) / n;
+  return n < 16 || va <= 0 || vb <= 0 ? null : (sab - (sa * sb) / n) / Math.sqrt(va * vb);
+}
+
+// The check after an erase, one pure function for the page and for the tests on a GPU: the first frame after the edit
+// (`after`), the frame under it (`before`) and the object's mask, all three RGBA at w x h. { changed, edges, left }.
+export function eraseCheck(after, before, mask, w, h) {
+  const changed = erasedShare(after, before, mask, w, h, { levels: 24 }), edges = edgesHeld(after, before, mask, w, h);
+  return { changed, edges, left: objectLeft({ changed, edges }) };
+}
+
 // What to do next, for the status line: an object with no name gets one; a named object gets other words or another seed.
 export const leftHint = (words) =>
   (words ? "Describe it with other words, then Generate, or press Ctrl+Enter for another seed." : "Type its name in the prompt bar, then Generate.");

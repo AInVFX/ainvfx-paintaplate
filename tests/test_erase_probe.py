@@ -165,6 +165,7 @@ class AgainstTheMock(unittest.TestCase):
         for cap, e in o["edits"].items():
             self.assertGreater(e["share"][0], 0.5, cap[:60])
             self.assertEqual(e["sam"], 1.0)
+            self.assertFalse(e["check"]["left"], cap[:60])  # the mock's Klein removes what it is asked to: the page's check agrees
             self.assertTrue(os.path.exists(os.path.join(self.out, e["after"])))
         with open(os.path.join(self.out, "report.md")) as f:
             report = f.read()

@@ -293,15 +293,10 @@ def shares(after, before, mask):
     return page(*[("erasedShare", *arrays, w, h, {"levels": n}) for n in LEVELS])
 
 
-def edges(after, before, mask):
-    """The correlation of the gradient's size inside the object, before and after: 1, the same edges; near 0, none of them."""
-    def grad(img):
-        g = img.astype(np.float32).mean(2)
-        return np.hypot(np.diff(g, axis=1, append=g[:, -1:]), np.diff(g, axis=0, append=g[-1:]))
-    a, b = grad(after)[mask], grad(before)[mask]
-    if a.size < 16 or a.std() == 0 or b.std() == 0:
-        return None
-    return float(np.corrcoef(a, b)[0, 1])
+def check(after, before, mask):
+    """logic.eraseCheck: what the page says of the erase, left or not, with its two measures (changed at 24 levels, edges)."""
+    h, w = mask.shape
+    return page(("eraseCheck", raw(rgba(after)), raw(rgba(before)), raw(rgba(white(mask))), w, h))[0]
 
 
 def overlap(a, b):
@@ -434,7 +429,8 @@ def verdict(req, r):
 def measured(e):
     if "share" not in e:
         return e.get("error", "no result")
-    return f"{' / '.join(pct(v) for v in e['share'])} · edges {num(e.get('edges'))} · SAM {num(e.get('sam'))}"
+    return (f"{' / '.join(pct(v) for v in e['share'])} · edges {num(e.get('edges'))} · SAM {num(e.get('sam'))}"
+            f" · {'left' if e['check']['left'] else 'gone'}")
 
 
 def short(text, n):
@@ -512,14 +508,14 @@ def report(path, objs, asked, head):
             lines += ["", f"The writer names it « {o.get('object') or 'nothing'} » (its answer: « {short(o['naming'].get('answer'), 80)} »)."
                       + (f" SAM 3.1 by that name kept {len(Q['kept'])} mask(s) ({', '.join(Q['kept']) or 'none'}); the object's "
                          f"box {Q['bbox']}; the writer's boxes {Q['chosen']['boxes']}." if Q else f" {o.get('name_error', '')}".rstrip())]
-        lines += ["", "| Request | The writer's answer | The page | Changed at 12 / 24 / 48 levels | Edges | SAM again | Seconds |",
-                  "| --- | --- | --- | --- | --- | --- | --- |"]
+        lines += ["", "| Request | The writer's answer | The page | Changed at 12 / 24 / 48 levels | Edges | SAM again | The page's check | Seconds |",
+                  "| --- | --- | --- | --- | --- | --- | --- | --- |"]
         for req in asked:
             r = o["requests"][req]
             e = o["edits"].get(edit_key(r), {})
             cells = [req, short(r.get("answer") or "", 110).replace("|", "/"), verdict(req, r),
                      " / ".join(pct(v) for v in e["share"]) if "share" in e else e.get("error", "no result"),
-                     num(e.get("edges")), num(e.get("sam")),
+                     num(e.get("edges")), num(e.get("sam")), ("left" if e["check"]["left"] else "gone") if "check" in e else "",
                      f"{r.get('seconds', 0):.0f} + {e.get('quick_seconds', 0) + e.get('full_seconds', 0):.0f}"]
             lines.append("| " + " | ".join(cells) + " |")
         lines += ["", "In full:", ""]
@@ -710,7 +706,8 @@ def main(argv=None):
             e["after"] = f"results/{o['name']}_{k}.png"
             Image.fromarray(after).save(os.path.join(out, e["after"]))
             o["afters"][key] = after
-            e["share"], e["edges"] = shares(after, frame_prev, R["mask_prev"]), edges(after, frame_prev, R["mask_prev"])
+            e["share"], e["check"] = shares(after, frame_prev, R["mask_prev"]), check(after, frame_prev, R["mask_prev"])
+            e["edges"] = e["check"]["edges"]
             used = [q for q, x in o["requests"].items() if edit_key(x) == key]
             say(f"{o['name']}, caption {k} ({', '.join(used)}): changed {' / '.join(pct(v) for v in e['share'])}, "
                 f"edges {num(e['edges'])}")
@@ -741,7 +738,8 @@ def main(argv=None):
             "The first is the page's rule (logic.erasedShare): under 2%, the page says that the object stayed. « Edges »: the "
             "correlation of the gradient inside the object, before and after (1: the same edges). « SAM again »: what SAM 3.1 "
             "keeps at the stroke's points on the result, over what it kept on the frame (1: the same object). « Seconds »: the "
-            "writer, then Klein. Each is measured inside the mask Klein got: as_words has its own."]
+            "writer, then Klein. Each is measured inside the mask Klein got: as_words has its own. « The page's check »: logic.eraseCheck, "
+            "left when under 30% of the object moved by more than 24 levels, or when its edges held above 0.85."]
     report(os.path.join(out, "report.md"), objs, asked, head)
     sheet(os.path.join(out, "sheet.png"), objs, asked, frame_prev,
           f"{a.plate} · seed {a.seed} · {'quick and full-size passes' if a.full else 'quick pass'} · "
