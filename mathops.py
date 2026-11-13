@@ -662,6 +662,14 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       comes back nearby is found again. The region keeps only the object's thick parts (an opening of 1/240 of the
       width), so it never creeps along a thin line; the matte itself keeps the thin parts near the object. An empty
       region searches nothing;
+    - a paint's tracker is given its paint zone (`first`), which can be several times the object (`element`), and it
+      returns that zone on its first frames before it finds the object (13 Nov 2026: 10 to 13 frames on each of five
+      cow recordings, where the matte held the zone, 3.4 to 5.4 times the cow, then fell to a quarter in one frame).
+      So with an element at most half the first-frame mask, a tracker's mask of two fifths of that mask or more is the
+      zone. With `base`, on those frames the matte of an object that stands still (see below) is its place of frame 0,
+      moved with the background, and the search keeps the zone; frames before the object is known to stand still are
+      set when it is. An object found to move in the scene is followed as before. One that moves inside its paint
+      zone is not found to move (its first matte is the zone, as at 32ea0a4), so the matte keeps to its place there;
     - a frame where the object is not seen keeps the previous matte (with no mask at all, the first-frame mask holds);
     - with `shot` and `base` (the regenerated frames and the plate they were made over, (N, H, W, 3) in 0 to 1), the
       matte also takes the generated pixels connected to the object: the areas that touch the object or its region,
@@ -792,11 +800,14 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
         return covered | (stood & ~(dilate((~inside).astype(np.uint8), gap) > 0)), levels, against
 
     line = el if el is not None and el.any() else seed  # the object's own region
+    given = int(seed.sum())  # the first-frame mask the tracker was given
+    zoned = line is el and 2 * int(el.sum()) <= given  # a paint zone at least twice the object: the tracker returns the zone first
     out, cores, prev, peak = np.zeros((n, h, w), np.float32), np.zeros((n, h, w), bool), seed, int(seed.sum())
     size, last = np.ones(n, np.int64), max(int(line.sum()), 1)  # the object's area on each frame
-    seen = strays = held = added = lost = guarded = smoothed = fronts = 0
+    seen = strays = held = added = lost = guarded = smoothed = fronts = zones = 0
     most, chunk = 1.0, 2 * max(1, workers)
     still = None  # does the object keep its place in the scene? Not known before frame FOLLOW_STILL
+    waiting = []  # the zone's frames before it is known whether the object stands still, each with the object's place
     ground = learnt = before = past = home = None  # the scene's map (the softened colours each place first showed, and which places it holds), the frame before's luma and colours, the first matte moved with the background
     rim = int(np.ceil(2.5 * soft[0]))  # as far as the large blur reads
     gone = moved = 0  # frames where a piece that left the object's place was left out; the frame where the object was seen to move in the scene
@@ -902,6 +913,12 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                 else:  # the object is not seen: the last matte holds, and the search grows
                     f, lost = prev, lost + 1
                     held += bool(prev.any())
+                if zoned and plates is not None and still is not False and 5 * int(s.sum()) >= 2 * given:  # the tracker's mask is the zone
+                    own = ndimage.binary_fill_holes(open0)  # the matte shows the object's place of frame 0; the search keeps the zone
+                    if still:
+                        f, zones = f & own, zones + 1
+                    else:
+                        waiting.append((t, own))
                 out[t], prev = f, f
                 if plates is not None and t == 0:
                     home = f
@@ -911,6 +928,10 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                         still, moved = False, t  # it moves in the scene: followed as before
                     elif t >= min(FOLLOW_STILL, n - 1):
                         still = True
+                if still and waiting:  # it stands still: the zone's frames before this one show its place too
+                    for j, own in waiting:
+                        out[j] *= own
+                    zones, prev, waiting = zones + len(waiting), out[t] > 0.5, []
     areas, solid = out.reshape(n, -1).sum(1), cores.reshape(n, -1).sum(1)
     for t in range(n):  # no frame several times its neighbours, unless the tracker's own mask is
         lo, hi = max(0, t - 3), min(n, t + 4)
@@ -926,6 +947,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
         summary = "SAM 3.1 returned no mask: the first-frame mask holds on every frame"
     else:
         summary = f"SAM 3.1 found the object on {seen} of {n} frames"
+        if zones:
+            summary += f"; on {zones} frame(s) its mask held the paint zone it was given, and the matte kept to the object's place there"
         if strays:
             summary += f"; what it found further than the object can move, on {strays} frame(s), is left out"
         if held:
