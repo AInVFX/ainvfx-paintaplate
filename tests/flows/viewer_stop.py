@@ -41,7 +41,7 @@ def run(browser, port, U):
     states = lambda: page.eval_on_selector_all("#history li .state", "els => els.map((e) => e.textContent)")
 
     # 1. The first Klein pass of edit 1 is held, edit 2 waits for its turn, then Esc: nothing is posted
-    page.keyboard.press("b"); U.paint_once(page, "a green lamp", [(0.20, 0.75), (0.30, 0.75)])
+    page.keyboard.press("p"); U.paint_once(page, "a green lamp", [(0.20, 0.75), (0.30, 0.75)])
     enter_held(page, port, U)
     page.keyboard.press("n"); U.paint_once(page, "a white cup", [(0.45, 0.20), (0.55, 0.20)]); page.keyboard.press("n")
     page.wait_for_function("document.querySelectorAll('#history li').length === 2", timeout=10000)
@@ -77,7 +77,7 @@ def run(browser, port, U):
             f"Enter runs the stopped edit, then the edit that waited, each with its own words: order {order}, History {U.row_words(page)}")
 
     # 4. SAM finds the object under an erase stroke: the status line says so, and no longer says it is looking
-    page.keyboard.press("n"); page.keyboard.press("e")
+    page.keyboard.press("n"); page.keyboard.press("c")
     if not page.is_checked("#whole"):
         page.check("#whole")
     U.paint_once(page, "cup", [(0.6, 0.4), (0.62, 0.45)])
@@ -85,7 +85,7 @@ def run(browser, port, U):
 
     # 5. The stopped edit dropped by a second Esc, then Enter: the edit that waited still runs
     page.keyboard.press("Escape")  # the erase strokes of check 4 go
-    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.70, 0.75), (0.80, 0.75)])
+    page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.70, 0.75), (0.80, 0.75)])
     enter_held(page, port, U)
     page.keyboard.press("n"); U.paint_once(page, "a blue vase", [(0.70, 0.25), (0.80, 0.25)]); page.keyboard.press("n")
     page.wait_for_function("document.querySelectorAll('#history li').length === 4", timeout=10000)
@@ -97,7 +97,7 @@ def run(browser, port, U):
             f"Enter with no edit in progress runs the edit that waited: History {U.row_words(page)}, {states()}")
 
     # 6. Try another on a History row under a stop: it waits for Enter, then runs after the stopped edit
-    page.keyboard.press("n"); page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.70, 0.75), (0.80, 0.75)])
+    page.keyboard.press("n"); page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.70, 0.75), (0.80, 0.75)])
     enter_held(page, port, U)
     page.keyboard.press("Escape")
     before = quiet(page, port)  # a job already on its way when Esc was pressed can still arrive: count once none has for a second
@@ -117,7 +117,7 @@ def run(browser, port, U):
     page.wait_for_function(f"{STATUS}.startsWith('Ready')", timeout=60000)
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function(OPEN, timeout=60000)
-    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.20, 0.75), (0.30, 0.75)])
+    page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.20, 0.75), (0.30, 0.75)])
     enter_held(page, port, U)
     page.keyboard.press("n"); U.paint_once(page, "a blue vase", [(0.45, 0.20), (0.55, 0.20)]); page.keyboard.press("n")
     page.wait_for_function("document.querySelectorAll('#history li').length === 2", timeout=10000)
@@ -136,6 +136,6 @@ def run(browser, port, U):
     before = page.evaluate(opened)
     U.open_path(page, "plates/desk.mp4")  # the same plate again: OPEN holds before the open has begun, so wait for the open's own line and an empty History
     page.wait_for_function(f"{opened} > {before} && document.querySelector('#opening').hidden && document.querySelectorAll('#history li').length === 0", timeout=60000)
-    page.keyboard.press("b"); U.paint_once(page, "a green lamp", [(0.60, 0.40), (0.70, 0.40)]); page.keyboard.press("n")
+    page.keyboard.press("p"); U.paint_once(page, "a green lamp", [(0.60, 0.40), (0.70, 0.40)]); page.keyboard.press("n")
     U.check(U.until(page, U.DONE.format(n=1), 60000) and U.row_words(page) == ["a green lamp"], f"a stop ends when another plate opens, and its first edit runs without Enter: History {U.row_words(page)}")
     page.close()

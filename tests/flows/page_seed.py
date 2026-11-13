@@ -25,7 +25,7 @@ def run(browser, port, U):
             "?index=0: the ingest runs again, though the job index holds it")
     U.check(sum("Job index off" in t for t in lines) == 1 and sum("Seed 7 asked for" in t for t in lines) == 1, "the log names each option once")
     page.evaluate(U.WATCH)
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)])
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("Composite, preview took"), 240000, "preview composite of the edit, with no job index")

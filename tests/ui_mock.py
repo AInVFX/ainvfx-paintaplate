@@ -97,7 +97,7 @@ def paint_once(page, words, pts):
     stroke(page, pts)
 
 
-def row_titles(page):  # History, newest first: "2. Erase", "1. Paint"
+def row_titles(page):  # History, newest first: "2. Clean", "1. Paint"
     return page.eval_on_selector_all("#history li .title", "els => els.map(e => e.textContent)")
 
 
@@ -442,23 +442,23 @@ def history_flow(browser, port):
     rested(page, seen)  # SAM runs while the strokes rest
     page.click("#generate")
     page.wait_for_function(DONE.format(n=2), timeout=120000)
-    check(row_titles(page) == ["2. Erase", "1. Paint"], f"two edits, numbered from the bottom: {row_titles(page)}")
+    check(row_titles(page) == ["2. Clean", "1. Paint"], f"two edits, numbered from the bottom: {row_titles(page)}")
     lines = log_lines(page)[seen:]
     found = next((i for i, line in enumerate(lines) if "under the stroke" in line), len(lines))
-    started = next((i for i, line in enumerate(lines) if line.startswith("Edit 2: Erase")), -1)
+    started = next((i for i, line in enumerate(lines) if line.startswith("Edit 2: Clean")), -1)
     asked = sum("asking Klein's prompt writer" in line for line in lines)
     check(found < started and asked == 1, f"a whole-object erase: SAM runs while the strokes rest, the prompt writer once "
           f"(SAM at line {found}, start at line {started}, {asked} request(s))")
 
-    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => e.textContent.includes('Erase pass, preview took'))", timeout=120000)
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => e.textContent.includes('Clean plate pass, preview took'))", timeout=120000)
     seen = len(log_lines(page))
     page.click("#history li:last-child .del")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
-    check(row_titles(page) == ["1. Erase"], f"after a removal the numbers start from 1 again: {row_titles(page)}")
+    check(row_titles(page) == ["1. Clean"], f"after a removal the numbers start from 1 again: {row_titles(page)}")
     page.wait_for_function("[...document.querySelectorAll('#log li span')].slice(%d).some((e) => e.textContent.includes('used again'))" % seen,
                            timeout=60000)
     lines = log_lines(page)[seen:]
-    check(not any("Track the erase (about" in line or "Erase pass, preview (about" in line for line in lines),
+    check(not any("Track the object (about" in line or "Clean plate pass, preview (about" in line for line in lines),
           "the paint removed, the next render uses the erase's matte and clean plate again: nothing tracks or cleans twice")
     page.wait_for_function("document.querySelector('#render-left').textContent === 'full size ready'", timeout=120000)
     lines = log_lines(page)[seen:]
@@ -474,16 +474,16 @@ def history_flow(browser, port):
     check(not page.is_disabled("#undo-btn") and page.is_disabled("#redo-btn"), "undo is live, redo is not")
     page.keyboard.press("Control+z")
     page.wait_for_function(DONE.format(n=2), timeout=120000)
-    check(row_titles(page) == ["2. Erase", "1. Paint"] and not page.is_disabled("#redo-btn"), f"undo brings the removed edit back: {row_titles(page)}")
+    check(row_titles(page) == ["2. Clean", "1. Paint"] and not page.is_disabled("#redo-btn"), f"undo brings the removed edit back: {row_titles(page)}")
     page.keyboard.press("Control+Shift+z")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
-    check(row_titles(page) == ["1. Erase"], f"redo removes it again: {row_titles(page)}")
-    check(page.is_visible("#editing") and page.text_content("#editing") == "Editing 1 · Erase",
+    check(row_titles(page) == ["1. Clean"], f"redo removes it again: {row_titles(page)}")
+    check(page.is_visible("#editing") and page.text_content("#editing") == "Editing 1 · Clean",
           "undo and redo keep the current edit: the next strokes still change it")
     page.keyboard.press("Escape")
 
     page.click("#history li .what")
-    check(page.text_content("#editing") == "Editing 1 · Erase" and page.is_checked("#whole"), "selecting shows the editing tag and the edit's switches")
+    check(page.text_content("#editing") == "Editing 1 · Clean" and page.is_checked("#whole"), "selecting shows the editing tag and the edit's switches")
     page.fill("#prompt", "the lamp")
     page.press("#prompt", "Enter")
     page.wait_for_function("document.querySelector('#history li.busy') !== null", timeout=20000)
@@ -503,7 +503,7 @@ def history_flow(browser, port):
         page.keyboard.press("Control+z")
         page.wait_for_function("(was) => document.querySelector('#status').textContent !== was", arg=was, timeout=5000)  # « Undone. 2 steps further back »
     page.wait_for_function("!document.querySelector('#history li.busy')", timeout=180000)
-    check(row_titles(page) == ["2. Erase", "1. Paint"] and row_words(page) == ["Whole object", "a red fire"],
+    check(row_titles(page) == ["2. Clean", "1. Paint"] and row_words(page) == ["Whole object", "a red fire"],
           f"three undos go back through the seed, the words and the removal: {row_titles(page)} {row_words(page)}")
     check(klein_passes(page) == made, f"undo gets the kept results back: no Klein pass runs again ({klein_passes(page) - made} ran)")
     page.select_option("#preview-size", index=1)
@@ -520,7 +520,7 @@ def one_edit_flow(browser, port):
     open_plate(page)
     box = view_box(page)
     cx, cy = box["x"] + box["w"] * 0.5, box["y"] + box["h"] * 0.5
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     page.fill("#prompt", "a dog"); page.evaluate("document.activeElement.blur()")
     stroke(page, [(0.2, 0.7), (0.25, 0.75)])
     page.keyboard.press("Enter")
@@ -574,7 +574,7 @@ def fluid_flow(browser, port):
     page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     check(not page.is_hidden("#fluid") and page.is_disabled("[data-tool=erase]") and page.is_disabled("[data-tool=light]"),
-          "a blank plate opens as a fluid shot: its panel shows, Erase and Light wait for a plate")
+          "a blank plate opens as a fluid shot: its panel shows, Clean and Light wait for a plate")
 
     def keys():
         return page.eval_on_selector_all("#tl-keys .tl-kf", "els => els.map(e => +e.dataset.frame).sort((a, b) => a - b)")
@@ -609,7 +609,7 @@ def fluid_flow(browser, port):
           f"Enter generates with the trigger, the words and the three keyframes: {sent}")
     rows = row_titles(page)
     check(rows == ["1. Fluid"] and any("under the edits: the fluid shot v1" in line for line in log) and not page.is_disabled("[data-tool=erase]"),
-          f"the fluid shot is the first edit and the plate under the next ones, with Erase and Light on: {rows}")
+          f"the fluid shot is the first edit and the plate under the next ones, with Clean and Light on: {rows}")
     page.click('#history li[data-id="fluid"] .edit')
     check(not page.is_hidden("#fluid"), "the pencil on the fluid row brings its keyframes back")
     page.keyboard.press("Enter")
@@ -618,7 +618,7 @@ def fluid_flow(browser, port):
     check(not any(line.startswith("Fluid v2") for line in log) and "already made" in page.text_content("#hud"),
           "Enter again on the same keyframes and words makes nothing twice")
     page.screenshot(path=os.path.join(SHOTS, "4_fluid.png"))
-    page.keyboard.press("e")
+    page.keyboard.press("c")
     check(page.is_hidden("#fluid") and row_titles(page) == ["1. Fluid"],
           "another tool closes the keyframes: the fluid shot stays the first edit")
     page.click('#history li[data-id="fluid"] .eye')
@@ -629,7 +629,7 @@ def fluid_flow(browser, port):
           "the eye on the fluid row bypasses it (the blank plate under the edits) and turns it back on (its shot)")
 
     # A paint edit on the fluid shot, then the scene saved and opened again: all of it comes back, from the job index
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     page.fill("#prompt", "a lantern"); page.evaluate("document.activeElement.blur()")
     stroke(page, [(0.2, 0.25), (0.3, 0.3)])
     page.evaluate(WATCH)
@@ -667,21 +667,21 @@ def scene_flow(browser, port):
         page.wait_for_function(f"window.__lines.filter((t) => t.includes('{REVIEWED}')).length >= {n}", timeout=180000)
 
     page.evaluate(WATCH)
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     page.fill("#prompt", "a red fire"); page.evaluate("document.activeElement.blur()")
     stroke(page, [(0.3, 0.6), (0.35, 0.65)])
     page.keyboard.press("Enter")
     page.wait_for_function("""(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
       return t.join() === '1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
     reviews(1)  # each set of edits renders to its export before the next edit, so the scene's every step is made once
-    page.keyboard.press("e")
+    page.keyboard.press("c")
     seen = len(log_lines(page))
     page.fill("#prompt", "the cup"); page.evaluate("document.activeElement.blur()")
     stroke(page, [(0.6, 0.4), (0.62, 0.45)])
     rested(page, seen)
     page.keyboard.press("Enter")
     page.wait_for_function("""(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
-      return t.join() === '2. Erase,1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
+      return t.join() === '2. Clean,1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
     reviews(2)
     settled(page)
     name, _ = save_scene(page)
@@ -689,7 +689,7 @@ def scene_flow(browser, port):
     open_scene(page, name)
     page.wait_for_function("window.__lines.some((t) => t.startsWith('Scene opened'))", timeout=120000)
     page.wait_for_function("""(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
-      return t.join() === '2. Erase,1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
+      return t.join() === '2. Clean,1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
     page.wait_for_function("window.__lines.some((t) => t.startsWith('review: made before') || t.startsWith('review '))", timeout=180000)
     settled(page)
     grew = added(page, ("ingest", "prompt", "edit", "clean", "cleanup", "shot", "matte", "comp", "review"))
@@ -701,7 +701,7 @@ def scene_flow(browser, port):
 
 
 def ocio_flow(browser, port):
-    """RV's OCIO menu on the right-click: another view, then another File Color Space, at once; the second is made again."""
+    """The OCIO menu on the right-click: another view, then another plate colour space, at once; the second is made again."""
     page = load(browser, port)
     errors = []
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
@@ -714,27 +714,27 @@ def ocio_flow(browser, port):
     page.wait_for_function(exact, timeout=30000)
     before = pixel()
     page.evaluate(WATCH)
-    menu(page, "OCIO", "Displays", "sRGB - Display", "ACES 2.0 - SDR 100 nits (Rec.709)")
+    menu(page, "OCIO", "View: Un-tone-mapped", "ACES 2.0 - SDR 100 nits (Rec.709)")
     page.wait_for_function("window.__lines.some((t) => t.startsWith('OCIO view: sRGB - Display: ACES 2.0'))", timeout=10000)
     until(page, differs, arg=before)
     aces = pixel()
     check(aces != before, f"another view applies at once: the same frame through ACES 2.0 SDR, {before} becomes {aces}")
     page.keyboard.press("Space")  # while it plays
-    menu(page, "OCIO", "Displays", "sRGB - Display", "Un-tone-mapped")
+    menu(page, "OCIO", "View: ACES 2.0 - SDR 100 nits (Rec.709)", "Un-tone-mapped")
     page.keyboard.press("Space")
     page.keyboard.press("Home")
     page.wait_for_function(exact, timeout=30000)
     until(page, same, arg=before)
     check(max(abs(a - b) for a, b in zip(pixel(), before)) <= 2, "back to Un-tone-mapped while it plays, the frame looks as it did")
-    menu(page, "OCIO", "File Color Space", "Utility", "Linear Rec.709 (sRGB)")
+    menu(page, "OCIO", "Plate colour space: sRGB Encoded Rec.709 (sRGB), read from the file", "Utility", "Linear Rec.709 (sRGB)")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('Linear Rec.709 (sRGB)') && document.querySelector('#opening').hidden", timeout=60000)
     until(page, differs, arg=before)
     until(page, "window.__lines.some((t) => t.startsWith('ingest '))")
     lines, linear = page.evaluate("window.__lines"), pixel()
-    said = [t for t in lines if t.startswith("File Color Space") or t.startswith("ingest ")]
-    check(any(t.startswith("File Color Space: Linear Rec.709 (sRGB)") for t in said) and any(t.startswith("ingest ") for t in said) and linear != before,
-          f"another File Color Space: the viewer shows it, and the plate opens again in it for the models and the export: {before} becomes {linear}; {said}")
-    menu(page, "OCIO", "File Color Space", "Utility", "sRGB Encoded Rec.709 (sRGB)")
+    said = [t for t in lines if t.startswith("Plate colour space") or t.startswith("ingest ")]
+    check(any(t.startswith("Plate colour space: Linear Rec.709 (sRGB)") for t in said) and any(t.startswith("ingest ") for t in said) and linear != before,
+          f"another plate colour space: the viewer shows it, and the plate opens again in it for the models and the export: {before} becomes {linear}; {said}")
+    menu(page, "OCIO", "Plate colour space: Linear Rec.709 (sRGB), chosen by you", "Utility", "sRGB Encoded Rec.709 (sRGB)")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('sRGB Encoded Rec.709 (sRGB)') && document.querySelector('#opening').hidden", timeout=60000)
     check(not errors, f"no page errors with OCIO: {errors}")
     page.close()
@@ -839,8 +839,8 @@ def keys_flow(browser, port):
     key("]", lambda: "Out point" in text("#hud")); key("[", lambda: "In point" in text("#hud")); key("\\", lambda: "cleared" in text("#hud"))
     key("F6", lambda: attr("#wipe-btn", "aria-pressed") == "true"); page.keyboard.press("F6")
     key("1", lambda: text("#hud") == "1:1"); key("f", lambda: text("#hud") == "Fit")
-    key("e", lambda: "on" in attr("[data-tool=erase]", "class")); key("l", lambda: "on" in attr("[data-tool=light]", "class"))
-    key("b", lambda: "on" in attr("[data-tool=paint]", "class"))
+    key("c", lambda: "on" in attr("[data-tool=erase]", "class")); key("l", lambda: "on" in attr("[data-tool=light]", "class"))
+    key("p", lambda: "on" in attr("[data-tool=paint]", "class"))
     size = int(text("#size-out")); key("=", lambda: int(text("#size-out")) > size); key("-", lambda: int(text("#size-out")) == size)
     key("x", lambda: attr("#rub-btn", "aria-pressed") == "true"); page.keyboard.press("x")
     key("i", lambda: page.evaluate("document.querySelector('#view').classList.contains('picking')")); page.keyboard.press("Escape")  # the in-frame picker
@@ -884,7 +884,7 @@ def hdr_flow(browser, port):
     page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
     check(page.is_hidden("#deliver-hdr-row") and not page.is_hidden("#deliver-auto"), "an EXR plate: SDR to HDR runs on its own, with no switch")
     page.evaluate(WATCH)
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     paint_once(page, "a red lamp", [(0.3, 0.6), (0.36, 0.7)])
     page.keyboard.press("Enter")
     page.wait_for_function("!document.querySelector('#live-inset').hidden", timeout=240000)
@@ -1022,11 +1022,18 @@ def close_flow(browser, port):
                                                   {"Content-Type": "application/json"}))
     page = load(browser, port)  # a new warm-up, its first upload held
     page.evaluate(WATCH)
+    check(poll(page, lambda: any(e[0] == "slow upload" for e in mock_route(port, "/mock/events")), 30),
+          "the warm-up's first upload is the one the mock holds, before the plate opens")
     page.click("#open-btn")
     page.click("#open .tabs [data-tab='files']")
     page.fill("#path", "plates/desk.mp4")
     page.click("#open-go")
-    page.wait_for_selector("#close-btn", state="visible", timeout=20000)
+    try:  # flows side by side, one per CPU (32 on the laptop in Chrome, 12 Nov): the open takes longer than alone
+        page.wait_for_selector("#close-btn", state="visible", timeout=60000)
+    except Exception as exc:  # Playwright's TimeoutError: the check says what the page and the mock show
+        if type(exc).__name__ != "TimeoutError":
+            raise
+        check(False, f"the plate opens and its × shows within 60 s{page_state(page)}, mock events {mock_route(port, '/mock/events')[-6:]}")
     page.click("#close-btn")
     page.wait_for_function("!document.querySelector('#empty').hidden", timeout=5000)
     ok = (page.is_hidden("#close-btn") and not page.text_content("#spec") and "Plate closed" in page.text_content("#status")

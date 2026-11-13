@@ -24,7 +24,7 @@ def run(browser, port, U):
     plate1, plate3 = pixel(p1), pixel(p3)
 
     # three paint edits far from each other, so none depends on another
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     for words, x, y in (("a red fire", 0.20, 0.30), ("a blue vase", 0.45, 0.50), ("a green lamp", 0.70, 0.70)):
         U.paint_once(page, words, [(x, y), (x + 0.10, y)]); page.keyboard.press("n")
     page.wait_for_function(U.DONE.format(n=3), timeout=120000)

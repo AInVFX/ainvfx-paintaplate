@@ -53,7 +53,7 @@ test("an erase renders at half size, then 2 steps at full size from it, with the
   assert.match(start._meta.title, /Stage 1 inside the blocks, the plate around them/);
   assert.equal(g[start.inputs.source[0]].class_type, "VAEDecode", "stage 1's frames reach stage 2 by link");
   assert.deepEqual([start.inputs.width, start.inputs.height], plate.work, "stage 2 starts at the working size");
-  const scaled = Object.values(g).filter((n) => n._meta.title.startsWith("ERASE PASS · stage 1 at 640 x 352") && n.class_type === "ImageScale" && n.inputs.width === 640);
+  const scaled = Object.values(g).filter((n) => n._meta.title.startsWith("CLEAN PLATE PASS · stage 1 at 640 x 352") && n.class_type === "ImageScale" && n.inputs.width === 640);
   assert.equal(scaled.length, 1, "stage 1 runs at half of 1280 x 704");
   const sigmas = Object.values(g).filter((n) => n.class_type === "ManualSigmas").map((n) => n.inputs.sigmas).sort();
   assert.deepEqual(sigmas, ["0.725, 0.421875, 0.0", "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"]);
@@ -67,9 +67,9 @@ test("the graph reads by sections: numbered ids, a README note opening each, the
   const ids = Object.keys(g), notes = Object.entries(g).filter(([, n]) => n.class_type === "PrimitiveStringMultiline");
   assert.ok(ids.every((id) => /^[1-9]\d*$/.test(id)), "numeric ids");
   assert.deepEqual(notes.map(([id, n]) => [Number(id) % 100, n._meta.title]).slice(0, 4),
-    [[0, "README · How this graph works"], [0, "README · INPUT"], [0, "README · MODELS"], [0, 'README · EDIT 1 · Erase "red umbrella"']]);
+    [[0, "README · How this graph works"], [0, "README · INPUT"], [0, "README · MODELS"], [0, 'README · EDIT 1 · Clean "red umbrella"']]);
   assert.deepEqual(notes.map(([, n]) => n._meta.title).slice(4),
-    ["README · EDIT 2 · Paint", "README · EDIT 3 · Light", "README · ERASE TRACKING", "README · ERASE PASS", "README · SHOT", "README · PAINT TRACKING", "README · OUTPUT"]);
+    ["README · EDIT 2 · Paint", "README · EDIT 3 · Light", "README · OBJECT TRACKING", "README · CLEAN PLATE PASS", "README · SHOT", "README · PAINT TRACKING", "README · OUTPUT"]);
   const read = new Set(Object.values(g).flatMap((n) => Object.values(n.inputs).filter(Array.isArray).map((v) => v[0])));
   assert.ok(notes.every(([id]) => !read.has(id)), "no node reads a README note, so none runs");
   let section = "";
@@ -78,12 +78,12 @@ test("the graph reads by sections: numbered ids, a README note opening each, the
     assert.ok(n._meta.title.startsWith(`${section} · `), `${id}: ${n._meta.title} under ${section}`);
   }
   const overview = g[notes[0][0]].inputs.value;
-  for (const s of ["AInVFX Paint a plate 1.0.0", "plates/shot.mp4", "output/paintaplate/x/graph/export", 'Edit 1: Erase "red umbrella", seed 1.'])
+  for (const s of ["AInVFX Paint a plate 1.0.0", "plates/shot.mp4", "output/paintaplate/x/graph/export", 'Edit 1: Clean "red umbrella", seed 1.'])
     assert.ok(overview.includes(s), s);
   const titled = (cls) => Object.values(g).filter((n) => n.class_type === cls).map((n) => n._meta.title);
   assert.ok(titled("UNETLoader").every((t) => t.startsWith("MODELS · UNETLoader · ")), "a loader serves every step, from MODELS");
   assert.ok(titled("CLIPTextEncode").some((t) => t.startsWith("SHOT · ") && t.endsWith("[prompt]")), "the shot's prompt is named");
-  assert.ok(titled("CLIPTextEncode").some((t) => t === 'EDIT 1 · Erase "red umbrella" · both passes · Caption [caption]'), "an edit's caption, one node for its two passes");
+  assert.ok(titled("CLIPTextEncode").some((t) => t === 'EDIT 1 · Clean "red umbrella" · both passes · Caption [caption]'), "an edit's caption, one node for its two passes");
 });
 
 // ---------- The page workstream, wave 3: the scene in the editor's own format ----------
@@ -114,13 +114,13 @@ test("the editor's format: one group per section in run order, a note at the hea
   assert.equal(file.version, 0.4);
   const readmes = Object.values(api).filter((n) => n.class_type === "PrimitiveStringMultiline");
   assert.deepEqual(file.groups.map((g) => g.title), ["README", ...readmes.slice(1).map((n) => n._meta.title.slice(9))]);
-  assert.deepEqual(file.groups.map((g) => g.title).filter((t) => !t.startsWith("EDIT ")), ["README", "INPUT", "MODELS", "ERASE TRACKING", "ERASE PASS", "SHOT", "PAINT TRACKING", "OUTPUT"]);
+  assert.deepEqual(file.groups.map((g) => g.title).filter((t) => !t.startsWith("EDIT ")), ["README", "INPUT", "MODELS", "OBJECT TRACKING", "CLEAN PLATE PASS", "SHOT", "PAINT TRACKING", "OUTPUT"]);
   const notes = file.nodes.filter((n) => n.type === "MarkdownNote");
   assert.equal(notes.length, file.groups.length);
   assert.equal(file.nodes.length, Object.keys(api).length); // each README is a note, every other node is itself
   assert.ok(file.nodes.every((n) => n.type === "MarkdownNote" || (n.type === api[n.id].class_type && n.title === api[n.id]._meta.title)), "the titles are kept");
   assert.match(notes[0].widgets_values[0], /AInVFX Paint a plate 1\.11\.9: the scene of shot/);
-  const edit1 = notes.find((n) => n.title === "README · EDIT 1 · Erase").widgets_values[0];
+  const edit1 = notes.find((n) => n.title === "README · EDIT 1 · Clean").widgets_values[0];
   assert.match(edit1, /\*\*Values the page set\*\*/);
   assert.match(edit1, /- both passes · Caption: text "erase caption"/); // the note names the value, the node's title its slot
   assert.equal(file.last_node_id, Math.max(...file.nodes.map((n) => n.id)));

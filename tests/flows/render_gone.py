@@ -14,7 +14,7 @@ def run(browser, port, U):
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden", timeout=60000)
     request = urllib.request.Request(f"http://127.0.0.1:{port}/mock/hold", data=json.dumps({"output": "patch", "seconds": 120}).encode(), headers={"Content-Type": "application/json"})
     urllib.request.urlopen(request, timeout=5).close()
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     U.paint_once(page, "a lantern", [(0.3, 0.5), (0.34, 0.56)])
     page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)

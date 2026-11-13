@@ -91,7 +91,7 @@ export function organise(prompt, where, sections) { // sections: [key, name, REA
   return out;
 }
 
-const TOOLS = { erase: "Erase", paint: "Paint", light: "Light" };
+const TOOLS = { erase: "Clean", paint: "Paint", light: "Light" };
 const by = ([w, h]) => `${w} x ${h}`;
 const quoted = (words) => (words ? ` "${words.length > 40 ? `${words.slice(0, 39)}…` : words}"` : "");
 
@@ -138,7 +138,7 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
     frame = e.tool === "light" ? full.relit : full.result;
     if (e.tool === "light") return;
     const patch = node(`${t} patch`, "SplitImageWithAlpha", { image: full.patch }), alpha = node(`${t} patch alpha`, "InvertMask", { mask: [`${t} patch`, 1] });
-    if (e.tool === "erase") { erasedFrame = over(`${t} on the erased frame`, erasedFrame, patch, alpha); erased.push(mask); }
+    if (e.tool === "erase") { erasedFrame = over(`${t} on the cleaned frame`, erasedFrame, patch, alpha); erased.push(mask); }
     else painted.push(alpha);
   });
 
@@ -146,14 +146,14 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
   const low = stageOne(plate.work);
   if (erased.length) {
     sec = "eraseTrack";
-    erasedMatte = add(instantiate(WF.matte, "erase tracking", { ...common, width: plate.trackErase[0], height: plate.trackErase[1],
-      prefix: out("matte_a/m") }, { mask: union("erased area", erased, plate.trackErase) }, { drop })).frames;
+    erasedMatte = add(instantiate(WF.matte, "object tracking", { ...common, width: plate.trackErase[0], height: plate.trackErase[1],
+      prefix: out("matte_a/m") }, { mask: union("area to clean", erased, plate.trackErase) }, { drop })).frames;
     // the erase pass in Lightricks' two stages, as the page renders it: half the working size, then 2 steps at full size
     const values = { ...common, seed: render.seed, prompt: render.erasePrompt ?? "" };
     sec = "erasePass";
-    const half = add(instantiate(WF.clean, "erase pass at half size", { ...values, width: low[0], height: low[1], prefix: out("clean_half/f"),
+    const half = add(instantiate(WF.clean, "clean plate pass at half size", { ...values, width: low[0], height: low[1], prefix: out("clean_half/f"),
       video_prefix: out("clean_half") }, { hole: erasedMatte, hero: erasedFrame }, { drop }), `stage 1 at ${by(low)} · `).frames;
-    made = add(instantiate(WF.cleanup, "erase pass", { ...values, width: plate.work[0], height: plate.work[1], prefix: out("clean/f"),
+    made = add(instantiate(WF.cleanup, "clean plate pass", { ...values, width: plate.work[0], height: plate.work[1], prefix: out("clean/f"),
       video_prefix: out("clean") }, { hole: erasedMatte, hero: erasedFrame, low: half }, { drop }), `stage 2 at ${by(plate.work)} · `).frames;
   }
   const clean = !!made;
@@ -185,9 +185,9 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
     ...edits.map((e, k) => [`edit${k + 1}`, `EDIT ${k + 1} · ${TOOLS[e.tool]}${quoted(e.words)}`, [
       `${TOOLS[e.tool]}${quoted(e.words)}, seed ${e.seed}. Klein makes a quick pass at ${by(plate.prev)} in ${e.quick?.steps ?? "its"} steps, then the full size at ${by(plate.work)} in ${e.full?.steps ?? "its"} steps from it. Its caption is the node marked [caption].`,
       `In: ${k ? `the frame EDIT ${k} made` : "frame 0"}, its mask (${e.mask})${e.layer ? ` and its strokes (${e.layer})` : ""}, from input/paintaplate/up.`,
-      `Out: ${{ erase: "the frame without the object, for the next edit, and the patch the erase pass starts from.", paint: "the frame with the addition, for the next edit, and the area PAINT TRACKING follows.", light: "the relit frame, for the next edit and the shot." }[e.tool]}`].join("\n\n")]),
-    ["eraseTrack", "ERASE TRACKING", `SAM 3.1 follows the erased area${erased.length > 1 ? "s" : ""} through the plate at ${by(plate.trackErase)}, and Follow Matte keeps the matte on the object.\n\nIn: the plate and the erase masks. Out: the erase matte, every frame.`],
-    ["erasePass", "ERASE PASS", `Lightricks' in-outpainting IC-LoRA on LTX 2.5 regenerates the erased area on every frame, in two stages: ${by(low)}, then 2 steps at ${by(plate.work)} from it. The prompt describes the scene as it stays, with the erased objects never named.\n\nIn: the plate, the erase matte and frame 0 with every erase. Out: the clean plate, every frame.`],
+      `Out: ${{ erase: "the frame without the object, for the next edit, and the patch the clean plate pass starts from.", paint: "the frame with the addition, for the next edit, and the area PAINT TRACKING follows.", light: "the relit frame, for the next edit and the shot." }[e.tool]}`].join("\n\n")]),
+    ["eraseTrack", "OBJECT TRACKING", `SAM 3.1 follows the area${erased.length > 1 ? "s" : ""} to clean through the plate at ${by(plate.trackErase)}, and Follow Matte keeps the matte on the object.\n\nIn: the plate and the masks of the Clean edits. Out: the clean matte, every frame.`],
+    ["erasePass", "CLEAN PLATE PASS", `Lightricks' in-outpainting IC-LoRA on LTX 2.5 regenerates the area to clean on every frame, in two stages: ${by(low)}, then 2 steps at ${by(plate.work)} from it. The prompt describes the scene as it stays, with the removed objects never named.\n\nIn: the plate, the clean matte and frame 0 with every Clean edit. Out: the clean plate, every frame.`],
     ["shot", "SHOT", `LTX 2.5 with WepeNerd's Ripple IC-LoRA carries the edited frame 0 through the shot, over ${clean ? "the clean plate" : "the plate"}, seed ${render.seed}. Its prompt is the node marked [prompt].\n\nIn: the edited frame 0 and ${clean ? "the clean plate" : "the plate"}. Out: the shot, every frame.`],
     ["paintTrack", "PAINT TRACKING", `SAM 3.1 follows the painted area${painting > 1 ? "s" : ""} through the shot at ${by(plate.track)}, and Follow Matte adds what the shot changed near it.\n\nIn: the shot and the painted areas. Out: the paint matte, every frame.`],
     ["hdr", "SDR TO HDR", "Lightricks' SDR-to-HDR IC-LoRA turns the shot into scene-linear values for an EXR plate.\n\nIn: the shot. Out: the HDR shot, every frame."],
@@ -330,5 +330,6 @@ export function editorGraph(prompt, info) {
       outputs: (s.output ?? []).map((t, slot) => ({ name: s.output_name?.[slot] ?? t, type: outType(id, slot), links: fed.get(`${id}:${slot}`) ?? null, slot_index: slot })),
       title: n._meta.title, properties: { "Node name for S&R": n.class_type }, ...(m.values.length ? { widgets_values: m.values } : {}) };
   });
-  return { last_node_id: Math.max(...ids.map(Number)), last_link_id: links.length, nodes, links, groups, config: {}, extra: {}, version: 0.4 };
+  const api = Object.fromEntries(ids.filter((id) => !notes.has(id)).map((id) => [id, structuredClone(prompt[id])])); // what graphToPrompt must give back (tests/graph_live.py)
+  return { last_node_id: Math.max(...ids.map(Number)), last_link_id: links.length, nodes, links, groups, config: {}, extra: { paintaplate: { prompt: api } }, version: 0.4 };
 }

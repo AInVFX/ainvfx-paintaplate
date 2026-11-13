@@ -71,7 +71,7 @@ def run(browser, port, U):
     plate, plate_gone = pixel(kept), pixel(gone)
 
     # 1. Esc during the first Klein pass: the edit stays, with its strokes, as the strokes in progress
-    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.30, 0.60), (0.40, 0.60)])
+    page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.30, 0.60), (0.40, 0.60)])
     enter_held(page, port, U)
     page.keyboard.press("Escape"); away()
     U.check(rows() == 1 and status().startswith("Stopped. Edit 1 keeps") and "Ctrl+Enter" in status() and not page.is_disabled("#generate"),

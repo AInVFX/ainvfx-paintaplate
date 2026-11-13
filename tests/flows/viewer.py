@@ -122,7 +122,7 @@ def native_and_inspector(page, port, U):
     want = client(20, 10)
     U.check(abs(mark[0] - want[0]) < 3 and abs(mark[1] - want[1]) < 3, f"zoomed, the inspector's point follows the frame: {mark} against {want}")
     page.keyboard.press("f")
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     cx, cy = client(1920, 1080); xy = page.evaluate(TO_CANVAS, [cx, cy]); before = page.evaluate(PIXEL, xy)
     page.mouse.move(cx - 3, cy); page.mouse.down(); page.mouse.move(cx + 3, cy, steps=4); page.mouse.up(); page.wait_for_timeout(300)
     U.check(page.evaluate(PIXEL, xy) != before and page.evaluate(ATTR)[0] == "20,10",
@@ -145,7 +145,7 @@ TO_CANVAS = """(([cx, cy]) => { const v = document.querySelector('#view'), r = v
 
 def zoom_and_paint(page, U):
     """RV's zoom keys, and a stroke lands under the pointer at 4:1 and at 1:2 (the plate on show is 4K, the edits 1920)."""
-    page.keyboard.press("Home"); page.keyboard.press("b"); page.click(".sw[data-color='#d32f2f']")
+    page.keyboard.press("Home"); page.keyboard.press("p"); page.click(".sw[data-color='#d32f2f']")
     box = page.eval_on_selector("#viewport", "e => { const r = e.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }")
     for key, n, at in (("4", 4, (0.5, 0.5)), ("Shift+2", 0.5, (0.45, 0.5))):
         page.keyboard.press(key); page.wait_for_timeout(300)
@@ -250,7 +250,7 @@ def rendered(browser, port, U):
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden", timeout=60000)
     page.evaluate(U.WATCH)
-    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
+    page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(U.REVIEWED), 300000, "the full-size composite of the paint")
     calm = 0
     while calm < 3:  # Generate reads Generate for three seconds running: no step left

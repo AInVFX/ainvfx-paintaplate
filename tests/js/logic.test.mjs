@@ -181,7 +181,7 @@ test("another tool than the edit being worked on starts a new edit; the same too
 test("a failed step says why in plain words", () => {
   assert.equal(plainError("PaintAPlate_LoadPlate: No image frames found in /w/ComfyUI/output/paintaplate/a1/v2/matte_b_640x352"),
     "the paint matte saved no frames, so there was nothing to read.");
-  assert.equal(plainError("PaintAPlate_LoadPlate: No image frames found in /w/output/paintaplate/a1/v2/640x352/clean"), "the erase pass saved no frames, so there was nothing to read.");
+  assert.equal(plainError("PaintAPlate_LoadPlate: No image frames found in /w/output/paintaplate/a1/v2/640x352/clean"), "the clean plate pass saved no frames, so there was nothing to read.");
   assert.equal(plainError("KSampler: CUDA out of memory. Tried to allocate 2 GiB"), "the GPU ran out of memory.");
   const gone = "ComfyUI did not answer: it may be restarting, or the connection dropped."; // a pod restarted under the page (29 Oct)
   assert.equal(plainError(`Unexpected token '<', "<!DOCTYPE "... is not valid JSON`), gone);

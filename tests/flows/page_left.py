@@ -17,7 +17,7 @@ def run(browser, port, U):
     U.open_plate(page)
     page.evaluate(U.WATCH)
     U.mock_route(port, "/mock/leave", {"times": 2})  # the erase's quick pass and its full-size pass
-    page.keyboard.press("e")
+    page.keyboard.press("c")
     U.paint_once(page, "", [(0.6, 0.4), (0.62, 0.45)])  # one stroke on the bottle, with no words
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(LEFT), 90000, "line that says the object is still there")

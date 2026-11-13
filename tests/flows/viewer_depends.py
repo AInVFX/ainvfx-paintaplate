@@ -25,7 +25,7 @@ def run(browser, port, U):
     plate2, plate3 = pixel(p2), pixel(p3)
 
     # edit 2 starts on edit 1's stroke, so it depends on it; edit 3 is far from both
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     for words, pts in (("a red fire", [(0.15, 0.25), (0.25, 0.25)]), ("a blue vase", [(0.22, 0.25), (0.50, 0.25)]), ("a green lamp", [(0.70, 0.80), (0.85, 0.80)])):
         U.paint_once(page, words, pts); page.keyboard.press("n")
     page.wait_for_function(U.DONE.format(n=3), timeout=120000)

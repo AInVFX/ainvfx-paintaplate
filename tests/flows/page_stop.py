@@ -15,7 +15,7 @@ def run(browser, port, U):
     page.wait_for_function(OPEN, timeout=60000)
     page.evaluate(U.WATCH)
     U.mock_route(port, "/mock/hold", {"slot": "hero", "seconds": 4})  # the preview shot lasts 4 s at any --speed: time to arm the upload that follows it
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     U.paint_once(page, "a lantern", [(0.3, 0.5), (0.34, 0.56)])
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("Shot, preview (about"), 60000, "start of the preview shot")
