@@ -150,21 +150,50 @@ def job_spans(history):
     return spans
 
 
-def node_times(events, graphs):
+FAILED_JOB = re.compile(r"(\w+) ([0-9a-f]{8}): failed after")  # a job line of the page that ComfyUI did not finish
+
+
+def workflow(name):
+    """The pack's own API graph of a job (web/workflows/<name>.json), with the node ids the page posts: what names the nodes
+    of a job that ComfyUI's /history no longer holds, after ComfyUI stopped. {} when there is none."""
+    try:
+        with open(os.path.join(REPO, "web", "workflows", f"{name}.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def running_at_stop(events, graphs, names=None):
+    """The node each job was running when its messages stopped with no end (ComfyUI stopped): {id[:8]: node class}."""
+    last = {}
+    for _, pid, node in events:
+        last[pid] = node
+    return {(pid or "")[:8]: ((graphs.get(pid) or workflow((names or {}).get((pid or "")[:8]))).get(str(node)) or {}).get("class_type", f"node {node}")
+            for pid, node in last.items() if node is not None}
+
+
+def node_times(events, graphs, names=None):
     """Where each job's time went: {the id's first 8 characters: [(node class, seconds), ...], longest first}. Each «
     executing » message starts a node and ends the one before; the one with no node ends the job. events: [[seconds,
-    prompt id, node id or None]] (ui_live.py's nodes.json); graphs: {prompt id: its API graph, from ComfyUI's /history}."""
+    prompt id, node id or None]] (ui_live.py's nodes.json); graphs: {prompt id: its API graph, from ComfyUI's /history};
+    names: {id[:8]: job name}, for a job that /history no longer holds: its nodes are named from the pack's workflow."""
     runs, out = {}, {}
     for t, pid, node in events:
         runs.setdefault(pid, []).append((t, node))
     for pid, seq in runs.items():
-        graph, spent = graphs.get(pid) or {}, {}
+        graph, spent = graphs.get(pid) or workflow((names or {}).get((pid or "")[:8])), {}
         for (t, node), (later, _) in zip(seq, seq[1:]):
             if node is not None:
                 name = (graph.get(str(node)) or {}).get("class_type", f"node {node}")
                 spent[name] = round(spent.get(name, 0.0) + later - t, 1)
         out[(pid or "")[:8]] = sorted(spent.items(), key=lambda x: -x[1])
     return out
+
+
+def render_hdr(steps):
+    """Whether a render ran SDR to HDR (« v1 SDR to HDR »): only a render's composite writes HDR Match's line. A fluid shot's
+    own pass (« fluid v1 SDR to HDR ») has no plate to match: fluid_720 of 13 Nov was told to look for a line that never was."""
+    return any(re.match(r"v\d+ SDR to HDR\b", label) for label, _ in steps)
 
 
 def comfy_lines(url, since, mark="PaintAPlate HDR Match:"):
@@ -536,7 +565,9 @@ def run_case(a, name, case, folder):
         history, spans = {}, {}
     nodes_file = os.path.join(folder, "nodes.json")  # ui_live.py: when ComfyUI started each node, from the page's WebSocket
     events = json.load(open(nodes_file)) if os.path.exists(nodes_file) else []
-    result["nodes"] = node_times(events, {pid: (e.get("prompt") or [None, None, {}])[2] for pid, e in history.items()})
+    graphs = {pid: (e.get("prompt") or [None, None, {}])[2] for pid, e in history.items()}
+    names = {**{j["id"]: j["name"] for j in result["jobs"]}, **{job: name for name, job in FAILED_JOB.findall("\n".join(result["ended"]))}}
+    result["nodes"], result["stopped_in"] = node_times(events, graphs, names), running_at_stop(events, graphs, names)
     try:  # the case's pictures: never a reason for the case to fail
         result["sheet"] = sheet(case, folder, os.path.join(a.comfy, "input", case["path"]) if case.get("path") else None,
                                 mask=page_mask(a.comfy, t0), judge_at=preview_size(result["log"]))
@@ -606,10 +637,15 @@ def report(a, machine, results):
             spent = r.get("nodes", {}).get(j["id"])
             if spent and j["seconds"] >= 30:
                 lines.append(f"- Where {j['name']} {j['id']}'s {j['seconds']:.1f} s went, by node: " + ", ".join(f"{c} {s:.1f} s" for c, s in spent[:5]) + ".")
+        for name, job in FAILED_JOB.findall("\n".join(r.get("ended", []))):  # what ran before ComfyUI stopped, and what was running
+            spent, at = r.get("nodes", {}).get(job), r.get("stopped_in", {}).get(job)
+            if spent or at:
+                lines.append(f"- {name} {job} before the stop, by node: " + (", ".join(f"{c} {s:.1f} s" for c, s in spent[:5]) or "none ended")
+                             + (f". Running at the stop: {at}." if at else "."))
         lines += carried(r, a.fresh, gb)
         lines += [f"- The page's figure for an erase: {f}" for f in r.get("figures", [])]
         lines += [f"- HDR Match, in ComfyUI's log: {m.split('HDR Match:', 1)[1].strip()}" for m in r.get("hdr_match", [])]
-        if not r.get("hdr_match") and any("SDR to HDR" in label for label, _ in r["steps"]):
+        if not r.get("hdr_match") and render_hdr(r["steps"]):
             lines.append("- HDR Match: its line has left ComfyUI's log buffer; grep the terminal for « HDR Match ».")
         lines += [f"- Did not finish: {line}" for line in r["ended"]]
         lines += [f"- {m}" for m in r["mattes"]]

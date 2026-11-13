@@ -508,6 +508,27 @@ class Sheet(unittest.TestCase):
             self.assertTrue(made["verdict"]["text"].startswith(f"Clean, frame 1: {state} ("), made["verdict"]["text"])
         self.assertIn("no verdict", gpu_matrix.sheet(case, tmp, plate)["verdict"]["text"], "no mask from the page, no verdict")
 
+class StoppedComfy(unittest.TestCase):
+    """hdr_cow on the laptop, 13 Nov: ComfyUI stopped in SDR to HDR, its /history went with it, and the report named nodes
+    « node 26 ». The pack's own workflows name them; the node that had no end is the one running at the stop."""
+
+    def test_nodes_are_named_from_the_pack_s_workflow_when_history_is_gone(self):
+        shot, hdr = gpu_matrix.workflow("shot"), gpu_matrix.workflow("hdr")
+        self.assertEqual((shot["26"]["class_type"], shot["29"]["class_type"]), ("SamplerCustomAdvanced", "VAEDecodeTiled"))
+        events = [[0.0, "b23042ca-1", "26"], [519.0, "b23042ca-1", "29"], [542.1, "b23042ca-1", None],
+                  [600.0, "b6ade25f-2", "26"], [1115.0, "b6ade25f-2", "29"]]
+        names = {"b23042ca": "shot", "b6ade25f": "hdr"}
+        spent = gpu_matrix.node_times(events, {}, names)
+        self.assertEqual(spent["b23042ca"], [("SamplerCustomAdvanced", 519.0), ("VAEDecodeTiled", 23.1)])
+        self.assertEqual(gpu_matrix.running_at_stop(events, {}, names), {"b6ade25f": hdr["29"]["class_type"]})
+        self.assertEqual(gpu_matrix.node_times(events, {}), {"b23042ca": [("node 26", 519.0), ("node 29", 23.1)], "b6ade25f": [("node 26", 515.0)]})
+        self.assertEqual(gpu_matrix.FAILED_JOB.findall("hdr b6ade25f: failed after 628.5 s (29 nodes, 4 previews): ComfyUI stopped answering"), [("hdr", "b6ade25f")])
+
+    def test_hdr_match_is_looked_for_after_a_render_s_sdr_to_hdr_only(self):
+        self.assertFalse(gpu_matrix.render_hdr([("fluid v1 SDR to HDR", 175.8), ("fluid v1 in all", 281.1)]))
+        self.assertTrue(gpu_matrix.render_hdr([("v1 Shot, full size", 580.0), ("v1 SDR to HDR", 640.0)]))
+
+
 class Verdict(unittest.TestCase):
     """What the verdict and the tree case read: the page's mask and preview size, the case, the end of ui_live.py's wait."""
 
