@@ -686,6 +686,34 @@ def follow_summary(n: int, seen=None, zones=0, placed=0, strays=0, held=0, added
     return "\n  ".join([f"tracked on {seen or 0} of {n} frames."] + lines)
 
 
+def matte_flicker(mattes, run: int = 3) -> np.ndarray:
+    """How much a matte flickers, frame by frame (backlog D9; Adrien, 13 Nov 2026: a detection per frame lost an arm on 18
+    of 121 frames): the share of the matte that appears or disappears for `run` frames at most, then comes back as it was.
+    A piece counts on frames s to s+L-1 (L <= run) when frames s-1 and s+L agree on it and every frame between differs,
+    and when it reaches more than (L+1) * r px inside both, or outside both, with r = max(1, W / 240): a move of r px a
+    frame does not count. The value on a frame is the pieces' area against the largest matte of frames s-1 to s+L. A
+    matte that comes or goes for good (the object hidden, back, or gone) does not count."""
+    M = np.asarray(mattes) > 0.5
+    n, w = len(M), M.shape[-1]
+    r, area, out = max(1, round(w / 240)), M.reshape(n, -1).sum(1), np.zeros(n)
+
+    def whole(piece, seed):  # the pieces that reach the seed, whole
+        labels, _ = ndimage.label(piece)
+        ids = np.unique(labels[piece & seed])
+        return int(np.isin(labels, ids[ids > 0]).sum())
+    for run_ in range(1, run + 1):
+        for s in range(1, n - run_):
+            before, after, between = M[s - 1], M[s + run_], M[s:s + run_]
+            lost, extra, k = before & after & ~between.any(0), ~before & ~after & between.all(0), 0
+            if lost.any():
+                k += whole(lost, ndimage.binary_erosion(before & after, iterations=(run_ + 1) * r))
+            if extra.any():
+                k += whole(extra, ~ndimage.binary_dilation(before | after, iterations=(run_ + 1) * r))
+            if k:
+                out[s:s + run_] = np.maximum(out[s:s + run_], k / max(int(area[s - 1:s + run_ + 1].max()), 1))
+    return out
+
+
 def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=None, zone: float = 1 / 16,
                  threshold: float = 0.1, workers: int = 8, element=None, tick=None):
     """One matte per frame from a tracker's masks, made safe for the composite. Returns (mattes (n, H, W), summary).
