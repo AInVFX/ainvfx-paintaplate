@@ -699,7 +699,9 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       front, and is left out. What is found counts only at the object's place of
       frame 0, with a margin of half a zone, and where it is joined to it there while a quarter of the place holds
       the object: a piece that leaves the place, with what stands in front or alone, is not the object (12 Nov
-      2026: LTX drew the cow walking away with the horse, then gave the horse its head). Of a changed area, what is
+      2026: LTX drew the cow walking away with the horse, then gave the horse its head); when less than a quarter
+      does, a found area that reaches beyond the margin is left out whole, not cut at it (13 Nov 2026: such a strip
+      stayed on the horse's chest). Of a changed area, what is
       covered counts only in that margin, and only when a quarter of the area at most is covered. So the matte is empty while the object is hidden, takes it again where it
       comes out, and leaves out what stands in front. An object that moves in the scene over its first frames is
       followed as before;
@@ -898,14 +900,18 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                         added += 1
                         most = max(most, float((core | gain).sum()) / max(int(core.sum()), 1))
                     found = core | gain
+                left = False  # whether all that was found has left the object's place
                 if hide is not None and not real and found.any():  # a painted object that stands still: a piece that has left its place, with what stands in front or alone, is not the object
                     whole = found
                     if 4 * int((found & here).sum()) >= int(open0.sum()):  # the object is seen at its place: what is joined to it there counts
                         found = touching(found, here)
-                    else:  # it is not: beyond its place, nothing can be told from what passes there
-                        found = found & here
+                    else:  # it is not: a found area that reaches beyond the place's margin is leaving it, and is left out whole
+                        parts, _ = ndimage.label(found, structure=eight)
+                        leaving = np.unique(parts[found & ~here])
+                        found = found & ~np.isin(parts, leaving[leaving > 0])
                     core = core & found
                     gone += bool(bulk(whole & ~found).any())
+                    left = not found.any()
                 seen += bool(core.any())
                 hidden = int((line & hide).sum()) if hide is not None else 0  # the part of the object's place that the plate covers
                 last = int(core.sum()) + hidden if core.any() else last
@@ -918,6 +924,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     line, lost = (ndimage.binary_fill_holes(thick) if thick.any() else ndimage.binary_fill_holes(region)), 0
                     if kept is not None:
                         line |= kept  # the region keeps its covered part
+                elif left:  # all that was found has left the object's place: nothing of it is there, and no last matte holds
+                    f = np.zeros((h, w), bool)
                 elif hide is not None:  # not seen: the last matte holds where its place is in view, and the search grows only around a place in view
                     f, lost = (bulk(prev & ~hide) if hidden else prev), lost + (2 * hidden < int(line.sum()))  # no crumbs of a matte that the plate covers
                     held += bool(f.any())
