@@ -231,13 +231,40 @@ def matte_areas(comfy, since):
     return best[1], [float((np.asarray(Image.open(f).convert("L")) > 127).mean()) for f in best[2]]
 
 
+def log_steps(text):
+    """The steps the page times, in its log's order: each render step (« Render vN: … took … s »); for a fluid shot its LTX
+    pass (the fluid job after « Fluid vN: »), each step timed (« Fluid vN: SDR to HDR took … s ») and the whole shot."""
+    steps, fluid = [], "?"
+    for line in text.splitlines():
+        if m := STEP.search(line):
+            steps.append((f"v{m.group(1)} {m.group(2)}", float(m.group(3))))
+        elif m := re.search(r"Fluid v(\d+): (.+?) took ([\d.]+) s", line):
+            steps.append((f"fluid v{m.group(1)} {m.group(2)}", float(m.group(3))))
+        elif m := re.search(r"Fluid v(\d+): done in ([\d.]+) s", line):
+            steps.append((f"fluid v{m.group(1)} in all", float(m.group(2))))
+        elif m := re.search(r"Fluid v(\d+):", line):
+            fluid = m.group(1)
+        elif m := re.search(r"(?<![a-z])fluid [0-9a-f?]{1,8}: done in ([\d.]+) s", line):
+            steps.append((f"fluid v{fluid} LTX pass", float(m.group(1))))
+    return steps
+
+
+def carried(r, fresh, gb):
+    """Without --fresh, ComfyUI holds what ran before a case: its first job's peak RAM can be that, not the case's own."""
+    j = next(iter(r["jobs"]), None)
+    if fresh or not j or j.get("run") is None:
+        return []
+    return [f"- ComfyUI was not freed before this case (no --fresh): the first job's peak RAM, {gb(j['ram'])} for {j['name']} {j['id']}, "
+            "can be what the case before left. Run with --fresh for this case's own."]
+
+
 def read_log(text):
     """What a case's page log says: the render steps and the jobs with their seconds, and the counts the report shows."""
     profile = re.search(r"Memory profile (\w+): ([^\n]*)", text)
     jobs = [{"name": name, "id": job, "seconds": float(s), "nodes": int(n), "cached": int(k or 0), "previews": int(p or 0)}
             for name, job, s, n, k, p in JOB.findall(text)]
     return {
-        "steps": [(f"v{v} {label}", float(s)) for v, label, s in STEP.findall(text)],
+        "steps": log_steps(text),
         "jobs": jobs,
         "ended": ENDED.findall(text),
         "indexed": text.count("taken from the job index"),
@@ -247,6 +274,7 @@ def read_log(text):
         "profile": f"{profile.group(1)} ({profile.group(2)})" if profile else "not in the log's last 400 lines",
         "mattes": re.findall(r"([A-Z][a-z]+ matte[^\n]*largest matte is [^\n]*)", text),  # any word before « matte »: Paint, Erase, Clean
         "seeds": sorted(set(re.findall(r"\bseed (\d+)", text)), key=int),
+        "figures": re.findall(r"(Edit \d+: [^\n]*?\(\d+% of it changed\))", text),  # an erase: how much of the object's box changed
     }
 
 
@@ -296,7 +324,7 @@ def report(a, machine, results):
              f"| Seeds | {a.seeds.replace(' ', '').replace(',', ', ') + ' (--seeds): each case runs once per seed' if a.seeds else 'each case runs from its own (gpu_matrix.json)'} |",
              "| Job index | left alone: the page is opened with `?index=0`, so every job runs |",
              f"| Memory profile asked for | {a.memory or 'none: the card decides'} |",
-             f"| Before each case | {'ComfyUI is freed (--fresh)' if a.fresh else 'ComfyUI stays as the case before left it'} |",
+             f"| Before each case | {'ComfyUI is freed (--fresh)' if a.fresh else 'ComfyUI stays as the case before left it: a first job can read its RAM'} |",
              f"| RAM read from | {a.source} |", "",
              "Peak RAM is the most that was held; « no file » is the part of it that no file backs, which a memory cap cannot take back. "
              "In a job's row, Seconds runs from the page's request to the job's end, and In ComfyUI from its start to its end in "
@@ -322,6 +350,8 @@ def report(a, machine, results):
                   f"- Out-of-memory retries: {r['oom']}. Jobs taken from the job index, so not timed: {r['indexed']}.",
                   f"- Previews received by the page: {r['previews']}. Live previews written by the node: {r['live_files']}."
                   + ("".join(f" Live preview off: {why}." for why in r["live_off"]))]
+        lines += carried(r, a.fresh, gb)
+        lines += [f"- The page's figure for an erase: {f}" for f in r.get("figures", [])]
         lines += [f"- Did not finish: {line}" for line in r["ended"]]
         lines += [f"- {m}" for m in r["mattes"]]
         if r["matte"]:

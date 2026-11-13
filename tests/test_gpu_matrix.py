@@ -187,7 +187,7 @@ class Run(unittest.TestCase):
         self.assertIn("| Before each case | ComfyUI is freed (--fresh) |", report)
         calls, _, report = self.matrix("horse_cow,horse_erase", [True])
         self.assertEqual(calls, ["horse_cow", "horse_erase"])
-        self.assertIn("| Before each case | ComfyUI stays as the case before left it |", report)
+        self.assertIn("| Before each case | ComfyUI stays as the case before left it: a first job can read its RAM |", report)
 
     def test_seeds_runs_each_case_once_per_seed(self):
         """The pod's first turn runs the erase on 5 seeds: one row of the report and one folder per seed."""
@@ -304,6 +304,37 @@ class Tools(unittest.TestCase):
         log = ("11:02:36 PMClean matte: SAM 3.1 found the object on 76 of 121 frames; the largest matte is 1.0 times the object, on frame 0\n"
                "23:02:37Paint matte (full): SAM 3.1 found the object on 54 of 121 frames; the largest matte is 1.0 times the object, on frame 8\n")
         self.assertEqual([m.split(":")[0] for m in gpu_matrix.read_log(log)["mattes"]], ["Clean matte", "Paint matte (full)"])
+
+
+class ReportLines(unittest.TestCase):
+    """What the report says (wave 5, R9): a fluid shot's steps, the RAM a first job can read, the page's figure for an erase."""
+
+    FLUID = ("11:38:49 PMFluid v1: 2 keyframe(s) at 1, 121, 1280 x 704, 121 frames at 24 fps, seed 104\n"
+             "11:38:49 PMFluid shot v1: one LTX 2.5 pass with ainvfx-fluid\n"
+             "11:40:38 PMfluid fd2d3d7a: done in 108.9 s (29 nodes, 4 previews)\n"
+             "11:40:38 PMFluid shot v1: SDR to HDR, one LTX 2.5 pass with Lightricks' IC-LoRA\n"
+             "11:43:33 PMhdr 647d4dd4: done in 175.3 s (29 nodes, 3 from ComfyUI's cache, 4 previews)\n"
+             "11:43:33 PMFluid v1: SDR to HDR took 175.3 s: half-float EXR frames in output:paintaplate/x/fluid_v1/hdr\n"
+             "11:43:33 PMFluid v1: done in 284.3 s: 1 file(s) in /data/ComfyUI/output/paintaplate/x/fluid_v1/plate\n")
+
+    def test_a_fluid_shot_has_its_steps(self):
+        """fluid_720 on the laptop, 12 Nov: its table of steps was empty, as only « Render vN: … took » lines were read."""
+        self.assertEqual(gpu_matrix.read_log(self.FLUID)["steps"], [("fluid v1 LTX pass", 108.9), ("fluid v1 SDR to HDR", 175.3), ("fluid v1 in all", 284.3)])
+
+    def test_render_steps_keep_their_names_and_order(self):
+        log = "11:02:36 PMRender v1: Track the erase took 28.7 s\n11:03:35 PMRender v1: Erase pass, preview took 59.1 s\n"
+        self.assertEqual(gpu_matrix.read_log(log)["steps"], [("v1 Track the erase", 28.7), ("v1 Erase pass, preview", 59.1)])
+
+    def test_an_erase_gives_the_page_s_figure(self):
+        log = "11:02:06 PMEdit 1: the object left the first frame (59% of it changed)\n"
+        self.assertEqual(gpu_matrix.read_log(log)["figures"], ["Edit 1: the object left the first frame (59% of it changed)"])
+
+    def test_without_fresh_a_first_job_can_read_the_case_before(self):
+        """horse_erase_barn's ingest on the laptop, 12 Nov: 30.3 GB of peak RAM for a 2.6 s job, the case before's memory."""
+        r, gb = {"jobs": [{"name": "ingest", "id": "69cce02d", "run": 2.6, "ram": 30.3e9}]}, (lambda x: f"{x / 1e9:.1f} GB")
+        note = gpu_matrix.carried(r, False, gb)
+        self.assertTrue(len(note) == 1 and "ingest 69cce02d" in note[0] and "--fresh" in note[0], note)
+        self.assertEqual(gpu_matrix.carried(r, True, gb), [])
 
 
 if __name__ == "__main__":
