@@ -17,8 +17,10 @@ start and its end in ComfyUI's /history.
 quick: on plates/horse.mp4 (python get_plates.py) a cow painted behind the fence, one erase, one light, then a fluid shot
 at 1280 x 704 x 121. all adds a 3840 x 2160 plate at 50 fps, made here from horse.mp4 (paint, erase, light), a fluid
 shot at 1920 x 1088 at 50 fps with one edit on it, then the same 3840 x 2160 plate at 25 fps. --cases also takes case
-names, with commas. The strokes are in gpu_matrix.json beside this file. Every run moves them by a fraction of a pixel,
-so no job comes back from the job index and every time is a real one; --exact keeps them as written. --memory small,
+names, with commas. The strokes and the seed of each case are in gpu_matrix.json beside this file: a case paints the
+same strokes from the same seed at every run, so a wrong picture comes back at the next run. --seeds 7,8,9 runs each
+case once per seed, in place of its own. ui_live.py opens the page with ?index=0: the page leaves its job index alone,
+so every job runs and every time is a measured one. --memory small,
 medium or large asks the page for that memory profile (logic.memoryProfile) in place of the one the card gives: the same
 case under two profiles shows what a profile costs.
 
@@ -30,7 +32,6 @@ import argparse
 import glob
 import json
 import os
-import random
 import re
 import subprocess
 import sys
@@ -173,14 +174,46 @@ def make_uhd(source, target, fps):
     plateio.write_movie(lambda i: frames[i], len(frames), target, fps, crf=14, preset="medium", size=UHD_SIZE)
 
 
-def moved(strokes, exact):
-    """The strokes with every point moved by at most 0.002 of the frame: new jobs, so nothing comes from the job index."""
-    if exact:
-        return strokes
-    out = json.loads(json.dumps(strokes))
-    for stroke in out:  # a stroke is [key, words, points, ...]; a fluid keyframe is [frame, colour, points, ...]
-        stroke[2] = [[min(1.0, max(0.0, v + random.uniform(-0.002, 0.002))) for v in point] for point in stroke[2]]
-    return out
+def load_cases():
+    """The cases of gpu_matrix.json, by name. A case with « like » takes another case's strokes, the brush scaled to its own
+    plate, and that case's seed unless it holds one."""
+    with open(os.path.join(HERE, "gpu_matrix.json"), encoding="utf-8") as f:
+        cases = {name: case for name, case in json.load(f).items() if isinstance(case, dict)}  # « note » is a sentence
+    for case in cases.values():
+        if "like" in case:
+            source = cases[case["like"]]
+            case["strokes"] = [[*s[:3], round(s[3] * case.get("scale", 1)), *s[4:]] for s in source["strokes"]]
+            case.setdefault("seed", source.get("seed"))
+    return cases
+
+
+def seeds_asked(text):
+    """--seeds 7,8,9 as numbers. Without it, [None]: each case runs once, from its own seed."""
+    if not text:
+        return [None]
+    seeds = [int(s) if s.strip().isdigit() else -1 for s in text.split(",")]
+    if any(not 0 <= s < 2 ** 31 for s in seeds):
+        stop("--seeds takes whole numbers from 0 to 2147483647, with commas: the seeds the page accepts in ?seed=.")
+    return seeds
+
+
+def command(a, case, folder):
+    """ui_live.py's command for one case: its plate or its fluid shot, its strokes as written, its seed."""
+    cmd = [sys.executable, os.path.join(HERE, "ui_live.py"), "--url", a.url, "--comfy", a.comfy, "--out", folder,
+           "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2", *(["--memory", a.memory] if a.memory else [])]
+    cmd += ["--fluid", json.dumps(case["fluid"])] if "fluid" in case else ["--path", case["path"]]
+    if case.get("strokes"):
+        cmd += ["--strokes", json.dumps(case["strokes"])]
+    if case.get("seed") is not None:
+        cmd += ["--seed", str(case["seed"])]
+    return cmd
+
+
+def seed_note(asked, named):
+    """A case's line on its seed: the one it asked the page for, and the seeds that the page's log names for its edits, its
+    fluid shot and its render."""
+    said = f"Seed asked for: {'none, the page draws one' if asked is None else asked}. In the page's log: {', '.join(named) or 'none'}."
+    return said if asked is None or named == [str(asked)] else said + " The page did not start from the seed asked for: its version may not read ?seed= yet."
 
 
 def matte_areas(comfy, since):
@@ -213,26 +246,19 @@ def read_log(text):
         "live_off": re.findall(r"Live preview is off: ([^\n]*)", text),
         "profile": f"{profile.group(1)} ({profile.group(2)})" if profile else "not in the log's last 400 lines",
         "mattes": re.findall(r"((?:Paint|Erase) matte[^\n]*largest matte is [^\n]*)", text),
+        "seeds": sorted(set(re.findall(r"\bseed (\d+)", text)), key=int),
     }
 
 
 def run_case(a, name, case, folder):
-    cmd = [sys.executable, os.path.join(HERE, "ui_live.py"), "--url", a.url, "--comfy", a.comfy, "--out", folder,
-           "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2", *(["--memory", a.memory] if a.memory else [])]
-    if "fluid" in case:
-        cmd += ["--fluid", json.dumps({**case["fluid"], "keys": moved(case["fluid"]["keys"], a.exact)})]
-    else:
-        cmd += ["--path", case["path"]]
-    if case.get("strokes"):
-        cmd += ["--strokes", json.dumps(moved(case["strokes"], a.exact))]
     memory, t0 = Memory(a.url), time.time()
     memory.start()
     print(f"--- {name}", flush=True)
-    subprocess.run(cmd)
+    subprocess.run(command(a, case, folder))
     memory.on = False
     memory.join(3)
     vram, ram, own = memory.peak()
-    result = {"name": name, "seconds": time.time() - t0, "vram": vram, "ram": ram, "own": own, "container": memory.container, "folder": folder}
+    result = {"name": name, "seconds": time.time() - t0, "vram": vram, "ram": ram, "own": own, "container": memory.container, "folder": folder, "seed": case.get("seed")}
     log_file, marks_file = os.path.join(folder, "page_log.txt"), os.path.join(folder, "timings.json")
     result["log"] = open(log_file, encoding="utf-8").read() if os.path.exists(log_file) else ""
     marks = json.load(open(marks_file)).get("marks", []) if os.path.exists(marks_file) else []
@@ -267,6 +293,8 @@ def report(a, machine, results):
              f"| PyTorch | {system.get('pytorch_version', 'unknown')} |",
              f"| Paint a plate | commit {git('rev-parse', '--short', 'HEAD')} on {git('rev-parse', '--abbrev-ref', 'HEAD')} |",
              f"| Cases | {a.cases}: {', '.join(r['name'] for r in results)} |",
+             f"| Seeds | {a.seeds.replace(' ', '').replace(',', ', ') + ' (--seeds): each case runs once per seed' if a.seeds else 'each case runs from its own (gpu_matrix.json)'} |",
+             "| Job index | left alone: the page is opened with `?index=0`, so every job runs |",
              f"| Memory profile asked for | {a.memory or 'none: the card decides'} |",
              f"| Before each case | {'ComfyUI is freed (--fresh)' if a.fresh else 'ComfyUI stays as the case before left it'} |",
              f"| RAM read from | {a.source} |", "",
@@ -288,7 +316,7 @@ def report(a, machine, results):
             in_comfy = "" if j["run"] is None else f"{j['run']:.1f}"
             peaks = " | | " if j["run"] is None else f"{gb(j['vram'])} | {gb(j['ram'])} | {gb(j['own'])}"
             lines.append(f"| {j['name']} {j['id']} | {j['seconds']:.1f} | {in_comfy} | {peaks} | {j['cached']} of {j['nodes']} | {j['previews']} |")
-        lines += ["", f"- Memory profile: {r['profile']}.",
+        lines += ["", f"- Memory profile: {r['profile']}.", f"- {seed_note(r.get('seed'), r['seeds'])}",
                   f"- Peak VRAM {gb(r['vram'])}. Peak RAM {gb(r['ram'])}, of which {gb(r['own'])} that no file backs"
                   + (f"; this container's own count, page cache included: {gb(r['container'])}" if r["container"] else "") + ".",
                   f"- Out-of-memory retries: {r['oom']}. Jobs taken from the job index, so not timed: {r['indexed']}.",
@@ -322,19 +350,16 @@ def main():
     ap.add_argument("--channel", default="chrome", help="the browser channel: Google Chrome plays H.264")
     ap.add_argument("--timeout", type=int, default=900, help="ui_live.py's --timeout: it waits 8 times this many seconds for a render, 4 times for a fluid shot, twice for an edit")
     ap.add_argument("--memory", default="", choices=("", "small", "medium", "large"), help="ask the page for this memory profile; by default the card decides")
-    ap.add_argument("--exact", action="store_true", help="the strokes as written: jobs made before come back from the job index")
+    ap.add_argument("--seeds", default="", help="whole numbers with commas: each case runs once per seed, as <case>_s<seed>, in place of its own seed")
     ap.add_argument("--fresh", action="store_true", help="free ComfyUI's memory before each case, so a case's peak RAM is its own; its first job then loads its models again")
     a = ap.parse_args()
     a.url, a.comfy, a.out = a.url.rstrip("/"), os.path.abspath(a.comfy), os.path.abspath(a.out)
-    with open(os.path.join(HERE, "gpu_matrix.json"), encoding="utf-8") as f:
-        cases = json.load(f)
-    for case in cases.values():
-        if isinstance(case, dict) and "like" in case:  # another case's strokes, the brush scaled to this plate
-            case["strokes"] = [[*s[:3], round(s[3] * case.get("scale", 1)), *s[4:]] for s in cases[case["like"]]["strokes"]]
+    cases = load_cases()
     names = QUICK if a.cases == "quick" else ALL if a.cases == "all" else tuple(a.cases.split(","))
-    unknown = [n for n in names if not isinstance(cases.get(n), dict)]
+    unknown = [n for n in names if n not in cases]
     if unknown:
-        stop(f"No such case: {', '.join(unknown)}. The cases are {', '.join(ALL)}.")
+        stop(f"No such case: {', '.join(unknown)}. The cases are {', '.join(cases)}.")
+    seeds = seeds_asked(a.seeds)
     browser_ready(a.channel)
     try:
         machine = get(a.url + "/system_stats")
@@ -350,16 +375,18 @@ def main():
             print(f"making {file} from horse.mp4", flush=True)
             make_uhd(os.path.join(plates, "horse.mp4"), os.path.join(plates, file), fps)
     os.makedirs(a.out, exist_ok=True)
-    results, left = [], list(names)
+    # one run per case, or per case and seed with --seeds: its name in the report and for its folder, and what it hands to the page
+    left = [(name, cases[name]) if seed is None else (f"{name}_s{seed}", {**cases[name], "seed": seed}) for name in names for seed in seeds]
+    results = []
     while left:
-        name = left.pop(0)
+        name, case = left.pop(0)
         if a.fresh:
             free(a.url)
-        results.append(run_case(a, name, cases[name], os.path.join(a.out, name)))
+        results.append(run_case(a, name, case, os.path.join(a.out, name)))
         print(f"{name}: {'passed' if results[-1]['passed'] else 'FAILED'} in {results[-1]['seconds']:.0f} s", flush=True)
         if left and not answers(a.url):  # each case left would fail in 31 s with a traceback (the laptop, 12 Nov)
-            print(f"ComfyUI has stopped. Not run: {', '.join(left)}", flush=True)
-            results += [{"name": n, "passed": False, "skipped": True} for n in left]
+            print(f"ComfyUI has stopped. Not run: {', '.join(n for n, _ in left)}", flush=True)
+            results += [{"name": n, "passed": False, "skipped": True} for n, _ in left]
             left = []
         report(a, machine, results)
     print(f"report: {os.path.join(a.out, 'report.md')}")

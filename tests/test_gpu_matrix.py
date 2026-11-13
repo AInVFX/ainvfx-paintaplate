@@ -1,5 +1,6 @@
 """tests/gpu_matrix.py: what it reads from a case's page log and from ComfyUI's history. tools/runpod_start.sh: what a
 start keeps. No GPU and no browser."""
+import argparse
 import contextlib
 import importlib.util
 import io
@@ -57,6 +58,51 @@ class Report(unittest.TestCase):
         self.assertEqual(memory.peak(), [99, 99, 99], "a whole case")
 
 
+class Seeds(unittest.TestCase):
+    """A case runs from its own seed with its strokes as written, so a wrong picture comes back at the next run."""
+
+    def test_every_case_holds_a_seed(self):
+        """The laptop's erase of 12 Nov (1.11.10) left its object in the picture. The page had drawn its seed, 1017942128,
+        and the GPU test had moved the strokes: the next run would have made another picture."""
+        cases = gpu_matrix.load_cases()
+        for name in gpu_matrix.ALL:
+            self.assertIsInstance(cases[name].get("seed"), int, name)
+            self.assertTrue(0 <= cases[name]["seed"] < 2 ** 31, name)
+        self.assertEqual(cases["horse_erase"]["seed"], 1017942128)
+        self.assertEqual((cases["uhd_erase"]["seed"], cases["uhd25_erase"]["seed"]), (1017942128, 1017942128), "« like » takes the other case's seed")
+        self.assertEqual(cases["uhd_erase"]["strokes"][0][3], 2 * cases["horse_erase"]["strokes"][0][3], "and its strokes, the brush scaled")
+
+    def test_a_case_hands_its_strokes_as_written_and_its_seed_to_the_page(self):
+        a = argparse.Namespace(url="http://127.0.0.1:8188", comfy="/comfy", channel="chrome", timeout=900, memory="")
+        cases = gpu_matrix.load_cases()
+        erase = gpu_matrix.command(a, cases["horse_erase"], "/out/horse_erase")
+        self.assertEqual(erase[erase.index("--seed") + 1], "1017942128")
+        self.assertEqual(json.loads(erase[erase.index("--strokes") + 1]), cases["horse_erase"]["strokes"])
+        self.assertEqual(gpu_matrix.command(a, cases["horse_erase"], "/out/horse_erase"), erase, "a second run asks for the same")
+        fluid = gpu_matrix.command(a, cases["fluid_720"], "/out/fluid_720")
+        self.assertEqual(json.loads(fluid[fluid.index("--fluid") + 1]), cases["fluid_720"]["fluid"])
+        self.assertEqual(fluid[fluid.index("--seed") + 1], str(cases["fluid_720"]["seed"]))
+        self.assertNotIn("--strokes", fluid)
+        self.assertNotIn("--seed", gpu_matrix.command(a, {"path": "plates/horse.mp4"}, "/out/x"), "a case without a seed: the page draws one")
+
+    def test_the_report_names_the_seed_asked_for_and_the_seeds_of_the_page_s_log(self):
+        log = ('04:35:35 PMEdit 1: Erase "", seed 1017942128, whole object on, 1 stroke, over 0 edits\n'
+               "04:36:10 PMRender v1: 1 edit(s) (1 Erase), preview at 640x352, seed 1017942128, steps: erase > clean > comp\n")
+        named = gpu_matrix.read_log(log)["seeds"]
+        self.assertEqual(named, ["1017942128"])
+        self.assertEqual(gpu_matrix.seed_note(1017942128, named), "Seed asked for: 1017942128. In the page's log: 1017942128.")
+        self.assertIn("The page did not start from the seed asked for", gpu_matrix.seed_note(7, named))
+        self.assertEqual(gpu_matrix.seed_note(None, named), "Seed asked for: none, the page draws one. In the page's log: 1017942128.")
+        self.assertEqual(gpu_matrix.read_log(LOG)["seeds"], [])
+
+    def test_seeds_takes_the_whole_numbers_the_page_accepts(self):
+        self.assertEqual(gpu_matrix.seeds_asked(""), [None])
+        self.assertEqual(gpu_matrix.seeds_asked("7,8, 2147483647"), [7, 8, 2147483647])
+        for text in ("7,x", "-1", "2147483648", "7,,8"):
+            with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
+                gpu_matrix.seeds_asked(text)
+
+
 class Run(unittest.TestCase):
     """gpu_matrix.main with stand-ins for the browser, ComfyUI and the cases."""
 
@@ -68,7 +114,7 @@ class Run(unittest.TestCase):
         def case(a, name, case, folder):
             calls.append(name)
             return {"name": name, "seconds": 255.0, "vram": 0, "ram": 0, "own": 0, "container": 0, "folder": folder, "log": "", "marks": [],
-                    **gpu_matrix.read_log(""), "jobs": list(jobs), "passed": True, "why": "", "matte": None, "live_files": 0}
+                    **gpu_matrix.read_log(""), "jobs": list(jobs), "passed": True, "why": "", "matte": None, "live_files": 0, "seed": case.get("seed")}
 
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "input", "plates"))
@@ -118,6 +164,19 @@ class Run(unittest.TestCase):
         self.assertEqual(calls, ["horse_cow", "horse_erase"])
         self.assertIn("| Before each case | ComfyUI stays as the case before left it |", report)
 
+    def test_seeds_runs_each_case_once_per_seed(self):
+        """The pod's first turn runs the erase on 5 seeds: one row of the report and one folder per seed."""
+        calls, code, report = self.matrix("horse_erase,horse_light", [True, True, True], "--seeds", "7,8")
+        self.assertEqual((calls, code), (["horse_erase_s7", "horse_erase_s8", "horse_light_s7", "horse_light_s8"], 0))
+        self.assertIn("| Seeds | 7, 8 (--seeds): each case runs once per seed |", report)
+        self.assertIn("## horse_erase_s8 · passed in 255 s", report)
+        self.assertIn("- Seed asked for: 8.", report)
+        calls, _, report = self.matrix("horse_erase", [])
+        self.assertEqual(calls, ["horse_erase"])
+        self.assertIn("| Seeds | each case runs from its own (gpu_matrix.json) |", report)
+        self.assertIn("- Seed asked for: 1017942128.", report)
+        self.assertIn("| Job index | left alone: the page is opened with `?index=0`, so every job runs |", report)
+
     def test_free_posts_what_the_page_posts(self):
         sent = []
 
@@ -146,6 +205,19 @@ class Live(unittest.TestCase):
         notes = ["preview about 14 s left", "preview about 3 s left", "preview almost ready", "full size about 8 min 20 s left",
                  "full size about 2 min 50 s left", "full size ready"]
         self.assertEqual([ui_live.stage(note) for note in notes], ["preview"] * 3 + ["full size"] * 2 + ["full size ready"])
+
+
+    def test_the_page_is_asked_for_the_seed_and_for_no_job_index(self):
+        """With one seed and the same strokes, a case's jobs are the same at every run: taken from the job index, none would
+        run, and no time or peak of memory would be measured."""
+        import ui_live
+        self.assertEqual(ui_live.address("http://127.0.0.1:8188"), "http://127.0.0.1:8188/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&index=0")
+        self.assertEqual(ui_live.address("http://x", "small", 1017942128).split("?")[1], "blank=0&index=0&memory=small&seed=1017942128")
+        self.assertEqual(ui_live.address("http://x", seed=0).split("?")[1], "blank=0&index=0&seed=0", "0 is a seed")
+        with open(os.path.join(gpu_matrix.REPO, "web", "app.mjs"), encoding="utf-8") as f:
+            page = f.read()
+        for option in ('Q.get("blank")', 'Q.get("index")', 'Q.get("memory")', 'Q.get("seed")'):
+            self.assertIn(option, page, "the page's own name for this option")
 
 
 @unittest.skipUnless(shutil.which("bash"), "tools/runpod_start.sh is a bash script")
