@@ -371,11 +371,11 @@ def main():
                     check(rates == [RATE], f"review {run}: its EXR frames say {rates} fps, the plate {RATE:g}")
                 if seq and exrs and not relight:  # outside the edit the review holds the plate's own values, as half floats
                     src = plateio.find_sequence(os.path.join(input_dir, path))
-                    a, b = plateio.read_float(src[3]), plateio.read_float(os.path.join(rdir, exrs[3]))
+                    own, seen = plateio.read_float(src[3]), plateio.read_float(os.path.join(rdir, exrs[3]))
                     out = np.zeros((H, W), bool); out[92:, :] = True; out[:, 160:] = True
                     tol = 2e-4 if kind == "exr" else 1.5e-3  # half floats; core's decode moves 16-bit PNG values by up to 0.0005
-                    check(np.allclose(a[out], b[out], rtol=2e-3, atol=tol), f"review {run}: untouched pixels are the plate's own values "
-                          f"(largest difference {float(np.abs(a[out] - b[out]).max()):.5f})")
+                    check(np.allclose(own[out], seen[out], rtol=2e-3, atol=tol), f"review {run}: untouched pixels are the plate's own values "
+                          f"(largest difference {float(np.abs(own[out] - seen[out]).max()):.5f})")
                 exp_dir = f"{shot}/export"
                 for folder in (exp_dir, f"{shot}/matte"):  # a second run on the same ComfyUI starts clean
                     shutil.rmtree(os.path.join(output_dir, folder), ignore_errors=True)
