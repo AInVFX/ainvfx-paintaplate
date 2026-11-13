@@ -2086,7 +2086,7 @@ async function generate(edit) {
       const at = p.prev, after = snap(before, at), px = (c) => c.getContext("2d").getImageData(0, 0, at[0], at[1]).data;
       after.getContext("2d").drawImage(edit.patch, 0, 0, at[0], at[1]);
       const check = eraseCheck(px(after), px(snap(before, at)), px(maskAt(edit, at)), at[0], at[1]);
-      if (check.left && !(await heldBack(edit, check))) return;
+      if (check.left && !(await heldBack(edit, check, alive))) return;
       if (!alive()) return;
       const said = check.changed === null ? "" : `${Math.round(check.changed * 100)}% of it changed`; // tests/gpu_matrix.py reads « (N% of it changed) »
       const held = check.edges === null ? "" : `, its edges held at ${check.edges.toFixed(2)}`;
@@ -2118,15 +2118,16 @@ async function generate(edit) {
 // ends a GPU case on #history li[data-left], so a case that nobody watches never waits on the dialog. The first frame shows
 // Klein's result under the question, under a version of its own, so no earlier render shows there. « Render anyway » (Enter)
 // keeps that first frame: true, and generate goes on to its shot, which takes the mark away. Cancel (Esc) drops the result:
-// Generate runs the erase again once its words, its strokes or its seed change.
-async function heldBack(edit, check) {
-  const lines = leftLines(num(edit), check), patch = edit.patch;
+// Generate runs the erase again once its words, its strokes or its seed change. A question that is open (the OCIO one) is
+// answered first; another pass of this edit, or its removal, drops this question (`current`).
+async function heldBack(edit, check, alive) {
+  const lines = leftLines(num(edit), check), patch = edit.patch, current = () => alive() && edit.patch === patch;
   Object.assign(edit, { preview: null, latent: null, state: "failed", left: true, force: false, version: ++S.vers });
   S.running = null;
   recompose(); historyUI(); render(); timelineUI();
   log(lines.fact, "error");
-  const anyway = await ask(lines.question, "Render anyway", true);
-  if (edit.patch !== patch) return false; // another pass of this edit replaced the result while the page asked
+  const anyway = await ask(lines.question, "Render anyway", { enter: true, still: current });
+  if (!current()) return false;
   if (!anyway) {
     edit.patch = null;
     recompose(); historyUI(); render(); timelineUI();

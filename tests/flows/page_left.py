@@ -4,8 +4,9 @@ nothing said so. After the edit the page compares the first frame with the frame
 (logic.eraseCheck). The check can be wrong on a thin or faint object, or on one behind a fence, so the page asks (Adrien,
 13 Nov 2026) in its question dialog, with History's row marked as the question opens: tests/ui_live.py ends a GPU case on
 that mark. Esc or Cancel renders nothing and leaves what to do next in the status line, and the page goes on: another seed
-asks again. « Render anyway », clicked or chosen by Enter, keeps the first frame and renders its shot. The mock answers the
-next edit jobs with the frame as it was (/mock/leave)."""
+asks again. « Render anyway », clicked or chosen by Enter, keeps the first frame and renders its shot. One question at a
+time: a second erase is held back while the OCIO question is open (/mock/hold keeps its passes running), and its question
+waits for that answer. The mock answers the next edit jobs with the frame as it was (/mock/leave)."""
 
 FACT = "Edit 1: the object may still be there ("
 QUESTION = ". Render the shot anyway?"
@@ -15,6 +16,7 @@ ROW = """(() => { const li = document.querySelector('#history li');
   return li ? [li.className, li.dataset.left ?? '', li.querySelector('small').textContent] : null; })()"""
 ASKED = """(() => { const d = document.querySelector('#ask');
   return d.open ? [d.querySelector('#ask-text').textContent, d.querySelector('#ask-yes').textContent, document.activeElement?.id ?? ''] : null; })()"""
+FILE, LINEAR = "sRGB Encoded Rec.709 (sRGB)", "Linear Rec.709 (sRGB)"  # as tests/flows/page_ocio.py
 COUNT = "(t) => window.__lines.filter((l) => l.includes(t)).length"
 
 
@@ -41,8 +43,8 @@ def cancelled(page, U, asked, facts, what):
             f"{what}: no shot renders, and History's row keeps its mark ({row})")
 
 
-def rendered(page, U, n, what):
-    page.wait_for_function(f"(t) => window.__lines.filter((l) => l.includes(t)).length >= {n}", arg=ANYWAY, timeout=60000)
+def rendered(page, U, n, what, line=ANYWAY, times=None):
+    page.wait_for_function(f"(t) => window.__lines.filter((l) => l.includes(t)).length >= {times or n}", arg=line, timeout=60000)
     U.wait_log(page, U.added_line(f"Render v{n}"), 120000, f"render v{n} after Render anyway")
     row = page.evaluate(ROW)
     U.check(page.is_hidden("#ask") and "failed" not in row[0] and row[1] == "",
@@ -78,8 +80,26 @@ def run(browser, port, U):
     page.click("#ask-yes")
     rendered(page, U, 1, "Render anyway")
     U.settled(page)
-    held(page, port, U, another, "another seed")
+    page.keyboard.press("n")  # New edit: edit 1 keeps its result, so the OCIO question has an edit to regenerate
+    U.mock_route(port, "/mock/leave", {"times": 2})
+    U.mock_route(port, "/mock/hold", {"output": "patch", "seconds": 6, "times": 2})  # edit 2's two passes last 6 s each
+    U.paint_once(page, "bottle", [(0.6, 0.4), (0.62, 0.45)])
     page.keyboard.press("Enter")
-    rendered(page, U, 2, "Enter chooses Render anyway")
+    U.wait_log(page, U.added_line("Edit 2: Klein full-size pass"), 60000, "edit 2's full-size pass")
+    U.menu(page, "OCIO", f"Colour space: {FILE}, from file", "Utility", LINEAR)
+    page.wait_for_selector("#ask[open]", timeout=5000)
+    ocio = page.text_content("#ask-text")
+    U.wait_log(page, U.added_line("Edit 2: the object may still be there ("), 60000, "edit 2 held back")
+    page.wait_for_timeout(500)
+    asked = page.evaluate(ASKED)
+    U.check(ocio.startswith("Changing the ") and bool(asked) and asked[0] == ocio and asked[1] == "Change",
+            f"a question that comes while another is open waits: the OCIO question stays as it was ({asked})")
+    page.click("#ask-no")
+    page.wait_for_function("() => document.querySelector('#ask').open && document.querySelector('#ask-text').textContent.startsWith('Edit 2: ')", timeout=5000)
+    asked = page.evaluate(ASKED)
+    U.check(asked[0].startswith("Edit 2: the object may still be there (") and asked[0].endswith(QUESTION) and asked[1] == "Render anyway"
+            and asked[2] == "ask-yes", f"once that question is answered, edit 2's question opens, under Enter ({asked})")
+    page.keyboard.press("Enter")
+    rendered(page, U, 2, "Enter chooses Render anyway", line="Edit 2: rendered at your request.", times=1)
     U.no_errors(errors, "after an erase that the check held back")
     page.close()
