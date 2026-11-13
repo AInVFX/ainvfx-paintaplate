@@ -726,7 +726,7 @@ def ocio_flow(browser, port):
     page.wait_for_function(exact, timeout=30000)
     until(page, same, arg=before)
     check(max(abs(a - b) for a, b in zip(pixel(), before)) <= 2, "back to Un-tone-mapped while it plays, the frame looks as it did")
-    menu(page, "OCIO", "Plate colour space: sRGB Encoded Rec.709 (sRGB), read from the file", "Utility", "Linear Rec.709 (sRGB)")
+    menu(page, "OCIO", "Colour space: sRGB Encoded Rec.709 (sRGB), from file", "Utility", "Linear Rec.709 (sRGB)")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('Linear Rec.709 (sRGB)') && document.querySelector('#opening').hidden", timeout=60000)
     until(page, differs, arg=before)
     until(page, "window.__lines.some((t) => t.startsWith('ingest '))")
@@ -734,7 +734,7 @@ def ocio_flow(browser, port):
     said = [t for t in lines if t.startswith("Plate colour space") or t.startswith("ingest ")]
     check(any(t.startswith("Plate colour space: Linear Rec.709 (sRGB)") for t in said) and any(t.startswith("ingest ") for t in said) and linear != before,
           f"another plate colour space: the viewer shows it, and the plate opens again in it for the models and the export: {before} becomes {linear}; {said}")
-    menu(page, "OCIO", "Plate colour space: Linear Rec.709 (sRGB), chosen by you", "Utility", "sRGB Encoded Rec.709 (sRGB)")
+    menu(page, "OCIO", "Colour space: Linear Rec.709 (sRGB), override", "Utility", "sRGB Encoded Rec.709 (sRGB)")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('sRGB Encoded Rec.709 (sRGB)') && document.querySelector('#opening').hidden", timeout=60000)
     check(not errors, f"no page errors with OCIO: {errors}")
     page.close()
