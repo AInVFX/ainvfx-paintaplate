@@ -529,10 +529,26 @@ def _padded(rgb, alpha, count: int, pad_8n1: bool):
     if rgb is None:
         return np.zeros((0, 0, 0, 3), np.float32), None, 0
     n = pad_count_8n1(count) if pad_8n1 else count
+    if len(rgb) != n:  # exactly the rows decoded and their padding: in place, shrunk or grown
+        rgb.resize((n, *rgb.shape[1:]), refcheck=False)
+        if alpha is not None:
+            alpha.resize((n, *alpha.shape[1:]), refcheck=False)
     rgb[count:n] = rgb[count - 1]
     if alpha is not None:
         alpha[count:n] = alpha[count - 1]
-    return rgb[:n], None if alpha is None else alpha[:n], count
+    return rgb, alpha, count
+
+
+def _frames_said(path: str) -> int:
+    """How many frames a video's header says it holds: its stream's count, else its duration at its average rate, else 0."""
+    with av.open(path) as c:
+        if not c.streams.video:
+            return 0
+        s = c.streams.video[0]
+        if s.frames:
+            return int(s.frames)
+        seconds = float(s.duration * s.time_base) if s.duration else (c.duration / 1e6 if c.duration else 0.0)
+        return max(0, round(seconds * float(s.average_rate))) if s.average_rate else 0
 
 
 def decode_video(path: str, max_frames: int, fps: float, pad_8n1: bool = False):
@@ -541,14 +557,26 @@ def decode_video(path: str, max_frames: int, fps: float, pad_8n1: bool = False):
     Core (VideoFromFile(path, duration=max_frames / fps).get_components()) holds the plate twice: its list of frames,
     then their stack, and Load Plate's 8k+1 padding made one more copy for a moment. Returns (RGB float32 (N, H, W, 3),
     alpha float32 (N, H, W) or None, the frames decoded); with `pad_8n1`, N also counts the padding. The live tests compare
-    it with core's decoder (tests/decode_parity.py), so a ComfyUI pin that changes core's pictures fails a test."""
-    rows = pad_count_8n1(max_frames) if pad_8n1 else max_frames
+    it with core's decoder (tests/decode_parity.py), so a ComfyUI pin that changes core's pictures fails a test.
+
+    The array holds what the file's header says it holds (_frames_said), up to `max_frames`, not `max_frames` rows: the
+    node allows 1,024, and a short clip loaded with more reserved rows for frames that do not exist, which Windows
+    commits. A file that holds more grows the array as its frames come; one that holds fewer shrinks it in place. Either
+    way the pictures are core's."""
+    expected = min(max_frames, _frames_said(path)) or min(max_frames, 8)
+    limit = pad_count_8n1(max_frames) if pad_8n1 else max_frames
     rgb = alpha = None
     count = 0
     for img, byte8, has_alpha in _core_frames(path, float(max_frames / fps)):
         if rgb is None:
+            rows = pad_count_8n1(expected) if pad_8n1 else expected
             rgb = np.empty((rows, *img.shape[:2], 3), np.float32)
             alpha = np.empty((rows, *img.shape[:2]), np.float32) if has_alpha else None
+        elif count == len(rgb):  # the file holds more than its header says: a quarter more, at least 8 frames
+            rows = min(limit, count + max(8, count // 4))
+            rgb.resize((rows, *rgb.shape[1:]), refcheck=False)
+            if alpha is not None:
+                alpha.resize((rows, *alpha.shape[1:]), refcheck=False)
         _put(rgb, alpha, count, img, byte8)
         count += 1
         if count == max_frames:  # Load Plate keeps no more
