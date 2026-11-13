@@ -473,6 +473,77 @@ class Sheet(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(tmp, "sheet_files")), "the unzipped frames are removed")
         self.assertIsNone(gpu_matrix.sheet({**case, "strokes": []}, tmp, plate), "no edit, no sheet")
 
+    @unittest.skipUnless(shutil.which("node"), "the verdict runs the page's rules with Node")
+    def test_the_sheet_says_gone_or_left_by_the_page_s_own_rule(self):
+        """R15: logic.eraseCheck, run with Node on the export's first frame against the plate's, inside the page's mask."""
+        import av
+        import numpy as np
+        from PIL import Image
+        tmp, (w, h, n), place = tempfile.mkdtemp(prefix="paintaplate_verdict_"), (320, 192, 4), (slice(80, 120), slice(200, 260))
+
+        def movie(path, with_object):
+            with av.open(path, "w") as c:
+                s = c.add_stream("mpeg4", rate=24)
+                s.width, s.height, s.pix_fmt = w, h, "yuv420p"
+                for _ in range(n):
+                    a = np.full((h, w, 3), 128, np.uint8)
+                    if with_object:
+                        a[place] = (220, 20, 20)
+                    for p in s.encode(av.VideoFrame.from_ndarray(a, format="rgb24")):
+                        c.mux(p)
+                for p in s.encode():
+                    c.mux(p)
+        plate, mask = os.path.join(tmp, "plate.mp4"), os.path.join(tmp, "e2_mask_full.png")
+        movie(plate, True)
+        m = np.zeros((h, w), np.uint8)
+        m[place] = 255
+        Image.fromarray(m).save(mask)
+        case = {"path": "plates/plate.mp4", "strokes": [["erase", "", [[0.65, 0.5], [0.8, 0.5]], 30, {"whole": True}]]}
+        for with_object, state in ((False, "gone"), (True, "left")):
+            movie(os.path.join(tmp, "result.mp4"), with_object)
+            with zipfile.ZipFile(os.path.join(tmp, "export.zip"), "w") as z:
+                z.write(os.path.join(tmp, "result.mp4"), "export/plate.mp4")
+            made = gpu_matrix.sheet(case, tmp, plate, mask=mask, judge_at=(w // 2, h // 2))
+            self.assertIs(made["verdict"]["left"], with_object, made["verdict"])
+            self.assertTrue(made["verdict"]["text"].startswith(f"Clean, frame 1: {state} ("), made["verdict"]["text"])
+        self.assertIn("no verdict", gpu_matrix.sheet(case, tmp, plate)["verdict"]["text"], "no mask from the page, no verdict")
+
+class Verdict(unittest.TestCase):
+    """What the verdict and the tree case read: the page's mask and preview size, the case, the end of ui_live.py's wait."""
+
+    def test_the_verdict_takes_the_page_s_newest_mask_and_its_preview_size(self):
+        tmp = tempfile.mkdtemp(prefix="paintaplate_mask_")
+        folder = os.path.join(tmp, "input", "paintaplate", "scene")
+        os.makedirs(folder)
+        older, newer = (os.path.join(folder, f"e{i}_mask_full.png") for i in (1, 2))
+        for i, path in enumerate((older, newer)):
+            open(path, "wb").close()
+            os.utime(path, (1000 + i, 1000 + i))
+        self.assertEqual(gpu_matrix.page_mask(tmp, 1000), newer)
+        self.assertIsNone(gpu_matrix.page_mask(tmp, 2000), "nothing written since the case started")
+        log = "Working sizes: edits at 1920 x 1088, quick passes at 768 x 432, preview at 608 x 352, tracking at 960 x 544"
+        self.assertEqual(gpu_matrix.preview_size(log), (608, 352))
+        self.assertIsNone(gpu_matrix.preview_size(""))
+
+    def test_the_tree_case_expects_the_name_and_stays_out_of_quick_and_all(self):
+        cases = gpu_matrix.load_cases()
+        tree, plain = cases["horse_erase_tree"], cases["horse_erase"]
+        self.assertEqual((tree["path"], tree["seed"], tree["expect"]), (plain["path"], plain["seed"], "name asked"))
+        self.assertEqual(tree["strokes"], [["erase", "", [[0.79, 0.26], [0.83, 0.25], [0.87, 0.27]], 36, {"whole": True}]])
+        self.assertNotIn("horse_erase_tree", gpu_matrix.ALL + gpu_matrix.QUICK)
+        asked = ["page ready: Ready.", "name asked: Edit 2: the prompt writer took the stroke for another object, so nothing ran"]
+        self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: asking Klein's prompt writer", [{"name": "prompt"}]), (True, ""))
+        self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: Klein quick pass at 768 x 432, 16 steps", []), (False, "a Klein pass ran"))
+        self.assertEqual(gpu_matrix.name_asked(asked[:1], "", [{"name": "shot"}]), (False, "the page did not ask for the name"))
+
+    def test_ui_live_ends_on_a_row_marked_left_even_behind_a_dialog(self):
+        """The edit agent's dialog (« Render anyway » or « Cancel ») can keep its row busy: ui_live.py waits for the rows to
+        finish or for a row marked left, whichever comes first, and tells a name asked from an object left."""
+        tool = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui_live.py"), encoding="utf-8").read()
+        self.assertIn("|| !!document.querySelector('{LEFT}')", tool)
+        self.assertIn('mark(f"name asked: {exc}")', tool)
+        self.assertIn("raise NameAsked(", tool)
+
 
 if __name__ == "__main__":
     unittest.main()

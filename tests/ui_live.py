@@ -114,6 +114,11 @@ def stroke(page, box, pts):
 DONE = "document.querySelectorAll('#history li').length === {n} && !document.querySelector('#history li.busy')"
 
 LEFT = "#history li[data-left]"  # an erase that left its object: the page says so and renders no shot (logic.eraseCheck)
+NAME_ASKED = "took the stroke for another object"  # the page's line when an erase with no words asks for its object's name (logic.asksName)
+
+
+class NameAsked(Exception):
+    """The page asked for an erase's object by name, and ran nothing: the case ends there (gpu_matrix.json, « expect »)."""
 
 
 def flow(page, url, open_plate, shots, wait_s=120):
@@ -363,9 +368,14 @@ def remote(a):
                     stroke(page, box, pts); mark(f"{tool} stroke")
                     page.keyboard.press("Enter")  # Generate
                     page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)
-                    page.wait_for_function(DONE.format(n=rows(i, fluid)), timeout=max(300, 2 * a.timeout) * 1000)  # a small card loads its models in turn
+                    # a small card loads its models in turn. A row marked left ends the wait at once: behind the page's dialog
+                    # (« Render anyway » or « Cancel ») the row can stay busy, which held the wait to its timeout
+                    page.wait_for_function(f"({DONE.format(n=rows(i, fluid))}) || !!document.querySelector('{LEFT}')", timeout=max(300, 2 * a.timeout) * 1000)
                     if page.query_selector(LEFT):  # no shot will render: without this the run waited 8 times --timeout for one
                         page.screenshot(path=f"{shots}/2_{tool}_done.png")
+                        said = [status(), *page.eval_on_selector_all("#log li", "els => els.slice(-5).map(e => e.textContent)")]
+                        if any(NAME_ASKED in line for line in said):
+                            raise NameAsked(next(line for line in said if NAME_ASKED in line))
                         raise RuntimeError("the erase left its object")
                     mark(f"{tool} edit on the first frame | {status()}"); page.screenshot(path=f"{shots}/2_{tool}_done.png")
                 seen, silent, asked = set(), 0, time.time()
@@ -402,6 +412,8 @@ def remote(a):
                             mark(f"ComfyUI graph saved: {len(json.load(open(f'{shots}/scene.comfyui.json'))['nodes'])} nodes and notes")
                         except Exception as exc:
                             mark(f"ComfyUI graph not saved: {type(exc).__name__}: {str(exc).splitlines()[0][:120]} | status: {status()}")
+        except NameAsked as exc:
+            mark(f"name asked: {exc}")
         except Exception as exc:
             mark(f"FAILED: {type(exc).__name__}: {str(exc).splitlines()[0][:160]} | status: {status()}")
             page.screenshot(path=f"{shots}/fail.png")
