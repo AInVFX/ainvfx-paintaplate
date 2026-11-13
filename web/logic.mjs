@@ -527,8 +527,12 @@ export function eraserAfterKey(was, held, dragged) { return !dragged && held < E
 export function plateSpaceLine(plate) {
   return plate ? `Colour space: ${plate.cs}, ${plate.pageSpaceChosen ? "override" : "from file"}` : "Colour space: no plate";
 }
-// The one question before an OCIO change that regenerates: what changes (« colour space », « config ») and the edits it counts.
-export function remakeQuestion(what, edits) { return `Changing the ${what} regenerates the first frame and ${edits} edit${edits === 1 ? "" : "s"}.`; }
+// The one question before an OCIO change that regenerates: the cause and the cost, then the question (Continue, Cancel).
+// `what`: « plate's colour space » or « OCIO config ». The first frame is the page's own step: the question counts the edits.
+export function remakeQuestion(what, edits) { return `Changing the ${what} affects generation: ${edits} edit${edits === 1 ? "" : "s"} will be regenerated. Continue?`; }
+// A family of the plate's colour-space tree. The config's « Display », the spaces encoded for a display, reads « Display-referred »
+// there, apart from the view's Display line, which changes nothing. RV and Nuke show it as « Display ».
+export function plateFamily(name) { return name === "Display" ? "Display-referred" : name; }
 // An image that the scene's ComfyUI graph reads. It sits at the top of ComfyUI's input folder: LoadImage lists only the files
 // there, and the editor marks an image input whose file is not in that list as missing. Named after the plate, the edit,
 // what it holds and its hash, so two scenes never share a name.

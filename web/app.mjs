@@ -18,7 +18,7 @@ import { asksName, eraseCheck, coreBox, writerBoxes, DAB_PROFILE, FLUID, dabFlow
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
 import { FAMILY, framesNeed, matteLargest, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
-import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, graphImageName, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
+import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { askedSeed } from "./logic.mjs"; // the tests: a seed asked for in the address
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
@@ -3524,7 +3524,7 @@ async function setPlateSpace(cs, asked = false) { // the plate's colour space (R
   const p = S.plate;
   if (!p || p.cs === cs) return;
   const made = regenerated(); // the edits it regenerates: the page asks first
-  if (made && !asked) return askRemake("colour space", made, () => setPlateSpace(cs, true).catch(quiet));
+  if (made && !asked) return askRemake("plate's colour space", made, () => setPlateSpace(cs, true).catch(quiet));
   log(`Plate colour space: ${cs}, was ${p.cs}`);
   Object.assign(p, { cs, proxySpace: p.deep ? p.proxySpace : cs }); // a video plate's proxy holds its own values
   hud(`Plate colour space: ${cs}`, 2000); render();
@@ -3535,7 +3535,7 @@ async function setPlateSpace(cs, asked = false) { // the plate's colour space (R
 }
 
 function regenerated() { return S.edits.filter((e) => e.on && e.state === "done").length; } // the edits a new colour space or config regenerates
-function askRemake(what, made, change) { // an OCIO change that regenerates asks first: Change goes on, Cancel or Esc changes nothing
+function askRemake(what, made, change) { // an OCIO change that regenerates asks first: Continue goes on, Cancel or Esc changes nothing
   const d = $("#ask");
   $("#ask-text").textContent = remakeQuestion(what, made);
   d.returnValue = "";
@@ -3545,7 +3545,7 @@ function askRemake(what, made, change) { // an OCIO change that regenerates asks
 
 async function setConfig(name, asked = false) { // RV's Change Config: the viewer and the workflows use another OCIO config
   const made = S.plate && name !== S.ocio.info?.config ? regenerated() : 0; // the edits it regenerates: the page asks first
-  if (made && !asked) return askRemake("config", made, () => setConfig(name, true).catch(quiet));
+  if (made && !asked) return askRemake("OCIO config", made, () => setConfig(name, true).catch(quiet));
   await loadOcio(name);
   log(`OCIO config: ${S.ocio.info.label}`);
   const p = S.plate;
@@ -3558,7 +3558,7 @@ async function setConfig(name, asked = false) { // RV's Change Config: the viewe
 
 function ocioItems() { // what affects generation (the plate's colour space), then what is display only (the view); the config holds both
   const o = S.ocio, info = o.info, p = S.plate;
-  const spaces = (node) => [...node.children.map((c) => [c.name, "", spaces(c)]),
+  const spaces = (node) => [...node.children.map((c) => [plateFamily(c.name), "", spaces(c)]),
     ...node.spaces.map((name) => [name, "", () => setPlateSpace(name).catch(quiet), !p, p?.cs === name])];
   const shown = info.displays.find((d) => d.name === o.display) ?? info.displays[0]; // the display in use: its views come first
   return ["Plate (affects generation)", [plateSpaceLine(p), "", spaces(ocioTree(info.spaces)), !p],
