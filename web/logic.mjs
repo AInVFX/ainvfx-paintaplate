@@ -833,8 +833,25 @@ export function freesBefore(profile, last, name, room = null) { // room: { free,
 // first and its latest step, and the rest comes from what the step took the last time on this machine (the page keeps
 // each step's total, lead and tail per size, frame count and memory profile, in paintaplate.times).
 export const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
-export const SLOWER = { small: { ltx: 3.5, sam: 1.4, frames: 1 } }; // against the references of a 96 GB card: a 16 GB card, measured on 11 Nov
-export const slower = (profile, id) => SLOWER[profile]?.[STEP_FAMILY[id]] ?? 1;
+// A step's time before it ever ran on this machine (stepGuess): the 96 GB card's reference (STAGES' ref, in seconds at
+// REF_SIZE), scaled to the plate, then to the card. A 16 GB card, the small profile, holds one family of models at a time,
+// so each job loads its models again: a lead in seconds per family, then a factor per step on the reference's scaled
+// seconds. Measured on the laptop (RTX 4090 Laptop GPU, 16 GB of VRAM, 52 GB of RAM) at 1.11.12 on 12 Nov, horse.mp4 at
+// 1920 x 1080 and 121 frames: the lead is what a job spent outside its sampler or its tracking loop in ComfyUI's trace,
+// and each factor makes the rest. hdr's factor comes from fluid_720's SDR to HDR, the same workflow at 1280 x 704. Other
+// profiles announce the references as they are. tests/js/render_estimates.test.mjs holds every measured step within 25%.
+export const SLOWER = {
+  small: { lead: { ltx: 38, sam: 11, frames: 0 }, erase: 2.1, track: 1, trackfull: 1, clean: 3.35, shot: 1.64, cleanfull: 1.18,
+    full: 2.98, hdr: 1.77, comp: 1.3, review: 0.42, export: 0.235 },
+};
+export const slower = (profile, id) => SLOWER[profile]?.[id] ?? 1;
+export const BIG_STEPS = ["full", "cleanfull", "hdr", "review", "export"]; // the steps made at the working size
+export const stepSizeOf = (id, plate) => (BIG_STEPS.includes(id) ? plate.work : ["erase", "track", "trackfull"].includes(id) ? plate.track : plate.shot);
+const REF_SIZE = 928 * 512 * 97; // pixels times frames, where the references were measured
+export function stepGuess(id, ref, plate, profile) { // seconds: the reference scaled to this plate (BIG_STEPS at 0.73 of it), then to this card
+  const [w, h] = stepSizeOf(id, plate), scale = (w * h * plate.frames) / REF_SIZE * (BIG_STEPS.includes(id) ? 0.73 : 1);
+  return (SLOWER[profile]?.lead?.[STEP_FAMILY[id]] ?? 0) + ref * Math.max(0.25, scale) * slower(profile, id);
+}
 export function stepLeft({ est, run, first = null, last = null, tail = null }) { // seconds left in the step that runs; first and last: [seconds since its start, progress]
   const after = tail ?? est * 0.15;
   if (first && last && last[1] - first[1] >= 0.2 && last[0] > first[0]) { // the sampler's own pace, over a fifth of its steps or more

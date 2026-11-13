@@ -16,7 +16,7 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
-import { FAMILY, framesNeed, matteLargest, freesBefore, memoryProfile, remember, slower, stepLeft, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
+import { FAMILY, framesNeed, matteLargest, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, hiddenAbove, layersHint, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
@@ -2557,17 +2557,14 @@ function plan(r, active) { // the steps this set of edits needs: the erase pass 
 const TIMES_KEY = "paintaplate.times";
 let TIMES = {};
 try { TIMES = JSON.parse(localStorage.getItem(TIMES_KEY) ?? "{}") ?? {}; } catch { TIMES = {}; }
-const BIG = ["full", "cleanfull", "hdr", "review", "export"];
-const stepSize = (id) => (BIG.includes(id) ? S.plate.work : ["erase", "track", "trackfull"].includes(id) ? S.plate.track : S.plate.shot);
+const stepSize = (id) => stepSizeOf(id, S.plate);
 const stepKey = (id) => timeKey(id, stepSize(id), S.plate.frames, S.memoryProfile.name);
 
-function estimate(id) { // seconds: what this step took last time on this plate, else on this machine at this size, else a measured reference scaled to this plate and this card
+function estimate(id) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess
   if (S.took[id]) return S.took[id];
   const known = TIMES[stepKey(id)];
   if (known?.total) return known.total;
-  const p = S.plate, ref = 928 * 512 * 97, size = stepSize(id);
-  const scale = (size[0] * size[1] * p.frames) / ref * (BIG.includes(id) ? 0.73 : 1);
-  return STAGES.find((x) => x.id === id).ref * Math.max(0.25, scale) * slower(S.memoryProfile.name, id);
+  return stepGuess(id, STAGES.find((x) => x.id === id).ref, S.plate, S.memoryProfile.name);
 }
 
 async function step(r, id, work, store = r) { // run one step of a render, timed and shown; preview steps keep their result per size
