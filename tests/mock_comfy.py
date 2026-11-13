@@ -11,7 +11,7 @@ Each job waits a little, so the page's progress, cancelling and ordering behave 
 these waits (the page suite runs with it). The windows a check holds open keep their own time: /mock/slow, /mock/oom,
 /mock/hold and the second after /free.
 """
-import argparse, asyncio, importlib, io, json, os, struct, sys, time, types, uuid
+import argparse, asyncio, importlib, io, json, os, re, struct, sys, time, types, uuid
 from fractions import Fraction
 
 import av
@@ -143,6 +143,11 @@ def acescct(x):  # ACEScct codes of linear values, primaries left as they are: t
 
 # ---------- the fake workflows ----------
 
+def locked_left(request):  # the left edges of the locked boxes of a prompt-writer request (logic.upsampleRequest), 0 to 1000
+    m = re.search(r"LOCKED BOUNDING-BOX ANNOTATIONS[^\n]*\n(\[.*?\])\n", request, re.S)
+    return [r["src_bbox"][1] for r in json.loads(m[1]) if r.get("src_bbox")] if m else []
+
+
 def inputs_by_slot(prompt):
     vals = {}
     for node in prompt.values():
@@ -214,7 +219,11 @@ async def execute(pid, prompt):
         armed = bool(writer) and writer["times"] > 0
         if armed:
             writer["times"] -= 1
-        o[outs["text"]] = {"text": [writer["text"] if armed else v.get("request", "")]}
+        text = writer["text"] if armed else v.get("request", "")
+        wide = armed and writer.get("wide")
+        if wide and min(locked_left(v.get("request", "")), default=1000) < wide["x_min_below"]:
+            text = wide["text"]  # a box that reaches the other object: the writer removes that one, as the laptop's did
+        o[outs["text"]] = {"text": [text]}
         await steps(pid, 1, 0.2)
     elif "patch" in outs:  # edit: a tinted, softened copy of the reference inside the mask, with step previews
         base, ref = load_image(v["base"]), load_image(v["reference"])
@@ -252,10 +261,17 @@ async def execute(pid, prompt):
         img = load_image(v["image"])
         h, w = img.shape[:2]
         yy, xx = np.mgrid[0:h, 0:w]
+        extra = STATE.get("snap")  # armed by /mock/snap: another object that some masks take in, as SAM took in a horse's nose
+        armed = bool(extra) and extra["times"] > 0
+        if armed:
+            extra["times"] -= 1
         for k in range(5):
             disc = np.zeros((h, w), bool)
             for p in json.loads(v.get(f"point_{k}") or "[]"):
                 disc |= ((xx - p["x"]) / (0.05 * w)) ** 2 + ((yy - p["y"]) / (0.14 * h)) ** 2 < 1
+            if armed and k in extra["points"] and disc.any():
+                cx, cy, rx, ry = extra["extra"]
+                disc |= ((xx - cx * w) / (rx * w)) ** 2 + ((yy - cy * h) / (ry * h)) ** 2 < 1
             o[outs[f"point_{k}"]] = {"images": [save_png(disc.astype(np.float32), "temp", f"paintaplate/{pid[:8]}_snap{k}")]}
         if "named" in outs:
             o[outs["named"]] = {"images": []}
@@ -535,7 +551,13 @@ async def leave_route(request):  # mock only: the next `times` edit jobs answer 
 
 async def writer_route(request):  # mock only: the next `times` prompt-writer jobs answer `text`, as a writer that takes the stroke for another object
     body = await request.json()
-    STATE["writer"] = {"times": int(body.get("times", 1)), "text": str(body.get("text", ""))}
+    STATE["writer"] = {"times": int(body.get("times", 1)), "text": str(body.get("text", "")), "wide": body.get("wide")}
+    return web.json_response({})
+
+
+async def snap_route(request):  # mock only: the next `times` snap jobs take another object, an ellipse (x, y, rx, ry as fractions of the frame), into the masks of the points listed
+    body = await request.json()
+    STATE["snap"] = {"times": int(body.get("times", 1)), "extra": body["extra"], "points": body.get("points", [0, 1])}
     return web.json_response({})
 
 
@@ -607,6 +629,7 @@ async def start():
     app.router.add_post("/mock/version", pack_version_route)
     app.router.add_post("/mock/leave", leave_route)
     app.router.add_post("/mock/writer", writer_route)
+    app.router.add_post("/mock/snap", snap_route)
     app.router.add_get("/mock/events", lambda r: web.json_response(EVENTS))
     app.router.add_get("/mock/posts", lambda r: web.json_response(POSTS))
     app.router.add_get("/ws", ws_route)
