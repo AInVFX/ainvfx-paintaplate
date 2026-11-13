@@ -19,7 +19,7 @@ def run(browser, port, U):
     U.open_plate(page)
     page.evaluate(U.WATCH)
     U.mock_route(port, "/mock/writer", {"times": 2, "text": HORSE})  # the snap's prefetch and Generate may each ask once
-    page.keyboard.press("c")
+    page.click('.tools [data-tool="erase"]')
     U.paint_once(page, "", [(0.6, 0.4), (0.62, 0.45)])  # one stroke on the bottle, with no words
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(ASK), 90000, "line that says the prompt writer took the stroke for another object")
