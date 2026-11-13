@@ -354,5 +354,16 @@ class MatteCases(unittest.TestCase):
         self.assertIn("flies away", cases["horse_bird"]["strokes"][0][1])
 
 
+class Estimates(unittest.TestCase):
+    """Each step beside what the page announced before it started (wave 5, R2): a GPU run checks the estimates."""
+
+    def test_the_report_holds_each_step_against_its_announcement(self):
+        log = ("11:02:07 PMRender v1: Track the erase (about 12 s)\n11:02:36 PMRender v1: Track the erase took 28.7 s\n"
+               "11:03:36 PMRender v1: Composite, preview (about 8 s) in the background\n11:03:47 PMRender v1: Composite, preview took 9.0 s\n")
+        info = gpu_matrix.read_log(log)
+        self.assertEqual(info["announced"], {"v1 Track the erase": 12, "v1 Composite, preview": 8})
+        self.assertEqual(gpu_matrix.estimates_off(info["steps"], info["announced"]), ["v1 Track the erase: about 12 s, took 28.7 s"])
+
+
 if __name__ == "__main__":
     unittest.main()

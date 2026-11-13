@@ -258,6 +258,12 @@ def carried(r, fresh, gb):
             "can be what the case before left. Run with --fresh for this case's own."]
 
 
+def estimates_off(steps, announced):
+    """The steps that took more than 25% over or under what the page announced before they started (logic.stepGuess)."""
+    return [f"{label}: about {announced[label]} s, took {s:.1f} s" for label, s in steps
+            if announced.get(label) and abs(s - announced[label]) > 0.25 * s]
+
+
 def read_log(text):
     """What a case's page log says: the render steps and the jobs with their seconds, and the counts the report shows."""
     profile = re.search(r"Memory profile (\w+): ([^\n]*)", text)
@@ -274,6 +280,7 @@ def read_log(text):
         "profile": f"{profile.group(1)} ({profile.group(2)})" if profile else "not in the log's last 400 lines",
         "mattes": re.findall(r"([A-Z][a-z]+ matte[^\n]*largest matte is [^\n]*)", text),  # any word before « matte »: Paint, Erase, Clean
         "seeds": sorted(set(re.findall(r"\bseed (\d+)", text)), key=int),
+        "announced": {f"v{v} {label}": int(s) for v, label, s in re.findall(r"Render v(\d+): (.+?) \(about (\d+) s\)", text)},
         "figures": re.findall(r"(Edit \d+: [^\n]*?\(\d+% of it changed\))", text),  # an erase: how much of the object's box changed
     }
 
@@ -338,7 +345,9 @@ def report(a, machine, results):
         lines += ["", f"## {r['name']} · {'passed' if r['passed'] else 'FAILED'} in {r['seconds']:.0f} s", ""]
         if r["why"]:
             lines += [r["why"], ""]
-        lines += ["| Step | Seconds |", "| --- | --- |", *[f"| {label} | {s:.1f} |" for label, s in r["steps"]]]
+        ann = r.get("announced", {})
+        lines += ["| Step | Seconds | Announced | Seconds / announced |", "| --- | --- | --- | --- |",
+                  *[f"| {label} | {s:.1f} | {ann.get(label, '')} | {f'{s / ann[label]:.2f}' if ann.get(label) else ''} |" for label, s in r["steps"]]]
         lines += ["", "| Job | Seconds | In ComfyUI | Peak VRAM | Peak RAM | No file | Nodes from ComfyUI's cache | Previews |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
         for j in r["jobs"]:
             in_comfy = "" if j["run"] is None else f"{j['run']:.1f}"
@@ -350,6 +359,8 @@ def report(a, machine, results):
                   f"- Out-of-memory retries: {r['oom']}. Jobs taken from the job index, so not timed: {r['indexed']}.",
                   f"- Previews received by the page: {r['previews']}. Live previews written by the node: {r['live_files']}."
                   + ("".join(f" Live preview off: {why}." for why in r["live_off"]))]
+        off = estimates_off(r["steps"], r.get("announced", {}))
+        lines += [f"- Steps more than 25% from their announcement: {'; '.join(off)}." if off else "- Every announced step took within 25% of its announcement."]
         lines += carried(r, a.fresh, gb)
         lines += [f"- The page's figure for an erase: {f}" for f in r.get("figures", [])]
         lines += [f"- Did not finish: {line}" for line in r["ended"]]
