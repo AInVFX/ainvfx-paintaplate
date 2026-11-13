@@ -529,8 +529,11 @@ async def leave_route(request):  # mock only: the next `times` edit jobs answer 
     return web.json_response({})
 
 
-async def pack_version_route(request):  # mock only: the version /paintaplate/version answers from now on, as a ComfyUI restarted after an update of the pack would
-    sys.modules["routes"].VERSION = (await request.json())["version"]
+async def pack_version_route(request):  # mock only: the version and the build /paintaplate/version answers from now on, as a ComfyUI restarted on other code would: it also drops every WebSocket, and open pages connect again
+    body, served = await request.json(), sys.modules["routes"]
+    served.VERSION, served.BUILD = body.get("version", served.VERSION), body.get("build", served.BUILD)
+    for ws in list(SOCKETS.values()):
+        await ws.close()
     return web.json_response({})
 
 
