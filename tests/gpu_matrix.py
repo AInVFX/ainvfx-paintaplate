@@ -245,7 +245,7 @@ def read_log(text):
         "previews": sum(j["previews"] for j in jobs),
         "live_off": re.findall(r"Live preview is off: ([^\n]*)", text),
         "profile": f"{profile.group(1)} ({profile.group(2)})" if profile else "not in the log's last 400 lines",
-        "mattes": re.findall(r"((?:Paint|Erase) matte[^\n]*largest matte is [^\n]*)", text),
+        "mattes": re.findall(r"([A-Z][a-z]+ matte[^\n]*largest matte is [^\n]*)", text),  # any word before « matte »: Paint, Erase, Clean
         "seeds": sorted(set(re.findall(r"\bseed (\d+)", text)), key=int),
     }
 
@@ -275,7 +275,7 @@ def run_case(a, name, case, folder):
     failed = [m for m in result["marks"] if m.startswith("FAILED")] or ([] if marks else ["ui_live.py wrote no marks"])
     done = any(m.startswith("downloaded") for m in result["marks"]) or not case.get("strokes")  # a fluid shot alone has no export
     result["passed"], result["why"] = not failed and done, (failed[0] if failed else "" if done else "the full-size composite was not reached: " + (result["marks"] or ["?"])[-1])
-    result["matte"] = matte_areas(a.comfy, t0) if any(s[0] == "b" for s in case.get("strokes", [])) else None
+    result["matte"] = matte_areas(a.comfy, t0) if any(s[0] == "paint" for s in case.get("strokes", [])) else None
     live = os.path.join(a.comfy, "temp", "paintaplate_live", "*.webp")
     result["live_files"] = sum(os.path.getmtime(f) >= t0 for f in glob.glob(live))
     return result

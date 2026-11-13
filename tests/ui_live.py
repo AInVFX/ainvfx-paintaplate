@@ -69,6 +69,11 @@ def stand_ins(out):
     g.save("prompt", out)
 
 
+def pick(page, tool):
+    """Pick a tool by its button, as a person clicks it: its data-tool (paint, erase, light) stays when a label or a key changes."""
+    page.click(f'.tools [data-tool="{tool}"]')
+
+
 def stroke(page, box, pts):
     page.mouse.move(box["x"] + pts[0][0] * box["width"], box["y"] + pts[0][1] * box["height"])
     page.mouse.down()
@@ -92,17 +97,17 @@ def flow(page, url, open_plate, shots, wait_s=120):
     playing_frame = page.inner_text("#frame-now")
     page.keyboard.press("Home")
     box = page.locator("#view").bounding_box()
-    for i, (key, words, pts) in enumerate((("b", "a fire", [(0.3, 0.6), (0.4, 0.5), (0.45, 0.65)]),
-                                           ("e", "", [(0.7, 0.3), (0.75, 0.4)]),
-                                           ("l", "warm sunset", [(0.1, 0.1), (0.2, 0.15)]))):
-        page.keyboard.press(key)
+    for i, (tool, words, pts) in enumerate((("paint", "a fire", [(0.3, 0.6), (0.4, 0.5), (0.45, 0.65)]),
+                                           ("erase", "", [(0.7, 0.3), (0.75, 0.4)]),
+                                           ("light", "warm sunset", [(0.1, 0.1), (0.2, 0.15)]))):
+        pick(page, tool)
         page.fill("#prompt", words)
         page.locator("#prompt").blur()
         stroke(page, box, pts)
         page.keyboard.press("Enter")  # Generate: the edit, then its shot
         page.wait_for_function(DONE.format(n=i + 1), timeout=wait_s * 1000)
-        page.screenshot(path=f"{shots}/2_{key}_done.png")
-        print(f"edit {key}: done |", status())
+        page.screenshot(path=f"{shots}/2_{tool}_done.png")
+        print(f"edit {tool}: done |", status())
     page.locator("#history li").nth(1).locator(".eye").click()  # bypass the erase, then bring it back
     page.wait_for_function("document.querySelectorAll('#history li.off').length === 1 && !document.querySelector('#history li.busy')",
                            timeout=wait_s * 1000)
@@ -160,7 +165,7 @@ def main():
     ap.add_argument("--url", default="", help="a running ComfyUI with the real workflows and models (no stand-ins)")
     ap.add_argument("--path", default="", help="plate path in that ComfyUI's input folder, typed into the open dialog")
 
-    ap.add_argument("--strokes", default="", help='JSON list of [key, words, [[x, y], ...], brush size, {"whole": false, "color": "#d32f2f"}]')
+    ap.add_argument("--strokes", default="", help='JSON list of [tool, words, [[x, y], ...], brush size, {"whole": false, "color": "#d32f2f"}]')
     ap.add_argument("--fluid", default="", help='with --url: a fluid shot from a blank plate first, as fluid_shot() describes; '
                     '--strokes then edit it as the plate')
     ap.add_argument("--timeout", type=int, default=150)
@@ -288,7 +293,7 @@ def remote(a):
     shots = a.out
     shutil.rmtree(shots, ignore_errors=True); os.makedirs(shots)
     fluid = json.loads(a.fluid) if a.fluid else None
-    default = [] if fluid else [["b", "a small campfire", [[0.45, 0.8], [0.5, 0.75], [0.55, 0.8]]]]
+    default = [] if fluid else [["paint", "a small campfire", [[0.45, 0.8], [0.5, 0.75], [0.55, 0.8]]]]
     strokes = json.loads(a.strokes) if a.strokes else default
     marks, errors, t0 = [], [], time.time()
     mark = lambda what: (marks.append((round(time.time() - t0, 1), what)), print(f"{marks[-1][0]:7.1f} s  {what}"))  # noqa: E731
@@ -311,8 +316,8 @@ def remote(a):
                 mark("plate open: " + page.inner_text("#spec")); page.screenshot(path=f"{shots}/1_open.png")
                 box = page.locator("#view").bounding_box()
                 page.wait_for_timeout(a.think * 1000)  # a person looks at the frame before painting
-                for i, (key, words, pts, *size) in enumerate(strokes):
-                    page.keyboard.press(key); page.fill("#prompt", words); page.locator("#prompt").blur()
+                for i, (tool, words, pts, *size) in enumerate(strokes):
+                    pick(page, tool); page.fill("#prompt", words); page.locator("#prompt").blur()
                     if size:  # brush size in frame pixels, set on the slider
                         page.eval_on_selector("#size", "(el, v) => { el.value = v; el.dispatchEvent(new Event('input')); }", size[0])
                     opts = size[1] if len(size) > 1 else {}  # options after the brush size
@@ -320,14 +325,14 @@ def remote(a):
                         page.set_checked("#whole", opts["whole"])
                     if "color" in opts:  # {"color": "#d32f2f"}: a swatch for the paint or the light
                         page.click(f".swatches .sw[data-color='{opts['color']}']")
-                    stroke(page, box, pts); mark(f"{key} stroke")
+                    stroke(page, box, pts); mark(f"{tool} stroke")
                     page.keyboard.press("Enter")  # Generate
                     page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)
                     page.wait_for_function(DONE.format(n=rows(i, fluid)), timeout=max(300, 2 * a.timeout) * 1000)  # a small card loads its models in turn
                     if page.query_selector(LEFT):  # no shot will render: without this the run waited 8 times --timeout for one
-                        page.screenshot(path=f"{shots}/2_{key}_done.png")
+                        page.screenshot(path=f"{shots}/2_{tool}_done.png")
                         raise RuntimeError("the erase left its object")
-                    mark(f"{key} edit on the first frame | {status()}"); page.screenshot(path=f"{shots}/2_{key}_done.png")
+                    mark(f"{tool} edit on the first frame | {status()}"); page.screenshot(path=f"{shots}/2_{tool}_done.png")
                 seen, silent, asked = set(), 0, time.time()
                 deadline = time.time() + a.timeout * 8
                 while time.time() < deadline:

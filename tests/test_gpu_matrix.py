@@ -2,10 +2,12 @@
 start keeps. No GPU and no browser."""
 import argparse
 import contextlib
+import glob
 import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -278,6 +280,30 @@ class PodStart(unittest.TestCase):
             self.assertEqual(kept.pop("comfyui.log"), "ComfyUI, run two")
             self.assertEqual(list(kept.values()), ["ComfyUI, run one"], "the log of the ComfyUI that stopped, under its own name")
             self.assertIn("is kept: " + os.path.join(work, next(iter(kept))), said)
+
+
+class Tools(unittest.TestCase):
+    """The GPU tools do not depend on the page's words and keys (wave 5, R8). A stroke names its tool by its button's
+    data-tool, which stays when a label or a key changes, and a matte line is read whatever word comes before « matte »."""
+
+    def test_every_stroke_names_a_tool_the_page_has(self):
+        html = "".join(open(p, encoding="utf-8").read() for p in glob.glob(os.path.join(gpu_matrix.REPO, "web", "*.html")))
+        tools = set(re.findall(r'data-tool="([a-z]+)"', html))
+        self.assertTrue({"paint", "erase", "light"} <= tools, tools)
+        for name, case in gpu_matrix.load_cases().items():
+            self.assertTrue(all(s[0] in tools for s in case.get("strokes", [])), name)
+
+    def test_ui_live_picks_a_tool_by_its_button(self):
+        with open(os.path.join(gpu_matrix.HERE, "ui_live.py"), encoding="utf-8") as f:
+            tool = f.read()
+        self.assertIn("""page.click(f'.tools [data-tool="{tool}"]')""", tool)
+        self.assertEqual(len(re.findall(r"(?<!def )pick\(page, tool\)", tool)), 2, "both runs, besides its def")
+        self.assertNotIn("keyboard.press(key)", tool)
+
+    def test_a_matte_line_is_read_whatever_its_first_word(self):
+        log = ("11:02:36 PMClean matte: SAM 3.1 found the object on 76 of 121 frames; the largest matte is 1.0 times the object, on frame 0\n"
+               "23:02:37Paint matte (full): SAM 3.1 found the object on 54 of 121 frames; the largest matte is 1.0 times the object, on frame 8\n")
+        self.assertEqual([m.split(":")[0] for m in gpu_matrix.read_log(log)["mattes"]], ["Clean matte", "Paint matte (full)"])
 
 
 if __name__ == "__main__":
