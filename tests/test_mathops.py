@@ -657,6 +657,29 @@ class FollowMatteErasedBehindThePlate(unittest.TestCase):
             self.assertGreaterEqual(int(((out[t] > 0.5) & (sam[t] > 0.5)).sum()), 0.9 * int(sam[t].sum()), f"frame {t}")
         self.assertIn("moved in the scene", summary)
 
+    def test_a_piece_of_the_mask_on_what_stands_in_front_is_left_out(self):
+        """12 Nov 2026, 1.11.10: while the horse hid the erased barn, SAM 3.1 also returned 43 to 55 px on the horse's
+        head, beside the barn's part in view. The matte took them, and the composite grew them to 1.2% of the frame."""
+        rng = np.random.default_rng(17)
+        n, h, w = 60, 200, 320
+        land = np.clip(0.5 + 3 * (ndimage.gaussian_filter(rng.random((h, w, 3)).astype(np.float32), (2, 2, 0)) - 0.5), 0, 1)
+        plate, sam, front = np.repeat(land[None], n, 0), np.zeros((n, h, w), np.float32), np.zeros((n, h, w), bool)
+        plate[:, 50:70, 200:286] = (0.9, 0.85, 0.8)  # the erased object stands still
+        sam[:, 50:70, 200:286] = 1
+        for t in range(n):
+            x = 10 + 4 * max(0, t - 12)  # what stands in front waits 12 frames, then goes over the object's place at 4 px a frame
+            front[t, 30:90, x:x + 100] = True
+            plate[t][front[t]] = (0.15, 0.1, 0.05)
+            sam[t][front[t]] = 0  # the tracker returns the object's part in view
+            if 42 <= t <= 50:
+                sam[t, 58:63, x + 70:x + 82] = 1  # and, on 9 frames, 60 px on what stands in front, 18 px from that part
+        out, summary = m.follow_matte(sam, n, sam[0], base=plate, zone=1 / 16)
+        matte = out > 0.5
+        for t in range(42, 51):
+            self.assertEqual(int((matte[t] & front[t]).sum()), 0, f"frame {t}")  # at f752c2f: 60 px on what stands in front
+            self.assertTrue(np.array_equal(matte[t], (sam[t] > 0.5) & ~front[t]), f"frame {t}")  # the object's part in view is kept whole
+        self.assertNotIn("moved in the scene", summary)
+
     def test_a_recording_keeps_the_frames_of_an_erase(self):
         import tempfile
         from unittest import mock

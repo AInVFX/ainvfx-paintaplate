@@ -697,7 +697,9 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       the plate's own (12 Nov 2026: an erased barn passed behind the horse; the matte held its last 30 px at one place
       of the frame for 65 frames, and left the barn out as too far when the tracker found it again). The plate is
       asked as above for an object that stands still: the region and a held matte move with the background, a held
-      matte drops what the plate covers, and a tracker's mask that lies mostly on covered places is left out. The
+      matte drops what the plate covers, and a tracker's mask that lies mostly on covered places is left out. So is each
+      piece of it that does: it lies on what stands in front (12 Nov 2026: 43 to 55 px on the horse's head, beside the
+      barn that the horse was hiding; the composite grew them to 1.2% of the frame). Otherwise the
       tracker's mask is taken wherever it goes: when it is the matte of the frame before, whole, on places that
       changed, the object moves by itself, and the plate is not asked again;
     - changes larger than 3 times the object's largest area keep only what lies at the tracker's own mask, and the
@@ -747,6 +749,11 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
         out = np.zeros_like(m)
         out[box] = np.isin(parts, keep[keep > 0])
         return out
+
+    def in_view(m, hide):  # a mask without its pieces that lie mostly on covered places
+        parts, count = ndimage.label(m, structure=eight)
+        areas, covered = np.bincount(parts.ravel(), minlength=count + 1), np.bincount(parts[hide], minlength=count + 1)
+        return m & (2 * covered <= areas)[parts]
     k = max(1, -(-w // FOLLOW_SIDE))  # the plate is read small, at the pixels that `record` keeps
     soft = (max(1.0, zone * (w // k) / 4), max(1.0, (w // k) / 160))  # two blurs: a quarter of a zone says that something large stands there, 1/160 of the width says where it ends
 
@@ -841,6 +848,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                         core, blocked = np.zeros((h, w), bool), True  # it is what stands in front
                 elif hide is not None and not real:
                     core = core & ~(hide & ~here)  # beyond a painted object's place, the tracker's mask counts only in view
+                elif hide is not None:
+                    core = in_view(core, hide)  # of an erased object's mask, a piece that lies mostly on covered places is on what stands in front
                 peak = max(peak, int(core.sum()))
                 found, follows = core, True
                 if block is not None and (core.any() or line.any()):
