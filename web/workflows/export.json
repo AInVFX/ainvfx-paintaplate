@@ -151,7 +151,11 @@
    ],
    "config": "ocio://studio-config-latest",
    "source": "@model",
-   "destination": "@model"
+   "destination": "@model",
+   "peak_of": [
+    "1",
+    0
+   ]
   },
   "_meta": {
    "title": "Shot in the plate's colour space",
@@ -248,7 +252,11 @@
    "shot_space": "sRGB",
    "radius": 1,
    "strength": 1.0,
-   "align": true
+   "align": true,
+   "peak_of": [
+    "14",
+    0
+   ]
   },
   "_meta": {
    "slots": {

@@ -206,6 +206,9 @@ def _route(name: str, src: str, dst: str):
     return one, tone
 
 
+TONE_ABOVE = 1.0001  # core tone-maps a batch whose peak is above this: it allows transfer-function roundoff at SDR white
+
+
 def _brightest(f) -> float:
     """The highest luminance of a frame in linear Rec.709."""
     return float(np.max(f[..., :3] @ REC709_LUMA, initial=0.0))
@@ -221,6 +224,11 @@ def batch_peak(frames, name: str, src: str) -> float:
     return max(1.0, max(_POOL.map(lambda f: _brightest(one(f)), frames), default=1.0))
 
 
+def linear_peak(frames) -> float:
+    """The peak of frames already in linear Rec.709 (@linear): what batch_peak reads for them, without a config."""
+    return max(1.0, max(_POOL.map(_brightest, frames), default=1.0))
+
+
 def _into_model(frames, peak=None):
     """Core's linear Rec.709 to sRGB for SDR output: tone mapping with the batch's peak (`peak` when the frames are a part
     of a larger batch), gamut compression, encoding."""
@@ -228,7 +236,7 @@ def _into_model(frames, peak=None):
         peak = max(1.0, max(map(_brightest, frames), default=1.0))
 
     def one(rgb):
-        if peak > 1.0001:  # core allows transfer-function roundoff at SDR white without tone mapping
+        if peak > TONE_ABOVE:
             lum = np.maximum(rgb @ REC709_LUMA, 0.0)[..., None]
             rgb = rgb * ((1.0 + lum / (peak * peak)) / (1.0 + lum))
         lum = np.clip(rgb @ REC709_LUMA, 0.0, 1.0)[..., None]
@@ -241,14 +249,50 @@ def _into_model(frames, peak=None):
     return _each(_rgb(one), frames)
 
 
+def undo_tone(rgb: np.ndarray, peak: float) -> np.ndarray:
+    """Core's tone mapping undone on RGB in linear Rec.709: each pixel's luminance goes back to the one that
+    L (1 + L / peak²) / (1 + L) came from, and its channels keep their ratios. `peak` is the one the way in took
+    (batch_peak); at or under TONE_ABOVE there was no tone mapping, and the RGB comes back as it is. A colour that the
+    gamut compression moved into Rec.709 keeps its luminance, not its saturation."""
+    if peak <= TONE_ABOVE:
+        return rgb
+    lum = np.maximum(rgb @ REC709_LUMA, 0.0)[..., None]
+    was = 2.0 * lum / ((1.0 - lum) + np.sqrt((1.0 - lum) ** 2 + 4.0 * lum / (peak * peak)))
+    return (rgb * (was / np.maximum(lum, np.finfo(np.float32).tiny))).astype(np.float32)
+
+
+def out_of_model(f: np.ndarray, peak: float) -> np.ndarray:
+    """One frame as the models see and make it (sRGB-encoded Rec.709) back to the linear Rec.709 it came from: core's
+    sRGB decode, then undo_tone with `peak`. Alpha untouched. Relight Transfer measures the light so."""
+    return _rgb(lambda rgb: undo_tone(decode(rgb), peak))(f)
+
+
+def _from_model(name: str, dst: str, peak: float):
+    """One frame's way out of @model with core's tone mapping undone: to linear Rec.709, undo_tone, then on to `dst`."""
+    steps = [_route(name, MODEL, LINEAR)[0], _rgb(lambda rgb: undo_tone(rgb, peak))]
+    if dst != LINEAR:
+        steps.append(_route(name, LINEAR, dst)[0])
+
+    def one(f):
+        for step in steps:
+            f = step(f)
+        return f
+    return one
+
+
 def convert(frames, name: str, src: str, dst: str, peak: float | None = None) -> list[np.ndarray]:
     """Each frame's RGB from `src` to `dst` in config `name`, frames in parallel; alpha untouched. Either may be @model or
     @linear. @linear is the config's Linear Rec.709 when it has one (a matrix from ACEScg, nothing clipped), else the model
     space decoded; into @model, frames pass through it, then core's tone mapping and gamut compression. The tone mapping
-    takes the peak of these frames, or `peak`: the peak of the batch they are a part of (batch_peak)."""
+    takes the peak of these frames, or `peak`: the peak of the batch they are a part of (batch_peak). Out of @model, a
+    `peak` above TONE_ABOVE is the peak of the plate the frames came from, read in `dst`: the frames go through linear
+    Rec.709, where that tone mapping is undone (undo_tone), and come back at the plate's levels. Without it, or at a peak
+    of 1.0, they are decoded as they are."""
     frames = list(frames)
     if src == dst or not frames:
         return frames
+    if src == MODEL and peak is not None and peak > TONE_ABOVE:
+        return _each(_from_model(name, dst, peak), frames)
     one, tone = _route(name, src, dst)
     out = _each(one, frames)
     return _into_model(out, peak) if tone else out

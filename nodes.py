@@ -172,7 +172,8 @@ class ColorSpace(io.ComfyNode):
             category=CATEGORY,
             description="Converts frames between two colour spaces of an OpenColorIO config, several frames at once. "
                         "@model is the sRGB-encoded Rec.709 the models see, entered with core's tone mapping of values "
-                        "above 1.0; @linear is that space in linear light. Alpha is not converted.",
+                        "above 1.0, which 'peak_of' undoes on the way out; @linear is that space in linear light. Alpha "
+                        "is not converted.",
             search_aliases=["ocio", "opencolorio", "colour space", "color space", "aces"],
             inputs=[
                 io.Image.Input("image"),
@@ -184,7 +185,9 @@ class ColorSpace(io.ComfyNode):
                 io.String.Input("destination", default="@model", tooltip="The same, for the result."),
                 io.Image.Input("peak_of", optional=True,
                                tooltip="The batch these frames are a part of. Into @model, the tone mapping takes that batch's "
-                                       "peak: a frame converted alone has the values it has in the whole batch converted."),
+                                       "peak: a frame converted alone has the values it has in the whole batch converted. "
+                                       "Out of @model, the plate the frames were made from, in 'destination': the tone "
+                                       "mapping of its peak is undone, so new content comes back at the plate's levels."),
             ],
             outputs=[io.Image.Output(display_name="image")],
         )
@@ -193,7 +196,11 @@ class ColorSpace(io.ComfyNode):
     def execute(cls, image, config, source, destination, peak_of=None) -> io.NodeOutput:
         if source == destination:
             return io.NodeOutput(image)
-        peak = ocio.batch_peak(frames_np(peak_of), config, source) if peak_of is not None and destination == ocio.MODEL else None
+        peak = None
+        if peak_of is not None and ocio.MODEL in (source, destination):  # the plate's peak, read in the plate's own space
+            peak = ocio.batch_peak(frames_np(peak_of), config, destination if source == ocio.MODEL else source)
+            if source == ocio.MODEL and peak > ocio.TONE_ABOVE:
+                logging.info("Paint a plate, Color Space (OCIO): out of @model, the tone mapping of a peak of %.2f undone", peak)
         return io.NodeOutput(to_image(ocio.convert(frames_np(image), config, source, destination, peak)))
 
 
@@ -395,13 +402,17 @@ class RelightTransfer(io.ComfyNode):
                                        "there, in linear light, by 'shade_density'. Klein ignores a painted shadow."),
                 io.Float.Input("shade_density", default=0.7, min=0.0, max=1.0, step=0.05, optional=True,
                                tooltip="How much light the painted shade takes away where it is full."),
+                io.Image.Input("peak_of", optional=True,
+                               tooltip="The plate in linear light, as 'plate' gives it. With 'shot_space' sRGB, the tone "
+                                       "mapping of its peak that brought 'source' and 'relit' into the model space is undone "
+                                       "after the decode: their light is measured at the plate's levels."),
             ],
             outputs=[io.Image.Output(display_name="image")],
         )
 
     @classmethod
     def execute(cls, plate, source, relit, radius, strength, align, plate_space="linear", shot_space="linear",
-                light=None, shade=None, shade_density=0.7) -> io.NodeOutput:
+                light=None, shade=None, shade_density=0.7, peak_of=None) -> io.NodeOutput:
         n = min(plate.shape[0], source.shape[0], relit.shape[0])
         src, rel = list(frames_np(source[:n])), list(frames_np(relit[:n]))
         shift = (0.0, 0.0)
@@ -413,12 +424,19 @@ class RelightTransfer(io.ComfyNode):
                 logging.info("Paint a plate, Relight Transfer: the shot realigned by %.2f, %.2f px over %d frames", *shift, n)
         painted = list(frames_np(light[:1]))[0] if light is not None else None
         shaded = list(frames_np(shade[:1]))[0] if shade is not None else None
+        peak = ocio.linear_peak(frames_np(peak_of)) if peak_of is not None and shot_space == "sRGB" else 1.0
+        untone = peak > ocio.TONE_ABOVE  # a plate above 1.0: 'source' and 'relit' go back to its levels, frame by frame
+        if untone:
+            logging.info("Paint a plate, Relight Transfer: the model space's tone mapping of a peak of %.2f undone", peak)
         bar, stop = comfy.utils.ProgressBar(n), Stop()
 
         def one(args):
             stop()
             i, p = args
-            out = mathops.relight_frame(p, src[i], rel[i], radius, strength, shift, plate_space, shot_space, painted)
+            s, r, space = src[i], rel[i], shot_space
+            if untone:  # the shift above was measured on the frames as the model saw them, as for any plate
+                s, r, space = ocio.out_of_model(s[..., :3], peak), ocio.out_of_model(r[..., :3], peak), "linear"
+            out = mathops.relight_frame(p, s, r, radius, strength, shift, plate_space, space, painted)
             if shaded is not None:
                 out = mathops.shade_frame(out, shaded, shade_density, plate_space)
             bar.update(1)
