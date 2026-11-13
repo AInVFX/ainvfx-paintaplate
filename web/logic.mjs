@@ -263,6 +263,27 @@ export function erasesPaint(text, locked, paint, share = 0.5) {
 // and the shot rendered. With words, the page's own caption carries them, and Klein runs.
 export const asksName = (tool, words) => tool === "erase" && !String(words ?? "").trim();
 
+// ---------- An erase with no words: the box the prompt writer gets ----------
+// The stroke, and the pixels that most of SAM's masks hold, with no margin. On 12 Nov 2026 two of the five masks of a stroke
+// on a barn took in the horse's nose: with a box around them all, the prompt writer removed the horse; with this one, it
+// removed the barn (the probe, 13 Nov). `painted` and `masks`: Uint8Arrays of 0 and 1 over w x h pixels. null: nothing.
+export function coreBox({ painted, masks, w, h }) {
+  let y0 = h, x0 = w, y1 = -1, x1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x;
+    let n = 0;
+    for (const m of masks) n += m[i];
+    if (!painted[i] && n * 2 <= masks.length) continue;
+    y0 = Math.min(y0, y); y1 = Math.max(y1, y); x0 = Math.min(x0, x); x1 = Math.max(x1, x);
+  }
+  return x1 < 0 ? null : [y0 / h, x0 / w, (y1 + 1) / h, (x1 + 1) / w].map((v) => Math.round(v * 1000));
+}
+
+// The boxes the prompt writer gets: an erase with no words, painted in one part, gets its core box; otherwise one box per
+// painted part (paintBoxes), with the edit's bounds (`bbox`).
+export const writerBoxes = ({ tool, words, parts, core, bbox }) =>
+  (tool === "erase" && !String(words ?? "").trim() && core && parts?.length === 1 ? { bbox: core, boxes: [core] } : { bbox, boxes: parts });
+
 // The erase pass's prompt: the scene as it stays, in the upsampler's own words for what it kept (rows with a box in the
 // result). People and text stay out (a pose in words fights the plate's own motion), and the erased object is never named
 // (named, the umbrella came back). Nothing kept: no prompt, as LTX's inpainting guide recommends.

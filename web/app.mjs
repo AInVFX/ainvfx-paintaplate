@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { asksName, DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
+import { asksName, coreBox, writerBoxes, DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
   erasePrompt, erasesPaint, erasedShare, eraseLeft, leftHint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
@@ -217,9 +217,9 @@ async function writeCaption(e, reference, key, kind) {
     log(`Edit ${num(e)}: relight request, with the light plan as Klein's second reference: ${e.caption.text}`);
     return e.caption.text;
   }
-  const paint = e.tool === "erase" ? paintGrid(e) : null; // an erase locks one box per painted part
-  const ask = upsampleRequest({ tool: e.tool, words: e.prompt, bbox: bounds(e.mask), boxes: paint && paintBoxes(paint),
-    colors: colorsOf(e), color: e.color });
+  const paint = e.tool === "erase" ? paintGrid(e) : null; // an erase locks one box per painted part, or with no words its core box
+  const ask = upsampleRequest({ tool: e.tool, words: e.prompt, colors: colorsOf(e), color: e.color,
+    ...writerBoxes({ tool: e.tool, words: e.prompt, parts: paint && paintBoxes(paint), core: e.editCore, bbox: bounds(e.mask) }) });
   const where = ask.locked?.length > 1 ? `boxes ${JSON.stringify(ask.locked.map((r) => r.src_bbox))}` : `box ${JSON.stringify(ask.locked?.[0]?.src_bbox ?? bounds(e.mask))}`;
   log(`Edit ${num(e)}: asking Klein's prompt writer (${ask.mode} mode) for "${e.prompt || "no words"}"${e.tool === "light" ? `, ${lightColor(colorsOf(e), e.color)} light,` : ""} in ${where}`);
   let text = "";
@@ -2124,9 +2124,9 @@ function editSettings(edit, size, pass) { // steps, denoise, and the growth and 
 async function prepare(edit, index, kind) {
   const below = (index < 0 ? S.edits : S.edits.slice(0, index)).filter((e) => e.on && e.patch), size = S.plate.prev;
   const before = layered(index < 0 ? S.edits.length : index);
-  if (edit.tool === "erase" && !edit.whole && edit.sam) { edit.sam = null; edit.snapped = ""; redrawStrokes(edit); } // Whole object turned off: the strokes alone
+  if (edit.tool === "erase" && !edit.whole && edit.sam) { edit.sam = null; edit.editCore = null; edit.snapped = ""; redrawStrokes(edit); } // Whole object turned off: the strokes alone
   if (edit.tool === "erase" && edit.whole && edit.snapped !== snapKeyOf(edit)) {
-    edit.sam = null; redrawStrokes(edit);
+    edit.sam = null; edit.editCore = null; redrawStrokes(edit);
     await snapErase(edit, before, kind === "edit" ? "snap" : kind);
     edit.snapped = snapKeyOf(edit); // only once SAM has answered: a snap stopped half way, or new words, runs it again
   }
@@ -2170,9 +2170,12 @@ async function findWhole(edit, before, kind) { // SAM 3.1 finds the whole object
     return m;
   };
   const fileBits = async (f) => bits(snap(await loadImage(viewUrl(f)), size));
-  const objects = pickObjects({ painted: bits(maskAt(edit, size)), area,
+  const painted = bits(maskAt(edit, size));
+  const objects = pickObjects({ painted, area,
     named: await Promise.all(outputFiles("snap", out, "named").map(fileBits)),
     points: await Promise.all(picks.map((_, j) => outputFile("snap", out, `point_${j}`)).filter(Boolean).map(fileBits)) });
+  // no words: the prompt writer's box, cut to the stroke and to what most of these masks hold (logic.coreBox, writerBoxes)
+  edit.editCore = objects.length && !String(edit.prompt ?? "").trim() ? coreBox({ painted, masks: objects, w: size[0], h: size[1] }) : null;
   log(`Edit ${num(edit)}: SAM 3.1 ${edit.prompt ? `found ${outputFiles("snap", out, "named").length - 1} object(s) named "${edit.prompt}", ` : ""}looked at ${picks.length} stroke point(s); ${objects.length} mask(s) kept`);
   if (!objects.length) return status("Clean takes only what you painted: no single object under the stroke.");
   const sam = canvas(size), d = sam.getContext("2d"), img = d.createImageData(size[0], size[1]);
