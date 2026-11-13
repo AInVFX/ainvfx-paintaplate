@@ -822,3 +822,9 @@ export function memoryProfile({ vram = 0, ram = 0, force = null } = {}) { // `fo
   const card = vram > 0 ? `${gib(vram)} GB of VRAM${ram > 0 ? `, ${gib(ram)} GB of RAM` : ""}` : "ComfyUI gave no VRAM size";
   return { name, why: forced ? `asked for; with ${card}, the page would choose ${auto}` : card, ...MEMORY[name] };
 }
+
+// ---------- A seed asked for in the address ----------
+// The seed that ?seed= in the address asks for, for the tests: a whole number from 0 to 2^31 - 1, as the page draws them.
+// With it every new edit and every new fluid shot starts from that seed, so a run makes the same pictures as the run before.
+// Another try (Ctrl+Enter) still draws one. null: no seed is asked for, or the text is not one, and the page draws.
+export const askedSeed = (text) => (/^\d{1,10}$/.test(text ?? "") && Number(text) < 2 ** 31 ? Number(text) : null);

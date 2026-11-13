@@ -769,3 +769,13 @@ test("the time left in a step follows the sampler's own pace, not the time the m
   assert.equal(Object.keys(times).length, 80); // the newest are kept
   assert.equal(times[key], undefined);
 });
+
+// ---------- The render workstream, wave 4 [cross]: a seed asked for in the address ----------
+import { askedSeed } from "../../web/logic.mjs";
+
+test("a seed asked for in the address is a whole number under 2^31, and anything else is not a seed", () => {
+  assert.equal(askedSeed("1017942128"), 1017942128); // the laptop's erase of 12 Nov that left its object: the page had drawn this seed
+  assert.equal(askedSeed("0"), 0);
+  assert.equal(askedSeed("2147483647"), 2 ** 31 - 1); // the largest seed the page draws: (Math.random() * 2 ** 31) | 0
+  for (const text of [null, "", "abc", "-1", "1.5", "1e3", " 7", "7 ", "2147483648", "99999999999"]) assert.equal(askedSeed(text), null, String(text));
+});
