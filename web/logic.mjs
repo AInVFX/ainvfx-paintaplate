@@ -858,12 +858,12 @@ export function resultFlows({ tools = [], render = [], fluid = false, fluidHdr =
 export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? null;
 
 // ---------- Pipeline: the paint matte's report ----------
-// Follow Matte ends its summary with "the largest matte is 1.2 times the object, on frame 31": how far the matte went
-// beyond the tracked object, and on which frame. Above MATTE_WARN times, the page's log shows the line as a warning:
-// the composite takes regenerated pixels there that the edit did not ask for.
+// Follow Matte's summary has a warning line when its largest matte is more than 3 times the tracked object on that frame:
+// "Warning: matte up to 31.1x the object at frame 67. Check the composite there." The page's log then shows the summary
+// as a warning: the composite takes regenerated pixels there that the edit did not ask for.
 export const MATTE_WARN = 3;
 export function matteLargest(summary) {
-  const m = /largest matte is ([\d.]+) times the object, on frame (\d+)/.exec(summary ?? "");
+  const m = /Warning: matte up to ([\d.]+)x the object at frame (\d+)\./.exec(summary ?? "");
   return m ? { ratio: +m[1], frame: +m[2], warn: +m[1] > MATTE_WARN } : null;
 }
 

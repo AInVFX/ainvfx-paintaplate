@@ -226,6 +226,7 @@ body.resizing, body.resizing * { user-select: none; }
 #log { flex-basis: 100%; box-sizing: border-box; list-style: none; margin: 0; padding: 8px 10px; height: var(--log-h, 180px); overflow-y: auto; border-radius: 4px;
   background: #0b0b0b; color: #c9d1d9; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
 #log li { display: flex; gap: 12px; }
+#log li span { white-space: pre-wrap; } /* a summary's detail lines show under its headline (Follow Matte) */
 #log time { color: #6e7681; flex: none; }
 #log li.error span { color: #ff7b72; }
 #log li.warn span { color: #e3b341; }
