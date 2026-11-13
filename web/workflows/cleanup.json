@@ -41,7 +41,7 @@
    "pad_8n1": false
   },
   "_meta": {
-   "title": "Erase matte",
+   "title": "Clean matte",
    "slots": {
     "path": "hole"
    }
@@ -77,7 +77,7 @@
    "scale_by": 0.03125
   },
   "_meta": {
-   "title": "Erase matte on LTX's 32 px grid"
+   "title": "Clean matte on LTX's 32 px grid"
   }
  },
  "6": {
@@ -137,7 +137,7 @@
    "pad_8n1": false
   },
   "_meta": {
-   "title": "Erase pass at half size",
+   "title": "Clean plate pass at half size",
    "slots": {
     "path": "low"
    }
@@ -286,7 +286,7 @@
    "image": ""
   },
   "_meta": {
-   "title": "Erased first frame",
+   "title": "Cleaned first frame",
    "slots": {
     "image": "hero"
    }

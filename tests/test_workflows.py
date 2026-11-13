@@ -183,7 +183,7 @@ class MemorySlots(unittest.TestCase):
         self.assertNotIn("ImageCompositeMasked", [node["class_type"] for node in prompt.values()])
         (composite,) = [node for node in prompt.values() if node["class_type"] == "PaintAPlate_CompositeFrames"]
         inputs = composite["inputs"]
-        self.assertEqual((title(inputs["destination"]), title(inputs["source"])), ("Plate in the model space", "Erase pass at half size"))
+        self.assertEqual((title(inputs["destination"]), title(inputs["source"])), ("Plate in the model space", "Clean plate pass at half size"))
         self.assertEqual(prompt[inputs["source"][0]]["class_type"], "PaintAPlate_LoadPlate")
         self.assertEqual(prompt[inputs["mask"][0]]["class_type"], "GrowMask", "the blocks on LTX's grid, at the grid's size")
         self.assertEqual(composite["_meta"]["slots"], {"width": "width", "height": "height"})

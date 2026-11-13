@@ -84,6 +84,20 @@ def executing(events, t0):
     return lambda ws: ws.on("framereceived", heard)
 
 
+def deliver_hdr(page):
+    """--hdr: SDR to HDR on for this run, before any edit, as a render's key holds the switch. On a plate whose format holds
+    nothing above 1.0, Deliver's switch asks to confirm; an EXR plate that holds values above 1.0 runs it on its own."""
+    if page.is_visible("#deliver-auto"):
+        return "SDR to HDR: on its own for this plate"
+    if not page.is_visible("#deliver-hdr"):
+        raise RuntimeError("--hdr: Deliver offers no SDR to HDR on this page (?hdr=0, or its model files or nodes are missing)")
+    page.click("#deliver-hdr")
+    if page.is_visible("#deliver-confirm"):
+        page.click("#deliver-yes")
+    page.wait_for_function("document.querySelector('#deliver-hdr').checked", timeout=10000)
+    return "SDR to HDR: on, asked for by --hdr"
+
+
 def pick(page, tool):
     """Pick a tool by its button, as a person clicks it: its data-tool (paint, erase, light) stays when a label or a key changes."""
     page.click(f'.tools [data-tool="{tool}"]')
@@ -188,6 +202,8 @@ def main():
     ap.add_argument("--think", type=float, default=0, help="seconds between opening the plate and the first stroke")
     ap.add_argument("--graph", action="store_true", help="after the export, also save the scene's ComfyUI graph")
     ap.add_argument("--memory", default="", help="with --url: the page's memory profile, small, medium or large (by default the card decides)")
+    ap.add_argument("--hdr", action="store_true", help="with --url: turn SDR to HDR on in Deliver before painting, so the render makes "
+                    "its full-size shot again in scene-linear values and HDR Match fits it to the plate")
     ap.add_argument("--seed", type=int, default=None, help="with --url: the seed of every new edit and fluid shot, the page's ?seed= (by default the page draws each one)")
     ap.add_argument("--channel", default="", help="a browser channel, such as chrome (it plays H.264; Playwright's Chromium does not)")
     a = ap.parse_args()
@@ -331,6 +347,8 @@ def remote(a):
                 page.wait_for_function("document.querySelector('#spec').textContent && document.querySelector('#opening').hidden", timeout=300000)
             if strokes:
                 mark("plate open: " + page.inner_text("#spec")); page.screenshot(path=f"{shots}/1_open.png")
+                if a.hdr:
+                    mark(deliver_hdr(page))
                 box = page.locator("#view").bounding_box()
                 page.wait_for_timeout(a.think * 1000)  # a person looks at the frame before painting
                 for i, (tool, words, pts, *size) in enumerate(strokes):

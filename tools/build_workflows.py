@@ -326,7 +326,7 @@ def erased_grid(g, matte):
     """
     cells = g("GrowMask", _title="One block more on every side", expand=Slot("grid_grow", 1), tapered_corners=False,
               mask=g("ThresholdMask", _title="Every block the matte touches", value=0.02,
-                     mask=g("ImageToMask", channel="red", image=g("ImageScaleBy", _title="Erase matte on LTX's 32 px grid", image=matte,
+                     mask=g("ImageToMask", channel="red", image=g("ImageScaleBy", _title="Clean matte on LTX's 32 px grid", image=matte,
                                                                 upscale_method="area", scale_by=1 / 32))))
     return cells, g("MaskToImage", mask=cells)
 
@@ -352,7 +352,7 @@ def clean():
     load, model = plate(g, pad=True)
     frames = g("ImageScale", image=model, upscale_method="lanczos", width=Slot("width", 960), height=Slot("height", 544), crop="disabled")
     size = g("GetImageSize", image=frames)
-    matte = g("ImageScale", image=g("PaintAPlate_LoadPlate", _title="Erase matte", path=Slot("hole", ""), max_frames=1024, pad_8n1=False),
+    matte = g("ImageScale", image=g("PaintAPlate_LoadPlate", _title="Clean matte", path=Slot("hole", ""), max_frames=1024, pad_8n1=False),
               upscale_method="area", width=size[0], height=size[1], crop="disabled")
     blocks, _ = erased_blocks(g, matte, size)
     reference = g("LTXVInpaintPreprocess", _title="Reference: erased areas in green", images=frames, mask=blocks)
@@ -364,7 +364,7 @@ def clean():
     audio_vae = g("VAELoader", vae_name=LTX_AUDIO_VAE)
     cond = g("LTXVConditioning", positive=g("CLIPTextEncode", _title="The scene as it stays", text=Slot("prompt", ""), clip=clip),
              negative=g("CLIPTextEncode", text=NEGATIVE, clip=clip), frame_rate=load[3])
-    first = g("ImageScale", image=g("LoadImage", _title="Erased first frame", image=Slot("hero", "")), upscale_method="lanczos",
+    first = g("ImageScale", image=g("LoadImage", _title="Cleaned first frame", image=Slot("hero", "")), upscale_method="lanczos",
               width=size[0], height=size[1], crop="disabled")
     latent = g("LTXVImgToVideoInplace", vae=vae, image=first, latent=g("EmptyLTXVLatentVideo", width=size[0], height=size[1],
                                                                        length=size[2], batch_size=1), strength=0.7, bypass=False)
@@ -401,11 +401,11 @@ def cleanup():
     """
     g = Graph()
     load, model = plate(g, pad=True)
-    matte = g("ImageScale", image=g("PaintAPlate_LoadPlate", _title="Erase matte", path=Slot("hole", ""), max_frames=1024, pad_8n1=False),
+    matte = g("ImageScale", image=g("PaintAPlate_LoadPlate", _title="Clean matte", path=Slot("hole", ""), max_frames=1024, pad_8n1=False),
               upscale_method="area", width=Slot("width", 1920), height=Slot("height", 1088), crop="disabled")
     cells, _ = erased_grid(g, matte)
     start = g("PaintAPlate_CompositeFrames", _title="Stage 1 inside the blocks, the plate around them", destination=model,
-              source=g("PaintAPlate_LoadPlate", _title="Erase pass at half size", path=Slot("low", ""), max_frames=1024, pad_8n1=False),
+              source=g("PaintAPlate_LoadPlate", _title="Clean plate pass at half size", path=Slot("low", ""), max_frames=1024, pad_8n1=False),
               mask=cells, width=Slot("width", 1920), height=Slot("height", 1088))
     size = g("GetImageSize", image=start)
     model = g("LoraLoaderModelOnly", _title="In-outpainting IC-LoRA", model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"),
@@ -415,7 +415,7 @@ def cleanup():
     audio_vae = g("VAELoader", vae_name=LTX_AUDIO_VAE)
     cond = g("LTXVConditioning", positive=g("CLIPTextEncode", _title="The scene as it stays", text=Slot("prompt", ""), clip=clip),
              negative=g("CLIPTextEncode", text=NEGATIVE, clip=clip), frame_rate=load[3])
-    first = g("ImageScale", image=g("LoadImage", _title="Erased first frame", image=Slot("hero", "")), upscale_method="lanczos",
+    first = g("ImageScale", image=g("LoadImage", _title="Cleaned first frame", image=Slot("hero", "")), upscale_method="lanczos",
               width=size[0], height=size[1], crop="disabled")
     latent = g("LTXVImgToVideoInplace", vae=vae, image=first, strength=1.0, bypass=False,
                latent=g("VAEEncodeTiled", pixels=start, vae=vae, tile_size=Slot("tile", 512), overlap=64, temporal_size=500, temporal_overlap=64))
