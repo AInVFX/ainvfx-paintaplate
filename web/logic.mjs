@@ -508,6 +508,13 @@ export function plateSpaceLine(plate) {
 }
 // The one question before an OCIO change that regenerates: what changes (« colour space », « config ») and the edits it counts.
 export function remakeQuestion(what, edits) { return `Changing the ${what} regenerates the first frame and ${edits} edit${edits === 1 ? "" : "s"}.`; }
+// An image that the scene's ComfyUI graph reads. It sits at the top of ComfyUI's input folder: LoadImage lists only the files
+// there, and the editor marks an image input whose file is not in that list as missing. Named after the plate, the edit,
+// what it holds and its hash, so two scenes never share a name.
+export function graphImageName(plate, edit, kind, hash) {
+  const stem = String(plate || "").replace(/[^A-Za-z0-9-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "plate";
+  return `paintaplate_${stem}_e${edit}_${kind}_${String(hash).slice(0, 8)}.png`;
+}
 
 export function fluidPrompt(words) { // the trigger first, as the model card asks; no words: its own example
   const rest = (words || "").trim().replace(/^ainvfxfluid\s*,?\s*/i, "");

@@ -18,7 +18,7 @@ import { asksName, DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, 
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
 import { FAMILY, framesNeed, matteLargest, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
-import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
+import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, graphImageName, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { askedSeed } from "./logic.mjs"; // the tests: a seed asked for in the address
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
@@ -136,6 +136,10 @@ const num = (e) => { const i = S.edits.indexOf(e); return i < 0 ? "New" : i + 1 
 const snapKeyOf = (e) => `${painted(e)}|${e.whole ? e.prompt : ""}`; // what SAM's answer depends on: the strokes, and the name when it searches by name
 // An image is uploaded under the hash of its content: once per session, and under the same name in every session, so a job
 // that reads it keeps its job index key when a scene opens again. Without WebCrypto (plain http) each upload has its own name.
+const uploadGraphImage = async (c, edit, kind) => { // an image of the scene's ComfyUI graph: at the top of the input folder (logic.graphImageName)
+  const b = await blob(c), h = (await hashHex(b)) || Date.now().toString(16);
+  return upload(b, graphImageName(S.plate.name, edit, kind, h), "");
+};
 const uploadCanvas = async (c, name) => {
   const b = await blob(c), h = await hashHex(b);
   if (!h) return upload(b, `${S.plate.id}_${++S.ups}_${name}`, `paintaplate/${S.plate.id}`);
@@ -3209,11 +3213,11 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
   if (!p || !active.length) return status("Make an edit first: the ComfyUI graph holds the edits and the render.", "hint");
   status("Writing the ComfyUI graph: each edit's mask and strokes go to ComfyUI's input folder");
   const edits = [];
-  for (const e of active) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, caption: e.caption?.text || templateCaption(e),
-    mask: await uploadCanvas(maskAt(e, p.work), `graph_e${e.id}_mask.png`),
-    layer: e.tool === "paint" ? await uploadCanvas(snap(e.paint, p.work), `graph_e${e.id}_strokes.png`) : null,
-    plan: e.tool === "light" ? await uploadCanvas(lightPlan(e, p.work), `graph_e${e.id}_plan.png`) : null, // a relight's second reference
-    shade: shaded(e) ? await uploadCanvas(shadeMask(e, p.work), `graph_e${e.id}_shade.png`) : null,
+  for (const [i, e] of active.entries()) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, caption: e.caption?.text || templateCaption(e),
+    mask: await uploadGraphImage(maskAt(e, p.work), i + 1, "mask"),
+    layer: e.tool === "paint" ? await uploadGraphImage(snap(e.paint, p.work), i + 1, "strokes") : null,
+    plan: e.tool === "light" ? await uploadGraphImage(lightPlan(e, p.work), i + 1, "plan") : null, // a relight's second reference
+    shade: shaded(e) ? await uploadGraphImage(shadeMask(e, p.work), i + 1, "shade") : null,
     quick: editSettings(e, p.prev, QUICK), full: editSettings(e, p.work, FULL) });
   const erase = active.some((e) => e.tool === "erase");
   const graph = sceneGraph(WF, { edits, about: { version: S.version, name: p.name },
