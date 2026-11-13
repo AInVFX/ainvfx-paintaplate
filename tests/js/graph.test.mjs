@@ -158,7 +158,7 @@ for (const hdr of [false, true]) test(`the editor's format${hdr ? ", with SDR to
     for (const k of Object.keys(back[id].inputs)) if (!(k in n.inputs)) extra.add(`${n.class_type}.${k}`);
   }
   // the editor also posts the optional inputs the API graph leaves to the node, at their default: these, and no other
-  const LEFT = ["PaintAPlate_LivePreview.transfer", "PaintAPlate_RelightTransfer.shade_density", "PaintAPlate_SaveFrames.format", "PaintAPlate_SaveMovie.config", "PaintAPlate_SaveMovie.crf",
+  const LEFT = ["PaintAPlate_LivePreview.transfer", "PaintAPlate_RelightTransfer.shade_density", "PaintAPlate_SaveFrames.format", "PaintAPlate_SaveFrames.fps", "PaintAPlate_SaveMovie.config", "PaintAPlate_SaveMovie.crf",
     "PaintAPlate_SaveMovie.destination", "PaintAPlate_SaveMovie.frames", "PaintAPlate_SaveMovie.largest_size", "PaintAPlate_SaveMovie.source"];
   assert.deepEqual([...extra].filter((k) => !LEFT.includes(k)), []);
 });

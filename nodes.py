@@ -682,18 +682,21 @@ class SaveFrames(io.ComfyNode):
                 io.Combo.Input("format", options=["png", "png16", "exr"], default="png", optional=True,
                                tooltip="png: 8 bits, as core Save Image. png16: 16 bits, for a plate deeper than 8 bits. "
                                        "exr: half float, every value as it is."),
+                io.Float.Input("fps", default=0.0, min=0.0, max=240.0, optional=True,
+                               tooltip="exr only: the shot's frame rate, written in each frame's header (framesPerSecond), "
+                                       "so the frames keep their rate when they open as a plate. 0 writes none."),
             ],
             is_output_node=True,
         )
 
     @classmethod
-    def execute(cls, images, filename_prefix, format="png") -> io.NodeOutput:
+    def execute(cls, images, filename_prefix, format="png", fps=0.0) -> io.NodeOutput:
         n, h, w = images.shape[0], images.shape[1], images.shape[2]
         folder, name, counter, sub, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory(), w, h)
         names = [f"{name}_{counter + i:05}_.{'png' if format == 'png16' else format}" for i in range(n)]
         paths, bar = [os.path.join(folder, f) for f in names], comfy.utils.ProgressBar(n)
         if format == "exr":
-            plateio.write_exrs(stoppable(lambda i: images[i].float().cpu().numpy()), paths, workers=WORKERS, tick=lambda: bar.update(1))
+            plateio.write_exrs(stoppable(lambda i: images[i].float().cpu().numpy()), paths, workers=WORKERS, tick=lambda: bar.update(1), fps=fps)
             return io.NodeOutput(ui={"images": [{"filename": f, "subfolder": sub, "type": "output"} for f in names]})
 
         def frame(i):  # as core Save Image: scaled by 255 and clipped, not rounded, so every pixel matches what it wrote

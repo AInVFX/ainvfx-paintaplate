@@ -1596,6 +1596,12 @@
       {
        "default": "png"
       }
+     ],
+     "fps": [
+      "FLOAT",
+      {
+       "default": 0.0
+      }
      ]
     }
    },

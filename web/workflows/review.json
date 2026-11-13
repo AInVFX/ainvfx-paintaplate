@@ -482,6 +482,10 @@
     0
    ],
    "format": "exr",
+   "fps": [
+    "1",
+    3
+   ],
    "filename_prefix": ""
   },
   "_meta": {
