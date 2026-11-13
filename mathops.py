@@ -684,7 +684,9 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       plate's background moves from frame to frame by the median shift of its tiles (plate_move). A place is covered
       where the plate's colours, at two blurs (a quarter of `zone` for what is large, 1/160 of the width for where it
       ends), differ from the colours it first showed at the same place of the scene by `threshold` more than the places in view
-      do; or where they differ as much from the frame before, moved with the background (what moves in the plate: a
+      do, and at the object's own place also from that first look read inside the place, so what stood beside the
+      object on frame 0 is no part of it (13 Nov 2026: a front object that touched the object on frame 0 kept it out
+      for 6 frames after it came out; 3 now); or where they differ as much from the frame before, moved with the background (what moves in the plate: a
       dark leg over a dark rail reads as the rail), unless frame 0 said covered there on the frame before (what stood
       there has just left). At the object's own place, slits and holes under a quarter of a
       zone are closed. The plate holds no painted object, so none of this depends on what was generated. It applies
@@ -770,6 +772,11 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
         b = (b if b.shape[:2] == (h, w) else resize_to(b, h, w))[::k, ::k, :3]  # every k-th pixel, as `record` keeps them: a replay reads the same plate
         return luma(b), [ndimage.gaussian_filter(b, (r, r, 0), truncate=2.5) for r in soft]
 
+    def read_in(b, m):  # the plate's colours at the two blurs, read inside a mask only: what stands beside it does not mix in
+        mf = m.astype(np.float32)
+        return [ndimage.gaussian_filter(b * mf[..., None], (r, r, 0), truncate=2.5)
+                / np.maximum(ndimage.gaussian_filter(mf, r, truncate=2.5), 1e-6)[..., None] for r in soft]
+
     def front(colours, at, was, levels, stood, past, by, far):  # where the plate covers what it first showed at this place of the scene (small), the levels of the places in view, and what that first look alone says
         hs, ws = colours[0].shape[:2]
         oy, ox = int(at[0]), int(at[1])
@@ -783,11 +790,11 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
         for i in (0, 1):
             apart = np.abs(colours[i] - ground[i][there]).max(axis=-1)
             levels[i] = float(np.median(apart[calm])) if int(calm.sum()) >= 64 else levels[i]
-            covered &= apart > threshold + levels[i]
+            covered &= (apart > threshold + levels[i]) & (np.abs(colours[i] - ground_in[i][there]).max(axis=-1) > threshold + levels[i])
         new = ~known  # the map learns a place the first time the plate shows it, away from the frame's edge where a blur reads the frame's own border
         new[:rim], new[hs - rim:], new[:, :rim], new[:, ws - rim:] = False, False, False, False
         for i in (0, 1):
-            ground[i][there][new] = colours[i][new]
+            ground[i][there][new], ground_in[i][there][new] = colours[i][new], colours[i][new]
         learnt[there][new] = 2
         against = covered.copy()  # covered, by that first look alone
         oy, ox = int(by[0]), int(by[1])  # what moves in the plate stands in front too: a dark leg over a dark rail reads as the rail, and differs from the frame before
@@ -808,7 +815,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     most, chunk = 1.0, 2 * max(1, workers)
     still = None  # does the object keep its place in the scene? Not known before frame FOLLOW_STILL
     waiting = []  # the zone's frames before it is known whether the object stands still, each with the object's place
-    ground = learnt = before = past = home = None  # the scene's map (the softened colours each place first showed, and which places it holds), the frame before's luma and colours, the first matte moved with the background
+    ground = ground_in = learnt = before = past = home = None  # the scene's map (the softened colours each place first showed, and which places it holds), the frame before's luma and colours, the first matte moved with the background
     rim = int(np.ceil(2.5 * soft[0]))  # as far as the large blur reads
     gone = moved = 0  # frames where a piece that left the object's place was left out; the frame where the object was seen to move in the scene
     inside = np.ones((h, w), bool)  # the places that frame 0 showed, moved with the background: an object cut by the frame's edge shows more of itself as the plate moves, and that is not a move
@@ -834,6 +841,10 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                         for i in (0, 1):
                             ground[i][hs:2 * hs, ws:2 * ws] = colours[i]
                         learnt[hs:2 * hs, ws:2 * ws] = 1
+                        stood, b0 = open0[::k, ::k], (base[0] if base[0].shape[:2] == (h, w) else resize_to(base[0], h, w))[::k, ::k, :3]
+                        ground_in = [g.copy() for g in ground]  # the object's place also read inside itself: what stood beside it on frame 0 is not its first look
+                        for i, inner in enumerate(read_in(b0, stood)):
+                            ground_in[i][hs:2 * hs, ws:2 * ws][stood] = inner[stood]
                     else:
                         dy, dx = plate_move(before, lum)
                         place += (dy, dx)
