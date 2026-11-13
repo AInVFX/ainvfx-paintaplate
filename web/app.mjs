@@ -86,7 +86,7 @@ const saved = (key) => { try { return JSON.parse(localStorage.getItem(key)) ?? {
 
 const TOOLS = { p: "paint", c: "erase", l: "light" }; // the keys P, C and L; "erase" stays the code's name for Clean until app.mjs is split
 // The viewer's colour keys, after OpenRV's rvui.mu: exposure e, gamma y, contrast k, saturation S, hue h; channels c r g b l.
-// Here E, B and L pick tools, so exposure and the channels take Shift.
+// Here P, C and L pick tools, so the channels take Shift, and exposure with them.
 const COLOR_KEYS = { "Shift+e": "exposure", y: "gamma", k: "contrast", "Shift+s": "saturation", h: "hue" };
 const CHANNEL_KEYS = { "Shift+c": "rgb", "Shift+r": "r", "Shift+g": "g", "Shift+b": "b", "Shift+l": "l" };
 const NAME = { paint: "Paint", erase: "Clean", light: "Light" }; // the names a person reads: Clean removes an object, the Eraser rubs out strokes
