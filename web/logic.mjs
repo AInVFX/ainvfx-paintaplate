@@ -578,10 +578,7 @@ export function erasedShare(after, before, mask, w, h, { cell = 4, levels = 12 }
   return all ? changed / all : null;
 }
 
-// The object is still there when less than `least` of it changed. With no mask there is nothing to judge.
-export const eraseLeft = (share, least = 0.02) => share !== null && share < least;
-
-// Whether an erase removed its object, as the page judges it (eraseCheck). The rule above (eraseLeft: under 2% at 12 levels)
+// Whether an erase removed its object, as the page judges it (eraseCheck). The first rule (under 2% of it changed, at 12 levels)
 // let through a barn that Klein had only recoloured: 59% of its cells moved (12 Nov 2026). On the probe's 21 results of 13 Nov,
 // what went had 53 to 78% of its cells moved by more than 24 levels and its edges at -0.03 to 0.75 (a fence in front of the
 // barn kept some); what stayed had 0 to 1% and 0.93 to 0.98; a tree half changed had 17% and 0.62. So an object is left when

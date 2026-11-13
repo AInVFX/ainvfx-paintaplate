@@ -113,7 +113,7 @@ def stroke(page, box, pts):
 
 DONE = "document.querySelectorAll('#history li').length === {n} && !document.querySelector('#history li.busy')"
 
-LEFT = "#history li[data-left]"  # an erase that left its object: the page says so and renders no shot (logic.eraseLeft)
+LEFT = "#history li[data-left]"  # an erase that left its object: the page says so and renders no shot (logic.eraseCheck)
 
 
 def flow(page, url, open_plate, shots, wait_s=120):

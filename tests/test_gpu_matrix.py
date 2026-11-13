@@ -85,7 +85,7 @@ class Seeds(unittest.TestCase):
         self.assertNotIn("horse_erase_barn", gpu_matrix.ALL)
 
     def test_a_case_ends_when_the_page_says_that_an_erase_left_its_object(self):
-        """The page renders no shot then (logic.eraseLeft), and ui_live.py waited 8 times --timeout for one: two hours. It
+        """The page renders no shot then (logic.eraseCheck), and ui_live.py waited 8 times --timeout for one: two hours. It
         reads the mark the page puts on History's row, which holds no words."""
         with open(os.path.join(gpu_matrix.REPO, "web", "app.mjs"), encoding="utf-8") as f:
             page = f.read()

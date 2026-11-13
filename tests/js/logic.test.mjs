@@ -793,7 +793,7 @@ test("the plate's identity is its path, files, size and time, and there is none 
   assert.equal(indexParts("1.11.11", "a1b2", plateIdentity("plates/horse.mp4", st, false), { seed: 1017942128 }), null, "no key: the job is posted, and the index keeps nothing of it");
 });
 
-import { erasedShare, eraseLeft, leftHint } from "../../web/logic.mjs";
+import { erasedShare, leftHint } from "../../web/logic.mjs";
 
 test("an erase that left its object: the share of the object that changed on the first frame, and what to do next", () => {
   const w = 16, h = 8;
@@ -802,18 +802,14 @@ test("an erase that left its object: the share of the object that changed on the
   const before = rgba((x) => (x >= 4 && x < 12 ? [60, 40, 30] : [150, 150, 150])); // a dark barn, 8 pixels wide, in the mist
   const mask = rgba((x) => (x >= 2 && x < 14 ? [255, 255, 255] : [0, 0, 0])); // its mask, 2 pixels wider on each side
   assert.equal(erasedShare(before, before, mask, w, h), 0); // Klein answered with the frame as it was (12 Nov 2026)
-  assert.equal(eraseLeft(0), true);
   // the same barn, softened (10 levels up and down from pixel to pixel) and 6 levels off, as Klein's fill can sit: unchanged
   const soft = rgba((x, y) => (x >= 4 && x < 12 ? [66 + ((x + y) % 2) * 20 - 10, 46, 36] : [156, 156, 156]));
   assert.equal(erasedShare(soft, before, mask, w, h), 0);
   assert.equal(erasedShare(mist, before, mask, w, h), 8 / 12); // the barn gone: its 8 columns of the mask's 12 changed
-  assert.equal(eraseLeft(8 / 12), false);
   // a wire 1 pixel wide under a stroke 12 pixels wide: the cell that held it moves by 40 levels, a third of the mask
   const wire = rgba((x) => (x === 5 ? [40, 40, 40] : [200, 200, 200]));
   assert.equal(erasedShare(rgba(() => [200, 200, 200]), wire, mask, w, h), 4 / 12);
   assert.equal(erasedShare(mist, before, rgba(() => [0, 0, 0]), w, h), null); // no mask: nothing to judge, nothing is held back
-  assert.equal(eraseLeft(null), false);
-  assert.deepEqual([eraseLeft(0.019), eraseLeft(0.02)], [true, false]); // less than 2% of the object changed: it is still there
   assert.equal(leftHint(""), "Type its name in the prompt bar, then Generate.");
   assert.equal(leftHint("barn"), "Describe it with other words, then Generate, or press Ctrl+Enter for another seed.");
 });
