@@ -60,15 +60,15 @@ class Report(unittest.TestCase):
 class Run(unittest.TestCase):
     """gpu_matrix.main with stand-ins for the browser, ComfyUI and the cases."""
 
-    def matrix(self, cases, alive, *more):
+    def matrix(self, cases, alive, *more, jobs=()):
         """main() on `cases`: what was called, in order, the exit code and the report. `alive` holds ComfyUI's answer after
-        each case."""
+        each case, and `jobs` the jobs each case ran."""
         calls, alive = [], iter(alive)
 
         def case(a, name, case, folder):
             calls.append(name)
             return {"name": name, "seconds": 255.0, "vram": 0, "ram": 0, "own": 0, "container": 0, "folder": folder, "log": "", "marks": [],
-                    **gpu_matrix.read_log(""), "passed": True, "why": "", "matte": None, "live_files": 0}
+                    **gpu_matrix.read_log(""), "jobs": list(jobs), "passed": True, "why": "", "matte": None, "live_files": 0}
 
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "input", "plates"))
@@ -90,6 +90,19 @@ class Run(unittest.TestCase):
             self.assertIn(f"| {name} | not run: ComfyUI had stopped |", report)
             self.assertNotIn(f"## {name}", report)
         self.assertIn("## horse_erase · passed in 255 s", report)
+
+    def test_the_report_is_written_when_a_job_ran(self):
+        """A job's row gives its seconds in ComfyUI. The report kept them under the name of its list of cases: it stopped
+        after the first case whose last job had run, and the cases left were not started (the laptop, 12 Nov, 1.11.10)."""
+        GB = gpu_matrix.GB
+        ran = {"name": "cleanup", "id": "5b938984", "seconds": 88.3, "run": 88.0, "vram": 15 * GB, "ram": 38 * GB, "own": 38 * GB,
+               "cached": 13, "nodes": 36, "previews": 1}
+        indexed = {**ran, "name": "ingest", "id": "05306f52", "seconds": 0.1, "run": None}  # taken from the job index: not timed
+        calls, code, report = self.matrix("horse_erase,horse_cow", [True], jobs=[indexed, ran])
+        self.assertEqual((calls, code), (["horse_erase", "horse_cow"], 0))
+        self.assertIn("| cleanup 5b938984 | 88.3 | 88.0 |", report)
+        self.assertIn("| ingest 05306f52 | 0.1 |", report)
+        self.assertNotIn("The log of each failure", report)
 
     def test_a_run_goes_to_its_end_while_comfyui_answers(self):
         calls, code, report = self.matrix("horse_cow,horse_erase", [True])

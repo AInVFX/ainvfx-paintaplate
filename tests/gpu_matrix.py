@@ -285,9 +285,9 @@ def report(a, machine, results):
         lines += ["| Step | Seconds |", "| --- | --- |", *[f"| {label} | {s:.1f} |" for label, s in r["steps"]]]
         lines += ["", "| Job | Seconds | In ComfyUI | Peak VRAM | Peak RAM | No file | Nodes from ComfyUI's cache | Previews |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
         for j in r["jobs"]:
-            ran = "" if j["run"] is None else f"{j['run']:.1f}"
+            in_comfy = "" if j["run"] is None else f"{j['run']:.1f}"
             peaks = " | | " if j["run"] is None else f"{gb(j['vram'])} | {gb(j['ram'])} | {gb(j['own'])}"
-            lines.append(f"| {j['name']} {j['id']} | {j['seconds']:.1f} | {ran} | {peaks} | {j['cached']} of {j['nodes']} | {j['previews']} |")
+            lines.append(f"| {j['name']} {j['id']} | {j['seconds']:.1f} | {in_comfy} | {peaks} | {j['cached']} of {j['nodes']} | {j['previews']} |")
         lines += ["", f"- Memory profile: {r['profile']}.",
                   f"- Peak VRAM {gb(r['vram'])}. Peak RAM {gb(r['ram'])}, of which {gb(r['own'])} that no file backs"
                   + (f"; this container's own count, page cache included: {gb(r['container'])}" if r["container"] else "") + ".",
