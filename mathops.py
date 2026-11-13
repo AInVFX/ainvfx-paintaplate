@@ -670,6 +670,10 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       moved with the background, and the search keeps the zone; frames before the object is known to stand still are
       set when it is. An object found to move in the scene is followed as before. One that moves inside its paint
       zone is not found to move (its first matte is the zone, as at 32ea0a4), so the matte keeps to its place there;
+    - an erased object (no `shot`, with `base`) is the plate's own: once it is known to stand still, its place of
+      frame 0, moved with the background, is the object wherever the plate shows that place thick (an opening by 1/240
+      of the width), seen by SAM or not (13 Nov 2026: the barn came out behind the horse, SAM found it again on frame
+      101 and the matte came back on 103; now on 98, and it holds more of the barn after);
     - a frame where the object is not seen keeps the previous matte (with no mask at all, the first-frame mask holds);
     - with `shot` and `base` (the regenerated frames and the plate they were made over, (N, H, W, 3) in 0 to 1), the
       matte also takes the generated pixels connected to the object: the areas that touch the object or its region,
@@ -814,7 +818,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     zoned = line is el and 2 * int(el.sum()) <= given  # a paint zone at least twice the object: the tracker returns the zone first
     out, cores, prev, peak = np.zeros((n, h, w), np.float32), np.zeros((n, h, w), bool), seed, int(seed.sum())
     size, last = np.ones(n, np.int64), max(int(line.sum()), 1)  # the object's area on each frame
-    seen = strays = held = added = alone = lost = guarded = smoothed = fronts = zones = 0
+    seen = strays = held = added = alone = lost = guarded = smoothed = fronts = zones = placed = 0
     most, chunk = 1.0, 2 * max(1, workers)
     still = None  # does the object keep its place in the scene? Not known before frame FOLLOW_STILL
     waiting = []  # the zone's frames before it is known whether the object stands still, each with the object's place
@@ -877,6 +881,10 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     core = in_view(core, hide)  # of an erased object's mask, a piece that lies mostly on covered places is on what stands in front
                 peak = max(peak, int(core.sum()))
                 found, follows = core, True
+                if real and hide is not None:  # an erased object stands still: its place of frame 0, where the plate shows it thick, is the object, seen by SAM or not
+                    shows = bulk(open0 & ~hide) & ~found
+                    if shows.any():
+                        found, placed = found | shows, placed + 1
                 if block is not None and (core.any() or line.any()):
                     d, anchor = block[t - start], core | line
                     within = grow(anchor, reach)
@@ -972,6 +980,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
         summary = f"SAM 3.1 found the object on {seen} of {n} frames"
         if zones:
             summary += f"; on {zones} frame(s) its mask held the paint zone it was given, and the matte kept to the object's place there"
+        if placed:
+            summary += f"; on {placed} frame(s) its place of frame 0, in view, added to SAM's mask: an erased object stands still"
         if strays:
             summary += f"; what it found further than the object can move, on {strays} frame(s), is left out"
         if held:
