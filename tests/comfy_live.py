@@ -401,6 +401,10 @@ def main():
     finally:
         if proc:
             proc.terminate(); proc.wait(20)
+    # PL7: our video decoder against core's, frame for frame, in ComfyUI's own Python (8 and 10 bits, alpha, trims)
+    r = subprocess.run([a.python, os.path.join(os.path.dirname(os.path.abspath(__file__)), "decode_parity.py"), "--comfy", a.comfy],
+                       capture_output=True, text=True, timeout=600)
+    check("DECODE SAME" in r.stdout, "our video decoder makes core's pictures: " + ((r.stdout.strip().splitlines() or [""])[-1] or r.stderr[-300:]))
     print("\nALL PASSED" if not FAILS else f"\n{len(FAILS)} FAILED")
     return 1 if FAILS else 0
 

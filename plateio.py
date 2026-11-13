@@ -17,6 +17,7 @@ it runs and is tested outside ComfyUI.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
@@ -450,6 +451,98 @@ def read_float(path: str) -> np.ndarray:
             g, b, r = planes
             return np.stack([r, g, b], -1).astype(np.float32)
         return frame.to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
+
+
+# What core's decoder reads plane by plane as floats, and what it decodes to 8 bits then divides by 255 (comfy_api's
+# VideoFromFile at ComfyUI e6515b16, the pin in tools/pins.sh); every other format it converts to 32-bit float planes
+CORE_FLOATS = ("gbrpf16le", "gbrpf16be", "gbrapf16le", "gbrapf16be", "grayf16le", "grayf16be",
+               "gbrpf32le", "gbrpf32be", "gbrapf32le", "gbrapf32be", "grayf32le", "grayf32be")
+CORE_BYTES = ("yuvj420p", "yuvj422p", "yuvj444p", "rgb24", "rgba", "pal8")
+
+
+def decode_video(path: str, max_frames: int, fps: float, pad_8n1: bool = False):
+    """A video's first `max_frames` frames as core's decoder gives them, each written into one array as it decodes.
+
+    Core (VideoFromFile(path, duration=max_frames / fps).get_components()) holds the plate twice: its list of frames,
+    then their stack, and Load Plate's 8k+1 padding made a third copy for a moment. This takes core's steps one by one:
+    its trim window, the first frame's choice of 8 bits or float, float planes read as stored, a width that is not a
+    multiple of 32 padded with a smeared border, the rotation. Returns (RGB float32 (N, H, W, 3), alpha float32 (N, H, W)
+    or None, the frames decoded); with `pad_8n1`, N also counts the padding: the last frame repeated. The live tests
+    compare it with core's decoder, so a ComfyUI pin that changes core's pictures fails a test."""
+    rows = pad_count_8n1(max_frames) if pad_8n1 else max_frames
+    rgb = alpha = align = None
+    count, done, fmt, byte8, has_alpha = 0, False, "", False, False
+    with av.open(path) as container:
+        if not len(container.streams.video):
+            raise ValueError(f"No video stream found in file '{path}'")
+        stream = container.streams.video[0]
+        stream.thread_type = "AUTO"
+        duration = float(max_frames / fps)
+        end_pts = int((0.0 + duration) / stream.time_base)
+        for packet in container.demux(stream):
+            if done:
+                break
+            try:
+                for frame in packet.decode():
+                    if frame.pts < 0:  # before the window's start, as core skips them
+                        continue
+                    if duration and frame.pts >= end_pts:
+                        done = True
+                        break
+                    if not fmt:  # the first frame decides for the whole video, as in core
+                        has_alpha = any(c.is_alpha for c in frame.format.components) or frame.format.name == "pal8"
+                        byte8 = frame.format.name in CORE_BYTES
+                        fmt = ("rgba" if has_alpha else "rgb24") if byte8 else ("gbrapf32le" if has_alpha else "gbrpf32le")
+                    if frame.format.name in CORE_FLOATS:  # read as stored: swscale can clip values above 1.0
+                        dtype = np.dtype(f"{'>' if frame.format.is_big_endian else '<'}f{frame.format.components[0].bits // 8}")
+                        planes = [np.ndarray((frame.height, frame.width), dtype=dtype, buffer=frame.planes[c.plane],
+                                             strides=(frame.planes[c.plane].line_size, dtype.itemsize)) for c in frame.format.components]
+                        img = np.stack(planes * 3 if len(planes) == 1 else planes, axis=-1, dtype=np.float32)
+                    elif fmt in ("gbrpf32le", "gbrapf32le") and frame.width % 32 != 0:  # core's fix for a nondeterministic decode
+                        if align is None:
+                            pad_w, pad_h = (frame.width + 31) // 32 * 32, (frame.height + 31) // 32 * 32
+                            g = av.filter.Graph()
+                            src = g.add_buffer(width=frame.width, height=frame.height, format=frame.format.name,
+                                               time_base=stream.time_base)
+                            pad = g.add("pad", f"{pad_w}:{pad_h}:0:0")
+                            fill = g.add("fillborders", f"left=0:right={pad_w - frame.width}:top=0:bottom={pad_h - frame.height}:mode=smear")
+                            sink = g.add("buffersink")
+                            src.link_to(pad)
+                            pad.link_to(fill)
+                            fill.link_to(sink)
+                            g.configure()
+                            align = (g, src, sink)
+                        align[1].push(frame)
+                        img = align[2].pull().to_ndarray(format=fmt)[:frame.height, :frame.width]
+                    else:
+                        img = frame.to_ndarray(format=fmt)
+                    turn = int(round(frame.rotation // 90)) % 4 if frame.rotation else 0
+                    if turn:
+                        img = np.rot90(img, k=turn, axes=(0, 1))
+                    if rgb is None:
+                        rgb = np.empty((rows, *img.shape[:2], 3), np.float32)
+                        alpha = np.empty((rows, *img.shape[:2]), np.float32) if has_alpha else None
+                    if byte8:  # as core: the 8-bit values as float32, divided by 255
+                        np.divide(img[..., :3], np.float32(255.0), out=rgb[count], dtype=np.float32)
+                        if alpha is not None:
+                            np.divide(img[..., -1], np.float32(255.0), out=alpha[count], dtype=np.float32)
+                    else:
+                        rgb[count] = img[..., :3]
+                        if alpha is not None:
+                            alpha[count] = img[..., -1]
+                    count += 1
+                    if count == max_frames:  # Load Plate keeps no more
+                        done = True
+                        break
+            except av.error.InvalidDataError:  # core skips the rest of a packet that fails to decode
+                logging.info("Paint a plate: a packet of %s did not decode", path)
+    if rgb is None:
+        return np.zeros((0, 0, 0, 3), np.float32), None, 0
+    n = pad_count_8n1(count) if pad_8n1 else count
+    rgb[count:n] = rgb[count - 1]
+    if alpha is not None:
+        alpha[count:n] = alpha[count - 1]
+    return rgb[:n], None if alpha is None else alpha[:n], count
 
 
 MATTE_STEP = 1.0 / 255  # the export's matte is 8-bit PNG, scaled by 255 and truncated: below one step it reads 0

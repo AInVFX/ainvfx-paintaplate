@@ -127,10 +127,12 @@ class LoadPlate(io.ComfyNode):
     def execute(cls, path, max_frames, pad_8n1) -> io.NodeOutput:
         full = resolve(path)
         spec = plateio.probe_plate(full)
-        if spec["kind"] == "video":  # core's decoder, trimmed before decoding
+        if spec["kind"] == "video":  # our decoder: core's pictures, each frame written into its place, the padding too
             bar = comfy.utils.ProgressBar(1)
-            parts = [InputImpl.VideoFromFile(full, duration=max_frames / spec["fps"]).get_components()]
+            rgb, a, count = plateio.decode_video(full, max_frames, spec["fps"], pad_8n1)
             bar.update(1)
+            images, extra = torch.from_numpy(rgb), rgb.shape[0] - count
+            alpha = None if a is None else torch.from_numpy(a)
         else:  # frames decode in parallel: PyAV releases the GIL while decoding; each one counts as progress
             files = spec["files"][:max_frames]
             bar = comfy.utils.ProgressBar(len(files))
@@ -144,20 +146,19 @@ class LoadPlate(io.ComfyNode):
                 return part
             with ThreadPoolExecutor(WORKERS) as pool:
                 parts = list(pool.map(read, files))
-        def whole(tensors):  # a video is one part: its decoded frames are the plate, held once
-            return (tensors[0] if len(tensors) == 1 else torch.cat(tensors))[:max_frames]
-        images = whole([p.images for p in parts])
-        count = images.shape[0]
-        extra = plateio.pad_count_8n1(count) - count if pad_8n1 else 0
-        if parts[0].alpha is not None:
-            alpha = whole([p.alpha[..., -1] for p in parts])
+            def whole(tensors):  # the frames joined: the plate
+                return (tensors[0] if len(tensors) == 1 else torch.cat(tensors))[:max_frames]
+            images = whole([p.images for p in parts])
+            count = images.shape[0]
+            extra = plateio.pad_count_8n1(count) - count if pad_8n1 else 0
+            alpha = None if parts[0].alpha is None else whole([p.alpha[..., -1] for p in parts])
             if extra:
-                alpha = torch.cat([alpha, alpha[-1:].expand(extra, -1, -1)])
-        else:  # an opaque plate: one frame of ones stands for every frame, and takes one frame of memory
+                images = torch.cat([images, images[-1:].expand(extra, -1, -1, -1)])
+                if alpha is not None:
+                    alpha = torch.cat([alpha, alpha[-1:].expand(extra, -1, -1)])
+        if alpha is None:  # an opaque plate: one frame of ones stands for every frame, and takes one frame of memory
             alpha = torch.ones((1, *images.shape[1:3]), dtype=images.dtype, device=images.device).expand(count + extra, -1, -1)
         spec.update(frames=count, color_space_guess=plateio.guess_color_space(spec))
-        if extra:
-            images = torch.cat([images, images[-1:].expand(extra, -1, -1, -1)])
         device, dtype = mm.intermediate_device(), mm.intermediate_dtype()
         return io.NodeOutput(images.to(device=device, dtype=dtype), alpha.to(device=device, dtype=dtype),
                              spec, float(spec["fps"]), count, plateio.spec_json(spec))
