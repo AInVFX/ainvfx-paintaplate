@@ -38,15 +38,37 @@ test("the probe's results on horse.mp4 (13 Nov 2026): what went passes; what sta
   for (const [changed, edges] of stayed) assert.equal(objectLeft({ changed, edges }), true, `${changed}, ${edges}`);
 });
 
-// E5's fixture (12 and 13 November 2026, horse.mp4, a stroke on the barn): real first frames at the page's quick-pass size,
-// 768 x 432, with the page's own mask of the barn. The frames live with the test data, never in git: PAINTAPLATE_FIXTURES
-// names the folder that holds edit_check/; without it this test is skipped. horse_erase's export (12 Nov, no words) kept
-// the barn, horse_erase_barn's (« the barn ») removed it. The probe of 13 Nov (tests/erase_probe.py, 1.11.13) adds Klein's
-// seven quick passes; SAM 3.1 run again on each is their verdict, and the frames agree. Measured on 13 Nov, at 24 levels
-// and for the edges: horse_erase 3% and 0.96, horse_erase_barn 77% and 0.76; the probe's removed barns 53 to 78% and -0.03
-// to 0.75, its kept barns 0 to 1% and 0.98. A removed barn keeps its edges up to 0.76: 0.09 under the rule's 0.85.
-const LEFT = { horse_erase: true, horse_erase_barn: false, probe_page: false, probe_dimmed: false, probe_crop: false,
-  probe_tight: false, probe_named: true, probe_as_words: true, probe_own: true };
+// E5's fixture (12 and 13 November 2026, horse.mp4): real first frames at the page's quick-pass size, 768 x 432, against
+// the check after an erase. The frames live with the test data, never in git: PAINTAPLATE_FIXTURES names the folder that
+// holds edit_check/; without it this test is skipped. Each case is [the frame under the edit, the object's mask, left]:
+// - the plate's first frame resized (horse_frame0, the same pixels as w6/horse_frame0.png at 768 x 432), with the page's mask
+//   of the barn (1.11.13): the exports' first frames of 12 Nov (1.11.12) and 13 Nov (1.11.14), and the probe of 13 Nov
+//   (tests/erase_probe.py, 1.11.13, seven requests);
+// - the frame and the masks that the probe of 1.11.14 sent (probe14_*): the barn, the post and the tree, with no words and
+//   with their names. Each probe's results are measured against its own frame: they give the probe's own figures exactly.
+// The verdicts agree with the frames and with SAM 3.1 run again. Measured on 13 Nov, at 24 levels and for the edges: a
+// kept object 0 to 3% and 0.91 to 0.98; a removed one 53 to 97% and -0.07 to 0.76, a thin post among them (73%, 0.05).
+const CASES = {
+  horse_erase: ["horse_frame0", "horse_barn_mask", true], // 12 Nov, no words: the barn kept
+  horse_erase_barn: ["horse_frame0", "horse_barn_mask", false],
+  probe_page: ["horse_frame0", "horse_barn_mask", false],
+  probe_dimmed: ["horse_frame0", "horse_barn_mask", false],
+  probe_crop: ["horse_frame0", "horse_barn_mask", false],
+  probe_tight: ["horse_frame0", "horse_barn_mask", false],
+  probe_named: ["horse_frame0", "horse_barn_mask", true],
+  probe_as_words: ["horse_frame0", "horse_barn_mask", true],
+  probe_own: ["horse_frame0", "horse_barn_mask", true],
+  w6_horse_erase: ["horse_frame0", "horse_barn_mask", false], // 13 Nov, no words: the writer's box cut to the object (E3)
+  w6_horse_erase_barn: ["horse_frame0", "horse_barn_mask", false],
+  probe14_barn_page: ["probe14_frame", "probe14_barn_mask", false],
+  probe14_barn_wide: ["probe14_frame", "probe14_barn_mask", true], // 1.11.13's request: the writer names the horse, refused
+  probe14_post_page: ["probe14_frame", "probe14_post_mask", false],
+  probe14_post_own: ["probe14_frame", "probe14_post_mask", true],
+  probe14_tree_own: ["probe14_frame", "probe14_tree_mask", true],
+  probe14_barn_words: ["probe14_frame", "probe14w_barn_mask", false], // with its name, SAM 3.1 finds the object by it
+  probe14_post_words: ["probe14_frame", "probe14w_post_mask", false],
+  probe14_tree_words: ["probe14_frame", "probe14_tree_mask", false],
+};
 
 function png(path) { // a PNG as RGBA: 8-bit grey, RGB or RGBA, not interlaced (what PIL writes)
   const b = readFileSync(path), idat = [];
@@ -73,11 +95,12 @@ function png(path) { // a PNG as RGBA: 8-bit grey, RGB or RGBA, not interlaced (
   return { w, h, data };
 }
 
-test("real first frames: a barn that stayed is left, a barn that went is gone", { skip: !process.env.PAINTAPLATE_FIXTURES && "PAINTAPLATE_FIXTURES is not set" }, () => {
-  const dir = join(process.env.PAINTAPLATE_FIXTURES, "edit_check"), before = png(join(dir, "horse_frame0.png")), mask = png(join(dir, "horse_barn_mask.png"));
-  assert.deepEqual([before.w, before.h, mask.w, mask.h], [768, 432, 768, 432]);
-  for (const [name, left] of Object.entries(LEFT)) {
-    const after = png(join(dir, `${name}.png`)), check = eraseCheck(after.data, before.data, mask.data, before.w, before.h);
+test("real first frames: an object that stayed is left, one that went is gone", { skip: !process.env.PAINTAPLATE_FIXTURES && "PAINTAPLATE_FIXTURES is not set" }, () => {
+  const dir = join(process.env.PAINTAPLATE_FIXTURES, "edit_check"), read = (name) => png(join(dir, `${name}.png`));
+  for (const [name, [frame, object, left]] of Object.entries(CASES)) {
+    const before = read(frame), mask = read(object), after = read(name);
+    assert.deepEqual([before.w, before.h, mask.w, mask.h, after.w, after.h], [768, 432, 768, 432, 768, 432], name);
+    const check = eraseCheck(after.data, before.data, mask.data, before.w, before.h);
     assert.equal(check.left, left, `${name}: ${JSON.stringify(check)}`);
   }
 });
