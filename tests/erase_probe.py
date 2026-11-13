@@ -2,7 +2,7 @@
 
     python tests/erase_probe.py plates/horse.mp4 --comfy /data/ComfyUI --out ~/paintaplate_gpu/erase_probe
         [--url http://127.0.0.1:8188] [--seed 1017942128] [--stroke NAME:x,y;x,y;...[:SIZE[:WORDS]]] [--full]
-        [--requests page,dimmed,crop,tight,named,own]
+        [--requests page,dimmed,crop,tight,named,as_words,own]
 
 `plate` is the path the page sends: a video or an image under ComfyUI's input folder (--comfy names ComfyUI's folder), or a
 file on this machine. Run it in the tests' environment: the page's rules come from web/logic.mjs itself, run by Node, and
@@ -10,12 +10,13 @@ Playwright's own Node serves when no other is on the PATH.
 
 For each stroke, the probe does what the page does for an erase with Whole object on (prepare, writeCaption and generate in
 web/app.mjs), with the page's own workflows (snap, prompt and edit in tools/build_workflows.py), and asks for Klein's caption
-in each way of REQUESTS. Klein then runs its quick pass, the page's first look, once per caption that differs; --full adds
-the page's full-size pass. With no --stroke: three strokes on horse.mp4 with no words, the barn of the GPU case horse_erase,
-the fence post under it and the tree above it. The jobs are grouped by model, so that each model loads once on a 16 GB card:
-SAM 3.1 for every stroke, the prompt writer for every request, Klein for every caption, then SAM 3.1 on every result.
+in each way of REQUESTS. Klein then runs its quick pass, the page's first look, once per mask and caption that differ;
+--full adds the page's full-size pass. With no --stroke: three strokes on horse.mp4 with no words, the barn of the GPU case
+horse_erase, the fence post under it and the tree above it. The jobs are grouped by model, so that each model loads few
+times on a 16 GB card: SAM 3.1 at every stroke's points, the writer's name for every object, SAM 3.1 by that name, the
+writer for every request, Klein for every caption, then SAM 3.1 on every result.
 
-Each result is measured inside the object's mask, at the quick pass's size:
+Each result is measured inside the mask Klein got, at the quick pass's size:
 - changed: the page's rule (logic.erasedShare), the share of the object whose 4-pixel cells moved by more than 12 levels
   of 255 (under 2%, the page says that the object stayed), then the same at 24 and at 48 levels;
 - edges: the correlation of the gradient's size before and after (1: the same edges; near 0: none of them);
@@ -69,6 +70,8 @@ REQUESTS = {  # how each one asks for Klein's caption: what the prompt writer se
             "the boxes of the answer come back to the frame",
     "tight": "one locked box cut to the object: the stroke, and the pixels that most of SAM's kept masks hold",
     "named": "a first question names the object, on the dimmed frame; the page's own caption then carries that name",
+    "as_words": "the same name, then the page as if it had been typed: SAM 3.1 by name, the locked boxes of its mask, "
+                "the writer's request with the name, and Klein inside that mask",
     "own": "the page's own caption, with no prompt writer: what the page sends when it refuses the writer's answer",
 }
 
@@ -331,6 +334,10 @@ def run(url, name, values, limit):
     return {out: entry.get("outputs", {}).get(nid, {}) for out, nid in outputs_of(prompt).items()}, seconds
 
 
+def text_of(got):
+    return ((got.get("text", {}).get("text") or [""])[0] or "").strip()
+
+
 def image(url, item, mode="RGB"):
     q = urllib.parse.urlencode({"filename": item["filename"], "subfolder": item.get("subfolder", ""),
                                 "type": item.get("type", "output")})
@@ -348,6 +355,27 @@ def objects_of(url, got, painted, points, prev):
     picked = page(("pickObjects", {"painted": raw(painted.ravel()), "points": [raw(m.ravel()) for m in pts],
                                     "named": [raw(m.ravel()) for m in named], "area": int(painted.size)}))[0]
     return [(kind, (named if kind == "named" else pts)[i]) for kind, i in picked]
+
+
+def path_of(url, o, words, got, prev, work):
+    """What the page prepares for an erase once SAM has answered, with these words (app.prepare): the object's masks, its
+    box, the paint's grid and locked boxes, the page's own caption, and the tight box and the crop of two requests."""
+    kept = objects_of(url, got, o["painted"], o["points"], prev)
+    p = {"words": words, "kept": [kind for kind, _ in kept], "sam": np.zeros(prev[::-1], bool)}
+    for _, m in kept:
+        p["sam"] |= m
+    p["mask_work"] = o["painted_work"] | (resized(p["sam"].astype(np.uint8) * 255, work) > 127)
+    p["mask_prev"], p["bbox"], p["paint"] = mask_at(p["mask_work"], prev), bounds(p["mask_work"]), paint_grid(p["mask_work"])
+    p["own"], p["boxes"] = page(("caption", {"tool": "erase", "words": words, "colors": [], "color": "#ffffff",
+                                             "bbox": p["bbox"]}), ("paintBoxes", p["paint"]))
+    from_points = [m for kind, m in kept if kind == "points"]
+    core = np.sum(from_points, 0) * 2 > len(from_points) if from_points else p["sam"]
+    p["core_box"], p["crop"] = tight_box(core | o["painted"]), crop_of(p["bbox"])
+    return p
+
+
+def edit_key(r):  # one Klein job per mask and caption
+    return f"{r['path']}|{r['caption']}"
 
 
 def first_frame(plate, comfy):
@@ -377,11 +405,12 @@ def verdict(req, r):
         return "the page's own caption: no writer"
     if req == "named":
         return f"named « {r.get('name') or 'nothing'} »: the page's own caption with that name"
+    head = f"named « {r.get('name') or 'nothing'} », then as typed: " if req == "as_words" else ""
     if r.get("error"):
-        return "the writer failed: the page's own caption"
+        return f"{head}{r['error']}: the page's own caption"
     if not r.get("answer"):
-        return "no answer: the page's own caption"
-    return "refused: the page's own caption" if r.get("refused") else "kept: the writer's caption"
+        return f"{head}no answer: the page's own caption"
+    return head + ("refused: the page's own caption" if r.get("refused") else "kept: the writer's caption")
 
 
 def measured(e):
@@ -417,28 +446,29 @@ def sheet(path, objs, asked, frame_prev, title):
     cyan), then the result of each request, with what the writer said and the measures."""
     cw, ch, th, gap = 384, 216, 60, 8
     font = font_of(13)
-    rows = [o for o in objs if "bbox" in o]
+    rows = [o for o in objs if "page" in o["paths"]]
     ph, pw = frame_prev.shape[:2]
     img = Image.new("RGB", (gap + (len(asked) + 1) * (cw + gap), 34 + max(1, len(rows)) * (ch + th + gap)), "white")
     d = ImageDraw.Draw(img)
     d.text((gap, 8), title, fill="black", font=font)
     for n, o in enumerate(rows):
-        y, view, m = 34 + n * (ch + th + gap), view_box(o["bbox"], (pw, ph)), o["mask_prev"]
+        P = o["paths"]["page"]
+        y, view, m = 34 + n * (ch + th + gap), view_box(P["bbox"], (pw, ph)), P["mask_prev"]
         marked = frame_prev.copy()
         marked[o["painted"]] = (marked[o["painted"]] * 0.5 + np.array([255, 220, 0]) * 0.5).astype(np.uint8)
         marked[(m ^ np.roll(m, 1, 0)) | (m ^ np.roll(m, 1, 1))] = (255, 40, 40)
         before = Image.fromarray(marked)
-        for b in o["boxes"]:
+        for b in P["boxes"]:
             ImageDraw.Draw(before).rectangle((b[1] * pw / 1000, b[0] * ph / 1000, b[3] * pw / 1000, b[2] * ph / 1000),
                                              outline=(0, 220, 255))
-        cells = [(before, [f"{o['name']}: the frame", f"SAM kept {len(o['kept'])} mask(s), box {o['bbox']}",
+        cells = [(before, [f"{o['name']}: the frame", f"SAM kept {len(P['kept'])} mask(s), box {P['bbox']}",
                            "red: the mask; cyan: the locked boxes"])]
         for req in asked:
-            r = o["requests"].get(req, {})
-            e, after = o["edits"].get(r.get("caption"), {}), o["afters"].get(r.get("caption"))
-            said = r.get("answer") if req not in ("own", "named") else r.get("caption")
+            r = o["requests"].get(req)
+            e, after = (o["edits"].get(edit_key(r), {}), o["afters"].get(edit_key(r))) if r else ({}, None)
+            said = (r or {}).get("answer") if req not in ("own", "named") else (r or {}).get("caption")
             cells.append((after if after is None else Image.fromarray(after),
-                          [short(f"{req}: {verdict(req, r)}", 54), f"« {short(said, 50)} »", short(measured(e), 54)]))
+                          [short(f"{req}: {verdict(req, r or {})}", 54), f"« {short(said, 50)} »", short(measured(e), 54)]))
         for k, (im, text) in enumerate(cells):
             x = gap + k * (cw + gap)
             if im is not None:
@@ -457,13 +487,18 @@ def report(path, objs, asked, head):
         if "error" in o:
             lines += ["", o["error"]]
             continue
-        lines += ["", f"SAM 3.1 kept {len(o['kept'])} mask(s) ({', '.join(o['kept']) or 'none'}). The object's box {o['bbox']}; "
-                  f"the locked boxes {o['boxes']}; the tight box {o['core_box']}; the crop {o['crop']}.", "",
-                  "| Request | The writer's answer | The page | Changed at 12 / 24 / 48 levels | Edges | SAM again | Seconds |",
+        P, Q = o["paths"]["page"], o["paths"].get("name")
+        lines += ["", f"SAM 3.1 kept {len(P['kept'])} mask(s) ({', '.join(P['kept']) or 'none'}). The object's box {P['bbox']}; "
+                  f"the locked boxes {P['boxes']}; the tight box {P['core_box']}; the crop {P['crop']}."]
+        if "naming" in o:
+            lines += ["", f"The writer names it « {o.get('object') or 'nothing'} » (its answer: « {short(o['naming'].get('answer'), 80)} »)."
+                      + (f" SAM 3.1 by that name kept {len(Q['kept'])} mask(s) ({', '.join(Q['kept']) or 'none'}); the object's "
+                         f"box {Q['bbox']}; the locked boxes {Q['boxes']}." if Q else f" {o.get('name_error', '')}".rstrip())]
+        lines += ["", "| Request | The writer's answer | The page | Changed at 12 / 24 / 48 levels | Edges | SAM again | Seconds |",
                   "| --- | --- | --- | --- | --- | --- | --- |"]
         for req in asked:
             r = o["requests"][req]
-            e = o["edits"].get(r["caption"], {})
+            e = o["edits"].get(edit_key(r), {})
             cells = [req, short(r.get("answer") or "", 110).replace("|", "/"), verdict(req, r),
                      " / ".join(pct(v) for v in e["share"]) if "share" in e else e.get("error", "no result"),
                      num(e.get("edges")), num(e.get("sam")),
@@ -480,9 +515,11 @@ def report(path, objs, asked, head):
 
 
 def plain(o):
-    keep = ("name", "stroke", "kept", "bbox", "boxes", "core_box", "crop", "points", "own", "page_ask", "error",
-            "snap_seconds", "requests", "edits")
-    return {k: o[k] for k in keep if k in o}
+    keep = ("name", "stroke", "points", "object", "naming", "name_error", "error", "requests", "edits")
+    out = {k: o[k] for k in keep if k in o}
+    out["paths"] = {k: {f: p[f] for f in ("words", "kept", "bbox", "boxes", "core_box", "crop", "own", "ask", "seconds") if f in p}
+                    for k, p in o["paths"].items()}
+    return out
 
 
 # ---------- The probe ----------
@@ -519,96 +556,122 @@ def main(argv=None):
     with open(os.path.join(REPO, "web", "upsampler.json")) as f:
         system = json.load(f)
     strokes = [parse_stroke(s) for s in a.stroke] if a.stroke else default_strokes()
+    naming = bool({"named", "as_words"} & set(asked))
     say(f"{facts}. {a.plate}, {W} x {H}: the quick pass at {prev[0]} x {prev[1]}, the full size {work[0]} x {work[1]}. "
         f"{len(strokes)} stroke(s); requests: {', '.join(asked)}")
     frame_name = upload(a.url, frame_prev, f"{tag}_frame.png", sent)
 
-    # 1. SAM 3.1: the whole object under each stroke (app.prepare, findWhole)
+    # 1. SAM 3.1 at the stroke's points: the whole object (app.prepare, findWhole)
     objs = []
     for s in strokes:
-        o = {"name": s["name"], "stroke": s, "requests": {}, "edits": {}, "afters": {}}
+        o = {"name": s["name"], "stroke": s, "paths": {}, "requests": {}, "edits": {}, "afters": {}}
         objs.append(o)
         o["painted_work"] = stroke_mask(s, work)
-        o["painted"] = mask_at(o["painted_work"], prev)
-        o["points"] = snap_points(s, work, prev)
+        o["painted"], o["points"] = mask_at(o["painted_work"], prev), snap_points(s, work, prev)
         try:
-            got, o["snap_seconds"] = run(a.url, "snap", {"image": frame_name, "words": s["words"], **o["points"]}, a.limit)
-            kept = objects_of(a.url, got, o["painted"], o["points"], prev)
+            got, seconds = run(a.url, "snap", {"image": frame_name, "words": s["words"], **o["points"]}, a.limit)
+            P = o["paths"]["page"] = path_of(a.url, o, s["words"], got, prev, work)
         except Exception as err:  # noqa: BLE001
             o["error"] = f"SAM 3.1 failed: {err}"
             say(f"{s['name']}: {o['error']}")
             continue
-        o["kept"], o["sam"] = [kind for kind, _ in kept], np.zeros(prev[::-1], bool)
-        for _, m in kept:
-            o["sam"] |= m
-        o["mask_work"] = o["painted_work"] | (resized(o["sam"].astype(np.uint8) * 255, work) > 127)
-        o["mask_prev"], o["bbox"], o["paint"] = mask_at(o["mask_work"], prev), bounds(o["mask_work"]), paint_grid(o["mask_work"])
-        o["own"], o["boxes"] = page(("caption", {"tool": "erase", "words": s["words"], "colors": [], "color": "#ffffff",
-                                                 "bbox": o["bbox"]}), ("paintBoxes", o["paint"]))
-        from_points = [m for kind, m in kept if kind == "points"]
-        core = np.sum(from_points, 0) * 2 > len(from_points) if from_points else o["sam"]
-        o["core_box"], o["crop"] = tight_box(core | o["painted"]), crop_of(o["bbox"])
-        say(f"{s['name']}: SAM 3.1 kept {len(kept)} mask(s) in {o['snap_seconds']:.1f} s; the object's box {o['bbox']}, "
-            f"the locked boxes {o['boxes']}, the tight box {o['core_box']}")
-    live = [o for o in objs if "bbox" in o]
+        P["seconds"] = seconds
+        say(f"{s['name']}: SAM 3.1 kept {len(P['kept'])} mask(s) in {seconds:.1f} s; the object's box {P['bbox']}, "
+            f"the locked boxes {P['boxes']}, the tight box {P['core_box']}")
+    live = [o for o in objs if "page" in o["paths"]]
 
-    # 2. The prompt writer: each request (app.writeCaption), then what the page makes of its answer
+    # 2. The prompt writer names each object, on the frame with all but the object dimmed (named, as_words)
     for o in live:
-        s = o["stroke"]
-        base = {"tool": "erase", "words": s["words"], "bbox": o["bbox"], "boxes": o["boxes"]}
-        o["page_ask"], crop_ask, tight_ask = page(
+        dimmed = (frame_prev * np.where(o["paths"]["page"]["mask_prev"], 1.0, DIM)[..., None]).astype(np.uint8)
+        o["dimmed"] = upload(a.url, dimmed, f"{tag}_{o['name']}_dimmed.png", sent) if naming or "dimmed" in asked else None
+        if not naming:
+            continue
+        n = o["naming"] = {"image": "dimmed", "request": NAME_REQUEST}
+        try:
+            got, n["seconds"] = run(a.url, "prompt", {"image": o["dimmed"], "request": NAME_REQUEST, "system": NAME_SYSTEM,
+                                                      "max_length": 24}, a.limit)
+            n["answer"] = text_of(got)
+        except Exception as err:  # noqa: BLE001
+            n["answer"], n["error"] = "", str(err)
+        o["object"] = name_of(n["answer"])
+        say(f"{o['name']}: the writer names it « {o['object'] or 'nothing'} »")
+
+    # 3. SAM 3.1 by that name (as_words): what the page finds once the name is in the prompt bar
+    for o in (live if "as_words" in asked else []):
+        if not o.get("object"):
+            continue
+        try:
+            got, seconds = run(a.url, "snap", {"image": frame_name, "words": o["object"], **o["points"]}, a.limit)
+            Q = o["paths"]["name"] = path_of(a.url, o, o["object"], got, prev, work)
+            Q["seconds"] = seconds
+            say(f"{o['name']}: SAM 3.1 by the name « {o['object']} » kept {len(Q['kept'])} mask(s); the object's box {Q['bbox']}")
+        except Exception as err:  # noqa: BLE001
+            o["name_error"] = f"SAM 3.1 by name failed: {err}"
+            say(f"{o['name']}: {o['name_error']}")
+
+    # 4. The prompt writer: each request (app.writeCaption), then what the page makes of its answer
+    for o in live:
+        s, P, Q = o["stroke"], o["paths"]["page"], o["paths"].get("name")
+        base = {"tool": "erase", "words": s["words"], "bbox": P["bbox"], "boxes": P["boxes"]}
+        P["ask"], crop_ask, tight_ask = page(
             ("upsampleRequest", base),
-            ("upsampleRequest", dict(base, bbox=to_crop(o["bbox"], o["crop"]), boxes=[to_crop(b, o["crop"]) for b in o["boxes"]])),
-            ("upsampleRequest", dict(base, bbox=o["core_box"], boxes=[o["core_box"]])))
-        images = {"frame": frame_name}
-        if {"dimmed", "named"} & set(asked):
-            dimmed = (frame_prev * np.where(o["mask_prev"], 1.0, DIM)[..., None]).astype(np.uint8)
-            images["dimmed"] = upload(a.url, dimmed, f"{tag}_{o['name']}_dimmed.png", sent)
+            ("upsampleRequest", dict(base, bbox=to_crop(P["bbox"], P["crop"]), boxes=[to_crop(b, P["crop"]) for b in P["boxes"]])),
+            ("upsampleRequest", dict(base, bbox=P["core_box"], boxes=[P["core_box"]])))
+        plan = {"page": ("frame", frame_name, P["ask"]), "dimmed": ("dimmed", o["dimmed"], P["ask"]),
+                "tight": ("frame", frame_name, tight_ask)}
         if "crop" in asked:
-            images["crop"] = upload(a.url, crop_image(frame, o["crop"]), f"{tag}_{o['name']}_crop.png", sent)
-        plan = {"page": ("frame", o["page_ask"]), "dimmed": ("dimmed", o["page_ask"]), "crop": ("crop", crop_ask),
-                "tight": ("frame", tight_ask)}
+            plan["crop"] = ("crop", upload(a.url, crop_image(frame, P["crop"]), f"{tag}_{o['name']}_crop.png", sent), crop_ask)
+        if Q:
+            Q["ask"] = page(("upsampleRequest", {"tool": "erase", "words": o["object"], "bbox": Q["bbox"], "boxes": Q["boxes"]}))[0]
+            plan["as_words"] = ("frame", frame_name, Q["ask"])
         for req in asked:
+            r = o["requests"][req] = {"path": "name" if req == "as_words" and Q else "page"}
+            R = Q if r["path"] == "name" else P
             if req == "own":
-                o["requests"][req] = {"caption": o["own"]}
-                continue
-            if req == "named":
-                r = {"image": "dimmed", "request": NAME_REQUEST, "system": NAME_SYSTEM}
-                values = {"image": images["dimmed"], "request": NAME_REQUEST, "system": NAME_SYSTEM, "max_length": 24}
+                r["caption"] = P["own"]
+            elif req == "named":
+                r.update(o["naming"], name=o["object"])
+                r["caption"] = page(("caption", {"tool": "erase", "words": o["object"] or s["words"], "colors": [],
+                                                 "color": "#ffffff", "bbox": P["bbox"]}))[0]
+            elif req == "as_words" and not Q:
+                r.update(name=o.get("object", ""), answer="", caption=P["own"],
+                         error="no name" if not o.get("object") else "SAM 3.1 by name failed")
             else:
-                seen, ask = plan[req]
-                r = {"image": seen, "request": ask["request"], "system": ask["mode"]}
-                values = {"image": images[seen], "request": ask["request"], "system": system[ask["mode"]]}
-            try:
-                got, r["seconds"] = run(a.url, "prompt", values, a.limit)
-                r["answer"] = ((got.get("text", {}).get("text") or [""])[0] or "").strip()
-            except Exception as err:  # noqa: BLE001
-                r["answer"], r["error"] = "", str(err)
-            if req == "named":
-                r["name"] = name_of(r["answer"])
-                r["caption"] = page(("caption", {"tool": "erase", "words": r["name"] or s["words"], "colors": [],
-                                                 "color": "#ffffff", "bbox": o["bbox"]}))[0]
-            else:
-                locked, text = (crop_ask if req == "crop" else tight_ask if req == "tight" else o["page_ask"])["locked"], r["answer"]
+                seen, image_name, ask = plan[req]
+                r.update(image=seen, request=ask["request"], system=ask["mode"])
+                if req == "as_words":
+                    r["name"] = o["object"]
+                try:
+                    got, r["seconds"] = run(a.url, "prompt", {"image": image_name, "request": ask["request"],
+                                                              "system": system[ask["mode"]]}, a.limit)
+                    r["answer"] = text_of(got)
+                except Exception as err:  # noqa: BLE001
+                    r["answer"], r["error"] = "", str(err)
+                locked, text = ask["locked"], r["answer"]
                 if text and req == "crop":  # the answer's boxes are on the crop: back on the frame, with the page's own rows
                     cap, rows = page(("splitTable", text))[0]
-                    text, locked = (f"{cap} {json.dumps(rows_to_frame(rows, o['crop']))}" if rows else cap), o["page_ask"]["locked"]
+                    text, locked = (f"{cap} {json.dumps(rows_to_frame(rows, P['crop']))}" if rows else cap), P["ask"]["locked"]
                 r["made"] = page(("reconcile", text, locked))[0] if text else ""
-                r["refused"] = bool(r["made"]) and not page(("erasesPaint", r["made"], locked, o["paint"]))[0]
-                r["caption"] = r["made"] if r["made"] and not r["refused"] else o["own"]
-            o["requests"][req] = r
-            say(f"{o['name']}, {req}: {verdict(req, r)}. The writer: « {short(r['answer'], 140)} »")
+                r["refused"] = bool(r["made"]) and not page(("erasesPaint", r["made"], locked, R["paint"]))[0]
+                r["caption"] = r["made"] if r["made"] and not r["refused"] else R["own"]
+            say(f"{o['name']}, {req}: {verdict(req, r)}. The writer: « {short(r.get('answer'), 140)} »")
 
-    # 3. Klein: once per caption that differs (app.generate)
+    # 5. Klein: once per mask and caption that differ (app.generate)
+    frame_work_name = upload(a.url, frame_work, f"{tag}_frame_full.png", sent) if a.full and live else None
     for o in live:
-        mask_name = upload(a.url, white(o["mask_prev"]), f"{tag}_{o['name']}_mask.png", sent)
-        if a.full:
-            mask_work_name = upload(a.url, white(o["mask_work"]), f"{tag}_{o['name']}_mask_full.png", sent)
-            frame_work_name = upload(a.url, frame_work, f"{tag}_frame_full.png", sent)
-        for k, cap in enumerate(dict.fromkeys(r["caption"] for r in o["requests"].values())):
-            e = o["edits"][cap] = {"index": k}
-            values = {"base": frame_name, "reference": frame_name, "start": frame_name, "caption": cap, "seed": a.seed,
-                      "plan": "", "mask": mask_name, "steps": QUICK["steps"], "denoise": QUICK["denoise"],
+        masks = {}
+        for r in o["requests"].values():
+            key, R = edit_key(r), o["paths"][r["path"]]
+            if key in o["edits"]:
+                continue
+            if r["path"] not in masks:
+                masks[r["path"]] = (upload(a.url, white(R["mask_prev"]), f"{tag}_{o['name']}_{r['path']}_mask.png", sent),
+                                    upload(a.url, white(R["mask_work"]), f"{tag}_{o['name']}_{r['path']}_mask_full.png", sent)
+                                    if a.full else None)
+            k = len(o["edits"])
+            e = o["edits"][key] = {"index": k, "path": r["path"]}
+            values = {"base": frame_name, "reference": frame_name, "start": frame_name, "caption": r["caption"], "seed": a.seed,
+                      "plan": "", "mask": masks[r["path"]][0], "steps": QUICK["steps"], "denoise": QUICK["denoise"],
                       "grow": jround(prev[0] / EDIT_GROW), "feather": QUICK["feather"], "sigma": QUICK["sigma"],
                       "prefix": f"paintaplate/{tag}/{o['name']}_{k}"}
             try:
@@ -616,11 +679,11 @@ def main(argv=None):
                 patch = image(a.url, got["patch"]["images"][0], "RGBA")
                 after = over(frame_prev, patch)
                 if a.full:  # the page's full-size pass, from the quick result; the page measures this one
-                    e["quick_share"] = shares(after, frame_prev, o["mask_prev"])
+                    e["quick_share"] = shares(after, frame_prev, R["mask_prev"])
                     start = upload(a.url, over(frame_work, patch), f"{tag}_{o['name']}_{k}_start.png", sent)
                     got, e["full_seconds"] = run(a.url, "edit", dict(
-                        values, base=frame_work_name, start=start, reference=start, mask=mask_work_name, steps=FULL["steps"],
-                        denoise=FULL["denoise"], grow=jround(work[0] / EDIT_GROW), feather=FULL["feather"],
+                        values, base=frame_work_name, start=start, reference=start, mask=masks[r["path"]][1],
+                        steps=FULL["steps"], denoise=FULL["denoise"], grow=jround(work[0] / EDIT_GROW), feather=FULL["feather"],
                         sigma=FULL["sigma"], relight=0, shade="", level=True), a.limit)
                     after = over(frame_prev, image(a.url, got["patch"]["images"][0], "RGBA"))
             except Exception as err:  # noqa: BLE001
@@ -629,23 +692,24 @@ def main(argv=None):
                 continue
             e["after"] = f"results/{o['name']}_{k}.png"
             Image.fromarray(after).save(os.path.join(out, e["after"]))
-            o["afters"][cap] = after
-            e["share"], e["edges"] = shares(after, frame_prev, o["mask_prev"]), edges(after, frame_prev, o["mask_prev"])
-            used = [q for q, r in o["requests"].items() if r["caption"] == cap]
+            o["afters"][key] = after
+            e["share"], e["edges"] = shares(after, frame_prev, R["mask_prev"]), edges(after, frame_prev, R["mask_prev"])
+            used = [q for q, x in o["requests"].items() if edit_key(x) == key]
             say(f"{o['name']}, caption {k} ({', '.join(used)}): changed {' / '.join(pct(v) for v in e['share'])}, "
                 f"edges {num(e['edges'])}")
 
-    # 4. SAM 3.1 again, on every result: does it still find the object at the stroke's points?
+    # 6. SAM 3.1 again, on every result: does it still find the object at the stroke's points?
     for o in live:
-        for cap, after in o["afters"].items():
-            e = o["edits"][cap]
+        for key, after in o["afters"].items():
+            e = o["edits"][key]
+            R = o["paths"][e["path"]]
             try:
                 name = upload(a.url, after, f"{tag}_{o['name']}_{e['index']}_after.png", sent)
-                got, _ = run(a.url, "snap", {"image": name, "words": o["stroke"]["words"], **o["points"]}, a.limit)
-                again = np.zeros_like(o["sam"])
+                got, _ = run(a.url, "snap", {"image": name, "words": R["words"], **o["points"]}, a.limit)
+                again = np.zeros_like(R["sam"])
                 for _, m in objects_of(a.url, got, o["painted"], o["points"], prev):
                     again |= m
-                e["sam"] = overlap(again, o["sam"]) if o["sam"].any() else None
+                e["sam"] = overlap(again, R["sam"]) if R["sam"].any() else None
             except Exception as err:  # noqa: BLE001
                 e["sam_error"] = str(err)
 
@@ -660,7 +724,7 @@ def main(argv=None):
             "The first is the page's rule (logic.erasedShare): under 2%, the page says that the object stayed. « Edges »: the "
             "correlation of the gradient inside the object, before and after (1: the same edges). « SAM again »: what SAM 3.1 "
             "keeps at the stroke's points on the result, over what it kept on the frame (1: the same object). « Seconds »: the "
-            "writer, then Klein."]
+            "writer, then Klein. Each is measured inside the mask Klein got: as_words has its own."]
     report(os.path.join(out, "report.md"), objs, asked, head)
     sheet(os.path.join(out, "sheet.png"), objs, asked, frame_prev,
           f"{a.plate} · seed {a.seed} · {'quick and full-size passes' if a.full else 'quick pass'} · "
@@ -672,7 +736,7 @@ def main(argv=None):
     for o in live:
         for req in asked:
             r = o["requests"][req]
-            print(f"  {o['name']:<6} {req:<7} {short(verdict(req, r), 46):<46} {measured(o['edits'].get(r['caption'], {}))}")
+            print(f"  {o['name']:<6} {req:<8} {short(verdict(req, r), 52):<52} {measured(o['edits'].get(edit_key(r), {}))}")
     say(f"Written to {out}: report.md, sheet.png and answers.json, with the images it sent and got back")
 
 

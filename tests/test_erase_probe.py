@@ -142,14 +142,17 @@ class AgainstTheMock(unittest.TestCase):
         self.assertEqual(list(o["requests"]), list(p.REQUESTS))
         self.assertTrue(o["requests"]["own"]["caption"].startswith("Remove the object inside <obj_1> completely"))
         # the mock's writer answers with the request, which cites <obj_1>: the page keeps it
-        for req in ("page", "dimmed", "crop", "tight"):
+        for req in ("page", "dimmed", "crop", "tight", "as_words"):
             self.assertFalse(o["requests"][req]["refused"], req)
             self.assertIn("<obj_1>", o["requests"][req]["caption"], req)
         # the crop's answer carries the page's own boxes on the frame, not the crop's
-        self.assertIn(json.dumps(o["boxes"][0], separators=(", ", ": ")).replace(" ", "")[1:-1],
+        self.assertIn(json.dumps(o["paths"]["page"]["boxes"][0], separators=(", ", ": ")).replace(" ", "")[1:-1],
                       o["requests"]["crop"]["caption"].replace(" ", ""))
-        # one Klein job per caption that differs; the mock's Klein moves what it removes by 51 levels, and SAM finds the same discs
-        self.assertEqual(len(o["edits"]), len({r["caption"] for r in o["requests"].values()}))
+        # one Klein job per mask and caption that differ; the mock's Klein moves what it removes by 51 levels, and SAM finds the same discs
+        self.assertEqual(len(o["edits"]), len({f"{r['path']}|{r['caption']}" for r in o["requests"].values()}))
+        # as_words names the object, then runs as if the name had been typed: SAM 3.1 by that name, and a mask of its own
+        self.assertEqual((o["requests"]["as_words"]["path"], o["paths"]["name"]["words"]), ("name", o["object"]))
+        self.assertIn(f"Remove the {o['object']} <obj_1>", o["requests"]["as_words"]["request"])
         for cap, e in o["edits"].items():
             self.assertGreater(e["share"][0], 0.5, cap[:60])
             self.assertEqual(e["sam"], 1.0)
@@ -160,7 +163,7 @@ class AgainstTheMock(unittest.TestCase):
             self.assertIn(f"| {req} |", report)
         from PIL import Image
         with Image.open(os.path.join(self.out, "sheet.png")) as sheet:
-            self.assertEqual(sheet.size[0], 8 + 7 * (384 + 8))
+            self.assertEqual(sheet.size[0], 8 + (len(p.REQUESTS) + 1) * (384 + 8))
         self.assertIn("Written to", said.getvalue())
 
 
