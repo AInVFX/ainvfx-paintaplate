@@ -224,16 +224,9 @@ def batch_peak(frames, name: str, src: str) -> float:
     return max(1.0, max(_POOL.map(lambda f: _brightest(one(f)), frames), default=1.0))
 
 
-def linear_peak(frames) -> float:
-    """The peak of frames already in linear Rec.709 (@linear): what batch_peak reads for them, without a config."""
-    return max(1.0, max(_POOL.map(_brightest, frames), default=1.0))
-
-
-def _into_model(frames, peak=None):
-    """Core's linear Rec.709 to sRGB for SDR output: tone mapping with the batch's peak (`peak` when the frames are a part
-    of a larger batch), gamut compression, encoding."""
-    if peak is None:
-        peak = max(1.0, max(map(_brightest, frames), default=1.0))
+def _into_model(frames, peak: float):
+    """Core's linear Rec.709 to sRGB for SDR output: tone mapping with the batch's peak (convert_with_peak reads it),
+    gamut compression, encoding."""
 
     def one(rgb):
         if peak > TONE_ABOVE:
@@ -288,14 +281,26 @@ def convert(frames, name: str, src: str, dst: str, peak: float | None = None) ->
     `peak` above TONE_ABOVE is the peak of the plate the frames came from, read in `dst`: the frames go through linear
     Rec.709, where that tone mapping is undone (undo_tone), and come back at the plate's levels. Without it, or at a peak
     of 1.0, they are decoded as they are."""
+    return convert_with_peak(frames, name, src, dst, peak)[0]
+
+
+def convert_with_peak(frames, name: str, src: str, dst: str, peak: float | None = None) -> tuple[list[np.ndarray], float]:
+    """convert's frames, and the peak of its tone mapping: into @model, `peak` or the peak of these frames, read on the way
+    in with no second pass; out of @model, the `peak` whose tone mapping is undone; 1.0 when there is none. Color Space
+    (OCIO) gives it as its second output, so the nodes after it take the plate's peak as a number (PL6). It is the float
+    batch_peak reads: the same way into linear Rec.709 (_route), the same frames."""
     frames = list(frames)
     if src == dst or not frames:
-        return frames
+        return frames, 1.0
     if src == MODEL and peak is not None and peak > TONE_ABOVE:
-        return _each(_from_model(name, dst, peak), frames)
+        return _each(_from_model(name, dst, peak), frames), peak
     one, tone = _route(name, src, dst)
     out = _each(one, frames)
-    return _into_model(out, peak) if tone else out
+    if not tone:
+        return out, 1.0
+    if peak is None:
+        peak = max(1.0, max(map(_brightest, out), default=1.0))
+    return _into_model(out, peak), peak
 
 
 # ---------- The viewer's shader ----------

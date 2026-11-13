@@ -152,9 +152,9 @@
    "config": "ocio://studio-config-latest",
    "source": "@model",
    "destination": "@model",
-   "peak_of": [
-    "1",
-    0
+   "peak": [
+    "2",
+    1
    ]
   },
   "_meta": {
@@ -253,9 +253,9 @@
    "radius": 1,
    "strength": 1.0,
    "align": true,
-   "peak_of": [
-    "14",
-    0
+   "peak": [
+    "2",
+    1
    ]
   },
   "_meta": {
