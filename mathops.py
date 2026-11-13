@@ -696,7 +696,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       and touches, in view, the tracker's mask or, with a thick part, the region (a thin line of changes runs along
       the outline of what stands in front); at the places where the object stood on frame 0, which frame 0 showed in
       view, what is covered never counts. A tracker's mask that lies mostly on covered places is what stands in
-      front, and is left out. What is found counts only at the object's place of
+      front, and is left out; so is each piece of it that does, as for an erase (13 Nov 2026: pieces of SAM's mask on
+      the horse's head, over the cow's place). What is found counts only at the object's place of
       frame 0, with a margin of half a zone, and where it is joined to it there while a quarter of the place holds
       the object: a piece that leaves the place, with what stands in front or alone, is not the object (12 Nov
       2026: LTX drew the cow walking away with the horse, then gave the horse its head); when less than a quarter
@@ -871,7 +872,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     else:
                         core, blocked = np.zeros((h, w), bool), True  # it is what stands in front
                 elif hide is not None and not real:
-                    core = core & ~(hide & ~here)  # beyond a painted object's place, the tracker's mask counts only in view
+                    core = in_view(core, hide) & ~(hide & ~here)  # a piece on what stands in front is left out; beyond the place, only what is in view counts
                 elif hide is not None:
                     core = in_view(core, hide)  # of an erased object's mask, a piece that lies mostly on covered places is on what stands in front
                 peak = max(peak, int(core.sum()))
