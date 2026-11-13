@@ -265,7 +265,16 @@
   }
  },
  "17": {
-  "class_type": "ImageCompositeMasked",
+  "class_type": "GetImageSize",
+  "inputs": {
+   "image": [
+    "15",
+    0
+   ]
+  }
+ },
+ "18": {
+  "class_type": "PaintAPlate_CompositeFrames",
   "inputs": {
    "destination": [
     "15",
@@ -275,11 +284,16 @@
     "16",
     0
    ],
-   "x": 0,
-   "y": 0,
-   "resize_source": false,
    "mask": [
     "16",
+    1
+   ],
+   "width": [
+    "17",
+    0
+   ],
+   "height": [
+    "17",
     1
    ]
   },
@@ -287,11 +301,11 @@
    "title": "Composite"
   }
  },
- "18": {
+ "19": {
   "class_type": "ImageFromBatch",
   "inputs": {
    "image": [
-    "17",
+    "18",
     0
    ],
    "batch_index": 0,
@@ -301,14 +315,14 @@
    ]
   }
  },
- "19": {
+ "20": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
    "width": 0,
    "height": 0,
    "filename_prefix": "paintaplate/plate/comp",
    "images": [
-    "18",
+    "19",
     0
    ],
    "fps": [

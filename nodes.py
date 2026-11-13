@@ -21,7 +21,7 @@ import comfy.model_management as mm
 import comfy.sd
 import comfy.utils
 import folder_paths
-from comfy_api.v0_0_2 import InputImpl, io
+from comfy_api.v0_0_2 import io
 from comfy_execution.utils import get_executing_context
 from PIL import Image
 from server import PromptServer
@@ -127,37 +127,25 @@ class LoadPlate(io.ComfyNode):
     def execute(cls, path, max_frames, pad_8n1) -> io.NodeOutput:
         full = resolve(path)
         spec = plateio.probe_plate(full)
-        if spec["kind"] == "video":  # core's decoder, trimmed before decoding
+        if spec["kind"] == "video":  # our decoder: core's pictures, each frame into its place, the padding too
             bar = comfy.utils.ProgressBar(1)
-            parts = [InputImpl.VideoFromFile(full, duration=max_frames / spec["fps"]).get_components()]
+            rgb, a, count = plateio.decode_video(full, max_frames, spec["fps"], pad_8n1)
             bar.update(1)
-        else:  # frames decode in parallel: PyAV releases the GIL while decoding; each one counts as progress
+            images, extra = torch.from_numpy(rgb), rgb.shape[0] - count
+            alpha = None if a is None else torch.from_numpy(a)
+        else:  # an image sequence: the files decode in parallel, each into its place, the padding too
             files = spec["files"][:max_frames]
-            bar = comfy.utils.ProgressBar(len(files))
+            bar, stop = comfy.utils.ProgressBar(len(files)), Stop()
 
-            stop = Stop()
-
-            def read(f):
+            def each(i):
                 stop()
-                part = InputImpl.VideoFromFile(f).get_components()
                 bar.update(1)
-                return part
-            with ThreadPoolExecutor(WORKERS) as pool:
-                parts = list(pool.map(read, files))
-        def whole(tensors):  # a video is one part: its decoded frames are the plate, held once
-            return (tensors[0] if len(tensors) == 1 else torch.cat(tensors))[:max_frames]
-        images = whole([p.images for p in parts])
-        count = images.shape[0]
-        extra = plateio.pad_count_8n1(count) - count if pad_8n1 else 0
-        if parts[0].alpha is not None:
-            alpha = whole([p.alpha[..., -1] for p in parts])
-            if extra:
-                alpha = torch.cat([alpha, alpha[-1:].expand(extra, -1, -1)])
-        else:  # an opaque plate: one frame of ones stands for every frame, and takes one frame of memory
+            rgb, a, count = plateio.decode_frames(files, pad_8n1, WORKERS, each)
+            images, extra = torch.from_numpy(rgb), rgb.shape[0] - count
+            alpha = None if a is None else torch.from_numpy(a)
+        if alpha is None:  # an opaque plate: one frame of ones stands for every frame, and takes one frame of memory
             alpha = torch.ones((1, *images.shape[1:3]), dtype=images.dtype, device=images.device).expand(count + extra, -1, -1)
         spec.update(frames=count, color_space_guess=plateio.guess_color_space(spec))
-        if extra:
-            images = torch.cat([images, images[-1:].expand(extra, -1, -1, -1)])
         device, dtype = mm.intermediate_device(), mm.intermediate_dtype()
         return io.NodeOutput(images.to(device=device, dtype=dtype), alpha.to(device=device, dtype=dtype),
                              spec, float(spec["fps"]), count, plateio.spec_json(spec))
@@ -172,7 +160,8 @@ class ColorSpace(io.ComfyNode):
             category=CATEGORY,
             description="Converts frames between two colour spaces of an OpenColorIO config, several frames at once. "
                         "@model is the sRGB-encoded Rec.709 the models see, entered with core's tone mapping of values "
-                        "above 1.0; @linear is that space in linear light. Alpha is not converted.",
+                        "above 1.0, which 'peak_of' undoes on the way out; @linear is that space in linear light. Alpha "
+                        "is not converted.",
             search_aliases=["ocio", "opencolorio", "colour space", "color space", "aces"],
             inputs=[
                 io.Image.Input("image"),
@@ -184,7 +173,9 @@ class ColorSpace(io.ComfyNode):
                 io.String.Input("destination", default="@model", tooltip="The same, for the result."),
                 io.Image.Input("peak_of", optional=True,
                                tooltip="The batch these frames are a part of. Into @model, the tone mapping takes that batch's "
-                                       "peak: a frame converted alone has the values it has in the whole batch converted."),
+                                       "peak: a frame converted alone has the values it has in the whole batch converted. "
+                                       "Out of @model, the plate the frames were made from, in 'destination': the tone "
+                                       "mapping of its peak is undone, so new content comes back at the plate's levels."),
             ],
             outputs=[io.Image.Output(display_name="image")],
         )
@@ -193,7 +184,11 @@ class ColorSpace(io.ComfyNode):
     def execute(cls, image, config, source, destination, peak_of=None) -> io.NodeOutput:
         if source == destination:
             return io.NodeOutput(image)
-        peak = ocio.batch_peak(frames_np(peak_of), config, source) if peak_of is not None and destination == ocio.MODEL else None
+        peak = None
+        if peak_of is not None and ocio.MODEL in (source, destination):  # the plate's peak, read in the plate's own space
+            peak = ocio.batch_peak(frames_np(peak_of), config, destination if source == ocio.MODEL else source)
+            if source == ocio.MODEL and peak > ocio.TONE_ABOVE:
+                logging.info("Paint a plate, Color Space (OCIO): out of @model, the tone mapping of a peak of %.2f undone", peak)
         return io.NodeOutput(to_image(ocio.convert(frames_np(image), config, source, destination, peak)))
 
 
@@ -395,13 +390,17 @@ class RelightTransfer(io.ComfyNode):
                                        "there, in linear light, by 'shade_density'. Klein ignores a painted shadow."),
                 io.Float.Input("shade_density", default=0.7, min=0.0, max=1.0, step=0.05, optional=True,
                                tooltip="How much light the painted shade takes away where it is full."),
+                io.Image.Input("peak_of", optional=True,
+                               tooltip="The plate in linear light, as 'plate' gives it. With 'shot_space' sRGB, the tone "
+                                       "mapping of its peak that brought 'source' and 'relit' into the model space is undone "
+                                       "after the decode: their light is measured at the plate's levels."),
             ],
             outputs=[io.Image.Output(display_name="image")],
         )
 
     @classmethod
     def execute(cls, plate, source, relit, radius, strength, align, plate_space="linear", shot_space="linear",
-                light=None, shade=None, shade_density=0.7) -> io.NodeOutput:
+                light=None, shade=None, shade_density=0.7, peak_of=None) -> io.NodeOutput:
         n = min(plate.shape[0], source.shape[0], relit.shape[0])
         src, rel = list(frames_np(source[:n])), list(frames_np(relit[:n]))
         shift = (0.0, 0.0)
@@ -413,12 +412,19 @@ class RelightTransfer(io.ComfyNode):
                 logging.info("Paint a plate, Relight Transfer: the shot realigned by %.2f, %.2f px over %d frames", *shift, n)
         painted = list(frames_np(light[:1]))[0] if light is not None else None
         shaded = list(frames_np(shade[:1]))[0] if shade is not None else None
+        peak = ocio.linear_peak(frames_np(peak_of)) if peak_of is not None and shot_space == "sRGB" else 1.0
+        untone = peak > ocio.TONE_ABOVE  # a plate above 1.0: 'source' and 'relit' go back to its levels, frame by frame
+        if untone:
+            logging.info("Paint a plate, Relight Transfer: the model space's tone mapping of a peak of %.2f undone", peak)
         bar, stop = comfy.utils.ProgressBar(n), Stop()
 
         def one(args):
             stop()
             i, p = args
-            out = mathops.relight_frame(p, src[i], rel[i], radius, strength, shift, plate_space, shot_space, painted)
+            s, r, space = src[i], rel[i], shot_space
+            if untone:  # the shift above was measured on the frames as the model saw them, as for any plate
+                s, r, space = ocio.out_of_model(s[..., :3], peak), ocio.out_of_model(r[..., :3], peak), "linear"
+            out = mathops.relight_frame(p, s, r, radius, strength, shift, plate_space, space, painted)
             if shaded is not None:
                 out = mathops.shade_frame(out, shaded, shade_density, plate_space)
             bar.update(1)
@@ -702,7 +708,7 @@ class SaveFrames(io.ComfyNode):
         def frame(i):  # as core Save Image: scaled by 255 and clipped, not rounded, so every pixel matches what it wrote
             if format == "png16":  # new content at a deep plate's depth: 65536 levels, rounded
                 return np.round(np.clip(images[i].float().cpu().numpy(), 0, 1) * 65535.0).astype(np.uint16)
-            return np.clip(255.0 * images[i].float().cpu().numpy(), 0, 255).astype(np.uint8)
+            return plateio.core_uint8(images[i].float().cpu().numpy())
         plateio.write_pngs(stoppable(frame), paths, workers=WORKERS, tick=lambda: bar.update(1))
         return io.NodeOutput(ui={"images": [{"filename": f, "subfolder": sub, "type": "output"} for f in names]})
 
@@ -762,7 +768,7 @@ class SaveMovie(io.ComfyNode):
                 x = to_image(ocio.convert([x[0].float().cpu().numpy()], config, source, destination, peak))
             if x.shape[1:3] != (h, w):
                 x = comfy.utils.common_upscale(x.movedim(-1, 1), w, h, "area", "disabled").movedim(1, -1)
-            return np.clip(255.0 * x[0].float().cpu().numpy(), 0, 255).astype(np.uint8)  # scaled by 255 and clipped, not rounded
+            return plateio.core_uint8(x[0].float().cpu().numpy())  # scaled by 255 and clipped, not rounded
 
         plateio.write_movie(stoppable(frame), n, os.path.join(folder, file), fps, workers=WORKERS, crf=crf, tick=lambda: bar.update(1),
                             size=(width, height))

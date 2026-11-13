@@ -25,6 +25,7 @@ import av  # noqa: E402
 from build_workflows import OCIO_CONFIG, Graph, fill  # noqa: E402
 
 N, W, H = 17, 192, 108
+RATE = 25.0  # the EXR plate's frame rate, in its header: the review's EXR frames must say it
 FAILS = []
 
 
@@ -101,7 +102,7 @@ def make_plates(input_dir):
     root = os.path.join(input_dir, "paintaplate_test")
     shutil.rmtree(root, ignore_errors=True)
     os.makedirs(os.path.join(root, "exr"))
-    test_plateio.make_exr_sequence(os.path.join(root, "exr"), n=N, h=H, w=W)
+    test_plateio.make_exr_sequence(os.path.join(root, "exr"), n=N, h=H, w=W, fps=RATE)
     test_plateio.make_prores(os.path.join(root, "plate.mov"), n=N, w=W, h=H)
     png = os.path.join(root, "png16"); os.makedirs(png)
     rng = np.random.default_rng(5)
@@ -365,6 +366,9 @@ def main():
                 rdir = os.path.join(output_dir, shot, "review")
                 exrs = sorted(f for f in os.listdir(rdir) if f.endswith(".exr")) if os.path.isdir(rdir) else []
                 check(len(exrs) == (N if seq else 0), f"review {run}: {len(exrs)} EXR frames (an image sequence: one per frame; a video: none)")
+                if kind == "exr" and exrs:  # the plate's rate goes from its header to the review's frames
+                    rates = sorted({float(plateio.exr_rate(os.path.join(rdir, f)) or 0) for f in exrs})
+                    check(rates == [RATE], f"review {run}: its EXR frames say {rates} fps, the plate {RATE:g}")
                 if seq and exrs and not relight:  # outside the edit the review holds the plate's own values, as half floats
                     src = plateio.find_sequence(os.path.join(input_dir, path))
                     a, b = plateio.read_float(src[3]), plateio.read_float(os.path.join(rdir, exrs[3]))
@@ -397,6 +401,10 @@ def main():
     finally:
         if proc:
             proc.terminate(); proc.wait(20)
+    # PL7: our video decoder against core's, frame for frame, in ComfyUI's own Python (8 and 10 bits, alpha, trims)
+    r = subprocess.run([a.python, os.path.join(os.path.dirname(os.path.abspath(__file__)), "decode_parity.py"), "--comfy", a.comfy],
+                       capture_output=True, text=True, timeout=600)
+    check("DECODE SAME" in r.stdout, "our video decoder makes core's pictures: " + ((r.stdout.strip().splitlines() or [""])[-1] or r.stderr[-300:]))
     print("\nALL PASSED" if not FAILS else f"\n{len(FAILS)} FAILED")
     return 1 if FAILS else 0
 
