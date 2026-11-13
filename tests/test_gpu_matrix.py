@@ -72,10 +72,33 @@ class Seeds(unittest.TestCase):
         self.assertEqual((cases["uhd_erase"]["seed"], cases["uhd25_erase"]["seed"]), (1017942128, 1017942128), "« like » takes the other case's seed")
         self.assertEqual(cases["uhd_erase"]["strokes"][0][3], 2 * cases["horse_erase"]["strokes"][0][3], "and its strokes, the brush scaled")
 
+    def test_the_erase_with_its_object_named_is_the_erase_with_two_words(self):
+        """With no words, Klein's prompt writer named the horse and the barn stayed (the laptop, 12 Nov, at 1.11.9 and at
+        1.11.10). The same stroke from the same seed with « the barn » says whether a name is enough."""
+        cases = gpu_matrix.load_cases()
+        plain, named = cases["horse_erase"], cases["horse_erase_barn"]
+        self.assertEqual((plain["strokes"][0][1], named["strokes"][0][1]), ("", "the barn"))
+        self.assertEqual((named["path"], named["seed"], named["strokes"][0][2:]), (plain["path"], plain["seed"], plain["strokes"][0][2:]))
+        self.assertNotIn("horse_erase_barn", gpu_matrix.ALL)
+
+    def test_a_case_ends_when_the_page_says_that_an_erase_left_its_object(self):
+        """The page renders no shot then (logic.eraseLeft), and ui_live.py waited 8 times --timeout for one: two hours. It
+        reads the mark the page puts on History's row, which holds no words."""
+        with open(os.path.join(gpu_matrix.REPO, "web", "app.mjs"), encoding="utf-8") as f:
+            page = f.read()
+        with open(os.path.join(gpu_matrix.HERE, "ui_live.py"), encoding="utf-8") as f:
+            tool = f.read()
+        self.assertIn('LEFT = "#history li[data-left]"', tool)
+        self.assertIn('li.dataset.left = "1"', page)
+        self.assertIn('if page.query_selector(LEFT):', tool)
+        self.assertLess(tool.index("if page.query_selector(LEFT):"), tool.index("deadline = time.time() + a.timeout * 8"), "before the wait for the render")
+
     def test_a_case_hands_its_strokes_as_written_and_its_seed_to_the_page(self):
-        a = argparse.Namespace(url="http://127.0.0.1:8188", comfy="/comfy", channel="chrome", timeout=900, memory="")
+        a = argparse.Namespace(url="http://127.0.0.1:8188", comfy="/comfy", channel="chrome", timeout=900, memory="", graph=False)
         cases = gpu_matrix.load_cases()
         erase = gpu_matrix.command(a, cases["horse_erase"], "/out/horse_erase")
+        self.assertNotIn("--graph", erase)
+        self.assertIn("--graph", gpu_matrix.command(argparse.Namespace(**{**vars(a), "graph": True}), cases["horse_erase"], "/out/horse_erase"))
         self.assertEqual(erase[erase.index("--seed") + 1], "1017942128")
         self.assertEqual(json.loads(erase[erase.index("--strokes") + 1]), cases["horse_erase"]["strokes"])
         self.assertEqual(gpu_matrix.command(a, cases["horse_erase"], "/out/horse_erase"), erase, "a second run asks for the same")

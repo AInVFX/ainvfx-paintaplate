@@ -79,6 +79,8 @@ def stroke(page, box, pts):
 
 DONE = "document.querySelectorAll('#history li').length === {n} && !document.querySelector('#history li.busy')"
 
+LEFT = "#history li[data-left]"  # an erase that left its object: the page says so and renders no shot (logic.eraseLeft)
+
 
 def flow(page, url, open_plate, shots, wait_s=120):
     """The flow both runs share: the page must already show 'Ready'."""
@@ -322,6 +324,9 @@ def remote(a):
                     page.keyboard.press("Enter")  # Generate
                     page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)
                     page.wait_for_function(DONE.format(n=rows(i, fluid)), timeout=max(300, 2 * a.timeout) * 1000)  # a small card loads its models in turn
+                    if page.query_selector(LEFT):  # no shot will render: without this the run waited 8 times --timeout for one
+                        page.screenshot(path=f"{shots}/2_{key}_done.png")
+                        raise RuntimeError("the erase left its object")
                     mark(f"{key} edit on the first frame | {status()}"); page.screenshot(path=f"{shots}/2_{key}_done.png")
                 seen, silent, asked = set(), 0, time.time()
                 deadline = time.time() + a.timeout * 8
@@ -348,12 +353,15 @@ def remote(a):
                         page.click("#x-go")
                     dl.value.save_as(f"{shots}/export.zip")
                     mark(f"downloaded {len(zipfile.ZipFile(f'{shots}/export.zip').namelist())} files")
-                    if a.graph:  # the scene as one ComfyUI workflow, from the Export dialog
-                        page.click("#export-btn")
-                        with page.expect_download(timeout=120000) as dl:
-                            page.click("#x-graph")
-                        dl.value.save_as(f"{shots}/scene.comfyui.json")
-                        mark(f"ComfyUI graph saved: {len(json.load(open(f'{shots}/scene.comfyui.json'))['nodes'])} nodes and notes")
+                    if a.graph:  # the scene as one ComfyUI workflow, from the Export dialog. A case does not depend on it
+                        try:
+                            page.click("#export-btn")
+                            with page.expect_download(timeout=120000) as dl:
+                                page.click("#x-graph")
+                            dl.value.save_as(f"{shots}/scene.comfyui.json")
+                            mark(f"ComfyUI graph saved: {len(json.load(open(f'{shots}/scene.comfyui.json'))['nodes'])} nodes and notes")
+                        except Exception as exc:
+                            mark(f"ComfyUI graph not saved: {type(exc).__name__}: {str(exc).splitlines()[0][:120]} | status: {status()}")
         except Exception as exc:
             mark(f"FAILED: {type(exc).__name__}: {str(exc).splitlines()[0][:160]} | status: {status()}")
             page.screenshot(path=f"{shots}/fail.png")
