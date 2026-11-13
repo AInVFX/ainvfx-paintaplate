@@ -1022,11 +1022,18 @@ def close_flow(browser, port):
                                                   {"Content-Type": "application/json"}))
     page = load(browser, port)  # a new warm-up, its first upload held
     page.evaluate(WATCH)
+    check(poll(page, lambda: any(e[0] == "slow upload" for e in mock_route(port, "/mock/events")), 30),
+          "the warm-up's first upload is the one the mock holds, before the plate opens")
     page.click("#open-btn")
     page.click("#open .tabs [data-tab='files']")
     page.fill("#path", "plates/desk.mp4")
     page.click("#open-go")
-    page.wait_for_selector("#close-btn", state="visible", timeout=20000)
+    try:  # flows side by side, one per CPU (32 on the laptop in Chrome, 12 Nov): the open takes longer than alone
+        page.wait_for_selector("#close-btn", state="visible", timeout=60000)
+    except Exception as exc:  # Playwright's TimeoutError: the check says what the page and the mock show
+        if type(exc).__name__ != "TimeoutError":
+            raise
+        check(False, f"the plate opens and its × shows within 60 s{page_state(page)}, mock events {mock_route(port, '/mock/events')[-6:]}")
     page.click("#close-btn")
     page.wait_for_function("!document.querySelector('#empty').hidden", timeout=5000)
     ok = (page.is_hidden("#close-btn") and not page.text_content("#spec") and "Plate closed" in page.text_content("#status")
