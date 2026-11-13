@@ -217,10 +217,14 @@ async def execute(pid, prompt):
         mask = load_image(v["mask"], "L")
         soft = np.asarray(Image.fromarray((mask * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(9)).filter(
             ImageFilter.GaussianBlur(max(2, base.shape[1] / 120))), np.float32) / 255
-        if "Relight" in v["caption"]:
+        if STATE.get("leave", 0) > 0:  # armed by /mock/leave: Klein answers with the frame as it was, so an erased object stays
+            STATE["leave"] -= 1
+            new = base
+        elif "Relight" in v["caption"]:
             new = base * np.array([1.18, 1.0, 0.8]) + 0.12 * ref
-        elif v["caption"].startswith("Remove"):
+        elif v["caption"].startswith("Remove") or "\nRemove the " in v["caption"]:  # an erase, by the page's own caption or the prompt writer's: softened, and every value moved by 0.2, as an object that goes
             new = np.asarray(Image.fromarray((ref * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(3)), np.float32) / 255
+            new = np.where(new < 0.5, new + 0.2, new - 0.2)
         else:
             new = np.asarray(Image.fromarray((ref * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(2)), np.float32) / 255
             new = new * np.array([1.0, 0.95, 0.9])
@@ -520,6 +524,11 @@ async def oom_route(request):  # mock only: the next `times` jobs of `workflow` 
     return web.json_response({})
 
 
+async def leave_route(request):  # mock only: the next `times` edit jobs answer with the frame as it was, as a Klein pass that leaves its object (an edit is two jobs)
+    STATE["leave"] = int((await request.json()).get("times", 2))
+    return web.json_response({})
+
+
 async def pack_version_route(request):  # mock only: the version /paintaplate/version answers from now on, as a ComfyUI restarted after an update of the pack would
     sys.modules["routes"].VERSION = (await request.json())["version"]
     return web.json_response({})
@@ -583,6 +592,7 @@ async def start():
     app.router.add_post("/mock/release", release_route)
     app.router.add_post("/mock/card", card_route)
     app.router.add_post("/mock/version", pack_version_route)
+    app.router.add_post("/mock/leave", leave_route)
     app.router.add_get("/mock/events", lambda r: web.json_response(EVENTS))
     app.router.add_get("/mock/posts", lambda r: web.json_response(POSTS))
     app.router.add_get("/ws", ws_route)

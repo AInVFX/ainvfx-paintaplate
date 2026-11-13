@@ -506,6 +506,36 @@ export function changedMask(a, b, z, threshold = 24) {
   return out;
 }
 
+// An erase that left its object. Klein can answer an erase with the frame as it was: on 12 November 2026 a stroke on a
+// barn, with no words, got the page's own caption, and the barn stayed through the whole shot. So after the edit the page
+// compares the first frame (`after`) with the frame under the edit (`before`) inside the object's mask (`mask`: painted
+// where its red is 128 or more), all three RGBA at `w` x `h`, on cells of `cell` pixels. A cell's mean colour holds under
+// Klein's softness and under the few levels its fill can sit off the frame (4 to 6, measured for Level Fill on 28
+// October), and it moves when the object goes. Returns the share of the object, from 0 to 1, whose cells moved by more
+// than `levels` of 255; null when the mask is empty.
+export function erasedShare(after, before, mask, w, h, { cell = 4, levels = 12 } = {}) {
+  let all = 0, changed = 0;
+  for (let top = 0; top < h; top += cell) for (let left = 0; left < w; left += cell) {
+    let n = 0, r = 0, g = 0, b = 0;
+    for (let y = top; y < Math.min(h, top + cell); y++) for (let x = left; x < Math.min(w, left + cell); x++) {
+      const j = (y * w + x) * 4;
+      if (mask[j] < 128) continue;
+      n++; r += after[j] - before[j]; g += after[j + 1] - before[j + 1]; b += after[j + 2] - before[j + 2];
+    }
+    if (!n) continue;
+    all += n;
+    if (Math.max(Math.abs(r), Math.abs(g), Math.abs(b)) / n > levels) changed += n;
+  }
+  return all ? changed / all : null;
+}
+
+// The object is still there when less than `least` of it changed. With no mask there is nothing to judge.
+export const eraseLeft = (share, least = 0.02) => share !== null && share < least;
+
+// What to do next, for the status line: an object with no name gets one; a named object gets other words or another seed.
+export const leftHint = (words) =>
+  (words ? "Describe it with other words, then Generate, or press Ctrl+Enter for another seed." : "Type its name in the prompt bar, then Generate.");
+
 // A divider's drag as a size the layout can take: never under the panel's least, and never leaving the stage under its own
 // least while the window has room. `kind` "side" sizes across the window's width, "log" down its height; `around` is what
 // the fixed parts take on that axis (the tools column, or the top bar and the log's status row).

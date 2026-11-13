@@ -12,7 +12,7 @@ import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
 import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
-  erasePrompt, erasesPaint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
+  erasePrompt, erasesPaint, erasedShare, eraseLeft, leftHint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
@@ -2022,7 +2022,7 @@ async function generate(edit) {
   cancel("warm"); // an edit never waits for the warm-up: what it needs loads now
   S.running = edit;
   edit.saw = activeBefore(edit).map(record); // the edits under it as it starts: a change to them restarts it (rebuild)
-  Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null });
+  Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false });
   recompose(); historyUI(); render();
   log(`Edit ${num(edit)}: ${NAME[edit.tool]} "${edit.prompt || ""}", seed ${edit.seed}${edit.tool === "erase" ? `, whole object ${edit.whole ? "on" : "off"}` : ""}, ${painted(edit)} stroke${painted(edit) === 1 ? "" : "s"}, over ${edit.saw.length} edit${edit.saw.length === 1 ? "" : "s"}`);
   try {
@@ -2065,6 +2065,19 @@ async function generate(edit) {
     if (!alive()) return;
     // a relight shows the frame as the export will make it: Klein's light on the plate's own detail
     edit.patch = await loadImage(viewUrl(outputFile("edit", full, light ? "relit" : "patch")));
+    if (edit.tool === "erase") { // an erase that left its object says so, and its shot does not render (logic.erasedShare)
+      const at = p.prev, after = snap(before, at), px = (c) => c.getContext("2d").getImageData(0, 0, at[0], at[1]).data;
+      after.getContext("2d").drawImage(edit.patch, 0, 0, at[0], at[1]);
+      const share = erasedShare(px(after), px(snap(before, at)), px(maskAt(edit, at)), at[0], at[1]);
+      const said = share === null ? "" : `${Math.round(share * 100)}% of it changed`;
+      if (eraseLeft(share)) { // it has no result: Generate runs it again once its words, its strokes or its seed change
+        Object.assign(edit, { patch: null, preview: null, latent: null, state: "failed", left: true, force: false });
+        S.running = null;
+        recompose(); historyUI(); render(); timelineUI();
+        return told(`Edit ${num(edit)} removed nothing: the object is still on the first frame (${said}). Its shot does not render`, leftHint(edit.prompt), "error");
+      }
+      if (said) log(`Edit ${num(edit)}: the object left the first frame (${said})`);
+    }
     Object.assign(edit, { preview: null, latent: null, state: "done", version: ++S.vers, force: false, kept: undefined }); // versions are unique: a kept result never meets a new one
     edit.foot = footprint(edit);
     edit.basis = activeBefore(edit).map(record);
@@ -2371,6 +2384,8 @@ function historyUI() {
     li.dataset.id = e.id;
     li.className = [e.on ? "" : "off", e.state === "generating" || e.state === "queued" || e.state === "drawing" ? "busy" : "",
       e.state === "failed" ? "failed" : "", S.selected === e ? "selected" : "", hidden.has(e) || awaits.has(e) ? "hidden-above" : ""].join(" ").trim();
+    const left = e.state === "failed" && e.left; // an erase that left its object (generate)
+    if (left) li.dataset.left = "1";
     li.innerHTML = `<img class="thumb" alt=""><div class="what"><span class="title"></span><small></small></div>
       <div class="acts"><button class="edit" title="Edit: its strokes and words come back on the first frame">${ICON.edit}</button><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
       <button class="again" title="Try another">${ICON.again}</button><button class="del" title="Remove this edit">${ICON.del}</button></div>`;
@@ -2384,7 +2399,7 @@ function historyUI() {
     if (hidden.has(e)) small.textContent = `Hidden until edit ${num(S.draft)} is generated`;
     else if (forEnter || (STATE[e.state] && e.on)) {
       small.innerHTML = '<span class="state"></span>';
-      small.firstChild.textContent = forEnter ? "Waits for Enter" : STATE[e.state];
+      small.firstChild.textContent = forEnter ? "Waits for Enter" : left ? "The object is still there" : STATE[e.state];
     } else if (awaits.has(e)) small.textContent = "Waits to be generated again";
     else small.textContent = e.on ? what : `Bypassed: ${what}`;
     small.title = e.caption?.text ? `What Klein received: ${e.caption.text}` : what;
@@ -2498,7 +2513,7 @@ function idle() { // one render step at a time, from the render queue; the edits
   if (S.heroKey) want(S.heroKey);
   if (S.piping) return; // the running step finishes; its render gives way at its next step when another must go first
   const r = pickRender();
-  if (!r) return;
+  if (!r) return generateUI(); // nothing to render, as after an edit that ended without a result: Stop goes, Generate says what Enter can start
   S.piping = r;
   pipeline(r).catch((e) => {
     if (e === YIELD || e?.message === "cancelled") return;
