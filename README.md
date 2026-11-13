@@ -15,7 +15,7 @@ Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com
 
 | | |
 | --- | --- |
-| **Erase** | Removes the object under your stroke. With **Whole object**, SAM 3.1 finds all of it: name it ("red umbrella") |
+| **Clean** | Removes the object under your stroke, and the clean plate comes back behind it. With **Whole object**, SAM 3.1 finds all of it: name it ("red umbrella") |
 | **Paint** | Adds what you describe where you paint, in the style of the image. It follows your drawing's outline, pose and colours |
 | **Light** | Relights the shot. Paint where the light comes from, in its colour. Paint in black to darken an area |
 | **A fluid shot** | Starts from a blank plate. Paint flat colour blobs on a few keyframes: ainvfx-fluid turns them into smoke, steam, fire, explosions, dust, fog or clouds. The shot becomes the plate for every edit |
@@ -111,7 +111,7 @@ The plates are synthetic shots from the dataset [AInVFX/ainvfx-paintaplate](http
 
 1. Press **Open plate**, then double-click a plate, for example `plates/horse.mp4`.
 2. Type a few words at the top, for example "a campfire".
-3. Pick **Paint**, **Erase** or **Light**, and paint on the first frame.
+3. Pick **Paint**, **Clean** or **Light** (keys P, C and L), and paint on the first frame.
 4. Press **Generate** (or Enter). The edit appears on the first frame, then the shot renders by itself: a quick preview first, then the full size.
 5. Press **Export** to write the result in the plate's own format.
 
@@ -119,9 +119,9 @@ Each edit stays in History: click one to change it, and add as many as you need.
 
 Good to know:
 
-- Erase a thin object by its full name: "floodlight pole" finds more than "floodlight".
-- A shadow outside the erased object stays: erase it with a second stroke, **Whole object** off.
-- To replace a head, paint the new head over the old one. An erased head comes back as a head.
+- Clean a thin object by its full name: "floodlight pole" finds more than "floodlight".
+- A shadow outside the removed object stays: clean it with a second stroke, **Whole object** off.
+- To replace a head, paint the new head over the old one. A head removed with Clean comes back as a head.
 - Paint additions on open ground. An addition painted across a foreground object breaks up during the shot.
 - Judge an effect on the full-size shot, not on the fast preview.
 
@@ -142,7 +142,7 @@ Every step is a ComfyUI workflow from `web/workflows`: the page fills its slots 
 
 ## Questions from the community
 
-**Why LTX 2.5?** Its weights are open and run on your own machine, under a licence that allows it, as the contest's Open Weights Only category asked. Its IC-LoRAs also let one video model make the erase, paint, light and fluid passes.
+**Why LTX 2.5?** Its weights are open and run on your own machine, under a licence that allows it, as the contest's Open Weights Only category asked. Its IC-LoRAs also let one video model make the clean plate, paint, light and fluid passes.
 
 **How was ainvfx-fluid trained?** It is an IC-LoRA for LTX 2.5, trained in three stages on 176 synthetic scenes with the `ltx_iclora` recipe of [ainvfx-runpod](https://github.com/AInVFX/ainvfx-runpod). Its [model card](https://huggingface.co/AInVFX/ainvfx-fluid) and its [dataset card](https://huggingface.co/datasets/AInVFX/ainvfx-fluid) give the method, the data and the compute.
 
@@ -161,7 +161,7 @@ Paint a plate builds on the work of others:
 | [FLUX 3 Image Klein (int8), Qwen3-VL-4B-Instruct, FLUX 3 Image Klein's text encoder (int8), FLUX 3 Image Klein prompt upsampler, Qwen 3.5 9B (w4a8), FLUX 2 VAE](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy) | Edits the first frame. Reads the caption for FLUX 3 Image Klein. Writes every edit's caption. Encodes and decodes FLUX 3 Image Klein's images | [FLUX Kommunity License v1.0](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/blob/main/LICENSE.md) |
 | [LTX 2.5 22B distilled (int8), Gemma 4 12B text encoder with LTX 2.5 projections (int8), LTX 2.5 video VAE (convolutional), LTX 2.5 audio VAE](https://huggingface.co/Lightricks/LTX-2.5) | Carries every edit through the shot; makes fluid shots and SDR to HDR. Reads LTX 2.5's prompts. Encodes and decodes LTX 2.5's video. LTX 2.5's audio latent, which its video samples with | [LTX-2.x Community License](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x) |
 | [Ripple IC-LoRA v1.1 (WepeNerd)](https://huggingface.co/WepeNerd/LTX-Ripple) | Carries paint and light through the shot | [LTX-2 Community License Agreement](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x) |
-| [LTX 2.3 in-outpainting IC-LoRA (Lightricks)](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting) | Makes the erase pass | [LTX-2 Community License](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2) |
+| [LTX 2.3 in-outpainting IC-LoRA (Lightricks)](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting) | Makes the clean plate pass | [LTX-2 Community License](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2) |
 | [SAM 3.1 (Meta)](https://huggingface.co/Comfy-Org/sam3.1) | Finds and tracks the objects painted on | [SAM License](https://huggingface.co/Comfy-Org/sam3.1/blob/main/LICENSE) |
 | [TAEHV tiny LTX decoder (taeltx2_3)](https://huggingface.co/Kijai/LTX2.3_comfy) | Decodes the live preview while a pass runs | [LTX-2 Community License Agreement](https://github.com/Lightricks/LTX-2/blob/main/LICENSE) |
 | [LTX 2.5 SDR-to-HDR IC-LoRA (Lightricks), Its fixed scene embeddings](https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR) | Turns the SDR shot into scene-linear HDR. The prompt SDR to HDR takes | [LTX-2.x Community License](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x) |
