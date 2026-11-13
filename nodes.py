@@ -720,7 +720,7 @@ class SaveFrames(io.ComfyNode):
         def frame(i):  # as core Save Image: scaled by 255 and clipped, not rounded, so every pixel matches what it wrote
             if format == "png16":  # new content at a deep plate's depth: 65536 levels, rounded
                 return np.round(np.clip(images[i].float().cpu().numpy(), 0, 1) * 65535.0).astype(np.uint16)
-            return np.clip(255.0 * images[i].float().cpu().numpy(), 0, 255).astype(np.uint8)
+            return plateio.core_uint8(images[i].float().cpu().numpy())
         plateio.write_pngs(stoppable(frame), paths, workers=WORKERS, tick=lambda: bar.update(1))
         return io.NodeOutput(ui={"images": [{"filename": f, "subfolder": sub, "type": "output"} for f in names]})
 
@@ -780,7 +780,7 @@ class SaveMovie(io.ComfyNode):
                 x = to_image(ocio.convert([x[0].float().cpu().numpy()], config, source, destination, peak))
             if x.shape[1:3] != (h, w):
                 x = comfy.utils.common_upscale(x.movedim(-1, 1), w, h, "area", "disabled").movedim(1, -1)
-            return np.clip(255.0 * x[0].float().cpu().numpy(), 0, 255).astype(np.uint8)  # scaled by 255 and clipped, not rounded
+            return plateio.core_uint8(x[0].float().cpu().numpy())  # scaled by 255 and clipped, not rounded
 
         plateio.write_movie(stoppable(frame), n, os.path.join(folder, file), fps, workers=WORKERS, crf=crf, tick=lambda: bar.update(1),
                             size=(width, height))

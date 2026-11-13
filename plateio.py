@@ -547,7 +547,9 @@ def write_movie(frame_at, n: int, path: str, fps: float, workers: int = 8, crf: 
                 tick=None, size: tuple | None = None) -> None:
     """An H.264 movie for the page to play, as core Save Video makes it (crf 18, yuv420p, BT.709 matrix and primaries, the
     sRGB transfer tag, limited range), only faster: the frames convert to YUV several at once and x264 runs at preset
-    veryfast with its own threads. Core took 8.3 s for 121 frames at 1920 x 1088 on an RTX PRO 6000 pod (28 Oct)."""
+    veryfast with its own threads. Core took 8.3 s for 121 frames at 1920 x 1088 on an RTX PRO 6000 pod (28 Oct). At most
+    twice `workers` frames are converted ahead of x264: Executor.map took the whole shot at once, and the converted frames
+    waited in memory when x264 was slower than the conversion."""
     first = np.ascontiguousarray(frame_at(0))
     h, w = first.shape[:2]
     if size and all(size):  # (width, height): scaled with swscale's Lanczos while converting, as the viewer's canvas wants it
@@ -568,17 +570,40 @@ def write_movie(frame_at, n: int, path: str, fps: float, workers: int = 8, crf: 
                 if tick:
                     tick()
                 return f
+            ahead = 2 * max(1, workers)
             with ThreadPoolExecutor(max(1, workers)) as pool:
-                for i, f in enumerate(pool.map(yuv, range(n))):
-                    f.pts = i
-                    for p in st.encode(f):
-                        out.mux(p)
+                pending = [pool.submit(yuv, i) for i in range(min(n, ahead))]
+                try:
+                    for i in range(n):
+                        f = pending.pop(0).result()
+                        if i + ahead < n:
+                            pending.append(pool.submit(yuv, i + ahead))
+                        f.pts = i
+                        for p in st.encode(f):
+                            out.mux(p)
+                finally:  # stopped or failed: the frames not yet converted are dropped
+                    for later in pending:
+                        later.cancel()
             for p in st.encode(None):
                 out.mux(p)
     except BaseException:  # stopped (nodes.py asks ComfyUI before each frame) or failed: no half-written movie stays
         if os.path.exists(path):
             os.remove(path)
         raise
+
+
+def core_uint8(frame: np.ndarray, rows: int = 64) -> np.ndarray:
+    """A float frame as core's Save Image and Save Video write it: scaled by 255, clipped to 0 to 255, truncated to 8 bits.
+    The bytes of np.clip(255.0 * frame, 0, 255).astype(np.uint8), made `rows` lines at a time: the float32 temporary is a
+    strip, where that expression makes two the size of the frame, and Save Movie's 16 threads each held them."""
+    out = np.empty(frame.shape, np.uint8)
+    strip = np.empty((min(rows, len(frame)),) + frame.shape[1:], np.float32)
+    for y in range(0, len(frame), rows):
+        part = strip[: len(frame[y:y + rows])]
+        np.multiply(frame[y:y + rows], np.float32(255.0), out=part)
+        np.clip(part, 0.0, 255.0, out=part)
+        np.copyto(out[y:y + rows], part, casting="unsafe")
+    return out
 
 
 def plane_array(plane, itemsize: int) -> np.ndarray:
