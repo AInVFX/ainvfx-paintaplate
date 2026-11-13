@@ -3556,17 +3556,22 @@ async function setPlateSpace(cs, asked = false) { // the plate's colour space (R
 
 function regenerated() { return S.edits.filter((e) => e.on && e.state === "done").length; } // the edits a new colour space or config regenerates
 // The page's one question dialog (#ask): `text`, then Cancel and the button `yes`. It resolves true for `yes`, false for Cancel
-// or Esc. Enter chooses the button that has the focus: Cancel, or `yes` when `enter` is true.
-function ask(text, yes, enter = false) {
-  const d = $("#ask"), ok = $("#ask-yes");
-  $("#ask-text").textContent = text;
-  ok.textContent = yes;
-  d.returnValue = "";
-  return new Promise((answer) => {
+// or Esc. Enter chooses the button that has the focus: Cancel, or `yes` when `enter` is true. One question at a time: a held-back
+// erase can ask while the OCIO question is open, so a question that comes then waits for that answer, and is dropped (false)
+// when `still()` no longer holds by its turn.
+let asking = Promise.resolve();
+function ask(text, yes, { enter = false, still = () => true } = {}) {
+  const turn = asking.then(() => still() && new Promise((answer) => {
+    const d = $("#ask"), ok = $("#ask-yes");
+    $("#ask-text").textContent = text;
+    ok.textContent = yes;
+    d.returnValue = "";
     d.onclose = () => answer(d.returnValue === "yes");
     d.showModal();
     if (enter) ok.focus();
-  });
+  }));
+  asking = turn.catch(() => false);
+  return turn;
 }
 function askRemake(what, made, change) { // an OCIO change that regenerates asks first: Change goes on, Cancel or Esc changes nothing
   ask(remakeQuestion(what, made), "Change").then((yes) => yes && change());
