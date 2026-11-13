@@ -330,5 +330,6 @@ export function editorGraph(prompt, info) {
       outputs: (s.output ?? []).map((t, slot) => ({ name: s.output_name?.[slot] ?? t, type: outType(id, slot), links: fed.get(`${id}:${slot}`) ?? null, slot_index: slot })),
       title: n._meta.title, properties: { "Node name for S&R": n.class_type }, ...(m.values.length ? { widgets_values: m.values } : {}) };
   });
-  return { last_node_id: Math.max(...ids.map(Number)), last_link_id: links.length, nodes, links, groups, config: {}, extra: {}, version: 0.4 };
+  const api = Object.fromEntries(ids.filter((id) => !notes.has(id)).map((id) => [id, structuredClone(prompt[id])])); // what graphToPrompt must give back (tests/graph_live.py)
+  return { last_node_id: Math.max(...ids.map(Number)), last_link_id: links.length, nodes, links, groups, config: {}, extra: { paintaplate: { prompt: api } }, version: 0.4 };
 }
