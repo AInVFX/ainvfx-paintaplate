@@ -148,6 +148,23 @@ def job_spans(history):
     return spans
 
 
+def node_times(events, graphs):
+    """Where each job's time went: {the id's first 8 characters: [(node class, seconds), ...], longest first}. Each «
+    executing » message starts a node and ends the one before; the one with no node ends the job. events: [[seconds,
+    prompt id, node id or None]] (ui_live.py's nodes.json); graphs: {prompt id: its API graph, from ComfyUI's /history}."""
+    runs, out = {}, {}
+    for t, pid, node in events:
+        runs.setdefault(pid, []).append((t, node))
+    for pid, seq in runs.items():
+        graph, spent = graphs.get(pid) or {}, {}
+        for (t, node), (later, _) in zip(seq, seq[1:]):
+            if node is not None:
+                name = (graph.get(str(node)) or {}).get("class_type", f"node {node}")
+                spent[name] = round(spent.get(name, 0.0) + later - t, 1)
+        out[(pid or "")[:8]] = sorted(spent.items(), key=lambda x: -x[1])
+    return out
+
+
 def browser_ready(channel):
     try:
         from playwright.sync_api import sync_playwright
@@ -300,9 +317,13 @@ def run_case(a, name, case, folder):
     result["marks"] = [what for _, what in marks]
     result.update(read_log(result["log"]))
     try:
-        spans = job_spans(get(a.url + "/history?max_items=400"))
+        history = get(a.url + "/history?max_items=400")
+        spans = job_spans(history)
     except (OSError, ValueError):
-        spans = {}
+        history, spans = {}, {}
+    nodes_file = os.path.join(folder, "nodes.json")  # ui_live.py: when ComfyUI started each node, from the page's WebSocket
+    events = json.load(open(nodes_file)) if os.path.exists(nodes_file) else []
+    result["nodes"] = node_times(events, {pid: (e.get("prompt") or [None, None, {}])[2] for pid, e in history.items()})
     for job in result["jobs"]:  # when ComfyUI ran it, and the most memory held between those two times
         span = spans.get(job["id"])
         job["run"] = span[1] - span[0] if span else None
@@ -361,6 +382,10 @@ def report(a, machine, results):
                   + ("".join(f" Live preview off: {why}." for why in r["live_off"]))]
         off = estimates_off(r["steps"], r.get("announced", {}))
         lines += [f"- Steps more than 25% from their announcement: {'; '.join(off)}." if off else "- Every announced step took within 25% of its announcement."]
+        for j in r["jobs"]:  # where the long jobs' time went (D7): the five longest nodes
+            spent = r.get("nodes", {}).get(j["id"])
+            if spent and j["seconds"] >= 30:
+                lines.append(f"- Where {j['name']} {j['id']}'s {j['seconds']:.1f} s went, by node: " + ", ".join(f"{c} {s:.1f} s" for c, s in spent[:5]) + ".")
         lines += carried(r, a.fresh, gb)
         lines += [f"- The page's figure for an erase: {f}" for f in r.get("figures", [])]
         lines += [f"- Did not finish: {line}" for line in r["ended"]]

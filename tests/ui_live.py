@@ -69,6 +69,21 @@ def stand_ins(out):
     g.save("prompt", out)
 
 
+def executing(events, t0):
+    """A listener for the page's WebSocket that keeps each « executing » message of ComfyUI, with the seconds since t0 when it
+    arrived: when each node started. gpu_matrix.py makes each node's seconds of them (node_times). Previews are binary."""
+    def heard(payload):
+        if isinstance(payload, str) and '"executing"' in payload:
+            try:
+                msg = json.loads(payload)
+            except ValueError:
+                return
+            if msg.get("type") == "executing":
+                data = msg.get("data") or {}
+                events.append([round(time.time() - t0, 3), data.get("prompt_id"), data.get("node")])
+    return lambda ws: ws.on("framereceived", heard)
+
+
 def pick(page, tool):
     """Pick a tool by its button, as a person clicks it: its data-tool (paint, erase, light) stays when a label or a key changes."""
     page.click(f'.tools [data-tool="{tool}"]')
@@ -291,6 +306,7 @@ def fluid_shot(page, spec, shots, mark, wait_s=900):
 def remote(a):
     """The real page, workflows and models on a remote ComfyUI: a timed mark for every stage."""
     shots = a.out
+    nodes, began = [], time.time()  # when ComfyUI started each node: nodes.json, for the report's node times
     shutil.rmtree(shots, ignore_errors=True); os.makedirs(shots)
     fluid = json.loads(a.fluid) if a.fluid else None
     default = [] if fluid else [["paint", "a small campfire", [[0.45, 0.8], [0.5, 0.75], [0.55, 0.8]]]]
@@ -300,6 +316,7 @@ def remote(a):
     with sync_playwright() as p:
         browser = p.chromium.launch(channel=a.channel or None)
         page = browser.new_page(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+        page.on("websocket", executing(nodes, began))
         page.on("console", lambda m: m.type == "error" and errors.append(m.text))
         page.on("pageerror", lambda e: errors.append(str(e)))
         status = lambda: page.inner_text("#status")  # noqa: E731
@@ -374,6 +391,7 @@ def remote(a):
         browser.close()
     open(f"{shots}/page_log.txt", "w").write("\n".join(page_log) + "\n")
     json.dump({"marks": marks, "errors": errors}, open(f"{shots}/timings.json", "w"), indent=1)
+    json.dump(nodes, open(f"{shots}/nodes.json", "w"))
     print("console errors:", errors[:5])
     return 0
 

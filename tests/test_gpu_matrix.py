@@ -365,5 +365,32 @@ class Estimates(unittest.TestCase):
         self.assertEqual(gpu_matrix.estimates_off(info["steps"], info["announced"]), ["v1 Track the erase: about 12 s, took 28.7 s"])
 
 
+class NodeClock(unittest.TestCase):
+    """Where a job's time goes (wave 5, D7): ui_live.py keeps ComfyUI's « executing » messages, gpu_matrix.py sums them by node."""
+
+    def test_each_node_s_seconds_from_comfyui_s_executing_messages(self):
+        pid = "b05b5b84-7022-4f56-a1c9-cf9dc1a678cd"
+        events = [[10.0, pid, "3"], [12.5, pid, "7"], [518.5, pid, "9"], [549.5, pid, "11"], [550.0, pid, None]]
+        graph = {"3": {"class_type": "CLIPTextEncode"}, "7": {"class_type": "SamplerCustomAdvanced"},
+                 "9": {"class_type": "VAEDecodeTiled"}, "11": {"class_type": "PaintAPlate_SavePlate"}}
+        self.assertEqual(gpu_matrix.node_times(events, {pid: graph}), {"b05b5b84": [
+            ("SamplerCustomAdvanced", 506.0), ("VAEDecodeTiled", 31.0), ("CLIPTextEncode", 2.5), ("PaintAPlate_SavePlate", 0.5)]})
+
+    @unittest.skipUnless(importlib.util.find_spec("playwright"), "tests/ui_live.py imports Playwright")
+    def test_ui_live_keeps_the_executing_messages_only(self):
+        spec = importlib.util.spec_from_file_location("ui_live_clock", os.path.join(gpu_matrix.HERE, "ui_live.py"))
+        tool = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tool)
+
+        class Socket:
+            def on(self, event, fn):
+                self.event, self.fn = event, fn
+        ws, events = Socket(), []
+        tool.executing(events, 0.0)(ws)
+        for frame in (b"\x00\x01 a preview", '{"type": "progress", "data": {"value": 1}}', '{"type": "executing", "data": {"node": "7", "prompt_id": "abc"}}'):
+            ws.fn(frame)
+        self.assertEqual((ws.event, [e[1:] for e in events]), ("framereceived", [["abc", "7"]]))
+
+
 if __name__ == "__main__":
     unittest.main()
