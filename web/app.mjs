@@ -3535,7 +3535,9 @@ function askRemake(what, made, change) { // an OCIO change that regenerates asks
   d.showModal();
 }
 
-async function setConfig(name) { // RV's Change Config: the viewer and the workflows use another OCIO config
+async function setConfig(name, asked = false) { // RV's Change Config: the viewer and the workflows use another OCIO config
+  const made = S.plate && name !== S.ocio.info?.config ? regenerated() : 0; // the edits it regenerates: the page asks first
+  if (made && !asked) return askRemake("config", made, () => setConfig(name, true).catch(quiet));
   await loadOcio(name);
   log(`OCIO config: ${S.ocio.info.label}`);
   const p = S.plate;

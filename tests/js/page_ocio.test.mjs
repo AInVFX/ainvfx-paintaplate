@@ -13,4 +13,5 @@ test("the plate's line shows its colour space, and whether it is the file's own 
 test("one question for every OCIO change that regenerates: what changes, and the edits it counts", () => {
   assert.equal(remakeQuestion("colour space", 1), "Changing the colour space regenerates the first frame and 1 edit.");
   assert.equal(remakeQuestion("colour space", 3), "Changing the colour space regenerates the first frame and 3 edits.");
+  assert.equal(remakeQuestion("config", 2), "Changing the config regenerates the first frame and 2 edits.");
 });
