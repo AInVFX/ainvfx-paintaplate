@@ -23,10 +23,10 @@ def run(browser, port, U):
     page.wait_for_function("window.__playable > 0", timeout=60000)  # the playback video is loaded: every sentence of the open is said
     status, lines = page.text_content("#status"), U.log_lines(page)
     plate, sizes = [OPENED.match(t) for t in lines if t.startswith("Plate ")], [t for t in lines if t.startswith("Working sizes")]
-    U.check(len(plate) == 1 and plate[0] is not None and plate[0].group(1, 2, 4) == ("1280", "704", "8-bit") and plate[0].group(5).endswith("(read from the file)")
+    U.check(len(plate) == 1 and plate[0] is not None and plate[0].group(1, 2, 4) == ("1280", "704", "8-bit") and plate[0].group(5).endswith("(from file)")
             and len(sizes) == 1 and SIZES.match(sizes[0]) is not None,
             f"a plate that opens writes two lines, one with the open's time, the size, the frames, the bit depth and the colour space, one with the working sizes: {[t for t in lines if t.startswith(('Plate ', 'Working sizes'))]}")
-    told = [t for t in lines if "Describe the edit" in t or "Ready to play" in t or "OCIO > Plate colour space" in t]
+    told = [t for t in lines if "Describe the edit" in t or "Ready to play" in t or "OCIO > Colour space" in t]
     U.check(status == f"Ready to play. {NEXT}" and not told, f"what to do next shows in the status line only: {status!r}, and in the log: {told}")
     page.evaluate(SAID)
     name, _ = U.save_scene(page)

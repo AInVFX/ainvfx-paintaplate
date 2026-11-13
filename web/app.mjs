@@ -18,7 +18,7 @@ import { asksName, eraseCheck, coreBox, writerBoxes, DAB_PROFILE, FLUID, dabFlow
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
 import { FAMILY, framesNeed, matteLargest, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
-import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
+import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, graphImageName, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { askedSeed } from "./logic.mjs"; // the tests: a seed asked for in the address
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
@@ -136,6 +136,10 @@ const num = (e) => { const i = S.edits.indexOf(e); return i < 0 ? "New" : i + 1 
 const snapKeyOf = (e) => `${painted(e)}|${e.whole ? e.prompt : ""}`; // what SAM's answer depends on: the strokes, and the name when it searches by name
 // An image is uploaded under the hash of its content: once per session, and under the same name in every session, so a job
 // that reads it keeps its job index key when a scene opens again. Without WebCrypto (plain http) each upload has its own name.
+const uploadGraphImage = async (c, edit, kind) => { // an image of the scene's ComfyUI graph: at the top of the input folder (logic.graphImageName)
+  const b = await blob(c), h = (await hashHex(b)) || Date.now().toString(16);
+  return upload(b, graphImageName(S.plate.name, edit, kind, h), "");
+};
 const uploadCanvas = async (c, name) => {
   const b = await blob(c), h = await hashHex(b);
   if (!h) return upload(b, `${S.plate.id}_${++S.ups}_${name}`, `paintaplate/${S.plate.id}`);
@@ -334,7 +338,7 @@ async function openPlate(list, typed, opts = {}) {
   previewUI(); fitView(); historyUI(); timelineUI(); stagesUI(); exportUI(); render();
   // The plate's two lines in the log (design rule 12): what it is, then the sizes the page works at. What to do next is a hint, below
   const depth = opts.fluid?.depth ? { bits: opts.fluid.depth, float: false } : plateDepth(spec); // a blank plate: the depth asked for its fluid shot
-  log(`Plate ${S.plate.name} opened in ${((performance.now() - began) / 1000).toFixed(1)} s: ${w} x ${h}, ${spec.frames} frames, ${depth.float ? "float" : `${depth.bits}-bit`}, ${cs}${opts.cs ? "" : " (read from the file)"}`);
+  log(`Plate ${S.plate.name} opened in ${((performance.now() - began) / 1000).toFixed(1)} s: ${w} x ${h}, ${spec.frames} frames, ${depth.float ? "float" : `${depth.bits}-bit`}, ${cs}${opts.cs ? "" : " (from file)"}`);
   log(`Working sizes: edits at ${S.plate.work.join(" x ")}, quick passes at ${S.plate.prev.join(" x ")}, preview at ${S.plate.shot.join(" x ")}, tracking at ${S.plate.track.join(" x ")}`);
 
   const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).map((n) => n).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
@@ -342,7 +346,7 @@ async function openPlate(list, typed, opts = {}) {
   const big = bigPlateWarning(spec, S.vram); // above 2K on a card under 48 GB: renders may not finish (README, GPU)
   if (big) { log(big); setTimeout(() => status(big), 80); }
   const next = "Describe the edit at the top, paint on the frame, then Generate.", plate = S.plate;
-  const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", read from the file"} (right-click > OCIO > Plate colour space changes it). ${next}`;
+  const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", from file"} (right-click > OCIO > Colour space changes it). ${next}`;
   status(opened, "hint");
   if (keying()) enterFluid(); else fluidUI();
   plateVid.addEventListener("canplaythrough", () => { // the playback video is loaded. It says so only while the open's own sentence is on show: a blank plate keeps its fluid hint
@@ -3213,11 +3217,11 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
   if (!p || !active.length) return status("Make an edit first: the ComfyUI graph holds the edits and the render.", "hint");
   status("Writing the ComfyUI graph: each edit's mask and strokes go to ComfyUI's input folder");
   const edits = [];
-  for (const e of active) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, caption: e.caption?.text || templateCaption(e),
-    mask: await uploadCanvas(maskAt(e, p.work), `graph_e${e.id}_mask.png`),
-    layer: e.tool === "paint" ? await uploadCanvas(snap(e.paint, p.work), `graph_e${e.id}_strokes.png`) : null,
-    plan: e.tool === "light" ? await uploadCanvas(lightPlan(e, p.work), `graph_e${e.id}_plan.png`) : null, // a relight's second reference
-    shade: shaded(e) ? await uploadCanvas(shadeMask(e, p.work), `graph_e${e.id}_shade.png`) : null,
+  for (const [i, e] of active.entries()) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, caption: e.caption?.text || templateCaption(e),
+    mask: await uploadGraphImage(maskAt(e, p.work), i + 1, "mask"),
+    layer: e.tool === "paint" ? await uploadGraphImage(snap(e.paint, p.work), i + 1, "strokes") : null,
+    plan: e.tool === "light" ? await uploadGraphImage(lightPlan(e, p.work), i + 1, "plan") : null, // a relight's second reference
+    shade: shaded(e) ? await uploadGraphImage(shadeMask(e, p.work), i + 1, "shade") : null,
     quick: editSettings(e, p.prev, QUICK), full: editSettings(e, p.work, FULL) });
   const erase = active.some((e) => e.tool === "erase");
   const graph = sceneGraph(WF, { edits, about: { version: S.version, name: p.name },
@@ -3519,26 +3523,29 @@ function setOcio(change) { // the display, the view or the look: the viewer only
 async function setPlateSpace(cs, asked = false) { // the plate's colour space (RV's File Color Space): the viewer at once, then the models and the export
   const p = S.plate;
   if (!p || p.cs === cs) return;
-  const made = S.edits.filter((e) => e.on && e.state === "done").length; // results it makes again: the page asks first
-  if (made && !asked) return askRemake(made, () => setPlateSpace(cs, true).catch(quiet));
+  const made = regenerated(); // the edits it regenerates: the page asks first
+  if (made && !asked) return askRemake("colour space", made, () => setPlateSpace(cs, true).catch(quiet));
   log(`Plate colour space: ${cs}, was ${p.cs}`);
   Object.assign(p, { cs, proxySpace: p.deep ? p.proxySpace : cs }); // a video plate's proxy holds its own values
   hud(`Plate colour space: ${cs}`, 2000); render();
   const edits = made > 0;
   await openPlate([], p.path, { under: true, cs }); // the first frame in the model space again, and the edits made again on it
   if (edits) queue(regenerateDependents);
-  status(`Plate colour space ${cs}: the viewer shows it, and the first frame${edits ? " and the edits are" : " is"} made again in it. Switching back takes the earlier results from the job index.`);
+  status(`Plate colour space ${cs}: the viewer shows it, and the first frame${edits ? " and the edits are" : " is"} regenerated in it. Switching back takes the earlier results from the job index.`);
 }
 
-function askRemake(made, change) { // a change that makes results again asks first: Change goes on, Cancel or Esc changes nothing
+function regenerated() { return S.edits.filter((e) => e.on && e.state === "done").length; } // the edits a new colour space or config regenerates
+function askRemake(what, made, change) { // an OCIO change that regenerates asks first: Change goes on, Cancel or Esc changes nothing
   const d = $("#ask");
-  $("#ask-text").textContent = remakeQuestion(made);
+  $("#ask-text").textContent = remakeQuestion(what, made);
   d.returnValue = "";
   d.onclose = () => { if (d.returnValue === "yes") change(); };
   d.showModal();
 }
 
-async function setConfig(name) { // RV's Change Config: the viewer and the workflows use another OCIO config
+async function setConfig(name, asked = false) { // RV's Change Config: the viewer and the workflows use another OCIO config
+  const made = S.plate && name !== S.ocio.info?.config ? regenerated() : 0; // the edits it regenerates: the page asks first
+  if (made && !asked) return askRemake("config", made, () => setConfig(name, true).catch(quiet));
   await loadOcio(name);
   log(`OCIO config: ${S.ocio.info.label}`);
   const p = S.plate;
@@ -3549,13 +3556,13 @@ async function setConfig(name) { // RV's Change Config: the viewer and the workf
   if (edits) queue(regenerateDependents);
 }
 
-function ocioItems() { // what changes the result (the plate's colour space), then what never does (the view); the config holds both
+function ocioItems() { // what affects generation (the plate's colour space), then what is display only (the view); the config holds both
   const o = S.ocio, info = o.info, p = S.plate;
   const spaces = (node) => [...node.children.map((c) => [c.name, "", spaces(c)]),
     ...node.spaces.map((name) => [name, "", () => setPlateSpace(name).catch(quiet), !p, p?.cs === name])];
   const shown = info.displays.find((d) => d.name === o.display) ?? info.displays[0]; // the display in use: its views come first
-  return ["THE PLATE · changes the result", [plateSpaceLine(p), "", spaces(ocioTree(info.spaces)), !p],
-    "THE VIEW · never changes a result",
+  return ["Plate (affects generation)", [plateSpaceLine(p), "", spaces(ocioTree(info.spaces)), !p],
+    "View (display only)",
     [`View: ${o.view}`, "", shown.views.map((v) => [v, "", () => setOcio({ display: shown.name, view: v }), false, o.view === v])],
     [`Display: ${o.display}`, "", info.displays.map((d) => [d.name, "", () => setOcio({ display: d.name, view: d.views.includes(o.view) ? o.view : d.views[0] }), false, o.display === d.name])],
     ...(info.looks.length ? [[`Look: ${o.look || "None"}`, "", [["None", "", () => setOcio({ look: "" }), false, !o.look], ...info.looks.map((lk) => [lk, "", () => setOcio({ look: lk }), false, o.look === lk])]]] : []),

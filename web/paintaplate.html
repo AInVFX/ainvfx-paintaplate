@@ -251,9 +251,9 @@
     <p class="hint">RV uses E, C, R, G, B and L without Shift. Here P, C and L pick the tools. The values are RV's: contrast is 0 at rest and turns about 0.5, gamma acts before the other tools, invert before exposure.</p>
     <h3>OCIO, as in RV: right-click, then OCIO</h3>
     <dl>
-      <dt>The plate · changes the result</dt><dd>Plate colour space: what the file's numbers mean, by family (RV calls it File Color Space). Its line says where the value comes from: read from the file, or chosen by you. The models and the export use it, so a change makes the first frame and the edits again. When an edit has a result, the page asks first</dd>
-      <dt>The view · never changes a result</dt><dd>View: the views of the display in use. Display: the other displays. Look: only when the config has looks. The viewer only, also while the shot plays</dd>
-      <dt>Config</dt><dd>The config named by $OCIO when it is set, as in RV, else OCIO's built-in configs. It holds both the plate's colour space and the view</dd>
+      <dt>Plate (affects generation)</dt><dd>Colour space: the plate colour space, what the file's numbers mean, by family (RV calls it File Color Space). The line ends with "from file" when the value is the file's own, and "override" once you choose another. The models and the export use it, so a change regenerates the first frame and the edits. When an edit has a result, the page asks first</dd>
+      <dt>View (display only)</dt><dd>View: the views of the display in use. Display: the other displays. Look: only when the config has looks. The viewer only, also while the shot plays</dd>
+      <dt>Config</dt><dd>The config named by $OCIO when it is set, as in RV, else OCIO's built-in configs. It holds the plate colour space and the view, so a change regenerates the first frame and the edits. When an edit has a result, the page asks first</dd>
     </dl>
     </section>
     <section class="help-tab" data-help="render" role="tabpanel" hidden>
