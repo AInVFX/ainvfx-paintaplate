@@ -230,6 +230,19 @@ class BlankCanvas(unittest.TestCase):
         self.assertIn("4444", back["profile"])
         print("ProRes 4444 plate export: ok", writer.notes)
 
+    def test_an_8_bit_fluid_shot_keeps_its_frame_rate(self):
+        """The fluid plate of an 8-bit blank plate is a ProRes 4444 file that Save Plate writes from the blank plate's
+        spec: made at 50 fps it is probed at 50 fps, as at the other rates the Blank plate tab offers."""
+        for fps in (24, 25, 50):
+            spec = plateio.probe_plate(plateio.write_blank(os.path.join(tempfile.mkdtemp(), "blank.mov"), 128, 64, fps, 9))
+            self.assertEqual((spec["fps"], spec["fps_num"], spec["fps_den"]), (float(fps), fps, 1))
+            writer = plateio.VideoWriter(spec, os.path.join(tempfile.mkdtemp(), "fluid.mov"))
+            for _ in range(9):
+                writer.write(np.full((64, 128, 3), 0.5, np.float32))
+            writer.close()
+            back = plateio.probe_plate(writer.path)
+            self.assertEqual((back["fps"], back["fps_num"], back["fps_den"], back["frames"]), (float(fps), fps, 1, 9), fps)
+
 
 class WritePngsTest(unittest.TestCase):
     def test_frames_written_in_parallel_exactly(self):
@@ -319,6 +332,36 @@ class Browser(unittest.TestCase):
             plateio.write_exrs(lambda i: frames[i], paths)
             for f, p in zip(frames, paths):
                 np.testing.assert_array_equal(plateio.read_float(p), f)
+
+    def test_exr_frames_say_their_frame_rate(self):
+        """A sequence written at 50 fps is probed at 50 fps: the frames of a 16-bit fluid shot open as a plate, and that
+        plate took 24 fps (pod, 11 Nov). The rate is OpenEXR's standard attribute framesPerSecond, a rational number, so
+        24000/1001 is exact. Frames without it are probed as before: the hint, 24 by default."""
+        frames = [np.full((6, 8, 3), v, np.float32) for v in (4.0, -0.5, 0.25)]
+        with tempfile.TemporaryDirectory() as d:
+            def written(name, **rate):
+                os.mkdir(os.path.join(d, name))
+                paths = [os.path.join(d, name, f"f_{k:05d}_.exr") for k in (1, 2, 3)]
+                plateio.write_exrs(lambda i: frames[i], paths, **rate)
+                return paths
+            for name, fps, exact in (("fifty", 50.0, Fraction(50)), ("ntsc", 24000 / 1001, Fraction(24000, 1001)), ("pal", 25, Fraction(25))):
+                paths = written(name, fps=fps)
+                self.assertEqual([plateio.exr_rate(p) for p in paths], [exact] * 3)
+                for path in (os.path.join(d, name), os.path.join(d, name, "f_#####_.exr"), paths[0]):  # a folder, a frame pattern, one frame
+                    spec = plateio.probe_plate(path, fps_hint=30.0)  # the frames' own rate wins over the hint
+                    self.assertEqual((spec["fps"], spec["fps_num"], spec["fps_den"]), (float(exact), exact.numerator, exact.denominator), path)
+                for f, p in zip(frames, paths):  # the attribute changes no value
+                    np.testing.assert_array_equal(plateio.read_float(p), f)
+            bare = written("bare")
+            self.assertEqual([plateio.exr_rate(p) for p in bare], [None] * 3)
+            spec = plateio.probe_plate(os.path.join(d, "bare"))
+            self.assertEqual((spec["fps"], spec["fps_num"], spec["fps_den"]), (24.0, 24, 1))
+            self.assertEqual(plateio.probe_plate(os.path.join(d, "bare"), fps_hint=25.0)["fps"], 25.0)
+            self.assertEqual(plateio.probe_plate(bare[0])["fps"], 24.0)
+            # the export of an EXR plate copies the source frame's header: an edited frame keeps the plate's rate
+            out = os.path.join(d, "export.exr")
+            plateio.write_exr_like(written("plate", fps=50)[0], np.zeros((6, 8, 3), np.float32), None, out)
+            self.assertEqual(plateio.exr_rate(out), Fraction(50))
 
     def test_an_animated_image_is_a_video_plate(self):
         from PIL import Image

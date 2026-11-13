@@ -595,7 +595,7 @@ def review():
     g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Review movie (full-size composite, H.264)", _output="review", images=movie, fps=load[3], crf=12,
       filename_prefix=Slot("review_prefix", "paintaplate/plate/review"))
     frames = g("PaintAPlate_SaveFrames", _title="Review frames (half-float EXR, image sequences only)", _output="frames",
-               images=real, format="exr", filename_prefix=Slot("frames_prefix", ""))
+               images=real, format="exr", fps=load[3], filename_prefix=Slot("frames_prefix", ""))
     g.link_slot(frames, "images", "review_frames")  # dropped for a video plate
     # What the viewer plays for an image sequence: log values (ACEScct, `view_space`), so the 8-bit movie shows what its EXR
     # frames show at full precision. The review movie above stays in the model space, for the zip. Dropped for a video plate.
@@ -618,7 +618,7 @@ def export():
     g.link_slot(plate_out, "images", "export_plate")  # dropped for an EXR result: a video file cannot hold values above 1.0
     # SDR to HDR on a plate whose format cannot hold values above 1.0 (a video, an integer sequence): Adrien, 2 Nov, the export
     # is the result as half-float EXR frames, in ACES2065-1 as every HDR file here
-    exr = g("PaintAPlate_SaveFrames", _title="Export as half-float EXR frames (an HDR result of a video plate)", _output="exr", format="exr",
+    exr = g("PaintAPlate_SaveFrames", _title="Export as half-float EXR frames (an HDR result of a video plate)", _output="exr", format="exr", fps=load[3],
             images=g("ImageFromBatch", image=colour(g, final, Slot("color_space", "@model"), HDR_SPACE, "The result in ACES2065-1"), batch_index=0, length=load[4]),
             filename_prefix=Slot("exr_prefix", ""))
     g.link_slot(exr, "images", "export_exr")
@@ -744,7 +744,9 @@ def hdr():
     # where the SDR shot is black, its own black: the IC-LoRA's frames are noisy there (the viewer measured a 16-bit fluid
     # shot, 2 Nov: 67% of pixels below 0.01, its channels spread by 41% of the luminance)
     linear = g("PaintAPlate_KeepBlack", hdr=linear[1], sdr=colour(g, load[0], "@model", "ACEScg", "The SDR shot in ACEScg"), low=0.001, high=0.01)
-    g("PaintAPlate_SaveFrames", _title="HDR frames (half-float EXR, ACES2065-1)", _output="hdr", format="exr",
+    # each frame says the shot's frame rate, the one the page sends for the movie below: a 16-bit fluid shot's frames open
+    # as a plate, and that plate took 24 fps for a shot made at 50 (pod, 11 Nov)
+    g("PaintAPlate_SaveFrames", _title="HDR frames (half-float EXR, ACES2065-1)", _output="hdr", format="exr", fps=Slot("movie_fps", 24.0),
       images=colour(g, linear, "ACEScg", HDR_SPACE, "ACEScg to ACES2065-1"), filename_prefix=Slot("prefix", "paintaplate/plate/hdr/f"))
     # the same frames as an 8-bit movie for the viewer, in log values (ACEScct, `view_space`): the look of the EXR frames
     g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="HDR movie (log values: the look of the EXR frames)", _output="movie", fps=Slot("movie_fps", 24.0),

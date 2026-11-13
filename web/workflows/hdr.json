@@ -423,6 +423,7 @@
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "format": "exr",
+   "fps": 24.0,
    "images": [
     "26",
     0
@@ -432,6 +433,7 @@
   "_meta": {
    "title": "HDR frames (half-float EXR, ACES2065-1)",
    "slots": {
+    "fps": "movie_fps",
     "filename_prefix": "prefix"
    },
    "output": "hdr"

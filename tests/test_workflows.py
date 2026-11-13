@@ -131,6 +131,25 @@ class ViewerMovies(unittest.TestCase):
         conv = wf[str(movie["inputs"]["images"][0])]
         self.assertEqual((conv["inputs"]["source"], conv["inputs"]["destination"]), ("ACEScg", "ACEScct"))
 
+    def test_exr_frames_take_the_shots_frame_rate(self):
+        """Every Save Frames node that writes EXR frames of a shot is given the shot's frame rate, which it writes in each
+        frame's header: SDR to HDR takes the rate the page sends for its movie, and the review and the export take the
+        plate's own. A 16-bit fluid shot's frames open as a plate, and that plate took 24 fps for a shot made at 50."""
+        def exr_frames(name):
+            with open(os.path.join(WORKFLOWS, f"{name}.json")) as f:
+                wf = json.load(f)
+            return wf, [n for n in wf.values() if n["class_type"] == "PaintAPlate_SaveFrames" and n["inputs"].get("format") == "exr"]
+        wf, [frames] = exr_frames("hdr")
+        [movie] = [n for n in wf.values() if n["class_type"] == "PaintAPlate_SaveMovie"]
+        self.assertEqual((frames["_meta"]["slots"]["fps"], movie["_meta"]["slots"]["fps"]), ("movie_fps", "movie_fps"))
+        self.assertEqual(frames["inputs"]["fps"], movie["inputs"]["fps"])
+        for name, fed, its in (("review", "PaintAPlate_SaveMovie", "fps"), ("export", "PaintAPlate_SavePlate", "plate")):
+            wf, [frames] = exr_frames(name)
+            loader, output = frames["inputs"]["fps"]
+            self.assertEqual((wf[loader]["class_type"], output), ("PaintAPlate_LoadPlate", 3), name)
+            plates = {n["inputs"][its][0] for n in wf.values() if n["class_type"] == fed}  # the plate's loader: it feeds these
+            self.assertEqual(plates, {loader}, f"{name}: the frames take the plate's rate")
+
     def test_hdr_decodes_in_128_frame_temporal_tiles(self):
         """64-frame temporal tiles with 8 of overlap made a 0.32-stop jump at frame 56 of a 121-frame HDR shot (2 Nov)."""
         prompt, _, _ = build_workflows.load("hdr")

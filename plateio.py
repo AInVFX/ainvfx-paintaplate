@@ -156,9 +156,23 @@ def sequence_frames(folder: str) -> tuple[list[str], int, list[int]]:
 # --------------------------------------------------------------------------
 # Spec
 # --------------------------------------------------------------------------
-def _fps_fields(fps_hint) -> dict:
-    """The frame rate of a still plate, as a float and as an exact fraction."""
-    rate = fps_hint if isinstance(fps_hint, Fraction) else Fraction(float(fps_hint or 24.0)).limit_denominator(100000)
+def exr_rate(path: str) -> Fraction | None:
+    """An EXR frame's own frame rate: `framesPerSecond`, a standard attribute of OpenEXR's header, stored as a rational
+    number (24000/1001 is exact). None when the frame carries none, or when OpenEXR is not installed."""
+    if OpenEXR is None:
+        return None
+    with OpenEXR.File(path, header_only=True) as f:
+        rates = [part.header.get("framesPerSecond") for part in f.parts]
+    return next((Fraction(rate) for rate in rates if rate and rate > 0), None)
+
+
+def _fps_fields(path: str, fps_hint) -> dict:
+    """The frame rate of a still plate, as a float and as an exact fraction: an EXR frame's own rate when its header
+    holds one (exr_rate), else the hint. A 16-bit fluid shot made at 50 fps opened as a plate at 24 fps until its frames
+    said their rate (pod, 11 Nov)."""
+    rate = exr_rate(path) if path.lower().endswith(".exr") else None
+    if rate is None:
+        rate = fps_hint if isinstance(fps_hint, Fraction) else Fraction(float(fps_hint or 24.0)).limit_denominator(100000)
     return {"fps": float(rate), "fps_num": rate.numerator, "fps_den": rate.denominator}
 
 
@@ -237,7 +251,7 @@ def probe_plate(path: str, fps_hint: float = 24.0) -> dict:
         first = files[0]
         ext = os.path.splitext(first)[1].lower()
         spec = {"kind": "sequence", "source": path, "files": files, "ext": ext, "step": step, "missing": missing,
-                "first_frame": frame_number(first) or 0, "frames": len(files), **_fps_fields(fps_hint)}
+                "first_frame": frame_number(first) or 0, "frames": len(files), **_fps_fields(first, fps_hint)}
         spec.update({k: v for k, v in probe_still(first).items() if k not in spec})
         if ext == ".exr":
             spec["exr"] = exr_info(first)
@@ -249,7 +263,7 @@ def probe_plate(path: str, fps_hint: float = 24.0) -> dict:
         return spec
     if ext in IMAGE_EXTS:
         spec = {"kind": "image", "source": path, "files": [path], "ext": ext, "frames": 1,
-                "first_frame": frame_number(path) or 0, **_fps_fields(fps_hint)}
+                "first_frame": frame_number(path) or 0, **_fps_fields(path, fps_hint)}
         spec.update({k: v for k, v in probe_still(path).items() if k not in spec})
         if ext == ".exr":
             spec["exr"] = exr_info(path)
@@ -470,14 +484,20 @@ def write_pngs(frame_at, paths: list, workers: int = 8, level: int = 1, tick=Non
         list(pool.map(one, range(len(paths))))
 
 
-def write_exrs(frame_at, paths: list, workers: int = 8, tick=None) -> None:
+def write_exrs(frame_at, paths: list, workers: int = 8, tick=None, fps: float = 0.0) -> None:
     """Write frame_at(i), an (H, W, 3) float array, to paths[i] as a half-float EXR with lossless PIZ compression, several
     frames at once: OpenEXR releases the GIL while it compresses (a 1080p frame: 83 ms, 5.3 MB, 29 Oct). These are the
-    review frames the viewer reads at full precision; the export keeps the plate's own EXR layers and header instead."""
+    review frames the viewer reads at full precision; the export keeps the plate's own EXR layers and header instead.
+    With `fps`, each header says the shot's frame rate (`framesPerSecond`, which exr_rate reads): the frames of a 16-bit
+    fluid shot open as a plate, and a plate has a rate."""
+    header = {"compression": OpenEXR.PIZ_COMPRESSION, "type": OpenEXR.scanlineimage}
+    if fps:
+        header["framesPerSecond"] = Fraction(fps).limit_denominator(1001)
+
     def one(i):
         rgb = np.ascontiguousarray(np.nan_to_num(frame_at(i)[..., :3], nan=0.0, posinf=65504.0, neginf=-65504.0)
                                    .clip(-65504.0, 65504.0).astype(np.float16))
-        with OpenEXR.File({"compression": OpenEXR.PIZ_COMPRESSION, "type": OpenEXR.scanlineimage}, {"RGB": rgb}) as f:
+        with OpenEXR.File(dict(header), {"RGB": rgb}) as f:
             f.write(paths[i])
         if tick:
             tick()
