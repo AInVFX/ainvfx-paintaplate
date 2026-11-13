@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
+import { asksName, DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
   erasePrompt, erasesPaint, erasedShare, eraseLeft, leftHint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
@@ -231,6 +231,10 @@ async function writeCaption(e, reference, key, kind) {
   if (made && paint && !erasesPaint(made, ask.locked, paint)) { // it removed something the paint does not cover (an astronaut, 28 Oct)
     log(`Edit ${num(e)}: the prompt writer removed something the paint does not cover: ${splitTable(made)[0]}`);
     made = "";
+    if (asksName(e.tool, e.prompt)) { // no words, and an answer about another object: the object's name comes first (generate)
+      e.caption = { key, text: "" };
+      return "";
+    }
   }
   e.caption = { key, text: made || templateCaption(e) };
   log(made ? `Edit ${num(e)}: caption from the prompt writer: ${e.caption.text}` : `Edit ${num(e)}: the page's own caption: ${e.caption.text}`);
@@ -2035,6 +2039,12 @@ async function generate(edit) {
     redrawStrokes(edit); // in one pass from its strokes, as a scene opened again draws them: the same images, the same job
     const { before, below, base, reference, cap } = await prepare(edit, S.edits.indexOf(edit), "edit");
     if (!alive()) return;
+    if (!cap) { // an erase with no words that the prompt writer took for another object (logic.asksName): no Klein pass, its name first
+      Object.assign(edit, { patch: null, preview: null, latent: null, state: "failed", left: true, force: false });
+      S.running = null;
+      recompose(); historyUI(); render(); timelineUI();
+      return told(`Edit ${num(edit)}: the prompt writer took the stroke for another object, so nothing ran`, leftHint(edit.prompt), "error");
+    }
     const show = (b) => alive() && createImageBitmap(b).then((bm) => {
       if (!alive() || edit.preview) return;
       edit.latent = bm;
