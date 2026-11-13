@@ -3535,12 +3535,21 @@ async function setPlateSpace(cs, asked = false) { // the plate's colour space (R
 }
 
 function regenerated() { return S.edits.filter((e) => e.on && e.state === "done").length; } // the edits a new colour space or config regenerates
-function askRemake(what, made, change) { // an OCIO change that regenerates asks first: Change goes on, Cancel or Esc changes nothing
-  const d = $("#ask");
-  $("#ask-text").textContent = remakeQuestion(what, made);
+// The page's one question dialog (#ask): `text`, then Cancel and the button `yes`. It resolves true for `yes`, false for Cancel
+// or Esc. Enter chooses the button that has the focus: Cancel, or `yes` when `enter` is true.
+function ask(text, yes, enter = false) {
+  const d = $("#ask"), ok = $("#ask-yes");
+  $("#ask-text").textContent = text;
+  ok.textContent = yes;
   d.returnValue = "";
-  d.onclose = () => { if (d.returnValue === "yes") change(); };
-  d.showModal();
+  return new Promise((answer) => {
+    d.onclose = () => answer(d.returnValue === "yes");
+    d.showModal();
+    if (enter) ok.focus();
+  });
+}
+function askRemake(what, made, change) { // an OCIO change that regenerates asks first: Change goes on, Cancel or Esc changes nothing
+  ask(remakeQuestion(what, made), "Change").then((yes) => yes && change());
 }
 
 async function setConfig(name, asked = false) { // RV's Change Config: the viewer and the workflows use another OCIO config
