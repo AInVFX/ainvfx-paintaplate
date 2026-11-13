@@ -133,6 +133,14 @@ def stage(note):
     return note.split(" about ")[0].split(" almost ")[0]
 
 
+def address(url, memory="", seed=None):
+    """The page's address for a run on real models. ?index=0: the page leaves its job index alone, so every job runs, and
+    each time and each peak of memory is a measured one, on a machine that ran the same strokes before too. ?seed=: every
+    new edit and every new fluid shot starts from this seed, so the next run starts from the same."""
+    options = ["blank=0", "index=0"] + ([f"memory={memory}"] if memory else []) + ([f"seed={seed}"] if seed is not None else [])
+    return f"{url}/extensions/ainvfx-paintaplate/paintaplate.html?" + "&".join(options)
+
+
 def answers(url):
     """Whether the ComfyUI at `url` still answers. On 11 Nov a memory cap stopped ComfyUI during a render, twice: the page
     waited, this script with it, and no report was written."""
@@ -158,6 +166,7 @@ def main():
     ap.add_argument("--think", type=float, default=0, help="seconds between opening the plate and the first stroke")
     ap.add_argument("--graph", action="store_true", help="after the export, also save the scene's ComfyUI graph")
     ap.add_argument("--memory", default="", help="with --url: the page's memory profile, small, medium or large (by default the card decides)")
+    ap.add_argument("--seed", type=int, default=None, help="with --url: the seed of every new edit and fluid shot, the page's ?seed= (by default the page draws each one)")
     ap.add_argument("--channel", default="", help="a browser channel, such as chrome (it plays H.264; Playwright's Chromium does not)")
     a = ap.parse_args()
     if a.url:
@@ -288,7 +297,7 @@ def remote(a):
         page.on("pageerror", lambda e: errors.append(str(e)))
         status = lambda: page.inner_text("#status")  # noqa: E731
         try:
-            page.goto(f"{a.url}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0" + (f"&memory={a.memory}" if a.memory else ""))
+            page.goto(address(a.url, a.memory, a.seed))
             page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
             mark("page ready: " + status())
             if fluid:  # a fluid shot first: once made, it is the plate the strokes are painted on

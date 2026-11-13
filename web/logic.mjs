@@ -295,6 +295,10 @@ export const stopsForEdit = ({ cls, progress }) => cls !== "preview" && progress
 // A job's key hashes its workflow and the values that change what it makes. Output folders (the prefixes) and the live
 // preview's rate change nothing it makes, so they stay out, and a scene opened again on the same machine finds its jobs.
 export const indexValues = (values) => Object.keys(values).sort().filter((k) => !/prefix$/.test(k) && k !== "live").map((k) => [k, values[k]]);
+// The plate's identity in a job index key: its path, its files, its size and its time, as /paintaplate/stat gives them (`st`).
+// null: no job index while this plate is open, because the plate could not be checked, or because the address says
+// ?index=0 (`on` is false), for the tests: every job then runs, so each time and each peak of memory is a measured one.
+export const plateIdentity = (path, st, on = true) => (st && on ? JSON.stringify([path, st.files, st.size, st.mtime]) : null);
 
 // ---------- The shot's prompt ----------
 export const RIPPLE = "Use the reference video for motion, timing, camera movement, framing and lighting changes; " +
@@ -822,3 +826,9 @@ export function memoryProfile({ vram = 0, ram = 0, force = null } = {}) { // `fo
   const card = vram > 0 ? `${gib(vram)} GB of VRAM${ram > 0 ? `, ${gib(ram)} GB of RAM` : ""}` : "ComfyUI gave no VRAM size";
   return { name, why: forced ? `asked for; with ${card}, the page would choose ${auto}` : card, ...MEMORY[name] };
 }
+
+// ---------- A seed asked for in the address ----------
+// The seed that ?seed= in the address asks for, for the tests: a whole number from 0 to 2^31 - 1, as the page draws them.
+// With it every new edit and every new fluid shot starts from that seed, so a run makes the same pictures as the run before.
+// Another try (Ctrl+Enter) still draws one. null: no seed is asked for, or the text is not one, and the page draws.
+export const askedSeed = (text) => (/^\d{1,10}$/.test(text ?? "") && Number(text) < 2 ** 31 ? Number(text) : null);
