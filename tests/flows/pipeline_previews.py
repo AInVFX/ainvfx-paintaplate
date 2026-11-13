@@ -52,7 +52,7 @@ def run(browser, port, U):
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden", timeout=60000)
     page.evaluate(U.WATCH)
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     U.paint_once(page, "a lantern", [(0.3, 0.5), (0.34, 0.56)])
     page.keyboard.press("Enter")
     U.wait_log(page, r"window.__lines.some((t) => /: done in [\d.]+ s \(.*\d+ previews?\)$/.test(t))", 120000, "the previews a job received, in its line of the log")

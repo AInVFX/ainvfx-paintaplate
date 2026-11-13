@@ -25,7 +25,7 @@ def edit(browser, port, U, free, words, pts):
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function(OPEN, timeout=60000)
     page.evaluate(U.WATCH)
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     U.paint_once(page, words, pts)
     page.keyboard.press("Enter")
     U.wait_log(page, "window.__lines.some((t) => /^matte [0-9a-f]{8}: done in /.test(t))", 120000, "the line of the tracking job that follows the preview shot")

@@ -426,7 +426,7 @@ export function nearKeys(keys, frame) { // the keyframes before and after a fram
 // One edit at a time: the strokes in progress, else the current edit (the one just started, or picked in History).
 // What a failed step's ComfyUI message means, in one plain sentence. The page puts it after "<step> failed:", and the
 // log keeps ComfyUI's own words.
-const SAVED = { matte_a: "the erase matte", matte_b: "the paint matte", clean: "the erase pass", shot: "the shot", plate: "the fluid shot" };
+const SAVED = { matte_a: "the clean matte", matte_b: "the paint matte", clean: "the clean plate pass", shot: "the shot", plate: "the fluid shot" };
 // ---------- OCIO, as RV's menu shows it ----------
 
 // The colour spaces as RV's OCIO menu builds its File Color Space tree (ocio_source_setup.py): each family path, such as
@@ -487,6 +487,11 @@ export function toolEndsEdit({ draft, current }, tool) { // picking another tool
   const work = draft ?? current;
   return !!work && work.tool !== tool;
 }
+
+// The eraser's key, X. Held while a stroke is dragged, the eraser lasts as long as the key is down; a tap, shorter than
+// ERASER_TAP seconds with no stroke, switches it on or off. The eraser's state once the key comes up.
+export const ERASER_TAP = 0.3;
+export function eraserAfterKey(was, held, dragged) { return !dragged && held < ERASER_TAP ? !was : was; }
 
 export function fluidPrompt(words) { // the trigger first, as the model card asks; no words: its own example
   const rest = (words || "").trim().replace(/^ainvfxfluid\s*,?\s*/i, "");

@@ -24,7 +24,7 @@ def fluid16_scene(page, U):
     U.paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)])
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("under the edits: the fluid shot v"), 240000, "the HDR fluid shot under the edits")
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     U.paint_once(page, "a lantern", [(0.3, 0.5), (0.34, 0.56)])
     page.keyboard.press("Enter")
     rows = """(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
@@ -80,9 +80,9 @@ def pass_rows(page, U):
     U.open_path(page, "plates/desk.mp4")  # waits for desk's own spec: the plate before also says fps
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden", timeout=60000)
     page.evaluate(U.WATCH)
-    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
+    page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(U.REVIEWED), 240000, "the full-size composite of the paint")
-    page.keyboard.press("e"); U.paint_once(page, "the cup", [(0.6, 0.4), (0.62, 0.45)]); page.wait_for_timeout(1500); page.keyboard.press("Enter")
+    page.keyboard.press("c"); U.paint_once(page, "the cup", [(0.6, 0.4), (0.62, 0.45)]); page.wait_for_timeout(1500); page.keyboard.press("Enter")
     U.wait_log(page, f"window.__lines.filter((t) => t.includes('{U.REVIEWED}')).length >= 2", 240000, "the full-size composite of both edits")
     settled(page)
     page.keyboard.press("n")  # New edit: nothing selected, so frame 0 shows the pass, not the strokes
@@ -165,7 +165,7 @@ def hdr_video(page, U):
     U.check(page.is_hidden("#deliver-confirm") and page.is_checked("#deliver-hdr"), "Turn on turns it on")
     page.evaluate("document.activeElement.blur()")
     page.evaluate(U.WATCH)
-    page.keyboard.press("b"); U.paint_once(page, "a red lamp", [(0.3, 0.6), (0.36, 0.7)]); page.keyboard.press("Enter")
+    page.keyboard.press("p"); U.paint_once(page, "a red lamp", [(0.3, 0.6), (0.36, 0.7)]); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(U.REVIEWED), 240000, "the full-size composite with SDR to HDR")
     lines = page.evaluate("window.__lines")
     U.check(any("SDR to HDR took" in t for t in lines), "the full-size shot went through SDR to HDR")

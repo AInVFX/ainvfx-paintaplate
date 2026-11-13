@@ -18,7 +18,7 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
 import { FAMILY, framesNeed, matteLargest, freesBefore, memoryProfile, remember, slower, stepLeft, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
-import { awaitingPass, editList, hiddenAbove, layersHint, stopHint } from "./logic.mjs";
+import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { askedSeed } from "./logic.mjs"; // the tests: a seed asked for in the address
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
@@ -84,12 +84,12 @@ const SCENE = { format: "paintaplate-scene", version: 6 }; // 3: the OCIO config
 const OCIO_PREF = "paintaplate.ocio"; // the config, display, view and look, kept for the next session as RV keeps them
 const saved = (key) => { try { return JSON.parse(localStorage.getItem(key)) ?? {}; } catch { return {}; } };
 
-const TOOLS = { b: "paint", e: "erase", l: "light" };
+const TOOLS = { p: "paint", c: "erase", l: "light" }; // the keys P, C and L; "erase" stays the code's name for Clean until app.mjs is split
 // The viewer's colour keys, after OpenRV's rvui.mu: exposure e, gamma y, contrast k, saturation S, hue h; channels c r g b l.
 // Here E, B and L pick tools, so exposure and the channels take Shift.
 const COLOR_KEYS = { "Shift+e": "exposure", y: "gamma", k: "contrast", "Shift+s": "saturation", h: "hue" };
 const CHANNEL_KEYS = { "Shift+c": "rgb", "Shift+r": "r", "Shift+g": "g", "Shift+b": "b", "Shift+l": "l" };
-const NAME = { paint: "Paint", erase: "Erase", light: "Light" };
+const NAME = { paint: "Paint", erase: "Clean", light: "Light" }; // the names a person reads: Clean removes an object, the Eraser rubs out strokes
 const HINT = {
   paint: "Describe what to paint, then paint it on the frame. A fire, a wooden desk, a red umbrella",
   erase: "Optional: name what to remove, then paint over it. A red umbrella, a man in a coat",
@@ -1322,6 +1322,7 @@ view.addEventListener("pointerdown", (e) => {
   if (e.button === 0 && nearWipe(e)) return dragWipe(e, view);
   const rub = S.rub || (e.pointerType === "pen" && (e.buttons & 32)); // the eraser tool, or a pen's eraser end
   if (e.button !== 0 && !rub) return;
+  if (rub && eraserKey) eraserKey.dragged = true; // a stroke while X is held: at the release the eraser goes back as it was
   if (S.playing) pause();
   if (keying()) return paintKey(e, rub);
   if (S.frame !== 0) { seek(0); hud("Edits are painted on the first frame"); }
@@ -1749,7 +1750,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     f.editing = false; // the shot is made: it becomes the plate under the next edits, and the viewer plays it
     f.busy = null;
     await rebase();
-    status(`Fluid shot v${v} is the plate under the next edits: Space plays it. Paint, erase or relight on it; the pencil on its History row returns to the keyframes.`, "hint");
+    status(`Fluid shot v${v} is the plate under the next edits: Space plays it. Paint, Clean and Light work on it; the pencil on its History row returns to the keyframes.`, "hint");
   } catch (err) {
     if (err?.message !== "cancelled") quiet(err);
   } finally {
@@ -2161,14 +2162,14 @@ async function findWhole(edit, before, kind) { // SAM 3.1 finds the whole object
     named: await Promise.all(outputFiles("snap", out, "named").map(fileBits)),
     points: await Promise.all(picks.map((_, j) => outputFile("snap", out, `point_${j}`)).filter(Boolean).map(fileBits)) });
   log(`Edit ${num(edit)}: SAM 3.1 ${edit.prompt ? `found ${outputFiles("snap", out, "named").length - 1} object(s) named "${edit.prompt}", ` : ""}looked at ${picks.length} stroke point(s); ${objects.length} mask(s) kept`);
-  if (!objects.length) return status("Erasing only what you painted: no single object under the stroke.");
+  if (!objects.length) return status("Clean takes only what you painted: no single object under the stroke.");
   const sam = canvas(size), d = sam.getContext("2d"), img = d.createImageData(size[0], size[1]);
   for (let i = 0; i < area; i++) if (objects.some((m) => m[i])) img.data.fill(255, i * 4, i * 4 + 4);
   d.putImageData(img, 0, 0);
   edit.sam = snap(sam, [edit.mask.width, edit.mask.height]);
   redrawStrokes(edit);
   render();
-  status(`Found the ${edit.prompt || "object"} under the stroke: the erase takes the whole object.`, "hint");
+  status(`Found the ${edit.prompt || "object"} under the stroke: Clean takes the whole object.`, "hint");
 }
 
 function footprint(edit) { // where the edit changed the frame, on a coarse grid, one cell wider
@@ -2531,10 +2532,10 @@ const feather = (w) => Math.max(6, Math.round(w / COMPOSITE_FEATHER));
 // it made at once. `final` steps run at full size right after them: the passes, then the full-size composite (the review) the viewer plays.
 // The export (`onDemand`) writes the result for compositing software, only when Export asks for it.
 const STAGES = [
-  { id: "erase", label: "Track the erase", ref: 6 }, { id: "clean", label: "Erase pass, preview", ref: 10, preview: true },
+  { id: "erase", label: "Track the object", ref: 6 }, { id: "clean", label: "Clean plate pass, preview", ref: 10, preview: true },
   { id: "shot", label: "Shot, preview", ref: 20, preview: true }, { id: "track", label: "Track the paint, preview", ref: 16, preview: true },
   { id: "comp", label: "Composite, preview", ref: 14, preview: true },
-  { id: "cleanfull", label: "Erase pass, full size", ref: 32, final: true }, { id: "full", label: "Shot, full size", ref: 45, final: true },
+  { id: "cleanfull", label: "Clean plate pass, full size", ref: 32, final: true }, { id: "full", label: "Shot, full size", ref: 45, final: true },
   { id: "trackfull", label: "Track the paint, full size", ref: 16, final: true }, { id: "hdr", label: "SDR to HDR", ref: 45, final: true },
   { id: "review", label: "Composite, full size", ref: 12, final: true },
   { id: "export", label: "Export", ref: 10, final: true, onDemand: true },
@@ -2601,7 +2602,7 @@ function reused(r, store, id, take) { // a step that a render with the same eras
   take();
   (store.done ??= {})[id] = 0;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // taken again: its workflows made it
-  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: made by an earlier render with the same erases, used again`);
+  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: made by an earlier render with the same Clean edits, used again`);
 }
 
 async function pipeline(r) { // a render's steps in order; a step made already is skipped, so a render resumes where it stopped
@@ -2626,7 +2627,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     r.told = true;
     log(`Render v${r.v}: ${active.length} edit(s) (${active.map((e) => `${num(e.src)} ${NAME[e.tool]}`).join(", ")}), preview at ${sized}, seed ${common.seed}, steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => st.id).join(" > ")}`);
     if (carry) log(`Render v${r.v}: LTX prompt: ${prompt}`);
-    if (erase) log(`Render v${r.v}: erase pass prompt: ${scene || "none"}`);
+    if (erase) log(`Render v${r.v}: clean plate pass prompt: ${scene || "none"}`);
   }
   // the erase is tracked on the plate first: the erase pass regenerates its areas, the composite keeps them
   if (E?.erased) reused(r, r, "erase", () => { r.erased = E.erased; });
@@ -2666,7 +2667,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       if (S.stage) S.stage.part = `stage 1 of 2 at ${low.join(" × ")}`; // the live preview names the stage: each starts at step 1
       const first = await cleanAt(low, (f) => progress(f / 2));
       if (S.stage) S.stage.part = `stage 2 of 2, upscaled to ${size.join(" × ")}`;
-      log(`Render v${r.v}: Erase pass, full size: stage 2 of 2, 2 steps at ${size.join(" x ")} from stage 1 at ${low.join(" x ")}`);
+      log(`Render v${r.v}: Clean plate pass, full size: stage 2 of 2, 2 steps at ${size.join(" x ")} from stage 1 at ${low.join(" x ")}`);
       const out = await run("cleanup", { ...common, seed: erases[0].seed, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, prompt: scene,
         low: first.clean, width: size[0], height: size[1], prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean`, live: LIVE.every },
         { kind: "clean", progress: (f) => progress(0.5 + f / 2), live: showLive }).done;
@@ -2790,7 +2791,7 @@ async function track(active, shotPath, base, suffix, progress, previous, tools, 
     const movie = outputFile("matte", out, "movie");
     if (movie) found[key === "matte_a" ? "movie_a" : "movie_b"] = viewUrl(movie);
     const note = outputText("matte", out, "follow");
-    if (note) log(`${tool === "erase" ? "Erase" : "Paint"} matte${suffix ? ` (${suffix.slice(1)})` : ""}: ${note}`, matteLargest(note)?.warn ? "warn" : "");
+    if (note) log(`${tool === "erase" ? "Clean" : "Paint"} matte${suffix ? ` (${suffix.slice(1)})` : ""}: ${note}`, matteLargest(note)?.warn ? "warn" : "");
     found[key] = folderOf("matte", out, "frames");
   }
   return mattesOf(found);
@@ -3551,7 +3552,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ...(HDR_ON ? [["Deliver: SDR to HDR", "", () => askDeliverHdr(!S.deliver.hdr), !p || !S.hdrReady || holdsHdr(p.spec, p.headroom), !!p && !!S.deliver.hdr]] : []),
       ["Render in full", "", renderInFull, !S.renders.get(S.heroKey)?.donor], ["Stop generating", "Esc", stopGenerating, !generating()],
       ["Deselect", "Esc", () => select(null), !S.selected]]],
-    ["Tools", [["Paint", "B", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Erase", "E", () => pickTool("erase"), !p || (keying() && !S.fluid.result), S.tool === "erase" && !S.rub],
+    ["Tools", [["Paint", "P", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Clean", "C", () => pickTool("erase"), !p || (keying() && !S.fluid.result), S.tool === "erase" && !S.rub],
       ["Light", "L", () => pickTool("light"), !p || (keying() && !S.fluid.result), S.tool === "light" && !S.rub], ["Eraser", "X", () => setRub(!S.rub), !p, S.rub], ["Pick a colour", "I", () => pickColor(), !p, !!S.picking], "-",
       ["Whole object", "", () => $("#whole").click(), !p, $("#whole").checked], ["Smaller brush", "-", () => setSize(S.size / 1.2), !p],
       ["Larger brush", "=", () => setSize(S.size * 1.2), !p]]],
@@ -3760,6 +3761,19 @@ function setRub(on) {
   hud(on ? "Eraser: rub out the strokes you just painted" : NAME[S.tool]);
   render();
 }
+let eraserKey = null; // X held down: when it went down, the eraser before it, and whether a stroke was dragged since
+function holdEraser() { // X goes down: the eraser is on while it is held
+  if (eraserKey) return;
+  eraserKey = { at: performance.now(), was: S.rub, dragged: false };
+  if (!S.rub) setRub(true);
+}
+function releaseEraser() { // X comes up: a tap switches the eraser, a hold or a stroke puts it back as it was (logic.eraserAfterKey)
+  const k = eraserKey;
+  if (!k) return;
+  eraserKey = null;
+  const on = eraserAfterKey(k.was, (performance.now() - k.at) / 1000, k.dragged);
+  if (on !== S.rub) setRub(on);
+}
 $("#rub-btn").onclick = () => setRub(!S.rub);
 $("#whole").onchange = () => { // on the current erase, the switch is a change like the words: Generate runs it again
   pickTool("erase");
@@ -3955,9 +3969,9 @@ addEventListener("keydown", (e) => {
   else if (/^Digit[1-8]$/.test(e.code) && !mod && !e.altKey) { const n = +e.code.slice(5); pixelZoom(e.shiftKey ? (n > 1 ? 1 / n : 1) : n); } // RV: 1 to 8 N:1, Ctrl+2 to 8 1:N
   else if (k === "`") fullScreen();
   else if (k === "?") showHelp("keys");
-  else if (TOOLS[low] && !mod) pickTool(TOOLS[low]);
+  else if (TOOLS[combo] && !mod) pickTool(TOOLS[combo]); // P, C and L; Shift+P is free
   else if (low === "n" && !mod) nextEdit();
-  else if (low === "x" && !mod) setRub(!S.rub);
+  else if (low === "x" && !mod) { if (!e.repeat) holdEraser(); } // the eraser while X is down; a tap switches it (releaseEraser)
   else if (k === "-" || k === "_") setSize(S.size / 1.2);
   else if (k === "=" || k === "+") setSize(S.size * 1.2);
   else if (k === "Enter") enter(mod);
@@ -3968,7 +3982,11 @@ addEventListener("keydown", (e) => {
   else return;
   e.preventDefault();
 });
-addEventListener("keyup", (e) => { if (e.key.toLowerCase() === "o" && S.compare) { S.compare = false; render(); } });
+addEventListener("keyup", (e) => {
+  if (e.key.toLowerCase() === "o" && S.compare) { S.compare = false; render(); }
+  if (e.key.toLowerCase() === "x") releaseEraser();
+});
+addEventListener("blur", () => { if (eraserKey) { eraserKey.dragged = true; releaseEraser(); } }); // X came up in another window: the hold ends
 function enter(another) { // Generate (Enter): the edit in progress, then its shot; nothing already made runs again. Ctrl+Enter: another seed
   const resumed = S.halted;
   S.halted = false; // a stop (Esc) lasts until Enter

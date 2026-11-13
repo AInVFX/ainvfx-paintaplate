@@ -56,7 +56,7 @@ def picker(page, name):
     grid = [(x / 10, y / 10) for x in range(1, 10) for y in range(1, 10) if abs(x / 10 - SPOT[0]) + abs(y / 10 - SPOT[1]) >= 0.3]
     far = max(grid, key=lambda f: sum(abs(a - b) for a, b in zip(seen(f), own)))
     under = seen(far)
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     over = dab(far)
     check(near(over, own, 2) and not near(under, own, 20), f"{name}: a stroke shows its own colour: {own} painted over {under} reads {over}")
 

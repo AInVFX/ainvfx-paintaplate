@@ -31,9 +31,9 @@
       <span>Paint</span>
     </button>
     <div class="tool-group">
-      <button data-tool="erase" title="Erase to the clean plate (E)">
+      <button data-tool="erase" title="Clean: remove an object, and the clean plate comes back behind it (C)">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4l5 5-9 9H6l-2-2 11-12zM9 18h11"/></svg>
-        <span>Erase</span>
+        <span>Clean</span>
       </button>
       <label class="whole" title="SAM 3.1 grows the stroke to the whole object under it">
         <input id="whole" type="checkbox" checked><span>Whole object</span>
@@ -47,7 +47,7 @@
       <label for="size">Brush</label>
       <input id="size" type="range" min="4" max="320" value="48" title="Brush size (- and =)">
       <output id="size-out" for="size">48</output>
-      <button id="rub-btn" class="rub" aria-pressed="false" title="Eraser: rub out strokes you just painted (X)">
+      <button id="rub-btn" class="rub" aria-pressed="false" title="Eraser: rub out strokes you just painted. Hold X while you drag, or tap X to switch it on or off">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3l5 5-10 10H6l-3-3L16 3zM9 9l6 6M6 21h14"/></svg>
         <span>Eraser</span>
       </button>
@@ -184,7 +184,7 @@
     <section class="help-tab" data-help="start" role="tabpanel" hidden>
       <ol class="help-steps">
         <li>Open a plate: Open, then ComfyUI files, Upload, Scenes or Blank plate. A blank plate starts a fluid shot.</li>
-        <li>Pick a tool (Paint, Erase or Light: B, E, L), describe the change, then paint it on the first frame.</li>
+        <li>Pick a tool (Paint, Clean or Light: P, C, L), describe the change, then paint it on the first frame.</li>
         <li>Generate (Enter): the edit on the first frame, then its shot through the whole plate.</li>
         <li>Play it, compare it with the plate in the wipe (F6), then Export.</li>
       </ol>
@@ -193,10 +193,10 @@
     <section class="help-tab" data-help="tools" role="tabpanel" hidden>
     <h3>Painting</h3>
     <dl>
-      <dt>B, E, L</dt><dd>Paint, Erase, Light. Another tool starts a new edit</dd>
+      <dt>P, C, L</dt><dd>Paint, Clean, Light. Clean removes an object, and the clean plate comes back behind it. Another tool starts a new edit</dd>
       <dt>N</dt><dd>New edit: the next strokes start a separate edit</dd>
       <dt>- and =</dt><dd>Brush size</dd>
-      <dt>X</dt><dd>Eraser: rub out the strokes you just painted</dd>
+      <dt>X</dt><dd>Eraser: hold X while you drag to rub out the strokes you just painted. A tap on X switches the eraser on or off. A pen's eraser end rubs out too</dd>
       <dt>I</dt><dd>Pick a colour: click the frame. On the first frame the brush takes the frame's own colour there, so a stroke of it shows as the picture does. Esc cancels.</dd>
       <dt>Enter</dt><dd>Generate: the edit on the first frame, then its shot. Pressed again with nothing changed, nothing runs twice</dd>
       <dt>Ctrl+Enter</dt><dd>Try another seed on the selected edit, else the last one</dd>

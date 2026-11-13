@@ -100,7 +100,7 @@ def run(browser, port, U):
     small.close()
 
     # 6. A shot on show: once its frames are in memory it plays from memory too
-    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.30, 0.60), (0.40, 0.60)]); page.keyboard.press("Enter")
+    page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.30, 0.60), (0.40, 0.60)]); page.keyboard.press("Enter")
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
     space(page)
     U.wait_log(page, f"{VIEW}.play === 'memory' && {VIEW}.picture === 'shot'", 150000, "shot playing from memory")
