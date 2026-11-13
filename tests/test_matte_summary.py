@@ -37,7 +37,38 @@ class Summary(unittest.TestCase):
     def test_frames_with_no_mask_from_sam_are_counted_apart(self):
         sam, shown, shot, base, front = scene(slice(60, 184))  # SAM loses the object on frame 50; the shot's changes bring it back
         _, summary = m.follow_matte(sam, len(sam), sam[0], shot=shot, base=base, zone=1 / 16, threshold=0.1, element=shown[0].astype(np.float32))
-        found = __import__("re").search(r"added area on \d+ frame\(s\), up to (\d+\.\d) times SAM's mask \((\d+) of them with no mask from SAM\)", summary)
+        found = __import__("re").search(r"\n  Added: areas the shot changed next to the object, on \d+ frames? \(up to (\d+\.\d)x SAM's mask; (\d+) frames? with no SAM mask\)\.", summary)
         self.assertIsNotNone(found, summary)  # at the commit before: « up to 1301.0 times SAM's mask », a count of pixels
         self.assertLess(float(found.group(1)), 5.0)
         self.assertGreater(int(found.group(2)), 0)
+
+
+class Form(unittest.TestCase):
+    """M8 (Adrien, 13 Nov 2026): a headline, the warning next when there is one, then one detail per line, only those."""
+
+    def test_adriens_example_word_for_word(self):  # his edit on 1280p_car.mp4 at 1.11.13
+        text = "Paint matte (640x352): " + m.follow_summary(121, 106, strays=2, added=112, most=30.4, alone=15, moved=1, largest=(31.1, 67))
+        self.assertEqual(text, "\n".join([
+            "Paint matte (640x352): tracked on 106 of 121 frames.",
+            "  Warning: matte up to 31.1x the object at frame 67. Check the composite there.",
+            "  Removed: SAM detections too far from the object, on 2 frames.",
+            "  Added: areas the shot changed next to the object, on 112 frames (up to 30.4x SAM's mask; 15 frames with no SAM mask).",
+            "  Object moves from frame 1: occlusion by the plate not tested."]))
+
+    def test_only_what_happened(self):
+        self.assertEqual(m.follow_summary(121, 121, largest=(1.2, 31)), "tracked on 121 of 121 frames.")  # no warning, no line
+        self.assertEqual(m.follow_summary(6, largest=(60.0, 0)).split("\n"), [
+            "tracked on 0 of 6 frames.", "  Warning: matte up to 60.0x the object at frame 0. Check the composite there.",
+            "  Held: first-frame mask, on every frame."])
+        one = m.follow_summary(12, 11, held=1, added=1, most=1.5, largest=(1.5, 3))
+        self.assertIn("\n  Held: last matte, on 1 frame with no SAM mask.", one)  # one frame, not « 1 frames »
+        self.assertIn("\n  Added: areas the shot changed next to the object, on 1 frame (up to 1.5x SAM's mask).", one)
+
+    def test_every_line_is_one_technical_line(self):
+        text = m.follow_summary(121, 100, zones=9, placed=23, strays=2, held=4, added=10, most=2.0, alone=1, guarded=2,
+                                smoothed=3, moved=5, fronts=30, gone=5, largest=(3.5, 40))
+        lines = text.split("\n")
+        self.assertEqual(len(lines), 12)
+        for line in lines[1:]:
+            self.assertRegex(line, r"^  [A-Z][^\n]*\.$")
+            self.assertNotRegex(line, r"\b(so|what it found|is asked|times|frame\(s\))\b")

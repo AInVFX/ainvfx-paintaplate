@@ -647,6 +647,45 @@ def replay(path: str) -> dict:
             "shot": back("shot"), "base": back("base"), "zone": float(d["zone"]), "threshold": float(d["threshold"]), "element": back("element")}
 
 
+def follow_summary(n: int, seen=None, zones=0, placed=0, strays=0, held=0, added=0, most=0.0, alone=0, guarded=0,
+                   smoothed=0, moved=0, fronts=0, gone=0, largest=None) -> str:
+    """Follow Matte's summary for a person (Adrien, 13 Nov 2026): a headline, the warning next when there is one, then one
+    line per rule that acted, and only those. The page writes « Paint matte (WxH): » or « Clean matte (WxH): » before it,
+    and the GPU report reads that start. `seen` counts the frames where SAM 3.1 found the object, None when it returned
+    no mask; `largest` is (the largest matte against the object's area on its frame, that frame); the other counts are
+    follow_matte's, in frames."""
+    def on(k):
+        return f"{k} frame" + ("" if k == 1 else "s")
+    lines = []
+    if seen is None:
+        lines.append("Held: first-frame mask, on every frame.")
+    else:
+        if zones:
+            lines.append(f"Removed: paint zone outside the object's place, on {on(zones)} (SAM mask held the paint zone).")
+        if placed:
+            lines.append(f"Object stands still: its place of frame 0 added where the plate shows it, on {on(placed)}.")
+        if strays:
+            lines.append(f"Removed: SAM detections too far from the object, on {on(strays)}.")
+        if held:
+            lines.append(f"Held: last matte, on {on(held)} with no SAM mask.")
+        if added:
+            why = [f"up to {most:.1f}x SAM's mask"] * bool(most) + [f"{on(alone)} with no SAM mask"] * bool(alone)
+            lines.append(f"Added: areas the shot changed next to the object, on {on(added)}" + (f" ({'; '.join(why)})." if why else "."))
+    if guarded:
+        lines.append(f"Removed: areas the shot changed away from the SAM mask, on {on(guarded)} (changes over 3x the object).")
+    if smoothed:
+        lines.append(f"Reduced: matte over {FOLLOW_SPIKE:g}x the frames around it, on {on(smoothed)}.")
+    if moved:
+        lines.append(f"Object moves from frame {moved}: occlusion by the plate not tested.")
+    if fronts:
+        lines.append(f"Removed: areas where the plate stands in front of the object, on {on(fronts)}.")
+    if gone:
+        lines.append(f"Removed: pieces that left the object's place, on {on(gone)}.")
+    if largest is not None and largest[0] > FOLLOW_WARN:
+        lines.insert(0, f"Warning: matte up to {largest[0]:.1f}x the object at frame {largest[1]}. Check the composite there.")
+    return "\n  ".join([f"tracked on {seen or 0} of {n} frames."] + lines)
+
+
 def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=None, zone: float = 1 / 16,
                  threshold: float = 0.1, workers: int = 8, element=None, tick=None):
     """One matte per frame from a tracker's masks, made safe for the composite. Returns (mattes (n, H, W), summary).
@@ -724,8 +763,9 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       tracker's own mask did not grow as much, keeps only what those frames hold too. So the matte's area changes
       smoothly, and a difference over the whole frame cannot move the search.
     `tick`, called once per frame, lets the caller stop the loop by raising (ComfyUI's interrupt check, in nodes.py).
-    The summary ends with the largest matte against the object's area (the tracker's mask on that frame with the part
-    of its place that the plate covers, or where it was last seen) and its frame, with a warning above FOLLOW_WARN.
+    The summary is follow_summary's: a headline, a warning when the largest matte is more than FOLLOW_WARN times the
+    object's area (the tracker's mask on that frame with the part of its place that the plate covers, or where it was
+    last seen), then one line per rule that acted.
     """
     if os.environ.get("PAINTAPLATE_RECORD"):
         record(os.environ["PAINTAPLATE_RECORD"], masks, n, first, shot, base, zone, threshold, element)
@@ -974,39 +1014,14 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     calm |= out[j] > 0.5
             out[t] = cores[t] | ((out[t] > 0.5) & grow(calm, thin))
             smoothed += 1
-    if not len(masks) or not masks.any():
-        summary = "SAM 3.1 returned no mask: the first-frame mask holds on every frame"
-    else:
-        summary = f"SAM 3.1 found the object on {seen} of {n} frames"
-        if zones:
-            summary += f"; on {zones} frame(s) its mask held the paint zone it was given, and the matte kept to the object's place there"
-        if placed:
-            summary += f"; on {placed} frame(s) its place of frame 0, in view, added to SAM's mask: an erased object stands still"
-        if strays:
-            summary += f"; what it found further than the object can move, on {strays} frame(s), is left out"
-        if held:
-            summary += f"; the last matte held on {held} frame(s) where the object was not seen"
-        if added:
-            summary += f"; the shot's changes connected to the object added area on {added} frame(s), up to {most:.1f} times SAM's mask"
-            if alone:
-                summary += f" ({alone} of them with no mask from SAM)"
-    if guarded:
-        summary += f"; on {guarded} frame(s) the changes were far larger than the object, and only those at SAM's mask were kept"
-    if smoothed:
-        summary += f"; {smoothed} frame(s) larger than {FOLLOW_SPIKE:g} times the frames around them were brought back to what those frames hold"
-    if moved:
-        summary += f"; the object moved in the scene on frame {moved}, so the plate is not asked what stands in front of it"
-    if fronts:
-        summary += f"; the plate stood in front of the object's place on {fronts} frame(s), and what stood there is left out"
-    if gone:
-        summary += f"; what left the object's place, on {gone} frame(s), is left out"
+    largest = None
     if n:
         ratio = out.reshape(n, -1).sum(1) / size
         worst = int(ratio.argmax())
-        summary += f"; the largest matte is {ratio[worst]:.1f} times the object, on frame {worst}"
-        if ratio[worst] > FOLLOW_WARN:
-            summary += f" (warning: above {FOLLOW_WARN:g}, check the composite on that frame)"
-    return out, summary
+        largest = (float(ratio[worst]), worst)
+    tracked_any = bool(len(masks)) and bool(masks.any())
+    counts = dict(seen=seen, zones=zones, placed=placed, strays=strays, held=held, added=added, most=most, alone=alone) if tracked_any else {}
+    return out, follow_summary(n, guarded=guarded, smoothed=smoothed, moved=moved, fronts=fronts, gone=gone, largest=largest, **counts)
 
 
 GRAIN_UNIT = _grain_unit()
