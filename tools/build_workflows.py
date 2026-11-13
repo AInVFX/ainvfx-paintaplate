@@ -528,8 +528,11 @@ def fitted(g, base, gen, union):
             match_color=True, grain=Slot("grain", 1.0), grow=Slot("grow", 8), feather=Slot("feather", 12),
             steady=Slot("steady", 2))
     g.link_slot(fit, "mask", "fit_mask")  # the page drops this link when there is no matte
-    final = g("ImageCompositeMasked", _title="Composite", destination=base, source=fit[0], x=0, y=0,
-              resize_source=False, mask=fit[1])
+    # One frame at a time: core's Image Composite Masked holds four copies of the shot and two of its mask on a whole
+    # batch. Fit to Plate always gives a mask (zeros without a matte), and Load Plate gives the plate's alpha apart: RGB here
+    size = g("GetImageSize", image=base)
+    final = g("PaintAPlate_CompositeFrames", _title="Composite", destination=base, source=fit[0], mask=fit[1],
+              width=size[0], height=size[1])
     return fit, final
 
 

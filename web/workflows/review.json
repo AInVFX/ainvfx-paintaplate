@@ -400,7 +400,16 @@
   }
  },
  "24": {
-  "class_type": "ImageCompositeMasked",
+  "class_type": "GetImageSize",
+  "inputs": {
+   "image": [
+    "19",
+    0
+   ]
+  }
+ },
+ "25": {
+  "class_type": "PaintAPlate_CompositeFrames",
   "inputs": {
    "destination": [
     "19",
@@ -410,11 +419,16 @@
     "23",
     0
    ],
-   "x": 0,
-   "y": 0,
-   "resize_source": false,
    "mask": [
     "23",
+    1
+   ],
+   "width": [
+    "24",
+    0
+   ],
+   "height": [
+    "24",
     1
    ]
   },
@@ -422,11 +436,11 @@
    "title": "Composite"
   }
  },
- "25": {
+ "26": {
   "class_type": "ImageFromBatch",
   "inputs": {
    "image": [
-    "24",
+    "25",
     0
    ],
    "batch_index": 0,
@@ -436,11 +450,11 @@
    ]
   }
  },
- "26": {
+ "27": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
-    "25",
+    "26",
     0
    ],
    "config": "ocio://studio-config-latest",
@@ -456,13 +470,13 @@
    }
   }
  },
- "27": {
+ "28": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
    "width": 0,
    "height": 0,
    "images": [
-    "26",
+    "27",
     0
    ],
    "fps": [
@@ -482,11 +496,11 @@
    "output": "review"
   }
  },
- "28": {
+ "29": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
-    "25",
+    "26",
     0
    ],
    "format": "exr",
@@ -505,11 +519,11 @@
    "output": "frames"
   }
  },
- "29": {
+ "30": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
-    "25",
+    "26",
     0
    ],
    "config": "ocio://studio-config-latest",
@@ -525,13 +539,13 @@
    }
   }
  },
- "30": {
+ "31": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
    "width": 0,
    "height": 0,
    "images": [
-    "29",
+    "30",
     0
    ],
    "fps": [
