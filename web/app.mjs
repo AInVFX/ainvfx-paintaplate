@@ -18,7 +18,7 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
 import { FAMILY, framesNeed, matteLargest, freesBefore, memoryProfile, remember, slower, stepLeft, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
-import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, stopHint } from "./logic.mjs";
+import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { askedSeed } from "./logic.mjs"; // the tests: a seed asked for in the address
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
@@ -243,6 +243,7 @@ async function writeCaption(e, reference, key, kind) {
 // opts.cs: the plate's colour space (else read from the file); opts.fluid: a blank plate, opened as a fluid shot; opts.under:
 // the same edits on another plate, or on the same plate in another colour space
 async function openPlate(list, typed, opts = {}) {
+  let fileSpace = null; // the colour space the file says it holds: the OCIO menu tells it from one the person chose
   if (!list.length && !typed) return status("Choose files, or type a path in ComfyUI's input folder.");
   const began = performance.now();
   stopEverything();
@@ -274,6 +275,7 @@ async function openPlate(list, typed, opts = {}) {
     const st = await fetch(`/paintaplate/stat?${new URLSearchParams({ path, config: S.ocio.config, cs: knownSpace(opts.cs) ?? "" })}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     headroom = st?.headroom ?? 1; // above 1.0 for a log encoding: an integer plate then holds SDR to HDR's values (logic.holdsHdr)
     setSalt(plateIdentity(path, st, INDEX_ON)); // the plate's identity: job index keys change when it does
+    fileSpace = st?.color_space ?? null;
     cs = knownSpace(opts.cs) ?? st?.color_space ?? modelSpace(); // one colour space per plate: the viewer, the models and the export use it
     // a video plate's proxy keeps its own values at the working size, so the viewer converts it with OCIO as it does the plate
     const video = st?.kind === "video", work = st?.width ? fitSize(st.width, st.height, WORK_SIDE, 32) : null;
@@ -298,7 +300,7 @@ async function openPlate(list, typed, opts = {}) {
   const spec = JSON.parse(outputText("ingest", out, "spec"));
   const [w, h] = [spec.width, spec.height];
   const stem = plateStem(spec.kind === "video" ? spec.source : spec.first_file ?? spec.source, spec.kind === "sequence");
-  S.plate = { id, path, cs, headroom, spec, frames: spec.frames, fps: spec.fps || 24, name: stem, deep: spec.kind !== "video", // an image sequence: read at full precision
+  S.plate = { id, path, cs, pageSpaceChosen: opts.chosen ?? (!!fileSpace && cs !== fileSpace), headroom, spec, frames: spec.frames, fps: spec.fps || 24, name: stem, deep: spec.kind !== "video", // an image sequence: read at full precision
     proxySpace: spec.kind === "video" ? cs : logSpace(), // an image sequence's proxy holds log values
     first: spec.kind === "video" ? 1 : spec.first_frame ?? 1,
     work: fitSize(w, h, WORK_SIDE, 32), prev: fitSize(w, h, EDIT_SIDE, 16),
@@ -336,7 +338,7 @@ async function openPlate(list, typed, opts = {}) {
   const big = bigPlateWarning(spec, S.vram); // above 2K on a card under 48 GB: renders may not finish (README, GPU)
   if (big) { log(big); setTimeout(() => status(big), 80); }
   const next = "Describe the edit at the top, paint on the frame, then Generate.", plate = S.plate;
-  const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", read from the file"} (right-click > OCIO > File Color Space changes it). ${next}`;
+  const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", read from the file"} (right-click > OCIO > Plate colour space changes it). ${next}`;
   status(opened, "hint");
   if (keying()) enterFluid(); else fluidUI();
   plateVid.addEventListener("canplaythrough", () => { // the playback video is loaded. It says so only while the open's own sentence is on show: a blank plate keeps its fluid hint
@@ -1092,7 +1094,7 @@ function render() {
     if (playStats && img && S.playing) { playStats.time("look", t1 - t0); playStats.time("copy", performance.now() - t1); } // main-thread time: the GPU's own shows as late frames
     return !!img;
   };
-  // the plate in its own values, so a new File Color Space shows at once: an image sequence's frames once they arrive,
+  // the plate in its own values, so a new plate colour space shows at once: an image sequence's frames once they arrive,
   // else the playback video (a video plate's own values at the working size), else the first frame as ingested
   const drawPlate = () => {
     if (still && draw(sharpFrame("plate", p.path), p.cs)) return void (native = true); // paused: the frame on show at native size
@@ -1783,7 +1785,7 @@ async function rebase() { // the plate under the edits: the fluid shot when it i
   if (!path || S.plate?.path === path) { historyUI(); return render(); }
   // an HDR fluid shot: the space the hdr workflow writes its EXR frames in (HDR_SPACE there). Read from the file, they
   // opened as Linear Rec.709 (2 Nov), their AP0 values taken for Rec.709 ones
-  await openPlate([], path, { under: true, cs: made && f.result.hdr ? knownSpace(HDR_FRAMES) ?? undefined : modelSpace() });
+  await openPlate([], path, { under: true, cs: made && f.result.hdr ? knownSpace(HDR_FRAMES) ?? undefined : modelSpace(), chosen: false });
   log(`The plate under the edits: ${made ? `the fluid shot v${f.result.v}` : "the blank plate"}`); // once it is open
   if (S.edits.some((e) => e.on && e.state === "done")) queue(regenerateDependents); // made again on it, or taken back
 }
@@ -1858,7 +1860,7 @@ async function openBlank() { // a black canvas LTX and ainvfx-fluid take, then a
   if (!r.ok) throw new Error(await r.text());
   const { path } = await r.json();
   $("#open").close();
-  await openPlate([], path, { fluid: { blankPath: path, depth }, cs: modelSpace() });
+  await openPlate([], path, { fluid: { blankPath: path, depth }, cs: modelSpace(), chosen: false });
 }
 
 function fluidUI() { // the panel, the tools and the help of a fluid shot; none of it outside one
@@ -3237,7 +3239,7 @@ async function openScene(text) { // the plate opens in its colour space, then ev
   if (scene.preview) setPreview(scene.preview);
   const deliverHdr = scene.version >= 6 ? !!scene.deliver?.hdr : scene.version === 5 && scene.hdr === true; // 5: the old switch, on
   const from = scene.version >= 2 && Array.isArray(scene.work) ? scene.work : null; // strokes in pixels of this working size
-  await openPlate([], scene.plate.path, { cs: scene.fluid ? modelSpace() // a blank plate, as openBlank opens it (1.4.0 saved the space under its edits)
+  await openPlate([], scene.plate.path, { chosen: scene.fluid ? false : undefined, cs: scene.fluid ? modelSpace() // a blank plate, as openBlank opens it (1.4.0 saved the space under its edits)
     : scene.version >= 3 ? scene.plate.color_space : undefined, // older scenes: read from the file
     ...(scene.fluid ? { fluid: { blankPath: scene.plate.path, seed: scene.fluid.seed, prompt: scene.fluid.prompt ?? "", on: scene.fluid.on !== false, depth: blankDepth(scene.fluid.depth) } } : {}) });
   S.deliver = { hdr: deliverHdr }; // openPlate reset Deliver's passes
@@ -3481,7 +3483,7 @@ function showInspector(pt, frame, got, live = true) { // live: the point and fra
   for (const t of ["pointerup", "pointercancel"]) box.addEventListener(t, () => { grab = null; });
 }
 
-// ---------- OCIO, as in RV: the plate's File Color Space, the look, the display and view, the config ----------
+// ---------- OCIO: the plate's colour space (RV's File Color Space), the view, the display, the look, the config ----------
 
 function saveOcio() { try { const { config, display, view, look: lk } = S.ocio; localStorage.setItem(OCIO_PREF, JSON.stringify({ config, display, view, look: lk })); } catch { /* this session only */ } }
 
@@ -3503,16 +3505,26 @@ function setOcio(change) { // the display, the view or the look: the viewer only
   hud(v, 1800); log(`OCIO view: ${v}`); render();
 }
 
-async function setPlateSpace(cs) { // the plate's File Color Space, as RV calls it: the viewer at once, then the models and the export
+async function setPlateSpace(cs, asked = false) { // the plate's colour space (RV's File Color Space): the viewer at once, then the models and the export
   const p = S.plate;
   if (!p || p.cs === cs) return;
-  log(`File Color Space: ${cs}, was ${p.cs}`);
+  const made = S.edits.filter((e) => e.on && e.state === "done").length; // results it makes again: the page asks first
+  if (made && !asked) return askRemake(made, () => setPlateSpace(cs, true).catch(quiet));
+  log(`Plate colour space: ${cs}, was ${p.cs}`);
   Object.assign(p, { cs, proxySpace: p.deep ? p.proxySpace : cs }); // a video plate's proxy holds its own values
-  hud(`File Color Space: ${cs}`, 2000); render();
-  const edits = S.edits.some((e) => e.on && e.state === "done");
+  hud(`Plate colour space: ${cs}`, 2000); render();
+  const edits = made > 0;
   await openPlate([], p.path, { under: true, cs }); // the first frame in the model space again, and the edits made again on it
   if (edits) queue(regenerateDependents);
-  status(`File Color Space ${cs}: the viewer shows it, and the first frame${edits ? " and the edits are" : " is"} made again in it. Switching back takes the earlier results from the job index.`);
+  status(`Plate colour space ${cs}: the viewer shows it, and the first frame${edits ? " and the edits are" : " is"} made again in it. Switching back takes the earlier results from the job index.`);
+}
+
+function askRemake(made, change) { // a change that makes results again asks first: Change goes on, Cancel or Esc changes nothing
+  const d = $("#ask");
+  $("#ask-text").textContent = remakeQuestion(made);
+  d.returnValue = "";
+  d.onclose = () => { if (d.returnValue === "yes") change(); };
+  d.showModal();
 }
 
 async function setConfig(name) { // RV's Change Config: the viewer and the workflows use another OCIO config
@@ -3526,14 +3538,17 @@ async function setConfig(name) { // RV's Change Config: the viewer and the workf
   if (edits) queue(regenerateDependents);
 }
 
-function ocioItems() { // RV's OCIO menu (ocio_source_setup.py): the File Color Space tree by family, the look, the displays and views, the config
+function ocioItems() { // what changes the result (the plate's colour space), then what never does (the view); the config holds both
   const o = S.ocio, info = o.info, p = S.plate;
   const spaces = (node) => [...node.children.map((c) => [c.name, "", spaces(c)]),
     ...node.spaces.map((name) => [name, "", () => setPlateSpace(name).catch(quiet), !p, p?.cs === name])];
-  return [["File Color Space", "", spaces(ocioTree(info.spaces)), !p],
-    ["Look", "", [["None", "", () => setOcio({ look: "" }), false, !o.look], ...info.looks.map((lk) => [lk, "", () => setOcio({ look: lk }), false, o.look === lk])]],
-    ["Displays", "", info.displays.map((d) => [d.name, "", d.views.map((v) => [v, "", () => setOcio({ display: d.name, view: v }), false, o.display === d.name && o.view === v])])],
-    "-", ["Change Config", "", info.configs.map((c) => [c.label, "", () => setConfig(c.name).catch(quiet), false, c.name === info.config])]];
+  const shown = info.displays.find((d) => d.name === o.display) ?? info.displays[0]; // the display in use: its views come first
+  return ["THE PLATE · changes the result", [plateSpaceLine(p), "", spaces(ocioTree(info.spaces)), !p],
+    "THE VIEW · never changes a result",
+    [`View: ${o.view}`, "", shown.views.map((v) => [v, "", () => setOcio({ display: shown.name, view: v }), false, o.view === v])],
+    [`Display: ${o.display}`, "", info.displays.map((d) => [d.name, "", () => setOcio({ display: d.name, view: d.views.includes(o.view) ? o.view : d.views[0] }), false, o.display === d.name])],
+    ...(info.looks.length ? [[`Look: ${o.look || "None"}`, "", [["None", "", () => setOcio({ look: "" }), false, !o.look], ...info.looks.map((lk) => [lk, "", () => setOcio({ look: lk }), false, o.look === lk])]]] : []),
+    "-", [`Config: ${info.label}`, "", info.configs.map((c) => [c.label, "", () => setConfig(c.name).catch(quiet), false, c.name === info.config])]];
 }
 
 // ---------- The right-click menu, as RV's: every action of the page, with its key ----------
@@ -3589,6 +3604,7 @@ function menuList(items) { // a submenu: actions, separators, and nested submenu
   for (const it of items) {
     const row = document.createElement("li");
     if (it === "-") { row.className = "sep"; sub.append(row); continue; }
+    if (typeof it === "string") { row.className = "head"; row.setAttribute("role", "presentation"); row.textContent = it; sub.append(row); continue; } // a heading
     const [label, key, action, disabled = false, checked] = it;
     if (Array.isArray(action)) { sub.append(menuGroup(label, action, disabled)); continue; }
     const b = document.createElement("button");

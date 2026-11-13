@@ -492,6 +492,12 @@ export function toolEndsEdit({ draft, current }, tool) { // picking another tool
 // ERASER_TAP seconds with no stroke, switches it on or off. The eraser's state once the key comes up.
 export const ERASER_TAP = 0.3;
 export function eraserAfterKey(was, held, dragged) { return !dragged && held < ERASER_TAP ? !was : was; }
+// The OCIO menu's line for the plate: its colour space, and where the value comes from (the file, at the open).
+export function plateSpaceLine(plate) {
+  return plate ? `Plate colour space: ${plate.cs}, ${plate.pageSpaceChosen ? "chosen by you" : "read from the file"}` : "Plate colour space: no plate";
+}
+// The question before a change of the plate's colour space that makes results again.
+export function remakeQuestion(edits) { return `This makes the first frame and ${edits} edit${edits === 1 ? "" : "s"} again.`; }
 
 export function fluidPrompt(words) { // the trigger first, as the model card asks; no words: its own example
   const rest = (words || "").trim().replace(/^ainvfxfluid\s*,?\s*/i, "");

@@ -251,9 +251,9 @@
     <p class="hint">RV uses E, C, R, G, B and L without Shift. Here P, C and L pick the tools. The values are RV's: contrast is 0 at rest and turns about 0.5, gamma acts before the other tools, invert before exposure.</p>
     <h3>OCIO, as in RV: right-click, then OCIO</h3>
     <dl>
-      <dt>File Color Space</dt><dd>The plate's colour space, by family. The viewer shows it at once; the models and the export use it too, so the edits are made again in it</dd>
-      <dt>Look, Displays</dt><dd>The look, then the display and its view: the viewer only, while the shot plays</dd>
-      <dt>Change Config</dt><dd>The config named by $OCIO when it is set, as in RV, else OCIO's built-in configs</dd>
+      <dt>The plate · changes the result</dt><dd>Plate colour space: what the file's numbers mean, by family (RV calls it File Color Space). Its line says where the value comes from: read from the file, or chosen by you. The models and the export use it, so a change makes the first frame and the edits again. When an edit has a result, the page asks first</dd>
+      <dt>The view · never changes a result</dt><dd>View: the views of the display in use. Display: the other displays. Look: only when the config has looks. The viewer only, also while the shot plays</dd>
+      <dt>Config</dt><dd>The config named by $OCIO when it is set, as in RV, else OCIO's built-in configs. It holds both the plate's colour space and the view</dd>
     </dl>
     </section>
     <section class="help-tab" data-help="render" role="tabpanel" hidden>
@@ -286,6 +286,13 @@
       <p id="x-note" class="hint"></p>
       <menu><button id="x-graph" value="cancel" title="One ComfyUI workflow for the whole scene: the edits, their captions and seeds, and the render, to keep editing in ComfyUI">ComfyUI graph</button>
         <button value="cancel">Cancel</button><button id="x-go" value="ok" class="primary">Export</button></menu>
+    </form>
+  </dialog>
+
+  <dialog id="ask" class="ask">
+    <form method="dialog">
+      <p id="ask-text"></p>
+      <menu><button id="ask-no" value="no">Cancel</button><button id="ask-yes" value="yes" class="primary">Change</button></menu>
     </form>
   </dialog>
 

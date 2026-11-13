@@ -104,6 +104,7 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .ctx button[aria-checked="true"] .check::before { content: "✓"; color: var(--gold); }
 .ctx kbd { color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .ctx .sep { height: 1px; margin: 4px 6px; background: var(--line); }
+.ctx .head { padding: 8px 10px 3px; font-size: 11px; letter-spacing: 0.04em; color: var(--muted); cursor: default; } /* a heading: what the rows under it do */
 .empty { position: relative; text-align: center; max-width: 400px; color: var(--muted); padding: 24px; }
 .opening { position: relative; width: min(420px, 86%); padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); z-index: 2; }
 .op-title { margin: 0 0 12px; font-weight: 600; }
