@@ -86,7 +86,7 @@ def pass_rows(page, U):
     U.wait_log(page, f"window.__lines.filter((t) => t.includes('{U.REVIEWED}')).length >= 2", 240000, "the full-size composite of both edits")
     settled(page)
     page.keyboard.press("n")  # New edit: nothing selected, so frame 0 shows the pass, not the strokes
-    mattes = ["Track the erase", "Track the paint, preview", "Track the paint, full size"]
+    mattes = ["Track the object", "Track the paint, preview", "Track the paint, full size"]
     U.check(set(mattes) <= set(rows(page)), f"each matte is a row to click: {rows(page)}")
     for label in mattes:
         page.click(f"#stages li.pick:has-text('{label}')"); page.wait_for_timeout(800)
@@ -95,7 +95,7 @@ def pass_rows(page, U):
                 f"{label}: its matte shows, grey, on the first frame, the next and the last: {shown(page)}, {seen}")
         page.click(f"#stages li.pick:has-text('{label}')"); page.wait_for_timeout(500)
         U.check(shown(page) == ["Composite, full size"], f"{label}: a second click gives the latest back: {shown(page)}")
-    page.click("#stages li.pick:has-text('Track the erase')"); page.wait_for_timeout(500)
+    page.click("#stages li.pick:has-text('Track the object')"); page.wait_for_timeout(500)
     page.keyboard.press("Escape"); page.wait_for_timeout(500)
     U.check(shown(page) == ["Composite, full size"], f"Esc gives the latest back from a matte: {shown(page)}")
     page.click("#export-btn")

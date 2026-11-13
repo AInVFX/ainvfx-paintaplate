@@ -246,7 +246,8 @@ def open_flow(browser, port):
     page = load(browser, port, errors=errors)
     version = page.text_content("#version") or ""
     first = page.eval_on_selector_all("#log li span", "els => els.slice(0, 3).map(e => e.textContent)")
-    check(version.count(".") == 2 and f"AInVFX Paint a plate {version}" in first, f"the top bar shows the pack's version and the log names it first: {version} {first}")
+    check(version.count(".") == 2 and any(t.startswith(f"AInVFX Paint a plate {version} (build ") for t in first),
+          f"the top bar shows the pack's version, and the log names it first with the server's build: {version} {first}")
 
     page.click("#open-btn")
     page.wait_for_selector("#browse .item.video:has-text('desk.mp4')", timeout=10000)
