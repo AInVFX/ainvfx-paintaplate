@@ -337,5 +337,22 @@ class ReportLines(unittest.TestCase):
         self.assertEqual(gpu_matrix.carried(r, True, gb), [])
 
 
+class MatteCases(unittest.TestCase):
+    """Two cases for the matte agent (wave 5, R4), outside quick and all: a paint on a moving object, and an object that
+    stands still for 12 frames or more, then leaves by itself (Adrien accepted that the matte loses it and wants a recording)."""
+
+    def test_two_paint_cases_outside_quick_and_all(self):
+        cases = gpu_matrix.load_cases()
+        html = "".join(open(p, encoding="utf-8").read() for p in glob.glob(os.path.join(gpu_matrix.REPO, "web", "*.html")))
+        for name in ("horse_saddle", "horse_bird"):
+            case = cases[name]
+            self.assertNotIn(name, gpu_matrix.ALL + gpu_matrix.QUICK)
+            self.assertEqual((case["path"], [s[0] for s in case["strokes"]]), ("plates/horse.mp4", ["paint"]))
+            self.assertIsInstance(case["seed"], int, "the same jobs at every run")
+            self.assertIn(f'data-color="{case["strokes"][0][4]["color"]}"', html, "one of the page's swatches")
+        self.assertIn("still", cases["horse_bird"]["strokes"][0][1])
+        self.assertIn("flies away", cases["horse_bird"]["strokes"][0][1])
+
+
 if __name__ == "__main__":
     unittest.main()
