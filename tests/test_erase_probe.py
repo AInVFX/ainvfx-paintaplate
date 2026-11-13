@@ -83,6 +83,14 @@ class Boxes(unittest.TestCase):
         self.assertEqual(p.tight_box(m), [200, 250, 400, 750])
         self.assertEqual(p.bounds(np.zeros((10, 10), bool)), [0, 0, 1000, 1000])
 
+    def test_masks_are_drawn_as_the_pages_canvas_draws_them(self):
+        import numpy as np
+        p = probe()
+        m = np.zeros((1088, 1920), np.uint8)
+        m[398:520, 1400:] = 255  # a barn's mask whose top is three quarters of the way down the grid's row 19
+        rows = np.nonzero((p.resized(m, (96, 54)) > 32).any(1))[0]
+        self.assertEqual(rows[0], 20)  # sampled at the cells' centres, as the page's canvas does: [362, ...] on 12 Nov
+
     def test_names(self):
         p = probe()
         self.assertEqual(p.name_of("The barn."), "barn")
@@ -135,24 +143,25 @@ class AgainstTheMock(unittest.TestCase):
         p = probe()
         said = io.StringIO()
         with redirect_stdout(said):
-            p.main(["plates/desk.mp4", "--url", self.url, "--comfy", self.root, "--out", self.out,
+            p.main(["plates/desk.mp4", "--url", self.url, "--out", self.out,
                     "--stroke", "bottle:0.45,0.5;0.55,0.5:40"])
         with open(os.path.join(self.out, "answers.json")) as f:
             o = json.load(f)["strokes"][0]
         self.assertEqual(list(o["requests"]), list(p.REQUESTS))
         self.assertTrue(o["requests"]["own"]["caption"].startswith("Remove the object inside <obj_1> completely"))
         # the mock's writer answers with the request, which cites <obj_1>: the page keeps it
-        for req in ("page", "dimmed", "crop", "tight", "as_words"):
+        for req in ("page", "wide", "dimmed", "crop", "as_words"):
             self.assertFalse(o["requests"][req]["refused"], req)
             self.assertIn("<obj_1>", o["requests"][req]["caption"], req)
         # the crop's answer carries the page's own boxes on the frame, not the crop's
-        self.assertIn(json.dumps(o["paths"]["page"]["boxes"][0], separators=(", ", ": ")).replace(" ", "")[1:-1],
+        self.assertIn(json.dumps(o["paths"]["page"]["chosen"]["boxes"][0], separators=(", ", ": ")).replace(" ", "")[1:-1],
                       o["requests"]["crop"]["caption"].replace(" ", ""))
         # one Klein job per mask and caption that differ; the mock's Klein moves what it removes by 51 levels, and SAM finds the same discs
         self.assertEqual(len(o["edits"]), len({f"{r['path']}|{r['caption']}" for r in o["requests"].values()}))
         # as_words names the object, then runs as if the name had been typed: SAM 3.1 by that name, and a mask of its own
         self.assertEqual((o["requests"]["as_words"]["path"], o["paths"]["name"]["words"]), ("name", o["object"]))
         self.assertIn(f"Remove the {o['object']} <obj_1>", o["requests"]["as_words"]["request"])
+        self.assertEqual(o["paths"]["page"]["chosen"]["boxes"], [o["paths"]["page"]["core"]])  # no words, one part: the core box
         for cap, e in o["edits"].items():
             self.assertGreater(e["share"][0], 0.5, cap[:60])
             self.assertEqual(e["sam"], 1.0)

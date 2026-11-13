@@ -1,11 +1,11 @@
 """Asks for the page's first-frame erase in several ways on a running ComfyUI, and says which way removes the object.
 
-    python tests/erase_probe.py plates/horse.mp4 --comfy /data/ComfyUI --out ~/paintaplate_gpu/erase_probe
+    python tests/erase_probe.py plates/horse.mp4 --out ~/paintaplate_gpu/erase_probe
         [--url http://127.0.0.1:8188] [--seed 1017942128] [--stroke NAME:x,y;x,y;...[:SIZE[:WORDS]]] [--full]
-        [--requests page,dimmed,crop,tight,named,as_words,own]
+        [--requests page,wide,dimmed,crop,named,as_words,own]
 
-`plate` is the path the page sends: a video or an image under ComfyUI's input folder (--comfy names ComfyUI's folder), or a
-file on this machine. Run it in the tests' environment: the page's rules come from web/logic.mjs itself, run by Node, and
+`plate` is the path the page sends, under ComfyUI's input folder: the probe opens it with the page's own `ingest`, and draws
+every image and mask as the page's canvas does (bilinear, sampled at each pixel's centre). Run it in the tests' environment: the page's rules come from web/logic.mjs itself, run by Node, and
 Playwright's own Node serves when no other is on the PATH.
 
 For each stroke, the probe does what the page does for an erase with Whole object on (prepare, writeCaption and generate in
@@ -64,11 +64,12 @@ NAME_SYSTEM = ("You see an image in which one object keeps its full colour and e
                "answer with its common name only, in one to three words, with no article and no sentence.")
 NAME_REQUEST = "Name the object that keeps its full colour."
 REQUESTS = {  # how each one asks for Klein's caption: what the prompt writer sees, and the boxes it gets
-    "page": "the page today: the frame, and locked boxes around the paint and the whole object (logic.paintBoxes)",
+    "page": "the page's own request (logic.writerBoxes): with no words and one painted part, one box cut to the stroke and to "
+            "what most of SAM's masks hold (logic.coreBox); otherwise one box per painted part",
+    "wide": "the request before 1.11.14: one box per painted part, around SAM's whole union (logic.paintBoxes)",
     "dimmed": "the page's request, on the frame with all but the object dimmed to 30% of its light",
     "crop": "the page's request on the object's own crop (its box, and half its size on each side); "
             "the boxes of the answer come back to the frame",
-    "tight": "one locked box cut to the object: the stroke, and the pixels that most of SAM's kept masks hold",
     "named": "a first question names the object, on the dimmed frame; the page's own caption then carries that name",
     "as_words": "the same name, then the page as if it had been typed: SAM 3.1 by name, the locked boxes of its mask, "
                 "the writer's request with the name, and Klein inside that mask",
@@ -147,8 +148,22 @@ def raw(a):
 # ---------- Images, as the page's canvases make them ----------
 
 def resized(img, size):
-    """An image (H x W [x C], 8 bits) drawn at `size` (width, height)."""
-    return np.asarray(Image.fromarray(img).resize(tuple(size), Image.BILINEAR))
+    """An image (H x W [x C], 8 bits) drawn at `size` (width, height) as the page's canvas draws it: bilinear, sampled at each
+    new pixel's centre, with no average over a wider area. An average (Pillow's resize) grew the barn's grid by a row on top,
+    and the probe asked with [343, 721, 490, 1000] where the page asked with [362, 721, 490, 1000] (12 and 13 Nov 2026)."""
+    h, w = img.shape[:2]
+    W, H = size
+    if (w, h) == (W, H):
+        return img
+    ys, xs = np.clip((np.arange(H) + 0.5) * h / H - 0.5, 0, h - 1), np.clip((np.arange(W) + 0.5) * w / W - 0.5, 0, w - 1)
+    y0, x0 = np.floor(ys).astype(int), np.floor(xs).astype(int)
+    y1, x1 = np.minimum(y0 + 1, h - 1), np.minimum(x0 + 1, w - 1)
+    fy, fx = (ys - y0)[:, None], (xs - x0)[None, :]
+    if img.ndim == 3:
+        fy, fx = fy[..., None], fx[..., None]
+    a = img.astype(np.float32)
+    top, bottom = a[y0][:, x0] * (1 - fx) + a[y0][:, x1] * fx, a[y1][:, x0] * (1 - fx) + a[y1][:, x1] * fx
+    return np.clip(top * (1 - fy) + bottom * fy + 0.5, 0, 255).astype(np.uint8)
 
 
 def mask_at(mask, size):  # app.maskAt: the mask at `size`, as 0 and 1
@@ -366,11 +381,14 @@ def path_of(url, o, words, got, prev, work):
         p["sam"] |= m
     p["mask_work"] = o["painted_work"] | (resized(p["sam"].astype(np.uint8) * 255, work) > 127)
     p["mask_prev"], p["bbox"], p["paint"] = mask_at(p["mask_work"], prev), bounds(p["mask_work"]), paint_grid(p["mask_work"])
-    p["own"], p["boxes"] = page(("caption", {"tool": "erase", "words": words, "colors": [], "color": "#ffffff",
-                                             "bbox": p["bbox"]}), ("paintBoxes", p["paint"]))
-    from_points = [m for kind, m in kept if kind == "points"]
-    core = np.sum(from_points, 0) * 2 > len(from_points) if from_points else p["sam"]
-    p["core_box"], p["crop"] = tight_box(core | o["painted"]), crop_of(p["bbox"])
+    got = page(("caption", {"tool": "erase", "words": words, "colors": [], "color": "#ffffff", "bbox": p["bbox"]}),
+               ("paintBoxes", p["paint"]),
+               ("coreBox", {"painted": raw(o["painted"].ravel()), "masks": [raw(m.ravel()) for _, m in kept],
+                            "w": int(prev[0]), "h": int(prev[1])}))
+    p["own"], p["parts"], p["core"] = got[0], got[1], got[2] if kept and not words.strip() else None  # app.findWhole
+    p["chosen"] = page(("writerBoxes", {"tool": "erase", "words": words, "parts": p["parts"], "core": p["core"],
+                                        "bbox": p["bbox"]}))[0]  # app.writeCaption
+    p["crop"] = crop_of(p["bbox"])
     return p
 
 
@@ -378,16 +396,16 @@ def edit_key(r):  # one Klein job per mask and caption
     return f"{r['path']}|{r['caption']}"
 
 
-def first_frame(plate, comfy):
-    """The plate's first frame in 8-bit RGB: a video's first picture, or an image."""
-    path = os.path.join(comfy, "input", plate) if comfy and not os.path.isabs(plate) else plate
-    if not os.path.exists(path):
-        sys.exit(f"No plate at {path}: give ComfyUI's folder with --comfy, or a file on this machine.")
-    if path.lower().endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp")):
-        return np.asarray(Image.open(path).convert("RGB"))
-    import av
-    with av.open(path) as c:
-        return next(c.decode(video=0)).to_ndarray(format="rgb24")
+def first_frame(url, plate, tag, limit):
+    """The plate's first frame as the page opens it: the hero frame of the page's own `ingest` (openPlate in web/app.mjs),
+    with the values tests/open_probe.py sends for the page."""
+    from open_probe import page_values
+    try:
+        st, _ = http(f"{url}/paintaplate/stat?{urllib.parse.urlencode({'path': plate, 'config': '', 'cs': ''})}")
+        got, _ = run(url, "ingest", page_values(plate, st, f"paintaplate/{tag}"), limit)
+    except Exception as err:  # noqa: BLE001
+        sys.exit(f"ComfyUI could not open {plate}: {err}")
+    return image(url, got["hero"]["images"][0])
 
 
 # ---------- What it writes ----------
@@ -458,7 +476,7 @@ def sheet(path, objs, asked, frame_prev, title):
         marked[o["painted"]] = (marked[o["painted"]] * 0.5 + np.array([255, 220, 0]) * 0.5).astype(np.uint8)
         marked[(m ^ np.roll(m, 1, 0)) | (m ^ np.roll(m, 1, 1))] = (255, 40, 40)
         before = Image.fromarray(marked)
-        for b in P["boxes"]:
+        for b in P["chosen"]["boxes"]:
             ImageDraw.Draw(before).rectangle((b[1] * pw / 1000, b[0] * ph / 1000, b[3] * pw / 1000, b[2] * ph / 1000),
                                              outline=(0, 220, 255))
         cells = [(before, [f"{o['name']}: the frame", f"SAM kept {len(P['kept'])} mask(s), box {P['bbox']}",
@@ -489,11 +507,11 @@ def report(path, objs, asked, head):
             continue
         P, Q = o["paths"]["page"], o["paths"].get("name")
         lines += ["", f"SAM 3.1 kept {len(P['kept'])} mask(s) ({', '.join(P['kept']) or 'none'}). The object's box {P['bbox']}; "
-                  f"the locked boxes {P['boxes']}; the tight box {P['core_box']}; the crop {P['crop']}."]
+                  f"the writer's boxes {P['chosen']['boxes']}; the boxes before 1.11.14 {P['parts']}; the crop {P['crop']}."]
         if "naming" in o:
             lines += ["", f"The writer names it « {o.get('object') or 'nothing'} » (its answer: « {short(o['naming'].get('answer'), 80)} »)."
                       + (f" SAM 3.1 by that name kept {len(Q['kept'])} mask(s) ({', '.join(Q['kept']) or 'none'}); the object's "
-                         f"box {Q['bbox']}; the locked boxes {Q['boxes']}." if Q else f" {o.get('name_error', '')}".rstrip())]
+                         f"box {Q['bbox']}; the writer's boxes {Q['chosen']['boxes']}." if Q else f" {o.get('name_error', '')}".rstrip())]
         lines += ["", "| Request | The writer's answer | The page | Changed at 12 / 24 / 48 levels | Edges | SAM again | Seconds |",
                   "| --- | --- | --- | --- | --- | --- | --- |"]
         for req in asked:
@@ -517,7 +535,7 @@ def report(path, objs, asked, head):
 def plain(o):
     keep = ("name", "stroke", "points", "object", "naming", "name_error", "error", "requests", "edits")
     out = {k: o[k] for k in keep if k in o}
-    out["paths"] = {k: {f: p[f] for f in ("words", "kept", "bbox", "boxes", "core_box", "crop", "own", "ask", "seconds") if f in p}
+    out["paths"] = {k: {f: p[f] for f in ("words", "kept", "bbox", "parts", "core", "chosen", "crop", "own", "ask", "seconds") if f in p}
                     for k, p in o["paths"].items()}
     return out
 
@@ -528,7 +546,6 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("plate", nargs="?", default="plates/horse.mp4")
     ap.add_argument("--url", default="http://127.0.0.1:8188")
-    ap.add_argument("--comfy", help="ComfyUI's folder, whose input folder holds the plate")
     ap.add_argument("--out", help="the folder for the report (default: erase_probe_<time>, here)")
     ap.add_argument("--seed", type=int, default=1017942128)
     ap.add_argument("--stroke", action="append", help="NAME:x,y;x,y;...[:SIZE[:WORDS]], once per stroke")
@@ -549,7 +566,7 @@ def main(argv=None):
         print(f"{time.time() - t0:6.1f} s  {text}", flush=True)
 
     facts = about(a.url)
-    frame = first_frame(a.plate, a.comfy)
+    frame = first_frame(a.url, a.plate, tag, a.limit)
     H, W = frame.shape[:2]
     work, prev = page(("fitSize", W, H, WORK_SIDE, 32), ("fitSize", W, H, EDIT_SIDE, 16))
     frame_prev, frame_work = resized(frame, prev), resized(frame, work)
@@ -577,7 +594,7 @@ def main(argv=None):
             continue
         P["seconds"] = seconds
         say(f"{s['name']}: SAM 3.1 kept {len(P['kept'])} mask(s) in {seconds:.1f} s; the object's box {P['bbox']}, "
-            f"the locked boxes {P['boxes']}, the tight box {P['core_box']}")
+            f"the writer's boxes {P['chosen']['boxes']}, before 1.11.14 {P['parts']}")
     live = [o for o in objs if "page" in o["paths"]]
 
     # 2. The prompt writer names each object, on the frame with all but the object dimmed (named, as_words)
@@ -612,17 +629,17 @@ def main(argv=None):
     # 4. The prompt writer: each request (app.writeCaption), then what the page makes of its answer
     for o in live:
         s, P, Q = o["stroke"], o["paths"]["page"], o["paths"].get("name")
-        base = {"tool": "erase", "words": s["words"], "bbox": P["bbox"], "boxes": P["boxes"]}
-        P["ask"], crop_ask, tight_ask = page(
+        base = {"tool": "erase", "words": s["words"], **P["chosen"]}
+        P["ask"], crop_ask, wide_ask = page(
             ("upsampleRequest", base),
-            ("upsampleRequest", dict(base, bbox=to_crop(P["bbox"], P["crop"]), boxes=[to_crop(b, P["crop"]) for b in P["boxes"]])),
-            ("upsampleRequest", dict(base, bbox=P["core_box"], boxes=[P["core_box"]])))
+            ("upsampleRequest", dict(base, bbox=to_crop(base["bbox"], P["crop"]), boxes=[to_crop(b, P["crop"]) for b in base["boxes"]])),
+            ("upsampleRequest", dict(base, bbox=P["bbox"], boxes=P["parts"])))
         plan = {"page": ("frame", frame_name, P["ask"]), "dimmed": ("dimmed", o["dimmed"], P["ask"]),
-                "tight": ("frame", frame_name, tight_ask)}
+                "wide": ("frame", frame_name, wide_ask)}
         if "crop" in asked:
             plan["crop"] = ("crop", upload(a.url, crop_image(frame, P["crop"]), f"{tag}_{o['name']}_crop.png", sent), crop_ask)
         if Q:
-            Q["ask"] = page(("upsampleRequest", {"tool": "erase", "words": o["object"], "bbox": Q["bbox"], "boxes": Q["boxes"]}))[0]
+            Q["ask"] = page(("upsampleRequest", {"tool": "erase", "words": o["object"], **Q["chosen"]}))[0]
             plan["as_words"] = ("frame", frame_name, Q["ask"])
         for req in asked:
             r = o["requests"][req] = {"path": "name" if req == "as_words" and Q else "page"}
