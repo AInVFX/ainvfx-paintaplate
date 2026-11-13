@@ -165,6 +165,16 @@ def node_times(events, graphs):
     return out
 
 
+def comfy_lines(url, since, mark="PaintAPlate HDR Match:"):
+    """ComfyUI's own log lines since `since` (its local time, ISO) that hold `mark`, from its /internal/logs/raw. It keeps the
+    last few hundred lines only: [] when they are gone, or when this ComfyUI has no such route."""
+    try:
+        entries = get(url + "/internal/logs/raw").get("entries", [])
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [e["m"].strip() for e in entries if e.get("t", "") >= since and mark in e.get("m", "")]
+
+
 def browser_ready(channel):
     try:
         from playwright.sync_api import sync_playwright
@@ -217,7 +227,8 @@ def seeds_asked(text):
 def command(a, case, folder):
     """ui_live.py's command for one case: its plate or its fluid shot, its strokes as written, its seed."""
     cmd = [sys.executable, os.path.join(HERE, "ui_live.py"), "--url", a.url, "--comfy", a.comfy, "--out", folder,
-           "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2", *(["--memory", a.memory] if a.memory else []), *(["--graph"] if a.graph else [])]
+           "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2", *(["--memory", a.memory] if a.memory else []), *(["--graph"] if a.graph else []),
+           *(["--hdr"] if getattr(a, "hdr", False) or case.get("hdr") else [])]
     cmd += ["--fluid", json.dumps(case["fluid"])] if "fluid" in case else ["--path", case["path"]]
     if case.get("strokes"):
         cmd += ["--strokes", json.dumps(case["strokes"])]
@@ -310,7 +321,7 @@ def run_case(a, name, case, folder):
     memory.on = False
     memory.join(3)
     vram, ram, own = memory.peak()
-    result = {"name": name, "seconds": time.time() - t0, "vram": vram, "ram": ram, "own": own, "container": memory.container, "folder": folder, "seed": case.get("seed")}
+    result = {"name": name, "hdr_match": comfy_lines(a.url, time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t0))), "seconds": time.time() - t0, "vram": vram, "ram": ram, "own": own, "container": memory.container, "folder": folder, "seed": case.get("seed")}
     log_file, marks_file = os.path.join(folder, "page_log.txt"), os.path.join(folder, "timings.json")
     result["log"] = open(log_file, encoding="utf-8").read() if os.path.exists(log_file) else ""
     marks = json.load(open(marks_file)).get("marks", []) if os.path.exists(marks_file) else []
@@ -388,6 +399,9 @@ def report(a, machine, results):
                 lines.append(f"- Where {j['name']} {j['id']}'s {j['seconds']:.1f} s went, by node: " + ", ".join(f"{c} {s:.1f} s" for c, s in spent[:5]) + ".")
         lines += carried(r, a.fresh, gb)
         lines += [f"- The page's figure for an erase: {f}" for f in r.get("figures", [])]
+        lines += [f"- HDR Match, in ComfyUI's log: {m.split('HDR Match:', 1)[1].strip()}" for m in r.get("hdr_match", [])]
+        if not r.get("hdr_match") and any("SDR to HDR" in label for label, _ in r["steps"]):
+            lines.append("- HDR Match: its line has left ComfyUI's log buffer; grep the terminal for « HDR Match ».")
         lines += [f"- Did not finish: {line}" for line in r["ended"]]
         lines += [f"- {m}" for m in r["mattes"]]
         if r["matte"]:
@@ -416,6 +430,7 @@ def main():
     ap.add_argument("--channel", default="chrome", help="the browser channel: Google Chrome plays H.264")
     ap.add_argument("--timeout", type=int, default=900, help="ui_live.py's --timeout: it waits 8 times this many seconds for a render, 4 times for a fluid shot, twice for an edit")
     ap.add_argument("--memory", default="", choices=("", "small", "medium", "large"), help="ask the page for this memory profile; by default the card decides")
+    ap.add_argument("--hdr", action="store_true", help="turn SDR to HDR on in every case (ui_live.py --hdr); a case asks for it with « hdr »: true")
     ap.add_argument("--graph", action="store_true", help="after each case's export, also save the scene's ComfyUI graph as scene.comfyui.json in the case's folder")
     ap.add_argument("--seeds", default="", help="whole numbers with commas: each case runs once per seed, as <case>_s<seed>, in place of its own seed")
     ap.add_argument("--fresh", action="store_true", help="free ComfyUI's memory before each case, so a case's peak RAM is its own; its first job then loads its models again")
@@ -441,6 +456,11 @@ def main():
         if any(cases[n].get("path", "").endswith(file) for n in names) and not os.path.exists(os.path.join(plates, file)):
             print(f"making {file} from horse.mp4", flush=True)
             make_uhd(os.path.join(plates, "horse.mp4"), os.path.join(plates, file), fps)
+    hdr = os.path.join(plates, "horse_hdr")  # the HDR test plate: horse.mp4's frames as half-float EXR, lifted to a peak near 7
+    if any(cases[n].get("path") == "plates/horse_hdr" for n in names) and not glob.glob(os.path.join(hdr, "horse_hdr.*.exr")):
+        print("making the HDR test plate from horse.mp4 (tests/hdr_plate.py)", flush=True)
+        import hdr_plate
+        hdr_plate.make(os.path.join(plates, "horse.mp4"), hdr)
     os.makedirs(a.out, exist_ok=True)
     # one run per case, or per case and seed with --seeds: its name in the report and for its folder, and what it hands to the page
     left = [(name, cases[name]) if seed is None else (f"{name}_s{seed}", {**cases[name], "seed": seed}) for name in names for seed in seeds]

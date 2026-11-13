@@ -392,5 +392,37 @@ class NodeClock(unittest.TestCase):
         self.assertEqual((ws.event, [e[1:] for e in events]), ("framereceived", [["abc", "7"]]))
 
 
+class Hdr(unittest.TestCase):
+    """--hdr (wave 6, R13, the plate workstream's proposal): SDR to HDR on for a run, so HDR Match's line can be read."""
+
+    def test_hdr_reaches_ui_live_for_a_run_or_a_case(self):
+        a = argparse.Namespace(url="http://127.0.0.1:8188", comfy="/comfy", channel="chrome", timeout=900, memory="", graph=False)
+        cases = gpu_matrix.load_cases()
+        self.assertNotIn("--hdr", gpu_matrix.command(a, cases["horse_cow"], "/out/horse_cow"))
+        self.assertIn("--hdr", gpu_matrix.command(argparse.Namespace(**vars(a), hdr=True), cases["horse_cow"], "/out/horse_cow"))
+        self.assertIn("--hdr", gpu_matrix.command(a, cases["hdr_cow"], "/out/hdr_cow"))
+
+    def test_the_hdr_case_paints_horse_cow_on_the_hdr_test_plate(self):
+        cases = gpu_matrix.load_cases()
+        hdr, cow = cases["hdr_cow"], cases["horse_cow"]
+        self.assertEqual((hdr["path"], hdr["seed"], hdr["strokes"], hdr["hdr"]), ("plates/horse_hdr", cow["seed"], cow["strokes"], True))
+        self.assertNotIn("hdr_cow", gpu_matrix.ALL + gpu_matrix.QUICK)
+
+    def test_ui_live_turns_it_on_before_the_strokes(self):
+        with open(os.path.join(gpu_matrix.HERE, "ui_live.py"), encoding="utf-8") as f:
+            tool = f.read()
+        self.assertTrue(all(s in tool for s in ('page.click("#deliver-hdr")', 'page.click("#deliver-yes")', 'page.is_visible("#deliver-auto")')))
+        self.assertLess(tool.index("mark(deliver_hdr(page))"), tool.index("for i, (tool, words, pts, *size) in enumerate(strokes)"))
+
+    def test_hdr_match_lines_come_from_comfyui_s_log_since_the_case_began(self):
+        entries = [{"t": "2026-11-13T09:59:59.900000", "m": "PaintAPlate HDR Match: a case before\n"},
+                   {"t": "2026-11-13T10:00:00.500000", "m": "PaintAPlate HDR Match: level +0.02 stops on 121 frames\n"},
+                   {"t": "2026-11-13T10:00:01.000000", "m": "Prompt executed in 9.10 seconds\n"}]
+        with mock.patch.object(gpu_matrix, "get", return_value={"entries": entries}):
+            self.assertEqual(gpu_matrix.comfy_lines("http://x", "2026-11-13T10:00:00"), ["PaintAPlate HDR Match: level +0.02 stops on 121 frames"])
+        with mock.patch.object(gpu_matrix, "get", side_effect=OSError("404")):
+            self.assertEqual(gpu_matrix.comfy_lines("http://x", "2026-11-13T10:00:00"), [])
+
+
 if __name__ == "__main__":
     unittest.main()
