@@ -209,8 +209,12 @@ async def execute(pid, prompt):
                             "animated": [True]}
         o[outs["spec"]] = {"text": [plateio.spec_json(spec)]}
         await steps(pid, 2, 0.4)
-    elif "text" in outs:  # prompt: the request comes back as the caption
-        o[outs["text"]] = {"text": [v.get("request", "")]}
+    elif "text" in outs:  # prompt: the request comes back as the caption, or the answer that /mock/writer armed
+        writer = STATE.get("writer")
+        armed = bool(writer) and writer["times"] > 0
+        if armed:
+            writer["times"] -= 1
+        o[outs["text"]] = {"text": [writer["text"] if armed else v.get("request", "")]}
         await steps(pid, 1, 0.2)
     elif "patch" in outs:  # edit: a tinted, softened copy of the reference inside the mask, with step previews
         base, ref = load_image(v["base"]), load_image(v["reference"])
@@ -529,6 +533,12 @@ async def leave_route(request):  # mock only: the next `times` edit jobs answer 
     return web.json_response({})
 
 
+async def writer_route(request):  # mock only: the next `times` prompt-writer jobs answer `text`, as a writer that takes the stroke for another object
+    body = await request.json()
+    STATE["writer"] = {"times": int(body.get("times", 1)), "text": str(body.get("text", ""))}
+    return web.json_response({})
+
+
 async def pack_version_route(request):  # mock only: the version /paintaplate/version answers from now on, as a ComfyUI restarted after an update of the pack would
     sys.modules["routes"].VERSION = (await request.json())["version"]
     return web.json_response({})
@@ -593,6 +603,7 @@ async def start():
     app.router.add_post("/mock/card", card_route)
     app.router.add_post("/mock/version", pack_version_route)
     app.router.add_post("/mock/leave", leave_route)
+    app.router.add_post("/mock/writer", writer_route)
     app.router.add_get("/mock/events", lambda r: web.json_response(EVENTS))
     app.router.add_get("/mock/posts", lambda r: web.json_response(POSTS))
     app.router.add_get("/ws", ws_route)
