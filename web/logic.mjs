@@ -125,15 +125,20 @@ export function colorName(hex) {
 // A light edit's colour, by name: its first light stroke's (dark strokes are shadow hints), else the tool's
 export const lightColor = (colors, color) => colorName(colors.find((c) => !dark(c)) ?? color);
 
+// An erase's words as its object's name after « the »: an article that was typed goes (the GPU case's « the barn » asked
+// Klein's prompt writer to « Remove the the barn », 12 Nov 2026).
+const objectName = (words) => String(words ?? "").trim().replace(/^(?:the|a|an)\s+/i, "");
+
 // tool: paint, erase or light; words: the prompt; colors: of the painted strokes; color: the tool's colour;
 // bbox: [y_min, x_min, y_max, x_max] on 0..1000. Only the chosen tool's text is built.
 export function caption({ tool, words, colors, color, bbox }) {
   if (tool === "light") return lightPlanCaption({ colors, color, words }); // a relight's request is the page's own
+  const name = objectName(words);
   const text = {
-    erase: () => `Remove ${words ? `the ${words}` : "the object"} inside <obj_1> completely, with its shadow and its reflection. Show the surface and the background that continue behind it, with matching detail, light, shadows and focus. Add no new object. Keep everything else unchanged.`,
+    erase: () => `Remove the ${name || "object"} inside <obj_1> completely, with its shadow and its reflection. Show the surface and the background that continue behind it, with matching detail, light, shadows and focus. Add no new object. Keep everything else unchanged.`,
     paint: () => `Replace the rough coloured drawing inside <obj_1> with ${words || "an object of that shape and colour"}, following the drawing's outline, pose and size, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.`,
   }[tool]();
-  const desc = { erase: words ? `${words} to remove` : "object to remove", paint: words || "the drawn object" }[tool];
+  const desc = { erase: name ? `${name} to remove` : "object to remove", paint: words || "the drawn object" }[tool];
   return `${text} ${JSON.stringify([{ id: "obj_1", bbox, desc }])}`;
 }
 
@@ -153,8 +158,8 @@ export function upsampleRequest({ tool, words, bbox, boxes = null, colors = [], 
       : { id: "obj_1", from: "target", src_bbox: null, tgt_bbox: bbox, desc: words || "an object of the drawing's shape and colour, in the image's own style" }];
   const cites = rows.map((r) => `<${r.id}>`), list = cites.length > 1 ? `${cites.slice(0, -1).join(", ")} and ${cites.at(-1)}` : cites[0];
   const ask = tool === "erase"
-    ? parts ? `Remove the ${words || "objects"} ${list} completely, with their shadows and their reflections, and continue the background behind them. Remove nothing else.`
-      : `Remove the ${words || "object"} <obj_1> completely, with its shadow and its reflection, and continue the background behind it. Remove nothing else.`
+    ? parts ? `Remove the ${objectName(words) || "objects"} ${list} completely, with their shadows and their reflections, and continue the background behind them. Remove nothing else.`
+      : `Remove the ${objectName(words) || "object"} <obj_1> completely, with its shadow and its reflection, and continue the background behind it. Remove nothing else.`
     : `Replace the rough coloured drawing at <obj_1> with ${words || "an object of the same shape and colour"}: follow the drawing's outline, pose, size and colours, and draw it in exactly the style of the rest of the image (a photograph, a painting or an illustration: whichever it is), in the same light, perspective, focus and grain, casting its own light and shadows on what is around it.${KEEP_TOUCHED}`;
   const instruction = `ORIGINAL PROMPT:\n${ask}\n\nLOCKED BOUNDING-BOX ANNOTATIONS ([y_min, x_min, y_max, x_max] on a 0-1000 canvas, with ` +
     "(0, 0) at the top-left). This is an authoritative JSON list of dictionaries; preserve every supplied identity, provenance value, " +
