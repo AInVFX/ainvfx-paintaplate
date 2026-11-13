@@ -21,6 +21,7 @@ import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsH
 import { awaitingPass, editList, hiddenAbove, layersHint, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { askedSeed } from "./logic.mjs"; // the tests: a seed asked for in the address
+import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
 import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
 import { readBack } from "./canvas.mjs"; // the viewer: a few pixels of the view, read without moving it off the GPU
 
@@ -45,6 +46,7 @@ const HDR_ON = Q.get("hdr") !== "0"; // SDR to HDR runs whenever its files and n
 const HDR_FRAMES = "ACES2065-1"; // the colour space of the SDR-to-HDR frames (HDR_SPACE in tools/build_workflows.py)
 const BLANK_AT_START = Q.get("blank") !== "0"; // with no plate open, a blank plate opens at start, ready for a fluid shot; ?blank=0 starts empty
 const SEED_ASKED = askedSeed(Q.get("seed")); // ?seed=<whole number>, for the tests: every new edit and every new fluid shot starts from it, so a run makes the same pictures again. Without it the page draws each seed
+const INDEX_ON = Q.get("index") !== "0"; // ?index=0, for the tests: no job is taken from the job index and none is written to it, so every job runs and is timed
 // The memory profile (logic.memoryProfile): the card decides, unless ?memory=small, medium or large in the address, or the
 // name kept under paintaplate.memory, asks for one
 const MEMORY_ASKED = Q.get("memory") || (() => { try { return localStorage.getItem("paintaplate.memory"); } catch { return null; } })();
@@ -271,7 +273,7 @@ async function openPlate(list, typed, opts = {}) {
     openStep("read", 0, "Decoding the frames");
     const st = await fetch(`/paintaplate/stat?${new URLSearchParams({ path, config: S.ocio.config, cs: knownSpace(opts.cs) ?? "" })}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     headroom = st?.headroom ?? 1; // above 1.0 for a log encoding: an integer plate then holds SDR to HDR's values (logic.holdsHdr)
-    setSalt(st ? JSON.stringify([path, st.files, st.size, st.mtime]) : null); // the plate's identity: job index keys change when it does
+    setSalt(plateIdentity(path, st, INDEX_ON)); // the plate's identity: job index keys change when it does
     cs = knownSpace(opts.cs) ?? st?.color_space ?? modelSpace(); // one colour space per plate: the viewer, the models and the export use it
     // a video plate's proxy keeps its own values at the working size, so the viewer converts it with OCIO as it does the plate
     const video = st?.kind === "video", work = st?.width ? fitSize(st.width, st.height, WORK_SIDE, 32) : null;
@@ -3674,6 +3676,7 @@ async function boot() { // the version, the workflows, the WebSocket, then what 
   log(`Page ready in ${Math.round(performance.now() - t0)} ms: ${WORKFLOWS.length} workflows, ${classes.length} node classes and ${models.size} model files checked`);
   log(`OCIO: ${S.ocio.info.label}, viewed on ${S.ocio.display} through ${S.ocio.view}${S.ocio.config === "$OCIO" ? " ($OCIO)" : ""}`);
   if (SEED_ASKED !== null) log(`Seed ${SEED_ASKED} asked for in the address (?seed=): every new edit and every new fluid shot starts from it`);
+  if (!INDEX_ON) log("Job index off, asked for in the address (?index=0): every job runs, and none is kept for a later session");
   status("Ready. Open a plate to start.", "hint");
   if (!S.plate && BLANK_AT_START && S.fluidReady) await openBlank().catch(quiet); // a canvas for a fluid shot, at the Blank tab's settings
   warmAll().catch(() => {}); // a ComfyUI that reports no GPU details simply skips it

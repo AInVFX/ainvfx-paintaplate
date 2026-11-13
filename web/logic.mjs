@@ -295,6 +295,10 @@ export const stopsForEdit = ({ cls, progress }) => cls !== "preview" && progress
 // A job's key hashes its workflow and the values that change what it makes. Output folders (the prefixes) and the live
 // preview's rate change nothing it makes, so they stay out, and a scene opened again on the same machine finds its jobs.
 export const indexValues = (values) => Object.keys(values).sort().filter((k) => !/prefix$/.test(k) && k !== "live").map((k) => [k, values[k]]);
+// The plate's identity in a job index key: its path, its files, its size and its time, as /paintaplate/stat gives them (`st`).
+// null: no job index while this plate is open, because the plate could not be checked, or because the address says
+// ?index=0 (`on` is false), for the tests: every job then runs, so each time and each peak of memory is a measured one.
+export const plateIdentity = (path, st, on = true) => (st && on ? JSON.stringify([path, st.files, st.size, st.mtime]) : null);
 
 // ---------- The shot's prompt ----------
 export const RIPPLE = "Use the reference video for motion, timing, camera movement, framing and lighting changes; " +

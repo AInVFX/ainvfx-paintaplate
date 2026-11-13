@@ -779,3 +779,16 @@ test("a seed asked for in the address is a whole number under 2^31, and anything
   assert.equal(askedSeed("2147483647"), 2 ** 31 - 1); // the largest seed the page draws: (Math.random() * 2 ** 31) | 0
   for (const text of [null, "", "abc", "-1", "1.5", "1e3", " 7", "7 ", "2147483648", "99999999999"]) assert.equal(askedSeed(text), null, String(text));
 });
+
+// ---------- The render workstream, wave 4 [cross]: no job index when the address says ?index=0 ----------
+import { plateIdentity } from "../../web/logic.mjs";
+import { indexParts } from "../../web/comfy.mjs";
+
+test("the plate's identity is its path, files, size and time, and there is none when the job index is off", () => {
+  const st = { files: 1, size: 6898529, mtime: 1794517860.5 };
+  assert.equal(plateIdentity("plates/horse.mp4", st), '["plates/horse.mp4",1,6898529,1794517860.5]');
+  assert.equal(plateIdentity("plates/horse.mp4", null), null); // the plate could not be checked
+  assert.equal(plateIdentity("plates/horse.mp4", st, false), null); // ?index=0
+  assert.notEqual(indexParts("1.11.11", "a1b2", plateIdentity("plates/horse.mp4", st), { seed: 1017942128 }), null);
+  assert.equal(indexParts("1.11.11", "a1b2", plateIdentity("plates/horse.mp4", st, false), { seed: 1017942128 }), null, "no key: the job is posted, and the index keeps nothing of it");
+});
