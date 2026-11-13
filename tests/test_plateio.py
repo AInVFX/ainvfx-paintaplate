@@ -11,7 +11,8 @@ import plateio  # noqa: E402
 import av, OpenEXR  # noqa: E402
 
 
-def make_exr_sequence(folder, n=3, h=36, w=64):
+def make_exr_sequence(folder, n=3, h=36, w=64, fps=0.0):
+    from fractions import Fraction
     rng = np.random.default_rng(0)
     for i in range(n):
         rgb = (rng.random((h, w, 3)) * 4.0).astype(np.float16)  # values above 1.0 on purpose
@@ -20,6 +21,8 @@ def make_exr_sequence(folder, n=3, h=36, w=64):
         ch = {"R": rgb[..., 0].copy(), "G": rgb[..., 1].copy(), "B": rgb[..., 2].copy(),
               "A": np.ones((h, w), np.float16), "depth.Z": rng.random((h, w)).astype(np.float32),
               "diffuse.R": rgb[..., 0].copy(), "diffuse.G": rgb[..., 1].copy(), "diffuse.B": rgb[..., 2].copy()}
+        if fps:  # the shot's frame rate in the header, which plateio.exr_rate reads
+            header["framesPerSecond"] = Fraction(fps).limit_denominator(1001)
         OpenEXR.File(header, ch).write(os.path.join(folder, f"shot_v001.{1001 + i:04d}.exr"))
 
 
