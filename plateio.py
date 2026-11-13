@@ -460,36 +460,26 @@ CORE_FLOATS = ("gbrpf16le", "gbrpf16be", "gbrapf16le", "gbrapf16be", "grayf16le"
 CORE_BYTES = ("yuvj420p", "yuvj422p", "yuvj444p", "rgb24", "rgba", "pal8")
 
 
-def decode_video(path: str, max_frames: int, fps: float, pad_8n1: bool = False):
-    """A video's first `max_frames` frames as core's decoder gives them, each written into one array as it decodes.
-
-    Core (VideoFromFile(path, duration=max_frames / fps).get_components()) holds the plate twice: its list of frames,
-    then their stack, and Load Plate's 8k+1 padding made a third copy for a moment. This takes core's steps one by one:
-    its trim window, the first frame's choice of 8 bits or float, float planes read as stored, a width that is not a
-    multiple of 32 padded with a smeared border, the rotation. Returns (RGB float32 (N, H, W, 3), alpha float32 (N, H, W)
-    or None, the frames decoded); with `pad_8n1`, N also counts the padding: the last frame repeated. The live tests
-    compare it with core's decoder, so a ComfyUI pin that changes core's pictures fails a test."""
-    rows = pad_count_8n1(max_frames) if pad_8n1 else max_frames
-    rgb = alpha = align = None
-    count, done, fmt, byte8, has_alpha = 0, False, "", False, False
+def _core_frames(path: str, duration: float = 0.0):
+    """Each frame core's decoder keeps from `path`, as it makes it: (the image, uint8 or float32 (H, W, C); whether its
+    values are 8-bit, which core divides by 255; whether its last channel is alpha). `duration` 0 keeps every frame.
+    Core's steps one by one: its trim window, the first frame's choice of 8 bits or float, float planes read as stored,
+    a width off a multiple of 32 padded with a smeared border, the rotation."""
     with av.open(path) as container:
         if not len(container.streams.video):
             raise ValueError(f"No video stream found in file '{path}'")
         stream = container.streams.video[0]
         stream.thread_type = "AUTO"
-        duration = float(max_frames / fps)
         end_pts = int((0.0 + duration) / stream.time_base)
+        fmt, byte8, has_alpha, align = "", False, False, None
         for packet in container.demux(stream):
-            if done:
-                break
             try:
                 for frame in packet.decode():
                     if frame.pts < 0:  # before the window's start, as core skips them
                         continue
                     if duration and frame.pts >= end_pts:
-                        done = True
-                        break
-                    if not fmt:  # the first frame decides for the whole video, as in core
+                        return
+                    if not fmt:  # the first frame decides for the whole file, as in core
                         has_alpha = any(c.is_alpha for c in frame.format.components) or frame.format.name == "pal8"
                         byte8 = frame.format.name in CORE_BYTES
                         fmt = ("rgba" if has_alpha else "rgb24") if byte8 else ("gbrapf32le" if has_alpha else "gbrpf32le")
@@ -517,25 +507,25 @@ def decode_video(path: str, max_frames: int, fps: float, pad_8n1: bool = False):
                     else:
                         img = frame.to_ndarray(format=fmt)
                     turn = int(round(frame.rotation // 90)) % 4 if frame.rotation else 0
-                    if turn:
-                        img = np.rot90(img, k=turn, axes=(0, 1))
-                    if rgb is None:
-                        rgb = np.empty((rows, *img.shape[:2], 3), np.float32)
-                        alpha = np.empty((rows, *img.shape[:2]), np.float32) if has_alpha else None
-                    if byte8:  # as core: the 8-bit values as float32, divided by 255
-                        np.divide(img[..., :3], np.float32(255.0), out=rgb[count], dtype=np.float32)
-                        if alpha is not None:
-                            np.divide(img[..., -1], np.float32(255.0), out=alpha[count], dtype=np.float32)
-                    else:
-                        rgb[count] = img[..., :3]
-                        if alpha is not None:
-                            alpha[count] = img[..., -1]
-                    count += 1
-                    if count == max_frames:  # Load Plate keeps no more
-                        done = True
-                        break
+                    yield (np.rot90(img, k=turn, axes=(0, 1)) if turn else img), byte8, has_alpha
             except av.error.InvalidDataError:  # core skips the rest of a packet that fails to decode
                 logging.info("Paint a plate: a packet of %s did not decode", path)
+
+
+def _put(rgb, alpha, i: int, img, byte8: bool) -> None:
+    """One frame of _core_frames into row `i`, as core's values: 8 bits as float32 divided by 255, floats as they are."""
+    if byte8:
+        np.divide(img[..., :3], np.float32(255.0), out=rgb[i], dtype=np.float32)
+        if alpha is not None:
+            np.divide(img[..., -1], np.float32(255.0), out=alpha[i], dtype=np.float32)
+    else:
+        rgb[i] = img[..., :3]
+        if alpha is not None:
+            alpha[i] = img[..., -1]
+
+
+def _padded(rgb, alpha, count: int, pad_8n1: bool):
+    """The rows decoded, and with `pad_8n1` the 8k+1 padding after them: the last frame repeated, in the same array."""
     if rgb is None:
         return np.zeros((0, 0, 0, 3), np.float32), None, 0
     n = pad_count_8n1(count) if pad_8n1 else count
@@ -543,6 +533,55 @@ def decode_video(path: str, max_frames: int, fps: float, pad_8n1: bool = False):
     if alpha is not None:
         alpha[count:n] = alpha[count - 1]
     return rgb[:n], None if alpha is None else alpha[:n], count
+
+
+def decode_video(path: str, max_frames: int, fps: float, pad_8n1: bool = False):
+    """A video's first `max_frames` frames as core's decoder gives them, each written into its place in one array.
+
+    Core (VideoFromFile(path, duration=max_frames / fps).get_components()) holds the plate twice: its list of frames,
+    then their stack, and Load Plate's 8k+1 padding made one more copy for a moment. Returns (RGB float32 (N, H, W, 3),
+    alpha float32 (N, H, W) or None, the frames decoded); with `pad_8n1`, N also counts the padding. The live tests compare
+    it with core's decoder (tests/decode_parity.py), so a ComfyUI pin that changes core's pictures fails a test."""
+    rows = pad_count_8n1(max_frames) if pad_8n1 else max_frames
+    rgb = alpha = None
+    count = 0
+    for img, byte8, has_alpha in _core_frames(path, float(max_frames / fps)):
+        if rgb is None:
+            rgb = np.empty((rows, *img.shape[:2], 3), np.float32)
+            alpha = np.empty((rows, *img.shape[:2]), np.float32) if has_alpha else None
+        _put(rgb, alpha, count, img, byte8)
+        count += 1
+        if count == max_frames:  # Load Plate keeps no more
+            break
+    return _padded(rgb, alpha, count, pad_8n1)
+
+
+def decode_frames(files: list, pad_8n1: bool = False, workers: int = 8, each=None):
+    """An image sequence as core's decoder gives it file by file (VideoFromFile(file).get_components(), then joined),
+    each file written into its place in one array, the padding too: core's join held the frames twice. Files decode in
+    parallel; `each(i)` runs before file i (Load Plate's stop and progress). Returns what decode_video returns."""
+    def one(i):
+        if each:
+            each(i)
+        got = list(_core_frames(files[i]))
+        if len(got) != 1:
+            raise ValueError(f"An image sequence holds one frame per file: {files[i]} has {len(got)}")
+        return got[0]
+    img, byte8, has_alpha = one(0)
+    rows = pad_count_8n1(len(files)) if pad_8n1 else len(files)
+    rgb = np.empty((rows, *img.shape[:2], 3), np.float32)
+    alpha = np.empty((rows, *img.shape[:2]), np.float32) if has_alpha else None
+    _put(rgb, alpha, 0, img, byte8)
+
+    def rest(i):
+        img, byte8, has = one(i)
+        if has != has_alpha:  # core's join would fail there too
+            raise ValueError(f"{files[i]} {'has' if has else 'lacks'} the alpha that the sequence's first frame "
+                             f"{'lacks' if has else 'has'}")
+        _put(rgb, alpha, i, img, byte8)
+    with ThreadPoolExecutor(max(1, workers)) as pool:
+        list(pool.map(rest, range(1, len(files))))
+    return _padded(rgb, alpha, len(files), pad_8n1)
 
 
 MATTE_STEP = 1.0 / 255  # the export's matte is 8-bit PNG, scaled by 255 and truncated: below one step it reads 0

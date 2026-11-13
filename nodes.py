@@ -21,7 +21,7 @@ import comfy.model_management as mm
 import comfy.sd
 import comfy.utils
 import folder_paths
-from comfy_api.v0_0_2 import InputImpl, io
+from comfy_api.v0_0_2 import io
 from comfy_execution.utils import get_executing_context
 from PIL import Image
 from server import PromptServer
@@ -127,35 +127,22 @@ class LoadPlate(io.ComfyNode):
     def execute(cls, path, max_frames, pad_8n1) -> io.NodeOutput:
         full = resolve(path)
         spec = plateio.probe_plate(full)
-        if spec["kind"] == "video":  # our decoder: core's pictures, each frame written into its place, the padding too
+        if spec["kind"] == "video":  # our decoder: core's pictures, each frame into its place, the padding too
             bar = comfy.utils.ProgressBar(1)
             rgb, a, count = plateio.decode_video(full, max_frames, spec["fps"], pad_8n1)
             bar.update(1)
             images, extra = torch.from_numpy(rgb), rgb.shape[0] - count
             alpha = None if a is None else torch.from_numpy(a)
-        else:  # frames decode in parallel: PyAV releases the GIL while decoding; each one counts as progress
+        else:  # an image sequence: the files decode in parallel, each into its place, the padding too
             files = spec["files"][:max_frames]
-            bar = comfy.utils.ProgressBar(len(files))
+            bar, stop = comfy.utils.ProgressBar(len(files)), Stop()
 
-            stop = Stop()
-
-            def read(f):
+            def each(i):
                 stop()
-                part = InputImpl.VideoFromFile(f).get_components()
                 bar.update(1)
-                return part
-            with ThreadPoolExecutor(WORKERS) as pool:
-                parts = list(pool.map(read, files))
-            def whole(tensors):  # the frames joined: the plate
-                return (tensors[0] if len(tensors) == 1 else torch.cat(tensors))[:max_frames]
-            images = whole([p.images for p in parts])
-            count = images.shape[0]
-            extra = plateio.pad_count_8n1(count) - count if pad_8n1 else 0
-            alpha = None if parts[0].alpha is None else whole([p.alpha[..., -1] for p in parts])
-            if extra:
-                images = torch.cat([images, images[-1:].expand(extra, -1, -1, -1)])
-                if alpha is not None:
-                    alpha = torch.cat([alpha, alpha[-1:].expand(extra, -1, -1)])
+            rgb, a, count = plateio.decode_frames(files, pad_8n1, WORKERS, each)
+            images, extra = torch.from_numpy(rgb), rgb.shape[0] - count
+            alpha = None if a is None else torch.from_numpy(a)
         if alpha is None:  # an opaque plate: one frame of ones stands for every frame, and takes one frame of memory
             alpha = torch.ones((1, *images.shape[1:3]), dtype=images.dtype, device=images.device).expand(count + extra, -1, -1)
         spec.update(frames=count, color_space_guess=plateio.guess_color_space(spec))
