@@ -1,5 +1,5 @@
 {
- "about": "What ComfyUI's /object_info says about the node classes of a scene's graph (with and without SDR to HDR), in the fields graph.editorGraph reads: each input in order with its type and five of its options (default, forceInput, control_after_generate, image_upload, multiline), and the outputs. Read from source on 12 November 2026, with no ComfyUI running: ComfyUI 0.44.2 (e6515b16), ComfyUI-LTXVideo 220e1d4 and this pack's nodes.py. A combo's choices are left out. A copy from a running ComfyUI replaces this file after the proof in a real editor.",
+ "about": "What ComfyUI's /object_info says about the node classes of a scene's graph (with and without SDR to HDR), in the fields graph.editorGraph reads: each input in order with its type and five of its options (default, forceInput, control_after_generate, image_upload, multiline), and the outputs. A combo's choices are left out. Read from a running ComfyUI 0.44.2 at http://127.0.0.1:8188 on 13 November 2026 (Toronto), by tests/object_info_fixture.py.",
  "nodes": {
   "BasicScheduler": {
    "input": {
@@ -802,7 +802,7 @@
       }
      ],
      "frame_rate": [
-      "FLOAT",
+      "FLOAT,INT",
       {
        "default": 25.0
       }
@@ -1056,7 +1056,8 @@
      "sigmas": [
       "STRING",
       {
-       "default": "1, 0.5"
+       "default": "1, 0.5",
+       "multiline": false
       }
      ]
     }
@@ -1129,18 +1130,23 @@
      ],
      "config": [
       "STRING",
-      {}
+      {
+       "default": "ocio://studio-config-latest",
+       "multiline": false
+      }
      ],
      "source": [
       "STRING",
       {
-       "default": "@model"
+       "default": "@model",
+       "multiline": false
       }
      ],
      "destination": [
       "STRING",
       {
-       "default": "@model"
+       "default": "@model",
+       "multiline": false
       }
      ]
     },
@@ -1424,7 +1430,8 @@
      "decoder": [
       "STRING",
       {
-       "default": "taeltx2_3.safetensors"
+       "default": "taeltx2_3.safetensors",
+       "multiline": false
       }
      ],
      "frames": [
@@ -1473,7 +1480,9 @@
     "required": {
      "path": [
       "STRING",
-      {}
+      {
+       "multiline": false
+      }
      ],
      "max_frames": [
       "INT",
@@ -1590,7 +1599,8 @@
      "filename_prefix": [
       "STRING",
       {
-       "default": "paintaplate/frames/f"
+       "default": "paintaplate/frames/f",
+       "multiline": false
       }
      ]
     },
@@ -1628,7 +1638,8 @@
      "filename_prefix": [
       "STRING",
       {
-       "default": "paintaplate/movie"
+       "default": "paintaplate/movie",
+       "multiline": false
       }
      ]
     },
@@ -1659,18 +1670,23 @@
      ],
      "config": [
       "STRING",
-      {}
+      {
+       "default": "ocio://studio-config-latest",
+       "multiline": false
+      }
      ],
      "source": [
       "STRING",
       {
-       "default": "@model"
+       "default": "@model",
+       "multiline": false
       }
      ],
      "destination": [
       "STRING",
       {
-       "default": "@model"
+       "default": "@model",
+       "multiline": false
       }
      ],
      "largest_size": [
@@ -1698,7 +1714,8 @@
      "filename_prefix": [
       "STRING",
       {
-       "default": "paintaplate/shot"
+       "default": "paintaplate/shot",
+       "multiline": false
       }
      ],
      "keep_untouched": [
@@ -1778,8 +1795,8 @@
      "noise_seed": [
       "INT",
       {
-       "control_after_generate": true,
-       "default": 0
+       "default": 0,
+       "control_after_generate": true
       }
      ]
     }
@@ -1839,7 +1856,8 @@
      "object_indices": [
       "STRING",
       {
-       "default": ""
+       "default": "",
+       "multiline": false
       }
      ]
     }
@@ -1931,6 +1949,28 @@
    "output_name": [
     "output",
     "denoised_output"
+   ]
+  },
+  "SaveImage": {
+   "input": {
+    "required": {
+     "images": [
+      "IMAGE",
+      {}
+     ],
+     "filename_prefix": [
+      "STRING",
+      {
+       "default": "ComfyUI"
+      }
+     ]
+    }
+   },
+   "output": [
+    "IMAGE"
+   ],
+   "output_name": [
+    "images"
    ]
   },
   "SetLatentNoiseMask": {
