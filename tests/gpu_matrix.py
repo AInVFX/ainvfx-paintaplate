@@ -148,6 +148,23 @@ def job_spans(history):
     return spans
 
 
+def node_times(events, graphs):
+    """Where each job's time went: {the id's first 8 characters: [(node class, seconds), ...], longest first}. Each «
+    executing » message starts a node and ends the one before; the one with no node ends the job. events: [[seconds,
+    prompt id, node id or None]] (ui_live.py's nodes.json); graphs: {prompt id: its API graph, from ComfyUI's /history}."""
+    runs, out = {}, {}
+    for t, pid, node in events:
+        runs.setdefault(pid, []).append((t, node))
+    for pid, seq in runs.items():
+        graph, spent = graphs.get(pid) or {}, {}
+        for (t, node), (later, _) in zip(seq, seq[1:]):
+            if node is not None:
+                name = (graph.get(str(node)) or {}).get("class_type", f"node {node}")
+                spent[name] = round(spent.get(name, 0.0) + later - t, 1)
+        out[(pid or "")[:8]] = sorted(spent.items(), key=lambda x: -x[1])
+    return out
+
+
 def browser_ready(channel):
     try:
         from playwright.sync_api import sync_playwright
@@ -231,13 +248,46 @@ def matte_areas(comfy, since):
     return best[1], [float((np.asarray(Image.open(f).convert("L")) > 127).mean()) for f in best[2]]
 
 
+def log_steps(text):
+    """The steps the page times, in its log's order: each render step (« Render vN: … took … s »); for a fluid shot its LTX
+    pass (the fluid job after « Fluid vN: »), each step timed (« Fluid vN: SDR to HDR took … s ») and the whole shot."""
+    steps, fluid = [], "?"
+    for line in text.splitlines():
+        if m := STEP.search(line):
+            steps.append((f"v{m.group(1)} {m.group(2)}", float(m.group(3))))
+        elif m := re.search(r"Fluid v(\d+): (.+?) took ([\d.]+) s", line):
+            steps.append((f"fluid v{m.group(1)} {m.group(2)}", float(m.group(3))))
+        elif m := re.search(r"Fluid v(\d+): done in ([\d.]+) s", line):
+            steps.append((f"fluid v{m.group(1)} in all", float(m.group(2))))
+        elif m := re.search(r"Fluid v(\d+):", line):
+            fluid = m.group(1)
+        elif m := re.search(r"(?<![a-z])fluid [0-9a-f?]{1,8}: done in ([\d.]+) s", line):
+            steps.append((f"fluid v{fluid} LTX pass", float(m.group(1))))
+    return steps
+
+
+def carried(r, fresh, gb):
+    """Without --fresh, ComfyUI holds what ran before a case: its first job's peak RAM can be that, not the case's own."""
+    j = next(iter(r["jobs"]), None)
+    if fresh or not j or j.get("run") is None:
+        return []
+    return [f"- ComfyUI was not freed before this case (no --fresh): the first job's peak RAM, {gb(j['ram'])} for {j['name']} {j['id']}, "
+            "can be what the case before left. Run with --fresh for this case's own."]
+
+
+def estimates_off(steps, announced):
+    """The steps that took more than 25% over or under what the page announced before they started (logic.stepGuess)."""
+    return [f"{label}: about {announced[label]} s, took {s:.1f} s" for label, s in steps
+            if announced.get(label) and abs(s - announced[label]) > 0.25 * s]
+
+
 def read_log(text):
     """What a case's page log says: the render steps and the jobs with their seconds, and the counts the report shows."""
     profile = re.search(r"Memory profile (\w+): ([^\n]*)", text)
     jobs = [{"name": name, "id": job, "seconds": float(s), "nodes": int(n), "cached": int(k or 0), "previews": int(p or 0)}
             for name, job, s, n, k, p in JOB.findall(text)]
     return {
-        "steps": [(f"v{v} {label}", float(s)) for v, label, s in STEP.findall(text)],
+        "steps": log_steps(text),
         "jobs": jobs,
         "ended": ENDED.findall(text),
         "indexed": text.count("taken from the job index"),
@@ -245,8 +295,10 @@ def read_log(text):
         "previews": sum(j["previews"] for j in jobs),
         "live_off": re.findall(r"Live preview is off: ([^\n]*)", text),
         "profile": f"{profile.group(1)} ({profile.group(2)})" if profile else "not in the log's last 400 lines",
-        "mattes": re.findall(r"((?:Paint|Erase) matte[^\n]*largest matte is [^\n]*)", text),
+        "mattes": re.findall(r"([A-Z][a-z]+ matte[^\n]*largest matte is [^\n]*)", text),  # any word before « matte »: Paint, Erase, Clean
         "seeds": sorted(set(re.findall(r"\bseed (\d+)", text)), key=int),
+        "announced": {f"v{v} {label}": int(s) for v, label, s in re.findall(r"Render v(\d+): (.+?) \(about (\d+) s\)", text)},
+        "figures": re.findall(r"(Edit \d+: [^\n]*?\(\d+% of it changed\))", text),  # an erase: how much of the object's box changed
     }
 
 
@@ -265,9 +317,13 @@ def run_case(a, name, case, folder):
     result["marks"] = [what for _, what in marks]
     result.update(read_log(result["log"]))
     try:
-        spans = job_spans(get(a.url + "/history?max_items=400"))
+        history = get(a.url + "/history?max_items=400")
+        spans = job_spans(history)
     except (OSError, ValueError):
-        spans = {}
+        history, spans = {}, {}
+    nodes_file = os.path.join(folder, "nodes.json")  # ui_live.py: when ComfyUI started each node, from the page's WebSocket
+    events = json.load(open(nodes_file)) if os.path.exists(nodes_file) else []
+    result["nodes"] = node_times(events, {pid: (e.get("prompt") or [None, None, {}])[2] for pid, e in history.items()})
     for job in result["jobs"]:  # when ComfyUI ran it, and the most memory held between those two times
         span = spans.get(job["id"])
         job["run"] = span[1] - span[0] if span else None
@@ -275,7 +331,7 @@ def run_case(a, name, case, folder):
     failed = [m for m in result["marks"] if m.startswith("FAILED")] or ([] if marks else ["ui_live.py wrote no marks"])
     done = any(m.startswith("downloaded") for m in result["marks"]) or not case.get("strokes")  # a fluid shot alone has no export
     result["passed"], result["why"] = not failed and done, (failed[0] if failed else "" if done else "the full-size composite was not reached: " + (result["marks"] or ["?"])[-1])
-    result["matte"] = matte_areas(a.comfy, t0) if any(s[0] == "b" for s in case.get("strokes", [])) else None
+    result["matte"] = matte_areas(a.comfy, t0) if any(s[0] == "paint" for s in case.get("strokes", [])) else None
     live = os.path.join(a.comfy, "temp", "paintaplate_live", "*.webp")
     result["live_files"] = sum(os.path.getmtime(f) >= t0 for f in glob.glob(live))
     return result
@@ -296,7 +352,7 @@ def report(a, machine, results):
              f"| Seeds | {a.seeds.replace(' ', '').replace(',', ', ') + ' (--seeds): each case runs once per seed' if a.seeds else 'each case runs from its own (gpu_matrix.json)'} |",
              "| Job index | left alone: the page is opened with `?index=0`, so every job runs |",
              f"| Memory profile asked for | {a.memory or 'none: the card decides'} |",
-             f"| Before each case | {'ComfyUI is freed (--fresh)' if a.fresh else 'ComfyUI stays as the case before left it'} |",
+             f"| Before each case | {'ComfyUI is freed (--fresh)' if a.fresh else 'ComfyUI stays as the case before left it: a first job can read its RAM'} |",
              f"| RAM read from | {a.source} |", "",
              "Peak RAM is the most that was held; « no file » is the part of it that no file backs, which a memory cap cannot take back. "
              "In a job's row, Seconds runs from the page's request to the job's end, and In ComfyUI from its start to its end in "
@@ -310,7 +366,9 @@ def report(a, machine, results):
         lines += ["", f"## {r['name']} · {'passed' if r['passed'] else 'FAILED'} in {r['seconds']:.0f} s", ""]
         if r["why"]:
             lines += [r["why"], ""]
-        lines += ["| Step | Seconds |", "| --- | --- |", *[f"| {label} | {s:.1f} |" for label, s in r["steps"]]]
+        ann = r.get("announced", {})
+        lines += ["| Step | Seconds | Announced | Seconds / announced |", "| --- | --- | --- | --- |",
+                  *[f"| {label} | {s:.1f} | {ann.get(label, '')} | {f'{s / ann[label]:.2f}' if ann.get(label) else ''} |" for label, s in r["steps"]]]
         lines += ["", "| Job | Seconds | In ComfyUI | Peak VRAM | Peak RAM | No file | Nodes from ComfyUI's cache | Previews |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
         for j in r["jobs"]:
             in_comfy = "" if j["run"] is None else f"{j['run']:.1f}"
@@ -322,6 +380,14 @@ def report(a, machine, results):
                   f"- Out-of-memory retries: {r['oom']}. Jobs taken from the job index, so not timed: {r['indexed']}.",
                   f"- Previews received by the page: {r['previews']}. Live previews written by the node: {r['live_files']}."
                   + ("".join(f" Live preview off: {why}." for why in r["live_off"]))]
+        off = estimates_off(r["steps"], r.get("announced", {}))
+        lines += [f"- Steps more than 25% from their announcement: {'; '.join(off)}." if off else "- Every announced step took within 25% of its announcement."]
+        for j in r["jobs"]:  # where the long jobs' time went (D7): the five longest nodes
+            spent = r.get("nodes", {}).get(j["id"])
+            if spent and j["seconds"] >= 30:
+                lines.append(f"- Where {j['name']} {j['id']}'s {j['seconds']:.1f} s went, by node: " + ", ".join(f"{c} {s:.1f} s" for c, s in spent[:5]) + ".")
+        lines += carried(r, a.fresh, gb)
+        lines += [f"- The page's figure for an erase: {f}" for f in r.get("figures", [])]
         lines += [f"- Did not finish: {line}" for line in r["ended"]]
         lines += [f"- {m}" for m in r["mattes"]]
         if r["matte"]:

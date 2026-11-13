@@ -25,8 +25,8 @@ const INDEXED = new Set(["ingest", "prompt", "edit", "clean", "cleanup", "shot",
 const hashes = {}; // workflow name -> hash of its file: a new workflow makes new keys
 let salt = null; // the plate's identity (path, size, time); null: no index, as when the plate could not be checked
 export const setSalt = (s) => { salt = s; };
-let pack = ""; // the pack's version, as the server gives it (/paintaplate/version); "": not known, so no index
-export const setPack = (version) => { pack = version || ""; };
+let build = ""; // the server's build (/paintaplate/version, routes.build_parts): what computes; "": not known, so no index
+export const setBuild = (value) => { build = value || ""; };
 
 export async function hashHex(data) { // SHA-256 of a string or a Blob, in hex; null where the page has no WebCrypto (plain http)
   if (!globalThis.crypto?.subtle) return null;
@@ -34,14 +34,16 @@ export async function hashHex(data) { // SHA-256 of a string or a Blob, in hex; 
   return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// What a job index key is made of: the pack's version, the workflow file's hash, the plate's identity and the job's values.
-// The version is part of it, because a new version can change what a node makes from the same workflow file and the same
-// values: 1.11.9's matte rule did. So a result made by another version never comes back as this version's. null: no index
-// for this job (the version is not known, the workflow has no hash, or the plate could not be checked).
-export const indexParts = (version, workflow, plate, values) =>
-  (version && workflow && plate !== null ? JSON.stringify([version, workflow, plate, indexValues(values)]) : null);
+// What a job index key is made of: the server's build, the workflow file's hash, the plate's identity and the job's values.
+// The build is a hash of what computes, made when ComfyUI starts (routes.build_parts): the pack's Python files, ComfyUI's
+// version, ComfyUI-LTXVideo's commit, and each model file's name, size and time. Other code can change what a node makes
+// from the same workflow file and the same values (1.11.9's matte rule did), and so can a new model file under an old
+// name: a result made by other code or other weights never comes back. A new version number alone changes nothing. null:
+// no index for this job (the build is not known, the workflow has no hash, or the plate could not be checked).
+export const indexParts = (build, workflow, plate, values) =>
+  (build && workflow && plate !== null ? JSON.stringify([build, workflow, plate, indexValues(values)]) : null);
 const indexKey = async (name, values) => {
-  const parts = INDEXED.has(name) ? indexParts(pack, hashes[name], salt, values) : null;
+  const parts = INDEXED.has(name) ? indexParts(build, hashes[name], salt, values) : null;
   return parts === null ? null : hashHex(parts);
 };
 
@@ -320,12 +322,15 @@ async function poll() { // some networks block WebSockets: then, and for prompts
   }
 }
 
+let back = () => {}; // the page's check when ComfyUI answers again after its WebSocket closed: it may have restarted on other code
+export const onBack = (fn) => { back = fn; };
 export function connect() {
+  let closed = false; // the WebSocket closed since it last opened: ComfyUI stopped, or the network did
   const open = () => {
     const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?clientId=${CLIENT}`);
     ws.binaryType = "arraybuffer";
-    ws.onopen = () => { socket = true; ws.send(JSON.stringify({ type: "feature_flags", data: { supports_preview_metadata: true } })); };
-    ws.onclose = () => { socket = false; setTimeout(open, 2000); };
+    ws.onopen = () => { socket = true; ws.send(JSON.stringify({ type: "feature_flags", data: { supports_preview_metadata: true } })); if (closed) back(); closed = false; };
+    ws.onclose = () => { socket = false; closed = true; setTimeout(open, 2000); };
     ws.onmessage = message;
   };
   open();

@@ -394,8 +394,10 @@ def cleanup():
 
     Composite Frames makes that start one frame at a time and holds it once: 2.8 GB for 121 frames at 1920 x 1088. Image
     Scale and Image Composite Masked made the same pictures from the whole shot: the plate, the first stage and the blocks
-    at full size (9.4 GB), then six copies of the result at the composite's peak (16.9 GB). On a 16 GB card with 52 GB of
-    RAM, ComfyUI stopped there, 16.5 GB above the 32.0 GB it held after the first stage (12 Nov).
+    at full size (9.4 GB), then core's composite, which holds four copies of the shot and two of its mask at its peak:
+    13.2 GB. On a 16 GB card with 52 GB of RAM, ComfyUI stopped there, 16.5 GB above the 32.0 GB it held after the first
+    stage (12 Nov). With Composite Frames, the laptop measured this stage posted at 28.5 GB, 31.8 GB before LTX loaded,
+    and 38.3 GB at its peak (1.11.10).
     """
     g = Graph()
     load, model = plate(g, pad=True)

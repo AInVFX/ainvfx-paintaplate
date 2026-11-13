@@ -3,7 +3,7 @@
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
-import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setPack, setSalt, upload, viewUrl } from "./comfy.mjs";
+import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromBytes, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
@@ -16,7 +16,7 @@ import { DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, c
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
-import { FAMILY, framesNeed, matteLargest, freesBefore, memoryProfile, remember, slower, stepLeft, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
+import { FAMILY, framesNeed, matteLargest, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, hiddenAbove, layersHint, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
@@ -2557,17 +2557,14 @@ function plan(r, active) { // the steps this set of edits needs: the erase pass 
 const TIMES_KEY = "paintaplate.times";
 let TIMES = {};
 try { TIMES = JSON.parse(localStorage.getItem(TIMES_KEY) ?? "{}") ?? {}; } catch { TIMES = {}; }
-const BIG = ["full", "cleanfull", "hdr", "review", "export"];
-const stepSize = (id) => (BIG.includes(id) ? S.plate.work : ["erase", "track", "trackfull"].includes(id) ? S.plate.track : S.plate.shot);
+const stepSize = (id) => stepSizeOf(id, S.plate);
 const stepKey = (id) => timeKey(id, stepSize(id), S.plate.frames, S.memoryProfile.name);
 
-function estimate(id) { // seconds: what this step took last time on this plate, else on this machine at this size, else a measured reference scaled to this plate and this card
+function estimate(id) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess
   if (S.took[id]) return S.took[id];
   const known = TIMES[stepKey(id)];
   if (known?.total) return known.total;
-  const p = S.plate, ref = 928 * 512 * 97, size = stepSize(id);
-  const scale = (size[0] * size[1] * p.frames) / ref * (BIG.includes(id) ? 0.73 : 1);
-  return STAGES.find((x) => x.id === id).ref * Math.max(0.25, scale) * slower(S.memoryProfile.name, id);
+  return stepGuess(id, STAGES.find((x) => x.id === id).ref, S.plate, S.memoryProfile.name);
 }
 
 async function step(r, id, work, store = r) { // run one step of a render, timed and shown; preview steps keep their result per size
@@ -3648,11 +3645,20 @@ document.addEventListener("pointerdown", (e) => { // a press outside the open me
 }, true);
 addEventListener("blur", closeMenu);
 
-async function boot() { // the version, the workflows, the WebSocket, then what this ComfyUI lacks: nodes, then model files
-  const { version = "" } = await fetch("/paintaplate/version").then((r) => r.json()).catch(() => ({})); // pyproject.toml's, on the server
-  setPack(version); // a part of every job index key: a result made by another version is not taken back (comfy.mjs)
+async function boot() { // the version and the build, the workflows, the WebSocket, then what this ComfyUI lacks: nodes, then model files
+  const served = () => fetch("/paintaplate/version").then((r) => r.json()).catch(() => ({})); // routes.version_route
+  const { version = "", build = "" } = await served(); // pyproject.toml's version, and the build: a hash of what computes on the server
+  setBuild(build); // a part of every job index key: a result made by other code or other model files is not taken back (comfy.mjs)
+  let asked = false;
+  onBack(async () => { // ComfyUI answers again after its WebSocket closed: a restart on other code or model files asks for a reload
+    const now = (await served()).build || "";
+    if (asked || !build || !now || now === build) return;
+    asked = true;
+    setBuild(""); // this page runs the code it loaded: a key made with either build would not say what made the result
+    told("ComfyUI restarted with other code or model files", "Reload this page. Until then, no job is taken from the job index or written to it");
+  });
   $("#version").textContent = S.version = version;
-  log(`AInVFX Paint a plate ${version || "of an unknown version: restart ComfyUI after an update"}`);
+  log(`AInVFX Paint a plate ${version || "of an unknown version: restart ComfyUI after an update"}${build ? ` (build ${build.slice(0, 8)})` : ""}`);
   onNotice(status);
   onLog(log);
   const t0 = performance.now();

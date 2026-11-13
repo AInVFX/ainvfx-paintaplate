@@ -137,8 +137,8 @@ def composite(destination: np.ndarray, source: np.ndarray, mask: np.ndarray) -> 
     """`source` inside `mask` and `destination` around it: one frame, (H, W, C) float32, with a mask (H, W) in 0 to 1.
 
     The arithmetic of core's Image Composite Masked (mask * source + (1 - mask) * destination), so a node that calls it
-    frame by frame makes that node's pictures. Core works on the whole batch and holds six copies of the result at its
-    peak: 16.9 GB for 121 frames at 1920 x 1088 (12 Nov).
+    frame by frame makes that node's pictures. Core works on the whole batch: at its peak it holds
+    four copies of the shot and two of its mask, 13.2 GB for 121 frames at 1920 x 1088.
     """
     m = mask[..., None].astype(np.float32)
     return m * source + (np.float32(1) - m) * destination

@@ -205,7 +205,7 @@ class PlateBrowser(unittest.TestCase):
         import json, tomllib
         with open(os.path.join(ROOT, "pyproject.toml"), "rb") as f:
             self.assertEqual(routes.VERSION, tomllib.load(f)["project"]["version"])
-        self.assertEqual(json.loads(asyncio.run(routes.version_route(None)).text), {"version": routes.VERSION})
+        self.assertEqual(json.loads(asyncio.run(routes.version_route(None)).text), {"version": routes.VERSION, "build": routes.BUILD})
 
     def test_plate_info_names_the_colour_space_in_the_config(self):
         info = routes.plate_info("plates/exr_shot")
@@ -277,6 +277,79 @@ class PlateBrowser(unittest.TestCase):
                 self.assertEqual(r.status, 404)
         asyncio.run(run())
 
+
+
+class Build(unittest.TestCase):
+    """/paintaplate/version's build (render workstream): a hash of what computes, made when ComfyUI starts. The page puts it
+    in every job index key in place of the version (comfy.indexParts)."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="paintaplate_build_")
+        self.pack, self.comfy, self.ltx = (os.path.join(self.dir, n) for n in ("pack", "ComfyUI", "ComfyUI-LTXVideo"))
+        touch(os.path.join(self.pack, "nodes.py"), b"STRENGTH = 1\n")
+        touch(os.path.join(self.pack, "pyproject.toml"), b'version = "1.11.12"\n')
+        touch(os.path.join(self.pack, "tests", "test_nodes.py"), b"")
+        touch(os.path.join(self.comfy, "comfyui_version.py"), b'__version__ = "0.42.1"\n')
+        touch(os.path.join(self.ltx, ".git", "HEAD"), b"ref: refs/heads/master\n")
+        touch(os.path.join(self.ltx, ".git", "refs", "heads", "master"), b"a" * 40 + b"\n")
+        touch(os.path.join(self.dir, "models", "ltx.safetensors"), b"weights")
+
+    def build(self):
+        find = lambda name: os.path.join(self.dir, "models", name)  # noqa: E731
+        stats = routes.model_stats(["ltx.safetensors", "hdr.safetensors"], find)
+        return routes.build_hash(routes.build_parts(self.pack, self.comfy, self.ltx, stats))
+
+    def test_the_build_is_16_hex_digits_made_at_start(self):
+        self.assertRegex(routes.BUILD, r"^[0-9a-f]{16}$")
+        self.assertEqual(routes.build_hash(routes.build_parts()), routes.BUILD, "the same code and files as at start")
+
+    def test_what_computes_makes_another_build(self):
+        builds = [self.build()]
+        self.assertEqual(self.build(), builds[0], "the same code and the same files: the same build")
+        changes = [  # each one alone makes a build no index has seen
+            lambda: touch(os.path.join(self.pack, "nodes.py"), b"STRENGTH = 2\n"),  # a branch or a local edit of one version
+            lambda: touch(os.path.join(self.pack, "plateio.py"), b""),  # a new Python file
+            lambda: touch(os.path.join(self.comfy, "comfyui_version.py"), b'__version__ = "0.43.0"\n'),
+            lambda: touch(os.path.join(self.ltx, ".git", "refs", "heads", "master"), b"b" * 40 + b"\n"),
+            lambda: touch(os.path.join(self.dir, "models", "ltx.safetensors"), b"other weights"),  # a new file, an old name
+            lambda: os.utime(os.path.join(self.dir, "models", "ltx.safetensors"), (1e9, 1e9)),  # the same size, another time
+            lambda: touch(os.path.join(self.dir, "models", "hdr.safetensors"), b"hdr"),  # a model file that was missing
+        ]
+        for change in changes:
+            change()
+            builds.append(self.build())
+        self.assertEqual(len(set(builds)), len(builds), builds)
+
+    def test_what_does_not_compute_leaves_it(self):
+        before = self.build()
+        touch(os.path.join(self.pack, "pyproject.toml"), b'version = "1.11.13"\n')  # a new version number alone
+        touch(os.path.join(self.pack, "tests", "test_nodes.py"), b"# a new test\n")  # tests do not run in ComfyUI
+        touch(os.path.join(self.pack, "web", "app.mjs"), b"")  # the page: its workflows and values are in each key already
+        self.assertEqual(self.build(), before)
+
+    def test_a_clone_s_commit_is_read_from_its_git_folder(self):
+        sha = "c" * 40
+        touch(os.path.join(self.dir, "packed", ".git", "HEAD"), b"ref: refs/heads/main\n")
+        touch(os.path.join(self.dir, "packed", ".git", "packed-refs"), f"# pack-refs\n{sha} refs/heads/main\n".encode())
+        touch(os.path.join(self.dir, "detached", ".git", "HEAD"), f"{sha}\n".encode())
+        commits = [routes.git_commit(os.path.join(self.dir, n)) for n in ("ComfyUI-LTXVideo", "packed", "detached", "pack")]
+        self.assertEqual(commits, ["a" * 40, sha, sha, ""])
+
+    def test_ltx_without_git_counts_by_its_python_files(self):
+        import shutil
+        shutil.rmtree(os.path.join(self.ltx, ".git"))
+        touch(os.path.join(self.ltx, "nodes", "guide.py"), b"A = 1\n")
+        before = self.build()
+        touch(os.path.join(self.ltx, "nodes", "guide.py"), b"A = 2\n")
+        self.assertNotEqual(self.build(), before, "installed from a zip: a change in any of its Python files makes another build")
+
+    def test_a_model_file_is_found_in_any_model_folder(self):
+        from unittest import mock
+        folders = {"loras": [os.path.join(self.dir, "loras")], "vae": [os.path.join(self.dir, "models")]}
+        full = lambda kind, name: next((os.path.join(p, name) for p in folders[kind] if os.path.isfile(os.path.join(p, name))), None)  # noqa: E731
+        with mock.patch.object(routes, "folder_paths", types.SimpleNamespace(folder_names_and_paths=folders, get_full_path=full)):
+            self.assertEqual(routes.model_path("ltx.safetensors"), os.path.join(self.dir, "models", "ltx.safetensors"))
+            self.assertIsNone(routes.model_path("hdr.safetensors"))
 
 
 class BlankPlate(unittest.TestCase):

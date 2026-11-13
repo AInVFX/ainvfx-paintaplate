@@ -1,7 +1,8 @@
 """The page's HTTP routes. Every path is a page path (folders.py): under the input folder, or the output folder with output:.
     GET  /paintaplate/browse?path=output:video        a folder for the Open dialog: subfolders, videos, sequences, scenes;
                                                       at a root, also the newest plates of the folders below it
-    GET  /paintaplate/version                         the pack's version, from pyproject.toml: the page's top bar and log
+    GET  /paintaplate/version                         the pack's version, from pyproject.toml: the page's top bar and log;
+                                                      and its build, a hash of what computes (build_parts): job index keys
     GET  /paintaplate/thumb?path=output:a.mp4         the first frame of a plate as a small JPEG, made once, kept in temp
     GET  /paintaplate/stat?path=plates/boat.mp4&config=ocio://studio-config-latest
                                                       a plate's size and time (job index keys change with them), its spec
@@ -121,6 +122,121 @@ def models_md(ids: list[str]) -> str:
     return "\n".join(out) + "\n"
 
 
+# ---------- The build: what computes, in every job index key ----------
+# The page puts it in every key in place of the pack's version (comfy.indexParts). A branch or a local edit of one version,
+# an update of ComfyUI or of ComfyUI-LTXVideo, and a new model file under an old name each make new keys, so a result made by
+# other code or other weights is never taken back. It is made once, when ComfyUI starts: the code that runs is the code
+# ComfyUI imported then, whatever changes on disk later.
+PACK = os.path.dirname(os.path.abspath(__file__))
+
+
+def python_digest(folder: str, deep: bool = False) -> str:
+    """SHA-256 of a folder's Python files, by name and content: its top level, or its subfolders too with `deep`."""
+    digest = hashlib.sha256()
+    for top, dirs, names in os.walk(folder):
+        dirs[:] = sorted(d for d in dirs if deep and not d.startswith(".") and d != "__pycache__")
+        for name in sorted(n for n in names if n.endswith(".py")):
+            path = os.path.join(top, name)
+            with open(path, "rb") as f:
+                digest.update(f"{os.path.relpath(path, folder)}\0".encode() + f.read() + b"\0")
+    return digest.hexdigest()
+
+
+def git_commit(folder: str) -> str:
+    """The commit a git clone is on, read from its .git folder with no git command; "" for a folder that is not a clone."""
+    git = os.path.join(folder, ".git")
+    try:
+        if os.path.isfile(git):  # a submodule or a worktree: "gitdir: <path>"
+            with open(git, encoding="utf-8") as f:
+                git = os.path.join(folder, f.read().split(":", 1)[1].strip())
+        with open(os.path.join(git, "HEAD"), encoding="utf-8") as f:
+            head = f.read().strip()
+        if not head.startswith("ref: "):
+            return head  # a detached HEAD holds the commit itself
+        ref = head[5:]
+        if os.path.isfile(os.path.join(git, ref)):
+            with open(os.path.join(git, ref), encoding="utf-8") as f:
+                return f.read().strip()
+        with open(os.path.join(git, "packed-refs"), encoding="utf-8") as f:
+            return next((line.split()[0] for line in f if line.rstrip().endswith(f" {ref}")), "")
+    except (OSError, IndexError):
+        return ""
+
+
+def comfy_version(root: str) -> str:
+    """ComfyUI's version, from comfyui_version.py at its root; "" when there is none."""
+    try:
+        with open(os.path.join(root, "comfyui_version.py"), encoding="utf-8") as f:
+            m = re.search(r"""__version__\s*=\s*["']([^"']+)""", f.read())
+        return m.group(1) if m else ""
+    except OSError:
+        return ""
+
+
+def ltx_folder() -> str:
+    """ComfyUI-LTXVideo's folder among the custom nodes; "" when it is not there (the page then stops on its nodes)."""
+    roots = getattr(folder_paths, "get_folder_paths", lambda _: [])("custom_nodes") or [os.path.dirname(PACK)]
+    for root in roots:
+        try:
+            names = sorted(os.listdir(root))
+        except OSError:
+            continue
+        for name in names:
+            if name.lower().startswith("comfyui-ltxvideo") and not name.endswith(".disabled") and os.path.isdir(os.path.join(root, name)):
+                return os.path.join(root, name)
+    return ""
+
+
+def model_path(name: str) -> str | None:
+    """Where this ComfyUI keeps a model file, in any of its model folders (extra_model_paths.yaml's too); None: nowhere."""
+    for kind in list(getattr(folder_paths, "folder_names_and_paths", {})):
+        try:
+            path = folder_paths.get_full_path(kind, name)
+        except Exception:  # a folder kind that holds no such file
+            path = None
+        if path:
+            return path
+    return None
+
+
+def model_stats(names: list[str], find=model_path) -> list:
+    """Each model file as [name, size, time], or [name] when this ComfyUI has none."""
+    stats = []
+    for name in names:
+        try:
+            st = os.stat(find(name) or "")
+            stats.append([name, st.st_size, int(st.st_mtime)])
+        except OSError:
+            stats.append([name])
+    return stats
+
+
+def build_parts(pack: str = PACK, root: str | None = None, ltx: str | None = None, models: list | None = None) -> dict:
+    """What computes: the pack's Python files (its top level, the modules ComfyUI imports), ComfyUI's version and commit,
+    ComfyUI-LTXVideo's commit (the hash of its Python files when it is not a git clone), and the name, size and time of
+    each model file of web/models.json. pyproject.toml is not in it: a new version number alone changes nothing."""
+    if root is None:
+        root = os.path.dirname(os.path.abspath(folder_paths.__file__)) if getattr(folder_paths, "__file__", None) else ""
+    ltx = ltx_folder() if ltx is None else ltx
+    if models is None:
+        with open(MODELS_JSON, encoding="utf-8") as f:
+            models = model_stats([m["file"] for m in json.load(f)["models"]])
+    return {"pack": python_digest(pack), "comfyui": [comfy_version(root), git_commit(root)] if root else [],
+            "ltx": (git_commit(ltx) or python_digest(ltx, deep=True)) if ltx else "", "models": models}
+
+
+def build_hash(parts: dict) -> str:
+    """The build: 16 hex digits of the SHA-256 of build_parts."""
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()[:16]
+
+
+_built = build_parts()
+BUILD = build_hash(_built)
+logging.info("Paint a plate %s: build %s, from ComfyUI %s, ComfyUI-LTXVideo %s and %d of %d model files (the job index keys)",
+             VERSION, BUILD, " ".join(x[:7] for x in _built["comfyui"] if x) or "unknown", _built["ltx"][:7] or "not found",
+             sum(len(m) == 3 for m in _built["models"]), len(_built["models"]))
+
+
 def build_zip(folder: str, name: str, parts: list[str], models: list[str] | None = None) -> str:
     """The zip of `parts`, stored (EXR, PNG and video are already compressed) and reused while it is current, with
     MODELS.md when the page names the models behind the result."""
@@ -237,7 +353,7 @@ def thumbnail(rel: str, width: int = THUMB_WIDTH) -> str:
 
 
 async def version_route(request: web.Request) -> web.Response:
-    return web.json_response({"version": VERSION})
+    return web.json_response({"version": VERSION, "build": BUILD})
 
 
 async def browse_route(request: web.Request) -> web.Response:

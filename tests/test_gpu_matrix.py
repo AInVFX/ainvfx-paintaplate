@@ -2,10 +2,12 @@
 start keeps. No GPU and no browser."""
 import argparse
 import contextlib
+import glob
 import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -185,7 +187,7 @@ class Run(unittest.TestCase):
         self.assertIn("| Before each case | ComfyUI is freed (--fresh) |", report)
         calls, _, report = self.matrix("horse_cow,horse_erase", [True])
         self.assertEqual(calls, ["horse_cow", "horse_erase"])
-        self.assertIn("| Before each case | ComfyUI stays as the case before left it |", report)
+        self.assertIn("| Before each case | ComfyUI stays as the case before left it: a first job can read its RAM |", report)
 
     def test_seeds_runs_each_case_once_per_seed(self):
         """The pod's first turn runs the erase on 5 seeds: one row of the report and one folder per seed."""
@@ -278,6 +280,116 @@ class PodStart(unittest.TestCase):
             self.assertEqual(kept.pop("comfyui.log"), "ComfyUI, run two")
             self.assertEqual(list(kept.values()), ["ComfyUI, run one"], "the log of the ComfyUI that stopped, under its own name")
             self.assertIn("is kept: " + os.path.join(work, next(iter(kept))), said)
+
+
+class Tools(unittest.TestCase):
+    """The GPU tools do not depend on the page's words and keys (wave 5, R8). A stroke names its tool by its button's
+    data-tool, which stays when a label or a key changes, and a matte line is read whatever word comes before « matte »."""
+
+    def test_every_stroke_names_a_tool_the_page_has(self):
+        html = "".join(open(p, encoding="utf-8").read() for p in glob.glob(os.path.join(gpu_matrix.REPO, "web", "*.html")))
+        tools = set(re.findall(r'data-tool="([a-z]+)"', html))
+        self.assertTrue({"paint", "erase", "light"} <= tools, tools)
+        for name, case in gpu_matrix.load_cases().items():
+            self.assertTrue(all(s[0] in tools for s in case.get("strokes", [])), name)
+
+    def test_ui_live_picks_a_tool_by_its_button(self):
+        with open(os.path.join(gpu_matrix.HERE, "ui_live.py"), encoding="utf-8") as f:
+            tool = f.read()
+        self.assertIn("""page.click(f'.tools [data-tool="{tool}"]')""", tool)
+        self.assertEqual(len(re.findall(r"(?<!def )pick\(page, tool\)", tool)), 2, "both runs, besides its def")
+        self.assertNotIn("keyboard.press(key)", tool)
+
+    def test_a_matte_line_is_read_whatever_its_first_word(self):
+        log = ("11:02:36 PMClean matte: SAM 3.1 found the object on 76 of 121 frames; the largest matte is 1.0 times the object, on frame 0\n"
+               "23:02:37Paint matte (full): SAM 3.1 found the object on 54 of 121 frames; the largest matte is 1.0 times the object, on frame 8\n")
+        self.assertEqual([m.split(":")[0] for m in gpu_matrix.read_log(log)["mattes"]], ["Clean matte", "Paint matte (full)"])
+
+
+class ReportLines(unittest.TestCase):
+    """What the report says (wave 5, R9): a fluid shot's steps, the RAM a first job can read, the page's figure for an erase."""
+
+    FLUID = ("11:38:49 PMFluid v1: 2 keyframe(s) at 1, 121, 1280 x 704, 121 frames at 24 fps, seed 104\n"
+             "11:38:49 PMFluid shot v1: one LTX 2.5 pass with ainvfx-fluid\n"
+             "11:40:38 PMfluid fd2d3d7a: done in 108.9 s (29 nodes, 4 previews)\n"
+             "11:40:38 PMFluid shot v1: SDR to HDR, one LTX 2.5 pass with Lightricks' IC-LoRA\n"
+             "11:43:33 PMhdr 647d4dd4: done in 175.3 s (29 nodes, 3 from ComfyUI's cache, 4 previews)\n"
+             "11:43:33 PMFluid v1: SDR to HDR took 175.3 s: half-float EXR frames in output:paintaplate/x/fluid_v1/hdr\n"
+             "11:43:33 PMFluid v1: done in 284.3 s: 1 file(s) in /data/ComfyUI/output/paintaplate/x/fluid_v1/plate\n")
+
+    def test_a_fluid_shot_has_its_steps(self):
+        """fluid_720 on the laptop, 12 Nov: its table of steps was empty, as only « Render vN: … took » lines were read."""
+        self.assertEqual(gpu_matrix.read_log(self.FLUID)["steps"], [("fluid v1 LTX pass", 108.9), ("fluid v1 SDR to HDR", 175.3), ("fluid v1 in all", 284.3)])
+
+    def test_render_steps_keep_their_names_and_order(self):
+        log = "11:02:36 PMRender v1: Track the erase took 28.7 s\n11:03:35 PMRender v1: Erase pass, preview took 59.1 s\n"
+        self.assertEqual(gpu_matrix.read_log(log)["steps"], [("v1 Track the erase", 28.7), ("v1 Erase pass, preview", 59.1)])
+
+    def test_an_erase_gives_the_page_s_figure(self):
+        log = "11:02:06 PMEdit 1: the object left the first frame (59% of it changed)\n"
+        self.assertEqual(gpu_matrix.read_log(log)["figures"], ["Edit 1: the object left the first frame (59% of it changed)"])
+
+    def test_without_fresh_a_first_job_can_read_the_case_before(self):
+        """horse_erase_barn's ingest on the laptop, 12 Nov: 30.3 GB of peak RAM for a 2.6 s job, the case before's memory."""
+        r, gb = {"jobs": [{"name": "ingest", "id": "69cce02d", "run": 2.6, "ram": 30.3e9}]}, (lambda x: f"{x / 1e9:.1f} GB")
+        note = gpu_matrix.carried(r, False, gb)
+        self.assertTrue(len(note) == 1 and "ingest 69cce02d" in note[0] and "--fresh" in note[0], note)
+        self.assertEqual(gpu_matrix.carried(r, True, gb), [])
+
+
+class MatteCases(unittest.TestCase):
+    """Two cases for the matte agent (wave 5, R4), outside quick and all: a paint on a moving object, and an object that
+    stands still for 12 frames or more, then leaves by itself (Adrien accepted that the matte loses it and wants a recording)."""
+
+    def test_two_paint_cases_outside_quick_and_all(self):
+        cases = gpu_matrix.load_cases()
+        html = "".join(open(p, encoding="utf-8").read() for p in glob.glob(os.path.join(gpu_matrix.REPO, "web", "*.html")))
+        for name in ("horse_saddle", "horse_bird"):
+            case = cases[name]
+            self.assertNotIn(name, gpu_matrix.ALL + gpu_matrix.QUICK)
+            self.assertEqual((case["path"], [s[0] for s in case["strokes"]]), ("plates/horse.mp4", ["paint"]))
+            self.assertIsInstance(case["seed"], int, "the same jobs at every run")
+            self.assertIn(f'data-color="{case["strokes"][0][4]["color"]}"', html, "one of the page's swatches")
+        self.assertIn("still", cases["horse_bird"]["strokes"][0][1])
+        self.assertIn("flies away", cases["horse_bird"]["strokes"][0][1])
+
+
+class Estimates(unittest.TestCase):
+    """Each step beside what the page announced before it started (wave 5, R2): a GPU run checks the estimates."""
+
+    def test_the_report_holds_each_step_against_its_announcement(self):
+        log = ("11:02:07 PMRender v1: Track the erase (about 12 s)\n11:02:36 PMRender v1: Track the erase took 28.7 s\n"
+               "11:03:36 PMRender v1: Composite, preview (about 8 s) in the background\n11:03:47 PMRender v1: Composite, preview took 9.0 s\n")
+        info = gpu_matrix.read_log(log)
+        self.assertEqual(info["announced"], {"v1 Track the erase": 12, "v1 Composite, preview": 8})
+        self.assertEqual(gpu_matrix.estimates_off(info["steps"], info["announced"]), ["v1 Track the erase: about 12 s, took 28.7 s"])
+
+
+class NodeClock(unittest.TestCase):
+    """Where a job's time goes (wave 5, D7): ui_live.py keeps ComfyUI's « executing » messages, gpu_matrix.py sums them by node."""
+
+    def test_each_node_s_seconds_from_comfyui_s_executing_messages(self):
+        pid = "b05b5b84-7022-4f56-a1c9-cf9dc1a678cd"
+        events = [[10.0, pid, "3"], [12.5, pid, "7"], [518.5, pid, "9"], [549.5, pid, "11"], [550.0, pid, None]]
+        graph = {"3": {"class_type": "CLIPTextEncode"}, "7": {"class_type": "SamplerCustomAdvanced"},
+                 "9": {"class_type": "VAEDecodeTiled"}, "11": {"class_type": "PaintAPlate_SavePlate"}}
+        self.assertEqual(gpu_matrix.node_times(events, {pid: graph}), {"b05b5b84": [
+            ("SamplerCustomAdvanced", 506.0), ("VAEDecodeTiled", 31.0), ("CLIPTextEncode", 2.5), ("PaintAPlate_SavePlate", 0.5)]})
+
+    @unittest.skipUnless(importlib.util.find_spec("playwright"), "tests/ui_live.py imports Playwright")
+    def test_ui_live_keeps_the_executing_messages_only(self):
+        spec = importlib.util.spec_from_file_location("ui_live_clock", os.path.join(gpu_matrix.HERE, "ui_live.py"))
+        tool = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tool)
+
+        class Socket:
+            def on(self, event, fn):
+                self.event, self.fn = event, fn
+        ws, events = Socket(), []
+        tool.executing(events, 0.0)(ws)
+        for frame in (b"\x00\x01 a preview", '{"type": "progress", "data": {"value": 1}}', '{"type": "executing", "data": {"node": "7", "prompt_id": "abc"}}'):
+            ws.fn(frame)
+        self.assertEqual((ws.event, [e[1:] for e in events]), ("framereceived", [["abc", "7"]]))
 
 
 if __name__ == "__main__":
