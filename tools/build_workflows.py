@@ -515,10 +515,10 @@ def mattes(g):
     sets both). The erase is tracked smaller (ERASE_TRACK_SIDE in app.mjs: 576 x 320 for a 1080p plate, the paint at
     960 x 544), and Combine Masks crops its source to its destination instead of scaling it: the paint matte kept only its
     top-left corner, stretched, so a boat painted on a plate with an erase vanished from the composite (29 Oct)."""
-    erase = g("PaintAPlate_LoadPlate", _title="Erase matte", path=Slot("matte_a", ""), max_frames=1024, pad_8n1=False)
+    erase = g("PaintAPlate_LoadPlate", _title="Clean matte", path=Slot("matte_a", ""), max_frames=1024, pad_8n1=False)
     add = g("PaintAPlate_LoadPlate", _title="Paint matte", path=Slot("matte_b", ""), max_frames=1024, pad_8n1=False)
     size = g("GetImageSize", image=add)
-    erase = g("ImageScale", _title="Erase matte at the paint matte's size", image=erase, upscale_method="bilinear",
+    erase = g("ImageScale", _title="Clean matte at the paint matte's size", image=erase, upscale_method="bilinear",
               width=size[0], height=size[1], crop="disabled")
     return g("MaskComposite", destination=g("ImageToMask", image=erase, channel="red"),
              source=g("ImageToMask", image=add, channel="red"), x=0, y=0, operation="add")

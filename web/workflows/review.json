@@ -55,7 +55,7 @@
    "pad_8n1": false
   },
   "_meta": {
-   "title": "Erase matte",
+   "title": "Clean matte",
    "slots": {
     "path": "matte_a"
    }
@@ -103,7 +103,7 @@
    "crop": "disabled"
   },
   "_meta": {
-   "title": "Erase matte at the paint matte's size"
+   "title": "Clean matte at the paint matte's size"
   }
  },
  "8": {
