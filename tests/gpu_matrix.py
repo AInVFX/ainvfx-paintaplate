@@ -33,11 +33,13 @@ import glob
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
 import time
 import urllib.request
+import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -313,6 +315,154 @@ def read_log(text):
     }
 
 
+# ---------- The pictures: one sheet per case (wave 6, R10) ----------
+# On 12 Nov horse_erase passed with the barn still in its result, and nothing in the report showed it. The sheet puts the
+# plate and the export side by side, cut around each edit's box, on four frames: the first, at a third, at two thirds and
+# the last. With one edit the box follows the export's matte from frame to frame; a relight shows the whole frame. For an
+# erase the sheet keeps a place for a verdict: the edit workstream's measure (E5), one pure function of web/logic.mjs that
+# this file will run with Node, as tests/erase_probe.py runs the page's rules. Until it is merged, the place says so.
+SHEET_CELL = (360, 240)  # the largest picture of one frame on the sheet, in pixels
+IMAGES = (".exr", ".png", ".jpg", ".jpeg", ".tif", ".tiff")
+MOVIES = (".mp4", ".mov", ".webm", ".mkv")
+VERDICT = "Verdict: waiting for E5, the edit workstream's measure"
+TOOL_NAMES = {"paint": "Paint", "erase": "Clean", "light": "Light"}
+
+
+def frames_source(path):
+    """A movie's path as it is, or the image files of a folder in order (an image sequence)."""
+    return sorted(f for f in glob.glob(os.path.join(path, "*")) if f.lower().endswith(IMAGES)) if os.path.isdir(path) else path
+
+
+def image_rgb(path):
+    """One image file as 8-bit RGB. An EXR's values are clipped at 1.0 under a plain 2.2 gamma: enough to see what is there."""
+    import numpy as np
+    from PIL import Image
+    if path.lower().endswith(".exr"):
+        if REPO not in sys.path:
+            sys.path.insert(0, REPO)
+        import plateio
+        return (np.clip(plateio.read_float(path)[..., :3], 0, 1) ** (1 / 2.2) * 255).astype(np.uint8)
+    with Image.open(path) as im:
+        return np.asarray(im.convert("RGB"))
+
+
+def media_count(src):
+    """How many frames a movie or a list of image files holds."""
+    if isinstance(src, list):
+        return len(src)
+    import av
+    with av.open(src) as c:
+        stream = c.streams.video[0]
+        return stream.frames or sum(1 for p in c.demux(stream) if p.size)
+
+
+def media_frames(src, want):
+    """{index: RGB uint8 array} for the frames `want` of a movie or of a list of image files."""
+    if isinstance(src, list):
+        return {i: image_rgb(src[min(i, len(src) - 1)]) for i in want}
+    import av
+    out = {}
+    with av.open(src) as c:
+        for i, frame in enumerate(c.decode(video=0)):
+            if i in want:
+                out[i] = frame.to_ndarray(format="rgb24")
+            if i >= max(want):
+                break
+    return out
+
+
+def edit_box(stroke, width, height):
+    """An edit's box on the first frame, in pixels: its stroke's points, and half its brush around them."""
+    xs, ys, r = [p[0] * width for p in stroke[2]], [p[1] * height for p in stroke[2]], (stroke[3] if len(stroke) > 3 else 64) / 2
+    return (min(xs) - r, min(ys) - r, max(xs) + r, max(ys) + r)
+
+
+def matte_box(path, width, height):
+    """The box around a matte frame's white, at the frame's size; None when the frame holds none."""
+    import numpy as np
+    from PIL import Image
+    with Image.open(path) as im:
+        m = np.asarray(im.convert("L")) > 127
+    if not m.any():
+        return None
+    ys, xs = np.nonzero(m)
+    sx, sy = width / m.shape[1], height / m.shape[0]
+    return (xs.min() * sx, ys.min() * sy, (xs.max() + 1) * sx, (ys.max() + 1) * sy)
+
+
+def framed(box, width, height, least=160):
+    """The box with as much again around it, at least `least` pixels a side, inside the frame."""
+    (x0, y0, x1, y1), cx, cy = box, (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    w, h = min(max((x1 - x0) * 2, least), width), min(max((y1 - y0) * 2, least), height)
+    left, top = min(max(0, cx - w / 2), width - w), min(max(0, cy - h / 2), height - h)
+    return (int(left), int(top), int(left + w), int(top + h))
+
+
+def sheet(case, folder, plate, others=()):
+    """The case's sheet, sheet.png in its folder: for each edit, the plate and the export cut around its box, on the first
+    frame, at a third, at two thirds and on the last. `others`: more (title, export.zip) columns, such as another run of
+    the same strokes. {"path", "frames" (from 1), "cells": [(row, column, x0, y0, x1, y1)]}, or None with no export or plate."""
+    from PIL import Image, ImageDraw, ImageFont
+    strokes, export = case.get("strokes") or [], os.path.join(folder, "export.zip")
+    if not strokes or not os.path.exists(export) or not plate or not os.path.exists(plate):
+        return None
+    work, columns, mattes = os.path.join(folder, "sheet_files"), [("plate", frames_source(plate))], []
+    try:
+        for title, path in (("export", export), *others):
+            into = os.path.join(work, title.replace(" ", "_"))
+            with zipfile.ZipFile(path) as z:
+                names = [n for n in z.namelist() if n.startswith(("export/", "matte/")) and not n.endswith("/")]
+                z.extractall(into, names)
+            movies = [n for n in names if n.startswith("export/") and n.lower().endswith(MOVIES)]
+            columns.append((title, os.path.join(into, movies[0]) if movies else
+                            [os.path.join(into, n) for n in sorted(names) if n.startswith("export/") and n.lower().endswith(IMAGES)]))
+            mattes = mattes or sorted(glob.glob(os.path.join(into, "matte", "*.png")))
+        count = media_count(columns[1][1])
+        rows = sorted({0, count // 3, 2 * count // 3, count - 1})
+        pictures = [media_frames(src, rows) for _, src in columns]
+        height, width = pictures[1][rows[0]].shape[:2]
+        edits = []
+        for s in strokes:
+            if s[0] == "light" or not mattes and s[0] != "erase" and s[0] != "paint":
+                edits.append((s, [(0, 0, width, height)] * len(rows)))
+                continue
+            last, boxes = edit_box(s, width, height), []
+            for i in rows:
+                found = matte_box(mattes[min(i, len(mattes) - 1)], width, height) if mattes and len(strokes) == 1 else None
+                last = found or last
+                boxes.append(framed(last, width, height))
+            edits.append((s, boxes))
+        (cw, ch), gap, head, left = SHEET_CELL, 8, 24, 76
+        try:
+            font = ImageFont.load_default(size=15)
+        except TypeError:
+            font = ImageFont.load_default()
+        span = len(columns) * (cw + gap)
+        out = Image.new("RGB", (left + len(edits) * span, 2 * head + len(rows) * (ch + gap) + head), (28, 28, 28))
+        draw, cells = ImageDraw.Draw(out), []
+        for e, (s, boxes) in enumerate(edits):
+            x = left + e * span
+            draw.text((x, 4), f"Edit {e + 1}: {TOOL_NAMES.get(s[0], s[0])} " + (f'"{s[1][:40]}"' if s[1] else "(no words)"), fill="white", font=font)
+            for c, (title, _) in enumerate(columns):
+                draw.text((x + c * (cw + gap), head + 2), title, fill=(200, 200, 200), font=font)
+            for r, i in enumerate(rows):
+                for c in range(len(columns)):
+                    crop = Image.fromarray(pictures[c].get(i, pictures[c][max(k for k in pictures[c] if k <= i)])).crop(boxes[r])
+                    crop.thumbnail((cw, ch))
+                    at = (x + c * (cw + gap), 2 * head + r * (ch + gap))
+                    out.paste(crop, at)
+                    cells.append((r, c, at[0], at[1], at[0] + crop.width, at[1] + crop.height))
+            if s[0] == "erase":
+                draw.text((x, out.height - head + 4), VERDICT, fill=(255, 200, 80), font=font)
+        for r, i in enumerate(rows):
+            draw.text((6, 2 * head + r * (ch + gap) + 4), f"frame {i + 1}", fill="white", font=font)
+        path = os.path.join(folder, "sheet.png")
+        out.save(path)
+        return {"path": path, "frames": [i + 1 for i in rows], "cells": cells}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def run_case(a, name, case, folder):
     memory, t0 = Memory(a.url), time.time()
     memory.start()
@@ -321,7 +471,7 @@ def run_case(a, name, case, folder):
     memory.on = False
     memory.join(3)
     vram, ram, own = memory.peak()
-    result = {"name": name, "hdr_match": comfy_lines(a.url, time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t0))), "seconds": time.time() - t0, "vram": vram, "ram": ram, "own": own, "container": memory.container, "folder": folder, "seed": case.get("seed")}
+    result = {"name": name, "strokes": case.get("strokes") or [], "hdr_match": comfy_lines(a.url, time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t0))), "seconds": time.time() - t0, "vram": vram, "ram": ram, "own": own, "container": memory.container, "folder": folder, "seed": case.get("seed")}
     log_file, marks_file = os.path.join(folder, "page_log.txt"), os.path.join(folder, "timings.json")
     result["log"] = open(log_file, encoding="utf-8").read() if os.path.exists(log_file) else ""
     marks = json.load(open(marks_file)).get("marks", []) if os.path.exists(marks_file) else []
@@ -335,6 +485,10 @@ def run_case(a, name, case, folder):
     nodes_file = os.path.join(folder, "nodes.json")  # ui_live.py: when ComfyUI started each node, from the page's WebSocket
     events = json.load(open(nodes_file)) if os.path.exists(nodes_file) else []
     result["nodes"] = node_times(events, {pid: (e.get("prompt") or [None, None, {}])[2] for pid, e in history.items()})
+    try:  # the case's pictures: never a reason for the case to fail
+        result["sheet"] = sheet(case, folder, os.path.join(a.comfy, "input", case["path"]) if case.get("path") else None)
+    except Exception as exc:
+        result["sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     for job in result["jobs"]:  # when ComfyUI ran it, and the most memory held between those two times
         span = spans.get(job["id"])
         job["run"] = span[1] - span[0] if span else None
@@ -411,6 +565,13 @@ def report(a, machine, results):
             lines += [f"- Paint matte read from `{os.path.relpath(folder, a.comfy)}`: {len(areas)} frames, the first covers {100 * areas[0]:.2f}% of the frame. "
                       f"Against the first frame, the area goes from {min(ratios):.2f} to {max(ratios):.2f} times; the furthest frame is {worst}, at {ratios[worst]:.2f} times.",
                       "- Every frame, against the first: " + " ".join(f"{x:.2f}" for x in ratios)]
+        made = r.get("sheet")
+        if made and made.get("path"):
+            lines += [f"- The plate and the export around each edit, on frames {', '.join(map(str, made['frames']))}:", "",
+                      f"  ![{r['name']}]({os.path.relpath(made['path'], a.out)})", ""]
+            lines += [f"- {VERDICT}." for s in r.get("strokes", []) if s[0] == "erase"][:1]
+        elif made:
+            lines.append(f"- No sheet: {made['error']}.")
         lines += [f"- Marks, screenshots, the page's log and the zip: `{os.path.relpath(r['folder'], a.out)}`."]
     failures = [r for r in ran if not r["passed"]]
     if failures:
