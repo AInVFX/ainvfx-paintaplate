@@ -44,7 +44,7 @@ def run(browser, port, U):
     hold(port, output="patch", seconds=8)
     page.evaluate(U.WATCH)
     page.keyboard.press("Enter")
-    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000); away()
+    page.wait_for_function(f"/edit preview|first look/.test({STATUS})", timeout=30000); away()
     U.check(np.abs(pixel(p2) - plate2).max() <= 16 and np.abs(pixel(p3) - plate3).sum() > 40,
             f"while edit 1 is generated, edit 2 is hidden ({pixel(p2).tolist()} against the plate's {plate2.tolist()}) and edit 3 stays ({pixel(p3).tolist()} on {plate3.tolist()})")
     U.check(rows()[1] == "2. Paint: Waits to be generated again (dimmed)" and "dimmed" not in rows()[0], f"History says that edit 2 waits for its pass, and edit 3 does not: {rows()}")

@@ -32,14 +32,14 @@ def hold(port, **what):  # the mock keeps the next job that writes `output`, or 
 
 def enter_held(page, port, U, seconds=30, key="Enter"):
     """Generate, with the edit's first Klein pass kept open by the mock for `seconds`; `key` is Enter, or Control+Enter for
-    another try. Returns once the mock runs that pass. The status line says « first look » before the pass is posted: a
+    another try. Returns once the mock runs that pass. The status line says « edit preview » before the pass is posted: a
     stop pressed in that gap cancels a pass that was never posted, and the hold stays armed for the next edit's pass,
     which then lasts `seconds`."""
     running = lambda: sum(e[0] == "held" for e in U.mock_route(port, "/mock/events"))  # noqa: E731
     before = running()
     hold(port, output="patch", seconds=seconds)
     page.keyboard.press(key)
-    page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000)
+    page.wait_for_function(f"/edit preview|first look/.test({STATUS})", timeout=30000)
     if not U.poll(page, lambda: running() > before, 30):
         raise AssertionError("the mock did not start the edit's first Klein pass within 30 s of Enter")
 
@@ -102,7 +102,7 @@ def run(browser, port, U):
     U.paint_once(page, "a red fire", [(0.30, 0.45), (0.34, 0.45)]); away()
     U.check(page.evaluate(PICTURE) != "live", "a stroke after the stop shows the first frame and the strokes")
     hold(port, output="patch", seconds=6)
-    page.keyboard.press("Enter"); page.wait_for_function(f"{STATUS}.includes('first look')", timeout=30000); page.wait_for_timeout(1000)
+    page.keyboard.press("Enter"); page.wait_for_function(f"/edit preview|first look/.test({STATUS})", timeout=30000); page.wait_for_timeout(1000)
     U.check(page.evaluate(PICTURE) != "live", "Generate after the stop never brings the stopped pass's preview back")
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
 

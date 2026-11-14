@@ -110,7 +110,7 @@ def log_lines(page):
 
 
 def klein_passes(page):  # Klein passes run so far: a result used again adds none
-    return sum("Klein quick pass" in line for line in log_lines(page))
+    return sum("Klein edit preview" in line or "Klein quick pass" in line for line in log_lines(page))  # the edit preview's line, in its new and earlier words
 
 
 # ---------- Waiting: on what the page shows, never on the clock ----------
@@ -417,8 +417,8 @@ def generate_flow(browser, port):
     check(klein_passes(page) == made and page.locator("#log li:has-text('Render v')").count() == renders and "Nothing changed" in page.text_content("#hud"),
           "Enter again with nothing changed runs nothing twice: no Klein pass, no render step")
     log = log_lines(page)
-    for key in (": done in", "prompt writer", "Klein quick pass"):
-        check(any(key in line for line in log), f"the log says what happens under the hood: {key}")
+    for key in (": done in", "prompt writer", "Klein edit preview|Klein quick pass"):
+        check(any(any(k in line for k in key.split("|")) for line in log), f"the log says what happens under the hood: {key}")
     no_errors(errors, "in a first edit and its render")
     page.close()
 
@@ -773,7 +773,7 @@ def race_flow(browser, port):
     poll(page, lambda: errors or klein_passes(page) >= made + 2, 60)  # the new edit's Klein pass, or the page error the old code threw
     check(not errors, f"Generate while the render before it starts, before its first step: no page error {errors}")
     page.wait_for_function(DONE.format(n=2), timeout=120000)
-    page.wait_for_function(f"[...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('Klein quick pass')).length >= {made + 2}",
+    page.wait_for_function(f"[...document.querySelectorAll('#log li span')].filter((e) => /Klein (edit preview|quick pass)/.test(e.textContent)).length >= {made + 2}",
                            timeout=60000)
     check(klein_passes(page) == made + 2, f"and the new edit is made, as the one before: {klein_passes(page) - made} Klein passes")
     page.close()
