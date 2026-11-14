@@ -617,29 +617,22 @@ def carry(mask: np.ndarray, dy: int, dx: int) -> np.ndarray:
     return out
 
 
-RECORD_SIDE = 320  # PAINTAPLATE_RECORD keeps what Follow Matte was given at this width at most
-
-
 def record(folder: str, masks, n: int, first, shot, base, zone: float, threshold: float, element, erased=None, erased_edge=0.0, first_frame=1) -> str:
     """With PAINTAPLATE_RECORD=<folder> in ComfyUI's environment, what Follow Matte was given, as one .npz file: the
-    tracker's masks, the first-frame mask, the element, the shot, the plate and the Clean matte under a paint, every
-    k-th pixel so the width is
-    RECORD_SIDE at most, in half floats (float16): Follow Matte reads the plate at these same pixels (`plate` in follow_matte),
-    so a replay measures the plate's move from the values the live run read. A recording in 8 bits still replays. SAM and LTX need a GPU; this file does not: follow_matte(**replay(file)) runs the
-    matte again anywhere, so a rule is tried on the real shot that showed its fault, and its summary names the same frames. Returns the file's path."""
-    def small(a, after=0):  # `after`: the axes that follow the width (1 for an image's channels)
+    tracker's masks, the first-frame mask, the element, the shot, the plate and the Clean matte under a paint, at their own
+    size, in half floats (float16), with the plate's first frame number. SAM and LTX need a GPU; this file does not:
+    follow_matte(**replay(file)) runs the matte again anywhere, at the live run's size, so it counts as the live run did
+    and a rule is tried on the real shot that showed its fault. Returns the file's path."""
+    def kept(a, after=0):  # `after`: 1 for an image, whose first 3 channels are kept
         if a is None or not np.size(a):
             return np.zeros((0,), np.float16)
-        a = np.asarray(a)
-        k = max(1, -(-a.shape[a.ndim - 1 - after] // RECORD_SIDE))
-        cut = a[..., ::k, ::k, :3] if after else a[..., ::k, ::k]
-        return cut.astype(np.float16)
+        return (np.asarray(a)[..., :3] if after else np.asarray(a)).astype(np.float16)
 
     os.makedirs(folder, exist_ok=True)
     h, w = np.shape(shot)[1:3] if shot is not None else np.shape(masks)[-2:]
     path = os.path.join(folder, f"follow_matte_{w}x{h}_{n}f_{time.strftime('%Y%m%d_%H%M%S')}.npz")
-    np.savez_compressed(path, masks=small(masks), first=small(first), element=small(element), shot=small(shot, 1), base=small(base, 1),
-                        erased=small(erased), erased_edge=erased_edge, n=n, zone=zone, threshold=threshold, first_frame=first_frame)
+    np.savez_compressed(path, masks=kept(masks), first=kept(first), element=kept(element), shot=kept(shot, 1), base=kept(base, 1),
+                        erased=kept(erased), erased_edge=erased_edge, n=n, zone=zone, threshold=threshold, first_frame=first_frame)
     return path
 
 
@@ -876,12 +869,12 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
         parts, count = ndimage.label(m, structure=eight)
         areas, covered = np.bincount(parts.ravel(), minlength=count + 1), np.bincount(parts[hide], minlength=count + 1)
         return m & (2 * covered <= areas)[parts]
-    k = max(1, -(-w // FOLLOW_SIDE))  # the plate is read small, at the pixels that `record` keeps
+    k = max(1, -(-w // FOLLOW_SIDE))  # the plate is read small: every k-th pixel
     soft = (max(1.0, zone * (w // k) / 4), max(1.0, (w // k) / 160))  # two blurs: a quarter of a zone says that something large stands there, 1/160 of the width says where it ends
 
     def plate(t):  # the plate, small: its luma, to measure its move, and its colours at the two blurs, to compare places and not their texture
         b = base[min(t, len(base) - 1)]
-        b = (b if b.shape[:2] == (h, w) else resize_to(b, h, w))[::k, ::k, :3]  # every k-th pixel, as `record` keeps them: a replay reads the same plate
+        b = (b if b.shape[:2] == (h, w) else resize_to(b, h, w))[::k, ::k, :3]  # every k-th pixel
         return luma(b), [ndimage.gaussian_filter(b, (r, r, 0), truncate=2.5) for r in soft]
 
     def read_in(b, m):  # the plate's colours at the two blurs, read inside a mask only: what stands beside it does not mix in
@@ -1098,7 +1091,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
         ratio = out.reshape(n, -1).sum(1) / size
         worst, over = int(ratio.argmax()), np.flatnonzero(ratio > FOLLOW_WARN)
         largest, above = (float(ratio[worst]), worst), ((int(over[0]), int(over[-1])) if len(over) else None)
-        shares = matte_flicker(out[:, ::k, ::k], FOLLOW_FLICKER)  # read small, as the plate is: a replay counts as the live run does
+        shares = matte_flicker(out[:, ::k, ::k], FOLLOW_FLICKER)  # read small, as the plate is
         flicker = (int((shares > 0).sum()), float(shares.max()), int(shares.argmax())) if shares.any() else None
     tracked_any = bool(len(masks)) and bool(masks.any())
     counts = dict(seen=seen, zones=zones, placed=placed, strays=strays, held=held, added=added, most=most, alone=alone) if tracked_any else {}

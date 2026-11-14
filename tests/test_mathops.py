@@ -364,7 +364,8 @@ class RelightFromTheShot(unittest.TestCase):
 
 class FollowMatteRecord(unittest.TestCase):
     def test_a_recorded_call_runs_again_from_its_file(self):
-        """PAINTAPLATE_RECORD keeps what Follow Matte was given, small: the same call runs again from the file, with no GPU."""
+        """PAINTAPLATE_RECORD keeps what Follow Matte was given, at its own size: the same call runs again from the file, with
+        no GPU, and gives the same mattes and the same summary."""
         import os, tempfile
         from unittest import mock
         n, h, w = 6, 270, 960
@@ -379,13 +380,11 @@ class FollowMatteRecord(unittest.TestCase):
                 out, summary = mathops.follow_matte(masks, n, masks[0], shot=shot, base=base)
             files = os.listdir(d)
             self.assertEqual(len(files), 1, files)
-            self.assertLess(os.path.getsize(os.path.join(d, files[0])), 200_000)
             again = mathops.replay(os.path.join(d, files[0]))
-        self.assertEqual((again["masks"].shape, again["shot"].shape, again["n"]), ((n, 90, 320), (n, 90, 320, 3), n))
-        small, said = mathops.follow_matte(**again)
-        self.assertEqual(said.split("\n")[0], summary.split("\n")[0])  # the headline: tracked on as many frames
-        for t in range(n):  # the same share of the frame, at a third of the size
-            self.assertAlmostEqual(float(small[t].mean()), float(out[t].mean()), delta=0.01)
+        self.assertEqual((again["masks"].shape, again["shot"].shape, again["n"]), ((n, h, w), (n, 2 * h, 2 * w, 3), n))
+        replayed, said = mathops.follow_matte(**again)
+        self.assertEqual(said, summary)
+        self.assertTrue(np.array_equal(replayed > 0.5, out > 0.5))
 
 
 class Composite(unittest.TestCase):

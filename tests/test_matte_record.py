@@ -1,5 +1,5 @@
-"""PAINTAPLATE_RECORD keeps what Follow Matte read in half floats (float16), so a replay counts as the live run does:
-the same mattes and the same summary. A recording in 8 bits still replays."""
+"""PAINTAPLATE_RECORD keeps what Follow Matte read at its own size, in half floats (float16), so a replay counts as the
+live run does: the same mattes, at the same size, and the same summary. A recording in 8 bits still replays."""
 import glob, os, sys, tempfile, unittest
 from _env import require
 require("numpy", "scipy")
@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import mathops as m  # noqa: E402
 
 
-def panning(n=12, h=90, w=160):
+def panning(n=12, h=90, w=400):
     """A camera that pans 1 px per frame over a textured plate, and a painted square that stands still in the scene. The
     tracker returns the whole paint zone on the first 3 frames, then the square."""
     rng = np.random.default_rng(5)
