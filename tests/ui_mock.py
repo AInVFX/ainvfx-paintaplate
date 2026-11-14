@@ -74,7 +74,7 @@ def open_plate(page, path="plates/desk.mp4"):
     """A plate opened from ComfyUI's files, its spec read and the page ready for an edit."""
     open_path(page, path)
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps')", timeout=60000)
-    page.wait_for_function("/Describe the edit|Ready to play/.test(document.querySelector('#status').textContent)", timeout=60000)
+    page.wait_for_function("/Describe the edit|Plate ready/.test(document.querySelector('#status').textContent)", timeout=60000)
 
 
 def view_box(page):
@@ -272,7 +272,7 @@ def open_flow(browser, port):
     check(all(v == k for k, v in shown.items()), f"one tab per source: ComfyUI files, Upload, Scenes, Blank plate: {shown}")
     page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps')", timeout=60000)
-    page.wait_for_function("/Describe the edit|Ready to play/.test(document.querySelector('#status').textContent)", timeout=60000)
+    page.wait_for_function("/Describe the edit|Plate ready/.test(document.querySelector('#status').textContent)", timeout=60000)
     menu = page.eval_on_selector_all("#preview-size option", "els => els.map(e => e.textContent)")
     check(any("Fast · 640 × 352 (1/2)" in m for m in menu) and menu[0].startswith("Full"), f"the preview menu comes from the plate: {menu}")
     page.screenshot(path=os.path.join(SHOTS, "1_open.png"))
@@ -502,7 +502,7 @@ def history_flow(browser, port):
     for _ in range(3):
         was = page.text_content("#status")
         page.keyboard.press("Control+z")
-        page.wait_for_function("(was) => document.querySelector('#status').textContent !== was", arg=was, timeout=5000)  # « Undone. 2 steps further back »
+        page.wait_for_function("(was) => document.querySelector('#status').textContent !== was", arg=was, timeout=5000)  # « Undone. 2 steps left to undo. »
     page.wait_for_function("!document.querySelector('#history li.busy')", timeout=180000)
     check(row_titles(page) == ["2. Clean", "1. Paint"] and row_words(page) == ["Whole object", "a red fire"],
           f"three undos go back through the seed, the words and the removal: {row_titles(page)} {row_words(page)}")
