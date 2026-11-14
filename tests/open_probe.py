@@ -1,4 +1,4 @@
-"""Opens one plate through the page's own `ingest` workflow on a running ComfyUI, and says what each node takes in memory.
+"""Runs one of the page's workflows on a running ComfyUI, the open (`ingest`) by default, and says what each node takes in memory.
 
     python tests/open_probe.py horse.mp4 [--url http://127.0.0.1:8188] [--fresh] [--csv readings.csv] [--same <folder>]
 
@@ -35,7 +35,7 @@ import av
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
-from build_workflows import fill  # noqa: E402
+from build_workflows import fill, load  # noqa: E402
 from comfy_live import frames_apart, http  # noqa: E402
 
 GB = 2 ** 30
@@ -233,6 +233,19 @@ def page_values(path, st, run, config="", color_space="", proxy_space=""):
             "prefix": f"{run}/hero", "video_prefix": f"{run}/proxy"}
 
 
+def job_values(workflow, path, st, run, config=""):
+    """What the page sends with a workflow other than `ingest`, as far as the plate decides it: the plate as `path`, its
+    frames and frame rate (the conditioning one at most 30, as hdrFps in web/logic.mjs), and every file under the probe's
+    folder. The other slots keep the workflow's saved values; --set gives the page's own, such as its memory profile's
+    (MEMORY in web/logic.mjs)."""
+    slots = load(workflow)[1]
+    fps = float(st.get("fps") or 24)
+    values = {"path": path, "config": config, "max_frames": st.get("frames") or 121, "fps": round(fps),
+              "cond_fps": min(30.0, fps), "movie_fps": fps}
+    values.update({slot: f"{run}/{slot}" for slot in slots if slot.endswith("prefix")})
+    return {slot: value for slot, value in values.items() if slot in slots}
+
+
 def view(url, folder, name):
     """One file of ComfyUI's output folder, as bytes."""
     query = urllib.parse.urlencode({"filename": name, "subfolder": folder, "type": "output"})
@@ -306,7 +319,8 @@ def write_csv(path, samples, job):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("plate", help="the plate as the page names it: a path under ComfyUI's input folder, or output:<path>")
+    ap.add_argument("plate", help="the plate as the page names it: a path under ComfyUI's input folder, or output:<path>; "
+                                  "blank:<width>x<height> is a black shot of that size, 121 frames at 24 fps, from the page's own route")
     ap.add_argument("--url", default="http://127.0.0.1:8188")
     ap.add_argument("--pid", type=int, help="ComfyUI's process, when the probe does not find it from the port")
     ap.add_argument("--remote", action="store_true", help="read the memory from /system_stats, also on ComfyUI's machine")
@@ -314,6 +328,10 @@ def main(argv=None):
     ap.add_argument("--color-space", default="", help="the plate's colour space (default: read from the file, as the page does)")
     ap.add_argument("--proxy-space", default="", help=f"the playback movie's colour space (default: the plate's for a video, {LOG_SPACE} for frames)")
     ap.add_argument("--max-frames", type=int, help="the page sends none: the workflow's own 121")
+    ap.add_argument("--workflow", default="ingest", help="the page's workflow to run (default: ingest, the open); another takes "
+                                                         "the plate as its path and writes its files under the probe's folder")
+    ap.add_argument("--set", action="append", default=[], metavar="SLOT=VALUE",
+                    help="a slot's value as the page sends it, in JSON or as text, such as the memory profile's: --set tile=256")
     ap.add_argument("--fresh", action="store_true", help="first POST /free: ComfyUI drops its cached results, and unloads its models")
     ap.add_argument("--settle", type=float, default=5, help="seconds of readings after the job, for what stays (default 5)")
     ap.add_argument("--limit", type=float, default=1800, help="seconds before the probe stops waiting (default 1800)")
@@ -326,21 +344,43 @@ def main(argv=None):
     except OSError as exc:
         say(f"No ComfyUI answers at {url}: {exc}")
         return 1
+    if a.plate.startswith("blank:"):
+        try:
+            width, height = (int(side) for side in a.plate[len("blank:"):].split("x"))
+        except ValueError:
+            say(f"A blank shot is blank:<width>x<height>, such as blank:1920x1088, not {a.plate}")
+            return 1
+        made, _ = http(f"{url}/paintaplate/blank", {"width": width, "height": height, "fps": 24, "frames": 121})
+        if not isinstance(made, dict) or "path" not in made:
+            say(f"ComfyUI made no blank shot of {width} x {height}: {made}")
+            return 1
+        a.plate = made["path"]
     st, _ = http(f"{url}/paintaplate/stat?{urllib.parse.urlencode({'path': a.plate, 'config': a.config, 'cs': a.color_space})}")
     if not isinstance(st, dict) or "width" not in st:
         say(f"ComfyUI cannot read {a.plate}: {st.get('error') if isinstance(st, dict) else 'nothing answers at /paintaplate/stat'}")
         return 1
     run = f"paintaplate/probe_{int(time.time())}"
-    values = page_values(a.plate, st, run, a.config, a.color_space, a.proxy_space)
+    ingest = a.workflow == "ingest"
+    values = page_values(a.plate, st, run, a.config, a.color_space, a.proxy_space) if ingest else job_values(a.workflow, a.plate, st, run, a.config)
     if a.max_frames:
         values["max_frames"] = a.max_frames
-    prompt = fill("ingest", values)
+    slots = load(a.workflow)[1]
+    for pair in a.set:
+        slot, _, text = pair.partition("=")
+        if slot not in slots:
+            say(f"The {a.workflow} workflow has no slot {slot}: its slots are {', '.join(sorted(slots))}")
+            return 1
+        try:
+            values[slot] = json.loads(text)
+        except ValueError:
+            values[slot] = text
+    prompt = fill(a.workflow, values)
     frames = min(st.get("frames") or 121, a.max_frames or 121)
     copy = st["width"] * st["height"] * frames * 12  # float32 RGB
     say(f"Open probe: {a.plate} on {url} ({versions(stats)})")
     say(f"This Python: PyAV {av.__version__}, libavcodec {'.'.join(map(str, av.library_versions['libavcodec']))}. ComfyUI's own Python gives ComfyUI's figures")
     say(f"Plate: {st.get('kind')} {st.get('codec') or st.get('ext') or ''} {st.get('pix_fmt') or ''}, {st['width']} x {st['height']}, "
-        f"{frames} frames, {values['color_space']}. One float32 copy of its frames: {copy / GB:.2f} GB")
+        f"{frames} frames, {values.get('color_space') or st.get('color_space', '')}. One float32 copy of its frames: {copy / GB:.2f} GB")
     if a.fresh:
         http(f"{url}/free", {"free_memory": True})
         time.sleep(2)
@@ -405,7 +445,7 @@ def main(argv=None):
         say(f"The job did not finish: {job.error or 'ComfyUI stopped answering'}, {t1 - job.posted:.1f} s after the post, in "
             f"{job.node_at(t1) or 'the queue'}. The table holds what was read until then")
         return 1
-    say(f"Its first frame and its movie are in ComfyUI's output folder, under {run}")
+    say(f"Its first frame and its movie are in ComfyUI's output folder, under {run}" if ingest else f"Its files are in ComfyUI's output folder, under {run}")
     if a.same:
         same, line = same_pictures(url, job.id, a.same.strip("/"))
         say(line)

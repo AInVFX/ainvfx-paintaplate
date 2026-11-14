@@ -218,6 +218,14 @@ class Pictures(unittest.TestCase):
         self.assertEqual(exact, usual)
 
 
+class OtherWorkflows(unittest.TestCase):
+    def test_the_values_the_probe_sends_with_hdr(self):
+        values = probe().job_values("hdr", "paintaplate/blank/x.mov", {"frames": 121, "fps": 50.0}, "paintaplate/probe_1")
+        self.assertEqual(values, {"path": "paintaplate/blank/x.mov", "config": "", "max_frames": 121, "fps": 50, "cond_fps": 30.0,
+                                  "movie_fps": 50.0, "prefix": "paintaplate/probe_1/prefix",
+                                  "video_prefix": "paintaplate/probe_1/video_prefix"})
+
+
 class AgainstTheMock(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -280,6 +288,18 @@ class AgainstTheMock(unittest.TestCase):
         code, text = self.run_probe("plates/desk.mp4", "--same", "paintaplate/probe_0")
         self.assertEqual(code, 1, text)
         self.assertIn("Not compared with paintaplate/probe_0: ", text)
+
+    def test_another_workflow_on_a_blank_shot(self):
+        code, text = self.run_probe("blank:192x128", "--workflow", "hdr", "--set", "tile=256", "--set", "guide_tiled=true")
+        self.assertEqual(code, 0, text)
+        self.assertIn("192 x 128, 121 frames", text)
+        self.assertRegex(text, r"the whole job +\d+\.\d +\d+\.\d +\d+\.\d +\d+\.\d\n")
+        self.assertRegex(text, r"Its files are in ComfyUI's output folder, under paintaplate/probe_\d+\n")
+        with urllib.request.urlopen(f"{self.url}/mock/posts") as r:
+            self.assertEqual(json.load(r)[-1]["outputs"], ["hdr", "movie"], "the hdr job, with the probe's values")
+        code, text = self.run_probe("blank:192x128", "--workflow", "hdr", "--set", "tiles=256")
+        self.assertEqual(code, 1, text)
+        self.assertIn("The hdr workflow has no slot tiles: its slots are ", text)
 
     def test_a_plate_that_is_not_there(self):
         code, text = self.run_probe("plates/none.mp4")
