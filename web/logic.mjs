@@ -547,22 +547,28 @@ export function crumbs(path) {
 // The frame pattern of a sequence from one of its file names: core's f_00001_.exr gives f_#####_.exr
 export const framePattern = (name) => name.replace(/(\d+)(\D*)$/, (_, d, rest) => "#".repeat(d.length) + rest);
 
-export function plainError(message) {
-  const m = String(message ?? "");
-  if (/out of memory|allocation on device/i.test(m)) return "the GPU ran out of memory.";
-  if (/ComfyUI stopped answering/i.test(m)) return "ComfyUI stopped answering. Its terminal says why: most often the machine ran out of memory. Start ComfyUI again.";
-  if (/No answer from ComfyUI|is not valid JSON|Unexpected end of JSON input|Failed to fetch|NetworkError/i.test(m)) return "ComfyUI did not answer: it may be restarting, or the connection dropped.";
+export function plainError(message) { // a failure in plain words: why, the fact for the log; todo, the action for the status line
+  const m = String(message ?? ""), again = "Press Generate to try again.";
+  const says = (why, todo = again) => ({ why, todo });
+  if (/out of memory|allocation on device/i.test(m)) return says("the GPU ran out of memory");
+  if (/ComfyUI stopped answering/i.test(m)) return says("ComfyUI stopped answering", "Its terminal says why: most often the machine ran out of memory. Start ComfyUI again, then press Generate.");
+  if (/No answer from ComfyUI|is not valid JSON|Unexpected end of JSON input|Failed to fetch|NetworkError/i.test(m)) return says("ComfyUI did not answer: it may be restarting, or the connection dropped");
   const empty = m.match(/(?:No image frames found in|Image sequence not found:) (\S+?)\.?(?:\s|$)/);
   if (empty) {
     const part = empty[1].split(/[\\/]/).filter(Boolean).find((p) => SAVED[p.replace(/_(\d+x\d+|full)$/, "")]);
-    return `${part ? SAVED[part.replace(/_(\d+x\d+|full)$/, "")] : "the step before it"} saved no frames, so there was nothing to read.`;
+    return says(`${part ? SAVED[part.replace(/_(\d+x\d+|full)$/, "")] : "the step before it"} saved no frames, so there was nothing to read`);
   }
-  if (/leaves the ComfyUI folders|outside the output folder|Absolute plate paths/i.test(m)) return "the file is outside ComfyUI's input and output folders.";
-  if (/Unsupported plate|Plate not supported/i.test(m)) return "Paint a plate cannot read this kind of file.";
-  if (/value not in list|not found in list|failed validation|Missing nodes|does not exist in/i.test(m)) return "a model or a node it needs is missing.";
-  if (/No such file|FileNotFound|not found/i.test(m)) return "a file it needs is missing.";
-  if (/Upload failed/i.test(m)) return "the browser could not send a picture to ComfyUI.";
-  return "ComfyUI stopped with an error.";
+  if (/leaves the ComfyUI folders|outside the output folder|Absolute plate paths/i.test(m)) return says("the file is outside ComfyUI's input and output folders");
+  if (/Unsupported plate|Plate not supported/i.test(m)) return says("Paint a plate cannot read this kind of file");
+  if (/value not in list|not found in list|failed validation|Missing nodes|does not exist in/i.test(m)) return says("a model or a node it needs is missing");
+  if (/No such file|FileNotFound|not found/i.test(m)) return says("a file it needs is missing");
+  if (/Upload failed/i.test(m)) return says("the browser could not send a picture to ComfyUI");
+  return says("ComfyUI stopped with an error");
+}
+
+export function logLevel(text) { // a log message's colour, from its words: red when a line starts « Error: », amber when one starts « Warning: »
+  const starts = (word) => String(text).split("\n").some((line) => line.trimStart().startsWith(word));
+  return starts("Error: ") ? "error" : starts("Warning: ") ? "warn" : "";
 }
 
 export function strokeTarget({ draft, current, tool }) { // where a new stroke goes: "draft", "current" or "new"
@@ -966,13 +972,6 @@ export function resultFlows({ tools = [], render = [], fluid = false, fluidHdr =
 }
 // The config's data colour space (OCIO's isdata, such as the studio config's Raw), from the spaces /paintaplate/ocio lists
 export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? null;
-
-// ---------- Pipeline: the paint matte's report ----------
-// Follow Matte's summary has a « Warning: » line when the matte needs a look (a matte several times its object, an object
-// that left its place): the page's log then shows the summary as a warning. Any warning's words count.
-export function matteWarns(summary) {
-  return /^ {2}Warning: /m.test(summary ?? "");
-}
 
 // ---------- Pipeline: the memory profile ----------
 // What the page does on the card it runs on, from the VRAM and RAM in ComfyUI's /system_stats. Three profiles to start from;

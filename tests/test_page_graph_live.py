@@ -3,6 +3,7 @@ other, red nodes, image files, the layout, and the offline check of a saved grap
 import contextlib
 import io
 import json
+import shutil
 import os
 import sys
 import tempfile
@@ -25,6 +26,30 @@ class GraphLive(unittest.TestCase):
         wrong, added = graph_live.differences(api, made)
         self.assertEqual(wrong, ["1 KSampler.denoise: 0.35 became 0.5", "2 VAELoader: only in the page's graph", "3 VAELoader: only in the editor's graph"])
         self.assertEqual(added, ["1 KSampler.steps = 8"])
+
+    def test_a_text_that_the_editor_holds_in_a_string_node_of_its_own_matches_the_page_s_value(self):
+        text = '[{"id": "barn_1"}] // {a|b}'
+        api = {"5": {"class_type": "CLIPTextEncode", "inputs": {"text": text, "clip": ["2", 0]}}}
+        made = {"5": {"class_type": "CLIPTextEncode", "inputs": {"text": ["9", 0], "clip": [2, 0]}},
+                "9": {"class_type": "PrimitiveStringMultiline", "inputs": {"value": text}}}
+        self.assertEqual(graph_live.differences(api, made), ([], []))
+        made["9"]["inputs"]["value"] = '["id": "barn_1"] '
+        self.assertEqual(len(graph_live.differences(api, made)[0]), 1)
+
+    @unittest.skipUnless(shutil.which("node"), "the rebuild runs web/graph.mjs with Node")
+    def test_rebuild_makes_the_editor_s_graph_again_from_the_page_graph_that_a_saved_graph_holds(self):
+        info = {"PrimitiveStringMultiline": {"input": {"required": {"value": ["STRING", {"multiline": True}]}}, "output": ["STRING"]},
+                "EmptyImage": {"input": {"required": {"width": ["INT", {"default": 512}]}}, "output": ["IMAGE"]},
+                "ImageInvert": {"input": {"required": {"image": ["IMAGE"]}}, "output": ["IMAGE"]}}
+        api = {"201": {"class_type": "EmptyImage", "inputs": {"width": 64}, "_meta": {"title": "INPUT · EmptyImage [width]", "set": ["width"]}},
+               "202": {"class_type": "ImageInvert", "inputs": {"image": ["201", 0]}, "_meta": {"title": "INPUT · ImageInvert"}}}
+        saved = {"nodes": [{"id": 200, "type": "MarkdownNote", "title": "README · INPUT", "widgets_values": ["The plate." + graph_live.SET + "- EmptyImage: width 64"]}],
+                 "extra": {"paintaplate": {"prompt": api}}}
+        made = graph_live.rebuild(saved, info)
+        self.assertEqual([n["type"] for n in made["nodes"]], ["MarkdownNote", "EmptyImage", "ImageInvert"])
+        self.assertEqual(made["nodes"][0]["widgets_values"][0].count("Values the page set"), 1)
+        self.assertEqual(made["extra"]["paintaplate"]["prompt"], api)
+        self.assertEqual(made["links"][0][1:5], [201, 0, 202, 0])
 
     def test_nodes_that_touch_are_apart_and_nodes_that_cross_are_named(self):
         boxes = [("1", "a", 0, 0, 100, 100), ("2", "b", 100, 0, 100, 100), ("3", "c", 50, 50, 100, 100)]

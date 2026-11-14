@@ -179,17 +179,17 @@ test("another tool than the edit being worked on starts a new edit; the same too
 });
 
 test("a failed step says why in plain words", () => {
-  assert.equal(plainError("PaintAPlate_LoadPlate: No image frames found in /w/ComfyUI/output/paintaplate/a1/v2/matte_b_640x352"),
-    "the paint matte saved no frames, so there was nothing to read.");
-  assert.equal(plainError("PaintAPlate_LoadPlate: No image frames found in /w/output/paintaplate/a1/v2/640x352/clean"), "the clean plate pass saved no frames, so there was nothing to read.");
-  assert.equal(plainError("KSampler: CUDA out of memory. Tried to allocate 2 GiB"), "the GPU ran out of memory.");
-  const gone = "ComfyUI did not answer: it may be restarting, or the connection dropped."; // a pod restarted under the page (29 Oct)
-  assert.equal(plainError(`Unexpected token '<', "<!DOCTYPE "... is not valid JSON`), gone);
-  assert.equal(plainError("No answer from ComfyUI (HTTP 502, an error page): it may be restarting, or the connection dropped"), gone);
-  assert.equal(plainError("Failed to fetch"), gone);
-  assert.equal(plainError("PaintAPlate_LoadPlate: Plate path leaves the ComfyUI folders: ../x"), "the file is outside ComfyUI's input and output folders.");
-  assert.equal(plainError("UNETLoader: Value not in list: unet_name: 'x.safetensors' not in []"), "a model or a node it needs is missing.");
-  assert.equal(plainError("something odd"), "ComfyUI stopped with an error.");
+  assert.equal(plainError("PaintAPlate_LoadPlate: No image frames found in /w/ComfyUI/output/paintaplate/a1/v2/matte_b_640x352").why,
+    "the paint matte saved no frames, so there was nothing to read");
+  assert.equal(plainError("PaintAPlate_LoadPlate: No image frames found in /w/output/paintaplate/a1/v2/640x352/clean").why, "the clean plate pass saved no frames, so there was nothing to read");
+  assert.equal(plainError("KSampler: CUDA out of memory. Tried to allocate 2 GiB").why, "the GPU ran out of memory");
+  const gone = "ComfyUI did not answer: it may be restarting, or the connection dropped"; // a pod restarted under the page (29 Oct)
+  assert.equal(plainError(`Unexpected token '<', "<!DOCTYPE "... is not valid JSON`).why, gone);
+  assert.equal(plainError("No answer from ComfyUI (HTTP 502, an error page): it may be restarting, or the connection dropped").why, gone);
+  assert.equal(plainError("Failed to fetch").why, gone);
+  assert.equal(plainError("PaintAPlate_LoadPlate: Plate path leaves the ComfyUI folders: ../x").why, "the file is outside ComfyUI's input and output folders");
+  assert.equal(plainError("UNETLoader: Value not in list: unet_name: 'x.safetensors' not in []").why, "a model or a node it needs is missing");
+  assert.equal(plainError("something odd").why, "ComfyUI stopped with an error");
 });
 
 test("the paint matte starts where the edit changed the first frame, inside the paint zones", () => {
@@ -713,9 +713,9 @@ test("every workflow has a family, and the small profile frees ComfyUI's memory 
 
 test("a ComfyUI that stopped is said in plain words, with what to do", async () => {
   const { plainError } = await import("../../web/logic.mjs");
-  assert.equal(plainError("ComfyUI stopped answering"), "ComfyUI stopped answering. Its terminal says why: most often the machine ran out of memory. Start ComfyUI again.");
-  assert.equal(plainError("Upload failed: patch.png: No answer from ComfyUI"), "ComfyUI did not answer: it may be restarting, or the connection dropped.");
-  assert.equal(plainError("Upload failed: patch.png"), "the browser could not send a picture to ComfyUI."); // ComfyUI answered, and refused the file
+  assert.deepEqual(plainError("ComfyUI stopped answering"), { why: "ComfyUI stopped answering", todo: "Its terminal says why: most often the machine ran out of memory. Start ComfyUI again, then press Generate." });
+  assert.equal(plainError("Upload failed: patch.png: No answer from ComfyUI").why, "ComfyUI did not answer: it may be restarting, or the connection dropped");
+  assert.equal(plainError("Upload failed: patch.png").why, "the browser could not send a picture to ComfyUI"); // ComfyUI answered, and refused the file
 });
 
 test("a larger card keeps its models, and frees ComfyUI's memory only when RAM is short for the job's frames", async () => {

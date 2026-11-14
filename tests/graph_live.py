@@ -19,6 +19,8 @@ hold. PLAYWRIGHT_CHANNEL picks the browser (default: chrome).
 saved ones, and check 3, which needs the editor, is left out."""
 import argparse
 import json
+import pathlib
+import subprocess
 import math
 import os
 import sys
@@ -48,10 +50,48 @@ def same(a, b):
     return link(a) == link(b)
 
 
+TEXT = "PrimitiveStringMultiline"  # the editor's graph holds each text of a widget that declares dynamicPrompts in one
+
+
+def held(api, made):
+    """The editor's graph with each text that a String (Multiline) node of its own holds put back into the input it feeds,
+    and that node left out: the page's API graph gives the text as the input's value."""
+    texts = {nid: n["inputs"].get("value") for nid, n in made.items() if nid not in api and n["class_type"] == TEXT}
+
+    def put(v):
+        v = link(v)
+        return texts[v[0]] if isinstance(v, list) and len(v) == 2 and v[0] in texts else v
+    return {nid: {**n, "inputs": {k: put(v) for k, v in n["inputs"].items()}} for nid, n in made.items() if nid not in texts}
+
+
+SET = "\n\n**Values the page set**\n\n"  # editorGraph appends this list to each README note
+GRAPH_MJS = pathlib.Path(__file__).resolve().parent.parent / "web" / "graph.mjs"
+
+
+def page_graph(graph):
+    """The page's API graph that a saved graph holds: extra.paintaplate.prompt, and each README note back as the String
+    (Multiline) node it was, with no « Values the page set » (editorGraph writes them again)."""
+    page = {str(k): v for k, v in graph["extra"]["paintaplate"]["prompt"].items()}
+    for n in graph["nodes"]:
+        if n["type"] == "MarkdownNote":
+            page[str(n["id"])] = {"class_type": TEXT, "inputs": {"value": n["widgets_values"][0].split(SET)[0]}, "_meta": {"title": n["title"]}}
+    return page
+
+
+def rebuild(graph, info):
+    """The editor's graph that this checkout's web/graph.mjs makes from a saved graph's page graph, with Node."""
+    script = (f"import {{ editorGraph }} from {json.dumps(GRAPH_MJS.as_uri())}; let s = ''; for await (const c of process.stdin) s += c; "
+              "const a = JSON.parse(s); process.stdout.write(JSON.stringify(editorGraph(a.page, a.info)));")
+    run = subprocess.run(["node", "--input-type=module", "-e", script], input=json.dumps({"page": page_graph(graph), "info": info}),
+                         capture_output=True, text=True, check=True)
+    return json.loads(run.stdout)
+
+
 def differences(api, made):
     """The page's API graph against the editor's, node by node. Returns (wrong, added): wrong lists a node, a class or a
     value that differs; added lists the inputs that only the editor holds."""
     api, made = {str(k): v for k, v in api.items()}, {str(k): v for k, v in made.items()}
+    made = held(api, made)
     wrong, added = [], []
     for nid in sorted(set(api) | set(made), key=lambda k: (len(k), k)):
         a, b = api.get(nid), made.get(nid)
@@ -139,6 +179,8 @@ def main():
     ap.add_argument("--graph", required=True, help="a graph the page saved: a GPU case's scene.comfyui.json, or File > ComfyUI graph")
     ap.add_argument("--out", default=".", help="where graph_live.png and graph_live.json go")
     ap.add_argument("--headed", action="store_true", help="show the browser's window")
+    ap.add_argument("--rebuild", action="store_true", help="first rebuild the editor's graph from the file's API graph with this checkout's web/graph.mjs (Node): "
+                    "a change of the layout is checked on a saved graph, with no GPU run; the rebuilt graph goes to --out as scene.rebuilt.comfyui.json")
     ap.add_argument("--offline", action="store_true", help="no ComfyUI and no browser: classes from tests/js/object_info.scene.json, sizes as saved, no check 3")
     a = ap.parse_args()
     with open(os.path.expanduser(a.graph)) as f:
@@ -146,9 +188,20 @@ def main():
     api = ((graph.get("extra") or {}).get("paintaplate") or {}).get("prompt")
     if not api:
         sys.exit("This file holds no API graph (extra.paintaplate.prompt): save the scene's graph again with a page from feat/page-w5 or later.")
-    types = [n["type"] for n in graph["nodes"]]
     out = os.path.expanduser(a.out)
     os.makedirs(out, exist_ok=True)
+    if a.rebuild:
+        if a.offline:
+            with open(FIXTURE) as f:
+                info = json.load(f)["nodes"]
+        else:
+            with urllib.request.urlopen(f"{a.url}/object_info", timeout=60) as r:
+                info = json.load(r)
+        graph = rebuild(graph, info)
+        a.graph = os.path.join(out, "scene.rebuilt.comfyui.json")
+        with open(a.graph, "w") as f:
+            json.dump(graph, f, ensure_ascii=False)
+    types = [n["type"] for n in graph["nodes"]]
     if a.offline:
         with open(FIXTURE) as f:
             known = set(json.load(f)["nodes"])

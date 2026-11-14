@@ -22,6 +22,8 @@ for (const hdr of [false, true]) test(`the saved graph carries the page's API gr
   const notes = file.nodes.filter((n) => n.type === "MarkdownNote").map((n) => String(n.id));
   assert.ok(notes.length > 1 && notes.every((id) => api[id]?.class_type === "PrimitiveStringMultiline"), "the README notes are the API graph's PrimitiveStringMultiline nodes");
   assert.deepEqual(Object.keys(kept).sort(), Object.keys(api).filter((id) => !notes.includes(id)).sort());
-  assert.deepEqual(file.nodes.filter((n) => n.type !== "MarkdownNote").map((n) => String(n.id)).sort(), Object.keys(kept).sort());
+  const own = file.nodes.filter((n) => !api[n.id]);
+  assert.ok(own.length && own.every((n) => n.type === "PrimitiveStringMultiline" || n.type === "Reroute"), "the editor's own nodes: the texts of the widgets that declare dynamicPrompts, and the stations of long sections");
+  assert.deepEqual(file.nodes.filter((n) => n.type !== "MarkdownNote" && api[n.id]).map((n) => String(n.id)).sort(), Object.keys(kept).sort());
   for (const [id, n] of Object.entries(kept)) assert.deepEqual([n.class_type, n.inputs], [api[id].class_type, api[id].inputs], id);
 });

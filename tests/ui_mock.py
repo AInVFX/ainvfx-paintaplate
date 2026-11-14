@@ -76,7 +76,7 @@ def open_plate(page, path="plates/desk.mp4"):
     """A plate opened from ComfyUI's files, its spec read and the page ready for an edit."""
     open_path(page, path)
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps')", timeout=60000)
-    page.wait_for_function("/Describe the edit|Ready to play/.test(document.querySelector('#status').textContent)", timeout=60000)
+    page.wait_for_function("/Describe the edit|Plate ready/.test(document.querySelector('#status').textContent)", timeout=60000)
 
 
 def view_box(page):
@@ -274,9 +274,9 @@ def open_flow(browser, port):
     check(all(v == k for k, v in shown.items()), f"one tab per source: ComfyUI files, Upload, Scenes, Blank plate: {shown}")
     page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps')", timeout=60000)
-    page.wait_for_function("/Describe the edit|Ready to play/.test(document.querySelector('#status').textContent)", timeout=60000)
+    page.wait_for_function("/Describe the edit|Plate ready/.test(document.querySelector('#status').textContent)", timeout=60000)
     menu = page.eval_on_selector_all("#preview-size option", "els => els.map(e => e.textContent)")
-    check(any("Fast · 640 × 352 (1/2)" in m for m in menu) and menu[0].startswith("Full"), f"the preview menu comes from the plate: {menu}")
+    check(any("Fast · 640 × 352 (1/2)" in m for m in menu) and menu[0].startswith("Off") and menu[1].startswith("Full"), f"the preview menu comes from the plate, after Off: {menu}")
     page.screenshot(path=os.path.join(SHOTS, "1_open.png"))
     no_errors(errors, "in the Open dialog")
     page.close()
@@ -504,12 +504,12 @@ def history_flow(browser, port):
     for _ in range(3):
         was = page.text_content("#status")
         page.keyboard.press("Control+z")
-        page.wait_for_function("(was) => document.querySelector('#status').textContent !== was", arg=was, timeout=5000)  # « Undone. 2 steps further back »
+        page.wait_for_function("(was) => document.querySelector('#status').textContent !== was", arg=was, timeout=5000)  # « Undone. 2 steps left to undo. »
     page.wait_for_function("!document.querySelector('#history li.busy')", timeout=180000)
     check(row_titles(page) == ["2. Clean", "1. Paint"] and row_words(page) == ["Whole object", "a red fire"],
           f"three undos go back through the seed, the words and the removal: {row_titles(page)} {row_words(page)}")
     check(klein_passes(page) == made, f"undo gets the kept results back: no Klein pass runs again ({klein_passes(page) - made} ran)")
-    page.select_option("#preview-size", index=1)
+    page.select_option("#preview-size", index=2)  # Off, then Full, then the next size down
     check("928 x 512" in page.text_content("#status"), "the preview size menu sets the shot size")
     no_errors(errors, "in History")
     page.close()
@@ -950,7 +950,7 @@ def fluid16_flow(browser, port):
     wait_log(page, added_line("under the edits: the fluid shot v"), 240000, "the HDR fluid shot under the edits")
     page.wait_for_function("!document.querySelector('#deliver-auto').hidden", timeout=60000)
     new = page.evaluate("window.__lines")
-    check(any(line.startswith("Plate ") and "16-bit" in line for line in new) and any("SDR to HDR took" in line or "SDR to HDR: done in" in line for line in new),
+    check(any(line.startswith("Plate ") and "16-bit" in line for line in new) and any(re.search(r"SDR to HDR(?: took|:? done in) ", line) for line in new),
           "16-bit: the plate's line says so, and the fluid shot goes through SDR to HDR")
     check(not page.is_hidden("#deliver-auto"), "the HDR fluid shot is an EXR plate: SDR to HDR runs on its own for the edits on it")
     check(not page.is_disabled("#export-btn"), "a fluid shot with no edit on it can be exported")

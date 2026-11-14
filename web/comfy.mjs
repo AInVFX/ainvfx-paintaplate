@@ -114,7 +114,7 @@ const unseen = new Set(); // why a live preview could not be made (nodes.py, Liv
 function liveOff(reason) {
   if (unseen.has(reason)) return;
   unseen.add(reason);
-  log(`Warning: live preview off: ${stop(reason)}`, "warn");
+  log(`Warning: live preview off: ${stop(reason)}`);
 }
 
 export const post = (path, body) =>
@@ -227,7 +227,7 @@ async function finish(id, error) {
     return job.submit();
   }
   live.delete(job);
-  if (error) { log(jobFailed(job, Date.now(), error), "error"); return job.reject(new Error(error)); }
+  if (error) { log(jobFailed(job, Date.now(), error)); return job.reject(new Error(error)); }
   let out = (await historyRecord(id))?.outputs ?? {};
   const fresh = files(out).length || Object.values(out).some((o) => o.text?.length);
   if (fresh) memo.set(job.key, out);

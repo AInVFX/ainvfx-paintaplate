@@ -1,5 +1,5 @@
 {
- "about": "What ComfyUI's /object_info says about the node classes of a scene's graph (with and without SDR to HDR), in the fields graph.editorGraph reads: each input in order with its type and five of its options (default, forceInput, control_after_generate, image_upload, multiline), and the outputs. A combo's choices are left out. Read from a running ComfyUI 0.44.2 at http://127.0.0.1:8188 on 13 November 2026 (Toronto), by tests/object_info_fixture.py.",
+ "about": "What ComfyUI's /object_info says about the node classes of a scene's graph (with and without SDR to HDR), in the fields graph.editorGraph reads: each input in order with its type and six of its options (default, forceInput, control_after_generate, image_upload, multiline, dynamicPrompts), and the outputs. A combo's choices are left out. Read from a running ComfyUI 0.44.2 at http://127.0.0.1:8188 on 13 November 2026 (Toronto), by tests/object_info_fixture.py.",
  "nodes": {
   "BasicScheduler": {
    "input": {
@@ -111,7 +111,8 @@
      "text": [
       "STRING",
       {
-       "multiline": true
+       "multiline": true,
+       "dynamicPrompts": true
       }
      ],
      "clip": [
