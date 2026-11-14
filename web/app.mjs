@@ -2441,7 +2441,7 @@ function historyUI() {
     if (hidden.has(e)) small.textContent = `Hidden until edit ${num(S.draft)} is generated`;
     else if (forEnter || (STATE[e.state] && e.on)) {
       small.innerHTML = '<span class="state"></span>';
-      small.firstChild.textContent = forEnter ? "Waits for Enter" : left ? "The object is still there" : STATE[e.state];
+      small.firstChild.textContent = forEnter ? "Waits for Enter" : left ? "The object may still be there" : STATE[e.state];
     } else if (awaits.has(e)) small.textContent = "Waits to be generated again";
     else small.textContent = e.on ? what : `Bypassed: ${what}`;
     small.title = e.caption?.text ? `What Klein received: ${e.caption.text}` : what;
