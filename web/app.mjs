@@ -1756,7 +1756,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
       hdrFrames = hf ? `output:${hf.subfolder}/${framePattern(hf.filename)}` : null; // for the Fluid: SDR to HDR row
       const m = outputFile("hdr", made, "movie");
       movie = m ? viewUrl(m) : null;
-      log(`Fluid shot v${v}: SDR to HDR done in ${((performance.now() - t1) / 1000).toFixed(1)} s.\n  Half-float EXR frames in ${path}.`);
+      log(`Fluid shot v${v}: SDR to HDR: done in ${((performance.now() - t1) / 1000).toFixed(1)} s.\n  Half-float EXR frames in ${path}.`);
     }
     const control = outputFile("fluid", out, "control"); // the control video, for the Fluid: keyframes row
     f.result = { v, sig, seed: f.seed, prompt, path, hdr, movie, run: fluidRun(path), preview: viewUrl(outputFile("fluid", out, "video")),
