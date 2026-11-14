@@ -778,7 +778,7 @@ export const wantsHdrFor = (spec, headroom, deliverHdr) => holdsHdr(spec, headro
 // 48 GB warns when it opens: a 48 GB card reports about 47.5 GiB, a 40 GB one about 39.6.
 export const BIG_PLATE = { side: 2048, vram: 46 * 2 ** 30 };
 export const bigPlateWarning = (spec, vram) => (spec && vram > 0 && Math.max(spec.width, spec.height) > BIG_PLATE.side && vram < BIG_PLATE.vram
-  ? `This plate is ${spec.width} x ${spec.height}, above 2K, and this card has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB card for now: its renders may not finish here.`
+  ? `This plate is ${spec.width} x ${spec.height}, above 2K, and this GPU has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB GPU for now: its renders may not finish here.`
   : null);
 export const hdrFps = (fps) => Math.min(30, +fps || 24); // the conditioning frame rate: at most 30, as in Lightricks' workflow
 export const blankDepth = (v) => (+v === HDR_DEPTH ? HDR_DEPTH : 8);

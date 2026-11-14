@@ -345,7 +345,7 @@ async function openPlate(list, typed, opts = {}) {
 
   const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).map((n) => n).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
-  const big = bigPlateWarning(spec, S.vram); // above 2K on a card under 48 GB: renders may not finish (README, GPU)
+  const big = bigPlateWarning(spec, S.vram); // above 2K on a GPU under BIG_PLATE.vram: renders may not finish (README, GPU)
   if (big) { log(big); setTimeout(() => status(big), 80); }
   const next = "Describe the edit at the top, paint on the frame, then Generate.", plate = S.plate;
   const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", from file"} (right-click > OCIO > Colour space changes it). ${next}`;
