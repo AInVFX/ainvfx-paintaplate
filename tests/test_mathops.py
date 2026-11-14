@@ -622,7 +622,8 @@ class FollowMatteLeftItsPlace(unittest.TestCase):
         self.assertEqual(int(matte[80:].sum()), 0)  # once it has left its place, nothing: the plate shows there (at 9aa332a the matte went with it to the last frame)
         self.assertEqual(int(matte[(slice(None),) + self.FRONT].sum()), 0)  # and never what stands in front
         self.assertIn("\n  Removed: pieces that left the object's place, on ", summary)
-        self.assertNotIn("Warning:", summary)
+        self.assertNotIn("Warning: matte", summary)  # the matte never grows past the object
+        self.assertIn("Warning: object left its place at frame", summary)  # it is lost, and the summary says so
 
 
 class FollowMatteErasedBehindThePlate(unittest.TestCase):
