@@ -91,7 +91,7 @@ class Seeds(unittest.TestCase):
             page = f.read()
         with open(os.path.join(gpu_matrix.HERE, "ui_live.py"), encoding="utf-8") as f:
             tool = f.read()
-        self.assertIn('LEFT = "#history li[data-left]"', tool)
+        self.assertIn('LEFT = "#history li:is([data-left], [data-asked])"', tool)
         self.assertIn('li.dataset.left = "1"', page)
         self.assertIn('if page.query_selector(LEFT):', tool)
         self.assertLess(tool.index("if page.query_selector(LEFT):"), tool.index("deadline = time.time() + a.timeout * 8"), "before the wait for the render")
