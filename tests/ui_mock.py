@@ -274,7 +274,7 @@ def open_flow(browser, port):
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps')", timeout=60000)
     page.wait_for_function("/Describe the edit|Plate ready/.test(document.querySelector('#status').textContent)", timeout=60000)
     menu = page.eval_on_selector_all("#preview-size option", "els => els.map(e => e.textContent)")
-    check(any("Fast · 640 × 352 (1/2)" in m for m in menu) and menu[0].startswith("Full"), f"the preview menu comes from the plate: {menu}")
+    check(any("Fast · 640 × 352 (1/2)" in m for m in menu) and menu[0].startswith("Off") and menu[1].startswith("Full"), f"the preview menu comes from the plate, after Off: {menu}")
     page.screenshot(path=os.path.join(SHOTS, "1_open.png"))
     no_errors(errors, "in the Open dialog")
     page.close()
@@ -507,7 +507,7 @@ def history_flow(browser, port):
     check(row_titles(page) == ["2. Clean", "1. Paint"] and row_words(page) == ["Whole object", "a red fire"],
           f"three undos go back through the seed, the words and the removal: {row_titles(page)} {row_words(page)}")
     check(klein_passes(page) == made, f"undo gets the kept results back: no Klein pass runs again ({klein_passes(page) - made} ran)")
-    page.select_option("#preview-size", index=1)
+    page.select_option("#preview-size", index=2)  # Off, then Full, then the next size down
     check("928 x 512" in page.text_content("#status"), "the preview size menu sets the shot size")
     no_errors(errors, "in History")
     page.close()

@@ -34,7 +34,7 @@ def run(browser, port, U):
     fact, then = f"Scene {name} saved on this ComfyUI", "Open plate > Scenes opens it again, or downloads it."
     U.check(f"{fact}. {then}" in said and [t for t in lines if "saved on this ComfyUI" in t] == [fact] and not any(then in t for t in lines),
             f"a save is one fact in the log, and the status line adds what to do next: {said} {[t for t in lines if 'Scene' in t]}")
-    page.select_option("#preview-size", index=1)
+    page.select_option("#preview-size", index=2)  # Off, then Full, then the next size down
     page.wait_for_function("window.__said.some((t) => t.startsWith('Shot preview:'))", timeout=10000)
     fact = next(t for t in page.evaluate("window.__said") if t.startswith("Shot preview:"))
     U.check(U.log_lines(page).count(fact) == 1, f"a fact with no instruction still shows in the status line and goes to the log, once: {fact!r}")

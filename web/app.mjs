@@ -107,7 +107,7 @@ const S = {
   fluid: null, clip: null, fluidReady: true, // a fluid shot on a blank plate, the last one, a copied keyframe
   shot: null, stage: null, run: 0, exported: null, wantDownload: null,
   ocio: { config: "", display: "", view: "", look: "", ...saved(OCIO_PREF), info: null }, // the OCIO config and the viewer's view, as in RV
-  previewCap: (() => { try { return +localStorage.getItem("paintaplate.preview") || PREVIEW_CAP; } catch { return PREVIEW_CAP; } })(), // long side of the shot preview: Fast by default
+  previewCap: (() => { try { const v = localStorage.getItem("paintaplate.preview"); return v && Number.isFinite(+v) ? +v : PREVIEW_CAP; } catch { return PREVIEW_CAP; } })(), // 0: Off // long side of the shot preview: Fast by default
   deliver: { hdr: false }, // Deliver's passes for this plate; hdr: the deliberate SDR to HDR of a plate that holds nothing above 1.0
   heroKey: "", renders: new Map(), // set of edits -> what has been rendered for it
   erases: new Map(), // set of erases -> their matte and clean plates, for every render that has the same erases
@@ -316,7 +316,7 @@ async function openPlate(list, typed, opts = {}) {
     work: fitSize(w, h, WORK_SIDE, 32), prev: fitSize(w, h, EDIT_SIDE, 16),
     track: fitSize(w, h, TRACK_SIDE, 32), trackErase: fitSize(w, h, ERASE_TRACK_SIDE, 32) }; // SAM tracks at one size whatever the preview size
   if (Q.get("shot") === "full") S.previewCap = Math.max(w, h);
-  S.plate.shot = previewSize([w, h], S.plate.work, S.previewCap);
+  S.plate.shot = previewSize([w, h], S.plate.work, S.previewCap || PREVIEW_CAP); // Off keeps a size, which no step uses
   S.original = snap(await loadImage(viewUrl(outputFile("ingest", out, "hero"))), S.plate.work);
   $("#prompt").value = "";
   Object.assign(S, { hero: S.original, running: null, live: null, halted: false, frame: 0, inPt: 0, outPt: S.plate.frames - 1, shot: null, exported: null,
@@ -341,7 +341,7 @@ async function openPlate(list, typed, opts = {}) {
   // The plate's two lines in the log (design rule 12): what it is, then the sizes the page works at. What to do next is a hint, below
   const depth = opts.fluid?.depth ? { bits: opts.fluid.depth, float: false } : plateDepth(spec); // a blank plate: the depth asked for its fluid shot
   log(`Plate ${S.plate.name}: opened in ${((performance.now() - began) / 1000).toFixed(1)} s.\n  ${w} x ${h}, ${spec.frames} frame${spec.frames === 1 ? "" : "s"}, ${depth.float ? "float" : `${depth.bits}-bit`}, ${cs}${opts.cs ? "" : ", from file"}.`);
-  log(`Working sizes: edits at ${S.plate.work.join(" x ")}, edit preview at ${S.plate.prev.join(" x ")}, shot preview at ${S.plate.shot.join(" x ")}, tracking at ${S.plate.track.join(" x ")}.`);
+  log(`Working sizes: edits at ${S.plate.work.join(" x ")}, edit preview at ${S.plate.prev.join(" x ")}, ${S.previewCap ? `shot preview at ${S.plate.shot.join(" x ")}` : "shot preview off"}, tracking at ${S.plate.track.join(" x ")}.`);
 
   const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).map((n) => n).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
@@ -2592,7 +2592,8 @@ function plan(r, active) { // the steps this set of edits needs: the erase pass 
   const erase = active.some((e) => e.tool === "erase"), paint = active.some((e) => e.tool === "paint"), carry = active.some((e) => e.tool !== "erase");
   r.skip = new Set([!erase && "erase", !erase && "clean", !carry && "shot", !paint && "track", (onePass || !erase) && "cleanfull",
     (onePass || !carry) && "full", (onePass || !paint) && "trackfull",
-    !(S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), hdrOfKey(r.key, holdsHdr(p.spec, p.headroom)))) && "hdr"].filter(Boolean)); // the switch is in the key
+    !(S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), hdrOfKey(r.key, holdsHdr(p.spec, p.headroom)))) && "hdr", // the switch is in the key
+    ...(S.previewCap ? [] : STAGES.filter((st) => st.preview).map((st) => st.id))].filter(Boolean)); // Preview size: Off
   return r;
 }
 
@@ -2665,7 +2666,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const scene = erase ? erasePrompt(erases.map((e) => e.caption)) : ""; // the scene as it stays, never the erased object
   if (!r.told) {
     r.told = true;
-    log(`Render v${r.v}: ${active.length} ${active.length === 1 ? "edit" : "edits"} (${active.map((e) => `${num(e.src)} ${NAME[e.tool]}`).join(", ")}), shot preview at ${sized}, seed ${common.seed}, steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => st.label).join(" > ")}.`);
+    log(`Render v${r.v}: ${active.length} ${active.length === 1 ? "edit" : "edits"} (${active.map((e) => `${num(e.src)} ${NAME[e.tool]}`).join(", ")}), ${S.previewCap ? `shot preview at ${sized}` : "shot preview off"}, seed ${common.seed}, steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => st.label).join(" > ")}.`);
     if (carry) log(`Render v${r.v}: LTX prompt: ${prompt}`);
     if (erase) log(`Render v${r.v}: Clean plate pass prompt: ${scene || "none"}`);
   }
@@ -2725,28 +2726,29 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     }, store);
     return carry ? store.shot : store.clean;
   };
-  const made = await passes(pv, p.shot, sized, false);
-  if (here() && !S.pass && !pv.taken && !pv.comp && !r.review && S.shot?.url !== pv.raw) { // a rough look at once: the whole frame as the model made it, until the composite
+  const off = !S.previewCap; // Preview size: Off: the four preview steps are in r.skip (plan), and the viewer keeps the plate until the full-size composite
+  const made = off ? null : await passes(pv, p.shot, sized, false);
+  if (!off && here() && !S.pass && !pv.taken && !pv.comp && !r.review && S.shot?.url !== pv.raw) { // a rough look at once: the whole frame as the model made it, until the composite
     setShot(pv.raw, key, "@model");
     hud("Rough preview: Space plays it. The composite follows.", 2500);
   }
-  await step(r, "track", async (progress) => { pv.painted = await track(active, made, base, `_${sized}`, progress, null, ["paint"],
+  if (!off) await step(r, "track", async (progress) => { pv.painted = await track(active, made, base, `_${sized}`, progress, null, ["paint"],
     underOf(pv), r.heroFrame); }, pv);
   pv.mattes = mattesOf({ ...r.erased?.found, ...pv.painted?.found });
-  await step(r, "comp", async (progress) => {
+  if (!off) await step(r, "comp", async (progress) => {
     const comp = await run("comp", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, width: sw, height: sh, shot: made, ...plateMovie(p),
       ...pv.mattes.values, relight, grow: grow(sw, erase), feather: feather(sw), grain: 0, video_prefix: `${base}/${sized}/comp` },
       { kind: "comp", progress }).done;
     pv.comp = viewUrl(outputFile("comp", comp, "video"));
   }, pv);
-  if (here() && !S.pass && !r.review && S.shot?.url !== pv.comp) {
+  if (!off && here() && !S.pass && !r.review && S.shot?.url !== pv.comp) {
     setShot(pv.comp, key, "@model");
     hud("The preview is ready: Space plays it. The full-size composite follows.", 2500);
     status("Composite, preview: ready. The full-size passes follow; Export writes the result at any time.", "hint");
   }
-  const onePass = sw === p.work[0] && sh === p.work[1];
+  const onePass = !off && sw === p.work[0] && sh === p.work[1];
   const final = onePass ? made : await passes(r, p.work, "full", true);
-  if (here() && !S.pass && !onePass && !r.taken && !r.review && r.raw && S.shot?.url !== r.raw) { // the full-size shot as LTX made it, until the full-size composite:
+  if (!off && here() && !S.pass && !onePass && !r.taken && !r.review && r.raw && S.shot?.url !== r.raw) { // the full-size shot as LTX made it, until the full-size composite:
     setShot(r.raw, key, "@model"); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640, 28 Oct)
     hud("Shot, full size: Space plays it as LTX made it. The full-size composite follows.", 2500);
     log(`Render v${r.v}: the viewer plays the full-size shot until the full-size composite is ready.`);
@@ -2901,6 +2903,7 @@ function log(text) { // the log panel only: what happened, one fact per message,
 }
 
 function renderLeft(finalToo = false) { // seconds until the preview, or the full-size composite (and the export once asked for), is ready
+  finalToo ||= !S.previewCap; // with Preview size: Off, the next result is the full-size composite
   const p = S.plate, r = S.renders.get(S.heroKey), exporting = !!S.wantDownload;
   if (!p || !S.heroKey || (finalToo ? (exporting ? r?.exported : r?.review) : previewOf(r)?.comp || r?.review)) return 0;
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
@@ -2966,7 +2969,7 @@ function stagesUI() {
   }));
   const pre = renderLeft(), all = renderLeft(true);
   const busy = S.stage?.key === S.heroKey, what = S.wantDownload ? "export" : "full size";
-  $("#render-left").textContent = stale() || !(previewOf(r)?.comp || r?.review) ? (pre ? `preview ${secs(pre)}` : busy ? "preview almost ready" : "")
+  $("#render-left").textContent = stale() || !(previewOf(r)?.comp || r?.review) ? (pre ? `${S.previewCap ? "preview" : "full size"} ${secs(pre)}` : busy ? `${S.previewCap ? "preview" : "full size"} almost ready` : "")
     : r?.exported ? "exported" : r?.review && !S.wantDownload ? "full size ready" : all ? `${what} ${secs(all)}` : busy ? `${what} almost ready` : "";
   timelineBar();
 }
@@ -3005,14 +3008,14 @@ function timelineUI() {
   stagesUI();
 }
 
-function setPreview(cap) { // a smaller shot preview renders faster; the export stays at full size
+function setPreview(cap) { // a smaller shot preview renders faster, and Off (0) renders the full size alone; the export stays at full size
   S.previewCap = cap;
   try { localStorage.setItem("paintaplate.preview", String(cap)); } catch { /* this session only */ }
   if (!S.plate) return;
-  S.plate.shot = previewSize([S.plate.spec.width, S.plate.spec.height], S.plate.work, cap);
+  S.plate.shot = previewSize([S.plate.spec.width, S.plate.spec.height], S.plate.work, cap || PREVIEW_CAP);
   previewUI();
   S.heroKey = ""; recompose(); // what this size made already plays at once; the full size and its export never depend on it
-  status(`Shot preview: ${S.plate.shot[0]} x ${S.plate.shot[1]}. The export stays at full size.`);
+  status(cap ? `Shot preview: ${S.plate.shot[0]} x ${S.plate.shot[1]}. The export stays at full size.` : "Shot preview: off. A render starts with the full-size passes.");
   stagesUI(); exportUI(); touch();
 }
 
@@ -3020,9 +3023,9 @@ function previewUI() { // the Preview size menu: the sizes this plate can take, 
   const sel = $("#preview-size"), p = S.plate;
   if (!p) return;
   const sizes = previewSizes([p.spec.width, p.spec.height], p.work);
-  sel.replaceChildren(...sizes.map((o) => new Option(`${o.label} · ${o.size[0]} × ${o.size[1]}${o.div > 1 ? ` (1/${o.div})` : o.label === "Full" ? " (slow)" : ""}`, String(o.cap))));
+  sel.replaceChildren(new Option("Off · full size only", "0"), ...sizes.map((o) => new Option(`${o.label} · ${o.size[0]} × ${o.size[1]}${o.div > 1 ? ` (1/${o.div})` : o.label === "Full" ? " (slow)" : ""}`, String(o.cap))));
   const on = sizes.find((o) => o.size[0] === p.shot[0] && o.size[1] === p.shot[1]) ?? sizes.at(-1);
-  sel.value = String(on.cap);
+  sel.value = S.previewCap ? String(on.cap) : "0";
 }
 
 function exportUI() {
