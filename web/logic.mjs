@@ -888,6 +888,45 @@ export const lightColors = (colors, color) => {
   const names = [...new Set(colors.filter((c) => !dark(c)).map(colorName))];
   return names.length ? names.join(" and ") : colorName(color);
 };
+// A relight's strokes read as intentions, in words that Klein can follow with the frame alone: one sentence per light (its
+// colour by name, its strength from the colour's brightness, its spread from the share of the frame it covers, its place),
+// one per shaded place, the person's words, then what must stay. `strokes`: { color, size, points }, the points as [x, y]
+// fractions of the frame and the size as a fraction of its width; `aspect`: the frame's width over its height. A light that
+// covers 8% of the frame or more is broad; under 1%, focused.
+export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
+  const place = (b) => { // b: [x0, y0, x1, y1] in fractions of the frame
+    const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+    const v = cy < 1 / 3 ? "top" : cy > 2 / 3 ? "bottom" : "", h = cx < 1 / 3 ? "left" : cx > 2 / 3 ? "right" : "";
+    return v && h ? `${v} ${h}` : v || h || "centre";
+  };
+  const groups = new Map();
+  for (const s of strokes) {
+    const r = s.size / 2, rh = r * aspect, pts = s.points;
+    let length = 0;
+    for (let i = 1; i < pts.length; i++) length += Math.hypot((pts[i][0] - pts[i - 1][0]) * aspect, pts[i][1] - pts[i - 1][1]);
+    const box = [Math.min(...pts.map((p) => p[0])) - r, Math.min(...pts.map((p) => p[1])) - rh,
+      Math.max(...pts.map((p) => p[0])) + r, Math.max(...pts.map((p) => p[1])) + rh].map((v) => Math.min(1, Math.max(0, v)));
+    const key = dark(s.color) ? `shade ${place(box)}` : colorName(s.color);
+    const g = groups.get(key) ?? { shade: dark(s.color), color: s.color, cover: 0, box };
+    g.cover += Math.min(1, ((length + 2 * rh) * 2 * rh) / aspect); // a round brush along its path, as a share of the frame
+    g.box = [Math.min(g.box[0], box[0]), Math.min(g.box[1], box[1]), Math.max(g.box[2], box[2]), Math.max(g.box[3], box[3])];
+    groups.set(key, g);
+  }
+  const said = ["Relight the whole scene with new light, as if it were photographed under that light."];
+  for (const [name, g] of groups) {
+    if (g.shade) { said.push(`The ${place(g.box)} of the frame falls into deep shadow.`); continue; }
+    const value = Math.max(...[1, 3, 5].map((i) => parseInt(g.color.slice(i, i + 2), 16))) / 255;
+    const strength = value >= 0.85 ? "strong" : value < 0.5 ? "dim" : "soft", spread = g.cover >= 0.08 ? ", broad" : g.cover < 0.01 ? ", focused" : "";
+    said.push(`A ${strength}${spread} ${name} light comes from the ${place(g.box)} of the frame.`);
+  }
+  if ([...groups.values()].some((g) => !g.shade)) said.push("Each light brightens the surfaces that face it with its colour and falls off with distance; " +
+    "it casts soft shadows away from it, and the old highlights and shadows that disagree with it fade.");
+  const w = String(words ?? "").trim();
+  if (w) said.push(`${w[0].toUpperCase()}${w.slice(1)}${/[.!?]$/.test(w) ? "" : "."}`);
+  said.push("Keep every object, face and texture, the camera angle, the framing and the composition exactly as they are: only the light changes.");
+  return said.join(" ");
+}
+
 export function lightPlanCaption({ colors = [], color = "#ffd890", words = "" }) {
   const shade = colors.some(dark) ? " The black strokes mark areas that must fall into deep shadow." : "";
   const w = words.trim() ? ` ${words.trim()[0].toUpperCase()}${words.trim().slice(1)}${/[.!?]$/.test(words.trim()) ? "" : "."}` : "";
