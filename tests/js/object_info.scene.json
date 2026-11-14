@@ -1373,6 +1373,20 @@
       "IMAGE",
       {}
      ],
+     "config": [
+      "STRING",
+      {
+       "default": "ocio://studio-config-latest",
+       "multiline": false
+      }
+     ],
+     "source": [
+      "STRING",
+      {
+       "default": "@model",
+       "multiline": false
+      }
+     ],
      "low": [
       "FLOAT",
       {
