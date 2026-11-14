@@ -215,7 +215,11 @@ const PRIMITIVE = new Set(["INT", "FLOAT", "STRING", "BOOLEAN"]);
 // px on the editor's canvas. A node's title bar sits above its position; a saved size that is too small makes the editor
 // grow the node over its neighbours, so the rows are counted generously. The editor draws a node at least as wide as its
 // title (ComfyUI 0.44.2, frontend 1.57.6: about 40 px plus 6.6 px a character), so the width follows the title, uncapped
-const BOX = { title: 30, slot: 20, widget: 24, text: 110, node: 320, note: 460, gapX: 60, gapY: 40, pad: 40, groupTitle: 40, groupGap: 80 };
+const BOX = { title: 30, slot: 20, widget: 24, text: 110, node: 320, note: 460, gapX: 60, gapY: 40, pad: 40, groupTitle: 40, groupGap: 80, rowGap: 80 };
+// A section longer than ROW columns continues on a new row, and each of its rows opens with a station: one Reroute per value
+// from outside the row that two or more of the row's inputs take; a value taken once links straight. The editor's Reroute
+// is a node of its own, 75 x 26 px with no title bar, and the editor leaves it out of the prompt it queues
+const ROW = 8, REROUTE = [75, 26];
 
 const inputsOf = (spec) => ["required", "optional"].flatMap((part) =>
   (spec.input_order?.[part] ?? Object.keys(spec.input?.[part] ?? {})).map((name) => [name, spec.input[part][name], part]));
@@ -298,8 +302,8 @@ export function editorGraph(page, info) {
     made.set(id, { inputs, values, tall: widgets.filter((w) => w.text).length });
   }
 
-  // sizes, then places: the sections from top to bottom, each a group; in a group the note, then one column per step
-  const size = new Map(), at = new Map(), groups = [], notes = new Map();
+  // sizes, then places: the sections from top to bottom, each a group; in a group the note, then one column per step, in rows
+  const size = new Map(), at = new Map(), groups = [], notes = new Map(), reroutes = new Map();
   for (const [id, m] of made) {
     const rows = Math.max(m.inputs.length, spec(id).output?.length ?? 0);
     size.set(id, [Math.max(BOX.node, Math.round(40 + 7.2 * prompt[id]._meta.title.length)),
@@ -324,23 +328,54 @@ export function editorGraph(page, info) {
     const lines = text.split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 58)), 0);
     const y0 = top + BOX.groupTitle + BOX.pad + BOX.title, noteH = Math.max(160, 60 + 22 * lines);
     notes.set(sec.note, { text, pos: [BOX.pad, y0], size: [BOX.note, noteH] });
-    let x = BOX.pad + BOX.note + BOX.gapX, bottom = y0 + noteH;
-    for (const column of columns) {
-      let y = y0, wide = 0;
-      for (const id of column) {
-        at.set(id, [x, y]);
-        bottom = Math.max(bottom, y + size.get(id)[1]);
-        y += size.get(id)[1] + BOX.gapY + BOX.title;
-        wide = Math.max(wide, size.get(id)[0]);
+    const x0 = BOX.pad + BOX.note + BOX.gapX, several = columns.length > ROW;
+    let right = x0, bottom = y0 + noteH, rowTop = y0;
+    for (let r = 0; r * ROW < columns.length; r++) { // each row right of the note, below the row before
+      const row = columns.slice(r * ROW, (r + 1) * ROW), inRow = new Set(row.flat()), station = new Map(); // "id:slot" -> Reroute
+      let x = x0, rowBottom = rowTop;
+      const outside = (input) => { const link = input.link ? links[input.link - 1] : null; return link && !inRow.has(String(link[1])) ? link : null; };
+      const shared = new Map(); // "id:slot" of a value from outside the row -> how many of the row's inputs take it
+      for (const id of several ? row.flat() : []) for (const link of made.get(id).inputs.map(outside).filter(Boolean)) shared.set(`${link[1]}:${link[2]}`, (shared.get(`${link[1]}:${link[2]}`) ?? 0) + 1);
+      for (const id of several ? row.flat() : []) for (const input of made.get(id).inputs) {
+        const link = outside(input), key = link && `${link[1]}:${link[2]}`;
+        if (!link || shared.get(key) < 2) continue;
+        if (!station.has(key)) {
+          const via = String(++next), y = rowTop + station.size * (REROUTE[1] + BOX.gapY + BOX.title);
+          links.push([links.length + 1, link[1], link[2], Number(via), 0, link[5]]);
+          fed.set(key, [...fed.get(key), links.length]);
+          reroutes.set(via, { pos: [x0, y], type: link[5], link: links.length, out: [] });
+          station.set(key, via);
+          ids.push(via);
+          rowBottom = Math.max(rowBottom, y + REROUTE[1]);
+        }
+        const via = station.get(key);
+        fed.set(key, fed.get(key).filter((l) => l !== link[0]));
+        [link[1], link[2]] = [Number(via), 0];
+        reroutes.get(via).out.push(link[0]);
       }
-      x += wide + BOX.gapX;
+      if (station.size) x += REROUTE[0] + BOX.gapX;
+      for (const column of row) {
+        let y = rowTop, wide = 0;
+        for (const id of column) {
+          at.set(id, [x, y]);
+          rowBottom = Math.max(rowBottom, y + size.get(id)[1]);
+          y += size.get(id)[1] + BOX.gapY + BOX.title;
+          wide = Math.max(wide, size.get(id)[0]);
+        }
+        x += wide + BOX.gapX;
+      }
+      right = Math.max(right, x);
+      bottom = Math.max(bottom, rowBottom);
+      rowTop = rowBottom + BOX.title + BOX.rowGap;
     }
-    groups.push({ id: i + 1, title: i ? sec.name : "README", bounding: [0, top, x - BOX.gapX + BOX.pad, bottom + BOX.pad - top], color: "#3f789e", font_size: 24, flags: {} });
+    groups.push({ id: i + 1, title: i ? sec.name : "README", bounding: [0, top, right - BOX.gapX + BOX.pad, bottom + BOX.pad - top], color: "#3f789e", font_size: 24, flags: {} });
     top = bottom + BOX.pad + BOX.groupGap;
   });
 
   const nodes = ids.map((id, order) => {
-    const n = prompt[id], note = notes.get(id);
+    const n = prompt[id], note = notes.get(id), via = reroutes.get(id);
+    if (via) return { id: Number(id), type: "Reroute", pos: via.pos, size: [...REROUTE], flags: {}, order, mode: 0, inputs: [{ name: "", type: "*", link: via.link }],
+      outputs: [{ name: "", type: via.type, links: via.out, slot_index: 0 }], properties: { showOutputText: false, horizontal: false } };
     if (note) return { id: Number(id), type: NOTE, pos: note.pos, size: note.size, flags: {}, order, mode: 0, inputs: [], outputs: [],
       title: n._meta.title, properties: {}, widgets_values: [note.text], color: "#432", bgcolor: "#653" };
     const m = made.get(id), s = spec(id);

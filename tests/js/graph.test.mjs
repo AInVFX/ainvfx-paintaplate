@@ -97,13 +97,14 @@ const cut = (a, b) => Math.min(a[2], b[2]) > Math.max(a[0], b[0]) && Math.min(a[
 const inside = (a, b) => a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3];
 const box = (g) => [g.bounding[0], g.bounding[1], g.bounding[0] + g.bounding[2], g.bounding[1] + g.bounding[3]];
 
-function posted(file) { // what the editor's Run posts: a widget's value by its name, a link by its input's name; a note is no node of a prompt
-  const link = new Map(file.links.map((l) => [l[0], l])), out = {};
+function posted(file) { // what the editor's Run posts: a widget's value by its name, a link by its input's name through any Reroute; a note and a Reroute are no nodes of a prompt
+  const link = new Map(file.links.map((l) => [l[0], l])), byId = new Map(file.nodes.map((n) => [n.id, n])), out = {};
+  const from = (id) => { let l = link.get(id); while (byId.get(l[1]).type === "Reroute") l = link.get(byId.get(l[1]).inputs[0].link); return l; };
   for (const n of file.nodes) {
-    if (n.type === "MarkdownNote") continue;
+    if (n.type === "MarkdownNote" || n.type === "Reroute") continue;
     const inputs = {};
     widgetsOf(INFO[n.type]).forEach((w, i) => { if (w.name !== undefined) inputs[w.name] = n.widgets_values[i]; });
-    for (const i of n.inputs) if (i.link !== null) inputs[i.name] = [String(link.get(i.link)[1]), link.get(i.link)[2]];
+    for (const i of n.inputs) if (i.link !== null) inputs[i.name] = [String(from(i.link)[1]), from(i.link)[2]];
     out[n.id] = { class_type: n.type, inputs };
   }
   return out;
@@ -117,9 +118,9 @@ test("the editor's format: one group per section in run order, a note at the hea
   assert.deepEqual(file.groups.map((g) => g.title).filter((t) => !t.startsWith("EDIT ")), ["README", "INPUT", "MODELS", "OBJECT TRACKING", "CLEAN PLATE PASS", "SHOT", "PAINT TRACKING", "OUTPUT"]);
   const notes = file.nodes.filter((n) => n.type === "MarkdownNote");
   assert.equal(notes.length, file.groups.length);
-  const held = file.nodes.filter((n) => !api[n.id]); // the editor's own String (Multiline) nodes: one per text of a widget that declares dynamicPrompts
-  assert.ok(held.length && held.every((n) => n.type === "PrimitiveStringMultiline"));
-  assert.equal(file.nodes.length - held.length, Object.keys(api).length); // each README is a note, every other node is itself
+  const own = file.nodes.filter((n) => !api[n.id]); // the editor's own nodes: a String (Multiline) per text of a widget that declares dynamicPrompts, a Reroute per station
+  assert.ok(own.some((n) => n.type === "PrimitiveStringMultiline") && own.every((n) => n.type === "PrimitiveStringMultiline" || n.type === "Reroute"));
+  assert.equal(file.nodes.length - own.length, Object.keys(api).length); // each README is a note, every other node is itself
   assert.ok(file.nodes.every((n) => !api[n.id] || n.type === "MarkdownNote" || (n.type === api[n.id].class_type && n.title === api[n.id]._meta.title)), "the titles are kept");
   assert.match(notes[0].widgets_values[0], /AInVFX Paint a plate 1\.11\.9: the scene of shot/);
   const edit1 = notes.find((n) => n.title === "README · EDIT 1 · Clean").widgets_values[0];
@@ -140,8 +141,10 @@ for (const hdr of [false, true]) test(`the editor's format${hdr ? ", with SDR to
   const byId = new Map(file.nodes.map((n) => [n.id, n]));
   for (const n of file.nodes.filter((x) => x.type === "MarkdownNote")) // the note is the first thing of its group, at its left
     assert.ok(file.nodes.every((o) => o === n || home(o) !== home(n) || o.pos[0] > n.pos[0] + n.size[0]), `${n.title} opens its group`);
-  for (const [, from, , to] of file.links) if (home(byId.get(from)) === home(byId.get(to)))
-    assert.ok(byId.get(from).pos[0] + byId.get(from).size[0] < byId.get(to).pos[0], `${byId.get(from).title} feeds ${byId.get(to).title} from its left`);
+  for (const [, from, , to] of file.links) if (home(byId.get(from)) === home(byId.get(to))) {
+    const [a, b] = [byId.get(from), byId.get(to)];
+    assert.ok(a.pos[0] + a.size[0] < b.pos[0] || a.pos[1] + a.size[1] < b.pos[1] - 30, `${a.title ?? "a station"} feeds ${b.title ?? "a station"} from its left or from an earlier row`);
+  }
 });
 
 for (const hdr of [false, true]) test(`the editor's format${hdr ? ", with SDR to HDR" : ""}: the links are whole, and Run posts the nodes of the API graph, value for value`, () => {
