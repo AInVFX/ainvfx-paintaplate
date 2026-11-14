@@ -1651,6 +1651,12 @@
       {
        "default": 0.0
       }
+     ],
+     "frames": [
+      "INT",
+      {
+       "default": 0
+      }
      ]
     }
    },
