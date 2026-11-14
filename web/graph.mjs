@@ -213,8 +213,9 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
 const README = "PrimitiveStringMultiline", NOTE = "MarkdownNote";
 const PRIMITIVE = new Set(["INT", "FLOAT", "STRING", "BOOLEAN"]);
 // px on the editor's canvas. A node's title bar sits above its position; a saved size that is too small makes the editor
-// grow the node over its neighbours, so the rows are counted generously
-const BOX = { title: 30, slot: 20, widget: 24, text: 110, node: 320, widest: 640, note: 460, gapX: 60, gapY: 40, pad: 40, groupTitle: 40, groupGap: 80 };
+// grow the node over its neighbours, so the rows are counted generously. The editor draws a node at least as wide as its
+// title (ComfyUI 0.44.2, frontend 1.57.6: about 40 px plus 6.6 px a character), so the width follows the title, uncapped
+const BOX = { title: 30, slot: 20, widget: 24, text: 110, node: 320, note: 460, gapX: 60, gapY: 40, pad: 40, groupTitle: 40, groupGap: 80 };
 
 const inputsOf = (spec) => ["required", "optional"].flatMap((part) =>
   (spec.input_order?.[part] ?? Object.keys(spec.input?.[part] ?? {})).map((name) => [name, spec.input[part][name], part]));
@@ -285,7 +286,7 @@ export function editorGraph(prompt, info) {
   const size = new Map(), at = new Map(), groups = [], notes = new Map();
   for (const [id, m] of made) {
     const rows = Math.max(m.inputs.length, spec(id).output?.length ?? 0);
-    size.set(id, [Math.min(BOX.widest, Math.max(BOX.node, Math.round(40 + 7.2 * prompt[id]._meta.title.length))),
+    size.set(id, [Math.max(BOX.node, Math.round(40 + 7.2 * prompt[id]._meta.title.length)),
       16 + rows * BOX.slot + m.values.length * BOX.widget + m.tall * BOX.text]);
   }
   const short = (v) => (typeof v === "string" ? `"${v.length > 80 ? `${v.slice(0, 79)}…` : v}"`.replace(/\s+/g, " ") : String(v));
