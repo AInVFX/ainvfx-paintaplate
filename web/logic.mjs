@@ -583,6 +583,30 @@ export function askedText(asked) {
 // The native frames' failure is said once per cause: a message that names its file counts once for every file.
 export const nativeCause = (message, path) => String(message).split(path).join("the file").trim();
 
+// The log's export: the text of paintaplate_log_<plate>_<YYYYMMDD_HHMM>.txt, to share for troubleshooting. It holds the
+// log and what ComfyUI reports of its versions and its machine (/system_stats): no command line and no path.
+export function logReport({ version, build, stats, browser, address, memory, plate, lines, now }) {
+  const sys = stats?.system ?? {}, two = (n) => String(n).padStart(2, "0"), devices = stats?.devices ?? [];
+  const gb = (bytes) => (+bytes > 0 ? `${(bytes / 2 ** 30).toFixed(1)} GB` : "unknown");
+  const when = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())} ${two(now.getHours())}:${two(now.getMinutes())}`;
+  return [
+    `AInVFX Paint a plate ${version || "unknown"} (build ${build || "unknown"}).`, `Exported: ${when}, this machine's time.`, "",
+    "Machine", `  ComfyUI: ${sys.comfyui_version || "unknown"}.`, `  Python: ${String(sys.python_version || "unknown").split(" ")[0]}.`,
+    `  PyTorch: ${sys.pytorch_version || "unknown"}.`, `  Operating system: ${sys.os || "unknown"}.`,
+    ...(devices.length ? devices.map((d, i) => `  GPU ${i}: ${d.name || "unknown"}, ${gb(d.vram_total)} of VRAM.`) : ["  GPU: none reported."]),
+    `  RAM: ${gb(sys.ram_total)}.`, "",
+    "Page", `  Browser: ${browser}.`, `  Address options: ${address || "none"}.`, `  Memory profile: ${memory || "unknown"}.`, "",
+    "Plate", ...(plate.length ? plate.map((l) => `  ${l}`) : ["  No plate open."]), "",
+    "Log", ...lines.map(([time, text]) => `${time}  ${String(text).replaceAll("\n", `\n${" ".repeat(String(time).length + 2)}`)}`),
+  ].join("\n") + "\n";
+}
+
+// The log's file name, in the browser's local time.
+export function logFileName(plate, d) {
+  const two = (n) => String(n).padStart(2, "0"), name = String(plate || "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "no_plate";
+  return `paintaplate_log_${name}_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}.txt`;
+}
+
 export function strokeTarget({ draft, current, tool }) { // where a new stroke goes: "draft", "current" or "new"
   if (draft) return "draft";
   return current?.tool === tool ? "current" : "new";
