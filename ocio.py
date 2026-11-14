@@ -160,6 +160,20 @@ def _each(fn, frames):
     return list(_POOL.map(fn, frames))
 
 
+def _fill(fn, frames):
+    """`fn` on each frame, frames in parallel, written into one array: one copy of the batch, with no list of frames to
+    stack after it."""
+    first = fn(frames[0])
+    out = np.empty((len(frames), *first.shape), first.dtype)
+    out[0] = first
+
+    def put(i):
+        out[i] = fn(frames[i])
+
+    list(_POOL.map(put, range(1, len(frames))))
+    return out
+
+
 def _rgb(fn):
     """fn on the RGB of a frame; an alpha channel stays as it is."""
     def one(f):
@@ -273,8 +287,8 @@ def _from_model(name: str, dst: str, peak: float):
     return one
 
 
-def convert(frames, name: str, src: str, dst: str, peak: float | None = None) -> list[np.ndarray]:
-    """Each frame's RGB from `src` to `dst` in config `name`, frames in parallel; alpha untouched. Either may be @model or
+def convert(frames, name: str, src: str, dst: str, peak: float | None = None) -> np.ndarray | list[np.ndarray]:
+    """Each frame's RGB from `src` to `dst` in config `name`, frames in parallel into one array; alpha untouched. Either may be @model or
     @linear. @linear is the config's Linear Rec.709 when it has one (a matrix from ACEScg, nothing clipped), else the model
     space decoded; into @model, frames pass through it, then core's tone mapping and gamut compression. The tone mapping
     takes the peak of these frames, or `peak`: the peak of the batch they are a part of (batch_peak). Out of @model, a
@@ -284,8 +298,8 @@ def convert(frames, name: str, src: str, dst: str, peak: float | None = None) ->
     return convert_with_peak(frames, name, src, dst, peak)[0]
 
 
-def convert_with_peak(frames, name: str, src: str, dst: str, peak: float | None = None) -> tuple[list[np.ndarray], float]:
-    """convert's frames, and the peak of its tone mapping: into @model, `peak` or the peak of these frames, read on the way
+def convert_with_peak(frames, name: str, src: str, dst: str, peak: float | None = None) -> tuple[np.ndarray | list[np.ndarray], float]:
+    """convert's frames, in one array, and the peak of its tone mapping: into @model, `peak` or the peak of these frames, read on the way
     in with no second pass; out of @model, the `peak` whose tone mapping is undone; 1.0 when there is none. Color Space
     (OCIO) gives it as its second output, so the nodes after it take the plate's peak as a number (PL6). It is the float
     batch_peak reads: the same way into linear Rec.709 (_route), the same frames."""
@@ -293,9 +307,9 @@ def convert_with_peak(frames, name: str, src: str, dst: str, peak: float | None 
     if src == dst or not frames:
         return frames, 1.0
     if src == MODEL and peak is not None and peak > TONE_ABOVE:
-        return _each(_from_model(name, dst, peak), frames), peak
+        return _fill(_from_model(name, dst, peak), frames), peak
     one, tone = _route(name, src, dst)
-    out = _each(one, frames)
+    out = _fill(one, frames)
     if not tone:
         return out, 1.0
     if peak is None:

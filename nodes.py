@@ -73,8 +73,10 @@ def frames_np(images: torch.Tensor):
         yield frame.float().cpu().numpy()
 
 
-def to_image(frames: list[np.ndarray]) -> torch.Tensor:
-    return torch.from_numpy(np.stack(frames)).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype())
+def to_image(frames) -> torch.Tensor:
+    """Frames as an IMAGE batch: an array of frames is taken as it is, with no copy; a list of frames is stacked."""
+    batch = frames if isinstance(frames, np.ndarray) else np.stack(frames)
+    return torch.from_numpy(batch).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype())
 
 
 def resize(t: torch.Tensor, h: int, w: int) -> torch.Tensor:
@@ -847,20 +849,33 @@ class KeepBlack(io.ComfyNode):
             display_name="Keep Black",
             category=CATEGORY,
             description="Where the SDR shot is black, its own black instead of SDR to HDR's noise (mathops.keep_black): below "
-                        "`low` of luminance the SDR values, above `high` the HDR ones, a smooth step between. Both in ACEScg.",
+                        "`low` of luminance the SDR values, above `high` the HDR ones, a smooth step between, and no value "
+                        "below 0. In ACEScg: each frame of the SDR shot is converted from 'source' as it is used, so no "
+                        "converted copy of the shot is held.",
             inputs=[io.Image.Input("hdr", tooltip="SDR to HDR's frames, ACEScg scene-linear."),
-                    io.Image.Input("sdr", tooltip="The SDR shot they were made from, in ACEScg."),
+                    io.Image.Input("sdr", tooltip="The SDR shot they were made from, in 'source'."),
+                    io.String.Input("config", default=ocio.BUILTIN,
+                                    tooltip="$OCIO for the config the OCIO environment variable names, or a built-in config "
+                                            "such as ocio://studio-config-latest."),
+                    io.String.Input("source", default="@model",
+                                    tooltip="The SDR shot's colour space: a colour space of the config, or @model."),
                     io.Float.Input("low", default=0.001, min=0.0, max=1.0, step=0.0001),
                     io.Float.Input("high", default=0.01, min=0.0, max=1.0, step=0.0001)],
             outputs=[io.Image.Output(display_name="image")],
         )
 
     @classmethod
-    def execute(cls, hdr, sdr, low, high) -> io.NodeOutput:
+    def execute(cls, hdr, sdr, config, source, low, high) -> io.NodeOutput:
         n = min(hdr.shape[0], sdr.shape[0])
+        out = np.empty((n, *hdr.shape[1:]), np.float32)
+
+        def frame(i):
+            black = ocio.convert([sdr[i].float().cpu().numpy()], config, source, "ACEScg")[0]
+            out[i] = mathops.keep_black(hdr[i].float().cpu().numpy(), black, low, high)
+
         with ThreadPoolExecutor(WORKERS) as pool:
-            out = list(pool.map(stoppable(lambda i: mathops.keep_black(hdr[i].float().cpu().numpy(), sdr[i].float().cpu().numpy(), low, high)), range(n)))
-        return io.NodeOutput(torch.from_numpy(np.stack(out)))
+            list(pool.map(stoppable(frame), range(n)))
+        return io.NodeOutput(to_image(out))
 
 
 NODES = [LoadPlate, SavePlate, ColorSpace, SaveFrames, SaveMovie, FitToPlate, CompositeFrames, RelightTransfer, FollowMatte, LevelFill, LivePreview,
