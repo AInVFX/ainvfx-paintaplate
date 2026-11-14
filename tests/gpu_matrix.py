@@ -197,9 +197,9 @@ def render_hdr(steps):
     return any(re.match(r"v\d+ SDR to HDR\b", label) for label, _ in steps)
 
 
-def comfy_lines(url, since, marks=("[Paint a plate] HDR Match:", "PaintAPlate HDR Match:")):
+def comfy_lines(url, since, marks=("[Paint a plate] HDR Match:",)):
     """ComfyUI's own log lines since `since` (its local time, ISO) that hold one of `marks` (HDR Match's line, with the pack's
-    « [Paint a plate] » prefix or in its older form), from its /internal/logs/raw. It keeps the last few hundred lines only:
+    « [Paint a plate] » prefix), from its /internal/logs/raw. It keeps the last few hundred lines only:
     [] when they are gone, or when this ComfyUI has no such route."""
     try:
         entries = get(url + "/internal/logs/raw").get("entries", [])
@@ -432,7 +432,7 @@ def framed(box, width, height, least=160):
 
 def page_mask(comfy, jobs, graphs):
     """The mask the page sent Klein for an erase: the image that the LoadImageMask node of the case's last edit job loads
-    (the full-size pass, which runs after the quick pass), as a path in ComfyUI's input folder. jobs: the page's job lines
+    (the full-size Klein pass, which runs after the edit preview), as a path in ComfyUI's input folder. jobs: the page's job lines
     (read_log); graphs: {prompt id: its API graph, from ComfyUI's /history}. The page uploads an image under the hash of its
     content (app.mjs, uploadCanvas), so only the job's graph names the file. None when /history holds no edit job of the case."""
     for job in reversed([j["id"] for j in jobs if j["name"] == "edit"]):
@@ -443,13 +443,11 @@ def page_mask(comfy, jobs, graphs):
     return None
 
 
-def quick_size(log):
-    """The size of the edit preview, from the page's line « Working sizes: edits at 1920 x 1088, edit preview at 768 x 432, ... »
-    (« quick passes at » in its older form): the size the page judges an erase at (app.mjs, `p.prev`). The same line's shot
-    preview is another size. None when the log has no such line."""
-    found = re.findall(r"(?:edit preview|quick passes) at (\d+) x (\d+)", log)
+def edit_preview_size(log):
+    """The edit preview's size from the page's working sizes line (« edit preview at 768 x 432 »): the size the page judges
+    an erase at (app.mjs, `p.prev`), and not the shot preview's. None without that line."""
+    found = re.findall(r"edit preview at (\d+) x (\d+)", log)
     return (int(found[-1][0]), int(found[-1][1])) if found else None
-
 
 def erase_verdict(after, before, mask, size, first=1):
     """The page's verdict on an erase, logic.eraseCheck run with Node: `after` the export's first frame and `before` the
@@ -462,7 +460,7 @@ def erase_verdict(after, before, mask, size, first=1):
     if not os.path.exists(mask):
         return none(f"No mask: {os.path.basename(mask)} is not in ComfyUI's input folder")
     if not size:
-        return none("No quick-pass size in the page's log")
+        return none("No edit preview size in the page's log")
     import numpy as np
     from PIL import Image
     import erase_probe as probe
@@ -482,7 +480,7 @@ def name_asked(marks, log, jobs):
     """A case that expects the page to ask for an erase's object by name (gpu_matrix.json: « expect »: « name asked »,
     logic.asksName) passes when the page asked and neither Klein nor LTX ran. (passed, why)."""
     asked = any(m.startswith("name asked") for m in marks)
-    ran = [what for what, found in (("a Klein pass", re.search(r"Klein (?:edit preview|full size|quick pass|full-size pass)", log)),
+    ran = [what for what, found in (("a Klein pass", re.search(r"Klein (?:edit preview|full size)", log)),
                                     ("a shot", any(j["name"] == "shot" for j in jobs))) if found]
     return asked and not ran, "" if asked and not ran else "the page did not ask for the name" if not asked else " and ".join(ran) + " ran"
 
@@ -499,7 +497,7 @@ def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
     """The case's sheet, sheet.png in its folder: for each edit, the plate and the export cut around its box, on the first
     frame, at a third, at two thirds and on the last. `others`: more (title, export.zip) columns, such as another run of
     the same strokes. `mask` and `judge_at`: the mask the page sent Klein (page_mask) and the page's quick-pass size
-    (quick_size), for the verdict on a Clean edit (erase_verdict). {"path", "frames" (from 1), "cells": [(row, column, x0,
+    (edit_preview_size), for the verdict on a Clean edit (erase_verdict). {"path", "frames" (from 1), "cells": [(row, column, x0,
     y0, x1, y1)], "verdict": that verdict or None}, or None with no export or plate."""
     from PIL import Image, ImageDraw, ImageFont
     strokes, export = case.get("strokes") or [], os.path.join(folder, "export.zip")
@@ -784,7 +782,7 @@ def run_case(a, name, case, folder):
     result["nodes"], result["stopped_in"] = node_times(events, graphs, names), running_at_stop(events, graphs, names)
     try:  # the case's pictures: never a reason for the case to fail
         result["sheet"] = sheet(case, folder, os.path.join(a.comfy, "input", case["path"]) if case.get("path") else None,
-                                mask=page_mask(a.comfy, result["jobs"], graphs), judge_at=quick_size(result["log"]))
+                                mask=page_mask(a.comfy, result["jobs"], graphs), judge_at=edit_preview_size(result["log"]))
     except Exception as exc:
         result["sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     try:  # a fluid case's keyframes and shot, also never a reason to fail
