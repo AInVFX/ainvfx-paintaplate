@@ -7,7 +7,7 @@
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_erased: ["erased"], follow_element: ["seed"],
-  review_frames: ["frames_prefix"], review_view: ["view_prefix"], edit_plan: ["plan"], hdr_shot: ["hdr"], relight_shade: ["shade"],
+  review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], relight_shade: ["shade"],
   matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"],
   export_plate: ["prefix"], export_exr: ["exr_prefix"] };
 
@@ -130,9 +130,10 @@ export const lightColor = (colors, color) => colorName(colors.find((c) => !dark(
 const objectName = (words) => String(words ?? "").trim().replace(/^(?:the|a|an)\s+/i, "");
 
 // tool: paint, erase or light; words: the prompt; colors: of the painted strokes; color: the tool's colour;
-// bbox: [y_min, x_min, y_max, x_max] on 0..1000. Only the chosen tool's text is built.
-export function caption({ tool, words, colors, color, bbox }) {
-  if (tool === "light") return lightPlanCaption({ colors, color, words }); // a relight's request is the page's own
+// bbox: [y_min, x_min, y_max, x_max] on 0..1000; strokes and aspect: a relight's, as lightIntent reads them. Only the
+// chosen tool's text is built.
+export function caption({ tool, words, colors, color, bbox, strokes = [], aspect }) {
+  if (tool === "light") return lightIntent({ strokes, words, aspect }); // a relight's request is the page's own: its strokes read as intentions
   const name = objectName(words);
   const text = {
     erase: () => `Remove the ${name || "object"} inside <obj_1> completely, with its shadow and its reflection. Show the surface and the background that continue behind it, with matching detail, light, shadows and focus. Add no new object. Keep everything else unchanged.`,
@@ -151,7 +152,6 @@ export const KEEP_TOUCHED = " Where the drawing touches an object, the new eleme
   "wets it or lights it); add no props, fuel or supports that were not asked for."; // a fire on a towel came with logs without it
 
 export function upsampleRequest({ tool, words, bbox, boxes = null, colors = [], color = "#ffd890" }) {
-  if (tool === "light") return { mode: "plain", locked: null, request: lightPlanCaption({ colors, color, words }) }; // no prompt writer: the light plan says it
   const parts = tool === "erase" && boxes?.length > 1 ? boxes : null; // several painted parts: one locked row each
   const rows = parts ? parts.map((b, i) => ({ id: `obj_${i + 1}`, from: "ref_image_0", src_bbox: b, tgt_bbox: null, desc: words || "an object to remove" }))
     : [tool === "erase" ? { id: "obj_1", from: "ref_image_0", src_bbox: boxes?.[0] ?? bbox, tgt_bbox: null, desc: words || "the object to remove" }
@@ -868,15 +868,7 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
   return { url, space: MATTE_PASSES.has(id) ? spaces.data ?? "@model" : id === "hdr" ? spaces.log ?? "@model" : "@model", frames: null };
 }
 
-// ---------- A relight's light plan (2 Nov test on an RTX PRO 6000, approved by Adrien) ----------
-// Klein gets two references: the frame, and the light plan, the light's strokes alone on grey (shade strokes in black). Shown
-// the frame with the light painted on it, Klein treated the strokes as paint; with the plan, it places the light where it is
-// painted, keeps its colours, and relights the rest of the frame to agree with it.
-export const PLAN_GREY = "#3a3a3a";
-export const lightColors = (colors, color) => {
-  const names = [...new Set(colors.filter((c) => !dark(c)).map(colorName))];
-  return names.length ? names.join(" and ") : colorName(color);
-};
+// ---------- A relight: Klein gets the frame and the prompt that its strokes make (lightIntent) ----------
 // A relight's strokes read as intentions, in words that Klein can follow with the frame alone: one sentence per light (its
 // colour by name, its strength from the colour's brightness, its spread from the share of the frame it covers, its place),
 // one per shaded place, the person's words, then what must stay. `strokes`: { color, size, points }, the points as [x, y]
@@ -914,16 +906,6 @@ export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
   if (w) said.push(`${w[0].toUpperCase()}${w.slice(1)}${/[.!?]$/.test(w) ? "" : "."}`);
   said.push("Keep every object, face and texture, the camera angle, the framing and the composition exactly as they are: only the light changes.");
   return said.join(" ");
-}
-
-export function lightPlanCaption({ colors = [], color = "#ffd890", words = "" }) {
-  const shade = colors.some(dark) ? " The black strokes mark areas that must fall into deep shadow." : "";
-  const w = words.trim() ? ` ${words.trim()[0].toUpperCase()}${words.trim().slice(1)}${/[.!?]$/.test(words.trim()) ? "" : "."}` : "";
-  return "Relight the first image with the light planned in the second image. The second image is a light plan of the same frame: each coloured " +
-    `stroke marks a light source at that exact place, with that colour (${lightColors(colors, color)}).${shade}${w} Make the light source itself ` +
-    "visible where it is painted, as a real lamp, window, fire or glow that fits the scene. Light every surface that faces it with its colour and a " +
-    "natural falloff, cast new shadows away from it, and remove or soften the old highlights and shadows that disagree with it. Keep every object, " +
-    "face and texture, the framing and the camera exactly as in the first image: only the light changes. Do not draw any stroke.";
 }
 
 // A fluid shot's own passes, shown from the Render panel with its keyframes open or closed: the control video LTX was

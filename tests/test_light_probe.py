@@ -1,4 +1,4 @@
-"""The light probe (tests/light_probe.py): its sets and its plan, then one run against the mock ComfyUI."""
+"""The light probe (tests/light_probe.py): its sets and its strokes, then one run against the mock ComfyUI."""
 import io
 import json
 import os
@@ -30,12 +30,12 @@ class Offline(unittest.TestCase):
                          ("glow", ("a soft glow", [("#ffb060", [(0.2, 0.25), (0.22, 0.27)], 60.0),
                                                    ("#000000", [(0.1, 0.1), (0.2, 0.2)], 100.0)])))
 
-    def test_the_plan_is_drawn_as_the_pages(self):
-        # app.lightPlan: grey, the shade in black under the light, solid colours; the lights' boxes leave the shade out
+    def test_the_strokes_are_drawn_on_grey(self):
+        # the strokes on grey, the shade in black under the light, solid colours; the lights' boxes leave the shade out
         p = probe()
         strokes = [("#ffb060", [(0.5, 0.5), (0.6, 0.5)], 192), ("#000000", [(0.3, 0.5), (0.55, 0.5)], 192)]
-        plan, lights = p.plan_of(strokes, (96, 54), [False, True])
-        self.assertEqual(tuple(plan[2, 2]), p.rgb(p.PLAN_GREY))
+        plan, lights = p.strokes_of(strokes, (96, 54), [False, True])
+        self.assertEqual(tuple(plan[2, 2]), p.rgb(p.GREY))
         self.assertEqual(tuple(plan[27, 52]), (0xff, 0xb0, 0x60))  # where both are painted, the light is on top
         self.assertEqual(tuple(plan[27, 30]), (0, 0, 0))
         self.assertTrue(lights[27, 52] and not lights[27, 30])
@@ -82,9 +82,8 @@ class AgainstTheMock(unittest.TestCase):
         for way, w in lamp.items():
             self.assertTrue(os.path.exists(os.path.join(self.out, w["after"])), way)
             self.assertGreater(w["edges"], 0.5, way)
-        self.assertTrue(lamp["today"]["caption"].startswith("Relight the first image with the light planned in the second image"))
         self.assertTrue(lamp["intent"]["caption"].startswith("Relight the whole scene with new light"))
-        self.assertEqual(lamp["intent_plan"]["caption"], lamp["intent"]["caption"])
+        self.assertTrue(lamp["intent"]["caption"].startswith("Relight the whole scene with new light"))
         self.assertEqual(lamp["words"]["request"], "a warm table lamp")  # the mock's writer gives the request back
         self.assertEqual(lamp["intent_writer"]["request"], sets["lamp"]["intent"])
         self.assertEqual(candle["words"], {"skipped": "no words"})
