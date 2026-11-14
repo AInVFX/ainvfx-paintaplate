@@ -884,7 +884,7 @@ function comparePass(id) {
   $("#wipe-btn").setAttribute("aria-pressed", "true");
   placeWipe(); render(); stagesUI();
   hud(`Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right. Ctrl+click it again, Esc or F6 ends it`, 3500);
-  log(`Viewer: ${S.cmp.label} against ${shownLabel()} in the wipe`);
+  log(`Viewer: wipe, ${S.cmp.label} against ${shownLabel()}.`);
 }
 // ---------- The X-ray (W): where the edits on show change the plate, tinted over the picture (xray.mjs) ----------
 // The overlay sits on the canvas with its zoom and pan, so the inspector and the picker read the picture without the tint.
@@ -1730,7 +1730,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     const keys = [];
     for (const k of [...f.keys].sort((a, b) => a.frame - b.frame)) // the control video's keyframes: the paint on black, at the shot's size
       redrawKey(k), keys.push({ frame: k.frame, image: await uploadCanvas(snap(k.canvas, size, "#000"), `fluid_v${v}_key${k.frame}.png`) });
-    log(`Fluid shot v${v}: ${keys.length} keyframe(s) at ${keys.map((k) => p.first + k.frame).join(", ")}, ${size.join(" x ")}, ${p.frames} frames at ${p.fps} fps, seed ${f.seed}, prompt "${prompt}"`);
+    log(`Fluid shot v${v}: started.\n  ${keys.length === 1 ? "1 keyframe, at frame" : `${keys.length} keyframes, at frames`} ${keys.map((k) => p.first + k.frame).join(", ")}.\n  ${size.join(" x ")}, ${p.frames} frames at ${p.fps} fps.\n  Seed ${f.seed}, prompt "${prompt}".`);
     status(`Fluid shot v${v}: running, one LTX 2.5 pass with ainvfx-fluid.`);
     const out = await run("fluid", { ...S.memoryProfile.slots, path: f.blankPath ?? p.path, config: S.ocio.config, color_space: "@model", max_frames: p.frames, keys: JSON.stringify(keys), prompt, seed: f.seed,
       prefix: `${dir}/plate`, video_prefix: `${dir}/preview`, control_prefix: `${dir}/control/c`, ...plateMovie(p), live: LIVE.every },
@@ -2665,7 +2665,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const scene = erase ? erasePrompt(erases.map((e) => e.caption)) : ""; // the scene as it stays, never the erased object
   if (!r.told) {
     r.told = true;
-    log(`Render v${r.v}: ${active.length} edit(s) (${active.map((e) => `${num(e.src)} ${NAME[e.tool]}`).join(", ")}), preview at ${sized}, seed ${common.seed}, steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => st.id).join(" > ")}`);
+    log(`Render v${r.v}: ${active.length} ${active.length === 1 ? "edit" : "edits"} (${active.map((e) => `${num(e.src)} ${NAME[e.tool]}`).join(", ")}), shot preview at ${sized}, seed ${common.seed}, steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => st.label).join(" > ")}.`);
     if (carry) log(`Render v${r.v}: LTX prompt: ${prompt}`);
     if (erase) log(`Render v${r.v}: Clean plate pass prompt: ${scene || "none"}`);
   }
@@ -3733,7 +3733,7 @@ async function boot() { // the version and the build, the workflows, the WebSock
     told("ComfyUI restarted with other code or model files", "Reload this page. Until then, no job is taken from the job index or written to it");
   });
   $("#version").textContent = S.version = version;
-  log(`AInVFX Paint a plate ${version || "of an unknown version: restart ComfyUI after an update"}${build ? ` (build ${build.slice(0, 8)})` : ""}`);
+  log(version ? `AInVFX Paint a plate ${version}${build ? ` (build ${build.slice(0, 8)})` : ""}.` : "Warning: Paint a plate version unknown. Restart ComfyUI after an update.");
   onNotice(status);
   onLog(log);
   const t0 = performance.now();
@@ -3765,7 +3765,7 @@ async function boot() { // the version and the build, the workflows, the WebSock
   const onlyHdr = (file) => hdrFiles.has(file) && !Object.entries(WF).some(([name, wf]) => name !== "hdr" && JSON.stringify(wf.prompt).includes(file));
   S.hdrReady = HDR_ON && !absent.some(onlyHdr) && HDR_NODES.every((cls) => info[cls]);
   if (!HDR_ON) log("SDR to HDR: off (?hdr=0 in the address).");
-  else if (!S.hdrReady) log(`SDR to HDR is off: ${absent.filter(onlyHdr).join(", ") || "update ComfyUI and ComfyUI-LTXVideo"}. ${HDR_MISSING}`);
+  else if (!S.hdrReady) log(`Warning: SDR to HDR off${absent.filter(onlyHdr).length ? `, ${absent.filter(onlyHdr).join(", ")} missing` : ""}. ${HDR_MISSING}`);
   depthUI();
   const missingFiles = absent.filter((file) => !only(file) && !onlyHdr(file));
   if (missingFiles.length) return stopped(`Missing model files: ${missingFiles.join(", ")}`, "Run python get_models.py in this pack's folder, then reload this page.");
