@@ -464,10 +464,6 @@ LIGHT_EPS = 1.0 / 512.0  # linear light: darker than this counts as this dark wh
 LIGHT_COLOUR_SPREAD = 4.0
 CHANNEL_FLOOR = 0.1
 RATIO_RANGE = (1.0 / 64.0, 64.0)  # a safety net, not a limit: a painted sun can be 30 times the sky it covers
-# Where a light stroke is strong, the relit frame keeps at least the plate with that light added, in display values, as the
-# brush showed it (Adrien, 31 Oct: the painted sun lost its brightness once made). In full from KEEP_LIGHT_AT of light, one
-# stroke's peak; less on a stroke's soft edge. Klein relights the rest of the frame.
-KEEP_LIGHT_AT = 0.3
 
 
 def light_change(source: np.ndarray, relit: np.ndarray, radius: float) -> np.ndarray:
@@ -497,20 +493,6 @@ def relight(plate: np.ndarray, source: np.ndarray, relit: np.ndarray, radius: fl
         ratio = resize_to(ratio, plate.shape[0], plate.shape[1])
     out = plate.copy()
     out[..., :3] = plate[..., :3] * ratio
-    return out
-
-
-def keep_light(out: np.ndarray, plate: np.ndarray, light: np.ndarray) -> np.ndarray:
-    """`out`, relit from `plate` (both linear light), raised where a light stroke is strong to the plate with that light
-    added, as the brush showed it. `light`: the painted light in display values (sRGB), black where none, any size."""
-    light = np.asarray(light, np.float32)[..., :3]
-    if light.shape[:2] != out.shape[:2]:
-        light = resize_to(light, out.shape[0], out.shape[1])
-    shown, under = linear_to_srgb(out[..., :3]), linear_to_srgb(plate[..., :3])
-    painted = np.minimum(under + light, np.maximum(under, 1.0))  # the brush adds in display values, up to white
-    weight = np.clip(light.max(-1, keepdims=True) / KEEP_LIGHT_AT, 0.0, 1.0)
-    out = out.copy()
-    out[..., :3] = srgb_to_linear(shown + weight * np.maximum(painted - shown, 0.0))
     return out
 
 
@@ -556,9 +538,8 @@ def shade_frame(img: np.ndarray, shade: np.ndarray, density: float = 0.7, space:
 
 
 def relight_frame(plate: np.ndarray, source: np.ndarray, relit: np.ndarray, radius: float, strength: float = 1.0,
-                  shift=(0.0, 0.0), plate_space: str = "linear", shot_space: str = "linear", light=None) -> np.ndarray:
-    """One frame of Relight Transfer: `relit` moved by `shift` onto `source`, then its light moved onto `plate`, and with
-    `light` the painted light kept where it is strong (`keep_light`).
+                  shift=(0.0, 0.0), plate_space: str = "linear", shot_space: str = "linear") -> np.ndarray:
+    """One frame of Relight Transfer: `relit` moved by `shift` onto `source`, then its light moved onto `plate`.
 
     The change of light is measured at the size of `source` and `relit`, then enlarged to the plate. The workflows give
     them at half the plate's size, where `radius` 1 still lets the shot's light through almost pixel for pixel.
@@ -571,8 +552,6 @@ def relight_frame(plate: np.ndarray, source: np.ndarray, relit: np.ndarray, radi
     if plate_space == "sRGB":  # decoded here, frame by frame, then encoded back: far cheaper than core at full size
         plate = np.concatenate([srgb_to_linear(plate[..., :3]), plate[..., 3:]], -1)
     out = relight(plate, source, relit, max(0.5, radius), strength).astype(np.float32)
-    if light is not None:
-        out = keep_light(out, plate, light).astype(np.float32)
     if plate_space == "sRGB":
         out[..., :3] = linear_to_srgb(out[..., :3])
     return out

@@ -351,18 +351,6 @@ class RelightFromTheShot(unittest.TestCase):
         err = lambda x: float(np.abs(x - plates[0])[8:-8, 8:-8].mean())
         self.assertLess(err(back), 0.4 * err(shots[0]))
 
-    def test_the_painted_light_is_kept_where_it_is_strong(self):
-        plate = np.full((16, 16, 3), 0.1, np.float32)
-        out = plate * 1.2  # Klein brightened it a little
-        light = np.zeros((16, 16, 3), np.float32)
-        light[4:12, 4:12] = [0.6, 0.5, 0.3]
-        kept = mathops.keep_light(out, plate, light)
-        want = mathops.srgb_to_linear(np.minimum(mathops.linear_to_srgb(plate) + light, 1.0))
-        np.testing.assert_allclose(kept[6:10, 6:10], want[6:10, 6:10], rtol=1e-4)
-        np.testing.assert_allclose(kept[:2, :2], out[:2, :2])  # no light painted there: the relit frame as it is
-
-
-class FollowMatteRecord(unittest.TestCase):
     def test_a_recorded_call_runs_again_from_its_file(self):
         """PAINTAPLATE_RECORD keeps what Follow Matte was given, small: the same call runs again from the file, with no GPU."""
         import os, tempfile
