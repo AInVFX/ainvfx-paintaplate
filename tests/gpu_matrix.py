@@ -434,10 +434,10 @@ def page_mask(comfy, since):
 
 
 def quick_size(log):
-    """The page's quick-pass size, from its line « Working sizes: ... quick passes at 768 x 432 ... »: the size the page
-    judges an erase at (app.mjs, `p.prev`). The same line's « preview at 640 x 352 » is the shot's preview, another size.
+    """The page's edit preview size, from its line « Working sizes: ... edit preview at 768 x 432 ... » (« quick passes at »
+    in older pages): the size the page judges an erase at (app.mjs, `p.prev`). The same line's shot preview is another size.
     None when the log has no such line."""
-    found = re.findall(r"quick passes at (\d+) x (\d+)", log)
+    found = re.findall(r"(?:quick passes|edit preview) at (\d+) x (\d+)", log)
     return (int(found[-1][0]), int(found[-1][1])) if found else None
 
 
