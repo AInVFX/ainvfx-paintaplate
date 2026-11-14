@@ -5,6 +5,8 @@ as Load Plate called it, on a movie and on an image sequence file by file, must 
 
 It makes its own movies (8 and 10 bits, full and limited range, widths on and off a multiple of 32, alpha) and image
 sequences (EXR half and float, with alpha; PNG 8 and 16 bits; JPEG; TIFF; DPX), and reads the movies named with --plates. One line per movie and trim, then DECODE SAME, or DECODE DIFFERS with exit code 1.
+A path given to --plates that is not a file stops it before any work: one line, exit code 2 (a shell pattern that
+matches nothing arrives as typed).
 tests/comfy_live.py runs it, so a ComfyUI pin that changes core's pictures fails the live tests."""
 import argparse
 import os
@@ -134,6 +136,12 @@ if __name__ == "__main__":
     ap.add_argument("--plates", nargs="*", default=[], help="more movies to compare, such as the laptop's plates")
     ap.add_argument("--max-frames", type=int, nargs="+", default=[17, 121])
     a = ap.parse_args()
+    gone = [p for p in a.plates if not os.path.isfile(p)]
+    if gone:
+        one = len(gone) == 1
+        print(f"{'Plate' if one else 'Plates'} not found: {', '.join(gone)}. "
+              f"Check the {'path' if one else 'paths'} given to --plates.", file=sys.stderr)
+        sys.exit(2)
     sys.path.insert(0, a.comfy)
     from comfy_api.v0_0_2 import InputImpl  # as nodes.py imports it
     differ = 0

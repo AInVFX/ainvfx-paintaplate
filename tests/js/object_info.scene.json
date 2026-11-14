@@ -1154,14 +1154,22 @@
      "peak_of": [
       "IMAGE",
       {}
+     ],
+     "peak": [
+      "FLOAT",
+      {
+       "forceInput": true
+      }
      ]
     }
    },
    "output": [
-    "IMAGE"
+    "IMAGE",
+    "FLOAT"
    ],
    "output_name": [
-    "image"
+    "image",
+    "peak"
    ]
   },
   "PaintAPlate_CompositeFrames": {
@@ -1576,9 +1584,11 @@
        "default": 0.7
       }
      ],
-     "peak_of": [
-      "IMAGE",
-      {}
+     "peak": [
+      "FLOAT",
+      {
+       "forceInput": true
+      }
      ]
     }
    },

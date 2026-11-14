@@ -178,11 +178,12 @@ def fill(name, values, folder=None):
     return prompt
 
 
-def colour(g, image, source, destination, title=None, peak_of=None):
+def colour(g, image, source, destination, title=None, peak_of=None, peak=None):
     """Color Space (OCIO) in the config the page names (Slot config). Into @model, `peak_of` is the batch `image` is a
     part of: the tone mapping takes that batch's peak. Out of @model, it is the plate in `destination`: the tone mapping of
-    its peak is undone, so new content comes back at the plate's levels."""
-    part = {} if peak_of is None else {"peak_of": peak_of}
+    its peak is undone, so new content comes back at the plate's levels. `peak` is that peak as a number: the second
+    output of the plate's own conversion, which read it (PL6)."""
+    part = {k: v for k, v in (("peak_of", peak_of), ("peak", peak)) if v is not None}
     return g("PaintAPlate_ColorSpace", _title=title, image=image, config=Slot("config", OCIO_CONFIG), source=source,
              destination=destination, **part)
 
@@ -193,7 +194,8 @@ def plate(g, pad, path="path", progress=False, first=False):
     The tone mapping of values above 1.0 shares one peak per batch, as core's did, so a different batch could change the
     exposure of an HDR plate between steps: every workflow converts the same whole plate. With `first`, the first frame
     alone is converted, with the whole plate's peak: it has the values it has in the whole plate converted, and no second
-    copy of the plate is made.
+    copy of the plate is made. The conversion's second output is that peak: composite() hands it on, so the plate is read
+    once.
     """
     load = g("PaintAPlate_LoadPlate", _title="Plate", _progress=progress, path=Slot(path, ""),
              max_frames=Slot("max_frames", 121), pad_8n1=pad)
@@ -566,17 +568,18 @@ def composite(g):
     load, model = plate(g, pad=True)
     gen = g("PaintAPlate_LoadPlate", _title="Generated shot", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
     union = mattes(g)
-    # The shot comes back at the plate's levels: the tone mapping of the plate's peak, which the models saw, is undone
-    gen_plate = colour(g, gen, "@model", Slot("color_space", "@model"), "Shot in the plate's colour space", peak_of=load[0])
+    # The shot comes back at the plate's levels: the tone mapping of the plate's peak, which the models saw, is undone.
+    # The peak is the number the plate's conversion into the model space read (its second output): the plate is read once.
+    gen_plate = colour(g, gen, "@model", Slot("color_space", "@model"), "Shot in the plate's colour space", peak=model[1])
     # Relight: the light from the regenerated shot, the detail from the plate, in linear light. The plate as the model saw
     # it is the conversion every workflow makes, so ComfyUI has it cached. Relight Transfer undoes the tone mapping of the
-    # linear plate's peak on the shot's two inputs, so it measures the light at the plate's levels.
+    # plate's peak on the shot's two inputs, so it measures the light at the plate's levels.
     size = g("GetImageSize", image=gen)
     source = g("ImageScale", image=model, upscale_method="area", width=size[0], height=size[1], crop="disabled")
     linear = colour(g, load[0], Slot("color_space", "@model"), "@linear")
     relit = g("PaintAPlate_RelightTransfer", plate=linear, source=half(g, source), relit=half(g, gen),
               plate_space="linear", shot_space="sRGB", radius=Slot("radius", 1), strength=Slot("strength", 1.0),
-              align=True, peak_of=linear)
+              align=True, peak=model[1])
     back = colour(g, relit, "@linear", Slot("color_space", "@model"))
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=load[0], on_true=back)
     # SDR to HDR: where the hdr workflow made the shot again in scene-linear values, those values, fitted to the plate's own
