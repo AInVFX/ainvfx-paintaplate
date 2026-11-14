@@ -31,6 +31,8 @@ def run(browser, port, U):
     asks = [t for t in lines if ASKING in t]
     boxes = [json.loads(m.group(1)) for m in (BOX.search(t) for t in asks) if m]
     U.check(sum(REFUSED in t for t in lines) == 1, "the writer's answer about the barn is refused once")
+    U.check(all(t.startswith("Edit 1: ") for t in asks) and not any(t.startswith("Edit New") for t in lines),
+            f"the draft's lines carry the number it takes in History ({asks[:1]})")
     U.check(len(asks) == 2 and not asks[0].endswith(DIMMED) and asks[1].endswith(DIMMED) and len(boxes) == 2 and boxes[0] == boxes[1],
             f"the writer looks once more, with the same box, at the dimmed frame ({asks})")
     U.check(not any("SAM 3.1 looking for the barn" in t for t in lines), "no SAM job looks for the barn")

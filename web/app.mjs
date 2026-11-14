@@ -134,7 +134,7 @@ const quiet = (e) => { // work stopped: the status line says so, and the log too
   const text = e?.message ?? String(e);
   status(text.startsWith("Error: ") ? text : `Error: ${text}`, e?.logged ? "hint" : "");
 };
-const num = (e) => { const i = S.edits.indexOf(e); return i < 0 ? "New" : i + 1 + (S.fluid ? 1 : 0); }; // a blank plate's fluid shot is 1; an edit's number: its place in History, 1 at the bottom
+const num = (e) => { const i = S.edits.indexOf(e); return (i < 0 ? S.edits.length : i) + 1 + (S.fluid ? 1 : 0); }; // a blank plate's fluid shot is 1; an edit's number: its place in History, 1 at the bottom; a draft's, the place it will take
 const snapKeyOf = (e) => `${painted(e)}|${e.whole ? e.prompt : ""}`; // what SAM's answer depends on: the strokes, and the name when it searches by name
 // An image is uploaded under the hash of its content: once per session, and under the same name in every session, so a job
 // that reads it keeps its job index key when a scene opens again. Without WebCrypto (plain http) each upload has its own name.
