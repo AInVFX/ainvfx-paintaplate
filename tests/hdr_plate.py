@@ -7,6 +7,9 @@ way back from the model space keeps the plate's levels (PLA, the colour review's
   seam  In the export's zip: the result against the plate on the ring of new pixels at the matte's edge, by the plate's
         luminance. The median level in stops: 0 is the plate's level. It also checks that the untouched pixels are the
         plate's. Written to seam.md beside the zip.
+  groups  Each frame folder in the export's zip with its file count and, for a folder of EXR frames as many as the plate's,
+        the largest difference from the plate where the delivered matte shows 0. The export copies those pixels exactly;
+        a folder that blends there is not the export.
 
 With ComfyUI's Python (numpy, scipy, av, OpenEXR), no GPU, on any version of the pack:
   python tests/hdr_plate.py make --source /data/ComfyUI/input/plates/horse.mp4 --out /data/ComfyUI/input/plates/horse_hdr
@@ -114,6 +117,44 @@ def seam(plate: str, export: str, ring: int = 6, every: int = 4) -> dict:
     return {"rows": rows, "untouched": untouched, "peak": top}
 
 
+def untouched_difference(z, tmp: str, frames: list, results: list, mattes: list, every: int):
+    """The largest difference from the plate where the delivered matte shows 0, on every `every`-th frame; None when the
+    folder's frames are not the plate's size or channels."""
+    worst = 0.0
+    for i in range(0, len(frames), every):
+        p = plateio.read_float(frames[i])
+        r = plateio.read_float(z.extract(results[i], tmp))
+        m = plateio.read_float(z.extract(mattes[i], tmp))[..., 0]
+        if r.shape != p.shape or m.shape != p.shape[:2]:
+            return None
+        out = plateio.untouched(m)
+        worst = max(worst, float(np.abs(r[out] - p[out]).max(initial=0.0)))
+    return worst
+
+
+def groups(plate: str, export: str, every: int = 30) -> dict:
+    frames = plateio.find_sequence(plate)
+    rows = []
+    with zipfile.ZipFile(export) as z, tempfile.TemporaryDirectory() as tmp:
+        names = z.namelist()
+        mattes = _group(names, len(frames), True)
+        folders = {}
+        for n in sorted(names):
+            if n.lower().endswith((".exr", ".png")):
+                folders.setdefault(os.path.dirname(n), []).append(n)
+        for folder, files in folders.items():
+            exrs = [n for n in files if n.lower().endswith(".exr")]
+            d = untouched_difference(z, tmp, frames, exrs, mattes, every) if len(exrs) == len(frames) else None
+            rows.append((folder or ".", len(files), d))
+    lines = [f"# The frame folders of `{export}`", "", f"The plate: {len(frames)} frames. The matte: `{os.path.dirname(mattes[0]) or '.'}`. "
+             f"Differences on every {every}th frame from the first.", "",
+             "| Folder | Files | Largest difference from the plate where the matte shows 0 |", "| --- | --- | --- |"]
+    lines += [f"| {f} | {n} | {'' if d is None else f'{d:.4f}'} |" for f, n, d in rows]
+    text = "\n".join(lines) + "\n"
+    print(text)
+    return {"rows": rows, "text": text}
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="what", required=True)
@@ -127,5 +168,14 @@ if __name__ == "__main__":
     s.add_argument("--export", required=True, help="the export.zip that tests/ui_live.py downloads")
     s.add_argument("--ring", type=int, default=6)
     s.add_argument("--every", type=int, default=4)
+    gr = sub.add_parser("groups", help="each frame folder of the zip, and its untouched pixels against the plate")
+    gr.add_argument("--plate", required=True)
+    gr.add_argument("--export", required=True, help="the export.zip that tests/ui_live.py downloads")
+    gr.add_argument("--every", type=int, default=30)
     a = ap.parse_args()
-    make(a.source, a.out, a.peak, a.frames) if a.what == "make" else seam(a.plate, a.export, a.ring, a.every)
+    if a.what == "make":
+        make(a.source, a.out, a.peak, a.frames)
+    elif a.what == "seam":
+        seam(a.plate, a.export, a.ring, a.every)
+    else:
+        groups(a.plate, a.export, a.every)
