@@ -522,11 +522,11 @@ class StoppedComfy(unittest.TestCase):
         shot, hdr = gpu_matrix.workflow("shot"), gpu_matrix.workflow("hdr")
         self.assertEqual((shot["26"]["class_type"], shot["29"]["class_type"]), ("SamplerCustomAdvanced", "VAEDecodeTiled"))
         events = [[0.0, "b23042ca-1", "26"], [519.0, "b23042ca-1", "29"], [542.1, "b23042ca-1", None],
-                  [600.0, "b6ade25f-2", "26"], [1115.0, "b6ade25f-2", "29"]]
+                  [600.0, "b6ade25f-2", "26"], [1115.0, "b6ade25f-2", "22"]]
         names = {"b23042ca": "shot", "b6ade25f": "hdr"}
         spent = gpu_matrix.node_times(events, {}, names)
         self.assertEqual(spent["b23042ca"], [("SamplerCustomAdvanced", 519.0), ("VAEDecodeTiled", 23.1)])
-        self.assertEqual(gpu_matrix.running_at_stop(events, {}, names), {"b6ade25f": hdr["29"]["class_type"]})
+        self.assertEqual(gpu_matrix.running_at_stop(events, {}, names), {"b6ade25f": hdr["22"]["class_type"]})
         self.assertEqual(gpu_matrix.node_times(events, {}), {"b23042ca": [("node 26", 519.0), ("node 29", 23.1)], "b6ade25f": [("node 26", 515.0)]})
         self.assertEqual(gpu_matrix.FAILED_JOB.findall("hdr b6ade25f: failed after 628.5 s (29 nodes, 4 previews): ComfyUI stopped answering"), [("hdr", "b6ade25f")])
 
