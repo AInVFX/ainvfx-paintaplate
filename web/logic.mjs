@@ -306,38 +306,15 @@ export function removedNames(text, locked = []) {
   return [...new Set(names.filter(Boolean))];
 }
 
-// The prompt writer's box once it named another object than the one under the stroke: the part of `box` that holds the most
-// of the object (`keep`, its core) and almost none of the other one (`other`, as SAM 3.1 finds it by the writer's name for
-// it). A tree's box that holds a barn's roof below its branches becomes the box above the roof. The search runs on a grid of
-// at most 48 cells a side, with sums over the box. null: the box already leaves the other object out (it covers under `share`
-// of the box), or no box without it holds `least` of the object. Masks: Uint8Arrays of 0 and 1 over w x h pixels; boxes:
-// [y0, x0, y1, x1] from 0 to 1000.
-export function boxWithout({ box, keep, other, w, h, share = 0.02, least = 0.5 }) {
-  const Y0 = Math.max(0, Math.floor((box[0] / 1000) * h)), X0 = Math.max(0, Math.floor((box[1] / 1000) * w));
-  const Y1 = Math.min(h, Math.ceil((box[2] / 1000) * h)), X1 = Math.min(w, Math.ceil((box[3] / 1000) * w));
-  if (Y1 <= Y0 || X1 <= X0) return null;
-  const c = Math.max(1, Math.ceil(Math.max(Y1 - Y0, X1 - X0) / 48)), rows = Math.ceil((Y1 - Y0) / c), cols = Math.ceil((X1 - X0) / c);
-  const W = cols + 1, K = new Float64Array((rows + 1) * W), O = new Float64Array((rows + 1) * W), A = new Float64Array((rows + 1) * W);
-  for (let y = Y0; y < Y1; y++) for (let x = X0; x < X1; x++) { // per cell: the object's pixels, the other's, and the pixels
-    const i = y * w + x, j = (Math.floor((y - Y0) / c) + 1) * W + Math.floor((x - X0) / c) + 1;
-    K[j] += keep[i]; O[j] += other[i] && !keep[i] ? 1 : 0; A[j] += 1;
-  }
-  for (const T of [K, O, A]) for (let r = 1; r <= rows; r++) for (let q = 1; q <= cols; q++) T[r * W + q] += T[(r - 1) * W + q] + T[r * W + q - 1] - T[(r - 1) * W + q - 1];
-  const sum = (T, r0, q0, r1, q1) => T[r1 * W + q1] - T[r0 * W + q1] - T[r1 * W + q0] + T[r0 * W + q0];
-  const all = sum(K, 0, 0, rows, cols);
-  if (!all || sum(O, 0, 0, rows, cols) <= share * sum(A, 0, 0, rows, cols)) return null;
-  let best = null;
-  for (let r0 = 0; r0 < rows; r0++) for (let r1 = r0 + 1; r1 <= rows; r1++) for (let q0 = 0; q0 < cols; q0++) for (let q1 = q0 + 1; q1 <= cols; q1++) {
-    const k = sum(K, r0, q0, r1, q1);
-    if (k < least * all || (best && k < best.k)) continue;
-    const a = sum(A, r0, q0, r1, q1);
-    if (sum(O, r0, q0, r1, q1) > share * a || (best && k === best.k && a >= best.a)) continue;
-    best = { k, a, r0, q0, r1, q1 };
-  }
-  if (!best) return null;
-  const y1 = Math.min(Y1, Y0 + best.r1 * c), x1 = Math.min(X1, X0 + best.q1 * c);
-  const cut = [(Y0 + best.r0 * c) / h, (X0 + best.q0 * c) / w, y1 / h, x1 / w].map((v) => Math.round(v * 1000));
-  return [Math.max(cut[0], box[0]), Math.max(cut[1], box[1]), Math.min(cut[2], box[2]), Math.min(cut[3], box[3])]; // inside `box`
+// The frame that the prompt writer gets for its second look at an erase with no words (app.dimFrame): the object in full
+// light and every other pixel at `keep` of its light, rounded down, so that the object under the stroke stands out from
+// everything around it. rgba: the frame's pixels, 4 values each; bits: a Uint8Array of 0 and 1, one per pixel, 1 inside
+// the object. A new array; the alpha stays.
+export const DIM = 0.3;
+export function dimOutside(rgba, bits, keep = DIM) {
+  const out = new Uint8ClampedArray(rgba);
+  for (let i = 0; i < bits.length; i++) if (!bits[i]) for (let c = 0; c < 3; c++) out[i * 4 + c] = Math.floor(rgba[i * 4 + c] * keep);
+  return out;
 }
 
 // The erase pass's prompt: the scene as it stays, in the upsampler's own words for what it kept (rows with a box in the

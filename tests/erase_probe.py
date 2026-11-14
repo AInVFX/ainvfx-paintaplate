@@ -11,8 +11,8 @@ Playwright's own Node serves when no other is on the PATH.
 For each stroke, the probe does what the page does for an erase with Whole object on (prepare, writeCaption and generate in
 web/app.mjs), with the page's own workflows (snap, prompt and edit in tools/build_workflows.py), and asks for Klein's caption
 in each way of REQUESTS. When the writer's answer to the page's request removes another object, for a stroke with no
-words, the probe goes on as the page does (prepare and leaveOut in web/app.mjs): SAM 3.1 finds that object by the writer's
-name for it, the writer's box leaves it out (logic.boxWithout), and the writer is asked once more. Klein then runs the page's edit preview once per mask and caption that differ;
+words, the probe goes on as the page does (prepare in web/app.mjs): the writer gets the same request once more, on the
+frame with all but the object dimmed (logic.dimOutside). Klein then runs the page's edit preview once per mask and caption that differ;
 --full adds the page's full-size pass. With no --stroke: three strokes on horse.mp4 with no words, the barn of the GPU case
 horse_erase, the fence post under it and the tree above it. The jobs are grouped by model, so that each model loads few
 times on a 16 GB card: SAM 3.1 at every stroke's points, the writer's name for every object, SAM 3.1 by that name, the
@@ -74,7 +74,7 @@ NAME_REQUEST = "Name the object that keeps its full colour."
 REQUESTS = {  # how each one asks for Klein's caption: what the prompt writer sees, and the boxes it gets
     "page": "the page's own request (logic.writerBoxes): with no words and one painted part, one box cut to the stroke and to "
             "what most of SAM's masks hold (logic.coreBox); otherwise one box per painted part. An answer about another "
-            "object: that object left out of the box (logic.boxWithout), and the writer asked once more",
+            "object: the writer asked once more, on the frame with all but the object dimmed (logic.dimOutside)",
     "wide": "the request before 1.11.14: one box per painted part, around SAM's whole union (logic.paintBoxes)",
     "dimmed": "the page's request, on the frame with all but the object dimmed to 30% of its light",
     "crop": "the page's request on the object's own crop (its box, and half its size on each side); "
@@ -415,37 +415,22 @@ def path_of(url, o, words, got, prev, work):
     got = page(("caption", {"tool": "erase", "words": words, "colors": [], "color": "#ffffff", "bbox": p["bbox"]}),
                ("paintBoxes", p["paint"]),
                ("coreBox", {"painted": raw(o["painted"].ravel()), "masks": [raw(m.ravel()) for _, m in kept],
-                            "w": int(prev[0]), "h": int(prev[1])}),
-               ("corePixels", {"painted": raw(o["painted"].ravel()), "masks": [raw(m.ravel()) for _, m in kept],
-                               "w": int(prev[0]), "h": int(prev[1])}))
+                            "w": int(prev[0]), "h": int(prev[1])}))
     p["own"], p["parts"], p["core"] = got[0], got[1], got[2] if kept and not words.strip() else None  # app.findWhole
-    p["core_bits"] = got[3].reshape(prev[::-1])
     p["chosen"] = page(("writerBoxes", {"tool": "erase", "words": words, "parts": p["parts"], "core": p["core"],
                                         "bbox": p["bbox"]}))[0]  # app.writeCaption
     p["crop"] = crop_of(p["bbox"])
     return p
 
 
-def leave_out(url, frame_name, r, P, locked, prev, system, limit):
-    """app.leaveOut, then app.writeCaption once more: SAM 3.1 finds the objects that the writer's answer removes by the
-    writer's names for them, the writer's box leaves them out (logic.boxWithout), and the writer gets that box. A kept
-    answer becomes the request's caption."""
-    r["others"] = page(("removedNames", r["made"], locked))[0]
-    if not r["others"]:
-        return
-    got, r["others_seconds"] = run(url, "snap", {"image": frame_name, "words": ", ".join(r["others"])}, limit)
-    other = np.zeros(prev[::-1], bool)
-    for item in got.get("named", {}).get("images", []):
-        m = image(url, item, "L")
-        other |= (m if m.shape[::-1] == tuple(prev) else resized(m, prev)) > 127
-    r["cut"] = page(("boxWithout", {"box": P["core"], "keep": raw(P["core_bits"].ravel()), "other": raw(other.ravel()),
-                                    "w": int(prev[0]), "h": int(prev[1])}))[0]
-    if not r["cut"]:
-        return
-    chosen = page(("writerBoxes", {"tool": "erase", "words": "", "parts": P["parts"], "core": r["cut"], "bbox": P["bbox"]}))[0]
-    ask = page(("upsampleRequest", {"tool": "erase", "words": "", **chosen}))[0]
+def look_again(url, r, o, P, system, limit):
+    """app.prepare's second look, then app.writeCaption once more: the writer's answer to the page's request was refused,
+    so the writer gets the same request on the frame with all but the object dimmed (logic.dimOutside). A kept answer
+    becomes the request's caption; a refused one leaves the page's own caption, where the page asks for the name."""
+    ask = P["ask"]
+    r["others"] = page(("removedNames", r["made"], ask["locked"]))[0]
     try:
-        got, r["again_seconds"] = run(url, "prompt", {"image": frame_name, "request": ask["request"],
+        got, r["again_seconds"] = run(url, "prompt", {"image": o["dimmed"], "request": ask["request"],
                                                       "system": system[ask["mode"]]}, limit)
         r["again"] = text_of(got)
     except Exception as err:  # noqa: BLE001
@@ -492,12 +477,10 @@ def verdict(req, r):
         return f"{head}{r['error']}: the page's own caption"
     if not r.get("answer"):
         return f"{head}no answer: the page's own caption"
-    if r.get("others"):  # the page's request, about another object: the box without it, and the writer once more
-        first = f"named « {', '.join(r['others'])} » first, "
-        if not r.get("cut"):
-            return first + "no box without it: the page's own caption"
-        return first + ("kept with the box without it: the writer's caption" if not r.get("refused")
-                        else "refused again with the box without it: the page's own caption")
+    if "again" in r:  # the page's request, refused: the writer once more, on the dimmed frame
+        first = f"named « {', '.join(r['others'])} » first, " if r.get("others") else "refused first, "
+        return first + ("kept on the dimmed frame: the writer's caption" if not r.get("refused")
+                        else "refused again on the dimmed frame: the page's own caption")
     return head + ("refused: the page's own caption" if r.get("refused") else "kept: the writer's caption")
 
 
@@ -669,10 +652,11 @@ def main(argv=None):
             f"the writer's boxes {P['chosen']['boxes']}, before 1.11.14 {P['parts']}")
     live = [o for o in objs if "page" in o["paths"]]
 
-    # 2. The prompt writer names each object, on the frame with all but the object dimmed (named, as_words)
+    # 2. The frame with all but the object dimmed (dimmed, and the page's second look); the writer names each object on it
+    #    (named, as_words)
     for o in live:
         dimmed = (frame_prev * np.where(o["paths"]["page"]["mask_prev"], 1.0, DIM)[..., None]).astype(np.uint8)
-        o["dimmed"] = upload(a.url, dimmed, f"{tag}_{o['name']}_dimmed.png", sent) if naming or "dimmed" in asked else None
+        o["dimmed"] = upload(a.url, dimmed, f"{tag}_{o['name']}_dimmed.png", sent) if naming or {"dimmed", "page"} & set(asked) else None
         if not naming:
             continue
         n = o["naming"] = {"image": "dimmed", "request": NAME_REQUEST}
@@ -743,11 +727,9 @@ def main(argv=None):
                 r["made"] = page(("reconcile", text, locked))[0] if text else ""
                 r["refused"] = bool(r["made"]) and not page(("erasesPaint", r["made"], locked, R["paint"]))[0]
                 r["caption"] = r["made"] if r["made"] and not r["refused"] else R["own"]
-                if req == "page" and r["refused"] and not s["words"].strip() and P["core"]:
-                    leave_out(a.url, frame_name, r, P, locked, prev, system, a.limit)
-                    if r.get("cut"):
-                        say(f"{o['name']}, page: the box without « {', '.join(r['others'])} » {r['cut']}; the writer again: "
-                            f"« {short(r.get('again'), 140)} »")
+                if req == "page" and r["refused"] and not s["words"].strip():
+                    look_again(a.url, r, o, P, system, a.limit)
+                    say(f"{o['name']}, page: the writer again, on the dimmed frame: « {short(r.get('again'), 140)} »")
             say(f"{o['name']}, {req}: {verdict(req, r)}. The writer: « {short(r.get('answer'), 140)} »")
 
     # 5. Klein: once per mask and caption that differ (app.generate)
