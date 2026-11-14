@@ -11,10 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { asksName, eraseCheck, coreBox, writerBoxes, DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
-  erasePrompt, erasesPaint, leftHint, leftLines, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
-  stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
-  defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
+import { asksName, blankDepth, blankSpec, browseItems, caption, changedMask, coreBox, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, keySlots, leftHint, leftLines, lightColor, logLevel, moveKey, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, writerBoxes } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
 import { FAMILY, framesNeed, matteLargest, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
@@ -131,7 +128,12 @@ const FLUID_HELP = "A fluid shot: paint flat colour blobs (light grey smoke, whi
   "last frame, and on the 8-frame grid between if you want. Ctrl+C and Ctrl+V copy a keyframe; drag its diamond to move it. Describe " +
   "the fluid, then Enter.";
 
-const quiet = (e) => { if (e?.message === "cancelled") return; console.error(e); status(e?.message ?? String(e), "error"); };
+const quiet = (e) => { // work stopped: the status line says so, and the log too unless explained() wrote its fact
+  if (e?.message === "cancelled") return;
+  console.error(e);
+  const text = e?.message ?? String(e);
+  status(text.startsWith("Error: ") ? text : `Error: ${text}`, e?.logged ? "hint" : "");
+};
 const num = (e) => { const i = S.edits.indexOf(e); return i < 0 ? "New" : i + 1 + (S.fluid ? 1 : 0); }; // a blank plate's fluid shot is 1; an edit's number: its place in History, 1 at the bottom
 const snapKeyOf = (e) => `${painted(e)}|${e.whole ? e.prompt : ""}`; // what SAM's answer depends on: the strokes, and the name when it searches by name
 // An image is uploaded under the hash of its content: once per session, and under the same name in every session, so a job
@@ -464,7 +466,7 @@ const playhead = () => (S.plate ? { fps: S.plate.fps, frame: S.frame, inPt: S.in
 const caches = new Map([plateVid, shotVid].map((v) => [v, new FrameCache(v, { view: playhead, changed: () => cacheUI(), budget: (CACHE_MB || 512) * 1e6 })])); // until planCaches gives each its share
 const deepOf = (v) => new DeepFrames(v, { view: playhead, changed: () => cacheUI(), budget: (DEEP_MB || 512) * 1e6 });
 const deep = deepOf(plateVid), deepShot = deepOf(shotVid); // full precision: an image-sequence plate, and its full-size composite (the review)
-const look = new Display({ onready: () => render(), onerror: (m) => log(m, "error") }); // the viewer's OCIO, as in RV
+const look = new Display({ onready: () => render(), onerror: (m) => log(`Error: ${m}`) }); // the viewer's OCIO, as in RV
 
 // One memory budget for every cache of decoded frames, as RV's look-ahead cache has one (frames.mjs: autoBudget, cachePlan).
 // View > Cache memory sets it and the next session keeps it; Auto by default. The caches of the sources on show share it
@@ -913,7 +915,7 @@ function xrayFrame(url) { // paused: a matte's frame on show from the frames rou
     const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number);
     xray.got.set(key, { width, height, alpha: alphaFromHalfs(new Uint16Array(await r.arrayBuffer())) });
     if (!S.playing) drawXray();
-  }).catch((err) => { xray.got.set(key, { failed: true }); log(`X-ray: the matte ${path} could not be read: ${err.message}`, "error"); });
+  }).catch((err) => { xray.got.set(key, { failed: true }); log(`Error: X-ray matte ${path} unreadable (${err.message}).`); });
   return null;
 }
 function videoAlpha(v) { // playing: a matte's frame from its movie, at XRAY_SIDE
@@ -2562,7 +2564,7 @@ function idle() { // one render step at a time, from the render queue; the edits
     const st = STAGES.find((x) => x.id === S.stage?.id), mine = r.key === S.heroKey;
     r.failed = st?.id ?? "render"; // it waits for Generate, which tries it again
     const err = explained(e, `${st?.label ?? "The render"}${mine ? "" : ` of v${r.v}, in the background,`}`);
-    if (mine) { quiet(err); S.wantDownload = null; } else log(err.message, "error");
+    if (mine) { quiet(err); S.wantDownload = null; } // explained() logged the fact; a render in the background says no more
   }).finally(() => { S.piping = null; S.stage = null; hideLive(); stagesUI(); exportUI(); generateUI(); touch(); });
 }
 
@@ -2864,30 +2866,30 @@ async function download(parts = ["export", "matte"]) {
 
 // ---------- Interface ----------
 
-function explained(err, what) { // ComfyUI's own message goes to the log; the status line says what failed, why, and what to do
+function explained(err, what) { // a failure writes one fact in the log; the error it returns adds what to do, for the status line
   if (err?.message === "cancelled") return err;
-  const raw = err?.message ?? String(err);
-  log(`${what} failed. ComfyUI said: ${raw}`, "error");
-  return new Error(`${what} failed: ${plainError(raw)} Generate tries again.`);
+  const { why, todo } = plainError(err?.message ?? String(err)), fact = `Error: ${what} failed: ${why}.`;
+  log(fact); // ComfyUI's own message is in the job's line
+  return Object.assign(new Error(`${fact} ${todo}`), { logged: true });
 }
 
-function status(text, level = "") { // the status line. A fact also goes to the log; a hint, a sentence that says what to do next, shows here only
+function status(text, level = "") { // the status line. A fact also goes to the log; a « hint », a sentence that says what to do next, shows here only
   $("#status").textContent = text;
-  if (level !== "hint") log(text, level);
+  if (level !== "hint") log(text);
 }
 
-function told(fact, next, level = "") { // what happened goes to the log, once; the status line shows it with what to do next
-  log(fact, level);
-  status(`${fact}. ${next}`, "hint");
+function told(fact, next) { // what happened goes to the log, once; the status line shows it with what to do next
+  log(fact);
+  status(`${fact}${/[.?!]$/.test(fact) ? "" : "."} ${next}`, "hint");
 }
 
 function stopped(fact, next) { // the page cannot go on: the fact is an error in the log, and the status line says how to repair it
-  told(fact, next, "error");
+  told(`Error: ${fact}`, next);
 }
 
-function log(text, level = "") { // the log panel only: what happened, one line per fact, with the time
+function log(text) { // the log panel only: what happened, one fact per message, with the time; its colour follows its words (logLevel)
   const li = document.createElement("li");
-  li.className = level;
+  li.className = logLevel(text);
   li.innerHTML = "<time></time><span></span>";
   li.firstChild.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   li.lastChild.textContent = text;
@@ -2895,7 +2897,7 @@ function log(text, level = "") { // the log panel only: what happened, one line 
   list.append(li);
   while (list.children.length > 400) list.firstChild.remove();
   list.scrollTop = list.scrollHeight;
-  if (level === "error" && list.hidden) $("#log-btn").classList.add("alert"); // an error while the log is closed: the button says so
+  if (li.className === "error" && list.hidden) $("#log-btn").classList.add("alert"); // an error while the log is closed: the button says so
 }
 
 function renderLeft(finalToo = false) { // seconds until the preview, or the full-size composite (and the export once asked for), is ready
@@ -3266,7 +3268,7 @@ async function openScene(text) { // the plate opens in its colour space, then ev
   const scene = JSON.parse(text), o = scene.ocio;
   if (scene.format !== SCENE.format || !(scene.version <= SCENE.version)) throw new Error("This file is not a Paint a plate scene.");
   if (o) { // its OCIO config and view, where this ComfyUI has them
-    if (o.config && o.config !== S.ocio.config) await loadOcio(o.config).catch((err) => log(`${err.message}: the scene opens in the config in use`, "error"));
+    if (o.config && o.config !== S.ocio.config) await loadOcio(o.config).catch((err) => log(`Warning: the scene's OCIO config did not load (${err.message}). Check its colours in the config in use.`));
     const info = S.ocio.info;
     if (info.displays.some((d) => d.name === o.display && d.views.includes(o.view))) Object.assign(S.ocio, { display: o.display, view: o.view });
     S.ocio.look = info.looks.includes(o.look) ? o.look : "";
@@ -3739,7 +3741,7 @@ async function boot() { // the version and the build, the workflows, the WebSock
   Object.assign(UPSAMPLER, upsampler);
   connect();
   const combo = (spec) => (Array.isArray(spec?.[0]) ? spec[0] : spec?.[1]?.options ?? []); // V1 or V3 schema
-  await loadOcio(S.ocio.config).catch((err) => { log(`${err.message}: the default OCIO config is used instead`, "error"); return loadOcio(""); });
+  await loadOcio(S.ocio.config).catch((err) => { log(`Warning: the OCIO config did not load (${err.message}). The default config is in use: right-click, then OCIO, chooses another.`); return loadOcio(""); });
   const needs = { PaintAPlate_LoadPlate: "this pack", PaintAPlate_ColorSpace: "this pack, restart ComfyUI after an update",
     PaintAPlate_FollowMatte: "this pack, restart ComfyUI after an update", PaintAPlate_LevelFill: "this pack, restart ComfyUI after an update",
     LTXAddVideoICLoRAGuide: "ComfyUI-LTXVideo",
