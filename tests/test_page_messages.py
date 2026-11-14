@@ -12,6 +12,16 @@ class Messages(unittest.TestCase):
         self.assertEqual(gpu_matrix.quick_size(old), (768, 432))
         self.assertIsNone(gpu_matrix.quick_size("Plate desk.mp4: opened in 1.2 s."))
 
+    def test_the_timed_steps_read_the_same_in_the_log_s_new_words_and_in_the_older_ones(self):
+        new = ("Render v1: Track the paint, full size (about 40 s).\nRender v1: Track the paint, full size done in 42.0 s.\n"
+               "Fluid shot v1: started.\nfluid 1a2b3c4d: done in 30.0 s (12 nodes)\nFluid shot v1: SDR to HDR done in 12.5 s.\n  Half-float EXR frames in x.\n"
+               "Fluid shot v1: done in 44.0 s.\n  summary")
+        old = ("Render v1: Track the paint, full size (about 40 s)\nRender v1: Track the paint, full size took 42.0 s\n"
+               "Fluid v1: 1 keyframe(s)\nfluid 1a2b3c4d: done in 30.0 s (12 nodes)\nFluid v1: SDR to HDR took 12.5 s: half-float EXR frames in x\n"
+               "Fluid v1: done in 44.0 s: summary")
+        self.assertTrue(gpu_matrix.log_steps(new))
+        self.assertEqual(gpu_matrix.log_steps(new), gpu_matrix.log_steps(old))
+
 
 if __name__ == "__main__":
     unittest.main()

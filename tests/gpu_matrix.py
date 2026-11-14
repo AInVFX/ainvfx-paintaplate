@@ -53,7 +53,7 @@ QUICK = ("horse_cow", "horse_erase", "horse_light", "fluid_720")
 ALL = QUICK + ("uhd_cow", "uhd_erase", "uhd_light", "fluid_1080_edit", "uhd25_cow", "uhd25_erase", "uhd25_light")
 UHD = {"horse_3840x2160_50fps.mp4": 50, "horse_3840x2160_25fps.mp4": 25}  # « 4K at 50 fps », and at 25: every tool runs on a 3840 x 2160 plate
 UHD_SIZE, UHD_FRAMES = (3840, 2160), 121
-STEP = re.compile(r"Render v(\d+): (.+?) took ([\d.]+) s")  # the page's log: one line per render step
+STEP = re.compile(r"Render v(\d+): (.+?) (?:took|done in) ([\d.]+) s")  # the page's log: one line per render step
 # and one line per finished job: its id, its seconds, its nodes, those ComfyUI took from its cache (a model loader among
 # them is a model not loaded again) and the previews the page received. A line starts with its time, with no space after it
 JOB = re.compile(r"([a-z]+) ([0-9a-f?]{1,8}): done in ([\d.]+) s \((\d+) nodes?(?:, (\d+) from ComfyUI's cache)?(?:, (\d+) previews?)?")
@@ -297,11 +297,11 @@ def log_steps(text):
     for line in text.splitlines():
         if m := STEP.search(line):
             steps.append((f"v{m.group(1)} {m.group(2)}", float(m.group(3))))
-        elif m := re.search(r"Fluid v(\d+): (.+?) took ([\d.]+) s", line):
+        elif m := re.search(r"Fluid (?:shot )?v(\d+): (.+?) (?:took|done in) ([\d.]+) s", line):
             steps.append((f"fluid v{m.group(1)} {m.group(2)}", float(m.group(3))))
-        elif m := re.search(r"Fluid v(\d+): done in ([\d.]+) s", line):
+        elif m := re.search(r"Fluid (?:shot )?v(\d+): done in ([\d.]+) s", line):
             steps.append((f"fluid v{m.group(1)} in all", float(m.group(2))))
-        elif m := re.search(r"Fluid v(\d+):", line):
+        elif m := re.search(r"Fluid (?:shot )?v(\d+):", line):
             fluid = m.group(1)
         elif m := re.search(r"(?<![a-z])fluid [0-9a-f?]{1,8}: done in ([\d.]+) s", line):
             steps.append((f"fluid v{fluid} LTX pass", float(m.group(1))))
