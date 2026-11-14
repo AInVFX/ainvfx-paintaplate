@@ -86,15 +86,29 @@ def executing(events, t0):
 
 def deliver_hdr(page):
     """--hdr: SDR to HDR on for this run, before any edit, as a render's key holds the switch. On a plate whose format holds
-    nothing above 1.0, Deliver's switch asks to confirm; an EXR plate that holds values above 1.0 runs it on its own."""
-    if page.is_visible("#deliver-auto"):
-        return "SDR to HDR: on its own for this plate"
-    if not page.is_visible("#deliver-hdr"):
-        raise RuntimeError("--hdr: Deliver offers no SDR to HDR on this page (?hdr=0, or its model files or nodes are missing)")
-    page.click("#deliver-hdr")
-    if page.is_visible("#deliver-confirm"):
-        page.click("#deliver-yes")
-    page.wait_for_function("document.querySelector('#deliver-hdr').checked", timeout=10000)
+    nothing above 1.0, the switch asks to confirm; an EXR plate that holds values above 1.0 runs it on its own. The switch
+    is in the Finish menu (#finish-btn), or under Deliver on a page without that menu."""
+    if page.query_selector("#finish-btn"):
+        page.click("#finish-btn")
+        box, why, ask, yes = "#finish-hdr", "#finish-hdr-why", "#finish-hdr-ask", "#finish-hdr-yes"
+        if page.is_disabled(box):
+            on = page.is_checked(box)
+            page.keyboard.press("Escape")
+            if on:
+                return "SDR to HDR: on its own for this plate"
+            raise RuntimeError(f"--hdr: the Finish menu offers no SDR to HDR on this page: {page.text_content(why)}")
+    else:
+        box, ask, yes = "#deliver-hdr", "#deliver-confirm", "#deliver-yes"
+        if page.is_visible("#deliver-auto"):
+            return "SDR to HDR: on its own for this plate"
+        if not page.is_visible(box):
+            raise RuntimeError("--hdr: Deliver offers no SDR to HDR on this page (?hdr=0, or its model files or nodes are missing)")
+    page.click(box)
+    if page.is_visible(ask):
+        page.click(yes)
+    page.wait_for_function(f"document.querySelector('{box}').checked", timeout=10000)
+    if box == "#finish-hdr":
+        page.keyboard.press("Escape")
     return "SDR to HDR: on, asked for by --hdr"
 
 

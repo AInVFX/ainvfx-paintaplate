@@ -456,7 +456,7 @@ class Hdr(unittest.TestCase):
     def test_ui_live_turns_it_on_before_the_strokes(self):
         with open(os.path.join(gpu_matrix.HERE, "ui_live.py"), encoding="utf-8") as f:
             tool = f.read()
-        self.assertTrue(all(s in tool for s in ('page.click("#deliver-hdr")', 'page.click("#deliver-yes")', 'page.is_visible("#deliver-auto")')))
+        self.assertTrue(all(s in tool for s in ('page.click("#finish-btn")', '"#finish-hdr", "#finish-hdr-why", "#finish-hdr-ask", "#finish-hdr-yes"', 'page.is_visible("#deliver-auto")', 'page.click(box)', 'page.click(yes)')))
         self.assertLess(tool.index("mark(deliver_hdr(page))"), tool.index("for i, (tool, words, pts, *size) in enumerate(strokes)"))
 
     def test_hdr_match_lines_come_from_comfyui_s_log_since_the_case_began(self):
