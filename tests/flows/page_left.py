@@ -27,7 +27,7 @@ def held(page, port, U, start, what):  # one erase that the mock leaves as it wa
     asked, row = page.evaluate(ASKED), page.evaluate(ROW)
     U.check(bool(asked) and asked[0].startswith(FACT) and asked[0].endswith(QUESTION) and asked[1] == "Render anyway"
             and asked[2] == "ask-yes", f"{what}: the page asks, and Enter would choose Render anyway ({asked})")
-    U.check(bool(row) and "failed" in row[0] and row[1] == "1" and row[2] == "The object is still there",
+    U.check(bool(row) and "failed" in row[0] and row[1] == "1" and row[2] in ("The object is still there", "The object may still be there"),  # the row's words, old and new
             f"{what}: History's row is marked while the question is open ({row})")
     return asked[0]
 
