@@ -562,6 +562,15 @@ class Verdict(unittest.TestCase):
         self.assertEqual(gpu_matrix.quick_size(log), (768, 432), "the size the page judges at (p.prev), not the shot's preview size")
         self.assertIsNone(gpu_matrix.quick_size(""))
 
+    def test_the_arm_case_paints_the_exr_plate_with_sdr_to_hdr_outside_quick_and_all(self):
+        arm = gpu_matrix.load_cases()["tos_arm"]
+        self.assertEqual((arm["path"], arm["hdr"], len(arm["strokes"])), ("plates/tos_05_4a", True, 1))
+        tool, words, points, _, options = arm["strokes"][0]
+        self.assertEqual((tool, options), ("paint", {"color": "#000000"}))
+        self.assertTrue(words.startswith("a robotic arm: ") and words.endswith("a row of very bright blue-white LEDs along the wiring"))
+        self.assertTrue(all(0 <= v <= 1 for point in points for v in point))
+        self.assertNotIn("tos_arm", gpu_matrix.ALL + gpu_matrix.QUICK)
+
     def test_the_tree_case_expects_the_name_and_stays_out_of_quick_and_all(self):
         cases = gpu_matrix.load_cases()
         tree, plain = cases["horse_erase_tree"], cases["horse_erase"]
