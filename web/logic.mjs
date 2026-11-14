@@ -576,6 +576,14 @@ export function strokeTarget({ draft, current, tool }) { // where a new stroke g
   return current?.tool === tool ? "current" : "new";
 }
 
+// The status line's note while an edit with active edits above it changes: the first frame shows the edits below it only,
+// so the note names the edits it hides and the way back. `n`: the edit's number; `above`: the numbers of the hidden edits.
+export function hidesNote(n, above) {
+  if (!above.length) return "";
+  const names = above.length === 1 ? `Edit ${above[0]} hides` : `Edits ${above.slice(0, -1).join(", ")} and ${above.at(-1)} hide`;
+  return `Edit ${n} changes: ${names} until Generate. Esc cancels the change.`;
+}
+
 export function toolEndsEdit({ draft, current }, tool) { // picking another tool than the edit being worked on starts a new edit
   const work = draft ?? current;
   return !!work && work.tool !== tool;

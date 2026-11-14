@@ -30,7 +30,7 @@ def run(browser, port, U):
     page.wait_for_function(U.DONE.format(n=3), timeout=120000)
 
     # 1. The second edit selected, nothing changed yet: every edit shows
-    page.click("#history li:nth-child(2) .what"); away()
+    page.click("#history li:nth-child(2) .edit"); away()
     shown1, shown3 = pixel(p1), pixel(p3)
     U.check(page.text_content("#editing").startswith("Editing 2") and np.abs(shown1 - plate1).sum() > 40 and np.abs(shown3 - plate3).sum() > 40 and not hidden(),
             f"an edit selected and not changed hides nothing: edit 1 shows {shown1.tolist()} on a plate of {plate1.tolist()}, edit 3 {shown3.tolist()} on {plate3.tolist()}")

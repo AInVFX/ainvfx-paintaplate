@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { asksName, blankDepth, blankSpec, boxOf, boxWithout, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, keySlots, leftHint, leftLines, lightColor, logLevel, moveKey, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, writerBoxes } from "./logic.mjs";
+import { asksName, blankDepth, blankSpec, boxOf, boxWithout, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logLevel, moveKey, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, writerBoxes } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
 import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
@@ -1337,7 +1337,8 @@ view.addEventListener("pointerdown", (e) => {
   if (rub && eraserKey) eraserKey.dragged = true; // a stroke while X is held: at the release the eraser goes back as it was
   if (S.playing) pause();
   if (keying()) return paintKey(e, rub);
-  if (S.frame !== 0) { seek(0); hud("Edits are painted on the first frame"); }
+  const jumped = S.frame !== 0; // a stroke on another frame: the viewer goes back to the first frame, where edits are painted
+  if (jumped) { seek(0); hud("Edits are painted on the first frame.", 3000); }
   if (rub) return rubOut(e);
   cancel("prefetch"); // a caption written for fewer strokes is outdated
   clearTimeout(S.prefetchTimer);
@@ -1345,7 +1346,9 @@ view.addEventListener("pointerdown", (e) => {
   let d = S.draft;
   const to = strokeTarget({ draft: S.draft, current: S.selected, tool: S.tool }); // the current edit takes the strokes of its own tool
   if (to === "current") d = busy(S.selected) ? reopen(S.selected) : reopenDone(S.selected); // the edit changes: its passes and its render stop
-  if (to === "new") { S.selected = null; d = S.draft = newEdit(); editingUI(); } // a new edit: what renders goes on until Generate
+  if (to === "new") { S.selected = null; S.peek = null; d = S.draft = newEdit(); } // a new edit: what renders goes on until Generate
+  if (jumped) S.jumped = d; // the status line's note says it until this edit is generated or cancelled
+  editingUI();
   view.setPointerCapture(e.pointerId);
   stroke = { tool: d.tool, color: S.color, size: S.size, points: [] };
   d.strokes.push(stroke);
@@ -1964,6 +1967,7 @@ function queueWaiting(first = null) {
 
 function select(edit) { // a History row becomes the current edit: its words in the prompt field, its strokes on the frame
   if (edit && S.draft && S.draft !== edit) launch(S.draft); // the strokes in progress start before another edit is picked
+  if (edit && S.selected !== edit) log(`Edit ${num(edit)} selected.`); // the log names the edit that the next strokes and words change
   S.selected = edit;
   S.peek = edit; // frame 0 shows its strokes until playback starts or an edit is launched
   if (edit) { setTool(edit.tool); $("#prompt").value = edit.prompt; if (edit.tool === "erase") $("#whole").checked = !!edit.whole; }
@@ -1972,12 +1976,29 @@ function select(edit) { // a History row becomes the current edit: its words in 
   historyUI(); render();
 }
 
+function show(edit) { // a click on a History row: frame 0 shows that edit's strokes and nothing is selected, so the next strokes start a new edit on top. Its pencil selects it
+  if (S.selected && !S.draft) $("#prompt").value = "";
+  S.selected = null;
+  S.peek = edit; // frame 0 shows its strokes until playback starts or an edit is launched
+  if (edit) hud(`Edit ${num(edit)} shown. A stroke starts a new edit on top; the pencil changes Edit ${num(edit)}.`, 3500);
+  historyUI(); render();
+}
+
 function editingUI() { // the Editing tag and the New edit button: which edit new strokes and words change
   const e = S.selected ?? (S.edits.includes(S.draft) ? S.draft : null), tag = $("#editing");
   tag.hidden = !e;
   if (e) tag.textContent = `Editing ${num(e)} · ${NAME[e.tool]}`;
   $("#new-edit").disabled = !S.plate || keying() || (!S.draft && !S.selected);
-  generateUI();
+  generateUI(); noteUI();
+}
+
+function noteUI() { // the status line's held note, beside its latest fact: what the first frame hides while an edit changes, or where strokes land
+  const changed = S.edits.includes(S.draft) ? S.draft : null;
+  const above = changed ? hiddenEdits().map(num).sort((a, b) => a - b) : [];
+  const text = above.length ? hidesNote(num(changed), above) : S.draft && S.draft === S.jumped ? "Edits are painted on the first frame." : "";
+  const note = $("#status-note");
+  if (note.textContent !== text) note.textContent = text;
+  note.hidden = !text;
 }
 
 function nextEdit() { // New edit (N): the strokes in progress start now, and the next strokes make a separate edit
@@ -2331,8 +2352,7 @@ function restore(snap) {
   clearTimeout(S.prefetchTimer);
   cancel("edit", "snap", "prefetch", "warm"); // the edits change; renders go on, and what they make stays
   for (const e of [...S.edits, S.draft].filter(Boolean)) if (e.state === "generating" || e.state === "queued") e.token = (e.token ?? 0) + 1;
-  const kept = S.selected; // the current edit stays current while it exists: the next strokes still change it
-  Object.assign(S, { running: null, draft: null, hover: null, selected: null });
+  Object.assign(S, { running: null, draft: null, hover: null, selected: null, peek: null }); // an undo or a redo ends the selection: the next strokes start a new edit
   const apply = ({ e, strokes, prompt, seed, on, whole }) => {
     const same = strokes.length === e.strokes.length && strokes.every((st, i) => st === e.strokes[i]);
     Object.assign(e, { prompt, seed, on, whole });
@@ -2349,8 +2369,7 @@ function restore(snap) {
   }
   if (snap.draft) { S.draft = apply(snap.draft); S.draft.state = "drawing"; $("#prompt").value = S.draft.prompt; if (painted(S.draft)) prepareSoon(); }
   S.edits = S.edits.filter((e) => e.strokes.length); // an edit undone to no strokes at all is gone
-  if (!S.draft && S.edits.includes(kept)) { S.selected = kept; $("#prompt").value = kept.prompt; }
-  else if (!S.draft && !keying()) $("#prompt").value = ""; // in a fluid shot the words belong to the shot, not to an edit
+  if (!S.draft && !keying()) $("#prompt").value = ""; // in a fluid shot the words belong to the shot, not to an edit
   if (snap.keys && S.fluid) { // a fluid shot's keyframes: their frames and strokes as they were
     S.fluid.keys = snap.keys.map(({ k, frame, strokes }) => {
       const same = strokes.length === k.strokes.length && strokes.every((st, i) => st === k.strokes[i]);
@@ -2456,15 +2475,15 @@ function historyUI() {
     const li = document.createElement("li");
     li.dataset.id = e.id;
     li.className = [e.on ? "" : "off", e.state === "generating" || e.state === "queued" || e.state === "drawing" ? "busy" : "",
-      e.state === "failed" ? "failed" : "", S.selected === e ? "selected" : "", hidden.has(e) || awaits.has(e) ? "hidden-above" : ""].join(" ").trim();
+      e.state === "failed" ? "failed" : "", S.selected === e ? "selected" : S.peek === e ? "shown" : "", hidden.has(e) || awaits.has(e) ? "hidden-above" : ""].join(" ").trim();
     const left = e.state === "failed" && e.left; // an erase that left its object (generate)
     if (left) li.dataset.left = "1";
     li.innerHTML = `<img class="thumb" alt=""><div class="what"><span class="title"></span><small></small></div>
-      <div class="acts"><button class="edit" title="Edit: its strokes and words come back on the first frame">${ICON.edit}</button><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
+      <div class="acts"><button class="edit" title="Change this edit: its strokes and words come back on the first frame.">${ICON.edit}</button><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
       <button class="again" title="Try another">${ICON.again}</button><button class="del" title="Remove this edit">${ICON.del}</button></div>`;
     const img = li.querySelector(".thumb");
     if (e.thumb) img.src = e.thumb; else img.removeAttribute("src");
-    li.title = "Select this edit: its words come back; retype them, paint more or rub strokes out, and it runs again";
+    li.title = "Show this edit's strokes on the first frame. Its pencil changes it.";
     li.querySelector(".title").textContent = `${num(e)}. ${NAME[e.tool]}`;
     const what = e.tool === "erase" ? (e.whole ? "Whole object" : "Painted area") : e.prompt || (e.tool === "light" ? "From the strokes" : "No words");
     const small = li.querySelector("small");
@@ -2483,7 +2502,7 @@ function historyUI() {
     li.querySelector(".again").disabled = e.state === "drawing" || !e.strokes.length;
     li.onmouseenter = () => { S.hover = e; render(); };
     li.onmouseleave = () => { S.hover = null; render(); };
-    li.onclick = (ev) => { if (!ev.target.closest("button")) { if (keying()) leaveKeys(); pause(); seek(0); select(S.selected === e ? null : e); } };
+    li.onclick = (ev) => { if (!ev.target.closest("button")) { if (keying()) leaveKeys(); pause(); seek(0); show(S.peek === e && !S.selected ? null : e); } };
     return li;
   }), ...fluid);
   hiddenUI();

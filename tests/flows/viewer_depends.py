@@ -31,7 +31,7 @@ def run(browser, port, U):
     page.wait_for_function(U.DONE.format(n=3), timeout=120000)
 
     # 1. Edit 1 changed, then Generate: edit 2 is generated again after it, edit 3 is not
-    page.click("#history li:nth-child(3) .what"); away()
+    page.click("#history li:nth-child(3) .edit"); away()
     U.stroke(page, [(0.10, 0.32), (0.14, 0.32)]); away()
     page.evaluate(U.WATCH)
     page.keyboard.press("Enter")
