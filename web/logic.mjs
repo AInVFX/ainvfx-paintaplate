@@ -575,6 +575,11 @@ export function workflowClasses(prompt) { // the node classes an API workflow ho
   return [...new Set(Object.values(prompt).filter((n) => n?.class_type).map((n) => n.class_type))].sort();
 }
 
+// History's row when the page asks for an object's name: what the prompt writer saw, when the edit holds it.
+export function askedText(asked) {
+  return typeof asked === "string" && asked ? `Needs its name (the prompt writer saw ${asked})` : "Needs its name";
+}
+
 export function strokeTarget({ draft, current, tool }) { // where a new stroke goes: "draft", "current" or "new"
   if (draft) return "draft";
   return current?.tool === tool ? "current" : "new";

@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { asksName, blankDepth, blankSpec, boxOf, boxWithout, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logLevel, moveKey, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes } from "./logic.mjs";
+import { askedText, asksName, blankDepth, blankSpec, boxOf, boxWithout, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logLevel, moveKey, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
 import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
@@ -2476,7 +2476,9 @@ function historyUI() {
     li.dataset.id = e.id;
     li.className = [e.on ? "" : "off", e.state === "generating" || e.state === "queued" || e.state === "drawing" ? "busy" : "",
       e.state === "failed" ? "failed" : "", S.selected === e ? "selected" : S.peek === e ? "shown" : "", hidden.has(e) || awaits.has(e) ? "hidden-above" : ""].join(" ").trim();
-    const left = e.state === "failed" && e.left; // an erase that left its object (generate)
+    const asked = e.state === "failed" && e.editAsked; // the page asks for the object's name: true, or what the prompt writer saw (generate)
+    const left = e.state === "failed" && e.left && !asked; // an erase that left its object (generate)
+    if (asked) li.dataset.asked = "1";
     if (left) li.dataset.left = "1";
     li.innerHTML = `<img class="thumb" alt=""><div class="what"><span class="title"></span><small></small></div>
       <div class="acts"><button class="edit" title="Change this edit: its strokes and words come back on the first frame.">${ICON.edit}</button><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
@@ -2491,7 +2493,7 @@ function historyUI() {
     if (hidden.has(e)) small.textContent = `Hidden until edit ${num(S.draft)} is generated`;
     else if (forEnter || (STATE[e.state] && e.on)) {
       small.innerHTML = '<span class="state"></span>';
-      small.firstChild.textContent = forEnter ? "Waits for Enter" : left ? "The object may still be there" : STATE[e.state];
+      small.firstChild.textContent = forEnter ? "Waits for Enter" : asked ? askedText(asked) : left ? "The object may still be there" : STATE[e.state];
     } else if (awaits.has(e)) small.textContent = "Waits to be generated again";
     else small.textContent = e.on ? what : `Bypassed: ${what}`;
     small.title = e.caption?.text ? `What Klein received: ${e.caption.text}` : what;
