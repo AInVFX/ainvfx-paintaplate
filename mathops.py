@@ -980,6 +980,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     core = in_view(core, hide) & ~(hide & ~here)  # a piece on what stands in front is left out; beyond the place, only what is in view counts
                 elif hide is not None:
                     core = in_view(core, hide)  # of an erased object's mask, a piece that lies mostly on covered places is on what stands in front
+                if core.any() and 20 * int(core.sum()) < last:  # a sliver of the object, as SAM 3.1 returns some: not a sighting
+                    core = np.zeros((h, w), bool)
                 peak = max(peak, int(core.sum()))
                 found, follows = core, True
                 if real and hide is not None:  # an erased object stands still: its place of frame 0, where the plate shows it thick, is the object, seen by SAM or not
