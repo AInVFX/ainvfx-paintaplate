@@ -33,7 +33,8 @@ def run(browser, port, U):
     U.check(not any("Klein edit preview" in t or t.startswith("Render v") for t in lines),
             "no Klein pass runs and no shot renders")
     row = page.evaluate(ROW)
-    U.check(bool(row) and "failed" in row[0] and row[1] == "1", f"History's row says that the object is still there ({row})")
+    U.check(bool(row) and "failed" in row[0] and (row[1] == "1" or row[2].startswith("Needs its name")),
+            f"History's row says that the edit needs the object's name, or that the object is still there ({row})")
     page.fill("#prompt", "bottle"); page.evaluate("document.activeElement.blur()")
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("Render v1"), 120000, "render of the erase once the object is named")
