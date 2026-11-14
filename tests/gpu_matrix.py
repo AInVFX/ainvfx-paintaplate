@@ -340,7 +340,7 @@ def read_log(text):
         "mattes": re.findall(r"([A-Z][a-z]+ matte(?: \([^)\n]*\))?: tracked on [^\n]*(?:\n  [^\n]*)*)", text),  # any word before « matte »; the headline and its detail lines (mathops.follow_summary)
         "seeds": sorted(set(re.findall(r"\bseed (\d+)", text)), key=int),
         "announced": {f"v{v} {label}": int(s) for v, label, s in re.findall(r"Render v(\d+): (.+?) \(about (\d+) s\)", text)},
-        "figures": re.findall(r"(Edit \d+: [^\n]*?\(\d+% of it changed[^)\n]*\))", text),  # an erase: how much of the object changed, gone or held back (logic.leftLines)
+        "figures": re.findall(r"((?:Edit \d+:|Warning: edit \d+,) [^\n]*?\(\d+% of it changed[^)\n]*\))", text),  # an erase: how much of the object changed, gone or held back (logic.leftLines)
     }
 
 
@@ -470,7 +470,7 @@ def name_asked(marks, log, jobs):
     """A case that expects the page to ask for an erase's object by name (gpu_matrix.json: « expect »: « name asked »,
     logic.asksName) passes when the page asked and neither Klein nor LTX ran. (passed, why)."""
     asked = any(m.startswith("name asked") for m in marks)
-    ran = [what for what, found in (("a Klein pass", re.search(r"Klein (quick|full-size) pass", log)),
+    ran = [what for what, found in (("a Klein pass", re.search(r"Klein (?:edit preview|full size|quick pass|full-size pass)", log)),
                                     ("a shot", any(j["name"] == "shot" for j in jobs))) if found]
     return asked and not ran, "" if asked and not ran else "the page did not ask for the name" if not asked else " and ".join(ran) + " ran"
 
