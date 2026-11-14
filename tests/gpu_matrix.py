@@ -451,12 +451,12 @@ def quick_size(log):
     return (int(found[-1][0]), int(found[-1][1])) if found else None
 
 
-def erase_verdict(after, before, mask, size):
+def erase_verdict(after, before, mask, size, first=1):
     """The page's verdict on an erase, logic.eraseCheck run with Node: `after` the export's first frame and `before` the
     plate's (RGB, 8 bits), `mask` the file the page sent Klein, all three drawn at `size` as the page's canvases draw them
     (tests/erase_probe.py: one bridge, one resize). {"left": True, False or None, "changed", "edges", "text"}."""
     def none(why):
-        return {"left": None, "changed": None, "edges": None, "text": f"Clean, frame 1: no verdict. {why}."}
+        return {"left": None, "changed": None, "edges": None, "text": f"Clean, frame {first}: no verdict. {why}."}
     if not mask:
         return none("No mask: ComfyUI's history holds no edit job of this case")
     if not os.path.exists(mask):
@@ -475,7 +475,7 @@ def erase_verdict(after, before, mask, size):
     figures = [f"{round(100 * got['changed'])}% of the object changed" if got.get("changed") is not None else "",
                f"edges held at {got['edges']:.2f}" if got.get("edges") is not None else ""]
     detail = "; ".join(f for f in figures if f)
-    return {**got, "text": f"Clean, frame 1: {'left' if got['left'] else 'gone'}" + (f" ({detail})." if detail else ".")}
+    return {**got, "text": f"Clean, frame {first}: {'left' if got['left'] else 'gone'}" + (f" ({detail})." if detail else ".")}
 
 
 def name_asked(marks, log, jobs):
@@ -516,13 +516,14 @@ def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
             columns.append((title, os.path.join(into, movies[0]) if movies else
                             [os.path.join(into, n) for n in sorted(names) if n.startswith("export/") and n.lower().endswith(IMAGES)]))
             mattes = mattes or sorted(glob.glob(os.path.join(into, "matte", "*.png")))
-        count = media_count(columns[1][1])
+        count, numbers = media_count(columns[1][1]), frame_numbers(columns[0][1])  # the plate's own frame numbers
+        number = lambda i: numbers[i] if i < len(numbers) else i + 1  # noqa: E731
         rows = sorted({0, count // 3, 2 * count // 3, count - 1})
         pictures = [media_frames(src, rows) for _, src in columns]
         height, width = pictures[1][rows[0]].shape[:2]
         erases = [s for s in strokes if s[0] == "erase"]
-        verdict = None if not erases else erase_verdict(pictures[1][rows[0]], pictures[0][rows[0]], mask, judge_at) if len(erases) == 1 else \
-            {"left": None, "changed": None, "edges": None, "text": f"Clean, frame 1: no verdict. {len(erases)} Clean edits share the frame."}
+        verdict = None if not erases else erase_verdict(pictures[1][rows[0]], pictures[0][rows[0]], mask, judge_at, number(0)) if len(erases) == 1 else \
+            {"left": None, "changed": None, "edges": None, "text": f"Clean, frame {number(0)}: no verdict. {len(erases)} Clean edits share the frame."}
         edits = []
         for s in strokes:
             if s[0] == "light" or not mattes and s[0] != "erase" and s[0] != "paint":
@@ -557,10 +558,10 @@ def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
             if s[0] == "erase" and verdict:
                 draw.text((x, out.height - head + 4), verdict["text"], fill=(120, 220, 120) if verdict["left"] is False else (255, 200, 80), font=font)
         for r, i in enumerate(rows):
-            draw.text((6, 2 * head + r * (ch + gap) + 4), f"frame {i + 1}", fill="white", font=font)
+            draw.text((6, 2 * head + r * (ch + gap) + 4), f"frame {number(i)}", fill="white", font=font)
         path = os.path.join(folder, "sheet.png")
         out.save(path)
-        return {"path": path, "frames": [i + 1 for i in rows], "cells": cells, "verdict": verdict}
+        return {"path": path, "frames": [number(i) for i in rows], "cells": cells, "verdict": verdict}
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -812,9 +813,19 @@ def run_case(a, name, case, folder):
             result["paint"] = {"held": None, "text": f"Paint: no verdict. {type(exc).__name__}: {str(exc)[:120]}."}
         result["passed"], result["why"] = paint_result(result["passed"], result["why"], result["paint"])
     result["matte"] = matte_areas(a.comfy, t0) if any(s[0] == "paint" for s in case.get("strokes", [])) else None
+    plate = os.path.join(a.comfy, "input", case["path"]) if case.get("path") else ""
+    result["numbers"] = frame_numbers(frames_source(plate)) if plate and os.path.exists(plate) else []  # the plate's own frame numbers
     live = os.path.join(a.comfy, "temp", "paintaplate_live", "*.webp")
     result["live_files"] = sum(os.path.getmtime(f) >= t0 for f in glob.glob(live))
     return result
+
+
+def matte_lines(where, areas, ratios, worst, numbers):
+    """The report's lines on a paint matte's area, frame by frame, in the plate's own frame numbers (`numbers`)."""
+    number = lambda i: numbers[i] if i < len(numbers) else i + 1  # noqa: E731
+    return [f"- Paint matte (`{where}`): {len(areas)} frames; frame {number(0)} covers {100 * areas[0]:.2f}% of the frame.",
+            f"- Area against frame {number(0)}: {min(ratios):.2f} to {max(ratios):.2f} times. Furthest: frame {number(worst)}, {ratios[worst]:.2f} times.",
+            f"- Every frame, against frame {number(0)}: " + " ".join(f"{x:.2f}" for x in ratios)]
 
 
 def report(a, machine, results):
@@ -884,9 +895,7 @@ def report(a, machine, results):
             folder, areas = r["matte"]
             ratios = [x / max(areas[0], 1e-9) for x in areas]
             worst = max(range(len(ratios)), key=lambda i: abs(ratios[i] - 1))
-            lines += [f"- Paint matte (`{os.path.relpath(folder, a.comfy)}`): {len(areas)} frames; frame 1 covers {100 * areas[0]:.2f}% of the frame.",
-                      f"- Area against frame 1: {min(ratios):.2f} to {max(ratios):.2f} times. Furthest: frame {worst + 1}, {ratios[worst]:.2f} times.",
-                      "- Every frame, against frame 1: " + " ".join(f"{x:.2f}" for x in ratios)]
+            lines += matte_lines(os.path.relpath(folder, a.comfy), areas, ratios, worst, r.get("numbers") or [])
         made = r.get("sheet")
         if made and made.get("path"):
             lines += [f"- The plate and the export around each edit, on frames {', '.join(map(str, made['frames']))}:", "",
