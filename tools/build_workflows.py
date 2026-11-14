@@ -128,7 +128,7 @@ def load(name, folder=None):
 # no EXR frames, its movie is the plate's own quality; no SDR-to-HDR shot: the SDR shot goes on as it is; not a light
 # edit: no painted light to keep; no movie asked of a matte, an export's matte or a fluid shot's control video (the
 # Render panel's rows show them; the ComfyUI graph of the Export dialog leaves them out).
-OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",),
+OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",), "follow_erased": ("erased",),
             "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "edit_plan": ("plan",), "hdr_shot": ("hdr",), "relight_shade": ("shade",),
             "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",),
             "export_plate": ("prefix",), "export_exr": ("exr_prefix",)}
@@ -484,7 +484,8 @@ def shot():
 def matte():
     """SAM 3.1 follows a painted or erased area through the frames from the first frame, then Follow Matte makes the
     track safe: one matte per frame even when SAM returns none, the last matte where SAM loses the object, and for
-    paint every pixel the shot changed near the matte, compared with the plate the shot was made over (`base`)."""
+    paint every pixel the shot changed near the matte, compared with the plate the shot was made over (`base`). Under a Clean edit it also takes the Clean matte (`erased`)
+    and how far the composite moves its edge (`erased_edge`): there only the SAM mask anchors a change."""
     g = Graph()
     load, model = plate(g, pad=True)
     frames = g("ImageScale", image=model, upscale_method="area", width=Slot("width", 960),
@@ -499,10 +500,13 @@ def matte():
     under = g("ImageScale", image=colour(g, under, Slot("base_color_space", "@model"), "@model"),
               upscale_method="area", width=Slot("width", 960), height=Slot("height", 544), crop="disabled")
     element = g("LoadImageMask", _title="Where the edit changed the first frame", image=Slot("seed", ""), channel="red")
+    clean = g("PaintAPlate_LoadPlate", _title="Clean matte under the paint", path=Slot("erased", ""), max_frames=1024, pad_8n1=False)
     follow = g("PaintAPlate_FollowMatte", masks=masks, first=first, frames=frames, base=under, element=element,
-               zone=Slot("zone", 0.0625), threshold=Slot("threshold", 0.1))
+               zone=Slot("zone", 0.0625), threshold=Slot("threshold", 0.1),
+               erased=g("ImageToMask", image=clean, channel="red"), erased_edge=Slot("erased_edge", 0.0))
     g.link_slot(follow, "base", "follow_base")  # dropped for an erase matte: no shot to compare
     g.link_slot(follow, "element", "follow_element")  # dropped for an erase matte: the object is the first-frame mask
+    g.link_slot(follow, "erased", "follow_erased")  # dropped when no Clean edit lies under the paint
     grey = g("MaskToImage", mask=follow[0])
     g("PaintAPlate_SaveFrames", _title="Matte frames", _output="frames", images=grey, filename_prefix=Slot("prefix", "paintaplate/plate/matte/m"))
     movie = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Matte movie (grey): its row in the Render panel shows it", _output="movie", images=grey,

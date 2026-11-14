@@ -6,7 +6,7 @@
 // Optional links: when every source slot is left empty, the link goes, with every node that fed it. The same rule as
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
-export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_element: ["seed"],
+export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_erased: ["erased"], follow_element: ["seed"],
   review_frames: ["frames_prefix"], review_view: ["view_prefix"], edit_plan: ["plan"], hdr_shot: ["hdr"], relight_shade: ["shade"],
   matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"],
   export_plate: ["prefix"], export_exr: ["exr_prefix"] };
@@ -872,13 +872,10 @@ export function resultFlows({ tools = [], render = [], fluid = false, fluidHdr =
 export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? null;
 
 // ---------- Pipeline: the paint matte's report ----------
-// Follow Matte's summary has a warning line when its largest matte is more than 3 times the tracked object on that frame:
-// "Warning: matte up to 31.1x the object at frame 67. Check the composite there." The page's log then shows the summary
-// as a warning: the composite takes regenerated pixels there that the edit did not ask for.
-export const MATTE_WARN = 3;
-export function matteLargest(summary) {
-  const m = /Warning: matte up to ([\d.]+)x the object at frame (\d+)\./.exec(summary ?? "");
-  return m ? { ratio: +m[1], frame: +m[2], warn: +m[1] > MATTE_WARN } : null;
+// Follow Matte's summary has a « Warning: » line when the matte needs a look (a matte several times its object, an object
+// that left its place): the page's log then shows the summary as a warning. Any warning's words count.
+export function matteWarns(summary) {
+  return /^ {2}Warning: /m.test(summary ?? "");
 }
 
 // ---------- Pipeline: the memory profile ----------

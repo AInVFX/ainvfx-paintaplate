@@ -452,36 +452,42 @@ class FollowMatte(io.ComfyNode):
             display_name="Follow Matte",
             category=CATEGORY,
             description="One matte per frame from SAM 3.1's track, safe for the composite. It follows the object's own region "
-                        "from the first-frame mask: objects SAM finds by itself elsewhere are left out; where the object is not "
+                        "from the first-frame mask: objects SAM 3.1 finds by itself elsewhere are left out; where the object is not "
                         "seen, the last matte holds (with no mask, the first-frame mask); with the plate the shot was made over, "
                         "the matte also takes the generated pixels connected to the object, so a generated element is never "
                         "dropped. A frame that differs from the plate everywhere adds nothing. An object that stands still in "
                         "the scene and passes behind something the plate holds leaves the matte while it is hidden, and comes "
-                        "back into it where it comes out: what stands in front is left out. The summary ends with the "
-                        "largest matte against the object's area, and its frame.",
+                        "back into it where it comes out: what stands in front is left out. The summary gives a "
+                        "headline, its warnings, then one line per rule that acted.",
             inputs=[
-                io.Mask.Input("masks", tooltip="SAM 3.1's masks, one per frame it tracked. It may return fewer, or none."),
-                io.Mask.Input("first", tooltip="The area on the first frame that SAM was asked to follow."),
-                io.Image.Input("frames", tooltip="The frames SAM tracked: their count sets the matte's length. For paint, the shot. For an erase, the plate: Follow Matte asks it what passes in front of the object."),
+                io.Mask.Input("masks", tooltip="SAM masks, one per tracked frame. SAM 3.1 may return fewer, or none."),
+                io.Mask.Input("first", tooltip="The area on the first frame that SAM 3.1 follows."),
+                io.Image.Input("frames", tooltip="The frames SAM 3.1 tracked: their count sets the matte's length. For Paint, the shot. For Clean, the plate: Follow Matte asks it what passes in front of the object."),
                 io.Image.Input("base", optional=True, tooltip="The plate the shot was made over, at the same size."),
                 io.Mask.Input("element", optional=True,
-                              tooltip="Where the edit changed the first frame: the object's region starts here instead of at first."),
+                              tooltip="Where the edit changed the first frame: the object's region starts here, not at the first-frame area."),
                 io.Float.Input("zone", default=0.0625, min=0.0, max=0.5, step=0.005,
-                               tooltip="How far from the object's region SAM's mask may move and a change still joins, as a fraction of the width."),
+                               tooltip="How far the SAM mask may move from the object's region, with a change still joining, as a fraction of the width."),
                 io.Float.Input("threshold", default=0.1, min=0.01, max=1.0, step=0.01,
                                tooltip="How much more a pixel must change than its frame changes around the object, from 0 to 1, to join the matte."),
+                io.Mask.Input("erased", optional=True,
+                              tooltip="The Clean matte under this paint. Inside it, a change joins only where it touches the SAM mask."),
+                io.Float.Input("erased_edge", default=0.0, min=0.0, max=0.5, step=0.001, optional=True,
+                               tooltip="How far the composite moves the Clean matte's edge: its grow plus its feather, as a fraction of the width."),
             ],
             outputs=[io.Mask.Output(display_name="mask"), io.String.Output(display_name="summary")],
         )
 
     @classmethod
-    def execute(cls, masks, first, frames, zone, threshold, base=None, element=None) -> io.NodeOutput:
+    def execute(cls, masks, first, frames, zone, threshold, base=None, element=None, erased=None,
+                erased_edge=0.0) -> io.NodeOutput:
         shot = frames[..., :3].float().cpu().numpy()
         plate = base[..., :3].float().cpu().numpy() if base is not None else None
         out, summary = mathops.follow_matte(masks.float().cpu().numpy(), len(shot), first.float().cpu().numpy(),
                                             shot if plate is not None else None, plate if plate is not None else shot,  # an erase: the tracked frames are the plate
                                             zone=zone, threshold=threshold, tick=Stop(),
-                                            element=element.float().cpu().numpy() if element is not None else None)
+                                            element=element.float().cpu().numpy() if element is not None else None,
+                                            erased=erased.float().cpu().numpy() if erased is not None else None, erased_edge=erased_edge)
         return io.NodeOutput(torch.from_numpy(out).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()), summary)
 
 

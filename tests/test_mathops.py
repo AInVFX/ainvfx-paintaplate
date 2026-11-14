@@ -534,7 +534,7 @@ class FollowMatteKeepsThePlate(unittest.TestCase):
         first[10:50, 10:100] = 1  # the whole paint zone, which holds when the tracker returns nothing
         element[30:36, 20:30] = 1  # what the edit changed: 60 px
         _, summary = m.follow_matte(np.zeros((0, h, w), np.float32), n, first, element=element)
-        self.assertEqual(summary.split("\n")[:3], ["tracked on 0 of 6 frames.", "  Warning: matte up to 60.0x the object at frame 0. Check the composite there.",
+        self.assertEqual(summary.split("\n")[:3], ["tracked on 0 of 6 frames.", "  Warning: matte above 3x the object from frame 0 to 5 (up to 60.0x at frame 0). Check the composite there.",
                                                     "  Held: first-frame mask, on every frame."])
 
 
@@ -622,7 +622,8 @@ class FollowMatteLeftItsPlace(unittest.TestCase):
         self.assertEqual(int(matte[80:].sum()), 0)  # once it has left its place, nothing: the plate shows there (at 9aa332a the matte went with it to the last frame)
         self.assertEqual(int(matte[(slice(None),) + self.FRONT].sum()), 0)  # and never what stands in front
         self.assertIn("\n  Removed: pieces that left the object's place, on ", summary)
-        self.assertNotIn("Warning:", summary)
+        self.assertNotIn("Warning: matte", summary)  # the matte never grows past the object
+        self.assertIn("Warning: object left its place at frame", summary)  # it is lost, and the summary says so
 
 
 class FollowMatteErasedBehindThePlate(unittest.TestCase):
