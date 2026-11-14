@@ -618,7 +618,7 @@ def carry(mask: np.ndarray, dy: int, dx: int) -> np.ndarray:
 RECORD_SIDE = 320  # PAINTAPLATE_RECORD keeps what Follow Matte was given at this width at most
 
 
-def record(folder: str, masks, n: int, first, shot, base, zone: float, threshold: float, element, erased=None) -> str:
+def record(folder: str, masks, n: int, first, shot, base, zone: float, threshold: float, element, erased=None, erased_edge=0.0) -> str:
     """With PAINTAPLATE_RECORD=<folder> in ComfyUI's environment, what Follow Matte was given, as one .npz file: the
     tracker's masks, the first-frame mask, the element, the shot, the plate and the Clean matte under a paint, every
     k-th pixel so the width is
@@ -636,7 +636,7 @@ def record(folder: str, masks, n: int, first, shot, base, zone: float, threshold
     h, w = np.shape(shot)[1:3] if shot is not None else np.shape(masks)[-2:]
     path = os.path.join(folder, f"follow_matte_{w}x{h}_{n}f_{time.strftime('%Y%m%d_%H%M%S')}.npz")
     np.savez_compressed(path, masks=small(masks), first=small(first), element=small(element), shot=small(shot, 1), base=small(base, 1),
-                        erased=small(erased), n=n, zone=zone, threshold=threshold)
+                        erased=small(erased), erased_edge=erased_edge, n=n, zone=zone, threshold=threshold)
     return path
 
 
@@ -646,7 +646,8 @@ def replay(path: str) -> dict:
     back = lambda k: d[k].astype(np.float32) / 255 if d[k].size else None  # noqa: E731
     return {"masks": back("masks") if d["masks"].size else np.zeros((0, 1, 1), np.float32), "n": int(d["n"]), "first": back("first"),
             "shot": back("shot"), "base": back("base"), "zone": float(d["zone"]), "threshold": float(d["threshold"]), "element": back("element"),
-            "erased": back("erased") if "erased" in d.files else None}
+            "erased": back("erased") if "erased" in d.files else None,
+            "erased_edge": float(d["erased_edge"]) if "erased_edge" in d.files else 0.0}
 
 
 def follow_summary(n: int, seen=None, zones=0, placed=0, strays=0, held=0, added=0, most=0.0, alone=0, guarded=0,
@@ -719,7 +720,8 @@ def matte_flicker(mattes, run: int = 3) -> np.ndarray:
 
 
 def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=None, zone: float = 1 / 16,
-                 threshold: float = 0.1, workers: int = 8, element=None, tick=None, erased=None):
+                 threshold: float = 0.1, workers: int = 8, element=None, tick=None, erased=None,
+                 erased_edge: float = 0.0):
     """One matte per frame from a tracker's masks, made safe for the composite. Returns (mattes (n, H, W), summary).
 
     A tracker can return no masks, fewer than the frames, lose part of an object, or find other objects by itself
@@ -790,7 +792,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       barn that the horse was hiding; the composite grew them to 1.2% of the frame). Otherwise the
       tracker's mask is taken wherever it goes: when it is the matte of the frame before, whole, on places that
       changed, the object moves by itself, and the plate is not asked again;
-    - with `erased`, the matte of a Clean edit made under this paint ((N, H, W) in 0 to 1, at any size): there the
+    - with `erased`, the matte of a Clean edit made under this paint ((N, H, W) in 0 to 1, at any size), grown by
+      `erased_edge` of the width, as far as the composite moves its edge (its grow plus its feather): there the
       shot shows the cleaned place while the plate still shows the object, so the two differ on every frame. Inside
       it the region is no anchor: a changed area joins only where it touches the tracker's mask, within `zone` of
       it. Painted smoke that drifts over the cleaned place away from its source is cut there;
@@ -804,7 +807,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     last seen), then one line per rule that acted.
     """
     if os.environ.get("PAINTAPLATE_RECORD"):
-        record(os.environ["PAINTAPLATE_RECORD"], masks, n, first, shot, base, zone, threshold, element, erased)
+        record(os.environ["PAINTAPLATE_RECORD"], masks, n, first, shot, base, zone, threshold, element, erased, erased_edge)
     masks = np.asarray(masks, np.float32).reshape((-1,) + np.shape(masks)[-2:]) if np.size(masks) else np.zeros((0, 1, 1), np.float32)
     first = np.asarray(first, np.float32)
     first = first[0] if first.ndim == 3 else first
@@ -814,7 +817,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     el = None if element is None or not np.size(element) else fit(np.asarray(element, np.float32).reshape(np.shape(element)[-2:]))
     tracked = lambda t: fit(masks[t]) if t < len(masks) else np.zeros((h, w), bool)  # noqa: E731
     erased = np.asarray(erased, np.float32).reshape((-1,) + np.shape(erased)[-2:]) if erased is not None and np.size(erased) else None
-    cleaned_at = (lambda t: fit(erased[min(t, len(erased) - 1)])) if erased is not None else None  # noqa: E731
+    cleaned_at = (lambda t: grow(fit(erased[min(t, len(erased) - 1)]), erased_edge * w)) if erased is not None else None  # noqa: E731
     grow = lambda m, r: dilate(m.astype(np.uint8), min(r, max(h, w))) > 0  # noqa: E731
     eight = np.ones((3, 3), bool)
 

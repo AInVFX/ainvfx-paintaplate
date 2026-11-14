@@ -175,6 +175,30 @@
   }
  },
  "12": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 1024,
+   "pad_8n1": false
+  },
+  "_meta": {
+   "title": "Clean matte under the paint",
+   "slots": {
+    "path": "erased"
+   }
+  }
+ },
+ "13": {
+  "class_type": "ImageToMask",
+  "inputs": {
+   "image": [
+    "12",
+    0
+   ],
+   "channel": "red"
+  }
+ },
+ "14": {
   "class_type": "PaintAPlate_FollowMatte",
   "inputs": {
    "masks": [
@@ -198,31 +222,38 @@
     0
    ],
    "zone": 0.0625,
-   "threshold": 0.1
+   "threshold": 0.1,
+   "erased": [
+    "13",
+    0
+   ],
+   "erased_edge": 0.0
   },
   "_meta": {
    "slots": {
     "zone": "zone",
     "threshold": "threshold",
+    "erased_edge": "erased_edge",
     "base": "follow_base",
-    "element": "follow_element"
+    "element": "follow_element",
+    "erased": "follow_erased"
    }
   }
  },
- "13": {
+ "15": {
   "class_type": "MaskToImage",
   "inputs": {
    "mask": [
-    "12",
+    "14",
     0
    ]
   }
  },
- "14": {
+ "16": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
-    "13",
+    "15",
     0
    ],
    "filename_prefix": "paintaplate/plate/matte/m"
@@ -235,13 +266,13 @@
    "output": "frames"
   }
  },
- "15": {
+ "17": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
    "width": 0,
    "height": 0,
    "images": [
-    "13",
+    "15",
     0
    ],
    "fps": [
@@ -262,11 +293,11 @@
    "output": "movie"
   }
  },
- "16": {
+ "18": {
   "class_type": "PreviewAny",
   "inputs": {
    "source": [
-    "12",
+    "14",
     1
    ]
   },

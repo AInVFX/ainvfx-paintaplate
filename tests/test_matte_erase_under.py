@@ -68,3 +68,37 @@ class PaintOverClean(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CleanEdge(unittest.TestCase):
+    def test_edge_grows_the_clean_matte(self):
+        """The composite changes the plate beyond the Clean matte, as far as its grow plus its feather: that ring is cut too."""
+        args, clean = scene(slice(34, 42), slice(44, 54))
+        middle = np.zeros_like(clean)
+        middle[:, 30:50, 74:100] = 1  # a Clean matte that holds only the middle of the changed place
+        loose, _ = mathops.follow_matte(**args, erased=middle)
+        tight, _ = mathops.follow_matte(**args, erased=middle, erased_edge=6 / W)
+        self.assertGreater(int((loose[:, CAR[0], CAR[1]] > 0.5).sum()), 0)  # the ring around it joins through the region
+        self.assertEqual(int((tight[:, CAR[0], CAR[1]] > 0.5).sum()), 0)
+
+    def test_recording_keeps_the_edge(self):
+        args, clean = scene(slice(34, 42), slice(44, 54))
+        with tempfile.TemporaryDirectory() as folder:
+            os.environ["PAINTAPLATE_RECORD"] = folder
+            try:
+                mathops.follow_matte(**args, erased=clean, erased_edge=0.05)
+            finally:
+                del os.environ["PAINTAPLATE_RECORD"]
+            self.assertAlmostEqual(mathops.replay(os.path.join(folder, os.listdir(folder)[0]))["erased_edge"], 0.05)
+
+    def test_matte_workflow_takes_the_clean_matte(self):
+        """The page fills `erased` and `erased_edge` under a Clean edit, and drops the link otherwise."""
+        import json
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
+        import build_workflows
+        wf = json.load(open(os.path.join(os.path.dirname(build_workflows.__file__), "..", "web", "workflows", "matte.json")))
+        follow = next(n for n in wf.values() if n["class_type"] == "PaintAPlate_FollowMatte")
+        self.assertEqual(follow["_meta"]["slots"]["erased"], "follow_erased")
+        self.assertEqual(build_workflows.OPTIONAL["follow_erased"], ("erased",))
+        loader = wf[wf[follow["inputs"]["erased"][0]]["inputs"]["image"][0]]
+        self.assertEqual((loader["class_type"], loader["_meta"]["slots"]["path"]), ("PaintAPlate_LoadPlate", "erased"))

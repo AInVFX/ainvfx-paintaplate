@@ -465,18 +465,24 @@ class FollowMatte(io.ComfyNode):
                                tooltip="How far from the object's region SAM's mask may move and a change still joins, as a fraction of the width."),
                 io.Float.Input("threshold", default=0.1, min=0.01, max=1.0, step=0.01,
                                tooltip="How much more a pixel must change than its frame changes around the object, from 0 to 1, to join the matte."),
+                io.Mask.Input("erased", optional=True,
+                              tooltip="The Clean matte under this paint. Inside it, a change joins only where it touches the SAM mask."),
+                io.Float.Input("erased_edge", default=0.0, min=0.0, max=0.5, step=0.001, optional=True,
+                               tooltip="How far the composite moves the Clean matte's edge: its grow plus its feather, as a fraction of the width."),
             ],
             outputs=[io.Mask.Output(display_name="mask"), io.String.Output(display_name="summary")],
         )
 
     @classmethod
-    def execute(cls, masks, first, frames, zone, threshold, base=None, element=None) -> io.NodeOutput:
+    def execute(cls, masks, first, frames, zone, threshold, base=None, element=None, erased=None,
+                erased_edge=0.0) -> io.NodeOutput:
         shot = frames[..., :3].float().cpu().numpy()
         plate = base[..., :3].float().cpu().numpy() if base is not None else None
         out, summary = mathops.follow_matte(masks.float().cpu().numpy(), len(shot), first.float().cpu().numpy(),
                                             shot if plate is not None else None, plate if plate is not None else shot,  # an erase: the tracked frames are the plate
                                             zone=zone, threshold=threshold, tick=Stop(),
-                                            element=element.float().cpu().numpy() if element is not None else None)
+                                            element=element.float().cpu().numpy() if element is not None else None,
+                                            erased=erased.float().cpu().numpy() if erased is not None else None, erased_edge=erased_edge)
         return io.NodeOutput(torch.from_numpy(out).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()), summary)
 
 
