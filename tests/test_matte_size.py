@@ -30,6 +30,18 @@ class OwnSize(unittest.TestCase):
         self.assertTrue(summary.startswith("tracked on 20 of 30 frames."), summary)
         self.assertNotIn("Warning", summary)
 
+    def test_the_guard_takes_the_object_not_the_zone(self):
+        n = 24
+        base, shot, square = still_scene(n)
+        shot[:, 43:47, 80:160] = (0.9, 0.9, 0.9)  # a changed strip that starts at the object and runs to the frame's edge
+        zone = np.zeros((90, 160), np.float32)
+        zone[30:60, 60:90] = 1  # the paint zone: 9 times the object
+        masks = np.repeat(square[None], n, 0)
+        masks[:3] = zone  # the tracker returns the zone first
+        matte, summary = m.follow_matte(masks, n, zone, shot=shot, base=base, element=square)
+        self.assertNotIn("Warning: matte", summary)
+        self.assertLessEqual(int((matte[-1] > 0.5).sum()), 3 * 100, summary)
+
 
 if __name__ == "__main__":
     unittest.main()

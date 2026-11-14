@@ -914,7 +914,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     line = el if el is not None and el.any() else seed  # the object's own region
     given = int(seed.sum())  # the first-frame mask the tracker was given
     zoned = line is el and 2 * int(el.sum()) <= given  # a paint zone at least twice the object: the tracker returns the zone first
-    out, cores, prev, peak = np.zeros((n, h, w), np.float32), np.zeros((n, h, w), bool), seed, int(seed.sum())
+    out, cores, prev = np.zeros((n, h, w), np.float32), np.zeros((n, h, w), bool), seed
+    peak = int(line.sum())  # the object's largest size: its region on frame 0, then SAM's masks that are not the paint zone
     size, last = np.ones(n, np.int64), max(int(line.sum()), 1)  # the object's area on each frame
     at_place, all_left = np.zeros(n, bool), np.zeros(n, bool)  # frames where the object was seen at its place; frames where all that was found had left it
     seen = strays = held = added = alone = lost = guarded = smoothed = fronts = zones = placed = cleaned = 0
@@ -982,7 +983,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     core = in_view(core, hide)  # of an erased object's mask, a piece that lies mostly on covered places is on what stands in front
                 if core.any() and 20 * int(core.sum()) < last:  # a sliver of the object, as SAM 3.1 returns some: not a sighting
                     core = np.zeros((h, w), bool)
-                peak = max(peak, int(core.sum()))
+                if not (zoned and 5 * int(core.sum()) >= 2 * given):  # a mask as large as the paint zone is the zone, not the object
+                    peak = max(peak, int(core.sum()))
                 found, follows = core, True
                 if real and hide is not None:  # an erased object stands still: its place of frame 0, where the plate shows it thick, is the object, seen by SAM or not
                     shows = bulk(open0 & ~hide) & ~found
