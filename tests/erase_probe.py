@@ -12,7 +12,7 @@ For each stroke, the probe does what the page does for an erase with Whole objec
 web/app.mjs), with the page's own workflows (snap, prompt and edit in tools/build_workflows.py), and asks for Klein's caption
 in each way of REQUESTS. When the writer's answer to the page's request removes another object, for a stroke with no
 words, the probe goes on as the page does (prepare and leaveOut in web/app.mjs): SAM 3.1 finds that object by the writer's
-name for it, the writer's box leaves it out (logic.boxWithout), and the writer is asked once more. Klein then runs its quick pass, the page's first look, once per mask and caption that differ;
+name for it, the writer's box leaves it out (logic.boxWithout), and the writer is asked once more. Klein then runs the page's edit preview once per mask and caption that differ;
 --full adds the page's full-size pass. With no --stroke: three strokes on horse.mp4 with no words, the barn of the GPU case
 horse_erase, the fence post under it and the tree above it. The jobs are grouped by model, so that each model loads few
 times on a 16 GB card: SAM 3.1 at every stroke's points, the writer's name for every object, SAM 3.1 by that name, the

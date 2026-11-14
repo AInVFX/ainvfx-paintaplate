@@ -218,14 +218,14 @@ async function captionFor(e, reference, key, kind = "edit") { // Klein's own ups
 async function writeCaption(e, reference, key, kind) {
   if (e.tool === "light") { // a relight's request is the page's own: the light plan says where the light is and its colour (logic.lightPlanCaption)
     e.caption = { key, text: lightPlanCaption({ colors: colorsOf(e), color: e.color, words: e.prompt }) };
-    log(`Edit ${num(e)}: relight request, with the light plan as Klein's second reference: ${e.caption.text}`);
+    log(`Edit ${num(e)}: relight request: ${e.caption.text}\n  Reference 2: the light plan.`);
     return e.caption.text;
   }
   const paint = e.tool === "erase" ? paintGrid(e) : null; // an erase locks one box per painted part, or with no words its core box
   const ask = upsampleRequest({ tool: e.tool, words: e.prompt, colors: colorsOf(e), color: e.color,
     ...writerBoxes({ tool: e.tool, words: e.prompt, parts: paint && paintBoxes(paint), core: e.editCore, bbox: bounds(e.mask) }) });
   const where = ask.locked?.length > 1 ? `boxes ${JSON.stringify(ask.locked.map((r) => r.src_bbox))}` : `box ${JSON.stringify(ask.locked?.[0]?.src_bbox ?? bounds(e.mask))}`;
-  log(`Edit ${num(e)}: asking Klein's prompt writer (${ask.mode} mode) for "${e.prompt || "no words"}"${e.tool === "light" ? `, ${lightColor(colorsOf(e), e.color)} light,` : ""} in ${where}`);
+  log(`Edit ${num(e)}: asking Klein's prompt writer (${ask.mode} mode) for "${e.prompt || "no words"}"${e.tool === "light" ? `, ${lightColor(colorsOf(e), e.color)} light,` : ""} in ${where}.`);
   let text = "";
   try {
     const out = await run("prompt", { image: reference, request: ask.request, system: UPSAMPLER[ask.mode] }, { kind, front: true }).done;
@@ -233,7 +233,7 @@ async function writeCaption(e, reference, key, kind) {
   } catch (err) { if (err?.message === "cancelled") throw err; quiet(err); }
   let made = text ? (ask.locked ? reconcile(text, ask.locked) : text) : "";
   if (made && paint && !erasesPaint(made, ask.locked, paint)) { // it removed something the paint does not cover (an astronaut, 28 Oct)
-    log(`Edit ${num(e)}: the prompt writer removed something the paint does not cover: ${splitTable(made)[0]}`);
+    log(`Edit ${num(e)}: prompt writer's answer refused: it removes an object outside the paint.\n  ${splitTable(made)[0]}`);
     if (asksName(e.tool, e.prompt)) { // no words, and an answer about another object: that object leaves the box (prepare, leaveOut), else the object's name comes first (generate)
       e.caption = { key, text: "", others: removedNames(made, ask.locked) };
       return "";
@@ -1905,8 +1905,8 @@ function launch(edit, another = false) { // Generate: the edit on the first fram
   S.selected = edit; // it stays the current edit: new words, more strokes or the switch change it, until New edit or another tool
   S.peek = null;
   if (reuse(edit)) {
-    log(`Edit ${num(edit)}: unchanged since a result it already has, so nothing runs again`);
-    hud(`Edit ${num(edit)} has not changed: its result stays. Ctrl+Enter tries another seed.`, 3000);
+    log(`Edit ${num(edit)}: unchanged, result reused.`);
+    hud(`Edit ${num(edit)}: unchanged, result reused. Ctrl+Enter for another seed.`, 3000);
     recompose(); historyUI(); render(); timelineUI();
     queueWaiting(() => queue(regenerateDependents));
     return;
@@ -2033,21 +2033,23 @@ async function generate(edit) {
   cancel("warm"); // an edit never waits for the warm-up: what it needs loads now
   S.running = edit;
   edit.saw = activeBefore(edit).map(record); // the edits under it as it starts: a change to them restarts it (rebuild)
-  Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false });
+  Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false, editAsked: false });
   recompose(); historyUI(); render();
-  log(`Edit ${num(edit)}: ${NAME[edit.tool]} "${edit.prompt || ""}", seed ${edit.seed}${edit.tool === "erase" ? `, whole object ${edit.whole ? "on" : "off"}` : ""}, ${painted(edit)} stroke${painted(edit) === 1 ? "" : "s"}, over ${edit.saw.length} edit${edit.saw.length === 1 ? "" : "s"}`);
+  log(`Edit ${num(edit)}: ${NAME[edit.tool]} "${edit.prompt || ""}", seed ${edit.seed}${edit.tool === "erase" ? `, whole object ${edit.whole ? "on" : "off"}` : ""}, ${painted(edit)} stroke${painted(edit) === 1 ? "" : "s"}, over ${edit.saw.length} edit${edit.saw.length === 1 ? "" : "s"}.`);
   try {
     await edit.preparing; // the snap and the caption started when the strokes stopped: reused when nothing changed since
     if (!alive()) return;
-    status(`Edit ${num(edit)}: ${NAME[edit.tool].toLowerCase()}, writing the prompt`);
+    status(`Edit ${num(edit)}: ${NAME[edit.tool]}, prompt writer running.`);
     redrawStrokes(edit); // in one pass from its strokes, as a scene opened again draws them: the same images, the same job
     const { before, below, base, reference, cap } = await prepare(edit, S.edits.indexOf(edit), "edit");
     if (!alive()) return;
     if (!cap) { // an erase with no words that the prompt writer took for another object (logic.asksName): no Klein pass, its name first
-      Object.assign(edit, { patch: null, preview: null, latent: null, state: "failed", left: true, force: false });
+      Object.assign(edit, { patch: null, preview: null, latent: null, state: "failed", left: true, editAsked: true, force: false }); // History marks its row (data-asked)
       S.running = null;
       recompose(); historyUI(); render(); timelineUI();
-      return told(`Edit ${num(edit)}: the prompt writer took the stroke for another object, so nothing ran`, leftHint(edit.prompt), "error");
+      const fact = `Error: edit ${num(edit)}, the prompt writer took the stroke for another object. Nothing ran.`; // tests/ui_live.py reads « took the stroke for another object »
+      log(fact, "error");
+      return status(`${fact} ${leftHint(edit.prompt)}`, "hint");
     }
     const show = (b) => alive() && createImageBitmap(b).then((bm) => {
       if (!alive() || edit.preview) return;
@@ -2055,26 +2057,26 @@ async function generate(edit) {
       edit.shown ??= performance.now();
       render();
     });
-    // 1. A quick pass at preview size: its steps appear live inside the strokes. Paint may change a zone around them.
-    status(`Edit ${num(edit)}: ${NAME[edit.tool].toLowerCase()}, first look`);
+    // 1. The edit preview, 768 px on the long side: its steps appear live inside the strokes. Paint may change a zone around them.
+    status(`Edit ${num(edit)}: ${NAME[edit.tool]}, edit preview.`);
     const size = p.prev, values = { base, reference, start: light ? base : reference, caption: cap, seed: edit.seed,
       plan: light ? await uploadCanvas(lightPlan(edit, size), `${tag}_plan.png`) : "",
       mask: await uploadCanvas(maskAt(edit, size), `${tag}_mask.png`), ...editSettings(edit, size, QUICK), prefix: `paintaplate/${p.id}/edits/e${edit.id}` };
-    log(`Edit ${num(edit)}: Klein quick pass at ${size.join(" x ")}, ${QUICK.steps} steps`);
+    log(`Edit ${num(edit)}: Klein edit preview, ${size.join(" x ")}, ${QUICK.steps} steps.`);
     const quick = await run("edit", values, { kind: "edit", front: true, preview: show, progress: (f) => editProgress(edit, f / 2) }).done;
     if (!alive()) return;
     edit.preview = await loadImage(viewUrl(outputFile("edit", quick, "patch")));
     edit.shown ??= performance.now();
     edit.latent = null; render();
-    // 2. The same seed at full size, starting from the quick pass: it resolves in place.
-    status(`Edit ${num(edit)}: ${NAME[edit.tool].toLowerCase()}, full size`);
-    log(`Edit ${num(edit)}: Klein full-size pass at ${p.work.join(" x ")}, ${FULL.steps} steps from the quick result at denoise ${FULL.denoise}${edit.tool === "erase" ? ", its fill levelled with the background around it (Level Fill)" : ""}`);
+    // 2. The same seed at full size, starting from the edit preview: it resolves in place.
+    status(`Edit ${num(edit)}: ${NAME[edit.tool]}, full size.`);
+    log(`Edit ${num(edit)}: Klein full size, ${p.work.join(" x ")}, ${FULL.steps} steps, denoise ${FULL.denoise} from the edit preview.${edit.tool === "erase" ? "\n  Fill levelled with the background (Level Fill)." : ""}`);
     const work = p.work, start = snap(before, work);
     start.getContext("2d").drawImage(edit.preview, 0, 0, work[0], work[1]);
     const startName = await uploadCanvas(start, `${tag}_start.png`);
     const full = await run("edit", { ...values, base: await baseUpload(below, before, work), start: startName,
-      // an erase refines the quick result, which has no object left: shown the original, Klein drew part of it back
-      // a relight refines its quick result, beside its light plan at full size
+      // an erase refines the edit preview, which has no object left: shown the original, Klein drew part of it back
+      // a relight refines its edit preview, beside its light plan at full size
       reference: edit.tool === "erase" || light ? startName : await uploadCanvas(editImage(edit, before, work), `${tag}_ref_full.png`),
       mask: await uploadCanvas(maskAt(edit, work), `${tag}_mask_full.png`), ...editSettings(edit, work, FULL),
       relight: light ? 1 : 0, plan: light ? await uploadCanvas(lightPlan(edit, work), `${tag}_plan_full.png`) : "",
@@ -2088,9 +2090,8 @@ async function generate(edit) {
       const check = eraseCheck(px(after), px(snap(before, at)), px(maskAt(edit, at)), at[0], at[1]);
       if (check.left && !(await heldBack(edit, check, alive))) return;
       if (!alive()) return;
-      const said = check.changed === null ? "" : `${Math.round(check.changed * 100)}% of it changed`; // tests/gpu_matrix.py reads « (N% of it changed) »
-      const held = check.edges === null ? "" : `, its edges held at ${check.edges.toFixed(2)}`;
-      if (said && !check.left) log(`Edit ${num(edit)}: the object left the first frame (${said})${held}`);
+      const said = [check.changed === null ? "" : `${Math.round(check.changed * 100)}% of it changed`, check.edges === null ? "" : `edges held at ${check.edges.toFixed(2)}`];
+      if (said[0] && !check.left) log(`Edit ${num(edit)}: the object left the first frame (${said.filter(Boolean).join(", ")}).`); // tests/gpu_matrix.py reads « (N% of it changed »
     }
     Object.assign(edit, { preview: null, latent: null, state: "done", version: ++S.vers, force: false, kept: undefined }); // versions are unique: a kept result never meets a new one
     edit.foot = footprint(edit);
@@ -2102,8 +2103,8 @@ async function generate(edit) {
     edit.thumb = thumbOf(edit);
     keep(edit);
     historyUI(); render(); timelineUI();
-    status(`Edit ${num(edit)} is on the first frame. Its shot renders next.`);
-    log(`Edit ${num(edit)}: done, ${((performance.now() - edit.launched) / 1000).toFixed(1)} s after it started`);
+    status(`Edit ${num(edit)}: on the first frame. The shot renders next.`);
+    log(`Edit ${num(edit)}: done in ${((performance.now() - edit.launched) / 1000).toFixed(1)} s.`);
   } catch (err) {
     if (edit.token === token) {
       Object.assign(edit, { state: edit.patch ? "done" : "failed", preview: null, latent: null });
@@ -2125,13 +2126,13 @@ async function heldBack(edit, check, alive) {
   Object.assign(edit, { preview: null, latent: null, state: "failed", left: true, force: false, version: ++S.vers });
   S.running = null;
   recompose(); historyUI(); render(); timelineUI();
-  log(lines.fact, "error");
+  log(lines.fact, "warning");
   const anyway = await ask(lines.question, "Render anyway", { enter: true, still: current });
   if (!current()) return false;
   if (!anyway) {
     edit.patch = null;
     recompose(); historyUI(); render(); timelineUI();
-    status(`${lines.fact}. ${leftHint(edit.prompt)}`, "hint");
+    status(`${lines.fact} ${leftHint(edit.prompt)}`, "hint");
     return false;
   }
   edit.left = false;
@@ -2217,7 +2218,7 @@ async function findWhole(edit, before, kind) { // SAM 3.1 finds the whole object
   const pts = edit.strokes.filter((s) => s.tool !== "rub").flatMap((s) => s.points);
   const picks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * (pts.length - 1))))]; // up to five points, one prompt each
   const points = Object.fromEntries(picks.map((i, j) => [`point_${j}`, JSON.stringify([{ x: Math.round(pts[i][0] * k), y: Math.round(pts[i][1] * k) }])]));
-  status(edit.prompt ? `Finding the ${edit.prompt} under the stroke` : "Finding the object under the stroke");
+  status(`Edit ${num(edit)}: SAM 3.1 looking for the ${edit.prompt || "object"} under the stroke.`);
   const frame = await uploadCanvas(snap(before, size), `e${edit.id}_snap.png`);
   const out = await run("snap", { image: frame, words: edit.prompt, ...points }, { kind, front: true }).done;
   const painted = canvasBits(maskAt(edit, size), size), fileBits = (f) => maskBits(f, size);
@@ -2229,15 +2230,16 @@ async function findWhole(edit, before, kind) { // SAM 3.1 finds the whole object
   const core = objects.length && !String(edit.prompt ?? "").trim() ? corePixels({ painted, masks: objects, w: size[0], h: size[1] }) : null;
   edit.editCore = core && boxOf(core, size[0], size[1]);
   edit.editKeep = core && { frame, bits: core };
-  log(`Edit ${num(edit)}: SAM 3.1 ${edit.prompt ? `found ${outputFiles("snap", out, "named").length - 1} object(s) named "${edit.prompt}", ` : ""}looked at ${picks.length} stroke point(s); ${objects.length} mask(s) kept`);
-  if (!objects.length) return status("Clean takes only what you painted: no single object under the stroke.");
+  const found = Math.max(0, outputFiles("snap", out, "named").length - 1), many = (k, one) => `${k} ${one}${k === 1 ? "" : "s"}`; // the blank frame comes first
+  log(`Edit ${num(edit)}: SAM masks, ${objects.length} kept.\n  ${edit.prompt ? `${many(found, "object")} named "${edit.prompt}", ` : ""}${many(picks.length, "stroke point")}.`);
+  if (!objects.length) return status(`Edit ${num(edit)}: no single object under the stroke. Clean takes the painted pixels only.`);
   const sam = canvas(size), d = sam.getContext("2d"), img = d.createImageData(size[0], size[1]);
   for (let i = 0; i < area; i++) if (objects.some((m) => m[i])) img.data.fill(255, i * 4, i * 4 + 4);
   d.putImageData(img, 0, 0);
   edit.sam = snap(sam, [edit.mask.width, edit.mask.height]);
   redrawStrokes(edit);
   render();
-  status(`Found the ${edit.prompt || "object"} under the stroke: Clean takes the whole object.`, "hint");
+  status(`Edit ${num(edit)}: ${edit.prompt || "object"} found under the stroke. Clean takes the whole object.`, "hint");
 }
 
 function footprint(edit) { // where the edit changed the frame, on a coarse grid, one cell wider

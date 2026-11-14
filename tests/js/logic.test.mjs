@@ -802,5 +802,5 @@ test("an erase that left its object: the share of the object that changed on the
   assert.equal(erasedShare(rgba(() => [200, 200, 200]), wire, mask, w, h), 4 / 12);
   assert.equal(erasedShare(mist, before, rgba(() => [0, 0, 0]), w, h), null); // no mask: nothing to judge, nothing is held back
   assert.equal(leftHint(""), "Type its name in the prompt bar, then Generate.");
-  assert.equal(leftHint("barn"), "Describe it with other words, then Generate, or press Ctrl+Enter for another seed.");
+  assert.equal(leftHint("barn"), "Use other words, then Generate, or Ctrl+Enter for another seed.");
 });

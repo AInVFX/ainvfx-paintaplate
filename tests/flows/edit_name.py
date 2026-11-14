@@ -30,7 +30,7 @@ def run(browser, port, U):
     lines = page.evaluate("window.__lines")
     U.check(sum(ASK in t for t in lines) == 1 and not any(NEXT in t for t in lines),
             "the log says it once, and what to do next stays in the status line")
-    U.check(not any("Klein quick pass" in t or t.startswith("Render v") for t in lines),
+    U.check(not any("Klein edit preview" in t or t.startswith("Render v") for t in lines),
             "no Klein pass runs and no shot renders")
     row = page.evaluate(ROW)
     U.check(bool(row) and "failed" in row[0] and row[1] == "1", f"History's row says that the object is still there ({row})")
@@ -38,7 +38,7 @@ def run(browser, port, U):
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("Render v1"), 120000, "render of the erase once the object is named")
     lines, row = page.evaluate("window.__lines"), page.evaluate(ROW)
-    U.check(any("Klein quick pass" in t for t in lines) and "failed" not in row[0] and row[1] == "",
+    U.check(any("Klein edit preview" in t for t in lines) and "failed" not in row[0] and row[1] == "",
             f"once the object is named, Generate runs Klein and the shot renders ({row})")
     U.no_errors(errors, "after an erase that the writer took for another object")
     page.close()

@@ -8,7 +8,7 @@ import re
 
 BARN = ('Remove the barn <barn_1> completely, including its roof. [{"id": "barn_1", "from": "ref_image_0", '
         '"src_bbox": [80, 40, 300, 260], "tgt_bbox": null, "desc": "a grey barn"}]')
-REFUSED = "the prompt writer removed something the paint does not cover"
+REFUSED = "prompt writer's answer refused: it removes an object outside the paint"
 LEFT_OUT = "the barn left out of the prompt writer's box"
 ASK = "the prompt writer took the stroke for another object"
 BOX = re.compile(r'for "no words" in box (\[[0-9,]+\])')
@@ -33,7 +33,7 @@ def run(browser, port, U):
             "the writer's answer about the barn is refused once, and the barn leaves the writer's box")
     U.check(len(boxes) == 2 and boxes[1][0] == boxes[0][0] and boxes[1][2] < boxes[0][2],
             f"the writer is asked again with the box above the barn ({boxes})")
-    U.check(not any(ASK in t for t in lines) and any("Klein quick pass" in t for t in lines),
+    U.check(not any(ASK in t for t in lines) and any("Klein edit preview" in t for t in lines),
             "the page does not ask for the object's name: Klein runs")
     U.check(bool(row) and "failed" not in row[0] and row[1] == "", f"History's row is not marked ({row})")
     U.no_errors(errors, "after an erase whose writer named another object")
