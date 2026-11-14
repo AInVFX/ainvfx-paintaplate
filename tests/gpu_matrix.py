@@ -402,8 +402,10 @@ def media_frames(src, want):
 
 
 def edit_box(stroke, width, height):
-    """An edit's box on the first frame, in pixels: its stroke's points, and half its brush around them."""
-    xs, ys, r = [p[0] * width for p in stroke[2]], [p[1] * height for p in stroke[2]], (stroke[3] if len(stroke) > 3 else 64) / 2
+    """An edit's box on the first frame, in pixels: the points of its strokes, and half its brush around them."""
+    from ui_live import paths
+    points = [p for path in paths(stroke[2]) for p in path]
+    xs, ys, r = [p[0] * width for p in points], [p[1] * height for p in points], (stroke[3] if len(stroke) > 3 else 64) / 2
     return (min(xs) - r, min(ys) - r, max(xs) + r, max(ys) + r)
 
 
@@ -580,6 +582,73 @@ def fluid_movies(comfy, jobs, history):
     return {}
 
 
+STAGE_JOBS = (("Clean plate pass", "cleanup"), ("Shot", "shot"), ("Paint matte", "matte"), ("Composite", "review"))
+
+
+def stage_movies(comfy, jobs, history):
+    """The full-size pictures of a render's stages, from the case's last job of each name in STAGE_JOBS and its outputs in
+    ComfyUI's /history: {title: a movie's path, or the image files in order}. A job's movie (PaintAPlate_SaveMovie) comes
+    first, else its frames (PaintAPlate_SaveFrames: the files of its folder whose names start as the first one's). The last
+    « matte » job is the paint's full-size tracking, the last « shot » job the full-size shot. A stage whose job did not run
+    in this ComfyUI is left out."""
+    found = {}
+    runs = {pid[:8]: ((entry.get("prompt") or [None, None, {}])[2], entry.get("outputs") or {}) for pid, entry in history.items()}
+    for title, name in STAGE_JOBS:
+        ran = [j["id"] for j in jobs if j["name"] == name and j["id"] in runs]
+        graph, outputs = runs[ran[-1]] if ran else ({}, {})
+        for kind in ("PaintAPlate_SaveMovie", "PaintAPlate_SaveFrames"):
+            files = [f for node, out in sorted(outputs.items()) if (graph.get(node) or {}).get("class_type") == kind for f in out.get("images") or []]
+            if files:
+                first = os.path.join(comfy, "output", *files[0].get("subfolder", "").split("/"), files[0]["filename"])
+                stem = re.match(r"[^0-9_]*", files[0]["filename"]).group(0)
+                found[title] = first if kind == "PaintAPlate_SaveMovie" else \
+                    sorted(f for f in glob.glob(os.path.join(os.path.dirname(first), stem + "*")) if f.lower().endswith(IMAGES))
+                break
+    return found
+
+
+def frame_numbers(src):
+    """A plate's own frame numbers, in order: the number in each file's name for an image sequence, from 1 for a movie."""
+    if isinstance(src, list):
+        return [int(found[-1]) if found else k + 1 for k, found in enumerate(re.findall(r"\d+", os.path.basename(f)) for f in src)]
+    return list(range(1, media_count(src) + 1))
+
+
+def stage_sheet(case, folder, plate, movies):
+    """A case's stages.png in its folder: the same frames of the plate and of each full-size stage (stage_movies), one
+    row per frame, one column per stage, each frame whole. The rows are the case's « stage_frames », in the plate's own
+    numbers (frame_numbers), or the first frame, a third, two thirds and the last. {"path", "frames", "columns",
+    "missing": the stages with no picture}, or {"error"} without the plate."""
+    from PIL import Image, ImageDraw, ImageFont
+    if not plate or not os.path.exists(plate):
+        return {"error": "the plate is not in ComfyUI's input folder"}
+    columns = [("Plate", frames_source(plate))] + [(title, movies[title]) for title, _ in STAGE_JOBS if movies.get(title)]
+    numbers = frame_numbers(columns[0][1])
+    asked = case.get("stage_frames") or [numbers[0], numbers[len(numbers) // 3], numbers[2 * len(numbers) // 3], numbers[-1]]
+    rows = [numbers.index(n) for n in asked if n in numbers]
+    pictures = [media_frames(src, set(rows)) for _, src in columns]
+    (cw, ch), gap, head, left = SHEET_CELL, 8, 24, 76
+    try:
+        font = ImageFont.load_default(size=15)
+    except TypeError:
+        font = ImageFont.load_default()
+    out = Image.new("RGB", (left + len(columns) * (cw + gap), head + len(rows) * (ch + gap)), (28, 28, 28))
+    draw = ImageDraw.Draw(out)
+    for c, (title, _) in enumerate(columns):
+        draw.text((left + c * (cw + gap), 4), title, fill="white", font=font)
+    for r, i in enumerate(rows):
+        draw.text((6, head + r * (ch + gap) + 4), f"frame {numbers[i]}", fill="white", font=font)
+        for c, frames in enumerate(pictures):
+            if i in frames:  # a stage shorter than the plate leaves its cell empty
+                picture = Image.fromarray(frames[i])
+                picture.thumbnail((cw, ch))
+                out.paste(picture, (left + c * (cw + gap), head + r * (ch + gap)))
+    path = os.path.join(folder, "stages.png")
+    out.save(path)
+    return {"path": path, "frames": [numbers[i] for i in rows], "columns": [title for title, _ in columns],
+            "missing": [title for title, _ in STAGE_JOBS if not movies.get(title)]}
+
+
 def fluid_sheet(case, folder, movies):
     """A fluid case's sheet, fluid_sheet.png in its folder: the keyframes the case painted, as its control video holds them,
     then the shot on its first frame, at a third, at two thirds and on its last (movies: fluid_movies). {"path", "keys" and
@@ -643,6 +712,11 @@ def run_case(a, name, case, folder):
         result["fluid_sheet"] = fluid_sheet(case, folder, fluid_movies(a.comfy, result["jobs"], history)) if case.get("fluid") else None
     except Exception as exc:
         result["fluid_sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+    try:  # each full-size stage beside the plate, never a reason to fail either
+        result["stage_sheet"] = stage_sheet(case, folder, os.path.join(a.comfy, "input", case["path"]), stage_movies(a.comfy, result["jobs"], history)) \
+            if case.get("stage_frames") else None
+    except Exception as exc:
+        result["stage_sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     for job in result["jobs"]:  # when ComfyUI ran it, and the most memory held between those two times
         span = spans.get(job["id"])
         job["run"] = span[1] - span[0] if span else None
@@ -742,6 +816,13 @@ def report(a, machine, results):
                       "", f"  ![{r['name']}, fluid]({os.path.relpath(fluid['path'], a.out)})", ""]
         elif fluid:
             lines.append(f"- No fluid sheet: {fluid['error']}.")
+        stages = r.get("stage_sheet")
+        if stages and stages.get("path"):
+            lines += [f"- Each stage at full size, on frames {', '.join(map(str, stages['frames']))}: {', '.join(stages['columns'])}."]
+            lines += [f"- No picture of: {', '.join(stages['missing'])}."] if stages["missing"] else []
+            lines += ["", f"  ![{r['name']}, stages]({os.path.relpath(stages['path'], a.out)})", ""]
+        elif stages:
+            lines.append(f"- No stage sheet: {stages['error']}.")
         lines += [f"- Marks, screenshots, the page's log and the zip: `{os.path.relpath(r['folder'], a.out)}`."]
     failures = [r for r in ran if not r["passed"]]
     if failures:

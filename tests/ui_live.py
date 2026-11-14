@@ -111,6 +111,12 @@ def stroke(page, box, pts):
     page.mouse.up()
 
 
+def paths(pts):
+    """The strokes of one edit: a case's points as one path of [x, y], or a list of such paths, drawn in turn before
+    Generate. The page joins the strokes of a draft into one edit."""
+    return pts if pts and isinstance(pts[0][0], (list, tuple)) else [pts]
+
+
 DONE = "document.querySelectorAll('#history li').length === {n} && !document.querySelector('#history li.busy')"
 
 LEFT = "#history li[data-left]"  # History's mark on an erase that the page's check holds back (logic.eraseCheck), or that asks for its object's name
@@ -206,7 +212,7 @@ def main():
     ap.add_argument("--url", default="", help="a running ComfyUI with the real workflows and models (no stand-ins)")
     ap.add_argument("--path", default="", help="plate path in that ComfyUI's input folder, typed into the open dialog")
 
-    ap.add_argument("--strokes", default="", help='JSON list of [tool, words, [[x, y], ...], brush size, {"whole": false, "color": "#d32f2f"}]')
+    ap.add_argument("--strokes", default="", help='JSON list of [tool, words, [[x, y], ...], brush size, {"whole": false, "color": "#d32f2f"}]; a list of such [[x, y], ...] draws several strokes for one edit')
     ap.add_argument("--fluid", default="", help='with --url: a fluid shot from a blank plate first, as fluid_shot() describes; '
                     '--strokes then edit it as the plate')
     ap.add_argument("--timeout", type=int, default=150)
@@ -372,7 +378,9 @@ def remote(a):
                         page.set_checked("#whole", opts["whole"])
                     if "color" in opts:  # {"color": "#d32f2f"}: a swatch for the paint or the light
                         page.click(f".swatches .sw[data-color='{opts['color']}']")
-                    stroke(page, box, pts); mark(f"{tool} stroke")
+                    for path in paths(pts):
+                        stroke(page, box, path)
+                    mark(f"{tool} stroke")
                     page.keyboard.press("Enter")  # Generate
                     page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)
                     # a small card loads its models in turn. A row marked left ends the wait at once: behind the page's dialog
