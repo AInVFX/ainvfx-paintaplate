@@ -3,6 +3,7 @@
  "horse_cow": {"path": "plates/horse.mp4", "seed": 101, "strokes": [["paint", "a brown and white cow standing just behind the fence, close to it", [[0.77, 0.47], [0.88, 0.47], [0.88, 0.55], [0.77, 0.55], [0.77, 0.51], [0.88, 0.51]], 110, {"color": "#6d4c41"}]]},
  "horse_erase": {"path": "plates/horse.mp4", "seed": 1017942128, "strokes": [["erase", "", [[0.83, 0.4], [0.9, 0.4], [0.975, 0.4], [0.975, 0.425], [0.84, 0.425]], 36, {"whole": true}]]},
  "horse_erase_barn": {"path": "plates/horse.mp4", "seed": 1017942128, "strokes": [["erase", "the barn", [[0.83, 0.4], [0.9, 0.4], [0.975, 0.4], [0.975, 0.425], [0.84, 0.425]], 36, {"whole": true}]]},
+ "horse_erase_tree": {"path": "plates/horse.mp4", "seed": 1017942128, "expect": "name asked", "strokes": [["erase", "", [[0.79, 0.26], [0.83, 0.25], [0.87, 0.27]], 36, {"whole": true}]]},
  "horse_light": {"path": "plates/horse.mp4", "seed": 103, "strokes": [["light", "warm low sun from the right", [[0.92, 0.18], [0.95, 0.28], [0.92, 0.38]], 64]]},
  "horse_saddle": {"path": "plates/horse.mp4", "seed": 105, "strokes": [["paint", "a red saddle blanket on the horse's back", [[0.42, 0.4], [0.51, 0.4], [0.51, 0.52], [0.42, 0.52], [0.42, 0.46], [0.51, 0.46]], 80, {"color": "#d32f2f"}]]},
  "horse_bird": {"path": "plates/horse.mp4", "seed": 106, "strokes": [["paint", "a black crow perched on top of the fence post: it sits still for one second, then flies away and leaves the frame", [[0.935, 0.43], [0.947, 0.43]], 44, {"color": "#000000"}]]},

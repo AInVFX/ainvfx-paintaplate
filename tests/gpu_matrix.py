@@ -6,7 +6,7 @@ Each case runs tests/ui_live.py on a running ComfyUI (the real page, in Google C
 case left behind and writes <out>/report.md: the machine, then per case the time of each step (the page's log times
 every step), each job with its seconds, its peak VRAM and RAM, the nodes ComfyUI took from its cache and the previews
 the page received, out-of-memory retries, the memory profile, the paint matte's area on every frame against the first
-frame's, pass or fail, then the log of each failure. The report is written again after every case, so a run that is
+frame's, pass or fail, the page's verdict on a Clean edit (gone or left), then the log of each failure. The report is written again after every case, so a run that is
 stopped still leaves one.
 
 Memory is read once a second. VRAM comes from ComfyUI's /system_stats. RAM is what ComfyUI's own process holds (VmRSS in
@@ -150,21 +150,50 @@ def job_spans(history):
     return spans
 
 
-def node_times(events, graphs):
+FAILED_JOB = re.compile(r"(\w+) ([0-9a-f]{8}): failed after")  # a job line of the page that ComfyUI did not finish
+
+
+def workflow(name):
+    """The pack's own API graph of a job (web/workflows/<name>.json), with the node ids the page posts: what names the nodes
+    of a job that ComfyUI's /history no longer holds, after ComfyUI stopped. {} when there is none."""
+    try:
+        with open(os.path.join(REPO, "web", "workflows", f"{name}.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def running_at_stop(events, graphs, names=None):
+    """The node each job was running when its messages stopped with no end (ComfyUI stopped): {id[:8]: node class}."""
+    last = {}
+    for _, pid, node in events:
+        last[pid] = node
+    return {(pid or "")[:8]: ((graphs.get(pid) or workflow((names or {}).get((pid or "")[:8]))).get(str(node)) or {}).get("class_type", f"node {node}")
+            for pid, node in last.items() if node is not None}
+
+
+def node_times(events, graphs, names=None):
     """Where each job's time went: {the id's first 8 characters: [(node class, seconds), ...], longest first}. Each «
     executing » message starts a node and ends the one before; the one with no node ends the job. events: [[seconds,
-    prompt id, node id or None]] (ui_live.py's nodes.json); graphs: {prompt id: its API graph, from ComfyUI's /history}."""
+    prompt id, node id or None]] (ui_live.py's nodes.json); graphs: {prompt id: its API graph, from ComfyUI's /history};
+    names: {id[:8]: job name}, for a job that /history no longer holds: its nodes are named from the pack's workflow."""
     runs, out = {}, {}
     for t, pid, node in events:
         runs.setdefault(pid, []).append((t, node))
     for pid, seq in runs.items():
-        graph, spent = graphs.get(pid) or {}, {}
+        graph, spent = graphs.get(pid) or workflow((names or {}).get((pid or "")[:8])), {}
         for (t, node), (later, _) in zip(seq, seq[1:]):
             if node is not None:
                 name = (graph.get(str(node)) or {}).get("class_type", f"node {node}")
                 spent[name] = round(spent.get(name, 0.0) + later - t, 1)
         out[(pid or "")[:8]] = sorted(spent.items(), key=lambda x: -x[1])
     return out
+
+
+def render_hdr(steps):
+    """Whether a render ran SDR to HDR (« v1 SDR to HDR »): only a render's composite writes HDR Match's line. A fluid shot's
+    own pass (« fluid v1 SDR to HDR ») has no plate to match: fluid_720 of 13 Nov was told to look for a line that never was."""
+    return any(re.match(r"v\d+ SDR to HDR\b", label) for label, _ in steps)
 
 
 def comfy_lines(url, since, mark="PaintAPlate HDR Match:"):
@@ -319,12 +348,11 @@ def read_log(text):
 # On 12 Nov horse_erase passed with the barn still in its result, and nothing in the report showed it. The sheet puts the
 # plate and the export side by side, cut around each edit's box, on four frames: the first, at a third, at two thirds and
 # the last. With one edit the box follows the export's matte from frame to frame; a relight shows the whole frame. For an
-# erase the sheet keeps a place for a verdict: the edit workstream's measure (E5), one pure function of web/logic.mjs that
-# this file will run with Node, as tests/erase_probe.py runs the page's rules. Until it is merged, the place says so.
+# erase the sheet writes the page's own verdict (wave 7, R15): logic.eraseCheck, run with Node through tests/erase_probe.py,
+# on the export's first frame against the plate's, inside the mask the page sent Klein, at the page's preview size.
 SHEET_CELL = (360, 240)  # the largest picture of one frame on the sheet, in pixels
 IMAGES = (".exr", ".png", ".jpg", ".jpeg", ".tif", ".tiff")
 MOVIES = (".mp4", ".mov", ".webm", ".mkv")
-VERDICT = "Verdict: waiting for E5, the edit workstream's measure"
 TOOL_NAMES = {"paint": "Paint", "erase": "Clean", "light": "Light"}
 
 
@@ -398,10 +426,60 @@ def framed(box, width, height, least=160):
     return (int(left), int(top), int(left + w), int(top + h))
 
 
-def sheet(case, folder, plate, others=()):
+def page_mask(comfy, since):
+    """The mask the page sent Klein for an erase: the newest *_mask_full*.png in ComfyUI's input folder written since
+    `since` (seconds since the epoch), or None."""
+    found = [f for f in glob.glob(os.path.join(comfy, "input", "**", "*_mask_full*.png"), recursive=True) if os.path.getmtime(f) >= since]
+    return max(found, key=os.path.getmtime) if found else None
+
+
+def preview_size(log):
+    """The page's preview size, from its line « Working sizes: ... preview at 608 x 352 ... »: the size the page judges an
+    erase at (app.mjs, `p.prev`). None when the log has no such line."""
+    found = re.findall(r"preview at (\d+) x (\d+)", log)
+    return (int(found[-1][0]), int(found[-1][1])) if found else None
+
+
+def erase_verdict(after, before, mask, size):
+    """The page's verdict on an erase, logic.eraseCheck run with Node: `after` the export's first frame and `before` the
+    plate's (RGB, 8 bits), `mask` the file the page sent Klein, all three drawn at `size` as the page's canvases draw them
+    (tests/erase_probe.py: one bridge, one resize). {"left": True, False or None, "changed", "edges", "text"}."""
+    def none(why):
+        return {"left": None, "changed": None, "edges": None, "text": f"Clean, frame 1: no verdict. {why}."}
+    if not mask:
+        return none("No mask from the page in ComfyUI's input folder since the case started")
+    if not size:
+        return none("No preview size in the page's log")
+    import numpy as np
+    from PIL import Image
+    import erase_probe as probe
+    with Image.open(mask) as im:
+        held = probe.mask_at(np.asarray(im.convert("L")) > 127, size)
+    if not held.any():
+        return none(f"The mask is empty at {size[0]} x {size[1]}")
+    got = probe.page(("eraseCheck", probe.raw(probe.rgba(probe.resized(after, size))), probe.raw(probe.rgba(probe.resized(before, size))),
+                      probe.raw(probe.rgba(probe.white(held))), size[0], size[1]))[0]
+    figures = [f"{round(100 * got['changed'])}% of the object changed" if got.get("changed") is not None else "",
+               f"edges held at {got['edges']:.2f}" if got.get("edges") is not None else ""]
+    detail = "; ".join(f for f in figures if f)
+    return {**got, "text": f"Clean, frame 1: {'left' if got['left'] else 'gone'}" + (f" ({detail})." if detail else ".")}
+
+
+def name_asked(marks, log, jobs):
+    """A case that expects the page to ask for an erase's object by name (gpu_matrix.json: « expect »: « name asked »,
+    logic.asksName) passes when the page asked and neither Klein nor LTX ran. (passed, why)."""
+    asked = any(m.startswith("name asked") for m in marks)
+    ran = [what for what, found in (("a Klein pass", re.search(r"Klein (quick|full-size) pass", log)),
+                                    ("a shot", any(j["name"] == "shot" for j in jobs))) if found]
+    return asked and not ran, "" if asked and not ran else "the page did not ask for the name" if not asked else " and ".join(ran) + " ran"
+
+
+def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
     """The case's sheet, sheet.png in its folder: for each edit, the plate and the export cut around its box, on the first
     frame, at a third, at two thirds and on the last. `others`: more (title, export.zip) columns, such as another run of
-    the same strokes. {"path", "frames" (from 1), "cells": [(row, column, x0, y0, x1, y1)]}, or None with no export or plate."""
+    the same strokes. `mask` and `judge_at`: the mask the page sent Klein (page_mask) and the page's preview size
+    (preview_size), for the verdict on a Clean edit (erase_verdict). {"path", "frames" (from 1), "cells": [(row, column, x0,
+    y0, x1, y1)], "verdict": that verdict or None}, or None with no export or plate."""
     from PIL import Image, ImageDraw, ImageFont
     strokes, export = case.get("strokes") or [], os.path.join(folder, "export.zip")
     if not strokes or not os.path.exists(export) or not plate or not os.path.exists(plate):
@@ -421,6 +499,9 @@ def sheet(case, folder, plate, others=()):
         rows = sorted({0, count // 3, 2 * count // 3, count - 1})
         pictures = [media_frames(src, rows) for _, src in columns]
         height, width = pictures[1][rows[0]].shape[:2]
+        erases = [s for s in strokes if s[0] == "erase"]
+        verdict = None if not erases else erase_verdict(pictures[1][rows[0]], pictures[0][rows[0]], mask, judge_at) if len(erases) == 1 else \
+            {"left": None, "changed": None, "edges": None, "text": f"Clean, frame 1: no verdict. {len(erases)} Clean edits share the frame."}
         edits = []
         for s in strokes:
             if s[0] == "light" or not mattes and s[0] != "erase" and s[0] != "paint":
@@ -452,13 +533,13 @@ def sheet(case, folder, plate, others=()):
                     at = (x + c * (cw + gap), 2 * head + r * (ch + gap))
                     out.paste(crop, at)
                     cells.append((r, c, at[0], at[1], at[0] + crop.width, at[1] + crop.height))
-            if s[0] == "erase":
-                draw.text((x, out.height - head + 4), VERDICT, fill=(255, 200, 80), font=font)
+            if s[0] == "erase" and verdict:
+                draw.text((x, out.height - head + 4), verdict["text"], fill=(120, 220, 120) if verdict["left"] is False else (255, 200, 80), font=font)
         for r, i in enumerate(rows):
             draw.text((6, 2 * head + r * (ch + gap) + 4), f"frame {i + 1}", fill="white", font=font)
         path = os.path.join(folder, "sheet.png")
         out.save(path)
-        return {"path": path, "frames": [i + 1 for i in rows], "cells": cells}
+        return {"path": path, "frames": [i + 1 for i in rows], "cells": cells, "verdict": verdict}
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -484,9 +565,12 @@ def run_case(a, name, case, folder):
         history, spans = {}, {}
     nodes_file = os.path.join(folder, "nodes.json")  # ui_live.py: when ComfyUI started each node, from the page's WebSocket
     events = json.load(open(nodes_file)) if os.path.exists(nodes_file) else []
-    result["nodes"] = node_times(events, {pid: (e.get("prompt") or [None, None, {}])[2] for pid, e in history.items()})
+    graphs = {pid: (e.get("prompt") or [None, None, {}])[2] for pid, e in history.items()}
+    names = {**{j["id"]: j["name"] for j in result["jobs"]}, **{job: name for name, job in FAILED_JOB.findall("\n".join(result["ended"]))}}
+    result["nodes"], result["stopped_in"] = node_times(events, graphs, names), running_at_stop(events, graphs, names)
     try:  # the case's pictures: never a reason for the case to fail
-        result["sheet"] = sheet(case, folder, os.path.join(a.comfy, "input", case["path"]) if case.get("path") else None)
+        result["sheet"] = sheet(case, folder, os.path.join(a.comfy, "input", case["path"]) if case.get("path") else None,
+                                mask=page_mask(a.comfy, t0), judge_at=preview_size(result["log"]))
     except Exception as exc:
         result["sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     for job in result["jobs"]:  # when ComfyUI ran it, and the most memory held between those two times
@@ -496,6 +580,8 @@ def run_case(a, name, case, folder):
     failed = [m for m in result["marks"] if m.startswith("FAILED")] or ([] if marks else ["ui_live.py wrote no marks"])
     done = any(m.startswith("downloaded") for m in result["marks"]) or not case.get("strokes")  # a fluid shot alone has no export
     result["passed"], result["why"] = not failed and done, (failed[0] if failed else "" if done else "the full-size composite was not reached: " + (result["marks"] or ["?"])[-1])
+    if case.get("expect") == "name asked":  # an erase with no words on another object: no Klein pass, no shot (logic.asksName)
+        result["passed"], result["why"] = name_asked(result["marks"], result["log"], result["jobs"])
     result["matte"] = matte_areas(a.comfy, t0) if any(s[0] == "paint" for s in case.get("strokes", [])) else None
     live = os.path.join(a.comfy, "temp", "paintaplate_live", "*.webp")
     result["live_files"] = sum(os.path.getmtime(f) >= t0 for f in glob.glob(live))
@@ -551,10 +637,15 @@ def report(a, machine, results):
             spent = r.get("nodes", {}).get(j["id"])
             if spent and j["seconds"] >= 30:
                 lines.append(f"- Where {j['name']} {j['id']}'s {j['seconds']:.1f} s went, by node: " + ", ".join(f"{c} {s:.1f} s" for c, s in spent[:5]) + ".")
+        for name, job in FAILED_JOB.findall("\n".join(r.get("ended", []))):  # what ran before ComfyUI stopped, and what was running
+            spent, at = r.get("nodes", {}).get(job), r.get("stopped_in", {}).get(job)
+            if spent or at:
+                lines.append(f"- {name} {job} before the stop, by node: " + (", ".join(f"{c} {s:.1f} s" for c, s in spent[:5]) or "none ended")
+                             + (f". Running at the stop: {at}." if at else "."))
         lines += carried(r, a.fresh, gb)
         lines += [f"- The page's figure for an erase: {f}" for f in r.get("figures", [])]
         lines += [f"- HDR Match, in ComfyUI's log: {m.split('HDR Match:', 1)[1].strip()}" for m in r.get("hdr_match", [])]
-        if not r.get("hdr_match") and any("SDR to HDR" in label for label, _ in r["steps"]):
+        if not r.get("hdr_match") and render_hdr(r["steps"]):
             lines.append("- HDR Match: its line has left ComfyUI's log buffer; grep the terminal for « HDR Match ».")
         lines += [f"- Did not finish: {line}" for line in r["ended"]]
         lines += [f"- {m}" for m in r["mattes"]]
@@ -569,7 +660,7 @@ def report(a, machine, results):
         if made and made.get("path"):
             lines += [f"- The plate and the export around each edit, on frames {', '.join(map(str, made['frames']))}:", "",
                       f"  ![{r['name']}]({os.path.relpath(made['path'], a.out)})", ""]
-            lines += [f"- {VERDICT}." for s in r.get("strokes", []) if s[0] == "erase"][:1]
+            lines += [f"- The page's verdict on the export (logic.eraseCheck): {made['verdict']['text']}"] if made.get("verdict") else []
         elif made:
             lines.append(f"- No sheet: {made['error']}.")
         lines += [f"- Marks, screenshots, the page's log and the zip: `{os.path.relpath(r['folder'], a.out)}`."]

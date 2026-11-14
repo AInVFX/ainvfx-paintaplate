@@ -52,10 +52,10 @@ FOUND_FOLDERS = 400  # folders read at most for them, breadth first: a root of t
 FOUND_SKIP = {"output:paintaplate", "paintaplate/up", "paintaplate/blank", "paintaplate/warm"}
 
 
-def pack_version() -> str:
-    """The pack's version, from the pyproject.toml beside this file (the Registry package keeps it)."""
+def pack_version(folder: str | None = None) -> str:
+    """A pack's version, from its pyproject.toml: this pack's (the Registry package keeps it), or the pack in `folder`."""
     try:
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyproject.toml"), encoding="utf-8") as f:
+        with open(os.path.join(folder or os.path.dirname(os.path.abspath(__file__)), "pyproject.toml"), encoding="utf-8") as f:
             m = re.search(r'^version\s*=\s*"([^"]+)"', f.read(), re.M)
         return m.group(1) if m else "unknown"
     except OSError:
@@ -225,6 +225,18 @@ def build_parts(pack: str = PACK, root: str | None = None, ltx: str | None = Non
             "ltx": (git_commit(ltx) or python_digest(ltx, deep=True)) if ltx else "", "models": models}
 
 
+def ltx_label(ltx: str, value: str) -> str:
+    """ComfyUI-LTXVideo as the build line names it: its commit when the folder is a git clone; otherwise its version, from
+    its pyproject.toml, and the hash of its Python files, said as such. That hash reads like a commit: on the laptop it was
+    taken for one and compared with the pin (13 Nov 2026). `value`: build_parts' « ltx », which the key keeps as it is."""
+    if not value:
+        return "not found"
+    if git_commit(ltx):
+        return value[:7]
+    version = pack_version(ltx) or ""
+    return (f"{version}, " if version[:1].isdigit() else "") + f"files {value[:7]} (not a git clone)"
+
+
 def build_hash(parts: dict) -> str:
     """The build: 16 hex digits of the SHA-256 of build_parts."""
     return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()[:16]
@@ -233,7 +245,7 @@ def build_hash(parts: dict) -> str:
 _built = build_parts()
 BUILD = build_hash(_built)
 logging.info("Paint a plate %s: build %s, from ComfyUI %s, ComfyUI-LTXVideo %s and %d of %d model files (the job index keys)",
-             VERSION, BUILD, " ".join(x[:7] for x in _built["comfyui"] if x) or "unknown", _built["ltx"][:7] or "not found",
+             VERSION, BUILD, " ".join(x[:7] for x in _built["comfyui"] if x) or "unknown", ltx_label(ltx_folder(), _built["ltx"]),
              sum(len(m) == 3 for m in _built["models"]), len(_built["models"]))
 
 
