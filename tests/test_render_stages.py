@@ -95,7 +95,7 @@ class Stages(unittest.TestCase):
                   "Paint matte": frames(os.path.join(self.tmp, "matte"), "m", [(k + 1, 255 * (k % 2)) for k in range(5)])}
         made = gpu_matrix.stage_sheet({"stage_frames": [480, 482, 484, 999]}, self.tmp, plate, movies)
         self.assertEqual(made["frames"], [480, 482, 484])
-        self.assertEqual(made["columns"], ["Plate", "Clean plate pass", "Shot", "Paint matte"])
+        self.assertEqual(made["columns"], ["Plate", "Clean plate pass", "Shot", "Paint matte"])  # no export.zip in this folder
         self.assertEqual(made["missing"], ["Composite"])
         (cw, ch), gap, head, left = gpu_matrix.SHEET_CELL, 8, 24, 76
         picture = Image.open(made["path"]).convert("RGB")
@@ -104,6 +104,22 @@ class Stages(unittest.TestCase):
         self.assertEqual([level(1, 0), level(1, 2), level(1, 3)], [80, 100, 0])  # frame 482: the third file of each sequence
         self.assertLess(abs(level(1, 1) - 90), 6)  # the movie's third frame, through its compression
         self.assertEqual(gpu_matrix.stage_sheet({}, self.tmp, os.path.join(self.tmp, "none"), movies), {"error": "the plate is not in ComfyUI's input folder"})
+
+    def test_the_sheet_s_composite_is_the_export_from_the_case_s_zip(self):
+        import zipfile
+        from PIL import Image
+        plate = os.path.join(self.tmp, "plate")
+        frames(plate, "plate", [(1, 0), (2, 40)])
+        made = frames(os.path.join(self.tmp, "made"), "f", [(1, 200), (2, 220)])
+        with zipfile.ZipFile(os.path.join(self.tmp, "export.zip"), "w") as z:
+            for k, path in enumerate(made):
+                z.write(path, f"export/plate.{k + 1:04d}.png")
+        result = gpu_matrix.stage_sheet({"stage_frames": [1, 2]}, self.tmp, plate, {})
+        self.assertEqual(result["columns"], ["Plate", "Composite"])
+        self.assertEqual(result["missing"], ["Clean plate pass", "Shot", "Paint matte"])
+        (cw, ch), gap, head, left = gpu_matrix.SHEET_CELL, 8, 24, 76
+        self.assertEqual(Image.open(result["path"]).convert("RGB").getpixel((left + cw + gap + 10, head + ch + gap + 10))[0], 220)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "stage_files")))
 
     def test_a_movie_plate_counts_its_frames_from_1_and_a_sequence_by_its_files(self):
         self.assertEqual(gpu_matrix.frame_numbers(movie(os.path.join(self.tmp, "p.mp4"), [0, 50, 100])), [1, 2, 3])

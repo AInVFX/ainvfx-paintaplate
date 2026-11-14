@@ -582,15 +582,18 @@ def fluid_movies(comfy, jobs, history):
     return {}
 
 
-STAGE_JOBS = (("Clean plate pass", "cleanup"), ("Shot", "shot"), ("Paint matte", "matte"), ("Composite", "review"))
+STAGE_JOBS = (("Clean plate pass", "cleanup"), ("Shot", "shot"), ("Paint matte", "matte"))
+STAGES_SHOWN = (*(title for title, _ in STAGE_JOBS), "Composite")  # the composite is the export, from the case's export.zip
 
 
 def stage_movies(comfy, jobs, history):
     """The full-size pictures of a render's stages, from the case's last job of each name in STAGE_JOBS and its outputs in
     ComfyUI's /history: {title: a movie's path, or the image files in order}. A job's movie (PaintAPlate_SaveMovie) comes
     first, else its frames (PaintAPlate_SaveFrames: the files of its folder whose names start as the first one's). The last
-    « matte » job is the paint's full-size tracking, the last « shot » job the full-size shot. A stage whose job did not run
-    in this ComfyUI is left out."""
+    « matte » job is the paint's full-size tracking, the last « shot » job the full-size shot. A render of fewer edits that
+    the page finishes in the background can run after them: its jobs have other names (a Clean alone has no shot and no
+    paint matte), and its composite is never read, since the sheet's composite is the export. A stage whose job did not
+    run in this ComfyUI is left out."""
     found = {}
     runs = {pid[:8]: ((entry.get("prompt") or [None, None, {}])[2], entry.get("outputs") or {}) for pid, entry in history.items()}
     for title, name in STAGE_JOBS:
@@ -607,6 +610,16 @@ def stage_movies(comfy, jobs, history):
     return found
 
 
+def export_media(path, into):
+    """The export inside a case's export.zip (its export/ folder), unzipped into `into`: the movie's path, or the image
+    files in order."""
+    with zipfile.ZipFile(path) as z:
+        names = [n for n in z.namelist() if n.startswith("export/") and not n.endswith("/")]
+        z.extractall(into, names)
+    movies = [n for n in names if n.lower().endswith(MOVIES)]
+    return os.path.join(into, movies[0]) if movies else [os.path.join(into, n) for n in sorted(names) if n.lower().endswith(IMAGES)]
+
+
 def frame_numbers(src):
     """A plate's own frame numbers, in order: the number in each file's name for an image sequence, from 1 for a movie."""
     if isinstance(src, list):
@@ -617,12 +630,24 @@ def frame_numbers(src):
 def stage_sheet(case, folder, plate, movies):
     """A case's stages.png in its folder: the same frames of the plate and of each full-size stage (stage_movies), one
     row per frame, one column per stage, each frame whole. The rows are the case's « stage_frames », in the plate's own
-    numbers (frame_numbers), or the first frame, a third, two thirds and the last. {"path", "frames", "columns",
-    "missing": the stages with no picture}, or {"error"} without the plate."""
+    numbers (frame_numbers), or the first frame, a third, two thirds and the last. The composite is the export, from the
+    case's export.zip when `movies` has none. {"path", "frames", "columns", "missing": the stages with no picture}, or
+    {"error"} without the plate."""
     from PIL import Image, ImageDraw, ImageFont
     if not plate or not os.path.exists(plate):
         return {"error": "the plate is not in ComfyUI's input folder"}
-    columns = [("Plate", frames_source(plate))] + [(title, movies[title]) for title, _ in STAGE_JOBS if movies.get(title)]
+    work, export = os.path.join(folder, "stage_files"), os.path.join(folder, "export.zip")
+    try:
+        if not movies.get("Composite") and os.path.exists(export):
+            movies = {**movies, "Composite": export_media(export, work)}
+        return draw_stages(case, folder, plate, movies, Image, ImageDraw, ImageFont)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def draw_stages(case, folder, plate, movies, Image, ImageDraw, ImageFont):
+    """stage_sheet's picture, once every stage has its pictures."""
+    columns = [("Plate", frames_source(plate))] + [(title, movies[title]) for title in STAGES_SHOWN if movies.get(title)]
     numbers = frame_numbers(columns[0][1])
     asked = case.get("stage_frames") or [numbers[0], numbers[len(numbers) // 3], numbers[2 * len(numbers) // 3], numbers[-1]]
     rows = [numbers.index(n) for n in asked if n in numbers]
@@ -646,7 +671,7 @@ def stage_sheet(case, folder, plate, movies):
     path = os.path.join(folder, "stages.png")
     out.save(path)
     return {"path": path, "frames": [numbers[i] for i in rows], "columns": [title for title, _ in columns],
-            "missing": [title for title, _ in STAGE_JOBS if not movies.get(title)]}
+            "missing": [title for title in STAGES_SHOWN if not movies.get(title)]}
 
 
 def fluid_sheet(case, folder, movies):
