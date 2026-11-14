@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, blankDepth, blankSpec, boxOf, boxWithout, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logLevel, moveKey, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes } from "./logic.mjs";
+import { askedText, asksName, blankDepth, blankSpec, boxOf, boxWithout, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logLevel, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
 import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
@@ -733,6 +733,7 @@ function inWork(draw) {
 // video's frame decoded with its own YUV matrix and range), one frame per source, the latest asked for: a 4K half-float
 // frame is about 50 MB. While a source plays, the movies and the 960 px cache stay.
 const sharp = { plate: null, shot: null, cmp: null }; // cmp: the pass compared in the wipe
+const nativeFailed = new Set(); // the native frames' failures said for the plate on show, one per cause
 function sharpFrame(slot, path) {
   const want = `${path}#${S.frame}`, s = sharp[slot];
   if (s?.key === want) return s.img;
@@ -747,7 +748,11 @@ function sharpFrame(slot, path) {
   }).catch((err) => {
     if (sharp[slot]?.loading !== want) return;
     sharp[slot] = { failed: path };
-    log(`Native frames of ${path}: stopped (${err.message}). Viewer: cached frames.`);
+    const cause = nativeCause(err.message, path); // one log line per cause, not one per file
+    if (nativeFailed.plate !== S.plate?.id) { nativeFailed.clear(); nativeFailed.plate = S.plate?.id; }
+    if (nativeFailed.has(cause)) return;
+    nativeFailed.add(cause);
+    log(`Native frames: stopped (${cause}).\n  First file: ${path}.\n  Viewer: cached frames.`);
   });
   return null;
 }

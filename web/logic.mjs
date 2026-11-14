@@ -580,6 +580,9 @@ export function askedText(asked) {
   return typeof asked === "string" && asked ? `Needs its name (the prompt writer saw ${asked})` : "Needs its name";
 }
 
+// The native frames' failure is said once per cause: a message that names its file counts once for every file.
+export const nativeCause = (message, path) => String(message).split(path).join("the file").trim();
+
 export function strokeTarget({ draft, current, tool }) { // where a new stroke goes: "draft", "current" or "new"
   if (draft) return "draft";
   return current?.tool === tool ? "current" : "new";
