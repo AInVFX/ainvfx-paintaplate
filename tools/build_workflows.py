@@ -129,7 +129,7 @@ def load(name, folder=None):
 # edit: no painted light to keep; no movie asked of a matte, an export's matte or a fluid shot's control video (the
 # Render panel's rows show them; the ComfyUI graph of the Export dialog leaves them out).
 OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",), "follow_erased": ("erased",),
-            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "edit_plan": ("plan",), "hdr_shot": ("hdr",), "relight_shade": ("shade",),
+            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "edit_plan": ("plan",), "hdr_shot": ("hdr",), "plate_level": ("plate_width", "plate_height"), "relight_shade": ("shade",),
             "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",),
             "export_plate": ("prefix",), "export_exr": ("exr_prefix",)}
 
@@ -729,8 +729,9 @@ def hdr():
 
     The page gives it a shot at the working size, already a multiple of 32, or a plate with no edit, which is its own SDR
     shot: the slots color_space, width and height bring the plate into the model space at the working size, and
-    plate_width and plate_height bring the HDR frames back to the plate's size. Save Frames and Save Movie keep Load
-    Plate's frame count, so the 8n+1 padding that LTX needs stays out of the result.
+    plate_width and plate_height bring the HDR frames back to the plate's size, where HDR Match sets them to the plate's
+    level as an edit's composite does, with an empty matte: nothing changed, so the whole plate's mid-tones decide. Save
+    Frames and Save Movie keep Load Plate's frame count, so the 8n+1 padding that LTX needs stays out of the result.
     """
     g = Graph()
     load = g("PaintAPlate_LoadPlate", _title="Shot (SDR)", path=Slot("path", ""), max_frames=Slot("max_frames", 121), pad_8n1=True)
@@ -770,10 +771,20 @@ def hdr():
     # converts each frame of the SDR shot as it uses it, so no converted copy of the shot waits through the sampling
     linear = g("PaintAPlate_KeepBlack", hdr=linear, sdr=sdr, config=Slot("config", OCIO_CONFIG), source="@model",
                low=0.001, high=0.01)
-    # a plate with no edit: the HDR frames at the plate's size (Slots plate_width and plate_height). Bilinear, so no value
-    # overshoots a highlight or falls below 0. 0 x 0 keeps the working size, where Fit to Plate takes a shot's HDR frames
-    linear = g("ImageScale", _title="HDR frames at the plate's size", image=linear, upscale_method="bilinear",
-               width=Slot("plate_width", 0), height=Slot("plate_height", 0), crop="disabled")
+    # a plate with no edit: the HDR frames at its size (Slots plate_width and plate_height; bilinear, so no value overshoots
+    # a highlight or falls below 0), set to its level by HDR Match as an edit's composite is, with nothing changed anywhere
+    # (an empty matte): one gain per channel from the whole plate's mid-tones, in ACEScg. For a shot no plate size is
+    # given, so the plate_level link goes with those three inputs, and HDR Match passes the frames on as they are: the
+    # review fits a shot's HDR frames to the plate inside the composite.
+    plate_size = g("GetImageSize", image=load[0])
+    matched = g("PaintAPlate_HDRMatch", _title="HDR Match: the HDR frames at the plate's level", image=linear, grow=0.0,
+                plate=colour(g, load[0], Slot("color_space", "@model"), "ACEScg", "Plate in ACEScg, for HDR Match"),
+                mask=g("SolidMask", _title="Nothing changed: an empty matte", value=0.0, width=plate_size[0], height=plate_size[1]),
+                hdr=g("ImageScale", _title="HDR frames at the plate's size", image=linear, upscale_method="bilinear",
+                      width=Slot("plate_width", 0), height=Slot("plate_height", 0), crop="disabled"))
+    for key in ("plate", "mask", "hdr"):
+        g.link_slot(matched, key, "plate_level")
+    linear = matched
     # each frame says the shot's frame rate, the one the page sends for the movie below: a 16-bit fluid shot's frames open
     # as a plate, and that plate took 24 fps for a shot made at 50 (pod, 11 Nov)
     g("PaintAPlate_SaveFrames", _title="HDR frames (half-float EXR, ACES2065-1)", _output="hdr", format="exr", fps=Slot("movie_fps", 24.0), frames=load[4],

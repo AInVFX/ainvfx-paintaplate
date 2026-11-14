@@ -799,10 +799,13 @@ class HDRMatch(io.ComfyNode):
                         "white balance, while the plate's untouched pixels hold the scene's real values: one gain per "
                         "channel, measured on the untouched mid-tones over the whole shot (no flicker), scales every pixel. "
                         "A gain keeps every ratio, so the range SDR to HDR made above the plate's white stays for grading. "
-                        "Without an HDR shot the image passes through; without a matte the HDR shot does.",
+                        "Without an HDR shot or a plate the image passes through; without a matte the HDR shot does. An empty "
+                        "matte (a plate with no edit) leaves every pixel untouched: the whole plate's mid-tones set the level.",
             inputs=[
                 io.Image.Input("image", tooltip="The shot in the plate's colour space as the SDR pass made it: the output without an HDR shot."),
-                io.Image.Input("plate", tooltip="The plate's own values, in its colour space."),
+                io.Image.Input("plate", optional=True,
+                               tooltip="The plate's own values, in its colour space. Without it, as without an HDR shot, the "
+                                       "image passes through."),
                 io.Float.Input("grow", default=24.0, min=0.0, max=512.0,
                                tooltip="Plate pixels the matte grows by before what is left counts as untouched: the composite's grow and feather."),
                 io.Mask.Input("mask", optional=True, tooltip="Where the edits changed the shot: the composite's matte."),
@@ -812,8 +815,8 @@ class HDRMatch(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, image, plate, grow, mask=None, hdr=None) -> io.NodeOutput:
-        if hdr is None:
+    def execute(cls, image, grow, plate=None, mask=None, hdr=None) -> io.NodeOutput:
+        if hdr is None or plate is None:
             return io.NodeOutput(image)
         if mask is None:
             logging.info("[Paint a plate] HDR Match: HDR shot kept as made.\n  No matte: no untouched pixels to measure.")
