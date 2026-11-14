@@ -617,6 +617,9 @@ export const FINISH = [
 ];
 export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on
 
+// What to do when a line names a missing model file: the status line adds it after the line, and the log keeps the fact.
+export const missingFileHint = (text) => (/models\/vae_approx/.test(String(text).split("\n")[0]) ? "Run python get_models.py." : "");
+
 export function strokeTarget({ draft, current, tool }) { // where a new stroke goes: "draft", "current" or "new"
   if (draft) return "draft";
   return current?.tool === tool ? "current" : "new";
