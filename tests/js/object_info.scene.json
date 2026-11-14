@@ -1763,22 +1763,6 @@
    "output": [],
    "output_name": []
   },
-  "PaintAPlate_VAEFloat32": {
-   "input": {
-    "required": {
-     "vae_name": [
-      "COMBO",
-      {}
-     ]
-    }
-   },
-   "output": [
-    "VAE"
-   ],
-   "output_name": [
-    "VAE"
-   ]
-  },
   "PreviewAny": {
    "input": {
     "required": {
@@ -2075,6 +2059,28 @@
    ],
    "output_name": [
     "MODEL"
+   ]
+  },
+  "VAEComputeDtype": {
+   "input": {
+    "required": {
+     "vae": [
+      "VAE",
+      {}
+     ],
+     "dtype": [
+      "COMBO",
+      {
+       "default": "default"
+      }
+     ]
+    }
+   },
+   "output": [
+    "VAE"
+   ],
+   "output_name": [
+    "VAE"
    ]
   },
   "VAEDecode": {
