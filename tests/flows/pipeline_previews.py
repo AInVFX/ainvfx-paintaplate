@@ -34,9 +34,10 @@ def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(address + "&memory=small")  # a small card, asked for: the mock's card has 32 GB
     page.wait_for_function(READY, timeout=60000)
-    line = logged(page, "Memory profile small:")
-    U.check(line.startswith("Memory profile small: asked for") and "would choose medium" in line, f"the log names the memory profile and why: {line}")
-    U.check(line.endswith("Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger card"),
+    line = logged(page, "Memory profile: small (") or logged(page, "Memory profile small:")  # the line's two forms
+    U.check(line.startswith(("Memory profile small: asked for", "Memory profile: small (asked for")) and "would choose medium" in line,
+            f"the log names the memory profile and why: {line}")
+    U.check(line.rstrip(".").endswith("Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger card"),
             "a small card: the same line says what it means, in one sentence")
     page.wait_for_timeout(3000)
     U.check(len(posts(port)) == before, "a small card: no model loads at page open (no job is posted)")
@@ -45,7 +46,7 @@ def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(address)
     page.wait_for_function(READY, timeout=60000)
-    U.check(logged(page, "Memory profile medium:") != "", "the mock's 32 GB card: the medium profile")
+    U.check((logged(page, "Memory profile: medium (") or logged(page, "Memory profile medium:")) != "", "the mock's 32 GB card: the medium profile")
     warm = posted(port, before + 2, page)[before:]
     U.check(len(warm) == 2 and all(p["extra_data"] == {"preview_method": "none"} for p in warm),
             f"medium: the two edit models load at page open, and a warm-up asks for no preview: {warm}")
@@ -55,7 +56,7 @@ def run(browser, port, U):
     page.keyboard.press("p")
     U.paint_once(page, "a lantern", [(0.3, 0.5), (0.34, 0.56)])
     page.keyboard.press("Enter")
-    U.wait_log(page, r"window.__lines.some((t) => /: done in [\d.]+ s \(.*\d+ previews?\)$/.test(t))", 120000, "the previews a job received, in its line of the log")
+    U.wait_log(page, r"window.__lines.some((t) => /: done in [\d.]+ s \(.*\d+ previews?\)\.?$/.test(t))", 120000, "the previews a job received, in its line of the log")
     asked = [p["extra_data"] for p in posts(port)[before + 2:] if "patch" in p["outputs"]]
     U.check({"preview_method": "latent2rgb"} in asked, f"a Klein pass asks ComfyUI for its step previews in its own post: {asked}")
     others = [p for p in posts(port)[before + 2:] if "patch" not in p["outputs"]]
