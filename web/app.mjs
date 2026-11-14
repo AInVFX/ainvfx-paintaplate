@@ -12,7 +12,7 @@ import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
 import { asksName, eraseCheck, coreBox, writerBoxes, DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
-  erasePrompt, erasesPaint, leftHint, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
+  erasePrompt, erasesPaint, leftHint, leftLines, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
 import { lightPlanCaption, PLAN_GREY } from "./logic.mjs"; // the edit path: a relight's light plan
@@ -2082,19 +2082,15 @@ async function generate(edit) {
     if (!alive()) return;
     // a relight shows the frame as the export will make it: Klein's light on the plate's own detail
     edit.patch = await loadImage(viewUrl(outputFile("edit", full, light ? "relit" : "patch")));
-    if (edit.tool === "erase") { // an erase that left its object says so, and its shot does not render (logic.eraseCheck)
+    if (edit.tool === "erase") { // the check after an erase (logic.eraseCheck): an object it finds still there asks first (heldBack)
       const at = p.prev, after = snap(before, at), px = (c) => c.getContext("2d").getImageData(0, 0, at[0], at[1]).data;
       after.getContext("2d").drawImage(edit.patch, 0, 0, at[0], at[1]);
       const check = eraseCheck(px(after), px(snap(before, at)), px(maskAt(edit, at)), at[0], at[1]);
+      if (check.left && !(await heldBack(edit, check, alive))) return;
+      if (!alive()) return;
       const said = check.changed === null ? "" : `${Math.round(check.changed * 100)}% of it changed`; // tests/gpu_matrix.py reads « (N% of it changed) »
       const held = check.edges === null ? "" : `, its edges held at ${check.edges.toFixed(2)}`;
-      if (check.left) { // it has no result: Generate runs it again once its words, its strokes or its seed change
-        Object.assign(edit, { patch: null, preview: null, latent: null, state: "failed", left: true, force: false });
-        S.running = null;
-        recompose(); historyUI(); render(); timelineUI();
-        return told(`Edit ${num(edit)} removed nothing: the object is still on the first frame (${said})${held}. Its shot does not render`, leftHint(edit.prompt), "error");
-      }
-      if (said) log(`Edit ${num(edit)}: the object left the first frame (${said})${held}`);
+      if (said && !check.left) log(`Edit ${num(edit)}: the object left the first frame (${said})${held}`);
     }
     Object.assign(edit, { preview: null, latent: null, state: "done", version: ++S.vers, force: false, kept: undefined }); // versions are unique: a kept result never meets a new one
     edit.foot = footprint(edit);
@@ -2117,6 +2113,31 @@ async function generate(edit) {
   }
 }
 
+
+// An erase that the check holds back (logic.eraseCheck, leftLines). History's row is marked as the question opens: tests/ui_live.py
+// ends a GPU case on #history li[data-left], so a case that nobody watches never waits on the dialog. The first frame shows
+// Klein's result under the question, under a version of its own, so no earlier render shows there. « Render anyway » (Enter)
+// keeps that first frame: true, and generate goes on to its shot, which takes the mark away. Cancel (Esc) drops the result:
+// Generate runs the erase again once its words, its strokes or its seed change. A question that is open (the OCIO one) is
+// answered first; another pass of this edit, or its removal, drops this question (`current`).
+async function heldBack(edit, check, alive) {
+  const lines = leftLines(num(edit), check), patch = edit.patch, current = () => alive() && edit.patch === patch;
+  Object.assign(edit, { preview: null, latent: null, state: "failed", left: true, force: false, version: ++S.vers });
+  S.running = null;
+  recompose(); historyUI(); render(); timelineUI();
+  log(lines.fact, "error");
+  const anyway = await ask(lines.question, "Render anyway", { enter: true, still: current });
+  if (!current()) return false;
+  if (!anyway) {
+    edit.patch = null;
+    recompose(); historyUI(); render(); timelineUI();
+    status(`${lines.fact}. ${leftHint(edit.prompt)}`, "hint");
+    return false;
+  }
+  edit.left = false;
+  log(lines.rendered);
+  return true;
+}
 
 function editSettings(edit, size, pass) { // steps, denoise, and the growth and edge of the mask, for one Klein pass at `size`
   const zone = edit.tool === "paint"; // paint may change a zone around its strokes: room for an explosion and its glow
@@ -3535,12 +3556,26 @@ async function setPlateSpace(cs, asked = false) { // the plate's colour space (R
 }
 
 function regenerated() { return S.edits.filter((e) => e.on && e.state === "done").length; } // the edits a new colour space or config regenerates
+// The page's one question dialog (#ask): `text`, then Cancel and the button `yes`. It resolves true for `yes`, false for Cancel
+// or Esc. Enter chooses the button that has the focus: Cancel, or `yes` when `enter` is true. One question at a time: a held-back
+// erase can ask while the OCIO question is open, so a question that comes then waits for that answer, and is dropped (false)
+// when `still()` no longer holds by its turn.
+let asking = Promise.resolve();
+function ask(text, yes, { enter = false, still = () => true } = {}) {
+  const turn = asking.then(() => still() && new Promise((answer) => {
+    const d = $("#ask"), ok = $("#ask-yes");
+    $("#ask-text").textContent = text;
+    ok.textContent = yes;
+    d.returnValue = "";
+    d.onclose = () => answer(d.returnValue === "yes");
+    d.showModal();
+    if (enter) ok.focus();
+  }));
+  asking = turn.catch(() => false);
+  return turn;
+}
 function askRemake(what, made, change) { // an OCIO change that regenerates asks first: Continue goes on, Cancel or Esc changes nothing
-  const d = $("#ask");
-  $("#ask-text").textContent = remakeQuestion(what, made);
-  d.returnValue = "";
-  d.onclose = () => { if (d.returnValue === "yes") change(); };
-  d.showModal();
+  ask(remakeQuestion(what, made), "Continue").then((yes) => yes && change());
 }
 
 async function setConfig(name, asked = false) { // RV's Change Config: the viewer and the workflows use another OCIO config

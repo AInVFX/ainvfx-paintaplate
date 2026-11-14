@@ -617,6 +617,16 @@ export function eraseCheck(after, before, mask, w, h) {
 export const leftHint = (words) =>
   (words ? "Describe it with other words, then Generate, or press Ctrl+Enter for another seed." : "Type its name in the prompt bar, then Generate.");
 
+// What the page says when the check holds an erase back. The check can be wrong on a thin or faint object, or on one behind a
+// fence, so the page asks (Adrien, 13 Nov): `fact` goes to the log once and, after Cancel, to the status line before leftHint;
+// `question` opens the dialog, where « Render anyway » keeps the first frame and renders its shot; `rendered` is the log's
+// line then. A figure the check could not measure (null) is left out.
+export function leftLines(n, { changed, edges }) {
+  const figures = [changed === null ? "" : `${Math.round(changed * 100)}% of it changed`, edges === null ? "" : `edges held at ${edges.toFixed(2)}`];
+  const fact = `Edit ${n}: the object may still be there${figures.some(Boolean) ? ` (${figures.filter(Boolean).join(", ")})` : ""}`;
+  return { fact, question: `${fact}. Render the shot anyway?`, rendered: `Edit ${n}: rendered at your request. The check found the object still there.` };
+}
+
 // A divider's drag as a size the layout can take: never under the panel's least, and never leaving the stage under its own
 // least while the window has room. `kind` "side" sizes across the window's width, "log" down its height; `around` is what
 // the fixed parts take on that axis (the tools column, or the top bar and the log's status row).
