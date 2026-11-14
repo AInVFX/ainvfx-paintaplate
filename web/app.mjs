@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { asksName, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, keySlots, leftHint, leftLines, lightColor, logLevel, moveKey, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, writerSaw, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, writerBoxes } from "./logic.mjs";
+import { asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, keySlots, leftHint, leftLines, lightColor, logLevel, moveKey, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, writerSaw, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, writerBoxes } from "./logic.mjs";
 import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -2038,7 +2038,7 @@ async function generate(edit) {
   cancel("warm"); // an edit never waits for the warm-up: what it needs loads now
   S.running = edit;
   edit.saw = activeBefore(edit).map(record); // the edits under it as it starts: a change to them restarts it (rebuild)
-  Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false, editAsked: false });
+  Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false, leftWhy: null, editAsked: false });
   recompose(); historyUI(); render();
   log(`Edit ${num(edit)}: ${NAME[edit.tool]} "${edit.prompt || ""}", seed ${edit.seed}${edit.tool === "erase" ? `, whole object ${edit.whole ? "on" : "off"}` : ""}, ${painted(edit)} stroke${painted(edit) === 1 ? "" : "s"}, over ${edit.saw.length} edit${edit.saw.length === 1 ? "" : "s"}.`);
   try {
@@ -2088,14 +2088,15 @@ async function generate(edit) {
     if (!alive()) return;
     // a relight shows the frame as the export will make it: Klein's light on the plate's own detail
     edit.patch = await loadImage(viewUrl(outputFile("edit", full, light ? "relit" : "patch")));
-    if (edit.tool === "erase") { // the check after an erase (logic.eraseCheck): an object it finds still there asks first (heldBack)
+    if (edit.tool === "erase") { // the check after an erase (logic.eraseCheck): an object it finds still there, or an area around it that changed too much, asks first (heldBack)
       const at = p.prev, after = snap(before, at), px = (c) => c.getContext("2d").getImageData(0, 0, at[0], at[1]).data;
       after.getContext("2d").drawImage(edit.patch, 0, 0, at[0], at[1]);
-      const check = eraseCheck(px(after), px(snap(before, at)), px(maskAt(edit, at)), at[0], at[1]);
-      if (check.left && !(await heldBack(edit, check, alive))) return;
+      const reach = Math.round(at[0] / EDIT_GROW) + QUICK.feather; // the band the edit reaches beyond the object, as editSettings grows its mask at this size
+      const check = eraseCheck(px(after), px(snap(before, at)), px(maskAt(edit, at)), at[0], at[1], reach);
+      if (check.why && !(await heldBack(edit, check, alive))) return;
       if (!alive()) return;
       const said = [check.changed === null ? "" : `${Math.round(check.changed * 100)}% of it changed`, check.edges === null ? "" : `edges held at ${check.edges.toFixed(2)}`];
-      if (said[0] && !check.left) log(`Edit ${num(edit)}: the object left the first frame (${said.filter(Boolean).join(", ")}).`); // tests/gpu_matrix.py reads « (N% of it changed »
+      if (said[0] && !check.left) log(`Edit ${num(edit)}: the object left the first frame (${said.filter(Boolean).join(", ")}).${beyondDetail(check)}`); // tests/gpu_matrix.py reads « (N% of it changed »
     }
     Object.assign(edit, { preview: null, latent: null, state: "done", version: ++S.vers, force: false, kept: undefined }); // versions are unique: a kept result never meets a new one
     edit.foot = footprint(edit);
@@ -2127,7 +2128,7 @@ async function generate(edit) {
 // answered first; another pass of this edit, or its removal, drops this question (`current`).
 async function heldBack(edit, check, alive) {
   const lines = leftLines(num(edit), check), patch = edit.patch, current = () => alive() && edit.patch === patch;
-  Object.assign(edit, { preview: null, latent: null, state: "failed", left: true, force: false, version: ++S.vers });
+  Object.assign(edit, { preview: null, latent: null, state: "failed", left: true, leftWhy: check.why, force: false, version: ++S.vers });
   S.running = null;
   recompose(); historyUI(); render(); timelineUI();
   log(lines.fact);

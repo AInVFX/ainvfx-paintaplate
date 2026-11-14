@@ -39,5 +39,6 @@ def run(browser, port, U):
     U.check(not any(ASK in t for t in lines) and any("Klein edit preview" in t for t in lines),
             "the page does not ask for the object's name: Klein runs")
     U.check(bool(row) and "failed" not in row[0] and row[1] == "", f"History's row is not marked ({row})")
+    U.check(any("Around the object: " in t and "% changed" in t for t in lines), "the log gives what changed around the object, as a detail line")
     U.no_errors(errors, "after an erase whose writer named another object")
     page.close()

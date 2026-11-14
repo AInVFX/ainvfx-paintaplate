@@ -112,14 +112,6 @@ class PageRules(unittest.TestCase):
 
 
 class Beyond(unittest.TestCase):
-    def test_the_band_that_the_edit_reaches(self):
-        import numpy as np
-        p, mask = probe(), np.zeros((6, 10), bool)
-        mask[2:4, 8:10] = True  # against the right edge: nothing wraps to the left one
-        self.assertEqual(p.grown(mask, 2).sum(), 6 * 4)
-        self.assertFalse(p.grown(mask, 2)[:, :6].any())
-
-    @unittest.skipUnless(os.environ.get("PAINTAPLATE_FIXTURES"), "PAINTAPLATE_FIXTURES is not set")
     def test_a_removal_beyond_the_object(self):
         # real first frames at 768 x 432 (tests/js/edit_check.test.mjs): an erase of the barn that also took the fence's upper
         # rail, and one that did not, against the frame before and the page's mask of the barn; the edit's reach is 22 px
@@ -128,9 +120,11 @@ class Beyond(unittest.TestCase):
         p, d = probe(), os.path.join(os.environ["PAINTAPLATE_FIXTURES"], "edit_check")
         read = lambda name, mode="RGB": np.asarray(Image.open(os.path.join(d, f"{name}.png")).convert(mode))  # noqa: E731
         frame, barn = read("horse_frame0"), read("horse_barn_mask", "L") > 127
-        changed, edges = p.beyond(read("probe_crop"), frame, barn, 22)
+        crop = p.check(read("probe_crop"), frame, barn, 22)
+        self.assertEqual(crop["why"], "beyond")  # over 20% of the band changed: the page holds it back
+        changed, edges = p.beyond(crop)
         self.assertTrue(changed > 0.2 and edges < 0.8, (changed, edges))
-        changed, edges = p.beyond(read("probe_page"), frame, barn, 22)
+        changed, edges = p.beyond(p.check(read("probe_page"), frame, barn, 22))
         self.assertTrue(changed < 0.02 and edges > 0.9, (changed, edges))
 
 

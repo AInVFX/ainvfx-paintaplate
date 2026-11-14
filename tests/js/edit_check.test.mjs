@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { eraseCheck, objectLeft } from "../../web/logic.mjs";
+import { bandBeyond, BEYOND, eraseCheck, objectLeft } from "../../web/logic.mjs";
 import { png } from "./edit_png.mjs";
 
 const w = 64, h = 32;
@@ -77,4 +77,31 @@ test("real first frames: an object that stayed is left, one that went is gone", 
     const check = eraseCheck(after.data, before.data, mask.data, before.w, before.h);
     assert.equal(check.left, left, `${name}: ${JSON.stringify(check)}`);
   }
+});
+
+test("the band beyond the object: the mask grown as a square by the reach, without the mask, never past the frame", () => {
+  const w = 8, h = 6, mask = new Uint8ClampedArray(w * h * 4), on = [];
+  mask.fill(255, 2 * w * 4, (2 * w + 1) * 4); // one pixel, at x 0 and y 2
+  const band = bandBeyond(mask, w, h, 1);
+  for (let i = 0; i < w * h; i++) if (band[i * 4] === 255) on.push([i % w, Math.floor(i / w)]);
+  assert.deepEqual(on, [[0, 1], [1, 1], [1, 2], [0, 3], [1, 3]]);
+});
+
+test("an erase that changed the whole area around its object is held back; one that kept it passes", () => {
+  const W = 40, H = 20, grey = (v) => new Uint8ClampedArray(W * H * 4).fill(v), mask = grey(0), inside = grey(100);
+  for (let y = 5; y < 15; y++) for (let x = 15; x < 25; x++) { mask.fill(255, (y * W + x) * 4, (y * W + x) * 4 + 4); inside.fill(160, (y * W + x) * 4, (y * W + x) * 4 + 3); }
+  const kept = eraseCheck(inside, grey(100), mask, W, H, 4), took = eraseCheck(grey(160), grey(100), mask, W, H, 4);
+  assert.deepEqual([kept.why, kept.beyond, took.why, took.beyond], [null, 0, "beyond", 1]);
+  assert.deepEqual(Object.keys(eraseCheck(inside, grey(100), mask, W, H)), ["changed", "edges", "left"]); // no reach: the object alone
+});
+
+test("real first frames: only the erase that removed a fence with the barn changed over 20% of the area around it", { skip: !process.env.PAINTAPLATE_FIXTURES && "PAINTAPLATE_FIXTURES is not set" }, () => {
+  const dir = join(process.env.PAINTAPLATE_FIXTURES, "edit_check"), read = (name) => png(join(dir, `${name}.png`));
+  const reach = Math.round(768 / 48) + 6; // the band the edit reaches at the edit preview's size (app.generate)
+  for (const [name, [frame, object]] of Object.entries(CASES)) {
+    const check = eraseCheck(read(name).data, read(frame).data, read(object).data, 768, 432, reach);
+    if (name === "probe_crop") assert.ok(check.why === "beyond" && check.beyond > 0.3 && check.beyondEdges < 0.8, `${name}: ${JSON.stringify(check)}`);
+    else assert.ok(check.beyond < 0.07 && check.why !== "beyond", `${name}: ${JSON.stringify(check)}`);
+  }
+  assert.equal(BEYOND, 0.2);
 });

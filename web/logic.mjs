@@ -650,12 +650,42 @@ export function edgesHeld(after, before, mask, w, h) {
   return n < 16 || va <= 0 || vb <= 0 ? null : (sab - (sa * sb) / n) / Math.sqrt(va * vb);
 }
 
-// The check after an erase, one pure function for the page and for the tests on a GPU: the first frame after the edit
-// (`after`), the frame under it (`before`) and the object's mask, all three RGBA at w x h. { changed, edges, left }.
-export function eraseCheck(after, before, mask, w, h) {
-  const changed = erasedShare(after, before, mask, w, h, { levels: 24 }), edges = edgesHeld(after, before, mask, w, h);
-  return { changed, edges, left: objectLeft({ changed, edges }) };
+// The band that an erase reaches beyond its object: the object's mask grown by `reach` pixels each way, as a square (along
+// the rows, then the columns, never past the frame's edge), without the mask itself. The edit's mask grows by about as much
+// before Klein's pass (app.editSettings: grow, then feather). mask: RGBA at w x h, painted where its red is 128 or more.
+// Returns RGBA, white in the band, as erasedShare and edgesHeld read a mask.
+export function bandBeyond(mask, w, h, reach) {
+  const m = new Uint8Array(w * h), rows = new Uint8Array(w * h), grown = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) m[i] = mask[i * 4] >= 128 ? 1 : 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (m[y * w + x]) rows.fill(1, y * w + Math.max(0, x - reach), y * w + Math.min(w - 1, x + reach) + 1);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (rows[y * w + x]) for (let k = Math.max(0, y - reach); k <= Math.min(h - 1, y + reach); k++) grown[k * w + x] = 1;
+  const band = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) if (grown[i] && !m[i]) band.fill(255, i * 4, i * 4 + 4);
+  return band;
 }
+
+// An erase that took more than its object: Klein can remove a neighbour with it, as a fence in front of a barn. On the probes'
+// results on horse.mp4 at the edit preview's size (768 x 432, a band of 22 px), the result that removed the fence with the
+// barn moved 32% of the band's cells by more than 24 levels; every other result, 6.1% at most. The mock's Klein moves 3.5
+// to 16.4% there. So an erase is held back when over 20% of the band beyond its object changed.
+export const BEYOND = 0.2;
+
+// The check after an erase, one pure function for the page and for the tests on a GPU: the first frame after the edit
+// (`after`), the frame under it (`before`) and the object's mask, all three RGBA at w x h. { changed, edges, left }. With
+// `reach`, the band beyond the object in pixels (bandBeyond), it also gives that band's two measures and why the erase is
+// held back: « object » when the object may still be there, « beyond » when over BEYOND of the band changed, else null.
+export function eraseCheck(after, before, mask, w, h, reach = 0) {
+  const changed = erasedShare(after, before, mask, w, h, { levels: 24 }), edges = edgesHeld(after, before, mask, w, h);
+  const left = objectLeft({ changed, edges });
+  if (!(reach > 0)) return { changed, edges, left };
+  const band = bandBeyond(mask, w, h, reach);
+  const beyond = erasedShare(after, before, band, w, h, { levels: 24 }), beyondEdges = edgesHeld(after, before, band, w, h);
+  return { changed, edges, left, beyond, beyondEdges, why: left ? "object" : beyond !== null && beyond > BEYOND ? "beyond" : null };
+}
+
+// The log's detail line under an erase that passed the check: what changed around its object (eraseCheck's band).
+export const beyondDetail = ({ beyond, beyondEdges }) => (beyond === null || beyond === undefined ? "" :
+  `\n  Around the object: ${Math.round(beyond * 100)}% changed${beyondEdges === null ? "" : `, edges held at ${beyondEdges.toFixed(2)}`}.`);
 
 // What to do next, for the status line: an object with no name gets one; a named object gets other words or another seed.
 export const leftHint = (words) =>
@@ -665,7 +695,14 @@ export const leftHint = (words) =>
 // fence, so the page asks: `fact`, a warning, goes to the log once and, after Cancel, to the status line before leftHint;
 // `question` opens the dialog, where « Render anyway » keeps the first frame and renders its shot; `rendered` is the log's
 // line then. A figure the check could not measure (null) is left out.
-export function leftLines(n, { changed, edges }) {
+export function leftLines(n, check) {
+  if (check.why === "beyond") { // the object went, and the area around it changed too much: « of that area », so no reader takes it for the object's figure
+    const figures = [`${Math.round(check.beyond * 100)}% of that area changed`, check.beyondEdges === null ? "" : `edges held at ${check.beyondEdges.toFixed(2)}`];
+    const around = `the erase also changed the area around the object (${figures.filter(Boolean).join(", ")})`;
+    return { fact: `Warning: edit ${n}, ${around}.`, question: `Edit ${n}: ${around}. Render the shot anyway?`,
+      rendered: `Edit ${n}: kept at your request. The check found the area around the object changed.` };
+  }
+  const { changed, edges } = check;
   const figures = [changed === null ? "" : `${Math.round(changed * 100)}% of it changed`, edges === null ? "" : `edges held at ${edges.toFixed(2)}`];
   const there = `the object may still be there${figures.some(Boolean) ? ` (${figures.filter(Boolean).join(", ")})` : ""}`;
   return { fact: `Warning: edit ${n}, ${there}.`, question: `Edit ${n}: ${there}. Render the shot anyway?`,
