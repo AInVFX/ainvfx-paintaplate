@@ -40,4 +40,4 @@ class LeavingPiece(unittest.TestCase):
         out, summary = m.follow_matte(sam, len(sam), sam[0], shot=shot, base=base, element=shown[0].astype(np.float32))
         held = [int(((out[t] > 0.5) & shown[t]).sum()) for t in range(70, 106)]
         self.assertEqual(max(held), 0, held)  # at the commit before: a strip inside the margin
-        self.assertIn("what left the object's place", summary)
+        self.assertIn("\n  Removed: pieces that left the object's place, on ", summary)

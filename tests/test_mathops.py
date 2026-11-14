@@ -228,10 +228,10 @@ class ResizeTo(unittest.TestCase):
         self.assertEqual(out[:, :, :12].max(), 0)  # what the shot did not change stays out
         self.assertEqual(out[:, :, 80:].max(), 0)  # the stray object and the changes around it are left out
         self.assertIn("on 8 of 12", summary)
-        self.assertIn("left out", summary)
+        self.assertIn("\n  Removed: ", summary)
         held, summary = m.follow_matte(np.zeros((0, h, w), np.float32), n, first)  # SAM returned no mask
         self.assertTrue((held == (first > 0.5)).all())
-        self.assertIn("no mask", summary)
+        self.assertIn("\n  Held: first-frame mask, on every frame.", summary)
         part, _ = m.follow_matte(sam[:3], n, first)  # fewer masks than frames: the last matte holds
         self.assertTrue((part[11] == part[2]).all())
         erase, start = np.zeros((n, h, w), np.float32), np.zeros((h, w), np.float32)  # an erase: a gap, then further on
@@ -383,7 +383,7 @@ class FollowMatteRecord(unittest.TestCase):
             again = mathops.replay(os.path.join(d, files[0]))
         self.assertEqual((again["masks"].shape, again["shot"].shape, again["n"]), ((n, 90, 320), (n, 90, 320, 3), n))
         small, said = mathops.follow_matte(**again)
-        self.assertEqual(said.split(";")[0], summary.split(";")[0])  # found on as many frames
+        self.assertEqual(said.split("\n")[0], summary.split("\n")[0])  # the headline: tracked on as many frames
         for t in range(n):  # the same share of the frame, at a third of the size
             self.assertAlmostEqual(float(small[t].mean()), float(out[t].mean()), delta=0.01)
 
@@ -500,7 +500,7 @@ class FollowMatteKeepsThePlate(unittest.TestCase):
         area, far, summary = self.follow(brighter)
         self.check(area, far)
         self.assertLess(float(area[[9, 20, 31]].max()), 1.25 * float(np.median(area)))  # those frames as their neighbours
-        self.assertRegex(summary, r"largest matte is 1\.\d times the object, on frame \d+$")  # reported, with no warning
+        self.assertNotIn("Warning:", summary)  # check() bounds the largest matte against the object
 
     def test_4_the_shot_is_softer_than_the_plate(self):
         self.check(*self.follow(lambda shot, rng: self.noisy(ndimage.gaussian_filter(shot, (0, 1.5, 1.5, 0)), rng))[:2])
@@ -514,7 +514,7 @@ class FollowMatteKeepsThePlate(unittest.TestCase):
             return shot
         area, far, summary = self.follow(flash)
         self.check(area, far)
-        self.assertIn("brought back", summary)
+        self.assertIn("\n  Reduced: matte over 2x the frames around it, on ", summary)
 
     def test_a_shot_that_differs_everywhere_with_no_tracker_adds_nothing(self):
         area, far, _ = self.follow(lambda shot, rng: np.clip(self.noisy(shot, rng) + 0.14, 0, 1), tracker=False)
@@ -526,7 +526,7 @@ class FollowMatteKeepsThePlate(unittest.TestCase):
         stray[:, 10:20, 30:50] = 1  # what the tracker found by itself, from an empty first-frame mask
         out, summary = m.follow_matte(stray, n, np.zeros((h, w), np.float32), shot=shot, base=np.zeros_like(shot))
         self.assertEqual(float(out.max()), 0.0)
-        self.assertIn("left out", summary)
+        self.assertIn("\n  Removed: ", summary)
 
     def test_a_large_matte_is_reported_with_a_warning(self):
         n, h, w = 6, 60, 120
@@ -534,7 +534,8 @@ class FollowMatteKeepsThePlate(unittest.TestCase):
         first[10:50, 10:100] = 1  # the whole paint zone, which holds when the tracker returns nothing
         element[30:36, 20:30] = 1  # what the edit changed: 60 px
         _, summary = m.follow_matte(np.zeros((0, h, w), np.float32), n, first, element=element)
-        self.assertRegex(summary, r"largest matte is 60\.0 times the object, on frame 0 \(warning: above 3")
+        self.assertEqual(summary.split("\n")[:3], ["tracked on 0 of 6 frames.", "  Warning: matte up to 60.0x the object at frame 0. Check the composite there.",
+                                                    "  Held: first-frame mask, on every frame."])
 
 
 class FollowMatteBehindThePlate(unittest.TestCase):
@@ -579,8 +580,8 @@ class FollowMatteBehindThePlate(unittest.TestCase):
             self.assertGreaterEqual(int((matte[t] & shown[t]).sum()), (0.9 if t >= 94 else 0.5) * int(shown[t].sum()), f"frame {t}")
         near = m.dilate(shown.astype(np.uint8), 2) > 0
         self.assertEqual(int((matte[11:] & ~near[11:]).sum()), 0)  # and nothing further than 2 px from the object, once the tracker is on it
-        self.assertIn("stood in front", summary)
-        self.assertRegex(summary, r"largest matte is \d\.\d times the object, on frame \d+$")  # reported, with no warning
+        self.assertIn("\n  Removed: areas where the plate stands in front of the object, on ", summary)
+        self.assertNotIn("Warning:", summary)
 
 
 class FollowMatteLeftItsPlace(unittest.TestCase):
@@ -620,8 +621,8 @@ class FollowMatteLeftItsPlace(unittest.TestCase):
             self.assertGreaterEqual(int((matte[t] & shown[t]).sum()), 0.9 * int(shown[t].sum()), f"frame {t}")
         self.assertEqual(int(matte[80:].sum()), 0)  # once it has left its place, nothing: the plate shows there (at 9aa332a the matte went with it to the last frame)
         self.assertEqual(int(matte[(slice(None),) + self.FRONT].sum()), 0)  # and never what stands in front
-        self.assertIn("what left the object's place", summary)
-        self.assertRegex(summary, r"largest matte is \d\.\d times the object, on frame \d+$")
+        self.assertIn("\n  Removed: pieces that left the object's place, on ", summary)
+        self.assertNotIn("Warning:", summary)
 
 
 class FollowMatteErasedBehindThePlate(unittest.TestCase):
@@ -641,7 +642,7 @@ class FollowMatteErasedBehindThePlate(unittest.TestCase):
         self.assertEqual(int(matte[58:80].sum()), 0)  # hidden, then not found: nothing held at a place of the frame (at 9aa332a the last matte stayed there to the last frame)
         for t in list(range(1, 56)) + list(range(80, n)):  # the tracker's mask before, and again from the frame it comes back, 39% of the width away
             self.assertTrue(np.array_equal(matte[t], shown[t]), f"frame {t}")
-        self.assertIn("stood in front", summary)
+        self.assertIn("\n  Removed: areas where the plate stands in front of the object, on ", summary)
 
     def test_an_erased_object_that_moves_by_itself_is_followed(self):
         rng = np.random.default_rng(13)
@@ -655,7 +656,7 @@ class FollowMatteErasedBehindThePlate(unittest.TestCase):
         out, summary = m.follow_matte(sam, n, sam[0], base=plate, zone=1 / 16)
         for t in range(n):  # the plate changes where it goes, and it is still the object
             self.assertGreaterEqual(int(((out[t] > 0.5) & (sam[t] > 0.5)).sum()), 0.9 * int(sam[t].sum()), f"frame {t}")
-        self.assertIn("moved in the scene", summary)
+        self.assertIn("\n  Object moves from frame ", summary)
 
     def test_a_piece_of_the_mask_on_what_stands_in_front_is_left_out(self):
         """12 Nov 2026, 1.11.10: while the horse hid the erased barn, SAM 3.1 also returned 43 to 55 px on the horse's
@@ -678,7 +679,7 @@ class FollowMatteErasedBehindThePlate(unittest.TestCase):
         for t in range(42, 51):
             self.assertEqual(int((matte[t] & front[t]).sum()), 0, f"frame {t}")  # at f752c2f: 60 px on what stands in front
             self.assertTrue(np.array_equal(matte[t], (sam[t] > 0.5) & ~front[t]), f"frame {t}")  # the object's part in view is kept whole
-        self.assertNotIn("moved in the scene", summary)
+        self.assertNotIn("Object moves from frame", summary)
 
     def test_a_recording_keeps_the_frames_of_an_erase(self):
         import tempfile

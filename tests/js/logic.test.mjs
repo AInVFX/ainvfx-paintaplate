@@ -615,16 +615,7 @@ test("strokes replay in the order they were made; SAM's object comes last, cut b
   assert.deepEqual(viewerRules.replayOrder([], true), [{ sam: true, cuts: [] }]);
 });
 
-// ---------- The pipeline, round 1: the paint matte's report, the memory profile ----------
-import { matteLargest } from "../../web/logic.mjs";
-
-test("the paint matte's report: its largest size against the object, the frame, and a warning above 3 times", () => {
-  assert.deepEqual(matteLargest("SAM 3.1 found the object on 121 of 121 frames; the largest matte is 1.2 times the object, on frame 31"), { ratio: 1.2, frame: 31, warn: false });
-  assert.deepEqual(matteLargest("SAM 3.1 returned no mask: the first-frame mask holds on every frame; the largest matte is 60.0 times the object, on frame 0 (warning: above 3, check the composite on that frame)"), { ratio: 60, frame: 0, warn: true });
-  assert.equal(matteLargest("SAM 3.1 found the object on 6 of 12 frames"), null, "a summary without the report");
-  assert.equal(matteLargest(undefined), null);
-});
-
+// ---------- The pipeline, round 1: the memory profile (the paint matte's report: matte_summary.test.mjs) ----------
 import { readFileSync as readFlow } from "node:fs";
 import { MEMORY, memoryProfile, fillWorkflow as fillFor, parseWorkflow as parseFor } from "../../web/logic.mjs";
 

@@ -42,7 +42,7 @@ class ErasedPlace(unittest.TestCase):
         self.assertEqual(int(matte[(slice(9, None),) + front].sum()), 0)  # what stands in front is never erased
         held = [int((matte[t] & shown[t]).sum()) / int(shown[t].sum()) for t in range(81, 83)]
         self.assertGreaterEqual(min(held), 0.6, held)  # at e347bf0: nothing until SAM is back on frame 83
-        self.assertIn("an erased object stands still", summary)
+        self.assertIn("\n  Object stands still: its place of frame 0 added where the plate shows it, on ", summary)
         print(f"erased place: frames 81 and 82 hold {min(held):.2f} to {max(held):.2f} of the barn in view, with no mask from SAM")
 
 

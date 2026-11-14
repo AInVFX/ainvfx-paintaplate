@@ -37,7 +37,7 @@ class PaintZone(unittest.TestCase):
             self.assertLess(abs(int(areas[t + 1]) - int(areas[t])), 0.3 * max(int(areas[t]), int(areas[t + 1])), (t, areas[:14]))
         for t in range(len(sam)):  # and the object is in the matte on every frame
             self.assertGreaterEqual(int((matte[t] & obj[t]).sum()), 0.95 * int(obj[t].sum()), t)
-        self.assertIn("held the paint zone it was given", summary)
+        self.assertIn("(SAM mask held the paint zone).", summary)
         print(f"paint zone: frames 0 to 12 at most {areas[:13].max() / tight:.2f} times the tracker's first tight mask")
 
     def test_a_first_mask_that_is_the_object_is_not_a_zone(self):
