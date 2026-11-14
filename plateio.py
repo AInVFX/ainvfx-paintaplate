@@ -130,7 +130,8 @@ def sequence_frames(folder: str) -> tuple[list[str], int, list[int]]:
         num = int(m.group("num")) if m else 0
         groups.setdefault(key, []).append((num, full))
     if not groups:
-        raise FileNotFoundError(f"No image frames found in {folder if not pattern else os.path.join(folder, pattern_of(*pattern[1:], 4))}")
+        raise FileNotFoundError(f"Image sequence not found: {folder if not pattern else os.path.join(folder, pattern_of(*pattern[1:], 4))}. "
+                                "Check the folder and the frame numbers.")
     key, best = max(groups.items(), key=lambda kv: len(kv[1]))
     if key[1] == "_":  # core Save Image's counter names (f_00001_.png): numbers count files, not frames
         return [p for _, p in sorted(best)], 1, []
@@ -205,7 +206,7 @@ def exr_info(path: str) -> dict:
 
 def probe_video(path: str) -> dict:
     if av is None:
-        raise RuntimeError("PyAV is required to read video plates")
+        raise RuntimeError("PyAV missing: video plates cannot be read. Install the pack's requirements.")
     with av.open(path) as c:
         vs = c.streams.video[0]
         cc = vs.codec_context
@@ -269,7 +270,7 @@ def probe_plate(path: str, fps_hint: float = 24.0) -> dict:
         if ext == ".exr":
             spec["exr"] = exr_info(path)
         return spec
-    raise ValueError(f"Unsupported plate: {path}")
+    raise ValueError(f"Plate not supported: {path}. Use a movie, an image or an image sequence.")
 
 
 def guess_color_space(spec: dict) -> str:
@@ -349,7 +350,8 @@ def _place(chans: dict, header: dict, new: dict, keep: np.ndarray | None) -> dic
     px0, py0, px1, py1 = _window(header, "displayWindow")
     h, w = next(iter(new.values())).shape[:2]
     if (h, w) != (py1 - py0 + 1, px1 - px0 + 1):
-        raise ValueError(f"Size mismatch: the frame is {w} x {h}, the display window {px1 - px0 + 1} x {py1 - py0 + 1}")
+        raise ValueError(f"EXR frame size mismatch: frame {w} x {h}, display window {px1 - px0 + 1} x {py1 - py0 + 1}. "
+                         "Check the frame's data and display windows.")
     inside = np.zeros((h, w), bool)  # the display pixels the data window holds
     inside[max(dy0 - py0, 0):max(dy1 - py0 + 1, 0), max(dx0 - px0, 0):max(dx1 - px0 + 1, 0)] = True
     made = np.zeros((h, w), bool)
@@ -389,7 +391,7 @@ def write_exr_like(src_path: str, rgb: np.ndarray, alpha: np.ndarray | None, out
     window outside the display window (overscan) stay the source's.
     """
     if OpenEXR is None:
-        raise RuntimeError("OpenEXR is not installed")
+        raise RuntimeError("OpenEXR missing: EXR frames cannot be written. Install the pack's requirements.")
     with OpenEXR.File(src_path, separate_channels=True) as f:
         parts_out = []
         rgb_done = False
@@ -467,7 +469,7 @@ def _core_frames(path: str, duration: float = 0.0):
     a width off a multiple of 32 padded with a smeared border, the rotation."""
     with av.open(path) as container:
         if not len(container.streams.video):
-            raise ValueError(f"No video stream found in file '{path}'")
+            raise ValueError(f"Plate has no video stream: {path}. Use a movie file that holds video.")
         stream = container.streams.video[0]
         stream.thread_type = "AUTO"
         end_pts = int((0.0 + duration) / stream.time_base)
@@ -509,7 +511,7 @@ def _core_frames(path: str, duration: float = 0.0):
                     turn = int(round(frame.rotation // 90)) % 4 if frame.rotation else 0
                     yield (np.rot90(img, k=turn, axes=(0, 1)) if turn else img), byte8, has_alpha
             except av.error.InvalidDataError:  # core skips the rest of a packet that fails to decode
-                logging.info("Paint a plate: a packet of %s did not decode", path)
+                logging.warning("[Paint a plate] Warning: a packet of %s did not decode.", path)
 
 
 def _put(rgb, alpha, i: int, img, byte8: bool) -> None:
@@ -593,7 +595,7 @@ def decode_frames(files: list, pad_8n1: bool = False, workers: int = 8, each=Non
             each(i)
         got = list(_core_frames(files[i]))
         if len(got) != 1:
-            raise ValueError(f"An image sequence holds one frame per file: {files[i]} has {len(got)}")
+            raise ValueError(f"Image sequence: {files[i]} holds {len(got)} frames, 1 expected. Write one frame per file.")
         return got[0]
     img, byte8, has_alpha = one(0)
     rows = pad_count_8n1(len(files)) if pad_8n1 else len(files)
@@ -604,8 +606,8 @@ def decode_frames(files: list, pad_8n1: bool = False, workers: int = 8, each=Non
     def rest(i):
         img, byte8, has = one(i)
         if has != has_alpha:  # core's join would fail there too
-            raise ValueError(f"{files[i]} {'has' if has else 'lacks'} the alpha that the sequence's first frame "
-                             f"{'lacks' if has else 'has'}")
+            raise ValueError(f"Image sequence: {files[i]} {'has alpha, the first frame has none' if has else 'has no alpha, the first frame has'}. "
+                             "Give every frame the same channels.")
         _put(rgb, alpha, i, img, byte8)
     with ThreadPoolExecutor(max(1, workers)) as pool:
         list(pool.map(rest, range(1, len(files))))
@@ -836,7 +838,7 @@ def encode_still(rgb: np.ndarray, alpha: np.ndarray | None, codec: str, pix_fmt:
     PyAV takes planar float formats as (H, W, C) arrays in RGB order.
     """
     if av is None:
-        raise RuntimeError("PyAV is required")
+        raise RuntimeError("PyAV missing: stills cannot be written. Install the pack's requirements.")
     h, w = rgb.shape[:2]
     if codec == "exr":
         data = rgb.astype(np.float32)
@@ -930,7 +932,7 @@ def write_blank(path: str, width: int, height: int, fps: float, frames: int) -> 
     1920 x 1088 x 121 canvas takes about a second instead of half a minute.
     """
     if av is None:
-        raise RuntimeError("PyAV is required")
+        raise RuntimeError("PyAV missing: blank plates cannot be written. Install the pack's requirements.")
     rate = Fraction(fps).limit_denominator(1001)
     with av.open(path, "w") as out:
         stream = out.add_stream("prores_ks", rate=rate)
@@ -984,7 +986,7 @@ class VideoWriter:
 
     def __init__(self, spec: dict, out_path: str, audio_source: str | None = None):
         if av is None:
-            raise RuntimeError("PyAV is required")
+            raise RuntimeError("PyAV missing: movies cannot be written. Install the pack's requirements.")
         self.spec = spec
         self.notes: list[str] = []
         codec = spec.get("codec", "prores")

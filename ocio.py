@@ -69,10 +69,10 @@ def config(name: str = "") -> OCIO.Config:
     name = name or default_config()
     if name == ENV:
         if not os.environ.get("OCIO"):
-            raise ValueError("The OCIO environment variable is not set")
+            raise ValueError("OCIO config not found: $OCIO is not set. Set it, or choose a built-in config.")
         return OCIO.Config.CreateFromFile(os.environ["OCIO"])
     if name not in {c["name"] for c in configs()}:
-        raise ValueError(f"Unknown OCIO config: {name}")
+        raise ValueError(f"OCIO config not found: {name}. Choose a built-in config, or a config file that exists.")
     return OCIO.Config.CreateFromFile(name)
 
 
@@ -88,7 +88,7 @@ def find(cfg: OCIO.Config, names) -> str | None:
 def model_space(cfg: OCIO.Config) -> str:
     found = find(cfg, MODEL_NAMES)
     if not found:
-        raise ValueError("This OCIO config has no sRGB-encoded Rec.709 space (role texture_paint): the models need it")
+        raise ValueError("OCIO config not usable: no sRGB-encoded Rec.709 space (role texture_paint). Choose a config that has one.")
     return found
 
 
@@ -98,7 +98,7 @@ def real(cfg: OCIO.Config, name: str) -> str:
         return model_space(cfg)
     cs = cfg.getColorSpace(name)
     if cs is None:
-        raise ValueError(f"The OCIO config has no colour space named {name!r}")
+        raise ValueError(f"Colour space not in the OCIO config: {name!r}. Choose one of its colour spaces.")
     return cs.getName()
 
 
@@ -332,7 +332,7 @@ def _gpu(proc, function: str, prefix: str) -> dict:
     tables += [{"sampler": t.samplerName, "kind": "3d", "size": t.edgeLen, "channels": 3, "nearest": near(t), "data": data(t)}
                for t in desc.get3DTextures()]
     if len(list(desc.getUniforms())):
-        raise ValueError("This transform has dynamic properties, which the viewer does not set")
+        raise ValueError("View not supported: its transform has dynamic properties. Choose another view.")
     return {"text": desc.getShaderText(), "function": function, "tables": tables}
 
 
@@ -354,12 +354,12 @@ def shader(name: str, space: str, display: str, view: str, look: str = "") -> di
     cfg = config(name)
     src = real(cfg, space)
     if display not in cfg.getDisplays() or view not in cfg.getViews(display):
-        raise ValueError(f"The OCIO config has no view {view!r} on display {display!r}")
+        raise ValueError(f"View not in the OCIO config: {view!r} on display {display!r}. Choose one of the display's views.")
     lin = OCIO.ROLE_SCENE_LINEAR
     out = OCIO.DisplayViewTransform(src=lin, display=display, view=view)
     if look:
         if cfg.getLook(look) is None:
-            raise ValueError(f"The OCIO config has no look named {look!r}")
+            raise ValueError(f"Look not in the OCIO config: {look!r}. Choose one of its looks.")
         out = OCIO.GroupTransform([OCIO.LookTransform(src=lin, dst=lin, looks=look), out])
     return {"in": _gpu(cfg.getProcessor(OCIO.ColorSpaceTransform(src=src, dst=lin)), "ocioIn", "ocio_in_"),
             "out": _gpu(cfg.getProcessor(out), "ocioOut", "ocio_out_"),

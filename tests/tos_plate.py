@@ -52,7 +52,7 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     first, last = (int(n) for n in a.frames.split("-"))
     if not os.path.isdir(os.path.join(a.comfy, "input")):
-        print(f"Error: ComfyUI's input folder not found: {os.path.join(a.comfy, 'input')}.\n  Give ComfyUI's folder with --comfy.")
+        print(f"ComfyUI's input folder not found: {os.path.join(a.comfy, 'input')}.\n  Give ComfyUI's folder with --comfy.")
         return 1
     folder = os.path.join(a.comfy, "input", FOLDER)
     os.makedirs(folder, exist_ok=True)
@@ -66,7 +66,7 @@ def main(argv=None) -> int:
         try:
             size += fetch(a.url.rstrip("/") + "/" + name(number), path)
         except (OSError, ValueError) as exc:
-            print(f"Error: frame {number} not fetched ({exc}).\n  Run the script again: it fetches only the frames that are missing.")
+            print(f"Frame {number} not fetched ({exc}).\n  Run the script again: it fetches only the frames that are missing.")
             return 1
         got += 1
         if got % 10 == 0:

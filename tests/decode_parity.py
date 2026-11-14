@@ -150,7 +150,7 @@ if __name__ == "__main__":
             for mf in a.max_frames:
                 ok, n, (h, w) = same(InputImpl.VideoFromFile, path, mf)
                 differ += not ok
-                print(f"{os.path.basename(path)}, at most {mf} frames: {'the same bytes' if ok else 'DIFFERENT'}, {n} frames, {w} x {h}")
+                print(f"{os.path.basename(path)}, {mf} frames at most: {'same bytes' if ok else 'different bytes'}, {n} frames, {w} x {h}.")
         for files in sequences(tmp):
             ok, n, (h, w) = same_frames(InputImpl.VideoFromFile, files)
             differ += not ok

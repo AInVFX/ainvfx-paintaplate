@@ -1113,15 +1113,16 @@ def hdr_match(n: int, shot_at, plate_at, changed_at, *, grow: float = 24.0, step
     if stops is None:
         return [np.array(shot_at(i)[..., :3], np.float32) for i in range(n)], {
             "samples": len(shot), "fitted": False,
-            "text": f"{len(shot)} untouched samples, too few mid-tones to measure: the HDR shot as it was made"}
+            "text": f"HDR shot kept as made.\n  Untouched samples: {len(shot):,}, too few mid-tones to measure."}
     fitted, lum = apply_level(shot, stops), plate @ np.array([0.2126, 0.7152, 0.0722], np.float32)
     mid = np.all((fitted > HDR_FLOOR) & (plate > HDR_FLOOR), axis=-1) & (lum >= HDR_MIDTONES[0]) & (lum <= HDR_MIDTONES[1])
     error = float(np.median(np.abs(np.log2(fitted[mid] / plate[mid])))) if mid.any() else float("nan")
     with ThreadPoolExecutor(max(1, workers)) as pool:
         frames = list(pool.map(lambda i: apply_level(shot_at(i), stops), range(n)))
     return frames, {"samples": len(shot), "fitted": True, "stops": [float(x) for x in stops], "error": error,
-                    "text": f"{len(shot)} untouched samples; the level moves by {', '.join(f'{x:+.2f}' for x in stops)} stops "
-                            f"(R, G, B), nothing compressed; median mid-tone error after it {error:.3f} stops"}
+                    "text": f"HDR shot fitted to the plate on {len(shot):,} untouched samples.\n  Level change (R, G, B): "
+                            f"{', '.join(f'{x:+.2f}' for x in stops)} stops.\n  Nothing compressed.\n"
+                            f"  Median mid-tone error after the fit: {error:.3f} stops."}
 
 AP1_TO_REC709 = np.array([[1.70505, -0.62179, -0.08326], [-0.13026, 1.14080, -0.01055], [-0.02400, -0.12897, 1.15297]], np.float32)
 

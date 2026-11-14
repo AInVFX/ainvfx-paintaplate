@@ -23,6 +23,7 @@ import asyncio
 import functools
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -273,14 +274,14 @@ def same_pictures(url, job, other):
 
 
 def versions(stats):
+    """ComfyUI's versions, then its RAM and VRAM: two detail lines of the probe's headline."""
     system, devices = stats.get("system") or {}, stats.get("devices") or []
     names = (("ComfyUI", "comfyui_version"), ("Python", "python_version"), ("PyTorch", "pytorch_version"))
-    parts = [f"{label} {str(system[key]).split()[0]}" for label, key in names if system.get(key)]
-    if system.get("ram_total"):
-        parts.append(f"{system['ram_total'] / GB:.1f} GB of RAM")
+    soft = ", ".join(f"{label} {str(system[key]).split()[0]}" for label, key in names if system.get(key)) or "No version reported"
+    memory = [f"RAM {system['ram_total'] / GB:.1f} GB"] if system.get("ram_total") else []
     if devices and devices[0].get("vram_total"):
-        parts.append(f"{devices[0]['vram_total'] / GB:.0f} GB of VRAM")
-    return ", ".join(parts) or "no version reported"
+        memory.append(f"VRAM {devices[0]['vram_total'] / GB:.0f} GB")
+    return f"{soft}.", ", ".join(memory) + "." if memory else ""
 
 
 async def _beats(job, sampler):
@@ -342,17 +343,18 @@ def main(argv=None):
     try:
         stats, _ = http(f"{url}/system_stats", timeout=10)
     except OSError as exc:
-        say(f"No ComfyUI answers at {url}: {exc}")
+        reason = re.sub(r"^\[Errno -?\d+\] ", "", str(getattr(exc, "reason", exc)))
+        say(f"ComfyUI not answering at {url}: {reason[:1].lower() + reason[1:]}.\n  Start ComfyUI, then run the probe again.")
         return 1
     if a.plate.startswith("blank:"):
         try:
             width, height = (int(side) for side in a.plate[len("blank:"):].split("x"))
         except ValueError:
-            say(f"A blank shot is blank:<width>x<height>, such as blank:1920x1088, not {a.plate}")
+            say(f"Blank shot not understood: {a.plate}.\n  Write blank:<width>x<height>, such as blank:1920x1088.")
             return 1
         made, _ = http(f"{url}/paintaplate/blank", {"width": width, "height": height, "fps": 24, "frames": 121})
         if not isinstance(made, dict) or "path" not in made:
-            say(f"ComfyUI made no blank shot of {width} x {height}: {made}")
+            say(str(made).strip() if isinstance(made, str) and made.strip() else f"Blank shot not made: {width} x {height}.")
             return 1
         a.plate = made["path"]
     st, _ = http(f"{url}/paintaplate/stat?{urllib.parse.urlencode({'path': a.plate, 'config': a.config, 'cs': a.color_space})}")
@@ -368,7 +370,7 @@ def main(argv=None):
     for pair in a.set:
         slot, _, text = pair.partition("=")
         if slot not in slots:
-            say(f"The {a.workflow} workflow has no slot {slot}: its slots are {', '.join(sorted(slots))}")
+            say(f"Slot not in the {a.workflow} workflow: {slot}.\n  Its slots: {', '.join(sorted(slots))}.")
             return 1
         try:
             values[slot] = json.loads(text)
@@ -377,10 +379,13 @@ def main(argv=None):
     prompt = fill(a.workflow, values)
     frames = min(st.get("frames") or 121, a.max_frames or 121)
     copy = st["width"] * st["height"] * frames * 12  # float32 RGB
-    say(f"Open probe: {a.plate} on {url} ({versions(stats)})")
-    say(f"This Python: PyAV {av.__version__}, libavcodec {'.'.join(map(str, av.library_versions['libavcodec']))}. ComfyUI's own Python gives ComfyUI's figures")
-    say(f"Plate: {st.get('kind')} {st.get('codec') or st.get('ext') or ''} {st.get('pix_fmt') or ''}, {st['width']} x {st['height']}, "
-        f"{frames} frames, {values.get('color_space') or st.get('color_space', '')}. One float32 copy of its frames: {copy / GB:.2f} GB")
+    soft, memory = versions(stats)
+    say(f"{'Open probe' if ingest else f'Probe of {a.workflow}'}: {a.plate} on {url}.\n  {soft}" + (f"\n  {memory}" if memory else ""))
+    say(f"This Python: PyAV {av.__version__}, libavcodec {'.'.join(map(str, av.library_versions['libavcodec']))}.\n"
+        "  For ComfyUI's figures, run it with ComfyUI's Python.")
+    kind = {"video": "movie", "sequence": "image sequence", "still": "image"}.get(st.get("kind"), st.get("kind") or "plate")
+    say(f"Plate: {' '.join(filter(None, [st.get('codec') or st.get('ext'), st.get('pix_fmt'), kind]))}, {st['width']} x {st['height']}, "
+        f"{frames} frames, {values.get('color_space') or st.get('color_space', '')}.\n  One float32 copy: {copy / GB:.2f} GB.")
     if a.fresh:
         http(f"{url}/free", {"free_memory": True})
         time.sleep(2)
@@ -420,22 +425,22 @@ def main(argv=None):
     say("\n".join(table(samples, job, job.posted, t1)))
     peak = span(samples, job.posted, t1)[1]
     peak_at = next(t for t, v, _ in samples if v == peak and t <= t1)
-    say(f"Peak: {peak / GB:.1f} GB, {(peak - before[1]) / GB:.1f} GB above the level before the job, or {(peak - before[1]) / copy:.1f} copies "
-        f"of the plate, in {job.node_at(peak_at) or 'the job'}")
+    say(f"Peak RAM: {peak / GB:.1f} GB, in {job.node_at(peak_at) or 'the job'}.\n  Above the level before the job: "
+        f"{(peak - before[1]) / GB:.1f} GB, {(peak - before[1]) / copy:.1f} plate copies.")
     if ended:
         after, stays = samples[-1][1], samples[-1][1] - before[1]
-        say(f"{a.settle:.0f} s after the job: {after / GB:.1f} GB, " + (f"{stays / GB:.1f} GB above the level before, or {stays / copy:.1f} copies"
-                                                                     if stays > 0.05 * GB else "the level before the job"))
+        say(f"RAM {a.settle:.0f} s after the job: {after / GB:.1f} GB, " + (f"{stays / GB:.1f} GB above the level before ({stays / copy:.1f} plate copies)."
+                                                                         if stays > 0.05 * GB else "the level before the job."))
     try:
         most = source.most()
     except OSError:
         most = None
     if most:
-        say(f"The most the process ever held (VmHWM): {most / GB:.1f} GB, " + ("reached during this job" if most > most_before else "reached before this job"))
+        say(f"Process RAM, highest ever (VmHWM): {most / GB:.1f} GB, " + ("during this job." if most > most_before else "before this job."))
     groups = [g for t, _, g in samples if g is not None and job.posted <= t <= t1]
     if groups:
-        say(f"Its cgroup, which also counts the file cache and the other processes (memory.current): {before[2] / GB:.1f} GB before, "
-            f"{max(groups) / GB:.1f} GB at the peak, {samples[-1][2] / GB:.1f} GB at the end")
+        say(f"Cgroup memory (memory.current, with the file cache and the other processes): {before[2] / GB:.1f} GB before, "
+            f"{max(groups) / GB:.1f} GB at the peak, {samples[-1][2] / GB:.1f} GB at the end.")
     if job.cached:
         say(f"{len(job.cached)} of {len(prompt)} nodes came from ComfyUI's cache and did not run ({', '.join(sorted(job.cached, key=lambda n: (len(n), n)))}): "
             "run again with --fresh for a full measure")
@@ -445,7 +450,7 @@ def main(argv=None):
         say(f"The job did not finish: {job.error or 'ComfyUI stopped answering'}, {t1 - job.posted:.1f} s after the post, in "
             f"{job.node_at(t1) or 'the queue'}. The table holds what was read until then")
         return 1
-    say(f"Its first frame and its movie are in ComfyUI's output folder, under {run}" if ingest else f"Its files are in ComfyUI's output folder, under {run}")
+    say(f"Output: first frame and movie in output/{run}." if ingest else f"Output: files in output/{run}.")
     if a.same:
         same, line = same_pictures(url, job.id, a.same.strip("/"))
         say(line)

@@ -80,13 +80,13 @@ class TosPlate(unittest.TestCase):
         comfy, folder = self.comfy_folder()
         code, text = self.run_tool(comfy, "482-483")
         self.assertEqual(code, 1, text)
-        self.assertIn("Error: frame 483 not fetched (HTTP Error 404", text)
+        self.assertIn("Frame 483 not fetched (HTTP Error 404", text)
         self.assertEqual(sorted(os.listdir(folder)), ["05_4a_00482.exr", "CREDIT.txt"])
 
     def test_no_comfyui_folder(self):
         code, text = self.run_tool(tempfile.mkdtemp(), "480-480")
         self.assertEqual(code, 1, text)
-        self.assertIn("Error: ComfyUI's input folder not found: ", text)
+        self.assertIn("ComfyUI's input folder not found: ", text)
 
     def test_load_plate_reads_the_frames_at_their_1920_x_1012(self):
         comfy, folder = self.comfy_folder()
