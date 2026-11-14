@@ -92,7 +92,7 @@ def run(browser, port, U):
     U.wait_log(page, U.added_line("Edit 2: the object may still be there ("), 60000, "edit 2 held back")
     page.wait_for_timeout(500)
     asked = page.evaluate(ASKED)
-    U.check(ocio.startswith("Changing the ") and bool(asked) and asked[0] == ocio and asked[1] == "Change",
+    U.check(ocio.startswith("Changing the ") and bool(asked) and asked[0] == ocio and asked[1] == "Continue",
             f"a question that comes while another is open waits: the OCIO question stays as it was ({asked})")
     page.click("#ask-no")
     page.wait_for_function("() => document.querySelector('#ask').open && document.querySelector('#ask-text').textContent.startsWith('Edit 2: ')", timeout=5000)
