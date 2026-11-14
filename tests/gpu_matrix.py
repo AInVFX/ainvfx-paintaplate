@@ -340,7 +340,7 @@ def read_log(text):
         "live_off": re.findall(r"(?:Warning: live preview off|Live preview is off): ([^\n]*)", text),
         "profile": f"{profile.group(1)} ({'. '.join(x for x in profile.group(2, 3) if x)})" if profile else "not in the log's last 400 lines",
         "mattes": re.findall(r"([A-Z][a-z]+ matte(?: \([^)\n]*\))?: tracked on [^\n]*(?:\n  [^\n]*)*)", text),  # any word before « matte »; the headline and its detail lines (mathops.follow_summary)
-        "seeds": sorted(set(re.findall(r"\bseed (\d+)", text)), key=int),
+        "seeds": sorted(set(re.findall(r"\b[Ss]eed (\d+)\b(?! asked for)", text)), key=int),  # « seed 105, » in a sentence, « Seed 104, » on a detail line
         "announced": {f"v{v} {label}": int(s) for v, label, s in re.findall(r"Render v(\d+): (.+?)(?: \(about |: about )(\d+) s", text)},
         "figures": re.findall(r"((?:Edit \d+:|Warning: edit \d+,) [^\n]*?\(\d+% of it changed[^)\n]*\))", text),  # an erase: how much of the object changed, gone or held back (logic.leftLines)
     }
