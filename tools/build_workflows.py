@@ -485,7 +485,8 @@ def matte():
     """SAM 3.1 follows a painted or erased area through the frames from the first frame, then Follow Matte makes the
     track safe: one matte per frame even when SAM returns none, the last matte where SAM loses the object, and for
     paint every pixel the shot changed near the matte, compared with the plate the shot was made over (`base`). Under a Clean edit it also takes the Clean matte (`erased`)
-    and how far the composite moves its edge (`erased_edge`): there only the SAM mask anchors a change."""
+    and how far the composite moves its edge (`erased_edge`): there only the SAM mask anchors a change. With the plate's first frame number (`first_frame`), the summary names the
+    plate's own frames."""
     g = Graph()
     load, model = plate(g, pad=True)
     frames = g("ImageScale", image=model, upscale_method="area", width=Slot("width", 960),
@@ -503,7 +504,7 @@ def matte():
     clean = g("PaintAPlate_LoadPlate", _title="Clean matte under the paint", path=Slot("erased", ""), max_frames=1024, pad_8n1=False)
     follow = g("PaintAPlate_FollowMatte", masks=masks, first=first, frames=frames, base=under, element=element,
                zone=Slot("zone", 0.0625), threshold=Slot("threshold", 0.1),
-               erased=g("ImageToMask", image=clean, channel="red"), erased_edge=Slot("erased_edge", 0.0))
+               erased=g("ImageToMask", image=clean, channel="red"), erased_edge=Slot("erased_edge", 0.0), first_frame=Slot("first_frame", 1))
     g.link_slot(follow, "base", "follow_base")  # dropped for an erase matte: no shot to compare
     g.link_slot(follow, "element", "follow_element")  # dropped for an erase matte: the object is the first-frame mask
     g.link_slot(follow, "erased", "follow_erased")  # dropped when no Clean edit lies under the paint

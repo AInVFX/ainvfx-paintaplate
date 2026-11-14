@@ -48,18 +48,18 @@ class Form(unittest.TestCase):
 
     def test_example_word_for_word(self):
         text = "Paint matte (640x352): " + m.follow_summary(121, 106, strays=2, added=112, most=30.4, alone=15, moved=1,
-                                                          largest=(33.1, 65), above=(25, 90))
+                                                          largest=(33.1, 64), above=(24, 89))
         self.assertEqual(text, "\n".join([
             "Paint matte (640x352): tracked on 106 of 121 frames.",
             "  Warning: matte above 3x the object from frame 25 to 90 (up to 33.1x at frame 65). Check the composite there.",
             "  Removed: SAM detections too far from the object, on 2 frames.",
             "  Added: areas the shot changed next to the object, on 112 frames (up to 30.4x the SAM mask; 15 frames with no SAM mask).",
-            "  Object moves from frame 1: occlusion by the plate not tested."]))
+            "  Object moves from frame 2: occlusion by the plate not tested."]))
 
     def test_only_what_happened(self):
         self.assertEqual(m.follow_summary(121, 121, largest=(1.2, 31)), "tracked on 121 of 121 frames.")  # no warning, no line
         self.assertEqual(m.follow_summary(6, largest=(60.0, 0)).split("\n"), [
-            "tracked on 0 of 6 frames.", "  Warning: matte 60.0x the object at frame 0. Check the composite there.",
+            "tracked on 0 of 6 frames.", "  Warning: matte 60.0x the object at frame 1. Check the composite there.",
             "  Held: first-frame mask, on every frame."])
         one = m.follow_summary(12, 11, held=1, added=1, most=1.5, largest=(1.5, 3))
         self.assertIn("\n  Held: last matte, on 1 frame with no SAM mask.", one)  # one frame, not « 1 frames »
@@ -68,7 +68,7 @@ class Form(unittest.TestCase):
     def test_every_line_is_one_technical_line(self):
         text = m.follow_summary(121, 100, zones=9, placed=23, strays=2, held=4, added=10, most=2.0, alone=1, guarded=2,
                                 smoothed=3, moved=5, fronts=30, gone=5, largest=(3.5, 40), above=(30, 44), cleaned=3,
-                                left=(50, 56), flicker=(5, 0.59, 53))
+                                left=(50, 56), flicker=(5, 0.59, 52))
         lines = text.split("\n")
         self.assertEqual(len(lines), 16)
         for line in lines[1:]:
@@ -81,13 +81,13 @@ class Choices(unittest.TestCase):
 
     def test_warning_names_its_range(self):
         self.assertIn("\n  Warning: matte 4.2x the object at frame 65. Check the composite there.",
-                      m.follow_summary(121, 100, largest=(4.2, 65), above=(65, 65)))  # one frame above 3x
-        self.assertNotIn("Warning", m.follow_summary(121, 100, largest=(2.9, 65), above=None))
+                      m.follow_summary(121, 100, largest=(4.2, 64), above=(64, 64)))  # one frame above 3x; indices from 0, a movie's frames from 1
+        self.assertNotIn("Warning", m.follow_summary(121, 100, largest=(2.9, 64), above=None))
 
     def test_flicker_is_the_last_detail_line(self):
-        self.assertTrue(m.follow_summary(10, 10, flicker=(5, 0.59, 53)).endswith(
+        self.assertTrue(m.follow_summary(10, 10, flicker=(5, 0.59, 52)).endswith(
             "\n  Flicker: pieces of the matte for 3 frames or fewer, on 5 frames (up to 59% of the matte at frame 53)."))
-        self.assertTrue(m.follow_summary(10, 10, gone=2, flicker=(1, 0.042, 7)).endswith(
+        self.assertTrue(m.follow_summary(10, 10, gone=2, flicker=(1, 0.042, 6)).endswith(
             "\n  Flicker: pieces of the matte for 3 frames or fewer, on 1 frame (up to 4.2% of the matte at frame 7)."))
 
     def test_follow_matte_reads_the_flicker(self):
@@ -100,7 +100,7 @@ class Choices(unittest.TestCase):
         import re
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "nodes.py")).read()
         tips = re.findall(r'tooltip="([^"]*)"', src[src.index("class FollowMatte"):src.index("class KeyframeVideo")])
-        self.assertEqual(len(tips), 9)
+        self.assertEqual(len(tips), 10)
         for tip in tips:
             self.assertTrue(tip.endswith("."), tip)
             self.assertNotIn("SAM's", tip)
