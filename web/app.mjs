@@ -2729,7 +2729,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     hud("Rough preview: Space plays it. The composite follows.", 2500);
   }
   await step(r, "track", async (progress) => { pv.painted = await track(active, made, base, `_${sized}`, progress, null, ["paint"],
-    underOf(pv), r.heroFrame); }, pv);
+    underOf(pv), r.heroFrame, r.erased?.found.matte_a); }, pv);
   pv.mattes = mattesOf({ ...r.erased?.found, ...pv.painted?.found });
   await step(r, "comp", async (progress) => {
     const comp = await run("comp", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, width: sw, height: sh, shot: made, ...plateMovie(p),
@@ -2750,7 +2750,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     log(`Render v${r.v}: the viewer plays the full-size shot until the full-size composite is ready`);
   }
   await step(r, "trackfull", async (progress) => { r.full = await track(active, final, base, "_full", progress, pv.mattes, ["paint"],
-    underOf(onePass ? pv : r), r.heroFrame); });
+    underOf(onePass ? pv : r), r.heroFrame, r.erased?.found.matte_a); });
   r.full ??= pv.mattes;
   await step(r, "hdr", async (progress) => { // SDR to HDR: the full-size shot made again in scene-linear values; review fits it to the plate
     const out = await run("hdr", { ...S.memoryProfile.slots, path: final, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps), ...plateMovie(p),
@@ -2810,7 +2810,7 @@ function elementOf(zones, size, hero = S.hero) { // where the edits changed the 
   return c;
 }
 
-async function track(active, shotPath, base, suffix, progress, previous, tools, under = null, hero = S.hero) { // SAM 3.1 follows a kind of edit through the shot; `under`: the plate the shot was made over
+async function track(active, shotPath, base, suffix, progress, previous, tools, under = null, hero = S.hero, erased = null) { // SAM 3.1 follows a kind of edit through the shot; `under`: the plate the shot was made over; `erased`: the Clean matte's frames under a paint
   const p = S.plate, found = { ...(previous?.found ?? {}) };
   for (const [key, tool, path, cs] of [["matte_a", "erase", p.path, p.cs], ["matte_b", "paint", shotPath, "@model"]]) {
     const edits = active.filter((e) => e.tool === tool);
@@ -2821,6 +2821,7 @@ async function track(active, shotPath, base, suffix, progress, previous, tools, 
     u.globalCompositeOperation = "lighten";
     for (const e of edits) u.drawImage(tool === "paint" ? whiteOf(e.patch) : e.mask, 0, 0, sw, sh);
     const compare = tool === "paint" && under ? { base: under.path, base_color_space: under.cs } : {}; // the paint matte follows what the shot changed
+    if (tool === "paint" && erased) Object.assign(compare, { erased, erased_edge: (grow(sw, true) + feather(sw)) / sw }); // under a Clean edit, as far as the composite moves its edge
     if (tool === "paint") compare.seed = await uploadCanvas(elementOf(union, size, hero), `seed${suffix}.png`); // from what the edits changed
     const out = await run("matte", { path, config: S.ocio.config, color_space: cs, max_frames: p.frames, width: sw, height: sh, prefix: `${base}/${key}${suffix}/m`,
       mask: await uploadCanvas(union, `${key}${suffix}.png`), zone: FOLLOW.zone, threshold: FOLLOW.threshold, ...compare,
