@@ -580,6 +580,7 @@ def relight_frame(plate: np.ndarray, source: np.ndarray, relit: np.ndarray, radi
 FOLLOW_SPIKE = 2.0  # a matte more than this many times the median of the 7 frames around it is a spike, unless the tracker's mask grew as much
 FOLLOW_WARN = 3.0  # the largest matte against the object's area: above it, the summary warns
 FOLLOW_SIDE = 320  # the plate's own move, and what it puts in front of the object, are read at about this width
+FOLLOW_FLICKER = 3  # frames: a piece of the matte that comes and goes within this many frames is a flicker (matte_flicker)
 FOLLOW_STILL = 8  # frames: an object that keeps its place in the scene this long stands still in it, so the plate can cover it
 
 
@@ -651,7 +652,8 @@ def replay(path: str) -> dict:
 
 
 def follow_summary(n: int, seen=None, zones=0, placed=0, strays=0, held=0, added=0, most=0.0, alone=0, guarded=0,
-                   smoothed=0, moved=0, fronts=0, gone=0, largest=None, cleaned=0, left=None) -> str:
+                   smoothed=0, moved=0, fronts=0, gone=0, largest=None, cleaned=0, left=None, above=None,
+                   flicker=None) -> str:
     """Follow Matte's summary for a person: a headline, the warning next when there is one, then one
     line per rule that acted, and only those. The page writes « Paint matte (WxH): » or « Clean matte (WxH): » before it,
     and the GPU report reads that start. `seen` counts the frames where SAM 3.1 found the object, None when it returned
@@ -672,7 +674,7 @@ def follow_summary(n: int, seen=None, zones=0, placed=0, strays=0, held=0, added
         if held:
             lines.append(f"Held: last matte, on {on(held)} with no SAM mask.")
         if added:
-            why = [f"up to {most:.1f}x SAM's mask"] * bool(most) + [f"{on(alone)} with no SAM mask"] * bool(alone)
+            why = [f"up to {most:.1f}x the SAM mask"] * bool(most) + [f"{on(alone)} with no SAM mask"] * bool(alone)
             lines.append(f"Added: areas the shot changed next to the object, on {on(added)}" + (f" ({'; '.join(why)})." if why else "."))
     if cleaned:
         lines.append(f"Removed: areas the shot changed inside the Clean matte, on {on(cleaned)} (not touching the SAM mask).")
@@ -688,8 +690,15 @@ def follow_summary(n: int, seen=None, zones=0, placed=0, strays=0, held=0, added
         lines.append(f"Removed: pieces that left the object's place, on {on(gone)}.")
     if left is not None:
         lines.append(f"Removed: whole matte from frame {left[1]} (object out of its place).")
+    if flicker is not None and flicker[0]:
+        share = f"{100 * flicker[1]:.0f}%" if flicker[1] >= 0.1 else f"{100 * flicker[1]:.1f}%"
+        lines.append(f"Flicker: pieces of the matte for {FOLLOW_FLICKER} frames or fewer, on {on(flicker[0])} (up to {share} of the matte at frame {flicker[2]}).")
     if largest is not None and largest[0] > FOLLOW_WARN:
-        lines.insert(0, f"Warning: matte up to {largest[0]:.1f}x the object at frame {largest[1]}. Check the composite there.")
+        if above is not None and above[0] != above[1]:  # the frames above FOLLOW_WARN, first to last
+            lines.insert(0, f"Warning: matte above {FOLLOW_WARN:g}x the object from frame {above[0]} to {above[1]} "
+                            f"(up to {largest[0]:.1f}x at frame {largest[1]}). Check the composite there.")
+        else:
+            lines.insert(0, f"Warning: matte {largest[0]:.1f}x the object at frame {largest[1]}. Check the composite there.")
     if left is not None:
         lines.insert(0, f"Warning: object left its place at frame {left[0]}. Try another seed, other words or another stroke.")
     return "\n  ".join([f"tracked on {seen or 0} of {n} frames."] + lines)
@@ -1076,14 +1085,17 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     calm |= out[j] > 0.5
             out[t] = cores[t] | ((out[t] > 0.5) & grow(calm, thin))
             smoothed += 1
-    largest = None
+    largest = above = flicker = None
     if n:
         ratio = out.reshape(n, -1).sum(1) / size
-        worst = int(ratio.argmax())
-        largest = (float(ratio[worst]), worst)
+        worst, over = int(ratio.argmax()), np.flatnonzero(ratio > FOLLOW_WARN)
+        largest, above = (float(ratio[worst]), worst), ((int(over[0]), int(over[-1])) if len(over) else None)
+        shares = matte_flicker(out[:, ::k, ::k], FOLLOW_FLICKER)  # read small, as the plate is: a replay counts as the live run does
+        flicker = (int((shares > 0).sum()), float(shares.max()), int(shares.argmax())) if shares.any() else None
     tracked_any = bool(len(masks)) and bool(masks.any())
     counts = dict(seen=seen, zones=zones, placed=placed, strays=strays, held=held, added=added, most=most, alone=alone) if tracked_any else {}
-    return out, follow_summary(n, guarded=guarded, smoothed=smoothed, moved=moved, fronts=fronts, gone=gone, largest=largest, cleaned=cleaned, left=left, **counts)
+    return out, follow_summary(n, guarded=guarded, smoothed=smoothed, moved=moved, fronts=fronts, gone=gone, largest=largest, cleaned=cleaned, left=left, above=above,
+                                flicker=flicker, **counts)
 
 
 GRAIN_UNIT = _grain_unit()
