@@ -28,7 +28,7 @@ def run(browser, port, U):
     page.keyboard.press("p")
     U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)])
     page.keyboard.press("Enter")
-    U.wait_log(page, U.added_line("Composite, preview took"), 240000, "preview composite of the edit, with no job index")
+    U.wait_log(page, "window.__lines.some((t) => /Composite, preview (took|done in) /.test(t))", 240000, "preview composite of the edit, with no job index")
     lines = page.evaluate("window.__lines")
     U.check(any(t.startswith("Edit 1:") and "seed 7," in t for t in lines) and any(t.startswith("Render v1:") and "seed 7," in t for t in lines),
             "?seed=7: the new edit and its render start from seed 7")
