@@ -176,6 +176,27 @@ class AgainstTheMock(unittest.TestCase):
             self.assertEqual(sheet.size[0], 8 + (len(p.REQUESTS) + 1) * (384 + 8))
         self.assertIn("Written to", said.getvalue())
 
+    def test_an_answer_about_another_object(self):
+        # the writer removes a barn that the stroke does not cover, and SAM 3.1 finds the barn by that name under the object:
+        # the box leaves the barn out, and the writer, asked again, removes the object under the stroke (app.leaveOut)
+        p, out = probe(), tempfile.mkdtemp()
+        barn = ('Remove the barn <barn_1> completely. [{"id": "barn_1", "from": "ref_image_0", "src_bbox": [80, 40, 300, 260], '
+                '"tgt_bbox": null, "desc": "a grey barn"}]')
+        for path, body in (("/mock/writer", {"times": 1, "text": barn}), ("/mock/named", {"times": 1, "ellipse": [0.5, 0.62, 0.2, 0.06]})):
+            urllib.request.urlopen(urllib.request.Request(self.url + path, data=json.dumps(body).encode(),
+                                                          headers={"Content-Type": "application/json"}), timeout=5).read()
+        with redirect_stdout(io.StringIO()):
+            p.main(["plates/desk.mp4", "--url", self.url, "--out", out, "--stroke", "bottle:0.45,0.5;0.55,0.5:40", "--requests", "page"])
+        with open(os.path.join(out, "answers.json")) as f:
+            o = json.load(f)["strokes"][0]
+        shutil.rmtree(out, ignore_errors=True)
+        r, core = o["requests"]["page"], o["paths"]["page"]["core"]
+        self.assertEqual(r["others"], ["barn"])
+        self.assertTrue(r["cut"][0] == core[0] and r["cut"][2] < core[2], (r["cut"], core))  # the rows above the barn
+        self.assertFalse(r["refused"])
+        self.assertIn("<obj_1>", r["caption"])
+        self.assertEqual(p.verdict("page", r), "named « barn » first, kept with the box without it: the writer's caption")
+
 
 if __name__ == "__main__":
     unittest.main()
