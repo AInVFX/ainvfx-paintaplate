@@ -406,10 +406,10 @@ function closePlate(message = "Plate closed: its frames left the browser's memor
 
 S.memoryProfile = memoryProfile({ force: MEMORY_ASKED }); // until /system_stats answers: nothing loads early, and LTX works in small tiles
 onFree(async (last, name) => { // why ComfyUI's memory is freed before this job, or null: speed first where there is room
-  if (freesBefore(S.memoryProfile, last, name)) return `the models of ${last} unloaded.\n  This card holds one model family at a time.`;
+  if (freesBefore(S.memoryProfile, last, name)) return `the models of ${last} unloaded.\n  This GPU holds one model family at a time.`;
   const p = S.plate;
   if (!p || !last || FAMILY[name] === FAMILY[last]) return null;
-  const sys = (await fetch("/system_stats").then((r) => r.json()).catch(() => null))?.system; // a larger card: only when RAM is short for this job's frames
+  const sys = (await fetch("/system_stats").then((r) => r.json()).catch(() => null))?.system; // a larger GPU: only when RAM is short for this job's frames
   const room = sys?.ram_free ? { free: sys.ram_free, need: framesNeed(p.spec.width ?? p.work[0], p.spec.height ?? p.work[1], p.frames, name) } : null;
   const gib = (n) => Math.round(n / 2 ** 30);
   return freesBefore(S.memoryProfile, last, name, room) ? `${gib(room.free)} GB of RAM free, ${gib(room.need)} GB needed for its frames.` : null;
@@ -422,7 +422,7 @@ async function warmAll() { // every model loads while the person looks at the pa
   S.vram = stats.devices?.[0]?.vram_total ?? 0;
   S.memoryProfile = memoryProfile({ vram: S.vram, ram: stats.system?.ram_total ?? 0, force: MEMORY_ASKED });
   log(`Memory profile: ${S.memoryProfile.name} (${S.memoryProfile.why}).\n  ${S.memoryProfile.does}.`); // the profile and the card, then what the page does on it
-  if (!S.memoryProfile.warm.length) return; // a small card: no model loads before an action needs it
+  if (!S.memoryProfile.warm.length) return; // a small GPU: no model loads before an action needs it
   // ComfyUI keeps its history in memory until it restarts: a model that a prompt in it used is still loaded
   const history = Object.values(await (await fetch("/history?max_items=200")).json());
   const used = new Set(history.flatMap((h) => Object.values(h.prompt?.[2] ?? {}).map((n) => n.class_type)));
@@ -430,7 +430,7 @@ async function warmAll() { // every model loads while the person looks at the pa
   const mask = await upload(await blob(snap(null, [256, 144], "#000")), "warm_mask.png", "paintaplate/warm");
   const jobs = [["edit", "ReferenceMultiLatent", { base: tiny, reference: tiny, start: tiny, mask, caption: "warm up", seed: 0, steps: 1, denoise: 1,
     grow: 0, feather: 1, sigma: 1 }], ["prompt", "TextGenerate", { image: tiny, request: "Say yes.", system: "Answer with one word.", max_length: 4 }]];
-  if (S.memoryProfile.warm.includes("warm")) jobs.push(["warm", "LTXVConditioning", {}]); // a large card only: on a smaller one LTX would push the edit models out
+  if (S.memoryProfile.warm.includes("warm")) jobs.push(["warm", "LTXVConditioning", {}]); // a large GPU only: on a smaller one LTX would push the edit models out
   let missed = 0; // jobs an opening, an edit or a close cancelled (stopEverything), or that failed: their models are not loaded
   for (const [name, cls, values] of jobs) if (!used.has(cls)) await run(name, values, { kind: "warm" }).done.catch(() => { missed += 1; }); // SAM loads in a second
   const end = warmEnd((performance.now() - t0) / 1000, missed, !S.plate && $("#status").textContent === start);

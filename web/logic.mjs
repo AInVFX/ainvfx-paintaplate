@@ -974,7 +974,7 @@ export function resultFlows({ tools = [], render = [], fluid = false, fluidHdr =
 export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? null;
 
 // ---------- Pipeline: the memory profile ----------
-// What the page does on the card it runs on, from the VRAM and RAM in ComfyUI's /system_stats. Three profiles to start from;
+// What the page does on the GPU it runs on, from the VRAM and RAM in ComfyUI's /system_stats. Three profiles to start from;
 // the borders move with measurements (tests/gpu_matrix.py writes each case's peak VRAM and RAM).
 // - small, under 24 GB of VRAM (the reference is an RTX 4090 Laptop with 16 GB): no model loads before an action needs it,
 //   so the prompt writer, Klein and LTX take turns; every LTX pass encodes its guide in tiles and decodes in 256 px tiles
@@ -982,7 +982,7 @@ export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? nu
 // - medium, from 24 GB: the edit models load at start, LTX with the first shot; 512 px tiles.
 // - large, from 60 GB: every model loads at start and stays loaded.
 // `slots` are workflow slot values (tile, guide_tiled): one set of workflows serves every profile.
-export const MEMORY_FROM = { medium: 24e9, large: 60e9 }; // bytes of VRAM: a 24 GB card reports about 25.7e9, a 16 GB one about 17.2e9
+export const MEMORY_FROM = { medium: 24e9, large: 60e9 }; // bytes of VRAM: a 24 GB GPU reports about 25.7e9, a 16 GB one about 17.2e9
 export const MEMORY = {
   small: { warm: [], frees: true, slots: { tile: 256, guide_tiled: true }, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger card" },
   medium: { warm: ["edit", "prompt"], frees: false, slots: { tile: 512, guide_tiled: false }, does: "The edit models load now, LTX with the first shot" },

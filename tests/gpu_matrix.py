@@ -22,7 +22,7 @@ names, with commas. The strokes and the seed of each case are in gpu_matrix.json
 same strokes from the same seed at every run, so a wrong picture comes back at the next run. --seeds 7,8,9 runs each
 case once per seed, in place of its own. ui_live.py opens the page with ?index=0: the page leaves its job index alone,
 so every job runs and every time is a measured one. --memory small,
-medium or large asks the page for that memory profile (logic.memoryProfile) in place of the one the card gives: the same
+medium or large asks the page for that memory profile (logic.memoryProfile) in place of the one the GPU gives: the same
 case under two profiles shows what a profile costs.
 
 It needs Playwright with Google Chrome: Playwright's own Chromium cannot play H.264. Run it on the machine that runs
@@ -747,7 +747,7 @@ def report(a, machine, results):
              f"| Cases | {a.cases}: {', '.join(r['name'] for r in results)} |",
              f"| Seeds | {a.seeds.replace(' ', '').replace(',', ', ') + ' (--seeds): each case runs once per seed' if a.seeds else 'each case runs from its own (gpu_matrix.json)'} |",
              "| Job index | left alone: the page is opened with `?index=0`, so every job runs |",
-             f"| Memory profile asked for | {a.memory or 'none: the card decides'} |",
+             f"| Memory profile asked for | {a.memory or 'none: the GPU decides'} |",
              f"| Before each case | {'ComfyUI is freed (--fresh)' if a.fresh else 'ComfyUI stays as the case before left it: a first job can read its RAM'} |",
              f"| RAM read from | {a.source} |", "",
              "GB means 2^30 bytes. Peak RAM is the most that was held; « no file » is the part of it that no file backs, which a memory cap cannot take back. "
@@ -841,7 +841,7 @@ def main():
     ap.add_argument("--cases", default="quick", help="quick, all, or case names with commas: " + ", ".join(ALL))
     ap.add_argument("--channel", default="chrome", help="the browser channel: Google Chrome plays H.264")
     ap.add_argument("--timeout", type=int, default=900, help="ui_live.py's --timeout: it waits 8 times this many seconds for a render, 4 times for a fluid shot, twice for an edit")
-    ap.add_argument("--memory", default="", choices=("", "small", "medium", "large"), help="ask the page for this memory profile; by default the card decides")
+    ap.add_argument("--memory", default="", choices=("", "small", "medium", "large"), help="ask the page for this memory profile; by default the GPU decides")
     ap.add_argument("--hdr", action="store_true", help="turn SDR to HDR on in every case (ui_live.py --hdr); a case asks for it with « hdr »: true")
     ap.add_argument("--graph", action="store_true", help="after each case's export, also save the scene's ComfyUI graph as scene.comfyui.json in the case's folder")
     ap.add_argument("--seeds", default="", help="whole numbers with commas: each case runs once per seed, as <case>_s<seed>, in place of its own seed")
