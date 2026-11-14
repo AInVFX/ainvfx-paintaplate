@@ -571,6 +571,10 @@ export function logLevel(text) { // a log message's colour, from its words: red 
   return starts("Error: ") ? "error" : starts("Warning: ") ? "warn" : "";
 }
 
+export function workflowClasses(prompt) { // the node classes an API workflow holds, once each, sorted
+  return [...new Set(Object.values(prompt).filter((n) => n?.class_type).map((n) => n.class_type))].sort();
+}
+
 export function strokeTarget({ draft, current, tool }) { // where a new stroke goes: "draft", "current" or "new"
   if (draft) return "draft";
   return current?.tool === tool ? "current" : "new";
