@@ -197,14 +197,15 @@ def render_hdr(steps):
     return any(re.match(r"v\d+ SDR to HDR\b", label) for label, _ in steps)
 
 
-def comfy_lines(url, since, mark="PaintAPlate HDR Match:"):
-    """ComfyUI's own log lines since `since` (its local time, ISO) that hold `mark`, from its /internal/logs/raw. It keeps the
-    last few hundred lines only: [] when they are gone, or when this ComfyUI has no such route."""
+def comfy_lines(url, since, marks=("[Paint a plate] HDR Match:", "PaintAPlate HDR Match:")):
+    """ComfyUI's own log lines since `since` (its local time, ISO) that hold one of `marks` (HDR Match's line, with the pack's
+    « [Paint a plate] » prefix or in its older form), from its /internal/logs/raw. It keeps the last few hundred lines only:
+    [] when they are gone, or when this ComfyUI has no such route."""
     try:
         entries = get(url + "/internal/logs/raw").get("entries", [])
     except (OSError, ValueError, AttributeError):
         return []
-    return [e["m"].strip() for e in entries if e.get("t", "") >= since and mark in e.get("m", "")]
+    return [e["m"].strip() for e in entries if e.get("t", "") >= since and any(m in e.get("m", "") for m in marks)]
 
 
 def browser_ready(channel):
@@ -441,10 +442,10 @@ def page_mask(comfy, jobs, graphs):
 
 
 def quick_size(log):
-    """The page's quick-pass size, from its line « Working sizes: ... quick passes at 768 x 432 ... »: the size the page
-    judges an erase at (app.mjs, `p.prev`). The same line's « preview at 640 x 352 » is the shot's preview, another size.
-    None when the log has no such line."""
-    found = re.findall(r"quick passes at (\d+) x (\d+)", log)
+    """The size of the edit preview, from the page's line « Working sizes: edits at 1920 x 1088, edit preview at 768 x 432, ... »
+    (« quick passes at » in its older form): the size the page judges an erase at (app.mjs, `p.prev`). The same line's shot
+    preview is another size. None when the log has no such line."""
+    found = re.findall(r"(?:edit preview|quick passes) at (\d+) x (\d+)", log)
     return (int(found[-1][0]), int(found[-1][1])) if found else None
 
 
@@ -675,7 +676,7 @@ def report(a, machine, results):
              f"| Memory profile asked for | {a.memory or 'none: the card decides'} |",
              f"| Before each case | {'ComfyUI is freed (--fresh)' if a.fresh else 'ComfyUI stays as the case before left it: a first job can read its RAM'} |",
              f"| RAM read from | {a.source} |", "",
-             "Peak RAM is the most that was held; « no file » is the part of it that no file backs, which a memory cap cannot take back. "
+             "GB means 2^30 bytes. Peak RAM is the most that was held; « no file » is the part of it that no file backs, which a memory cap cannot take back. "
              "In a job's row, Seconds runs from the page's request to the job's end, and In ComfyUI from its start to its end in "
              "ComfyUI's history. A job's peaks are the highest readings, once a second, between those two times.", "",
              "| Case | Result | Seconds | Peak VRAM | Peak RAM | No file | Memory stops retried | Previews received |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
@@ -696,9 +697,9 @@ def report(a, machine, results):
             peaks = " | | " if j["run"] is None else f"{gb(j['vram'])} | {gb(j['ram'])} | {gb(j['own'])}"
             lines.append(f"| {j['name']} {j['id']} | {j['seconds']:.1f} | {in_comfy} | {peaks} | {j['cached']} of {j['nodes']} | {j['previews']} |")
         lines += ["", f"- Memory profile: {r['profile']}.", f"- {seed_note(r.get('seed'), r['seeds'])}",
-                  f"- Peak VRAM {gb(r['vram'])}. Peak RAM {gb(r['ram'])}, of which {gb(r['own'])} that no file backs"
-                  + (f"; this container's own count, page cache included: {gb(r['container'])}" if r["container"] else "") + ".",
-                  f"- Out-of-memory retries: {r['oom']}. Jobs taken from the job index, so not timed: {r['indexed']}.",
+                  f"- Peak VRAM: {gb(r['vram'])}.", f"- Peak RAM: {gb(r['ram'])}, {gb(r['own'])} of it not backed by a file.",
+                  *([f"- This container's own count, page cache included: {gb(r['container'])}."] if r["container"] else []),
+                  f"- Out-of-memory retries: {r['oom']}.", f"- Jobs from the job index (not timed): {r['indexed']}.",
                   f"- Previews received by the page: {r['previews']}. Live previews written by the node: {r['live_files']}."
                   + ("".join(f" Live preview off: {why}." for why in r["live_off"]))]
         off = estimates_off(r["steps"], r.get("announced", {}))
@@ -725,9 +726,9 @@ def report(a, machine, results):
             folder, areas = r["matte"]
             ratios = [x / max(areas[0], 1e-9) for x in areas]
             worst = max(range(len(ratios)), key=lambda i: abs(ratios[i] - 1))
-            lines += [f"- Paint matte read from `{os.path.relpath(folder, a.comfy)}`: {len(areas)} frames, the first covers {100 * areas[0]:.2f}% of the frame. "
-                      f"Against the first frame, the area goes from {min(ratios):.2f} to {max(ratios):.2f} times; the furthest frame is {worst}, at {ratios[worst]:.2f} times.",
-                      "- Every frame, against the first: " + " ".join(f"{x:.2f}" for x in ratios)]
+            lines += [f"- Paint matte (`{os.path.relpath(folder, a.comfy)}`): {len(areas)} frames; frame 1 covers {100 * areas[0]:.2f}% of the frame.",
+                      f"- Area against frame 1: {min(ratios):.2f} to {max(ratios):.2f} times. Furthest: frame {worst + 1}, {ratios[worst]:.2f} times.",
+                      "- Every frame, against frame 1: " + " ".join(f"{x:.2f}" for x in ratios)]
         made = r.get("sheet")
         if made and made.get("path"):
             lines += [f"- The plate and the export around each edit, on frames {', '.join(map(str, made['frames']))}:", "",

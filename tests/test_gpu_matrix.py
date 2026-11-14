@@ -132,7 +132,7 @@ class Seeds(unittest.TestCase):
 class Run(unittest.TestCase):
     """gpu_matrix.main with stand-ins for the browser, ComfyUI and the cases."""
 
-    def matrix(self, cases, alive, *more, jobs=()):
+    def matrix(self, cases, alive, *more, jobs=(), result=None):
         """main() on `cases`: what was called, in order, the exit code and the report. `alive` holds ComfyUI's answer after
         each case, and `jobs` the jobs each case ran."""
         calls, alive = [], iter(alive)
@@ -140,7 +140,7 @@ class Run(unittest.TestCase):
         def case(a, name, case, folder):
             calls.append(name)
             return {"name": name, "seconds": 255.0, "vram": 0, "ram": 0, "own": 0, "container": 0, "folder": folder, "log": "", "marks": [],
-                    **gpu_matrix.read_log(""), "jobs": list(jobs), "passed": True, "why": "", "matte": None, "live_files": 0, "seed": case.get("seed")}
+                    **gpu_matrix.read_log(""), "jobs": list(jobs), "passed": True, "why": "", "matte": None, "live_files": 0, "seed": case.get("seed"), **(result or {})}
 
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "input", "plates"))
@@ -195,6 +195,16 @@ class Run(unittest.TestCase):
             report = self.matrix("horse_cow", [True])[2]
         self.assertIn("- Paint matte (full): tracked on 53 of 121 frames.\n  - Warning: object left its place from frame 56. Check the composite "
                       "there.\n  - Removed: areas where the plate stands in front of the object, on 66 frames.\n", report)
+
+    def test_the_report_gives_one_fact_a_line_and_counts_frames_from_1(self):
+        GB = gpu_matrix.GB
+        report = self.matrix("horse_cow", [True], result={"vram": 15 * GB, "ram": 49.8 * GB, "own": 49.7 * GB, "container": 50 * GB,
+                                                          "matte": ("/m/paint", [0.0522, 0.0261, 0.0726, 0.0])})[2]
+        for line in ("GB means 2^30 bytes.", "- Peak VRAM: 15.0 GB.\n", "- Peak RAM: 49.8 GB, 49.7 GB of it not backed by a file.\n",
+                     "- This container's own count, page cache included: 50.0 GB.\n", "- Out-of-memory retries: 0.\n",
+                     "- Jobs from the job index (not timed): 0.\n", "frames; frame 1 covers 5.22% of the frame.\n",
+                     "- Area against frame 1: 0.00 to 1.39 times. Furthest: frame 4, 0.00 times.\n", "- Every frame, against frame 1: 1.00 0.50 1.39 0.00"):
+            self.assertIn(line, report)
 
     def test_fresh_frees_comfyui_before_each_case(self):
         """On the pod of 11 Nov a case's first job read the 138 GB that the case before it had left."""
@@ -439,9 +449,11 @@ class Hdr(unittest.TestCase):
     def test_hdr_match_lines_come_from_comfyui_s_log_since_the_case_began(self):
         entries = [{"t": "2026-11-13T09:59:59.900000", "m": "PaintAPlate HDR Match: a case before\n"},
                    {"t": "2026-11-13T10:00:00.500000", "m": "PaintAPlate HDR Match: level +0.02 stops on 121 frames\n"},
+                   {"t": "2026-11-13T10:00:01.000000", "m": "[Paint a plate] HDR Match: level +0.02 stops on 121 frames.\n"},
                    {"t": "2026-11-13T10:00:01.000000", "m": "Prompt executed in 9.10 seconds\n"}]
         with mock.patch.object(gpu_matrix, "get", return_value={"entries": entries}):
-            self.assertEqual(gpu_matrix.comfy_lines("http://x", "2026-11-13T10:00:00"), ["PaintAPlate HDR Match: level +0.02 stops on 121 frames"])
+            self.assertEqual(gpu_matrix.comfy_lines("http://x", "2026-11-13T10:00:00"), ["PaintAPlate HDR Match: level +0.02 stops on 121 frames",
+                              "[Paint a plate] HDR Match: level +0.02 stops on 121 frames."], "both marks of HDR Match's line")
         with mock.patch.object(gpu_matrix, "get", side_effect=OSError("404")):
             self.assertEqual(gpu_matrix.comfy_lines("http://x", "2026-11-13T10:00:00"), [])
 
@@ -611,6 +623,8 @@ class Verdict(unittest.TestCase):
                          "Clean, frame 1: no verdict. No mask: gone.png is not in ComfyUI's input folder.")
         log = "Working sizes: edits at 1920 x 1088, quick passes at 768 x 432, preview at 608 x 352, tracking at 960 x 544"
         self.assertEqual(gpu_matrix.quick_size(log), (768, 432), "the size the page judges at (p.prev), not the shot's preview size")
+        log = "Working sizes: edits at 1920 x 1088, edit preview at 768 x 432, shot preview at 640 x 352, tracking at 960 x 544."
+        self.assertEqual(gpu_matrix.quick_size(log), (768, 432), "the line's words of the edit preview")
         self.assertIsNone(gpu_matrix.quick_size(""))
 
     def test_the_arm_case_paints_the_exr_plate_with_sdr_to_hdr_outside_quick_and_all(self):
