@@ -984,7 +984,7 @@ export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? nu
 // `slots` are workflow slot values (tile, guide_tiled): one set of workflows serves every profile.
 export const MEMORY_FROM = { medium: 24e9, large: 60e9 }; // bytes of VRAM: a 24 GB GPU reports about 25.7e9, a 16 GB one about 17.2e9
 export const MEMORY = {
-  small: { warm: [], frees: true, slots: { tile: 256, guide_tiled: true }, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger card" },
+  small: { warm: [], frees: true, slots: { tile: 256, guide_tiled: true }, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger GPU" },
   medium: { warm: ["edit", "prompt"], frees: false, slots: { tile: 512, guide_tiled: false }, does: "The edit models load now, LTX with the first shot" },
   large: { warm: ["edit", "prompt", "warm"], frees: false, slots: { tile: 512, guide_tiled: false }, does: "Every model loads now and stays loaded" },
 };

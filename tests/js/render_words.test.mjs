@@ -16,3 +16,10 @@ test("the GPU report names the GPU, never the card, where a person reads it", ()
   assert.match(report, /none: the GPU decides/);
   assert.doesNotMatch(report, /the card (decides|gives)/);
 });
+
+test("the memory profiles describe what the page does on the GPU, never on the card", async () => {
+  const { MEMORY } = await import("../../web/logic.mjs");
+  const texts = Object.values(MEMORY).flatMap((p) => [p.does, p.why].filter((x) => typeof x === "string"));
+  assert.ok(texts.length >= 3);
+  for (const text of texts) assert.doesNotMatch(text, /\bcard\b/);
+});
