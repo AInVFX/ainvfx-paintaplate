@@ -210,7 +210,7 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
 // posts the nodes of the API graph, value for value: the notes are not nodes of a prompt.
 // `info` is what /object_info says about each node class. It tells a node's widgets from its links and gives their order:
 // the editor keeps a node's widget values by position.
-const README = "PrimitiveStringMultiline", NOTE = "MarkdownNote";
+const MULTILINE = "PrimitiveStringMultiline", NOTE = "MarkdownNote"; // core String (Multiline): a README in the page's graph
 const PRIMITIVE = new Set(["INT", "FLOAT", "STRING", "BOOLEAN"]);
 // px on the editor's canvas. A node's title bar sits above its position; a saved size that is too small makes the editor
 // grow the node over its neighbours, so the rows are counted generously. The editor draws a node at least as wide as its
@@ -243,15 +243,31 @@ export function widgetsOf(spec, inputs = {}) {
   return out;
 }
 
-export function editorGraph(prompt, info) {
-  const ids = Object.keys(prompt).sort((a, b) => a - b);
+export function editorGraph(page, info) {
+  const prompt = structuredClone(page), ids = Object.keys(prompt).sort((a, b) => a - b); // the page's graph, then the editor's own nodes
   const spec = (id) => info[prompt[id].class_type] ?? (() => { throw new Error(`ComfyUI does not know the node ${prompt[id].class_type}`); })();
   const sections = []; // { note, name, members }, in the order they run: a README note opens each
   for (const id of ids) {
     const n = prompt[id];
-    if (n.class_type === README && n._meta.title.startsWith("README · ")) sections.push({ note: id, name: n._meta.title.slice(9), members: [] });
+    if (n.class_type === MULTILINE && n._meta.title.startsWith("README · ")) sections.push({ note: id, name: n._meta.title.slice(9), members: [] });
     else if (sections.length) sections.at(-1).members.push(id);
     else throw new Error("The graph does not open with a README note");
+  }
+
+  // A widget that declares dynamicPrompts takes its text from a String (Multiline) node of the editor's graph, placed before
+  // it in its section. When the editor queues, it rewrites such a widget's own text ({a|b} keeps one option, a block's braces
+  // and every // or /* */ comment go) and sends a linked text as it is
+  let next = Math.max(...ids.map(Number));
+  for (const sec of sections) for (const id of [...sec.members]) {
+    const n = prompt[id];
+    for (const [name, [, opts = {}]] of inputsOf(spec(id))) {
+      if (!opts.dynamicPrompts || typeof n.inputs[name] !== "string") continue;
+      const text = String(++next);
+      prompt[text] = { class_type: MULTILINE, inputs: { value: n.inputs[name] }, _meta: { title: `${n._meta.title.replace(/ \[[^\]]*\]$/, "")} · ${name}` } };
+      n.inputs[name] = [text, 0];
+      sec.members.splice(sec.members.indexOf(id), 0, text);
+      ids.push(text);
+    }
   }
 
   // each node's sockets and widgets, and the links between them
@@ -302,8 +318,8 @@ export function editorGraph(prompt, info) {
     };
     const columns = [];
     for (const id of sec.members) (columns[depth(id)] ??= []).push(id);
-    const set = sec.members.flatMap((id) => (prompt[id]._meta.set ?? []).filter((k) => prompt[id].inputs[k] !== undefined && !Array.isArray(prompt[id].inputs[k]))
-      .map((k) => `- ${prompt[id]._meta.title.replace(`${sec.name} · `, "").replace(/ \[[^\]]*\]$/, "")}: ${k} ${short(prompt[id].inputs[k])}`));
+    const set = sec.members.filter((id) => page[id]).flatMap((id) => (page[id]._meta.set ?? []).filter((k) => page[id].inputs[k] !== undefined && !Array.isArray(page[id].inputs[k]))
+      .map((k) => `- ${page[id]._meta.title.replace(`${sec.name} · `, "").replace(/ \[[^\]]*\]$/, "")}: ${k} ${short(page[id].inputs[k])}`));
     const text = `${prompt[sec.note].inputs.value}${set.length ? `\n\n**Values the page set**\n\n${set.join("\n")}` : ""}`;
     const lines = text.split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 58)), 0);
     const y0 = top + BOX.groupTitle + BOX.pad + BOX.title, noteH = Math.max(160, 60 + 22 * lines);
@@ -332,6 +348,6 @@ export function editorGraph(prompt, info) {
       outputs: (s.output ?? []).map((t, slot) => ({ name: s.output_name?.[slot] ?? t, type: outType(id, slot), links: fed.get(`${id}:${slot}`) ?? null, slot_index: slot })),
       title: n._meta.title, properties: { "Node name for S&R": n.class_type }, ...(m.values.length ? { widgets_values: m.values } : {}) };
   });
-  const api = Object.fromEntries(ids.filter((id) => !notes.has(id)).map((id) => [id, structuredClone(prompt[id])])); // what graphToPrompt must give back (tests/graph_live.py)
+  const api = Object.fromEntries(ids.filter((id) => page[id] && !notes.has(id)).map((id) => [id, structuredClone(page[id])])); // what graphToPrompt must give back (tests/graph_live.py)
   return { last_node_id: Math.max(...ids.map(Number)), last_link_id: links.length, nodes, links, groups, config: {}, extra: { paintaplate: { prompt: api } }, version: 0.4 };
 }

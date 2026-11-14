@@ -26,6 +26,15 @@ class GraphLive(unittest.TestCase):
         self.assertEqual(wrong, ["1 KSampler.denoise: 0.35 became 0.5", "2 VAELoader: only in the page's graph", "3 VAELoader: only in the editor's graph"])
         self.assertEqual(added, ["1 KSampler.steps = 8"])
 
+    def test_a_text_that_the_editor_holds_in_a_string_node_of_its_own_matches_the_page_s_value(self):
+        text = '[{"id": "barn_1"}] // {a|b}'
+        api = {"5": {"class_type": "CLIPTextEncode", "inputs": {"text": text, "clip": ["2", 0]}}}
+        made = {"5": {"class_type": "CLIPTextEncode", "inputs": {"text": ["9", 0], "clip": [2, 0]}},
+                "9": {"class_type": "PrimitiveStringMultiline", "inputs": {"value": text}}}
+        self.assertEqual(graph_live.differences(api, made), ([], []))
+        made["9"]["inputs"]["value"] = '["id": "barn_1"] '
+        self.assertEqual(len(graph_live.differences(api, made)[0]), 1)
+
     def test_nodes_that_touch_are_apart_and_nodes_that_cross_are_named(self):
         boxes = [("1", "a", 0, 0, 100, 100), ("2", "b", 100, 0, 100, 100), ("3", "c", 50, 50, 100, 100)]
         self.assertEqual(graph_live.overlaps(boxes), ["1 « a » and 3 « c »", "2 « b » and 3 « c »"])

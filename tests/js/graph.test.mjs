@@ -117,8 +117,10 @@ test("the editor's format: one group per section in run order, a note at the hea
   assert.deepEqual(file.groups.map((g) => g.title).filter((t) => !t.startsWith("EDIT ")), ["README", "INPUT", "MODELS", "OBJECT TRACKING", "CLEAN PLATE PASS", "SHOT", "PAINT TRACKING", "OUTPUT"]);
   const notes = file.nodes.filter((n) => n.type === "MarkdownNote");
   assert.equal(notes.length, file.groups.length);
-  assert.equal(file.nodes.length, Object.keys(api).length); // each README is a note, every other node is itself
-  assert.ok(file.nodes.every((n) => n.type === "MarkdownNote" || (n.type === api[n.id].class_type && n.title === api[n.id]._meta.title)), "the titles are kept");
+  const held = file.nodes.filter((n) => !api[n.id]); // the editor's own String (Multiline) nodes: one per text of a widget that declares dynamicPrompts
+  assert.ok(held.length && held.every((n) => n.type === "PrimitiveStringMultiline"));
+  assert.equal(file.nodes.length - held.length, Object.keys(api).length); // each README is a note, every other node is itself
+  assert.ok(file.nodes.every((n) => !api[n.id] || n.type === "MarkdownNote" || (n.type === api[n.id].class_type && n.title === api[n.id]._meta.title)), "the titles are kept");
   assert.match(notes[0].widgets_values[0], /AInVFX Paint a plate 1\.11\.9: the scene of shot/);
   const edit1 = notes.find((n) => n.title === "README · EDIT 1 · Clean").widgets_values[0];
   assert.match(edit1, /\*\*Values the page set\*\*/);
@@ -151,6 +153,11 @@ for (const hdr of [false, true]) test(`the editor's format${hdr ? ", with SDR to
     assert.equal(byId.get(from).outputs[slot].type, type);
   }
   const back = posted(file), extra = new Set();
+  for (const [id, n] of Object.entries(back)) if (!api[id]) { // a text that the editor holds reaches the input it feeds as it is
+    assert.equal(n.class_type, "PrimitiveStringMultiline");
+    for (const m of Object.values(back)) for (const [k, v] of Object.entries(m.inputs)) if (Array.isArray(v) && String(v[0]) === id) m.inputs[k] = n.inputs.value;
+    delete back[id];
+  }
   for (const [id, n] of Object.entries(api)) {
     if (n.class_type === "PrimitiveStringMultiline") { assert.equal(back[id], undefined); continue; }
     assert.equal(back[id].class_type, n.class_type);

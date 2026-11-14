@@ -48,10 +48,25 @@ def same(a, b):
     return link(a) == link(b)
 
 
+TEXT = "PrimitiveStringMultiline"  # the editor's graph holds each text of a widget that declares dynamicPrompts in one
+
+
+def held(api, made):
+    """The editor's graph with each text that a String (Multiline) node of its own holds put back into the input it feeds,
+    and that node left out: the page's API graph gives the text as the input's value."""
+    texts = {nid: n["inputs"].get("value") for nid, n in made.items() if nid not in api and n["class_type"] == TEXT}
+
+    def put(v):
+        v = link(v)
+        return texts[v[0]] if isinstance(v, list) and len(v) == 2 and v[0] in texts else v
+    return {nid: {**n, "inputs": {k: put(v) for k, v in n["inputs"].items()}} for nid, n in made.items() if nid not in texts}
+
+
 def differences(api, made):
     """The page's API graph against the editor's, node by node. Returns (wrong, added): wrong lists a node, a class or a
     value that differs; added lists the inputs that only the editor holds."""
     api, made = {str(k): v for k, v in api.items()}, {str(k): v for k, v in made.items()}
+    made = held(api, made)
     wrong, added = [], []
     for nid in sorted(set(api) | set(made), key=lambda k: (len(k), k)):
         a, b = api.get(nid), made.get(nid)
