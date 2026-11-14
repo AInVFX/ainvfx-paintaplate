@@ -404,13 +404,13 @@ function closePlate(message = "Plate closed: its frames left the browser's memor
 
 S.memoryProfile = memoryProfile({ force: MEMORY_ASKED }); // until /system_stats answers: nothing loads early, and LTX works in small tiles
 onFree(async (last, name) => { // why ComfyUI's memory is freed before this job, or null: speed first where there is room
-  if (freesBefore(S.memoryProfile, last, name)) return `the models of ${last} are not this job's, and this card holds one family at a time`;
+  if (freesBefore(S.memoryProfile, last, name)) return `the models of ${last} unloaded.\n  This card holds one model family at a time.`;
   const p = S.plate;
   if (!p || !last || FAMILY[name] === FAMILY[last]) return null;
   const sys = (await fetch("/system_stats").then((r) => r.json()).catch(() => null))?.system; // a larger card: only when RAM is short for this job's frames
   const room = sys?.ram_free ? { free: sys.ram_free, need: framesNeed(p.spec.width ?? p.work[0], p.spec.height ?? p.work[1], p.frames, name) } : null;
   const gib = (n) => Math.round(n / 2 ** 30);
-  return freesBefore(S.memoryProfile, last, name, room) ? `${gib(room.free)} GB of RAM are free, and this job's frames can take ${gib(room.need)} GB` : null;
+  return freesBefore(S.memoryProfile, last, name, room) ? `${gib(room.free)} GB of RAM free, ${gib(room.need)} GB needed for its frames.` : null;
 });
 onStop((kind) => S.halted && STOPPED.includes(kind)); // a stop stops everything: a render step that was uploading its images when the stop came posts no job after it
 
@@ -419,7 +419,7 @@ async function warmAll() { // every model loads while the person looks at the pa
   const stats = await (await fetch("/system_stats")).json();
   S.vram = stats.devices?.[0]?.vram_total ?? 0;
   S.memoryProfile = memoryProfile({ vram: S.vram, ram: stats.system?.ram_total ?? 0, force: MEMORY_ASKED });
-  log(`Memory profile ${S.memoryProfile.name}: ${S.memoryProfile.why}. ${S.memoryProfile.does}`); // the profile's one line: the card, then what the page does on it
+  log(`Memory profile: ${S.memoryProfile.name} (${S.memoryProfile.why}).\n  ${S.memoryProfile.does}.`); // the profile and the card, then what the page does on it
   if (!S.memoryProfile.warm.length) return; // a small card: no model loads before an action needs it
   // ComfyUI keeps its history in memory until it restarts: a model that a prompt in it used is still loaded
   const history = Object.values(await (await fetch("/history?max_items=200")).json());
@@ -2545,7 +2545,7 @@ function preempt() { // Generate: a full-size or export step in its first half s
   if (!st || !r) return;
   const def = STAGES.find((x) => x.id === st.id), cls = !def.final ? "preview" : st.id === "export" ? "export" : "full", pct = Math.round(st.progress * 100);
   if (!stopsForEdit({ cls, progress: st.progress })) return void log(`Render v${r.v}: ${def.label} finishes first (${pct}% done), then the new edit runs`);
-  log(`Render v${r.v}: ${def.label} stops for the new edit at ${pct}%; it runs again later`);
+  log(`Render v${r.v}: ${def.label} stopped at ${pct}% for the new edit. It runs again after it.`);
   cancel(...BACKGROUND);
 }
 
@@ -2612,10 +2612,10 @@ function estimate(id) { // seconds: what this step took last time on this plate,
 async function step(r, id, work, store = r) { // run one step of a render, timed and shown; preview steps keep their result per size
   if (store.done?.[id] !== undefined || r.skip?.has(id)) return;
   if (S.running || S.queued || pickRender() !== r) throw YIELD; // an edit, or a step of a more urgent render, goes first
-  const t0 = performance.now(), behind = r.key === S.heroKey ? "" : ", in the background";
+  const t0 = performance.now(), behind = r.key === S.heroKey ? "" : ", in the background", guess = Math.round(estimate(id));
   S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step
   stagesUI();
-  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label} (about ${Math.round(estimate(id))} s)${behind}`);
+  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: about ${guess} s${behind}.`);
   const stage = S.stage;
   await work((f) => {
     if (S.stage !== stage) return;
@@ -2631,7 +2631,7 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
   S.took[id] = dt;
   S.stage = null;
-  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label} took ${dt.toFixed(1)} s`);
+  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: done in ${dt.toFixed(1)} s (estimate ${guess} s).`);
   stagesUI();
 }
 
@@ -2640,7 +2640,7 @@ function reused(r, store, id, take) { // a step that a render with the same eras
   take();
   (store.done ??= {})[id] = 0;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // taken again: its workflows made it
-  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: made by an earlier render with the same Clean edits, used again`);
+  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: reused from an earlier render (same Clean edits).`);
 }
 
 async function pipeline(r) { // a render's steps in order; a step made already is skipped, so a render resumes where it stopped
@@ -2663,7 +2663,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const scene = erase ? erasePrompt(erases.map((e) => e.caption)) : ""; // the scene as it stays, never the erased object
   if (!r.told) {
     r.told = true;
-    log(`Render v${r.v}: ${active.length} edit(s) (${active.map((e) => `${num(e.src)} ${NAME[e.tool]}`).join(", ")}), preview at ${sized}, seed ${common.seed}, steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => st.id).join(" > ")}`);
+    log(`Render v${r.v}: ${active.length} edit${active.length === 1 ? "" : "s"} (${active.map((e) => `${NAME[e.tool]} ${num(e.src)}`).join(", ")}), seed ${common.seed}, preview at ${sw} x ${sh}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => st.label).join("; ")}.`);
     if (carry) log(`Render v${r.v}: LTX prompt: ${prompt}`);
     if (erase) log(`Render v${r.v}: clean plate pass prompt: ${scene || "none"}`);
   }
@@ -2747,7 +2747,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   if (here() && !S.pass && !onePass && !r.taken && !r.review && r.raw && S.shot?.url !== r.raw) { // the full-size shot as LTX made it, until the full-size composite:
     setShot(r.raw, key, "@model"); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640, 28 Oct)
     hud("Shot, full size: Space plays it as LTX made it. The full-size composite follows.", 2500);
-    log(`Render v${r.v}: the viewer plays the full-size shot until the full-size composite is ready`);
+    log("Viewer: full-size shot until the full-size composite is ready.");
   }
   await step(r, "trackfull", async (progress) => { r.full = await track(active, final, base, "_full", progress, pv.mattes, ["paint"],
     underOf(onePass ? pv : r), r.heroFrame, r.erased?.found.matte_a); });

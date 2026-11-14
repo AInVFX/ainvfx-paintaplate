@@ -244,8 +244,9 @@ def build_hash(parts: dict) -> str:
 
 _built = build_parts()
 BUILD = build_hash(_built)
-logging.info("Paint a plate %s: build %s, from ComfyUI %s, ComfyUI-LTXVideo %s and %d of %d model files (the job index keys)",
-             VERSION, BUILD, " ".join(x[:7] for x in _built["comfyui"] if x) or "unknown", ltx_label(ltx_folder(), _built["ltx"]),
+_comfy = [x[:7] for x in _built["comfyui"] if x]  # its version, then its commit
+logging.info("[Paint a plate] %s: build %s.\n  Build parts: ComfyUI %s; ComfyUI-LTXVideo %s; model files: %d of %d.",
+             VERSION, BUILD, f"{_comfy[0]} ({_comfy[1]})" if len(_comfy) == 2 else " ".join(_comfy) or "unknown", ltx_label(ltx_folder(), _built["ltx"]),
              sum(len(m) == 3 for m in _built["models"]), len(_built["models"]))
 
 

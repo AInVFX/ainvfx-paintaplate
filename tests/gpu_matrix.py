@@ -6,7 +6,8 @@ Each case runs tests/ui_live.py on a running ComfyUI (the real page, in Google C
 case left behind and writes <out>/report.md: the machine, then per case the time of each step (the page's log times
 every step), each job with its seconds, its peak VRAM and RAM, the nodes ComfyUI took from its cache and the previews
 the page received, out-of-memory retries, the memory profile, the paint matte's area on every frame against the first
-frame's, pass or fail, the page's verdict on a Clean edit (gone or left), then the log of each failure. The report is written again after every case, so a run that is
+frame's, pass or fail (a case also fails when a matte summary warns), the page's verdict on a Clean edit (gone or left), a fluid case's
+keyframes and four frames of its shot, then the log of each failure. The report is written again after every case, so a run that is
 stopped still leaves one.
 
 Memory is read once a second. VRAM comes from ComfyUI's /system_stats. RAM is what ComfyUI's own process holds (VmRSS in
@@ -53,7 +54,7 @@ QUICK = ("horse_cow", "horse_erase", "horse_light", "fluid_720")
 ALL = QUICK + ("uhd_cow", "uhd_erase", "uhd_light", "fluid_1080_edit", "uhd25_cow", "uhd25_erase", "uhd25_light")
 UHD = {"horse_3840x2160_50fps.mp4": 50, "horse_3840x2160_25fps.mp4": 25}  # « 4K at 50 fps », and at 25: every tool runs on a 3840 x 2160 plate
 UHD_SIZE, UHD_FRAMES = (3840, 2160), 121
-STEP = re.compile(r"Render v(\d+): (.+?) took ([\d.]+) s")  # the page's log: one line per render step
+STEP = re.compile(r"Render v(\d+): (.+?)(?: took |: done in )([\d.]+) s")  # the page's log: one line per render step
 # and one line per finished job: its id, its seconds, its nodes, those ComfyUI took from its cache (a model loader among
 # them is a model not loaded again) and the previews the page received. A line starts with its time, with no space after it
 JOB = re.compile(r"([a-z]+) ([0-9a-f?]{1,8}): done in ([\d.]+) s \((\d+) nodes?(?:, (\d+) from ComfyUI's cache)?(?:, (\d+) previews?)?")
@@ -196,14 +197,15 @@ def render_hdr(steps):
     return any(re.match(r"v\d+ SDR to HDR\b", label) for label, _ in steps)
 
 
-def comfy_lines(url, since, mark="PaintAPlate HDR Match:"):
-    """ComfyUI's own log lines since `since` (its local time, ISO) that hold `mark`, from its /internal/logs/raw. It keeps the
-    last few hundred lines only: [] when they are gone, or when this ComfyUI has no such route."""
+def comfy_lines(url, since, marks=("[Paint a plate] HDR Match:", "PaintAPlate HDR Match:")):
+    """ComfyUI's own log lines since `since` (its local time, ISO) that hold one of `marks` (HDR Match's line, with the pack's
+    « [Paint a plate] » prefix or in its older form), from its /internal/logs/raw. It keeps the last few hundred lines only:
+    [] when they are gone, or when this ComfyUI has no such route."""
     try:
         entries = get(url + "/internal/logs/raw").get("entries", [])
     except (OSError, ValueError, AttributeError):
         return []
-    return [e["m"].strip() for e in entries if e.get("t", "") >= since and mark in e.get("m", "")]
+    return [e["m"].strip() for e in entries if e.get("t", "") >= since and any(m in e.get("m", "") for m in marks)]
 
 
 def browser_ready(channel):
@@ -319,13 +321,13 @@ def carried(r, fresh, gb):
 
 def estimates_off(steps, announced):
     """The steps that took more than 25% over or under what the page announced before they started (logic.stepGuess)."""
-    return [f"{label}: about {announced[label]} s, took {s:.1f} s" for label, s in steps
+    return [f"{label}: about {announced[label]} s, done in {s:.1f} s" for label, s in steps
             if announced.get(label) and abs(s - announced[label]) > 0.25 * s]
 
 
 def read_log(text):
     """What a case's page log says: the render steps and the jobs with their seconds, and the counts the report shows."""
-    profile = re.search(r"Memory profile (\w+): ([^\n]*)", text)
+    profile = re.search(r"Memory profile:? (\w+)(?:: | \()([^\n]*?)\)?\.?(?:\n  ([^\n]*?)\.?)?$", text, re.M)  # « Memory profile: small (…). » and its detail line
     jobs = [{"name": name, "id": job, "seconds": float(s), "nodes": int(n), "cached": int(k or 0), "previews": int(p or 0)}
             for name, job, s, n, k, p in JOB.findall(text)]
     return {
@@ -335,11 +337,11 @@ def read_log(text):
         "indexed": text.count("taken from the job index"),
         "oom": text.count(RETRY),
         "previews": sum(j["previews"] for j in jobs),
-        "live_off": re.findall(r"Live preview is off: ([^\n]*)", text),
-        "profile": f"{profile.group(1)} ({profile.group(2)})" if profile else "not in the log's last 400 lines",
+        "live_off": re.findall(r"(?:Warning: live preview off|Live preview is off): ([^\n]*)", text),
+        "profile": f"{profile.group(1)} ({'. '.join(x for x in profile.group(2, 3) if x)})" if profile else "not in the log's last 400 lines",
         "mattes": re.findall(r"([A-Z][a-z]+ matte(?: \([^)\n]*\))?: tracked on [^\n]*(?:\n  [^\n]*)*)", text),  # any word before « matte »; the headline and its detail lines (mathops.follow_summary)
         "seeds": sorted(set(re.findall(r"\bseed (\d+)", text)), key=int),
-        "announced": {f"v{v} {label}": int(s) for v, label, s in re.findall(r"Render v(\d+): (.+?) \(about (\d+) s\)", text)},
+        "announced": {f"v{v} {label}": int(s) for v, label, s in re.findall(r"Render v(\d+): (.+?)(?: \(about |: about )(\d+) s", text)},
         "figures": re.findall(r"(Edit \d+: [^\n]*?\(\d+% of it changed[^)\n]*\))", text),  # an erase: how much of the object changed, gone or held back (logic.leftLines)
     }
 
@@ -426,18 +428,24 @@ def framed(box, width, height, least=160):
     return (int(left), int(top), int(left + w), int(top + h))
 
 
-def page_mask(comfy, since):
-    """The mask the page sent Klein for an erase: the newest *_mask_full*.png in ComfyUI's input folder written since
-    `since` (seconds since the epoch), or None."""
-    found = [f for f in glob.glob(os.path.join(comfy, "input", "**", "*_mask_full*.png"), recursive=True) if os.path.getmtime(f) >= since]
-    return max(found, key=os.path.getmtime) if found else None
+def page_mask(comfy, jobs, graphs):
+    """The mask the page sent Klein for an erase: the image that the LoadImageMask node of the case's last edit job loads
+    (the full-size pass, which runs after the quick pass), as a path in ComfyUI's input folder. jobs: the page's job lines
+    (read_log); graphs: {prompt id: its API graph, from ComfyUI's /history}. The page uploads an image under the hash of its
+    content (app.mjs, uploadCanvas), so only the job's graph names the file. None when /history holds no edit job of the case."""
+    for job in reversed([j["id"] for j in jobs if j["name"] == "edit"]):
+        for pid, graph in graphs.items():
+            names = [n["inputs"].get("image") for n in (graph or {}).values() if n.get("class_type") == "LoadImageMask"] if pid[:8] == job else []
+            if names and isinstance(names[0], str):
+                return os.path.join(comfy, "input", *names[0].split("/"))
+    return None
 
 
 def quick_size(log):
-    """The page's quick-pass size, from its line « Working sizes: ... quick passes at 768 x 432 ... »: the size the page
-    judges an erase at (app.mjs, `p.prev`). The same line's « preview at 640 x 352 » is the shot's preview, another size.
-    None when the log has no such line."""
-    found = re.findall(r"quick passes at (\d+) x (\d+)", log)
+    """The size of the edit preview, from the page's line « Working sizes: edits at 1920 x 1088, edit preview at 768 x 432, ... »
+    (« quick passes at » in its older form): the size the page judges an erase at (app.mjs, `p.prev`). The same line's shot
+    preview is another size. None when the log has no such line."""
+    found = re.findall(r"(?:edit preview|quick passes) at (\d+) x (\d+)", log)
     return (int(found[-1][0]), int(found[-1][1])) if found else None
 
 
@@ -448,7 +456,9 @@ def erase_verdict(after, before, mask, size):
     def none(why):
         return {"left": None, "changed": None, "edges": None, "text": f"Clean, frame 1: no verdict. {why}."}
     if not mask:
-        return none("No mask from the page in ComfyUI's input folder since the case started")
+        return none("No mask: ComfyUI's history holds no edit job of this case")
+    if not os.path.exists(mask):
+        return none(f"No mask: {os.path.basename(mask)} is not in ComfyUI's input folder")
     if not size:
         return none("No quick-pass size in the page's log")
     import numpy as np
@@ -473,6 +483,14 @@ def name_asked(marks, log, jobs):
     ran = [what for what, found in (("a Klein pass", re.search(r"Klein (quick|full-size) pass", log)),
                                     ("a shot", any(j["name"] == "shot" for j in jobs))) if found]
     return asked and not ran, "" if asked and not ran else "the page did not ask for the name" if not asked else " and ".join(ran) + " ran"
+
+
+def matte_verdict(passed, why, mattes):
+    """(passed, why) once the page's matte summaries are read: a case that passed fails on the first warning of its mattes
+    (mathops.follow_summary writes « Warning: … » among its detail lines), and says where to look. Every step can run and
+    the export download while the matte lost the object."""
+    warned = [line.strip() for m in mattes for line in m.split("\n") if line.strip().startswith("Warning:")]
+    return (False, f"{warned[0]} The case fails on this matte warning: check its picture on the sheet.") if passed and warned else (passed, why)
 
 
 def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
@@ -545,6 +563,53 @@ def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
         shutil.rmtree(work, ignore_errors=True)
 
 
+def fluid_movies(comfy, jobs, history):
+    """The movies of the case's last fluid job, from its graph and its outputs in ComfyUI's /history: {"control": the control
+    video (PaintAPlate_SaveMovie: the keyframes on black), "shot": the shot's preview (SaveVideo)}, as paths in ComfyUI's
+    output folder. {} when /history holds no fluid job of the case."""
+    kinds = {"PaintAPlate_SaveMovie": "control", "SaveVideo": "shot"}
+    for job in reversed([j["id"] for j in jobs if j["name"] == "fluid"]):
+        for pid, entry in history.items():
+            if pid[:8] == job:
+                graph, found = (entry.get("prompt") or [None, None, {}])[2], {}
+                for node, out in (entry.get("outputs") or {}).items():
+                    kind, files = kinds.get((graph.get(node) or {}).get("class_type")), out.get("images") or []
+                    if kind and files:
+                        found[kind] = os.path.join(comfy, "output", *files[0].get("subfolder", "").split("/"), files[0]["filename"])
+                return found
+    return {}
+
+
+def fluid_sheet(case, folder, movies):
+    """A fluid case's sheet, fluid_sheet.png in its folder: the keyframes the case painted, as its control video holds them,
+    then the shot on its first frame, at a third, at two thirds and on its last (movies: fluid_movies). {"path", "keys" and
+    "frames" (from 1)}, or {"error"} without both movies."""
+    from PIL import Image, ImageDraw, ImageFont
+    if not all(os.path.exists(movies.get(kind) or "") for kind in ("control", "shot")):
+        return {"error": "ComfyUI's history holds no control video and shot of the case's fluid job"}
+    count, frames = media_count(movies["control"]), media_count(movies["shot"])
+    keys, at = sorted({k[0] % count for k in case["fluid"]["keys"]}), sorted({0, frames // 3, 2 * frames // 3, frames - 1})
+    rows = [("keyframes", keys, media_frames(movies["control"], keys)), ("shot", at, media_frames(movies["shot"], at))]
+    (cw, ch), gap, head, left = SHEET_CELL, 8, 24, 96
+    try:
+        font = ImageFont.load_default(size=15)
+    except TypeError:
+        font = ImageFont.load_default()
+    out = Image.new("RGB", (left + max(len(keys), len(at)) * (cw + gap), len(rows) * (head + ch + gap)), (28, 28, 28))
+    draw = ImageDraw.Draw(out)
+    for r, (title, indices, pictures) in enumerate(rows):
+        y = r * (head + ch + gap)
+        draw.text((6, y + head + 4), title, fill="white", font=font)
+        for c, i in enumerate(indices):
+            picture = Image.fromarray(pictures[i])
+            picture.thumbnail((cw, ch))
+            out.paste(picture, (left + c * (cw + gap), y + head))
+            draw.text((left + c * (cw + gap), y + 4), f"frame {i + 1}", fill=(200, 200, 200), font=font)
+    path = os.path.join(folder, "fluid_sheet.png")
+    out.save(path)
+    return {"path": path, "keys": [i + 1 for i in keys], "frames": [i + 1 for i in at]}
+
+
 def run_case(a, name, case, folder):
     memory, t0 = Memory(a.url), time.time()
     memory.start()
@@ -571,9 +636,13 @@ def run_case(a, name, case, folder):
     result["nodes"], result["stopped_in"] = node_times(events, graphs, names), running_at_stop(events, graphs, names)
     try:  # the case's pictures: never a reason for the case to fail
         result["sheet"] = sheet(case, folder, os.path.join(a.comfy, "input", case["path"]) if case.get("path") else None,
-                                mask=page_mask(a.comfy, t0), judge_at=quick_size(result["log"]))
+                                mask=page_mask(a.comfy, result["jobs"], graphs), judge_at=quick_size(result["log"]))
     except Exception as exc:
         result["sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+    try:  # a fluid case's keyframes and shot, also never a reason to fail
+        result["fluid_sheet"] = fluid_sheet(case, folder, fluid_movies(a.comfy, result["jobs"], history)) if case.get("fluid") else None
+    except Exception as exc:
+        result["fluid_sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     for job in result["jobs"]:  # when ComfyUI ran it, and the most memory held between those two times
         span = spans.get(job["id"])
         job["run"] = span[1] - span[0] if span else None
@@ -583,6 +652,7 @@ def run_case(a, name, case, folder):
     result["passed"], result["why"] = not failed and done, (failed[0] if failed else "" if done else "the full-size composite was not reached: " + (result["marks"] or ["?"])[-1])
     if case.get("expect") == "name asked":  # an erase with no words on another object: no Klein pass, no shot (logic.asksName)
         result["passed"], result["why"] = name_asked(result["marks"], result["log"], result["jobs"])
+    result["passed"], result["why"] = matte_verdict(result["passed"], result["why"], result["mattes"])
     result["matte"] = matte_areas(a.comfy, t0) if any(s[0] == "paint" for s in case.get("strokes", [])) else None
     live = os.path.join(a.comfy, "temp", "paintaplate_live", "*.webp")
     result["live_files"] = sum(os.path.getmtime(f) >= t0 for f in glob.glob(live))
@@ -606,7 +676,7 @@ def report(a, machine, results):
              f"| Memory profile asked for | {a.memory or 'none: the card decides'} |",
              f"| Before each case | {'ComfyUI is freed (--fresh)' if a.fresh else 'ComfyUI stays as the case before left it: a first job can read its RAM'} |",
              f"| RAM read from | {a.source} |", "",
-             "Peak RAM is the most that was held; « no file » is the part of it that no file backs, which a memory cap cannot take back. "
+             "GB means 2^30 bytes. Peak RAM is the most that was held; « no file » is the part of it that no file backs, which a memory cap cannot take back. "
              "In a job's row, Seconds runs from the page's request to the job's end, and In ComfyUI from its start to its end in "
              "ComfyUI's history. A job's peaks are the highest readings, once a second, between those two times.", "",
              "| Case | Result | Seconds | Peak VRAM | Peak RAM | No file | Memory stops retried | Previews received |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
@@ -627,13 +697,13 @@ def report(a, machine, results):
             peaks = " | | " if j["run"] is None else f"{gb(j['vram'])} | {gb(j['ram'])} | {gb(j['own'])}"
             lines.append(f"| {j['name']} {j['id']} | {j['seconds']:.1f} | {in_comfy} | {peaks} | {j['cached']} of {j['nodes']} | {j['previews']} |")
         lines += ["", f"- Memory profile: {r['profile']}.", f"- {seed_note(r.get('seed'), r['seeds'])}",
-                  f"- Peak VRAM {gb(r['vram'])}. Peak RAM {gb(r['ram'])}, of which {gb(r['own'])} that no file backs"
-                  + (f"; this container's own count, page cache included: {gb(r['container'])}" if r["container"] else "") + ".",
-                  f"- Out-of-memory retries: {r['oom']}. Jobs taken from the job index, so not timed: {r['indexed']}.",
+                  f"- Peak VRAM: {gb(r['vram'])}.", f"- Peak RAM: {gb(r['ram'])}, {gb(r['own'])} of it not backed by a file.",
+                  *([f"- This container's own count, page cache included: {gb(r['container'])}."] if r["container"] else []),
+                  f"- Out-of-memory retries: {r['oom']}.", f"- Jobs from the job index (not timed): {r['indexed']}.",
                   f"- Previews received by the page: {r['previews']}. Live previews written by the node: {r['live_files']}."
                   + ("".join(f" Live preview off: {why}." for why in r["live_off"]))]
         off = estimates_off(r["steps"], r.get("announced", {}))
-        lines += [f"- Steps more than 25% from their announcement: {'; '.join(off)}." if off else "- Every announced step took within 25% of its announcement."]
+        lines += [f"- Steps more than 25% from their announcement: {'; '.join(off)}." if off else "- Every announced step was within 25% of its announcement."]
         for j in r["jobs"]:  # where the long jobs' time went (D7): the five longest nodes
             spent = r.get("nodes", {}).get(j["id"])
             if spent and j["seconds"] >= 30:
@@ -649,14 +719,16 @@ def report(a, machine, results):
         if not r.get("hdr_match") and render_hdr(r["steps"]):
             lines.append("- HDR Match: its line has left ComfyUI's log buffer; grep the terminal for « HDR Match ».")
         lines += [f"- Did not finish: {line}" for line in r["ended"]]
-        lines += [f"- {m}" for m in r["mattes"]]
+        for m in r["mattes"]:  # a summary's headline, then each of its detail lines as a sub-item
+            head, *details = m.split("\n")
+            lines += [f"- {head}", *(f"  - {d.strip()}" for d in details)]
         if r["matte"]:
             folder, areas = r["matte"]
             ratios = [x / max(areas[0], 1e-9) for x in areas]
             worst = max(range(len(ratios)), key=lambda i: abs(ratios[i] - 1))
-            lines += [f"- Paint matte read from `{os.path.relpath(folder, a.comfy)}`: {len(areas)} frames, the first covers {100 * areas[0]:.2f}% of the frame. "
-                      f"Against the first frame, the area goes from {min(ratios):.2f} to {max(ratios):.2f} times; the furthest frame is {worst}, at {ratios[worst]:.2f} times.",
-                      "- Every frame, against the first: " + " ".join(f"{x:.2f}" for x in ratios)]
+            lines += [f"- Paint matte (`{os.path.relpath(folder, a.comfy)}`): {len(areas)} frames; frame 1 covers {100 * areas[0]:.2f}% of the frame.",
+                      f"- Area against frame 1: {min(ratios):.2f} to {max(ratios):.2f} times. Furthest: frame {worst + 1}, {ratios[worst]:.2f} times.",
+                      "- Every frame, against frame 1: " + " ".join(f"{x:.2f}" for x in ratios)]
         made = r.get("sheet")
         if made and made.get("path"):
             lines += [f"- The plate and the export around each edit, on frames {', '.join(map(str, made['frames']))}:", "",
@@ -664,6 +736,12 @@ def report(a, machine, results):
             lines += [f"- The page's verdict on the export (logic.eraseCheck): {made['verdict']['text']}"] if made.get("verdict") else []
         elif made:
             lines.append(f"- No sheet: {made['error']}.")
+        fluid = r.get("fluid_sheet")
+        if fluid and fluid.get("path"):
+            lines += [f"- The fluid shot's keyframes (frames {', '.join(map(str, fluid['keys']))}), then the shot on frames {', '.join(map(str, fluid['frames']))}:",
+                      "", f"  ![{r['name']}, fluid]({os.path.relpath(fluid['path'], a.out)})", ""]
+        elif fluid:
+            lines.append(f"- No fluid sheet: {fluid['error']}.")
         lines += [f"- Marks, screenshots, the page's log and the zip: `{os.path.relpath(r['folder'], a.out)}`."]
     failures = [r for r in ran if not r["passed"]]
     if failures:

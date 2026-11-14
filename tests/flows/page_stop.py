@@ -20,7 +20,7 @@ def run(browser, port, U):
     page.keyboard.press("p")
     U.paint_once(page, "a lantern", [(0.3, 0.5), (0.34, 0.56)])
     page.keyboard.press("Enter")
-    U.wait_log(page, U.added_line("Shot, preview (about"), 60000, "start of the preview shot")
+    U.wait_log(page, U.added_line(("Shot, preview (about", "Shot, preview: about")), 60000, "start of the preview shot")
     U.mock_route(port, "/mock/slow", {"seconds": 120, "times": 1})  # the next upload is the tracking step's: it waits for /mock/release
     answers = []  # the time of each /mock/events, while the preview shot ends and writes its files
 

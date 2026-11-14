@@ -396,7 +396,7 @@ def remote(a):
                     if time.time() - asked >= 10:  # a ComfyUI stopped for its memory leaves the page waiting: the case ends here, with what it has
                         asked, silent = time.time(), 0 if answers(a.url) else silent + 1
                         if silent >= 3:
-                            mark(f"FAILED: ComfyUI stopped answering during « {note or status()[:60]} »")
+                            mark(f"FAILED: ComfyUI stopped answering in « {note or status()[:60]} ».")
                             break
                     time.sleep(1)
                 mark("final: " + status())

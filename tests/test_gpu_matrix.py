@@ -132,7 +132,7 @@ class Seeds(unittest.TestCase):
 class Run(unittest.TestCase):
     """gpu_matrix.main with stand-ins for the browser, ComfyUI and the cases."""
 
-    def matrix(self, cases, alive, *more, jobs=()):
+    def matrix(self, cases, alive, *more, jobs=(), result=None):
         """main() on `cases`: what was called, in order, the exit code and the report. `alive` holds ComfyUI's answer after
         each case, and `jobs` the jobs each case ran."""
         calls, alive = [], iter(alive)
@@ -140,7 +140,7 @@ class Run(unittest.TestCase):
         def case(a, name, case, folder):
             calls.append(name)
             return {"name": name, "seconds": 255.0, "vram": 0, "ram": 0, "own": 0, "container": 0, "folder": folder, "log": "", "marks": [],
-                    **gpu_matrix.read_log(""), "jobs": list(jobs), "passed": True, "why": "", "matte": None, "live_files": 0, "seed": case.get("seed")}
+                    **gpu_matrix.read_log(""), "jobs": list(jobs), "passed": True, "why": "", "matte": None, "live_files": 0, "seed": case.get("seed"), **(result or {})}
 
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "input", "plates"))
@@ -180,6 +180,42 @@ class Run(unittest.TestCase):
         calls, code, report = self.matrix("horse_cow,horse_erase", [True])
         self.assertEqual((calls, code), (["horse_cow", "horse_erase"], 0))
         self.assertNotIn("not run", report)
+
+    def test_a_matte_warning_fails_a_case_that_passed_and_the_report_lists_each_detail(self):
+        summary = ("Paint matte (full): tracked on 53 of 121 frames.\n  Warning: object left its place from frame 56. Check the composite there.\n"
+                   "  Removed: areas where the plate stands in front of the object, on 66 frames.")
+        quiet = "Paint matte (640x352): tracked on 51 of 121 frames.\n  Held: last matte, on 1 frame with no SAM mask."
+        self.assertEqual(gpu_matrix.matte_verdict(True, "", [quiet]), (True, ""))
+        self.assertEqual(gpu_matrix.matte_verdict(True, "", [quiet, summary]),
+                         (False, "Warning: object left its place from frame 56. Check the composite there. "
+                                 "The case fails on this matte warning: check its picture on the sheet."))
+        self.assertEqual(gpu_matrix.matte_verdict(False, "FAILED: no export", [summary]), (False, "FAILED: no export"), "a failed case keeps its reason")
+        real = gpu_matrix.read_log
+        with mock.patch.object(gpu_matrix, "read_log", lambda text: {**real(text), "mattes": [summary]}):
+            report = self.matrix("horse_cow", [True])[2]
+        self.assertIn("- Paint matte (full): tracked on 53 of 121 frames.\n  - Warning: object left its place from frame 56. Check the composite "
+                      "there.\n  - Removed: areas where the plate stands in front of the object, on 66 frames.\n", report)
+
+    def test_the_report_gives_one_fact_a_line_and_counts_frames_from_1(self):
+        GB = gpu_matrix.GB
+        report = self.matrix("horse_cow", [True], result={"vram": 15 * GB, "ram": 49.8 * GB, "own": 49.7 * GB, "container": 50 * GB,
+                                                          "matte": ("/m/paint", [0.0522, 0.0261, 0.0726, 0.0])})[2]
+        for line in ("GB means 2^30 bytes.", "- Peak VRAM: 15.0 GB.\n", "- Peak RAM: 49.8 GB, 49.7 GB of it not backed by a file.\n",
+                     "- This container's own count, page cache included: 50.0 GB.\n", "- Out-of-memory retries: 0.\n",
+                     "- Jobs from the job index (not timed): 0.\n", "frames; frame 1 covers 5.22% of the frame.\n",
+                     "- Area against frame 1: 0.00 to 1.39 times. Furthest: frame 4, 0.00 times.\n", "- Every frame, against frame 1: 1.00 0.50 1.39 0.00"):
+            self.assertIn(line, report)
+
+    def test_the_report_reads_the_render_s_lines_in_their_old_and_new_words(self):
+        old = ("11:02:07 PMRender v1: Track the erase (about 12 s)\n11:02:36 PMRender v1: Track the erase took 28.7 s\n"
+               "11:02:40 PMMemory profile small: 16 GB of VRAM, 52 GB of RAM. Models load one at a time\n11:02:41 PMLive preview is off: no frames\n")
+        new = ("11:02:07 PMRender v1: Track the erase: about 12 s.\n11:02:36 PMRender v1: Track the erase: done in 28.7 s (estimate 12 s).\n"
+               "11:02:40 PMMemory profile: small (16 GB of VRAM, 52 GB of RAM).\n  Models load one at a time.\n11:02:41 PMWarning: live preview off: no frames.\n")
+        for log in (old, new):
+            r = gpu_matrix.read_log(log)
+            self.assertEqual((r["steps"], r["announced"]), ([("v1 Track the erase", 28.7)], {"v1 Track the erase": 12}))
+            self.assertEqual(r["profile"], "small (16 GB of VRAM, 52 GB of RAM. Models load one at a time)")
+            self.assertEqual(len(r["live_off"]), 1)
 
     def test_fresh_frees_comfyui_before_each_case(self):
         """On the pod of 11 Nov a case's first job read the 138 GB that the case before it had left."""
@@ -369,7 +405,7 @@ class Estimates(unittest.TestCase):
                "11:03:36 PMRender v1: Composite, preview (about 8 s) in the background\n11:03:47 PMRender v1: Composite, preview took 9.0 s\n")
         info = gpu_matrix.read_log(log)
         self.assertEqual(info["announced"], {"v1 Track the erase": 12, "v1 Composite, preview": 8})
-        self.assertEqual(gpu_matrix.estimates_off(info["steps"], info["announced"]), ["v1 Track the erase: about 12 s, took 28.7 s"])
+        self.assertEqual(gpu_matrix.estimates_off(info["steps"], info["announced"]), ["v1 Track the erase: about 12 s, done in 28.7 s"])
 
 
 class NodeClock(unittest.TestCase):
@@ -424,9 +460,11 @@ class Hdr(unittest.TestCase):
     def test_hdr_match_lines_come_from_comfyui_s_log_since_the_case_began(self):
         entries = [{"t": "2026-11-13T09:59:59.900000", "m": "PaintAPlate HDR Match: a case before\n"},
                    {"t": "2026-11-13T10:00:00.500000", "m": "PaintAPlate HDR Match: level +0.02 stops on 121 frames\n"},
+                   {"t": "2026-11-13T10:00:01.000000", "m": "[Paint a plate] HDR Match: level +0.02 stops on 121 frames.\n"},
                    {"t": "2026-11-13T10:00:01.000000", "m": "Prompt executed in 9.10 seconds\n"}]
         with mock.patch.object(gpu_matrix, "get", return_value={"entries": entries}):
-            self.assertEqual(gpu_matrix.comfy_lines("http://x", "2026-11-13T10:00:00"), ["PaintAPlate HDR Match: level +0.02 stops on 121 frames"])
+            self.assertEqual(gpu_matrix.comfy_lines("http://x", "2026-11-13T10:00:00"), ["PaintAPlate HDR Match: level +0.02 stops on 121 frames",
+                              "[Paint a plate] HDR Match: level +0.02 stops on 121 frames."], "both marks of HDR Match's line")
         with mock.patch.object(gpu_matrix, "get", side_effect=OSError("404")):
             self.assertEqual(gpu_matrix.comfy_lines("http://x", "2026-11-13T10:00:00"), [])
 
@@ -535,22 +573,79 @@ class StoppedComfy(unittest.TestCase):
         self.assertTrue(gpu_matrix.render_hdr([("v1 Shot, full size", 580.0), ("v1 SDR to HDR", 640.0)]))
 
 
+    def test_a_fluid_case_s_sheet_shows_its_keyframes_and_four_frames_of_its_shot(self):
+        import av
+        import numpy as np
+        from PIL import Image
+        tmp = tempfile.mkdtemp(prefix="paintaplate_fluid_")
+        out, (w, h, n) = os.path.join(tmp, "output", "paintaplate", "f1"), (64, 48, 17)
+        os.makedirs(os.path.join(out, "control"))
+
+        def movie(path, colour):
+            with av.open(path, "w") as c:
+                s = c.add_stream("mpeg4", rate=24)
+                s.width, s.height, s.pix_fmt = w, h, "yuv420p"
+                for i in range(n):
+                    for p in s.encode(av.VideoFrame.from_ndarray(np.full((h, w, 3), colour(i), np.uint8), format="rgb24")):
+                        c.mux(p)
+                for p in s.encode():
+                    c.mux(p)
+        movie(os.path.join(out, "control", "c_00001_.mp4"), lambda i: (245, 124, 0) if i in (0, n - 1) else (0, 0, 0))
+        movie(os.path.join(out, "preview_00001_.mp4"), lambda i: (12 * i,) * 3)
+        graph = {"5": {"class_type": "PaintAPlate_SaveMovie"}, "27": {"class_type": "PaintAPlate_SavePlate"}, "29": {"class_type": "SaveVideo"}}
+        outputs = {"5": {"images": [{"filename": "c_00001_.mp4", "subfolder": "paintaplate/f1/control", "type": "output"}], "animated": [True]},
+                   "27": {"images": [{"filename": "plate_00001.exr", "subfolder": "paintaplate/f1", "type": "output"}]},
+                   "29": {"images": [{"filename": "preview_00001_.mp4", "subfolder": "paintaplate/f1", "type": "output"}], "animated": [True]}}
+        history = {"abcdef12-34": {"prompt": [0, "abcdef12-34", graph], "outputs": outputs}}
+        movies = gpu_matrix.fluid_movies(tmp, [{"name": "fluid", "id": "abcdef12"}], history)
+        self.assertEqual(movies, {"control": os.path.join(out, "control", "c_00001_.mp4"), "shot": os.path.join(out, "preview_00001_.mp4")})
+        self.assertEqual(gpu_matrix.fluid_movies(tmp, [{"name": "shot", "id": "abcdef12"}], history), {}, "a case with no fluid job")
+        case = {"fluid": {"keys": [[0, "#f57c00", [[0.5, 0.5]], 64], [-1, "#f57c00", [[0.5, 0.5]], 96]]}}
+        made = gpu_matrix.fluid_sheet(case, tmp, movies)
+        self.assertEqual((made["keys"], made["frames"]), ([1, n], [1, n // 3 + 1, 2 * n // 3 + 1, n]), "the keyframes as painted, the last as -1")
+        with Image.open(made["path"]) as im:
+            a = np.asarray(im.convert("RGB")).astype(int)
+        orange = (abs(a[..., 0] - 245) < 24) & (abs(a[..., 1] - 124) < 24) & (a[..., 2] < 40)
+        self.assertGreaterEqual(orange.sum(), 2 * w * h * 0.9, "both keyframes show their blob")
+        self.assertIn("error", gpu_matrix.fluid_sheet(case, tmp, {}))
+
 class Verdict(unittest.TestCase):
     """What the verdict and the tree case read: the page's mask and quick-pass size, the case, the end of ui_live.py's wait."""
 
-    def test_the_verdict_takes_the_page_s_newest_mask_and_its_quick_pass_size(self):
+    def test_the_verdict_takes_the_mask_of_the_case_s_last_edit_job_and_the_quick_pass_size(self):
         tmp = tempfile.mkdtemp(prefix="paintaplate_mask_")
-        folder = os.path.join(tmp, "input", "paintaplate", "scene")
+        folder = os.path.join(tmp, "input", "paintaplate", "up")
         os.makedirs(folder)
-        older, newer = (os.path.join(folder, f"e{i}_mask_full.png") for i in (1, 2))
-        for i, path in enumerate((older, newer)):
+        quick, full = (os.path.join(folder, f"{h * 32}.png") for h in "ab")
+        for path in (quick, full):  # named by the hash of its content, and older than the case: only the job's graph names it
             open(path, "wb").close()
-            os.utime(path, (1000 + i, 1000 + i))
-        self.assertEqual(gpu_matrix.page_mask(tmp, 1000), newer)
-        self.assertIsNone(gpu_matrix.page_mask(tmp, 2000), "nothing written since the case started")
+            os.utime(path, (1000, 1000))
+        graph = lambda h: {"4": {"class_type": "LoadImage", "inputs": {"image": f"paintaplate/up/{'c' * 32}.png"}},  # noqa: E731
+                           "8": {"class_type": "LoadImageMask", "inputs": {"image": f"paintaplate/up/{h * 32}.png", "channel": "red"}}}
+        jobs = [{"name": "prompt", "id": "11111111"}, {"name": "edit", "id": "22222222"}, {"name": "edit", "id": "33333333"}]
+        graphs = {"22222222-quick": graph("a"), "33333333-full": graph("b"), "44444444-other": graph("d")}
+        self.assertEqual(gpu_matrix.page_mask(tmp, jobs, graphs), full, "the full-size pass: the case's last edit job")
+        self.assertEqual(gpu_matrix.page_mask(tmp, jobs, {k: v for k, v in graphs.items() if k[0] != "3"}), quick,
+                         "the last edit job that /history still holds")
+        self.assertIsNone(gpu_matrix.page_mask(tmp, jobs[:1], graphs), "a case with no edit job")
+        self.assertEqual(gpu_matrix.erase_verdict(None, None, None, (768, 432))["text"],
+                         "Clean, frame 1: no verdict. No mask: ComfyUI's history holds no edit job of this case.")
+        self.assertEqual(gpu_matrix.erase_verdict(None, None, os.path.join(folder, "gone.png"), (768, 432))["text"],
+                         "Clean, frame 1: no verdict. No mask: gone.png is not in ComfyUI's input folder.")
         log = "Working sizes: edits at 1920 x 1088, quick passes at 768 x 432, preview at 608 x 352, tracking at 960 x 544"
         self.assertEqual(gpu_matrix.quick_size(log), (768, 432), "the size the page judges at (p.prev), not the shot's preview size")
+        log = "Working sizes: edits at 1920 x 1088, edit preview at 768 x 432, shot preview at 640 x 352, tracking at 960 x 544."
+        self.assertEqual(gpu_matrix.quick_size(log), (768, 432), "the line's words of the edit preview")
         self.assertIsNone(gpu_matrix.quick_size(""))
+
+    def test_the_arm_case_paints_the_exr_plate_with_sdr_to_hdr_outside_quick_and_all(self):
+        arm = gpu_matrix.load_cases()["tos_arm"]
+        self.assertEqual((arm["path"], arm["hdr"], len(arm["strokes"])), ("plates/tos_05_4a", True, 1))
+        tool, words, points, _, options = arm["strokes"][0]
+        self.assertEqual((tool, options), ("paint", {"color": "#000000"}))
+        self.assertTrue(words.startswith("a robotic arm: ") and words.endswith("a row of very bright blue-white LEDs along the wiring"))
+        self.assertTrue(all(0 <= v <= 1 for point in points for v in point))
+        self.assertNotIn("tos_arm", gpu_matrix.ALL + gpu_matrix.QUICK)
 
     def test_the_tree_case_expects_the_name_and_stays_out_of_quick_and_all(self):
         cases = gpu_matrix.load_cases()

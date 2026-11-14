@@ -24,7 +24,9 @@ SHOTS = "/tmp/paintaplate_ui_mock"
 PAGE = "http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html{query}"
 VIEWPORT = {"width": 1400, "height": 900}
 DONE = "document.querySelectorAll('#history li').length === {n} && !document.querySelector('#history li.busy')"
-REVIEWED = "Composite, full size took"  # a render's full-size composite in the log: "Render v2: Composite, full size took 3.1 s"
+REVIEWED = ("Composite, full size took", "Composite, full size: done in")  # a render's full-size composite in the log, in both forms:
+# "Render v2: Composite, full size took 3.1 s" and "Render v2: Composite, full size: done in 3.1 s (estimate 45 s)."
+HAS_REVIEWED = "%s.some((x) => t.includes(x))" % json.dumps(list(REVIEWED))  # a JS test of the log line `t`
 CHECKS = {"passed": 0, "failed": None}  # this process's checks: how many passed, and the sentence of the one that failed
 
 
@@ -166,12 +168,12 @@ WATCH = """() => { window.__lines = []; if (window.__watch) window.__watch.disco
 
 def added(page, steps):  # how many jobs of each step were taken from the job index, and how many were posted, since WATCH
     lines = page.evaluate("window.__lines")  # a posted job's lines start with its step and its id: "ingest ef88a8f3: done in 2.0 s (10 nodes)"
-    return {**{f"{s}: made before": sum(line.startswith(f"{s}: made before") for line in lines) for s in steps},
+    return {**{f"{s}: made before": sum(line.startswith((f"{s}: made before", f"{s}: taken from the job index")) for line in lines) for s in steps},
             **{f"{s}: posted": len({line.split(":")[0] for line in lines if line.startswith(f"{s} ")}) for s in steps}}
 
 
-def added_line(text):  # a JS test: a line added to the log since WATCH holds `text` (the log keeps its last 400 lines only)
-    return "window.__lines.some((t) => t.includes(%s))" % json.dumps(text)
+def added_line(text):  # a JS test: a line added to the log since WATCH holds `text`, or one of a tuple of texts (the log keeps its last 400 lines only)
+    return "window.__lines.some((t) => %s.some((x) => t.includes(x)))" % json.dumps([text] if isinstance(text, str) else list(text))
 
 
 def wait_log(page, js, timeout, what):
@@ -383,8 +385,8 @@ def generate_flow(browser, port):
     check(row_titles(page) == ["1. Paint"] and row_words(page) == ["a red fire"], f"Enter generates edit 1 with its words: {row_titles(page)} {row_words(page)}")
     page.wait_for_function("document.querySelector('#render-left').textContent === 'full size ready'", timeout=120000)
     lines = log_lines(page)
-    full = [i for i, line in enumerate(lines) if "plays the full-size shot" in line]
-    done = [i for i, line in enumerate(lines) if REVIEWED in line]
+    full = [i for i, line in enumerate(lines) if "plays the full-size shot" in line or line.startswith("Viewer: full-size shot")]
+    done = [i for i, line in enumerate(lines) if any(r in line for r in REVIEWED)]
     check(bool(full and done) and full[-1] < done[-1] and not any(line.startswith("Export v") for line in lines),
           f"Generate makes the full-size composite and nothing for compositing software: the full-size shot plays, then the review: {full} {done}")
     with page.expect_download(timeout=120000) as dl:
@@ -451,25 +453,25 @@ def history_flow(browser, port):
     check(found < started and asked == 1, f"a whole-object erase: SAM runs while the strokes rest, the prompt writer once "
           f"(SAM at line {found}, start at line {started}, {asked} request(s))")
 
-    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => e.textContent.includes('Clean plate pass, preview took'))", timeout=120000)
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => /Clean plate pass, preview( took|: done in)/.test(e.textContent))", timeout=120000)
     seen = len(log_lines(page))
     page.click("#history li:last-child .del")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
     check(row_titles(page) == ["1. Clean"], f"after a removal the numbers start from 1 again: {row_titles(page)}")
-    page.wait_for_function("[...document.querySelectorAll('#log li span')].slice(%d).some((e) => e.textContent.includes('used again'))" % seen,
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].slice(%d).some((e) => /used again|reused from an earlier render/.test(e.textContent))" % seen,
                            timeout=60000)
     lines = log_lines(page)[seen:]
-    check(not any("Track the object (about" in line or "Clean plate pass, preview (about" in line for line in lines),
+    check(not any(re.search(r"(Track the object|Clean plate pass, preview)(?: \(|: )about", line) for line in lines),
           "the paint removed, the next render uses the erase's matte and clean plate again: nothing tracks or cleans twice")
     page.wait_for_function("document.querySelector('#render-left').textContent === 'full size ready'", timeout=120000)
     lines = log_lines(page)[seen:]
     stopped = [line for line in lines if re.match(r"^(clean|cleanup|shot|matte|comp|review|export) \S+: cancelled", line)]
     check(not stopped, f"a removal stops no render step: the render it leaves keeps what it made {stopped}")
-    behind = [line for line in lines if line.endswith(", in the background")]
+    behind = [line for line in lines if line.rstrip(".").endswith(", in the background")]
     check(bool(behind), f"the render of the edits before the removal goes on in the background: {behind[:2]}")
-    steps = [(i, line) for i, line in enumerate(lines) if re.match(r"^Render v\d+: .* \(about \d+ s\)", line)]
-    comp = next((i for i, line in steps if "Composite, preview (about" in line and not line.endswith("in the background")), None)
-    full = next((i for i, line in steps if ", full size (about" in line or "Export (about" in line), None)
+    steps = [(i, line) for i, line in enumerate(lines) if re.match(r"^Render v\d+: .*(?: \(about |: about )\d+ s", line)]
+    comp = next((i for i, line in steps if re.search(r"Composite, preview(?: \(|: )about", line) and not line.rstrip(".").endswith("in the background")), None)
+    full = next((i for i, line in steps if re.search(r"(, full size|Export)(?: \(|: )about", line)), None)
     check(comp is not None and (full is None or comp < full),
           f"the render queue: the preview of the edits on show runs before any full-size step (composite at {comp}, first full size at {full})")
     check(not page.is_disabled("#undo-btn") and page.is_disabled("#redo-btn"), "undo is live, redo is not")
@@ -639,7 +641,7 @@ def fluid_flow(browser, port):
       const f = document.querySelector('#history li[data-id="fluid"] small');
       return t.join() === '2. Paint,1. Fluid' && !document.querySelector('#history li.busy') && !!f && f.textContent.includes('thick white smoke'); })()"""
     page.wait_for_function(rows_done, timeout=120000)
-    page.wait_for_function(f"window.__lines.some((t) => t.includes('{REVIEWED}'))", timeout=120000)  # its render made, through the full-size composite
+    page.wait_for_function(f"window.__lines.some((t) => {HAS_REVIEWED})", timeout=120000)  # its render made, through the full-size composite
     name, scene = save_scene(page)
     check(scene["fluid"]["prompt"] == "thick white smoke" and scene["fluid"]["made"] and [e["prompt"] for e in scene["edits"]] == ["a lantern"],
           f"the scene keeps the fluid shot's own words, that it was made, and the edit on it: {scene['fluid']['prompt']!r}, {[e['prompt'] for e in scene['edits']]}")
@@ -648,7 +650,7 @@ def fluid_flow(browser, port):
     open_scene(page, name)
     page.wait_for_function("window.__lines.some((t) => t.startsWith('Scene opened'))", timeout=120000)
     page.wait_for_function(rows_done, timeout=120000)
-    page.wait_for_function("window.__lines.some((t) => t.startsWith('review: made before') || t.startsWith('review '))", timeout=120000)
+    page.wait_for_function("window.__lines.some((t) => t.startsWith('review: made before') || t.startsWith('review: taken from the job index') || t.startsWith('review '))", timeout=120000)
     grew = added(page, ("ingest", "fluid", "edit", "shot", "matte", "comp", "review"))
     posted = {k: v for k, v in grew.items() if k.endswith("posted") and v}
     check(not posted and all(grew[f"{s}: made before"] >= 1 for s in ("fluid", "edit", "shot", "review")),
@@ -665,7 +667,7 @@ def scene_flow(browser, port):
     open_plate(page)
 
     def reviews(n):  # the full-size composite of the edits on show, the last step Generate starts
-        page.wait_for_function(f"window.__lines.filter((t) => t.includes('{REVIEWED}')).length >= {n}", timeout=180000)
+        page.wait_for_function(f"window.__lines.filter((t) => {HAS_REVIEWED}).length >= {n}", timeout=180000)
 
     page.evaluate(WATCH)
     page.keyboard.press("p")
@@ -691,7 +693,7 @@ def scene_flow(browser, port):
     page.wait_for_function("window.__lines.some((t) => t.startsWith('Scene opened'))", timeout=120000)
     page.wait_for_function("""(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
       return t.join() === '2. Clean,1. Paint' && !document.querySelector('#history li.busy'); })()""", timeout=120000)
-    page.wait_for_function("window.__lines.some((t) => t.startsWith('review: made before') || t.startsWith('review '))", timeout=180000)
+    page.wait_for_function("window.__lines.some((t) => t.startsWith('review: made before') || t.startsWith('review: taken from the job index') || t.startsWith('review '))", timeout=180000)
     settled(page)
     grew = added(page, ("ingest", "prompt", "edit", "clean", "cleanup", "shot", "matte", "comp", "review"))
     posted = {k: v for k, v in grew.items() if k.endswith("posted") and v}
@@ -894,8 +896,8 @@ def hdr_flow(browser, port):
     check(bool(re.search(r"step \d+ of \d+", caption)) and page.is_hidden("#live-inset"),
           f"a full-size pass shows its live preview in a corner while the preview plays, then it goes: {caption}")
     new = lines()
-    at = lambda text: next((i for i, line in enumerate(new) if text in line), None)  # noqa: E731
-    check(at("SDR to HDR took") is not None and at("SDR to HDR took") < at(REVIEWED),
+    at = lambda texts: next((i for i, line in enumerate(new) if any(x in line for x in texts)), None)  # noqa: E731
+    check(at(("SDR to HDR took", "SDR to HDR: done in")) is not None and at(("SDR to HDR took", "SDR to HDR: done in")) < at(REVIEWED),
           "the full-size shot goes through SDR to HDR before the full-size composite the viewer plays")
     rows = lambda: page.eval_on_selector_all("#stages li.pick .name", "els => els.map(e => e.textContent)")  # noqa: E731
     shown = lambda: page.eval_on_selector_all("#stages li.shown .name", "els => els.map(e => e.textContent)")  # noqa: E731
@@ -913,7 +915,7 @@ def hdr_flow(browser, port):
     check(shown() == ["Composite, full size"], f"a second click goes back to the latest: {shown()}")
     page.evaluate(WATCH)
     page.keyboard.press("Control+Enter")  # another seed: a new edit pass, then a new render
-    wait_log(page, "window.__lines.some((t) => /^Render v\\d+: .* \\(about \\d+ s\\)/.test(t))", 120000, "render step")
+    wait_log(page, "window.__lines.some((t) => /^Render v\\d+: .*(?: \\(about |: about )\\d+ s/.test(t))", 120000, "render step")
     stopped = lambda: any(line.startswith("Stopped") for line in lines())  # noqa: E731
     page.keyboard.press("Escape")
     poll(page, lambda: stopped() or "Esc again" in (page.text_content("#hud") or ""))
@@ -948,7 +950,7 @@ def fluid16_flow(browser, port):
     wait_log(page, added_line("under the edits: the fluid shot v"), 240000, "the HDR fluid shot under the edits")
     page.wait_for_function("!document.querySelector('#deliver-auto').hidden", timeout=60000)
     new = page.evaluate("window.__lines")
-    check(any(line.startswith("Plate ") and "16-bit" in line for line in new) and any("SDR to HDR took" in line for line in new),
+    check(any(line.startswith("Plate ") and "16-bit" in line for line in new) and any("SDR to HDR took" in line or "SDR to HDR: done in" in line for line in new),
           "16-bit: the plate's line says so, and the fluid shot goes through SDR to HDR")
     check(not page.is_hidden("#deliver-auto"), "the HDR fluid shot is an EXR plate: SDR to HDR runs on its own for the edits on it")
     check(not page.is_disabled("#export-btn"), "a fluid shot with no edit on it can be exported")
@@ -1061,9 +1063,10 @@ def phone_flow(browser, port):
         page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=20000)
         page.click("#open-btn"); page.fill("#path", "plates/desk.mp4"); page.click("#open-go")
         page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
-        until(page, "[...document.querySelectorAll('#log li span')].some((e) => e.textContent.includes('ingest: made before'))")
+        until(page, "[...document.querySelectorAll('#log li span')].some((e) => /ingest: (made before|taken from the job index)/.test(e.textContent))")
         logged = log_lines(page)
-        check(any("ingest: made before with the same inputs, taken from the job index" in line for line in logged),
+        check(any("ingest: made before with the same inputs, taken from the job index" in line or line.startswith("ingest: taken from the job index")
+                  for line in logged),
               f"{name} phone: the plate opened again in a new session comes from the job index, with no new ingest")
         fits = page.evaluate("""() => { const W = innerWidth, H = innerHeight, r = (q) => document.querySelector(q).getBoundingClientRect();
           const inside = (q) => { const b = r(q); return b.left >= -1 && b.right <= W + 1 && b.top >= -1 && b.bottom <= H + 1 && b.width > 0; };

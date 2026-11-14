@@ -7,7 +7,7 @@ reads the build again when it connects again, asks for a reload, and keeps no jo
 import time
 
 OPEN = "document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden"
-TAKEN = "ingest: made before with the same inputs, taken from the job index"
+TAKEN = "ingest: taken from the job index (same inputs as an earlier job)."
 ASKED = "ComfyUI restarted with other code or model files"
 
 
