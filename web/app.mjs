@@ -339,7 +339,7 @@ async function openPlate(list, typed, opts = {}) {
   // The plate's two lines in the log (design rule 12): what it is, then the sizes the page works at. What to do next is a hint, below
   const depth = opts.fluid?.depth ? { bits: opts.fluid.depth, float: false } : plateDepth(spec); // a blank plate: the depth asked for its fluid shot
   log(`Plate ${S.plate.name} opened in ${((performance.now() - began) / 1000).toFixed(1)} s: ${w} x ${h}, ${spec.frames} frames, ${depth.float ? "float" : `${depth.bits}-bit`}, ${cs}${opts.cs ? "" : " (from file)"}`);
-  log(`Working sizes: edits at ${S.plate.work.join(" x ")}, quick passes at ${S.plate.prev.join(" x ")}, preview at ${S.plate.shot.join(" x ")}, tracking at ${S.plate.track.join(" x ")}`);
+  log(`Working sizes: edits at ${S.plate.work.join(" x ")}, edit preview at ${S.plate.prev.join(" x ")}, shot preview at ${S.plate.shot.join(" x ")}, tracking at ${S.plate.track.join(" x ")}.`);
 
   const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).map((n) => n).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
   if (gaps) setTimeout(() => status(gaps.trim()), 50);

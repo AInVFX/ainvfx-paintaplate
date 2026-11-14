@@ -10,7 +10,7 @@ PLAYABLE = "() => { window.__playable = 0; document.addEventListener('canplaythr
 NEXT = "Describe the edit at the top, paint on the frame, then Generate."
 FLUID = "Paint a fluid keyframe, describe it at the top, then Generate."
 OPENED = re.compile(r"^Plate \S+ opened in [\d.]+ s: (\d+) x (\d+), (\d+) frames, (\d+-bit|float), (.+)$")  # the plate's line: the open's time, the size, the frames, the bit depth, the colour space
-SIZES = re.compile(r"^Working sizes: edits at \d+ x \d+, quick passes at \d+ x \d+, preview at \d+ x \d+, tracking at \d+ x \d+$")
+SIZES = re.compile(r"^Working sizes: edits at \d+ x \d+, edit preview at \d+ x \d+, shot preview at \d+ x \d+, tracking at \d+ x \d+\.$")
 
 
 def run(browser, port, U):
