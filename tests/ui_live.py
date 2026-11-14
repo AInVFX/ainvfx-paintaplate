@@ -113,7 +113,8 @@ def stroke(page, box, pts):
 
 DONE = "document.querySelectorAll('#history li').length === {n} && !document.querySelector('#history li.busy')"
 
-LEFT = "#history li[data-left]"  # an erase that left its object: the page says so and renders no shot (logic.eraseCheck)
+LEFT = "#history li[data-left]"  # History's mark on an erase that the page's check holds back (logic.eraseCheck), or that asks for its object's name
+ASKED = "document.querySelector('#ask').open"  # the page's question dialog: while it is open, the page behind it takes no click
 NAME_ASKED = "took the stroke for another object"  # the page's line when an erase with no words asks for its object's name (logic.asksName)
 
 
@@ -139,7 +140,12 @@ def flow(page, url, open_plate, shots, wait_s=120):
         page.locator("#prompt").blur()
         stroke(page, box, pts)
         page.keyboard.press("Enter")  # Generate: the edit, then its shot
-        page.wait_for_function(DONE.format(n=i + 1), timeout=wait_s * 1000)
+        settled = f"({DONE.format(n=i + 1)}) && !document.querySelector('{LEFT}')"
+        page.wait_for_function(f"{ASKED} || ({settled})", timeout=wait_s * 1000)
+        if page.evaluate(ASKED):  # the check holds this erase back: a stand-in edit keeps the object's edges. « Render anyway » keeps the first frame, and its shot renders
+            print(f"edit {tool}: asked |", page.inner_text("#ask-text"))
+            page.click("#ask-yes")
+            page.wait_for_function(f"!{ASKED} && ({settled})", timeout=wait_s * 1000)
         page.screenshot(path=f"{shots}/2_{tool}_done.png")
         print(f"edit {tool}: done |", status())
     page.locator("#history li").nth(1).locator(".eye").click()  # bypass the erase, then bring it back
