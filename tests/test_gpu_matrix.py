@@ -550,6 +550,42 @@ class StoppedComfy(unittest.TestCase):
         self.assertTrue(gpu_matrix.render_hdr([("v1 Shot, full size", 580.0), ("v1 SDR to HDR", 640.0)]))
 
 
+    def test_a_fluid_case_s_sheet_shows_its_keyframes_and_four_frames_of_its_shot(self):
+        import av
+        import numpy as np
+        from PIL import Image
+        tmp = tempfile.mkdtemp(prefix="paintaplate_fluid_")
+        out, (w, h, n) = os.path.join(tmp, "output", "paintaplate", "f1"), (64, 48, 17)
+        os.makedirs(os.path.join(out, "control"))
+
+        def movie(path, colour):
+            with av.open(path, "w") as c:
+                s = c.add_stream("mpeg4", rate=24)
+                s.width, s.height, s.pix_fmt = w, h, "yuv420p"
+                for i in range(n):
+                    for p in s.encode(av.VideoFrame.from_ndarray(np.full((h, w, 3), colour(i), np.uint8), format="rgb24")):
+                        c.mux(p)
+                for p in s.encode():
+                    c.mux(p)
+        movie(os.path.join(out, "control", "c_00001_.mp4"), lambda i: (245, 124, 0) if i in (0, n - 1) else (0, 0, 0))
+        movie(os.path.join(out, "preview_00001_.mp4"), lambda i: (12 * i,) * 3)
+        graph = {"5": {"class_type": "PaintAPlate_SaveMovie"}, "27": {"class_type": "PaintAPlate_SavePlate"}, "29": {"class_type": "SaveVideo"}}
+        outputs = {"5": {"images": [{"filename": "c_00001_.mp4", "subfolder": "paintaplate/f1/control", "type": "output"}], "animated": [True]},
+                   "27": {"images": [{"filename": "plate_00001.exr", "subfolder": "paintaplate/f1", "type": "output"}]},
+                   "29": {"images": [{"filename": "preview_00001_.mp4", "subfolder": "paintaplate/f1", "type": "output"}], "animated": [True]}}
+        history = {"abcdef12-34": {"prompt": [0, "abcdef12-34", graph], "outputs": outputs}}
+        movies = gpu_matrix.fluid_movies(tmp, [{"name": "fluid", "id": "abcdef12"}], history)
+        self.assertEqual(movies, {"control": os.path.join(out, "control", "c_00001_.mp4"), "shot": os.path.join(out, "preview_00001_.mp4")})
+        self.assertEqual(gpu_matrix.fluid_movies(tmp, [{"name": "shot", "id": "abcdef12"}], history), {}, "a case with no fluid job")
+        case = {"fluid": {"keys": [[0, "#f57c00", [[0.5, 0.5]], 64], [-1, "#f57c00", [[0.5, 0.5]], 96]]}}
+        made = gpu_matrix.fluid_sheet(case, tmp, movies)
+        self.assertEqual((made["keys"], made["frames"]), ([1, n], [1, n // 3 + 1, 2 * n // 3 + 1, n]), "the keyframes as painted, the last as -1")
+        with Image.open(made["path"]) as im:
+            a = np.asarray(im.convert("RGB")).astype(int)
+        orange = (abs(a[..., 0] - 245) < 24) & (abs(a[..., 1] - 124) < 24) & (a[..., 2] < 40)
+        self.assertGreaterEqual(orange.sum(), 2 * w * h * 0.9, "both keyframes show their blob")
+        self.assertIn("error", gpu_matrix.fluid_sheet(case, tmp, {}))
+
 class Verdict(unittest.TestCase):
     """What the verdict and the tree case read: the page's mask and quick-pass size, the case, the end of ui_live.py's wait."""
 

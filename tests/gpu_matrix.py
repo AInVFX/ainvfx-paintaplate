@@ -6,8 +6,8 @@ Each case runs tests/ui_live.py on a running ComfyUI (the real page, in Google C
 case left behind and writes <out>/report.md: the machine, then per case the time of each step (the page's log times
 every step), each job with its seconds, its peak VRAM and RAM, the nodes ComfyUI took from its cache and the previews
 the page received, out-of-memory retries, the memory profile, the paint matte's area on every frame against the first
-frame's, pass or fail (a case also fails when a matte summary warns), the page's verdict on a Clean edit (gone or left), then the
-log of each failure. The report is written again after every case, so a run that is
+frame's, pass or fail (a case also fails when a matte summary warns), the page's verdict on a Clean edit (gone or left), a fluid case's
+keyframes and four frames of its shot, then the log of each failure. The report is written again after every case, so a run that is
 stopped still leaves one.
 
 Memory is read once a second. VRAM comes from ComfyUI's /system_stats. RAM is what ComfyUI's own process holds (VmRSS in
@@ -562,6 +562,53 @@ def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
         shutil.rmtree(work, ignore_errors=True)
 
 
+def fluid_movies(comfy, jobs, history):
+    """The movies of the case's last fluid job, from its graph and its outputs in ComfyUI's /history: {"control": the control
+    video (PaintAPlate_SaveMovie: the keyframes on black), "shot": the shot's preview (SaveVideo)}, as paths in ComfyUI's
+    output folder. {} when /history holds no fluid job of the case."""
+    kinds = {"PaintAPlate_SaveMovie": "control", "SaveVideo": "shot"}
+    for job in reversed([j["id"] for j in jobs if j["name"] == "fluid"]):
+        for pid, entry in history.items():
+            if pid[:8] == job:
+                graph, found = (entry.get("prompt") or [None, None, {}])[2], {}
+                for node, out in (entry.get("outputs") or {}).items():
+                    kind, files = kinds.get((graph.get(node) or {}).get("class_type")), out.get("images") or []
+                    if kind and files:
+                        found[kind] = os.path.join(comfy, "output", *files[0].get("subfolder", "").split("/"), files[0]["filename"])
+                return found
+    return {}
+
+
+def fluid_sheet(case, folder, movies):
+    """A fluid case's sheet, fluid_sheet.png in its folder: the keyframes the case painted, as its control video holds them,
+    then the shot on its first frame, at a third, at two thirds and on its last (movies: fluid_movies). {"path", "keys" and
+    "frames" (from 1)}, or {"error"} without both movies."""
+    from PIL import Image, ImageDraw, ImageFont
+    if not all(os.path.exists(movies.get(kind) or "") for kind in ("control", "shot")):
+        return {"error": "ComfyUI's history holds no control video and shot of the case's fluid job"}
+    count, frames = media_count(movies["control"]), media_count(movies["shot"])
+    keys, at = sorted({k[0] % count for k in case["fluid"]["keys"]}), sorted({0, frames // 3, 2 * frames // 3, frames - 1})
+    rows = [("keyframes", keys, media_frames(movies["control"], keys)), ("shot", at, media_frames(movies["shot"], at))]
+    (cw, ch), gap, head, left = SHEET_CELL, 8, 24, 96
+    try:
+        font = ImageFont.load_default(size=15)
+    except TypeError:
+        font = ImageFont.load_default()
+    out = Image.new("RGB", (left + max(len(keys), len(at)) * (cw + gap), len(rows) * (head + ch + gap)), (28, 28, 28))
+    draw = ImageDraw.Draw(out)
+    for r, (title, indices, pictures) in enumerate(rows):
+        y = r * (head + ch + gap)
+        draw.text((6, y + head + 4), title, fill="white", font=font)
+        for c, i in enumerate(indices):
+            picture = Image.fromarray(pictures[i])
+            picture.thumbnail((cw, ch))
+            out.paste(picture, (left + c * (cw + gap), y + head))
+            draw.text((left + c * (cw + gap), y + 4), f"frame {i + 1}", fill=(200, 200, 200), font=font)
+    path = os.path.join(folder, "fluid_sheet.png")
+    out.save(path)
+    return {"path": path, "keys": [i + 1 for i in keys], "frames": [i + 1 for i in at]}
+
+
 def run_case(a, name, case, folder):
     memory, t0 = Memory(a.url), time.time()
     memory.start()
@@ -591,6 +638,10 @@ def run_case(a, name, case, folder):
                                 mask=page_mask(a.comfy, result["jobs"], graphs), judge_at=quick_size(result["log"]))
     except Exception as exc:
         result["sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+    try:  # a fluid case's keyframes and shot, also never a reason to fail
+        result["fluid_sheet"] = fluid_sheet(case, folder, fluid_movies(a.comfy, result["jobs"], history)) if case.get("fluid") else None
+    except Exception as exc:
+        result["fluid_sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     for job in result["jobs"]:  # when ComfyUI ran it, and the most memory held between those two times
         span = spans.get(job["id"])
         job["run"] = span[1] - span[0] if span else None
@@ -684,6 +735,12 @@ def report(a, machine, results):
             lines += [f"- The page's verdict on the export (logic.eraseCheck): {made['verdict']['text']}"] if made.get("verdict") else []
         elif made:
             lines.append(f"- No sheet: {made['error']}.")
+        fluid = r.get("fluid_sheet")
+        if fluid and fluid.get("path"):
+            lines += [f"- The fluid shot's keyframes (frames {', '.join(map(str, fluid['keys']))}), then the shot on frames {', '.join(map(str, fluid['frames']))}:",
+                      "", f"  ![{r['name']}, fluid]({os.path.relpath(fluid['path'], a.out)})", ""]
+        elif fluid:
+            lines.append(f"- No fluid sheet: {fluid['error']}.")
         lines += [f"- Marks, screenshots, the page's log and the zip: `{os.path.relpath(r['folder'], a.out)}`."]
     failures = [r for r in ran if not r["passed"]]
     if failures:
