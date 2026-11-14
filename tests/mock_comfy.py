@@ -7,11 +7,12 @@ It serves web/ at /extensions/ainvfx-paintaplate/, answers /object_info, /upload
 blurs the reference inside the mask and streams step previews, the shot pastes the edited first frame over
 every frame, the matte repeats the first mask, the composite and the export blend through the matte. The
 download route and the plate browser are the pack's own routes.py. --plate writes a 1280 x 704 test plate to input/plates/desk.mp4.
-Each job waits a little, so the page's progress, cancelling and ordering behave as they do on a GPU. --speed divides
+Each job waits a little, so the page's progress, cancelling and ordering behave as they do on a GPU. The jobs run
+on a thread of their own, as ComfyUI runs its prompts beside its server: every route answers while a job writes its files. --speed divides
 these waits (the page suite runs with it). The windows a check holds open keep their own time: /mock/slow, /mock/oom,
 /mock/hold and the second after /free.
 """
-import argparse, asyncio, importlib, io, json, os, re, struct, sys, time, types, uuid
+import argparse, asyncio, importlib, io, json, os, re, struct, sys, threading, time, types, uuid
 from fractions import Fraction
 
 import av
@@ -29,6 +30,7 @@ A = None  # parsed arguments
 JOBS, HISTORY, SOCKETS = [], {}, {}
 STATE = {"running": None, "interrupt": False, "oom": {}}
 EVENTS = []  # (what, time, ...) for the out-of-memory test: the failure, /free, every fluid job posted
+LOOPS = {}  # "server": the loop of the routes, which owns the WebSockets; "jobs": the loop of the jobs, on its own thread
 
 
 def folder(kind):
@@ -180,9 +182,7 @@ async def send_preview(pid, img):
     buf = io.BytesIO()
     Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8)).save(buf, "JPEG", quality=80)
     meta = json.dumps({"prompt_id": pid, "image_type": "image/jpeg", "node_id": "16"}).encode()
-    msg = struct.pack(">II", 4, len(meta)) + meta + buf.getvalue()
-    for ws in list(SOCKETS.values()):
-        await ws.send_bytes(msg)
+    await to_pages(struct.pack(">II", 4, len(meta)) + meta + buf.getvalue())
 
 
 async def execute(pid, prompt):
@@ -401,8 +401,15 @@ async def execute(pid, prompt):
 # ---------- the API ----------
 
 async def send(msg):
+    await to_pages(json.dumps(msg))
+
+
+async def to_pages(data):
+    """Text or bytes to every page's WebSocket, on the loop of the routes: a job calls it from its own thread."""
+    if asyncio.get_running_loop() is not LOOPS["server"]:
+        return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(to_pages(data), LOOPS["server"]))
     for ws in list(SOCKETS.values()):
-        await ws.send_str(json.dumps(msg))
+        await (ws.send_bytes(data) if isinstance(data, bytes) else ws.send_str(data))
 
 
 async def worker():
@@ -415,7 +422,7 @@ async def worker():
         await send({"type": "execution_start", "data": {"prompt_id": pid}})
         t0 = time.time()
         try:
-            outputs = await execute(pid, prompt)
+            outputs = await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(execute(pid, prompt), LOOPS["jobs"]))
             HISTORY[pid] = {"outputs": outputs, "status": {"completed": True, "status_str": "success", "messages": []}}
             await send({"type": "execution_success", "data": {"prompt_id": pid}})
         except asyncio.CancelledError:
@@ -609,6 +616,8 @@ def download_routes():
 
 
 async def start():
+    LOOPS["server"], LOOPS["jobs"] = asyncio.get_running_loop(), asyncio.new_event_loop()
+    threading.Thread(target=LOOPS["jobs"].run_forever, name="jobs", daemon=True).start()
     app = web.Application(client_max_size=1024 ** 3)
     app.router.add_post("/prompt", prompt_route)
     app.router.add_get("/history", lambda r: web.json_response({}))  # the page reads it once at start, for the models already loaded

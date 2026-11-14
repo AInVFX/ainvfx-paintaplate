@@ -8,8 +8,15 @@ Google Chrome opens ComfyUI's editor and loads the file with app.loadGraphData, 
 3. app.graphToPrompt() gives back, value for value, the API graph that the page saved in the same file
    (extra.paintaplate.prompt, written by graph.editorGraph). An input that only the editor holds is listed apart: an
    optional input that the page leaves out, at its default.
-It writes graph_live.png (the whole graph on the canvas) and graph_live.json (every finding), and ends with 0 when 1 to 3
-hold. PLAYWRIGHT_CHANNEL picks the browser (default: chrome)."""
+4. each image loader reads a file at the top of ComfyUI's input folder, and the README note names that file.
+It measures the layout too: the canvas, and the links longer than 1500 px, each from its output slot to its input slot.
+It writes graph_live.png (the whole graph on the canvas) and graph_live.json (every finding), and ends with 0 when 1 to 4
+hold. PLAYWRIGHT_CHANNEL picks the browser (default: chrome).
+
+    python tests/graph_live.py --offline --graph <scene.comfyui.json>
+
+--offline needs no ComfyUI and no browser: the classes come from tests/js/object_info.scene.json, the sizes are the
+saved ones, and check 3, which needs the editor, is left out."""
 import argparse
 import json
 import math
@@ -19,6 +26,9 @@ import urllib.parse
 import urllib.request
 
 FRONTEND_ONLY = {"MarkdownNote", "Note", "Reroute", "PrimitiveNode"}  # nodes the editor draws with no class in /object_info
+FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "js", "object_info.scene.json")  # --offline: the laptop's copy
+TITLE, SLOT, LONG = 30, 20, 1500  # px: LiteGraph's title bar and slot row; a link longer than LONG crosses most of a screen
+LOADERS = ("LoadImage", "LoadImageMask")
 APP = "(window.app ?? window.comfyAPI?.app?.app)"
 BOXES = f"""() => {{ const a = {APP}, t = window.LiteGraph?.NODE_TITLE_HEIGHT ?? 30;
   return (a.graph._nodes ?? a.graph.nodes).map((n) => [String(n.id), n.title, n.pos[0], n.pos[1] - t, n.size[0], n.size[1] + t]); }}"""
@@ -71,6 +81,28 @@ def red(types, known):
     return sorted({t for t in types if t not in known and t not in FRONTEND_ONLY})
 
 
+def spread(boxes, links):
+    """The layout's measures: the canvas over every node, title bars included, and the links longer than LONG, each from
+    its output slot on the right edge to its input slot on the left edge. A link is [id, origin, slot, target, slot, type]."""
+    at, lengths = {str(b[0]): b for b in boxes}, []
+    for _, origin, out, target, slot, *_ in links:
+        a, b = at.get(str(origin)), at.get(str(target))
+        if a and b:
+            lengths.append(math.hypot(b[2] - (a[2] + a[4]), (b[3] + slot * SLOT) - (a[3] + out * SLOT)))
+    width = max(b[2] + b[4] for b in boxes) - min(b[2] for b in boxes)
+    height = max(b[3] + b[5] for b in boxes) - min(b[3] for b in boxes)
+    return {"canvas": [round(width), round(height)], "links": len(lengths), "long": sum(v > LONG for v in lengths), "longest": round(max(lengths, default=0))}
+
+
+def loaders(graph):
+    """The image loaders' files: those in a subfolder, which ComfyUI's loaders do not list, and those the README note does
+    not name."""
+    files = [n["widgets_values"][0] for n in graph["nodes"] if n["type"] in LOADERS and n.get("widgets_values")]
+    note = " ".join(str(v) for n in graph["nodes"] if n["type"] == "MarkdownNote" for v in n.get("widgets_values") or [])
+    named = {w.strip(",.;:()«»\"'") for w in note.split()}
+    return [f for f in files if "/" in f or "\\" in f], [f for f in files if f not in named]
+
+
 def known_classes(url, types):
     """The classes of `types` that this ComfyUI knows, one /object_info/<class> each."""
     found = set()
@@ -81,23 +113,9 @@ def known_classes(url, types):
     return found
 
 
-def main():
-    ap = argparse.ArgumentParser(description="A scene's graph in ComfyUI's own editor: red nodes, nodes over another, values against the page's API graph")
-    ap.add_argument("--url", default="http://127.0.0.1:8188", help="ComfyUI")
-    ap.add_argument("--graph", required=True, help="a graph the page saved: a GPU case's scene.comfyui.json, or File > ComfyUI graph")
-    ap.add_argument("--out", default=".", help="where graph_live.png and graph_live.json go")
-    ap.add_argument("--headed", action="store_true", help="show the browser's window")
-    a = ap.parse_args()
-    with open(os.path.expanduser(a.graph)) as f:
-        graph = json.load(f)
-    api = ((graph.get("extra") or {}).get("paintaplate") or {}).get("prompt")
-    if not api:
-        sys.exit("This file holds no API graph (extra.paintaplate.prompt): save the scene's graph again with a page from feat/page-w5 or later.")
-    types = [n["type"] for n in graph["nodes"]]
-    known = known_classes(a.url, types)
+def in_editor(a, graph, out):
+    """The graph in ComfyUI's editor, loaded as a drop would: the boxes ComfyUI drew, its API graph, and graph_live.png."""
     from playwright.sync_api import sync_playwright  # here, so that the unit tests need no browser
-    out = os.path.expanduser(a.out)
-    os.makedirs(out, exist_ok=True)
     with sync_playwright() as p:
         browser = p.chromium.launch(channel=os.environ.get("PLAYWRIGHT_CHANNEL", "chrome"), headless=not a.headed)
         page = browser.new_page(viewport={"width": 2560, "height": 1440})
@@ -112,16 +130,51 @@ def main():
         page.wait_for_timeout(1000)
         page.screenshot(path=os.path.join(out, "graph_live.png"))
         browser.close()
-    wrong, added = differences(api, made)
-    found = {"graph": a.graph, "nodes": len(types), "red": red(types, known), "over": overlaps(boxes), "wrong": wrong, "added": added}
+    return boxes, made
+
+
+def main():
+    ap = argparse.ArgumentParser(description="A scene's graph in ComfyUI's own editor: red nodes, nodes over another, values against the page's API graph, image files, the layout")
+    ap.add_argument("--url", default="http://127.0.0.1:8188", help="ComfyUI")
+    ap.add_argument("--graph", required=True, help="a graph the page saved: a GPU case's scene.comfyui.json, or File > ComfyUI graph")
+    ap.add_argument("--out", default=".", help="where graph_live.png and graph_live.json go")
+    ap.add_argument("--headed", action="store_true", help="show the browser's window")
+    ap.add_argument("--offline", action="store_true", help="no ComfyUI and no browser: classes from tests/js/object_info.scene.json, sizes as saved, no check 3")
+    a = ap.parse_args()
+    with open(os.path.expanduser(a.graph)) as f:
+        graph = json.load(f)
+    api = ((graph.get("extra") or {}).get("paintaplate") or {}).get("prompt")
+    if not api:
+        sys.exit("This file holds no API graph (extra.paintaplate.prompt): save the scene's graph again with a page from feat/page-w5 or later.")
+    types = [n["type"] for n in graph["nodes"]]
+    out = os.path.expanduser(a.out)
+    os.makedirs(out, exist_ok=True)
+    if a.offline:
+        with open(FIXTURE) as f:
+            known = set(json.load(f)["nodes"])
+        boxes = [[str(n["id"]), n.get("title") or n["type"], n["pos"][0], n["pos"][1] - TITLE, n["size"][0], n["size"][1] + TITLE] for n in graph["nodes"]]
+        wrong, added = [], []
+    else:
+        known = known_classes(a.url, types)
+        boxes, made = in_editor(a, graph, out)
+        wrong, added = differences(api, made)
+    deep, unnamed = loaders(graph)
+    found = {"graph": a.graph, "offline": a.offline, "nodes": len(types), "red": red(types, known), "over": overlaps(boxes), "wrong": wrong,
+             "added": added, "deep": deep, "unnamed": unnamed, "spread": spread(boxes, graph["links"])}
     with open(os.path.join(out, "graph_live.json"), "w") as f:
         json.dump(found, f, indent=1, ensure_ascii=False)
-    for key, what in (("red", "classes this ComfyUI does not know: the editor draws them red"), ("over", "pairs of nodes over each other, at the sizes ComfyUI drew"),
-                      ("wrong", "differences from the page's API graph"), ("added", "inputs that only the editor holds: optional, at their default")):
+    sizes = "saved in the file" if a.offline else "ComfyUI drew"
+    for key, what in (("red", "classes this ComfyUI does not know: the editor draws them red"), ("over", f"pairs of nodes over each other, at the sizes {sizes}"),
+                      ("wrong", "differences from the page's API graph"), ("added", "inputs that only the editor holds: optional, at their default"),
+                      ("deep", "image files in a subfolder: ComfyUI's loaders list only the top of the input folder"), ("unnamed", "image files the README note does not name")):
         print(f"{len(found[key])} {what}")
         for line in found[key][:40]:
             print(f"  {line}")
-    ok = not (found["red"] or found["over"] or found["wrong"])
+    s = found["spread"]
+    print(f"Layout: canvas {s['canvas'][0]} x {s['canvas'][1]} px; {s['long']} of {s['links']} links longer than {LONG} px; the longest {s['longest']} px")
+    if a.offline:
+        print("Check 3, the values against the page's API graph, needs ComfyUI's editor: run it without --offline")
+    ok = not (found["red"] or found["over"] or found["wrong"] or found["deep"] or found["unnamed"])
     print("GRAPH LIVE PASSED" if ok else "GRAPH LIVE FAILED")
     return 0 if ok else 1
 

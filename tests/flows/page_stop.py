@@ -1,8 +1,10 @@
 """The page workstream's check of a stop that lands between two jobs (tests/flows/README.md). A render step uploads its
 images, then posts its job. A stop cancels the jobs that exist, and the step that still uploads has none. The mock holds
 that upload open (/mock/slow), Stop is pressed, then the upload goes on (/mock/release): the step ends there, no job is
-posted until Enter, and Enter goes on from that step."""
+posted until Enter, and Enter goes on from that step. While the preview shot before it writes its frames and movie, the
+mock answers its routes, as ComfyUI does: on a busy machine a mock that did not timed out mock_route."""
 import re
+import time
 
 OPEN = "document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden"
 TRACKED = "window.__lines.some((t) => /^matte [0-9a-f]{8}: done in /.test(t))"
@@ -20,9 +22,16 @@ def run(browser, port, U):
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("Shot, preview (about"), 60000, "start of the preview shot")
     U.mock_route(port, "/mock/slow", {"seconds": 120, "times": 1})  # the next upload is the tracking step's: it waits for /mock/release
-    held = lambda: any(e[0] == "slow upload" for e in U.mock_route(port, "/mock/events"))  # noqa: E731
+    answers = []  # the time of each /mock/events, while the preview shot ends and writes its files
+
+    def held():
+        start = time.time()
+        events = U.mock_route(port, "/mock/events")
+        answers.append(time.time() - start)
+        return any(e[0] == "slow upload" for e in events)
     U.check(U.poll(page, held, 60) and not any(re.match(r"^matte [0-9a-f?]{1,8}: ", t) for t in page.evaluate("window.__lines")),
             "the tracking step waits for its upload, which the mock holds: it has posted no job yet")
+    U.check(max(answers) < 1, f"the mock answers while the preview shot writes its files: longest of {len(answers)} answers {max(answers):.2f} s, mock_route waits 5 s")
 
     page.click("#stop")
     U.wait_log(page, U.added_line("Stopped: what finished is kept"), 10000, "line of the stop")
