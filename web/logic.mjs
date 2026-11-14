@@ -496,13 +496,13 @@ export function plainError(message) {
   if (/out of memory|allocation on device/i.test(m)) return "the GPU ran out of memory.";
   if (/ComfyUI stopped answering/i.test(m)) return "ComfyUI stopped answering. Its terminal says why: most often the machine ran out of memory. Start ComfyUI again.";
   if (/No answer from ComfyUI|is not valid JSON|Unexpected end of JSON input|Failed to fetch|NetworkError/i.test(m)) return "ComfyUI did not answer: it may be restarting, or the connection dropped.";
-  const empty = m.match(/No image frames found in (\S+)/);
+  const empty = m.match(/(?:No image frames found in|Image sequence not found:) (\S+?)\.?(?:\s|$)/);
   if (empty) {
     const part = empty[1].split(/[\\/]/).filter(Boolean).find((p) => SAVED[p.replace(/_(\d+x\d+|full)$/, "")]);
     return `${part ? SAVED[part.replace(/_(\d+x\d+|full)$/, "")] : "the step before it"} saved no frames, so there was nothing to read.`;
   }
   if (/leaves the ComfyUI folders|outside the output folder|Absolute plate paths/i.test(m)) return "the file is outside ComfyUI's input and output folders.";
-  if (/Unsupported plate/i.test(m)) return "Paint a plate cannot read this kind of file.";
+  if (/Unsupported plate|Plate not supported/i.test(m)) return "Paint a plate cannot read this kind of file.";
   if (/value not in list|not found in list|failed validation|Missing nodes|does not exist in/i.test(m)) return "a model or a node it needs is missing.";
   if (/No such file|FileNotFound|not found/i.test(m)) return "a file it needs is missing.";
   if (/Upload failed/i.test(m)) return "the browser could not send a picture to ComfyUI.";
