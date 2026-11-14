@@ -538,16 +538,26 @@ class StoppedComfy(unittest.TestCase):
 class Verdict(unittest.TestCase):
     """What the verdict and the tree case read: the page's mask and quick-pass size, the case, the end of ui_live.py's wait."""
 
-    def test_the_verdict_takes_the_page_s_newest_mask_and_its_quick_pass_size(self):
+    def test_the_verdict_takes_the_mask_of_the_case_s_last_edit_job_and_the_quick_pass_size(self):
         tmp = tempfile.mkdtemp(prefix="paintaplate_mask_")
-        folder = os.path.join(tmp, "input", "paintaplate", "scene")
+        folder = os.path.join(tmp, "input", "paintaplate", "up")
         os.makedirs(folder)
-        older, newer = (os.path.join(folder, f"e{i}_mask_full.png") for i in (1, 2))
-        for i, path in enumerate((older, newer)):
+        quick, full = (os.path.join(folder, f"{h * 32}.png") for h in "ab")
+        for path in (quick, full):  # named by the hash of its content, and older than the case: only the job's graph names it
             open(path, "wb").close()
-            os.utime(path, (1000 + i, 1000 + i))
-        self.assertEqual(gpu_matrix.page_mask(tmp, 1000), newer)
-        self.assertIsNone(gpu_matrix.page_mask(tmp, 2000), "nothing written since the case started")
+            os.utime(path, (1000, 1000))
+        graph = lambda h: {"4": {"class_type": "LoadImage", "inputs": {"image": f"paintaplate/up/{'c' * 32}.png"}},  # noqa: E731
+                           "8": {"class_type": "LoadImageMask", "inputs": {"image": f"paintaplate/up/{h * 32}.png", "channel": "red"}}}
+        jobs = [{"name": "prompt", "id": "11111111"}, {"name": "edit", "id": "22222222"}, {"name": "edit", "id": "33333333"}]
+        graphs = {"22222222-quick": graph("a"), "33333333-full": graph("b"), "44444444-other": graph("d")}
+        self.assertEqual(gpu_matrix.page_mask(tmp, jobs, graphs), full, "the full-size pass: the case's last edit job")
+        self.assertEqual(gpu_matrix.page_mask(tmp, jobs, {k: v for k, v in graphs.items() if k[0] != "3"}), quick,
+                         "the last edit job that /history still holds")
+        self.assertIsNone(gpu_matrix.page_mask(tmp, jobs[:1], graphs), "a case with no edit job")
+        self.assertEqual(gpu_matrix.erase_verdict(None, None, None, (768, 432))["text"],
+                         "Clean, frame 1: no verdict. No mask: ComfyUI's history holds no edit job of this case.")
+        self.assertEqual(gpu_matrix.erase_verdict(None, None, os.path.join(folder, "gone.png"), (768, 432))["text"],
+                         "Clean, frame 1: no verdict. No mask: gone.png is not in ComfyUI's input folder.")
         log = "Working sizes: edits at 1920 x 1088, quick passes at 768 x 432, preview at 608 x 352, tracking at 960 x 544"
         self.assertEqual(gpu_matrix.quick_size(log), (768, 432), "the size the page judges at (p.prev), not the shot's preview size")
         self.assertIsNone(gpu_matrix.quick_size(""))

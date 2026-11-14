@@ -426,11 +426,17 @@ def framed(box, width, height, least=160):
     return (int(left), int(top), int(left + w), int(top + h))
 
 
-def page_mask(comfy, since):
-    """The mask the page sent Klein for an erase: the newest *_mask_full*.png in ComfyUI's input folder written since
-    `since` (seconds since the epoch), or None."""
-    found = [f for f in glob.glob(os.path.join(comfy, "input", "**", "*_mask_full*.png"), recursive=True) if os.path.getmtime(f) >= since]
-    return max(found, key=os.path.getmtime) if found else None
+def page_mask(comfy, jobs, graphs):
+    """The mask the page sent Klein for an erase: the image that the LoadImageMask node of the case's last edit job loads
+    (the full-size pass, which runs after the quick pass), as a path in ComfyUI's input folder. jobs: the page's job lines
+    (read_log); graphs: {prompt id: its API graph, from ComfyUI's /history}. The page uploads an image under the hash of its
+    content (app.mjs, uploadCanvas), so only the job's graph names the file. None when /history holds no edit job of the case."""
+    for job in reversed([j["id"] for j in jobs if j["name"] == "edit"]):
+        for pid, graph in graphs.items():
+            names = [n["inputs"].get("image") for n in (graph or {}).values() if n.get("class_type") == "LoadImageMask"] if pid[:8] == job else []
+            if names and isinstance(names[0], str):
+                return os.path.join(comfy, "input", *names[0].split("/"))
+    return None
 
 
 def quick_size(log):
@@ -448,7 +454,9 @@ def erase_verdict(after, before, mask, size):
     def none(why):
         return {"left": None, "changed": None, "edges": None, "text": f"Clean, frame 1: no verdict. {why}."}
     if not mask:
-        return none("No mask from the page in ComfyUI's input folder since the case started")
+        return none("No mask: ComfyUI's history holds no edit job of this case")
+    if not os.path.exists(mask):
+        return none(f"No mask: {os.path.basename(mask)} is not in ComfyUI's input folder")
     if not size:
         return none("No quick-pass size in the page's log")
     import numpy as np
@@ -571,7 +579,7 @@ def run_case(a, name, case, folder):
     result["nodes"], result["stopped_in"] = node_times(events, graphs, names), running_at_stop(events, graphs, names)
     try:  # the case's pictures: never a reason for the case to fail
         result["sheet"] = sheet(case, folder, os.path.join(a.comfy, "input", case["path"]) if case.get("path") else None,
-                                mask=page_mask(a.comfy, t0), judge_at=quick_size(result["log"]))
+                                mask=page_mask(a.comfy, result["jobs"], graphs), judge_at=quick_size(result["log"]))
     except Exception as exc:
         result["sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     for job in result["jobs"]:  # when ComfyUI ran it, and the most memory held between those two times
