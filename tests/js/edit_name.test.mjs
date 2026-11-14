@@ -1,7 +1,7 @@
 // The edit workstream's tests of an erase that Klein's prompt writer takes for another object (web/logic.mjs: asksName).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { asksName, erasesPaint, reconcile } from "../../web/logic.mjs";
+import { asksName, erasesPaint, reconcile, removedNames, writerSaw } from "../../web/logic.mjs";
 
 test("the laptop's answer of 12 November 2026 is refused, and an erase with no words then asks for its object's name", () => {
   // a stroke on the barn of horse.mp4, with no words: the prompt writer removed the horse, which holds none of the paint
@@ -20,4 +20,14 @@ test("with words, or for paint and light, the page goes on with its own caption"
   assert.equal(asksName("erase", "the barn"), false); // the page's own caption carries the name
   assert.equal(asksName("paint", ""), false);
   assert.equal(asksName("light", ""), false);
+});
+
+test("what the prompt writer saw, for History's row when the page asks for an object's name", () => {
+  assert.equal(writerSaw(["barn"]), "barn");
+  assert.equal(writerSaw(["old car", "sign"]), "old car and sign");
+  assert.equal(writerSaw(["old car", "sign", "fence"]), "old car, sign and fence");
+  assert.equal(writerSaw([]), true); // an answer refused with no name in it
+  assert.equal(writerSaw(undefined), true);
+  const barn = 'Remove the barn <barn_1>. [{"id": "barn_1", "from": "ref_image_0", "src_bbox": [80, 40, 300, 260], "tgt_bbox": null, "desc": "a barn"}]';
+  assert.equal(writerSaw(removedNames(barn)), "barn"); // as generate reads the writer's last answer
 });

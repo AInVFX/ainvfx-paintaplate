@@ -299,6 +299,11 @@ export const coreBox = ({ painted, masks, w, h }) => boxOf(corePixels({ painted,
 export const writerBoxes = ({ tool, words, parts, core, bbox }) =>
   (tool === "erase" && !String(words ?? "").trim() && core && parts?.length === 1 ? { bbox: core, boxes: [core] } : { bbox, boxes: parts });
 
+// What the prompt writer saw when the page asks for an object's name (app.generate, edit.editAsked): the objects that its
+// last answer removes, as « barn » or « old car, sign and fence », or true when that answer names none.
+export const writerSaw = (names = []) =>
+  !names?.length ? true : names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+
 // The objects that an answer removes, apart from the locked ones, as SAM 3.1 reads a name: the row « barn_1 » is « barn ».
 export function removedNames(text, locked = []) {
   const [caption, rows] = splitTable(text ?? "");
