@@ -168,7 +168,7 @@ def hdr_video(page, U):
     page.keyboard.press("p"); U.paint_once(page, "a red lamp", [(0.3, 0.6), (0.36, 0.7)]); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(U.REVIEWED), 240000, "the full-size composite with SDR to HDR")
     lines = page.evaluate("window.__lines")
-    U.check(any("SDR to HDR took" in t for t in lines), "the full-size shot went through SDR to HDR")
+    U.check(any("SDR to HDR done in" in t for t in lines), "the full-size shot went through SDR to HDR")
     settled(page)
     page.keyboard.press("n")
     page.wait_for_function("document.querySelector('canvas[data-precision]').dataset.precision === 'float'", timeout=60000)

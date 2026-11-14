@@ -9,7 +9,7 @@ SAID = """() => { window.__said = []; const line = document.querySelector('#stat
 PLAYABLE = "() => { window.__playable = 0; document.addEventListener('canplaythrough', () => { window.__playable += 1; }, true); }"  # counts each time a video can play through: the open's last sentence comes then
 NEXT = "Describe the edit at the top, paint on the frame, then Generate."
 FLUID = "Blank plate: paint a fluid keyframe, describe it at the top, then Generate."
-OPENED = re.compile(r"^Plate \S+ opened in [\d.]+ s: (\d+) x (\d+), (\d+) frames, (\d+-bit|float), (.+)$")  # the plate's line: the open's time, the size, the frames, the bit depth, the colour space
+OPENED = re.compile(r"^Plate \S+: opened in [\d.]+ s\.\n  (\d+) x (\d+), (\d+) frames?, (\d+-bit|float), (.+)\.$")  # the plate's line: the open's time, the size, the frames, the bit depth, the colour space
 SIZES = re.compile(r"^Working sizes: edits at \d+ x \d+, edit preview at \d+ x \d+, shot preview at \d+ x \d+, tracking at \d+ x \d+\.$")
 
 
@@ -23,7 +23,7 @@ def run(browser, port, U):
     page.wait_for_function("window.__playable > 0", timeout=60000)  # the playback video is loaded: every sentence of the open is said
     status, lines = page.text_content("#status"), U.log_lines(page)
     plate, sizes = [OPENED.match(t) for t in lines if t.startswith("Plate ")], [t for t in lines if t.startswith("Working sizes")]
-    U.check(len(plate) == 1 and plate[0] is not None and plate[0].group(1, 2, 4) == ("1280", "704", "8-bit") and plate[0].group(5).endswith("(from file)")
+    U.check(len(plate) == 1 and plate[0] is not None and plate[0].group(1, 2, 4) == ("1280", "704", "8-bit") and plate[0].group(5).endswith(", from file")
             and len(sizes) == 1 and SIZES.match(sizes[0]) is not None,
             f"a plate that opens writes two lines, one with the open's time, the size, the frames, the bit depth and the colour space, one with the working sizes: {[t for t in lines if t.startswith(('Plate ', 'Working sizes'))]}")
     told = [t for t in lines if "Describe the edit" in t or "Plate ready" in t or "OCIO > Colour space" in t]

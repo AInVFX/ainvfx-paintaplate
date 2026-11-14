@@ -24,7 +24,7 @@ SHOTS = "/tmp/paintaplate_ui_mock"
 PAGE = "http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html{query}"
 VIEWPORT = {"width": 1400, "height": 900}
 DONE = "document.querySelectorAll('#history li').length === {n} && !document.querySelector('#history li.busy')"
-REVIEWED = "Composite, full size took"  # a render's full-size composite in the log: "Render v2: Composite, full size took 3.1 s"
+REVIEWED = "Composite, full size done in"  # a render's full-size composite in the log: "Render v2: Composite, full size done in 3.1 s."
 CHECKS = {"passed": 0, "failed": None}  # this process's checks: how many passed, and the sentence of the one that failed
 
 
@@ -451,12 +451,12 @@ def history_flow(browser, port):
     check(found < started and asked == 1, f"a whole-object erase: SAM runs while the strokes rest, the prompt writer once "
           f"(SAM at line {found}, start at line {started}, {asked} request(s))")
 
-    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => e.textContent.includes('Clean plate pass, preview took'))", timeout=120000)
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => e.textContent.includes('Clean plate pass, preview done in'))", timeout=120000)
     seen = len(log_lines(page))
     page.click("#history li:last-child .del")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
     check(row_titles(page) == ["1. Clean"], f"after a removal the numbers start from 1 again: {row_titles(page)}")
-    page.wait_for_function("[...document.querySelectorAll('#log li span')].slice(%d).some((e) => e.textContent.includes('used again'))" % seen,
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].slice(%d).some((e) => e.textContent.includes('reused from an earlier render'))" % seen,
                            timeout=60000)
     lines = log_lines(page)[seen:]
     check(not any("Track the object (about" in line or "Clean plate pass, preview (about" in line for line in lines),
@@ -465,10 +465,10 @@ def history_flow(browser, port):
     lines = log_lines(page)[seen:]
     stopped = [line for line in lines if re.match(r"^(clean|cleanup|shot|matte|comp|review|export) \S+: cancelled", line)]
     check(not stopped, f"a removal stops no render step: the render it leaves keeps what it made {stopped}")
-    behind = [line for line in lines if line.endswith(", in the background")]
+    behind = [line for line in lines if line.endswith(", in the background.")]
     check(bool(behind), f"the render of the edits before the removal goes on in the background: {behind[:2]}")
     steps = [(i, line) for i, line in enumerate(lines) if re.match(r"^Render v\d+: .* \(about \d+ s\)", line)]
-    comp = next((i for i, line in steps if "Composite, preview (about" in line and not line.endswith("in the background")), None)
+    comp = next((i for i, line in steps if "Composite, preview (about" in line and not line.endswith("in the background.")), None)
     full = next((i for i, line in steps if ", full size (about" in line or "Export (about" in line), None)
     check(comp is not None and (full is None or comp < full),
           f"the render queue: the preview of the edits on show runs before any full-size step (composite at {comp}, first full size at {full})")
@@ -895,7 +895,7 @@ def hdr_flow(browser, port):
           f"a full-size pass shows its live preview in a corner while the preview plays, then it goes: {caption}")
     new = lines()
     at = lambda text: next((i for i, line in enumerate(new) if text in line), None)  # noqa: E731
-    check(at("SDR to HDR took") is not None and at("SDR to HDR took") < at(REVIEWED),
+    check(at("SDR to HDR done in") is not None and at("SDR to HDR done in") < at(REVIEWED),
           "the full-size shot goes through SDR to HDR before the full-size composite the viewer plays")
     rows = lambda: page.eval_on_selector_all("#stages li.pick .name", "els => els.map(e => e.textContent)")  # noqa: E731
     shown = lambda: page.eval_on_selector_all("#stages li.shown .name", "els => els.map(e => e.textContent)")  # noqa: E731
@@ -948,7 +948,7 @@ def fluid16_flow(browser, port):
     wait_log(page, added_line("under the edits: the fluid shot v"), 240000, "the HDR fluid shot under the edits")
     page.wait_for_function("!document.querySelector('#deliver-auto').hidden", timeout=60000)
     new = page.evaluate("window.__lines")
-    check(any(line.startswith("Plate ") and "16-bit" in line for line in new) and any("SDR to HDR took" in line for line in new),
+    check(any(line.startswith("Plate ") and "16-bit" in line for line in new) and any("SDR to HDR done in" in line for line in new),
           "16-bit: the plate's line says so, and the fluid shot goes through SDR to HDR")
     check(not page.is_hidden("#deliver-auto"), "the HDR fluid shot is an EXR plate: SDR to HDR runs on its own for the edits on it")
     check(not page.is_disabled("#export-btn"), "a fluid shot with no edit on it can be exported")

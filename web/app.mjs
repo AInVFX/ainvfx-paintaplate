@@ -208,7 +208,7 @@ function paintGrid(e) { // the painted area on a coarse grid: an erase's locked 
 
 async function captionFor(e, reference, key, kind = "edit") { // Klein's own upsampler writes the caption Klein was trained on; the page keeps its boxes
   if (e.caption?.key === key) return e.caption.text;
-  if (e.caption?.key === "scene") { e.caption.key = key; log(`Edit ${num(e)}: the caption saved with the scene is used as it is`); return e.caption.text; }
+  if (e.caption?.key === "scene") { e.caption.key = key; log(`Edit ${num(e)}: caption from the scene, used unchanged.`); return e.caption.text; }
   if (e.captioning?.key === key) { // the same request is on its way (the strokes rested, then Generate): wait for it rather than ask twice
     try { return await e.captioning.promise; } catch (err) { if (err?.message !== "cancelled" || kind !== "edit") throw err; }
   }
@@ -340,7 +340,7 @@ async function openPlate(list, typed, opts = {}) {
   previewUI(); fitView(); historyUI(); timelineUI(); stagesUI(); exportUI(); render();
   // The plate's two lines in the log (design rule 12): what it is, then the sizes the page works at. What to do next is a hint, below
   const depth = opts.fluid?.depth ? { bits: opts.fluid.depth, float: false } : plateDepth(spec); // a blank plate: the depth asked for its fluid shot
-  log(`Plate ${S.plate.name} opened in ${((performance.now() - began) / 1000).toFixed(1)} s: ${w} x ${h}, ${spec.frames} frames, ${depth.float ? "float" : `${depth.bits}-bit`}, ${cs}${opts.cs ? "" : " (from file)"}`);
+  log(`Plate ${S.plate.name}: opened in ${((performance.now() - began) / 1000).toFixed(1)} s.\n  ${w} x ${h}, ${spec.frames} frame${spec.frames === 1 ? "" : "s"}, ${depth.float ? "float" : `${depth.bits}-bit`}, ${cs}${opts.cs ? "" : ", from file"}.`);
   log(`Working sizes: edits at ${S.plate.work.join(" x ")}, edit preview at ${S.plate.prev.join(" x ")}, shot preview at ${S.plate.shot.join(" x ")}, tracking at ${S.plate.track.join(" x ")}.`);
 
   const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).map((n) => n).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
@@ -372,7 +372,7 @@ function cancelOpen() { // Cancel on the opening screen, or Esc: the upload and 
   const ctl = openCtl;
   openCtl = null;
   ctl.abort(); cancel("ingest");
-  log("Opening cancelled");
+  log("Opening cancelled.");
   closePlate("Opening cancelled. Open a plate to start.");
 }
 
@@ -400,7 +400,7 @@ function closePlate(message = "Plate closed: its frames left the browser's memor
   $("#spec").textContent = ""; $("#prompt").value = "";
   for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = true;
   historyUI(); exportUI(); fluidUI(); undoUI(); generateUI(); cacheUI();
-  if (had) log(`Plate ${had} closed: renders stopped, frames freed`);
+  if (had) log(`Plate ${had} closed: renders stopped, frames freed.`);
   status(message);
 }
 
@@ -747,7 +747,7 @@ function sharpFrame(slot, path) {
   }).catch((err) => {
     if (sharp[slot]?.loading !== want) return;
     sharp[slot] = { failed: path };
-    log(`Native frames stopped for ${path}: ${err.message}. The viewer shows the cached frames.`);
+    log(`Native frames of ${path}: stopped (${err.message}). Viewer: cached frames.`);
   });
   return null;
 }
@@ -771,7 +771,7 @@ function deliverUI() { // Deliver's panel: the passes that run after the full-si
 }
 function setDeliverHdr(on) { // each setting keeps its own renders: the render key gains "|hdr"
   S.deliver.hdr = on;
-  log(`Deliver: SDR to HDR ${on ? "on: the full-size shot is made again in scene-linear values, then fitted to the plate. The result becomes an EXR sequence: the player shows its frames and Export writes them, half-float EXR in ACES2065-1" : "off"}`);
+  log(on ? "Deliver: SDR to HDR on.\n  Full-size shot: regenerated in scene-linear values, fitted to the plate.\n  Result: half-float EXR frames in ACES2065-1, in the viewer and in Export." : "Deliver: SDR to HDR off.");
   hud(`Deliver: SDR to HDR ${on ? "on" : "off"}`, 1500);
   deliverUI(); recompose(); touch();
 }
@@ -831,7 +831,7 @@ function choosePass(id) {
   }
   fluidInput();
   hud(`${label}: on show. Click it again, or Esc, for the latest`, 3000);
-  log(`Viewer: ${label} on show`);
+  log(`Viewer: ${label}.`);
   stagesUI();
 }
 
@@ -1014,7 +1014,7 @@ function stopGenerating() { // Esc on the edit being generated, or Stop: everyth
   cancel(...STOPPED);
   dropLive();
   const waits = S.edits.filter((e) => e.state === "queued").map(num);
-  log(`Stopped: ${edit ? `edit ${num(edit)} keeps its strokes, words and seed` : "what finished is kept"}${waits.length ? `, ${editList(waits)} ${waits.length > 1 ? "wait" : "waits"}` : ""}. Nothing starts until Enter`);
+  log(`Stopped: ${edit ? `edit ${num(edit)} keeps its strokes, words and seed` : "what finished is kept"}${waits.length ? `, ${editList(waits)} ${waits.length > 1 ? "wait" : "waits"}` : ""}. Nothing starts until Enter.`);
   hud(edit ? `Stopped. Enter generates edit ${num(edit)} again` : "Stopped. Enter goes on from where it stopped", 4000);
   historyUI(); // before the status line: a waiting row says so, and the stop's sentence comes last
   stoppedUI(edit);
@@ -1616,7 +1616,7 @@ function staleFluid() { // the keyframes or the words changed: the shot on show 
   const f = S.fluid;
   if (f?.busy && f.busy.sig !== fluidSig()) {
     cancel("fluid");
-    log(`Fluid v${f.busy.v}: stopped, its keyframes or words changed`);
+    log(`Fluid shot v${f.busy.v}: stopped. Keyframes or words changed.`);
     hud("Stopped: the keyframes or the words changed. Generate starts again.", 2500);
   }
   fluidUI(); timelineUI();
@@ -1714,7 +1714,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     if (f.busy?.sig === fluidSig()) return hud(`Fluid shot v${f.busy.v} is being made from these keyframes and words`, 2500);
     const made = f.made?.get(fluidSig());
     if (made) {
-      if (f.result !== made) { f.result = made; showFluid(); log(`Fluid v${made.v}: made before from these keyframes, words and seed: shown again, nothing runs`); }
+      if (f.result !== made) { f.result = made; showFluid(); log(`Fluid shot v${made.v}: from the job index (same keyframes, words and seed). Nothing runs.`); }
       f.view = "result"; fluidUI(); render();
       return hud(`Fluid shot v${made.v} is already made from these keyframes and words. Ctrl+Enter tries another seed.`, 3000);
     }
@@ -1730,7 +1730,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     const keys = [];
     for (const k of [...f.keys].sort((a, b) => a.frame - b.frame)) // the control video's keyframes: the paint on black, at the shot's size
       redrawKey(k), keys.push({ frame: k.frame, image: await uploadCanvas(snap(k.canvas, size, "#000"), `fluid_v${v}_key${k.frame}.png`) });
-    log(`Fluid v${v}: ${keys.length} keyframe(s) at ${keys.map((k) => p.first + k.frame).join(", ")}, ${size.join(" x ")}, ${p.frames} frames at ${p.fps} fps, seed ${f.seed}, prompt "${prompt}"`);
+    log(`Fluid shot v${v}: ${keys.length} keyframe(s) at ${keys.map((k) => p.first + k.frame).join(", ")}, ${size.join(" x ")}, ${p.frames} frames at ${p.fps} fps, seed ${f.seed}, prompt "${prompt}"`);
     status(`Fluid shot v${v}: running, one LTX 2.5 pass with ainvfx-fluid.`);
     const out = await run("fluid", { ...S.memoryProfile.slots, path: f.blankPath ?? p.path, config: S.ocio.config, color_space: "@model", max_frames: p.frames, keys: JSON.stringify(keys), prompt, seed: f.seed,
       prefix: `${dir}/plate`, video_prefix: `${dir}/preview`, control_prefix: `${dir}/control/c`, ...plateMovie(p), live: LIVE.every },
@@ -1748,7 +1748,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
       hdrFrames = hf ? `output:${hf.subfolder}/${framePattern(hf.filename)}` : null; // for the Fluid: SDR to HDR row
       const m = outputFile("hdr", made, "movie");
       movie = m ? viewUrl(m) : null;
-      log(`Fluid v${v}: SDR to HDR took ${((performance.now() - t1) / 1000).toFixed(1)} s: half-float EXR frames in ${path}`);
+      log(`Fluid shot v${v}: SDR to HDR done in ${((performance.now() - t1) / 1000).toFixed(1)} s.\n  Half-float EXR frames in ${path}.`);
     }
     const control = outputFile("fluid", out, "control"); // the control video, for the Fluid: keyframes row
     f.result = { v, sig, seed: f.seed, prompt, path, hdr, movie, run: fluidRun(path), preview: viewUrl(outputFile("fluid", out, "video")),
@@ -1758,7 +1758,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     f.busy = null;
     if (S.pass?.startsWith("fluid_")) S.pass = null; // a new shot: the viewer shows it, not a pass of the one before
     showFluid();
-    log(`Fluid v${v}: done in ${((performance.now() - t0) / 1000).toFixed(1)} s: ${(outputText("fluid", out, "plate") ?? "").split("\n")[0]}`);
+    log(`Fluid shot v${v}: done in ${((performance.now() - t0) / 1000).toFixed(1)} s.\n  ${(outputText("fluid", out, "plate") ?? "").split("\n")[0]}`);
     f.editing = false; // the shot is made: it becomes the plate under the next edits, and the viewer plays it
     f.busy = null;
     await rebase();
@@ -1796,7 +1796,7 @@ async function rebase() { // the plate under the edits: the fluid shot when it i
   // an HDR fluid shot: the space the hdr workflow writes its EXR frames in (HDR_SPACE there). Read from the file, they
   // opened as Linear Rec.709 (2 Nov), their AP0 values taken for Rec.709 ones
   await openPlate([], path, { under: true, cs: made && f.result.hdr ? knownSpace(HDR_FRAMES) ?? undefined : modelSpace(), chosen: false });
-  log(`The plate under the edits: ${made ? `the fluid shot v${f.result.v}` : "the blank plate"}`); // once it is open
+  log(`Plate under the edits: ${made ? `the fluid shot v${f.result.v}` : "the blank plate"}.`); // once it is open
   if (S.edits.some((e) => e.on && e.state === "done")) queue(regenerateDependents); // made again on it, or taken back
 }
 
@@ -2232,7 +2232,7 @@ const needsRegen = (edit) => edit.base !== S.plate?.path || dependsOnChange(edit
 
 function rebuild() { // after a bypass, a removal or another try: make again only what depends on the change; renders go on
   const r = S.running; // an edit being generated whose base changed, or which is to run again, stops now: its pass would be thrown away
-  if (r && (r.force || !S.edits.includes(r) || !r.on || dependsOnChange(r, activeBefore(r).map(record), r.saw ?? []))) { log(`Edit ${num(r)}: its pass is stopped, it runs again`); stopEdit(r); }
+  if (r && (r.force || !S.edits.includes(r) || !r.on || dependsOnChange(r, activeBefore(r).map(record), r.saw ?? []))) { log(`Edit ${num(r)}: pass stopped, queued again.`); stopEdit(r); }
   recompose(); historyUI(); render();
   queue(async () => {
     for (const e of [...S.edits]) {
@@ -2518,7 +2518,7 @@ function renderInFull() { // Render in full: the set on show made again with its
   S.renders.delete(r.key);
   const fresh = want(r.key);
   fresh.own = true;
-  log(`Render v${fresh.v}: the edits of v${r.v} again, with their own shot (v${r.v} took the frames of v${r.donor})`);
+  log(`Render v${fresh.v}: the edits of v${r.v} again, with their own shot.\n  v${r.v} used the frames of v${r.donor}.`);
   S.halted = false;
   queueWaiting(); // under a stop, Render in full lifts it as Enter does: the edits that waited run too
   stagesUI(); generateUI(); touch(0);
@@ -2546,8 +2546,8 @@ function preempt() { // Generate: a full-size or export step in its first half s
   const st = S.stage, r = S.piping;
   if (!st || !r) return;
   const def = STAGES.find((x) => x.id === st.id), cls = !def.final ? "preview" : st.id === "export" ? "export" : "full", pct = Math.round(st.progress * 100);
-  if (!stopsForEdit({ cls, progress: st.progress })) return void log(`Render v${r.v}: ${def.label} finishes first (${pct}% done), then the new edit runs`);
-  log(`Render v${r.v}: ${def.label} stops for the new edit at ${pct}%; it runs again later`);
+  if (!stopsForEdit({ cls, progress: st.progress })) return void log(`Render v${r.v}: ${def.label} at ${pct}%, finishing before the new edit.`);
+  log(`Render v${r.v}: ${def.label} stopped at ${pct}% for the new edit, queued again.`);
   cancel(...BACKGROUND);
 }
 
@@ -2617,7 +2617,7 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   const t0 = performance.now(), behind = r.key === S.heroKey ? "" : ", in the background";
   S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step
   stagesUI();
-  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label} (about ${Math.round(estimate(id))} s)${behind}`);
+  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label} (about ${Math.round(estimate(id))} s)${behind}.`);
   const stage = S.stage;
   await work((f) => {
     if (S.stage !== stage) return;
@@ -2633,7 +2633,7 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
   S.took[id] = dt;
   S.stage = null;
-  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label} took ${dt.toFixed(1)} s`);
+  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label} done in ${dt.toFixed(1)} s.`);
   stagesUI();
 }
 
@@ -2642,7 +2642,7 @@ function reused(r, store, id, take) { // a step that a render with the same eras
   take();
   (store.done ??= {})[id] = 0;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // taken again: its workflows made it
-  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: made by an earlier render with the same Clean edits, used again`);
+  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: reused from an earlier render with the same Clean edits.`);
 }
 
 async function pipeline(r) { // a render's steps in order; a step made already is skipped, so a render resumes where it stopped
@@ -2667,7 +2667,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     r.told = true;
     log(`Render v${r.v}: ${active.length} edit(s) (${active.map((e) => `${num(e.src)} ${NAME[e.tool]}`).join(", ")}), preview at ${sized}, seed ${common.seed}, steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => st.id).join(" > ")}`);
     if (carry) log(`Render v${r.v}: LTX prompt: ${prompt}`);
-    if (erase) log(`Render v${r.v}: clean plate pass prompt: ${scene || "none"}`);
+    if (erase) log(`Render v${r.v}: Clean plate pass prompt: ${scene || "none"}`);
   }
   // the erase is tracked on the plate first: the erase pass regenerates its areas, the composite keeps them
   if (E?.erased) reused(r, r, "erase", () => { r.erased = E.erased; });
@@ -2686,7 +2686,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       if (r.skip.has(id) || store.done?.[id] !== undefined) continue;
       (store.done ??= {})[id] = 0;
       (store.taken ??= {})[id] = d.v;
-      log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: taken from render v${d.v}, whose other edits are far from these`);
+      log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: reused from render v${d.v}, whose other edits are far from these.`);
     }
     Object.assign(store, { clean: from.clean, shot: from.shot, raw: from.raw, cleanRaw: from.cleanRaw });
     r.donor = d.v;
@@ -2707,7 +2707,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       if (S.stage) S.stage.part = `stage 1 of 2 at ${low.join(" × ")}`; // the live preview names the stage: each starts at step 1
       const first = await cleanAt(low, (f) => progress(f / 2));
       if (S.stage) S.stage.part = `stage 2 of 2, upscaled to ${size.join(" × ")}`;
-      log(`Render v${r.v}: Clean plate pass, full size: stage 2 of 2, 2 steps at ${size.join(" x ")} from stage 1 at ${low.join(" x ")}`);
+      log(`Render v${r.v}: Clean plate pass, full size: stage 2 of 2, 2 steps at ${size.join(" x ")} from stage 1 at ${low.join(" x ")}.`);
       const out = await run("cleanup", { ...common, seed: erases[0].seed, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, prompt: scene,
         low: first.clean, width: size[0], height: size[1], prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean`, live: LIVE.every },
         { kind: "clean", progress: (f) => progress(0.5 + f / 2), live: showLive }).done;
@@ -2749,7 +2749,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   if (here() && !S.pass && !onePass && !r.taken && !r.review && r.raw && S.shot?.url !== r.raw) { // the full-size shot as LTX made it, until the full-size composite:
     setShot(r.raw, key, "@model"); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640, 28 Oct)
     hud("Shot, full size: Space plays it as LTX made it. The full-size composite follows.", 2500);
-    log(`Render v${r.v}: the viewer plays the full-size shot until the full-size composite is ready`);
+    log(`Render v${r.v}: the viewer plays the full-size shot until the full-size composite is ready.`);
   }
   await step(r, "trackfull", async (progress) => { r.full = await track(active, final, base, "_full", progress, pv.mattes, ["paint"],
     underOf(onePass ? pv : r), r.heroFrame); });
@@ -2779,7 +2779,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       reviewFrames: frame ? `output:${frame.subfolder}/${framePattern(frame.filename)}` : null, // wherever the job index took it from
       play: viewUrl(shown ?? movie), playSpace: shown ? logSpace() : deep ? "@model" : p.cs });
   });
-  if (!here()) return log(`Render v${r.v}: the full-size composite is ready, in the background`);
+  if (!here()) return log(`Render v${r.v}: Composite, full size: ready, in the background.`);
   if (!S.pass) setShot(r.play ?? r.review, key, r.playSpace ?? r.reviewSpace, r.reviewFrames);
   hud("Composite, full size: the viewer plays it", 2500);
   stagesUI(); exportUI();
@@ -2797,7 +2797,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   S.exported = r.exported;
   stagesUI(); exportUI();
   status(`Export: done, in ComfyUI's output folder: ${S.exported.text.split("\n")[0]}.`);
-  log(`Export v${r.v}: ${S.exported.text.replace(/\n/g, "; ")}`);
+  log(`Export v${r.v}: done.\n  ${S.exported.text.split("\n").join("\n  ")}`);
   const parts = S.wantDownload;
   S.wantDownload = null;
   download(parts);
@@ -3045,7 +3045,7 @@ function fluidExportDialog() {
 function downloadFluid() {
   const f = S.fluid.result;
   S.exported = { run: f.run ?? fluidRun(f.path), name: `fluid_v${f.v}`, text: "" };
-  log(`Export: the fluid shot v${f.v}${f.hdr ? " in HDR" : ""}, from ${S.exported.run}`);
+  log(`Export: fluid shot v${f.v}${f.hdr ? " in HDR" : ""}, from ${S.exported.run}.`);
   download(f.hdr ? ["hdr", "plate", "preview"] : ["plate", "preview"]);
 }
 
@@ -3322,13 +3322,13 @@ function fetchDeep(cache, path, what) { // frames as RGB half floats from the fr
   const fresh = cache.fillDeep(async (first, count) => {
     const r = await fetch(`/paintaplate/frames?${new URLSearchParams({ path, first, count, side: DEEP_SIDE })}`);
     if (!r.ok) {
-      log(`Full-precision frames stopped for ${what}: ${await r.text()}. The viewer plays the 8-bit movie.`);
+      log(`Full-precision frames of ${what}: stopped (${await r.text()}). Viewer: 8-bit movie.`);
       throw new Error("frames");
     }
     const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number);
     return { width, height, data: new Uint16Array(await r.arrayBuffer()) };
   }, path);
-  if (fresh) log(`Full-precision frames: ${what} (${S.plate.cs}) at ${DEEP_SIDE} px on the long side, read in the background`);
+  if (fresh) log(`Full-precision frames of ${what}: loading in the background, ${DEEP_SIDE} px on the long side, ${S.plate.cs}.`);
 }
 
 function setDisplay(change) {
@@ -3540,7 +3540,7 @@ function setOcio(change) { // the display, the view or the look: the viewer only
   Object.assign(S.ocio, change);
   look.setView(S.ocio); saveOcio();
   const v = `${S.ocio.display}: ${S.ocio.view}${S.ocio.look ? `, look ${S.ocio.look}` : ""}`;
-  hud(v, 1800); log(`OCIO view: ${v}`); render();
+  hud(v, 1800); log(`OCIO view: ${v}.`); render();
 }
 
 async function setPlateSpace(cs, asked = false) { // the plate's colour space (RV's File Color Space): the viewer at once, then the models and the export
@@ -3548,7 +3548,7 @@ async function setPlateSpace(cs, asked = false) { // the plate's colour space (R
   if (!p || p.cs === cs) return;
   const made = regenerated(); // the edits it regenerates: the page asks first
   if (made && !asked) return askRemake("plate's colour space", made, () => setPlateSpace(cs, true).catch(quiet));
-  log(`Plate colour space: ${cs}, was ${p.cs}`);
+  log(`Plate colour space: ${cs}, was ${p.cs}.`);
   Object.assign(p, { cs, proxySpace: p.deep ? p.proxySpace : cs }); // a video plate's proxy holds its own values
   hud(`Plate colour space: ${cs}`, 2000); render();
   const edits = made > 0;
@@ -3584,7 +3584,7 @@ async function setConfig(name, asked = false) { // RV's Change Config: the viewe
   const made = S.plate && name !== S.ocio.info?.config ? regenerated() : 0; // the edits it regenerates: the page asks first
   if (made && !asked) return askRemake("OCIO config", made, () => setConfig(name, true).catch(quiet));
   await loadOcio(name);
-  log(`OCIO config: ${S.ocio.info.label}`);
+  log(`OCIO config: ${S.ocio.info.label}.`);
   const p = S.plate;
   if (!p) return render();
   const st = knownSpace(p.cs) ? null : await fetch(`/paintaplate/stat?${new URLSearchParams({ path: p.path, config: S.ocio.config })}`).then((r) => r.json());
@@ -3760,19 +3760,19 @@ async function boot() { // the version and the build, the workflows, the WebSock
   const fluidFiles = new Set(Object.values(WF.fluid.prompt).flatMap((n) => Object.values(n.inputs)).filter((v) => typeof v === "string" && v.endsWith(".safetensors")));
   const only = (file) => fluidFiles.has(file) && !Object.entries(WF).some(([name, wf]) => name !== "fluid" && JSON.stringify(wf.prompt).includes(file));
   S.fluidReady = !absent.some(only) && !!info.PaintAPlate_KeyframeVideo && !!info.LTXICLoRALoaderModelOnly; // fluid shots are optional
-  if (!S.fluidReady) log(`Fluid shots are off: ${absent.filter(only).join(", ") || "update this pack and ComfyUI-LTXVideo"} (blank plates need ainvfx-fluid in models/loras).`);
+  if (!S.fluidReady) log(`Warning: fluid shots off${absent.filter(only).length ? `, ${absent.filter(only).join(", ")} missing` : ""}. Put ainvfx-fluid in models/loras, or update this pack and ComfyUI-LTXVideo.`);
   const hdrFiles = new Set(Object.values(WF.hdr.prompt).flatMap((n) => Object.values(n.inputs)).filter((v) => typeof v === "string" && v.endsWith(".safetensors")));
   const onlyHdr = (file) => hdrFiles.has(file) && !Object.entries(WF).some(([name, wf]) => name !== "hdr" && JSON.stringify(wf.prompt).includes(file));
   S.hdrReady = HDR_ON && !absent.some(onlyHdr) && HDR_NODES.every((cls) => info[cls]);
-  if (!HDR_ON) log("SDR to HDR is off: ?hdr=0 is in the address");
+  if (!HDR_ON) log("SDR to HDR: off (?hdr=0 in the address).");
   else if (!S.hdrReady) log(`SDR to HDR is off: ${absent.filter(onlyHdr).join(", ") || "update ComfyUI and ComfyUI-LTXVideo"}. ${HDR_MISSING}`);
   depthUI();
   const missingFiles = absent.filter((file) => !only(file) && !onlyHdr(file));
   if (missingFiles.length) return stopped(`Missing model files: ${missingFiles.join(", ")}`, "Run python get_models.py in this pack's folder, then reload this page.");
-  log(`Page ready in ${Math.round(performance.now() - t0)} ms: ${WORKFLOWS.length} workflows, ${classes.length} node classes and ${models.size} model files checked`);
-  log(`OCIO: ${S.ocio.info.label}, viewed on ${S.ocio.display} through ${S.ocio.view}${S.ocio.config === "$OCIO" ? " ($OCIO)" : ""}`);
-  if (SEED_ASKED !== null) log(`Seed ${SEED_ASKED} asked for in the address (?seed=): every new edit and every new fluid shot starts from it`);
-  if (!INDEX_ON) log("Job index off, asked for in the address (?index=0): every job runs, and none is kept for a later session");
+  log(`Page ready in ${Math.round(performance.now() - t0)} ms: ${WORKFLOWS.length} workflows, ${classes.length} node classes and ${models.size} model files checked.`);
+  log(`OCIO: ${S.ocio.info.label}${S.ocio.config === "$OCIO" ? " ($OCIO)" : ""}, display ${S.ocio.display}, view ${S.ocio.view}.`);
+  if (SEED_ASKED !== null) log(`Seed ${SEED_ASKED} asked for in the address (?seed=): every new edit and every new fluid shot starts from it.`);
+  if (!INDEX_ON) log("Job index off, asked for in the address (?index=0): every job runs, and none is kept for a later session.");
   status("Ready. Open a plate to start.", "hint");
   if (!S.plate && BLANK_AT_START && S.fluidReady) await openBlank().catch(quiet); // a canvas for a fluid shot, at the Blank tab's settings
   warmAll().catch(() => {}); // a ComfyUI that reports no GPU details simply skips it
