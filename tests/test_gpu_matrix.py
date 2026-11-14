@@ -206,6 +206,17 @@ class Run(unittest.TestCase):
                      "- Area against frame 1: 0.00 to 1.39 times. Furthest: frame 4, 0.00 times.\n", "- Every frame, against frame 1: 1.00 0.50 1.39 0.00"):
             self.assertIn(line, report)
 
+    def test_the_report_reads_the_render_s_lines_in_their_old_and_new_words(self):
+        old = ("11:02:07 PMRender v1: Track the erase (about 12 s)\n11:02:36 PMRender v1: Track the erase took 28.7 s\n"
+               "11:02:40 PMMemory profile small: 16 GB of VRAM, 52 GB of RAM. Models load one at a time\n11:02:41 PMLive preview is off: no frames\n")
+        new = ("11:02:07 PMRender v1: Track the erase: about 12 s.\n11:02:36 PMRender v1: Track the erase: done in 28.7 s (estimate 12 s).\n"
+               "11:02:40 PMMemory profile: small (16 GB of VRAM, 52 GB of RAM).\n  Models load one at a time.\n11:02:41 PMWarning: live preview off: no frames.\n")
+        for log in (old, new):
+            r = gpu_matrix.read_log(log)
+            self.assertEqual((r["steps"], r["announced"]), ([("v1 Track the erase", 28.7)], {"v1 Track the erase": 12}))
+            self.assertEqual(r["profile"], "small (16 GB of VRAM, 52 GB of RAM. Models load one at a time)")
+            self.assertEqual(len(r["live_off"]), 1)
+
     def test_fresh_frees_comfyui_before_each_case(self):
         """On the pod of 11 Nov a case's first job read the 138 GB that the case before it had left."""
         calls, _, report = self.matrix("horse_cow,horse_erase", [True], "--fresh")
@@ -394,7 +405,7 @@ class Estimates(unittest.TestCase):
                "11:03:36 PMRender v1: Composite, preview (about 8 s) in the background\n11:03:47 PMRender v1: Composite, preview took 9.0 s\n")
         info = gpu_matrix.read_log(log)
         self.assertEqual(info["announced"], {"v1 Track the erase": 12, "v1 Composite, preview": 8})
-        self.assertEqual(gpu_matrix.estimates_off(info["steps"], info["announced"]), ["v1 Track the erase: about 12 s, took 28.7 s"])
+        self.assertEqual(gpu_matrix.estimates_off(info["steps"], info["announced"]), ["v1 Track the erase: about 12 s, done in 28.7 s"])
 
 
 class NodeClock(unittest.TestCase):

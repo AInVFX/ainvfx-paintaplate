@@ -84,8 +84,9 @@ export function jobWaited(job, now) { // null for a job that starts within QUEUE
   return `${head(job)}: started after ${secs(now - job.sent)} in ComfyUI's queue${how ? ` (${how})` : ""}`;
 }
 // `fresh` false: ComfyUI ran nothing and listed no output, so the page took the outputs this prompt gave before
-export const jobDone = (job, now, fresh = true) => `${head(job)}: done in ${secs(now - job.posted)} (${folded(job, fresh ? "" : "outputs as it made them before")})`;
-export const jobFailed = (job, now, error) => `${head(job)}: failed after ${secs(now - job.posted)} (${folded(job)}): ${error}`; // ComfyUI's error names the node
+const stop = (s) => (/[.!?]$/.test(s) ? s : `${s}.`); // every line ends with a full stop
+export const jobDone = (job, now, fresh = true) => `${head(job)}: done in ${secs(now - job.posted)} (${folded(job, fresh ? "" : "outputs as it made them before")}).`;
+export const jobFailed = (job, now, error) => `${head(job)}: failed after ${secs(now - job.posted)}. ${stop(error)}`; // ComfyUI's error names the node
 export function jobStopped(job, now, heard = true) { // `heard` false: the WebSocket is closed, so the page does not know whether the job had started
   const where = !job.id ? " before ComfyUI answered its post" : job.started != null ? (job.at ? ` in ${job.at}` : "") : heard ? " in ComfyUI's queue" : "";
   return `${head(job)}: stopped after ${secs(now - job.posted)}${where} (${folded(job)})`;
@@ -113,7 +114,7 @@ const unseen = new Set(); // why a live preview could not be made (nodes.py, Liv
 function liveOff(reason) {
   if (unseen.has(reason)) return;
   unseen.add(reason);
-  log(`Live preview is off: ${reason}`, "warn");
+  log(`Warning: live preview off: ${stop(reason)}`, "warn");
 }
 
 export const post = (path, body) =>
@@ -176,7 +177,7 @@ export function run(name, values, { kind = name, preview, progress, step, live: 
       await post("/free", { unload_models: true, free_memory: true }).catch(() => {}); // unanswered, the job still runs
       await new Promise((ok) => setTimeout(ok, FREE_SETTLE_MS));
       await released();
-      log(`${name}: ComfyUI's memory freed first: ${why}`);
+      log(`Memory freed before ${name}: ${why}`);
     }
     if (job.cancelled) return; // cancelled while the page read ComfyUI's free RAM, or while the memory was freed: nothing is posted
     Object.assign(job, { sent: Date.now(), started: null, at: null, cached: 0, previews: 0, inMain: false });
@@ -197,7 +198,7 @@ export function run(name, values, { kind = name, preview, progress, step, live: 
     if (job.cancelled) return;
     if (!outputs) return job.submit();
     live.delete(job);
-    log(`${name}: made before with the same inputs, taken from the job index`);
+    log(`${name}: taken from the job index (same inputs as an earlier job).`);
     progress?.(1);
     job.resolve(outputs);
   }).catch(() => { if (!job.cancelled) job.submit(); });
@@ -217,7 +218,7 @@ async function finish(id, error) {
   byId.delete(id);
   early.delete(id);
   // An interrupt can land on the next prompt when the one it targeted had just finished: run it again once.
-  if (error === "cancelled" && !job.cancelled && job.retries-- > 0) { log(`${job.name} ${short(id)}: interrupted by a stray interrupt, posted again`); return job.submit(); }
+  if (error === "cancelled" && !job.cancelled && job.retries-- > 0) { log(`${job.name} ${short(id)}: interrupted by another client. Posted again.`); return job.submit(); }
   if (error && /out of memory|allocation on device/i.test(error) && !job.freed) { // models and caches piled up on the GPU
     job.freed = true;
     notice("The GPU ran out of memory: freeing ComfyUI's memory, then trying once more.");

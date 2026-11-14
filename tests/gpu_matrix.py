@@ -54,7 +54,7 @@ QUICK = ("horse_cow", "horse_erase", "horse_light", "fluid_720")
 ALL = QUICK + ("uhd_cow", "uhd_erase", "uhd_light", "fluid_1080_edit", "uhd25_cow", "uhd25_erase", "uhd25_light")
 UHD = {"horse_3840x2160_50fps.mp4": 50, "horse_3840x2160_25fps.mp4": 25}  # « 4K at 50 fps », and at 25: every tool runs on a 3840 x 2160 plate
 UHD_SIZE, UHD_FRAMES = (3840, 2160), 121
-STEP = re.compile(r"Render v(\d+): (.+?) took ([\d.]+) s")  # the page's log: one line per render step
+STEP = re.compile(r"Render v(\d+): (.+?)(?: took |: done in )([\d.]+) s")  # the page's log: one line per render step
 # and one line per finished job: its id, its seconds, its nodes, those ComfyUI took from its cache (a model loader among
 # them is a model not loaded again) and the previews the page received. A line starts with its time, with no space after it
 JOB = re.compile(r"([a-z]+) ([0-9a-f?]{1,8}): done in ([\d.]+) s \((\d+) nodes?(?:, (\d+) from ComfyUI's cache)?(?:, (\d+) previews?)?")
@@ -321,13 +321,13 @@ def carried(r, fresh, gb):
 
 def estimates_off(steps, announced):
     """The steps that took more than 25% over or under what the page announced before they started (logic.stepGuess)."""
-    return [f"{label}: about {announced[label]} s, took {s:.1f} s" for label, s in steps
+    return [f"{label}: about {announced[label]} s, done in {s:.1f} s" for label, s in steps
             if announced.get(label) and abs(s - announced[label]) > 0.25 * s]
 
 
 def read_log(text):
     """What a case's page log says: the render steps and the jobs with their seconds, and the counts the report shows."""
-    profile = re.search(r"Memory profile (\w+): ([^\n]*)", text)
+    profile = re.search(r"Memory profile:? (\w+)(?:: | \()([^\n]*?)\)?\.?(?:\n  ([^\n]*?)\.?)?$", text, re.M)  # « Memory profile: small (…). » and its detail line
     jobs = [{"name": name, "id": job, "seconds": float(s), "nodes": int(n), "cached": int(k or 0), "previews": int(p or 0)}
             for name, job, s, n, k, p in JOB.findall(text)]
     return {
@@ -337,11 +337,11 @@ def read_log(text):
         "indexed": text.count("taken from the job index"),
         "oom": text.count(RETRY),
         "previews": sum(j["previews"] for j in jobs),
-        "live_off": re.findall(r"Live preview is off: ([^\n]*)", text),
-        "profile": f"{profile.group(1)} ({profile.group(2)})" if profile else "not in the log's last 400 lines",
+        "live_off": re.findall(r"(?:Warning: live preview off|Live preview is off): ([^\n]*)", text),
+        "profile": f"{profile.group(1)} ({'. '.join(x for x in profile.group(2, 3) if x)})" if profile else "not in the log's last 400 lines",
         "mattes": re.findall(r"([A-Z][a-z]+ matte(?: \([^)\n]*\))?: tracked on [^\n]*(?:\n  [^\n]*)*)", text),  # any word before « matte »; the headline and its detail lines (mathops.follow_summary)
         "seeds": sorted(set(re.findall(r"\bseed (\d+)", text)), key=int),
-        "announced": {f"v{v} {label}": int(s) for v, label, s in re.findall(r"Render v(\d+): (.+?) \(about (\d+) s\)", text)},
+        "announced": {f"v{v} {label}": int(s) for v, label, s in re.findall(r"Render v(\d+): (.+?)(?: \(about |: about )(\d+) s", text)},
         "figures": re.findall(r"(Edit \d+: [^\n]*?\(\d+% of it changed[^)\n]*\))", text),  # an erase: how much of the object changed, gone or held back (logic.leftLines)
     }
 
@@ -703,7 +703,7 @@ def report(a, machine, results):
                   f"- Previews received by the page: {r['previews']}. Live previews written by the node: {r['live_files']}."
                   + ("".join(f" Live preview off: {why}." for why in r["live_off"]))]
         off = estimates_off(r["steps"], r.get("announced", {}))
-        lines += [f"- Steps more than 25% from their announcement: {'; '.join(off)}." if off else "- Every announced step took within 25% of its announcement."]
+        lines += [f"- Steps more than 25% from their announcement: {'; '.join(off)}." if off else "- Every announced step was within 25% of its announcement."]
         for j in r["jobs"]:  # where the long jobs' time went (D7): the five longest nodes
             spent = r.get("nodes", {}).get(j["id"])
             if spent and j["seconds"] >= 30:
