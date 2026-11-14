@@ -10,12 +10,16 @@ way back from the model space keeps the plate's levels (PLA, the colour review's
   groups  Each frame folder in the export's zip with its file count and, for a folder of EXR frames as many as the plate's,
         the largest difference from the plate where the delivered matte shows 0. The export copies those pixels exactly;
         a folder that blends there is not the export.
+  finish  SDR to HDR on a plate with no edit, as the page's Finish runs it, on a running ComfyUI: the seconds of the job
+        and of each node, the peaks of the GPU's memory and of ComfyUI's RAM, and the HDR frames' count and size.
+        python tests/hdr_plate.py finish --comfy /data/ComfyUI --plate plates/horse.mp4 --out ~/paintaplate_gpu/w9_plate
 
 With ComfyUI's Python (numpy, scipy, av, OpenEXR), no GPU, on any version of the pack:
   python tests/hdr_plate.py make --source /data/ComfyUI/input/plates/horse.mp4 --out /data/ComfyUI/input/plates/horse_hdr
   python tests/hdr_plate.py seam --plate /data/ComfyUI/input/plates/horse_hdr --export ~/paintaplate_gpu/hdr_dev/export.zip
 """
 import argparse
+import json
 import glob
 import os
 import sys
@@ -155,6 +159,147 @@ def groups(plate: str, export: str, every: int = 30) -> dict:
     return {"rows": rows, "text": text}
 
 
+def _plate_info(path: str):
+    """(width, height, frames) of a movie or of a folder of frames."""
+    if os.path.isdir(path):
+        frames = plateio.find_sequence(path)
+        h, w = plateio.read_float(frames[0]).shape[:2]
+        return w, h, len(frames)
+    import av
+    n = w = h = 0
+    with av.open(path) as c:
+        for f in c.decode(video=0):
+            n, w, h = n + 1, f.width, f.height
+    return w, h, n
+
+
+def _comfy_pid():
+    """The process of a ComfyUI started from main.py on this machine, or None."""
+    for d in os.listdir("/proc"):
+        if d.isdigit() and int(d) != os.getpid():
+            try:
+                with open(f"/proc/{d}/cmdline", "rb") as f:
+                    args = f.read().split(b"\0")
+            except OSError:
+                continue
+            if any(a.endswith(b"main.py") for a in args[:3]):
+                return int(d)
+    return None
+
+
+def run_prompt(url: str, prompt: dict, pid=None, timeout: float = 7200.0) -> dict:
+    """Post `prompt` to the ComfyUI at `url` and follow it: its seconds, the seconds of each node (from one « executing »
+    message to the next), and the peaks read once a second: the GPU's memory in use and the RSS of process `pid`."""
+    import asyncio
+    import subprocess
+    import threading
+    import urllib.request
+    import uuid
+    import aiohttp
+    cid, events, peaks, stop = uuid.uuid4().hex, [], {"vram": None, "ram": None}, threading.Event()
+
+    def sample():
+        while not stop.is_set():
+            try:
+                used = subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+                                      capture_output=True, text=True, timeout=5).stdout.split()
+                if used:
+                    peaks["vram"] = max(peaks["vram"] or 0.0, float(used[0]) / 1024)
+            except (OSError, subprocess.SubprocessError, ValueError):
+                pass
+            if pid:
+                try:
+                    with open(f"/proc/{pid}/status") as f:
+                        rss = next(int(line.split()[1]) for line in f if line.startswith("VmRSS:"))
+                    peaks["ram"] = max(peaks["ram"] or 0.0, rss / 1048576)
+                except (OSError, StopIteration, ValueError):
+                    pass
+            stop.wait(1.0)
+
+    def history(job):
+        with urllib.request.urlopen(f"{url}/history/{job}", timeout=30) as r:
+            return json.loads(r.read()).get(job)
+
+    async def follow():
+        async with aiohttp.ClientSession() as s:
+            async with s.ws_connect(url.replace("http", "ws", 1) + f"/ws?clientId={cid}", max_msg_size=0) as ws:
+                req = urllib.request.Request(url + "/prompt", data=json.dumps({"prompt": prompt, "client_id": cid}).encode(),
+                                             headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    job = json.loads(r.read())["prompt_id"]
+                t0 = time.time()
+                while time.time() - t0 < timeout:
+                    try:
+                        msg = await ws.receive(timeout=1.0)
+                    except asyncio.TimeoutError:
+                        msg = None
+                    if msg is not None and msg.type == aiohttp.WSMsgType.TEXT:
+                        m = json.loads(msg.data)
+                        d = m.get("data") or {}
+                        if d.get("prompt_id") == job:
+                            events.append((time.time(), m.get("type"), d.get("node")))
+                            if m.get("type") in ("execution_success", "execution_error", "execution_interrupted"):
+                                break
+                            if m.get("type") == "executing" and d.get("node") is None:
+                                break
+                    elif msg is not None and msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                        break
+                    if msg is None:  # nothing said for a second: the history may hold the end
+                        h = history(job)
+                        if h and (h.get("outputs") or (h.get("status") or {}).get("completed") is not None):
+                            break
+                return job, t0, time.time()
+
+    threading.Thread(target=sample, daemon=True).start()
+    try:
+        job, t0, t1 = asyncio.run(follow())
+    finally:
+        stop.set()
+    spent = {}
+    for (t, kind, node), nxt in zip(events, events[1:] + [(t1, None, None)]):
+        if kind == "executing" and node is not None:
+            spent[str(node)] = spent.get(str(node), 0.0) + nxt[0] - t
+    return {"job": job, "seconds": t1 - t0, "spent": spent, "peaks": peaks, "history": history(job) or {}}
+
+
+def finish(url: str, comfy: str, plate: str, out: str, label: str = "finish", width: int = 0, height: int = 0,
+           tile=None, guide_tiled=None, color_space: str = "@model") -> dict:
+    """SDR to HDR on a plate with no edit, as the page's Finish runs it, timed node by node: a report in `out`."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
+    import build_workflows
+    full = os.path.join(comfy, "input", plate)
+    if not os.path.exists(full):
+        full = next(os.path.join(d, f) for d, _, fs in os.walk(comfy) for f in fs if f == os.path.basename(plate))
+    w, h, n = _plate_info(full)
+    up = lambda v: -(-v // 32) * 32  # noqa: E731
+    ww, wh, count = width or up(w), height or up(h), min(n, 121)
+    values = {"path": plate, "color_space": color_space, "max_frames": count, "width": ww, "height": wh, "plate_width": w,
+              "plate_height": h, "prefix": f"{label}/hdr/f", "video_prefix": f"{label}/hdr_movie"}
+    values.update({k: v for k, v in (("tile", tile), ("guide_tiled", guide_tiled)) if v is not None})
+    prompt = build_workflows.fill("hdr", values)
+    r = run_prompt(url, prompt, pid=_comfy_pid())
+    exrs = sorted(glob.glob(os.path.join(comfy, "output", label, "hdr", "*.exr")))
+    size = plateio.read_float(exrs[0]).shape[:2] if exrs else None
+    status = (r["history"].get("status") or {}).get("status_str", "no status")
+    gb = lambda v: "not read" if v is None else f"{v:.1f} GB"  # noqa: E731
+    by = sorted(r["spent"].items(), key=lambda kv: -kv[1])
+    lines = [f"# SDR to HDR on a plate with no edit: `{plate}`", "", "| | |", "| --- | --- |",
+             f"| ComfyUI | {url}, job {r['job'][:8]}: {status} |",
+             f"| Plate | {w} x {h}, {count} frames, working size {ww} x {wh} |",
+             f"| Slots | tile {values.get('tile', 'default')}, guide_tiled {values.get('guide_tiled', 'default')}, colour space {color_space} |",
+             f"| Seconds | {r['seconds']:.1f} |", f"| Peak VRAM | {gb(r['peaks']['vram'])}, the GPU's memory in use |",
+             f"| Peak RAM | {gb(r['peaks']['ram'])}, ComfyUI's process |",
+             f"| HDR frames | {len(exrs)} EXR frames" + (f" at {size[1]} x {size[0]}" if size else "") + " |", "",
+             "GB means 2^30 bytes.", "", "| Node | Seconds |", "| --- | --- |"]
+    lines += [f"| {prompt.get(nid, {}).get('class_type', nid)} | {s:.1f} |" for nid, s in by[:8]]
+    text = "\n".join(lines) + "\n"
+    os.makedirs(out, exist_ok=True)
+    with open(os.path.join(out, f"{label}.md"), "w") as f:
+        f.write(text)
+    print(text)
+    return {"seconds": r["seconds"], "frames": len(exrs), "size": size, "status": status, "by_node": by, "peaks": r["peaks"]}
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="what", required=True)
@@ -172,10 +317,24 @@ if __name__ == "__main__":
     gr.add_argument("--plate", required=True)
     gr.add_argument("--export", required=True, help="the export.zip that tests/ui_live.py downloads")
     gr.add_argument("--every", type=int, default=30)
+    fi = sub.add_parser("finish", help="SDR to HDR on a plate with no edit, timed node by node, on a running ComfyUI")
+    fi.add_argument("--url", default="http://127.0.0.1:8188")
+    fi.add_argument("--comfy", required=True, help="ComfyUI's folder: the plate under its input folder, the frames under its output folder")
+    fi.add_argument("--plate", required=True, help="the plate as Load Plate takes it, such as plates/horse.mp4")
+    fi.add_argument("--out", required=True, help="the folder of the report")
+    fi.add_argument("--label", default="finish", help="the report's name and the frames' folder under ComfyUI's output folder")
+    fi.add_argument("--width", type=int, default=0, help="the working width: 0 is the plate's, up to a multiple of 32")
+    fi.add_argument("--height", type=int, default=0, help="the working height: 0 is the plate's, up to a multiple of 32")
+    fi.add_argument("--tile", type=int, help="the decode's tile in px, as the page's memory profile sends it")
+    fi.add_argument("--guide-tiled", type=int, choices=(0, 1), help="1 encodes the guide in tiles, as the page's small profile does")
+    fi.add_argument("--color-space", default="@model", help="the plate's file colour space in the OCIO config")
     a = ap.parse_args()
     if a.what == "make":
         make(a.source, a.out, a.peak, a.frames)
     elif a.what == "seam":
         seam(a.plate, a.export, a.ring, a.every)
-    else:
+    elif a.what == "groups":
         groups(a.plate, a.export, a.every)
+    else:
+        finish(a.url, a.comfy, a.plate, os.path.expanduser(a.out), a.label, a.width, a.height, a.tile,
+               None if a.guide_tiled is None else bool(a.guide_tiled), a.color_space)

@@ -144,5 +144,31 @@ class StandInAnswer(unittest.TestCase):
             mock.wait(10)
 
 
+class FinishTool(unittest.TestCase):
+    """tests/hdr_plate.py finish runs SDR to HDR on a plate with no edit and reports its frames, here on the stand-in."""
+
+    def test_finish_on_the_stand_in(self):
+        import hdr_plate
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        root, out = tempfile.mkdtemp(prefix="finish_"), tempfile.mkdtemp(prefix="finish_report_")
+        mock = subprocess.Popen([sys.executable, os.path.join(HERE, "mock_comfy.py"), "--port", str(port), "--root", root,
+                                 "--speed", "16", "--plate"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            for _ in range(120):
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/system_stats", timeout=2).close()
+                    break
+                except OSError:
+                    time.sleep(0.5)
+            got = hdr_plate.finish(f"http://127.0.0.1:{port}", root, "plates/desk.mp4", out, label="t9")
+        finally:
+            mock.terminate()
+            mock.wait(10)
+        self.assertGreater(got["frames"], 0)
+        self.assertTrue(os.path.exists(os.path.join(out, "t9.md")))
+
+
 if __name__ == "__main__":
     unittest.main()
