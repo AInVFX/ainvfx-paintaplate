@@ -181,6 +181,21 @@ class Run(unittest.TestCase):
         self.assertEqual((calls, code), (["horse_cow", "horse_erase"], 0))
         self.assertNotIn("not run", report)
 
+    def test_a_matte_warning_fails_a_case_that_passed_and_the_report_lists_each_detail(self):
+        summary = ("Paint matte (full): tracked on 53 of 121 frames.\n  Warning: object left its place from frame 56. Check the composite there.\n"
+                   "  Removed: areas where the plate stands in front of the object, on 66 frames.")
+        quiet = "Paint matte (640x352): tracked on 51 of 121 frames.\n  Held: last matte, on 1 frame with no SAM mask."
+        self.assertEqual(gpu_matrix.matte_verdict(True, "", [quiet]), (True, ""))
+        self.assertEqual(gpu_matrix.matte_verdict(True, "", [quiet, summary]),
+                         (False, "Warning: object left its place from frame 56. Check the composite there. "
+                                 "The case fails on this matte warning: check its picture on the sheet."))
+        self.assertEqual(gpu_matrix.matte_verdict(False, "FAILED: no export", [summary]), (False, "FAILED: no export"), "a failed case keeps its reason")
+        real = gpu_matrix.read_log
+        with mock.patch.object(gpu_matrix, "read_log", lambda text: {**real(text), "mattes": [summary]}):
+            report = self.matrix("horse_cow", [True])[2]
+        self.assertIn("- Paint matte (full): tracked on 53 of 121 frames.\n  - Warning: object left its place from frame 56. Check the composite "
+                      "there.\n  - Removed: areas where the plate stands in front of the object, on 66 frames.\n", report)
+
     def test_fresh_frees_comfyui_before_each_case(self):
         """On the pod of 11 Nov a case's first job read the 138 GB that the case before it had left."""
         calls, _, report = self.matrix("horse_cow,horse_erase", [True], "--fresh")

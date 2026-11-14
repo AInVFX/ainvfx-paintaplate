@@ -6,7 +6,8 @@ Each case runs tests/ui_live.py on a running ComfyUI (the real page, in Google C
 case left behind and writes <out>/report.md: the machine, then per case the time of each step (the page's log times
 every step), each job with its seconds, its peak VRAM and RAM, the nodes ComfyUI took from its cache and the previews
 the page received, out-of-memory retries, the memory profile, the paint matte's area on every frame against the first
-frame's, pass or fail, the page's verdict on a Clean edit (gone or left), then the log of each failure. The report is written again after every case, so a run that is
+frame's, pass or fail (a case also fails when a matte summary warns), the page's verdict on a Clean edit (gone or left), then the
+log of each failure. The report is written again after every case, so a run that is
 stopped still leaves one.
 
 Memory is read once a second. VRAM comes from ComfyUI's /system_stats. RAM is what ComfyUI's own process holds (VmRSS in
@@ -483,6 +484,14 @@ def name_asked(marks, log, jobs):
     return asked and not ran, "" if asked and not ran else "the page did not ask for the name" if not asked else " and ".join(ran) + " ran"
 
 
+def matte_verdict(passed, why, mattes):
+    """(passed, why) once the page's matte summaries are read: a case that passed fails on the first warning of its mattes
+    (mathops.follow_summary writes « Warning: … » among its detail lines), and says where to look. Every step can run and
+    the export download while the matte lost the object."""
+    warned = [line.strip() for m in mattes for line in m.split("\n") if line.strip().startswith("Warning:")]
+    return (False, f"{warned[0]} The case fails on this matte warning: check its picture on the sheet.") if passed and warned else (passed, why)
+
+
 def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
     """The case's sheet, sheet.png in its folder: for each edit, the plate and the export cut around its box, on the first
     frame, at a third, at two thirds and on the last. `others`: more (title, export.zip) columns, such as another run of
@@ -591,6 +600,7 @@ def run_case(a, name, case, folder):
     result["passed"], result["why"] = not failed and done, (failed[0] if failed else "" if done else "the full-size composite was not reached: " + (result["marks"] or ["?"])[-1])
     if case.get("expect") == "name asked":  # an erase with no words on another object: no Klein pass, no shot (logic.asksName)
         result["passed"], result["why"] = name_asked(result["marks"], result["log"], result["jobs"])
+    result["passed"], result["why"] = matte_verdict(result["passed"], result["why"], result["mattes"])
     result["matte"] = matte_areas(a.comfy, t0) if any(s[0] == "paint" for s in case.get("strokes", [])) else None
     live = os.path.join(a.comfy, "temp", "paintaplate_live", "*.webp")
     result["live_files"] = sum(os.path.getmtime(f) >= t0 for f in glob.glob(live))
@@ -657,7 +667,9 @@ def report(a, machine, results):
         if not r.get("hdr_match") and render_hdr(r["steps"]):
             lines.append("- HDR Match: its line has left ComfyUI's log buffer; grep the terminal for « HDR Match ».")
         lines += [f"- Did not finish: {line}" for line in r["ended"]]
-        lines += [f"- {m}" for m in r["mattes"]]
+        for m in r["mattes"]:  # a summary's headline, then each of its detail lines as a sub-item
+            head, *details = m.split("\n")
+            lines += [f"- {head}", *(f"  - {d.strip()}" for d in details)]
         if r["matte"]:
             folder, areas = r["matte"]
             ratios = [x / max(areas[0], 1e-9) for x in areas]
