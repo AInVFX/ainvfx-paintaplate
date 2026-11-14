@@ -229,6 +229,7 @@ body.resizing, body.resizing * { user-select: none; }
 #log li span { white-space: pre-wrap; } /* a summary's detail lines show under its headline (Follow Matte) */
 #log time { color: #6e7681; flex: none; }
 #log li.error span { color: #ff7b72; }
+#log li.warning span { color: #f5b800; }
 #log li.warn span { color: #e3b341; }
 
 /* Dialogs */

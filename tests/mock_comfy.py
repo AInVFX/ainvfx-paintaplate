@@ -257,7 +257,7 @@ async def execute(pid, prompt):
         o[outs["patch"]] = {"images": [save_png(np.dstack([new, soft]), saved, f"paintaplate/{pid[:8]}_patch")]}
         if "relit" in outs:
             o[outs["relit"]] = {"images": [save_png(result, saved, f"paintaplate/{pid[:8]}_relit")]}
-    elif "point_0" in outs:  # snap: an object around each point it was given, none found by name
+    elif "point_0" in outs:  # snap: an object around each point it was given; by name, only what /mock/named armed
         img = load_image(v["image"])
         h, w = img.shape[:2]
         yy, xx = np.mgrid[0:h, 0:w]
@@ -273,8 +273,16 @@ async def execute(pid, prompt):
                 cx, cy, rx, ry = extra["extra"]
                 disc |= ((xx - cx * w) / (rx * w)) ** 2 + ((yy - cy * h) / (ry * h)) ** 2 < 1
             o[outs[f"point_{k}"]] = {"images": [save_png(disc.astype(np.float32), "temp", f"paintaplate/{pid[:8]}_snap{k}")]}
-        if "named" in outs:
-            o[outs["named"]] = {"images": []}
+        if "named" in outs:  # by name: the object that /mock/named armed, after the blank frame that the graph puts first
+            found = STATE.get("named")
+            if found and found["times"] > 0 and (v.get("words") or "").strip():
+                found["times"] -= 1
+                cx, cy, rx, ry = found["ellipse"]
+                obj = ((xx - cx * w) / (rx * w)) ** 2 + ((yy - cy * h) / (ry * h)) ** 2 < 1
+                o[outs["named"]] = {"images": [save_png(np.zeros((h, w), np.float32), "temp", f"paintaplate/{pid[:8]}_named0"),
+                                               save_png(obj.astype(np.float32), "temp", f"paintaplate/{pid[:8]}_named1")]}
+            else:
+                o[outs["named"]] = {"images": []}
         await steps(pid, 2, 0.5)
     elif "hdr" in outs:  # SDR to HDR: the shot decoded from sRGB, its brightest values lifted above 1.0, as half-float EXR frames
         frames, spec = read_plate(v["path"], v.get("max_frames", 1024), pad=True)
@@ -568,6 +576,12 @@ async def snap_route(request):  # mock only: the next `times` snap jobs take ano
     return web.json_response({})
 
 
+async def named_route(request):  # mock only: the next `times` snap jobs with words find one object by them, an ellipse (x, y, rx, ry as fractions of the frame)
+    body = await request.json()
+    STATE["named"] = {"times": int(body.get("times", 1)), "ellipse": body["ellipse"]}
+    return web.json_response({})
+
+
 async def pack_version_route(request):  # mock only: the version and the build /paintaplate/version answers from now on, as a ComfyUI restarted on other code would: it also drops every WebSocket, and open pages connect again
     body, served = await request.json(), sys.modules["routes"]
     served.VERSION, served.BUILD = body.get("version", served.VERSION), body.get("build", served.BUILD)
@@ -639,6 +653,7 @@ async def start():
     app.router.add_post("/mock/leave", leave_route)
     app.router.add_post("/mock/writer", writer_route)
     app.router.add_post("/mock/snap", snap_route)
+    app.router.add_post("/mock/named", named_route)
     app.router.add_get("/mock/events", lambda r: web.json_response(EVENTS))
     app.router.add_get("/mock/posts", lambda r: web.json_response(POSTS))
     app.router.add_get("/ws", ws_route)

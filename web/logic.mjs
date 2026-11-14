@@ -242,12 +242,17 @@ export function paintBoxes({ bits, w, h }, { max = 4, fill = 0.4, gain = 0.25, m
 // Whether a caption erases what was painted: it cites a locked row (<obj_1>), or the rows it removes and cites hold most of the
 // paint. `paint`: { bits, w, h }, the painted area on a coarse grid. On 28 Oct the bad caption removed person_1, a box with none
 // of the paint in it; the good one never cited <obj_1> but removed four rows that held nearly all of it.
+// The rows of an answer that removes objects, apart from the locked ones: named in its caption, with a box in the frame and none
+// in the result.
+const removedRows = (caption, rows, locked) => {
+  const ids = new Set(locked.map((r) => r.id));
+  return (rows ?? []).filter((r) => r && !ids.has(r.id) && r.tgt_bbox == null && validBox(r.src_bbox) && caption.includes(`<${r.id}>`));
+};
+
 export function erasesPaint(text, locked, paint, share = 0.5) {
   const [caption, rows] = splitTable(text);
   if (locked.some((r) => caption.includes(`<${r.id}>`))) return true;
-  const ids = new Set(locked.map((r) => r.id));
-  const boxes = (rows ?? []).filter((r) => r && !ids.has(r.id) && r.tgt_bbox == null && validBox(r.src_bbox) && caption.includes(`<${r.id}>`))
-    .map((r) => r.src_bbox);
+  const boxes = removedRows(caption, rows, locked).map((r) => r.src_bbox);
   let painted = 0, inside = 0;
   for (let y = 0; y < paint.h; y++) for (let x = 0; x < paint.w; x++) {
     if (!paint.bits[y * paint.w + x]) continue;
@@ -264,25 +269,76 @@ export function erasesPaint(text, locked, paint, share = 0.5) {
 export const asksName = (tool, words) => tool === "erase" && !String(words ?? "").trim();
 
 // ---------- An erase with no words: the box the prompt writer gets ----------
-// The stroke, and the pixels that most of SAM's masks hold, with no margin. On 12 Nov 2026 two of the five masks of a stroke
-// on a barn took in the horse's nose: with a box around them all, the prompt writer removed the horse; with this one, it
-// removed the barn (the probe, 13 Nov). `painted` and `masks`: Uint8Arrays of 0 and 1 over w x h pixels. null: nothing.
-export function coreBox({ painted, masks, w, h }) {
-  let y0 = h, x0 = w, y1 = -1, x1 = -1;
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const i = y * w + x;
+// The object's core: the stroke, and the pixels that most of SAM's masks hold. A neighbour that a few masks take in (a horse's
+// nose beside a barn) stays out of it, so the prompt writer's box holds the object under the stroke. `painted` and `masks`:
+// Uint8Arrays of 0 and 1 over w x h pixels.
+export function corePixels({ painted, masks, w, h }) {
+  const bits = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
     let n = 0;
     for (const m of masks) n += m[i];
-    if (!painted[i] && n * 2 <= masks.length) continue;
+    bits[i] = painted[i] || n * 2 > masks.length ? 1 : 0;
+  }
+  return bits;
+}
+
+// The box around the pixels that `bits` sets, with no margin, as [y0, x0, y1, x1] from 0 to 1000. null: none is set.
+export function boxOf(bits, w, h) {
+  let y0 = h, x0 = w, y1 = -1, x1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (!bits[y * w + x]) continue;
     y0 = Math.min(y0, y); y1 = Math.max(y1, y); x0 = Math.min(x0, x); x1 = Math.max(x1, x);
   }
   return x1 < 0 ? null : [y0 / h, x0 / w, (y1 + 1) / h, (x1 + 1) / w].map((v) => Math.round(v * 1000));
 }
 
+export const coreBox = ({ painted, masks, w, h }) => boxOf(corePixels({ painted, masks, w, h }), w, h);
+
 // The boxes the prompt writer gets: an erase with no words, painted in one part, gets its core box; otherwise one box per
 // painted part (paintBoxes), with the edit's bounds (`bbox`).
 export const writerBoxes = ({ tool, words, parts, core, bbox }) =>
   (tool === "erase" && !String(words ?? "").trim() && core && parts?.length === 1 ? { bbox: core, boxes: [core] } : { bbox, boxes: parts });
+
+// The objects that an answer removes, apart from the locked ones, as SAM 3.1 reads a name: the row « barn_1 » is « barn ».
+export function removedNames(text, locked = []) {
+  const [caption, rows] = splitTable(text ?? "");
+  const names = removedRows(caption, rows, locked).map((r) => String(r.id).replace(/_\d+$/, "").replace(/_/g, " ").trim());
+  return [...new Set(names.filter(Boolean))];
+}
+
+// The prompt writer's box once it named another object than the one under the stroke: the part of `box` that holds the most
+// of the object (`keep`, its core) and almost none of the other one (`other`, as SAM 3.1 finds it by the writer's name for
+// it). A tree's box that holds a barn's roof below its branches becomes the box above the roof. The search runs on a grid of
+// at most 48 cells a side, with sums over the box. null: the box already leaves the other object out (it covers under `share`
+// of the box), or no box without it holds `least` of the object. Masks: Uint8Arrays of 0 and 1 over w x h pixels; boxes:
+// [y0, x0, y1, x1] from 0 to 1000.
+export function boxWithout({ box, keep, other, w, h, share = 0.02, least = 0.5 }) {
+  const Y0 = Math.max(0, Math.floor((box[0] / 1000) * h)), X0 = Math.max(0, Math.floor((box[1] / 1000) * w));
+  const Y1 = Math.min(h, Math.ceil((box[2] / 1000) * h)), X1 = Math.min(w, Math.ceil((box[3] / 1000) * w));
+  if (Y1 <= Y0 || X1 <= X0) return null;
+  const c = Math.max(1, Math.ceil(Math.max(Y1 - Y0, X1 - X0) / 48)), rows = Math.ceil((Y1 - Y0) / c), cols = Math.ceil((X1 - X0) / c);
+  const W = cols + 1, K = new Float64Array((rows + 1) * W), O = new Float64Array((rows + 1) * W), A = new Float64Array((rows + 1) * W);
+  for (let y = Y0; y < Y1; y++) for (let x = X0; x < X1; x++) { // per cell: the object's pixels, the other's, and the pixels
+    const i = y * w + x, j = (Math.floor((y - Y0) / c) + 1) * W + Math.floor((x - X0) / c) + 1;
+    K[j] += keep[i]; O[j] += other[i] && !keep[i] ? 1 : 0; A[j] += 1;
+  }
+  for (const T of [K, O, A]) for (let r = 1; r <= rows; r++) for (let q = 1; q <= cols; q++) T[r * W + q] += T[(r - 1) * W + q] + T[r * W + q - 1] - T[(r - 1) * W + q - 1];
+  const sum = (T, r0, q0, r1, q1) => T[r1 * W + q1] - T[r0 * W + q1] - T[r1 * W + q0] + T[r0 * W + q0];
+  const all = sum(K, 0, 0, rows, cols);
+  if (!all || sum(O, 0, 0, rows, cols) <= share * sum(A, 0, 0, rows, cols)) return null;
+  let best = null;
+  for (let r0 = 0; r0 < rows; r0++) for (let r1 = r0 + 1; r1 <= rows; r1++) for (let q0 = 0; q0 < cols; q0++) for (let q1 = q0 + 1; q1 <= cols; q1++) {
+    const k = sum(K, r0, q0, r1, q1);
+    if (k < least * all || (best && k < best.k)) continue;
+    const a = sum(A, r0, q0, r1, q1);
+    if (sum(O, r0, q0, r1, q1) > share * a || (best && k === best.k && a >= best.a)) continue;
+    best = { k, a, r0, q0, r1, q1 };
+  }
+  if (!best) return null;
+  const y1 = Math.min(Y1, Y0 + best.r1 * c), x1 = Math.min(X1, X0 + best.q1 * c);
+  const cut = [(Y0 + best.r0 * c) / h, (X0 + best.q0 * c) / w, y1 / h, x1 / w].map((v) => Math.round(v * 1000));
+  return [Math.max(cut[0], box[0]), Math.max(cut[1], box[1]), Math.min(cut[2], box[2]), Math.min(cut[3], box[3])]; // inside `box`
+}
 
 // The erase pass's prompt: the scene as it stays, in the upsampler's own words for what it kept (rows with a box in the
 // result). People and text stay out (a pose in words fights the plate's own motion), and the erased object is never named
@@ -615,16 +671,17 @@ export function eraseCheck(after, before, mask, w, h) {
 
 // What to do next, for the status line: an object with no name gets one; a named object gets other words or another seed.
 export const leftHint = (words) =>
-  (words ? "Describe it with other words, then Generate, or press Ctrl+Enter for another seed." : "Type its name in the prompt bar, then Generate.");
+  (words ? "Use other words, then Generate, or Ctrl+Enter for another seed." : "Type its name in the prompt bar, then Generate.");
 
 // What the page says when the check holds an erase back. The check can be wrong on a thin or faint object, or on one behind a
-// fence, so the page asks (Adrien, 13 Nov): `fact` goes to the log once and, after Cancel, to the status line before leftHint;
+// fence, so the page asks: `fact`, a warning, goes to the log once and, after Cancel, to the status line before leftHint;
 // `question` opens the dialog, where « Render anyway » keeps the first frame and renders its shot; `rendered` is the log's
 // line then. A figure the check could not measure (null) is left out.
 export function leftLines(n, { changed, edges }) {
   const figures = [changed === null ? "" : `${Math.round(changed * 100)}% of it changed`, edges === null ? "" : `edges held at ${edges.toFixed(2)}`];
-  const fact = `Edit ${n}: the object may still be there${figures.some(Boolean) ? ` (${figures.filter(Boolean).join(", ")})` : ""}`;
-  return { fact, question: `${fact}. Render the shot anyway?`, rendered: `Edit ${n}: rendered at your request. The check found the object still there.` };
+  const there = `the object may still be there${figures.some(Boolean) ? ` (${figures.filter(Boolean).join(", ")})` : ""}`;
+  return { fact: `Warning: edit ${n}, ${there}.`, question: `Edit ${n}: ${there}. Render the shot anyway?`,
+    rendered: `Edit ${n}: kept at your request. The check found the object still there.` };
 }
 
 // A divider's drag as a size the layout can take: never under the panel's least, and never leaving the stage under its own
@@ -832,6 +889,45 @@ export const lightColors = (colors, color) => {
   const names = [...new Set(colors.filter((c) => !dark(c)).map(colorName))];
   return names.length ? names.join(" and ") : colorName(color);
 };
+// A relight's strokes read as intentions, in words that Klein can follow with the frame alone: one sentence per light (its
+// colour by name, its strength from the colour's brightness, its spread from the share of the frame it covers, its place),
+// one per shaded place, the person's words, then what must stay. `strokes`: { color, size, points }, the points as [x, y]
+// fractions of the frame and the size as a fraction of its width; `aspect`: the frame's width over its height. A light that
+// covers 8% of the frame or more is broad; under 1%, focused.
+export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
+  const place = (b) => { // b: [x0, y0, x1, y1] in fractions of the frame
+    const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+    const v = cy < 1 / 3 ? "top" : cy > 2 / 3 ? "bottom" : "", h = cx < 1 / 3 ? "left" : cx > 2 / 3 ? "right" : "";
+    return v && h ? `${v} ${h}` : v || h || "centre";
+  };
+  const groups = new Map();
+  for (const s of strokes) {
+    const r = s.size / 2, rh = r * aspect, pts = s.points;
+    let length = 0;
+    for (let i = 1; i < pts.length; i++) length += Math.hypot((pts[i][0] - pts[i - 1][0]) * aspect, pts[i][1] - pts[i - 1][1]);
+    const box = [Math.min(...pts.map((p) => p[0])) - r, Math.min(...pts.map((p) => p[1])) - rh,
+      Math.max(...pts.map((p) => p[0])) + r, Math.max(...pts.map((p) => p[1])) + rh].map((v) => Math.min(1, Math.max(0, v)));
+    const key = dark(s.color) ? `shade ${place(box)}` : colorName(s.color);
+    const g = groups.get(key) ?? { shade: dark(s.color), color: s.color, cover: 0, box };
+    g.cover += Math.min(1, ((length + 2 * rh) * 2 * rh) / aspect); // a round brush along its path, as a share of the frame
+    g.box = [Math.min(g.box[0], box[0]), Math.min(g.box[1], box[1]), Math.max(g.box[2], box[2]), Math.max(g.box[3], box[3])];
+    groups.set(key, g);
+  }
+  const said = ["Relight the whole scene with new light, as if it were photographed under that light."];
+  for (const [name, g] of groups) {
+    if (g.shade) { said.push(`The ${place(g.box)} of the frame falls into deep shadow.`); continue; }
+    const value = Math.max(...[1, 3, 5].map((i) => parseInt(g.color.slice(i, i + 2), 16))) / 255;
+    const strength = value >= 0.85 ? "strong" : value < 0.5 ? "dim" : "soft", spread = g.cover >= 0.08 ? ", broad" : g.cover < 0.01 ? ", focused" : "";
+    said.push(`A ${strength}${spread} ${name} light comes from the ${place(g.box)} of the frame.`);
+  }
+  if ([...groups.values()].some((g) => !g.shade)) said.push("Each light brightens the surfaces that face it with its colour and falls off with distance; " +
+    "it casts soft shadows away from it, and the old highlights and shadows that disagree with it fade.");
+  const w = String(words ?? "").trim();
+  if (w) said.push(`${w[0].toUpperCase()}${w.slice(1)}${/[.!?]$/.test(w) ? "" : "."}`);
+  said.push("Keep every object, face and texture, the camera angle, the framing and the composition exactly as they are: only the light changes.");
+  return said.join(" ");
+}
+
 export function lightPlanCaption({ colors = [], color = "#ffd890", words = "" }) {
   const shade = colors.some(dark) ? " The black strokes mark areas that must fall into deep shadow." : "";
   const w = words.trim() ? ` ${words.trim()[0].toUpperCase()}${words.trim().slice(1)}${/[.!?]$/.test(words.trim()) ? "" : "."}` : "";

@@ -8,10 +8,11 @@ asks again. « Render anyway », clicked or chosen by Enter, keeps the first fra
 time: a second erase is held back while the OCIO question is open (/mock/hold keeps its passes running), and its question
 waits for that answer. The mock answers the next edit jobs with the frame as it was (/mock/leave)."""
 
-FACT = "Edit 1: the object may still be there ("
+FACT = "Warning: edit 1, the object may still be there ("  # the log's line and the status line after Cancel
+ASKS = "Edit 1: the object may still be there ("  # the dialog's question
 QUESTION = ". Render the shot anyway?"
 NAME = "Type its name in the prompt bar, then Generate."
-ANYWAY = "Edit 1: rendered at your request. The check found the object still there."
+ANYWAY = "Edit 1: kept at your request. The check found the object still there."
 ROW = """(() => { const li = document.querySelector('#history li');
   return li ? [li.className, li.dataset.left ?? '', li.querySelector('small').textContent] : null; })()"""
 ASKED = """(() => { const d = document.querySelector('#ask');
@@ -25,7 +26,7 @@ def held(page, port, U, start, what):  # one erase that the mock leaves as it wa
     start()
     page.wait_for_selector("#ask[open]", timeout=90000)
     asked, row = page.evaluate(ASKED), page.evaluate(ROW)
-    U.check(bool(asked) and asked[0].startswith(FACT) and asked[0].endswith(QUESTION) and asked[1] == "Render anyway"
+    U.check(bool(asked) and asked[0].startswith(ASKS) and asked[0].endswith(QUESTION) and asked[1] == "Render anyway"
             and asked[2] == "ask-yes", f"{what}: the page asks, and Enter would choose Render anyway ({asked})")
     U.check(bool(row) and "failed" in row[0] and row[1] == "1" and row[2] == "The object is still there",
             f"{what}: History's row is marked while the question is open ({row})")
@@ -35,7 +36,8 @@ def held(page, port, U, start, what):  # one erase that the mock leaves as it wa
 def cancelled(page, U, asked, facts, what):
     U.settled(page)
     status, lines, row = page.text_content("#status"), page.evaluate("window.__lines"), page.evaluate(ROW)
-    U.check(page.is_hidden("#ask") and status == asked[: -len(QUESTION)] + ". " + NAME,
+    n, there = asked[len("Edit "):].split(": ", 1)  # the question's fact, as the warning says it
+    U.check(page.is_hidden("#ask") and status == f"Warning: edit {n}, {there[: -len(QUESTION)]}. {NAME}",
             f"{what}: the question closes, and the status line keeps what to do next ({status})")
     U.check(page.evaluate(COUNT, FACT) == facts and not any(NAME in t for t in lines),
             f"{what}: the log says each held-back erase once, and what to do next stays in the status line")
@@ -85,11 +87,11 @@ def run(browser, port, U):
     U.mock_route(port, "/mock/hold", {"output": "patch", "seconds": 6, "times": 2})  # edit 2's two passes last 6 s each
     U.paint_once(page, "bottle", [(0.6, 0.4), (0.62, 0.45)])
     page.keyboard.press("Enter")
-    U.wait_log(page, U.added_line("Edit 2: Klein full-size pass"), 60000, "edit 2's full-size pass")
+    U.wait_log(page, U.added_line("Edit 2: Klein full size"), 60000, "edit 2's full-size pass")
     U.menu(page, "OCIO", f"Colour space: {FILE}, from file", "Utility", LINEAR)
     page.wait_for_selector("#ask[open]", timeout=5000)
     ocio = page.text_content("#ask-text")
-    U.wait_log(page, U.added_line("Edit 2: the object may still be there ("), 60000, "edit 2 held back")
+    U.wait_log(page, U.added_line("Warning: edit 2, the object may still be there ("), 60000, "edit 2 held back")
     page.wait_for_timeout(500)
     asked = page.evaluate(ASKED)
     U.check(ocio.startswith("Changing the ") and bool(asked) and asked[0] == ocio and asked[1] == "Continue",
@@ -100,6 +102,6 @@ def run(browser, port, U):
     U.check(asked[0].startswith("Edit 2: the object may still be there (") and asked[0].endswith(QUESTION) and asked[1] == "Render anyway"
             and asked[2] == "ask-yes", f"once that question is answered, edit 2's question opens, under Enter ({asked})")
     page.keyboard.press("Enter")
-    rendered(page, U, 2, "Enter chooses Render anyway", line="Edit 2: rendered at your request.", times=1)
+    rendered(page, U, 2, "Enter chooses Render anyway", line="Edit 2: kept at your request.", times=1)
     U.no_errors(errors, "after an erase that the check held back")
     page.close()

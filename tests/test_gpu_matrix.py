@@ -371,6 +371,8 @@ class ReportLines(unittest.TestCase):
         self.assertEqual(gpu_matrix.read_log(log)["figures"], ["Edit 1: the object left the first frame (59% of it changed)"])
         held = "11:02:06 PMEdit 1: the object may still be there (17% of it changed, edges held at 0.62)\n"  # the page's line since wave 7 (logic.leftLines)
         self.assertEqual(gpu_matrix.read_log(held)["figures"], ["Edit 1: the object may still be there (17% of it changed, edges held at 0.62)"])
+        warned = "11:02:06 PMWarning: edit 1, the object may still be there (17% of it changed, edges held at 0.62).\n"  # the page's line as a warning
+        self.assertEqual(gpu_matrix.read_log(warned)["figures"], ["Warning: edit 1, the object may still be there (17% of it changed, edges held at 0.62)"])
 
     def test_without_fresh_a_first_job_can_read_the_case_before(self):
         """horse_erase_barn's ingest on the laptop, 12 Nov: 30.3 GB of peak RAM for a 2.6 s job, the case before's memory."""
@@ -656,6 +658,7 @@ class Verdict(unittest.TestCase):
         asked = ["page ready: Ready.", "name asked: Edit 2: the prompt writer took the stroke for another object, so nothing ran"]
         self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: asking Klein's prompt writer", [{"name": "prompt"}]), (True, ""))
         self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: Klein quick pass at 768 x 432, 16 steps", []), (False, "a Klein pass ran"))
+        self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: Klein edit preview, 768 x 432, 16 steps.", []), (False, "a Klein pass ran"))
         self.assertEqual(gpu_matrix.name_asked(asked[:1], "", [{"name": "shot"}]), (False, "the page did not ask for the name"))
 
     def test_ui_live_ends_on_a_row_marked_left_even_behind_a_dialog(self):

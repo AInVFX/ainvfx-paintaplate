@@ -111,6 +111,29 @@ class PageRules(unittest.TestCase):
         self.assertEqual(picked, [["points", 0], ["points", 1]])
 
 
+class Beyond(unittest.TestCase):
+    def test_the_band_that_the_edit_reaches(self):
+        import numpy as np
+        p, mask = probe(), np.zeros((6, 10), bool)
+        mask[2:4, 8:10] = True  # against the right edge: nothing wraps to the left one
+        self.assertEqual(p.grown(mask, 2).sum(), 6 * 4)
+        self.assertFalse(p.grown(mask, 2)[:, :6].any())
+
+    @unittest.skipUnless(os.environ.get("PAINTAPLATE_FIXTURES"), "PAINTAPLATE_FIXTURES is not set")
+    def test_a_removal_beyond_the_object(self):
+        # real first frames at 768 x 432 (tests/js/edit_check.test.mjs): an erase of the barn that also took the fence's upper
+        # rail, and one that did not, against the frame before and the page's mask of the barn; the edit's reach is 22 px
+        import numpy as np
+        from PIL import Image
+        p, d = probe(), os.path.join(os.environ["PAINTAPLATE_FIXTURES"], "edit_check")
+        read = lambda name, mode="RGB": np.asarray(Image.open(os.path.join(d, f"{name}.png")).convert(mode))  # noqa: E731
+        frame, barn = read("horse_frame0"), read("horse_barn_mask", "L") > 127
+        changed, edges = p.beyond(read("probe_crop"), frame, barn, 22)
+        self.assertTrue(changed > 0.2 and edges < 0.8, (changed, edges))
+        changed, edges = p.beyond(read("probe_page"), frame, barn, 22)
+        self.assertTrue(changed < 0.02 and edges > 0.9, (changed, edges))
+
+
 class AgainstTheMock(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -165,6 +188,7 @@ class AgainstTheMock(unittest.TestCase):
         for cap, e in o["edits"].items():
             self.assertGreater(e["share"][0], 0.5, cap[:60])
             self.assertEqual(e["sam"], 1.0)
+            self.assertEqual(len(e["beyond"]), 2)  # the band around the object: changed, edges
             self.assertFalse(e["check"]["left"], cap[:60])  # the mock's Klein removes what it is asked to: the page's check agrees
             self.assertTrue(os.path.exists(os.path.join(self.out, e["after"])))
         with open(os.path.join(self.out, "report.md")) as f:
@@ -175,6 +199,27 @@ class AgainstTheMock(unittest.TestCase):
         with Image.open(os.path.join(self.out, "sheet.png")) as sheet:
             self.assertEqual(sheet.size[0], 8 + (len(p.REQUESTS) + 1) * (384 + 8))
         self.assertIn("Written to", said.getvalue())
+
+    def test_an_answer_about_another_object(self):
+        # the writer removes a barn that the stroke does not cover, and SAM 3.1 finds the barn by that name under the object:
+        # the box leaves the barn out, and the writer, asked again, removes the object under the stroke (app.leaveOut)
+        p, out = probe(), tempfile.mkdtemp()
+        barn = ('Remove the barn <barn_1> completely. [{"id": "barn_1", "from": "ref_image_0", "src_bbox": [80, 40, 300, 260], '
+                '"tgt_bbox": null, "desc": "a grey barn"}]')
+        for path, body in (("/mock/writer", {"times": 1, "text": barn}), ("/mock/named", {"times": 1, "ellipse": [0.5, 0.62, 0.2, 0.06]})):
+            urllib.request.urlopen(urllib.request.Request(self.url + path, data=json.dumps(body).encode(),
+                                                          headers={"Content-Type": "application/json"}), timeout=5).read()
+        with redirect_stdout(io.StringIO()):
+            p.main(["plates/desk.mp4", "--url", self.url, "--out", out, "--stroke", "bottle:0.45,0.5;0.55,0.5:40", "--requests", "page"])
+        with open(os.path.join(out, "answers.json")) as f:
+            o = json.load(f)["strokes"][0]
+        shutil.rmtree(out, ignore_errors=True)
+        r, core = o["requests"]["page"], o["paths"]["page"]["core"]
+        self.assertEqual(r["others"], ["barn"])
+        self.assertTrue(r["cut"][0] == core[0] and r["cut"][2] < core[2], (r["cut"], core))  # the rows above the barn
+        self.assertFalse(r["refused"])
+        self.assertIn("<obj_1>", r["caption"])
+        self.assertEqual(p.verdict("page", r), "named « barn » first, kept with the box without it: the writer's caption")
 
 
 if __name__ == "__main__":
