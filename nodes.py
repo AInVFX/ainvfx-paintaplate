@@ -821,29 +821,6 @@ class HDRMatch(io.ComfyNode):
         return io.NodeOutput(to_image(frames))
 
 
-class VAEFloat32(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="PaintAPlate_VAEFloat32",
-            display_name="Load VAE (float32)",
-            category=CATEGORY,
-            description="Loads a VAE in float32 from the start, as SDR to HDR's float32 encode and decode need. Core's VAE "
-                        "Loader builds it in bf16, and LTXVVAEForceFloat32 then casts it in place: under ComfyUI's dynamic "
-                        "VRAM, its default without --highvram, the buffers stay sized for bf16 and the HDR pass failed on a "
-                        "32 GB card with « Buffer too small » (2 Nov 2026).",
-            inputs=[io.Combo.Input("vae_name", options=folder_paths.get_filename_list("vae"))],
-            outputs=[io.Vae.Output(display_name="VAE")],
-        )
-
-    @classmethod
-    def execute(cls, vae_name) -> io.NodeOutput:  # as core's VAE Loader for a VAE file, with its dtype set at load
-        sd, metadata = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("vae", vae_name), return_metadata=True)
-        vae = comfy.sd.VAE(sd=sd, metadata=metadata, dtype=torch.float32)
-        vae.throw_exception_if_invalid()
-        return io.NodeOutput(vae)
-
-
 class KeepBlack(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -882,4 +859,4 @@ class KeepBlack(io.ComfyNode):
 
 
 NODES = [LoadPlate, SavePlate, ColorSpace, SaveFrames, SaveMovie, FitToPlate, CompositeFrames, RelightTransfer, FollowMatte, LevelFill, LivePreview,
-         KeyframeVideo, HDRMatch, VAEFloat32, KeepBlack]
+         KeyframeVideo, HDRMatch, KeepBlack]

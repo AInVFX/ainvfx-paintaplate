@@ -97,6 +97,19 @@ class HdrWorkflowTest(unittest.TestCase):
         self.assertEqual("PaintAPlate_LoadPlate", prompt[str(keep["inputs"]["sdr"][0])]["class_type"])
         self.assertEqual("@model", keep["inputs"]["source"])
 
+    def test_hdr_computes_its_vae_in_float32_through_core(self):
+        prompt, slots, _ = build_workflows.load("hdr")
+        (dtype,) = [k for k, n in prompt.items() if n["class_type"] == "VAEComputeDtype"]
+        self.assertEqual("fp32", prompt[dtype]["inputs"]["dtype"])
+        loader = prompt[str(prompt[dtype]["inputs"]["vae"][0])]
+        self.assertEqual("VAELoader", loader["class_type"])
+        self.assertIn([str(prompt[dtype]["inputs"]["vae"][0]), "vae_name"], slots["video_vae"])
+        for cls in ("LTXAddVideoICLoRAGuide", "VAEDecodeTiled"):  # the guide's encode and the shot's decode
+            node = next(n for n in prompt.values() if n["class_type"] == cls)
+            self.assertEqual(dtype, str(node["inputs"]["vae"][0]), cls)
+        for name in ("hdr", "fluid", "shot", "clean", "cleanup"):
+            self.assertNotIn("PaintAPlate_VAEFloat32", {n["class_type"] for n in build_workflows.load(name)[0].values()}, name)
+
 
 if __name__ == "__main__":
     unittest.main()
