@@ -620,6 +620,59 @@ def export_media(path, into):
     return os.path.join(into, movies[0]) if movies else [os.path.join(into, n) for n in sorted(names) if n.lower().endswith(IMAGES)]
 
 
+PAINT_HELD = 0.5  # a paint holds while its matte's changed share on the last frames stays above half of frame 1's
+PAINT_DIFF = 0.08  # a pixel differs from the plate above this, from 0 to 1 on its largest channel
+PAINT_WIDTH = 480  # the width the frames are compared at: enough for a share, and quick on 4K frames
+
+
+def paint_verdict(folder, plate, matte):
+    """Whether a paint holds to the last frames: inside the paint matte (`matte`: stage_movies' « Paint matte »), the share
+    of pixels where the export (the case's export.zip) differs from the plate, on the last tenth of the frames that keep a
+    matte, against the first frame. {"held": True, False, or None with no verdict, "text"}."""
+    import numpy as np
+    from PIL import Image
+    export = os.path.join(folder, "export.zip")
+    if not matte or not plate or not os.path.exists(plate) or not os.path.exists(export):
+        return {"held": None, "text": "Paint: no verdict. The export, the plate or the paint matte is missing."}
+    work = os.path.join(folder, "paint_files")
+    try:
+        made, source = export_media(export, work), frames_source(plate)
+        numbers, count = frame_numbers(source), media_count(made)
+        small = lambda a, size, how: np.asarray(Image.fromarray(a).resize(size, how), dtype=np.float32) / 255  # noqa: E731
+        areas = []
+        for i in range(count):  # the matte's frames are small: all of them, to find the last frames that keep one
+            m = media_frames(matte, {i})[i]
+            areas.append(int((m[..., 0] > 127).sum()))
+        kept = [i for i in range(count) if areas[i]]
+        if not kept or kept[0] != 0:
+            return {"held": None, "text": "Paint: no verdict. Its matte is empty on the first frame."}
+        tail = kept[-max(1, count // 10):]
+        if tail[-1] < count // 2:
+            return {"held": None, "text": f"Paint: no verdict. Its matte is empty from frame {numbers[kept[-1] + 1]}."}
+        want = {0, *tail}
+        a, b, m = media_frames(made, want), media_frames(source, want), media_frames(matte, want)
+        size = (PAINT_WIDTH, max(1, round(PAINT_WIDTH * a[0].shape[0] / a[0].shape[1])))
+        def share(i):
+            changed = np.abs(small(a[i], size, Image.BILINEAR) - small(b[i], size, Image.BILINEAR)).max(axis=2) > PAINT_DIFF
+            inside = small(m[i], size, Image.NEAREST)[..., 0] > 0.5
+            return float(changed[inside].mean()) if inside.any() else 0.0
+        first, last = share(0), sum(share(i) for i in tail) / len(tail)
+        if first < 0.05:
+            return {"held": None, "text": f"Paint: no verdict. The export differs from the plate on {100 * first:.0f}% of the matte on frame {numbers[0]}."}
+        held = last >= PAINT_HELD * first
+        return {"held": held, "first": first, "last": last, "text": f"Paint, frames {numbers[tail[0]]} to {numbers[tail[-1]]}: {'held' if held else 'lost'} "
+                f"({100 * last:.0f}% of its matte changed, against {100 * first:.0f}% on frame {numbers[0]})."}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def paint_result(passed, why, paint):
+    """A case that passed fails when its paint did not hold (paint_verdict)."""
+    if passed and paint and paint.get("held") is False:
+        return False, f"{paint['text']} The case fails: the paint did not hold. Check its picture on the sheet."
+    return passed, why
+
+
 def frame_numbers(src):
     """A plate's own frame numbers, in order: the number in each file's name for an image sequence, from 1 for a movie."""
     if isinstance(src, list):
@@ -752,6 +805,12 @@ def run_case(a, name, case, folder):
     if case.get("expect") == "name asked":  # an erase with no words on another object: no Klein pass, no shot (logic.asksName)
         result["passed"], result["why"] = name_asked(result["marks"], result["log"], result["jobs"])
     result["passed"], result["why"] = matte_verdict(result["passed"], result["why"], result["mattes"])
+    if any(s[0] == "paint" for s in case.get("strokes", [])) and case.get("path"):
+        try:  # the paint's verdict on the export: a paint that does not hold fails the case
+            result["paint"] = paint_verdict(folder, os.path.join(a.comfy, "input", case["path"]), stage_movies(a.comfy, result["jobs"], history).get("Paint matte"))
+        except Exception as exc:
+            result["paint"] = {"held": None, "text": f"Paint: no verdict. {type(exc).__name__}: {str(exc)[:120]}."}
+        result["passed"], result["why"] = paint_result(result["passed"], result["why"], result["paint"])
     result["matte"] = matte_areas(a.comfy, t0) if any(s[0] == "paint" for s in case.get("strokes", [])) else None
     live = os.path.join(a.comfy, "temp", "paintaplate_live", "*.webp")
     result["live_files"] = sum(os.path.getmtime(f) >= t0 for f in glob.glob(live))
@@ -835,6 +894,7 @@ def report(a, machine, results):
             lines += [f"- The page's verdict on the export (logic.eraseCheck): {made['verdict']['text']}"] if made.get("verdict") else []
         elif made:
             lines.append(f"- No sheet: {made['error']}.")
+        lines += [f"- {r['paint']['text']}"] if r.get("paint") else []
         fluid = r.get("fluid_sheet")
         if fluid and fluid.get("path"):
             lines += [f"- The fluid shot's keyframes (frames {', '.join(map(str, fluid['keys']))}), then the shot on frames {', '.join(map(str, fluid['frames']))}:",
