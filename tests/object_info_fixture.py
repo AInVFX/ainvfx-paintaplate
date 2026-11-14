@@ -5,7 +5,7 @@ tests/js/object_info.scene.json, which graph.editorGraph's Node tests and the mo
 
 The classes are those already in the file, those of the workflows a scene's graph is made of (web/workflows: edit, matte,
 clean, cleanup, shot, export, hdr), and those of any graph given with --graph. Each keeps the fields editorGraph reads:
-every input in order, with its type and five of its options, and the outputs. A combo's choices are left out. A class
+every input in order, with its type and six of its options, and the outputs. A combo's choices are left out. A class
 that this ComfyUI does not have keeps its entry, and the script names it."""
 import argparse
 import json
@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 HERE = os.path.dirname(os.path.abspath(__file__))
 FILE = os.path.join(HERE, "js", "object_info.scene.json")
 SCENE = ("edit", "matte", "clean", "cleanup", "shot", "export", "hdr")  # the workflows graph.sceneGraph puts in a scene
-KEEP = ("default", "forceInput", "control_after_generate", "image_upload", "multiline")
+KEEP = ("default", "forceInput", "control_after_generate", "image_upload", "multiline", "dynamicPrompts")
 FRONTEND_ONLY = {"MarkdownNote", "Note", "Reroute", "PrimitiveNode"}  # drawn by the editor, with no class in /object_info
 
 
@@ -77,8 +77,8 @@ def main():
     version = (get("/system_stats").get("system") or {}).get("comfyui_version") or "of unknown version"
     when = datetime.now(ZoneInfo("America/Toronto")).strftime("%-d %B %Y")
     about = ("What ComfyUI's /object_info says about the node classes of a scene's graph (with and without SDR to HDR), in the fields "
-             "graph.editorGraph reads: each input in order with its type and five of its options (default, forceInput, "
-             "control_after_generate, image_upload, multiline), and the outputs. A combo's choices are left out. "
+             "graph.editorGraph reads: each input in order with its type and six of its options (default, forceInput, "
+             "control_after_generate, image_upload, multiline, dynamicPrompts), and the outputs. A combo's choices are left out. "
              f"Read from a running ComfyUI {version} at {a.url} on {when} (Toronto), by tests/object_info_fixture.py.")
     if missing:
         about += f" Not in that ComfyUI, kept as they were: {', '.join(missing)}."
