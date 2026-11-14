@@ -18,12 +18,18 @@ horse_erase, the fence post under it and the tree above it. The jobs are grouped
 times on a 16 GB card: SAM 3.1 at every stroke's points, the writer's name for every object, SAM 3.1 by that name, the
 writer for every request, Klein for every caption, then SAM 3.1 on every result.
 
-Each result is measured inside the mask Klein got, at the quick pass's size:
+Each result is measured inside the mask Klein got, at the edit preview's size:
 - changed: the page's rule (logic.erasedShare), the share of the object whose 4-pixel cells moved by more than 12 levels
   of 255 (under 2%, the page says that the object stayed), then the same at 24 and at 48 levels;
 - edges: the correlation of the gradient's size before and after (1: the same edges; near 0: none of them);
 - SAM again: SAM 3.1 at the stroke's points on the result, and the intersection over union of what it keeps with the object
   it kept on the frame (near 1: the object is still there; 0: SAM finds nothing there).
+
+- beyond: the band around the object that the edit reaches outside the object's mask (the page's growth and feather at
+  the edit preview's size: 22 pixels on a frame 768 pixels across), the share of its 4-pixel cells that moved by more than
+  24 levels, then its edges. A removal that stays on its object leaves the band almost as it was; a removal that takes a
+  neighbour with it (a fence's rail beside a barn) changes it, and the page's check, which looks inside the mask, cannot
+  see that.
 
 It writes to --out: report.md (one row per stroke and request, then every answer in full), sheet.png (the frame around each
 object, then the result of each request), answers.json (all of it, for a script), and the images it sent and got back.
@@ -305,6 +311,30 @@ def check(after, before, mask):
     return page(("eraseCheck", raw(rgba(after)), raw(rgba(before)), raw(rgba(white(mask))), w, h))[0]
 
 
+def grown(mask, r):
+    """The mask grown by r pixels each way, as a square: along the rows, then the columns, with no wrap at the frame's edge."""
+    out = np.asarray(mask, bool).copy()
+    for axis in (0, 1):
+        acc, n = out.copy(), out.shape[axis]
+        for k in range(1, min(r, n - 1) + 1):
+            a, b = [slice(None)] * 2, [slice(None)] * 2
+            a[axis], b[axis] = slice(k, None), slice(None, n - k)
+            acc[tuple(a)] |= out[tuple(b)]
+            acc[tuple(b)] |= out[tuple(a)]
+        out = acc
+    return out
+
+
+def beyond(after, before, mask, reach):
+    """What the edit changed around the object, in the band that it reaches outside the object's mask: [the share of the
+    band's 4-pixel cells that moved by more than 24 levels (logic.erasedShare), the band's edges (logic.edgesHeld)]."""
+    m = np.asarray(mask, bool)
+    band = grown(m, reach) & ~m
+    h, w = m.shape
+    arrays = [raw(rgba(after)), raw(rgba(before)), raw(rgba(white(band)))]
+    return page(("erasedShare", *arrays, w, h, {"levels": 24}), ("edgesHeld", *arrays, w, h))
+
+
 def overlap(a, b):
     return float((a & b).sum() / max(1, (a | b).sum()))
 
@@ -475,7 +505,7 @@ def measured(e):
     if "share" not in e:
         return e.get("error", "no result")
     return (f"{' / '.join(pct(v) for v in e['share'])} · edges {num(e.get('edges'))} · SAM {num(e.get('sam'))}"
-            f" · {'left' if e['check']['left'] else 'gone'}")
+            f" · {'left' if e['check']['left'] else 'gone'} · beyond {pct(e['beyond'][0])} / {num(e['beyond'][1])}")
 
 
 def short(text, n):
@@ -553,14 +583,15 @@ def report(path, objs, asked, head):
             lines += ["", f"The writer names it « {o.get('object') or 'nothing'} » (its answer: « {short(o['naming'].get('answer'), 80)} »)."
                       + (f" SAM 3.1 by that name kept {len(Q['kept'])} mask(s) ({', '.join(Q['kept']) or 'none'}); the object's "
                          f"box {Q['bbox']}; the writer's boxes {Q['chosen']['boxes']}." if Q else f" {o.get('name_error', '')}".rstrip())]
-        lines += ["", "| Request | The writer's answer | The page | Changed at 12 / 24 / 48 levels | Edges | SAM again | The page's check | Seconds |",
-                  "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+        lines += ["", "| Request | The writer's answer | The page | Changed at 12 / 24 / 48 levels | Edges | SAM again | The page's check | Beyond the object | Seconds |",
+                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
         for req in asked:
             r = o["requests"][req]
             e = o["edits"].get(edit_key(r), {})
             cells = [req, short(r.get("answer") or "", 110).replace("|", "/"), verdict(req, r),
                      " / ".join(pct(v) for v in e["share"]) if "share" in e else e.get("error", "no result"),
                      num(e.get("edges")), num(e.get("sam")), ("left" if e["check"]["left"] else "gone") if "check" in e else "",
+                     f"{pct(e['beyond'][0])} / {num(e['beyond'][1])}" if "beyond" in e else "",
                      f"{r.get('seconds', 0):.0f} + {e.get('quick_seconds', 0) + e.get('full_seconds', 0):.0f}"]
             lines.append("| " + " | ".join(cells) + " |")
         lines += ["", "In full:", ""]
@@ -757,6 +788,7 @@ def main(argv=None):
             Image.fromarray(after).save(os.path.join(out, e["after"]))
             o["afters"][key] = after
             e["share"], e["check"] = shares(after, frame_prev, R["mask_prev"]), check(after, frame_prev, R["mask_prev"])
+            e["beyond"] = beyond(after, frame_prev, R["mask_prev"], jround(prev[0] / EDIT_GROW) + QUICK["feather"])  # app.editSettings' reach
             e["edges"] = e["check"]["edges"]
             used = [q for q, x in o["requests"].items() if edit_key(x) == key]
             say(f"{o['name']}, caption {k} ({', '.join(used)}): changed {' / '.join(pct(v) for v in e['share'])}, "
