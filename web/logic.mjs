@@ -607,6 +607,16 @@ export function logFileName(plate, d) {
   return `paintaplate_log_${name}_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}.txt`;
 }
 
+// The Finish menu: the passes on the whole plate after the full-size composite, in the order the render runs them. Each
+// option: its id (its switch is #finish-<id>), its name, the line that says what it does to the result, and the question
+// it asks before it turns on, when it changes what Export writes.
+export const FINISH = [
+  { id: "hdr", name: "SDR to HDR",
+    line: "The full-size shot is regenerated in scene-linear values, fitted to the plate. The result is half-float EXR frames in ACES2065-1, in the viewer and in Export.",
+    ask: "This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1." },
+];
+export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on
+
 export function strokeTarget({ draft, current, tool }) { // where a new stroke goes: "draft", "current" or "new"
   if (draft) return "draft";
   return current?.tool === tool ? "current" : "new";

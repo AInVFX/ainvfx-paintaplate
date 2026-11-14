@@ -864,15 +864,17 @@ def keys_flow(browser, port):
 
 
 def hdr_flow(browser, port):
-    """SDR to HDR in Deliver. ?hdr=0 turns it off: an EXR plate offers no bit-depth pass, a blank plate no 16-bit. By default
-    a video plate offers it, switched off, and an EXR plate runs it on its own, with no switch: after the full-size shot
+    """SDR to HDR in the Finish menu. ?hdr=0 turns it off: the menu greys its switch, and a blank plate offers no 16-bit. By default
+    a video plate offers it, switched off, and an EXR plate runs it on its own, its switch greyed: after the full-size shot
     and before the full-size composite, its live preview in a corner naming its step of the pass's steps. Every finished
     pass with a picture is a row to click. Esc stops the render on its way and Enter goes on."""
     page = load(browser, port, "?blank=0&hdr=0")
     open_path(page, "paintaplate/hdr_room")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
-    check(page.is_hidden("#deliver-hdr-row") and page.is_hidden("#deliver-auto") and page.evaluate("document.querySelector('#b-depth').closest('label').style.display") == "none",
-          "?hdr=0 turns SDR to HDR off: Deliver offers no bit-depth pass, no 16-bit blank plate")
+    page.click("#finish-btn")
+    check(page.is_disabled("#finish-hdr") and page.text_content("#finish-hdr-why") == "Off in this page's address (hdr=0)." and page.evaluate("document.querySelector('#b-depth').closest('label').style.display") == "none",
+          "?hdr=0 turns SDR to HDR off: the Finish menu greys its switch and says why, and a blank plate offers no 16-bit")
+    page.keyboard.press("Escape")
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     page.evaluate(WATCH)
@@ -881,10 +883,15 @@ def hdr_flow(browser, port):
     lines = lambda: page.evaluate("window.__lines")  # noqa: E731
     open_path(page, "plates/desk.mp4")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)
-    check(not page.is_hidden("#deliver-hdr-row") and not page.is_checked("#deliver-hdr"), "a video plate: Deliver offers SDR to HDR, off")
+    page.click("#finish-btn")
+    check(page.is_enabled("#finish-hdr") and not page.is_checked("#finish-hdr"), "a video plate: the Finish menu offers SDR to HDR, off")
+    page.keyboard.press("Escape")
     open_path(page, "paintaplate/hdr_room")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
-    check(page.is_hidden("#deliver-hdr-row") and not page.is_hidden("#deliver-auto"), "an EXR plate: SDR to HDR runs on its own, with no switch")
+    page.click("#finish-btn")
+    check(page.is_disabled("#finish-hdr") and page.is_checked("#finish-hdr") and page.text_content("#finish-hdr-why").startswith("This plate holds values above 1.0"),
+          "an EXR plate: SDR to HDR runs on its own, its switch on and greyed")
+    page.keyboard.press("Escape")
     page.evaluate(WATCH)
     page.keyboard.press("p")
     paint_once(page, "a red lamp", [(0.3, 0.6), (0.36, 0.7)])
@@ -947,11 +954,11 @@ def fluid16_flow(browser, port):
     paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)])
     page.keyboard.press("Enter")
     wait_log(page, added_line("under the edits: the fluid shot v"), 240000, "the HDR fluid shot under the edits")
-    page.wait_for_function("!document.querySelector('#deliver-auto').hidden", timeout=60000)
+    page.wait_for_function("!document.querySelector('#finish-hdr-why').hidden && document.querySelector('#finish-hdr').checked", timeout=60000)
     new = page.evaluate("window.__lines")
     check(any(line.startswith("Plate ") and "16-bit" in line for line in new) and any(re.search(r"SDR to HDR(?: took|:? done in) ", line) for line in new),
           "16-bit: the plate's line says so, and the fluid shot goes through SDR to HDR")
-    check(not page.is_hidden("#deliver-auto"), "the HDR fluid shot is an EXR plate: SDR to HDR runs on its own for the edits on it")
+    check(page.evaluate("!document.querySelector('#finish-hdr-why').hidden && document.querySelector('#finish-hdr').checked"), "the HDR fluid shot is an EXR plate: SDR to HDR runs on its own for the edits on it")
     check(not page.is_disabled("#export-btn"), "a fluid shot with no edit on it can be exported")
     page.click("#export-btn")
     fmt = page.text_content("#x-format") or ""

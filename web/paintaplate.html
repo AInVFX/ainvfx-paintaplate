@@ -22,8 +22,14 @@
     <button id="help-btn" class="quiet" title="Keys (?)" aria-label="Keys">?</button>
     <button id="open-btn">Open plate</button>
     <button id="save-btn" disabled title="Save the scene: the plate and every edit with its strokes, words and seed">Save scene</button>
+    <button id="finish-btn" type="button" disabled aria-haspopup="dialog" aria-expanded="false" title="Finish: the passes on the whole plate after the full-size composite.">Finish</button>
     <button id="export-btn" class="primary" disabled title="Write the result in the plate's own format and its matte, then download one zip">Export</button>
   </header>
+  <div id="finish" class="finish" role="dialog" aria-label="Finish" hidden>
+    <h2>Finish</h2>
+    <p class="hint">The passes on the whole plate after the full-size composite, in the order they run.</p>
+    <ol id="finish-list"></ol>
+  </div>
 
   <nav class="tools" aria-label="Tools">
     <button data-tool="paint" title="Paint something new (P)">
@@ -152,13 +158,6 @@
       <ol id="stages"></ol>
       <p class="hint render-hint">Click a finished step to show it on every frame; click it again, or Esc, for the latest.</p>
       <button id="render-full" type="button" class="quiet render-full" hidden title="These edits took the frames of an earlier render whose other edits are far away: only the tracking and the composites ran. Render them in full, with their own shot, the same edits and seeds">Render in full</button>
-    </section>
-    <section id="deliver" class="deliver" hidden>
-      <h2>Deliver</h2>
-      <p class="hint">Passes that run after the full-size composite, each on or off.</p>
-      <label id="deliver-hdr-row" title="Lightricks' SDR-to-HDR IC-LoRA on the new content of a plate whose format holds nothing above 1.0: the result becomes an EXR sequence"><input type="checkbox" id="deliver-hdr"> Bit depth: SDR to HDR, delivered as EXR</label>
-      <div id="deliver-confirm" class="hdr-confirm" hidden><p>This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1.</p><button id="deliver-yes">Turn on</button> <button id="deliver-no">Cancel</button></div>
-      <p id="deliver-auto" class="hint" hidden>This plate holds values above 1.0: its new content goes through SDR to HDR on its own.</p>
     </section>
   </aside>
 
