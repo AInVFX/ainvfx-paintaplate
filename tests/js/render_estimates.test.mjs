@@ -24,6 +24,7 @@ const MEASURED = [ // [case, step, seconds, plate]
   ["horse_erase 1.11.10", "erase", 28.5], ["horse_erase 1.11.10", "clean", 57.4], ["horse_erase 1.11.10", "comp", 10.9],
   ["horse_erase 1.11.10", "cleanfull", 186.1], ["horse_erase 1.11.10", "review", 17.6], ["horse_erase 1.11.10", "export", 9.0],
   ["fluid_720", "hdr", 175.3, FLUID], // the fluid shot's SDR to HDR: the same workflow as the render's
+  ["fluid_720 0.45.3", "hdr", 172.1, FLUID], ["hdr_cow", "hdr", 606.4], // SDR to HDR at 1280 x 704 and at 1920 x 1088
 ];
 const OUTSIDE = { "horse_light export": "a relight's export writes no matte: 19 nodes against 27, 6.1 s against 9.3 to 10.0 s" };
 
