@@ -254,9 +254,9 @@ def build_zip(folder: str, name: str, parts: list[str], models: list[str] | None
     MODELS.md when the page names the models behind the result."""
     files = collect(folder, parts)
     if "export" in parts and not any(arc.startswith("export/") for _, arc in files):
-        raise FileNotFoundError("This run has no export yet")
+        raise FileNotFoundError("Export not found for this run. Run Export first.")
     if not files:  # a fluid shot's zip holds no export: its HDR frames, its plate and its preview
-        raise FileNotFoundError("Nothing to download in this run")
+        raise FileNotFoundError("Download: no files in this run.")
     mark = f"__m{hashlib.sha1(','.join(models).encode()).hexdigest()[:8]}" if models else ""  # another list of models, another zip
     target = os.path.join(folder, f"{name}__{'-'.join(p for p in PARTS if p in parts)}{mark}.zip")
     newest = max(os.path.getmtime(p) for p, _ in files)
@@ -295,7 +295,7 @@ def browse(rel: str) -> dict:
     Each item carries the page path that opens it: a frame pattern for a sequence, the file for a video or a scene."""
     full = folders.plate_path(rel, folder=True)
     if not os.path.isdir(full):
-        raise FileNotFoundError("Not a folder")
+        raise FileNotFoundError(f"Folder not found: {rel}.")
     page = folders.page_path(full)
     listed = plateio.scan_folder(full)
     for item in listed["items"]:
@@ -392,11 +392,11 @@ def blank_plate(width: int, height: int, fps: float, frames: int) -> str:
     LTX and ainvfx-fluid need sides in multiples of 64 and 8k + 1 frames; the page keeps to the trained limits.
     """
     if not (64 <= width <= 4096 and 64 <= height <= 4096 and width % 64 == 0 and height % 64 == 0):
-        raise ValueError("width and height must be multiples of 64, from 64 to 4096")
+        raise ValueError("Blank plate: width and height must be multiples of 64, from 64 to 4096 px.")
     if not (9 <= frames <= 1025 and (frames - 1) % 8 == 0):
-        raise ValueError("the length must be 8k + 1 frames, from 9 to 1025")
+        raise ValueError("Blank plate: length must be 8k + 1 frames, from 9 to 1,025.")
     if not 1 <= fps <= 120:
-        raise ValueError("the frame rate must be from 1 to 120")
+        raise ValueError("Blank plate: frame rate must be from 1 to 120 fps.")
     rel = f"{BLANK}/fluid_{width}x{height}_{fps:g}fps_{frames}f.mov"
     full = os.path.join(os.path.abspath(folder_paths.get_input_directory()), rel)
     if not os.path.exists(full):
@@ -416,7 +416,7 @@ async def blank(request: web.Request) -> web.Response:
         body = await request.json()
         rel = await asyncio.to_thread(blank_plate, int(body["width"]), int(body["height"]), float(body["fps"]), int(body["frames"]))
     except (KeyError, TypeError, ValueError) as exc:
-        raise web.HTTPBadRequest(text=f"No blank plate: {exc}") from exc
+        raise web.HTTPBadRequest(text=str(exc) if str(exc).startswith("Blank plate:") else f"Blank plate: request not valid ({exc}).") from exc
     return web.json_response({"path": rel})
 
 
@@ -602,7 +602,7 @@ def video_frames(path: str, first: int, count: int) -> list[np.ndarray]:
                 if len(out) == count:
                     break
         if last is None:
-            raise ValueError("No frames in this video")
+            raise ValueError("Plate has no frames. Check the file.")
     return out + [out[-1] if out else _video_rgb(last)] * (count - len(out))
 
 
@@ -612,7 +612,7 @@ def frame_rgb(full: str, index: int) -> np.ndarray:
     if plateio.is_sequence(full):
         files = plateio.sequence_frames(full)[0]
         if not files:
-            raise ValueError("No frames in this plate")
+            raise ValueError("Plate has no frames. Check the file.")
         return plateio.read_float(files[min(max(0, index), len(files) - 1)])
     if full.lower().endswith(STILLS):
         return plateio.read_float(full)
@@ -664,7 +664,7 @@ def pixel(rel: str, frame: int, x: int, y: int, size: int = 1, of: str = "") -> 
         if ow > 0 and oh > 0 and (ow, oh) != (w, h):
             x, y = int((x + 0.5) * w / ow), int((y + 0.5) * h / oh)
     if not (0 <= x < w and 0 <= y < h):
-        raise ValueError(f"Pixel {x}, {y} is outside the {w} x {h} frame")
+        raise ValueError(f"Pixel {x}, {y} outside the frame ({w} x {h}).")
     r = max(1, min(int(size), 64)) // 2
     block = rgb[max(0, y - r): y + r + 1, max(0, x - r): x + r + 1].reshape(-1, 3)
     out = {"width": w, "height": h, "x": x, "y": y, "frame": frame, "value": [float(v) for v in rgb[y, x]],
@@ -712,7 +712,7 @@ SCENE_MAX = 64 << 20  # bytes: strokes are saved as drawn
 
 def scene_path(name: str) -> str:
     if not SCENE_NAME.match(name or "") or name.startswith("."):
-        raise ValueError("A scene name is letters, digits, '.', '-' and '_'")
+        raise ValueError("Scene name not allowed. Use letters, digits, '.', '-' and '_'.")
     return os.path.join(folder_paths.get_output_directory(), SCENES, f"{name.removesuffix('.paintaplate.json')}.paintaplate.json")
 
 
@@ -735,10 +735,10 @@ def list_scenes() -> list[dict]:
 
 def save_scene(name: str, body: bytes) -> None:
     if len(body) > SCENE_MAX:
-        raise ValueError("Scene too large")
+        raise ValueError(f"Scene not saved: larger than {SCENE_MAX >> 20} MB.")
     scene = json.loads(body)
     if not isinstance(scene, dict) or scene.get("format") != "paintaplate-scene":
-        raise ValueError("Not a Paint a plate scene")
+        raise ValueError("Scene not saved: not a Paint a plate scene.")
     path = scene_path(name)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = f"{path}.{uuid.uuid4().hex}.tmp"
@@ -813,13 +813,13 @@ async def trace(request: web.Request, handler):
     what, t0, before = f"{request.method} {request.path_qs[:240]}", time.perf_counter(), held()
     quiet = request.method == "GET" and request.path.endswith(TRACE_QUIET) and not request.path.startswith("/paintaplate/")
     if not quiet:
-        logging.info("Paint a plate trace: starts %s, at %.1f GB", what, before)
+        logging.info("[Paint a plate] Trace: %s started, RAM %.1f GB.", what, before)
     try:
         return await handler(request)
     finally:
         seconds, after = time.perf_counter() - t0, held()
         if not quiet or seconds >= 0.5 or after - before >= 0.1:
-            logging.info("Paint a plate trace: ends %s after %.2f s, at %.1f GB", what, seconds, after)
+            logging.info("[Paint a plate] Trace: %s ended, done in %.2f s, RAM %.1f GB.", what, seconds, after)
 
 
 async def _pulse(app) -> None:
@@ -830,7 +830,7 @@ async def _pulse(app) -> None:
             await asyncio.sleep(1)
             now = held()
             if abs(now - last) >= 0.5:
-                logging.info("Paint a plate trace: the process holds %.1f GB", now)
+                logging.info("[Paint a plate] Trace: process RAM %.1f GB.", now)
                 last = now
     app["paintaplate_pulse"] = asyncio.create_task(watch())
 
@@ -841,7 +841,7 @@ def setup(server) -> None:
     if TRACE and app is not None:
         app.middlewares.append(trace)
         app.on_startup.append(_pulse)
-        logging.info("Paint a plate trace: on. Every request to ComfyUI writes a line when it starts and when it ends")
+        logging.info("[Paint a plate] Trace: on.\n  One line per request to ComfyUI, at its start and at its end.")
     server.routes.get("/paintaplate/download")(download)
     server.routes.get("/paintaplate/browse")(browse_route)
     server.routes.get("/paintaplate/thumb")(thumb)

@@ -104,15 +104,16 @@ AP1_LUMA = np.array([0.2722287168, 0.6740817658, 0.0536895174], np.float32)  # A
 
 
 def keep_black(hdr: np.ndarray, sdr: np.ndarray, low: float = 0.001, high: float = 0.01) -> np.ndarray:
-    """Where the SDR shot is black, its own black instead of SDR to HDR's: the IC-LoRA's frames carry noise there (a
-    16-bit fluid shot on a blank plate, 2 Nov: 67% of its pixels below 0.01, median 6.6e-4, its channels spread by 41%
-    of the luminance), while the shot they come from holds the plate's black. `hdr` and `sdr` in ACEScg, scene-linear:
-    below `low` (the SDR shot's luminance) the frame takes the SDR values, above `high` SDR to HDR's, a smooth step
-    between; values above 1.0 stay wherever the shot is not black."""
+    """Where the SDR shot is black, its own black instead of SDR to HDR's: the IC-LoRA's frames carry noise there (on a
+    16-bit fluid shot of a blank plate, 67% of the pixels below 0.01, median 6.6e-4, the channels spread by 41% of the
+    luminance), while the shot they come from holds the plate's black. `hdr` and `sdr` in ACEScg, scene-linear: below
+    `low` (the SDR shot's luminance) the frame takes the SDR values, above `high` SDR to HDR's, a smooth step between;
+    values above 1.0 stay wherever the shot is not black. No value is below 0: ACEScct codes under 0.0729 decode to
+    small negative values, which Lightricks' LTXVHDRDecodePostprocess also clamps to 0."""
     y = np.asarray(sdr[..., :3], np.float32) @ AP1_LUMA
     t = np.clip((y - low) / max(high - low, 1e-9), 0.0, 1.0)
     w = (t * t * (3.0 - 2.0 * t))[..., None]
-    out = np.array(hdr, np.float32, copy=True)
+    out = np.maximum(np.asarray(hdr, np.float32), 0.0)
     out[..., :3] = sdr[..., :3] * (1.0 - w) + out[..., :3] * w
     return out
 
@@ -1112,15 +1113,16 @@ def hdr_match(n: int, shot_at, plate_at, changed_at, *, grow: float = 24.0, step
     if stops is None:
         return [np.array(shot_at(i)[..., :3], np.float32) for i in range(n)], {
             "samples": len(shot), "fitted": False,
-            "text": f"{len(shot)} untouched samples, too few mid-tones to measure: the HDR shot as it was made"}
+            "text": f"HDR shot kept as made.\n  Untouched samples: {len(shot):,}, too few mid-tones to measure."}
     fitted, lum = apply_level(shot, stops), plate @ np.array([0.2126, 0.7152, 0.0722], np.float32)
     mid = np.all((fitted > HDR_FLOOR) & (plate > HDR_FLOOR), axis=-1) & (lum >= HDR_MIDTONES[0]) & (lum <= HDR_MIDTONES[1])
     error = float(np.median(np.abs(np.log2(fitted[mid] / plate[mid])))) if mid.any() else float("nan")
     with ThreadPoolExecutor(max(1, workers)) as pool:
         frames = list(pool.map(lambda i: apply_level(shot_at(i), stops), range(n)))
     return frames, {"samples": len(shot), "fitted": True, "stops": [float(x) for x in stops], "error": error,
-                    "text": f"{len(shot)} untouched samples; the level moves by {', '.join(f'{x:+.2f}' for x in stops)} stops "
-                            f"(R, G, B), nothing compressed; median mid-tone error after it {error:.3f} stops"}
+                    "text": f"HDR shot fitted to the plate on {len(shot):,} untouched samples.\n  Level change (R, G, B): "
+                            f"{', '.join(f'{x:+.2f}' for x in stops)} stops.\n  Nothing compressed.\n"
+                            f"  Median mid-tone error after the fit: {error:.3f} stops."}
 
 AP1_TO_REC709 = np.array([[1.70505, -0.62179, -0.08326], [-0.13026, 1.14080, -0.01055], [-0.02400, -0.12897, 1.15297]], np.float32)
 

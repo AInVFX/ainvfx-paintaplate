@@ -719,9 +719,9 @@ def hdr():
     pinned ComfyUI-LTXVideo): core Convert Image Color Space maps the shot from sRGB to ACEScct, the IC-LoRA's guide (not the
     creative SDR-to-HDR expand); fixed scene embeddings stand for the prompt, positive and negative, at CFG 1; the 8 distilled
     sigmas with euler; the video VAE in float32 encodes the guide and decodes the result, tiled (128-frame temporal tiles, as
-    Lightricks' Tiled Fusion graph); LTXVHDRDecodePostprocess
-    returns ACEScg scene-linear values (its own EXR writer stays off: Save Frames writes them). The conditioning frame rate is
-    at most 30, as there. The page gives it shots at the working size, already a multiple of 32.
+    Lightricks' Tiled Fusion graph); Color Space (OCIO) turns the decoded ACEScct codes into ACEScg scene-linear values with
+    the config's own conversion, the curve of Lightricks' LTXVHDRDecodePostprocess, frame by frame into one array and with
+    no tone-mapped copy; Save Frames writes them. The conditioning frame rate is at most 30, as there. The page gives it shots at the working size, already a multiple of 32.
     """
     g = Graph()
     load = g("PaintAPlate_LoadPlate", _title="Shot (SDR)", path=Slot("path", ""), max_frames=Slot("max_frames", 121), pad_8n1=True)
@@ -730,9 +730,9 @@ def hdr():
     lora = g("LTXICLoRALoaderModelOnly", _title="SDR-to-HDR IC-LoRA (reads its downscale factor)",
              model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"), lora_name=Slot("hdr_lora", HDR_LORA),
              strength_model=1.0)
-    # float32 from the start (Load VAE (float32)): LTXVVAEForceFloat32 casts a bf16 VAE in place, which ComfyUI's dynamic VRAM,
-    # its default below --highvram, does not follow: the pass failed with « Buffer too small » on a 32 GB card (2 Nov)
-    vae = g("PaintAPlate_VAEFloat32", _title="Video VAE in float32", vae_name=Slot("video_vae", LTX_VAE))
+    # the encode and the decode compute in float32 through core's VAE Compute Dtype, under dynamic VRAM too: on a 16 GB
+    # budget, 121 frames at 1920 x 1088 come out the same, value for value, as with a VAE loaded in float32
+    vae = g("VAEComputeDtype", _title="Video VAE, computed in float32", vae=g("VAELoader", vae_name=Slot("video_vae", LTX_VAE)), dtype="fp32")
     audio_vae = g("VAELoader", vae_name=LTX_AUDIO_VAE)
     scene = g("LTXVLoadConditioning", _title="Scene embeddings: the fixed prompt", file_name=Slot("hdr_scene", HDR_SCENE), device="cpu")
     cond = g("LTXVConditioning", positive=scene, negative=scene, frame_rate=Slot("cond_fps", 24.0))
@@ -750,12 +750,11 @@ def hdr():
     # 64 with 8 made the HDR frames of a 121-frame fluid shot jump 0.32 stops at frame 56, where the second tile starts; with
     # 128 and 32 the largest step was 0.07 stops, the SDR shot's own (RTX PRO 6000, 2 Nov 2026).
     decoded = g("VAEDecodeTiled", samples=video[2], vae=vae, tile_size=Slot("tile", 512), overlap=64, temporal_size=128, temporal_overlap=32)
-    linear = g("LTXVHDRDecodePostprocess", _title="ACEScct to ACEScg scene-linear", image=decoded, transfer="acescct", exposure=0.0,
-               save_exr=False, exr_color_space="acescg", output_dir="paintaplate/hdr_unused", filename_prefix="frame",
-               half_precision=True)
-    # where the SDR shot is black, its own black: the IC-LoRA's frames are noisy there (the viewer measured a 16-bit fluid
-    # shot, 2 Nov: 67% of pixels below 0.01, its channels spread by 41% of the luminance)
-    linear = g("PaintAPlate_KeepBlack", hdr=linear[1], sdr=colour(g, load[0], "@model", "ACEScg", "The SDR shot in ACEScg"), low=0.001, high=0.01)
+    linear = colour(g, decoded, "ACEScct", "ACEScg", "ACEScct to ACEScg scene-linear")
+    # where the SDR shot is black, its own black: the IC-LoRA's frames are noisy there (mathops.keep_black). Keep Black
+    # converts each frame of the SDR shot as it uses it, so no converted copy of the shot waits through the sampling
+    linear = g("PaintAPlate_KeepBlack", hdr=linear, sdr=load[0], config=Slot("config", OCIO_CONFIG), source="@model",
+               low=0.001, high=0.01)
     # each frame says the shot's frame rate, the one the page sends for the movie below: a 16-bit fluid shot's frames open
     # as a plate, and that plate took 24 fps for a shot made at 50 (pod, 11 Nov)
     g("PaintAPlate_SaveFrames", _title="HDR frames (half-float EXR, ACES2065-1)", _output="hdr", format="exr", fps=Slot("movie_fps", 24.0),

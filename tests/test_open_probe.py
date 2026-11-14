@@ -218,6 +218,14 @@ class Pictures(unittest.TestCase):
         self.assertEqual(exact, usual)
 
 
+class OtherWorkflows(unittest.TestCase):
+    def test_the_values_the_probe_sends_with_hdr(self):
+        values = probe().job_values("hdr", "paintaplate/blank/x.mov", {"frames": 121, "fps": 50.0}, "paintaplate/probe_1")
+        self.assertEqual(values, {"path": "paintaplate/blank/x.mov", "config": "", "max_frames": 121, "fps": 50, "cond_fps": 30.0,
+                                  "movie_fps": 50.0, "prefix": "paintaplate/probe_1/prefix",
+                                  "video_prefix": "paintaplate/probe_1/video_prefix"})
+
+
 class AgainstTheMock(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -258,8 +266,8 @@ class AgainstTheMock(unittest.TestCase):
         self.assertIn(f"process {self.mock.pid} (", text, "the mock's own process, found from its port")
         self.assertIn("1280 x 704", text)
         self.assertRegex(text, r"the whole job +\d+\.\d +\d+\.\d +\d+\.\d +\d+\.\d\n")
-        self.assertRegex(text, r"Peak: \d+\.\d GB, ")
-        self.assertRegex(text, r"The most the process ever held \(VmHWM\): \d+\.\d GB")
+        self.assertRegex(text, r"Peak RAM: \d+\.\d GB, in ")
+        self.assertRegex(text, r"Process RAM, highest ever \(VmHWM\): \d+\.\d GB")
         with urllib.request.urlopen(f"{self.url}/mock/posts") as r:
             self.assertEqual(json.load(r)[-1]["outputs"], ["hero", "proxy", "spec"], "the ingest, as the page posts it")
         with open(readings) as f:
@@ -270,7 +278,7 @@ class AgainstTheMock(unittest.TestCase):
     def test_the_same_pictures_as_an_earlier_open(self):
         code, text = self.run_probe("plates/desk.mp4")
         self.assertEqual(code, 0, text)
-        earlier = re.search(r"under (paintaplate/probe_\d+)\n", text).group(1)
+        earlier = re.search(r"in output/(paintaplate/probe_\d+)\.\n", text).group(1)
         code, text = self.run_probe("plates/desk.mp4", "--same", earlier)
         self.assertEqual(code, 0, text)
         self.assertRegex(text, rf"The same pictures as under {earlier}, by their decoded pixels: hero\S+ and proxy\S+\n")
@@ -280,6 +288,18 @@ class AgainstTheMock(unittest.TestCase):
         code, text = self.run_probe("plates/desk.mp4", "--same", "paintaplate/probe_0")
         self.assertEqual(code, 1, text)
         self.assertIn("Not compared with paintaplate/probe_0: ", text)
+
+    def test_another_workflow_on_a_blank_shot(self):
+        code, text = self.run_probe("blank:192x128", "--workflow", "hdr", "--set", "tile=256", "--set", "guide_tiled=true")
+        self.assertEqual(code, 0, text)
+        self.assertIn("192 x 128, 121 frames", text)
+        self.assertRegex(text, r"the whole job +\d+\.\d +\d+\.\d +\d+\.\d +\d+\.\d\n")
+        self.assertRegex(text, r"Output: files in output/paintaplate/probe_\d+\.\n")
+        with urllib.request.urlopen(f"{self.url}/mock/posts") as r:
+            self.assertEqual(json.load(r)[-1]["outputs"], ["hdr", "movie"], "the hdr job, with the probe's values")
+        code, text = self.run_probe("blank:192x128", "--workflow", "hdr", "--set", "tiles=256")
+        self.assertEqual(code, 1, text)
+        self.assertIn("Slot not in the hdr workflow: tiles.", text)
 
     def test_a_plate_that_is_not_there(self):
         code, text = self.run_probe("plates/none.mp4")
@@ -291,7 +311,7 @@ class AgainstTheMock(unittest.TestCase):
         with redirect_stdout(out):
             code = self.p.main(["plates/desk.mp4", "--url", "http://127.0.0.1:9"])
         self.assertEqual(code, 1)
-        self.assertIn("No ComfyUI answers at http://127.0.0.1:9", out.getvalue())
+        self.assertIn("ComfyUI not answering at http://127.0.0.1:9: ", out.getvalue())
 
 
 if __name__ == "__main__":

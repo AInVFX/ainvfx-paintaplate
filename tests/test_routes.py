@@ -523,8 +523,8 @@ class TraceTest(unittest.TestCase):
             self.assertEqual(self.call("GET", "/paintaplate/thumb?path=plates/horse.mp4"), "answer")
         lines = [r.getMessage() for r in said.records]
         self.assertEqual(len(lines), 2)
-        self.assertRegex(lines[0], r"^Paint a plate trace: starts GET /paintaplate/thumb\?path=plates/horse\.mp4, at \d+\.\d GB$")
-        self.assertRegex(lines[1], r"^Paint a plate trace: ends GET /paintaplate/thumb\?path=plates/horse\.mp4 after \d+\.\d\d s, at \d+\.\d GB$")
+        self.assertRegex(lines[0], r"^\[Paint a plate\] Trace: GET /paintaplate/thumb\?path=plates/horse\.mp4 started, RAM \d+\.\d GB\.$")
+        self.assertRegex(lines[1], r"^\[Paint a plate\] Trace: GET /paintaplate/thumb\?path=plates/horse\.mp4 ended, done in \d+\.\d\d s, RAM \d+\.\d GB\.$")
 
     def test_a_front_end_file_is_said_only_when_it_is_slow(self):
         with self.assertLogs(level="INFO") as said:
@@ -533,7 +533,7 @@ class TraceTest(unittest.TestCase):
         self.assertEqual(len(said.records), 1)
         with self.assertLogs(level="INFO") as said:
             self.call("GET", "/extensions/ainvfx-paintaplate/app.mjs", seconds=0.6)
-        self.assertIn("ends GET /extensions/ainvfx-paintaplate/app.mjs after 0.6", said.records[0].getMessage())
+        self.assertIn("GET /extensions/ainvfx-paintaplate/app.mjs ended, done in 0.6", said.records[0].getMessage())
 
     def test_a_request_that_fails_still_says_that_it_ended(self):
         async def handler(request):
@@ -541,4 +541,4 @@ class TraceTest(unittest.TestCase):
         request = types.SimpleNamespace(method="GET", path_qs="/paintaplate/thumb?path=x", path="/paintaplate/thumb")
         with self.assertLogs(level="INFO") as said, self.assertRaises(web.HTTPNotFound):
             asyncio.run(routes.trace(request, handler))
-        self.assertIn("ends GET /paintaplate/thumb?path=x", said.records[-1].getMessage())
+        self.assertIn("GET /paintaplate/thumb?path=x ended, done in ", said.records[-1].getMessage())

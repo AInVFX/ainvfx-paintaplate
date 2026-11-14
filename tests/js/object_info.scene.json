@@ -1373,6 +1373,20 @@
       "IMAGE",
       {}
      ],
+     "config": [
+      "STRING",
+      {
+       "default": "ocio://studio-config-latest",
+       "multiline": false
+      }
+     ],
+     "source": [
+      "STRING",
+      {
+       "default": "@model",
+       "multiline": false
+      }
+     ],
      "low": [
       "FLOAT",
       {
@@ -1749,22 +1763,6 @@
    "output": [],
    "output_name": []
   },
-  "PaintAPlate_VAEFloat32": {
-   "input": {
-    "required": {
-     "vae_name": [
-      "COMBO",
-      {}
-     ]
-    }
-   },
-   "output": [
-    "VAE"
-   ],
-   "output_name": [
-    "VAE"
-   ]
-  },
   "PreviewAny": {
    "input": {
     "required": {
@@ -2061,6 +2059,28 @@
    ],
    "output_name": [
     "MODEL"
+   ]
+  },
+  "VAEComputeDtype": {
+   "input": {
+    "required": {
+     "vae": [
+      "VAE",
+      {}
+     ],
+     "dtype": [
+      "COMBO",
+      {
+       "default": "default"
+      }
+     ]
+    }
+   },
+   "output": [
+    "VAE"
+   ],
+   "output_name": [
+    "VAE"
    ]
   },
   "VAEDecode": {

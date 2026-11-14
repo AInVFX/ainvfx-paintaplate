@@ -73,8 +73,10 @@ def frames_np(images: torch.Tensor):
         yield frame.float().cpu().numpy()
 
 
-def to_image(frames: list[np.ndarray]) -> torch.Tensor:
-    return torch.from_numpy(np.stack(frames)).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype())
+def to_image(frames) -> torch.Tensor:
+    """Frames as an IMAGE batch: an array of frames is taken as it is, with no copy; a list of frames is stacked."""
+    batch = frames if isinstance(frames, np.ndarray) else np.stack(frames)
+    return torch.from_numpy(batch).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype())
 
 
 def resize(t: torch.Tensor, h: int, w: int) -> torch.Tensor:
@@ -190,7 +192,7 @@ class ColorSpace(io.ComfyNode):
         if peak is None and peak_of is not None and ocio.MODEL in (source, destination):  # the plate's peak, in its own space
             peak = ocio.batch_peak(frames_np(peak_of), config, destination if source == ocio.MODEL else source)
         if source == ocio.MODEL and peak is not None and peak > ocio.TONE_ABOVE:
-            logging.info("Paint a plate, Color Space (OCIO): out of @model, the tone mapping of a peak of %.2f undone", peak)
+            logging.info("[Paint a plate] Color Space (OCIO): model space's tone mapping undone, peak %.2f.", peak)
         out, peak = ocio.convert_with_peak(frames_np(image), config, source, destination, peak)
         return io.NodeOutput(to_image(out), peak)
 
@@ -259,8 +261,11 @@ class SavePlate(io.ComfyNode):
                     keep = plateio.untouched(changed[min(i, changed.shape[0] - 1)].float().cpu().numpy())  # what the matte shows as 0
                 written.append(plateio.write_still(spec, i, rgb, a, keep, out_dir))
             if spec["ext"] == ".exr" and plateio.OpenEXR is None:
-                notes.append("OpenEXR is not installed: extra EXR layers were not copied.")
-        text = f"{len(written)} file(s) in {out_dir}\n" + "\n".join(notes + [os.path.basename(p) for p in written[:3]])
+                notes.append("Extra EXR layers not copied: OpenEXR is not installed.")
+        lines = [f"Save Plate: {len(written)} {'file' if len(written) == 1 else 'files'} written to {out_dir}."] + notes
+        if written:
+            lines.append("First files: " + ", ".join(os.path.basename(p) for p in written[:3]) + ".")
+        text = "\n  ".join(lines)
         # the files themselves, under a key ComfyUI's frontend ignores: the job index keeps the record while they exist,
         # and the page finds the render's folder from them
         sub = os.path.relpath(out_dir, folder_paths.get_output_directory()).replace(os.sep, "/")
@@ -412,13 +417,13 @@ class RelightTransfer(io.ComfyNode):
             with ThreadPoolExecutor(WORKERS) as pool:
                 shift = mathops.shot_shift(list(pool.map(lambda sr: mathops.frame_shift(*sr, width, shot_space), zip(src, rel))))
             if shift != (0.0, 0.0):
-                logging.info("Paint a plate, Relight Transfer: the shot realigned by %.2f, %.2f px over %d frames", *shift, n)
+                logging.info("[Paint a plate] Relight Transfer: shot realigned by x %+.2f px, y %+.2f px, over %d frames.", shift[1], shift[0], n)
         painted = list(frames_np(light[:1]))[0] if light is not None else None
         shaded = list(frames_np(shade[:1]))[0] if shade is not None else None
         peak = peak if peak is not None and shot_space == "sRGB" else 1.0
         untone = peak > ocio.TONE_ABOVE  # a plate above 1.0: 'source' and 'relit' go back to its levels, frame by frame
         if untone:
-            logging.info("Paint a plate, Relight Transfer: the model space's tone mapping of a peak of %.2f undone", peak)
+            logging.info("[Paint a plate] Relight Transfer: model space's tone mapping undone, peak %.2f.", peak)
         bar, stop = comfy.utils.ProgressBar(n), Stop()
 
         def one(args):
@@ -560,18 +565,18 @@ class LivePreview(io.ComfyNode):
         running = context.prompt_id if context else server.last_prompt_id
 
         def off(reason, prompt_id=running):  # never silent: the page's log says once why this pass shows no preview
-            logging.warning("Paint a plate Live Preview is off for this shot: %s", reason)
+            logging.warning("[Paint a plate] Warning: Live Preview off for this shot: %s.", str(reason).rstrip("."))
             server.send_sync("paintaplate.live", {"prompt_id": prompt_id, "off": str(reason)}, server.client_id)
 
         path = folder_paths.get_full_path("vae_approx", decoder)
         if not path:
-            off(f"its decoder, {decoder}, is not in models/vae_approx (python get_models.py downloads it)")
+            off(f"decoder {decoder} not in models/vae_approx")
             return io.NodeOutput(model)
         try:
             if path not in _TINY:
                 _TINY[path] = comfy.sd.VAE(sd=comfy.utils.load_torch_file(path))
         except Exception as exc:  # a preview never stops a shot
-            off(f"its decoder, {decoder}, did not load: {exc}")
+            off(f"decoder {decoder} did not load ({exc})")
             return io.NodeOutput(model)
         tiny = _TINY[path]
         latent_frames, state = (frames - 1) // 8 + 1, {"calls": 0, "busy": False}
@@ -668,7 +673,7 @@ class LevelFill(io.ComfyNode):
         out = []
         for i, (fill, under) in enumerate(zip(frames_np(image), frames_np(resize(base[..., :3], h, w)))):
             levelled, moved = mathops.level_fill(fill, a[min(i, len(a) - 1)], under, p[min(i, len(p) - 1)])
-            logging.info("Paint a plate Level Fill: the fill moved %.1f levels on average", moved)
+            logging.info("[Paint a plate] Level Fill: fill moved by %.1f levels on average.", moved)
             out.append(levelled)
         return io.NodeOutput(to_image(out))
 
@@ -806,37 +811,14 @@ class HDRMatch(io.ComfyNode):
         if hdr is None:
             return io.NodeOutput(image)
         if mask is None:
-            logging.info("PaintAPlate HDR Match: no matte, so nothing untouched to measure: the HDR shot as it was made")
+            logging.info("[Paint a plate] HDR Match: HDR shot kept as made.\n  No matte: no untouched pixels to measure.")
             return io.NodeOutput(hdr)
         m = (mask if mask.ndim == 3 else mask[None]).float().cpu().numpy()
         n, k = hdr.shape[0], plate.shape[0]
         frames, report = mathops.hdr_match(n, stoppable(lambda i: hdr[i].float().cpu().numpy()), lambda i: plate[min(i, k - 1)].float().cpu().numpy(),
                                            lambda i: m[min(i, len(m) - 1)], grow=grow, workers=WORKERS)
-        logging.info("PaintAPlate HDR Match: %s", report["text"])
+        logging.info("[Paint a plate] HDR Match: %s", report["text"])
         return io.NodeOutput(to_image(frames))
-
-
-class VAEFloat32(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="PaintAPlate_VAEFloat32",
-            display_name="Load VAE (float32)",
-            category=CATEGORY,
-            description="Loads a VAE in float32 from the start, as SDR to HDR's float32 encode and decode need. Core's VAE "
-                        "Loader builds it in bf16, and LTXVVAEForceFloat32 then casts it in place: under ComfyUI's dynamic "
-                        "VRAM, its default without --highvram, the buffers stay sized for bf16 and the HDR pass failed on a "
-                        "32 GB card with « Buffer too small » (2 Nov 2026).",
-            inputs=[io.Combo.Input("vae_name", options=folder_paths.get_filename_list("vae"))],
-            outputs=[io.Vae.Output(display_name="VAE")],
-        )
-
-    @classmethod
-    def execute(cls, vae_name) -> io.NodeOutput:  # as core's VAE Loader for a VAE file, with its dtype set at load
-        sd, metadata = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("vae", vae_name), return_metadata=True)
-        vae = comfy.sd.VAE(sd=sd, metadata=metadata, dtype=torch.float32)
-        vae.throw_exception_if_invalid()
-        return io.NodeOutput(vae)
 
 
 class KeepBlack(io.ComfyNode):
@@ -847,21 +829,34 @@ class KeepBlack(io.ComfyNode):
             display_name="Keep Black",
             category=CATEGORY,
             description="Where the SDR shot is black, its own black instead of SDR to HDR's noise (mathops.keep_black): below "
-                        "`low` of luminance the SDR values, above `high` the HDR ones, a smooth step between. Both in ACEScg.",
+                        "`low` of luminance the SDR values, above `high` the HDR ones, a smooth step between, and no value "
+                        "below 0. In ACEScg: each frame of the SDR shot is converted from 'source' as it is used, so no "
+                        "converted copy of the shot is held.",
             inputs=[io.Image.Input("hdr", tooltip="SDR to HDR's frames, ACEScg scene-linear."),
-                    io.Image.Input("sdr", tooltip="The SDR shot they were made from, in ACEScg."),
+                    io.Image.Input("sdr", tooltip="The SDR shot they were made from, in 'source'."),
+                    io.String.Input("config", default=ocio.BUILTIN,
+                                    tooltip="$OCIO for the config the OCIO environment variable names, or a built-in config "
+                                            "such as ocio://studio-config-latest."),
+                    io.String.Input("source", default="@model",
+                                    tooltip="The SDR shot's colour space: a colour space of the config, or @model."),
                     io.Float.Input("low", default=0.001, min=0.0, max=1.0, step=0.0001),
                     io.Float.Input("high", default=0.01, min=0.0, max=1.0, step=0.0001)],
             outputs=[io.Image.Output(display_name="image")],
         )
 
     @classmethod
-    def execute(cls, hdr, sdr, low, high) -> io.NodeOutput:
+    def execute(cls, hdr, sdr, config, source, low, high) -> io.NodeOutput:
         n = min(hdr.shape[0], sdr.shape[0])
+        out = np.empty((n, *hdr.shape[1:]), np.float32)
+
+        def frame(i):
+            black = ocio.convert([sdr[i].float().cpu().numpy()], config, source, "ACEScg")[0]
+            out[i] = mathops.keep_black(hdr[i].float().cpu().numpy(), black, low, high)
+
         with ThreadPoolExecutor(WORKERS) as pool:
-            out = list(pool.map(stoppable(lambda i: mathops.keep_black(hdr[i].float().cpu().numpy(), sdr[i].float().cpu().numpy(), low, high)), range(n)))
-        return io.NodeOutput(torch.from_numpy(np.stack(out)))
+            list(pool.map(stoppable(frame), range(n)))
+        return io.NodeOutput(to_image(out))
 
 
 NODES = [LoadPlate, SavePlate, ColorSpace, SaveFrames, SaveMovie, FitToPlate, CompositeFrames, RelightTransfer, FollowMatte, LevelFill, LivePreview,
-         KeyframeVideo, HDRMatch, VAEFloat32, KeepBlack]
+         KeyframeVideo, HDRMatch, KeepBlack]

@@ -69,10 +69,10 @@ def config(name: str = "") -> OCIO.Config:
     name = name or default_config()
     if name == ENV:
         if not os.environ.get("OCIO"):
-            raise ValueError("The OCIO environment variable is not set")
+            raise ValueError("OCIO config not found: $OCIO is not set. Set it, or choose a built-in config.")
         return OCIO.Config.CreateFromFile(os.environ["OCIO"])
     if name not in {c["name"] for c in configs()}:
-        raise ValueError(f"Unknown OCIO config: {name}")
+        raise ValueError(f"OCIO config not found: {name}. Choose a built-in config, or a config file that exists.")
     return OCIO.Config.CreateFromFile(name)
 
 
@@ -88,7 +88,7 @@ def find(cfg: OCIO.Config, names) -> str | None:
 def model_space(cfg: OCIO.Config) -> str:
     found = find(cfg, MODEL_NAMES)
     if not found:
-        raise ValueError("This OCIO config has no sRGB-encoded Rec.709 space (role texture_paint): the models need it")
+        raise ValueError("OCIO config not usable: no sRGB-encoded Rec.709 space (role texture_paint). Choose a config that has one.")
     return found
 
 
@@ -98,7 +98,7 @@ def real(cfg: OCIO.Config, name: str) -> str:
         return model_space(cfg)
     cs = cfg.getColorSpace(name)
     if cs is None:
-        raise ValueError(f"The OCIO config has no colour space named {name!r}")
+        raise ValueError(f"Colour space not in the OCIO config: {name!r}. Choose one of its colour spaces.")
     return cs.getName()
 
 
@@ -158,6 +158,20 @@ def _cpu(name: str, src: str, dst: str):
 
 def _each(fn, frames):
     return list(_POOL.map(fn, frames))
+
+
+def _fill(fn, frames):
+    """`fn` on each frame, frames in parallel, written into one array: one copy of the batch, with no list of frames to
+    stack after it."""
+    first = fn(frames[0])
+    out = np.empty((len(frames), *first.shape), first.dtype)
+    out[0] = first
+
+    def put(i):
+        out[i] = fn(frames[i])
+
+    list(_POOL.map(put, range(1, len(frames))))
+    return out
 
 
 def _rgb(fn):
@@ -273,8 +287,8 @@ def _from_model(name: str, dst: str, peak: float):
     return one
 
 
-def convert(frames, name: str, src: str, dst: str, peak: float | None = None) -> list[np.ndarray]:
-    """Each frame's RGB from `src` to `dst` in config `name`, frames in parallel; alpha untouched. Either may be @model or
+def convert(frames, name: str, src: str, dst: str, peak: float | None = None) -> np.ndarray | list[np.ndarray]:
+    """Each frame's RGB from `src` to `dst` in config `name`, frames in parallel into one array; alpha untouched. Either may be @model or
     @linear. @linear is the config's Linear Rec.709 when it has one (a matrix from ACEScg, nothing clipped), else the model
     space decoded; into @model, frames pass through it, then core's tone mapping and gamut compression. The tone mapping
     takes the peak of these frames, or `peak`: the peak of the batch they are a part of (batch_peak). Out of @model, a
@@ -284,8 +298,8 @@ def convert(frames, name: str, src: str, dst: str, peak: float | None = None) ->
     return convert_with_peak(frames, name, src, dst, peak)[0]
 
 
-def convert_with_peak(frames, name: str, src: str, dst: str, peak: float | None = None) -> tuple[list[np.ndarray], float]:
-    """convert's frames, and the peak of its tone mapping: into @model, `peak` or the peak of these frames, read on the way
+def convert_with_peak(frames, name: str, src: str, dst: str, peak: float | None = None) -> tuple[np.ndarray | list[np.ndarray], float]:
+    """convert's frames, in one array, and the peak of its tone mapping: into @model, `peak` or the peak of these frames, read on the way
     in with no second pass; out of @model, the `peak` whose tone mapping is undone; 1.0 when there is none. Color Space
     (OCIO) gives it as its second output, so the nodes after it take the plate's peak as a number (PL6). It is the float
     batch_peak reads: the same way into linear Rec.709 (_route), the same frames."""
@@ -293,9 +307,9 @@ def convert_with_peak(frames, name: str, src: str, dst: str, peak: float | None 
     if src == dst or not frames:
         return frames, 1.0
     if src == MODEL and peak is not None and peak > TONE_ABOVE:
-        return _each(_from_model(name, dst, peak), frames), peak
+        return _fill(_from_model(name, dst, peak), frames), peak
     one, tone = _route(name, src, dst)
-    out = _each(one, frames)
+    out = _fill(one, frames)
     if not tone:
         return out, 1.0
     if peak is None:
@@ -318,7 +332,7 @@ def _gpu(proc, function: str, prefix: str) -> dict:
     tables += [{"sampler": t.samplerName, "kind": "3d", "size": t.edgeLen, "channels": 3, "nearest": near(t), "data": data(t)}
                for t in desc.get3DTextures()]
     if len(list(desc.getUniforms())):
-        raise ValueError("This transform has dynamic properties, which the viewer does not set")
+        raise ValueError("View not supported: its transform has dynamic properties. Choose another view.")
     return {"text": desc.getShaderText(), "function": function, "tables": tables}
 
 
@@ -340,12 +354,12 @@ def shader(name: str, space: str, display: str, view: str, look: str = "") -> di
     cfg = config(name)
     src = real(cfg, space)
     if display not in cfg.getDisplays() or view not in cfg.getViews(display):
-        raise ValueError(f"The OCIO config has no view {view!r} on display {display!r}")
+        raise ValueError(f"View not in the OCIO config: {view!r} on display {display!r}. Choose one of the display's views.")
     lin = OCIO.ROLE_SCENE_LINEAR
     out = OCIO.DisplayViewTransform(src=lin, display=display, view=view)
     if look:
         if cfg.getLook(look) is None:
-            raise ValueError(f"The OCIO config has no look named {look!r}")
+            raise ValueError(f"Look not in the OCIO config: {look!r}. Choose one of its looks.")
         out = OCIO.GroupTransform([OCIO.LookTransform(src=lin, dst=lin, looks=look), out])
     return {"in": _gpu(cfg.getProcessor(OCIO.ColorSpaceTransform(src=src, dst=lin)), "ocioIn", "ocio_in_"),
             "out": _gpu(cfg.getProcessor(out), "ocioOut", "ocio_out_"),
