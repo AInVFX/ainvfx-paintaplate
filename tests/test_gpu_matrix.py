@@ -536,9 +536,9 @@ class StoppedComfy(unittest.TestCase):
 
 
 class Verdict(unittest.TestCase):
-    """What the verdict and the tree case read: the page's mask and preview size, the case, the end of ui_live.py's wait."""
+    """What the verdict and the tree case read: the page's mask and quick-pass size, the case, the end of ui_live.py's wait."""
 
-    def test_the_verdict_takes_the_page_s_newest_mask_and_its_preview_size(self):
+    def test_the_verdict_takes_the_page_s_newest_mask_and_its_quick_pass_size(self):
         tmp = tempfile.mkdtemp(prefix="paintaplate_mask_")
         folder = os.path.join(tmp, "input", "paintaplate", "scene")
         os.makedirs(folder)
@@ -549,8 +549,8 @@ class Verdict(unittest.TestCase):
         self.assertEqual(gpu_matrix.page_mask(tmp, 1000), newer)
         self.assertIsNone(gpu_matrix.page_mask(tmp, 2000), "nothing written since the case started")
         log = "Working sizes: edits at 1920 x 1088, quick passes at 768 x 432, preview at 608 x 352, tracking at 960 x 544"
-        self.assertEqual(gpu_matrix.preview_size(log), (608, 352))
-        self.assertIsNone(gpu_matrix.preview_size(""))
+        self.assertEqual(gpu_matrix.quick_size(log), (768, 432), "the size the page judges at (p.prev), not the shot's preview size")
+        self.assertIsNone(gpu_matrix.quick_size(""))
 
     def test_the_tree_case_expects_the_name_and_stays_out_of_quick_and_all(self):
         cases = gpu_matrix.load_cases()

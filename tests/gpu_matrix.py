@@ -349,7 +349,7 @@ def read_log(text):
 # plate and the export side by side, cut around each edit's box, on four frames: the first, at a third, at two thirds and
 # the last. With one edit the box follows the export's matte from frame to frame; a relight shows the whole frame. For an
 # erase the sheet writes the page's own verdict (wave 7, R15): logic.eraseCheck, run with Node through tests/erase_probe.py,
-# on the export's first frame against the plate's, inside the mask the page sent Klein, at the page's preview size.
+# on the export's first frame against the plate's, inside the mask the page sent Klein, at the page's quick-pass size.
 SHEET_CELL = (360, 240)  # the largest picture of one frame on the sheet, in pixels
 IMAGES = (".exr", ".png", ".jpg", ".jpeg", ".tif", ".tiff")
 MOVIES = (".mp4", ".mov", ".webm", ".mkv")
@@ -433,10 +433,11 @@ def page_mask(comfy, since):
     return max(found, key=os.path.getmtime) if found else None
 
 
-def preview_size(log):
-    """The page's preview size, from its line « Working sizes: ... preview at 608 x 352 ... »: the size the page judges an
-    erase at (app.mjs, `p.prev`). None when the log has no such line."""
-    found = re.findall(r"preview at (\d+) x (\d+)", log)
+def quick_size(log):
+    """The page's quick-pass size, from its line « Working sizes: ... quick passes at 768 x 432 ... »: the size the page
+    judges an erase at (app.mjs, `p.prev`). The same line's « preview at 640 x 352 » is the shot's preview, another size.
+    None when the log has no such line."""
+    found = re.findall(r"quick passes at (\d+) x (\d+)", log)
     return (int(found[-1][0]), int(found[-1][1])) if found else None
 
 
@@ -449,7 +450,7 @@ def erase_verdict(after, before, mask, size):
     if not mask:
         return none("No mask from the page in ComfyUI's input folder since the case started")
     if not size:
-        return none("No preview size in the page's log")
+        return none("No quick-pass size in the page's log")
     import numpy as np
     from PIL import Image
     import erase_probe as probe
@@ -477,8 +478,8 @@ def name_asked(marks, log, jobs):
 def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
     """The case's sheet, sheet.png in its folder: for each edit, the plate and the export cut around its box, on the first
     frame, at a third, at two thirds and on the last. `others`: more (title, export.zip) columns, such as another run of
-    the same strokes. `mask` and `judge_at`: the mask the page sent Klein (page_mask) and the page's preview size
-    (preview_size), for the verdict on a Clean edit (erase_verdict). {"path", "frames" (from 1), "cells": [(row, column, x0,
+    the same strokes. `mask` and `judge_at`: the mask the page sent Klein (page_mask) and the page's quick-pass size
+    (quick_size), for the verdict on a Clean edit (erase_verdict). {"path", "frames" (from 1), "cells": [(row, column, x0,
     y0, x1, y1)], "verdict": that verdict or None}, or None with no export or plate."""
     from PIL import Image, ImageDraw, ImageFont
     strokes, export = case.get("strokes") or [], os.path.join(folder, "export.zip")
@@ -570,7 +571,7 @@ def run_case(a, name, case, folder):
     result["nodes"], result["stopped_in"] = node_times(events, graphs, names), running_at_stop(events, graphs, names)
     try:  # the case's pictures: never a reason for the case to fail
         result["sheet"] = sheet(case, folder, os.path.join(a.comfy, "input", case["path"]) if case.get("path") else None,
-                                mask=page_mask(a.comfy, t0), judge_at=preview_size(result["log"]))
+                                mask=page_mask(a.comfy, t0), judge_at=quick_size(result["log"]))
     except Exception as exc:
         result["sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     for job in result["jobs"]:  # when ComfyUI ran it, and the most memory held between those two times
