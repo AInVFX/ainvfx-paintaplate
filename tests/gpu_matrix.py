@@ -337,10 +337,10 @@ def read_log(text):
         "previews": sum(j["previews"] for j in jobs),
         "live_off": re.findall(r"Live preview is off: ([^\n]*)", text),
         "profile": f"{profile.group(1)} ({profile.group(2)})" if profile else "not in the log's last 400 lines",
-        "mattes": re.findall(r"([A-Z][a-z]+ matte[^\n]*largest matte is [^\n]*)", text),  # any word before « matte »: Paint, Erase, Clean
+        "mattes": re.findall(r"([A-Z][a-z]+ matte(?: \([^)\n]*\))?: tracked on [^\n]*(?:\n  [^\n]*)*)", text),  # any word before « matte »; the headline and its detail lines (mathops.follow_summary)
         "seeds": sorted(set(re.findall(r"\bseed (\d+)", text)), key=int),
         "announced": {f"v{v} {label}": int(s) for v, label, s in re.findall(r"Render v(\d+): (.+?) \(about (\d+) s\)", text)},
-        "figures": re.findall(r"(Edit \d+: [^\n]*?\(\d+% of it changed\))", text),  # an erase: how much of the object's box changed
+        "figures": re.findall(r"(Edit \d+: [^\n]*?\(\d+% of it changed[^)\n]*\))", text),  # an erase: how much of the object changed, gone or held back (logic.leftLines)
     }
 
 

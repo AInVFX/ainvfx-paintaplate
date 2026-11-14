@@ -302,9 +302,13 @@ class Tools(unittest.TestCase):
         self.assertNotIn("keyboard.press(key)", tool)
 
     def test_a_matte_line_is_read_whatever_its_first_word(self):
-        log = ("11:02:36 PMClean matte: SAM 3.1 found the object on 76 of 121 frames; the largest matte is 1.0 times the object, on frame 0\n"
-               "23:02:37Paint matte (full): SAM 3.1 found the object on 54 of 121 frames; the largest matte is 1.0 times the object, on frame 8\n")
-        self.assertEqual([m.split(":")[0] for m in gpu_matrix.read_log(log)["mattes"]], ["Clean matte", "Paint matte (full)"])
+        log = ("11:02:36 PMClean matte: tracked on 76 of 121 frames.\n  Object stands still: its place of frame 0 added where the plate shows it, on 68 frames.\n"
+               "  Removed: areas where the plate stands in front of the object, on 77 frames.\n"
+               "11:02:40 PMRender v1: Track the object took 26.2 s\n"
+               "23:02:37Paint matte (full): tracked on 54 of 121 frames.\n")
+        mattes = gpu_matrix.read_log(log)["mattes"]
+        self.assertEqual([m.split(":")[0] for m in mattes], ["Clean matte", "Paint matte (full)"])
+        self.assertEqual(mattes[0].count("\n  "), 2, "the summary's detail lines come with their headline, and the next log line does not")
 
 
 class ReportLines(unittest.TestCase):
@@ -329,6 +333,8 @@ class ReportLines(unittest.TestCase):
     def test_an_erase_gives_the_page_s_figure(self):
         log = "11:02:06 PMEdit 1: the object left the first frame (59% of it changed)\n"
         self.assertEqual(gpu_matrix.read_log(log)["figures"], ["Edit 1: the object left the first frame (59% of it changed)"])
+        held = "11:02:06 PMEdit 1: the object may still be there (17% of it changed, edges held at 0.62)\n"  # the page's line since wave 7 (logic.leftLines)
+        self.assertEqual(gpu_matrix.read_log(held)["figures"], ["Edit 1: the object may still be there (17% of it changed, edges held at 0.62)"])
 
     def test_without_fresh_a_first_job_can_read_the_case_before(self):
         """horse_erase_barn's ingest on the laptop, 12 Nov: 30.3 GB of peak RAM for a 2.6 s job, the case before's memory."""
