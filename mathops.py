@@ -624,15 +624,16 @@ def record(folder: str, masks, n: int, first, shot, base, zone: float, threshold
     """With PAINTAPLATE_RECORD=<folder> in ComfyUI's environment, what Follow Matte was given, as one .npz file: the
     tracker's masks, the first-frame mask, the element, the shot, the plate and the Clean matte under a paint, every
     k-th pixel so the width is
-    RECORD_SIDE at most, in 8 bits. SAM and LTX need a GPU; this file does not: follow_matte(**replay(file)) runs the
+    RECORD_SIDE at most, in half floats (float16): Follow Matte reads the plate at these same pixels (`plate` in follow_matte),
+    so a replay measures the plate's move from the values the live run read. A recording in 8 bits still replays. SAM and LTX need a GPU; this file does not: follow_matte(**replay(file)) runs the
     matte again anywhere, so a rule is tried on the real shot that showed its fault, and its summary names the same frames. Returns the file's path."""
     def small(a, after=0):  # `after`: the axes that follow the width (1 for an image's channels)
         if a is None or not np.size(a):
-            return np.zeros((0,), np.uint8)
+            return np.zeros((0,), np.float16)
         a = np.asarray(a)
         k = max(1, -(-a.shape[a.ndim - 1 - after] // RECORD_SIDE))
         cut = a[..., ::k, ::k, :3] if after else a[..., ::k, ::k]
-        return (np.clip(cut, 0, 1) * 255 + 0.5).astype(np.uint8)
+        return cut.astype(np.float16)
 
     os.makedirs(folder, exist_ok=True)
     h, w = np.shape(shot)[1:3] if shot is not None else np.shape(masks)[-2:]
@@ -645,7 +646,7 @@ def record(folder: str, masks, n: int, first, shot, base, zone: float, threshold
 def replay(path: str) -> dict:
     """follow_matte's arguments from a file that PAINTAPLATE_RECORD wrote: follow_matte(**replay(path))."""
     d = np.load(path)
-    back = lambda k: d[k].astype(np.float32) / 255 if d[k].size else None  # noqa: E731
+    back = lambda k: (d[k].astype(np.float32) / (255 if d[k].dtype == np.uint8 else 1)) if d[k].size else None  # noqa: E731
     return {"masks": back("masks") if d["masks"].size else np.zeros((0, 1, 1), np.float32), "n": int(d["n"]), "first": back("first"),
             "shot": back("shot"), "base": back("base"), "zone": float(d["zone"]), "threshold": float(d["threshold"]), "element": back("element"),
             "erased": back("erased") if "erased" in d.files else None,
