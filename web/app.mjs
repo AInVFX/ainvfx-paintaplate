@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { asksName, eraseCheck, coreBox, writerBoxes, DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
+import { asksName, eraseCheck, boxOf, boxWithout, corePixels, removedNames, writerBoxes, DAB_PROFILE, FLUID, dabFlow, dabsAlong, donorFor, blankSpec, caption, changedMask, lightColor, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dark, dependsOnChange, fitSize,
   erasePrompt, erasesPaint, leftHint, leftLines, gb, nextRender, paintBoxes, pickObjects, pickedColor, plainError, previewSize, previewSizes, reconcile, secs, shotPrompt, splitTable, stageOne,
   stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, ocioTree, browseItems, crumbs, framePattern, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, HDR_DEPTH, escapeAction,
   defaultDepth, viewerSpace, drawsDeep, fluidRun, passMovie } from "./logic.mjs";
@@ -234,11 +234,11 @@ async function writeCaption(e, reference, key, kind) {
   let made = text ? (ask.locked ? reconcile(text, ask.locked) : text) : "";
   if (made && paint && !erasesPaint(made, ask.locked, paint)) { // it removed something the paint does not cover (an astronaut, 28 Oct)
     log(`Edit ${num(e)}: the prompt writer removed something the paint does not cover: ${splitTable(made)[0]}`);
-    made = "";
-    if (asksName(e.tool, e.prompt)) { // no words, and an answer about another object: the object's name comes first (generate)
-      e.caption = { key, text: "" };
+    if (asksName(e.tool, e.prompt)) { // no words, and an answer about another object: that object leaves the box (prepare, leaveOut), else the object's name comes first (generate)
+      e.caption = { key, text: "", others: removedNames(made, ask.locked) };
       return "";
     }
+    made = "";
   }
   e.caption = { key, text: made || templateCaption(e) };
   log(made ? `Edit ${num(e)}: caption from the prompt writer: ${e.caption.text}` : `Edit ${num(e)}: the page's own caption: ${e.caption.text}`);
@@ -2150,16 +2150,19 @@ function editSettings(edit, size, pass) { // steps, denoise, and the growth and 
 async function prepare(edit, index, kind) {
   const below = (index < 0 ? S.edits : S.edits.slice(0, index)).filter((e) => e.on && e.patch), size = S.plate.prev;
   const before = layered(index < 0 ? S.edits.length : index);
-  if (edit.tool === "erase" && !edit.whole && edit.sam) { edit.sam = null; edit.editCore = null; edit.snapped = ""; redrawStrokes(edit); } // Whole object turned off: the strokes alone
+  if (edit.tool === "erase" && !edit.whole && edit.sam) { edit.sam = null; edit.editCore = edit.editKeep = null; edit.snapped = ""; redrawStrokes(edit); } // Whole object turned off: the strokes alone
   if (edit.tool === "erase" && edit.whole && edit.snapped !== snapKeyOf(edit)) {
-    edit.sam = null; edit.editCore = null; redrawStrokes(edit);
+    edit.sam = null; edit.editCore = edit.editKeep = null; redrawStrokes(edit);
     await snapErase(edit, before, kind === "edit" ? "snap" : kind);
     edit.snapped = snapKeyOf(edit); // only once SAM has answered: a snap stopped half way, or new words, runs it again
   }
   const base = await baseUpload(below, before, size);
   const reference = await uploadCanvas(editImage(edit, before, size), `e${edit.id}_${painted(edit)}_ref.png`);
-  const key = [edit.tool, edit.prompt, bounds(edit.mask), painted(edit), edit.sam ? 1 : 0, below.map((e) => `${e.id}.${e.version}`)].join("|");
-  return { before, below, base, reference, cap: await captionFor(edit, reference, key, kind) };
+  const key = () => [edit.tool, edit.prompt, bounds(edit.mask), painted(edit), edit.sam ? 1 : 0, edit.editCore ?? "", below.map((e) => `${e.id}.${e.version}`)].join("|");
+  let cap = await captionFor(edit, reference, key(), kind);
+  // no words, and an answer about another object: the writer's box leaves that object out, and the writer is asked again
+  if (!cap && asksName(edit.tool, edit.prompt) && (await leaveOut(edit, kind === "edit" ? "snap" : kind))) cap = await captionFor(edit, reference, key(), kind);
+  return { before, below, base, reference, cap };
 }
 
 // what a set of strokes is: tool, colour, size, and the points themselves (a sum, so two strokes of the same length differ)
@@ -2182,26 +2185,50 @@ async function snapErase(edit, before, kind = "snap") { // one SAM request per s
   try { return await promise; } finally { if (edit.snapping?.promise === promise) edit.snapping = null; }
 }
 
+function canvasBits(c, size) { // a mask canvas at `size`, as 0 and 1 per pixel
+  const area = size[0] * size[1], d = c.getContext("2d").getImageData(0, 0, size[0], size[1]).data, m = new Uint8Array(area);
+  for (let i = 0; i < area; i++) m[i] = d[i * 4] > 127 ? 1 : 0;
+  return m;
+}
+const maskBits = async (file, size) => canvasBits(snap(await loadImage(viewUrl(file)), size), size); // a mask file of ComfyUI's, the same way
+
+// An erase with no words whose prompt writer named another object (writeCaption keeps the names): SAM 3.1 finds that object
+// by the writer's name for it, and the writer's box leaves its pixels out (logic.boxWithout). Once per snap: a second answer
+// about another object asks for the object's name. true: the box changed, and the writer is asked again.
+async function leaveOut(edit, kind) {
+  const keep = edit.editKeep, names = edit.caption?.others ?? [];
+  if (!keep || !edit.editCore || !names.length) return false;
+  const size = S.plate.prev, said = names.join(", "), other = new Uint8Array(size[0] * size[1]);
+  status(`Edit ${num(edit)}: SAM 3.1 looking for the ${said}.`);
+  const out = await run("snap", { image: keep.frame, words: said }, { kind, front: true }).done;
+  edit.editKeep = null;
+  for (const f of outputFiles("snap", out, "named")) {
+    const m = await maskBits(f, size);
+    for (let i = 0; i < m.length; i++) other[i] |= m[i];
+  }
+  const box = boxWithout({ box: edit.editCore, keep: keep.bits, other, w: size[0], h: size[1] });
+  log(box ? `Edit ${num(edit)}: the ${said} left out of the prompt writer's box.` : `Edit ${num(edit)}: no SAM mask of the ${said} to leave out of the prompt writer's box.`);
+  if (box) edit.editCore = box;
+  return !!box;
+}
+
 async function findWhole(edit, before, kind) { // SAM 3.1 finds the whole object under the erase strokes: by name, else point by point
   const size = S.plate.prev, k = size[0] / S.plate.work[0], area = size[0] * size[1];
   const pts = edit.strokes.filter((s) => s.tool !== "rub").flatMap((s) => s.points);
   const picks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * (pts.length - 1))))]; // up to five points, one prompt each
   const points = Object.fromEntries(picks.map((i, j) => [`point_${j}`, JSON.stringify([{ x: Math.round(pts[i][0] * k), y: Math.round(pts[i][1] * k) }])]));
   status(edit.prompt ? `Finding the ${edit.prompt} under the stroke` : "Finding the object under the stroke");
-  const out = await run("snap", { image: await uploadCanvas(snap(before, size), `e${edit.id}_snap.png`), words: edit.prompt, ...points },
-    { kind, front: true }).done;
-  const bits = (c) => { // a mask canvas as 0 and 1 per pixel
-    const d = c.getContext("2d").getImageData(0, 0, size[0], size[1]).data, m = new Uint8Array(area);
-    for (let i = 0; i < area; i++) m[i] = d[i * 4] > 127 ? 1 : 0;
-    return m;
-  };
-  const fileBits = async (f) => bits(snap(await loadImage(viewUrl(f)), size));
-  const painted = bits(maskAt(edit, size));
+  const frame = await uploadCanvas(snap(before, size), `e${edit.id}_snap.png`);
+  const out = await run("snap", { image: frame, words: edit.prompt, ...points }, { kind, front: true }).done;
+  const painted = canvasBits(maskAt(edit, size), size), fileBits = (f) => maskBits(f, size);
   const objects = pickObjects({ painted, area,
     named: await Promise.all(outputFiles("snap", out, "named").map(fileBits)),
     points: await Promise.all(picks.map((_, j) => outputFile("snap", out, `point_${j}`)).filter(Boolean).map(fileBits)) });
-  // no words: the prompt writer's box, cut to the stroke and to what most of these masks hold (logic.coreBox, writerBoxes)
-  edit.editCore = objects.length && !String(edit.prompt ?? "").trim() ? coreBox({ painted, masks: objects, w: size[0], h: size[1] }) : null;
+  // no words: the prompt writer's box, cut to the stroke and to what most of these masks hold (logic.corePixels, writerBoxes);
+  // the core and the frame stay for a box that leaves out another object, if the writer names one (leaveOut)
+  const core = objects.length && !String(edit.prompt ?? "").trim() ? corePixels({ painted, masks: objects, w: size[0], h: size[1] }) : null;
+  edit.editCore = core && boxOf(core, size[0], size[1]);
+  edit.editKeep = core && { frame, bits: core };
   log(`Edit ${num(edit)}: SAM 3.1 ${edit.prompt ? `found ${outputFiles("snap", out, "named").length - 1} object(s) named "${edit.prompt}", ` : ""}looked at ${picks.length} stroke point(s); ${objects.length} mask(s) kept`);
   if (!objects.length) return status("Clean takes only what you painted: no single object under the stroke.");
   const sam = canvas(size), d = sam.getContext("2d"), img = d.createImageData(size[0], size[1]);

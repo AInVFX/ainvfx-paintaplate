@@ -242,12 +242,17 @@ export function paintBoxes({ bits, w, h }, { max = 4, fill = 0.4, gain = 0.25, m
 // Whether a caption erases what was painted: it cites a locked row (<obj_1>), or the rows it removes and cites hold most of the
 // paint. `paint`: { bits, w, h }, the painted area on a coarse grid. On 28 Oct the bad caption removed person_1, a box with none
 // of the paint in it; the good one never cited <obj_1> but removed four rows that held nearly all of it.
+// The rows of an answer that removes objects, apart from the locked ones: named in its caption, with a box in the frame and none
+// in the result.
+const removedRows = (caption, rows, locked) => {
+  const ids = new Set(locked.map((r) => r.id));
+  return (rows ?? []).filter((r) => r && !ids.has(r.id) && r.tgt_bbox == null && validBox(r.src_bbox) && caption.includes(`<${r.id}>`));
+};
+
 export function erasesPaint(text, locked, paint, share = 0.5) {
   const [caption, rows] = splitTable(text);
   if (locked.some((r) => caption.includes(`<${r.id}>`))) return true;
-  const ids = new Set(locked.map((r) => r.id));
-  const boxes = (rows ?? []).filter((r) => r && !ids.has(r.id) && r.tgt_bbox == null && validBox(r.src_bbox) && caption.includes(`<${r.id}>`))
-    .map((r) => r.src_bbox);
+  const boxes = removedRows(caption, rows, locked).map((r) => r.src_bbox);
   let painted = 0, inside = 0;
   for (let y = 0; y < paint.h; y++) for (let x = 0; x < paint.w; x++) {
     if (!paint.bits[y * paint.w + x]) continue;
@@ -264,25 +269,76 @@ export function erasesPaint(text, locked, paint, share = 0.5) {
 export const asksName = (tool, words) => tool === "erase" && !String(words ?? "").trim();
 
 // ---------- An erase with no words: the box the prompt writer gets ----------
-// The stroke, and the pixels that most of SAM's masks hold, with no margin. On 12 Nov 2026 two of the five masks of a stroke
-// on a barn took in the horse's nose: with a box around them all, the prompt writer removed the horse; with this one, it
-// removed the barn (the probe, 13 Nov). `painted` and `masks`: Uint8Arrays of 0 and 1 over w x h pixels. null: nothing.
-export function coreBox({ painted, masks, w, h }) {
-  let y0 = h, x0 = w, y1 = -1, x1 = -1;
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const i = y * w + x;
+// The object's core: the stroke, and the pixels that most of SAM's masks hold. A neighbour that a few masks take in (a horse's
+// nose beside a barn) stays out of it, so the prompt writer's box holds the object under the stroke. `painted` and `masks`:
+// Uint8Arrays of 0 and 1 over w x h pixels.
+export function corePixels({ painted, masks, w, h }) {
+  const bits = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
     let n = 0;
     for (const m of masks) n += m[i];
-    if (!painted[i] && n * 2 <= masks.length) continue;
+    bits[i] = painted[i] || n * 2 > masks.length ? 1 : 0;
+  }
+  return bits;
+}
+
+// The box around the pixels that `bits` sets, with no margin, as [y0, x0, y1, x1] from 0 to 1000. null: none is set.
+export function boxOf(bits, w, h) {
+  let y0 = h, x0 = w, y1 = -1, x1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (!bits[y * w + x]) continue;
     y0 = Math.min(y0, y); y1 = Math.max(y1, y); x0 = Math.min(x0, x); x1 = Math.max(x1, x);
   }
   return x1 < 0 ? null : [y0 / h, x0 / w, (y1 + 1) / h, (x1 + 1) / w].map((v) => Math.round(v * 1000));
 }
 
+export const coreBox = ({ painted, masks, w, h }) => boxOf(corePixels({ painted, masks, w, h }), w, h);
+
 // The boxes the prompt writer gets: an erase with no words, painted in one part, gets its core box; otherwise one box per
 // painted part (paintBoxes), with the edit's bounds (`bbox`).
 export const writerBoxes = ({ tool, words, parts, core, bbox }) =>
   (tool === "erase" && !String(words ?? "").trim() && core && parts?.length === 1 ? { bbox: core, boxes: [core] } : { bbox, boxes: parts });
+
+// The objects that an answer removes, apart from the locked ones, as SAM 3.1 reads a name: the row « barn_1 » is « barn ».
+export function removedNames(text, locked = []) {
+  const [caption, rows] = splitTable(text ?? "");
+  const names = removedRows(caption, rows, locked).map((r) => String(r.id).replace(/_\d+$/, "").replace(/_/g, " ").trim());
+  return [...new Set(names.filter(Boolean))];
+}
+
+// The prompt writer's box once it named another object than the one under the stroke: the part of `box` that holds the most
+// of the object (`keep`, its core) and almost none of the other one (`other`, as SAM 3.1 finds it by the writer's name for
+// it). A tree's box that holds a barn's roof below its branches becomes the box above the roof. The search runs on a grid of
+// at most 48 cells a side, with sums over the box. null: the box already leaves the other object out (it covers under `share`
+// of the box), or no box without it holds `least` of the object. Masks: Uint8Arrays of 0 and 1 over w x h pixels; boxes:
+// [y0, x0, y1, x1] from 0 to 1000.
+export function boxWithout({ box, keep, other, w, h, share = 0.02, least = 0.5 }) {
+  const Y0 = Math.max(0, Math.floor((box[0] / 1000) * h)), X0 = Math.max(0, Math.floor((box[1] / 1000) * w));
+  const Y1 = Math.min(h, Math.ceil((box[2] / 1000) * h)), X1 = Math.min(w, Math.ceil((box[3] / 1000) * w));
+  if (Y1 <= Y0 || X1 <= X0) return null;
+  const c = Math.max(1, Math.ceil(Math.max(Y1 - Y0, X1 - X0) / 48)), rows = Math.ceil((Y1 - Y0) / c), cols = Math.ceil((X1 - X0) / c);
+  const W = cols + 1, K = new Float64Array((rows + 1) * W), O = new Float64Array((rows + 1) * W), A = new Float64Array((rows + 1) * W);
+  for (let y = Y0; y < Y1; y++) for (let x = X0; x < X1; x++) { // per cell: the object's pixels, the other's, and the pixels
+    const i = y * w + x, j = (Math.floor((y - Y0) / c) + 1) * W + Math.floor((x - X0) / c) + 1;
+    K[j] += keep[i]; O[j] += other[i] && !keep[i] ? 1 : 0; A[j] += 1;
+  }
+  for (const T of [K, O, A]) for (let r = 1; r <= rows; r++) for (let q = 1; q <= cols; q++) T[r * W + q] += T[(r - 1) * W + q] + T[r * W + q - 1] - T[(r - 1) * W + q - 1];
+  const sum = (T, r0, q0, r1, q1) => T[r1 * W + q1] - T[r0 * W + q1] - T[r1 * W + q0] + T[r0 * W + q0];
+  const all = sum(K, 0, 0, rows, cols);
+  if (!all || sum(O, 0, 0, rows, cols) <= share * sum(A, 0, 0, rows, cols)) return null;
+  let best = null;
+  for (let r0 = 0; r0 < rows; r0++) for (let r1 = r0 + 1; r1 <= rows; r1++) for (let q0 = 0; q0 < cols; q0++) for (let q1 = q0 + 1; q1 <= cols; q1++) {
+    const k = sum(K, r0, q0, r1, q1);
+    if (k < least * all || (best && k < best.k)) continue;
+    const a = sum(A, r0, q0, r1, q1);
+    if (sum(O, r0, q0, r1, q1) > share * a || (best && k === best.k && a >= best.a)) continue;
+    best = { k, a, r0, q0, r1, q1 };
+  }
+  if (!best) return null;
+  const y1 = Math.min(Y1, Y0 + best.r1 * c), x1 = Math.min(X1, X0 + best.q1 * c);
+  const cut = [(Y0 + best.r0 * c) / h, (X0 + best.q0 * c) / w, y1 / h, x1 / w].map((v) => Math.round(v * 1000));
+  return [Math.max(cut[0], box[0]), Math.max(cut[1], box[1]), Math.min(cut[2], box[2]), Math.min(cut[3], box[3])]; // inside `box`
+}
 
 // The erase pass's prompt: the scene as it stays, in the upsampler's own words for what it kept (rows with a box in the
 // result). People and text stay out (a pose in words fights the plate's own motion), and the erased object is never named
