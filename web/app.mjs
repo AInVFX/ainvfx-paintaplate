@@ -3266,7 +3266,6 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
   for (const [i, e] of active.entries()) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, caption: e.caption?.text || templateCaption(e),
     mask: await uploadGraphImage(maskAt(e, p.work), i + 1, "mask"),
     layer: e.tool === "paint" ? await uploadGraphImage(snap(e.paint, p.work), i + 1, "strokes") : null,
-    plan: e.tool === "light" ? await uploadGraphImage(lightPlan(e, p.work), i + 1, "plan") : null, // a relight's second reference
     shade: shaded(e) ? await uploadGraphImage(shadeMask(e, p.work), i + 1, "shade") : null,
     quick: editSettings(e, p.prev, QUICK), full: editSettings(e, p.work, FULL) });
   const erase = active.some((e) => e.tool === "erase");

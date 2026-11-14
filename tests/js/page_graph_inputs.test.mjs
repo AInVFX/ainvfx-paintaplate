@@ -16,19 +16,19 @@ const plate = { path: "plates/horse.mp4", config: "ocio://studio-config-latest",
 const render = { prompt: "Ripple", seed: 1, grow: 53, feather: 13, prefix: "paintaplate/x/graph" };
 const image = (k, kind) => graphImageName("horse", k, kind, `${k}${kind}`.padEnd(32, "0"));
 const edit = (tool, k) => ({ tool, seed: k, caption: `${tool} caption`, quick: pass, full: pass, mask: image(k, "mask"),
-  layer: tool === "paint" ? image(k, "strokes") : null, plan: tool === "light" ? image(k, "plan") : null });
+  layer: tool === "paint" ? image(k, "strokes") : null });
 
 test("an image of the graph is named after the plate, the edit and what it holds, and sits at the top of the input folder", () => {
   assert.equal(graphImageName("horse", 1, "mask", "a64a59080b03a6baa8d9aaef75719cfc"), "paintaplate_horse_e1_mask_a64a5908.png");
   assert.equal(graphImageName("my plate.v2", 2, "strokes", "4d19b271e717"), "paintaplate_my_plate_v2_e2_strokes_4d19b271.png");
-  assert.equal(graphImageName("shots/a b", 3, "plan", "0123456789"), "paintaplate_shots_a_b_e3_plan_01234567.png");
+  assert.equal(graphImageName("shots/a b", 3, "shade", "0123456789"), "paintaplate_shots_a_b_e3_shade_01234567.png");
 });
 
 test("every image loader reads a file at the top of the input folder, and the README names each file that must be there", () => {
   const edits = [edit("erase", 1), edit("paint", 2), edit("light", 3)];
   const api = sceneGraph(WF, { plate, edits, render, about: { version: "1.11.13", name: "horse" } });
   const read = Object.values(api).filter((n) => ["LoadImage", "LoadImageMask"].includes(n.class_type)).map((n) => n.inputs.image);
-  const files = edits.flatMap((e) => [e.mask, e.layer, e.plan].filter(Boolean));
+  const files = edits.flatMap((e) => [e.mask, e.layer].filter(Boolean));
   assert.deepEqual([...new Set(read)].sort(), [...files].sort());
   assert.ok(read.every((name) => !name.includes("/")), `no image in a subfolder of input: ${read}`);
   const readme = Object.values(Object.values(api).find((n) => n.class_type === "PrimitiveStringMultiline").inputs).find((v) => typeof v === "string");
