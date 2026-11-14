@@ -21,11 +21,11 @@ def run(browser, port, U):
     page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('#render-left').textContent === 'full size ready'", timeout=180000)
     lines = page.evaluate("window.__lines")
-    started = [t for t in lines if re.match(r"Render v\d+: .+ \(about \d+ s\)", t)]
-    U.check(any(t.startswith("Render v1: Composite, full size (about") for t in started) and not any(", preview (about" in t for t in started),
+    started = [t for t in lines if re.match(r"Render v\d+: .+: about \d+ s", t)]
+    U.check(any(t.startswith("Render v1: Composite, full size: about") for t in started) and not any(", preview: about" in t for t in started),
             f"the render starts no preview step, and makes the full-size composite: {started}")
     U.check(any(t.startswith("Render v1: 1 edit (") and "shot preview off" in t for t in lines), "the render's line says that the shot preview is off")
-    U.check(not any("plays the full-size shot" in t for t in lines), "the viewer keeps the plate until the full-size composite")
+    U.check(not any(t.startswith("Viewer: full-size shot") for t in lines), "the viewer keeps the plate until the full-size composite")
     rows = page.evaluate("[...document.querySelectorAll('#stages li .name')].map((e) => e.textContent)")
     U.check(bool(rows) and not any(", preview" in r for r in rows), f"the Render panel lists no preview row: {rows}")
     page.close()

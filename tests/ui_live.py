@@ -115,6 +115,7 @@ DONE = "document.querySelectorAll('#history li').length === {n} && !document.que
 
 LEFT = "#history li[data-left]"  # History's mark on an erase that the page's check holds back (logic.eraseCheck), or that asks for its object's name
 ASKED = "document.querySelector('#ask').open"  # the page's question dialog: while it is open, the page behind it takes no click
+ENDED = ("Export: done", "Download: ")  # the status line once the export is written, then once its zip downloads
 NAME_ASKED = "took the stroke for another object"  # the page's line when an erase with no words asks for its object's name (logic.asksName)
 
 
@@ -267,7 +268,7 @@ def main():
                 print("status:", page.inner_text("#status"))
                 page.screenshot(path=f"{SHOTS}/fail.png")
                 raise
-            ok = final.startswith("Exported") or final.startswith("Downloading")
+            ok = final.startswith(ENDED)
             browser.close()
     except Exception as exc:
         print("FAILED AT:", type(exc).__name__, str(exc).splitlines()[0][:200])

@@ -21,11 +21,11 @@ def run(browser, port, U):
             U.mock_route(port, "/mock/leave", {"times": 2})
         picked(p, tool)
 
-    ui_live.pick, names = pick, []
+    ui_live.pick, final, names = pick, "", []
     try:
         with contextlib.redirect_stdout(said):  # the flow's own lines: « edit erase: asked | ... » when it answers the question
-            names = ui_live.flow(page, f"http://127.0.0.1:{port}", lambda: U.open_path(page, "plates/desk.mp4"),
-                                 tempfile.mkdtemp(prefix="paintaplate_live_"), wait_s=60)[1]
+            final, names = ui_live.flow(page, f"http://127.0.0.1:{port}", lambda: U.open_path(page, "plates/desk.mp4"),
+                                        tempfile.mkdtemp(prefix="paintaplate_live_"), wait_s=60)
     except Exception as exc:  # a wait that ran out: the check says where the flow stopped and what the page shows
         U.check(False, f"the live flow runs to the export: it stopped with {type(exc).__name__}: {str(exc).splitlines()[0][:120]}"
                        f"{U.page_state(page)} | its lines: {said.getvalue()[-400:]}")
@@ -33,6 +33,7 @@ def run(browser, port, U):
         ui_live.pick = picked
     U.check("edit erase: asked |" in said.getvalue(), "the check holds the erase back and asks « Render anyway »: the flow "
             "answers it, and the erase's shot renders")
+    U.check(final.startswith(ui_live.ENDED), f"the flow ends on the status line that CI's live job reads, the export's or the download's: {final[:80]!r}")
     folders = sorted({n.split("/")[0] for n in names})
     U.check({"export", "matte"} <= set(folders), f"the flow reaches the export: {len(names)} files in the zip ({', '.join(folders)})")
     page.close()

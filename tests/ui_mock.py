@@ -607,8 +607,8 @@ def fluid_flow(browser, port):
     page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
       return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden; })()""", timeout=120000)
     log = log_lines(page)
-    sent = [line for line in log if line.startswith("Fluid v1: 3 keyframe")]
-    check(sent and 'prompt "ainvfxfluid, thick white smoke"' in sent[0] and "at 1, 18, 33," in sent[0],
+    sent = [line for line in log if line.startswith("Fluid shot v1: started.")]
+    check(sent and 'prompt "ainvfxfluid, thick white smoke"' in sent[0] and "3 keyframes, at frames 1, 18, 33." in sent[0],
           f"Enter generates with the trigger, the words and the three keyframes: {sent}")
     rows = row_titles(page)
     check(rows == ["1. Fluid"] and any("under the edits: the fluid shot v1" in line for line in log) and not page.is_disabled("[data-tool=erase]"),
@@ -618,7 +618,7 @@ def fluid_flow(browser, port):
     page.keyboard.press("Enter")
     until(page, "document.querySelector('#hud').textContent.includes('already made')")
     log = log_lines(page)
-    check(not any(line.startswith("Fluid v2") for line in log) and "already made" in page.text_content("#hud"),
+    check(not any(line.startswith("Fluid shot v2") for line in log) and "already made" in page.text_content("#hud"),
           "Enter again on the same keyframes and words makes nothing twice")
     page.screenshot(path=os.path.join(SHOTS, "4_fluid.png"))
     page.keyboard.press("c")

@@ -81,7 +81,7 @@ def run(browser, port, U):
     if not page.is_checked("#whole"):
         page.check("#whole")
     U.paint_once(page, "cup", [(0.6, 0.4), (0.62, 0.45)])
-    U.check(U.until(page, f"{STATUS}.startsWith('Found the cup under the stroke')", 30000), f"once SAM's masks are kept the status line says the object is found: {status()}")
+    U.check(U.until(page, f"/^Edit \\w+: cup found under the stroke\\./.test({STATUS})", 30000), f"once SAM's masks are kept the status line says the object is found: {status()}")
 
     # 5. The stopped edit dropped by a second Esc, then Enter: the edit that waited still runs
     page.keyboard.press("Escape")  # the erase strokes of check 4 go
