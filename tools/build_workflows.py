@@ -725,11 +725,22 @@ def hdr():
     sigmas with euler; the video VAE in float32 encodes the guide and decodes the result, tiled (128-frame temporal tiles, as
     Lightricks' Tiled Fusion graph); Color Space (OCIO) turns the decoded ACEScct codes into ACEScg scene-linear values with
     the config's own conversion, the curve of Lightricks' LTXVHDRDecodePostprocess, frame by frame into one array and with
-    no tone-mapped copy; Save Frames writes them. The conditioning frame rate is at most 30, as there. The page gives it shots at the working size, already a multiple of 32.
+    no tone-mapped copy; Save Frames writes them. The conditioning frame rate is at most 30, as there.
+
+    The page gives it a shot at the working size, already a multiple of 32, or a plate with no edit, which is its own SDR
+    shot: the slots color_space, width and height bring the plate into the model space at the working size, and
+    plate_width and plate_height bring the HDR frames back to the plate's size. Save Frames and Save Movie keep Load
+    Plate's frame count, so the 8n+1 padding that LTX needs stays out of the result.
     """
     g = Graph()
     load = g("PaintAPlate_LoadPlate", _title="Shot (SDR)", path=Slot("path", ""), max_frames=Slot("max_frames", 121), pad_8n1=True)
-    guide = g("ImageColorSpace", _title="Guide: the shot from sRGB to ACEScct", image=load[0], source="sRGB", destination="HDR ACEScct")
+    # a plate with no edit: Color Space (OCIO) from its file's colour space (Slot color_space) into the model space, then the
+    # working size (Slots width and height). A shot is in the model space at the working size already: both pass it on as
+    # it is, with no copy (source equal to destination, and 0 x 0 in core's Upscale Image)
+    sdr = colour(g, load[0], Slot("color_space", "@model"), "@model", "SDR shot in the model space")
+    sdr = g("ImageScale", _title="SDR shot at the working size", image=sdr, upscale_method="lanczos", width=Slot("width", 0),
+            height=Slot("height", 0), crop="disabled")
+    guide = g("ImageColorSpace", _title="Guide: the shot from sRGB to ACEScct", image=sdr, source="sRGB", destination="HDR ACEScct")
     size = g("GetImageSize", image=guide)
     lora = g("LTXICLoRALoaderModelOnly", _title="SDR-to-HDR IC-LoRA (reads its downscale factor)",
              model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"), lora_name=Slot("hdr_lora", HDR_LORA),
@@ -757,15 +768,19 @@ def hdr():
     linear = colour(g, decoded, "ACEScct", "ACEScg", "ACEScct to ACEScg scene-linear")
     # where the SDR shot is black, its own black: the IC-LoRA's frames are noisy there (mathops.keep_black). Keep Black
     # converts each frame of the SDR shot as it uses it, so no converted copy of the shot waits through the sampling
-    linear = g("PaintAPlate_KeepBlack", hdr=linear, sdr=load[0], config=Slot("config", OCIO_CONFIG), source="@model",
+    linear = g("PaintAPlate_KeepBlack", hdr=linear, sdr=sdr, config=Slot("config", OCIO_CONFIG), source="@model",
                low=0.001, high=0.01)
+    # a plate with no edit: the HDR frames at the plate's size (Slots plate_width and plate_height). Bilinear, so no value
+    # overshoots a highlight or falls below 0. 0 x 0 keeps the working size, where Fit to Plate takes a shot's HDR frames
+    linear = g("ImageScale", _title="HDR frames at the plate's size", image=linear, upscale_method="bilinear",
+               width=Slot("plate_width", 0), height=Slot("plate_height", 0), crop="disabled")
     # each frame says the shot's frame rate, the one the page sends for the movie below: a 16-bit fluid shot's frames open
     # as a plate, and that plate took 24 fps for a shot made at 50 (pod, 11 Nov)
-    g("PaintAPlate_SaveFrames", _title="HDR frames (half-float EXR, ACES2065-1)", _output="hdr", format="exr", fps=Slot("movie_fps", 24.0),
+    g("PaintAPlate_SaveFrames", _title="HDR frames (half-float EXR, ACES2065-1)", _output="hdr", format="exr", fps=Slot("movie_fps", 24.0), frames=load[4],
       images=colour(g, linear, "ACEScg", HDR_SPACE, "ACEScg to ACES2065-1"), filename_prefix=Slot("prefix", "paintaplate/plate/hdr/f"))
     # the same frames as an 8-bit movie for the viewer, in log values (ACEScct, `view_space`): the look of the EXR frames
     g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="HDR movie (log values: the look of the EXR frames)", _output="movie", fps=Slot("movie_fps", 24.0),
-      crf=12, images=colour(g, linear, "ACEScg", Slot("view_space", "ACEScct"), "HDR movie values"),
+      crf=12, frames=load[4], images=colour(g, linear, "ACEScg", Slot("view_space", "ACEScct"), "HDR movie values"),
       filename_prefix=Slot("video_prefix", "paintaplate/plate/hdr_movie"))
     g.save("hdr")
 

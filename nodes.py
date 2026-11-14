@@ -705,13 +705,16 @@ class SaveFrames(io.ComfyNode):
                 io.Float.Input("fps", default=0.0, min=0.0, max=240.0, optional=True,
                                tooltip="exr only: the shot's frame rate, written in each frame's header (framesPerSecond), "
                                        "so the frames keep their rate when they open as a plate. 0 writes none."),
+                io.Int.Input("frames", default=0, min=0, max=4096, optional=True,
+                             tooltip="The frames to save, from the first: 0 saves them all. Load Plate's 'frames' leaves its "
+                                     "8k+1 padding out."),
             ],
             is_output_node=True,
         )
 
     @classmethod
-    def execute(cls, images, filename_prefix, format="png", fps=0.0) -> io.NodeOutput:
-        n, h, w = images.shape[0], images.shape[1], images.shape[2]
+    def execute(cls, images, filename_prefix, format="png", fps=0.0, frames=0) -> io.NodeOutput:
+        n, h, w = min(frames, images.shape[0]) if frames else images.shape[0], images.shape[1], images.shape[2]
         folder, name, counter, sub, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory(), w, h)
         names = [f"{name}_{counter + i:05}_.{'png' if format == 'png16' else format}" for i in range(n)]
         paths, bar = [os.path.join(folder, f) for f in names], comfy.utils.ProgressBar(n)
