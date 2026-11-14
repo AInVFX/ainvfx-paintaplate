@@ -320,8 +320,13 @@ export function editorGraph(page, info) {
       }
       return level.get(id);
     };
+    // then each node moves right, to the column before its first consumer in the section: a value is made where it is used
+    for (const id of sec.members) depth(id);
+    const users = new Map(sec.members.map((id) => [id, []]));
+    for (const id of sec.members) for (const v of Object.values(prompt[id].inputs)) if (Array.isArray(v) && within.has(String(v[0]))) users.get(String(v[0])).push(id);
+    for (const id of [...sec.members].sort((p, q) => level.get(q) - level.get(p))) if (users.get(id).length) level.set(id, Math.max(level.get(id), Math.min(...users.get(id).map((u) => level.get(u))) - 1));
     const columns = [];
-    for (const id of sec.members) (columns[depth(id)] ??= []).push(id);
+    for (const id of sec.members) (columns[level.get(id)] ??= []).push(id);
     const set = sec.members.filter((id) => page[id]).flatMap((id) => (page[id]._meta.set ?? []).filter((k) => page[id].inputs[k] !== undefined && !Array.isArray(page[id].inputs[k]))
       .map((k) => `- ${page[id]._meta.title.replace(`${sec.name} · `, "").replace(/ \[[^\]]*\]$/, "")}: ${k} ${short(page[id].inputs[k])}`));
     const text = `${prompt[sec.note].inputs.value}${set.length ? `\n\n**Values the page set**\n\n${set.join("\n")}` : ""}`;
