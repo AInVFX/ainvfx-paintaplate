@@ -618,9 +618,10 @@ def carry(mask: np.ndarray, dy: int, dx: int) -> np.ndarray:
 RECORD_SIDE = 320  # PAINTAPLATE_RECORD keeps what Follow Matte was given at this width at most
 
 
-def record(folder: str, masks, n: int, first, shot, base, zone: float, threshold: float, element) -> str:
+def record(folder: str, masks, n: int, first, shot, base, zone: float, threshold: float, element, erased=None) -> str:
     """With PAINTAPLATE_RECORD=<folder> in ComfyUI's environment, what Follow Matte was given, as one .npz file: the
-    tracker's masks, the first-frame mask, the element, the shot and the plate, every k-th pixel so the width is
+    tracker's masks, the first-frame mask, the element, the shot, the plate and the Clean matte under a paint, every
+    k-th pixel so the width is
     RECORD_SIDE at most, in 8 bits. SAM and LTX need a GPU; this file does not: follow_matte(**replay(file)) runs the
     matte again anywhere, so a rule is tried on the real shot that showed its fault. Returns the file's path."""
     def small(a, after=0):  # `after`: the axes that follow the width (1 for an image's channels)
@@ -635,7 +636,7 @@ def record(folder: str, masks, n: int, first, shot, base, zone: float, threshold
     h, w = np.shape(shot)[1:3] if shot is not None else np.shape(masks)[-2:]
     path = os.path.join(folder, f"follow_matte_{w}x{h}_{n}f_{time.strftime('%Y%m%d_%H%M%S')}.npz")
     np.savez_compressed(path, masks=small(masks), first=small(first), element=small(element), shot=small(shot, 1), base=small(base, 1),
-                        n=n, zone=zone, threshold=threshold)
+                        erased=small(erased), n=n, zone=zone, threshold=threshold)
     return path
 
 
@@ -644,12 +645,13 @@ def replay(path: str) -> dict:
     d = np.load(path)
     back = lambda k: d[k].astype(np.float32) / 255 if d[k].size else None  # noqa: E731
     return {"masks": back("masks") if d["masks"].size else np.zeros((0, 1, 1), np.float32), "n": int(d["n"]), "first": back("first"),
-            "shot": back("shot"), "base": back("base"), "zone": float(d["zone"]), "threshold": float(d["threshold"]), "element": back("element")}
+            "shot": back("shot"), "base": back("base"), "zone": float(d["zone"]), "threshold": float(d["threshold"]), "element": back("element"),
+            "erased": back("erased") if "erased" in d.files else None}
 
 
 def follow_summary(n: int, seen=None, zones=0, placed=0, strays=0, held=0, added=0, most=0.0, alone=0, guarded=0,
-                   smoothed=0, moved=0, fronts=0, gone=0, largest=None) -> str:
-    """Follow Matte's summary for a person (Adrien, 13 Nov 2026): a headline, the warning next when there is one, then one
+                   smoothed=0, moved=0, fronts=0, gone=0, largest=None, cleaned=0) -> str:
+    """Follow Matte's summary for a person: a headline, the warning next when there is one, then one
     line per rule that acted, and only those. The page writes « Paint matte (WxH): » or « Clean matte (WxH): » before it,
     and the GPU report reads that start. `seen` counts the frames where SAM 3.1 found the object, None when it returned
     no mask; `largest` is (the largest matte against the object's area on its frame, that frame); the other counts are
@@ -671,6 +673,8 @@ def follow_summary(n: int, seen=None, zones=0, placed=0, strays=0, held=0, added
         if added:
             why = [f"up to {most:.1f}x SAM's mask"] * bool(most) + [f"{on(alone)} with no SAM mask"] * bool(alone)
             lines.append(f"Added: areas the shot changed next to the object, on {on(added)}" + (f" ({'; '.join(why)})." if why else "."))
+    if cleaned:
+        lines.append(f"Removed: areas the shot changed inside the Clean matte, on {on(cleaned)} (not touching the SAM mask).")
     if guarded:
         lines.append(f"Removed: areas the shot changed away from the SAM mask, on {on(guarded)} (changes over 3x the object).")
     if smoothed:
@@ -715,7 +719,7 @@ def matte_flicker(mattes, run: int = 3) -> np.ndarray:
 
 
 def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=None, zone: float = 1 / 16,
-                 threshold: float = 0.1, workers: int = 8, element=None, tick=None):
+                 threshold: float = 0.1, workers: int = 8, element=None, tick=None, erased=None):
     """One matte per frame from a tracker's masks, made safe for the composite. Returns (mattes (n, H, W), summary).
 
     A tracker can return no masks, fewer than the frames, lose part of an object, or find other objects by itself
@@ -786,6 +790,10 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       barn that the horse was hiding; the composite grew them to 1.2% of the frame). Otherwise the
       tracker's mask is taken wherever it goes: when it is the matte of the frame before, whole, on places that
       changed, the object moves by itself, and the plate is not asked again;
+    - with `erased`, the matte of a Clean edit made under this paint ((N, H, W) in 0 to 1, at any size): there the
+      shot shows the cleaned place while the plate still shows the object, so the two differ on every frame. Inside
+      it the region is no anchor: a changed area joins only where it touches the tracker's mask, within `zone` of
+      it. Painted smoke that drifts over the cleaned place away from its source is cut there;
     - changes larger than 3 times the object's largest area keep only what lies at the tracker's own mask, and the
       region does not follow them. A matte more than FOLLOW_SPIKE times the median of the 7 frames around it, when the
       tracker's own mask did not grow as much, keeps only what those frames hold too. So the matte's area changes
@@ -796,7 +804,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     last seen), then one line per rule that acted.
     """
     if os.environ.get("PAINTAPLATE_RECORD"):
-        record(os.environ["PAINTAPLATE_RECORD"], masks, n, first, shot, base, zone, threshold, element)
+        record(os.environ["PAINTAPLATE_RECORD"], masks, n, first, shot, base, zone, threshold, element, erased)
     masks = np.asarray(masks, np.float32).reshape((-1,) + np.shape(masks)[-2:]) if np.size(masks) else np.zeros((0, 1, 1), np.float32)
     first = np.asarray(first, np.float32)
     first = first[0] if first.ndim == 3 else first
@@ -805,6 +813,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     seed = fit(first)
     el = None if element is None or not np.size(element) else fit(np.asarray(element, np.float32).reshape(np.shape(element)[-2:]))
     tracked = lambda t: fit(masks[t]) if t < len(masks) else np.zeros((h, w), bool)  # noqa: E731
+    erased = np.asarray(erased, np.float32).reshape((-1,) + np.shape(erased)[-2:]) if erased is not None and np.size(erased) else None
+    cleaned_at = (lambda t: fit(erased[min(t, len(erased) - 1)])) if erased is not None else None  # noqa: E731
     grow = lambda m, r: dilate(m.astype(np.uint8), min(r, max(h, w))) > 0  # noqa: E731
     eight = np.ones((3, 3), bool)
 
@@ -886,7 +896,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     zoned = line is el and 2 * int(el.sum()) <= given  # a paint zone at least twice the object: the tracker returns the zone first
     out, cores, prev, peak = np.zeros((n, h, w), np.float32), np.zeros((n, h, w), bool), seed, int(seed.sum())
     size, last = np.ones(n, np.int64), max(int(line.sum()), 1)  # the object's area on each frame
-    seen = strays = held = added = alone = lost = guarded = smoothed = fronts = zones = placed = 0
+    seen = strays = held = added = alone = lost = guarded = smoothed = fronts = zones = placed = cleaned = 0
     most, chunk = 1.0, 2 * max(1, workers)
     still = None  # does the object keep its place in the scene? Not known before frame FOLLOW_STILL
     waiting = []  # the zone's frames before it is known whether the object stands still, each with the object's place
@@ -970,6 +980,12 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                         areas, covered = np.bincount(labels[changed]), np.bincount(labels[changed & hide], minlength=int(labels.max()) + 1)
                         gain = np.isin(labels, joined[2 * covered[joined] <= areas[joined]]) & ~hide  # of an area that lies mostly in view, what is in view
                         gain |= np.isin(labels, joined[4 * covered[joined] <= areas[joined]]) & hide & here & ~open0  # and, when a quarter of it at most is covered, its covered part in the margin around the place: there the plate may have first shown something that has left
+                    if cleaned_at is not None:  # under a Clean edit the shot differs from the plate on every frame: there only the tracker's mask anchors a change
+                        under = gain & cleaned_at(t)
+                        near = under & grow(core, reach) if core.any() else np.zeros_like(under)
+                        cut = under & ~(touching(near, grow(core, thin)) if near.any() else near)
+                        if cut.any():
+                            gain, cleaned = gain & ~cut, cleaned + 1
                     if int(gain.sum()) > 3 * max(peak, 1):  # never a runaway: changes far beyond the object's size stay out
                         gain, follows = (gain & grow(core, reach) if core.any() else np.zeros_like(core)), False
                         guarded += 1
@@ -1049,7 +1065,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
         largest = (float(ratio[worst]), worst)
     tracked_any = bool(len(masks)) and bool(masks.any())
     counts = dict(seen=seen, zones=zones, placed=placed, strays=strays, held=held, added=added, most=most, alone=alone) if tracked_any else {}
-    return out, follow_summary(n, guarded=guarded, smoothed=smoothed, moved=moved, fronts=fronts, gone=gone, largest=largest, **counts)
+    return out, follow_summary(n, guarded=guarded, smoothed=smoothed, moved=moved, fronts=fronts, gone=gone, largest=largest, cleaned=cleaned, **counts)
 
 
 GRAIN_UNIT = _grain_unit()
