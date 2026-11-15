@@ -63,13 +63,13 @@ def run(browser, port, U):
             f"a click on Edit 1's row shows it and selects nothing: class {row!r}, prompt {page.input_value('#prompt')!r}")
     start = len(U.log_lines(page))
     U.stroke(page, E3); away()
-    for _ in range(80):  # the new edit's first line, once the stroke rests
+    for _ in range(80):  # the new edit's first line, once the stroke rests: it carries the number the edit takes in History, above the two edits
         added = U.log_lines(page)[start:]
-        if any(t.startswith("Edit New:") for t in added):
+        if any(t.startswith("Edit 3:") for t in added):
             break
         page.wait_for_timeout(250)
     ok, seen = both()
-    U.check(ok and page.is_hidden("#editing") and not hidden() and any(t.startswith("Edit New:") for t in added) and not any(t.startswith("Edit 1:") for t in added),
+    U.check(ok and page.is_hidden("#editing") and not hidden() and any(t.startswith("Edit 3:") for t in added) and not any(t.startswith("Edit 1:") for t in added),
             f"after the click, a stroke of Edit 1's tool starts a new edit on top: {seen}, lines {[t[:40] for t in added[:3]]}")
     page.keyboard.press("Escape")
 
