@@ -2,6 +2,8 @@
 
 **Winner of the Open Weights Only category and of the « VFX Workflow Built with LTX » bonus in Comfy's [Open Source Higgsfield](https://comfy.org/open-source-higgsfield/) contest** (November 2026). #OpenSourceHiggsfield
 
+<p align="center"><a href="https://cloud.swmgpu.com/w/samofvaani/ltx-2-5-paint-a-plate-vfx"><img src="https://img.shields.io/badge/swm%20cloud-Launch%20Pre--Loaded%20Workspace-0A66C2" alt="swm cloud"></a></p>
+
 <table>
 <tr>
 <td align="center" width="50%"><a href="https://youtu.be/EsL3O7WvBr4"><img src="https://img.youtube.com/vi/EsL3O7WvBr4/maxresdefault.jpg" alt="The showcase of Paint a plate on YouTube: painted fire, smoke and water, a set extension, a green screen, a relight" width="100%"></a><br><b><a href="https://youtu.be/EsL3O7WvBr4">▶ Watch the showcase (4 minutes)</a></b><br>Shots made live with the app</td>
@@ -31,7 +33,7 @@ On Hugging Face: the 23 test plates, [AInVFX/ainvfx-paintaplate](https://hugging
 
 ## Install it
 
-The steps are the same on Windows, macOS and Linux. Paint a plate needs ComfyUI v0.43.0 or newer and [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo), and its models need a large NVIDIA GPU (see **GPU** above): on a Mac or a smaller card, run it on Runpod (option 3).
+The steps are the same on Windows, macOS and Linux. Paint a plate needs ComfyUI v0.43.0 or newer and [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo), and its models need a large NVIDIA GPU (see **GPU** above): on a Mac or a smaller card, run it on Runpod (option 3) or launch the pre-loaded [**swm cloud** workspace](https://cloud.swmgpu.com/w/samofvaani/ltx-2-5-paint-a-plate-vfx) with all ~62.6 GB of weights already installed.
 
 ### 1. With ComfyUI Manager (recommended)
 
