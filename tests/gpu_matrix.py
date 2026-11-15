@@ -22,7 +22,7 @@ names, with commas. The strokes and the seed of each case are in gpu_matrix.json
 same strokes from the same seed at every run, so a wrong picture comes back at the next run. --seeds 7,8,9 runs each
 case once per seed, in place of its own. ui_live.py opens the page with ?index=0: the page leaves its job index alone,
 so every job runs and every time is a measured one. --memory small,
-medium or large asks the page for that memory profile (logic.memoryProfile) in place of the one the card gives: the same
+medium or large asks the page for that memory profile (logic.memoryProfile) in place of the one the GPU gives: the same
 case under two profiles shows what a profile costs.
 
 It needs Playwright with Google Chrome: Playwright's own Chromium cannot play H.264. Run it on the machine that runs
@@ -197,9 +197,9 @@ def render_hdr(steps):
     return any(re.match(r"v\d+ SDR to HDR\b", label) for label, _ in steps)
 
 
-def comfy_lines(url, since, marks=("[Paint a plate] HDR Match:", "PaintAPlate HDR Match:")):
+def comfy_lines(url, since, marks=("[Paint a plate] HDR Match:",)):
     """ComfyUI's own log lines since `since` (its local time, ISO) that hold one of `marks` (HDR Match's line, with the pack's
-    « [Paint a plate] » prefix or in its older form), from its /internal/logs/raw. It keeps the last few hundred lines only:
+    « [Paint a plate] » prefix), from its /internal/logs/raw. It keeps the last few hundred lines only:
     [] when they are gone, or when this ComfyUI has no such route."""
     try:
         entries = get(url + "/internal/logs/raw").get("entries", [])
@@ -340,7 +340,7 @@ def read_log(text):
         "live_off": re.findall(r"(?:Warning: live preview off|Live preview is off): ([^\n]*)", text),
         "profile": f"{profile.group(1)} ({'. '.join(x for x in profile.group(2, 3) if x)})" if profile else "not in the log's last 400 lines",
         "mattes": re.findall(r"([A-Z][a-z]+ matte(?: \([^)\n]*\))?: tracked on [^\n]*(?:\n  [^\n]*)*)", text),  # any word before « matte »; the headline and its detail lines (mathops.follow_summary)
-        "seeds": sorted(set(re.findall(r"\bseed (\d+)", text)), key=int),
+        "seeds": sorted(set(re.findall(r"\b[Ss]eed (\d+)\b(?! asked for)", text)), key=int),  # « seed 105, » in a sentence, « Seed 104, » on a detail line
         "announced": {f"v{v} {label}": int(s) for v, label, s in re.findall(r"Render v(\d+): (.+?)(?: \(about |: about )(\d+) s", text)},
         "figures": re.findall(r"((?:Edit \d+:|Warning: edit \d+,) [^\n]*?\(\d+% of it changed[^)\n]*\))", text),  # an erase: how much of the object changed, gone or held back (logic.leftLines)
     }
@@ -402,8 +402,10 @@ def media_frames(src, want):
 
 
 def edit_box(stroke, width, height):
-    """An edit's box on the first frame, in pixels: its stroke's points, and half its brush around them."""
-    xs, ys, r = [p[0] * width for p in stroke[2]], [p[1] * height for p in stroke[2]], (stroke[3] if len(stroke) > 3 else 64) / 2
+    """An edit's box on the first frame, in pixels: the points of its strokes, and half its brush around them."""
+    from ui_live import paths
+    points = [p for path in paths(stroke[2]) for p in path]
+    xs, ys, r = [p[0] * width for p in points], [p[1] * height for p in points], (stroke[3] if len(stroke) > 3 else 64) / 2
     return (min(xs) - r, min(ys) - r, max(xs) + r, max(ys) + r)
 
 
@@ -430,7 +432,7 @@ def framed(box, width, height, least=160):
 
 def page_mask(comfy, jobs, graphs):
     """The mask the page sent Klein for an erase: the image that the LoadImageMask node of the case's last edit job loads
-    (the full-size pass, which runs after the quick pass), as a path in ComfyUI's input folder. jobs: the page's job lines
+    (the full-size Klein pass, which runs after the edit preview), as a path in ComfyUI's input folder. jobs: the page's job lines
     (read_log); graphs: {prompt id: its API graph, from ComfyUI's /history}. The page uploads an image under the hash of its
     content (app.mjs, uploadCanvas), so only the job's graph names the file. None when /history holds no edit job of the case."""
     for job in reversed([j["id"] for j in jobs if j["name"] == "edit"]):
@@ -441,26 +443,24 @@ def page_mask(comfy, jobs, graphs):
     return None
 
 
-def quick_size(log):
-    """The size of the edit preview, from the page's line « Working sizes: edits at 1920 x 1088, edit preview at 768 x 432, ... »
-    (« quick passes at » in its older form): the size the page judges an erase at (app.mjs, `p.prev`). The same line's shot
-    preview is another size. None when the log has no such line."""
-    found = re.findall(r"(?:edit preview|quick passes) at (\d+) x (\d+)", log)
+def edit_preview_size(log):
+    """The edit preview's size from the page's working sizes line (« edit preview at 768 x 432 »): the size the page judges
+    an erase at (app.mjs, `p.prev`), and not the shot preview's. None without that line."""
+    found = re.findall(r"edit preview at (\d+) x (\d+)", log)
     return (int(found[-1][0]), int(found[-1][1])) if found else None
 
-
-def erase_verdict(after, before, mask, size):
+def erase_verdict(after, before, mask, size, first=1):
     """The page's verdict on an erase, logic.eraseCheck run with Node: `after` the export's first frame and `before` the
     plate's (RGB, 8 bits), `mask` the file the page sent Klein, all three drawn at `size` as the page's canvases draw them
     (tests/erase_probe.py: one bridge, one resize). {"left": True, False or None, "changed", "edges", "text"}."""
     def none(why):
-        return {"left": None, "changed": None, "edges": None, "text": f"Clean, frame 1: no verdict. {why}."}
+        return {"left": None, "changed": None, "edges": None, "text": f"Clean, frame {first}: no verdict. {why}."}
     if not mask:
         return none("No mask: ComfyUI's history holds no edit job of this case")
     if not os.path.exists(mask):
         return none(f"No mask: {os.path.basename(mask)} is not in ComfyUI's input folder")
     if not size:
-        return none("No quick-pass size in the page's log")
+        return none("No edit preview size in the page's log")
     import numpy as np
     from PIL import Image
     import erase_probe as probe
@@ -473,14 +473,14 @@ def erase_verdict(after, before, mask, size):
     figures = [f"{round(100 * got['changed'])}% of the object changed" if got.get("changed") is not None else "",
                f"edges held at {got['edges']:.2f}" if got.get("edges") is not None else ""]
     detail = "; ".join(f for f in figures if f)
-    return {**got, "text": f"Clean, frame 1: {'left' if got['left'] else 'gone'}" + (f" ({detail})." if detail else ".")}
+    return {**got, "text": f"Clean, frame {first}: {'left' if got['left'] else 'gone'}" + (f" ({detail})." if detail else ".")}
 
 
 def name_asked(marks, log, jobs):
     """A case that expects the page to ask for an erase's object by name (gpu_matrix.json: « expect »: « name asked »,
     logic.asksName) passes when the page asked and neither Klein nor LTX ran. (passed, why)."""
     asked = any(m.startswith("name asked") for m in marks)
-    ran = [what for what, found in (("a Klein pass", re.search(r"Klein (?:edit preview|full size|quick pass|full-size pass)", log)),
+    ran = [what for what, found in (("a Klein pass", re.search(r"Klein (?:edit preview|full size)", log)),
                                     ("a shot", any(j["name"] == "shot" for j in jobs))) if found]
     return asked and not ran, "" if asked and not ran else "the page did not ask for the name" if not asked else " and ".join(ran) + " ran"
 
@@ -497,7 +497,7 @@ def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
     """The case's sheet, sheet.png in its folder: for each edit, the plate and the export cut around its box, on the first
     frame, at a third, at two thirds and on the last. `others`: more (title, export.zip) columns, such as another run of
     the same strokes. `mask` and `judge_at`: the mask the page sent Klein (page_mask) and the page's quick-pass size
-    (quick_size), for the verdict on a Clean edit (erase_verdict). {"path", "frames" (from 1), "cells": [(row, column, x0,
+    (edit_preview_size), for the verdict on a Clean edit (erase_verdict). {"path", "frames" (from 1), "cells": [(row, column, x0,
     y0, x1, y1)], "verdict": that verdict or None}, or None with no export or plate."""
     from PIL import Image, ImageDraw, ImageFont
     strokes, export = case.get("strokes") or [], os.path.join(folder, "export.zip")
@@ -514,13 +514,14 @@ def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
             columns.append((title, os.path.join(into, movies[0]) if movies else
                             [os.path.join(into, n) for n in sorted(names) if n.startswith("export/") and n.lower().endswith(IMAGES)]))
             mattes = mattes or sorted(glob.glob(os.path.join(into, "matte", "*.png")))
-        count = media_count(columns[1][1])
+        count, numbers = media_count(columns[1][1]), frame_numbers(columns[0][1])  # the plate's own frame numbers
+        number = lambda i: numbers[i] if i < len(numbers) else i + 1  # noqa: E731
         rows = sorted({0, count // 3, 2 * count // 3, count - 1})
         pictures = [media_frames(src, rows) for _, src in columns]
         height, width = pictures[1][rows[0]].shape[:2]
         erases = [s for s in strokes if s[0] == "erase"]
-        verdict = None if not erases else erase_verdict(pictures[1][rows[0]], pictures[0][rows[0]], mask, judge_at) if len(erases) == 1 else \
-            {"left": None, "changed": None, "edges": None, "text": f"Clean, frame 1: no verdict. {len(erases)} Clean edits share the frame."}
+        verdict = None if not erases else erase_verdict(pictures[1][rows[0]], pictures[0][rows[0]], mask, judge_at, number(0)) if len(erases) == 1 else \
+            {"left": None, "changed": None, "edges": None, "text": f"Clean, frame {number(0)}: no verdict. {len(erases)} Clean edits share the frame."}
         edits = []
         for s in strokes:
             if s[0] == "light" or not mattes and s[0] != "erase" and s[0] != "paint":
@@ -555,10 +556,10 @@ def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
             if s[0] == "erase" and verdict:
                 draw.text((x, out.height - head + 4), verdict["text"], fill=(120, 220, 120) if verdict["left"] is False else (255, 200, 80), font=font)
         for r, i in enumerate(rows):
-            draw.text((6, 2 * head + r * (ch + gap) + 4), f"frame {i + 1}", fill="white", font=font)
+            draw.text((6, 2 * head + r * (ch + gap) + 4), f"frame {number(i)}", fill="white", font=font)
         path = os.path.join(folder, "sheet.png")
         out.save(path)
-        return {"path": path, "frames": [i + 1 for i in rows], "cells": cells, "verdict": verdict}
+        return {"path": path, "frames": [number(i) for i in rows], "cells": cells, "verdict": verdict}
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -578,6 +579,151 @@ def fluid_movies(comfy, jobs, history):
                         found[kind] = os.path.join(comfy, "output", *files[0].get("subfolder", "").split("/"), files[0]["filename"])
                 return found
     return {}
+
+
+STAGE_JOBS = (("Clean plate pass", "cleanup"), ("Shot", "shot"), ("Paint matte", "matte"))
+STAGES_SHOWN = (*(title for title, _ in STAGE_JOBS), "Composite")  # the composite is the export, from the case's export.zip
+
+
+def stage_movies(comfy, jobs, history):
+    """The full-size pictures of a render's stages, from the case's last job of each name in STAGE_JOBS and its outputs in
+    ComfyUI's /history: {title: a movie's path, or the image files in order}. A job's movie (PaintAPlate_SaveMovie) comes
+    first, else its frames (PaintAPlate_SaveFrames: the files of its folder whose names start as the first one's). The last
+    « matte » job is the paint's full-size tracking, the last « shot » job the full-size shot. A render of fewer edits that
+    the page finishes in the background can run after them: its jobs have other names (a Clean alone has no shot and no
+    paint matte), and its composite is never read, since the sheet's composite is the export. A stage whose job did not
+    run in this ComfyUI is left out."""
+    found = {}
+    runs = {pid[:8]: ((entry.get("prompt") or [None, None, {}])[2], entry.get("outputs") or {}) for pid, entry in history.items()}
+    for title, name in STAGE_JOBS:
+        ran = [j["id"] for j in jobs if j["name"] == name and j["id"] in runs]
+        graph, outputs = runs[ran[-1]] if ran else ({}, {})
+        for kind in ("PaintAPlate_SaveMovie", "PaintAPlate_SaveFrames"):
+            files = [f for node, out in sorted(outputs.items()) if (graph.get(node) or {}).get("class_type") == kind for f in out.get("images") or []]
+            if files:
+                first = os.path.join(comfy, "output", *files[0].get("subfolder", "").split("/"), files[0]["filename"])
+                stem = re.match(r"[^0-9_]*", files[0]["filename"]).group(0)
+                found[title] = first if kind == "PaintAPlate_SaveMovie" else \
+                    sorted(f for f in glob.glob(os.path.join(os.path.dirname(first), stem + "*")) if f.lower().endswith(IMAGES))
+                break
+    return found
+
+
+def export_media(path, into):
+    """The export inside a case's export.zip (its export/ folder), unzipped into `into`: the movie's path, or the image
+    files in order."""
+    with zipfile.ZipFile(path) as z:
+        names = [n for n in z.namelist() if n.startswith("export/") and not n.endswith("/")]
+        z.extractall(into, names)
+    movies = [n for n in names if n.lower().endswith(MOVIES)]
+    return os.path.join(into, movies[0]) if movies else [os.path.join(into, n) for n in sorted(names) if n.lower().endswith(IMAGES)]
+
+
+PAINT_HELD = 0.5  # a paint holds while its matte's changed share on the last frames stays above half of frame 1's
+PAINT_DIFF = 0.08  # a pixel differs from the plate above this, from 0 to 1 on its largest channel
+PAINT_WIDTH = 480  # the width the frames are compared at: enough for a share, and quick on 4K frames
+
+
+def paint_verdict(folder, plate, matte):
+    """Whether a paint holds to the last frames: inside the paint matte (`matte`: stage_movies' « Paint matte »), the share
+    of pixels where the export (the case's export.zip) differs from the plate, on the last tenth of the frames that keep a
+    matte, against the first frame. {"held": True, False, or None with no verdict, "text"}."""
+    import numpy as np
+    from PIL import Image
+    export = os.path.join(folder, "export.zip")
+    if not matte or not plate or not os.path.exists(plate) or not os.path.exists(export):
+        return {"held": None, "text": "Paint: no verdict. The export, the plate or the paint matte is missing."}
+    work = os.path.join(folder, "paint_files")
+    try:
+        made, source = export_media(export, work), frames_source(plate)
+        numbers, count = frame_numbers(source), media_count(made)
+        small = lambda a, size, how: np.asarray(Image.fromarray(a).resize(size, how), dtype=np.float32) / 255  # noqa: E731
+        areas = []
+        for i in range(count):  # the matte's frames are small: all of them, to find the last frames that keep one
+            m = media_frames(matte, {i})[i]
+            areas.append(int((m[..., 0] > 127).sum()))
+        kept = [i for i in range(count) if areas[i]]
+        if not kept or kept[0] != 0:
+            return {"held": None, "text": "Paint: no verdict. Its matte is empty on the first frame."}
+        tail = kept[-max(1, count // 10):]
+        if tail[-1] < count // 2:
+            return {"held": None, "text": f"Paint: no verdict. Its matte is empty from frame {numbers[kept[-1] + 1]}."}
+        want = {0, *tail}
+        a, b, m = media_frames(made, want), media_frames(source, want), media_frames(matte, want)
+        size = (PAINT_WIDTH, max(1, round(PAINT_WIDTH * a[0].shape[0] / a[0].shape[1])))
+        def share(i):
+            changed = np.abs(small(a[i], size, Image.BILINEAR) - small(b[i], size, Image.BILINEAR)).max(axis=2) > PAINT_DIFF
+            inside = small(m[i], size, Image.NEAREST)[..., 0] > 0.5
+            return float(changed[inside].mean()) if inside.any() else 0.0
+        first, last = share(0), sum(share(i) for i in tail) / len(tail)
+        if first < 0.05:
+            return {"held": None, "text": f"Paint: no verdict. The export differs from the plate on {100 * first:.0f}% of the matte on frame {numbers[0]}."}
+        held = last >= PAINT_HELD * first
+        return {"held": held, "first": first, "last": last, "text": f"Paint, frames {numbers[tail[0]]} to {numbers[tail[-1]]}: {'held' if held else 'lost'} "
+                f"({100 * last:.0f}% of its matte changed, against {100 * first:.0f}% on frame {numbers[0]})."}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def paint_result(passed, why, paint):
+    """A case that passed fails when its paint did not hold (paint_verdict)."""
+    if passed and paint and paint.get("held") is False:
+        return False, f"{paint['text']} The case fails: the paint did not hold. Check its picture on the sheet."
+    return passed, why
+
+
+def frame_numbers(src):
+    """A plate's own frame numbers, in order: the number in each file's name for an image sequence, from 1 for a movie."""
+    if isinstance(src, list):
+        return [int(found[-1]) if found else k + 1 for k, found in enumerate(re.findall(r"\d+", os.path.basename(f)) for f in src)]
+    return list(range(1, media_count(src) + 1))
+
+
+def stage_sheet(case, folder, plate, movies):
+    """A case's stages.png in its folder: the same frames of the plate and of each full-size stage (stage_movies), one
+    row per frame, one column per stage, each frame whole. The rows are the case's « stage_frames », in the plate's own
+    numbers (frame_numbers), or the first frame, a third, two thirds and the last. The composite is the export, from the
+    case's export.zip when `movies` has none. {"path", "frames", "columns", "missing": the stages with no picture}, or
+    {"error"} without the plate."""
+    from PIL import Image, ImageDraw, ImageFont
+    if not plate or not os.path.exists(plate):
+        return {"error": "the plate is not in ComfyUI's input folder"}
+    work, export = os.path.join(folder, "stage_files"), os.path.join(folder, "export.zip")
+    try:
+        if not movies.get("Composite") and os.path.exists(export):
+            movies = {**movies, "Composite": export_media(export, work)}
+        return draw_stages(case, folder, plate, movies, Image, ImageDraw, ImageFont)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def draw_stages(case, folder, plate, movies, Image, ImageDraw, ImageFont):
+    """stage_sheet's picture, once every stage has its pictures."""
+    columns = [("Plate", frames_source(plate))] + [(title, movies[title]) for title in STAGES_SHOWN if movies.get(title)]
+    numbers = frame_numbers(columns[0][1])
+    asked = case.get("stage_frames") or [numbers[0], numbers[len(numbers) // 3], numbers[2 * len(numbers) // 3], numbers[-1]]
+    rows = [numbers.index(n) for n in asked if n in numbers]
+    pictures = [media_frames(src, set(rows)) for _, src in columns]
+    (cw, ch), gap, head, left = SHEET_CELL, 8, 24, 76
+    try:
+        font = ImageFont.load_default(size=15)
+    except TypeError:
+        font = ImageFont.load_default()
+    out = Image.new("RGB", (left + len(columns) * (cw + gap), head + len(rows) * (ch + gap)), (28, 28, 28))
+    draw = ImageDraw.Draw(out)
+    for c, (title, _) in enumerate(columns):
+        draw.text((left + c * (cw + gap), 4), title, fill="white", font=font)
+    for r, i in enumerate(rows):
+        draw.text((6, head + r * (ch + gap) + 4), f"frame {numbers[i]}", fill="white", font=font)
+        for c, frames in enumerate(pictures):
+            if i in frames:  # a stage shorter than the plate leaves its cell empty
+                picture = Image.fromarray(frames[i])
+                picture.thumbnail((cw, ch))
+                out.paste(picture, (left + c * (cw + gap), head + r * (ch + gap)))
+    path = os.path.join(folder, "stages.png")
+    out.save(path)
+    return {"path": path, "frames": [numbers[i] for i in rows], "columns": [title for title, _ in columns],
+            "missing": [title for title in STAGES_SHOWN if not movies.get(title)]}
 
 
 def fluid_sheet(case, folder, movies):
@@ -636,13 +782,18 @@ def run_case(a, name, case, folder):
     result["nodes"], result["stopped_in"] = node_times(events, graphs, names), running_at_stop(events, graphs, names)
     try:  # the case's pictures: never a reason for the case to fail
         result["sheet"] = sheet(case, folder, os.path.join(a.comfy, "input", case["path"]) if case.get("path") else None,
-                                mask=page_mask(a.comfy, result["jobs"], graphs), judge_at=quick_size(result["log"]))
+                                mask=page_mask(a.comfy, result["jobs"], graphs), judge_at=edit_preview_size(result["log"]))
     except Exception as exc:
         result["sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     try:  # a fluid case's keyframes and shot, also never a reason to fail
         result["fluid_sheet"] = fluid_sheet(case, folder, fluid_movies(a.comfy, result["jobs"], history)) if case.get("fluid") else None
     except Exception as exc:
         result["fluid_sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+    try:  # each full-size stage beside the plate, never a reason to fail either
+        result["stage_sheet"] = stage_sheet(case, folder, os.path.join(a.comfy, "input", case["path"]), stage_movies(a.comfy, result["jobs"], history)) \
+            if case.get("stage_frames") else None
+    except Exception as exc:
+        result["stage_sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     for job in result["jobs"]:  # when ComfyUI ran it, and the most memory held between those two times
         span = spans.get(job["id"])
         job["run"] = span[1] - span[0] if span else None
@@ -653,10 +804,26 @@ def run_case(a, name, case, folder):
     if case.get("expect") == "name asked":  # an erase with no words on another object: no Klein pass, no shot (logic.asksName)
         result["passed"], result["why"] = name_asked(result["marks"], result["log"], result["jobs"])
     result["passed"], result["why"] = matte_verdict(result["passed"], result["why"], result["mattes"])
+    if any(s[0] == "paint" for s in case.get("strokes", [])) and case.get("path"):
+        try:  # the paint's verdict on the export: a paint that does not hold fails the case
+            result["paint"] = paint_verdict(folder, os.path.join(a.comfy, "input", case["path"]), stage_movies(a.comfy, result["jobs"], history).get("Paint matte"))
+        except Exception as exc:
+            result["paint"] = {"held": None, "text": f"Paint: no verdict. {type(exc).__name__}: {str(exc)[:120]}."}
+        result["passed"], result["why"] = paint_result(result["passed"], result["why"], result["paint"])
     result["matte"] = matte_areas(a.comfy, t0) if any(s[0] == "paint" for s in case.get("strokes", [])) else None
+    plate = os.path.join(a.comfy, "input", case["path"]) if case.get("path") else ""
+    result["numbers"] = frame_numbers(frames_source(plate)) if plate and os.path.exists(plate) else []  # the plate's own frame numbers
     live = os.path.join(a.comfy, "temp", "paintaplate_live", "*.webp")
     result["live_files"] = sum(os.path.getmtime(f) >= t0 for f in glob.glob(live))
     return result
+
+
+def matte_lines(where, areas, ratios, worst, numbers):
+    """The report's lines on a paint matte's area, frame by frame, in the plate's own frame numbers (`numbers`)."""
+    number = lambda i: numbers[i] if i < len(numbers) else i + 1  # noqa: E731
+    return [f"- Paint matte (`{where}`): {len(areas)} frames; frame {number(0)} covers {100 * areas[0]:.2f}% of the frame.",
+            f"- Area against frame {number(0)}: {min(ratios):.2f} to {max(ratios):.2f} times. Furthest: frame {number(worst)}, {ratios[worst]:.2f} times.",
+            f"- Every frame, against frame {number(0)}: " + " ".join(f"{x:.2f}" for x in ratios)]
 
 
 def report(a, machine, results):
@@ -673,7 +840,7 @@ def report(a, machine, results):
              f"| Cases | {a.cases}: {', '.join(r['name'] for r in results)} |",
              f"| Seeds | {a.seeds.replace(' ', '').replace(',', ', ') + ' (--seeds): each case runs once per seed' if a.seeds else 'each case runs from its own (gpu_matrix.json)'} |",
              "| Job index | left alone: the page is opened with `?index=0`, so every job runs |",
-             f"| Memory profile asked for | {a.memory or 'none: the card decides'} |",
+             f"| Memory profile asked for | {a.memory or 'none: the GPU decides'} |",
              f"| Before each case | {'ComfyUI is freed (--fresh)' if a.fresh else 'ComfyUI stays as the case before left it: a first job can read its RAM'} |",
              f"| RAM read from | {a.source} |", "",
              "GB means 2^30 bytes. Peak RAM is the most that was held; « no file » is the part of it that no file backs, which a memory cap cannot take back. "
@@ -726,9 +893,7 @@ def report(a, machine, results):
             folder, areas = r["matte"]
             ratios = [x / max(areas[0], 1e-9) for x in areas]
             worst = max(range(len(ratios)), key=lambda i: abs(ratios[i] - 1))
-            lines += [f"- Paint matte (`{os.path.relpath(folder, a.comfy)}`): {len(areas)} frames; frame 1 covers {100 * areas[0]:.2f}% of the frame.",
-                      f"- Area against frame 1: {min(ratios):.2f} to {max(ratios):.2f} times. Furthest: frame {worst + 1}, {ratios[worst]:.2f} times.",
-                      "- Every frame, against frame 1: " + " ".join(f"{x:.2f}" for x in ratios)]
+            lines += matte_lines(os.path.relpath(folder, a.comfy), areas, ratios, worst, r.get("numbers") or [])
         made = r.get("sheet")
         if made and made.get("path"):
             lines += [f"- The plate and the export around each edit, on frames {', '.join(map(str, made['frames']))}:", "",
@@ -736,12 +901,20 @@ def report(a, machine, results):
             lines += [f"- The page's verdict on the export (logic.eraseCheck): {made['verdict']['text']}"] if made.get("verdict") else []
         elif made:
             lines.append(f"- No sheet: {made['error']}.")
+        lines += [f"- {r['paint']['text']}"] if r.get("paint") else []
         fluid = r.get("fluid_sheet")
         if fluid and fluid.get("path"):
             lines += [f"- The fluid shot's keyframes (frames {', '.join(map(str, fluid['keys']))}), then the shot on frames {', '.join(map(str, fluid['frames']))}:",
                       "", f"  ![{r['name']}, fluid]({os.path.relpath(fluid['path'], a.out)})", ""]
         elif fluid:
             lines.append(f"- No fluid sheet: {fluid['error']}.")
+        stages = r.get("stage_sheet")
+        if stages and stages.get("path"):
+            lines += [f"- Each stage at full size, on frames {', '.join(map(str, stages['frames']))}: {', '.join(stages['columns'])}."]
+            lines += [f"- No picture of: {', '.join(stages['missing'])}."] if stages["missing"] else []
+            lines += ["", f"  ![{r['name']}, stages]({os.path.relpath(stages['path'], a.out)})", ""]
+        elif stages:
+            lines.append(f"- No stage sheet: {stages['error']}.")
         lines += [f"- Marks, screenshots, the page's log and the zip: `{os.path.relpath(r['folder'], a.out)}`."]
     failures = [r for r in ran if not r["passed"]]
     if failures:
@@ -760,7 +933,7 @@ def main():
     ap.add_argument("--cases", default="quick", help="quick, all, or case names with commas: " + ", ".join(ALL))
     ap.add_argument("--channel", default="chrome", help="the browser channel: Google Chrome plays H.264")
     ap.add_argument("--timeout", type=int, default=900, help="ui_live.py's --timeout: it waits 8 times this many seconds for a render, 4 times for a fluid shot, twice for an edit")
-    ap.add_argument("--memory", default="", choices=("", "small", "medium", "large"), help="ask the page for this memory profile; by default the card decides")
+    ap.add_argument("--memory", default="", choices=("", "small", "medium", "large"), help="ask the page for this memory profile; by default the GPU decides")
     ap.add_argument("--hdr", action="store_true", help="turn SDR to HDR on in every case (ui_live.py --hdr); a case asks for it with « hdr »: true")
     ap.add_argument("--graph", action="store_true", help="after each case's export, also save the scene's ComfyUI graph as scene.comfyui.json in the case's folder")
     ap.add_argument("--seeds", default="", help="whole numbers with commas: each case runs once per seed, as <case>_s<seed>, in place of its own seed")

@@ -975,7 +975,7 @@ export function resultFlows({ tools = [], render = [], fluid = false, fluidHdr =
 export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? null;
 
 // ---------- Pipeline: the memory profile ----------
-// What the page does on the card it runs on, from the VRAM and RAM in ComfyUI's /system_stats. Three profiles to start from;
+// What the page does on the GPU it runs on, from the VRAM and RAM in ComfyUI's /system_stats. Three profiles to start from;
 // the borders move with measurements (tests/gpu_matrix.py writes each case's peak VRAM and RAM).
 // - small, under 24 GB of VRAM (the reference is an RTX 4090 Laptop with 16 GB): no model loads before an action needs it,
 //   so the prompt writer, Klein and LTX take turns; every LTX pass encodes its guide in tiles and decodes in 256 px tiles
@@ -983,9 +983,9 @@ export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? nu
 // - medium, from 24 GB: the edit models load at start, LTX with the first shot; 512 px tiles.
 // - large, from 60 GB: every model loads at start and stays loaded.
 // `slots` are workflow slot values (tile, guide_tiled): one set of workflows serves every profile.
-export const MEMORY_FROM = { medium: 24e9, large: 60e9 }; // bytes of VRAM: a 24 GB card reports about 25.7e9, a 16 GB one about 17.2e9
+export const MEMORY_FROM = { medium: 24e9, large: 60e9 }; // bytes of VRAM: a 24 GB GPU reports about 25.7e9, a 16 GB one about 17.2e9
 export const MEMORY = {
-  small: { warm: [], frees: true, slots: { tile: 256, guide_tiled: true }, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger card" },
+  small: { warm: [], frees: true, slots: { tile: 256, guide_tiled: true }, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger GPU" },
   medium: { warm: ["edit", "prompt"], frees: false, slots: { tile: 512, guide_tiled: false }, does: "The edit models load now, LTX with the first shot" },
   large: { warm: ["edit", "prompt", "warm"], frees: false, slots: { tile: 512, guide_tiled: false }, does: "Every model loads now and stays loaded" },
 };
@@ -1020,13 +1020,14 @@ export const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sa
 // A step's time before it ever ran on this machine (stepGuess): the 96 GB card's reference (STAGES' ref, in seconds at
 // REF_SIZE), scaled to the plate, then to the card. A 16 GB card, the small profile, holds one family of models at a time,
 // so each job loads its models again: a lead in seconds per family, then a factor per step on the reference's scaled
-// seconds. Measured on the laptop (RTX 4090 Laptop GPU, 16 GB of VRAM, 52 GB of RAM) at 1.11.12 on 12 Nov, horse.mp4 at
+// seconds. Measured on an RTX 4090 Laptop GPU (16 GB of VRAM, 52 GB of RAM), horse.mp4 at
 // 1920 x 1080 and 121 frames: the lead is what a job spent outside its sampler or its tracking loop in ComfyUI's trace,
-// and each factor makes the rest. hdr's factor comes from fluid_720's SDR to HDR, the same workflow at 1280 x 704. Other
+// and each factor makes the rest. SDR to HDR grows faster than its pixels (`grow`, the power of its scale): 172 s at
+// 1280 x 704 and 606 s at 1920 x 1088, 121 frames each, the same workflow for a fluid shot and a render. Other
 // profiles announce the references as they are. tests/js/render_estimates.test.mjs holds every measured step within 25%.
 export const SLOWER = {
   small: { lead: { ltx: 38, sam: 11, frames: 0 }, erase: 2.1, track: 1, trackfull: 1, clean: 3.35, shot: 1.64, cleanfull: 1.18,
-    full: 2.98, hdr: 1.77, comp: 1.3, review: 0.42, export: 0.235 },
+    full: 2.98, hdr: 1.166, comp: 1.3, review: 0.42, export: 0.235, grow: { hdr: 1.72 } },
 };
 export const slower = (profile, id) => SLOWER[profile]?.[id] ?? 1;
 export const BIG_STEPS = ["full", "cleanfull", "hdr", "review", "export"]; // the steps made at the working size
@@ -1034,7 +1035,7 @@ export const stepSizeOf = (id, plate) => (BIG_STEPS.includes(id) ? plate.work : 
 const REF_SIZE = 928 * 512 * 97; // pixels times frames, where the references were measured
 export function stepGuess(id, ref, plate, profile) { // seconds: the reference scaled to this plate (BIG_STEPS at 0.73 of it), then to this card
   const [w, h] = stepSizeOf(id, plate), scale = (w * h * plate.frames) / REF_SIZE * (BIG_STEPS.includes(id) ? 0.73 : 1);
-  return (SLOWER[profile]?.lead?.[STEP_FAMILY[id]] ?? 0) + ref * Math.max(0.25, scale) * slower(profile, id);
+  return (SLOWER[profile]?.lead?.[STEP_FAMILY[id]] ?? 0) + ref * Math.max(0.25, scale) ** (SLOWER[profile]?.grow?.[id] ?? 1) * slower(profile, id);
 }
 export function stepLeft({ est, run, first = null, last = null, tail = null }) { // seconds left in the step that runs; first and last: [seconds since its start, progress]
   const after = tail ?? est * 0.15;

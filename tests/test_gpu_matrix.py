@@ -112,8 +112,8 @@ class Seeds(unittest.TestCase):
         self.assertNotIn("--seed", gpu_matrix.command(a, {"path": "plates/horse.mp4"}, "/out/x"), "a case without a seed: the page draws one")
 
     def test_the_report_names_the_seed_asked_for_and_the_seeds_of_the_page_s_log(self):
-        log = ('04:35:35 PMEdit 1: Erase "", seed 1017942128, whole object on, 1 stroke, over 0 edits\n'
-               "04:36:10 PMRender v1: 1 edit(s) (1 Erase), preview at 640x352, seed 1017942128, steps: erase > clean > comp\n")
+        log = ('04:35:35 PMEdit 1: Clean "", seed 1017942128, whole object on, 1 stroke, over 0 edits.\n'
+               "04:36:10 PMRender v1: 1 edit (Clean 1), seed 1017942128, shot preview at 640 x 352.\n")
         named = gpu_matrix.read_log(log)["seeds"]
         self.assertEqual(named, ["1017942128"])
         self.assertEqual(gpu_matrix.seed_note(1017942128, named), "Seed asked for: 1017942128. In the page's log: 1017942128.")
@@ -460,13 +460,13 @@ class Hdr(unittest.TestCase):
         self.assertLess(tool.index("mark(deliver_hdr(page))"), tool.index("for i, (tool, words, pts, *size) in enumerate(strokes)"))
 
     def test_hdr_match_lines_come_from_comfyui_s_log_since_the_case_began(self):
-        entries = [{"t": "2026-11-13T09:59:59.900000", "m": "PaintAPlate HDR Match: a case before\n"},
-                   {"t": "2026-11-13T10:00:00.500000", "m": "PaintAPlate HDR Match: level +0.02 stops on 121 frames\n"},
+        entries = [{"t": "2026-11-13T09:59:59.900000", "m": "[Paint a plate] HDR Match: a case before\n"},
+                   {"t": "2026-11-13T10:00:00.500000", "m": "[Paint a plate] HDR Match: level +0.02 stops on 121 frames\n"},
                    {"t": "2026-11-13T10:00:01.000000", "m": "[Paint a plate] HDR Match: level +0.02 stops on 121 frames.\n"},
                    {"t": "2026-11-13T10:00:01.000000", "m": "Prompt executed in 9.10 seconds\n"}]
         with mock.patch.object(gpu_matrix, "get", return_value={"entries": entries}):
-            self.assertEqual(gpu_matrix.comfy_lines("http://x", "2026-11-13T10:00:00"), ["PaintAPlate HDR Match: level +0.02 stops on 121 frames",
-                              "[Paint a plate] HDR Match: level +0.02 stops on 121 frames."], "both marks of HDR Match's line")
+            self.assertEqual(gpu_matrix.comfy_lines("http://x", "2026-11-13T10:00:00"), ["[Paint a plate] HDR Match: level +0.02 stops on 121 frames",
+                              "[Paint a plate] HDR Match: level +0.02 stops on 121 frames."], "each HDR Match line since the case began")
         with mock.patch.object(gpu_matrix, "get", side_effect=OSError("404")):
             self.assertEqual(gpu_matrix.comfy_lines("http://x", "2026-11-13T10:00:00"), [])
 
@@ -634,11 +634,11 @@ class Verdict(unittest.TestCase):
                          "Clean, frame 1: no verdict. No mask: ComfyUI's history holds no edit job of this case.")
         self.assertEqual(gpu_matrix.erase_verdict(None, None, os.path.join(folder, "gone.png"), (768, 432))["text"],
                          "Clean, frame 1: no verdict. No mask: gone.png is not in ComfyUI's input folder.")
-        log = "Working sizes: edits at 1920 x 1088, quick passes at 768 x 432, preview at 608 x 352, tracking at 960 x 544"
-        self.assertEqual(gpu_matrix.quick_size(log), (768, 432), "the size the page judges at (p.prev), not the shot's preview size")
+        log = "Working sizes: edits at 1920 x 1088, edit preview at 768 x 432, shot preview at 608 x 352, tracking at 960 x 544"
+        self.assertEqual(gpu_matrix.edit_preview_size(log), (768, 432), "the size the page judges at (p.prev), not the shot's preview size")
         log = "Working sizes: edits at 1920 x 1088, edit preview at 768 x 432, shot preview at 640 x 352, tracking at 960 x 544."
-        self.assertEqual(gpu_matrix.quick_size(log), (768, 432), "the line's words of the edit preview")
-        self.assertIsNone(gpu_matrix.quick_size(""))
+        self.assertEqual(gpu_matrix.edit_preview_size(log), (768, 432), "the line's words of the edit preview")
+        self.assertIsNone(gpu_matrix.edit_preview_size(""))
 
     def test_the_arm_case_paints_the_exr_plate_with_sdr_to_hdr_outside_quick_and_all(self):
         arm = gpu_matrix.load_cases()["tos_arm"]
@@ -657,7 +657,7 @@ class Verdict(unittest.TestCase):
         self.assertNotIn("horse_erase_tree", gpu_matrix.ALL + gpu_matrix.QUICK)
         asked = ["page ready: Ready.", "name asked: Edit 2: the prompt writer took the stroke for another object, so nothing ran"]
         self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: asking Klein's prompt writer", [{"name": "prompt"}]), (True, ""))
-        self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: Klein quick pass at 768 x 432, 16 steps", []), (False, "a Klein pass ran"))
+        self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: Klein edit preview, 768 x 432, 16 steps.", []), (False, "a Klein pass ran"))
         self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: Klein edit preview, 768 x 432, 16 steps.", []), (False, "a Klein pass ran"))
         self.assertEqual(gpu_matrix.name_asked(asked[:1], "", [{"name": "shot"}]), (False, "the page did not ask for the name"))
 

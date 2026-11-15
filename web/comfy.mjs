@@ -173,7 +173,7 @@ export function run(name, values, { kind = name, preview, progress, step, live: 
     const before = lastPosted;
     lastPosted = name;
     const why = await freeFirst(before, name);
-    if (why) { // a small card holds one family of models at a time; a larger one frees only when RAM is short
+    if (why) { // a small GPU holds one family of models at a time; a larger one frees only when RAM is short
       await post("/free", { unload_models: true, free_memory: true }).catch(() => {}); // unanswered, the job still runs
       await new Promise((ok) => setTimeout(ok, FREE_SETTLE_MS));
       await released();

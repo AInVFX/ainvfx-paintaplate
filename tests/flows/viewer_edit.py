@@ -39,7 +39,7 @@ def enter_held(page, port, U, seconds=30, key="Enter"):
     before = running()
     hold(port, output="patch", seconds=seconds)
     page.keyboard.press(key)
-    page.wait_for_function(f"/edit preview|first look/.test({STATUS})", timeout=30000)
+    page.wait_for_function(f"/edit preview/.test({STATUS})", timeout=30000)
     if not U.poll(page, lambda: running() > before, 30):
         raise AssertionError("the mock did not start the edit's first Klein pass within 30 s of Enter")
 
@@ -102,7 +102,7 @@ def run(browser, port, U):
     U.paint_once(page, "a red fire", [(0.30, 0.45), (0.34, 0.45)]); away()
     U.check(page.evaluate(PICTURE) != "live", "a stroke after the stop shows the first frame and the strokes")
     hold(port, output="patch", seconds=6)
-    page.keyboard.press("Enter"); page.wait_for_function(f"/edit preview|first look/.test({STATUS})", timeout=30000); page.wait_for_timeout(1000)
+    page.keyboard.press("Enter"); page.wait_for_function(f"/edit preview/.test({STATUS})", timeout=30000); page.wait_for_timeout(1000)
     U.check(page.evaluate(PICTURE) != "live", "Generate after the stop never brings the stopped pass's preview back")
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
 
