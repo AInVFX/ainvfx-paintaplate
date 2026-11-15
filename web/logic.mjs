@@ -7,7 +7,7 @@
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_erased: ["erased"], follow_element: ["seed"],
-  review_frames: ["frames_prefix"], review_view: ["view_prefix"], edit_plan: ["plan"], hdr_shot: ["hdr"], relight_shade: ["shade"],
+  review_frames: ["frames_prefix"], review_view: ["view_prefix"], edit_plan: ["plan"], hdr_shot: ["hdr"], plate_level: ["plate_width", "plate_height"], relight_shade: ["shade"],
   matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"],
   export_plate: ["prefix"], export_exr: ["exr_prefix"] };
 

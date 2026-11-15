@@ -390,9 +390,6 @@ class RelightTransfer(io.ComfyNode):
                 io.Combo.Input("shot_space", options=["linear", "sRGB"], default="linear", optional=True,
                                tooltip="How 'source' and 'relit' are encoded: sRGB, as the model saw and made them, is "
                                        "decoded here."),
-                io.Image.Input("light", optional=True,
-                               tooltip="A light edit's painted light, in display values on black. Where it is strong, the "
-                                       "result keeps at least the plate with that light added, as the brush showed it."),
                 io.Image.Input("shade", optional=True,
                                tooltip="A light edit's shade strokes, white where the shadow is full: the result is darkened "
                                        "there, in linear light, by 'shade_density'. Klein ignores a painted shadow."),
@@ -408,7 +405,7 @@ class RelightTransfer(io.ComfyNode):
 
     @classmethod
     def execute(cls, plate, source, relit, radius, strength, align, plate_space="linear", shot_space="linear",
-                light=None, shade=None, shade_density=0.7, peak=None) -> io.NodeOutput:
+                shade=None, shade_density=0.7, peak=None) -> io.NodeOutput:
         n = min(plate.shape[0], source.shape[0], relit.shape[0])
         src, rel = list(frames_np(source[:n])), list(frames_np(relit[:n]))
         shift = (0.0, 0.0)
@@ -418,7 +415,6 @@ class RelightTransfer(io.ComfyNode):
                 shift = mathops.shot_shift(list(pool.map(lambda sr: mathops.frame_shift(*sr, width, shot_space), zip(src, rel))))
             if shift != (0.0, 0.0):
                 logging.info("[Paint a plate] Relight Transfer: shot realigned by x %+.2f px, y %+.2f px, over %d frames.", shift[1], shift[0], n)
-        painted = list(frames_np(light[:1]))[0] if light is not None else None
         shaded = list(frames_np(shade[:1]))[0] if shade is not None else None
         peak = peak if peak is not None and shot_space == "sRGB" else 1.0
         untone = peak > ocio.TONE_ABOVE  # a plate above 1.0: 'source' and 'relit' go back to its levels, frame by frame
@@ -432,7 +428,7 @@ class RelightTransfer(io.ComfyNode):
             s, r, space = src[i], rel[i], shot_space
             if untone:  # the shift above was measured on the frames as the model saw them, as for any plate
                 s, r, space = ocio.out_of_model(s[..., :3], peak), ocio.out_of_model(r[..., :3], peak), "linear"
-            out = mathops.relight_frame(p, s, r, radius, strength, shift, plate_space, space, painted)
+            out = mathops.relight_frame(p, s, r, radius, strength, shift, plate_space, space)
             if shaded is not None:
                 out = mathops.shade_frame(out, shaded, shade_density, plate_space)
             bar.update(1)
@@ -705,13 +701,16 @@ class SaveFrames(io.ComfyNode):
                 io.Float.Input("fps", default=0.0, min=0.0, max=240.0, optional=True,
                                tooltip="exr only: the shot's frame rate, written in each frame's header (framesPerSecond), "
                                        "so the frames keep their rate when they open as a plate. 0 writes none."),
+                io.Int.Input("frames", default=0, min=0, max=4096, optional=True,
+                             tooltip="The frames to save, from the first: 0 saves them all. Load Plate's 'frames' leaves its "
+                                     "8k+1 padding out."),
             ],
             is_output_node=True,
         )
 
     @classmethod
-    def execute(cls, images, filename_prefix, format="png", fps=0.0) -> io.NodeOutput:
-        n, h, w = images.shape[0], images.shape[1], images.shape[2]
+    def execute(cls, images, filename_prefix, format="png", fps=0.0, frames=0) -> io.NodeOutput:
+        n, h, w = min(frames, images.shape[0]) if frames else images.shape[0], images.shape[1], images.shape[2]
         folder, name, counter, sub, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory(), w, h)
         names = [f"{name}_{counter + i:05}_.{'png' if format == 'png16' else format}" for i in range(n)]
         paths, bar = [os.path.join(folder, f) for f in names], comfy.utils.ProgressBar(n)
@@ -800,10 +799,13 @@ class HDRMatch(io.ComfyNode):
                         "white balance, while the plate's untouched pixels hold the scene's real values: one gain per "
                         "channel, measured on the untouched mid-tones over the whole shot (no flicker), scales every pixel. "
                         "A gain keeps every ratio, so the range SDR to HDR made above the plate's white stays for grading. "
-                        "Without an HDR shot the image passes through; without a matte the HDR shot does.",
+                        "Without an HDR shot or a plate the image passes through; without a matte the HDR shot does. An empty "
+                        "matte (a plate with no edit) leaves every pixel untouched: the whole plate's mid-tones set the level.",
             inputs=[
                 io.Image.Input("image", tooltip="The shot in the plate's colour space as the SDR pass made it: the output without an HDR shot."),
-                io.Image.Input("plate", tooltip="The plate's own values, in its colour space."),
+                io.Image.Input("plate", optional=True,
+                               tooltip="The plate's own values, in its colour space. Without it, as without an HDR shot, the "
+                                       "image passes through."),
                 io.Float.Input("grow", default=24.0, min=0.0, max=512.0,
                                tooltip="Plate pixels the matte grows by before what is left counts as untouched: the composite's grow and feather."),
                 io.Mask.Input("mask", optional=True, tooltip="Where the edits changed the shot: the composite's matte."),
@@ -813,8 +815,8 @@ class HDRMatch(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, image, plate, grow, mask=None, hdr=None) -> io.NodeOutput:
-        if hdr is None:
+    def execute(cls, image, grow, plate=None, mask=None, hdr=None) -> io.NodeOutput:
+        if hdr is None or plate is None:
             return io.NodeOutput(image)
         if mask is None:
             logging.info("[Paint a plate] HDR Match: HDR shot kept as made.\n  No matte: no untouched pixels to measure.")

@@ -170,19 +170,19 @@ def pixels(source):
 def differences(a, b):
     """How the decoded frames of two files differ: (frames that differ, frames in the longer file, the largest difference
     in levels, the first sample that differs with its level in each file). A frame one file lacks counts as one that
-    differs. A sample is named by its place in the decoded array: (row, column, channel) of a PNG, (row, column) of a
+    differs. A frame is named from 1, as a movie's frames are; a sample by its place in the decoded array: (row, column, channel) of a PNG, (row, column) of a
     movie's Y, U and V planes one under the other."""
     a, b = pixels(a), pixels(b)
     count, largest, first = abs(len(a) - len(b)), 0, ""
     for i, (x, y) in enumerate(zip(a, b)):
         if x.shape != y.shape:
-            count, first = count + 1, first or f"frame {i} is {x.shape} and {y.shape}"
+            count, first = count + 1, first or f"frame {i + 1} is {x.shape} and {y.shape}"
             continue
         d = np.abs(x.astype(np.int64) - y.astype(np.int64))
         if d.any():
             at = tuple(int(v) for v in np.argwhere(d)[0])
             count, largest = count + 1, max(largest, int(d.max()))
-            first = first or f"frame {i}, sample {at}: {int(x[at])} and {int(y[at])}"
+            first = first or f"frame {i + 1}, sample {at}: {int(x[at])} and {int(y[at])}"
     return count, max(len(a), len(b)), largest, first or "a frame is missing"
 
 

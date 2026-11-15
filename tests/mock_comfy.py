@@ -24,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path[:0] = [REPO, os.path.join(REPO, "tools")]
 import plateio  # noqa: E402
+import mathops  # noqa: E402
 from build_workflows import outputs_of  # noqa: E402
 
 A = None  # parsed arguments
@@ -287,6 +288,12 @@ async def execute(pid, prompt):
     elif "hdr" in outs:  # SDR to HDR: the shot decoded from sRGB, its brightest values lifted above 1.0, as half-float EXR frames
         frames, spec = read_plate(v["path"], v.get("max_frames", 1024), pad=True)
         await steps(pid, 8, 2.0, live=(v.get("live") or 0, frames[0]))
+        # Save Frames and Save Movie keep Load Plate's frame count, without the 8n+1 padding. A plate with no edit runs at
+        # the working size (width, height) and comes back at its own size (plate_width, plate_height); a shot keeps its size
+        frames = frames[:len(read_plate(v["path"], v.get("max_frames", 1024))[0])]
+        for w, h in ((v.get("width"), v.get("height")), (v.get("plate_width"), v.get("plate_height"))):
+            if w and h:
+                frames = [mathops.resize_to(f, h, w) for f in frames]
         sub, _, stem = v["prefix"].rpartition("/")
         os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
         names = [f"{stem}_{i + 1:05d}_.exr" for i in range(len(frames))]

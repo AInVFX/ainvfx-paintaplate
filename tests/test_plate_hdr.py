@@ -94,7 +94,11 @@ class HdrWorkflowTest(unittest.TestCase):
         self.assertEqual(("PaintAPlate_ColorSpace", "ACEScct", "ACEScg"),
                          (decode["class_type"], decode["inputs"]["source"], decode["inputs"]["destination"]))
         self.assertEqual("VAEDecodeTiled", prompt[str(decode["inputs"]["image"][0])]["class_type"])
-        self.assertEqual("PaintAPlate_LoadPlate", prompt[str(keep["inputs"]["sdr"][0])]["class_type"])
+        sdr = prompt[str(keep["inputs"]["sdr"][0])]
+        while sdr["class_type"] != "PaintAPlate_LoadPlate":  # a shot goes through a plate's slots as it is: @model to @model, 0 x 0
+            self.assertTrue((sdr["class_type"], sdr["inputs"].get("width"), sdr["inputs"].get("height")) == ("ImageScale", 0, 0) or
+                            (sdr["class_type"] == "PaintAPlate_ColorSpace" and sdr["inputs"]["source"] == sdr["inputs"]["destination"]), sdr)
+            sdr = prompt[str(sdr["inputs"]["image"][0])]
         self.assertEqual("@model", keep["inputs"]["source"])
 
     def test_hdr_computes_its_vae_in_float32_through_core(self):

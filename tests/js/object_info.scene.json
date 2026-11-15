@@ -1344,10 +1344,6 @@
       "IMAGE",
       {}
      ],
-     "plate": [
-      "IMAGE",
-      {}
-     ],
      "grow": [
       "FLOAT",
       {
@@ -1356,6 +1352,10 @@
      ]
     },
     "optional": {
+     "plate": [
+      "IMAGE",
+      {}
+     ],
      "mask": [
       "MASK",
       {}
@@ -1595,10 +1595,6 @@
        "default": "linear"
       }
      ],
-     "light": [
-      "IMAGE",
-      {}
-     ],
      "shade": [
       "IMAGE",
       {}
@@ -1650,6 +1646,12 @@
       "FLOAT",
       {
        "default": 0.0
+      }
+     ],
+     "frames": [
+      "INT",
+      {
+       "default": 0
       }
      ]
     }
@@ -2010,6 +2012,36 @@
    ],
    "output_name": [
     "LATENT"
+   ]
+  },
+  "SolidMask": {
+   "input": {
+    "required": {
+     "value": [
+      "FLOAT",
+      {
+       "default": 1.0
+      }
+     ],
+     "width": [
+      "INT",
+      {
+       "default": 512
+      }
+     ],
+     "height": [
+      "INT",
+      {
+       "default": 512
+      }
+     ]
+    }
+   },
+   "output": [
+    "MASK"
+   ],
+   "output_name": [
+    "MASK"
    ]
   },
   "SplitImageWithAlpha": {

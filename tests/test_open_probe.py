@@ -191,7 +191,7 @@ class Pictures(unittest.TestCase):
         touched[3, 5, 1] ^= 1
         self.assertEqual(comfy_live.frames_apart(one, png(touched, "a")), 1)
         level = int(frames[0][3, 5, 1])  # what a failed check says: how many frames, by how much, and where first
-        self.assertEqual(comfy_live.differences(one, png(touched, "a")), (1, 1, 1, f"frame 0, sample (3, 5, 1): {level} and {level ^ 1}"))
+        self.assertEqual(comfy_live.differences(one, png(touched, "a")), (1, 1, 1, f"frame 1, sample (3, 5, 1): {level} and {level ^ 1}"))
         self.assertEqual(comfy_live.differences(one, other), (0, 1, 0, "a frame is missing"))
         folder = tempfile.mkdtemp()
         try:
