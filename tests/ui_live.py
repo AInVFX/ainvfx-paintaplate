@@ -15,7 +15,6 @@ REPO = os.path.dirname(HERE)
 sys.path[:0] = [REPO, HERE, os.path.join(REPO, "tools")]
 import comfy_live  # noqa: E402
 from build_workflows import Graph, Slot, plate  # noqa: E402
-from playwright.sync_api import sync_playwright  # noqa: E402
 
 SHOTS = "/tmp/paintaplate_ui"
 
@@ -268,6 +267,7 @@ def main():
                 if time.time() - t0 > 150:
                     raise SystemExit("ComfyUI did not start")
                 time.sleep(1)
+        from playwright.sync_api import sync_playwright  # here and not at the top: the pure functions of this file are read without Playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(channel=os.environ.get("PLAYWRIGHT_CHANNEL") or None)
             page = browser.new_page(viewport={"width": 1280, "height": 800}, accept_downloads=True)
@@ -361,6 +361,7 @@ def remote(a):
     strokes = json.loads(a.strokes) if a.strokes else default
     marks, errors, t0 = [], [], time.time()
     mark = lambda what: (marks.append((round(time.time() - t0, 1), what)), print(f"{marks[-1][0]:7.1f} s  {what}"))  # noqa: E731
+    from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch(channel=a.channel or None)
         page = browser.new_page(viewport={"width": 1440, "height": 900}, accept_downloads=True)

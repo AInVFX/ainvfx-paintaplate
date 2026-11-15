@@ -2,6 +2,7 @@
 clean plate pass, the shot, the paint matte and the composite."""
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -10,6 +11,22 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import gpu_matrix  # noqa: E402
 import ui_live  # noqa: E402
+
+
+class WithoutPlaywright(unittest.TestCase):
+    def test_the_report_s_tools_are_read_without_playwright(self):
+        # the unit tests' job has no Playwright: the sheet and the strokes' paths must load without it
+        code = ("import sys\n"
+                "class Hidden:\n"
+                "    def find_spec(self, name, path=None, target=None):\n"
+                "        if name.split('.')[0] == 'playwright':\n"
+                "            raise ModuleNotFoundError(name)\n"
+                "sys.meta_path.insert(0, Hidden())\n"
+                "import gpu_matrix, ui_live\n"
+                "print(ui_live.paths([[0, 0], [1, 1]]), gpu_matrix.edit_box(['paint', '', [[0.5, 0.5]], 64], 640, 320))\n")
+        done = subprocess.run([sys.executable, "-c", code], cwd=HERE, capture_output=True, text=True, timeout=120)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertIn("[[[0, 0], [1, 1]]]", done.stdout)
 
 
 def frames(folder, name, values, size=(64, 32)):
