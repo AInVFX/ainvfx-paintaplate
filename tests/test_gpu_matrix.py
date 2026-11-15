@@ -649,10 +649,10 @@ class Verdict(unittest.TestCase):
         self.assertTrue(all(0 <= v <= 1 for point in points for v in point))
         self.assertNotIn("tos_arm", gpu_matrix.ALL + gpu_matrix.QUICK)
 
-    def test_the_tree_case_expects_the_name_and_stays_out_of_quick_and_all(self):
+    def test_the_tree_case_expects_the_tree_gone_and_stays_out_of_quick_and_all(self):
         cases = gpu_matrix.load_cases()
         tree, plain = cases["horse_erase_tree"], cases["horse_erase"]
-        self.assertEqual((tree["path"], tree["seed"], tree["expect"]), (plain["path"], plain["seed"], "name asked"))
+        self.assertEqual((tree["path"], tree["seed"], tree.get("expect")), (plain["path"], plain["seed"], None))  # the tree goes, as the barn does
         self.assertEqual(tree["strokes"], [["erase", "", [[0.79, 0.26], [0.83, 0.25], [0.87, 0.27]], 36, {"whole": True}]])
         self.assertNotIn("horse_erase_tree", gpu_matrix.ALL + gpu_matrix.QUICK)
         asked = ["page ready: Ready.", "name asked: Edit 2: the prompt writer took the stroke for another object, so nothing ran"]
