@@ -112,6 +112,7 @@ class PageRules(unittest.TestCase):
 
 
 class Beyond(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("PAINTAPLATE_FIXTURES"), "PAINTAPLATE_FIXTURES is not set")
     def test_a_removal_beyond_the_object(self):
         # real first frames at 768 x 432 (tests/js/edit_check.test.mjs): an erase of the barn that also took the fence's upper
         # rail, and one that did not, against the frame before and the page's mask of the barn; the edit's reach is 22 px
