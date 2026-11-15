@@ -60,25 +60,13 @@
    "image": ""
   },
   "_meta": {
-   "title": "Light plan (light edits)",
-   "slots": {
-    "image": "plan"
-   }
-  }
- },
- "7": {
-  "class_type": "LoadImage",
-  "inputs": {
-   "image": ""
-  },
-  "_meta": {
    "title": "Start image",
    "slots": {
     "image": "start"
    }
   }
  },
- "8": {
+ "7": {
   "class_type": "LoadImageMask",
   "inputs": {
    "image": "",
@@ -91,7 +79,7 @@
    }
   }
  },
- "9": {
+ "8": {
   "class_type": "CLIPTextEncode",
   "inputs": {
    "text": "",
@@ -107,24 +95,24 @@
    }
   }
  },
- "10": {
+ "9": {
   "class_type": "ConditioningZeroOut",
   "inputs": {
    "conditioning": [
-    "9",
+    "8",
     0
    ]
   }
  },
- "11": {
+ "10": {
   "class_type": "ReferenceMultiLatent",
   "inputs": {
    "positive": [
-    "9",
+    "8",
     0
    ],
    "negative": [
-    "10",
+    "9",
     0
    ],
    "vae": [
@@ -135,23 +123,14 @@
    "images.image0": [
     "5",
     0
-   ],
-   "images.image1": [
-    "6",
-    0
    ]
-  },
-  "_meta": {
-   "slots": {
-    "images.image1": "edit_plan"
-   }
   }
  },
- "12": {
+ "11": {
   "class_type": "GrowMask",
   "inputs": {
    "mask": [
-    "8",
+    "7",
     0
    ],
    "expand": 16,
@@ -163,11 +142,11 @@
    }
   }
  },
- "13": {
+ "12": {
   "class_type": "VAEEncode",
   "inputs": {
    "pixels": [
-    "7",
+    "6",
     0
    ],
    "vae": [
@@ -176,20 +155,20 @@
    ]
   }
  },
- "14": {
+ "13": {
   "class_type": "SetLatentNoiseMask",
   "inputs": {
    "samples": [
-    "13",
+    "12",
     0
    ],
    "mask": [
-    "12",
+    "11",
     0
    ]
   }
  },
- "15": {
+ "14": {
   "class_type": "KSampler",
   "inputs": {
    "model": [
@@ -202,15 +181,15 @@
    "sampler_name": "euler",
    "scheduler": "simple",
    "positive": [
-    "11",
+    "10",
     0
    ],
    "negative": [
-    "11",
+    "10",
     1
    ],
    "latent_image": [
-    "14",
+    "13",
     0
    ],
    "denoise": 1.0
@@ -224,11 +203,11 @@
    "progress": true
   }
  },
- "16": {
+ "15": {
   "class_type": "VAEDecode",
   "inputs": {
    "samples": [
-    "15",
+    "14",
     0
    ],
    "vae": [
@@ -237,20 +216,20 @@
    ]
   }
  },
- "17": {
+ "16": {
   "class_type": "MaskToImage",
   "inputs": {
    "mask": [
-    "12",
+    "11",
     0
    ]
   }
  },
- "18": {
+ "17": {
   "class_type": "ImageBlur",
   "inputs": {
    "image": [
-    "17",
+    "16",
     0
    ],
    "blur_radius": 12,
@@ -263,25 +242,25 @@
    }
   }
  },
- "19": {
+ "18": {
   "class_type": "ImageToMask",
   "inputs": {
    "channel": "red",
    "image": [
-    "18",
+    "17",
     0
    ]
   }
  },
- "20": {
+ "19": {
   "class_type": "PaintAPlate_LevelFill",
   "inputs": {
    "image": [
-    "16",
+    "15",
     0
    ],
    "alpha": [
-    "19",
+    "18",
     0
    ],
    "base": [
@@ -289,7 +268,7 @@
     0
    ],
    "paint": [
-    "8",
+    "7",
     0
    ],
    "enabled": false
@@ -301,7 +280,7 @@
    }
   }
  },
- "21": {
+ "20": {
   "class_type": "ImageCompositeMasked",
   "inputs": {
    "destination": [
@@ -309,23 +288,23 @@
     0
    ],
    "source": [
-    "20",
+    "19",
     0
    ],
    "x": 0,
    "y": 0,
    "resize_source": false,
    "mask": [
-    "19",
+    "18",
     0
    ]
   }
  },
- "22": {
+ "21": {
   "class_type": "SaveImage",
   "inputs": {
    "images": [
-    "21",
+    "20",
     0
    ],
    "filename_prefix": "paintaplate/edits/edit"
@@ -338,33 +317,33 @@
    "output": "result"
   }
  },
- "23": {
+ "22": {
   "class_type": "InvertMask",
   "inputs": {
    "mask": [
+    "18",
+    0
+   ]
+  }
+ },
+ "23": {
+  "class_type": "JoinImageWithAlpha",
+  "inputs": {
+   "image": [
     "19",
+    0
+   ],
+   "alpha": [
+    "22",
     0
    ]
   }
  },
  "24": {
-  "class_type": "JoinImageWithAlpha",
-  "inputs": {
-   "image": [
-    "20",
-    0
-   ],
-   "alpha": [
-    "23",
-    0
-   ]
-  }
- },
- "25": {
   "class_type": "SaveImage",
   "inputs": {
    "images": [
-    "24",
+    "23",
     0
    ],
    "filename_prefix": "paintaplate/edits/edit"
@@ -377,7 +356,7 @@
    "output": "patch"
   }
  },
- "26": {
+ "25": {
   "class_type": "ImageScaleBy",
   "inputs": {
    "image": [
@@ -388,18 +367,18 @@
    "scale_by": 0.5
   }
  },
- "27": {
+ "26": {
   "class_type": "ImageScaleBy",
   "inputs": {
    "image": [
-    "21",
+    "20",
     0
    ],
    "upscale_method": "area",
    "scale_by": 0.5
   }
  },
- "28": {
+ "27": {
   "class_type": "LoadImage",
   "inputs": {
    "image": ""
@@ -411,7 +390,7 @@
    }
   }
  },
- "29": {
+ "28": {
   "class_type": "PaintAPlate_RelightTransfer",
   "inputs": {
    "plate": [
@@ -419,11 +398,11 @@
     0
    ],
    "source": [
-    "26",
+    "25",
     0
    ],
    "relit": [
-    "27",
+    "26",
     0
    ],
    "radius": 1,
@@ -432,7 +411,7 @@
    "plate_space": "sRGB",
    "shot_space": "sRGB",
    "shade": [
-    "28",
+    "27",
     0
    ]
   },
@@ -444,11 +423,11 @@
    }
   }
  },
- "30": {
+ "29": {
   "class_type": "SaveImage",
   "inputs": {
    "images": [
-    "29",
+    "28",
     0
    ],
    "filename_prefix": "paintaplate/edits/edit"

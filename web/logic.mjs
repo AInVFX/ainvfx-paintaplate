@@ -7,7 +7,7 @@
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_erased: ["erased"], follow_element: ["seed"],
-  review_frames: ["frames_prefix"], review_view: ["view_prefix"], edit_plan: ["plan"], hdr_shot: ["hdr"], plate_level: ["plate_width", "plate_height"], relight_shade: ["shade"],
+  review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], plate_level: ["plate_width", "plate_height"], relight_shade: ["shade"],
   matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"],
   export_plate: ["prefix"], export_exr: ["exr_prefix"] };
 
@@ -130,9 +130,10 @@ export const lightColor = (colors, color) => colorName(colors.find((c) => !dark(
 const objectName = (words) => String(words ?? "").trim().replace(/^(?:the|a|an)\s+/i, "");
 
 // tool: paint, erase or light; words: the prompt; colors: of the painted strokes; color: the tool's colour;
-// bbox: [y_min, x_min, y_max, x_max] on 0..1000. Only the chosen tool's text is built.
-export function caption({ tool, words, colors, color, bbox }) {
-  if (tool === "light") return lightPlanCaption({ colors, color, words }); // a relight's request is the page's own
+// bbox: [y_min, x_min, y_max, x_max] on 0..1000; strokes and aspect: a relight's, as lightIntent reads them. Only the
+// chosen tool's text is built.
+export function caption({ tool, words, colors, color, bbox, strokes = [], aspect }) {
+  if (tool === "light") return lightIntent({ strokes, words, aspect }); // a relight's request is the page's own: its strokes read as intentions
   const name = objectName(words);
   const text = {
     erase: () => `Remove the ${name || "object"} inside <obj_1> completely, with its shadow and its reflection. Show the surface and the background that continue behind it, with matching detail, light, shadows and focus. Add no new object. Keep everything else unchanged.`,
@@ -151,7 +152,6 @@ export const KEEP_TOUCHED = " Where the drawing touches an object, the new eleme
   "wets it or lights it); add no props, fuel or supports that were not asked for."; // a fire on a towel came with logs without it
 
 export function upsampleRequest({ tool, words, bbox, boxes = null, colors = [], color = "#ffd890" }) {
-  if (tool === "light") return { mode: "plain", locked: null, request: lightPlanCaption({ colors, color, words }) }; // no prompt writer: the light plan says it
   const parts = tool === "erase" && boxes?.length > 1 ? boxes : null; // several painted parts: one locked row each
   const rows = parts ? parts.map((b, i) => ({ id: `obj_${i + 1}`, from: "ref_image_0", src_bbox: b, tgt_bbox: null, desc: words || "an object to remove" }))
     : [tool === "erase" ? { id: "obj_1", from: "ref_image_0", src_bbox: boxes?.[0] ?? bbox, tgt_bbox: null, desc: words || "the object to remove" }
@@ -299,6 +299,11 @@ export const coreBox = ({ painted, masks, w, h }) => boxOf(corePixels({ painted,
 export const writerBoxes = ({ tool, words, parts, core, bbox }) =>
   (tool === "erase" && !String(words ?? "").trim() && core && parts?.length === 1 ? { bbox: core, boxes: [core] } : { bbox, boxes: parts });
 
+// What the prompt writer saw when the page asks for an object's name (app.generate, edit.editAsked): the objects that its
+// last answer removes, as « barn » or « old car, sign and fence », or true when that answer names none.
+export const writerSaw = (names = []) =>
+  !names?.length ? true : names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+
 // The objects that an answer removes, apart from the locked ones, as SAM 3.1 reads a name: the row « barn_1 » is « barn ».
 export function removedNames(text, locked = []) {
   const [caption, rows] = splitTable(text ?? "");
@@ -306,38 +311,15 @@ export function removedNames(text, locked = []) {
   return [...new Set(names.filter(Boolean))];
 }
 
-// The prompt writer's box once it named another object than the one under the stroke: the part of `box` that holds the most
-// of the object (`keep`, its core) and almost none of the other one (`other`, as SAM 3.1 finds it by the writer's name for
-// it). A tree's box that holds a barn's roof below its branches becomes the box above the roof. The search runs on a grid of
-// at most 48 cells a side, with sums over the box. null: the box already leaves the other object out (it covers under `share`
-// of the box), or no box without it holds `least` of the object. Masks: Uint8Arrays of 0 and 1 over w x h pixels; boxes:
-// [y0, x0, y1, x1] from 0 to 1000.
-export function boxWithout({ box, keep, other, w, h, share = 0.02, least = 0.5 }) {
-  const Y0 = Math.max(0, Math.floor((box[0] / 1000) * h)), X0 = Math.max(0, Math.floor((box[1] / 1000) * w));
-  const Y1 = Math.min(h, Math.ceil((box[2] / 1000) * h)), X1 = Math.min(w, Math.ceil((box[3] / 1000) * w));
-  if (Y1 <= Y0 || X1 <= X0) return null;
-  const c = Math.max(1, Math.ceil(Math.max(Y1 - Y0, X1 - X0) / 48)), rows = Math.ceil((Y1 - Y0) / c), cols = Math.ceil((X1 - X0) / c);
-  const W = cols + 1, K = new Float64Array((rows + 1) * W), O = new Float64Array((rows + 1) * W), A = new Float64Array((rows + 1) * W);
-  for (let y = Y0; y < Y1; y++) for (let x = X0; x < X1; x++) { // per cell: the object's pixels, the other's, and the pixels
-    const i = y * w + x, j = (Math.floor((y - Y0) / c) + 1) * W + Math.floor((x - X0) / c) + 1;
-    K[j] += keep[i]; O[j] += other[i] && !keep[i] ? 1 : 0; A[j] += 1;
-  }
-  for (const T of [K, O, A]) for (let r = 1; r <= rows; r++) for (let q = 1; q <= cols; q++) T[r * W + q] += T[(r - 1) * W + q] + T[r * W + q - 1] - T[(r - 1) * W + q - 1];
-  const sum = (T, r0, q0, r1, q1) => T[r1 * W + q1] - T[r0 * W + q1] - T[r1 * W + q0] + T[r0 * W + q0];
-  const all = sum(K, 0, 0, rows, cols);
-  if (!all || sum(O, 0, 0, rows, cols) <= share * sum(A, 0, 0, rows, cols)) return null;
-  let best = null;
-  for (let r0 = 0; r0 < rows; r0++) for (let r1 = r0 + 1; r1 <= rows; r1++) for (let q0 = 0; q0 < cols; q0++) for (let q1 = q0 + 1; q1 <= cols; q1++) {
-    const k = sum(K, r0, q0, r1, q1);
-    if (k < least * all || (best && k < best.k)) continue;
-    const a = sum(A, r0, q0, r1, q1);
-    if (sum(O, r0, q0, r1, q1) > share * a || (best && k === best.k && a >= best.a)) continue;
-    best = { k, a, r0, q0, r1, q1 };
-  }
-  if (!best) return null;
-  const y1 = Math.min(Y1, Y0 + best.r1 * c), x1 = Math.min(X1, X0 + best.q1 * c);
-  const cut = [(Y0 + best.r0 * c) / h, (X0 + best.q0 * c) / w, y1 / h, x1 / w].map((v) => Math.round(v * 1000));
-  return [Math.max(cut[0], box[0]), Math.max(cut[1], box[1]), Math.min(cut[2], box[2]), Math.min(cut[3], box[3])]; // inside `box`
+// The frame that the prompt writer gets for its second look at an erase with no words (app.dimFrame): the object in full
+// light and every other pixel at `keep` of its light, rounded down, so that the object under the stroke stands out from
+// everything around it. rgba: the frame's pixels, 4 values each; bits: a Uint8Array of 0 and 1, one per pixel, 1 inside
+// the object. A new array; the alpha stays.
+export const DIM = 0.3;
+export function dimOutside(rgba, bits, keep = DIM) {
+  const out = new Uint8ClampedArray(rgba);
+  for (let i = 0; i < bits.length; i++) if (!bits[i]) for (let c = 0; c < 3; c++) out[i * 4 + c] = Math.floor(rgba[i * 4 + c] * keep);
+  return out;
 }
 
 // The erase pass's prompt: the scene as it stays, in the upsampler's own words for what it kept (rows with a box in the
@@ -668,12 +650,42 @@ export function edgesHeld(after, before, mask, w, h) {
   return n < 16 || va <= 0 || vb <= 0 ? null : (sab - (sa * sb) / n) / Math.sqrt(va * vb);
 }
 
-// The check after an erase, one pure function for the page and for the tests on a GPU: the first frame after the edit
-// (`after`), the frame under it (`before`) and the object's mask, all three RGBA at w x h. { changed, edges, left }.
-export function eraseCheck(after, before, mask, w, h) {
-  const changed = erasedShare(after, before, mask, w, h, { levels: 24 }), edges = edgesHeld(after, before, mask, w, h);
-  return { changed, edges, left: objectLeft({ changed, edges }) };
+// The band that an erase reaches beyond its object: the object's mask grown by `reach` pixels each way, as a square (along
+// the rows, then the columns, never past the frame's edge), without the mask itself. The edit's mask grows by about as much
+// before Klein's pass (app.editSettings: grow, then feather). mask: RGBA at w x h, painted where its red is 128 or more.
+// Returns RGBA, white in the band, as erasedShare and edgesHeld read a mask.
+export function bandBeyond(mask, w, h, reach) {
+  const m = new Uint8Array(w * h), rows = new Uint8Array(w * h), grown = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) m[i] = mask[i * 4] >= 128 ? 1 : 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (m[y * w + x]) rows.fill(1, y * w + Math.max(0, x - reach), y * w + Math.min(w - 1, x + reach) + 1);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (rows[y * w + x]) for (let k = Math.max(0, y - reach); k <= Math.min(h - 1, y + reach); k++) grown[k * w + x] = 1;
+  const band = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) if (grown[i] && !m[i]) band.fill(255, i * 4, i * 4 + 4);
+  return band;
 }
+
+// An erase that took more than its object: Klein can remove a neighbour with it, as a fence in front of a barn. On the probes'
+// results on horse.mp4 at the edit preview's size (768 x 432, a band of 22 px), the result that removed the fence with the
+// barn moved 32% of the band's cells by more than 24 levels; every other result, 6.1% at most. The mock's Klein moves 3.5
+// to 16.4% there. So an erase is held back when over 20% of the band beyond its object changed.
+export const BEYOND = 0.2;
+
+// The check after an erase, one pure function for the page and for the tests on a GPU: the first frame after the edit
+// (`after`), the frame under it (`before`) and the object's mask, all three RGBA at w x h. { changed, edges, left }. With
+// `reach`, the band beyond the object in pixels (bandBeyond), it also gives that band's two measures and why the erase is
+// held back: « object » when the object may still be there, « beyond » when over BEYOND of the band changed, else null.
+export function eraseCheck(after, before, mask, w, h, reach = 0) {
+  const changed = erasedShare(after, before, mask, w, h, { levels: 24 }), edges = edgesHeld(after, before, mask, w, h);
+  const left = objectLeft({ changed, edges });
+  if (!(reach > 0)) return { changed, edges, left };
+  const band = bandBeyond(mask, w, h, reach);
+  const beyond = erasedShare(after, before, band, w, h, { levels: 24 }), beyondEdges = edgesHeld(after, before, band, w, h);
+  return { changed, edges, left, beyond, beyondEdges, why: left ? "object" : beyond !== null && beyond > BEYOND ? "beyond" : null };
+}
+
+// The log's detail line under an erase that passed the check: what changed around its object (eraseCheck's band).
+export const beyondDetail = ({ beyond, beyondEdges }) => (beyond === null || beyond === undefined ? "" :
+  `\n  Around the object: ${Math.round(beyond * 100)}% changed${beyondEdges === null ? "" : `, edges held at ${beyondEdges.toFixed(2)}`}.`);
 
 // What to do next, for the status line: an object with no name gets one; a named object gets other words or another seed.
 export const leftHint = (words) =>
@@ -683,7 +695,14 @@ export const leftHint = (words) =>
 // fence, so the page asks: `fact`, a warning, goes to the log once and, after Cancel, to the status line before leftHint;
 // `question` opens the dialog, where « Render anyway » keeps the first frame and renders its shot; `rendered` is the log's
 // line then. A figure the check could not measure (null) is left out.
-export function leftLines(n, { changed, edges }) {
+export function leftLines(n, check) {
+  if (check.why === "beyond") { // the object went, and the area around it changed too much: « of that area », so no reader takes it for the object's figure
+    const figures = [`${Math.round(check.beyond * 100)}% of that area changed`, check.beyondEdges === null ? "" : `edges held at ${check.beyondEdges.toFixed(2)}`];
+    const around = `the erase also changed the area around the object (${figures.filter(Boolean).join(", ")})`;
+    return { fact: `Warning: edit ${n}, ${around}.`, question: `Edit ${n}: ${around}. Render the shot anyway?`,
+      rendered: `Edit ${n}: kept at your request. The check found the area around the object changed.` };
+  }
+  const { changed, edges } = check;
   const figures = [changed === null ? "" : `${Math.round(changed * 100)}% of it changed`, edges === null ? "" : `edges held at ${edges.toFixed(2)}`];
   const there = `the object may still be there${figures.some(Boolean) ? ` (${figures.filter(Boolean).join(", ")})` : ""}`;
   return { fact: `Warning: edit ${n}, ${there}.`, question: `Edit ${n}: ${there}. Render the shot anyway?`,
@@ -886,15 +905,7 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
   return { url, space: MATTE_PASSES.has(id) ? spaces.data ?? "@model" : id === "hdr" ? spaces.log ?? "@model" : "@model", frames: null };
 }
 
-// ---------- A relight's light plan (2 Nov test on an RTX PRO 6000, approved by Adrien) ----------
-// Klein gets two references: the frame, and the light plan, the light's strokes alone on grey (shade strokes in black). Shown
-// the frame with the light painted on it, Klein treated the strokes as paint; with the plan, it places the light where it is
-// painted, keeps its colours, and relights the rest of the frame to agree with it.
-export const PLAN_GREY = "#3a3a3a";
-export const lightColors = (colors, color) => {
-  const names = [...new Set(colors.filter((c) => !dark(c)).map(colorName))];
-  return names.length ? names.join(" and ") : colorName(color);
-};
+// ---------- A relight: Klein gets the frame and the prompt that its strokes make (lightIntent) ----------
 // A relight's strokes read as intentions, in words that Klein can follow with the frame alone: one sentence per light (its
 // colour by name, its strength from the colour's brightness, its spread from the share of the frame it covers, its place),
 // one per shaded place, the person's words, then what must stay. `strokes`: { color, size, points }, the points as [x, y]
@@ -932,16 +943,6 @@ export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
   if (w) said.push(`${w[0].toUpperCase()}${w.slice(1)}${/[.!?]$/.test(w) ? "" : "."}`);
   said.push("Keep every object, face and texture, the camera angle, the framing and the composition exactly as they are: only the light changes.");
   return said.join(" ");
-}
-
-export function lightPlanCaption({ colors = [], color = "#ffd890", words = "" }) {
-  const shade = colors.some(dark) ? " The black strokes mark areas that must fall into deep shadow." : "";
-  const w = words.trim() ? ` ${words.trim()[0].toUpperCase()}${words.trim().slice(1)}${/[.!?]$/.test(words.trim()) ? "" : "."}` : "";
-  return "Relight the first image with the light planned in the second image. The second image is a light plan of the same frame: each coloured " +
-    `stroke marks a light source at that exact place, with that colour (${lightColors(colors, color)}).${shade}${w} Make the light source itself ` +
-    "visible where it is painted, as a real lamp, window, fire or glow that fits the scene. Light every surface that faces it with its colour and a " +
-    "natural falloff, cast new shadows away from it, and remove or soften the old highlights and shadows that disagree with it. Keep every object, " +
-    "face and texture, the framing and the camera exactly as in the first image: only the light changes. Do not draw any stroke.";
 }
 
 // A fluid shot's own passes, shown from the Render panel with its keyframes open or closed: the control video LTX was

@@ -67,8 +67,9 @@ test("captions name the object when given and build only the chosen tool", () =>
   assert.match(caption({ tool: "erase", words: "black umbrella", colors: [], color: "#000000", bbox }), /^Remove the black umbrella inside <obj_1>/);
   assert.match(caption({ tool: "erase", words: "", colors: [], color: "#000000", bbox }), /^Remove the object inside/);
   assert.match(caption({ tool: "paint", words: "a cactus", colors: ["#3d7a35"], color: "#3d7a35", bbox }), /with a cactus, following the drawing's outline, pose and size, in exactly/); // a paint keeps the drawing's shape and the image's style
-  const light = caption({ tool: "light", words: "", colors: ["#ffd890", "#000000"], color: "#ffd890", bbox });
-  assert.equal(light, lightPlanCaption({ colors: ["#ffd890", "#000000"], color: "#ffd890", words: "" })); // a relight's request is the page's own
+  const strokes = [{ color: "#ffd890", size: 0.05, points: [[0.9, 0.2], [0.9, 0.4]] }, { color: "#000000", size: 0.1, points: [[0.1, 0.8]] }];
+  const light = caption({ tool: "light", words: "", colors: ["#ffd890", "#000000"], color: "#ffd890", bbox, strokes, aspect: 16 / 9 });
+  assert.equal(light, lightIntent({ strokes, words: "", aspect: 16 / 9 })); // a relight's request is the page's own: its strokes read as intentions
 });
 
 test("an edit is made again only when something it saw changed", () => {
@@ -116,15 +117,12 @@ test("every workflow names the outputs and the progress node the page reads", ()
 
 import { pickObjects, reconcile, shotPrompt, splitTable, upsampleRequest, RIPPLE } from "../../web/logic.mjs";
 
-test("the upsampler request locks one row in Klein's edit format, and a relight stays plain", () => {
+test("the upsampler request locks one row in Klein's edit format", () => {
   const erase = upsampleRequest({ tool: "erase", words: "red umbrella", bbox: [342, 404, 428, 556] });
   assert.equal(erase.mode, "table");
   assert.deepEqual(erase.locked, [{ id: "obj_1", from: "ref_image_0", src_bbox: [342, 404, 428, 556], tgt_bbox: null, desc: "red umbrella" }]);
   assert.match(erase.request, /"src_bbox": \[342, 404, 428, 556\], "tgt_bbox": null/); // json.dumps spacing, as BFL's code writes it
   assert.equal(upsampleRequest({ tool: "paint", words: "a fire", bbox: [1, 2, 3, 4] }).locked[0].from, "target");
-  const light = upsampleRequest({ tool: "light", words: "night time", bbox: [0, 0, 1000, 1000], colors: ["#388e3c"], color: "#388e3c" });
-  assert.equal(light.mode, "plain"); assert.equal(light.locked, null); // no prompt writer for a relight: the light plan says it
-  assert.equal(light.request, lightPlanCaption({ colors: ["#388e3c"], color: "#388e3c", words: "night time" }));
 });
 
 test("reconcile keeps the locked row, takes the upsampler's description and its cited rows, and survives a cut-off table", () => {
@@ -417,14 +415,13 @@ test("a light's shade is an optional input of its edit, gone without shade strok
   const find = (w, test) => Object.values(w.prompt).find(test);
   const relit = (w) => find(w, (n) => n.class_type === "PaintAPlate_RelightTransfer");
   const loader = (w, title) => find(w, (n) => n._meta?.title?.startsWith(title));
-  const plain = fillWorkflow(wf, { caption: "x", seed: 1 }); // not a light: no relight, no shade, no light plan, and no error
+  const plain = fillWorkflow(wf, { caption: "x", seed: 1 }); // not a light: no relight, no shade, and no error
   assert.equal(relit(plain), undefined);
   assert.equal(loader(plain, "Painted shade"), undefined);
-  assert.equal(loader(plain, "Light plan"), undefined);
-  const lit = fillWorkflow(wf, { caption: "x", seed: 1, relight: 1, plan: "p.png", shade: "s.png" });
+  const lit = fillWorkflow(wf, { caption: "x", seed: 1, relight: 1, shade: "s.png" });
   assert.ok(Array.isArray(relit(lit).inputs.shade)); // the shade strokes, darkened as painted
-  assert.ok(Array.isArray(find(lit, (n) => n.class_type === "ReferenceMultiLatent").inputs["images.image1"])); // the light plan, Klein's second reference
-  const bare = fillWorkflow(wf, { caption: "x", seed: 1, relight: 1, plan: "p.png" }); // a relight without shade strokes still runs
+  assert.equal(find(lit, (n) => n.class_type === "ReferenceMultiLatent").inputs["images.image1"], undefined); // Klein's one reference: the frame
+  const bare = fillWorkflow(wf, { caption: "x", seed: 1, relight: 1 }); // a relight without shade strokes still runs
   assert.ok(relit(bare) && !("shade" in relit(bare).inputs));
   assert.equal(loader(bare, "Painted shade"), undefined);
 });
@@ -471,16 +468,7 @@ test("a dropped link takes the nodes that only fed it: none is left feeding noth
   assert.ok(!out.prompt[wf.outputs.view] && fillWorkflow(wf, { view_prefix: "p/review/view" }).prompt[wf.outputs.view]);
 });
 
-import { lightPlanCaption, lightColors } from "../../web/logic.mjs";
-
-test("a relight's request: the light plan's colours and words, the shade only when painted", () => {
-  const warm = lightPlanCaption({ colors: ["#ffa040"], color: "#ffa040", words: "night outside" });
-  assert.match(warm, /^Relight the first image with the light planned in the second image/);
-  assert.match(warm, /with that colour \(warm orange\)\. Night outside\. Make the light source itself visible/);
-  assert.doesNotMatch(warm, /deep shadow/);
-  assert.match(lightPlanCaption({ colors: ["#ffa040", "#101010"], color: "#ffa040" }), /The black strokes mark areas that must fall into deep shadow\./);
-  assert.equal(lightColors(["#ffa040", "#5aa0ff", "#ffa040"], "#ffd890").split(" and ").length, 2); // two colours, each named once
-});
+import { lightIntent } from "../../web/logic.mjs";
 
 import { fluidPasses, dataSpace, MATTE_PASSES } from "../../web/logic.mjs";
 

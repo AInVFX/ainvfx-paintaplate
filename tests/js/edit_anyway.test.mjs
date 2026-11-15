@@ -1,7 +1,7 @@
 // The edit workstream's tests of what the page says when its check holds an erase back (web/logic.mjs: leftLines, leftHint).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { leftHint, leftLines } from "../../web/logic.mjs";
+import { beyondDetail, leftHint, leftLines } from "../../web/logic.mjs";
 
 const check = { changed: 0.17, edges: 0.62, left: true };
 
@@ -30,4 +30,13 @@ test("after Cancel the status line is the fact, then what to do next", () => {
   const { fact } = leftLines(1, check);
   assert.equal(`${fact} ${leftHint("")}`, "Warning: edit 1, the object may still be there (17% of it changed, edges held at 0.62). Type its name in the prompt bar, then Generate.");
   assert.equal(`${fact} ${leftHint("barn")}`, "Warning: edit 1, the object may still be there (17% of it changed, edges held at 0.62). Use other words, then Generate, or Ctrl+Enter for another seed.");
+});
+
+test("an erase held back for the area around its object: the warning, the question, the kept line, and the detail line", () => {
+  const around = { changed: 0.96, edges: -0.01, left: false, beyond: 0.324, beyondEdges: 0.73, why: "beyond" }, lines = leftLines(1, around);
+  assert.equal(lines.fact, "Warning: edit 1, the erase also changed the area around the object (32% of that area changed, edges held at 0.73).");
+  assert.equal(lines.question, "Edit 1: the erase also changed the area around the object (32% of that area changed, edges held at 0.73). Render the shot anyway?");
+  assert.equal(lines.rendered, "Edit 1: kept at your request. The check found the area around the object changed.");
+  assert.equal(beyondDetail({ beyond: 0.021, beyondEdges: 0.95 }), "\n  Around the object: 2% changed, edges held at 0.95.");
+  assert.equal(beyondDetail({ beyond: undefined }), ""); // a check with no band
 });

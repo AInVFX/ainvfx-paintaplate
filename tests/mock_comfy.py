@@ -231,6 +231,10 @@ async def execute(pid, prompt):
         mask = load_image(v["mask"], "L")
         soft = np.asarray(Image.fromarray((mask * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(9)).filter(
             ImageFilter.GaussianBlur(max(2, base.shape[1] / 120))), np.float32) / 255
+        if STATE.get("spill", 0) > 0 and (v["caption"].startswith("Remove") or "\nRemove the " in v["caption"]):
+            STATE["spill"] -= 1  # armed by /mock/spill: the erase reaches far beyond its object, as a Klein pass that removes a neighbour
+            wide = np.asarray(Image.fromarray((mask * 255).astype(np.uint8)).filter(ImageFilter.BoxBlur(max(2, base.shape[1] // 24))), np.float32) > 0
+            soft = np.asarray(Image.fromarray((wide * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(2)), np.float32) / 255
         if STATE.get("leave", 0) > 0:  # armed by /mock/leave: Klein answers with the frame as it was, so an erased object stays
             STATE["leave"] -= 1
             new = base
@@ -571,6 +575,11 @@ async def leave_route(request):  # mock only: the next `times` edit jobs answer 
     return web.json_response({})
 
 
+async def spill_route(request):  # mock only: the next `times` erase jobs reach far beyond their object, as a Klein pass that removes a neighbour (an edit is two jobs)
+    STATE["spill"] = int((await request.json()).get("times", 2))
+    return web.json_response({})
+
+
 async def writer_route(request):  # mock only: the next `times` prompt-writer jobs answer `text`, as a writer that takes the stroke for another object
     body = await request.json()
     STATE["writer"] = {"times": int(body.get("times", 1)), "text": str(body.get("text", "")), "wide": body.get("wide")}
@@ -658,6 +667,7 @@ async def start():
     app.router.add_post("/mock/card", card_route)
     app.router.add_post("/mock/version", pack_version_route)
     app.router.add_post("/mock/leave", leave_route)
+    app.router.add_post("/mock/spill", spill_route)
     app.router.add_post("/mock/writer", writer_route)
     app.router.add_post("/mock/snap", snap_route)
     app.router.add_post("/mock/named", named_route)
