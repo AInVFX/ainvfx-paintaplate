@@ -553,9 +553,66 @@ export function logLevel(text) { // a log message's colour, from its words: red 
   return starts("Error: ") ? "error" : starts("Warning: ") ? "warn" : "";
 }
 
+export function workflowClasses(prompt) { // the node classes an API workflow holds, once each, sorted
+  return [...new Set(Object.values(prompt).filter((n) => n?.class_type).map((n) => n.class_type))].sort();
+}
+
+// History's row when the page asks for an object's name: what the prompt writer saw, when the edit holds it.
+export function askedText(asked) {
+  return typeof asked === "string" && asked ? `Needs its name (the prompt writer saw ${asked})` : "Needs its name";
+}
+
+// The native frames' failure is said once per cause: a message that names its file counts once for every file.
+export const nativeCause = (message, path) => String(message).split(path).join("the file").trim();
+
+// The log's export: the text of paintaplate_log_<plate>_<YYYYMMDD_HHMM>.txt, to share for troubleshooting. It holds the
+// log and what ComfyUI reports of its versions and its machine (/system_stats): no command line and no path.
+export function logReport({ version, build, stats, browser, address, memory, plate, lines, now }) {
+  const sys = stats?.system ?? {}, two = (n) => String(n).padStart(2, "0"), devices = stats?.devices ?? [];
+  const gb = (bytes) => (+bytes > 0 ? `${(bytes / 2 ** 30).toFixed(1)} GB` : "unknown");
+  const when = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())} ${two(now.getHours())}:${two(now.getMinutes())}`;
+  return [
+    `AInVFX Paint a plate ${version || "unknown"} (build ${build || "unknown"}).`, `Exported: ${when}, this machine's time.`, "",
+    "Machine", `  ComfyUI: ${sys.comfyui_version || "unknown"}.`, `  Python: ${String(sys.python_version || "unknown").split(" ")[0]}.`,
+    `  PyTorch: ${sys.pytorch_version || "unknown"}.`, `  Operating system: ${sys.os || "unknown"}.`,
+    ...(devices.length ? devices.map((d, i) => `  GPU ${i}: ${d.name || "unknown"}, ${gb(d.vram_total)} of VRAM.`) : ["  GPU: none reported."]),
+    `  RAM: ${gb(sys.ram_total)}.`, "",
+    "Page", `  Browser: ${browser}.`, `  Address options: ${address || "none"}.`, `  Memory profile: ${memory || "unknown"}.`, "",
+    "Plate", ...(plate.length ? plate.map((l) => `  ${l}`) : ["  No plate open."]), "",
+    "Log", ...lines.map(([time, text]) => `${time}  ${String(text).replaceAll("\n", `\n${" ".repeat(String(time).length + 2)}`)}`),
+  ].join("\n") + "\n";
+}
+
+// The log's file name, in the browser's local time.
+export function logFileName(plate, d) {
+  const two = (n) => String(n).padStart(2, "0"), name = String(plate || "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "no_plate";
+  return `paintaplate_log_${name}_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}.txt`;
+}
+
+// The Finish menu: the passes on the whole plate after the full-size composite, in the order the render runs them. Each
+// option: its id (its switch is #finish-<id>), its name, the line that says what it does to the result, and the question
+// it asks before it turns on, when it changes what Export writes.
+export const FINISH = [
+  { id: "hdr", name: "SDR to HDR",
+    line: "The full-size shot is regenerated in scene-linear values, fitted to the plate. The result is half-float EXR frames in ACES2065-1, in the viewer and in Export.",
+    ask: "This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1." },
+];
+export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on
+
+// What to do when a line names a missing model file: the status line adds it after the line, and the log keeps the fact.
+export const missingFileHint = (text) => (/models\/vae_approx/.test(String(text).split("\n")[0]) ? "Run python get_models.py." : "");
+
 export function strokeTarget({ draft, current, tool }) { // where a new stroke goes: "draft", "current" or "new"
   if (draft) return "draft";
   return current?.tool === tool ? "current" : "new";
+}
+
+// The status line's note while an edit with active edits above it changes: the first frame shows the edits below it only,
+// so the note names the edits it hides and the way back. `n`: the edit's number; `above`: the numbers of the hidden edits.
+export function hidesNote(n, above) {
+  if (!above.length) return "";
+  const names = above.length === 1 ? `Edit ${above[0]} hides` : `Edits ${above.slice(0, -1).join(", ")} and ${above.at(-1)} hide`;
+  return `Edit ${n} changes: ${names} until Generate. Esc cancels the change.`;
 }
 
 export function toolEndsEdit({ draft, current }, tool) { // picking another tool than the edit being worked on starts a new edit
@@ -780,7 +837,7 @@ export const wantsHdrFor = (spec, headroom, deliverHdr) => holdsHdr(spec, headro
 // 48 GB warns when it opens: a 48 GB card reports about 47.5 GiB, a 40 GB one about 39.6.
 export const BIG_PLATE = { side: 2048, vram: 46 * 2 ** 30 };
 export const bigPlateWarning = (spec, vram) => (spec && vram > 0 && Math.max(spec.width, spec.height) > BIG_PLATE.side && vram < BIG_PLATE.vram
-  ? `This plate is ${spec.width} x ${spec.height}, above 2K, and this card has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB card for now: its renders may not finish here.`
+  ? `This plate is ${spec.width} x ${spec.height}, above 2K, and this GPU has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB GPU for now: its renders may not finish here.`
   : null);
 export const hdrFps = (fps) => Math.min(30, +fps || 24); // the conditioning frame rate: at most 30, as in Lightricks' workflow
 export const blankDepth = (v) => (+v === HDR_DEPTH ? HDR_DEPTH : 8);

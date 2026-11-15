@@ -552,9 +552,9 @@ import { bigPlateWarning } from "../../web/logic.mjs";
 
 test("a plate above 2K warns when it opens on a card under 48 GB", () => {
   const uhd = { width: 3840, height: 2160 }, hd = { width: 1920, height: 1080 }, dci = { width: 2048, height: 1080 };
-  assert.match(bigPlateWarning(uhd, 32 * 2 ** 30), /3840 x 2160, above 2K, and this card has 32 GB/);
+  assert.match(bigPlateWarning(uhd, 32 * 2 ** 30), /3840 x 2160, above 2K, and this GPU has 32 GB/);
   assert.equal(bigPlateWarning(uhd, 47.5 * 2 ** 30), null, "a 48 GB card: no warning");
-  assert.equal(bigPlateWarning(uhd, 95 * 2 ** 30), null, "a 96 GB card");
+  assert.equal(bigPlateWarning(uhd, 95 * 2 ** 30), null, "a 96 GB GPU");
   assert.equal(bigPlateWarning(hd, 24 * 2 ** 30), null, "1920 wide is not above 2K");
   assert.equal(bigPlateWarning(dci, 24 * 2 ** 30), null, "2048 is 2K itself");
   assert.equal(bigPlateWarning(uhd, 0), null, "the card's memory not yet known: no warning");

@@ -155,14 +155,16 @@ def hdr_video(page, U):
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     U.open_path(page, "plates/desk.mp4")  # waits for desk's own spec: the plate before also says fps
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden", timeout=60000)
-    U.check(not page.is_hidden("#deliver-hdr-row") and not page.is_checked("#deliver-hdr") and not page.query_selector("#hdr-switch"),
-            "a video plate: Deliver's bit-depth pass offers SDR to HDR, off; no switch near the render steps")
-    page.click("#deliver-hdr")
-    U.check(not page.is_hidden("#deliver-confirm") and not page.is_checked("#deliver-hdr"), "turning it on asks first, and stays off until confirmed")
-    page.click("#deliver-no")
-    U.check(page.is_hidden("#deliver-confirm") and not page.is_checked("#deliver-hdr"), "Cancel leaves it off")
-    page.click("#deliver-hdr"); page.click("#deliver-yes")
-    U.check(page.is_hidden("#deliver-confirm") and page.is_checked("#deliver-hdr"), "Turn on turns it on")
+    page.click("#finish-btn")
+    U.check(page.is_enabled("#finish-hdr") and not page.is_checked("#finish-hdr") and not page.query_selector("#hdr-switch"),
+            "a video plate: the Finish menu offers SDR to HDR, off; no switch near the render steps")
+    page.click("#finish-hdr")
+    U.check(not page.is_hidden("#finish-hdr-ask") and not page.is_checked("#finish-hdr"), "turning it on asks first, and stays off until confirmed")
+    page.click("#finish-hdr-no")
+    U.check(page.is_hidden("#finish-hdr-ask") and not page.is_checked("#finish-hdr"), "Cancel leaves it off")
+    page.click("#finish-hdr"); page.click("#finish-hdr-yes")
+    U.check(page.is_hidden("#finish-hdr-ask") and page.is_checked("#finish-hdr"), "Turn on turns it on")
+    page.keyboard.press("Escape")  # the Finish menu closes
     page.evaluate("document.activeElement.blur()")
     page.evaluate(U.WATCH)
     page.keyboard.press("p"); U.paint_once(page, "a red lamp", [(0.3, 0.6), (0.36, 0.7)]); page.keyboard.press("Enter")

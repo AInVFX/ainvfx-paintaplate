@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, keySlots, leftHint, leftLines, lightColor, logLevel, moveKey, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, writerSaw, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, writerBoxes } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -107,7 +107,7 @@ const S = {
   shot: null, stage: null, run: 0, exported: null, wantDownload: null,
   ocio: { config: "", display: "", view: "", look: "", ...saved(OCIO_PREF), info: null }, // the OCIO config and the viewer's view, as in RV
   previewCap: (() => { try { const v = localStorage.getItem("paintaplate.preview"); return v && Number.isFinite(+v) ? +v : PREVIEW_CAP; } catch { return PREVIEW_CAP; } })(), // 0: Off // long side of the shot preview: Fast by default
-  deliver: { hdr: false }, // Deliver's passes for this plate; hdr: the deliberate SDR to HDR of a plate that holds nothing above 1.0
+  deliver: { hdr: false }, // the Finish menu's passes for this plate, under the scene's key « deliver »; hdr: the deliberate SDR to HDR of a plate that holds nothing above 1.0
   heroKey: "", renders: new Map(), // set of edits -> what has been rendered for it
   erases: new Map(), // set of erases -> their matte and clean plates, for every render that has the same erases
   peek: null, // the History row picked: frame 0 shows its strokes over the edited first frame
@@ -261,7 +261,7 @@ async function openPlate(list, typed, opts = {}) {
   const began = performance.now();
   stopEverything();
   if (!opts.under) { S.halted = false; S.viewStopped = false; S.viewEpoch++; } // another plate, or a scene: what generates stops, a stop in force ends, and what waited for it is void
-  if (!opts.under) S.deliver = { hdr: false }; // a new plate: Deliver's passes off; the fluid shot under the edits keeps them
+  if (!opts.under) S.deliver = { hdr: false }; // a new plate: the Finish menu's passes off; the fluid shot under the edits keeps them
   if (openCtl) { openCtl.abort(); cancel("ingest"); } // a plate still opening gives way to this one
   const ctl = (openCtl = new AbortController()); // Cancel on the opening screen, or Esc, aborts it (cancelOpen)
   Object.assign(S, { plate: null, hero: null, original: null }); // nothing to draw while the new plate loads
@@ -348,7 +348,7 @@ async function openPlate(list, typed, opts = {}) {
 
   const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).map((n) => n).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
-  const big = bigPlateWarning(spec, S.vram); // above 2K on a card under 48 GB: renders may not finish (README, GPU)
+  const big = bigPlateWarning(spec, S.vram); // above 2K on a GPU under BIG_PLATE.vram: renders may not finish (README, GPU)
   if (big) { log(big); setTimeout(() => status(big), 80); }
   const next = "Describe the edit at the top, paint on the frame, then Generate.", plate = S.plate;
   const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", from file"} (right-click > OCIO > Colour space changes it). ${next}`;
@@ -736,6 +736,7 @@ function inWork(draw) {
 // video's frame decoded with its own YUV matrix and range), one frame per source, the latest asked for: a 4K half-float
 // frame is about 50 MB. While a source plays, the movies and the 960 px cache stay.
 const sharp = { plate: null, shot: null, cmp: null }; // cmp: the pass compared in the wipe
+const nativeFailed = new Set(); // the native frames' failures said for the plate on show, one per cause
 function sharpFrame(slot, path) {
   const want = `${path}#${S.frame}`, s = sharp[slot];
   if (s?.key === want) return s.img;
@@ -750,7 +751,11 @@ function sharpFrame(slot, path) {
   }).catch((err) => {
     if (sharp[slot]?.loading !== want) return;
     sharp[slot] = { failed: path };
-    log(`Native frames of ${path}: stopped (${err.message}). Viewer: cached frames.`);
+    const cause = nativeCause(err.message, path); // one log line per cause, not one per file
+    if (nativeFailed.plate !== S.plate?.id) { nativeFailed.clear(); nativeFailed.plate = S.plate?.id; }
+    if (nativeFailed.has(cause)) return;
+    nativeFailed.add(cause);
+    log(`Native frames: stopped (${cause}).\n  First file: ${path}.\n  Viewer: cached frames.`);
   });
   return null;
 }
@@ -762,37 +767,80 @@ function layered(upto = S.edits.length, keep = () => true) { // the first frame 
 }
 
 // SDR to HDR runs on its own for new content on a plate that holds values above 1.0 (logic.holdsHdr). On any other plate it
-// runs only when Deliver's bit-depth pass asks for it, confirmed first, and its result is an EXR sequence (Adrien, 3 Nov).
-// The switch near the render steps is gone: the rule and Deliver cover both of its cases.
+// runs only when the Finish menu asks for it, confirmed first, and its result is an EXR sequence.
 const hdrWanted = () => wantsHdrFor(S.plate?.spec, S.plate?.headroom, S.deliver.hdr);
-function deliverUI() { // Deliver's panel: the passes that run after the full-size composite (the bit-depth pass, for now)
-  const p = S.plate, auto = !!p && holdsHdr(p.spec, p.headroom);
-  $("#deliver").hidden = !p || keying();
-  $("#deliver-hdr-row").hidden = !S.hdrReady || auto;
-  $("#deliver-auto").hidden = !S.hdrReady || !auto;
-  $("#deliver-hdr").checked = !!S.deliver.hdr;
+function finishState(opt) { // a Finish option on this plate: on, disabled, and why: the line that says why it cannot change here
+  const p = S.plate;
+  if (opt.id !== "hdr") return { on: false, disabled: true, why: "" };
+  if (!HDR_ON) return { on: false, disabled: true, why: "Off in this page's address (hdr=0)." };
+  if (!S.hdrReady) return { on: false, disabled: true, why: "Its model files or nodes are missing on this ComfyUI. Run python get_models.py for the files." };
+  if (p && holdsHdr(p.spec, p.headroom)) return { on: true, disabled: true, why: "This plate holds values above 1.0: its new content goes through SDR to HDR on its own." };
+  return { on: !!S.deliver.hdr, disabled: false, why: "" };
 }
-function setDeliverHdr(on) { // each setting keeps its own renders: the render key gains "|hdr"
-  S.deliver.hdr = on;
-  log(on ? "Deliver: SDR to HDR on.\n  Full-size shot: regenerated in scene-linear values, fitted to the plate.\n  Result: half-float EXR frames in ACES2065-1, in the viewer and in Export." : "Deliver: SDR to HDR off.");
-  hud(`Deliver: SDR to HDR ${on ? "on" : "off"}`, 1500);
-  deliverUI(); recompose(); touch();
+function finishRow(opt) { // one row of the Finish menu: its switch and name, its line, why it cannot change here, and its question
+  const li = document.createElement("li");
+  li.className = "finish-row";
+  li.innerHTML = `<label><input type="checkbox" id="finish-${opt.id}"><span class="name"></span></label><small class="line"></small><small id="finish-${opt.id}-why" class="why" hidden></small>`
+    + (opt.ask ? `<div id="finish-${opt.id}-ask" class="finish-ask" hidden><p></p><button id="finish-${opt.id}-yes" type="button">Turn on</button> <button id="finish-${opt.id}-no" type="button" class="quiet">Cancel</button></div>` : "");
+  li.querySelector(".name").textContent = opt.name;
+  li.querySelector(".line").textContent = opt.line;
+  li.querySelector("input").addEventListener("change", (e) => askFinish(opt, e.target.checked));
+  if (opt.ask) {
+    li.querySelector(".finish-ask p").textContent = opt.ask;
+    li.querySelector(`#finish-${opt.id}-yes`).addEventListener("click", () => { $(`#finish-${opt.id}-ask`).hidden = true; setFinish(opt, true); });
+    li.querySelector(`#finish-${opt.id}-no`).addEventListener("click", () => { $(`#finish-${opt.id}-ask`).hidden = true; finishUI(); });
+  }
+  return li;
 }
-function askDeliverHdr(on) { // turning it on asks first: this plate's format holds nothing above 1.0
-  $("#deliver-confirm").hidden = true;
-  if (!on) return setDeliverHdr(false);
-  $("#deliver-hdr").checked = false;
-  $("#deliver-confirm").hidden = false;
-  hud("SDR to HDR makes this plate's result an EXR sequence: confirm in Deliver", 3000);
+function finishUI() { // the Finish button and its menu: each row as this plate allows it, and the button's count
+  const list = $("#finish-list"), btn = $("#finish-btn");
+  if (!list.children.length) list.replaceChildren(...FINISH.map(finishRow));
+  btn.disabled = !S.plate || keying();
+  if (btn.disabled) closeFinish();
+  const on = [];
+  for (const opt of FINISH) {
+    const st = finishState(opt), box = $(`#finish-${opt.id}`), why = $(`#finish-${opt.id}-why`);
+    box.checked = st.on; box.disabled = st.disabled;
+    why.textContent = st.why; why.hidden = !st.why;
+    if (st.on && !st.disabled) on.push(opt.name);
+  }
+  btn.textContent = finishLabel(on.length);
+  btn.title = `Finish: the passes on the whole plate after the full-size composite.${on.length ? ` On: ${on.join(", ")}.` : ""}`;
 }
-$("#deliver-hdr").addEventListener("change", () => askDeliverHdr($("#deliver-hdr").checked));
-$("#deliver-yes").addEventListener("click", () => { $("#deliver-confirm").hidden = true; setDeliverHdr(true); });
-$("#deliver-no").addEventListener("click", () => { $("#deliver-confirm").hidden = true; deliverUI(); });
+function askFinish(opt, on) { // a pass that changes what Export writes asks first, under its row
+  const ask = $(`#finish-${opt.id}-ask`);
+  if (ask) ask.hidden = true;
+  if (!on || !ask) return setFinish(opt, on);
+  $(`#finish-${opt.id}`).checked = false;
+  ask.hidden = false;
+}
+function setFinish(opt, on) { // each setting keeps its own renders: the render key gains "|hdr"
+  if (opt.id === "hdr") S.deliver.hdr = on;
+  log(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Full-size shot: regenerated in scene-linear values, fitted to the plate.\n  Result: half-float EXR frames in ACES2065-1, in the viewer and in Export." : ""}` : `Finish: ${opt.name} off.`);
+  hud(`Finish: ${opt.name} ${on ? "on" : "off"}.`, 1500);
+  finishUI(); recompose(); touch();
+}
+function openFinish(open = $("#finish").hidden) { // the menu opens under its button; Esc, a click outside or the button closes it
+  if (!open) return closeFinish();
+  finishUI();
+  const r = $("#finish-btn").getBoundingClientRect(), menu = $("#finish");
+  Object.assign(menu.style, { top: `${Math.round(r.bottom + 6)}px`, right: `${Math.max(8, Math.round(innerWidth - r.right))}px` });
+  menu.hidden = false;
+  $("#finish-btn").setAttribute("aria-expanded", "true");
+}
+function closeFinish() { // an open question closes as « Cancel » does
+  $("#finish").hidden = true;
+  $("#finish-btn").setAttribute("aria-expanded", "false");
+  for (const ask of document.querySelectorAll(".finish-ask")) ask.hidden = true;
+}
+$("#finish-btn").addEventListener("click", () => openFinish());
+addEventListener("pointerdown", (e) => { if (!$("#finish").hidden && !e.target.closest("#finish, #finish-btn")) closeFinish(); }, true);
+addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#finish").hidden) { closeFinish(); e.preventDefault(); e.stopImmediatePropagation(); } }, true);
 
 function recompose() {
   S.hero = layered();
   const edits = S.edits.filter((e) => e.on && e.patch && e.state !== "generating").map((e) => `${e.id}.${e.version}`).join(",");
-  const key = edits && hdrKey(edits, holdsHdr(S.plate?.spec, S.plate?.headroom), hdrWanted()); // Deliver's SDR to HDR on an SDR plate: another render
+  const key = edits && hdrKey(edits, holdsHdr(S.plate?.spec, S.plate?.headroom), hdrWanted()); // Finish's SDR to HDR on an SDR plate: another render
   if (key === S.heroKey) return;
   S.heroKey = key;
   const r = S.renders.get(key); // a set of edits seen before plays at once (a bypass turned back on, for example)
@@ -1340,7 +1388,8 @@ view.addEventListener("pointerdown", (e) => {
   if (rub && eraserKey) eraserKey.dragged = true; // a stroke while X is held: at the release the eraser goes back as it was
   if (S.playing) pause();
   if (keying()) return paintKey(e, rub);
-  if (S.frame !== 0) { seek(0); hud("Edits are painted on the first frame"); }
+  const jumped = S.frame !== 0; // a stroke on another frame: the viewer goes back to the first frame, where edits are painted
+  if (jumped) { seek(0); hud("Edits are painted on the first frame.", 3000); }
   if (rub) return rubOut(e);
   cancel("prefetch"); // a caption written for fewer strokes is outdated
   clearTimeout(S.prefetchTimer);
@@ -1348,7 +1397,9 @@ view.addEventListener("pointerdown", (e) => {
   let d = S.draft;
   const to = strokeTarget({ draft: S.draft, current: S.selected, tool: S.tool }); // the current edit takes the strokes of its own tool
   if (to === "current") d = busy(S.selected) ? reopen(S.selected) : reopenDone(S.selected); // the edit changes: its passes and its render stop
-  if (to === "new") { S.selected = null; d = S.draft = newEdit(); editingUI(); } // a new edit: what renders goes on until Generate
+  if (to === "new") { S.selected = null; S.peek = null; d = S.draft = newEdit(); } // a new edit: what renders goes on until Generate
+  if (jumped) S.jumped = d; // the status line's note says it until this edit is generated or cancelled
+  editingUI();
   view.setPointerCapture(e.pointerId);
   stroke = { tool: d.tool, color: S.color, size: S.size, points: [] };
   d.strokes.push(stroke);
@@ -1751,7 +1802,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
       hdrFrames = hf ? `output:${hf.subfolder}/${framePattern(hf.filename)}` : null; // for the Fluid: SDR to HDR row
       const m = outputFile("hdr", made, "movie");
       movie = m ? viewUrl(m) : null;
-      log(`Fluid shot v${v}: SDR to HDR done in ${((performance.now() - t1) / 1000).toFixed(1)} s.\n  Half-float EXR frames in ${path}.`);
+      log(`Fluid shot v${v}: SDR to HDR: done in ${((performance.now() - t1) / 1000).toFixed(1)} s.\n  Half-float EXR frames in ${path}.`);
     }
     const control = outputFile("fluid", out, "control"); // the control video, for the Fluid: keyframes row
     f.result = { v, sig, seed: f.seed, prompt, path, hdr, movie, run: fluidRun(path), preview: viewUrl(outputFile("fluid", out, "video")),
@@ -1967,6 +2018,7 @@ function queueWaiting(first = null) {
 
 function select(edit) { // a History row becomes the current edit: its words in the prompt field, its strokes on the frame
   if (edit && S.draft && S.draft !== edit) launch(S.draft); // the strokes in progress start before another edit is picked
+  if (edit && S.selected !== edit) log(`Edit ${num(edit)} selected.`); // the log names the edit that the next strokes and words change
   S.selected = edit;
   S.peek = edit; // frame 0 shows its strokes until playback starts or an edit is launched
   if (edit) { setTool(edit.tool); $("#prompt").value = edit.prompt; if (edit.tool === "erase") $("#whole").checked = !!edit.whole; }
@@ -1975,12 +2027,29 @@ function select(edit) { // a History row becomes the current edit: its words in 
   historyUI(); render();
 }
 
+function show(edit) { // a click on a History row: frame 0 shows that edit's strokes and nothing is selected, so the next strokes start a new edit on top. Its pencil selects it
+  if (S.selected && !S.draft) $("#prompt").value = "";
+  S.selected = null;
+  S.peek = edit; // frame 0 shows its strokes until playback starts or an edit is launched
+  if (edit) hud(`Edit ${num(edit)} shown. A stroke starts a new edit on top; the pencil changes Edit ${num(edit)}.`, 3500);
+  historyUI(); render();
+}
+
 function editingUI() { // the Editing tag and the New edit button: which edit new strokes and words change
   const e = S.selected ?? (S.edits.includes(S.draft) ? S.draft : null), tag = $("#editing");
   tag.hidden = !e;
   if (e) tag.textContent = `Editing ${num(e)} · ${NAME[e.tool]}`;
   $("#new-edit").disabled = !S.plate || keying() || (!S.draft && !S.selected);
-  generateUI();
+  generateUI(); noteUI();
+}
+
+function noteUI() { // the status line's held note, beside its latest fact: what the first frame hides while an edit changes, or where strokes land
+  const changed = S.edits.includes(S.draft) ? S.draft : null;
+  const above = changed ? hiddenEdits().map(num).sort((a, b) => a - b) : [];
+  const text = above.length ? hidesNote(num(changed), above) : S.draft && S.draft === S.jumped ? "Edits are painted on the first frame." : "";
+  const note = $("#status-note");
+  if (note.textContent !== text) note.textContent = text;
+  note.hidden = !text;
 }
 
 function nextEdit() { // New edit (N): the strokes in progress start now, and the next strokes make a separate edit
@@ -2315,8 +2384,7 @@ function restore(snap) {
   clearTimeout(S.prefetchTimer);
   cancel("edit", "snap", "prefetch", "warm"); // the edits change; renders go on, and what they make stays
   for (const e of [...S.edits, S.draft].filter(Boolean)) if (e.state === "generating" || e.state === "queued") e.token = (e.token ?? 0) + 1;
-  const kept = S.selected; // the current edit stays current while it exists: the next strokes still change it
-  Object.assign(S, { running: null, draft: null, hover: null, selected: null });
+  Object.assign(S, { running: null, draft: null, hover: null, selected: null, peek: null }); // an undo or a redo ends the selection: the next strokes start a new edit
   const apply = ({ e, strokes, prompt, seed, on, whole }) => {
     const same = strokes.length === e.strokes.length && strokes.every((st, i) => st === e.strokes[i]);
     Object.assign(e, { prompt, seed, on, whole });
@@ -2333,8 +2401,7 @@ function restore(snap) {
   }
   if (snap.draft) { S.draft = apply(snap.draft); S.draft.state = "drawing"; $("#prompt").value = S.draft.prompt; if (painted(S.draft)) prepareSoon(); }
   S.edits = S.edits.filter((e) => e.strokes.length); // an edit undone to no strokes at all is gone
-  if (!S.draft && S.edits.includes(kept)) { S.selected = kept; $("#prompt").value = kept.prompt; }
-  else if (!S.draft && !keying()) $("#prompt").value = ""; // in a fluid shot the words belong to the shot, not to an edit
+  if (!S.draft && !keying()) $("#prompt").value = ""; // in a fluid shot the words belong to the shot, not to an edit
   if (snap.keys && S.fluid) { // a fluid shot's keyframes: their frames and strokes as they were
     S.fluid.keys = snap.keys.map(({ k, frame, strokes }) => {
       const same = strokes.length === k.strokes.length && strokes.every((st, i) => st === k.strokes[i]);
@@ -2440,15 +2507,17 @@ function historyUI() {
     const li = document.createElement("li");
     li.dataset.id = e.id;
     li.className = [e.on ? "" : "off", e.state === "generating" || e.state === "queued" || e.state === "drawing" ? "busy" : "",
-      e.state === "failed" ? "failed" : "", S.selected === e ? "selected" : "", hidden.has(e) || awaits.has(e) ? "hidden-above" : ""].join(" ").trim();
-    const left = e.state === "failed" && e.left; // an erase that left its object (generate)
+      e.state === "failed" ? "failed" : "", S.selected === e ? "selected" : S.peek === e ? "shown" : "", hidden.has(e) || awaits.has(e) ? "hidden-above" : ""].join(" ").trim();
+    const asked = e.state === "failed" && e.editAsked; // the page asks for the object's name: true, or what the prompt writer saw (generate)
+    const left = e.state === "failed" && e.left && !asked; // an erase that left its object (generate)
+    if (asked) li.dataset.asked = "1";
     if (left) li.dataset.left = "1";
     li.innerHTML = `<img class="thumb" alt=""><div class="what"><span class="title"></span><small></small></div>
-      <div class="acts"><button class="edit" title="Edit: its strokes and words come back on the first frame">${ICON.edit}</button><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
+      <div class="acts"><button class="edit" title="Change this edit: its strokes and words come back on the first frame.">${ICON.edit}</button><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
       <button class="again" title="Try another">${ICON.again}</button><button class="del" title="Remove this edit">${ICON.del}</button></div>`;
     const img = li.querySelector(".thumb");
     if (e.thumb) img.src = e.thumb; else img.removeAttribute("src");
-    li.title = "Select this edit: its words come back; retype them, paint more or rub strokes out, and it runs again";
+    li.title = "Show this edit's strokes on the first frame. Its pencil changes it.";
     li.querySelector(".title").textContent = `${num(e)}. ${NAME[e.tool]}`;
     const what = e.tool === "erase" ? (e.whole ? "Whole object" : "Painted area") : e.prompt || (e.tool === "light" ? "From the strokes" : "No words");
     const small = li.querySelector("small");
@@ -2456,7 +2525,7 @@ function historyUI() {
     if (hidden.has(e)) small.textContent = `Hidden until edit ${num(S.draft)} is generated`;
     else if (forEnter || (STATE[e.state] && e.on)) {
       small.innerHTML = '<span class="state"></span>';
-      small.firstChild.textContent = forEnter ? "Waits for Enter" : left ? (e.leftWhy === "beyond" ? "The area around the object changed" : "The object may still be there") : STATE[e.state];
+      small.firstChild.textContent = forEnter ? "Waits for Enter" : asked ? askedText(asked) : left ? (e.leftWhy === "beyond" ? "The area around the object changed" : "The object may still be there") : STATE[e.state];
     } else if (awaits.has(e)) small.textContent = "Waits to be generated again";
     else small.textContent = e.on ? what : `Bypassed: ${what}`;
     small.title = e.caption?.text ? `What Klein received: ${e.caption.text}` : what;
@@ -2467,7 +2536,7 @@ function historyUI() {
     li.querySelector(".again").disabled = e.state === "drawing" || !e.strokes.length;
     li.onmouseenter = () => { S.hover = e; render(); };
     li.onmouseleave = () => { S.hover = null; render(); };
-    li.onclick = (ev) => { if (!ev.target.closest("button")) { if (keying()) leaveKeys(); pause(); seek(0); select(S.selected === e ? null : e); } };
+    li.onclick = (ev) => { if (!ev.target.closest("button")) { if (keying()) leaveKeys(); pause(); seek(0); show(S.peek === e && !S.selected ? null : e); } };
     return li;
   }), ...fluid);
   hiddenUI();
@@ -2914,7 +2983,24 @@ function log(text) { // the log panel only: what happened, one fact per message,
   while (list.children.length > 400) list.firstChild.remove();
   list.scrollTop = list.scrollHeight;
   if (li.className === "error" && list.hidden) $("#log-btn").classList.add("alert"); // an error while the log is closed: the button says so
+  const hint = missingFileHint(text); // a line that names a missing model file: the status line adds what to do
+  if (hint) status(`${String(text).split("\n")[0]} ${hint}`, "hint");
 }
+
+async function exportLog() { // the log's export (logic.logReport): the log with its times, and what ComfyUI reports of its versions and machine
+  const [served, stats] = await Promise.all([fetch("/paintaplate/version").then((r) => r.json()).catch(() => ({})), fetch("/system_stats").then((r) => r.json()).catch(() => null)]);
+  const now = new Date(), p = S.plate, name = p?.path?.split("/").filter(Boolean).pop()?.replace(/\.[^.]+$/, "") ?? "";
+  const text = logReport({ version: served.version ?? S.version, build: served.build, stats, browser: navigator.userAgent, address: location.search.slice(1),
+    memory: S.memoryProfile ? `${S.memoryProfile.name} (${S.memoryProfile.why})` : "", plate: p ? [$("#spec").textContent.trim(), plateSpaceLine(p)] : [],
+    lines: [...$("#log").children].map((li) => [li.firstChild.textContent, li.lastChild.textContent]), now });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  a.download = logFileName(name, now);
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  hud(`Log exported: ${a.download}.`, 2500);
+}
+$("#log-export").addEventListener("click", exportLog);
 
 function renderLeft(finalToo = false) { // seconds until the preview, or the full-size composite (and the export once asked for), is ready
   finalToo ||= !S.previewCap; // with Preview size: Off, the next result is the full-size composite
@@ -2936,7 +3022,7 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
 
 function stagesUI() {
   $("#stop").hidden = !generating();
-  deliverUI(); // the Render panel: every step, done, running or waiting, and the time left
+  finishUI(); // the Render panel: every step, done, running or waiting, and the time left
   const list = $("#stages"), p = S.plate, r = S.renders.get(S.heroKey);
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
   const fluid = p ? fluidPasses(S.fluid?.result, { log: logSpace() }) : []; // a made fluid shot's rows, keyframes open or closed
@@ -3296,7 +3382,7 @@ async function openScene(text) { // the plate opens in its colour space, then ev
   await openPlate([], scene.plate.path, { chosen: scene.fluid ? false : undefined, cs: scene.fluid ? modelSpace() // a blank plate, as openBlank opens it (1.4.0 saved the space under its edits)
     : scene.version >= 3 ? scene.plate.color_space : undefined, // older scenes: read from the file
     ...(scene.fluid ? { fluid: { blankPath: scene.plate.path, seed: scene.fluid.seed, prompt: scene.fluid.prompt ?? "", on: scene.fluid.on !== false, depth: blankDepth(scene.fluid.depth) } } : {}) });
-  S.deliver = { hdr: deliverHdr }; // openPlate reset Deliver's passes
+  S.deliver = { hdr: deliverHdr }; // openPlate reset the Finish menu's passes
   if (scene.fluid) { // the fluid shot first: its keyframes, then the shot itself, the plate the edits were painted on
     S.fluid.keys = scene.fluid.keys.map((k) => { const key = newKey(k.frame); key.strokes = unpackStrokes(k.strokes, S.plate.work, from); redrawKey(key); return key; });
     fluidUI(); timelineUI(); historyUI(); render();
@@ -3635,7 +3721,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["ComfyUI graph", "", () => saveGraph().catch(quiet), !edits], "-", ["Close plate", "", () => closePlate(), !p && !openCtl]]],
     ["Edit", [["Undo", "Ctrl+Z", undo, !S.past.length], ["Redo", "Ctrl+Shift+Z", redo, !S.future.length], "-",
       ["New edit", "N", nextEdit, !p || keying() || (!S.draft && !S.selected)], ["Generate", "Enter", () => enter(false), $("#generate").disabled], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
-      ...(HDR_ON ? [["Deliver: SDR to HDR", "", () => askDeliverHdr(!S.deliver.hdr), !p || !S.hdrReady || holdsHdr(p.spec, p.headroom), !!p && !!S.deliver.hdr]] : []),
+      ...(HDR_ON ? [["Finish: SDR to HDR", "", () => { openFinish(true); askFinish(FINISH[0], !S.deliver.hdr); }, !p || !S.hdrReady || holdsHdr(p.spec, p.headroom), !!p && !!S.deliver.hdr]] : []),
       ["Render in full", "", renderInFull, !S.renders.get(S.heroKey)?.donor], ["Stop generating", "Esc", stopGenerating, !generating()],
       ["Deselect", "Esc", () => select(null), !S.selected]]],
     ["Tools", [["Paint", "P", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Clean", "C", () => pickTool("erase"), !p || (keying() && !S.fluid.result), S.tool === "erase" && !S.rub],
@@ -3766,7 +3852,7 @@ async function boot() { // the version and the build, the workflows, the WebSock
   const models = new Map(); // every model file the workflows load, by loader and input
   for (const wf of Object.values(WF)) for (const n of Object.values(wf.prompt))
     for (const [k, v] of Object.entries(n.inputs)) if (typeof v === "string" && v.endsWith(".safetensors")) models.set(v, [n.class_type, k]);
-  const HDR_NODES = ["ImageColorSpace", "LTXVVAEForceFloat32", "LTXVLoadConditioning", "LTXVHDRDecodePostprocess"]; // SDR to HDR is optional
+  const HDR_NODES = workflowClasses(WF.hdr.prompt); // SDR to HDR is optional: it turns on when every node class of its workflow is present
   const classes = [...new Set([...Object.keys(needs), ...[...models.values()].map(([cls]) => cls), "PaintAPlate_KeyframeVideo", ...HDR_NODES])];
   const info = Object.fromEntries(await Promise.all(classes.map(async (cls) => [cls, await objectInfo(cls)]))); // one round trip for all
   const missing = Object.entries(needs).filter(([cls]) => !info[cls]).map(([cls, from]) => `${cls} (${from})`);
