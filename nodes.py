@@ -454,7 +454,7 @@ class FollowMatte(io.ComfyNode):
                         "dropped. A frame that differs from the plate everywhere adds nothing. An object that stands still in "
                         "the scene and passes behind something the plate holds leaves the matte while it is hidden, and comes "
                         "back into it where it comes out: what stands in front is left out. The summary gives a "
-                        "headline, its warnings, then one line per rule that acted.",
+                        "headline, its warnings, then one line per rule that acted, and names each frame by the plate's own number.",
             inputs=[
                 io.Mask.Input("masks", tooltip="SAM masks, one per tracked frame. SAM 3.1 may return fewer, or none."),
                 io.Mask.Input("first", tooltip="The area on the first frame that SAM 3.1 follows."),
@@ -470,20 +470,23 @@ class FollowMatte(io.ComfyNode):
                               tooltip="The Clean matte under this paint. Inside it, a change joins only where it touches the SAM mask."),
                 io.Float.Input("erased_edge", default=0.0, min=0.0, max=0.5, step=0.001, optional=True,
                                tooltip="How far the composite moves the Clean matte's edge: its grow plus its feather, as a fraction of the width."),
+                io.Int.Input("first_frame", default=1, min=0, max=99999999, optional=True,
+                             tooltip="The plate's number for its first frame: 1 for a movie, the first file's number for a sequence. The summary names frames by these numbers."),
             ],
             outputs=[io.Mask.Output(display_name="mask"), io.String.Output(display_name="summary")],
         )
 
     @classmethod
     def execute(cls, masks, first, frames, zone, threshold, base=None, element=None, erased=None,
-                erased_edge=0.0) -> io.NodeOutput:
+                erased_edge=0.0, first_frame=1) -> io.NodeOutput:
         shot = frames[..., :3].float().cpu().numpy()
         plate = base[..., :3].float().cpu().numpy() if base is not None else None
         out, summary = mathops.follow_matte(masks.float().cpu().numpy(), len(shot), first.float().cpu().numpy(),
                                             shot if plate is not None else None, plate if plate is not None else shot,  # an erase: the tracked frames are the plate
                                             zone=zone, threshold=threshold, tick=Stop(),
                                             element=element.float().cpu().numpy() if element is not None else None,
-                                            erased=erased.float().cpu().numpy() if erased is not None else None, erased_edge=erased_edge)
+                                            erased=erased.float().cpu().numpy() if erased is not None else None, erased_edge=erased_edge,
+                                            first_frame=first_frame)
         return io.NodeOutput(torch.from_numpy(out).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()), summary)
 
 

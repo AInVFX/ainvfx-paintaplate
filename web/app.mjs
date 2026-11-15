@@ -2857,7 +2857,7 @@ async function track(active, shotPath, base, suffix, progress, previous, tools, 
     if (tool === "paint" && erased) Object.assign(compare, { erased, erased_edge: (grow(sw, true) + feather(sw)) / sw }); // under a Clean edit, as far as the composite moves its edge
     if (tool === "paint") compare.seed = await uploadCanvas(elementOf(union, size, hero), `seed${suffix}.png`); // from what the edits changed
     const out = await run("matte", { path, config: S.ocio.config, color_space: cs, max_frames: p.frames, width: sw, height: sh, prefix: `${base}/${key}${suffix}/m`,
-      mask: await uploadCanvas(union, `${key}${suffix}.png`), zone: FOLLOW.zone, threshold: FOLLOW.threshold, ...compare,
+      mask: await uploadCanvas(union, `${key}${suffix}.png`), zone: FOLLOW.zone, threshold: FOLLOW.threshold, first_frame: p.first, ...compare,
       fps: p.fps, video_prefix: `${base}/${key}${suffix}_movie/m`, ...plateMovie(p) }, // its grey movie, for its row in the Render panel
       { kind: "matte", progress }).done;
     const movie = outputFile("matte", out, "movie");

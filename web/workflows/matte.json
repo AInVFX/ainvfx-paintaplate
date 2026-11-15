@@ -227,13 +227,15 @@
     "13",
     0
    ],
-   "erased_edge": 0.0
+   "erased_edge": 0.0,
+   "first_frame": 1
   },
   "_meta": {
    "slots": {
     "zone": "zone",
     "threshold": "threshold",
     "erased_edge": "erased_edge",
+    "first_frame": "first_frame",
     "base": "follow_base",
     "element": "follow_element",
     "erased": "follow_erased"

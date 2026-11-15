@@ -34,6 +34,7 @@ class LeftItsPlace(unittest.TestCase):
         matte, summary = mathops.follow_matte(**shot_of(path, residue=24))
         start = int(re.search(r"Warning: object left its place at frame (\d+)\. Try another seed, other words or another stroke\.", summary)[1])
         empty = int(re.search(r"\n  Removed: whole matte from frame (\d+) \(object out of its place\)\.", summary)[1])
+        start, empty = start - 1, empty - 1  # indices: the summary names a movie's frames from 1
         self.assertTrue(14 <= start <= empty <= 24, summary)
         self.assertEqual(int((matte[empty:] > 0.5).sum()), 0)  # the change at the empty place too
         self.assertTrue((matte[:14, 26:38, 40:52] > 0.5).all())

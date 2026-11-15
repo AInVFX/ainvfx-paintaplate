@@ -1325,6 +1325,12 @@
       {
        "default": 0.0
       }
+     ],
+     "first_frame": [
+      "INT",
+      {
+       "default": 1
+      }
      ]
     }
    },
