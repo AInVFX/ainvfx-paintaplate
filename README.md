@@ -21,7 +21,7 @@ Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com
 | **A fluid shot** | Starts from a blank plate. Paint flat colour blobs on a few keyframes: ainvfx-fluid turns them into smoke, steam, fire, explosions, dust, fog or clouds. The shot becomes the plate for every edit |
 | **Review** | The viewer follows OpenRV: colour through OpenColorIO, the same keys, a wipe against the plate, the Color Inspector. |
 | **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers) with its matte, as one zip. **ComfyUI graph** saves the whole scene as one ComfyUI workflow in the editor's own format: one group per step, each with a note, to drop on ComfyUI's canvas |
-| **Deliver** | Readies a shot for delivery. Its bit-depth pass turns an SDR result into half-float EXR frames |
+| **Finish** | The passes on the whole plate, in a menu between Save scene and Export. SDR to HDR turns an SDR result into half-float EXR frames |
 
 The limits that matter today: edits are painted on the first frame only; shots are tested up to 121 frames; edits are made at up to 1920 px on the long side; a plate can be up to 3840 x 2160.
 
@@ -129,7 +129,7 @@ Good to know:
 
 ## When something goes wrong
 
-- **The log.** The **Log** button opens it. It records what happened, one line per fact, and the button is highlighted when an error arrives.
+- **The log.** The **Log** button opens it. It records what happened, one line per fact, and the button is highlighted when an error arrives. The download icon beside it saves the log as a text file, with the versions and the machine as ComfyUI reports them: attach it when you ask for help. It holds no path of your machine.
 - **The memory profile.** Its line in the log says how the page uses your card. Small, under 24 GB of VRAM: models load one at a time and LTX runs in tiles. Medium: the edit models load when the page opens. Large, from 60 GB: LTX 2.5 loads at start too.
 - **Stop.** Esc, or **Stop** beside Generate, stops what generates. What finished is kept, and Enter goes on from there.
 - **ComfyUI's memory grows, or the page waits and nothing runs.** Start ComfyUI with `PAINTAPLATE_TRACE=1` in its environment. Every request then writes a line in ComfyUI's terminal when it starts and when it ends, with the memory the process holds. Add these lines to your report.
