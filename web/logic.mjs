@@ -634,9 +634,11 @@ export function remakeQuestion(what, edits) { return `Changing the ${what} affec
 // The HUD's line when a fluid keyframe moves to the nearest frame it can sit on; `frame` is the plate's own number
 export const keyframeSlotLine = (frame) => `Keyframes sit on the first frame, on the last frame, or every 8 frames between: frame ${frame}.`;
 
-// A family of the plate's colour-space tree. The config's « Display », the spaces encoded for a display, reads « Display-referred »
-// there, apart from the view's Display line, which changes nothing. RV and Nuke show it as « Display ».
-export function plateFamily(name) { return name === "Display" ? "Display-referred" : name; }
+// A family of the plate's colour-space tree, named for a person. The config's « Display », the spaces encoded for a
+// display, reads « Display-referred ». « ITU » is spelled out: the International Telecommunication Union publishes the
+// « Rec. » standards, such as Rec.709 and Rec.2020. RV and Nuke show the config's own names. The spaces keep theirs.
+const FAMILIES = { Display: "Display-referred", ITU: "ITU (International Telecommunication Union)" };
+export function plateFamily(name) { return FAMILIES[name] ?? name; }
 // An image that the scene's ComfyUI graph reads. It sits at the top of ComfyUI's input folder: LoadImage lists only the files
 // there, and the editor marks an image input whose file is not in that list as missing. Named after the plate, the edit,
 // what it holds and its hash, so two scenes never share a name.
