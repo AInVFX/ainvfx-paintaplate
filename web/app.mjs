@@ -3409,7 +3409,10 @@ async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it ag
     ...(f ? { fluid: { prompt: keying() ? $("#prompt").value.trim() : f.prompt ?? "", seed: f.seed, depth: f.depth ?? 8, made: !!f.result, on: f.on !== false, keys: f.keys.map((k) => ({ frame: k.frame, strokes: packStrokes(k.strokes) })) } } : {}) };
   const name = (S.plate.name || "scene").replace(/[^\w.-]/g, "_").slice(0, 100), r = await post(`/paintaplate/scenes/${encodeURIComponent(name)}`, scene);
   if (!r.ok) throw new Error(`The scene was not saved: ${await r.text()}`);
-  told(`Scene ${name} saved on this ComfyUI`, "Open plate > Scenes opens it again, or downloads it.");
+  const { path } = await r.json().catch(() => ({})); // the scene's file, on the machine that runs ComfyUI
+  const fact = `Scene ${name} saved${path ? `: ${path}` : ""}.`;
+  hud(fact, 3000);
+  told(fact, "Open plate > Scenes opens it again, or downloads it.");
 }
 
 async function saveGraph() { // the whole scene as one ComfyUI workflow, to open in ComfyUI and keep editing there

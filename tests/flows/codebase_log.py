@@ -30,9 +30,12 @@ def run(browser, port, U):
     U.check(status == f"Plate ready. {NEXT}" and not told, f"what to do next shows in the status line only: {status!r}, and in the log: {told}")
     page.evaluate(SAID)
     name, _ = U.save_scene(page)
+    U.check(page.text_content("#hud") == next((t for t in U.log_lines(page) if t.startswith(f"Scene {name} saved")), None),
+            f"the HUD confirms the save in the log's words: {page.text_content('#hud')!r}")
     said, lines = page.evaluate("window.__said"), U.log_lines(page)
-    fact, then = f"Scene {name} saved on this ComfyUI", "Open plate > Scenes opens it again, or downloads it."
-    U.check(f"{fact}. {then}" in said and [t for t in lines if "saved on this ComfyUI" in t] == [fact] and not any(then in t for t in lines),
+    then = "Open plate > Scenes opens it again, or downloads it."
+    fact = next((t for t in lines if t.startswith(f"Scene {name} saved: ")), "")
+    U.check(fact.endswith(f"/{name}.paintaplate.json.") and f"{fact} {then}" in said and [t for t in lines if t.startswith(f"Scene {name} saved")] == [fact] and not any(then in t for t in lines),
             f"a save is one fact in the log, and the status line adds what to do next: {said} {[t for t in lines if 'Scene' in t]}")
     page.select_option("#preview-size", "4")  # Quarter size
     page.wait_for_function("window.__said.some((t) => t.startsWith('Shot preview:'))", timeout=10000)

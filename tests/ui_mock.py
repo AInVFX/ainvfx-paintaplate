@@ -193,7 +193,7 @@ def page_state(page):  # what a failed check prints: the status line, the plate'
 
 def save_scene(page):
     """Save scene keeps it on this ComfyUI: the newest scene, read back through the scenes route."""
-    saved = "[...document.querySelectorAll('#log li span')].filter((e) => /saved on this ComfyUI/.test(e.textContent)).length"
+    saved = "[...document.querySelectorAll('#log li span')].filter((e) => /^Scene \\S+ saved[.:]/.test(e.textContent)).length"
     before = page.evaluate(saved)
     page.click("#save-btn")
     page.wait_for_function(f"{saved} > {before}", timeout=20000)  # the log keeps the fact: a later sentence can replace it in the status line
