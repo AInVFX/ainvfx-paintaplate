@@ -2274,7 +2274,8 @@ async function prepare(edit, index, kind) {
   let cap = edit.caption?.key === dimmed ? edit.caption.text : await captionFor(edit, reference, plain, kind);
   if (!cap && asksName(edit.tool, edit.prompt) && edit.caption?.key === plain)
     cap = await captionFor(edit, await uploadCanvas(dimFrame(edit, before, size), `e${edit.id}_${painted(edit)}_dim.png`), dimmed, kind, true);
-  if (cap && edit.tool === "erase" && edit.whole && edit.sam) await joinShadow(edit, before, kind); // its cast shadow, when the caption cites one
+  if (cap && edit.tool === "erase" && edit.whole && edit.sam && await joinShadow(edit, before, kind)) // its cast shadow, when the caption cites one
+    edit.caption.key = edit.caption.key === dimmed ? `${key()}|dimmed` : key(); // the caption that cites the shadow stays, under the key of the mask that now holds it
   return { before, below, base, reference, cap };
 }
 
@@ -2339,7 +2340,7 @@ function samMask(bits, size, edit) { // a SAM mask (0 or 1 per pixel at `size`) 
   return snap(c, [edit.mask.width, edit.mask.height]);
 }
 
-async function joinShadow(edit, before, kind) { // the object's cast shadow joins its SAM mask when the caption cites one (logic.shadowOf)
+async function joinShadow(edit, before, kind) { // the object's cast shadow joins its SAM mask when the caption cites one (logic.shadowOf): true when it joins
   const box = shadowBox(edit.caption?.text), found = edit.found;
   if (!box || !found || found.key !== snapKeyOf(edit) || found.shadow === JSON.stringify(box)) return;
   const [w, h] = found.size, name = edit.prompt || "object";
@@ -2348,11 +2349,12 @@ async function joinShadow(edit, before, kind) { // the object's cast shadow join
   const out = await run("snap", { image: frame, words: "shadow" }, { kind: kind === "edit" ? "snap" : kind, front: true }).done;
   const shadow = shadowOf({ object: found.bits, box, w, h, shadows: await Promise.all(outputFiles("snap", out, "named").slice(1).map((f) => maskBits(f, found.size))) });
   found.shadow = JSON.stringify(box); // looked for: Generate after a prefetch does not ask again
-  if (!shadow) return log(`Edit ${num(edit)}: no shadow of the ${name} next to it or under it.\n  Its SAM mask holds the ${name} alone.`);
+  if (!shadow) { log(`Edit ${num(edit)}: no shadow of the ${name} next to it or under it.\n  Its SAM mask holds the ${name} alone.`); return false; }
   edit.sam = samMask(found.bits.map((v, i) => v | shadow.bits[i]), found.size, edit);
   redrawStrokes(edit);
   render();
   log(`Edit ${num(edit)}: the ${name}'s shadow joins its SAM mask (${Math.round(100 * shadow.share)}% of the ${name}'s area).`);
+  return true;
 }
 
 function footprint(edit) { // where the edit changed the frame, on a coarse grid, one cell wider
