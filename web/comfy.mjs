@@ -47,6 +47,9 @@ const indexKey = async (name, values) => {
   return parts === null ? null : hashHex(parts);
 };
 
+let notRun = 0; // jobs answered without running: taken from the job index, or made before, every output from ComfyUI's cache
+export const jobsNotRun = () => notRun; // a render's step whose jobs were answered so keeps no time (app.mjs, step)
+
 async function indexed(key) { // the outputs a finished job with this key made, if its files are all still there
   try { const r = await fetch(`/paintaplate/jobs/${key}`); return r.ok ? (await r.json()).outputs : null; } catch { return null; }
 }
@@ -198,6 +201,7 @@ export function run(name, values, { kind = name, preview, progress, step, live: 
     if (job.cancelled) return;
     if (!outputs) return job.submit();
     live.delete(job);
+    notRun++;
     log(`${name}: taken from the job index (same inputs as an earlier job).`);
     progress?.(1);
     job.resolve(outputs);
@@ -233,6 +237,7 @@ async function finish(id, error) {
   if (fresh) memo.set(job.key, out);
   else out = memo.get(job.key) ?? out;
   if (memo.size > MEMO_MAX) memo.delete(memo.keys().next().value);
+  if (!fresh) notRun++; // made before: ComfyUI answered every output from its cache
   log(jobDone(job, Date.now(), !!fresh));
   if (job.index && (files(out).length || Object.values(out).some((o) => o.text?.length))) // recorded for later sessions
     if (recordable(out)) post(`/paintaplate/jobs/${job.index}`, { workflow: job.name, outputs: out }).catch(() => {});

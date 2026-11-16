@@ -3,7 +3,7 @@
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
-import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl } from "./comfy.mjs";
+import { WF, cancel, connect, hashHex, jobsNotRun, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
@@ -2730,7 +2730,7 @@ function plan(r, active) { // the steps this set of edits needs: the erase pass 
 
 // What each step took on this machine, kept between sessions (logic.remember): its total, its lead before the sampler's
 // first step and its tail after the last, per size, frame count and memory profile.
-const TIMES_KEY = "paintaplate.times";
+const TIMES_KEY = "paintaplate.step-times"; // what each step took on this machine (logic.remember, logic.timeKey): only steps whose jobs ran
 let TIMES = {};
 try { TIMES = JSON.parse(localStorage.getItem(TIMES_KEY) ?? "{}") ?? {}; } catch { TIMES = {}; }
 const stepSize = (id) => stepSizeOf(id, S.plate);
@@ -2748,7 +2748,7 @@ function estimate(id, skip) { // seconds: what this step took last time on this 
 async function step(r, id, work, store = r) { // run one step of a render, timed and shown; preview steps keep their result per size
   if (store.done?.[id] !== undefined || r.skip?.has(id)) return;
   if (S.running || S.queued || pickRender() !== r) throw YIELD; // an edit, or a step of a more urgent render, goes first
-  const t0 = performance.now(), behind = r.key === S.heroKey ? "" : ", in the background", guess = Math.round(estimate(id, r.skip));
+  const t0 = performance.now(), behind = r.key === S.heroKey ? "" : ", in the background", guess = Math.round(estimate(id, r.skip)), notRun = jobsNotRun();
   S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step
   stagesUI();
   log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: about ${guess} s${behind}.`);
@@ -2761,11 +2761,13 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   });
   hideLive();
   const dt = (performance.now() - t0) / 1000;
-  TIMES = remember(TIMES, stepKey(id, makesHdr(r.skip)), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
-  try { localStorage.setItem(TIMES_KEY, JSON.stringify(TIMES)); } catch { /* a private window: the session's own times still serve */ }
+  if (jobsNotRun() === notRun) { // a step whose jobs were answered without running (the job index, ComfyUI's cache) keeps no time
+    TIMES = remember(TIMES, stepKey(id, makesHdr(r.skip)), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
+    try { localStorage.setItem(TIMES_KEY, JSON.stringify(TIMES)); } catch { /* a private window: the session's own times still serve */ }
+    S.took[timeId(id, makesHdr(r.skip))] = dt;
+  }
   (store.done ??= {})[id] = dt;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
-  S.took[timeId(id, makesHdr(r.skip))] = dt;
   S.stage = null;
   log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: done in ${dt.toFixed(1)} s (estimate ${guess} s).`);
   stagesUI();

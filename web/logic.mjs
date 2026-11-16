@@ -1184,7 +1184,7 @@ export function freesBefore(profile, last, name, room = null) { // room: { free,
 // was the time run so far, scaled by the progress: 37 s into a preview shot whose first step of 8 had just ended, the
 // page said « 4 min 10 s » for a pass that ended 20 s later. Now the sampling is timed by its own pace, between its
 // first and its latest step, and the rest comes from what the step took the last time on this machine (the page keeps
-// each step's total, lead and tail per size, frame count and memory profile, in paintaplate.times).
+// each step's total, lead and tail per size, frame count and memory profile, in paintaplate.step-times).
 export const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
 // A step's time before it ever ran on this machine (stepGuess): the 96 GB card's reference (STAGES' ref, in seconds at
 // REF_SIZE), scaled to the plate, then to the card. A 16 GB card, the small profile, holds one family of models at a time,
