@@ -16,6 +16,9 @@ sys.path[:0] = [REPO, HERE, os.path.join(REPO, "tools")]
 import comfy_live  # noqa: E402
 from build_workflows import Graph, Slot, plate  # noqa: E402
 
+# The log's lines as the page's own export writes them: each <li> holds a <time> and a <span>, written with a space between
+LOG_LINES = "els => els.map((e) => e.firstChild.textContent + ' ' + e.lastChild.textContent)"
+
 SHOTS = "/tmp/paintaplate_ui"
 
 
@@ -447,7 +450,7 @@ def remote(a):
         except Exception as exc:
             mark(f"FAILED: {type(exc).__name__}: {str(exc).splitlines()[0][:160]} | status: {status()}")
             page.screenshot(path=f"{shots}/fail.png")
-        page_log = page.eval_on_selector_all("#log li", "els => els.map(e => e.textContent)")  # what ran, with which values
+        page_log = page.eval_on_selector_all("#log li", LOG_LINES)  # what ran, with which values
         browser.close()
     open(f"{shots}/page_log.txt", "w").write("\n".join(page_log) + "\n")
     json.dump({"marks": marks, "errors": errors}, open(f"{shots}/timings.json", "w"), indent=1)

@@ -6,6 +6,8 @@ import json
 import re
 import urllib.request
 
+import ui_live
+
 PROFILE = ("Memory profile: small (16 GB of VRAM, 61 GB of RAM).\n  Models load one at a time and LTX works in 256 px tiles, so each step takes longer "
            "than on a larger GPU.")
 DONE = r"done in [\d.]+ s \(\d+ nodes?(, \d+ from ComfyUI's cache)?(, \d+ previews?)?\)\."
@@ -33,6 +35,9 @@ def run(browser, port, U):
     for start in ("Memory profile", "ingest "):
         page.wait_for_function(LOGGED, arg=start, timeout=20000)
     log = page.eval_on_selector_all("#log li span", "els => els.map((e) => e.textContent)")
+    pairs = page.eval_on_selector_all("#log li", "els => els.map((e) => [e.firstChild.textContent, e.lastChild.textContent])")
+    U.check(page.eval_on_selector_all("#log li", ui_live.LOG_LINES) == [f"{t} {x}" for t, x in pairs],
+            "page_log.txt: each line holds the time, a space, then the text, as the log's export writes it")
     profile = [t for t in log if "Memory profile" in t]
     U.check(profile == [PROFILE], f"the memory profile is one entry: the card in GB (bytes / 2**30), then what the page does on it: {profile}")
     ingest = [t for t in log if t.startswith("ingest")]
