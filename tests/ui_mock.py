@@ -844,7 +844,7 @@ def keys_flow(browser, port):
     key("c", lambda: "on" in attr("[data-tool=erase]", "class")); key("l", lambda: "on" in attr("[data-tool=light]", "class"))
     key("p", lambda: "on" in attr("[data-tool=paint]", "class"))
     size = int(text("#size-out")); key("=", lambda: int(text("#size-out")) > size); key("-", lambda: int(text("#size-out")) == size)
-    key("x", lambda: attr("#rub-btn", "aria-pressed") == "true"); page.keyboard.press("x")
+    key("e", lambda: attr("#rub-btn", "aria-pressed") == "true"); page.keyboard.press("e")
     key("i", lambda: page.evaluate("document.querySelector('#view').classList.contains('picking')")); page.keyboard.press("Escape")  # the in-frame picker
     for k, name in (("Shift+E", "Exposure"), ("k", "Contrast"), ("y", "Gamma"), ("Shift+S", "Saturation"), ("h", "Hue")):
         key(k, lambda name=name: text("#hud").startswith(name)); page.keyboard.press("Escape")

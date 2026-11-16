@@ -937,7 +937,7 @@ function comparePass(id) {
   hud(`Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right. Ctrl+click it again, Esc or F6 ends it`, 3500);
   log(`Viewer: wipe, ${S.cmp.label} against ${shownLabel()}.`);
 }
-// ---------- The X-ray (W): where the edits on show change the plate, tinted over the picture (xray.mjs) ----------
+// ---------- The X-ray (X): where the edits on show change the plate, tinted over the picture (xray.mjs) ----------
 // The overlay sits on the canvas with its zoom and pan, so the inspector and the picker read the picture without the tint.
 // Paused, each matte's frame comes from the frames route at XRAY_SIDE, in any browser; playing, from its movie, which
 // follows the playhead. Until every matte has the frame, the last tint stays; data-frame names the frame it shows.
@@ -3725,7 +3725,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Render in full", "", renderInFull, !S.renders.get(S.heroKey)?.donor], ["Stop generating", "Esc", stopGenerating, !generating()],
       ["Deselect", "Esc", () => select(null), !S.selected]]],
     ["Tools", [["Paint", "P", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Clean", "C", () => pickTool("erase"), !p || (keying() && !S.fluid.result), S.tool === "erase" && !S.rub],
-      ["Light", "L", () => pickTool("light"), !p || (keying() && !S.fluid.result), S.tool === "light" && !S.rub], ["Eraser", "X", () => setRub(!S.rub), !p, S.rub], ["Pick a colour", "I", () => pickColor(), !p, !!S.picking], "-",
+      ["Light", "L", () => pickTool("light"), !p || (keying() && !S.fluid.result), S.tool === "light" && !S.rub], ["Eraser", "E", () => setRub(!S.rub), !p, S.rub], ["Pick a colour", "I", () => pickColor(), !p, !!S.picking], "-",
       ["Whole object", "", () => $("#whole").click(), !p, $("#whole").checked], ["Smaller brush", "-", () => setSize(S.size / 1.2), !p],
       ["Larger brush", "=", () => setSize(S.size * 1.2), !p]]],
     ["Control", [["Play or pause", "Space", () => (S.playing ? pause() : play()), !p, S.playing], ["Next frame", "Right", step(1), !p],
@@ -3738,7 +3738,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
     ["View", [chan("rgb", "Shift+C"), chan("r", "Shift+R"), chan("g", "Shift+G"), chan("b", "Shift+B"), chan("l", "Shift+L"), "-",
       ["Fit", "F", () => zoomTo(1), !p], ["Frame width", "Ctrl+F", widthZoom, !p], ["1:1", "1", () => pixelZoom(1), !p],
       ["2:1", "2", () => pixelZoom(2), !p], ["4:1", "4", () => pixelZoom(4), !p], ["1:2", "Shift+2", () => pixelZoom(1 / 2), !p], ["1:4", "Shift+4", () => pixelZoom(1 / 4), !p],
-      ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["X-ray", "W", () => setXray(!S.xray), !p, S.xray], ["Full screen", "`", fullScreen],
+      ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["X-ray", "X", () => setXray(!S.xray), !p, S.xray], ["Full screen", "`", fullScreen],
       ["Cache memory", "", [["Auto", "", () => setCache(0), false, !S.cache], ...CACHE_CHOICES.filter(Boolean).map((b) => [memoryText(b), "", () => setCache(b), false, S.cache === b])], !!CACHE_MB],
       ["Playback statistics", "", toggleStats, false, S.stats],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
@@ -3943,13 +3943,13 @@ function setRub(on) {
   hud(on ? "Eraser: rub out the strokes you just painted" : NAME[S.tool]);
   render();
 }
-let eraserKey = null; // X held down: when it went down, the eraser before it, and whether a stroke was dragged since
-function holdEraser() { // X goes down: the eraser is on while it is held
+let eraserKey = null; // E held down: when it went down, the eraser before it, and whether a stroke was dragged since
+function holdEraser() { // E goes down: the eraser is on while it is held
   if (eraserKey) return;
   eraserKey = { at: performance.now(), was: S.rub, dragged: false };
   if (!S.rub) setRub(true);
 }
-function releaseEraser() { // X comes up: a tap switches the eraser, a hold or a stroke puts it back as it was (logic.eraserAfterKey)
+function releaseEraser() { // E comes up: a tap switches the eraser, a hold or a stroke puts it back as it was (logic.eraserAfterKey)
   const k = eraserKey;
   if (!k) return;
   eraserKey = null;
@@ -4145,7 +4145,7 @@ addEventListener("keydown", (e) => {
   else if (k === "]") setOut(S.frame);
   else if (k === "\\") clearRange();
   else if (k === "F6") setWipe(S.wipe === null);
-  else if (low === "w" && !mod && !e.altKey && !e.shiftKey) setXray(!S.xray); // free in RV's rvui.mu (0bd9675)
+  else if (combo === "x" && !mod && !e.altKey) setXray(!S.xray); // x is free in RV's rvui.mu (0bd9675), where Shift+X flops the image
   else if (low === "f" && !mod && !e.altKey) zoomTo(1);
   else if (low === "f" && mod && !e.shiftKey) widthZoom(); // RV's Frame Width; the page takes Ctrl+F from the browser's find
   else if (/^Digit[1-8]$/.test(e.code) && !mod && !e.altKey) { const n = +e.code.slice(5); pixelZoom(e.shiftKey ? (n > 1 ? 1 / n : 1) : n); } // RV: 1 to 8 N:1, Ctrl+2 to 8 1:N
@@ -4153,7 +4153,7 @@ addEventListener("keydown", (e) => {
   else if (k === "?") showHelp("keys");
   else if (TOOLS[combo] && !mod) pickTool(TOOLS[combo]); // P, C and L; Shift+P is free
   else if (low === "n" && !mod) nextEdit();
-  else if (low === "x" && !mod) { if (!e.repeat) holdEraser(); } // the eraser while X is down; a tap switches it (releaseEraser)
+  else if (combo === "e" && !mod && !e.altKey) { if (!e.repeat) holdEraser(); } // the eraser while E is down; a tap switches it (releaseEraser). RV's e is exposure: here Shift+E
   else if (k === "-" || k === "_") setSize(S.size / 1.2);
   else if (k === "=" || k === "+") setSize(S.size * 1.2);
   else if (k === "Enter") enter(mod);
@@ -4166,9 +4166,9 @@ addEventListener("keydown", (e) => {
 });
 addEventListener("keyup", (e) => {
   if (e.key.toLowerCase() === "o" && S.compare) { S.compare = false; render(); }
-  if (e.key.toLowerCase() === "x") releaseEraser();
+  if (e.key.toLowerCase() === "e") releaseEraser();
 });
-addEventListener("blur", () => { if (eraserKey) { eraserKey.dragged = true; releaseEraser(); } }); // X came up in another window: the hold ends
+addEventListener("blur", () => { if (eraserKey) { eraserKey.dragged = true; releaseEraser(); } }); // E came up in another window: the hold ends
 function enter(another) { // Generate (Enter): the edit in progress, then its shot; nothing already made runs again. Ctrl+Enter: another seed
   const resumed = S.halted;
   S.halted = false; // a stop (Esc) lasts until Enter

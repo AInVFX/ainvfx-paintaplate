@@ -1,4 +1,4 @@
-// The X-ray (W), as PlateLock's: where the edits on show change the plate, tinted over the picture. Its mattes: the
+// The X-ray (X), as PlateLock's: where the edits on show change the plate, tinted over the picture. Its mattes: the
 // export's once Export has made one, else the tracking mattes of the size on show; a light edit changes every pixel, so
 // it tints the whole frame. Pure functions, tested in tests/js/xray.test.mjs; app.mjs draws them on the #xray overlay,
 // above the canvas, so the colour inspector and the colour picker read the picture without the tint.

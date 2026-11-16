@@ -1,6 +1,7 @@
-"""The page workstream's check of the tools' names and keys, and of the eraser's key (tests/flows/README.md). P, C and L
-pick Paint, Clean and Light, and B and E are free. A tap on X switches the eraser on or off. X held with no stroke
-leaves it as it was. X held while a stroke is dragged rubs the stroke out, and the eraser is off again when X comes up."""
+"""The check of the tools' names and keys, and of the eraser's key (tests/flows/README.md). P, C and L
+pick Paint, Clean and Light, and B and W are free. A tap on E switches the eraser on or off. E held with no stroke
+leaves it as it was. E held while a stroke is dragged rubs the stroke out, and the eraser is off again when E comes up.
+X toggles the X-ray, and Shift+E stays the exposure."""
 
 PIXEL = """([fx, fy]) => { const c = document.querySelector('#view'), s = [0, 0, 0];
   const d = c.getContext('2d').getImageData(Math.round(c.width * fx) - 2, Math.round(c.height * fy) - 2, 5, 5).data;
@@ -22,23 +23,24 @@ def run(browser, port, U):
     U.check(paint.endswith("(P)"), f"the Paint tooltip gives the key P: {paint!r}")
     page.keyboard.press("c")
     U.check(on("erase"), "C picks Clean")
-    for key in ("b", "e"):
+    for key in ("b", "w"):
         page.keyboard.press(key)
-        U.check(on("erase") and not on("paint"), f"{key.upper()} is free: Clean stays picked")
+        U.check(on("erase") and not on("paint") and not rub() and page.is_hidden("#xray"),
+                f"{key.upper()} is free: Clean stays picked, the eraser stays off and the X-ray stays hidden")
     page.keyboard.press("l")
     U.check(on("light"), "L picks Light")
     page.keyboard.press("p")
     U.check(on("paint") and not on("light"), "P picks Paint")
 
-    page.keyboard.press("x")
-    U.check(rub(), "a tap on X switches the eraser on")
-    page.keyboard.press("x")
+    page.keyboard.press("e")
+    U.check(rub(), "a tap on E switches the eraser on")
+    page.keyboard.press("e")
     U.check(not rub(), "a second tap switches it off")
-    page.keyboard.down("x")
-    U.check(rub(), "X held: the eraser is on while the key is down")
+    page.keyboard.down("e")
+    U.check(rub(), "E held: the eraser is on while the key is down")
     page.wait_for_timeout(500)
-    page.keyboard.up("x")
-    U.check(not rub(), "X held for 0.5 s with no stroke: the eraser is off again, as before the press")
+    page.keyboard.up("e")
+    U.check(not rub(), "E held for 0.5 s with no stroke: the eraser is off again, as before the press")
 
     at = [0.33, 0.50]  # the middle of the stroke
     pixel = lambda: page.evaluate(PIXEL, at)  # noqa: E731
@@ -51,11 +53,11 @@ def run(browser, port, U):
     U.check(apart(pixel(), plate) > 40, f"the red stroke shows on the frame: {pixel()} on a plate of {plate}")
     for _ in range(6):
         page.keyboard.press("=")
-    page.keyboard.down("x")
+    page.keyboard.down("e")
     U.stroke(page, [(0.27, 0.50), (0.39, 0.50)])
-    page.keyboard.up("x")
+    page.keyboard.up("e")
     page.mouse.move(2, 2)
-    U.check(not rub(), "X comes up after a stroke: the eraser is off again")
+    U.check(not rub(), "E comes up after a stroke: the eraser is off again")
     U.check(U.poll(page, lambda: apart(pixel(), plate) <= 16, 5),
-            f"the stroke dragged while X was held rubbed the paint out: {pixel()} against the plate's {plate}")
+            f"the stroke dragged while E was held rubbed the paint out: {pixel()} against the plate's {plate}")
     page.close()
