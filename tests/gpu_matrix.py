@@ -573,31 +573,37 @@ def fluid_movies(comfy, jobs, history):
     return {}
 
 
-STAGE_JOBS = (("Clean plate pass", "cleanup"), ("Shot", "shot"), ("Paint matte", "matte"))
-STAGES_SHOWN = (*(title for title, _ in STAGE_JOBS), "Composite")  # the composite is the export, from the case's export.zip
+STAGE_JOBS = (("Clean matte", "matte", "matte_a"), ("Clean plate pass", "cleanup", None), ("Shot", "shot", None),
+              ("Paint matte", "matte", "matte_b"))  # (title, job, the folder of its files where one job serves two stages)
+STAGES_SHOWN = (*(title for title, *_ in STAGE_JOBS), "Composite")  # the composite is the export, from the case's export.zip
 
 
 def stage_movies(comfy, jobs, history):
-    """The full-size pictures of a render's stages, from the case's last job of each name in STAGE_JOBS and its outputs in
-    ComfyUI's /history: {title: a movie's path, or the image files in order}. A job's movie (PaintAPlate_SaveMovie) comes
-    first, else its frames (PaintAPlate_SaveFrames: the files of its folder whose names start as the first one's). The last
-    « matte » job is the paint's full-size tracking, the last « shot » job the full-size shot. A render of fewer edits that
-    the page finishes in the background can run after them: its jobs have other names (a Clean alone has no shot and no
-    paint matte), and its composite is never read, since the sheet's composite is the export. A stage whose job did not
-    run in this ComfyUI is left out."""
+    """The full-size pictures of a render's stages, from the case's jobs in STAGE_JOBS and their outputs in ComfyUI's
+    /history: {title: a movie's path, or the image files in order}. A job's movie (PaintAPlate_SaveMovie) comes first, else
+    its frames (PaintAPlate_SaveFrames: the files of its folder whose names start as the first one's). A stage is the last
+    job of its name; for the two mattes, the last « matte » job whose files sit in its folder: the page tracks a Clean's
+    edits into matte_a, at the size it tracks an erase (the hole the clean plate pass fills), and the paint into matte_b,
+    the last one at full size. A render of fewer edits that the page finishes in the background can run after them: its
+    jobs have other names, and its composite is never read, since the sheet's composite is the export. A stage whose job
+    did not run in this ComfyUI is left out."""
     found = {}
     runs = {pid[:8]: ((entry.get("prompt") or [None, None, {}])[2], entry.get("outputs") or {}) for pid, entry in history.items()}
-    for title, name in STAGE_JOBS:
+    for title, name, folder in STAGE_JOBS:
         ran = [j["id"] for j in jobs if j["name"] == name and j["id"] in runs]
-        graph, outputs = runs[ran[-1]] if ran else ({}, {})
-        for kind in ("PaintAPlate_SaveMovie", "PaintAPlate_SaveFrames"):
-            files = [f for node, out in sorted(outputs.items()) if (graph.get(node) or {}).get("class_type") == kind for f in out.get("images") or []]
-            if files:
-                first = os.path.join(comfy, "output", *files[0].get("subfolder", "").split("/"), files[0]["filename"])
-                stem = re.match(r"[^0-9_]*", files[0]["filename"]).group(0)
-                found[title] = first if kind == "PaintAPlate_SaveMovie" else \
-                    sorted(f for f in glob.glob(os.path.join(os.path.dirname(first), stem + "*")) if f.lower().endswith(IMAGES))
-                break
+        for job in reversed(ran if folder else ran[-1:]):
+            graph, outputs = runs[job]
+            for kind in ("PaintAPlate_SaveMovie", "PaintAPlate_SaveFrames"):
+                files = [f for node, out in sorted(outputs.items()) if (graph.get(node) or {}).get("class_type") == kind for f in out.get("images") or []]
+                if files:
+                    break
+            if not files or (folder and not re.search(rf"(?:^|/){folder}[^/]*$", files[0].get("subfolder", ""))):
+                continue
+            first = os.path.join(comfy, "output", *files[0].get("subfolder", "").split("/"), files[0]["filename"])
+            stem = re.match(r"[^0-9_]*", files[0]["filename"]).group(0)
+            found[title] = first if kind == "PaintAPlate_SaveMovie" else \
+                sorted(f for f in glob.glob(os.path.join(os.path.dirname(first), stem + "*")) if f.lower().endswith(IMAGES))
+            break
     return found
 
 
