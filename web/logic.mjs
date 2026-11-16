@@ -114,17 +114,6 @@ export function secs(t) { // "about 40 s left", "about 1 min 40 s left": rounded
 
 export const dark = (hex) => [1, 3, 5].reduce((a, i, k) => a + [0.2126, 0.7152, 0.0722][k] * parseInt(hex.slice(i, i + 2), 16), 0) < 60;
 
-export function colorName(hex) {
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  if (max - min < 0.12) return max > 0.6 ? "white" : "soft grey";
-  const h = (max === r ? (g - b) / (max - min) : max === g ? 2 + (b - r) / (max - min) : 4 + (r - g) / (max - min)) * 60;
-  return ["red", "warm orange", "golden yellow", "green", "cyan", "cool blue", "violet", "magenta"][Math.floor(((h + 360 + 22) % 360) / 45)];
-}
-
-// A light edit's colour, by name: its first light stroke's (dark strokes are shadow hints), else the tool's
-export const lightColor = (colors, color) => colorName(colors.find((c) => !dark(c)) ?? color);
-
 // An erase's words as its object's name after « the »: an article that was typed goes (the GPU case's « the barn » asked
 // Klein's prompt writer to « Remove the the barn », 12 Nov 2026).
 const objectName = (words) => String(words ?? "").trim().replace(/^(?:the|a|an)\s+/i, "");
@@ -136,7 +125,11 @@ const objectName = (words) => String(words ?? "").trim().replace(/^(?:the|a|an)\
 export const COLOR_WORDS = /\b(?:red|orange|yellow|green|cyan|blue|violet|purple|magenta|pink|brown|black|white|gr[ae]y|silver|gold(?:en)?|beige|tan|crimson|scarlet|maroon|navy|teal|turquoise|ivory)\b/i;
 const HUES = [[15, "red"], [40, "orange"], [70, "yellow"], [165, "green"], [195, "cyan"], [255, "blue"], [290, "violet"], [345, "magenta"], [361, "red"]];
 
-export function paintHue(hex) { // a painted colour in an object's words: « black », « brown », « dark blue », « pink »
+// A colour by name, one namer for a paint and a light: « black », « brown », « dark blue », « pink », « warm white ». Each
+// colour swatch of the page is named as its title names it, and a picked colour by the same rule. A colour is pale when
+// each of its channels is above 55%; a pale orange, as the swatch « Warm light », is « warm white », which reads well in a
+// light's sentence: « a strong, broad warm white light ».
+export function colorName(hex) {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
   const max = Math.max(r, g, b), min = Math.min(r, g, b), c = max - min;
   if (c < 0.12) return max < 0.2 ? "black" : max < 0.45 ? "dark grey" : max < 0.7 ? "grey" : max < 0.9 ? "light grey" : "white";
@@ -144,9 +137,16 @@ export function paintHue(hex) { // a painted colour in an object's words: « bla
   const name = HUES.find(([end]) => h < end)[1];
   if ((name === "orange" || name === "yellow") && max < 0.6) return "brown";
   if (max < 0.35) return `dark ${name}`;
-  if (min > 0.6) return name === "red" || name === "magenta" ? "pink" : `pale ${name}`;
+  if (min > 0.55) return name === "red" || name === "magenta" ? "pink" : name === "orange" ? "warm white" : `pale ${name}`;
   return name;
 }
+
+// A light edit's colour, by name: its first stroke that is not dark (a dark stroke is a shade), or the tool's colour when the
+// edit has no stroke. None when every colour is dark: a shade alone names no light.
+export const lightColor = (colors, color) => {
+  const c = colors.length ? colors.find((x) => !dark(x)) : color;
+  return c && !dark(c) ? colorName(c) : null;
+};
 
 // The pixels of each colour of `palette` (#rrggbb) in `rgba`, a canvas's bytes: a pixel counts when it is at least half
 // opaque and within 24 levels of that colour on every channel. Where two strokes blend, it counts for neither.
@@ -164,7 +164,7 @@ export function paintColors({ words, shares }) { // the names, largest share fir
   if (COLOR_WORDS.test(String(words ?? ""))) return [];
   const by = new Map();
   let total = 0;
-  for (const [hex, n] of Object.entries(shares ?? {})) if (n > 0) { const h = paintHue(hex); by.set(h, (by.get(h) ?? 0) + n); total += n; }
+  for (const [hex, n] of Object.entries(shares ?? {})) if (n > 0) { const h = colorName(hex); by.set(h, (by.get(h) ?? 0) + n); total += n; }
   return [...by].filter(([, n]) => n >= 0.05 * total).sort((a, b) => b[1] - a[1]).map(([h]) => h);
 }
 
