@@ -12,7 +12,7 @@ import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
 import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
-import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
+import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
@@ -2686,19 +2686,21 @@ const TIMES_KEY = "paintaplate.times";
 let TIMES = {};
 try { TIMES = JSON.parse(localStorage.getItem(TIMES_KEY) ?? "{}") ?? {}; } catch { TIMES = {}; }
 const stepSize = (id) => stepSizeOf(id, S.plate);
-const stepKey = (id) => timeKey(id, stepSize(id), S.plate.frames, S.memoryProfile.name);
+const stepKey = (id, hdr = false) => timeKey(timeId(id, hdr), stepSize(id), S.plate.frames, S.memoryProfile.name);
+const makesHdr = (skip) => !!skip && !skip.has("hdr"); // a render makes SDR to HDR unless its plan leaves the step out
 
-function estimate(id) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess
-  if (S.took[id]) return S.took[id];
-  const known = TIMES[stepKey(id)];
+function estimate(id, skip) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess. skip: the render's steps left out
+  const hdr = makesHdr(skip);
+  if (S.took[timeId(id, hdr)]) return S.took[timeId(id, hdr)];
+  const known = TIMES[stepKey(id, hdr)];
   if (known?.total) return known.total;
-  return stepGuess(id, STAGES.find((x) => x.id === id).ref, S.plate, S.memoryProfile.name);
+  return stepGuess(id, STAGES.find((x) => x.id === id).ref, S.plate, S.memoryProfile.name, hdr);
 }
 
 async function step(r, id, work, store = r) { // run one step of a render, timed and shown; preview steps keep their result per size
   if (store.done?.[id] !== undefined || r.skip?.has(id)) return;
   if (S.running || S.queued || pickRender() !== r) throw YIELD; // an edit, or a step of a more urgent render, goes first
-  const t0 = performance.now(), behind = r.key === S.heroKey ? "" : ", in the background", guess = Math.round(estimate(id));
+  const t0 = performance.now(), behind = r.key === S.heroKey ? "" : ", in the background", guess = Math.round(estimate(id, r.skip));
   S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step
   stagesUI();
   log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: about ${guess} s${behind}.`);
@@ -2711,11 +2713,11 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   });
   hideLive();
   const dt = (performance.now() - t0) / 1000;
-  TIMES = remember(TIMES, stepKey(id), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
+  TIMES = remember(TIMES, stepKey(id, makesHdr(r.skip)), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
   try { localStorage.setItem(TIMES_KEY, JSON.stringify(TIMES)); } catch { /* a private window: the session's own times still serve */ }
   (store.done ??= {})[id] = dt;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
-  S.took[id] = dt;
+  S.took[timeId(id, makesHdr(r.skip))] = dt;
   S.stage = null;
   log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: done in ${dt.toFixed(1)} s (estimate ${guess} s).`);
   stagesUI();
@@ -3013,9 +3015,9 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
   for (const st of STAGES) {
     if (st.final && !finalToo) break;
     if (skip.has(st.id) || doneOf(r, st) !== undefined || (st.onDemand && !exporting)) continue;
-    const est = estimate(st.id);
+    const est = estimate(st.id, skip);
     if (S.stage?.id === st.id && S.stage.key === S.heroKey) {
-      t += stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(st.id)]?.tail ?? null });
+      t += stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(st.id, makesHdr(skip))]?.tail ?? null });
     } else t += est;
   }
   return t;
@@ -3060,7 +3062,7 @@ function stagesUI() {
     li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time"></span>';
     li.children[1].textContent = st.label;
     li.children[2].textContent = from ? `from v${from}` : took !== undefined ? `${Math.round(took)} s` : now ? `${Math.round(S.stage.progress * 100)}%`
-      : later(st) ? "on Export" : `~${Math.round(estimate(st.id))} s`;
+      : later(st) ? "on Export" : `~${Math.round(estimate(st.id, skip))} s`;
     const movie = took !== undefined ? passMovie(st.id, r, previewOf(r), { log: logSpace(), data: matteSpace() }) : null;
     if (movie) {
       pick(li, st.id, st.label.toLowerCase());
@@ -3080,9 +3082,9 @@ function timelineBar() { // the line under the timeline: the preview in gold, th
   bar.className = "tl-render";
   if (!S.plate || !S.heroKey || !r) { bar.style.width = "0"; if (S.heroKey && stale()) bar.classList.add("stale"); return; }
   const steps = STAGES.filter((st) => !r.skip?.has(st.id) && (!st.onDemand || S.wantDownload || r.exported));
-  const total = steps.reduce((a, st) => a + estimate(st.id), 0);
-  let done = steps.reduce((a, st) => a + (doneOf(r, st) !== undefined ? estimate(st.id) : 0), 0);
-  if (S.stage?.key === S.heroKey) done += estimate(S.stage.id) * S.stage.progress;
+  const total = steps.reduce((a, st) => a + estimate(st.id, r.skip), 0);
+  let done = steps.reduce((a, st) => a + (doneOf(r, st) !== undefined ? estimate(st.id, r.skip) : 0), 0);
+  if (S.stage?.key === S.heroKey) done += estimate(S.stage.id, r.skip) * S.stage.progress;
   bar.style.width = `${Math.round((done / Math.max(1, total)) * 100)}%`;
   if (r.review) bar.classList.add("ready");
   else if (previewOf(r)?.comp) bar.classList.add("export");
