@@ -12,7 +12,7 @@ import json
 import os
 
 OUT = os.environ.get("PAINTAPLATE_WORKFLOWS_OUT") or os.path.join(os.path.dirname(__file__), "..", "web", "workflows")
-NAMES = ("ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "shotup", "matte", "comp", "review", "export", "warm", "fluid", "hdr")
+NAMES = ("ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "shotup", "matte", "comp", "review", "export", "warm", "fluid", "hdr", "upscale")
 OCIO_CONFIG = "ocio://studio-config-latest"  # the page fills the config in use: $OCIO when it is set, as in RV
 
 KLEIN = "flux3-image-klein-int8-convrot.safetensors"
@@ -32,6 +32,9 @@ LTX_AUDIO_VAE = "ltx-2.5-audio-vae-bf16.safetensors"  # its audio VAE (models/va
 RIPPLE_LORA = "LTX25_Ripple_v11.safetensors"  # WepeNerd's Ripple IC-LoRA, which carries paint and light (models/loras)
 HDR_LORA = "ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors"  # Lightricks' SDR-to-HDR IC-LoRA (models/loras, gated)
 HDR_SCENE = "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors"  # its fixed scene embeddings: the prompt it takes (models/embeddings)
+SEEDVR2 = "seedvr2_7b_fp16.safetensors"  # SeedVR2 7B, a one-step video restoration model: Upscale to 4K (models/diffusion_models)
+SEEDVR2_VAE = "seedvr2_ema_vae_fp16.safetensors"  # its VAE (models/vae)
+UPSCALE_CHUNK = 21  # frames SeedVR2 samples at once: one pass over 121 frames at 3840 x 2160 overflows the model's MLP
 HDR_SPACE = "ACES2065-1"  # the SDR-to-HDR frames are saved in it: the colour space the config's file rules give an EXR
 FLUID_NEGATIVE = "blurry, low quality, distorted, watermark"  # the negative prompt of its model card's samples
 SNAP_POINTS = 5  # stroke points SAM looks at one by one
@@ -841,7 +844,46 @@ def hdr():
       filename_prefix=Slot("video_prefix", "paintaplate/plate/hdr_movie"))
     g.save("hdr")
 
+
+def upscale():
+    """Upscale to 4K: one window of the result, frames `first` to `first + count - 1` (Slots first and count), made sharp
+    at the size the page sends (Slots width and height) by SeedVR2 7B, with core's SeedVR2 nodes wired as core's blueprint
+    wires them.
+
+    The page sends the export (Slot shot), in the plate's colour space (Slot color_space), and one job per window, so a
+    window bounds a job's RAM: 121 frames at 3840 x 2160 in one job reach 52 GB of RAM on a 96 GB GPU. The window goes
+    into the model space with the whole shot's peak (peak_of), so an HDR shot keeps one exposure from one window to the
+    next, and comes back with that peak. Lanczos brings it to the target size; SeedVR2 restores it in chunks of
+    UPSCALE_CHUNK frames, in one sampling step; its post-processing matches the colours to the Lanczos frames (Slot
+    color_fix: lab, the node's default, or none). Save Frames writes the window: 16-bit PNG, or half-float EXR for a float
+    plate (Slot format). Core's file counter goes on from the files already in the folder, so the windows of one prefix
+    make one numbered sequence.
+    """
+    g = Graph()
+    load = g("PaintAPlate_LoadPlate", _title="Result", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
+    window = g("ImageFromBatch", _title="The window", image=load[0], batch_index=Slot("first", 0), length=Slot("count", 121))
+    model = colour(g, window, Slot("color_space", "@model"), "@model", "The window in the model space", peak_of=load[0])
+    resized = g("ImageScale", _title="The window at the target size (Lanczos)", image=model, upscale_method="lanczos",
+                width=Slot("width", 3840), height=Slot("height", 2160), crop="disabled")
+    vae = g("VAELoader", vae_name=SEEDVR2_VAE)
+    unet = g("UNETLoader", unet_name=SEEDVR2, weight_dtype="default")
+    latent = g("VAEEncodeTiled", pixels=g("SeedVR2Preprocess", resized_images=resized), vae=vae, tile_size=512, overlap=128,
+               temporal_size=64, temporal_overlap=8)
+    chunks = g("SeedVR2TemporalChunk", latent=latent, temporal_overlap=0, chunking_mode="manual",
+               chunking_mode__frames_per_chunk=UPSCALE_CHUNK)
+    cond = g("SeedVR2Conditioning", model=unet, vae_conditioning=chunks[0])
+    sampled = g("KSampler", _progress=True, model=unet, seed=Slot("seed", 42), steps=1, cfg=1.0, sampler_name="euler",
+                scheduler="simple", positive=cond[0], negative=cond[1], latent_image=chunks[0], denoise=1.0)
+    decoded = g("VAEDecodeTiled", samples=g("SeedVR2TemporalMerge", latents=sampled, temporal_overlap=chunks[1]), vae=vae,
+                tile_size=512, overlap=128, temporal_size=64, temporal_overlap=8)
+    sharp = g("SeedVR2PostProcessing", images=decoded, original_resized_images=resized, color_correction_method=Slot("color_fix", "lab"))
+    back = colour(g, sharp, "@model", Slot("color_space", "@model"), "The window in the plate's colour space", peak=model[1])
+    g("PaintAPlate_SaveFrames", _title="Upscaled frames", _output="frames", images=back, fps=load[3], format=Slot("format", "png16"),
+      filename_prefix=Slot("prefix", "paintaplate/plate/upscale/f"))
+    g.save("upscale")
+
+
 if __name__ == "__main__":
-    for build in (ingest, prompt, edit, snap, clean, cleanup, shot, shotup, matte, comp, review, export, warm, fluid, hdr):
+    for build in (ingest, prompt, edit, snap, clean, cleanup, shot, shotup, matte, comp, review, export, warm, fluid, hdr, upscale):
         build()
     print("wrote", sorted(os.listdir(OUT)))
