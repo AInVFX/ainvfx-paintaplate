@@ -1011,14 +1011,17 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
 // colour by name, its strength from the colour's brightness, its spread from the share of the frame it covers, its place),
 // one per shaded place, the person's words, then what must stay. `strokes`: { color, size, points }, the points as [x, y]
 // fractions of the frame and the size as a fraction of its width; `aspect`: the frame's width over its height. A light that
-// covers 8% of the frame or more is broad; under 1%, focused.
+// covers 8% of the frame or more is broad; under 1%, focused. A small light inside the frame shows its source where it is
+// drawn: its strokes of one colour that touch make one source, placed by a row of Klein's layout table (tgt_bbox, as a
+// paint's request places its object). A source spans under a fifth of the frame each way and stays 2% inside its edges; a
+// wash, or a light at the frame's edge, comes from outside the frame and shows no source.
 export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
   const place = (b) => { // b: [x0, y0, x1, y1] in fractions of the frame
     const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
     const v = cy < 1 / 3 ? "top" : cy > 2 / 3 ? "bottom" : "", h = cx < 1 / 3 ? "left" : cx > 2 / 3 ? "right" : "";
     return v && h ? `${v} ${h}` : v || h || "centre";
   };
-  const groups = new Map();
+  const groups = new Map(), lamps = [];
   for (const s of strokes) {
     const r = s.size / 2, rh = r * aspect, pts = s.points;
     let length = 0;
@@ -1030,7 +1033,20 @@ export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
     g.cover += Math.min(1, ((length + 2 * rh) * 2 * rh) / aspect); // a round brush along its path, as a share of the frame
     g.box = [Math.min(g.box[0], box[0]), Math.min(g.box[1], box[1]), Math.max(g.box[2], box[2]), Math.max(g.box[3], box[3])];
     groups.set(key, g);
+    if (!g.shade) lamps.push({ name: key, box });
   }
+  const touch = (a, b) => a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3];
+  for (let joined = true; joined;) { // until no two touch: the sources do not depend on the strokes' order
+    joined = false;
+    for (let i = 0; i < lamps.length && !joined; i++) for (let j = i + 1; j < lamps.length && !joined; j++) {
+      const a = lamps[i], b = lamps[j];
+      if (a.name !== b.name || !touch(a.box, b.box)) continue;
+      a.box = [Math.min(a.box[0], b.box[0]), Math.min(a.box[1], b.box[1]), Math.max(a.box[2], b.box[2]), Math.max(a.box[3], b.box[3])];
+      lamps.splice(j, 1);
+      joined = true;
+    }
+  }
+  const shown = lamps.filter(({ box: b }) => b[2] - b[0] < 0.2 && b[3] - b[1] < 0.2 && Math.min(b[0], b[1]) > 0.02 && Math.max(b[2], b[3]) < 0.98);
   const said = ["Relight the whole scene with new light, as if it were photographed under that light."];
   for (const [name, g] of groups) {
     if (g.shade) { said.push(`The ${place(g.box)} of the frame falls into deep shadow.`); continue; }
@@ -1042,8 +1058,14 @@ export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
     "it casts soft shadows away from it, and the old highlights and shadows that disagree with it fade.");
   const w = String(words ?? "").trim();
   if (w) said.push(`${w[0].toUpperCase()}${w.slice(1)}${/[.!?]$/.test(w) ? "" : "."}`);
-  said.push("Keep every object, face and texture, the camera angle, the framing and the composition exactly as they are: only the light changes.");
-  return said.join(" ");
+  const rows = shown.map(({ name, box: b }, k) => {
+    said.push(`The ${name} light's source <light_${k + 1}> is visible in the frame: a small, very bright ${name} light.`);
+    return { id: `light_${k + 1}`, from: "target", src_bbox: null, tgt_bbox: [b[1], b[0], b[3], b[2]].map((v) => Math.round(v * 1000)),
+      desc: `the light's source: a small, very bright ${name} light` };
+  });
+  said.push("Keep every object, face and texture, the camera angle, the framing and the composition exactly as they are: only the light " +
+    `changes${rows.length ? ", and each light's source shows where it is placed" : ""}.`);
+  return rows.length ? `${said.join(" ")} ${pyJSON(rows)}` : said.join(" ");
 }
 
 // A fluid shot's own passes, shown from the Render panel with its keyframes open or closed: the control video LTX was

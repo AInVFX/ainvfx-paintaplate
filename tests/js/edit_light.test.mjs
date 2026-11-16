@@ -32,3 +32,29 @@ test("shade alone: no sentence about lights", () => {
   assert.ok(said.includes("The left of the frame falls into deep shadow. Dusk. Keep every object"), said);
   assert.ok(!said.includes("Each light"));
 });
+
+test("a small light inside the frame shows its source where it is drawn, placed by a row of Klein's layout table", () => {
+  const patch = { color: "#ffeb3b", size: 50 / 1920, points: [[0.44, 0.2], [0.45, 0.2]] }; // a yellow patch above a building
+  const said = lightIntent({ strokes: [patch], aspect: 16 / 9 });
+  assert.match(said, /The warm orange light's source <light_1> is visible in the frame: a small, very bright warm orange light\./);
+  assert.match(said, /only the light changes, and each light's source shows where it is placed\. \[\{"id": "light_1", "from": "target", "src_bbox": null, "tgt_bbox": \[177, 427, 223, 463\], /);
+  const edge = lightIntent({ strokes: [{ ...patch, points: [[0.985, 0.2], [0.99, 0.2]] }] }); // light from outside the frame
+  const wash = lightIntent({ strokes: [{ ...patch, size: 0.1, points: [[0.15, 0.22], [0.85, 0.22]] }] }); // a sunset band
+  for (const t of [edge, wash]) assert.ok(!t.includes("<light_") && t.endsWith("only the light changes."), t);
+});
+
+test("strokes of one colour that touch make one source; apart, two; a shade never shows a source", () => {
+  const dab = (x, y) => ({ color: "#ffb060", size: 0.02, points: [[x, y], [x + 0.005, y]] });
+  const one = lightIntent({ strokes: [dab(0.5, 0.5), dab(0.51, 0.505), dab(0.52, 0.51)] });
+  assert.equal(one.match(/<light_\d>/g).length, 1, one);
+  const two = lightIntent({ strokes: [dab(0.2, 0.5), dab(0.7, 0.5), { color: "#000000", size: 0.02, points: [[0.4, 0.4], [0.41, 0.4]] }] });
+  assert.deepEqual(two.match(/"id": "light_\d"/g), ['"id": "light_1"', '"id": "light_2"'], two);
+  assert.ok(two.includes("falls into deep shadow"), two);
+});
+
+test("the sources do not depend on the strokes' order: two that touch only once joined still join a third", () => {
+  const at = (x0, y0, x1, y1) => ({ color: "#ffb060", size: 0.01, points: [[x0 + 0.005, y0 + 0.005 * 16 / 9], [x1 - 0.005, y1 - 0.005 * 16 / 9]] });
+  const a = at(0.5, 0.5, 0.53, 0.53), b = at(0.42, 0.42, 0.45, 0.51), c = at(0.44, 0.38, 0.51, 0.43); // b and c touch; together they reach a
+  for (const order of [[a, b, c], [b, c, a], [c, a, b]])
+    assert.equal(lightIntent({ strokes: order, aspect: 16 / 9 }).match(/"id": "light_\d"/g).length, 1);
+});
