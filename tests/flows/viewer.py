@@ -265,6 +265,16 @@ def wipe_compare(page, U):
     Ctrl+click, Esc or F6 ends it."""
     row = "#stages li.pick:has-text('Track the paint, preview')"
     names = lambda: [page.text_content("#wipe .label.left"), page.text_content("#wipe .label.right")]  # noqa: E731
+    compared = lambda: page.evaluate("document.querySelector('#view').dataset.compared")  # noqa: E731
+    page.keyboard.press("F6"); page.wait_for_timeout(300)
+    U.check(names() == ["Plate", "Composite, full size"], f"F6: the plate on the left, the pass on show on the right, both named: {names()}")
+    page.click(row); page.wait_for_timeout(500)
+    U.check(names() == ["Plate", "Track the paint, preview"], f"F6, then a click on a Render step: the right side takes the step's name: {names()}")
+    page.click(row, modifiers=["Control"]); page.wait_for_timeout(300)
+    said = page.evaluate("[...document.querySelectorAll('#log li span')].map((s) => s.textContent)")
+    U.check(names() == ["Plate", "Track the paint, preview"] and compared() == "" and "Viewer: wipe, Plate against Track the paint, preview." in said,
+            f"Ctrl+click on the pass on show compares it with the plate, never with itself: {names()}, {said[-1:]}")
+    page.click(row); page.wait_for_timeout(500); page.keyboard.press("F6"); page.wait_for_timeout(300)  # the latest result, and the wipe off
     before = page.evaluate(SUM, [0.5, 1.0])
     page.click(row, modifiers=["Control"])
     page.wait_for_function("document.querySelector('#view').dataset.compared === 'drawn'", timeout=30000)  # its own frame: the plate shows until then

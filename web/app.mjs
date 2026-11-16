@@ -927,7 +927,7 @@ function passLabel(id) {
 function shownLabel() { // the pass on show, by its row's name: the one clicked, else the latest result
   if (S.pass) return passLabel(S.pass);
   const r = S.renders.get(S.heroKey), pv = previewOf(r);
-  return STAGES.find((x) => S.shot?.url && passMovie(x.id, r, pv, passSpaces())?.url === S.shot.url)?.label ?? (S.shot ? "Result" : "Plate");
+  return STAGES.find((x) => S.shot?.url && passMovie(x.id, r, pv, passSpaces())?.url === S.shot.url)?.label ?? (S.shot ? "Result" : S.edits.length ? "First frame" : "Plate");
 }
 // A fluid row on show with the wipe: its step's input on the wipe's left side (logic.fluidWipeLeft), as a comparison that
 // ends with the row or the wipe. A comparison picked by Ctrl+click stays as it is.
@@ -944,6 +944,7 @@ function fluidInput() {
 }
 function comparePass(id) {
   if (S.cmp?.id === id) return endCompare();
+  if (passLabel(id) === shownLabel()) return plateWipe(); // the pass on show against itself shows nothing: the plate takes the left side
   const r = S.renders.get(S.heroKey);
   const m = id === "first" ? { url: null, space: modelSpace(), frames: null } : passMovie(id, r, previewOf(r), passSpaces());
   if (!m) return;
@@ -956,6 +957,14 @@ function comparePass(id) {
   placeWipe(); render(); stagesUI();
   hud(`Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right. Ctrl+click it again, Esc or F6 ends it`, 3500);
   log(`Viewer: wipe, ${S.cmp.label} against ${shownLabel()}.`);
+}
+function plateWipe() { // the plain wipe: the plate on the left, the pass on show on the right
+  if (S.cmp) endCompare(false);
+  S.wipe ??= 0.5;
+  $("#wipe-btn").setAttribute("aria-pressed", "true");
+  placeWipe(); render(); stagesUI();
+  hud(`Wipe: Plate on the left, ${shownLabel()} on the right`, 3500);
+  log(`Viewer: wipe, Plate against ${shownLabel()}.`);
 }
 // ---------- The X-ray (X): where the edits on show change the plate, tinted over the picture (xray.mjs) ----------
 // The overlay sits on the canvas with its zoom and pan, so the inspector and the picker read the picture without the tint.
@@ -1165,7 +1174,7 @@ function render() {
   if (keying()) return renderFluid();
   if (S.cmp && S.cmp.key !== S.heroKey) endCompare(false); // other edits on show: the pass compared was the old edits'
   $("#wipe .label.left").textContent = S.cmp?.label ?? "Plate";
-  $("#wipe .label.right").textContent = S.cmp ? shownLabel() : "Result";
+  $("#wipe .label.right").textContent = shownLabel();
   wantDeep(); // once a colour value moves, the frames' own values load around the playhead, as OpenRV's cache does
   const W = view.width, H = view.height, still = !S.playing;
   const live = S.draft || stroke ? null : liveNow(); // while an edit is painted, the frame shows it, not the live preview of a render
@@ -1354,7 +1363,7 @@ function setWipe(on) {
   $("#wipe-btn").setAttribute("aria-pressed", String(on));
   fluidInput(); // a fluid row on show: its step's input on the left
   placeWipe(); render();
-  hud(!on ? "Wipe off" : S.cmp ? `Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right` : "Wipe: the plate on the left, the result on the right");
+  hud(!on ? "Wipe off" : `Wipe: ${S.cmp?.label ?? "Plate"} on the left, ${shownLabel()} on the right`);
 }
 
 function nearWipe(e) { // a press this close to the wipe line moves the wipe: it never paints
