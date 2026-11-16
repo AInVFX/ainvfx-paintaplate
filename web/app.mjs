@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { CACHE_LEAST, CACHE_MOST, askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, PREVIEW_PARTS, previewCap, memoryBytes, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, colorShares, paintColors, inHues, shadowBox, shadowOf } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, PREVIEW_PARTS, previewCap, previewSize, previewSizes, reconcile, removedNames, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -1532,7 +1532,8 @@ function rubStroke(layers, s, from = 0) { // an eraser stroke, taken out of ever
 
 function drawStroke(d, s, from = 0) {
   const pc = d.paint.getContext("2d"), mc = d.mask.getContext("2d");
-  if (s.tool === "rub") return rubStroke([pc, mc, d.shade?.getContext("2d")].filter(Boolean), s, from); // the eraser takes strokes away, whatever drew them: paint, light or shade
+  if (s.tool === "rub" && d.tool === "light") { rubStroke([mc], s, from); return rubLight(d, s, from); } // the mask, laid hard, goes hard; light and shade go soft
+  if (s.tool === "rub") return rubStroke([pc, mc, d.shade?.getContext("2d")].filter(Boolean), s, from); // the eraser takes strokes away, whatever drew them
   for (let i = from; i < s.points.length; i++) {
     const [x, y, p] = s.points[i], [px, py] = s.points[Math.max(i - 1, 0)], r = (s.size * (0.5 + p)) / 2;
     line(mc, px, py, x, y, r, "#fff");
@@ -1543,7 +1544,7 @@ function drawStroke(d, s, from = 0) {
 
 // The light brush: soft dabs at a fixed spacing along the stroke (logic.dabsAlong), so the light never depends on how fast
 // the hand moved. Light adds up ("lighter") at a flow that gives one stroke at most LIGHT.flow of its colour; a dark colour
-// lays shade on its own layer (d.shade) the same way. The eraser takes both away.
+// lays shade on its own layer (d.shade) the same way. The eraser takes both away in soft dabs (rubLight).
 const carried = new WeakMap(); // stroke -> the distance walked since its last dab, between two pointer moves
 function lightDabs(d, s, from) {
   const shade = dark(s.color), layer = shade ? (d.shade ??= canvas([d.paint.width, d.paint.height])) : d.paint;
@@ -1558,6 +1559,22 @@ function lightDabs(d, s, from) {
     c.fillStyle = g; c.fillRect(x - r, y - r, 2 * r, 2 * r);
   }
   c.globalCompositeOperation = "source-over";
+}
+
+// The eraser on a Light edit: soft dabs with the brush's spacing, reach and profile take light and shade away (logic.rubDabs).
+// A straight pass takes away all the light on its centre line, and less towards its edge: more than one pass of the brush
+// lays anywhere, so new light fills an erased place with no edge. redrawStrokes replays it the same way.
+function rubLight(d, s, from) {
+  const pts = s.points.map(([x, y, p]) => [x, y, ((s.size * (0.5 + p)) / 2) * LIGHT.spread]);
+  const { dabs, carry } = dabsAlong(pts, from, (r) => r * LIGHT.spacing, from ? carried.get(s) ?? 0 : 0);
+  carried.set(s, carry);
+  for (const layer of [d.paint, d.shade]) {
+    const box = layer && dabsBox(dabs, layer.width, layer.height);
+    if (!box) continue;
+    const c = layer.getContext("2d"), img = c.getImageData(box.x, box.y, box.w, box.h);
+    rubDabs(img.data, box, dabs, dabFlow(1, LIGHT.spacing));
+    c.putImageData(img, box.x, box.y);
+  }
 }
 
 const rgbOf = (hex) => { // "#rgb" or "#rrggbb" as "r, g, b"

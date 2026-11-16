@@ -1023,6 +1023,32 @@ export function dabAlpha(d) { // the profile between its stops
   const i = DAB_PROFILE.findIndex(([at]) => at > d), [a0, k0] = DAB_PROFILE[i - 1], [a1, k1] = DAB_PROFILE[i];
   return k0 + ((k1 - k0) * (d - a0)) / (a1 - a0);
 }
+// The eraser on a Light edit: soft dabs with the brush's profile (dabAlpha) take light and shade away. Each dab lowers a
+// pixel's alpha by `amount` times the profile, never below 0, and keeps its colour, so it undoes the brush's "lighter"
+// dabs of one colour exactly: paint, erase and the same paint again leave one paint, with no edge. `pixels`: the RGBA
+// bytes of `box` ({ x, y, w, h }, in the layer's pixels), as getImageData gives them; `dabs`: [x, y, radius].
+export function rubDabs(pixels, box, dabs, amount) {
+  for (const [cx, cy, r] of dabs) {
+    const x0 = Math.max(box.x, Math.floor(cx - r)), x1 = Math.min(box.x + box.w, Math.ceil(cx + r));
+    const y0 = Math.max(box.y, Math.floor(cy - r)), y1 = Math.min(box.y + box.h, Math.ceil(cy + r));
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const k = dabAlpha(Math.hypot(x + 0.5 - cx, y + 0.5 - cy) / r), i = ((y - box.y) * box.w + x - box.x) * 4 + 3;
+        if (k > 0) pixels[i] = Math.max(0, pixels[i] - 255 * amount * k);
+      }
+    }
+  }
+}
+// The pixels that `dabs` reach inside a layer of `width` x `height`, as { x, y, w, h }, or null when they reach none
+export function dabsBox(dabs, width, height) {
+  let x0 = width, y0 = height, x1 = 0, y1 = 0;
+  for (const [x, y, r] of dabs) {
+    x0 = Math.min(x0, Math.floor(x - r)); y0 = Math.min(y0, Math.floor(y - r));
+    x1 = Math.max(x1, Math.ceil(x + r)); y1 = Math.max(y1, Math.ceil(y + r));
+  }
+  [x0, y0, x1, y1] = [Math.max(0, x0), Math.max(0, y0), Math.min(width, x1), Math.min(height, y1)];
+  return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+}
 // Each dab's alpha so the dabs of one straight stroke add up to `peak` on its centre line, at a spacing of
 // `spacingOverRadius` of their radius
 export function dabFlow(peak, spacingOverRadius) {
