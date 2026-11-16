@@ -120,8 +120,8 @@ class ViewerMovies(unittest.TestCase):
         used = {str(v[0]) for n in video.values() for v in n["inputs"].values() if isinstance(v, list)}
         idle = [n["class_type"] for nid, n in video.items() if nid not in used and "output" not in n.get("_meta", {})]
         self.assertEqual(idle, [], "a dropped link leaves no node that feeds nothing")
-        conv = seq[str(seq[outputs["view"]]["inputs"]["images"][0])]  # Save Movie scales it to the size the page sends
-        self.assertEqual(conv["inputs"]["destination"], "ACEScct")
+        movie = seq[outputs["view"]]  # Save Movie converts each frame as it saves it, and scales it to the size the page sends
+        self.assertEqual(movie["inputs"]["destination"], "ACEScct")
 
     def test_hdr_writes_a_log_movie_beside_its_frames(self):
         _, _, outputs = build_workflows.load("hdr")

@@ -605,17 +605,18 @@ def review():
     nothing here is written for compositing software (that is export, when Export is pressed)."""
     g = Graph()
     load, _, final = composite(g)
-    real = g("ImageFromBatch", image=final, batch_index=0, length=load[4])
-    movie = colour(g, real, Slot("color_space", "@model"), Slot("movie_space", "@model"), "Movie values")  # Save Movie scales it
-    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Review movie (full-size composite, H.264)", _output="review", images=movie, fps=load[3], crf=12,
+    # Each writer takes the composite as it is: it saves the plate's own frames (`frames`, without Load Plate's padding) and
+    # converts each frame as it saves it, so no second batch of the shot is held
+    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Review movie (full-size composite, H.264)", _output="review", images=final, frames=load[4],
+      config=Slot("config", OCIO_CONFIG), source=Slot("color_space", "@model"), destination=Slot("movie_space", "@model"), fps=load[3], crf=12,
       filename_prefix=Slot("review_prefix", "paintaplate/plate/review"))
     frames = g("PaintAPlate_SaveFrames", _title="Review frames (half-float EXR, image sequences only)", _output="frames",
-               images=real, format="exr", fps=load[3], filename_prefix=Slot("frames_prefix", ""))
+               images=final, frames=load[4], format="exr", fps=load[3], filename_prefix=Slot("frames_prefix", ""))
     g.link_slot(frames, "images", "review_frames")  # dropped for a video plate
     # What the viewer plays for an image sequence: log values (ACEScct, `view_space`), so the 8-bit movie shows what its EXR
     # frames show at full precision. The review movie above stays in the model space, for the zip. Dropped for a video plate.
     view = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Viewer movie (image sequences: log values, the look of the EXR frames)", _output="view",
-             images=colour(g, real, Slot("color_space", "@model"), Slot("view_space", "ACEScct"), "Viewer movie values"),
+             images=final, frames=load[4], config=Slot("config", OCIO_CONFIG), source=Slot("color_space", "@model"), destination=Slot("view_space", "ACEScct"),
              fps=load[3], crf=12, filename_prefix=Slot("view_prefix", ""))
     g.link_slot(view, "images", "review_view")
     g.save("review")

@@ -437,48 +437,21 @@
   }
  },
  "26": {
-  "class_type": "ImageFromBatch",
-  "inputs": {
-   "image": [
-    "25",
-    0
-   ],
-   "batch_index": 0,
-   "length": [
-    "1",
-    4
-   ]
-  }
- },
- "27": {
-  "class_type": "PaintAPlate_ColorSpace",
-  "inputs": {
-   "image": [
-    "26",
-    0
-   ],
-   "config": "ocio://studio-config-latest",
-   "source": "@model",
-   "destination": "@model"
-  },
-  "_meta": {
-   "title": "Movie values",
-   "slots": {
-    "config": "config",
-    "source": "color_space",
-    "destination": "movie_space"
-   }
-  }
- },
- "28": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
    "width": 0,
    "height": 0,
    "images": [
-    "27",
+    "25",
     0
    ],
+   "frames": [
+    "1",
+    4
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "@model",
    "fps": [
     "1",
     3
@@ -491,17 +464,24 @@
    "slots": {
     "width": "movie_width",
     "height": "movie_height",
+    "config": "config",
+    "source": "color_space",
+    "destination": "movie_space",
     "filename_prefix": "review_prefix"
    },
    "output": "review"
   }
  },
- "29": {
+ "27": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
-    "26",
+    "25",
     0
+   ],
+   "frames": [
+    "1",
+    4
    ],
    "format": "exr",
    "fps": [
@@ -519,35 +499,22 @@
    "output": "frames"
   }
  },
- "30": {
-  "class_type": "PaintAPlate_ColorSpace",
-  "inputs": {
-   "image": [
-    "26",
-    0
-   ],
-   "config": "ocio://studio-config-latest",
-   "source": "@model",
-   "destination": "ACEScct"
-  },
-  "_meta": {
-   "title": "Viewer movie values",
-   "slots": {
-    "config": "config",
-    "source": "color_space",
-    "destination": "view_space"
-   }
-  }
- },
- "31": {
+ "28": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
    "width": 0,
    "height": 0,
    "images": [
-    "30",
+    "25",
     0
    ],
+   "frames": [
+    "1",
+    4
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "ACEScct",
    "fps": [
     "1",
     3
@@ -560,6 +527,9 @@
    "slots": {
     "width": "movie_width",
     "height": "movie_height",
+    "config": "config",
+    "source": "color_space",
+    "destination": "view_space",
     "filename_prefix": "view_prefix",
     "images": "review_view"
    },
