@@ -985,7 +985,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                         joined = joined[joined > 0]
                         areas, covered = np.bincount(labels[changed]), np.bincount(labels[changed & hide], minlength=int(labels.max()) + 1)
                         gain = np.isin(labels, joined[2 * covered[joined] <= areas[joined]]) & ~hide  # of an area that lies mostly in view, what is in view
-                        gain |= np.isin(labels, joined[4 * covered[joined] <= areas[joined]]) & hide & here & ~open0  # and, when a quarter of it at most is covered, its covered part in the margin around the place: there the plate may have first shown something that has left
+                        gain |= bulk(np.isin(labels, joined[4 * covered[joined] <= areas[joined]]) & hide & here & ~open0)  # and, when a quarter of it at most is covered, its covered part in the margin around the place: there the plate may have first shown something that has left
+                        # (its thick part only: a thin covered line at the place's edge is the edge of what stands in front, or a fence's slat)
                     if cleaned_at is not None:  # under a Clean edit the shot differs from the plate on every frame: there only the tracker's mask anchors a change
                         under = gain & cleaned_at(t)
                         near = under & grow(core, reach) if core.any() else np.zeros_like(under)
