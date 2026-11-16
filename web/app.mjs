@@ -12,7 +12,7 @@ import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
 import { CACHE_LEAST, CACHE_MOST, askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, PREVIEW_PARTS, previewCap, memoryBytes, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, colorShares, paintColors, inHues, shadowBox, shadowOf } from "./logic.mjs";
-import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
+import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
@@ -2737,8 +2737,7 @@ try { TIMES = JSON.parse(localStorage.getItem(TIMES_KEY) ?? "{}") ?? {}; } catch
 const stepSize = (id) => stepSizeOf(id, S.plate);
 const stepKey = (id, hdr = false) => timeKey(timeId(id, hdr), stepSize(id), S.plate.frames, S.memoryProfile.name);
 const makesHdr = (skip) => !!skip && !skip.has("hdr"); // a render makes SDR to HDR unless its plan leaves the step out
-const fromPreview = () => { const low = stageOne(S.plate.work); return S.plate.shot?.[0] === low[0] && S.plate.shot?.[1] === low[1]; }; // the full-size clean plate pass starts from the preview's own pass
-const timeStep = (id) => (id === "cleanfull" && fromPreview() ? "cleanup" : id); // the name a step's seconds go under: stage 2 alone apart from both stages
+const timeStep = (id) => (id === "cleanfull" && startsFromPreview(S.plate, S.previewCap) ? "cleanup" : id); // the name a step's seconds go under: stage 2 alone apart from both stages
 
 function estimate(id, skip) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess. skip: the render's steps left out
   const hdr = makesHdr(skip), t = timeStep(id);

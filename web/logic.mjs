@@ -1215,6 +1215,9 @@ export function stepGuess(id, ref, plate, profile, hdr = false) { // seconds: th
 }
 // The full-size clean plate pass when its first stage is the preview's own pass, made already: the pass less that stage
 // (ref: each step's reference, by id). Its seconds are kept as « cleanup », apart from the pass that makes both stages.
+// Whether the full-size clean plate pass starts from the preview's own pass: the Preview pass is on (previewCap, 0 when Off)
+// and makes its clean pass at the size of stage 1, half the working size.
+export const startsFromPreview = (plate, previewCap) => { if (!plate?.work || !previewCap) return false; const low = stageOne(plate.work); return plate.shot?.[0] === low[0] && plate.shot?.[1] === low[1]; };
 export const stageTwoGuess = (ref, plate, profile) => Math.max(1, stepGuess("cleanfull", ref.cleanfull, plate, profile) - stepGuess("clean", ref.clean, plate, profile));
 // The name a step's seconds are kept under: with SDR to HDR on, the steps it slows (SLOWER's withHdr) are kept apart.
 export const timeId = (id, hdr) => (hdr && Object.values(SLOWER).some((p) => p.withHdr?.[id]) ? `${id}+hdr` : id);

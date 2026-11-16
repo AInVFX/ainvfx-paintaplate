@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { SLOWER, stageTwoGuess, stepGuess, stepSizeOf, timeId } from "../../web/logic.mjs";
+import { SLOWER, stageTwoGuess, startsFromPreview, stepGuess, stepSizeOf, timeId } from "../../web/logic.mjs";
 
 const app = readFileSync(new URL("../../web/app.mjs", import.meta.url), "utf8");
 const REF = Object.fromEntries([...app.matchAll(/\{ id: "(\w+)", label: "[^"]*", ref: (\d+)/g)].map((m) => [m[1], Number(m[2])]));
@@ -62,4 +62,9 @@ test("with SDR to HDR on, the full-size composite and the export announce their 
   }
   assert.equal(stepGuess("shot", REF.shot, HORSE, "small", true), stepGuess("shot", REF.shot, HORSE, "small"));
   assert.deepEqual([timeId("review", true), timeId("review", false), timeId("shot", true)], ["review+hdr", "review", "shot"]);
+});
+
+test("the full-size clean plate pass starts from the preview's own pass only when the Preview pass makes it at half the working size", () => {
+  const quarter = { ...HORSE, shot: [480, 288] };
+  assert.deepEqual([startsFromPreview(HALF, 960), startsFromPreview(quarter, 480), startsFromPreview(HALF, 0)], [true, false, false]); // Off keeps a size
 });
