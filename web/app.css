@@ -387,3 +387,4 @@ dialog.open { width: min(900px, 94vw); }
 body.plate-alone { grid-template: "stage" minmax(0, 1fr) / minmax(0, 1fr); }
 body.plate-alone :is(.top, .tools, .split-side, .side, .log), body.plate-alone .stage > :not(.viewport) { display: none; }
 .preview-note { margin: 0 0 10px; color: var(--faint); font-size: 11px; line-height: 1.35; } /* the line under Preview pass: what each choice costs and gives */
+#ask-field { display: block; width: 100%; box-sizing: border-box; margin: 0 0 12px; } /* the answer ask() takes, when it asks for one */

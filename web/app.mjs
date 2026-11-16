@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, PREVIEW_PARTS, previewCap, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import {CACHE_LEAST, CACHE_MOST,  askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, PREVIEW_PARTS, previewCap, memoryBytes, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -478,7 +478,7 @@ const look = new Display({ onready: () => render(), onerror: (m) => log(`Error: 
 // View > Cache memory sets it and the next session keeps it; Auto by default. The caches of the sources on show share it
 // first, each at the size the frame is shown, so the frames between the in and out points fit and the shot plays from memory.
 const CACHE_PREF = "paintaplate.cache";
-S.cache = (() => { try { const v = +localStorage.getItem(CACHE_PREF); return CACHE_CHOICES.includes(v) ? v : 0; } catch { return 0; } })(); // bytes; 0: Auto
+S.cache = (() => { try { const v = +localStorage.getItem(CACHE_PREF); return v >= CACHE_LEAST && v <= CACHE_MOST ? v : 0; } catch { return 0; } })(); // bytes, from the list or Custom…; 0: Auto
 const memoryText = (b) => (b >= 1e9 ? `${Math.round(b / 1e8) / 10} GB` : `${Math.round(b / 1e6)} MB`);
 const cacheBudget = () => (CACHE_MB ? CACHE_MB * 1e6 : S.cache || autoBudget({ host: location.hostname, profile: S.memoryProfile.name, deviceMemory: navigator.deviceMemory }));
 const planned = { key: "", said: "", timer: 0 };
@@ -506,6 +506,14 @@ function planCaches() { // each cache's share and frame size, when the budget, t
   cacheUI();
 }
 function planSoon() { if (!planned.timer) planned.timer = setTimeout(() => { planned.timer = 0; planCaches(); }, 300); }
+function customCache() { // View > Cache memory > Custom…: a size in MB or GB; the next session keeps it
+  ask("Memory for the frames the viewer keeps, in MB or GB.", "Set", { field: { value: S.cache ? memoryText(S.cache) : "", placeholder: "2 GB" } }).then((typed) => {
+    if (typed === false) return;
+    const bytes = memoryBytes(typed);
+    if (bytes) setCache(bytes);
+    else status(`Cache memory: type a size from ${memoryText(CACHE_LEAST)} to ${memoryText(CACHE_MOST)}, such as 2 GB.`, "hint");
+  });
+}
 function setCache(bytes) { // View > Cache memory; 0 is Auto
   S.cache = bytes;
   try { localStorage.setItem(CACHE_PREF, String(bytes)); } catch { /* private browsing: the setting lasts for this session */ }
@@ -3694,19 +3702,22 @@ function regenerated() { return S.edits.filter((e) => e.on && e.state === "done"
 // erase can ask while the OCIO question is open, so a question that comes then waits for that answer, and is dropped (false)
 // when `still()` no longer holds by its turn.
 let asking = Promise.resolve();
-function ask(text, yes, { enter = false, still = () => true } = {}) {
+function ask(text, yes, { enter = false, still = () => true, field = null } = {}) { // with a field ({ value, placeholder }), the answer is the text typed, or false
   const turn = asking.then(() => still() && new Promise((answer) => {
-    const d = $("#ask"), ok = $("#ask-yes");
+    const d = $("#ask"), ok = $("#ask-yes"), input = $("#ask-field");
     $("#ask-text").textContent = text;
     ok.textContent = yes;
+    input.hidden = !field;
+    if (field) Object.assign(input, { value: field.value ?? "", placeholder: field.placeholder ?? "" });
     d.returnValue = "";
-    d.onclose = () => answer(d.returnValue === "yes");
+    d.onclose = () => answer(d.returnValue === "yes" && (field ? input.value : true));
     d.showModal();
-    if (enter) ok.focus();
+    if (field) input.select(); else if (enter) ok.focus();
   }));
   asking = turn.catch(() => false);
   return turn;
 }
+$("#ask-field").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); $("#ask").close("yes"); } }; // Enter answers, as the button does
 function askRemake(what, made, change) { // an OCIO change that regenerates asks first: Continue goes on, Cancel or Esc changes nothing
   ask(remakeQuestion(what, made), "Continue").then((yes) => yes && change());
 }
@@ -3768,7 +3779,8 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Fit", "F", () => zoomTo(1), !p], ["Frame width", "Ctrl+F", widthZoom, !p], ["1:1", "1", () => pixelZoom(1), !p],
       ["2:1", "2", () => pixelZoom(2), !p], ["4:1", "4", () => pixelZoom(4), !p], ["1:2", "Shift+2", () => pixelZoom(1 / 2), !p], ["1:4", "Shift+4", () => pixelZoom(1 / 4), !p],
       ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["X-ray", "X", () => setXray(!S.xray), !p, S.xray], ["Full screen", "`", fullScreen, !p, !!fullFrom],
-      ["Cache memory", "", [["Auto", "", () => setCache(0), false, !S.cache], ...CACHE_CHOICES.filter(Boolean).map((b) => [memoryText(b), "", () => setCache(b), false, S.cache === b])], !!CACHE_MB],
+      ["Cache memory", "", [["Auto", "", () => setCache(0), false, !S.cache], ...CACHE_CHOICES.filter(Boolean).map((b) => [memoryText(b), "", () => setCache(b), false, S.cache === b]),
+        ["Custom…", "", customCache, false, !!S.cache && !CACHE_CHOICES.includes(S.cache)]], !!CACHE_MB],
       ["Playback statistics", "", toggleStats, false, S.stats],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
     ["Help", [["Getting started", "", () => showHelp("start")], ["Keys", "?", () => showHelp("keys")], ["Models and licences", "", showModels]]],

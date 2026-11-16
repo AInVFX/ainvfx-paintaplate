@@ -1126,3 +1126,13 @@ export function memoryProfile({ vram = 0, ram = 0, force = null } = {}) { // `fo
 // With it every new edit and every new fluid shot starts from that seed, so a run makes the same pictures as the run before.
 // Another try (Ctrl+Enter) still draws one. null: no seed is asked for, or the text is not one, and the page draws.
 export const askedSeed = (text) => (/^\d{1,10}$/.test(text ?? "") && Number(text) < 2 ** 31 ? Number(text) : null);
+
+// View > Cache memory > Custom…: a size a person types, in MB or GB (a number alone is MB), as bytes, or null outside
+// CACHE_LEAST to CACHE_MOST. The page counts 1 GB as 10^9 bytes, as its other memory lines do.
+export const CACHE_LEAST = 128e6;
+export const CACHE_MOST = 32e9;
+export function memoryBytes(text) {
+  const m = /^\s*(\d+(?:[.,]\d+)?)\s*(mb|m|gb|g)?\s*$/i.exec(text ?? "");
+  const b = m ? parseFloat(m[1].replace(",", ".")) * (/^g/i.test(m[2] ?? "") ? 1e9 : 1e6) : NaN;
+  return b >= CACHE_LEAST && b <= CACHE_MOST ? Math.round(b) : null;
+}
