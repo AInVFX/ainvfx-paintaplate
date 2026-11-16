@@ -328,7 +328,7 @@ def plates_below(full: str, page: str) -> list:
     return sorted(found, key=lambda i: -i["mtime"])[:FOUND_MAX]
 
 
-def first_frame(first: str, still: bool) -> np.ndarray:
+def first_image(first: str, still: bool) -> np.ndarray:
     """The first frame of a plate as float RGB: `first` is an image sequence's first file (`still`), or a video or an
     animated image. Float formats keep their values (plateio.read_float); 8-bit ones come back from 0 to 1."""
     if still:
@@ -351,7 +351,7 @@ def thumbnail(rel: str, width: int = THUMB_WIDTH) -> str:
     target = os.path.join(folder, f"{key}.jpg")
     if os.path.exists(target):
         return target
-    rgb = first_frame(first, still)
+    rgb = first_image(first, still)
     h, w = rgb.shape[:2]
     k = min(1.0, width / max(h, w))
     small = mathops.resize_to(rgb, max(1, round(h * k)), max(1, round(w * k))) if k < 1.0 else rgb
