@@ -1129,3 +1129,8 @@ export function memoryProfile({ vram = 0, ram = 0, force = null } = {}) { // `fo
 export const askedSeed = (text) => (/^\d{1,10}$/.test(text ?? "") && Number(text) < 2 ** 31 ? Number(text) : null);
 // The seed of a session's new edit: `made` edits came before it. null when no seed is asked for.
 export const editSeed = (asked, made) => (asked === null ? null : (asked + made) % 2 ** 31);
+
+// The blocks of LTX's 32 px grid that the clean plate pass grows its erased grid by, at a width of `sizeW`, so that it erases
+// as far as the composite pastes an erase on a plate `plateW` wide: `reach`, the composite's grow and feather in the plate's
+// pixels, scaled to that width, plus the block that hides the object's outline.
+export const gridGrow = (sizeW, plateW, reach) => 1 + Math.ceil((reach * sizeW) / plateW / 32);

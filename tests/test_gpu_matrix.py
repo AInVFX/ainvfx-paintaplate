@@ -695,6 +695,13 @@ class Verdict(unittest.TestCase):
         open(os.path.join(tmp, "horse_cow", "export.zip"), "w").close()
         self.assertEqual(gpu_matrix.beside(two, os.path.join(tmp, "horse_cow_two")), [("horse_cow", os.path.join(tmp, "horse_cow", "export.zip"))])
 
+    def test_the_grid_case_is_horse_erase_with_grid_composite_and_horse_erase_beside_it(self):
+        cases = gpu_matrix.load_cases()
+        grid, plain = cases["horse_erase_grid"], cases["horse_erase"]
+        self.assertEqual((grid["path"], grid["seed"], grid["strokes"]), (plain["path"], plain["seed"], plain["strokes"]))
+        self.assertEqual((grid["address"], grid["beside"], grid["stage_frames"]), (["grid=composite"], "horse_erase", [101, 111, 121]))
+        self.assertNotIn("horse_erase_grid", gpu_matrix.ALL + gpu_matrix.QUICK)
+
     def test_every_case_passes_on_its_export(self):
         """No case expects the page to stop before its shot: each one passes when its export downloads."""
         self.assertEqual([n for n, c in gpu_matrix.load_cases().items() if "expect" in c], [])

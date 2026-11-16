@@ -16,7 +16,7 @@ import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, ti
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
-import { askedSeed, editSeed } from "./logic.mjs"; // the tests: a seed asked for in the address, and each edit's seed from it
+import { askedSeed, editSeed, gridGrow } from "./logic.mjs"; // the tests: a seed asked for in the address, and each edit's seed from it
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
 import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
 import { readBack } from "./canvas.mjs"; // the viewer: a few pixels of the view, read without moving it off the GPU
@@ -38,6 +38,7 @@ const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-s
 // the erase matte only places the erase pass's box, grown by 1/24 of the width: 640 is enough, at half the time of 960
 const ERASE_TRACK_SIDE = 640;
 const LIVE = { every: 2 }; // the live preview while LTX samples, on every card: from step 1, every other step. Every pass hands its previews to showLive, which alone decides what shows
+const GRID_REACH = Q.get("grid") === "composite"; // ?grid=composite: the clean plate pass erases as far as the composite pastes (logic.gridGrow); by default one block more
 const TWO_STAGE_SHOT = Q.get("shot") === "2"; // ?shot=2: the full-size shot in two stages, at half the working size, then 2 steps at full size from it (shotup)
 const HDR_ON = Q.get("hdr") !== "0"; // SDR to HDR runs whenever its files and nodes are present; ?hdr=0 in the address turns it off
 const HDR_FRAMES = "ACES2065-1"; // the colour space of the SDR-to-HDR frames (HDR_SPACE in tools/build_workflows.py)
@@ -2654,6 +2655,7 @@ function idle() { // one render step at a time, from the render queue; the edits
 
 const grow = (w, erase) => Math.max(4, Math.round(w / (erase ? COMPOSITE_GROW.erase : COMPOSITE_GROW.other))); // pixels at width w
 const feather = (w) => Math.max(6, Math.round(w / COMPOSITE_FEATHER));
+const gridAt = (w) => (GRID_REACH ? gridGrow(w, S.plate.spec.width, grow(S.plate.spec.width, true) + feather(S.plate.spec.width)) : 1); // blocks grown at width w
 
 // Every step of a render, in order. `preview` steps run at the preview size, once per size, so going back to a size plays what
 // it made at once. `final` steps run at full size right after them: the passes, then the full-size composite (the review) the viewer plays.
@@ -2763,7 +2765,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     const at = `${size[0]}x${size[1]}`, kept = (E.sizes[at] ??= {});
     if (kept.clean) return kept;
     const out = await run("clean", { ...common, seed: erases[0].seed, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, prompt: scene,
-      width: size[0], height: size[1], prefix: `${base}/${at}/clean/f`, video_prefix: `${base}/${at}/clean`, live: LIVE.every },
+      width: size[0], height: size[1], grid_grow: gridAt(size[0]), prefix: `${base}/${at}/clean/f`, video_prefix: `${base}/${at}/clean`, live: LIVE.every },
       { kind: "clean", progress, live: showLive }).done;
     return Object.assign(kept, { clean: folderOf("clean", out, "frames"), raw: viewUrl(outputFile("clean", out, "video")) });
   };
@@ -2796,7 +2798,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       if (S.stage) S.stage.part = `stage 2 of 2, upscaled to ${size.join(" × ")}`;
       log(`Render v${r.v}: Clean plate pass, full size: stage 2 of 2, 2 steps at ${size.join(" x ")} from stage 1 at ${low.join(" x ")}.`);
       const out = await run("cleanup", { ...common, seed: erases[0].seed, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, prompt: scene,
-        low: first.clean, width: size[0], height: size[1], prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean`, live: LIVE.every },
+        low: first.clean, width: size[0], height: size[1], grid_grow: gridAt(size[0]), prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean`, live: LIVE.every },
         { kind: "clean", progress: (f) => progress(0.5 + f / 2), live: showLive }).done;
       E.full = { clean: folderOf("cleanup", out, "frames"), raw: viewUrl(outputFile("cleanup", out, "video")) };
       Object.assign(store, E.full);
