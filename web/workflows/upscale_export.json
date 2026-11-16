@@ -1,0 +1,54 @@
+{
+ "1": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 121,
+   "pad_8n1": false
+  },
+  "_meta": {
+   "title": "Result: its format",
+   "slots": {
+    "path": "shot",
+    "max_frames": "max_frames"
+   }
+  }
+ },
+ "2": {
+  "class_type": "PaintAPlate_LoadPlate",
+  "inputs": {
+   "path": "",
+   "max_frames": 121,
+   "pad_8n1": false
+  },
+  "_meta": {
+   "title": "Upscaled frames",
+   "slots": {
+    "path": "frames",
+    "max_frames": "max_frames"
+   }
+  }
+ },
+ "3": {
+  "class_type": "PaintAPlate_SavePlate",
+  "inputs": {
+   "images": [
+    "2",
+    0
+   ],
+   "plate": [
+    "1",
+    2
+   ],
+   "filename_prefix": "paintaplate/plate/upscaled",
+   "keep_untouched": false
+  },
+  "_meta": {
+   "title": "Upscaled export",
+   "slots": {
+    "filename_prefix": "prefix"
+   },
+   "output": "export"
+  }
+ }
+}

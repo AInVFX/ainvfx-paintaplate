@@ -90,5 +90,24 @@ class WindowTool(unittest.TestCase):
         self.assertEqual((v["first"], v["count"], v["width"], v["height"]), (84, 37, 3840, 2160))
 
 
+class ExportJob(unittest.TestCase):
+    def test_save_plate_writes_the_windows_frames_in_the_results_format_with_no_source_pixel(self):
+        with open(os.path.join(ROOT, "web", "workflows", "upscale_export.json")) as f:
+            p = json.load(f)
+        (sid, shot), (fid, frames) = of(p, "PaintAPlate_LoadPlate")
+        (_, save), = of(p, "PaintAPlate_SavePlate")
+        self.assertEqual((shot["_meta"]["slots"]["path"], frames["_meta"]["slots"]["path"]), ("shot", "frames"))
+        self.assertEqual((save["inputs"]["images"], save["inputs"]["plate"], save["inputs"]["keep_untouched"]), ([fid, 0], [sid, 2], False))
+        self.assertEqual(save["_meta"]["output"], "export")
+        self.assertEqual(set(upscale_plate.export_values("plates/horse.mp4", 121)), slots(p))
+
+    def test_every_window_then_the_export(self):
+        self.assertEqual(upscale_plate.windows(121, every=True), [(0, 42), (42, 42), (84, 37)])
+        self.assertEqual(upscale_plate.windows(121, 84, 42), [(84, 37)])
+        self.assertEqual(upscale_plate.export_values("plates/horse.mp4", 121)["frames"], "output:upscale/upscale")
+        with open(os.path.join(ROOT, "folders.py")) as f:
+            self.assertIn(f'\nOUTPUT = "{upscale_plate.OUTPUT}"', f.read())
+
+
 if __name__ == "__main__":
     unittest.main()

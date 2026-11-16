@@ -12,7 +12,7 @@ import json
 import os
 
 OUT = os.environ.get("PAINTAPLATE_WORKFLOWS_OUT") or os.path.join(os.path.dirname(__file__), "..", "web", "workflows")
-NAMES = ("ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "shotup", "matte", "comp", "review", "export", "warm", "fluid", "hdr", "upscale")
+NAMES = ("ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "shotup", "matte", "comp", "review", "export", "warm", "fluid", "hdr", "upscale", "upscale_export")
 OCIO_CONFIG = "ocio://studio-config-latest"  # the page fills the config in use: $OCIO when it is set, as in RV
 
 KLEIN = "flux3-image-klein-int8-convrot.safetensors"
@@ -888,7 +888,20 @@ def upscale():
     g.save("upscale")
 
 
+def upscale_export():
+    """Upscale to 4K's export, after the last window: the windows' frames (Slot frames) written by Save Plate at their own
+    size, in the format of the export at the plate's size (Slot shot), which Load Plate reads for its spec: the same file
+    type, codec, bit depth, frame numbers, colour tags, timecode and audio. The frames are in the plate's colour space
+    already, so nothing converts them."""
+    g = Graph()
+    shot = g("PaintAPlate_LoadPlate", _title="Result: its format", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
+    frames = g("PaintAPlate_LoadPlate", _title="Upscaled frames", path=Slot("frames", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
+    g("PaintAPlate_SavePlate", _title="Upscaled export", _output="export", images=frames[0], plate=shot[2],
+      filename_prefix=Slot("prefix", "paintaplate/plate/upscaled"), keep_untouched=False)
+    g.save("upscale_export")
+
+
 if __name__ == "__main__":
-    for build in (ingest, prompt, edit, snap, clean, cleanup, shot, shotup, matte, comp, review, export, warm, fluid, hdr, upscale):
+    for build in (ingest, prompt, edit, snap, clean, cleanup, shot, shotup, matte, comp, review, export, warm, fluid, hdr, upscale, upscale_export):
         build()
     print("wrote", sorted(os.listdir(OUT)))
