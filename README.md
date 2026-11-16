@@ -109,7 +109,7 @@ The plates are synthetic shots from the dataset [AInVFX/ainvfx-paintaplate](http
 
 ## A first edit
 
-1. Press **Open plate**, then double-click a plate, for example `plates/horse.mp4`.
+1. Press **Open plate**, then double-click a plate, for example `plates/horse.mp4`. When ComfyUI runs on your own machine, you can also type the full path of a movie, a frame of a sequence or a folder of frames.
 2. Type a few words at the top, for example "a campfire".
 3. Pick **Paint**, **Clean** or **Light** (keys P, C and L), and paint on the first frame.
 4. Press **Generate** (or Enter). The edit appears on the first frame, then the shot renders by itself: a quick preview first, then the full size.
@@ -120,12 +120,12 @@ Each edit stays in History: click one to change it, and add as many as you need.
 Good to know:
 
 - Clean a thin object by its full name: "floodlight pole" finds more than "floodlight".
-- A shadow outside the removed object stays: clean it with a second stroke, **Whole object** off.
+- Clean with **Whole object** on also takes the object's cast shadow when Klein's prompt writer points at one. If a shadow stays, clean it with a second stroke, **Whole object** off.
 - To replace a head, paint the new head over the old one. A head removed with Clean comes back as a head.
 - Paint additions on open ground. An addition painted across a foreground object breaks up during the shot.
 - Judge an effect on the full-size shot, not on the fast preview.
 
-**Where the rest is.** Press `?` for the keys. The right-click menu holds every action with its key, and the viewer's colour tools under **OCIO**. [`ARCHITECTURE.md`](ARCHITECTURE.md) explains how the pack works and how to change it. [`TESTING.md`](TESTING.md) describes every test.
+**Where the rest is.** Press `?` for the keys; the backquote key shows the plate alone, full screen. The right-click menu holds every action with its key, and the viewer's colour tools under **OCIO**. [`ARCHITECTURE.md`](ARCHITECTURE.md) explains how the pack works and how to change it. [`TESTING.md`](TESTING.md) describes every test.
 
 ## When something goes wrong
 
