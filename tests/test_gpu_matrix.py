@@ -347,18 +347,21 @@ class Tools(unittest.TestCase):
 
 
 class ReportLines(unittest.TestCase):
-    """What the report says (wave 5, R9): a fluid shot's steps, the RAM a first job can read, the page's figure for an erase."""
+    """What the report says: a fluid shot's steps, the RAM a first job can read, the page's figure for an erase."""
 
-    FLUID = ("11:38:49 PM Fluid v1: 2 keyframe(s) at 1, 121, 1280 x 704, 121 frames at 24 fps, seed 104\n"
-             "11:38:49 PM Fluid shot v1: one LTX 2.5 pass with ainvfx-fluid\n"
-             "11:40:38 PM fluid fd2d3d7a: done in 108.9 s (29 nodes, 4 previews)\n"
-             "11:40:38 PM Fluid shot v1: SDR to HDR, one LTX 2.5 pass with Lightricks' IC-LoRA\n"
-             "11:43:33 PM hdr 647d4dd4: done in 175.3 s (29 nodes, 3 from ComfyUI's cache, 4 previews)\n"
-             "11:43:33 PM Fluid v1: SDR to HDR took 175.3 s: half-float EXR frames in output:paintaplate/x/fluid_v1/hdr\n"
-             "11:43:33 PM Fluid v1: done in 284.3 s: 1 file(s) in /data/ComfyUI/output/paintaplate/x/fluid_v1/plate\n")
+    FLUID = ("11:38:49 PM Fluid shot v1: started.\n"
+             "  2 keyframes, at frames 1, 121.\n"
+             "  1280 x 704, 121 frames at 24 fps.\n"
+             "  Seed 104, prompt \"a wild fire, flames rising\".\n"
+             "11:40:38 PM fluid fd2d3d7a: done in 108.9 s (29 nodes, 4 previews).\n"
+             "11:43:33 PM hdr 647d4dd4: done in 175.3 s (29 nodes, 3 from ComfyUI's cache, 4 previews).\n"
+             "11:43:33 PM Fluid shot v1: SDR to HDR: done in 175.3 s.\n"
+             "  Half-float EXR frames in output:paintaplate/x/fluid_v1/hdr.\n"
+             "11:43:33 PM Fluid shot v1: done in 284.3 s.\n"
+             "  Save Plate: 1 file written to /data/ComfyUI/output/paintaplate/x/fluid_v1/plate.\n")
 
     def test_a_fluid_shot_has_its_steps(self):
-        """fluid_720 on the laptop, 12 Nov: its table of steps was empty, as only « Render vN: … took » lines were read."""
+        """The page's lines for a fluid shot give its steps: the LTX pass (the fluid job), SDR to HDR and the whole shot."""
         self.assertEqual(gpu_matrix.read_log(self.FLUID)["steps"], [("fluid v1 LTX pass", 108.9), ("fluid v1 SDR to HDR", 175.3), ("fluid v1 in all", 284.3)])
 
     def test_render_steps_keep_their_names_and_order(self):

@@ -294,7 +294,8 @@ def matte_areas(comfy, since):
 
 def log_steps(text):
     """The steps the page times, in its log's order: each render step (« Render vN: … took … s »); for a fluid shot its LTX
-    pass (the fluid job after « Fluid vN: »), each step timed (« Fluid vN: SDR to HDR took … s ») and the whole shot."""
+    pass (the fluid job after « Fluid shot vN: started »), each step timed (« Fluid shot vN: SDR to HDR: done in … s ») and the
+    whole shot (« Fluid shot vN: done in … s »)."""
     steps, fluid = [], "?"
     for line in text.splitlines():
         if m := STEP.search(line):
