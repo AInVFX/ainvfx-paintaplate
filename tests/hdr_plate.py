@@ -255,11 +255,34 @@ def run_prompt(url: str, prompt: dict, pid=None, timeout: float = 7200.0) -> dic
         job, t0, t1 = asyncio.run(follow())
     finally:
         stop.set()
-    spent = {}
-    for (t, kind, node), nxt in zip(events, events[1:] + [(t1, None, None)]):
-        if kind == "executing" and node is not None:
-            spent[str(node)] = spent.get(str(node), 0.0) + nxt[0] - t
-    return {"job": job, "seconds": t1 - t0, "spent": spent, "peaks": peaks, "history": history(job) or {}}
+    return {"job": job, "seconds": t1 - t0, "spent": node_seconds(events, t0, t1), "peaks": peaks, "history": history(job) or {}}
+
+
+BEFORE, AFTER = "before the first node", "after the last node"
+
+
+def node_seconds(events: list, t0: float, t1: float) -> dict:
+    """The seconds of each node of a job, from its « executing » message to the next « executing » one: the messages
+    between them (a sampler's progress, an « executed ») belong to the node that runs. `events` holds (time, type, node)
+    for the job's messages, `t0` is when the job was posted and `t1` when it ended. The seconds before the first node
+    and after the last (its « executing » with no node) come under BEFORE and AFTER, so the values add up to t1 - t0."""
+    starts = [(t, node) for t, kind, node in events if kind == "executing"]
+    spent = {BEFORE: (starts[0][0] if starts else t1) - t0}
+    for (t, node), (nxt, _) in zip(starts, starts[1:] + [(t1, None)]):
+        key = AFTER if node is None else str(node)
+        spent[key] = spent.get(key, 0.0) + nxt - t
+    return spent
+
+
+def node_rows(spent: dict, prompt: dict, top: int = 8) -> list:
+    """(label, seconds) for a job's table: its `top` slowest nodes by class, the others in one row, then the seconds
+    before the first node and after the last. The rows add up to the job's seconds."""
+    nodes = sorted(((k, s) for k, s in spent.items() if k not in (BEFORE, AFTER)), key=lambda kv: -kv[1])
+    rows = [(prompt.get(k, {}).get("class_type", k), s) for k, s in nodes[:top]]
+    if nodes[top:]:
+        rest = nodes[top:]
+        rows.append((f"{len(rest)} other {'node' if len(rest) == 1 else 'nodes'}", sum(s for _, s in rest)))
+    return rows + [(k.capitalize(), spent[k]) for k in (BEFORE, AFTER) if k in spent]
 
 
 def finish(url: str, comfy: str, plate: str, out: str, label: str = "finish", width: int = 0, height: int = 0,
@@ -282,7 +305,7 @@ def finish(url: str, comfy: str, plate: str, out: str, label: str = "finish", wi
     size = plateio.read_float(exrs[0]).shape[:2] if exrs else None
     status = (r["history"].get("status") or {}).get("status_str", "no status")
     gb = lambda v: "not read" if v is None else f"{v:.1f} GB"  # noqa: E731
-    by = sorted(r["spent"].items(), key=lambda kv: -kv[1])
+    by = sorted(((k, s) for k, s in r["spent"].items() if k not in (BEFORE, AFTER)), key=lambda kv: -kv[1])
     lines = [f"# SDR to HDR on a plate with no edit: `{plate}`", "", "| | |", "| --- | --- |",
              f"| ComfyUI | {url}, job {r['job'][:8]}: {status} |",
              f"| Plate | {w} x {h}, {count} frames, working size {ww} x {wh} |",
@@ -291,7 +314,7 @@ def finish(url: str, comfy: str, plate: str, out: str, label: str = "finish", wi
              f"| Peak RAM | {gb(r['peaks']['ram'])}, ComfyUI's process |",
              f"| HDR frames | {len(exrs)} EXR frames" + (f" at {size[1]} x {size[0]}" if size else "") + " |", "",
              "GB means 2^30 bytes.", "", "| Node | Seconds |", "| --- | --- |"]
-    lines += [f"| {prompt.get(nid, {}).get('class_type', nid)} | {s:.1f} |" for nid, s in by[:8]]
+    lines += [f"| {label} | {s:.1f} |" for label, s in node_rows(r["spent"], prompt)]
     text = "\n".join(lines) + "\n"
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, f"{label}.md"), "w") as f:

@@ -31,23 +31,41 @@ def structure(img: np.ndarray, sigma: float = 8.0) -> np.ndarray:
     return log - ndimage.gaussian_filter(log, sigma)
 
 
-def phase_shift(ref: np.ndarray, img: np.ndarray, max_shift: float) -> tuple[float, float]:
-    """Sub-pixel (dy, dx) that moves `img` onto `ref` (2D float arrays)."""
+def phase_shift(ref: np.ndarray, img: np.ndarray, max_shift: float, fine: bool = False) -> tuple[float, float]:
+    """Sub-pixel (dy, dx) that moves `img` onto `ref` (2D float arrays): the peak of their phase correlation, found to the
+    whole pixel on the inverse FFT, then refined. With `fine`, the inverse DFT is evaluated on a grid around the peak,
+    twice (steps of 1/10 px over 2 px, then of 1/100 px over 0.2 px), and a shift reads to 1/100 px. Without it, a
+    parabola through the peak's three samples refines it, and a sub-pixel shift reads short, since the peak is sharp:
+    0.2 px reads 0.13 on a smooth texture."""
     h, w = ref.shape
     win = np.outer(np.hanning(h), np.hanning(w)).astype(np.float32)
-    fa, fb = np.fft.rfft2(ref * win), np.fft.rfft2(img * win)
-    cross = fa * np.conj(fb)
-    corr = np.fft.irfft2(cross / (np.abs(cross) + 1e-9), s=(h, w))
+    if not fine:
+        cross = np.fft.rfft2(ref * win) * np.conj(np.fft.rfft2(img * win))
+        corr = np.fft.irfft2(cross / (np.abs(cross) + 1e-9), s=(h, w))
+    else:
+        cross = np.fft.fft2(ref * win) * np.conj(np.fft.fft2(img * win))
+        size = np.abs(cross)
+        if not size.max() > 0:
+            return 0.0, 0.0  # nothing to correlate
+        cross /= size + 1e-9 * size.max()
+        corr = np.fft.ifft2(cross).real
     py, px = np.unravel_index(np.argmax(corr), corr.shape)
+    if fine:
+        dy, dx = float(py - h if py > h / 2 else py), float(px - w if px > w / 2 else px)
+        fy, fx = np.fft.fftfreq(h), np.fft.fftfreq(w)
+        for step in (0.1, 0.01):
+            ys, xs = dy + np.arange(-10, 11) * step, dx + np.arange(-10, 11) * step
+            grid = (np.exp(2j * np.pi * np.outer(ys, fy)) @ cross @ np.exp(2j * np.pi * np.outer(fx, xs))).real
+            iy, ix = np.unravel_index(np.argmax(grid), grid.shape)
+            dy, dx = float(ys[iy]), float(xs[ix])
+    else:
+        def refine(c_m, c_0, c_p):  # parabola through three samples around the peak
+            d = c_m - 2 * c_0 + c_p
+            return 0.0 if abs(d) < 1e-12 else 0.5 * (c_m - c_p) / d
 
-    def refine(c_m, c_0, c_p):  # parabola through three samples around the peak
-        d = c_m - 2 * c_0 + c_p
-        return 0.0 if abs(d) < 1e-12 else 0.5 * (c_m - c_p) / d
-
-    dy = py + refine(corr[py - 1, px], corr[py, px], corr[(py + 1) % h, px])
-    dx = px + refine(corr[py, px - 1], corr[py, px], corr[py, (px + 1) % w])
-    dy = dy - h if dy > h / 2 else dy
-    dx = dx - w if dx > w / 2 else dx
+        dy = py + refine(corr[py - 1, px], corr[py, px], corr[(py + 1) % h, px])
+        dx = px + refine(corr[py, px - 1], corr[py, px], corr[py, (px + 1) % w])
+        dy, dx = (dy - h if dy > h / 2 else dy), (dx - w if dx > w / 2 else dx)
     if abs(dy) > max_shift or abs(dx) > max_shift:
         return 0.0, 0.0  # not a small misalignment: leave the frame alone
     return float(dy), float(dx)
@@ -386,7 +404,7 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
         dy = dx = 0.0
         if align:
             keep = 1.0 - resize_to(small[i], ha, wa)
-            dy, dx = phase_shift(structure(shrink(p, al)) * keep, structure(low(g, al, ha, wa)) * keep, max_shift / al)
+            dy, dx = phase_shift(structure(shrink(p, al)) * keep, structure(low(g, al, ha, wa)) * keep, max_shift / al, fine=True)
             dy, dx = dy * al, dx * al
         field = None
         if match_color and small[i].max() > 0.02:
@@ -513,7 +531,7 @@ def frame_shift(source: np.ndarray, relit: np.ndarray, plate_width: int, shot_sp
     their structure, up to 8 plate pixels."""
     if shot_space == "sRGB":
         source, relit = srgb_to_linear(source[..., :3]), srgb_to_linear(relit[..., :3])
-    return phase_shift(structure(source), structure(relit), 8.0 * source.shape[1] / plate_width)
+    return phase_shift(structure(source), structure(relit), 8.0 * source.shape[1] / plate_width, fine=True)
 
 
 def shot_shift(shifts) -> tuple:

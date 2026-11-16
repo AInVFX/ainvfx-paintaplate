@@ -441,7 +441,7 @@ PLANAR_FLOATS = {"gbrpf16le": "<f2", "gbrapf16le": "<f2", "gbrpf32le": "<f4", "g
 
 def read_float(path: str) -> np.ndarray:
     """One still frame in its own values, as float32 RGB (H, W, 3): an EXR's linear light above 1.0 and below 0 as stored,
-    other formats scaled to 0 to 1. The viewer's colour tools read these, as OpenRV's cache keeps an EXR's half floats."""
+    other formats scaled to 0 to 1 at their own depth: an 8-bit level k reads k / 255, a deeper one k / 65535. The viewer's colour tools read these, as OpenRV's cache keeps an EXR's half floats."""
     with av.open(path) as c:
         frame = next(c.decode(video=0))
         dtype = PLANAR_FLOATS.get(frame.format.name)
@@ -452,6 +452,8 @@ def read_float(path: str) -> np.ndarray:
                 planes.append(a[: frame.height * (p.line_size // a.itemsize)].reshape(frame.height, -1)[:, : frame.width])
             g, b, r = planes
             return np.stack([r, g, b], -1).astype(np.float32)
+        if max(c.bits for c in frame.format.components) <= 8:  # at its own depth: swscale's 16-bit output of an 8-bit
+            return frame.to_ndarray(format="rgb24").astype(np.float32) / 255.0  # level k is k * 256, and white reads 0.9962
         return frame.to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
 
 
@@ -618,9 +620,9 @@ MATTE_STEP = 1.0 / 255  # the export's matte is 8-bit PNG, scaled by 255 and tru
 
 
 def untouched(changed: np.ndarray) -> np.ndarray:
-    """The pixels the export copies from the source, exactly: those its delivered matte shows as 0. Until 3 Nov the
-    threshold was 1/1024, so the matte's faint edge (weights between 1/1024 and 1/255) was blended while the 8-bit matte
-    showed nothing: on a 4K EXR plate 1.2% of the pixels outside the matte differed from the source, by up to 0.012."""
+    """The pixels the export copies from the source, exactly: those its delivered matte shows as 0. The matte is 8-bit
+    PNG, 255 times the weight truncated (core_uint8), so a weight under 1/255 shows 0. Read back with read_float, a
+    level k reads k / 255, so this rule reads the delivered matte too."""
     return np.asarray(changed) < MATTE_STEP
 
 

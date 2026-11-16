@@ -297,8 +297,12 @@ def browse(rel: str) -> dict:
     full = folders.plate_path(rel, folder=True)
     if not os.path.isdir(full):
         raise FileNotFoundError(f"Folder not found: {rel}.")
-    page = folders.page_path(full)
     listed = plateio.scan_folder(full)
+    if folders.absolute(rel):  # a folder of the machine: its subfolders and plates, each by its absolute path
+        items = [dict(i, path=os.path.join(full, i["name"])) for i in listed["items"] if i["kind"] != "scene"]
+        up = os.path.dirname(full)
+        return {"path": full, "parent": None if up == full else up, **listed, "items": items, "found": []}
+    page = folders.page_path(full)
     for item in listed["items"]:
         item["path"] = f"{page}/{item['name']}" if page not in ("", folders.OUTPUT) else page + item["name"]
     parent = None if page in ("", folders.OUTPUT) else (page.rsplit("/", 1)[0] if "/" in page else
@@ -328,7 +332,7 @@ def plates_below(full: str, page: str) -> list:
     return sorted(found, key=lambda i: -i["mtime"])[:FOUND_MAX]
 
 
-def first_frame(first: str, still: bool) -> np.ndarray:
+def first_image(first: str, still: bool) -> np.ndarray:
     """The first frame of a plate as float RGB: `first` is an image sequence's first file (`still`), or a video or an
     animated image. Float formats keep their values (plateio.read_float); 8-bit ones come back from 0 to 1."""
     if still:
@@ -351,7 +355,7 @@ def thumbnail(rel: str, width: int = THUMB_WIDTH) -> str:
     target = os.path.join(folder, f"{key}.jpg")
     if os.path.exists(target):
         return target
-    rgb = first_frame(first, still)
+    rgb = first_image(first, still)
     h, w = rgb.shape[:2]
     k = min(1.0, width / max(h, w))
     small = mathops.resize_to(rgb, max(1, round(h * k)), max(1, round(w * k))) if k < 1.0 else rgb
@@ -372,6 +376,8 @@ async def version_route(request: web.Request) -> web.Response:
 async def browse_route(request: web.Request) -> web.Response:
     try:
         return web.json_response(await asyncio.to_thread(browse, request.query.get("path", "")))
+    except PermissionError as exc:  # the machine refuses to read it
+        return web.json_response({"error": str(exc)}, status=403)
     except (FileNotFoundError, ValueError, NotADirectoryError) as exc:
         return web.json_response({"error": str(exc)}, status=404)
 
@@ -527,6 +533,11 @@ def plate_info(rel: str, config: str = "", cs: str = "") -> dict:
     """What the Open dialog says about a plate, its file colour space guessed in `config`, for the viewer's OCIO, and the
     headroom of `cs` (else of that guess)."""
     full = folders.plate_path(rel)
+    if os.path.isdir(full) and folders.absolute(rel):
+        try:
+            plateio.find_sequence(full)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"No plate in {rel}.") from None
     spec = plateio.probe_plate(full)
     first = spec["files"][0] if spec.get("files") else full
     keep = ("kind", "ext", "codec", "pix_fmt", "width", "height", "frames", "fps", "first_frame", "missing")
@@ -538,6 +549,8 @@ async def stat(request: web.Request) -> web.Response:
     try:
         return web.json_response(await asyncio.to_thread(plate_info, request.query.get("path", ""), request.query.get("config", ""),
                                                          request.query.get("cs", "")))
+    except PermissionError as exc:  # the machine refuses to read it
+        return web.json_response({"error": str(exc)}, status=403)
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         return web.json_response({"error": str(exc)}, status=404)
 
