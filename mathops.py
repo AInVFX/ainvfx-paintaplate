@@ -970,8 +970,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                 strays += bool((s & ~near).any())
                 here = grow(open0, reach / 2) if hide is not None else None  # the object's place of frame 0, with a margin of half a zone
                 if hide is not None and 2 * int((core & hide).sum()) > int(core.sum()):  # most of the tracker's mask lies on covered places
-                    if real and 4 * int((core & prev).sum()) >= 3 * max(int(core.sum()), int(prev.sum())) and 4 * int(core.sum()) >= int(line.sum()):
-                        still, hide, moved = False, None, t  # an erased object is the plate's own: the matte of the frame before, whole, on places that changed, is the object moving by itself
+                    if real and 4 * int((core & prev).sum()) >= 3 * max(int(core.sum()), int(prev.sum())) and 4 * int(core.sum()) >= last:
+                        still, hide, moved = False, None, t  # an erased object is the plate's own: the matte of the frame before, whole, on places that changed, and a quarter of the object's last area or more, is the object moving by itself (its region can be a stroke's zone many times the object)
                     else:
                         core, blocked = np.zeros((h, w), bool), True  # it is what stands in front
                 elif hide is not None and not real:
