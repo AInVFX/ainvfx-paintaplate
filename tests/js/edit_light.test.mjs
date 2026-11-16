@@ -58,3 +58,18 @@ test("the sources do not depend on the strokes' order: two that touch only once 
   for (const order of [[a, b, c], [b, c, a], [c, a, b]])
     assert.equal(lightIntent({ strokes: order, aspect: 16 / 9 }).match(/"id": "light_\d"/g).length, 1);
 });
+
+test("a dab is a source whatever the brush's size: its path decides, not its paint", () => {
+  // a 174 px brush on a 1920 x 1088 frame, its path from x 405 to 467 and y 211 to 319: its paint covers about 12% by 26%
+  // of the frame, its path 3% by 10%
+  const W = 1920, H = 1088, at = ([x, y]) => [x / W, y / H];
+  const sun = { color: "#fbc02d", size: 174 / W, points: [[425, 254], [405, 211], [467, 265], [405, 319], [467, 300]].map(at) };
+  const said = lightIntent({ strokes: [sun], words: "Sunset, with sun just above the skyscraper on the left of image", aspect: W / H });
+  assert.match(said, /A strong(, broad|, focused)? yellow light comes from the top left of the frame\./);
+  assert.match(said, /The yellow light's source <light_1> is visible in the frame: a small, very bright yellow light\./);
+  assert.ok(said.includes('"tgt_bbox": [114, 166, 373, 289]'), said); // the painted area, where the dab is
+  const wash = [[100, 250], [1800, 260]], edge = [[1900, 300], [1910, 380]]; // dragged across the frame; at its edge
+  for (const pts of [wash, edge]) assert.ok(!lightIntent({ strokes: [{ ...sun, points: pts.map(at) }], aspect: W / H }).includes("<light_"), pts);
+  for (const size of [8, 174, 400]) // a click of any brush size
+    assert.match(lightIntent({ strokes: [{ ...sun, size: size / W, points: [at([960, 300])] }], aspect: W / H }), /<light_1>/, size);
+});

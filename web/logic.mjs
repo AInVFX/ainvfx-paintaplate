@@ -1059,27 +1059,29 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
 // fractions of the frame and the size as a fraction of its width; `aspect`: the frame's width over its height. A light that
 // covers 8% of the frame or more is broad; under 1%, focused. A small light inside the frame shows its source where it is
 // drawn: its strokes of one colour that touch make one source, placed by a row of Klein's layout table (tgt_bbox, as a
-// paint's request places its object). A source spans under a fifth of the frame each way and stays 2% inside its edges; a
-// wash, or a light at the frame's edge, comes from outside the frame and shows no source.
+// paint's request places its object). A source is judged by its path, its points without the brush's width: the path
+// spans under a fifth of the frame each way and stays 2% inside its edges, so a dab of any brush size is a source. A
+// stroke dragged across the frame is a wash, and a light at the frame's edge comes from outside: neither shows a source.
 export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
   const place = (b) => { // b: [x0, y0, x1, y1] in fractions of the frame
     const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
     const v = cy < 1 / 3 ? "top" : cy > 2 / 3 ? "bottom" : "", h = cx < 1 / 3 ? "left" : cx > 2 / 3 ? "right" : "";
     return v && h ? `${v} ${h}` : v || h || "centre";
   };
+  const union = (a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])];
   const groups = new Map(), lamps = [];
   for (const s of strokes) {
     const r = s.size / 2, rh = r * aspect, pts = s.points;
     let length = 0;
     for (let i = 1; i < pts.length; i++) length += Math.hypot((pts[i][0] - pts[i - 1][0]) * aspect, pts[i][1] - pts[i - 1][1]);
-    const box = [Math.min(...pts.map((p) => p[0])) - r, Math.min(...pts.map((p) => p[1])) - rh,
-      Math.max(...pts.map((p) => p[0])) + r, Math.max(...pts.map((p) => p[1])) + rh].map((v) => Math.min(1, Math.max(0, v)));
+    const path = [Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1])), Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))];
+    const box = [path[0] - r, path[1] - rh, path[2] + r, path[3] + rh].map((v) => Math.min(1, Math.max(0, v))); // its paint
     const key = dark(s.color) ? `shade ${place(box)}` : colorName(s.color);
     const g = groups.get(key) ?? { shade: dark(s.color), color: s.color, cover: 0, box };
     g.cover += Math.min(1, ((length + 2 * rh) * 2 * rh) / aspect); // a round brush along its path, as a share of the frame
-    g.box = [Math.min(g.box[0], box[0]), Math.min(g.box[1], box[1]), Math.max(g.box[2], box[2]), Math.max(g.box[3], box[3])];
+    g.box = union(g.box, box);
     groups.set(key, g);
-    if (!g.shade) lamps.push({ name: key, box });
+    if (!g.shade) lamps.push({ name: key, box, path });
   }
   const touch = (a, b) => a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3];
   for (let joined = true; joined;) { // until no two touch: the sources do not depend on the strokes' order
@@ -1087,12 +1089,13 @@ export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
     for (let i = 0; i < lamps.length && !joined; i++) for (let j = i + 1; j < lamps.length && !joined; j++) {
       const a = lamps[i], b = lamps[j];
       if (a.name !== b.name || !touch(a.box, b.box)) continue;
-      a.box = [Math.min(a.box[0], b.box[0]), Math.min(a.box[1], b.box[1]), Math.max(a.box[2], b.box[2]), Math.max(a.box[3], b.box[3])];
+      a.box = union(a.box, b.box);
+      a.path = union(a.path, b.path);
       lamps.splice(j, 1);
       joined = true;
     }
   }
-  const shown = lamps.filter(({ box: b }) => b[2] - b[0] < 0.2 && b[3] - b[1] < 0.2 && Math.min(b[0], b[1]) > 0.02 && Math.max(b[2], b[3]) < 0.98);
+  const shown = lamps.filter(({ path: p }) => p[2] - p[0] < 0.2 && p[3] - p[1] < 0.2 && Math.min(p[0], p[1]) > 0.02 && Math.max(p[2], p[3]) < 0.98);
   const said = ["Relight the whole scene with new light, as if it were photographed under that light."];
   for (const [name, g] of groups) {
     if (g.shade) { said.push(`The ${place(g.box)} of the frame falls into deep shadow.`); continue; }
