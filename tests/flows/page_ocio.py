@@ -1,7 +1,7 @@
 """The page workstream's check of the OCIO menu (tests/flows/README.md). Two headings say which part affects generation
 and which is for display only, and each line shows its value. The plate's line ends with « from file » or « override ».
 With an edit that has a result, an OCIO change that regenerates asks first, with one question: a new config, then a new
-colour space. Cancel changes nothing and keeps the menu's tick; Continue goes on. A new view asks nothing. In the plate's tree the
+colour space. « No, keep it » changes nothing and keeps the menu's tick; « Yes, continue » goes on. A new view asks nothing. In the plate's tree the
 config's family « Display » reads « Display-referred »: the view's Display line keeps the word."""
 import re
 
@@ -70,7 +70,7 @@ def run(browser, port, U):
     asked, buttons = page.text_content("#ask-text"), page.eval_on_selector_all("#ask menu button", "els => els.map((e) => e.textContent)")
     page.click("#ask-no")
     page.wait_for_timeout(1000)
-    U.check(asked == "Changing the OCIO config affects generation: 1 edit will be regenerated. Continue?" and buttons == ["Cancel", "Continue"] and ticked(config) == before and not changed() and page.is_hidden("#ask"),
+    U.check(asked == "Changing the OCIO config affects generation: 1 edit will be regenerated. Continue?" and buttons == ["No, keep it", "Yes, continue"] and ticked(config) == before and not changed() and page.is_hidden("#ask"),
             f"a new config ({other}) asks first, and Cancel keeps the config and its tick: {asked!r} {buttons}, {before} then {ticked(config)}, {changed()}")
 
     pick = (f"Colour space: {FILE}, from file", "Utility", LINEAR)
@@ -85,7 +85,7 @@ def run(browser, port, U):
     page.wait_for_selector("#ask[open]", timeout=5000)
     page.click("#ask-yes")
     page.wait_for_function(f"document.querySelector('#spec').textContent.includes('{LINEAR}') && document.querySelector('#opening').hidden", timeout=60000)
-    U.check(any(t.startswith(f"Plate colour space: {LINEAR}, was {FILE}") for t in changed()), f"Continue opens the plate again in the new colour space: {changed()}")
+    U.check(any(t.startswith(f"Plate colour space: {LINEAR}, was {FILE}") for t in changed()), f"« Yes, continue » opens the plate again in the new colour space: {changed()}")
     after = rows()
     U.check(after[1] == f"Colour space: {LINEAR}, override", f"the plate's line now ends with override: {after[1]!r}")
     U.check(not errors, f"no page errors: {errors}")

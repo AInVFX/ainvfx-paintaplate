@@ -516,7 +516,7 @@ function planCaches() { // each cache's share and frame size, when the budget, t
 }
 function planSoon() { if (!planned.timer) planned.timer = setTimeout(() => { planned.timer = 0; planCaches(); }, 300); }
 function customCache() { // View > Cache memory > Custom…: a size in MB or GB; the next session keeps it
-  ask("Memory for the frames the viewer keeps, in MB or GB.", "Set", { field: { value: S.cache ? memoryText(S.cache) : "", placeholder: "2 GB" } }).then((typed) => {
+  ask("Memory for the frames the viewer keeps, in MB or GB.", "Set this size", { no: "Keep the current size", field: { value: S.cache ? memoryText(S.cache) : "", placeholder: "2 GB" } }).then((typed) => {
     if (typed === false) return;
     const bytes = memoryBytes(typed);
     if (bytes) setCache(bytes);
@@ -801,7 +801,7 @@ function finishRow(opt) { // one row of the Finish menu: its switch and name, it
   const li = document.createElement("li");
   li.className = "finish-row";
   li.innerHTML = `<label><input type="checkbox" id="finish-${opt.id}"><span class="name"></span></label><small class="line"></small><small id="finish-${opt.id}-why" class="why" hidden></small>`
-    + (opt.ask ? `<div id="finish-${opt.id}-ask" class="finish-ask" hidden><p></p><button id="finish-${opt.id}-yes" type="button">Turn on</button> <button id="finish-${opt.id}-no" type="button" class="quiet">Cancel</button></div>` : "");
+    + (opt.ask ? `<div id="finish-${opt.id}-ask" class="finish-ask" hidden><p></p><button id="finish-${opt.id}-yes" type="button">Yes, turn it on</button> <button id="finish-${opt.id}-no" type="button" class="quiet">No, keep it off</button></div>` : "");
   li.querySelector(".name").textContent = opt.name;
   li.querySelector(".line").textContent = opt.line;
   li.querySelector("input").addEventListener("change", (e) => askFinish(opt, e.target.checked));
@@ -3764,11 +3764,12 @@ function regenerated() { return S.edits.filter((e) => e.on && e.state === "done"
 // erase can ask while the OCIO question is open, so a question that comes then waits for that answer, and is dropped (false)
 // when `still()` no longer holds by its turn.
 let asking = Promise.resolve();
-function ask(text, yes, { enter = false, still = () => true, field = null } = {}) { // with a field ({ value, placeholder }), the answer is the text typed, or false
+function ask(text, yes, { enter = false, still = () => true, field = null, no = "Cancel" } = {}) { // yes, no: what each button does. With a field ({ value, placeholder }), the answer is the text typed, or false
   const turn = asking.then(() => still() && new Promise((answer) => {
     const d = $("#ask"), ok = $("#ask-yes"), input = $("#ask-field");
     $("#ask-text").textContent = text;
     ok.textContent = yes;
+    $("#ask-no").textContent = no;
     input.hidden = !field;
     if (field) Object.assign(input, { value: field.value ?? "", placeholder: field.placeholder ?? "" });
     d.returnValue = "";
@@ -3780,8 +3781,8 @@ function ask(text, yes, { enter = false, still = () => true, field = null } = {}
   return turn;
 }
 $("#ask-field").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); $("#ask").close("yes"); } }; // Enter answers, as the button does
-function askRemake(what, made, change) { // an OCIO change that regenerates asks first: Continue goes on, Cancel or Esc changes nothing
-  ask(remakeQuestion(what, made), "Continue").then((yes) => yes && change());
+function askRemake(what, made, change) { // an OCIO change that regenerates asks first: « Yes, continue » goes on, « No, keep it » or Esc changes nothing
+  ask(remakeQuestion(what, made), "Yes, continue", { no: "No, keep it" }).then((yes) => yes && change());
 }
 
 async function setConfig(name, asked = false) { // RV's Change Config: the viewer and the workflows use another OCIO config

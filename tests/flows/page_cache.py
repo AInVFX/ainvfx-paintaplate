@@ -24,6 +24,8 @@ def run(browser, port, U):
     page.locator("#ctx [role=menuitemcheckbox]", has_text="Custom…").click()
     page.wait_for_function("document.querySelector('#ask').open", timeout=5000)
     U.check(page.input_value("#ask-field") == "1.5 GB", "the field opens on the size in use")
+    U.check([page.text_content("#ask-no"), page.text_content("#ask-yes")] == ["Keep the current size", "Set this size"],
+            f"Custom… names what each button does: {[page.text_content('#ask-no'), page.text_content('#ask-yes')]}")
     page.fill("#ask-field", "5 TB"); page.click("#ask-yes")
     U.check(U.poll(page, lambda: "from 128 MB to 32 GB" in page.text_content("#status"), 5) and page.evaluate(KEPT) == "1500000000",
             f"a size outside 128 MB to 32 GB changes nothing, and the status line says what to type: {page.text_content('#status')!r}")
