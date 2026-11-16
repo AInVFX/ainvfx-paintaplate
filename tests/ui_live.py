@@ -203,12 +203,12 @@ def stage(note):
     return note.split(" about ")[0].split(" almost ")[0]
 
 
-def address(url, memory="", seed=None):
+def address(url, memory="", seed=None, options=()):
     """The page's address for a run on real models. ?index=0: the page leaves its job index alone, so every job runs, and
     each time and each peak of memory is a measured one, on a machine that ran the same strokes before too. ?seed=: the
     first new edit and every new fluid shot start from this seed, each next edit from the next number, so the next run starts
     from the same."""
-    options = ["blank=0", "index=0"] + ([f"memory={memory}"] if memory else []) + ([f"seed={seed}"] if seed is not None else [])
+    options = ["blank=0", "index=0"] + ([f"memory={memory}"] if memory else []) + ([f"seed={seed}"] if seed is not None else []) + list(options)
     return f"{url}/extensions/ainvfx-paintaplate/paintaplate.html?" + "&".join(options)
 
 
@@ -236,6 +236,7 @@ def main():
     ap.add_argument("--out", default=SHOTS, help="folder for screenshots and timings")
     ap.add_argument("--think", type=float, default=0, help="seconds between opening the plate and the first stroke")
     ap.add_argument("--graph", action="store_true", help="after the export, also save the scene's ComfyUI graph")
+    ap.add_argument("--option", action="append", default=[], help="with --url: one more option of the page's address, such as shot=2 (the full-size shot in two stages)")
     ap.add_argument("--memory", default="", help="with --url: the page's memory profile, small, medium or large (by default the card decides)")
     ap.add_argument("--hdr", action="store_true", help="with --url: turn SDR to HDR on in Deliver before painting, so the render makes "
                     "its full-size shot again in scene-linear values and HDR Match fits it to the plate")
@@ -374,7 +375,7 @@ def remote(a):
         page.on("pageerror", lambda e: errors.append(str(e)))
         status = lambda: page.inner_text("#status")  # noqa: E731
         try:
-            page.goto(address(a.url, a.memory, a.seed))
+            page.goto(address(a.url, a.memory, a.seed, a.option))
             page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
             mark("page ready: " + status())
             if fluid:  # a fluid shot first: once made, it is the plate the strokes are painted on

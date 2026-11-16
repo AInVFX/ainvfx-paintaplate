@@ -1050,7 +1050,7 @@ export const MEMORY = {
 // 52 GB of RAM, a full-size shot left LTX and its text encoder there, 35 GB, and the tracking job after it took the rest:
 // the system stopped ComfyUI (11 Nov). A profile that `frees` holds one family of models at a time: the page asks
 // ComfyUI to free its memory before a job whose family is not that of the job posted before it.
-export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", clean: "ltx", cleanup: "ltx", fluid: "ltx", hdr: "ltx", warm: "ltx",
+export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", shotup: "ltx", clean: "ltx", cleanup: "ltx", fluid: "ltx", hdr: "ltx", warm: "ltx",
   matte: "sam", snap: "sam", ingest: "frames", comp: "frames", review: "frames", export: "frames" }; // by workflow: the models it loads, or frames only
 // Speed first where there is room (Adrien, 11 Nov). Under 24 GB of VRAM the card cannot hold two families of models, so a
 // change of family frees ComfyUI's memory. On a larger card the models stay loaded, and the memory is freed only when

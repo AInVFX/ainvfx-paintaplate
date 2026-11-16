@@ -64,7 +64,7 @@ class Workflows(unittest.TestCase):
     def test_outputs_the_page_reads(self):
         """The page picks results by output name, not by position."""
         wanted = {"ingest": {"hero", "proxy", "spec"}, "prompt": {"text"}, "edit": {"patch", "relit", "result"},
-                  "snap": {"named"} | {f"point_{k}" for k in range(5)}, "clean": {"frames", "video"}, "cleanup": {"frames", "video"}, "shot": {"frames", "video"},
+                  "snap": {"named"} | {f"point_{k}" for k in range(5)}, "clean": {"frames", "video"}, "cleanup": {"frames", "video"}, "shotup": {"frames", "video"}, "shot": {"frames", "video"},
                   "matte": {"follow", "frames", "movie"}, "comp": {"video"}, "review": {"review", "frames", "view"},
                   "export": {"export", "exr", "matte", "matte_movie"}, "warm": {"frame"},
                   "fluid": {"plate", "video", "control"}, "hdr": {"hdr", "movie"}}
@@ -162,7 +162,7 @@ class MemorySlots(unittest.TestCase):
         """`tile` and `guide_tiled` (logic.memoryProfile on the page): unfilled, a workflow runs as on a large card."""
         import json
         folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web", "workflows")
-        for name, tiles, guides in (("clean", 0, 1), ("cleanup", 2, 0), ("shot", 1, 1), ("fluid", 1, 1), ("hdr", 1, 1)):
+        for name, tiles, guides in (("clean", 0, 1), ("cleanup", 2, 0), ("shot", 1, 1), ("shotup", 2, 1), ("fluid", 1, 1), ("hdr", 1, 1)):
             with open(os.path.join(folder, f"{name}.json")) as f:
                 prompt = json.load(f)
             slots = {slot: (node["class_type"], node["inputs"][key]) for node in prompt.values() for key, slot in node.get("_meta", {}).get("slots", {}).items()}

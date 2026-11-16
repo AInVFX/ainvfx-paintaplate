@@ -681,6 +681,20 @@ class Verdict(unittest.TestCase):
         self.assertGreater(rig["strokes"][0][3], arm["strokes"][0][3])  # a wider brush covers what is strapped on the arm
         self.assertFalse({"tos_arm_clean", "tos_arm_rig"} & set(gpu_matrix.ALL + gpu_matrix.QUICK))
 
+    def test_the_two_stage_shot_case_is_horse_cow_with_shot_2_and_horse_cow_beside_it(self):
+        import ui_live
+        cases = gpu_matrix.load_cases()
+        two, cow = cases["horse_cow_two"], cases["horse_cow"]
+        self.assertEqual((two["path"], two["seed"], two["strokes"], two["address"], two["beside"]), (cow["path"], cow["seed"], cow["strokes"], ["shot=2"], "horse_cow"))
+        self.assertNotIn("horse_cow_two", gpu_matrix.ALL + gpu_matrix.QUICK)
+        self.assertTrue(ui_live.address("http://h", seed=101, options=["shot=2"]).endswith("seed=101&shot=2"))
+        tmp = tempfile.mkdtemp(prefix="beside_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        os.makedirs(os.path.join(tmp, "horse_cow"))
+        self.assertEqual(gpu_matrix.beside(two, os.path.join(tmp, "horse_cow_two")), [])  # horse_cow made no export
+        open(os.path.join(tmp, "horse_cow", "export.zip"), "w").close()
+        self.assertEqual(gpu_matrix.beside(two, os.path.join(tmp, "horse_cow_two")), [("horse_cow", os.path.join(tmp, "horse_cow", "export.zip"))])
+
     def test_every_case_passes_on_its_export(self):
         """No case expects the page to stop before its shot: each one passes when its export downloads."""
         self.assertEqual([n for n, c in gpu_matrix.load_cases().items() if "expect" in c], [])

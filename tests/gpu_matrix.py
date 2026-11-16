@@ -260,7 +260,7 @@ def seeds_asked(text):
 def command(a, case, folder):
     """ui_live.py's command for one case: its plate or its fluid shot, its strokes as written, its seed."""
     cmd = [sys.executable, os.path.join(HERE, "ui_live.py"), "--url", a.url, "--comfy", a.comfy, "--out", folder,
-           "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2", *(["--memory", a.memory] if a.memory else []), *(["--graph"] if a.graph else []),
+           "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2", *(["--memory", a.memory] if a.memory else []), *[f"--option={o}" for o in case.get("address", [])], *(["--graph"] if a.graph else []),
            *(["--hdr"] if getattr(a, "hdr", False) or case.get("hdr") else [])]
     cmd += ["--fluid", json.dumps(case["fluid"])] if "fluid" in case else ["--path", case["path"]]
     if case.get("strokes"):
@@ -485,6 +485,12 @@ def matte_verdict(passed, why, mattes):
     return (False, f"{warned[0]} The case fails on this matte warning: check its picture on the sheet.") if passed and warned else (passed, why)
 
 
+def beside(case, folder):
+    """The export of the case that « beside » names, run into the same folder: its column on this case's sheet."""
+    zipped = os.path.join(os.path.dirname(folder), case.get("beside", ""), "export.zip")
+    return [(case["beside"], zipped)] if case.get("beside") and os.path.exists(zipped) else []
+
+
 def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
     """The case's sheet, sheet.png in its folder: for each edit, the plate and the export cut around its box, on the first
     frame, at a third, at two thirds and on the last. `others`: more (title, export.zip) columns, such as another run of
@@ -573,8 +579,8 @@ def fluid_movies(comfy, jobs, history):
     return {}
 
 
-STAGE_JOBS = (("Clean matte", "matte", "matte_a"), ("Clean plate pass", "cleanup", None), ("Shot", "shot", None),
-              ("Paint matte", "matte", "matte_b"))  # (title, job, the folder of its files where one job serves two stages)
+STAGE_JOBS = (("Clean matte", ("matte",), "matte_a"), ("Clean plate pass", ("cleanup",), None), ("Shot", ("shot", "shotup"), None),
+              ("Paint matte", ("matte",), "matte_b"))  # (title, its jobs, the folder of its files where one job serves two stages)
 STAGES_SHOWN = (*(title for title, *_ in STAGE_JOBS), "Composite")  # the composite is the export, from the case's export.zip
 
 
@@ -584,13 +590,14 @@ def stage_movies(comfy, jobs, history):
     its frames (PaintAPlate_SaveFrames: the files of its folder whose names start as the first one's). A stage is the last
     job of its name; for the two mattes, the last « matte » job whose files sit in its folder: the page tracks a Clean's
     edits into matte_a, at the size it tracks an erase (the hole the clean plate pass fills), and the paint into matte_b,
-    the last one at full size. A render of fewer edits that the page finishes in the background can run after them: its
+    the last one at full size. The shot at full size is the last « shot » or « shotup » job (the second stage of a shot
+    in two stages, ?shot=2). A render of fewer edits that the page finishes in the background can run after them: its
     jobs have other names, and its composite is never read, since the sheet's composite is the export. A stage whose job
     did not run in this ComfyUI is left out."""
     found = {}
     runs = {pid[:8]: ((entry.get("prompt") or [None, None, {}])[2], entry.get("outputs") or {}) for pid, entry in history.items()}
-    for title, name, folder in STAGE_JOBS:
-        ran = [j["id"] for j in jobs if j["name"] == name and j["id"] in runs]
+    for title, names, folder in STAGE_JOBS:
+        ran = [j["id"] for j in jobs if j["name"] in names and j["id"] in runs]
         for job in reversed(ran if folder else ran[-1:]):
             graph, outputs = runs[job]
             for kind in ("PaintAPlate_SaveMovie", "PaintAPlate_SaveFrames"):
@@ -812,7 +819,8 @@ def run_case(a, name, case, folder):
     result["nodes"], result["stopped_in"] = node_times(events, graphs, names), running_at_stop(events, graphs, names)
     try:  # the case's pictures: never a reason for the case to fail
         result["sheet"] = sheet(case, folder, os.path.join(a.comfy, "input", case["path"]) if case.get("path") else None,
-                                mask=page_mask(a.comfy, result["jobs"], graphs), judge_at=edit_preview_size(result["log"]))
+                                mask=page_mask(a.comfy, result["jobs"], graphs), judge_at=edit_preview_size(result["log"]),
+                                others=beside(case, folder))
     except Exception as exc:
         result["sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     try:  # a fluid case's keyframes and shot, also never a reason to fail
