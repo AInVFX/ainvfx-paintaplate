@@ -87,19 +87,19 @@ export function previewSize(plate, work, cap, step = 32, tol = 0.025) {
   return fitSize(plate[0], plate[1], cap, step, tol);
 }
 
-export const PREVIEW_CAPS = [["Standard", 960], ["Fast", 640], ["Draft", 448]];
 
-// The Preview size menu for a plate: Full, then each cap below the working size, with the size it gives and the whole
-// number it divides the working size by (0 when it does not divide it). Two caps that give one size are listed once.
+// Preview pass: half and a quarter of the working size, each on the grid with the plate's aspect (previewSize). `div` is
+// the part of the working size's long side, `cap` that long side.
+export const PREVIEW_PARTS = [[2, "Half size"], [4, "Quarter size"]];
 export function previewSizes(plate, work, step = 32) {
-  const long = Math.max(...work), out = [];
-  for (const [label, cap] of [["Full", long], ...PREVIEW_CAPS.filter(([, c]) => c < long)]) {
-    const size = previewSize(plate, work, cap, step), k = work[0] / size[0];
-    if (out.some((o) => o.size[0] === size[0] && o.size[1] === size[1])) continue;
-    out.push({ label, cap, size, div: Number.isInteger(k) && work[1] / size[1] === k ? k : 0 });
+  const out = [];
+  for (const [div, label] of PREVIEW_PARTS) {
+    const cap = previewCap(work, div), size = previewSize(plate, work, cap, step);
+    if (!out.some((o) => o.size[0] === size[0] && o.size[1] === size[1])) out.push({ label, div, cap, size });
   }
   return out;
 }
+export const previewCap = (work, div) => (div ? Math.round(Math.max(...work) / div) : 0); // the shot preview's long side; 0: Off
 
 export const gb = (n) => (n > 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
 
@@ -631,9 +631,14 @@ export function plateSpaceLine(plate) {
 // The one question before an OCIO change that regenerates: the cause and the cost, then the question (Continue, Cancel).
 // `what`: « plate's colour space » or « OCIO config ». The first frame is the page's own step: the question counts the edits.
 export function remakeQuestion(what, edits) { return `Changing the ${what} affects generation: ${edits} edit${edits === 1 ? "" : "s"} will be regenerated. Continue?`; }
-// A family of the plate's colour-space tree. The config's « Display », the spaces encoded for a display, reads « Display-referred »
-// there, apart from the view's Display line, which changes nothing. RV and Nuke show it as « Display ».
-export function plateFamily(name) { return name === "Display" ? "Display-referred" : name; }
+// The HUD's line when a fluid keyframe moves to the nearest frame it can sit on; `frame` is the plate's own number
+export const keyframeSlotLine = (frame) => `Keyframes sit on the first frame, on the last frame, or every 8 frames between: frame ${frame}.`;
+
+// A family of the plate's colour-space tree, named for a person. The config's « Display », the spaces encoded for a
+// display, reads « Display-referred ». « ITU » is spelled out: the International Telecommunication Union publishes the
+// « Rec. » standards, such as Rec.709 and Rec.2020. RV and Nuke show the config's own names. The spaces keep theirs.
+const FAMILIES = { Display: "Display-referred", ITU: "ITU (International Telecommunication Union)" };
+export function plateFamily(name) { return FAMILIES[name] ?? name; }
 // An image that the scene's ComfyUI graph reads. It sits at the top of ComfyUI's input folder: LoadImage lists only the files
 // there, and the editor marks an image input whose file is not in that list as missing. Named after the plate, the edit,
 // what it holds and its hash, so two scenes never share a name.
@@ -1121,3 +1126,13 @@ export function memoryProfile({ vram = 0, ram = 0, force = null } = {}) { // `fo
 // With it every new edit and every new fluid shot starts from that seed, so a run makes the same pictures as the run before.
 // Another try (Ctrl+Enter) still draws one. null: no seed is asked for, or the text is not one, and the page draws.
 export const askedSeed = (text) => (/^\d{1,10}$/.test(text ?? "") && Number(text) < 2 ** 31 ? Number(text) : null);
+
+// View > Cache memory > Custom…: a size a person types, in MB or GB (a number alone is MB), as bytes, or null outside
+// CACHE_LEAST to CACHE_MOST. The page counts 1 GB as 10^9 bytes, as its other memory lines do.
+export const CACHE_LEAST = 128e6;
+export const CACHE_MOST = 32e9;
+export function memoryBytes(text) {
+  const m = /^\s*(\d+(?:[.,]\d+)?)\s*(mb|m|gb|g)?\s*$/i.exec(text ?? "");
+  const b = m ? parseFloat(m[1].replace(",", ".")) * (/^g/i.test(m[2] ?? "") ? 1e9 : 1e6) : NaN;
+  return b >= CACHE_LEAST && b <= CACHE_MOST ? Math.round(b) : null;
+}

@@ -1,4 +1,4 @@
-// The X-ray (W), as PlateLock's: where the edits on show change the plate, tinted over the picture. Its mattes: the
+// The X-ray (X), as PlateLock's: where the edits on show change the plate, tinted over the picture. Its mattes: the
 // export's once Export has made one, else the tracking mattes of the size on show; a light edit changes every pixel, so
 // it tints the whole frame. Pure functions, tested in tests/js/xray.test.mjs; app.mjs draws them on the #xray overlay,
 // above the canvas, so the colour inspector and the colour picker read the picture without the tint.
@@ -31,12 +31,6 @@ const HALF = Float32Array.from({ length: 65536 }, (_, h) => halfToFloat(h));
 export function alphaFromHalfs(halfs) { // a grey matte's RGB half floats (the frames route): 0 to 255 by its Rec. 709 luma
   const n = halfs.length / 3, out = new Uint8ClampedArray(n);
   for (let i = 0; i < n; i++) out[i] = 255 * (0.2126 * HALF[halfs[3 * i]] + 0.7152 * HALF[halfs[3 * i + 1]] + 0.0722 * HALF[halfs[3 * i + 2]]);
-  return out;
-}
-
-export function alphaFromBytes(rgba) { // a grey matte drawn from its movie: 0 to 255 by its Rec. 709 luma
-  const n = rgba.length / 4, out = new Uint8ClampedArray(n);
-  for (let i = 0; i < n; i++) out[i] = 0.2126 * rgba[4 * i] + 0.7152 * rgba[4 * i + 1] + 0.0722 * rgba[4 * i + 2];
   return out;
 }
 

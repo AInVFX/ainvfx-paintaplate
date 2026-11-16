@@ -305,14 +305,14 @@ XSTAT = """(() => { const x = document.querySelector('#xray'), d = x.getContext(
 
 
 def xray_view(page, U):
-    """W tints, over the picture, where the edits on show change the plate: the tracking mattes of the size on show, then
+    """X tints, over the picture, where the edits on show change the plate: the tracking mattes of the size on show, then
     the export's matte once Export made one; a light edit tints the whole frame. The canvas itself stays the picture."""
     page.keyboard.press("Home"); pic = page.evaluate(SUM, [0.0, 1.0])
-    page.keyboard.press("w")
+    page.keyboard.press("x")
     page.wait_for_function("(() => { const x = document.querySelector('#xray'); return !x.hidden && x.dataset.frame === '0'; })()", timeout=30000)
     got = page.evaluate(XSTAT)
     U.check(got["from"] == "full" and 0 < got["share"] < 0.5 and got["at"][0] < 0.5 and page.evaluate(SUM, [0.0, 1.0])["sum"] == pic["sum"],
-            f"W tints where the paint changes the plate, from the full-size tracking mattes, and leaves the canvas's picture as it was: {got}")
+            f"X tints where the paint changes the plate, from the full-size tracking mattes, and leaves the canvas's picture as it was: {got}")
     page.keyboard.press("ArrowRight")
     page.wait_for_function("document.querySelector('#xray').dataset.frame === '1'", timeout=30000)
     page.keyboard.press("Home")
@@ -322,12 +322,33 @@ def xray_view(page, U):
     page.wait_for_function("(() => { const x = document.querySelector('#xray'); return x.dataset.from === 'export' && x.dataset.frame === '0'; })()", timeout=60000)
     got = page.evaluate(XSTAT)
     U.check(0 < got["share"] < 0.5, f"once Export has made its matte, the X-ray reads it: {got}")
+    tint = "(() => { const x = document.querySelector('#xray'), d = x.getContext('2d').getImageData(0, 0, x.width, x.height).data; let s = 0; for (let i = 3; i < d.length; i += 4) s += d[i]; return [Number(x.dataset.frame), s]; })()"
+    page.click("#play-btn")  # the button: after Export, a key could go to the button that has the focus
+    probe = "[document.querySelector('#frame-now').textContent, document.querySelector('#xray').dataset.frame, document.querySelector('#view').dataset.play]"
+    trail = [page.evaluate(probe)]
+    for _ in range(60):  # the shot starts to play: up to 15 s
+        if trail[-1][1] not in ("", "0"):
+            break
+        page.wait_for_timeout(250); trail.append(page.evaluate(probe))
+    seen = {}
+    for _ in range(16):
+        page.wait_for_timeout(120); f, s = page.evaluate(tint); seen.setdefault(f, s)
+    page.click("#play-btn")
+    page.evaluate("document.activeElement.blur()")
+    same = []
+    for f in sorted(seen)[1:4]:
+        page.keyboard.press("Home")
+        for _ in range(f):
+            page.keyboard.press("ArrowRight")
+        page.wait_for_function(f"document.querySelector('#xray').dataset.frame === '{f}'", timeout=30000)
+        same.append(page.evaluate(tint)[1] == seen[f])
+    U.check(len(seen) > 2 and len(same) == 3 and all(same), f"while the shot plays, the X-ray tints each frame with that frame's matte, as it does paused: frames {sorted(seen)}, same {same}, start {trail[:2]} to {trail[-1]}")
     page.keyboard.press("l"); U.paint_once(page, "warm sunset light", [(0.7, 0.3), (0.75, 0.35)]); page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('#xray').dataset.from === 'light'", timeout=120000)
     got = page.evaluate(XSTAT)
     U.check(got["share"] == 1 and not got["hidden"], f"with a light edit on show, the X-ray tints the whole frame: {got}")
-    page.keyboard.press("w")
-    U.check(page.is_hidden("#xray"), "W again hides the X-ray")
+    page.keyboard.press("x")
+    U.check(page.is_hidden("#xray"), "X again hides the X-ray")
 
 
 def run(browser, port, U):

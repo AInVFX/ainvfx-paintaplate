@@ -20,3 +20,9 @@ test("the plate's tree shows the config's family Display as Display-referred, an
   assert.equal(plateFamily("Display"), "Display-referred");
   for (const name of ["ACES", "Utility", "Input", "ARRI", "Displays", "display"]) assert.equal(plateFamily(name), name);
 });
+
+test("the plate's colour-space tree names two families for a person, and the others as the config does", () => {
+  assert.equal(plateFamily("ITU"), "ITU (International Telecommunication Union)");
+  assert.equal(plateFamily("Display"), "Display-referred");
+  assert.equal(plateFamily("ACES"), "ACES");
+});
