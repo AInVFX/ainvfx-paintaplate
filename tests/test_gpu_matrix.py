@@ -662,6 +662,14 @@ class Verdict(unittest.TestCase):
         note = json.load(open(os.path.join(gpu_matrix.HERE, "gpu_matrix.json")))["note"]
         self.assertNotRegex(note, r"(?i)\blaptop\b|\b20\d\d\b|\b\d+\.\d+\.\d+\b|\b(?:Oct|Nov|Dec)\b")
 
+    def test_each_case_s_plate_comes_from_a_script_of_the_pack(self):
+        """An MP4 of plates/ comes from the dataset through get_plates.py; the two other plates from the scripts that make them."""
+        made = {"plates/horse_hdr": "hdr_plate.py", "plates/tos_05_4a": "tos_plate.py"}
+        paths = {c["path"] for c in gpu_matrix.load_cases().values() if "path" in c}
+        self.assertEqual({p for p in paths if not (p.startswith("plates/") and p.endswith(".mp4"))}, set(made))
+        for path, script in made.items():
+            self.assertIn(os.path.basename(path), open(os.path.join(gpu_matrix.HERE, script)).read(), script)
+
     def test_every_case_passes_on_its_export(self):
         """No case expects the page to stop before its shot: each one passes when its export downloads."""
         self.assertEqual([n for n, c in gpu_matrix.load_cases().items() if "expect" in c], [])
