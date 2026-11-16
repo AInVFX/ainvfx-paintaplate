@@ -14,7 +14,7 @@ import { editorGraph, sceneGraph } from "./graph.mjs";
 import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
-import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
+import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { askedSeed } from "./logic.mjs"; // the tests: a seed asked for in the address
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
@@ -124,7 +124,7 @@ let fullFrom = null; // full screen (fullScreen): the zoom it came from and the 
 S.xray = false;
 const fx = document.createElement("canvas"); // scratch layer for masked overlays
 const HISTORY_HELP = $("#history-empty").textContent;
-const FLUID_HELP = "A fluid shot: paint flat colour blobs (light grey smoke, white steam, orange and yellow fire) on frame 0 and on the " +
+const FLUID_HELP = "A fluid shot: paint flat colour blobs (light grey smoke, white steam, orange and yellow fire) on the first frame and on the " +
   "last frame, and on the 8-frame grid between if you want. Ctrl+C and Ctrl+V copy a keyframe; drag its diamond to move it. Describe " +
   "the fluid, then Enter.";
 
@@ -1626,7 +1626,7 @@ function enterFluid() { // a blank plate opens as a fluid shot: the paint tool i
 
 function paintKey(e, rub) { // strokes go to the keyframe on the playhead's slot of the 8-frame grid
   const f = S.fluid, slot = snapKey(S.frame, S.plate.frames);
-  if (slot !== S.frame) { seek(slot); hud(`Keyframes sit on frame 0, on the last frame, or on 8k + 1 between: frame ${S.plate.first + slot}`, 2500); }
+  if (slot !== S.frame) { seek(slot); hud(keyframeSlotLine(S.plate.first + slot), 2500); }
   let key = f.keys.find((k) => k.frame === slot);
   if (!key && rub) return hud("No keyframe on this frame to rub out");
   mark();
@@ -1763,7 +1763,7 @@ function keysUI(force = false) { // the keyframe diamonds on the timeline, over 
 async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-fluid: the keyframes become smoke, steam or fire
   const p = S.plate, f = S.fluid;
   if (!S.fluidReady) return status(FLUID_MISSING);
-  if (!f.keys.length) return status("Fluid shot: no keyframe. Paint flat colour blobs on frame 0 and on the last frame.", "hint");
+  if (!f.keys.length) return status("Fluid shot: no keyframe. Paint flat colour blobs on the first frame and on the last frame.", "hint");
   if (another) f.seed = (Math.random() * 2 ** 31) | 0;
   else { // Enter again: a shot being made, or already made, from these keyframes, words and seed is not made twice
     if (f.busy?.sig === fluidSig()) return hud(`Fluid shot v${f.busy.v} is being made from these keyframes and words`, 2500);

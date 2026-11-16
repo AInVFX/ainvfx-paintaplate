@@ -631,6 +631,9 @@ export function plateSpaceLine(plate) {
 // The one question before an OCIO change that regenerates: the cause and the cost, then the question (Continue, Cancel).
 // `what`: « plate's colour space » or « OCIO config ». The first frame is the page's own step: the question counts the edits.
 export function remakeQuestion(what, edits) { return `Changing the ${what} affects generation: ${edits} edit${edits === 1 ? "" : "s"} will be regenerated. Continue?`; }
+// The HUD's line when a fluid keyframe moves to the nearest frame it can sit on; `frame` is the plate's own number
+export const keyframeSlotLine = (frame) => `Keyframes sit on the first frame, on the last frame, or every 8 frames between: frame ${frame}.`;
+
 // A family of the plate's colour-space tree. The config's « Display », the spaces encoded for a display, reads « Display-referred »
 // there, apart from the view's Display line, which changes nothing. RV and Nuke show it as « Display ».
 export function plateFamily(name) { return name === "Display" ? "Display-referred" : name; }
