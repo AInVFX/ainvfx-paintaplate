@@ -36,6 +36,8 @@ def run(browser, port, U):
     U.check(len(asks) == 2 and not asks[0].endswith(DIMMED) and asks[1].endswith(DIMMED) and len(boxes) == 2 and boxes[0] == boxes[1],
             f"the writer looks once more, with the same box, at the dimmed frame ({asks})")
     U.check(not any("SAM 3.1 looking for the barn" in t for t in lines), "no SAM job looks for the barn")
+    U.check(any(t.startswith("Edit 1: caption from the prompt writer" + DIMMED) for t in lines),
+            "the caption's headline says the writer saw the frame with all but the object dimmed: its words describe that frame")
     running = [i for i, t in enumerate(lines) if t.endswith("prompt writer running.")]
     U.check(all(i > 0 and ASKING in lines[i - 1] for i in running),
             f"the status line names the writer only right after the page asks it ({[lines[i - 1] for i in running][:2]})")

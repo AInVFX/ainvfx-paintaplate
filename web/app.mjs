@@ -247,7 +247,7 @@ async function writeCaption(e, reference, key, kind, dimmed = false) {
     made = "";
   }
   e.caption = { key, text: made || templateCaption(e) };
-  log(`Edit ${num(e)}: ${made ? "caption from the prompt writer" : "the page's own caption"}.\n  ${e.caption.text}`); // the caption as Klein gets it, as a detail line
+  log(`Edit ${num(e)}: ${made ? "caption from the prompt writer" : "the page's own caption"}${dimmed ? ", on the frame with all but the object dimmed" : ""}.\n  ${e.caption.text}`); // the caption as Klein gets it, as a detail line
   return e.caption.text;
 }
 
