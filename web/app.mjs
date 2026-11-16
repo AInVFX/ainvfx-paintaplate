@@ -1993,6 +1993,11 @@ function launch(edit, another = false) { // Generate: the edit on the first fram
     queueWaiting(() => queue(regenerateDependents));
     return;
   }
+  if (edit.refused?.record === recordOf(edit)) { // refused at the check's question and unchanged since: it stays as « No » left it
+    Object.assign(edit, { state: "failed", left: true });
+    recompose(); historyUI(); render(); timelineUI();
+    return status(edit.refused.said, "hint");
+  }
   preempt(); // Generate: a full-size or export step in its first half stops for this edit, and runs again later
   edit.state = "queued";
   edit.thumb ??= strokesThumb(edit);
@@ -2127,13 +2132,14 @@ async function baseUpload(below, before, size) { // the frame under an edit, upl
 async function generate(edit) {
   if (!S.edits.includes(edit) || !edit.on || edit.state === "drawing") return; // changed since it was queued: it waits for Generate
   if (S.halted) return; // a stop: no job is posted until Enter, which runs what waits, by its state (queueWaiting)
+  if (edit.refused?.record === recordOf(edit)) return; // « No » at the check's question: nothing of it runs until it changes (heldBack)
   const token = (edit.token = (edit.token ?? 0) + 1);
   const alive = () => edit.token === token && S.edits.includes(edit) && edit.on;
   const p = S.plate, light = edit.tool === "light", tag = `e${edit.id}_${token}`;
   cancel("warm"); // an edit never waits for the warm-up: what it needs loads now
   S.running = edit;
   edit.saw = activeBefore(edit).map(record); // the edits under it as it starts: a change to them restarts it (rebuild)
-  Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false, leftWhy: null, editAsked: false });
+  Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false, leftWhy: null, editAsked: false, refused: null });
   recompose(); historyUI(); render();
   log(`Edit ${num(edit)}: ${NAME[edit.tool]} ${edit.prompt ? `"${edit.prompt}"` : "with no words"}, seed ${edit.seed}${edit.tool === "erase" ? `, whole object ${edit.whole ? "on" : "off"}` : ""}, ${painted(edit)} stroke${painted(edit) === 1 ? "" : "s"}, over ${edit.saw.length} edit${edit.saw.length === 1 ? "" : "s"}.`);
   try {
@@ -2216,22 +2222,25 @@ async function generate(edit) {
 
 // An erase that the check holds back (logic.eraseCheck, leftLines). History's row is marked as the question opens: tests/ui_live.py
 // ends a GPU case on #history li[data-left], so a case that nobody watches never waits on the dialog. The first frame shows
-// Klein's result under the question, under a version of its own, so no earlier render shows there. « Render anyway » (Enter)
-// keeps that first frame: true, and generate goes on to its shot, which takes the mark away. Cancel (Esc) drops the result:
-// Generate runs the erase again once its words, its strokes or its seed change. A question that is open (the OCIO one) is
-// answered first; another pass of this edit, or its removal, drops this question (`current`).
+// Klein's result under the question, under a version of its own, so no earlier render shows there. « Yes, render anyway »
+// (Enter) keeps that first frame: true, and generate goes on to its shot, which takes the mark away. « No, cancel » (Esc)
+// drops the result, and nothing of this edit runs again until its words, its strokes, its seed or its switch change
+// (`refused`): neither what Enter runs after a stop (queueWaiting) nor a rebuild. Generate on the unchanged edit says again
+// what to do. A question that is open (the OCIO one) is answered first; another pass of this edit, or its removal, drops
+// this question (`current`).
 async function heldBack(edit, check, alive) {
   const lines = leftLines(num(edit), check), patch = edit.patch, current = () => alive() && edit.patch === patch;
   Object.assign(edit, { preview: null, latent: null, state: "failed", left: true, leftWhy: check.why, force: false, version: ++S.vers });
   S.running = null;
   recompose(); historyUI(); render(); timelineUI();
   log(lines.fact);
-  const anyway = await ask(lines.question, "Render anyway", { enter: true, still: current });
+  const anyway = await ask(lines.question, "Yes, render anyway", { enter: true, still: current, no: "No, cancel" });
   if (!current()) return false;
   if (!anyway) {
-    edit.patch = null;
+    const said = `${lines.fact} ${leftHint(edit.prompt)}`;
+    Object.assign(edit, { patch: null, refused: { record: recordOf(edit), said } });
     recompose(); historyUI(); render(); timelineUI();
-    status(`${lines.fact} ${leftHint(edit.prompt)}`, "hint");
+    status(said, "hint");
     return false;
   }
   edit.left = false;

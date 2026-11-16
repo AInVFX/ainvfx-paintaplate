@@ -839,8 +839,8 @@ export const leftHint = (words) =>
   (words ? "Use other words, then Generate, or Ctrl+Enter for another seed." : "Type its name in the prompt bar, then Generate.");
 
 // What the page says when the check holds an erase back. The check can be wrong on a thin or faint object, or on one behind a
-// fence, so the page asks: `fact`, a warning, goes to the log once and, after Cancel, to the status line before leftHint;
-// `question` opens the dialog, where « Render anyway » keeps the first frame and renders its shot; `rendered` is the log's
+// fence, so the page asks: `fact`, a warning, goes to the log once and, after « No, cancel », to the status line before leftHint;
+// `question` opens the dialog, where « Yes, render anyway » keeps the first frame and renders its shot; `rendered` is the log's
 // line then. A figure the check could not measure (null) is left out.
 export function leftLines(n, check) {
   if (check.why === "beyond") { // the object went, and the area around it changed too much: « of that area », so no reader takes it for the object's figure

@@ -3,8 +3,8 @@ erase with the frame as it was: on 12 November 2026 a stroke on a barn, with no 
 nothing said so. After the edit the page compares the first frame with the frame under it inside the object's mask
 (logic.eraseCheck). The check can be wrong on a thin or faint object, or on one behind a fence, so the page asks (Adrien,
 13 Nov 2026) in its question dialog, with History's row marked as the question opens: tests/ui_live.py ends a GPU case on
-that mark. Esc or Cancel renders nothing and leaves what to do next in the status line, and the page goes on: another seed
-asks again. « Render anyway », clicked or chosen by Enter, keeps the first frame and renders its shot. One question at a
+that mark. Esc or « No, cancel » renders nothing and leaves what to do next in the status line, and the page goes on: another seed
+asks again. « Yes, render anyway », clicked or chosen by Enter, keeps the first frame and renders its shot. One question at a
 time: a second erase is held back while the OCIO question is open (/mock/hold keeps its passes running), and its question
 waits for that answer. The mock answers the next edit jobs with the frame as it was (/mock/leave)."""
 
@@ -26,8 +26,8 @@ def held(page, port, U, start, what):  # one erase that the mock leaves as it wa
     start()
     page.wait_for_selector("#ask[open]", timeout=90000)
     asked, row = page.evaluate(ASKED), page.evaluate(ROW)
-    U.check(bool(asked) and asked[0].startswith(ASKS) and asked[0].endswith(QUESTION) and asked[1] == "Render anyway"
-            and asked[2] == "ask-yes", f"{what}: the page asks, and Enter would choose Render anyway ({asked})")
+    U.check(bool(asked) and asked[0].startswith(ASKS) and asked[0].endswith(QUESTION) and asked[1] == "Yes, render anyway"
+            and asked[2] == "ask-yes", f"{what}: the page asks, and Enter would choose « Yes, render anyway » ({asked})")
     U.check(bool(row) and "failed" in row[0] and row[1] == "1" and row[2] in ("The object is still there", "The object may still be there"),  # the row's words, old and new
             f"{what}: History's row is marked while the question is open ({row})")
     return asked[0]
@@ -99,7 +99,7 @@ def run(browser, port, U):
     page.click("#ask-no")
     page.wait_for_function("() => document.querySelector('#ask').open && document.querySelector('#ask-text').textContent.startsWith('Edit 2: ')", timeout=5000)
     asked = page.evaluate(ASKED)
-    U.check(asked[0].startswith("Edit 2: the object may still be there (") and asked[0].endswith(QUESTION) and asked[1] == "Render anyway"
+    U.check(asked[0].startswith("Edit 2: the object may still be there (") and asked[0].endswith(QUESTION) and asked[1] == "Yes, render anyway"
             and asked[2] == "ask-yes", f"once that question is answered, edit 2's question opens, under Enter ({asked})")
     page.keyboard.press("Enter")
     rendered(page, U, 2, "Enter chooses Render anyway", line="Edit 2: kept at your request.", times=1)
