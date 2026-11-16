@@ -111,7 +111,7 @@ const S = {
   fluid: null, clip: null, fluidReady: true, // a fluid shot on a blank plate, the last one, a copied keyframe
   shot: null, stage: null, run: 0, exported: null, wantDownload: null,
   ocio: { config: "", display: "", view: "", look: "", ...saved(OCIO_PREF), info: null }, // the OCIO config and the viewer's view, as in RV
-  previewCap: 0, // the shot preview's long side for the plate open (logic.previewCap); 0: Off // 0: Off // long side of the shot preview: Fast by default
+  previewCap: 0, // the shot preview's long side for the plate open (logic.previewCap); 0: Off
   deliver: { hdr: false }, // the Finish menu's passes for this plate, under the scene's key « deliver »; hdr: the deliberate SDR to HDR of a plate that holds nothing above 1.0
   heroKey: "", renders: new Map(), // set of edits -> what has been rendered for it
   erases: new Map(), // set of erases -> their matte and clean plates, for every render that has the same erases

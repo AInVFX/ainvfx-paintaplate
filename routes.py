@@ -376,8 +376,6 @@ async def version_route(request: web.Request) -> web.Response:
 async def browse_route(request: web.Request) -> web.Response:
     try:
         return web.json_response(await asyncio.to_thread(browse, request.query.get("path", "")))
-    except PermissionError as exc:  # the machine refuses to read it
-        return web.json_response({"error": str(exc)}, status=403)
     except (FileNotFoundError, ValueError, NotADirectoryError) as exc:
         return web.json_response({"error": str(exc)}, status=404)
 
@@ -549,8 +547,6 @@ async def stat(request: web.Request) -> web.Response:
     try:
         return web.json_response(await asyncio.to_thread(plate_info, request.query.get("path", ""), request.query.get("config", ""),
                                                          request.query.get("cs", "")))
-    except PermissionError as exc:  # the machine refuses to read it
-        return web.json_response({"error": str(exc)}, status=403)
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         return web.json_response({"error": str(exc)}, status=404)
 
@@ -849,6 +845,23 @@ async def _pulse(app) -> None:
     app["paintaplate_pulse"] = asyncio.create_task(watch())
 
 
+FORWARDED = ("X-Forwarded-For", "Forwarded")  # what a proxy adds to a request it passes on
+
+
+def this_machine(handler):
+    """`handler`, a route that reads `path`, behind the rules of an absolute path. One in a request that a proxy passed on
+    is refused: a proxy on this machine opens a loopback listener to other machines. A path that folders.plate_path
+    refuses for its listener, or that the machine may not read, answers 403 with its sentence."""
+    async def guarded(request: web.Request):
+        try:
+            if folders.absolute(request.query.get("path", "").strip()) and any(h in request.headers for h in FORWARDED):
+                raise PermissionError(folders.THIS_MACHINE_ONLY)
+            return await handler(request)
+        except PermissionError as exc:
+            return web.json_response({"error": str(exc)}, status=403)
+    return guarded
+
+
 def setup(server) -> None:
     """Add the routes to ComfyUI's server (or to anything with an aiohttp RouteTableDef as `routes`)."""
     app = getattr(server, "app", None)
@@ -857,14 +870,14 @@ def setup(server) -> None:
         app.on_startup.append(_pulse)
         logging.info("[Paint a plate] Trace: on.\n  One line per request to ComfyUI, at its start and at its end.")
     server.routes.get("/paintaplate/download")(download)
-    server.routes.get("/paintaplate/browse")(browse_route)
-    server.routes.get("/paintaplate/thumb")(thumb)
+    server.routes.get("/paintaplate/browse")(this_machine(browse_route))
+    server.routes.get("/paintaplate/thumb")(this_machine(thumb))
     server.routes.post("/paintaplate/blank")(blank)
     server.routes.get("/paintaplate/jobs/{key}")(job_get)
     server.routes.post("/paintaplate/jobs/{key}")(job_post)
-    server.routes.get("/paintaplate/stat")(stat)
-    server.routes.get("/paintaplate/frames")(frames)
-    server.routes.get("/paintaplate/pixel")(pixel_route)
+    server.routes.get("/paintaplate/stat")(this_machine(stat))
+    server.routes.get("/paintaplate/frames")(this_machine(frames))
+    server.routes.get("/paintaplate/pixel")(this_machine(pixel_route))
     server.routes.get("/paintaplate/scenes")(scenes)
     server.routes.get("/paintaplate/scenes/{name}")(scene_get)
     server.routes.post("/paintaplate/scenes/{name}")(scene_post)

@@ -3,11 +3,13 @@
 A path that starts with "output:" names something in the output folder; any other path names something in the input
 folder. A frame pattern (shot.####.exr, ComfyUI_#####_.png) names one image sequence in a folder. A symbolic link, or a
 path that leaves its folder, is refused. An absolute path names a place on the machine itself (machine_path): a movie, a
-frame of a sequence (the whole sequence) or a folder, read only when it has a plate's extension. Nothing is written outside
-the output folder. nodes.py and routes.py both resolve through here.
+frame of a sequence (the whole sequence) or a folder, read only when it has a plate's extension. It opens only when
+ComfyUI answers this machine alone (on_this_machine): on a server that listens on the network, a file goes through the
+page's upload. Nothing is written outside the output folder. nodes.py and routes.py both resolve through here.
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 
@@ -20,12 +22,35 @@ except ImportError:  # imported as a plain module by the tests, outside the pack
 
 OUTPUT = "output:"
 WINDOWS = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")  # C:\plates, C:/plates, \\server\share
+THIS_MACHINE_ONLY = "Full paths open only when ComfyUI runs on this machine. Upload the file instead."
 
 
 def absolute(rel: str) -> bool:
     """`rel` names a place on the machine itself, outside ComfyUI's folders: an absolute path here, or one in Windows' form
     (C:\\plates\\shot.mov, C:/plates/shot.mov, \\\\server\\share\\shot.mov), which on another system names nothing."""
     return os.path.isabs(rel) or bool(WINDOWS.match(rel))
+
+
+def listens() -> list:
+    """The addresses ComfyUI listens on, its --listen (several, with commas). None outside ComfyUI."""
+    try:
+        from comfy.cli_args import args  # ComfyUI's own arguments, read when a path asks
+    except ImportError:
+        return []
+    return [a.strip() for a in str(args.listen).split(",") if a.strip()]
+
+
+def on_this_machine() -> bool:
+    """ComfyUI answers this machine alone: every address it listens on is a loopback one (127.0.0.1, its default, ::1 or
+    localhost). Only then does an absolute path open. Load Plate reads its path inside a prompt, where no client's address
+    exists, and any client that can post a prompt can name a path: only the listener limits those clients to this machine."""
+    def loopback(address: str) -> bool:
+        try:
+            return address == "localhost" or ipaddress.ip_address(address).is_loopback
+        except ValueError:
+            return False
+    heard = listens()
+    return bool(heard) and all(loopback(a) for a in heard)
 
 
 def machine_path(rel: str) -> str:
@@ -61,6 +86,8 @@ def plate_path(rel: str, folder: bool = False) -> str:
     `folder`: `rel` may name the root folder itself (the plate browser lists it)."""
     rel = (rel or "").strip()
     if absolute(rel):
+        if not on_this_machine():
+            raise PermissionError(THIS_MACHINE_ONLY)
         return machine_path(rel)
     root, inner = base(rel), rel.removeprefix(OUTPUT)
     full = os.path.abspath(os.path.join(root, inner))

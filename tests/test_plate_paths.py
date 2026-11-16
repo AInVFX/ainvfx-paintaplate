@@ -1,10 +1,15 @@
 """A plate from any path on the machine: an absolute path names a movie, a frame of a sequence (the whole sequence) or a
 folder. Only a plate's extension is read; Windows' forms name nothing on another system; each refusal says why in one
-sentence. The Open dialog lists such a folder's subfolders and plates by their absolute paths."""
+sentence. The Open dialog lists such a folder's subfolders and plates by their absolute paths. An absolute path opens only
+when ComfyUI answers this machine alone: a listener on the network refuses it, and so does a route in a request that a
+proxy passed on."""
+import asyncio
 import os
 import sys
 import tempfile
+import types
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -14,11 +19,14 @@ import test_routes  # noqa: E402  the stand-ins for ComfyUI's folders, shared wi
 
 routes = test_routes.routes
 folders, plateio = routes.folders, routes.plateio
+HERE_ONLY = mock.patch.object(folders, "listens", lambda: ["127.0.0.1"])  # ComfyUI's default listener: this machine alone
 
 
 class AbsolutePaths(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        HERE_ONLY.start()
+        cls.addClassCleanup(HERE_ONLY.stop)
         cls.d = tempfile.mkdtemp(prefix="paintaplate_machine_")
         os.makedirs(os.path.join(cls.d, "seq")); os.makedirs(os.path.join(cls.d, "empty"))
         frame = np.full((16, 16, 3), 0.5, np.float32)
@@ -75,6 +83,51 @@ class AbsolutePaths(unittest.TestCase):
             folders.plate_path("../outside.mov")
         with self.assertRaises(ValueError):
             folders.plate_path("output:" + self.d)
+
+
+class ThisMachineOnly(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.d = tempfile.mkdtemp(prefix="paintaplate_listener_")
+        cls.clip = os.path.join(cls.d, "clip.mp4")
+        open(cls.clip, "wb").write(b"\0")
+        test_routes.touch(os.path.join(test_routes.INPUT, "listener", "clip.mp4"))
+
+    def test_a_listener_on_this_machine_alone_takes_an_absolute_path(self):
+        for heard in (["127.0.0.1"], ["localhost"], ["::1"], ["127.0.0.1", "::1"], ["127.0.0.2"]):
+            with mock.patch.object(folders, "listens", lambda heard=heard: heard):
+                self.assertEqual(folders.plate_path(self.clip), self.clip, heard)
+
+    def test_a_listener_on_the_network_refuses_it_and_says_what_to_do(self):
+        for heard in (["0.0.0.0"], ["0.0.0.0", "::"], ["127.0.0.1", "192.168.1.20"], ["plates.example"], []):  # []: outside ComfyUI
+            with mock.patch.object(folders, "listens", lambda heard=heard: heard):
+                with self.assertRaises(PermissionError, msg=heard) as e:
+                    folders.plate_path(self.clip)
+                self.assertEqual(str(e.exception), "Full paths open only when ComfyUI runs on this machine. Upload the file instead.")
+                self.assertTrue(folders.plate_path("listener/clip.mp4").endswith(os.path.join("listener", "clip.mp4")), "a page path opens on any listener")
+
+    def test_a_route_refuses_an_absolute_path_that_a_proxy_passed_on(self):
+        async def run():
+            from aiohttp import web
+            from aiohttp.test_utils import TestClient, TestServer
+            table = web.RouteTableDef()
+            routes.setup(types.SimpleNamespace(routes=table))
+            app = web.Application()
+            app.add_routes(table)
+            async with TestClient(TestServer(app)) as client:
+                for route, path in (("browse", self.d), ("stat", self.clip), ("thumb", self.clip), ("frames", self.clip), ("pixel", self.clip)):
+                    for mark in ("X-Forwarded-For", "Forwarded"):
+                        r = await client.get(f"/paintaplate/{route}", params={"path": path}, headers={mark: "203.0.113.7"})
+                        self.assertEqual((r.status, await r.json()), (403, {"error": folders.THIS_MACHINE_ONLY}), f"{route}, {mark}")
+                r = await client.get("/paintaplate/browse", params={"path": self.d})
+                self.assertEqual((r.status, [i["name"] for i in (await r.json())["items"]]), (200, ["clip.mp4"]))
+                r = await client.get("/paintaplate/browse", params={"path": "listener"}, headers={"X-Forwarded-For": "203.0.113.7"})
+                self.assertEqual(r.status, 200, "a page path passes through a proxy, as before")
+                with mock.patch.object(folders, "listens", lambda: ["0.0.0.0"]):
+                    r = await client.get("/paintaplate/stat", params={"path": self.clip})
+                    self.assertEqual((r.status, await r.json()), (403, {"error": folders.THIS_MACHINE_ONLY}))
+        with HERE_ONLY:
+            asyncio.run(run())
 
 
 if __name__ == "__main__":
