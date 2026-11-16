@@ -63,6 +63,26 @@
     0
    ],
    "upscale_method": "lanczos",
+   "width": 0,
+   "height": 0,
+   "crop": "disabled"
+  },
+  "_meta": {
+   "title": "The window at the size SeedVR2 restores from",
+   "slots": {
+    "width": "source_width",
+    "height": "source_height"
+   }
+  }
+ },
+ "5": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "image": [
+    "4",
+    0
+   ],
+   "upscale_method": "lanczos",
    "width": 3840,
    "height": 2160,
    "crop": "disabled"
@@ -75,37 +95,37 @@
    }
   }
  },
- "5": {
+ "6": {
   "class_type": "VAELoader",
   "inputs": {
    "vae_name": "seedvr2_ema_vae_fp16.safetensors"
   }
  },
- "6": {
+ "7": {
   "class_type": "UNETLoader",
   "inputs": {
    "unet_name": "seedvr2_7b_fp16.safetensors",
    "weight_dtype": "default"
   }
  },
- "7": {
+ "8": {
   "class_type": "SeedVR2Preprocess",
   "inputs": {
    "resized_images": [
-    "4",
+    "5",
     0
    ]
   }
  },
- "8": {
+ "9": {
   "class_type": "VAEEncodeTiled",
   "inputs": {
    "pixels": [
-    "7",
+    "8",
     0
    ],
    "vae": [
-    "5",
+    "6",
     0
    ],
    "tile_size": 512,
@@ -114,11 +134,11 @@
    "temporal_overlap": 8
   }
  },
- "9": {
+ "10": {
   "class_type": "SeedVR2TemporalChunk",
   "inputs": {
    "latent": [
-    "8",
+    "9",
     0
    ],
    "temporal_overlap": 0,
@@ -126,24 +146,24 @@
    "chunking_mode.frames_per_chunk": 21
   }
  },
- "10": {
+ "11": {
   "class_type": "SeedVR2Conditioning",
   "inputs": {
    "model": [
-    "6",
+    "7",
     0
    ],
    "vae_conditioning": [
-    "9",
+    "10",
     0
    ]
   }
  },
- "11": {
+ "12": {
   "class_type": "KSampler",
   "inputs": {
    "model": [
-    "6",
+    "7",
     0
    ],
    "seed": 42,
@@ -152,15 +172,15 @@
    "sampler_name": "euler",
    "scheduler": "simple",
    "positive": [
-    "10",
+    "11",
     0
    ],
    "negative": [
-    "10",
+    "11",
     1
    ],
    "latent_image": [
-    "9",
+    "10",
     0
    ],
    "denoise": 1.0
@@ -172,28 +192,28 @@
    "progress": true
   }
  },
- "12": {
+ "13": {
   "class_type": "SeedVR2TemporalMerge",
   "inputs": {
    "latents": [
-    "11",
+    "12",
     0
    ],
    "temporal_overlap": [
-    "9",
+    "10",
     1
    ]
   }
  },
- "13": {
+ "14": {
   "class_type": "VAEDecodeTiled",
   "inputs": {
    "samples": [
-    "12",
+    "13",
     0
    ],
    "vae": [
-    "5",
+    "6",
     0
    ],
    "tile_size": 512,
@@ -202,15 +222,15 @@
    "temporal_overlap": 8
   }
  },
- "14": {
+ "15": {
   "class_type": "SeedVR2PostProcessing",
   "inputs": {
    "images": [
-    "13",
+    "14",
     0
    ],
    "original_resized_images": [
-    "4",
+    "5",
     0
    ],
    "color_correction_method": "lab"
@@ -221,11 +241,11 @@
    }
   }
  },
- "15": {
+ "16": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
-    "14",
+    "15",
     0
    ],
    "config": "ocio://studio-config-latest",
@@ -244,11 +264,11 @@
    }
   }
  },
- "16": {
+ "17": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
-    "15",
+    "16",
     0
    ],
    "fps": [

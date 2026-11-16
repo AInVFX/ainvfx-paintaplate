@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 
 LONG_SIDE = 3840
+FACTOR = 2  # SeedVR2 restores from at most the target divided by this
 
 
 def target_size(width: int, height: int, long_side: int = LONG_SIDE) -> tuple:
@@ -30,11 +31,20 @@ def target_size(width: int, height: int, long_side: int = LONG_SIDE) -> tuple:
     return 2 * round(long_side * width / height / 2), long_side
 
 
+def source_size(width: int, height: int, target: tuple) -> tuple:
+    """The size SeedVR2 restores from: 0 x 0 (the shot as it is) when the target is FACTOR times its size or more, else
+    the target divided by FACTOR, in even numbers."""
+    if max(width, height) * FACTOR <= max(target):
+        return 0, 0
+    return 2 * round(target[0] / FACTOR / 2), 2 * round(target[1] / FACTOR / 2)
+
+
 def values(shot: str, width: int, height: int, frames: int, label: str = "upscale", first: int = 0, count: int = 42,
            color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16", seed: int = 42) -> dict:
     """The slots of the upscale workflow for one window of `frames` frames."""
     w, h = target_size(width, height)
-    return {"shot": shot, "max_frames": frames, "first": first, "count": max(1, min(count, frames - first)), "width": w,
+    sw, sh = source_size(width, height, (w, h))
+    return {"shot": shot, "max_frames": frames, "source_width": sw, "source_height": sh, "first": first, "count": max(1, min(count, frames - first)), "width": w,
             "height": h, "color_space": color_space, "color_fix": color_fix, "format": fmt, "seed": seed,
             "prefix": f"{label}/upscale/f"}
 
@@ -63,7 +73,7 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
     lines = [f"# Upscale to 4K, one window: `{shot}`", "", "| | |", "| --- | --- |",
              f"| ComfyUI | {url}, job {r['job'][:8]}: {status} |",
              f"| Shot | {w} x {h}, {n} frames; window: frames {v['first'] + 1} to {v['first'] + v['count']} |",
-             f"| Target | {v['width']} x {v['height']}, colour correction {color_fix}, {fmt} |",
+             f"| Target | {v['width']} x {v['height']}, from " + (f"{v['source_width']} x {v['source_height']}" if v["source_width"] else "the shot's size") + f", colour correction {color_fix}, {fmt} |",
              f"| Seconds | {r['seconds']:.1f} |", f"| Peak VRAM | {gb(r['peaks']['vram'])}, the GPU's memory in use |",
              f"| Peak RAM | {gb(r['peaks']['ram'])}, ComfyUI's process |",
              f"| Frames | {len(files)} files" + (f" at {size[0]} x {size[1]}" if size else "") + " |", "",

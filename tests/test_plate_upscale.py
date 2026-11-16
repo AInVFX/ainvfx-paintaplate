@@ -73,6 +73,17 @@ class WindowTool(unittest.TestCase):
         self.assertEqual(upscale_plate.target_size(3840, 1600), (3840, 1600))
         self.assertEqual(upscale_plate.target_size(4096, 2160), (4096, 2160))
 
+    def test_a_shot_larger_than_half_the_target_comes_down_to_it_first(self):
+        self.assertEqual(upscale_plate.source_size(1920, 1080, (3840, 2160)), (0, 0))
+        self.assertEqual(upscale_plate.source_size(1280, 720, (3840, 2160)), (0, 0))
+        self.assertEqual(upscale_plate.source_size(3840, 2160, (3840, 2160)), (1920, 1080))
+        self.assertEqual(upscale_plate.source_size(2560, 1440, (3840, 2160)), (1920, 1080))
+        self.assertEqual(upscale_plate.source_size(4096, 1716, (4096, 1716)), (2048, 858))
+        p = workflow()
+        (sid, source), (_, resized) = of(p, "ImageScale")
+        self.assertEqual(source["_meta"]["slots"], {"width": "source_width", "height": "source_height"})
+        self.assertEqual((source["inputs"]["width"], source["inputs"]["height"], resized["inputs"]["image"]), (0, 0, [sid, 0]))
+
     def test_its_values_fill_every_slot_but_the_config(self):
         v = upscale_plate.values("plates/horse.mp4", 1920, 1080, 121, first=84, count=42)
         self.assertEqual(set(v) | {"config"}, slots(workflow()))
