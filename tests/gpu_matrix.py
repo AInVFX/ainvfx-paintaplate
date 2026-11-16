@@ -614,12 +614,38 @@ def export_media(path, into):
 PAINT_HELD = 0.5  # a paint holds while its matte's changed share on the last frames stays above half of frame 1's
 PAINT_DIFF = 0.08  # a pixel differs from the plate above this, from 0 to 1 on its largest channel
 PAINT_WIDTH = 480  # the width the frames are compared at: enough for a share, and quick on 4K frames
+PAINT_LIKE = 0.5  # the shot still shows the paint when it differs from its base over half the paint's first area, or more
+PAINT_SHRUNK = 0.1  # a paint matte under a tenth of its first area no longer holds the paint
 
 
-def paint_verdict(folder, plate, matte):
+def composite_lost(shot, base, matte, areas, count, small):
+    """Whether the composite lost a paint that the shot still shows: on the last tenth of the plate's frames, the shot
+    differs from its base (the clean plate pass, else the plate) over PAINT_LIKE of the paint's area on the first frame,
+    beyond what differs outside the paint matte on that frame, while the matte covers under PAINT_SHRUNK of it. `areas`:
+    the matte's pixels on each frame. (tail, the shot's share, the matte's largest share, its first share), or None."""
+    import numpy as np
+    from PIL import Image
+    tail = list(range(count - max(1, count // 10), count))
+    m0 = media_frames(matte, {0})[0]
+    pixels = m0.shape[0] * m0.shape[1]
+    first, left = areas[0] / pixels, max(areas[i] for i in tail) / pixels
+    if not first or left >= PAINT_SHRUNK * first:
+        return None
+    a, b = media_frames(shot, {0, *tail}), media_frames(base, {0, *tail})
+    size = (PAINT_WIDTH, max(1, round(PAINT_WIDTH * a[0].shape[0] / a[0].shape[1])))
+    changed = lambda i: np.abs(small(a[i], size, Image.BILINEAR) - small(b[i], size, Image.BILINEAR)).max(axis=2) > PAINT_DIFF  # noqa: E731
+    outside = ~(small(m0, size, Image.NEAREST)[..., 0] > 0.5)
+    noise = float(changed(0)[outside].mean()) if outside.any() else 0.0
+    shown = sum(float(changed(i).mean()) for i in tail) / len(tail) - noise
+    return (tail, shown, left, first) if shown >= PAINT_LIKE * first else None
+
+
+def paint_verdict(folder, plate, matte, shot=None, base=None):
     """Whether a paint holds to the last frames: inside the paint matte (`matte`: stage_movies' « Paint matte »), the share
     of pixels where the export (the case's export.zip) differs from the plate, on the last tenth of the frames that keep a
-    matte, against the first frame. {"held": True, False, or None with no verdict, "text"}."""
+    matte, against the first frame. With `shot` (stage_movies' « Shot ») and `base` (its « Clean plate pass », else the
+    plate), a paint that the shot still shows while its matte shrank away is lost from the composite (composite_lost).
+    {"held": True, False, or None with no verdict, "text"}."""
     import numpy as np
     from PIL import Image
     export = os.path.join(folder, "export.zip")
@@ -634,6 +660,12 @@ def paint_verdict(folder, plate, matte):
         for i in range(count):  # the matte's frames are small: all of them, to find the last frames that keep one
             m = media_frames(matte, {i})[i]
             areas.append(int((m[..., 0] > 127).sum()))
+        lost = shot and areas[0] and composite_lost(shot, base or source, matte, areas, count, small)
+        if lost:
+            tail, shown, left, first = lost
+            return {"held": False, "first": first, "last": left, "text": f"Paint, frames {numbers[tail[0]]} to {numbers[tail[-1]]}: lost from the "
+                    f"composite (the shot shows it on {100 * shown:.1f}% of the frame, the paint matte on {100 * left:.1f}%, against "
+                    f"{100 * first:.1f}% on frame {numbers[0]})."}
         kept = [i for i in range(count) if areas[i]]
         if not kept or kept[0] != 0:
             return {"held": None, "text": "Paint: no verdict. Its matte is empty on the first frame."}
@@ -796,7 +828,8 @@ def run_case(a, name, case, folder):
     result["passed"], result["why"] = matte_verdict(result["passed"], result["why"], result["mattes"])
     if any(s[0] == "paint" for s in case.get("strokes", [])) and case.get("path"):
         try:  # the paint's verdict on the export: a paint that does not hold fails the case
-            result["paint"] = paint_verdict(folder, os.path.join(a.comfy, "input", case["path"]), stage_movies(a.comfy, result["jobs"], history).get("Paint matte"))
+            movies = stage_movies(a.comfy, result["jobs"], history)
+            result["paint"] = paint_verdict(folder, os.path.join(a.comfy, "input", case["path"]), movies.get("Paint matte"), movies.get("Shot"), movies.get("Clean plate pass"))
         except Exception as exc:
             result["paint"] = {"held": None, "text": f"Paint: no verdict. {type(exc).__name__}: {str(exc)[:120]}."}
         result["passed"], result["why"] = paint_result(result["passed"], result["why"], result["paint"])
