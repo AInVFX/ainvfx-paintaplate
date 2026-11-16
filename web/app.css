@@ -223,6 +223,7 @@ dialog .check small { color: var(--muted); }
 body.resizing, body.resizing * { user-select: none; }
 .log { position: relative; grid-area: log; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 12px; border-top: 1px solid var(--line); background: var(--panel); }
 #status { flex: 1; min-width: 0; margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#status.error { color: #ff7b72; } #status.warn { color: #e3b341; } /* a fault, in the log's colours, until the next event that succeeds */
 #status-note { flex: 0 1 auto; min-width: 0; max-width: 55%; margin: 0 12px 0 0; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #history li.shown { outline: 1px dashed var(--muted); outline-offset: -1px; }
 #log-btn { padding: 2px 10px; }

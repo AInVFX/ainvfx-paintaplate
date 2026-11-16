@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, PREVIEW_PARTS, previewCap, previewSize, previewSizes, reconcile, removedNames, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, PREVIEW_PARTS, previewCap, previewSize, previewSizes, reconcile, removedNames, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -521,14 +521,14 @@ function customCache() { // View > Cache memory > Custom…: a size in MB or GB;
     if (typed === false) return;
     const bytes = memoryBytes(typed);
     if (bytes) setCache(bytes);
-    else status(`Cache memory: type a size from ${memoryText(CACHE_LEAST)} to ${memoryText(CACHE_MOST)}, such as 2 GB.`, "hint");
+    else stopped(`Cache memory not changed: "${typed.trim()}" is not a size from ${memoryText(CACHE_LEAST)} to ${memoryText(CACHE_MOST)}.`, "Type a size such as 2 GB.");
   });
 }
 function setCache(bytes) { // View > Cache memory; 0 is Auto
   S.cache = bytes;
   try { localStorage.setItem(CACHE_PREF, String(bytes)); } catch { /* private browsing: the setting lasts for this session */ }
   planCaches();
-  hud(`Cache memory: ${bytes ? memoryText(bytes) : `Auto, ${memoryText(cacheBudget())}`}`, 2500);
+  confirmed(`Cache memory: ${bytes ? memoryText(bytes) : `Auto, ${memoryText(cacheBudget())}`}.`);
 }
 
 function cacheUI() { // the green stripe along the top of the timeline: frames that draw at once
@@ -837,8 +837,7 @@ function askFinish(opt, on) { // a pass that changes what Export writes asks fir
 }
 function setFinish(opt, on) { // each setting keeps its own renders: the render key gains "|hdr"
   if (opt.id === "hdr") S.deliver.hdr = on;
-  log(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Full-size shot: regenerated in scene-linear values, fitted to the plate.\n  Result: half-float EXR frames in ACES2065-1, in the viewer and in Export." : ""}` : `Finish: ${opt.name} off.`);
-  hud(`Finish: ${opt.name} ${on ? "on" : "off"}.`, 1500);
+  confirmed(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Full-size shot: regenerated in scene-linear values, fitted to the plate.\n  Result: half-float EXR frames in ACES2065-1, in the viewer and in Export." : ""}` : `Finish: ${opt.name} off.`, 1500);
   finishUI(); recompose(); touch();
 }
 function openFinish(open = $("#finish").hidden) { // the menu opens under its button; Esc, a click outside or the button closes it
@@ -2970,7 +2969,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   });
   S.exported = r.exported;
   stagesUI(); exportUI();
-  status(`Export: done, in ComfyUI's output folder: ${S.exported.text.split("\n")[0]}.`);
+  confirmed(`Export: done, in ComfyUI's output folder: ${S.exported.text.split("\n")[0]}.`);
   log(`Export v${r.v}: done.\n  ${S.exported.text.split("\n").join("\n  ")}`);
   const parts = S.wantDownload;
   S.wantDownload = null;
@@ -3048,9 +3047,24 @@ function explained(err, what) { // a failure writes one fact in the log; the err
   return Object.assign(new Error(`${fact} ${todo}`), { logged: true });
 }
 
+let statusLevel = ""; // the status line's colour, from its words (logic.logLevel): "error", "warn" or ""
+function showStatus(text, level = logLevel(text)) { // an error shows in red and a warning in amber, with their word, as in the log
+  const el = $("#status");
+  el.textContent = text;
+  el.classList.toggle("error", level === "error"); el.classList.toggle("warn", level === "warn");
+  statusLevel = level;
+}
+
 function status(text, level = "") { // the status line. A fact also goes to the log; a « hint », a sentence that says what to do next, shows here only
-  $("#status").textContent = text;
   if (level !== "hint") log(text);
+  showStatus(text);
+}
+
+function confirmed(text, ms = 2500) { // what the person just did, in the same words in the HUD, on the status line and in the log
+  const head = String(text).split("\n")[0];
+  hud(head, ms);
+  log(text);
+  showStatus(head);
 }
 
 function told(fact, next) { // what happened goes to the log, once; the status line shows it with what to do next
@@ -3073,6 +3087,8 @@ function log(text) { // the log panel only: what happened, one fact per message,
   while (list.children.length > 400) list.firstChild.remove();
   list.scrollTop = list.scrollHeight;
   if (li.className === "error" && list.hidden) $("#log-btn").classList.add("alert"); // an error while the log is closed: the button says so
+  const shown = statusOf(text, statusLevel); // a fault shows on the status line, and the next line that succeeds replaces it
+  if (shown) showStatus(shown.text, shown.level);
   const hint = missingFileHint(text); // a line that names a missing model file: the status line adds what to do
   if (hint) status(`${String(text).split("\n")[0]} ${hint}`, "hint");
 }

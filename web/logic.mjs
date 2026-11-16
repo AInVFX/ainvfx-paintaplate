@@ -597,6 +597,17 @@ export function logLevel(text) { // a log message's colour, from its words: red 
   return starts("Error: ") ? "error" : starts("Warning: ") ? "warn" : "";
 }
 
+// What the status line shows once the log writes `text` (choices 24 and 25), or null to leave it as it is. An error or a
+// warning shows by its first line that starts with its word, in its colour (logLevel). A line that succeeds replaces a
+// fault that is over (`shown`: the status line's level), in the normal colour, unless it is bookkeeping. Every other event
+// reaches the status line from the code that makes it, with what to do next.
+const BOOKKEEPING = /^(Frame cache|Viewer|Played|Memory profile|Working sizes|Native frames|Plate under the edits|Job index off)\b/;
+export function statusOf(text, shown = "") {
+  const lines = String(text).split("\n"), level = logLevel(text), word = level === "error" ? "Error: " : "Warning: ";
+  if (level) return { text: lines.map((l) => l.trim()).find((l) => l.startsWith(word)), level };
+  return shown && !BOOKKEEPING.test(lines[0]) ? { text: lines[0], level: "" } : null;
+}
+
 export function workflowClasses(prompt) { // the node classes an API workflow holds, once each, sorted
   return [...new Set(Object.values(prompt).filter((n) => n?.class_type).map((n) => n.class_type))].sort();
 }

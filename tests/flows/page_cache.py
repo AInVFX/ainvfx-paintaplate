@@ -16,8 +16,8 @@ def run(browser, port, U):
     page.wait_for_function("document.querySelector('#ask').open", timeout=5000)
     U.check(page.is_visible("#ask-field"), "Custom… asks for the size in a field")
     page.fill("#ask-field", "1.5 GB"); page.keyboard.press("Enter")
-    U.check(U.poll(page, lambda: page.text_content("#hud") == "Cache memory: 1.5 GB", 5) and page.evaluate(KEPT) == "1500000000",
-            f"Enter sets 1.5 GB, and the next session keeps it: {page.text_content('#hud')!r}, {page.evaluate(KEPT)}")
+    U.check(U.poll(page, lambda: page.text_content("#hud") == page.text_content("#status") == "Cache memory: 1.5 GB.", 5) and page.evaluate(KEPT) == "1500000000",
+            f"Enter sets 1.5 GB, the HUD and the status line say so in the same words, and the next session keeps it: {page.text_content('#hud')!r}, {page.evaluate(KEPT)}")
     page.click("#view", button="right")  # as U.menu, with the row found by its text: a ticked row's name holds its tick
     for label in ("View", "Cache memory"):
         page.locator("#ctx li.group > span:first-child", has_text=re.compile(f"^{label}$")).first.hover()
@@ -29,6 +29,18 @@ def run(browser, port, U):
     page.fill("#ask-field", "5 TB"); page.click("#ask-yes")
     U.check(U.poll(page, lambda: "from 128 MB to 32 GB" in page.text_content("#status"), 5) and page.evaluate(KEPT) == "1500000000",
             f"a size outside 128 MB to 32 GB changes nothing, and the status line says what to type: {page.text_content('#status')!r}")
+    said = page.text_content("#status")
+    U.check("error" in (page.get_attribute("#status", "class") or "").split() and said.startswith('Error: Cache memory not changed: "5 TB"')
+            and said.endswith("Type a size such as 2 GB.") and not any("Type a size" in t for t in U.log_lines(page)),
+            f"the fault shows in red with its word, and what to type stays out of the log: {said!r}")
+    page.click("#view", button="right")
+    for label in ("View", "Cache memory"):
+        page.locator("#ctx li.group > span:first-child", has_text=re.compile(f"^{label}$")).first.hover()
+    page.locator("#ctx [role=menuitemcheckbox]", has_text="Custom…").click()
+    page.wait_for_function("document.querySelector('#ask').open", timeout=5000)
+    page.fill("#ask-field", "1.5 GB"); page.keyboard.press("Enter")
+    U.check(U.poll(page, lambda: page.text_content("#status") == "Cache memory: 1.5 GB.", 5) and "error" not in (page.get_attribute("#status", "class") or ""),
+            f"a right size then replaces the fault on the status line, in the normal colour: {page.text_content('#status')!r}")
     page.reload()
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     U.open_path(page, "plates/desk.mp4")
