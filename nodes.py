@@ -207,7 +207,8 @@ class SavePlate(io.ComfyNode):
             description="Writes frames in the plate's own format: same file type, bit depth, frame numbers, "
                         "colour tags, timecode and audio. For EXR, every other layer and header attribute "
                         "is kept, and the data window grows only to hold an edit outside it. The plate's own "
-                        "alpha is kept as it is. Outside 'changed', the exact source pixels are written back.",
+                        "alpha is kept as it is. Outside 'changed', the exact source pixels are written back. Frames of "
+                        "another size are written at their own size, in the same format, with none of the source's pixels.",
             is_output_node=True,
             inputs=[
                 io.Image.Input("images", tooltip="Frames in the plate's colour space."),
@@ -224,7 +225,8 @@ class SavePlate(io.ComfyNode):
 
     @classmethod
     def execute(cls, images, plate, filename_prefix, keep_untouched, changed=None, alpha=None) -> io.NodeOutput:
-        spec = plate
+        spec = plateio.at_size(plate, images.shape[2], images.shape[1])  # frames of another size: Upscale to 4K
+        keep_untouched = keep_untouched and "scaled_from" not in spec
         out_dir = output_folder(filename_prefix)
         os.makedirs(out_dir, exist_ok=True)
         count = min(images.shape[0], spec["frames"])
@@ -262,6 +264,8 @@ class SavePlate(io.ComfyNode):
                 written.append(plateio.write_still(spec, i, rgb, a, keep, out_dir))
             if spec["ext"] == ".exr" and plateio.OpenEXR is None:
                 notes.append("Extra EXR layers not copied: OpenEXR is not installed.")
+        if "scaled_from" in spec:
+            notes.append("Written at {} x {} from a {} x {} plate: no source pixel is kept.".format(spec["width"], spec["height"], *spec["scaled_from"]))
         lines = [f"Save Plate: {len(written)} {'file' if len(written) == 1 else 'files'} written to {out_dir}."] + notes
         if written:
             lines.append("First files: " + ", ".join(os.path.basename(p) for p in written[:3]) + ".")

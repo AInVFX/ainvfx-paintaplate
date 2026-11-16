@@ -414,6 +414,32 @@ def write_exr_like(src_path: str, rgb: np.ndarray, alpha: np.ndarray | None, out
                      for i, p in enumerate(parts_out)]
             OpenEXR.File(parts).write(out_path)
 
+SIZED = ("channels", "dataWindow", "displayWindow", "chunkCount", "type", "name", "tiles", "version")  # header keys of one size
+
+
+def at_size(spec: dict, width: int, height: int) -> dict:
+    """The spec that writes the plate's frames at another size: the same format, codec, bit depth, frame numbers, colour
+    tags, timecode and audio. `scaled_from` holds the plate's size. No source pixel, other EXR channel or own alpha has
+    the new size, so none of them is written. At the plate's own size, the spec itself."""
+    if (width, height) == (spec.get("width"), spec.get("height")):
+        return spec
+    return dict(spec, width=width, height=height, scaled_from=(spec.get("width"), spec.get("height")))
+
+
+def write_exr_scaled(src_path: str, rgb: np.ndarray, alpha: np.ndarray | None, out_path: str) -> None:
+    """Write `rgb` (H, W, 3 float), a frame at another size than the source EXR frame, in the pixel type of the source's
+    RGB channels and with every header attribute of their part that holds at any size: compression, chromaticities,
+    frame rate, timecode and the others. Its windows take the new size."""
+    with OpenEXR.File(src_path, separate_channels=True) as f:
+        part = next(p for p in f.parts if set(RGB_NAMES) <= set(p.channels))
+        dtype = part.channels[RGB_NAMES[0]].pixels.dtype
+        header = {k: v for k, v in dict(part.header).items() if k not in SIZED}
+    chans = {name: np.ascontiguousarray(rgb[..., i], dtype=dtype) for i, name in enumerate(RGB_NAMES)}
+    if alpha is not None:
+        chans["A"] = np.ascontiguousarray(alpha, dtype=dtype)
+    OpenEXR.File(header, chans).write(out_path)
+
+
 def read_native(path: str, with_alpha: bool, eight: bool = False) -> np.ndarray:
     """Read one still frame exactly, as integers (RGB or RGBA): 8 bits for an 8-bit target, else 16.
 
@@ -909,8 +935,16 @@ def write_still(spec: dict, index: int, rgb: np.ndarray, alpha: np.ndarray | Non
     the path. Where `keep` (H, W) holds, the source's exact pixels. The plate's own alpha stays sample for sample, since
     no edit works on it, unless a new `alpha` is given."""
     src, out = spec["files"][index], output_frame_name(spec, index, out_dir)
+    if "scaled_from" in spec and spec["ext"] == ".exr" and OpenEXR is not None:
+        write_exr_scaled(src, rgb, alpha, out)
+        return out
     if spec["ext"] == ".exr" and OpenEXR is not None:
         write_exr_like(src, rgb, alpha, out, keep=keep)
+        return out
+    if "scaled_from" in spec:  # another size: the new frame alone, in the plate's format
+        codec, pix_fmt, options = still_target(spec, alpha is not None)
+        with open(out, "wb") as f:
+            f.write(encode_still(rgb, alpha, codec, pix_fmt, options))
         return out
     own = alpha is None and carries_alpha(spec.get("pix_fmt", ""))
     codec, pix_fmt, options = still_target(spec, alpha is not None or own)
