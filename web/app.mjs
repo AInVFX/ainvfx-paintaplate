@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, colorShares, paintColors, inHues } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, colorShares, paintColors, inHues, shadowBox, shadowOf } from "./logic.mjs";
 import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -2245,6 +2245,7 @@ async function prepare(edit, index, kind) {
   let cap = edit.caption?.key === dimmed ? edit.caption.text : await captionFor(edit, reference, plain, kind);
   if (!cap && asksName(edit.tool, edit.prompt) && edit.caption?.key === plain)
     cap = await captionFor(edit, await uploadCanvas(dimFrame(edit, before, size), `e${edit.id}_${painted(edit)}_dim.png`), dimmed, kind, true);
+  if (cap && edit.tool === "erase" && edit.whole && edit.sam) await joinShadow(edit, before, kind); // its cast shadow, when the caption cites one
   return { before, below, base, reference, cap };
 }
 
@@ -2293,13 +2294,36 @@ async function findWhole(edit, before, kind) { // SAM 3.1 finds the whole object
   const found = Math.max(0, outputFiles("snap", out, "named").length - 1), many = (k, one) => `${k} ${one}${k === 1 ? "" : "s"}`; // the blank frame comes first
   log(`Edit ${num(edit)}: SAM masks, ${objects.length} kept.\n  ${edit.prompt ? `${many(found, "object")} named "${edit.prompt}", ` : ""}${many(picks.length, "stroke point")}.`);
   if (!objects.length) return status(`Edit ${num(edit)}: no single object under the stroke. Clean takes the painted pixels only.`);
-  const sam = canvas(size), d = sam.getContext("2d"), img = d.createImageData(size[0], size[1]);
-  for (let i = 0; i < area; i++) if (objects.some((m) => m[i])) img.data.fill(255, i * 4, i * 4 + 4);
-  d.putImageData(img, 0, 0);
-  edit.sam = snap(sam, [edit.mask.width, edit.mask.height]);
+  const bits = new Uint8Array(area);
+  for (let i = 0; i < area; i++) if (objects.some((m) => m[i])) bits[i] = 1;
+  edit.found = { key: snapKeyOf(edit), bits, size }; // the object alone: its shadow joins it once the caption cites one (joinShadow)
+  edit.sam = samMask(bits, size, edit);
   redrawStrokes(edit);
   render();
   status(`Edit ${num(edit)}: ${edit.prompt || "object"} found under the stroke. Clean takes the whole object.`, "hint");
+}
+
+function samMask(bits, size, edit) { // a SAM mask (0 or 1 per pixel at `size`) as a canvas at the edit's mask size
+  const c = canvas(size), d = c.getContext("2d"), img = d.createImageData(size[0], size[1]);
+  for (let i = 0; i < bits.length; i++) if (bits[i]) img.data.fill(255, i * 4, i * 4 + 4);
+  d.putImageData(img, 0, 0);
+  return snap(c, [edit.mask.width, edit.mask.height]);
+}
+
+async function joinShadow(edit, before, kind) { // the object's cast shadow joins its SAM mask when the caption cites one (logic.shadowOf)
+  const box = shadowBox(edit.caption?.text), found = edit.found;
+  if (!box || !found || found.key !== snapKeyOf(edit) || found.shadow === JSON.stringify(box)) return;
+  const [w, h] = found.size, name = edit.prompt || "object";
+  status(`Edit ${num(edit)}: SAM 3.1 looking for the shadow of the ${name}.`);
+  const frame = await uploadCanvas(snap(before, found.size), `e${edit.id}_shadow.png`);
+  const out = await run("snap", { image: frame, words: "shadow" }, { kind: kind === "edit" ? "snap" : kind, front: true }).done;
+  const shadow = shadowOf({ object: found.bits, box, w, h, shadows: await Promise.all(outputFiles("snap", out, "named").slice(1).map((f) => maskBits(f, found.size))) });
+  found.shadow = JSON.stringify(box); // looked for: Generate after a prefetch does not ask again
+  if (!shadow) return log(`Edit ${num(edit)}: no shadow of the ${name} next to it or under it.\n  Its SAM mask holds the ${name} alone.`);
+  edit.sam = samMask(found.bits.map((v, i) => v | shadow.bits[i]), found.size, edit);
+  redrawStrokes(edit);
+  render();
+  log(`Edit ${num(edit)}: the ${name}'s shadow joins its SAM mask (${Math.round(100 * shadow.share)}% of the ${name}'s area).`);
 }
 
 function footprint(edit) { // where the edit changed the frame, on a coarse grid, one cell wider

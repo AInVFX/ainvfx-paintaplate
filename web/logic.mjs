@@ -755,14 +755,55 @@ export function edgesHeld(after, before, mask, w, h) {
 // the rows, then the columns, never past the frame's edge), without the mask itself. The edit's mask grows by about as much
 // before Klein's pass (app.editSettings: grow, then feather). mask: RGBA at w x h, painted where its red is 128 or more.
 // Returns RGBA, white in the band, as erasedShare and edgesHeld read a mask.
-export function bandBeyond(mask, w, h, reach) {
-  const m = new Uint8Array(w * h), rows = new Uint8Array(w * h), grown = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i++) m[i] = mask[i * 4] >= 128 ? 1 : 0;
+function grownBy(m, w, h, reach) { // `m` (0 or 1 per pixel) grown by `reach` pixels each way, as a square brush
+  const rows = new Uint8Array(w * h), out = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (m[y * w + x]) rows.fill(1, y * w + Math.max(0, x - reach), y * w + Math.min(w - 1, x + reach) + 1);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (rows[y * w + x]) for (let k = Math.max(0, y - reach); k <= Math.min(h - 1, y + reach); k++) grown[k * w + x] = 1;
-  const band = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (rows[y * w + x]) for (let k = Math.max(0, y - reach); k <= Math.min(h - 1, y + reach); k++) out[k * w + x] = 1;
+  return out;
+}
+
+export function bandBeyond(mask, w, h, reach) {
+  const m = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) m[i] = mask[i * 4] >= 128 ? 1 : 0;
+  const grown = grownBy(m, w, h, reach), band = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) if (grown[i] && !m[i]) band.fill(255, i * 4, i * 4 + 4);
   return band;
+}
+
+// ---------- An erase's cast shadow ----------
+// Clean that takes the whole object takes its cast shadow too, when the prompt writer's caption cites one (« the dark cast
+// shadow <shadow_1> »). SAM 3.1 finds the shadows by that word; the object keeps those that meet the caption's box for its
+// shadow and touch its mask (within 1% of the frame's width) or lie under it (their middle below the object's, within its
+// width). A mask over three times the object's area is the scene's shade, not the object's shadow.
+export function shadowBox(text) { // the box of the shadow row that the caption cites, [y_min, x_min, y_max, x_max] on 0..1000, or null
+  const [caption, rows] = splitTable(String(text ?? ""));
+  const row = (rows ?? []).find((r) => r && /shadow/i.test(`${r.id ?? ""} ${r.desc ?? ""}`) && caption.includes(`<${r.id}>`) && validBox(r.src_bbox));
+  return row ? row.src_bbox : null;
+}
+
+export function shadowOf({ object, shadows, box, w, h }) { // { bits, share } of the shadow that joins the object, or null
+  const n = count(object);
+  if (!n || !box) return null;
+  let x0 = w, x1 = -1, sy = 0;
+  for (let i = 0; i < w * h; i++) if (object[i]) { const x = i % w; x0 = Math.min(x0, x); x1 = Math.max(x1, x); sy += Math.floor(i / w); }
+  const near = grownBy(object, w, h, Math.max(1, Math.round(0.01 * w))), [by0, bx0, by1, bx1] = box.map((v, k) => (v / 1000) * (k % 2 ? w : h));
+  const kept = shadows.filter((m) => {
+    let c = 0, mx = 0, my = 0, touches = false, inBox = false;
+    for (let i = 0; i < w * h; i++) {
+      if (!m[i]) continue;
+      const x = i % w, y = Math.floor(i / w);
+      c++; mx += x; my += y;
+      touches ||= near[i] === 1;
+      inBox ||= x >= bx0 && x < bx1 && y >= by0 && y < by1;
+    }
+    return c > 0 && c <= 3 * n && inBox && (touches || (my / c > sy / n && mx / c >= x0 && mx / c <= x1));
+  });
+  if (!kept.length) return null;
+  const bits = new Uint8Array(w * h);
+  for (const m of kept) for (let i = 0; i < w * h; i++) if (m[i]) bits[i] = 1;
+  let added = 0;
+  for (let i = 0; i < w * h; i++) if (bits[i] && !object[i]) added++;
+  return { bits, share: added / n };
 }
 
 // An erase that took more than its object: Klein can remove a neighbour with it, as a fence in front of a barn. On the probes'
