@@ -3479,6 +3479,12 @@ function showHelp(tab = "keys") {
   if (!$("#help").open) $("#help").showModal();
 }
 for (const b of $$("#help [role=tab]")) b.onclick = () => (b.dataset.help === "models" ? showModels() : showHelp(b.dataset.help));
+// A click outside the Help closes it, as Esc does. A modal dialog receives the clicks on its backdrop, outside its box. The
+// press starts outside too, so a drag from a line of the Help that ends outside keeps it open.
+let helpPress = false;
+const outsideBox = (el, e) => { const r = el.getBoundingClientRect(); return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom; };
+$("#help").addEventListener("pointerdown", (e) => (helpPress = e.target === $("#help") && outsideBox($("#help"), e)));
+$("#help").addEventListener("click", (e) => { if (helpPress && e.target === $("#help") && outsideBox($("#help"), e)) $("#help").close(); helpPress = false; });
 
 // ---------- Models and licences (models.mjs, web/models.json) ----------
 // The models behind the result on show, from the workflows that made it, then every model the pack downloads.
