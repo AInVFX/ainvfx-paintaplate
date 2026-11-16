@@ -506,7 +506,7 @@ def read_float(path: str) -> np.ndarray:
 
 
 # What core's decoder reads plane by plane as floats, and what it decodes to 8 bits then divides by 255 (comfy_api's
-# VideoFromFile at ComfyUI e6515b16, the pin in tools/pins.sh); every other format it converts to 32-bit float planes
+# VideoFromFile at ComfyUI 71096d1a, the pin in tools/pins.sh); every other format it converts to 32-bit float planes
 CORE_FLOATS = ("gbrpf16le", "gbrpf16be", "gbrapf16le", "gbrapf16be", "grayf16le", "grayf16be",
                "gbrpf32le", "gbrpf32be", "gbrapf32le", "gbrapf32be", "grayf32le", "grayf32be")
 CORE_BYTES = ("yuvj420p", "yuvj422p", "yuvj444p", "rgb24", "rgba", "pal8")
