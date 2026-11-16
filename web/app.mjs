@@ -2631,8 +2631,8 @@ function preempt() { // Generate: a full-size or export step in its first half s
   const st = S.stage, r = S.piping;
   if (!st || !r) return;
   const def = STAGES.find((x) => x.id === st.id), cls = !def.final ? "preview" : st.id === "export" ? "export" : "full", pct = Math.round(st.progress * 100);
-  if (!stopsForEdit({ cls, progress: st.progress })) return void log(`Render v${r.v}: ${def.label} at ${pct}%, finishing before the new edit.`);
-  log(`Render v${r.v}: ${def.label} stopped at ${pct}% for the new edit. It runs again after it.`);
+  if (!stopsForEdit({ cls, progress: st.progress })) return void log(`Render v${r.v}: ${def.label}: at ${pct}%, finishing before the new edit.`);
+  log(`Render v${r.v}: ${def.label}: stopped at ${pct}% for the new edit. It runs again after it.`);
   cancel(...BACKGROUND);
 }
 
