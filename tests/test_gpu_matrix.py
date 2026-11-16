@@ -654,6 +654,11 @@ class Verdict(unittest.TestCase):
         self.assertEqual(tree["strokes"], [["erase", "", [[0.79, 0.26], [0.83, 0.25], [0.87, 0.27]], 36, {"whole": True}]])
         self.assertNotIn("horse_erase_tree", gpu_matrix.ALL + gpu_matrix.QUICK)
 
+    def test_the_note_describes_the_cases_for_any_reader(self):
+        """The note of gpu_matrix.json says what each case does, with no run's date, machine or version."""
+        note = json.load(open(os.path.join(gpu_matrix.HERE, "gpu_matrix.json")))["note"]
+        self.assertNotRegex(note, r"(?i)\blaptop\b|\b20\d\d\b|\b\d+\.\d+\.\d+\b|\b(?:Oct|Nov|Dec)\b")
+
     def test_every_case_passes_on_its_export(self):
         """No case expects the page to stop before its shot: each one passes when its export downloads."""
         self.assertEqual([n for n, c in gpu_matrix.load_cases().items() if "expect" in c], [])
