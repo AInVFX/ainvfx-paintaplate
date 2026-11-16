@@ -1,5 +1,5 @@
-"""The check of the two options the GPU test puts in the page's address (tests/flows/README.md). ?seed=<n>: every new
-edit starts from seed n, so a run makes the same pictures as the run before. ?index=0: the page takes no job from its job
+"""The check of the two options the GPU test puts in the page's address (tests/flows/README.md). ?seed=<n>: the first new
+edit starts from seed n and each next one from the next number, so a run makes the same pictures as the run before. ?index=0: the page takes no job from its job
 index and writes none to it, so every job runs and is timed, on a machine that ran the same strokes before too. A page
 opened without them finds the index as it was."""
 
@@ -25,13 +25,19 @@ def run(browser, port, U):
             "?index=0: the ingest runs again, though the job index holds it")
     U.check(sum("Job index off" in t for t in lines) == 1 and sum("Seed 7 asked for" in t for t in lines) == 1, "the log names each option once")
     page.evaluate(U.WATCH)
-    page.keyboard.press("p")
+    page.click('.tools [data-tool="paint"]')
     U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)])
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("Composite, preview: done in"), 240000, "preview composite of the edit, with no job index")
     lines = page.evaluate("window.__lines")
     U.check(any(t.startswith("Edit 1:") and "seed 7," in t for t in lines) and any(t.startswith("Render v1:") and "seed 7," in t for t in lines),
             "?seed=7: the new edit and its render start from seed 7")
+    page.click("#new-edit")  # edit 1 closes, so the next strokes make edit 2
+    page.click('.tools [data-tool="paint"]')
+    U.paint_once(page, "a blue fire", [(0.6, 0.4), (0.65, 0.45)])
+    page.keyboard.press("Enter")
+    U.wait_log(page, U.added_line("Edit 2:"), 60000, "the second edit's line")
+    U.check(any(t.startswith("Edit 2:") and "seed 8," in t for t in page.evaluate("window.__lines")), "?seed=7: the second edit starts from seed 8")
     U.check(not any(TAKEN in t for t in lines), "no job of the edit or of its render comes from the job index")
     U.no_errors(errors, "with ?seed= and ?index=0 in the address")
     page.close()

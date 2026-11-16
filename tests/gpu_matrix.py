@@ -260,7 +260,7 @@ def seeds_asked(text):
 def command(a, case, folder):
     """ui_live.py's command for one case: its plate or its fluid shot, its strokes as written, its seed."""
     cmd = [sys.executable, os.path.join(HERE, "ui_live.py"), "--url", a.url, "--comfy", a.comfy, "--out", folder,
-           "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2", *(["--memory", a.memory] if a.memory else []), *(["--graph"] if a.graph else []),
+           "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2", *(["--memory", a.memory] if a.memory else []), *[f"--option={o}" for o in case.get("address", [])], *(["--graph"] if a.graph else []),
            *(["--hdr"] if getattr(a, "hdr", False) or case.get("hdr") else [])]
     cmd += ["--fluid", json.dumps(case["fluid"])] if "fluid" in case else ["--path", case["path"]]
     if case.get("strokes"):
@@ -294,7 +294,8 @@ def matte_areas(comfy, since):
 
 def log_steps(text):
     """The steps the page times, in its log's order: each render step (« Render vN: … took … s »); for a fluid shot its LTX
-    pass (the fluid job after « Fluid vN: »), each step timed (« Fluid vN: SDR to HDR took … s ») and the whole shot."""
+    pass (the fluid job after « Fluid shot vN: started »), each step timed (« Fluid shot vN: SDR to HDR: done in … s ») and the
+    whole shot (« Fluid shot vN: done in … s »)."""
     steps, fluid = [], "?"
     for line in text.splitlines():
         if m := STEP.search(line):
@@ -476,21 +477,18 @@ def erase_verdict(after, before, mask, size, first=1):
     return {**got, "text": f"Clean, frame {first}: {'left' if got['left'] else 'gone'}" + (f" ({detail})." if detail else ".")}
 
 
-def name_asked(marks, log, jobs):
-    """A case that expects the page to ask for an erase's object by name (gpu_matrix.json: « expect »: « name asked »,
-    logic.asksName) passes when the page asked and neither Klein nor LTX ran. (passed, why)."""
-    asked = any(m.startswith("name asked") for m in marks)
-    ran = [what for what, found in (("a Klein pass", re.search(r"Klein (?:edit preview|full size)", log)),
-                                    ("a shot", any(j["name"] == "shot" for j in jobs))) if found]
-    return asked and not ran, "" if asked and not ran else "the page did not ask for the name" if not asked else " and ".join(ran) + " ran"
-
-
 def matte_verdict(passed, why, mattes):
     """(passed, why) once the page's matte summaries are read: a case that passed fails on the first warning of its mattes
     (mathops.follow_summary writes « Warning: … » among its detail lines), and says where to look. Every step can run and
     the export download while the matte lost the object."""
     warned = [line.strip() for m in mattes for line in m.split("\n") if line.strip().startswith("Warning:")]
     return (False, f"{warned[0]} The case fails on this matte warning: check its picture on the sheet.") if passed and warned else (passed, why)
+
+
+def beside(case, folder):
+    """The export of the case that « beside » names, run into the same folder: its column on this case's sheet."""
+    zipped = os.path.join(os.path.dirname(folder), case.get("beside", ""), "export.zip")
+    return [(case["beside"], zipped)] if case.get("beside") and os.path.exists(zipped) else []
 
 
 def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
@@ -581,31 +579,38 @@ def fluid_movies(comfy, jobs, history):
     return {}
 
 
-STAGE_JOBS = (("Clean plate pass", "cleanup"), ("Shot", "shot"), ("Paint matte", "matte"))
-STAGES_SHOWN = (*(title for title, _ in STAGE_JOBS), "Composite")  # the composite is the export, from the case's export.zip
+STAGE_JOBS = (("Clean matte", ("matte",), "matte_a"), ("Clean plate pass", ("cleanup",), None), ("Shot", ("shot", "shotup"), None),
+              ("Paint matte", ("matte",), "matte_b"))  # (title, its jobs, the folder of its files where one job serves two stages)
+STAGES_SHOWN = (*(title for title, *_ in STAGE_JOBS), "Composite")  # the composite is the export, from the case's export.zip
 
 
 def stage_movies(comfy, jobs, history):
-    """The full-size pictures of a render's stages, from the case's last job of each name in STAGE_JOBS and its outputs in
-    ComfyUI's /history: {title: a movie's path, or the image files in order}. A job's movie (PaintAPlate_SaveMovie) comes
-    first, else its frames (PaintAPlate_SaveFrames: the files of its folder whose names start as the first one's). The last
-    « matte » job is the paint's full-size tracking, the last « shot » job the full-size shot. A render of fewer edits that
-    the page finishes in the background can run after them: its jobs have other names (a Clean alone has no shot and no
-    paint matte), and its composite is never read, since the sheet's composite is the export. A stage whose job did not
-    run in this ComfyUI is left out."""
+    """The full-size pictures of a render's stages, from the case's jobs in STAGE_JOBS and their outputs in ComfyUI's
+    /history: {title: a movie's path, or the image files in order}. A job's movie (PaintAPlate_SaveMovie) comes first, else
+    its frames (PaintAPlate_SaveFrames: the files of its folder whose names start as the first one's). A stage is the last
+    job of its name; for the two mattes, the last « matte » job whose files sit in its folder: the page tracks a Clean's
+    edits into matte_a, at the size it tracks an erase (the hole the clean plate pass fills), and the paint into matte_b,
+    the last one at full size. The shot at full size is the last « shot » or « shotup » job (the second stage of a shot
+    in two stages, ?shot=2). A render of fewer edits that the page finishes in the background can run after them: its
+    jobs have other names, and its composite is never read, since the sheet's composite is the export. A stage whose job
+    did not run in this ComfyUI is left out."""
     found = {}
     runs = {pid[:8]: ((entry.get("prompt") or [None, None, {}])[2], entry.get("outputs") or {}) for pid, entry in history.items()}
-    for title, name in STAGE_JOBS:
-        ran = [j["id"] for j in jobs if j["name"] == name and j["id"] in runs]
-        graph, outputs = runs[ran[-1]] if ran else ({}, {})
-        for kind in ("PaintAPlate_SaveMovie", "PaintAPlate_SaveFrames"):
-            files = [f for node, out in sorted(outputs.items()) if (graph.get(node) or {}).get("class_type") == kind for f in out.get("images") or []]
-            if files:
-                first = os.path.join(comfy, "output", *files[0].get("subfolder", "").split("/"), files[0]["filename"])
-                stem = re.match(r"[^0-9_]*", files[0]["filename"]).group(0)
-                found[title] = first if kind == "PaintAPlate_SaveMovie" else \
-                    sorted(f for f in glob.glob(os.path.join(os.path.dirname(first), stem + "*")) if f.lower().endswith(IMAGES))
-                break
+    for title, names, folder in STAGE_JOBS:
+        ran = [j["id"] for j in jobs if j["name"] in names and j["id"] in runs]
+        for job in reversed(ran if folder else ran[-1:]):
+            graph, outputs = runs[job]
+            for kind in ("PaintAPlate_SaveMovie", "PaintAPlate_SaveFrames"):
+                files = [f for node, out in sorted(outputs.items()) if (graph.get(node) or {}).get("class_type") == kind for f in out.get("images") or []]
+                if files:
+                    break
+            if not files or (folder and not re.search(rf"(?:^|/){folder}[^/]*$", files[0].get("subfolder", ""))):
+                continue
+            first = os.path.join(comfy, "output", *files[0].get("subfolder", "").split("/"), files[0]["filename"])
+            stem = re.match(r"[^0-9_]*", files[0]["filename"]).group(0)
+            found[title] = first if kind == "PaintAPlate_SaveMovie" else \
+                sorted(f for f in glob.glob(os.path.join(os.path.dirname(first), stem + "*")) if f.lower().endswith(IMAGES))
+            break
     return found
 
 
@@ -622,12 +627,38 @@ def export_media(path, into):
 PAINT_HELD = 0.5  # a paint holds while its matte's changed share on the last frames stays above half of frame 1's
 PAINT_DIFF = 0.08  # a pixel differs from the plate above this, from 0 to 1 on its largest channel
 PAINT_WIDTH = 480  # the width the frames are compared at: enough for a share, and quick on 4K frames
+PAINT_LIKE = 0.5  # the shot still shows the paint when it differs from its base over half the paint's first area, or more
+PAINT_SHRUNK = 0.1  # a paint matte under a tenth of its first area no longer holds the paint
 
 
-def paint_verdict(folder, plate, matte):
+def composite_lost(shot, base, matte, areas, count, small):
+    """Whether the composite lost a paint that the shot still shows: on the last tenth of the plate's frames, the shot
+    differs from its base (the clean plate pass, else the plate) over PAINT_LIKE of the paint's area on the first frame,
+    beyond what differs outside the paint matte on that frame, while the matte covers under PAINT_SHRUNK of it. `areas`:
+    the matte's pixels on each frame. (tail, the shot's share, the matte's largest share, its first share), or None."""
+    import numpy as np
+    from PIL import Image
+    tail = list(range(count - max(1, count // 10), count))
+    m0 = media_frames(matte, {0})[0]
+    pixels = m0.shape[0] * m0.shape[1]
+    first, left = areas[0] / pixels, max(areas[i] for i in tail) / pixels
+    if not first or left >= PAINT_SHRUNK * first:
+        return None
+    a, b = media_frames(shot, {0, *tail}), media_frames(base, {0, *tail})
+    size = (PAINT_WIDTH, max(1, round(PAINT_WIDTH * a[0].shape[0] / a[0].shape[1])))
+    changed = lambda i: np.abs(small(a[i], size, Image.BILINEAR) - small(b[i], size, Image.BILINEAR)).max(axis=2) > PAINT_DIFF  # noqa: E731
+    outside = ~(small(m0, size, Image.NEAREST)[..., 0] > 0.5)
+    noise = float(changed(0)[outside].mean()) if outside.any() else 0.0
+    shown = sum(float(changed(i).mean()) for i in tail) / len(tail) - noise
+    return (tail, shown, left, first) if shown >= PAINT_LIKE * first else None
+
+
+def paint_verdict(folder, plate, matte, shot=None, base=None):
     """Whether a paint holds to the last frames: inside the paint matte (`matte`: stage_movies' « Paint matte »), the share
     of pixels where the export (the case's export.zip) differs from the plate, on the last tenth of the frames that keep a
-    matte, against the first frame. {"held": True, False, or None with no verdict, "text"}."""
+    matte, against the first frame. With `shot` (stage_movies' « Shot ») and `base` (its « Clean plate pass », else the
+    plate), a paint that the shot still shows while its matte shrank away is lost from the composite (composite_lost).
+    {"held": True, False, or None with no verdict, "text"}."""
     import numpy as np
     from PIL import Image
     export = os.path.join(folder, "export.zip")
@@ -642,6 +673,12 @@ def paint_verdict(folder, plate, matte):
         for i in range(count):  # the matte's frames are small: all of them, to find the last frames that keep one
             m = media_frames(matte, {i})[i]
             areas.append(int((m[..., 0] > 127).sum()))
+        lost = shot and areas[0] and composite_lost(shot, base or source, matte, areas, count, small)
+        if lost:
+            tail, shown, left, first = lost
+            return {"held": False, "first": first, "last": left, "text": f"Paint, frames {numbers[tail[0]]} to {numbers[tail[-1]]}: lost from the "
+                    f"composite (the shot shows it on {100 * shown:.1f}% of the frame, the paint matte on {100 * left:.1f}%, against "
+                    f"{100 * first:.1f}% on frame {numbers[0]})."}
         kept = [i for i in range(count) if areas[i]]
         if not kept or kept[0] != 0:
             return {"held": None, "text": "Paint: no verdict. Its matte is empty on the first frame."}
@@ -782,7 +819,8 @@ def run_case(a, name, case, folder):
     result["nodes"], result["stopped_in"] = node_times(events, graphs, names), running_at_stop(events, graphs, names)
     try:  # the case's pictures: never a reason for the case to fail
         result["sheet"] = sheet(case, folder, os.path.join(a.comfy, "input", case["path"]) if case.get("path") else None,
-                                mask=page_mask(a.comfy, result["jobs"], graphs), judge_at=edit_preview_size(result["log"]))
+                                mask=page_mask(a.comfy, result["jobs"], graphs), judge_at=edit_preview_size(result["log"]),
+                                others=beside(case, folder))
     except Exception as exc:
         result["sheet"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     try:  # a fluid case's keyframes and shot, also never a reason to fail
@@ -801,12 +839,11 @@ def run_case(a, name, case, folder):
     failed = [m for m in result["marks"] if m.startswith("FAILED")] or ([] if marks else ["ui_live.py wrote no marks"])
     done = any(m.startswith("downloaded") for m in result["marks"]) or not case.get("strokes")  # a fluid shot alone has no export
     result["passed"], result["why"] = not failed and done, (failed[0] if failed else "" if done else "the full-size composite was not reached: " + (result["marks"] or ["?"])[-1])
-    if case.get("expect") == "name asked":  # an erase with no words on another object: no Klein pass, no shot (logic.asksName)
-        result["passed"], result["why"] = name_asked(result["marks"], result["log"], result["jobs"])
     result["passed"], result["why"] = matte_verdict(result["passed"], result["why"], result["mattes"])
     if any(s[0] == "paint" for s in case.get("strokes", [])) and case.get("path"):
         try:  # the paint's verdict on the export: a paint that does not hold fails the case
-            result["paint"] = paint_verdict(folder, os.path.join(a.comfy, "input", case["path"]), stage_movies(a.comfy, result["jobs"], history).get("Paint matte"))
+            movies = stage_movies(a.comfy, result["jobs"], history)
+            result["paint"] = paint_verdict(folder, os.path.join(a.comfy, "input", case["path"]), movies.get("Paint matte"), movies.get("Shot"), movies.get("Clean plate pass"))
         except Exception as exc:
             result["paint"] = {"held": None, "text": f"Paint: no verdict. {type(exc).__name__}: {str(exc)[:120]}."}
         result["passed"], result["why"] = paint_result(result["passed"], result["why"], result["paint"])

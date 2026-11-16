@@ -1,11 +1,10 @@
-// Render workstream, wave 5 (R2): time estimates that hold on the laptop. Before a step ever ran on a machine, the page
-// announces logic.stepGuess: the 96 GB card's reference from STAGES, scaled to the plate, then to the card. The rows are the
-// laptop's measures, read from its page logs: 1.11.12 on 12 Nov (w4_1) and the erase at 1.11.10. Every row holds within
-// 25% of its measure, except those OUTSIDE names, each with why.
+// The time a step announces before it ever ran on a machine: logic.stepGuess, the 96 GB GPU's reference from STAGES, scaled
+// to the plate, then to the GPU. The rows are measures on an RTX 4090 Laptop GPU (16 GB of VRAM, 52 GB of RAM), read from the
+// page's log. Every row holds within 25% of its measure, except those OUTSIDE names, each with why.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { SLOWER, stepGuess, stepSizeOf } from "../../web/logic.mjs";
+import { SLOWER, stepGuess, stepSizeOf, timeId } from "../../web/logic.mjs";
 
 const app = readFileSync(new URL("../../web/app.mjs", import.meta.url), "utf8");
 const REF = Object.fromEntries([...app.matchAll(/\{ id: "(\w+)", label: "[^"]*", ref: (\d+)/g)].map((m) => [m[1], Number(m[2])]));
@@ -43,4 +42,13 @@ test("on a 16 GB card a step pays its models' load, so a short plate does not ma
   const short = { ...HORSE, frames: 25 };
   assert.ok(stepGuess("clean", REF.clean, short, "small") > SLOWER.small.lead.ltx);
   assert.deepEqual([stepSizeOf("trackfull", HORSE), stepSizeOf("review", HORSE), stepSizeOf("shot", HORSE)], [[960, 544], [1920, 1088], [640, 352]]);
+});
+
+test("with SDR to HDR on, the full-size composite and the export announce their EXR frames' seconds", () => {
+  for (const [id, took] of [["review", 37.7], ["export", 14.6]]) { // the HDR test plate, made from horse.mp4: its size and frames
+    const guess = stepGuess(id, REF[id], HORSE, "small", true);
+    assert.ok(Math.abs(guess - took) <= 0.25 * took, `${id}: ${guess.toFixed(1)} s announced, ${took} s measured`);
+  }
+  assert.equal(stepGuess("shot", REF.shot, HORSE, "small", true), stepGuess("shot", REF.shot, HORSE, "small"));
+  assert.deepEqual([timeId("review", true), timeId("review", false), timeId("shot", true)], ["review+hdr", "review", "shot"]);
 });

@@ -16,8 +16,8 @@ export function workflowsFor({ tools = [], fluid = false, hdr = false }) {
   if (fluid) w.add("fluid");
   if (t.size) ["prompt", "edit", "comp", "review"].forEach((n) => w.add(n));
   if (t.has("erase")) ["snap", "matte", "clean", "cleanup"].forEach((n) => w.add(n));
-  if (t.has("paint")) ["shot", "matte"].forEach((n) => w.add(n));
-  if (t.has("light")) w.add("shot");
+  if (t.has("paint")) ["shot", "shotup", "matte"].forEach((n) => w.add(n));
+  if (t.has("light")) ["shot", "shotup"].forEach((n) => w.add(n));
   if (hdr && (fluid || t.size)) w.add("hdr");
   return [...w];
 }

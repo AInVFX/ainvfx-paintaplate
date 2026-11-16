@@ -11,12 +11,12 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import {CACHE_LEAST, CACHE_MOST,  askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, PREVIEW_PARTS, previewCap, memoryBytes, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
-import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
+import { CACHE_LEAST, CACHE_MOST, askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, PREVIEW_PARTS, previewCap, memoryBytes, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
-import { askedSeed } from "./logic.mjs"; // the tests: a seed asked for in the address
+import { askedSeed, editSeed, gridGrow } from "./logic.mjs"; // the tests: a seed asked for in the address, and each edit's seed from it
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
 import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, sameMachine, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
 import { readBack } from "./canvas.mjs"; // the viewer: a few pixels of the view, read without moving it off the GPU
@@ -38,10 +38,13 @@ const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-s
 // the erase matte only places the erase pass's box, grown by 1/24 of the width: 640 is enough, at half the time of 960
 const ERASE_TRACK_SIDE = 640;
 const LIVE = { every: 2 }; // the live preview while LTX samples, on every card: from step 1, every other step. Every pass hands its previews to showLive, which alone decides what shows
+const GRID_REACH = Q.get("grid") === "composite"; // ?grid=composite: the clean plate pass erases as far as the composite pastes (logic.gridGrow); by default one block more
+const TWO_STAGE_SHOT = Q.get("shot") === "2"; // ?shot=2: the full-size shot in two stages, at half the working size, then 2 steps at full size from it (shotup)
 const HDR_ON = Q.get("hdr") !== "0"; // SDR to HDR runs whenever its files and nodes are present; ?hdr=0 in the address turns it off
 const HDR_FRAMES = "ACES2065-1"; // the colour space of the SDR-to-HDR frames (HDR_SPACE in tools/build_workflows.py)
 const BLANK_AT_START = Q.get("blank") !== "0"; // with no plate open, a blank plate opens at start, ready for a fluid shot; ?blank=0 starts empty
-const SEED_ASKED = askedSeed(Q.get("seed")); // ?seed=<whole number>, for the tests: every new edit and every new fluid shot starts from it, so a run makes the same pictures again. Without it the page draws each seed
+const SEED_ASKED = askedSeed(Q.get("seed")); // ?seed=<whole number>, for the tests: the first new edit and every new fluid shot start from it, each next edit from the next number (logic.editSeed), so a run makes the same pictures again. Without it the page draws each seed
+let editsSeeded = 0; // the new edits that took a seed from ?seed= so far
 const INDEX_ON = Q.get("index") !== "0"; // ?index=0, for the tests: no job is taken from the job index and none is written to it, so every job runs and is timed
 // The memory profile (logic.memoryProfile): the card decides, unless ?memory=small, medium or large in the address, or the
 // name kept under paintaplate.memory, asks for one
@@ -74,7 +77,7 @@ const RENDERS_WANTED = 6; // sets of edits whose renders go on in the background
 // at most LIGHT.flow of its colour (LIGHT.shade of darkness for a dark colour), so light builds up stroke by stroke and
 // mixed colours add up to white only after a few passes (30 Oct: one stroke of the earlier brush reached white at once).
 const LIGHT = { flow: 0.3, shade: 0.35, spread: 1.6, spacing: 0.25 };
-const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid", "hdr"];
+const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "shotup", "matte", "comp", "review", "export", "warm", "fluid", "hdr"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "hdr", "review", "export"]; // the render's job kinds: Generate and a new plate stop them
 const STOPPED = ["edit", "fluid", "snap", "prefetch", ...BACKGROUND]; // the job kinds a stop ends: none of them is posted until Enter (design rule 13)
 const UPSAMPLER = {}; // Black Forest Labs' system prompts for Klein's upsampler (upsampler.json): table and plain
@@ -1489,7 +1492,7 @@ function prepareSoon(typing = false) { // the draft waits for Generate; SAM and 
 }
 
 function newEdit() {
-  return { id: ++S.ids, tool: S.tool, color: S.color, prompt: "", seed: SEED_ASKED ?? ((Math.random() * 2 ** 31) | 0),
+  return { id: ++S.ids, tool: S.tool, color: S.color, prompt: "", seed: editSeed(SEED_ASKED, editsSeeded++) ?? ((Math.random() * 2 ** 31) | 0),
     strokes: [], on: true, state: "drawing", version: 0, basis: [], results: new Map(),
     paint: canvas(S.plate.work), mask: canvas(S.plate.work), patch: null, foot: null };
 }
@@ -2645,8 +2648,8 @@ function preempt() { // Generate: a full-size or export step in its first half s
   const st = S.stage, r = S.piping;
   if (!st || !r) return;
   const def = STAGES.find((x) => x.id === st.id), cls = !def.final ? "preview" : st.id === "export" ? "export" : "full", pct = Math.round(st.progress * 100);
-  if (!stopsForEdit({ cls, progress: st.progress })) return void log(`Render v${r.v}: ${def.label} at ${pct}%, finishing before the new edit.`);
-  log(`Render v${r.v}: ${def.label} stopped at ${pct}% for the new edit. It runs again after it.`);
+  if (!stopsForEdit({ cls, progress: st.progress })) return void log(`Render v${r.v}: ${def.label}: at ${pct}%, finishing before the new edit.`);
+  log(`Render v${r.v}: ${def.label}: stopped at ${pct}% for the new edit. It runs again after it.`);
   cancel(...BACKGROUND);
 }
 
@@ -2669,6 +2672,7 @@ function idle() { // one render step at a time, from the render queue; the edits
 
 const grow = (w, erase) => Math.max(4, Math.round(w / (erase ? COMPOSITE_GROW.erase : COMPOSITE_GROW.other))); // pixels at width w
 const feather = (w) => Math.max(6, Math.round(w / COMPOSITE_FEATHER));
+const gridAt = (w) => (GRID_REACH ? gridGrow(w, S.plate.spec.width, grow(S.plate.spec.width, true) + feather(S.plate.spec.width)) : 1); // blocks grown at width w
 
 // Every step of a render, in order. `preview` steps run at the preview size, once per size, so going back to a size plays what
 // it made at once. `final` steps run at full size right after them: the passes, then the full-size composite (the review) the viewer plays.
@@ -2702,19 +2706,21 @@ const TIMES_KEY = "paintaplate.times";
 let TIMES = {};
 try { TIMES = JSON.parse(localStorage.getItem(TIMES_KEY) ?? "{}") ?? {}; } catch { TIMES = {}; }
 const stepSize = (id) => stepSizeOf(id, S.plate);
-const stepKey = (id) => timeKey(id, stepSize(id), S.plate.frames, S.memoryProfile.name);
+const stepKey = (id, hdr = false) => timeKey(timeId(id, hdr), stepSize(id), S.plate.frames, S.memoryProfile.name);
+const makesHdr = (skip) => !!skip && !skip.has("hdr"); // a render makes SDR to HDR unless its plan leaves the step out
 
-function estimate(id) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess
-  if (S.took[id]) return S.took[id];
-  const known = TIMES[stepKey(id)];
+function estimate(id, skip) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess. skip: the render's steps left out
+  const hdr = makesHdr(skip);
+  if (S.took[timeId(id, hdr)]) return S.took[timeId(id, hdr)];
+  const known = TIMES[stepKey(id, hdr)];
   if (known?.total) return known.total;
-  return stepGuess(id, STAGES.find((x) => x.id === id).ref, S.plate, S.memoryProfile.name);
+  return stepGuess(id, STAGES.find((x) => x.id === id).ref, S.plate, S.memoryProfile.name, hdr);
 }
 
 async function step(r, id, work, store = r) { // run one step of a render, timed and shown; preview steps keep their result per size
   if (store.done?.[id] !== undefined || r.skip?.has(id)) return;
   if (S.running || S.queued || pickRender() !== r) throw YIELD; // an edit, or a step of a more urgent render, goes first
-  const t0 = performance.now(), behind = r.key === S.heroKey ? "" : ", in the background", guess = Math.round(estimate(id));
+  const t0 = performance.now(), behind = r.key === S.heroKey ? "" : ", in the background", guess = Math.round(estimate(id, r.skip));
   S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step
   stagesUI();
   log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: about ${guess} s${behind}.`);
@@ -2727,11 +2733,11 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   });
   hideLive();
   const dt = (performance.now() - t0) / 1000;
-  TIMES = remember(TIMES, stepKey(id), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
+  TIMES = remember(TIMES, stepKey(id, makesHdr(r.skip)), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
   try { localStorage.setItem(TIMES_KEY, JSON.stringify(TIMES)); } catch { /* a private window: the session's own times still serve */ }
   (store.done ??= {})[id] = dt;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
-  S.took[id] = dt;
+  S.took[timeId(id, makesHdr(r.skip))] = dt;
   S.stage = null;
   log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: done in ${dt.toFixed(1)} s (estimate ${guess} s).`);
   stagesUI();
@@ -2776,7 +2782,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     const at = `${size[0]}x${size[1]}`, kept = (E.sizes[at] ??= {});
     if (kept.clean) return kept;
     const out = await run("clean", { ...common, seed: erases[0].seed, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, prompt: scene,
-      width: size[0], height: size[1], prefix: `${base}/${at}/clean/f`, video_prefix: `${base}/${at}/clean`, live: LIVE.every },
+      width: size[0], height: size[1], grid_grow: gridAt(size[0]), prefix: `${base}/${at}/clean/f`, video_prefix: `${base}/${at}/clean`, live: LIVE.every },
       { kind: "clean", progress, live: showLive }).done;
     return Object.assign(kept, { clean: folderOf("clean", out, "frames"), raw: viewUrl(outputFile("clean", out, "video")) });
   };
@@ -2809,7 +2815,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       if (S.stage) S.stage.part = `stage 2 of 2, upscaled to ${size.join(" × ")}`;
       log(`Render v${r.v}: Clean plate pass, full size: stage 2 of 2, 2 steps at ${size.join(" x ")} from stage 1 at ${low.join(" x ")}.`);
       const out = await run("cleanup", { ...common, seed: erases[0].seed, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, prompt: scene,
-        low: first.clean, width: size[0], height: size[1], prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean`, live: LIVE.every },
+        low: first.clean, width: size[0], height: size[1], grid_grow: gridAt(size[0]), prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean`, live: LIVE.every },
         { kind: "clean", progress: (f) => progress(0.5 + f / 2), live: showLive }).done;
       E.full = { clean: folderOf("cleanup", out, "frames"), raw: viewUrl(outputFile("cleanup", out, "video")) };
       Object.assign(store, E.full);
@@ -2817,11 +2823,21 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     if (erase && store.cleanRaw === undefined) store.cleanRaw = store.raw; // the erase pass's own movie: Ripple's shot takes `raw` next
     await step(r, final ? "full" : "shot", async (progress) => {
       const plate = erase ? { path: store.clean, color_space: "@model" } : { path: p.path };
-      const out = await run("shot", { ...common, ...plate, hero: r.hero, prompt, width: size[0], height: size[1],
-        prefix: `${base}/${dir}/shot/f`, video_prefix: `${base}/${dir}/raw`, live: LIVE.every },
-        { kind: "shot", progress, live: showLive }).done;
-      store.shot = folderOf("shot", out, "frames");
-      store.raw = viewUrl(outputFile("shot", out, "video"));
+      const values = { ...common, ...plate, hero: r.hero, prompt, prefix: `${base}/${dir}/shot/f`, video_prefix: `${base}/${dir}/raw`, live: LIVE.every };
+      let name = "shot", out;
+      if (final && TWO_STAGE_SHOT) { // Lightricks' two stages: the shot at half the working size, then 2 steps at full size from it
+        const low = stageOne(p.work);
+        if (S.stage) S.stage.part = `stage 1 of 2 at ${low.join(" × ")}`;
+        const first = await run("shot", { ...values, width: low[0], height: low[1], prefix: `${base}/${dir}/shot_low/f`, video_prefix: `${base}/${dir}/raw_low` },
+          { kind: "shot", progress: (f) => progress(f / 2), live: showLive }).done;
+        if (S.stage) S.stage.part = `stage 2 of 2, upscaled to ${size.join(" × ")}`;
+        log(`Render v${r.v}: Shot, full size: stage 2 of 2, 2 steps at ${size.join(" x ")} from stage 1 at ${low.join(" x ")}.`);
+        name = "shotup";
+        out = await run(name, { ...values, low: folderOf("shot", first, "frames"), width: size[0], height: size[1] },
+          { kind: "shot", progress: (f) => progress(0.5 + f / 2), live: showLive }).done;
+      } else out = await run(name, { ...values, width: size[0], height: size[1] }, { kind: "shot", progress, live: showLive }).done;
+      store.shot = folderOf(name, out, "frames");
+      store.raw = viewUrl(outputFile(name, out, "video"));
     }, store);
     return carry ? store.shot : store.clean;
   };
@@ -3029,9 +3045,9 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
   for (const st of STAGES) {
     if (st.final && !finalToo) break;
     if (skip.has(st.id) || doneOf(r, st) !== undefined || (st.onDemand && !exporting)) continue;
-    const est = estimate(st.id);
+    const est = estimate(st.id, skip);
     if (S.stage?.id === st.id && S.stage.key === S.heroKey) {
-      t += stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(st.id)]?.tail ?? null });
+      t += stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(st.id, makesHdr(skip))]?.tail ?? null });
     } else t += est;
   }
   return t;
@@ -3076,7 +3092,7 @@ function stagesUI() {
     li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time"></span>';
     li.children[1].textContent = st.label;
     li.children[2].textContent = from ? `from v${from}` : took !== undefined ? `${Math.round(took)} s` : now ? `${Math.round(S.stage.progress * 100)}%`
-      : later(st) ? "on Export" : `~${Math.round(estimate(st.id))} s`;
+      : later(st) ? "on Export" : `~${Math.round(estimate(st.id, skip))} s`;
     const movie = took !== undefined ? passMovie(st.id, r, previewOf(r), { log: logSpace(), data: matteSpace() }) : null;
     if (movie) {
       pick(li, st.id, st.label.toLowerCase());
@@ -3096,9 +3112,9 @@ function timelineBar() { // the line under the timeline: the preview in gold, th
   bar.className = "tl-render";
   if (!S.plate || !S.heroKey || !r) { bar.style.width = "0"; if (S.heroKey && stale()) bar.classList.add("stale"); return; }
   const steps = STAGES.filter((st) => !r.skip?.has(st.id) && (!st.onDemand || S.wantDownload || r.exported));
-  const total = steps.reduce((a, st) => a + estimate(st.id), 0);
-  let done = steps.reduce((a, st) => a + (doneOf(r, st) !== undefined ? estimate(st.id) : 0), 0);
-  if (S.stage?.key === S.heroKey) done += estimate(S.stage.id) * S.stage.progress;
+  const total = steps.reduce((a, st) => a + estimate(st.id, r.skip), 0);
+  let done = steps.reduce((a, st) => a + (doneOf(r, st) !== undefined ? estimate(st.id, r.skip) : 0), 0);
+  if (S.stage?.key === S.heroKey) done += estimate(S.stage.id, r.skip) * S.stage.progress;
   bar.style.width = `${Math.round((done / Math.max(1, total)) * 100)}%`;
   if (r.review) bar.classList.add("ready");
   else if (previewOf(r)?.comp) bar.classList.add("export");

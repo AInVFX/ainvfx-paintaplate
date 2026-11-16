@@ -112,8 +112,8 @@ class Seeds(unittest.TestCase):
         self.assertNotIn("--seed", gpu_matrix.command(a, {"path": "plates/horse.mp4"}, "/out/x"), "a case without a seed: the page draws one")
 
     def test_the_report_names_the_seed_asked_for_and_the_seeds_of_the_page_s_log(self):
-        log = ('04:35:35 PMEdit 1: Clean "", seed 1017942128, whole object on, 1 stroke, over 0 edits.\n'
-               "04:36:10 PMRender v1: 1 edit (Clean 1), seed 1017942128, shot preview at 640 x 352.\n")
+        log = ('04:35:35 PM Edit 1: Clean "", seed 1017942128, whole object on, 1 stroke, over 0 edits.\n'
+               "04:36:10 PM Render v1: 1 edit (Clean 1), seed 1017942128, shot preview at 640 x 352.\n")
         named = gpu_matrix.read_log(log)["seeds"]
         self.assertEqual(named, ["1017942128"])
         self.assertEqual(gpu_matrix.seed_note(1017942128, named), "Seed asked for: 1017942128. In the page's log: 1017942128.")
@@ -207,10 +207,10 @@ class Run(unittest.TestCase):
             self.assertIn(line, report)
 
     def test_the_report_reads_the_render_s_lines_in_their_old_and_new_words(self):
-        old = ("11:02:07 PMRender v1: Track the erase (about 12 s)\n11:02:36 PMRender v1: Track the erase took 28.7 s\n"
-               "11:02:40 PMMemory profile small: 16 GB of VRAM, 52 GB of RAM. Models load one at a time\n11:02:41 PMLive preview is off: no frames\n")
-        new = ("11:02:07 PMRender v1: Track the erase: about 12 s.\n11:02:36 PMRender v1: Track the erase: done in 28.7 s (estimate 12 s).\n"
-               "11:02:40 PMMemory profile: small (16 GB of VRAM, 52 GB of RAM).\n  Models load one at a time.\n11:02:41 PMWarning: live preview off: no frames.\n")
+        old = ("11:02:07 PM Render v1: Track the erase (about 12 s)\n11:02:36 PM Render v1: Track the erase took 28.7 s\n"
+               "11:02:40 PM Memory profile small: 16 GB of VRAM, 52 GB of RAM. Models load one at a time\n11:02:41 PM Live preview is off: no frames\n")
+        new = ("11:02:07 PM Render v1: Track the erase: about 12 s.\n11:02:36 PM Render v1: Track the erase: done in 28.7 s (estimate 12 s).\n"
+               "11:02:40 PM Memory profile: small (16 GB of VRAM, 52 GB of RAM).\n  Models load one at a time.\n11:02:41 PM Warning: live preview off: no frames.\n")
         for log in (old, new):
             r = gpu_matrix.read_log(log)
             self.assertEqual((r["steps"], r["announced"]), ([("v1 Track the erase", 28.7)], {"v1 Track the erase": 12}))
@@ -251,18 +251,17 @@ class Run(unittest.TestCase):
         self.assertEqual(sent, [("http://127.0.0.1:8188/free", "POST", {"unload_models": True, "free_memory": True})])
 
 
-@unittest.skipUnless(importlib.util.find_spec("playwright"), "tests/ui_live.py imports Playwright")
 class Live(unittest.TestCase):
     """tests/ui_live.py: the two rules that read the page's History and its render note."""
 
     def test_a_fluid_shot_has_its_own_history_row(self):
-        """fluid_1080_edit waited 600 s for one row after its first edit, and History held two (pod, 11 Nov)."""
+        """A fluid shot has a row of its own in History: a fluid shot and one edit make two rows."""
         import ui_live
         self.assertEqual([ui_live.rows(0, None), ui_live.rows(1, None)], [1, 2])
         self.assertEqual(ui_live.rows(0, {"size": [1920, 1088]}), 2)
 
     def test_a_stage_is_marked_once(self):
-        """The laptop's horse_cow of 12 Nov wrote 61 marks for two stages: the estimate in the note changes every second."""
+        """Each stage is marked once, while the estimate in the render note changes every second."""
         import ui_live
         notes = ["preview about 14 s left", "preview about 3 s left", "preview almost ready", "full size about 8 min 20 s left",
                  "full size about 2 min 50 s left", "full size ready"]
@@ -338,9 +337,9 @@ class Tools(unittest.TestCase):
         self.assertNotIn("keyboard.press(key)", tool)
 
     def test_a_matte_line_is_read_whatever_its_first_word(self):
-        log = ("11:02:36 PMClean matte: tracked on 76 of 121 frames.\n  Object stands still: its place of frame 0 added where the plate shows it, on 68 frames.\n"
+        log = ("11:02:36 PM Clean matte: tracked on 76 of 121 frames.\n  Object stands still: its place of frame 0 added where the plate shows it, on 68 frames.\n"
                "  Removed: areas where the plate stands in front of the object, on 77 frames.\n"
-               "11:02:40 PMRender v1: Track the object took 26.2 s\n"
+               "11:02:40 PM Render v1: Track the object took 26.2 s\n"
                "23:02:37Paint matte (full): tracked on 54 of 121 frames.\n")
         mattes = gpu_matrix.read_log(log)["mattes"]
         self.assertEqual([m.split(":")[0] for m in mattes], ["Clean matte", "Paint matte (full)"])
@@ -348,30 +347,33 @@ class Tools(unittest.TestCase):
 
 
 class ReportLines(unittest.TestCase):
-    """What the report says (wave 5, R9): a fluid shot's steps, the RAM a first job can read, the page's figure for an erase."""
+    """What the report says: a fluid shot's steps, the RAM a first job can read, the page's figure for an erase."""
 
-    FLUID = ("11:38:49 PMFluid v1: 2 keyframe(s) at 1, 121, 1280 x 704, 121 frames at 24 fps, seed 104\n"
-             "11:38:49 PMFluid shot v1: one LTX 2.5 pass with ainvfx-fluid\n"
-             "11:40:38 PMfluid fd2d3d7a: done in 108.9 s (29 nodes, 4 previews)\n"
-             "11:40:38 PMFluid shot v1: SDR to HDR, one LTX 2.5 pass with Lightricks' IC-LoRA\n"
-             "11:43:33 PMhdr 647d4dd4: done in 175.3 s (29 nodes, 3 from ComfyUI's cache, 4 previews)\n"
-             "11:43:33 PMFluid v1: SDR to HDR took 175.3 s: half-float EXR frames in output:paintaplate/x/fluid_v1/hdr\n"
-             "11:43:33 PMFluid v1: done in 284.3 s: 1 file(s) in /data/ComfyUI/output/paintaplate/x/fluid_v1/plate\n")
+    FLUID = ("11:38:49 PM Fluid shot v1: started.\n"
+             "  2 keyframes, at frames 1, 121.\n"
+             "  1280 x 704, 121 frames at 24 fps.\n"
+             "  Seed 104, prompt \"a wild fire, flames rising\".\n"
+             "11:40:38 PM fluid fd2d3d7a: done in 108.9 s (29 nodes, 4 previews).\n"
+             "11:43:33 PM hdr 647d4dd4: done in 175.3 s (29 nodes, 3 from ComfyUI's cache, 4 previews).\n"
+             "11:43:33 PM Fluid shot v1: SDR to HDR: done in 175.3 s.\n"
+             "  Half-float EXR frames in output:paintaplate/x/fluid_v1/hdr.\n"
+             "11:43:33 PM Fluid shot v1: done in 284.3 s.\n"
+             "  Save Plate: 1 file written to /data/ComfyUI/output/paintaplate/x/fluid_v1/plate.\n")
 
     def test_a_fluid_shot_has_its_steps(self):
-        """fluid_720 on the laptop, 12 Nov: its table of steps was empty, as only « Render vN: … took » lines were read."""
+        """The page's lines for a fluid shot give its steps: the LTX pass (the fluid job), SDR to HDR and the whole shot."""
         self.assertEqual(gpu_matrix.read_log(self.FLUID)["steps"], [("fluid v1 LTX pass", 108.9), ("fluid v1 SDR to HDR", 175.3), ("fluid v1 in all", 284.3)])
 
     def test_render_steps_keep_their_names_and_order(self):
-        log = "11:02:36 PMRender v1: Track the erase took 28.7 s\n11:03:35 PMRender v1: Erase pass, preview took 59.1 s\n"
+        log = "11:02:36 PM Render v1: Track the erase took 28.7 s\n11:03:35 PM Render v1: Erase pass, preview took 59.1 s\n"
         self.assertEqual(gpu_matrix.read_log(log)["steps"], [("v1 Track the erase", 28.7), ("v1 Erase pass, preview", 59.1)])
 
     def test_an_erase_gives_the_page_s_figure(self):
-        log = "11:02:06 PMEdit 1: the object left the first frame (59% of it changed)\n"
+        log = "11:02:06 PM Edit 1: the object left the first frame (59% of it changed)\n"
         self.assertEqual(gpu_matrix.read_log(log)["figures"], ["Edit 1: the object left the first frame (59% of it changed)"])
-        held = "11:02:06 PMEdit 1: the object may still be there (17% of it changed, edges held at 0.62)\n"  # the page's line since wave 7 (logic.leftLines)
+        held = "11:02:06 PM Edit 1: the object may still be there (17% of it changed, edges held at 0.62)\n"  # the page's line since wave 7 (logic.leftLines)
         self.assertEqual(gpu_matrix.read_log(held)["figures"], ["Edit 1: the object may still be there (17% of it changed, edges held at 0.62)"])
-        warned = "11:02:06 PMWarning: edit 1, the object may still be there (17% of it changed, edges held at 0.62).\n"  # the page's line as a warning
+        warned = "11:02:06 PM Warning: edit 1, the object may still be there (17% of it changed, edges held at 0.62).\n"  # the page's line as a warning
         self.assertEqual(gpu_matrix.read_log(warned)["figures"], ["Warning: edit 1, the object may still be there (17% of it changed, edges held at 0.62)"])
 
     def test_without_fresh_a_first_job_can_read_the_case_before(self):
@@ -403,8 +405,8 @@ class Estimates(unittest.TestCase):
     """Each step beside what the page announced before it started (wave 5, R2): a GPU run checks the estimates."""
 
     def test_the_report_holds_each_step_against_its_announcement(self):
-        log = ("11:02:07 PMRender v1: Track the erase (about 12 s)\n11:02:36 PMRender v1: Track the erase took 28.7 s\n"
-               "11:03:36 PMRender v1: Composite, preview (about 8 s) in the background\n11:03:47 PMRender v1: Composite, preview took 9.0 s\n")
+        log = ("11:02:07 PM Render v1: Track the erase (about 12 s)\n11:02:36 PM Render v1: Track the erase took 28.7 s\n"
+               "11:03:36 PM Render v1: Composite, preview (about 8 s) in the background\n11:03:47 PM Render v1: Composite, preview took 9.0 s\n")
         info = gpu_matrix.read_log(log)
         self.assertEqual(info["announced"], {"v1 Track the erase": 12, "v1 Composite, preview": 8})
         self.assertEqual(gpu_matrix.estimates_off(info["steps"], info["announced"]), ["v1 Track the erase: about 12 s, done in 28.7 s"])
@@ -421,7 +423,6 @@ class NodeClock(unittest.TestCase):
         self.assertEqual(gpu_matrix.node_times(events, {pid: graph}), {"b05b5b84": [
             ("SamplerCustomAdvanced", 506.0), ("VAEDecodeTiled", 31.0), ("CLIPTextEncode", 2.5), ("PaintAPlate_SavePlate", 0.5)]})
 
-    @unittest.skipUnless(importlib.util.find_spec("playwright"), "tests/ui_live.py imports Playwright")
     def test_ui_live_keeps_the_executing_messages_only(self):
         spec = importlib.util.spec_from_file_location("ui_live_clock", os.path.join(gpu_matrix.HERE, "ui_live.py"))
         tool = importlib.util.module_from_spec(spec)
@@ -655,11 +656,55 @@ class Verdict(unittest.TestCase):
         self.assertEqual((tree["path"], tree["seed"], tree.get("expect")), (plain["path"], plain["seed"], None))  # the tree goes, as the barn does
         self.assertEqual(tree["strokes"], [["erase", "", [[0.79, 0.26], [0.83, 0.25], [0.87, 0.27]], 36, {"whole": True}]])
         self.assertNotIn("horse_erase_tree", gpu_matrix.ALL + gpu_matrix.QUICK)
-        asked = ["page ready: Ready.", "name asked: Edit 2: the prompt writer took the stroke for another object, so nothing ran"]
-        self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: asking Klein's prompt writer", [{"name": "prompt"}]), (True, ""))
-        self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: Klein edit preview, 768 x 432, 16 steps.", []), (False, "a Klein pass ran"))
-        self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: Klein edit preview, 768 x 432, 16 steps.", []), (False, "a Klein pass ran"))
-        self.assertEqual(gpu_matrix.name_asked(asked[:1], "", [{"name": "shot"}]), (False, "the page did not ask for the name"))
+
+    def test_the_note_describes_the_cases_for_any_reader(self):
+        """The note of gpu_matrix.json says what each case does, with no run's date, machine or version."""
+        note = json.load(open(os.path.join(gpu_matrix.HERE, "gpu_matrix.json")))["note"]
+        self.assertNotRegex(note, r"(?i)\blaptop\b|\b20\d\d\b|\b\d+\.\d+\.\d+\b|\b(?:Oct|Nov|Dec)\b")
+
+    def test_each_case_s_plate_comes_from_a_script_of_the_pack(self):
+        """An MP4 of plates/ comes from the dataset through get_plates.py; the two other plates from the scripts that make them."""
+        made = {"plates/horse_hdr": "hdr_plate.py", "plates/tos_05_4a": "tos_plate.py"}
+        paths = {c["path"] for c in gpu_matrix.load_cases().values() if "path" in c}
+        self.assertEqual({p for p in paths if not (p.startswith("plates/") and p.endswith(".mp4"))}, set(made))
+        for path, script in made.items():
+            self.assertIn(os.path.basename(path), open(os.path.join(gpu_matrix.HERE, script)).read(), script)
+
+    def test_two_more_tries_paint_the_robotic_arm_on_the_same_exr_plate_outside_quick_and_all(self):
+        cases = gpu_matrix.load_cases()
+        arm, clean, rig = cases["tos_arm"], cases["tos_arm_clean"], cases["tos_arm_rig"]
+        for case in (clean, rig):
+            self.assertEqual((case["path"], case["seed"], case["hdr"]), (arm["path"], arm["seed"], True))
+        self.assertEqual([s[0] for s in clean["strokes"]], ["erase", "paint"])  # the rig goes first, then the same Paint
+        self.assertEqual((clean["strokes"][0][2], clean["strokes"][1]), (arm["strokes"][0][2], arm["strokes"][0]))
+        self.assertEqual(rig["strokes"][0][2], arm["strokes"][0][2])
+        self.assertGreater(rig["strokes"][0][3], arm["strokes"][0][3])  # a wider brush covers what is strapped on the arm
+        self.assertFalse({"tos_arm_clean", "tos_arm_rig"} & set(gpu_matrix.ALL + gpu_matrix.QUICK))
+
+    def test_the_two_stage_shot_case_is_horse_cow_with_shot_2_and_horse_cow_beside_it(self):
+        import ui_live
+        cases = gpu_matrix.load_cases()
+        two, cow = cases["horse_cow_two"], cases["horse_cow"]
+        self.assertEqual((two["path"], two["seed"], two["strokes"], two["address"], two["beside"]), (cow["path"], cow["seed"], cow["strokes"], ["shot=2"], "horse_cow"))
+        self.assertNotIn("horse_cow_two", gpu_matrix.ALL + gpu_matrix.QUICK)
+        self.assertTrue(ui_live.address("http://h", seed=101, options=["shot=2"]).endswith("seed=101&shot=2"))
+        tmp = tempfile.mkdtemp(prefix="beside_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        os.makedirs(os.path.join(tmp, "horse_cow"))
+        self.assertEqual(gpu_matrix.beside(two, os.path.join(tmp, "horse_cow_two")), [])  # horse_cow made no export
+        open(os.path.join(tmp, "horse_cow", "export.zip"), "w").close()
+        self.assertEqual(gpu_matrix.beside(two, os.path.join(tmp, "horse_cow_two")), [("horse_cow", os.path.join(tmp, "horse_cow", "export.zip"))])
+
+    def test_the_grid_case_is_horse_erase_with_grid_composite_and_horse_erase_beside_it(self):
+        cases = gpu_matrix.load_cases()
+        grid, plain = cases["horse_erase_grid"], cases["horse_erase"]
+        self.assertEqual((grid["path"], grid["seed"], grid["strokes"]), (plain["path"], plain["seed"], plain["strokes"]))
+        self.assertEqual((grid["address"], grid["beside"], grid["stage_frames"]), (["grid=composite"], "horse_erase", [101, 111, 121]))
+        self.assertNotIn("horse_erase_grid", gpu_matrix.ALL + gpu_matrix.QUICK)
+
+    def test_every_case_passes_on_its_export(self):
+        """No case expects the page to stop before its shot: each one passes when its export downloads."""
+        self.assertEqual([n for n, c in gpu_matrix.load_cases().items() if "expect" in c], [])
 
     def test_ui_live_ends_on_a_row_marked_left_even_behind_a_dialog(self):
         """The edit agent's dialog (« Render anyway » or « Cancel ») can keep its row busy: ui_live.py waits for the rows to
@@ -672,3 +717,4 @@ class Verdict(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

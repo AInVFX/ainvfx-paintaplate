@@ -81,17 +81,18 @@ class Stages(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_each_stage_is_the_last_job_of_its_name_its_movie_first_else_its_frames(self):
+    def test_each_stage_is_the_last_job_of_its_name_and_folder_its_movie_first_else_its_frames(self):
         out = os.path.join(self.tmp, "output", "paintaplate", "p")
-        matte = frames(os.path.join(out, "matte"), "m", [(1, 255), (2, 255), (3, 0)])
-        frames(os.path.join(out, "matte"), "x", [(1, 0)])  # another node's files in the same folder
+        clean = frames(os.path.join(out, "matte_a"), "m", [(1, 255), (2, 0)])  # the Clean's tracking: the clean plate pass's hole
+        matte = frames(os.path.join(out, "matte_b_full"), "m", [(1, 255), (2, 255), (3, 0)])
+        frames(os.path.join(out, "matte_b_full"), "x", [(1, 0)])  # another node's files in the same folder
         movie_ = {"class_type": "PaintAPlate_SaveMovie"}
         saves = {  # job: (its graph's save nodes, the files ComfyUI lists for each)
-            "aaaaaaaa": ({"16": {"class_type": "PaintAPlate_SaveFrames"}}, {"16": [("paintaplate/p/matte", "x.0001.png")]}),
+            "aaaaaaaa": ({"16": {"class_type": "PaintAPlate_SaveFrames"}}, {"16": [("paintaplate/p/matte_a", "m.0001.png")]}),
             "bbbbbbbb": ({"35": {"class_type": "PaintAPlate_SaveFrames"}, "36": movie_}, {"35": [("paintaplate/p/full/clean", "f.0001.png")], "36": [("paintaplate/p/full", "clean.mp4")]}),
             "cccccccc": ({"31": movie_}, {"31": [("paintaplate/p", "shot_00001_.mp4")]}),
             "dddddddd": ({"31": movie_}, {"31": [("paintaplate/p", "shot_00002_.mp4")]}),
-            "eeeeeeee": ({"16": {"class_type": "PaintAPlate_SaveFrames"}}, {"16": [("paintaplate/p/matte", "m.0001.png")]}),
+            "eeeeeeee": ({"16": {"class_type": "PaintAPlate_SaveFrames"}}, {"16": [("paintaplate/p/matte_b_full", "m.0001.png")]}),
         }
         history = {job + "-0000": {"prompt": [0, job, graph], "outputs": {node: {"images": [{"subfolder": sub, "filename": name} for sub, name in files]} for node, files in listed.items()}}
                    for job, (graph, listed) in saves.items()}
@@ -100,7 +101,7 @@ class Stages(unittest.TestCase):
         found = gpu_matrix.stage_movies(self.tmp, jobs, history)
         self.assertEqual(found["Clean plate pass"], os.path.join(out, "full", "clean.mp4"))
         self.assertEqual(found["Shot"], os.path.join(out, "shot_00002_.mp4"))
-        self.assertEqual(found["Paint matte"], matte)
+        self.assertEqual((found["Clean matte"], found["Paint matte"]), (clean, matte))
         self.assertNotIn("Composite", found)
 
     def test_the_sheet_shows_the_same_frames_of_each_stage_by_the_plate_s_own_numbers(self):
@@ -113,7 +114,7 @@ class Stages(unittest.TestCase):
         made = gpu_matrix.stage_sheet({"stage_frames": [480, 482, 484, 999]}, self.tmp, plate, movies)
         self.assertEqual(made["frames"], [480, 482, 484])
         self.assertEqual(made["columns"], ["Plate", "Clean plate pass", "Shot", "Paint matte"])  # no export.zip in this folder
-        self.assertEqual(made["missing"], ["Composite"])
+        self.assertEqual(made["missing"], ["Clean matte", "Composite"])
         (cw, ch), gap, head, left = gpu_matrix.SHEET_CELL, 8, 24, 76
         picture = Image.open(made["path"]).convert("RGB")
         self.assertEqual(picture.size, (left + 4 * (cw + gap), head + 3 * (ch + gap)))
@@ -133,7 +134,7 @@ class Stages(unittest.TestCase):
                 z.write(path, f"export/plate.{k + 1:04d}.png")
         result = gpu_matrix.stage_sheet({"stage_frames": [1, 2]}, self.tmp, plate, {})
         self.assertEqual(result["columns"], ["Plate", "Composite"])
-        self.assertEqual(result["missing"], ["Clean plate pass", "Shot", "Paint matte"])
+        self.assertEqual(result["missing"], ["Clean matte", "Clean plate pass", "Shot", "Paint matte"])
         (cw, ch), gap, head, left = gpu_matrix.SHEET_CELL, 8, 24, 76
         self.assertEqual(Image.open(result["path"]).convert("RGB").getpixel((left + cw + gap + 10, head + ch + gap + 10))[0], 220)
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "stage_files")))
