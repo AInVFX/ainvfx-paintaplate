@@ -36,6 +36,9 @@ def run(browser, port, U):
     U.check(len(asks) == 2 and not asks[0].endswith(DIMMED) and asks[1].endswith(DIMMED) and len(boxes) == 2 and boxes[0] == boxes[1],
             f"the writer looks once more, with the same box, at the dimmed frame ({asks})")
     U.check(not any("SAM 3.1 looking for the barn" in t for t in lines), "no SAM job looks for the barn")
+    running = [i for i, t in enumerate(lines) if t.endswith("prompt writer running.")]
+    U.check(all(i > 0 and ASKING in lines[i - 1] for i in running),
+            f"the status line names the writer only right after the page asks it ({[lines[i - 1] for i in running][:2]})")
     U.check(not any(ASK in t for t in lines) and any("Klein edit preview" in t for t in lines),
             "the page does not ask for the object's name: Klein runs")
     U.check(bool(row) and "failed" not in row[0] and row[1] == "", f"History's row is not marked ({row})")

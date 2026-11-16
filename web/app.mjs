@@ -231,6 +231,7 @@ async function writeCaption(e, reference, key, kind, dimmed = false) {
     ...writerBoxes({ tool: e.tool, words: e.prompt, parts: paint && paintBoxes(paint), core: e.editCore, bbox: bounds(e.mask) }) });
   const where = ask.locked?.length > 1 ? `boxes ${JSON.stringify(ask.locked.map((r) => r.src_bbox))}` : `box ${JSON.stringify(ask.locked?.[0]?.src_bbox ?? bounds(e.mask))}`;
   log(`Edit ${num(e)}: asking Klein's prompt writer (${ask.mode} mode) for "${e.prompt || "no words"}" in ${where}${dimmed ? ", on the frame with all but the object dimmed" : ""}.`);
+  if (kind === "edit") status(`Edit ${num(e)}: ${NAME[e.tool]}, prompt writer running.`); // the status line names the writer while Generate waits for it; a prefetch asks it behind the strokes' own lines
   let text = "";
   try {
     const out = await run("prompt", { image: reference, request: ask.request, system: UPSAMPLER[ask.mode] }, { kind, front: true }).done;
@@ -2113,7 +2114,6 @@ async function generate(edit) {
   try {
     await edit.preparing; // the snap and the caption started when the strokes stopped: reused when nothing changed since
     if (!alive()) return;
-    status(`Edit ${num(edit)}: ${NAME[edit.tool]}, prompt writer running.`);
     redrawStrokes(edit); // in one pass from its strokes, as a scene opened again draws them: the same images, the same job
     const { before, below, base, reference, cap } = await prepare(edit, S.edits.indexOf(edit), "edit");
     if (!alive()) return;
