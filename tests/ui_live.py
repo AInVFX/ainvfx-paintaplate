@@ -205,8 +205,9 @@ def stage(note):
 
 def address(url, memory="", seed=None):
     """The page's address for a run on real models. ?index=0: the page leaves its job index alone, so every job runs, and
-    each time and each peak of memory is a measured one, on a machine that ran the same strokes before too. ?seed=: every
-    new edit and every new fluid shot starts from this seed, so the next run starts from the same."""
+    each time and each peak of memory is a measured one, on a machine that ran the same strokes before too. ?seed=: the
+    first new edit and every new fluid shot start from this seed, each next edit from the next number, so the next run starts
+    from the same."""
     options = ["blank=0", "index=0"] + ([f"memory={memory}"] if memory else []) + ([f"seed={seed}"] if seed is not None else [])
     return f"{url}/extensions/ainvfx-paintaplate/paintaplate.html?" + "&".join(options)
 
@@ -238,7 +239,7 @@ def main():
     ap.add_argument("--memory", default="", help="with --url: the page's memory profile, small, medium or large (by default the card decides)")
     ap.add_argument("--hdr", action="store_true", help="with --url: turn SDR to HDR on in Deliver before painting, so the render makes "
                     "its full-size shot again in scene-linear values and HDR Match fits it to the plate")
-    ap.add_argument("--seed", type=int, default=None, help="with --url: the seed of every new edit and fluid shot, the page's ?seed= (by default the page draws each one)")
+    ap.add_argument("--seed", type=int, default=None, help="with --url: the page's ?seed=: the first new edit and each fluid shot start from it, each next edit from the next number (by default the page draws each seed)")
     ap.add_argument("--channel", default="", help="a browser channel, such as chrome (it plays H.264; Playwright's Chromium does not)")
     a = ap.parse_args()
     if a.url:

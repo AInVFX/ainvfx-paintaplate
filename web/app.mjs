@@ -16,7 +16,7 @@ import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, st
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
-import { askedSeed } from "./logic.mjs"; // the tests: a seed asked for in the address
+import { askedSeed, editSeed } from "./logic.mjs"; // the tests: a seed asked for in the address, and each edit's seed from it
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
 import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
 import { readBack } from "./canvas.mjs"; // the viewer: a few pixels of the view, read without moving it off the GPU
@@ -41,7 +41,8 @@ const LIVE = { every: 2 }; // the live preview while LTX samples, on every card:
 const HDR_ON = Q.get("hdr") !== "0"; // SDR to HDR runs whenever its files and nodes are present; ?hdr=0 in the address turns it off
 const HDR_FRAMES = "ACES2065-1"; // the colour space of the SDR-to-HDR frames (HDR_SPACE in tools/build_workflows.py)
 const BLANK_AT_START = Q.get("blank") !== "0"; // with no plate open, a blank plate opens at start, ready for a fluid shot; ?blank=0 starts empty
-const SEED_ASKED = askedSeed(Q.get("seed")); // ?seed=<whole number>, for the tests: every new edit and every new fluid shot starts from it, so a run makes the same pictures again. Without it the page draws each seed
+const SEED_ASKED = askedSeed(Q.get("seed")); // ?seed=<whole number>, for the tests: the first new edit and every new fluid shot start from it, each next edit from the next number (logic.editSeed), so a run makes the same pictures again. Without it the page draws each seed
+let editsSeeded = 0; // the new edits that took a seed from ?seed= so far
 const INDEX_ON = Q.get("index") !== "0"; // ?index=0, for the tests: no job is taken from the job index and none is written to it, so every job runs and is timed
 // The memory profile (logic.memoryProfile): the card decides, unless ?memory=small, medium or large in the address, or the
 // name kept under paintaplate.memory, asks for one
@@ -1472,7 +1473,7 @@ function prepareSoon(typing = false) { // the draft waits for Generate; SAM and 
 }
 
 function newEdit() {
-  return { id: ++S.ids, tool: S.tool, color: S.color, prompt: "", seed: SEED_ASKED ?? ((Math.random() * 2 ** 31) | 0),
+  return { id: ++S.ids, tool: S.tool, color: S.color, prompt: "", seed: editSeed(SEED_ASKED, editsSeeded++) ?? ((Math.random() * 2 ** 31) | 0),
     strokes: [], on: true, state: "drawing", version: 0, basis: [], results: new Map(),
     paint: canvas(S.plate.work), mask: canvas(S.plate.work), patch: null, foot: null };
 }
