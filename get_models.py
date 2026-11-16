@@ -1,6 +1,6 @@
 """Download the models Paint a plate's workflows load, at the tested revisions, into a ComfyUI models folder.
 
-    python get_models.py [MODELS_FOLDER] [--list] [--no-fluid] [--no-hdr] [--only FILE ...]
+    python get_models.py [MODELS_FOLDER] [--list] [--no-fluid] [--no-hdr] [--no-upscale] [--only FILE ...]
 
 Run it with the Python that runs ComfyUI, which has huggingface_hub. It works the same on Windows, macOS and Linux, on a
 local machine and on a pod. Without MODELS_FOLDER it uses the models folder of the ComfyUI this pack is installed in
@@ -8,7 +8,8 @@ local machine and on a pod. Without MODELS_FOLDER it uses the models folder of t
 
 First accept the licences of FLUX 3 Image Klein, LTX 2.5, the in-outpainting IC-LoRA and the SDR-to-HDR IC-LoRA on
 Hugging Face, then set the HF_TOKEN environment variable to a read token. A file already in place is skipped, and
-several files download at once: about 62 GB in all, ainvfx-fluid 0.65 GB and SDR to HDR 1.32 GB of it. The last line
+several files download at once: about 79 GB in all, ainvfx-fluid 0.65 GB,
+SDR to HDR 1.32 GB and SeedVR2 17.0 GB of it. The last line
 says how many files were downloaded, were already there and are missing; the exit code is 1 while a file the workflows
 need is missing, 2 when the folder or huggingface_hub is not found. tools/pod_setup.sh runs this script on a pod, so every model file, its size and its revision have one
 home: here. get_plates.py, beside this file, downloads the example plates with the same code.
@@ -29,7 +30,8 @@ REVISIONS = {  # the tested revision of each repository
     "Comfy-Org/sam3.1": "7bb8374780a725b4353ed31f3a9395c9742b5621",
     "Kijai/LTX2.3_comfy": "6d980fde0d330f2fed6ff8dfdfddb06d88a004e5",
     "Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR": "c7578ebddb54f4210e534e4d8cad698a5a520692",  # gated: accept its licence first
-    "AInVFX/ainvfx-fluid": "6102c50e9629ab4bf32a36d184e705b7a829e4f3",  # retrained on synthetic data (1 November 2026)
+    "AInVFX/ainvfx-fluid": "6102c50e9629ab4bf32a36d184e705b7a829e4f3",
+    "Comfy-Org/SeedVR2": "df48879708206a403d2a61acd55578c2e80fd233",  # Apache-2.0, as ByteDance-Seed/SeedVR2-7B  # retrained on synthetic data (1 November 2026)
 }
 MODELS = [  # (repository, file in the repository, folder under models/)
     ("black-forest-labs/flux-3-image-klein-comfy", "diffusion_models/flux3-image-klein-int8-convrot.safetensors", "diffusion_models"),
@@ -47,12 +49,17 @@ MODELS = [  # (repository, file in the repository, folder under models/)
     ("Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR", "ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors", "loras"),  # SDR to HDR
     ("Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR", "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors", "embeddings"),  # its prompt
     ("AInVFX/ainvfx-fluid", "ltx-2.5/ainvfx-fluid.safetensors", "loras"),  # optional: fluid shots from a blank plate
+    ("Comfy-Org/SeedVR2", "diffusion_models/seedvr2_7b_fp16.safetensors", "diffusion_models"),  # optional: Upscale to 4K
+    ("Comfy-Org/SeedVR2", "vae/seedvr2_ema_vae_fp16.safetensors", "vae"),  # its VAE
 ]
 FLUID = "ainvfx-fluid.safetensors"
 HDR = ("ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors", "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors")  # gated
-OPTIONAL = (FLUID, *HDR)  # without them, fluid shots or SDR to HDR switch off and the rest works
+UPSCALE = ("seedvr2_7b_fp16.safetensors", "seedvr2_ema_vae_fp16.safetensors")
+OPTIONAL = (FLUID, *HDR, *UPSCALE)  # without them, fluid shots, SDR to HDR or Upscale to 4K switch off and the rest works
 NVFP4 = ("black-forest-labs/flux-3-image-klein-comfy", "diffusion_models/flux3-image-klein-nvfp4.safetensors", "diffusion_models")
-SIZES = {  # bytes of each file at its revision (Hugging Face, read 11 November 2026): --list prints them and adds them up
+SIZES = {  # bytes of each file at its revision, as Hugging Face lists it: --list prints them and adds them up
+    "seedvr2_7b_fp16.safetensors": 16480583960,
+    "seedvr2_ema_vae_fp16.safetensors": 501324814,
     "flux3-image-klein-int8-convrot.safetensors": 5827874779,
     "qwen3vl_4b_int8_convrot.safetensors": 4858559240,
     "qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors": 6724090780,
@@ -162,12 +169,13 @@ def main(argv=None) -> int:
     ap.add_argument("models", nargs="?", default=comfy_folder("models"), help="ComfyUI's models folder (default: the one this pack is in)")
     ap.add_argument("--no-fluid", action="store_true", help="skip ainvfx-fluid: fluid shots from a blank plate switch off")
     ap.add_argument("--no-hdr", action="store_true", help="skip the SDR-to-HDR IC-LoRA (gated): SDR to HDR switches off")
+    ap.add_argument("--no-upscale", action="store_true", help="skip SeedVR2 7B and its VAE (17.0 GB): Upscale to 4K switches off")
     ap.add_argument("--nvfp4", action="store_true", help=argparse.SUPPRESS)  # FLUX 3 Image Klein's nvfp4 file: tests/gpu_bench.py only
     ap.add_argument("--only", nargs="+", metavar="FILE", help="these files only")
     ap.add_argument("--list", action="store_true", help="print each file with its size and whether it is in place, then stop")
     a = ap.parse_args(argv)
     todo = [m for m in MODELS + ([NVFP4] if a.nvfp4 else [])
-            if not (a.no_fluid and m[1].endswith(FLUID)) and not (a.no_hdr and os.path.basename(m[1]) in HDR) and (not a.only or os.path.basename(m[1]) in a.only)]
+            if not (a.no_fluid and m[1].endswith(FLUID)) and not (a.no_hdr and os.path.basename(m[1]) in HDR) and not (a.no_upscale and os.path.basename(m[1]) in UPSCALE) and (not a.only or os.path.basename(m[1]) in a.only)]
     if not a.models or not os.path.isdir(a.models):
         print("Name ComfyUI's models folder: python get_models.py path/to/ComfyUI/models", file=sys.stderr)
         return 2
@@ -177,7 +185,7 @@ def main(argv=None) -> int:
     else:
         missing = download(files, a.models, "model files")
     missing = {os.path.basename(rel) for rel in missing}
-    off = [name for name, group in (("fluid shots", (FLUID,)), ("SDR to HDR", HDR)) if missing & set(group)]
+    off = [name for name, group in (("fluid shots", (FLUID,)), ("SDR to HDR", HDR), ("Upscale to 4K", UPSCALE)) if missing & set(group)]
     if off and not a.list:
         print(f"Off while their files are missing: {', '.join(off)}. The rest works without them.")
     return 1 if missing - set(OPTIONAL) else 0
