@@ -273,11 +273,33 @@ def probe_plate(path: str, fps_hint: float = 24.0) -> dict:
     raise ValueError(f"Plate not supported: {path}. Use a movie, an image or an image sequence.")
 
 
+CHROMATICITIES = {  # an EXR's chromaticities (red, green, blue and white, as x and y), and the scene-linear space they name
+    "AP0": ((0.7347, 0.2653, 0.0, 1.0, 0.0001, -0.077, 0.32168, 0.33767), "linear ACES2065-1"),
+    "AP1": ((0.713, 0.293, 0.165, 0.83, 0.128, 0.044, 0.32168, 0.33767), "linear ACEScg"),
+    "Rec.2020": ((0.708, 0.292, 0.17, 0.797, 0.131, 0.046, 0.3127, 0.329), "linear Rec.2020"),
+    "P3-D65": ((0.68, 0.32, 0.265, 0.69, 0.15, 0.06, 0.3127, 0.329), "linear P3-D65"),
+    "Rec.709": ((0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329), "linear"),
+}
+
+
+def gamut_of(chromaticities: str) -> str | None:
+    """The scene-linear space an EXR's chromaticities name, by its red primary and its white point; None for another."""
+    nums = [float(x) for x in re.findall(r"-?\d+\.\d+(?:[eE][-+]?\d+)?", chromaticities or "")]
+    if len(nums) < 8:
+        return None
+    seen = nums[0:2] + nums[6:8]
+    for xy, name in CHROMATICITIES.values():
+        if all(abs(a - b) < 0.002 for a, b in zip(seen, xy[0:2] + xy[6:8])):
+            return name
+    return None
+
+
 def guess_color_space(spec: dict) -> str:
     """A starting guess from the file; the user can always override it in the app.
 
-    EXR is scene-linear by convention: its chromaticities say which gamut.
-    ACEScg (AP1) has its red primary at (0.713, 0.293).
+    A movie tagged PQ, HLG or linear says so. EXR is scene-linear by convention, and its chromaticities name its gamut
+    (CHROMATICITIES): ACES2065-1, ACEScg, Rec.2020, P3-D65 or Rec.709. An EXR without them, or with other ones, reads as
+    linear Rec.709, and every other file as sRGB.
     """
     trc = spec.get("color_trc")  # FFmpeg's numbers: 16 SMPTE ST 2084, 18 ARIB STD-B67, 8 linear
     if spec.get("kind") == "video" and trc in (16, 18, 8):
@@ -285,9 +307,9 @@ def guess_color_space(spec: dict) -> str:
     if spec.get("ext") != ".exr":
         return "sRGB"
     for part in spec.get("exr", {}).get("parts", []):
-        nums = [float(x) for x in re.findall(r"-?\d+\.\d+", part.get("chromaticities", ""))]
-        if len(nums) >= 2 and abs(nums[0] - 0.713) < 0.002 and abs(nums[1] - 0.293) < 0.002:
-            return "linear ACEScg"
+        name = gamut_of(part.get("chromaticities", ""))
+        if name:
+            return name
     return "linear"
 
 
