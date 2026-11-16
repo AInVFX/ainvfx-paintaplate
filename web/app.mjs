@@ -1377,9 +1377,10 @@ function dragWipe(e, el) {
 $("#wipe .grip").addEventListener("pointerdown", (e) => dragWipe(e, e.currentTarget));
 
 let hudTimer;
-function hud(text, ms = 1600) {
+function hud(text, ms = 1600, corner = false) { // corner: full screen's frame number, in the bottom-right corner (app.css)
   const el = $("#hud");
   el.textContent = text;
+  el.classList.toggle("corner", corner);
   el.classList.add("on");
   clearTimeout(hudTimer);
   hudTimer = setTimeout(() => el.classList.remove("on"), ms);
@@ -3163,7 +3164,7 @@ function timelineUI() {
   cacheUI();
   $("#tl-key").style.left = pos(0);
   $("#frame-now").textContent = p.first + S.frame;
-  if (fullFrom && fullFrom.frame !== S.frame) { fullFrom.frame = S.frame; hud(String(p.first + S.frame), 1000); } // full screen: the plate's own frame number, for a moment
+  if (fullFrom && fullFrom.frame !== S.frame) { fullFrom.frame = S.frame; hud(String(p.first + S.frame), 1000, true); } // full screen: the plate's own frame number, for a moment
   $("#frame-total").textContent = `/ ${p.first + n - 1}`;
   $("#fps").textContent = `${Math.round(p.fps * 100) / 100} fps`;
   const t = $("#timeline");

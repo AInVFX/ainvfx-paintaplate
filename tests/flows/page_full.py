@@ -32,6 +32,8 @@ def run(browser, port, U):
     page.keyboard.press("ArrowRight")
     U.check(U.poll(page, lambda: page.text_content("#frame-now") == str(start + 1), 5) and page.text_content("#hud") == str(start + 1),
             f"the keys keep working: the right arrow steps from frame {start}, and the new number shows in the corner: {page.text_content('#hud')!r}")
+    hb = page.evaluate("(() => { const r = document.querySelector('#hud').getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; })()")
+    U.check(hb[0] > iw / 2 and hb[1] > ih / 2 and hb[2] > iw - 40 and hb[3] > ih - 40, f"the frame number sits in the bottom-right corner: {hb} on {iw} x {ih}")
     U.check(U.poll(page, lambda: "on" not in page.get_attribute("#hud", "class").split(), 4), "the number shows for a moment, then goes")
     page.keyboard.press("`")
     U.check(not page.evaluate(ALONE) and all(page.is_visible(s) for s in (".top", ".tools", ".side", ".log", ".transport")),

@@ -118,6 +118,7 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .op-steps li.done::before { content: "✓"; color: var(--ok); }
 .hud { position: absolute; left: 14px; top: 10px; margin: 0; padding: 4px 9px; border-radius: 4px; background: #000a; color: var(--text); font-variant-numeric: tabular-nums; pointer-events: none; opacity: 0; transition: opacity .25s; max-width: calc(100% - 28px); }
 .hud.on { opacity: 1; transition: none; }
+body.plate-alone .hud.corner { left: auto; top: auto; right: 14px; bottom: 10px; } /* full screen: the frame number in the bottom-right corner */
 .wipe { position: absolute; top: 0; height: 100%; width: 0; border-left: 2px solid #fff; box-shadow: 0 0 0 1px #0006; pointer-events: none; }
 .wipe .grip { position: absolute; left: -15px; top: 50%; width: 28px; height: 64px; margin-top: -32px; border-radius: 14px; background: #fff; border: 2px solid #222; cursor: ew-resize; pointer-events: auto; }
 #view.painting.near-wipe { cursor: ew-resize; }
