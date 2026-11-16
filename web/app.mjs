@@ -120,6 +120,7 @@ const plateVid = $("#plate-video"), shotVid = $("#shot-video");
 const followers = []; // videos that follow the playhead beside the plate's and the shot's: the pass compared in the wipe, the X-ray's mattes
 const cmpVid = follower("cmp-video");
 const xray = { el: $("#xray"), vids: [follower("xray-a"), follower("xray-b")], scratch: document.createElement("canvas"), got: new Map() }; // the X-ray (W): its overlay, its mattes' videos, their frames read paused
+let fullFrom = null; // full screen (fullScreen): the zoom it came from and the frame on show, while the plate fills the screen alone
 S.xray = false;
 const fx = document.createElement("canvas"); // scratch layer for masked overlays
 const HISTORY_HELP = $("#history-empty").textContent;
@@ -388,7 +389,7 @@ function closePlate(message = "Plate closed: its frames left the browser's memor
   stopEverything();
   if (S.picking) pickFrame(false);
   if (S.mode) leaveMode();
-  closeMenu(); hideLive();
+  closeMenu(); hideLive(); leaveFull();
   for (const v of [plateVid, shotVid]) { v.removeAttribute("src"); v.load(); }
   for (const c of [...caches.values(), deep, deepShot]) c.reset();
   setSalt(null);
@@ -3101,6 +3102,7 @@ function timelineUI() {
   cacheUI();
   $("#tl-key").style.left = pos(0);
   $("#frame-now").textContent = p.first + S.frame;
+  if (fullFrom && fullFrom.frame !== S.frame) { fullFrom.frame = S.frame; hud(String(p.first + S.frame), 1000); } // full screen: the plate's own frame number, for a moment
   $("#frame-total").textContent = `/ ${p.first + n - 1}`;
   $("#fps").textContent = `${Math.round(p.fps * 100) / 100} fps`;
   const t = $("#timeline");
@@ -3405,7 +3407,26 @@ async function openScene(text) { // the plate opens in its colour space, then ev
 }
 
 function clearRange() { S.inPt = 0; S.outPt = S.plate.frames - 1; hud("In and out points cleared"); timelineUI(); }
-function fullScreen() { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); }
+// Full screen (View > Full screen, or `): the plate alone fills the screen, fitted, with no panel, menu bar, timeline or
+// status line. The right-click menu and every key keep working. Esc or ` comes back to the zoom it came from. Where the
+// browser refuses its own full screen, the plate fills the window the same way. When the frame changes, its number shows
+// for a moment in the HUD's corner.
+function fullScreen() {
+  if (fullFrom) return leaveFull();
+  fullFrom = { zoom: { ...S.zoom }, frame: S.frame };
+  document.body.classList.add("plate-alone");
+  document.documentElement.requestFullscreen?.().catch(() => {});
+  S.zoom = { k: 1, x: 0, y: 0 };
+  fitView(); render();
+}
+function leaveFull() {
+  if (!fullFrom) return;
+  S.zoom = fullFrom.zoom; fullFrom = null;
+  document.body.classList.remove("plate-alone");
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  fitView(); render();
+}
+addEventListener("fullscreenchange", () => { if (!document.fullscreenElement) leaveFull(); }); // the browser's own Esc ends its full screen
 
 // ---------- The viewer's colour, as in RV: the colour tools in scene-linear, then the OCIO view, then the channel ----------
 // Display only, after OpenRV: each frame goes through one WebGL2 program before it is drawn (display.mjs), the strokes and
@@ -3744,7 +3765,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
     ["View", [chan("rgb", "Shift+C"), chan("r", "Shift+R"), chan("g", "Shift+G"), chan("b", "Shift+B"), chan("l", "Shift+L"), "-",
       ["Fit", "F", () => zoomTo(1), !p], ["Frame width", "Ctrl+F", widthZoom, !p], ["1:1", "1", () => pixelZoom(1), !p],
       ["2:1", "2", () => pixelZoom(2), !p], ["4:1", "4", () => pixelZoom(4), !p], ["1:2", "Shift+2", () => pixelZoom(1 / 2), !p], ["1:4", "Shift+4", () => pixelZoom(1 / 4), !p],
-      ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["X-ray", "X", () => setXray(!S.xray), !p, S.xray], ["Full screen", "`", fullScreen],
+      ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["X-ray", "X", () => setXray(!S.xray), !p, S.xray], ["Full screen", "`", fullScreen, !p, !!fullFrom],
       ["Cache memory", "", [["Auto", "", () => setCache(0), false, !S.cache], ...CACHE_CHOICES.filter(Boolean).map((b) => [memoryText(b), "", () => setCache(b), false, S.cache === b])], !!CACHE_MB],
       ["Playback statistics", "", toggleStats, false, S.stats],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
@@ -4165,6 +4186,7 @@ addEventListener("keydown", (e) => {
   else if (k === "-" || k === "_") setSize(S.size / 1.2);
   else if (k === "=" || k === "+") setSize(S.size * 1.2);
   else if (k === "Enter") enter(mod);
+  else if (k === "Escape" && fullFrom) leaveFull();
   else if (k === "Escape") escape();
   else if (low === "z" && mod) e.shiftKey ? redo() : undo();
   else if (low === "y" && mod) redo();

@@ -383,3 +383,6 @@ dialog.open { width: min(900px, 94vw); }
 .finish-row small.why { color: var(--text); }
 .finish-ask { margin: 8px 0 0 24px; padding: 8px; border: 1px solid var(--line); border-radius: 4px; font-size: 12px; }
 .finish-ask p { margin: 0 0 6px; }
+/* Full screen: the plate alone, fitted, on the whole screen, or on the whole window where the browser refuses its full screen */
+body.plate-alone { grid-template: "stage" minmax(0, 1fr) / minmax(0, 1fr); }
+body.plate-alone :is(.top, .tools, .split-side, .side, .log), body.plate-alone .stage > :not(.viewport) { display: none; }
