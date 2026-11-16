@@ -1163,7 +1163,7 @@ export const MEMORY = {
 // the system stopped ComfyUI (11 Nov). A profile that `frees` holds one family of models at a time: the page asks
 // ComfyUI to free its memory before a job whose family is not that of the job posted before it.
 export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", shotup: "ltx", clean: "ltx", cleanup: "ltx", fluid: "ltx", hdr: "ltx", warm: "ltx",
-  matte: "sam", snap: "sam", ingest: "frames", comp: "frames", review: "frames", export: "frames", upscale: "seedvr2" }; // by workflow: the models it loads, or frames only
+  matte: "sam", snap: "sam", ingest: "frames", comp: "frames", review: "frames", export: "frames", upscale: "seedvr2", upscale_export: "frames" }; // by workflow: the models it loads, or frames only
 // Speed first where there is room (Adrien, 11 Nov). Under 24 GB of VRAM the card cannot hold two families of models, so a
 // change of family frees ComfyUI's memory. On a larger card the models stay loaded, and the memory is freed only when
 // RAM is short for the next job's frames: a job that reads the plate can hold RAM_COPIES float32 copies of it (the
