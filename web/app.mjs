@@ -3888,17 +3888,18 @@ async function boot() { // the version and the build, the workflows, the WebSock
 
 $$(".tools [data-tool]").forEach((b) => (b.onclick = () => pickTool(b.dataset.tool)));
 $("#size").oninput = (e) => setSize(+e.target.value);
-function setColor(c) { // the colour of the current tool: Paint and Light keep their own
+function setColor(c) { // the colour of the current tool: Paint and Light keep their own. A swatch clicked while the pipette is on ends it
   if (S.tool === "erase") return;
   S.colors[S.tool] = c;
+  if (S.picking) pickFrame(false);
   colorUI();
 }
-function colorUI() {
-  const c = S.color, off = S.tool === "erase";
-  $$(".swatches .sw[data-color]").forEach((b) => b.setAttribute("aria-pressed", String(!off && b.dataset.color === c)));
+function colorUI() { // the brush's colour is lit among the swatches, and none is while the pipette is on: the pipette alone shows what acts
+  const c = S.color, off = S.tool === "erase", lit = !off && !S.picking;
+  $$(".swatches .sw[data-color]").forEach((b) => b.setAttribute("aria-pressed", String(lit && b.dataset.color === c)));
   $(".swatches").classList.toggle("off", off);
   $("#color").value = c;
-  $(".swatches .custom").classList.toggle("on", !off && ![...$$(".swatches .sw[data-color]")].some((b) => b.dataset.color === c));
+  $(".swatches .custom").classList.toggle("on", lit && ![...$$(".swatches .sw[data-color]")].some((b) => b.dataset.color === c));
 }
 $$(".swatches .sw[data-color]").forEach((b) => (b.onclick = () => setColor(b.dataset.color)));
 $("#color").oninput = (e) => setColor(e.target.value);
@@ -3912,6 +3913,7 @@ function pickFrame(on) {
   S.picking = on && !!S.plate;
   view.classList.toggle("picking", S.picking);
   $("#pick").setAttribute("aria-pressed", String(S.picking));
+  colorUI();
   if (S.picking) hud("Pick a colour: click the frame. Esc cancels.", 4000);
   render();
 }

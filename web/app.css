@@ -32,7 +32,6 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .logo { height: 15px; width: auto; display: block; }
 .mark { height: 26px; width: auto; display: block; }
 .version { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-#view.picking { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 16 16'%3E%3Cpath d='M11.2 1.6a1.9 1.9 0 0 1 2.7 2.7l-1.6 1.6.7.7-1 1-.7-.7-5.6 5.6H3.6v-2.1l5.6-5.6-.7-.7 1-1 .7.7z' fill='%23fff' stroke='%23000' stroke-width='.8'/%3E%3C/svg%3E") 5 19, crosshair; }
 .sw.pick { display: grid; place-items: center; background: var(--panel-2, #2a2d33); color: var(--text, #e6e6e6); }
 .sw.pick[hidden] { display: none; }
 .sw.pick svg { width: 12px; height: 12px; fill: currentColor; }
@@ -122,6 +121,9 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .wipe { position: absolute; top: 0; height: 100%; width: 0; border-left: 2px solid #fff; box-shadow: 0 0 0 1px #0006; pointer-events: none; }
 .wipe .grip { position: absolute; left: -15px; top: 50%; width: 28px; height: 64px; margin-top: -32px; border-radius: 14px; background: #fff; border: 2px solid #222; cursor: ew-resize; pointer-events: auto; }
 #view.painting.near-wipe { cursor: ew-resize; }
+/* The pipette, above every other cursor of the view (the class painting is on while a plate is open): an eyedropper whose tip,
+   the centre of pixel (2, 21), is the hotspot, so the tip is the pixel a click reads. A browser that cannot draw it shows a crosshair. */
+#view.painting.picking { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Cg fill='%23fff' stroke='%23000' stroke-linejoin='round'%3E%3Crect x='-2.2' y='-3' width='4.4' height='6' rx='2.2' transform='translate(17 7) rotate(45)'/%3E%3Cpath d='M2.5 21.5 4 18l9-9 2 2-9 9z'/%3E%3Cpath d='M11.5 7.5l1-1 5 5-1 1z'/%3E%3C/g%3E%3C/svg%3E") 2 21, crosshair; }
 .wipe .label { position: absolute; top: 10px; padding: 2px 7px; border-radius: 3px; background: #000a; font-size: 12px; white-space: nowrap; }
 .wipe .left { right: 8px; }
 .wipe .right { left: 8px; }
