@@ -251,18 +251,17 @@ class Run(unittest.TestCase):
         self.assertEqual(sent, [("http://127.0.0.1:8188/free", "POST", {"unload_models": True, "free_memory": True})])
 
 
-@unittest.skipUnless(importlib.util.find_spec("playwright"), "tests/ui_live.py imports Playwright")
 class Live(unittest.TestCase):
     """tests/ui_live.py: the two rules that read the page's History and its render note."""
 
     def test_a_fluid_shot_has_its_own_history_row(self):
-        """fluid_1080_edit waited 600 s for one row after its first edit, and History held two (pod, 11 Nov)."""
+        """A fluid shot has a row of its own in History: a fluid shot and one edit make two rows."""
         import ui_live
         self.assertEqual([ui_live.rows(0, None), ui_live.rows(1, None)], [1, 2])
         self.assertEqual(ui_live.rows(0, {"size": [1920, 1088]}), 2)
 
     def test_a_stage_is_marked_once(self):
-        """The laptop's horse_cow of 12 Nov wrote 61 marks for two stages: the estimate in the note changes every second."""
+        """Each stage is marked once, while the estimate in the render note changes every second."""
         import ui_live
         notes = ["preview about 14 s left", "preview about 3 s left", "preview almost ready", "full size about 8 min 20 s left",
                  "full size about 2 min 50 s left", "full size ready"]
@@ -421,7 +420,6 @@ class NodeClock(unittest.TestCase):
         self.assertEqual(gpu_matrix.node_times(events, {pid: graph}), {"b05b5b84": [
             ("SamplerCustomAdvanced", 506.0), ("VAEDecodeTiled", 31.0), ("CLIPTextEncode", 2.5), ("PaintAPlate_SavePlate", 0.5)]})
 
-    @unittest.skipUnless(importlib.util.find_spec("playwright"), "tests/ui_live.py imports Playwright")
     def test_ui_live_keeps_the_executing_messages_only(self):
         spec = importlib.util.spec_from_file_location("ui_live_clock", os.path.join(gpu_matrix.HERE, "ui_live.py"))
         tool = importlib.util.module_from_spec(spec)
