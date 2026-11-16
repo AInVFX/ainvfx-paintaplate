@@ -646,7 +646,7 @@ class Verdict(unittest.TestCase):
         self.assertEqual((arm["path"], arm["hdr"], len(arm["strokes"])), ("plates/tos_05_4a", True, 1))
         tool, words, points, _, options = arm["strokes"][0]
         self.assertEqual((tool, options), ("paint", {"color": "#000000"}))
-        self.assertTrue(words.startswith("a robotic arm: ") and words.endswith("a row of very bright blue-white LEDs along the wiring"))
+        self.assertTrue(words.startswith("Turn the raised forearm and hand into a robotic arm") and words.endswith("the framing and the composition exactly as they are."))
         self.assertTrue(all(0 <= v <= 1 for point in points for v in point))
         self.assertNotIn("tos_arm", gpu_matrix.ALL + gpu_matrix.QUICK)
 
@@ -670,16 +670,17 @@ class Verdict(unittest.TestCase):
         for path, script in made.items():
             self.assertIn(os.path.basename(path), open(os.path.join(gpu_matrix.HERE, script)).read(), script)
 
-    def test_two_more_tries_paint_the_robotic_arm_on_the_same_exr_plate_outside_quick_and_all(self):
+    def test_tos_arm_paints_the_arm_and_its_rig_in_one_wide_stroke_and_tos_arm_clean_erases_the_rig_first(self):
         cases = gpu_matrix.load_cases()
-        arm, clean, rig = cases["tos_arm"], cases["tos_arm_clean"], cases["tos_arm_rig"]
-        for case in (clean, rig):
-            self.assertEqual((case["path"], case["seed"], case["hdr"]), (arm["path"], arm["seed"], True))
-        self.assertEqual([s[0] for s in clean["strokes"]], ["erase", "paint"])  # the rig goes first, then the same Paint
-        self.assertEqual((clean["strokes"][0][2], clean["strokes"][1]), (arm["strokes"][0][2], arm["strokes"][0]))
-        self.assertEqual(rig["strokes"][0][2], arm["strokes"][0][2])
-        self.assertGreater(rig["strokes"][0][3], arm["strokes"][0][3])  # a wider brush covers what is strapped on the arm
-        self.assertFalse({"tos_arm_clean", "tos_arm_rig"} & set(gpu_matrix.ALL + gpu_matrix.QUICK))
+        arm, clean = cases["tos_arm"], cases["tos_arm_clean"]
+        self.assertNotIn("tos_arm_rig", cases)
+        self.assertEqual((clean["path"], clean["seed"], clean["hdr"], arm["hdr"]), (arm["path"], arm["seed"], True, True))
+        self.assertEqual(([s[0] for s in arm["strokes"]], [s[0] for s in clean["strokes"]]), (["paint"], ["erase", "paint"]))
+        self.assertTrue(all(s[2] == arm["strokes"][0][2] for s in clean["strokes"]))  # the same points
+        self.assertGreater(arm["strokes"][0][3], clean["strokes"][1][3])  # a wider brush covers what is strapped on the arm
+        self.assertIn("everything strapped on it", arm["strokes"][0][1])
+        self.assertEqual(arm["stage_frames"], clean["stage_frames"])
+        self.assertFalse({"tos_arm", "tos_arm_clean"} & set(gpu_matrix.ALL + gpu_matrix.QUICK))
 
     def test_the_two_stage_shot_case_is_horse_cow_with_shot_2_and_horse_cow_beside_it(self):
         import ui_live
