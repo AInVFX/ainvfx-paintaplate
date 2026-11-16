@@ -2,9 +2,9 @@
 
     python tests/ui_live.py --comfy /path/to/ComfyUI --python /path/to/python
 
-The pack is copied to a temporary folder where `edit`, `snap`, `shot` and `matte` are replaced by
-stand-ins built from core nodes only (same slots and outputs, no models), so the whole flow runs on a
-CPU: open a plate, play it, paint, erase and light, start each edit with Generate (Enter), bypass and bring back
+The pack is copied to a temporary folder where the workflows that load a model and that this flow posts (`edit`, `snap`,
+`prompt`, `matte`, `shot`, `clean`, and the second stages `shotup` and `cleanup`) are replaced by stand-ins built from
+core nodes only (same slots and outputs, no models), so the whole flow runs on a CPU, the full-size passes included: open a plate, play it, paint, erase and light, start each edit with Generate (Enter), bypass and bring back
 an edit, let the idle time render the shot, the composite and the export, wipe, then download the zip.
 `ingest`, `comp` and `export` are the real workflows. Screenshots go to /tmp/paintaplate_ui.
 """
@@ -46,7 +46,8 @@ def stand_ins(out):
     g("SaveVideo", _output="video", video=g("CreateVideo", images=ref, fps=load[3], bit_depth=8, color_space="sRGB", codec="none"),
       filename_prefix=Slot("video_prefix", "x/v"), format="auto", format__codec="auto")
     g.save("shot", out)
-    g.save("clean", out)  # the erase pass: the same stand-in, saved under its name
+    for name in ("clean", "cleanup", "shotup"):  # the erase pass and both second stages: the same stand-in, saved under each name
+        g.save(name, out)
 
     g = Graph()  # matte: the first-frame mask repeated over every frame
     _, srgb = plate(g, pad=True)
