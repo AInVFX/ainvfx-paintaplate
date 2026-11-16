@@ -45,7 +45,10 @@ WAYS = {
     "words": "the person's words alone, through the prompt writer",
     "intent": "the page's request (logic.lightIntent): the strokes read as intentions, with the words",
     "intent_writer": "logic.lightIntent through the prompt writer, which reads the plate",
+    "source": "logic.lightIntent, and each small light inside the frame shows its source where it is drawn, placed in words",
+    "source_box": "the same, with each source's place as a box of Klein's layout table (<light_1>)",
 }
+KEEP = "Keep every object, face and texture, the camera angle, the framing and the composition exactly as they are: only the light changes."
 COLOR = "#ffd890"  # the Light tool's colour
 GREY = "#3a3a3a"  # the ground of the strokes' picture on a sheet
 TILE = 384  # a sheet's tile, in pixels across
@@ -64,6 +67,42 @@ SETS = {
         "candle": ("", [("#ff9a3c", [(0.5, 0.6), (0.51, 0.61)], 30), ("#000000", [(0.05, 0.05), (0.3, 0.4)], 220)]),
     },
 }
+
+
+def place(b):
+    """A box's place in the frame by thirds, as logic.lightIntent names it: « top right », « centre »."""
+    cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
+    v, h = ("top" if cy < 1 / 3 else "bottom" if cy > 2 / 3 else ""), ("left" if cx < 1 / 3 else "right" if cx > 2 / 3 else "")
+    return f"{v} {h}" if v and h else v or h or "centre"
+
+
+def sources_of(strokes, darks, names, aspect):
+    """The small lights inside the frame: (name, box) per light stroke whose box, as logic.lightIntent measures it, spans
+    under a fifth of the frame each way and stays 2% inside its edges. A box is [x0, y0, x1, y1] in fractions."""
+    out = []
+    for (color, pts, size), shade, name in zip(strokes, darks, names):
+        r = size / 1920 / 2
+        box = [min(p[0] for p in pts) - r, min(p[1] for p in pts) - r * aspect, max(p[0] for p in pts) + r, max(p[1] for p in pts) + r * aspect]
+        if not shade and box[2] - box[0] < 0.2 and box[3] - box[1] < 0.2 and min(box[:2]) > 0.02 and max(box[2:]) < 0.98:
+            out.append((name, box))
+    return out
+
+
+def source_text(intent, sources, boxed):
+    """The page's request with each small light's source shown where it is drawn: placed in words, or as a box of Klein's
+    layout table ([y_min, x_min, y_max, x_max] on 0..1000, a target row as the page's paint request writes one)."""
+    if not intent.endswith(KEEP):
+        raise ValueError("the request's last sentence is not the one this probe replaces")
+    said, rows = [], []
+    for k, (name, b) in enumerate(sources, 1):
+        if boxed:
+            said.append(f"The {name} light's source <light_{k}> is visible in the frame: a small, very bright {name} light.")
+            rows.append({"id": f"light_{k}", "from": "target", "src_bbox": None, "tgt_bbox": [round(v * 1000) for v in (b[1], b[0], b[3], b[2])],
+                         "desc": f"the light's source: a small, very bright {name} light"})
+        else:
+            said.append(f"The {name} light's source is visible in the frame, at the {place(b)} of the frame, where it is drawn: a small, very bright {name} light.")
+    text = f"{intent[:-len(KEEP)]}{' '.join(said)} {KEEP[:-1]}, and each light's source shows where it is placed."
+    return f"{text} {json.dumps(rows)}" if rows else text
 
 
 def parse_set(text):
@@ -194,7 +233,9 @@ def main(argv=None):
             strokes_img, lights = strokes_of(strokes, prev, darks)
             intent = page(("lightIntent", {"strokes": [{"color": c, "size": s / 1920, "points": [list(p) for p in pts]}
                                            for c, pts, s in strokes], "words": words, "aspect": W / H}))[0]
-            runs.append({"plate": plate, "stem": stem, "set": name, "words": words, "strokes": strokes, "size": [W, H],
+            names = page(*[("colorName", c) for c, _, _ in strokes])
+            sources = sources_of(strokes, darks, names, W / H)
+            runs.append({"plate": plate, "stem": stem, "set": name, "words": words, "strokes": strokes, "size": [W, H], "sources": sources,
                          "edit_preview": prev, "intent": intent, "frame": frame_prev, "frame_name": frame_name,
                          "whole": whole, "strokes_img": strokes_img, "lights": lights, "ways": {}})
         say(f"{plate}, {W} x {H}: the edit preview at {prev[0]} x {prev[1]}")
@@ -224,6 +265,11 @@ def main(argv=None):
                 continue
             if way == "intent":
                 w["caption"] = r["intent"]
+            if way in ("source", "source_box"):
+                if not r["sources"]:
+                    w["skipped"] = "no small light inside the frame"
+                    continue
+                w["caption"] = source_text(r["intent"], r["sources"], way == "source_box")
             if not w.get("caption"):
                 w["error"] = "the prompt writer gave nothing"
                 continue
