@@ -6,7 +6,7 @@ import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
 import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
-import { XRAY_SIDE, XRAY_TEXT, alphaFromBytes, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
+import { XRAY_SIDE, XRAY_TEXT, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
 import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
@@ -119,9 +119,9 @@ const S = {
 
 const view = $("#view"), ctx = view.getContext("2d");
 const plateVid = $("#plate-video"), shotVid = $("#shot-video");
-const followers = []; // videos that follow the playhead beside the plate's and the shot's: the pass compared in the wipe, the X-ray's mattes
+const followers = []; // videos that follow the playhead beside the plate's and the shot's: the pass compared in the wipe
 const cmpVid = follower("cmp-video");
-const xray = { el: $("#xray"), vids: [follower("xray-a"), follower("xray-b")], scratch: document.createElement("canvas"), got: new Map() }; // the X-ray (W): its overlay, its mattes' videos, their frames read paused
+const xray = { el: $("#xray"), got: new Map() }; // the X-ray (X): its overlay, and each matte's frames in memory (xrayLoad)
 let fullFrom = null; // full screen (fullScreen): the zoom it came from and the frame on show, while the plate fills the screen alone
 S.xray = false;
 const fx = document.createElement("canvas"); // scratch layer for masked overlays
@@ -559,7 +559,7 @@ function follower(id) { // a video beside the shot's, at the playhead once loade
 // Playing from memory, as RV plays from its cache. When every frame between the in and out points is in memory for the
 // sources the picture draws, a clock at the plate's frame rate picks the frame and the videos stay paused. Otherwise the
 // videos play, and each frame they present is drawn once. A second video that follows the playhead (the pass compared
-// in the wipe, the X-ray's mattes) keeps the videos playing. #view names the path in data-play.
+// in the wipe) keeps the videos playing; the X-ray's mattes play from memory (xrayLoad). #view names the path in data-play.
 S.memory = null; // while playing: true from memory, false from the videos
 S.stats = Q.get("stats") === "1"; // playback statistics: one log line for each stretch played (View > Playback statistics)
 const RVFC = "requestVideoFrameCallback" in HTMLVideoElement.prototype;
@@ -950,8 +950,9 @@ function comparePass(id) {
 }
 // ---------- The X-ray (X): where the edits on show change the plate, tinted over the picture (xray.mjs) ----------
 // The overlay sits on the canvas with its zoom and pan, so the inspector and the picker read the picture without the tint.
-// Paused, each matte's frame comes from the frames route at XRAY_SIDE, in any browser; playing, from its movie, which
-// follows the playhead. Until every matte has the frame, the last tint stays; data-frame names the frame it shows.
+// Each matte's frames come from the frames route at XRAY_SIDE, in any browser, and stay in memory: one byte a pixel, about
+// 18 MB for 121 frames at 512 x 288. Playing or paused, the tint is the mattes' frame on show, as RV plays from its cache.
+// Until every matte has the frame, the last tint stays; data-frame names the frame it shows.
 function xrayNow() { // the mattes of the edits on show, at the size on show
   const r = S.renders.get(S.heroKey), st = STAGES.find((x) => x.id === S.pass);
   const full = st ? !!st.final : !!S.shot?.url && [r?.play, r?.review, r?.raw, r?.cleanRaw, r?.hdrMovie].includes(S.shot.url);
@@ -967,33 +968,36 @@ function xrayLater() { // the Render panel changed (a step finished, Export made
   xrayLater.queued = true;
   queueMicrotask(() => { xrayLater.queued = false; if (S.xray && !S.playing) drawXray(); });
 }
-function xrayFrame(url) { // paused: a matte's frame on show from the frames route, as its opacity; null while it loads
-  const path = sourcePath({ url }, null), key = `${path}#${S.frame}`;
-  if (xray.got.has(key)) return xray.got.get(key);
-  xray.got.set(key, null);
-  if (xray.got.size > 64) xray.got.delete(xray.got.keys().next().value);
-  fetch(`/paintaplate/frames?${new URLSearchParams({ path, first: S.frame, count: 1, side: XRAY_SIDE })}`).then(async (r) => {
-    if (!r.ok) throw new Error(await r.text());
-    const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number);
-    xray.got.set(key, { width, height, alpha: alphaFromHalfs(new Uint16Array(await r.arrayBuffer())) });
-    if (!S.playing) drawXray();
-  }).catch((err) => { xray.got.set(key, { failed: true }); log(`Error: X-ray matte ${path} unreadable (${err.message}).`); });
-  return null;
+const XRAY_NONE = { failed: true }; // a frame its matte does not hold
+const XRAY_CHUNK = 16; // frames a request: the most the frames route sends (routes.DEEP_FRAMES_MAX)
+function xrayFrame(url) { // a matte's frame on show, as its opacity, from memory; null while it loads
+  const path = sourcePath({ url }, null), got = xray.got.get(path);
+  if (!got) xrayLoad(path);
+  return got?.frames[S.frame] ?? null;
 }
-function videoAlpha(v) { // playing: a matte's frame from its movie, at XRAY_SIDE
-  if (v.readyState < 2 || !v.videoWidth) return null;
-  const k = Math.min(1, XRAY_SIDE / Math.max(v.videoWidth, v.videoHeight)), w = Math.round(v.videoWidth * k), h = Math.round(v.videoHeight * k), c = xray.scratch;
-  if (c.width !== w || c.height !== h) [c.width, c.height] = [w, h];
-  const g = c.getContext("2d", { willReadFrequently: true });
-  g.drawImage(v, 0, 0, w, h);
-  return { width: w, height: h, alpha: alphaFromBytes(g.getImageData(0, 0, w, h).data) };
+async function xrayLoad(path) { // every frame of a matte at XRAY_SIDE, XRAY_CHUNK a request, the chunk of the frame on show first
+  const n = S.plate.frames, got = { frames: new Array(n).fill(null), told: false }, first = S.frame - (S.frame % XRAY_CHUNK);
+  xray.got.set(path, got);
+  const starts = Array.from({ length: Math.ceil(n / XRAY_CHUNK) }, (_, k) => k * XRAY_CHUNK).sort((a, b) => (b === first) - (a === first) || a - b);
+  for (const at of starts) {
+    if (xray.got.get(path) !== got) return; // the mattes on show changed
+    const count = Math.min(XRAY_CHUNK, n - at);
+    try {
+      const r = await fetch(`/paintaplate/frames?${new URLSearchParams({ path, first: at, count, side: XRAY_SIDE })}`);
+      if (!r.ok) throw new Error(await r.text());
+      const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number), halfs = new Uint16Array(await r.arrayBuffer()), size = width * height * 3;
+      for (let i = 0; i < count; i++) got.frames[at + i] = { width, height, alpha: alphaFromHalfs(halfs.subarray(i * size, (i + 1) * size)) };
+    } catch (err) { // these frames have no matte: they show no tint from it, and the log says so once
+      got.frames.fill(XRAY_NONE, at, at + count);
+      if (!got.told) { got.told = true; log(`Error: X-ray matte ${path}: frames ${S.plate.first + at} to ${S.plate.first + at + count - 1} unreadable (${err.message}).`); }
+    }
+    if (!S.playing) drawXray();
+  }
 }
 function drawXray() {
   const el = xray.el, plan = S.xray && S.plate && !keying() ? xrayNow() : null, urls = plan?.urls ?? [];
-  xray.vids.forEach((v, k) => { // the mattes' movies follow the playhead only while the X-ray needs them
-    if (urls[k] && v.getAttribute("src") !== urls[k]) v.src = urls[k];
-    else if (!urls[k] && v.getAttribute("src")) { v.removeAttribute("src"); v.load(); }
-  });
+  const paths = new Set(urls.map((url) => sourcePath({ url }, null)));
+  for (const k of xray.got.keys()) if (!paths.has(k)) xray.got.delete(k); // the mattes of the edits no longer on show go
   el.hidden = !plan || plan.from === "none";
   el.dataset.from = plan?.from ?? "";
   if (el.hidden) return void (el.dataset.frame = "");
@@ -1003,8 +1007,10 @@ function drawXray() {
     x.putImageData(new ImageData(tintPixels([new Uint8ClampedArray([255])], 1), 1, 1), 0, 0);
     return void (el.dataset.frame = String(S.frame));
   }
-  const layers = urls.map((url, k) => (S.playing ? videoAlpha(xray.vids[k]) : xrayFrame(url))).filter((l) => !l?.failed);
-  if (!layers.length || layers.some((l) => !l)) return; // the last tint stays until every matte has this frame
+  const all = urls.map((url) => xrayFrame(url));
+  if (all.some((l) => !l)) return; // the last tint stays until every matte has this frame
+  const layers = all.filter((l) => !l.failed);
+  if (!layers.length) { x.clearRect(0, 0, el.width, el.height); return void (el.dataset.frame = String(S.frame)); } // no matte holds this frame: no tint
   const { width, height } = layers[0];
   if (el.width !== width || el.height !== height) [el.width, el.height] = [width, height];
   x.putImageData(new ImageData(tintPixels(layers.filter((l) => l.width === width && l.height === height).map((l) => l.alpha), width * height), width, height), 0, 0);
@@ -1219,7 +1225,7 @@ function render() {
   view.dataset.compared = S.cmp ? compared : ""; // the wipe's left side: drawn once the pass compared has this frame
   inWork(drawCursor);
   if (S.inspect.on) timed("inspector", refreshInspector); // RV redraws its inspector with the view: the frame, the source, the pass, zoom and pan
-  if (S.xray || !xray.el.hidden || xray.vids.some((v) => v.getAttribute("src"))) timed("X-ray", drawXray); // on, or still to hide
+  if (S.xray || !xray.el.hidden) timed("X-ray", drawXray); // on, or still to hide
   drew = true;
 }
 
@@ -1241,7 +1247,7 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
   $("#wipe .label.left").textContent = S.cmp?.label ?? "Keyframe"; $("#wipe .label.right").textContent = S.cmp ? shownLabel() : "Result";
   inWork(drawCursor);
   if (S.inspect.on) refreshInspector();
-  if (!xray.el.hidden || xray.vids.some((v) => v.getAttribute("src"))) drawXray(); // it hides: a fluid shot's keyframes have no matte
+  if (!xray.el.hidden) drawXray(); // it hides: a fluid shot's keyframes have no matte
   drew = true;
 }
 

@@ -34,12 +34,6 @@ export function alphaFromHalfs(halfs) { // a grey matte's RGB half floats (the f
   return out;
 }
 
-export function alphaFromBytes(rgba) { // a grey matte drawn from its movie: 0 to 255 by its Rec. 709 luma
-  const n = rgba.length / 4, out = new Uint8ClampedArray(n);
-  for (let i = 0; i < n; i++) out[i] = 0.2126 * rgba[4 * i] + 0.7152 * rgba[4 * i + 1] + 0.0722 * rgba[4 * i + 2];
-  return out;
-}
-
 export function tintPixels(layers, n, tint = XRAY_TINT, k = XRAY_ALPHA) { // RGBA: the tint, its opacity the union of the mattes
   const out = new Uint8ClampedArray(n * 4);
   for (let i = 0; i < n; i++) {
