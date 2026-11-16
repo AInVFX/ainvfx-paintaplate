@@ -129,17 +129,61 @@ export const lightColor = (colors, color) => colorName(colors.find((c) => !dark(
 // Klein's prompt writer to « Remove the the barn », 12 Nov 2026).
 const objectName = (words) => String(words ?? "").trim().replace(/^(?:the|a|an)\s+/i, "");
 
-// tool: paint, erase or light; words: the prompt; colors: of the painted strokes; color: the tool's colour;
-// bbox: [y_min, x_min, y_max, x_max] on 0..1000; strokes and aspect: a relight's, as lightIntent reads them. Only the
-// chosen tool's text is built.
-export function caption({ tool, words, colors, color, bbox, strokes = [], aspect }) {
+// A paint's colours by name. Klein sees the strokes on the frame, but words alone (« saddle ») leave the prompt writer free to
+// give the object its usual colour. When the words name no colour, the writer's request and the page's own caption name the
+// colours that the strokes show, by their share of the painted pixels, largest first; a colour under 5% of them is an edge
+// where two strokes meet. Words that name a colour win, and then the page names none.
+export const COLOR_WORDS = /\b(?:red|orange|yellow|green|cyan|blue|violet|purple|magenta|pink|brown|black|white|gr[ae]y|silver|gold(?:en)?|beige|tan|crimson|scarlet|maroon|navy|teal|turquoise|ivory)\b/i;
+const HUES = [[15, "red"], [40, "orange"], [70, "yellow"], [165, "green"], [195, "cyan"], [255, "blue"], [290, "violet"], [345, "magenta"], [361, "red"]];
+
+export function paintHue(hex) { // a painted colour in an object's words: « black », « brown », « dark blue », « pink »
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), c = max - min;
+  if (c < 0.12) return max < 0.2 ? "black" : max < 0.45 ? "dark grey" : max < 0.7 ? "grey" : max < 0.9 ? "light grey" : "white";
+  const h = ((max === r ? (g - b) / c : max === g ? 2 + (b - r) / c : 4 + (r - g) / c) * 60 + 360) % 360;
+  const name = HUES.find(([end]) => h < end)[1];
+  if ((name === "orange" || name === "yellow") && max < 0.6) return "brown";
+  if (max < 0.35) return `dark ${name}`;
+  if (min > 0.6) return name === "red" || name === "magenta" ? "pink" : `pale ${name}`;
+  return name;
+}
+
+// The pixels of each colour of `palette` (#rrggbb) in `rgba`, a canvas's bytes: a pixel counts when it is at least half
+// opaque and within 24 levels of that colour on every channel. Where two strokes blend, it counts for neither.
+export function colorShares(rgba, palette) {
+  const cols = palette.map((hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))), n = palette.map(() => 0);
+  for (let i = 0; i < rgba.length; i += 4) {
+    if (rgba[i + 3] < 128) continue;
+    const k = cols.findIndex((c) => Math.abs(c[0] - rgba[i]) <= 24 && Math.abs(c[1] - rgba[i + 1]) <= 24 && Math.abs(c[2] - rgba[i + 2]) <= 24);
+    if (k >= 0) n[k]++;
+  }
+  return Object.fromEntries(palette.map((hex, k) => [hex, n[k]]));
+}
+
+export function paintColors({ words, shares }) { // the names, largest share first; none when the words name a colour
+  if (COLOR_WORDS.test(String(words ?? ""))) return [];
+  const by = new Map();
+  let total = 0;
+  for (const [hex, n] of Object.entries(shares ?? {})) if (n > 0) { const h = paintHue(hex); by.set(h, (by.get(h) ?? 0) + n); total += n; }
+  return [...by].filter(([, n]) => n >= 0.05 * total).sort((a, b) => b[1] - a[1]).map(([h]) => h);
+}
+
+export const andList = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}` : xs[0] ?? "");
+export const inHues = (hues) => (hues.length ? ` in the drawing's colour${hues.length > 1 ? "s" : ""}, ${andList(hues)}` : "");
+// what a paint becomes, in a request's words: the words, else `shape`; with the strokes' colours when they are named
+const paintWhat = (words, hues, shape) => (words ? `${words}${inHues(hues)}` : hues.length ? `${shape}${inHues(hues)}` : `${shape} and colour`);
+
+// tool: paint, erase or light; words: the prompt;
+// bbox: [y_min, x_min, y_max, x_max] on 0..1000; strokes and aspect: a relight's, as lightIntent reads them; hues: a
+// paint's colours by name (paintColors). Only the chosen tool's text is built.
+export function caption({ tool, words, bbox, strokes = [], aspect, hues = [] }) {
   if (tool === "light") return lightIntent({ strokes, words, aspect }); // a relight's request is the page's own: its strokes read as intentions
   const name = objectName(words);
   const text = {
     erase: () => `Remove the ${name || "object"} inside <obj_1> completely, with its shadow and its reflection. Show the surface and the background that continue behind it, with matching detail, light, shadows and focus. Add no new object. Keep everything else unchanged.`,
-    paint: () => `Replace the rough coloured drawing inside <obj_1> with ${words || "an object of that shape and colour"}, following the drawing's outline, pose and size, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.`,
+    paint: () => `Replace the rough coloured drawing inside <obj_1> with ${paintWhat(words, hues, "an object of that shape")}, following the drawing's outline, pose and size, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.`,
   }[tool]();
-  const desc = { erase: name ? `${name} to remove` : "object to remove", paint: words || "the drawn object" }[tool];
+  const desc = { erase: name ? `${name} to remove` : "object to remove", paint: hues.length ? `${words || "the drawn object"}, ${andList(hues)}` : words || "the drawn object" }[tool];
   return `${text} ${JSON.stringify([{ id: "obj_1", bbox, desc }])}`;
 }
 
@@ -151,16 +195,16 @@ const pyJSON = (v) => JSON.stringify(v).replace(/("(?:[^"\\]|\\.)*")|([,:])/g, (
 export const KEEP_TOUCHED = " Where the drawing touches an object, the new element acts on that object itself (it burns it, rests on it, " +
   "wets it or lights it); add no props, fuel or supports that were not asked for."; // a fire on a towel came with logs without it
 
-export function upsampleRequest({ tool, words, bbox, boxes = null, colors = [], color = "#ffd890" }) {
+export function upsampleRequest({ tool, words, bbox, boxes = null, hues = [] }) { // hues: a paint's colours by name (paintColors)
   const parts = tool === "erase" && boxes?.length > 1 ? boxes : null; // several painted parts: one locked row each
   const rows = parts ? parts.map((b, i) => ({ id: `obj_${i + 1}`, from: "ref_image_0", src_bbox: b, tgt_bbox: null, desc: words || "an object to remove" }))
     : [tool === "erase" ? { id: "obj_1", from: "ref_image_0", src_bbox: boxes?.[0] ?? bbox, tgt_bbox: null, desc: words || "the object to remove" }
-      : { id: "obj_1", from: "target", src_bbox: null, tgt_bbox: bbox, desc: words || "an object of the drawing's shape and colour, in the image's own style" }];
-  const cites = rows.map((r) => `<${r.id}>`), list = cites.length > 1 ? `${cites.slice(0, -1).join(", ")} and ${cites.at(-1)}` : cites[0];
+      : { id: "obj_1", from: "target", src_bbox: null, tgt_bbox: bbox, desc: hues.length ? `${words || "an object of the drawing's shape"}, ${andList(hues)}` : words || "an object of the drawing's shape and colour, in the image's own style" }];
+  const list = andList(rows.map((r) => `<${r.id}>`));
   const ask = tool === "erase"
     ? parts ? `Remove the ${objectName(words) || "objects"} ${list} completely, with their shadows and their reflections, and continue the background behind them. Remove nothing else.`
       : `Remove the ${objectName(words) || "object"} <obj_1> completely, with its shadow and its reflection, and continue the background behind it. Remove nothing else.`
-    : `Replace the rough coloured drawing at <obj_1> with ${words || "an object of the same shape and colour"}: follow the drawing's outline, pose, size and colours, and draw it in exactly the style of the rest of the image (a photograph, a painting or an illustration: whichever it is), in the same light, perspective, focus and grain, casting its own light and shadows on what is around it.${KEEP_TOUCHED}`;
+    : `Replace the rough coloured drawing at <obj_1> with ${paintWhat(words, hues, "an object of the same shape")}: follow the drawing's outline, pose, size and colours, and draw it in exactly the style of the rest of the image (a photograph, a painting or an illustration: whichever it is), in the same light, perspective, focus and grain, casting its own light and shadows on what is around it.${KEEP_TOUCHED}`;
   const instruction = `ORIGINAL PROMPT:\n${ask}\n\nLOCKED BOUNDING-BOX ANNOTATIONS ([y_min, x_min, y_max, x_max] on a 0-1000 canvas, with ` +
     "(0, 0) at the top-left). This is an authoritative JSON list of dictionaries; preserve every supplied identity, provenance value, " +
     `null, and coordinate exactly:\n${pyJSON(rows)}`;

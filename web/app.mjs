@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, colorShares, paintColors, inHues } from "./logic.mjs";
 import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -191,6 +191,11 @@ const shaded = (e) => e.tool === "light" && !!e.shade && colorsOf(e).some(dark);
 const maskAt = (e, size) => (e.tool === "light" ? snap(null, size, "#fff") : snap(e.mask, size, "#000"));
 
 const colorsOf = (e) => e.strokes.filter((s) => s.tool !== "rub").map((s) => s.color); // eraser strokes have no colour
+function paintHues(e) { // a paint's colours by name, as its strokes show them (logic.paintColors); none for another tool
+  if (e.tool !== "paint" || !e.paint) return [];
+  const w = 256, h = Math.max(1, Math.round((w * e.paint.height) / e.paint.width));
+  return paintColors({ words: e.prompt, shares: colorShares(snap(e.paint, [w, h]).getContext("2d").getImageData(0, 0, w, h).data, [...new Set(colorsOf(e))]) });
+}
 const hueOf = (e) => (e.tool === "light" ? lightColor(colorsOf(e), e.color) : null); // a light's colour, by name, for the shot's prompt
 
 // A relight's strokes as logic.lightIntent reads them: the points as fractions of the frame, the size as a fraction of its width
@@ -198,7 +203,7 @@ const lightStrokes = (e) => e.strokes.filter((s) => s.tool !== "rub")
   .map((s) => ({ color: s.color, size: s.size / S.plate.work[0], points: s.points.map(([x, y]) => [x / S.plate.work[0], y / S.plate.work[1]]) }));
 
 function templateCaption(e) { // the page's own caption: a relight's always, another edit's when the upsampler gives nothing back
-  return caption({ tool: e.tool, words: e.prompt, colors: colorsOf(e), color: e.color, bbox: bounds(e.mask),
+  return caption({ tool: e.tool, words: e.prompt, bbox: bounds(e.mask), hues: paintHues(e),
     ...(e.tool === "light" ? { strokes: lightStrokes(e), aspect: S.plate.work[0] / S.plate.work[1] } : {}) });
 }
 
@@ -227,10 +232,10 @@ async function writeCaption(e, reference, key, kind, dimmed = false) {
     return e.caption.text;
   }
   const paint = e.tool === "erase" ? paintGrid(e) : null; // an erase locks one box per painted part, or with no words its core box
-  const ask = upsampleRequest({ tool: e.tool, words: e.prompt, colors: colorsOf(e), color: e.color,
+  const hues = paintHues(e), ask = upsampleRequest({ tool: e.tool, words: e.prompt, hues,
     ...writerBoxes({ tool: e.tool, words: e.prompt, parts: paint && paintBoxes(paint), core: e.editCore, bbox: bounds(e.mask) }) });
   const where = ask.locked?.length > 1 ? `boxes ${JSON.stringify(ask.locked.map((r) => r.src_bbox))}` : `box ${JSON.stringify(ask.locked?.[0]?.src_bbox ?? bounds(e.mask))}`;
-  log(`Edit ${num(e)}: asking Klein's prompt writer (${ask.mode} mode) for "${e.prompt || "no words"}" in ${where}${dimmed ? ", on the frame with all but the object dimmed" : ""}.`);
+  log(`Edit ${num(e)}: asking Klein's prompt writer (${ask.mode} mode) for "${e.prompt || "no words"}"${inHues(hues)}${hues.length ? "," : ""} in ${where}${dimmed ? ", on the frame with all but the object dimmed" : ""}.`);
   if (kind === "edit") status(`Edit ${num(e)}: ${NAME[e.tool]}, prompt writer running.`); // the status line names the writer while Generate waits for it; a prefetch asks it behind the strokes' own lines
   let text = "";
   try {
@@ -2233,7 +2238,7 @@ async function prepare(edit, index, kind) {
   }
   const base = await baseUpload(below, before, size);
   const reference = await uploadCanvas(editImage(edit, before, size), `e${edit.id}_${painted(edit)}_ref.png`);
-  const key = () => [edit.tool, edit.prompt, bounds(edit.mask), painted(edit), edit.sam ? 1 : 0, edit.editCore ?? "", below.map((e) => `${e.id}.${e.version}`)].join("|");
+  const key = () => [edit.tool, edit.prompt, bounds(edit.mask), painted(edit), edit.sam ? 1 : 0, edit.editCore ?? "", paintHues(edit).join(" "), below.map((e) => `${e.id}.${e.version}`)].join("|"); // a paint's colours too: a caption written before a stroke of another colour is not reused
   // no words, and an answer about another object: the writer looks once more, at the frame with all but the object dimmed
   // (dimFrame); a second answer about another object asks for the object's name (generate). Each look keeps its own key.
   const plain = key(), dimmed = `${plain}|dimmed`;
