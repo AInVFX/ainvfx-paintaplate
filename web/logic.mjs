@@ -129,17 +129,61 @@ export const lightColor = (colors, color) => colorName(colors.find((c) => !dark(
 // Klein's prompt writer to « Remove the the barn », 12 Nov 2026).
 const objectName = (words) => String(words ?? "").trim().replace(/^(?:the|a|an)\s+/i, "");
 
-// tool: paint, erase or light; words: the prompt; colors: of the painted strokes; color: the tool's colour;
-// bbox: [y_min, x_min, y_max, x_max] on 0..1000; strokes and aspect: a relight's, as lightIntent reads them. Only the
-// chosen tool's text is built.
-export function caption({ tool, words, colors, color, bbox, strokes = [], aspect }) {
+// A paint's colours by name. Klein sees the strokes on the frame, but words alone (« saddle ») leave the prompt writer free to
+// give the object its usual colour. When the words name no colour, the writer's request and the page's own caption name the
+// colours that the strokes show, by their share of the painted pixels, largest first; a colour under 5% of them is an edge
+// where two strokes meet. Words that name a colour win, and then the page names none.
+export const COLOR_WORDS = /\b(?:red|orange|yellow|green|cyan|blue|violet|purple|magenta|pink|brown|black|white|gr[ae]y|silver|gold(?:en)?|beige|tan|crimson|scarlet|maroon|navy|teal|turquoise|ivory)\b/i;
+const HUES = [[15, "red"], [40, "orange"], [70, "yellow"], [165, "green"], [195, "cyan"], [255, "blue"], [290, "violet"], [345, "magenta"], [361, "red"]];
+
+export function paintHue(hex) { // a painted colour in an object's words: « black », « brown », « dark blue », « pink »
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), c = max - min;
+  if (c < 0.12) return max < 0.2 ? "black" : max < 0.45 ? "dark grey" : max < 0.7 ? "grey" : max < 0.9 ? "light grey" : "white";
+  const h = ((max === r ? (g - b) / c : max === g ? 2 + (b - r) / c : 4 + (r - g) / c) * 60 + 360) % 360;
+  const name = HUES.find(([end]) => h < end)[1];
+  if ((name === "orange" || name === "yellow") && max < 0.6) return "brown";
+  if (max < 0.35) return `dark ${name}`;
+  if (min > 0.6) return name === "red" || name === "magenta" ? "pink" : `pale ${name}`;
+  return name;
+}
+
+// The pixels of each colour of `palette` (#rrggbb) in `rgba`, a canvas's bytes: a pixel counts when it is at least half
+// opaque and within 24 levels of that colour on every channel. Where two strokes blend, it counts for neither.
+export function colorShares(rgba, palette) {
+  const cols = palette.map((hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))), n = palette.map(() => 0);
+  for (let i = 0; i < rgba.length; i += 4) {
+    if (rgba[i + 3] < 128) continue;
+    const k = cols.findIndex((c) => Math.abs(c[0] - rgba[i]) <= 24 && Math.abs(c[1] - rgba[i + 1]) <= 24 && Math.abs(c[2] - rgba[i + 2]) <= 24);
+    if (k >= 0) n[k]++;
+  }
+  return Object.fromEntries(palette.map((hex, k) => [hex, n[k]]));
+}
+
+export function paintColors({ words, shares }) { // the names, largest share first; none when the words name a colour
+  if (COLOR_WORDS.test(String(words ?? ""))) return [];
+  const by = new Map();
+  let total = 0;
+  for (const [hex, n] of Object.entries(shares ?? {})) if (n > 0) { const h = paintHue(hex); by.set(h, (by.get(h) ?? 0) + n); total += n; }
+  return [...by].filter(([, n]) => n >= 0.05 * total).sort((a, b) => b[1] - a[1]).map(([h]) => h);
+}
+
+export const andList = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}` : xs[0] ?? "");
+export const inHues = (hues) => (hues.length ? ` in the drawing's colour${hues.length > 1 ? "s" : ""}, ${andList(hues)}` : "");
+// what a paint becomes, in a request's words: the words, else `shape`; with the strokes' colours when they are named
+const paintWhat = (words, hues, shape) => (words ? `${words}${inHues(hues)}` : hues.length ? `${shape}${inHues(hues)}` : `${shape} and colour`);
+
+// tool: paint, erase or light; words: the prompt;
+// bbox: [y_min, x_min, y_max, x_max] on 0..1000; strokes and aspect: a relight's, as lightIntent reads them; hues: a
+// paint's colours by name (paintColors). Only the chosen tool's text is built.
+export function caption({ tool, words, bbox, strokes = [], aspect, hues = [] }) {
   if (tool === "light") return lightIntent({ strokes, words, aspect }); // a relight's request is the page's own: its strokes read as intentions
   const name = objectName(words);
   const text = {
     erase: () => `Remove the ${name || "object"} inside <obj_1> completely, with its shadow and its reflection. Show the surface and the background that continue behind it, with matching detail, light, shadows and focus. Add no new object. Keep everything else unchanged.`,
-    paint: () => `Replace the rough coloured drawing inside <obj_1> with ${words || "an object of that shape and colour"}, following the drawing's outline, pose and size, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.`,
+    paint: () => `Replace the rough coloured drawing inside <obj_1> with ${paintWhat(words, hues, "an object of that shape")}, following the drawing's outline, pose and size, in exactly the same style, lighting, perspective and grain as the rest of the image. Keep everything else unchanged.`,
   }[tool]();
-  const desc = { erase: name ? `${name} to remove` : "object to remove", paint: words || "the drawn object" }[tool];
+  const desc = { erase: name ? `${name} to remove` : "object to remove", paint: hues.length ? `${words || "the drawn object"}, ${andList(hues)}` : words || "the drawn object" }[tool];
   return `${text} ${JSON.stringify([{ id: "obj_1", bbox, desc }])}`;
 }
 
@@ -151,16 +195,16 @@ const pyJSON = (v) => JSON.stringify(v).replace(/("(?:[^"\\]|\\.)*")|([,:])/g, (
 export const KEEP_TOUCHED = " Where the drawing touches an object, the new element acts on that object itself (it burns it, rests on it, " +
   "wets it or lights it); add no props, fuel or supports that were not asked for."; // a fire on a towel came with logs without it
 
-export function upsampleRequest({ tool, words, bbox, boxes = null, colors = [], color = "#ffd890" }) {
+export function upsampleRequest({ tool, words, bbox, boxes = null, hues = [] }) { // hues: a paint's colours by name (paintColors)
   const parts = tool === "erase" && boxes?.length > 1 ? boxes : null; // several painted parts: one locked row each
   const rows = parts ? parts.map((b, i) => ({ id: `obj_${i + 1}`, from: "ref_image_0", src_bbox: b, tgt_bbox: null, desc: words || "an object to remove" }))
     : [tool === "erase" ? { id: "obj_1", from: "ref_image_0", src_bbox: boxes?.[0] ?? bbox, tgt_bbox: null, desc: words || "the object to remove" }
-      : { id: "obj_1", from: "target", src_bbox: null, tgt_bbox: bbox, desc: words || "an object of the drawing's shape and colour, in the image's own style" }];
-  const cites = rows.map((r) => `<${r.id}>`), list = cites.length > 1 ? `${cites.slice(0, -1).join(", ")} and ${cites.at(-1)}` : cites[0];
+      : { id: "obj_1", from: "target", src_bbox: null, tgt_bbox: bbox, desc: hues.length ? `${words || "an object of the drawing's shape"}, ${andList(hues)}` : words || "an object of the drawing's shape and colour, in the image's own style" }];
+  const list = andList(rows.map((r) => `<${r.id}>`));
   const ask = tool === "erase"
     ? parts ? `Remove the ${objectName(words) || "objects"} ${list} completely, with their shadows and their reflections, and continue the background behind them. Remove nothing else.`
       : `Remove the ${objectName(words) || "object"} <obj_1> completely, with its shadow and its reflection, and continue the background behind it. Remove nothing else.`
-    : `Replace the rough coloured drawing at <obj_1> with ${words || "an object of the same shape and colour"}: follow the drawing's outline, pose, size and colours, and draw it in exactly the style of the rest of the image (a photograph, a painting or an illustration: whichever it is), in the same light, perspective, focus and grain, casting its own light and shadows on what is around it.${KEEP_TOUCHED}`;
+    : `Replace the rough coloured drawing at <obj_1> with ${paintWhat(words, hues, "an object of the same shape")}: follow the drawing's outline, pose, size and colours, and draw it in exactly the style of the rest of the image (a photograph, a painting or an illustration: whichever it is), in the same light, perspective, focus and grain, casting its own light and shadows on what is around it.${KEEP_TOUCHED}`;
   const instruction = `ORIGINAL PROMPT:\n${ask}\n\nLOCKED BOUNDING-BOX ANNOTATIONS ([y_min, x_min, y_max, x_max] on a 0-1000 canvas, with ` +
     "(0, 0) at the top-left). This is an authoritative JSON list of dictionaries; preserve every supplied identity, provenance value, " +
     `null, and coordinate exactly:\n${pyJSON(rows)}`;
@@ -716,14 +760,55 @@ export function edgesHeld(after, before, mask, w, h) {
 // the rows, then the columns, never past the frame's edge), without the mask itself. The edit's mask grows by about as much
 // before Klein's pass (app.editSettings: grow, then feather). mask: RGBA at w x h, painted where its red is 128 or more.
 // Returns RGBA, white in the band, as erasedShare and edgesHeld read a mask.
-export function bandBeyond(mask, w, h, reach) {
-  const m = new Uint8Array(w * h), rows = new Uint8Array(w * h), grown = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i++) m[i] = mask[i * 4] >= 128 ? 1 : 0;
+function grownBy(m, w, h, reach) { // `m` (0 or 1 per pixel) grown by `reach` pixels each way, as a square brush
+  const rows = new Uint8Array(w * h), out = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (m[y * w + x]) rows.fill(1, y * w + Math.max(0, x - reach), y * w + Math.min(w - 1, x + reach) + 1);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (rows[y * w + x]) for (let k = Math.max(0, y - reach); k <= Math.min(h - 1, y + reach); k++) grown[k * w + x] = 1;
-  const band = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (rows[y * w + x]) for (let k = Math.max(0, y - reach); k <= Math.min(h - 1, y + reach); k++) out[k * w + x] = 1;
+  return out;
+}
+
+export function bandBeyond(mask, w, h, reach) {
+  const m = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) m[i] = mask[i * 4] >= 128 ? 1 : 0;
+  const grown = grownBy(m, w, h, reach), band = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) if (grown[i] && !m[i]) band.fill(255, i * 4, i * 4 + 4);
   return band;
+}
+
+// ---------- An erase's cast shadow ----------
+// Clean that takes the whole object takes its cast shadow too, when the prompt writer's caption cites one (« the dark cast
+// shadow <shadow_1> »). SAM 3.1 finds the shadows by that word; the object keeps those that meet the caption's box for its
+// shadow and touch its mask (within 1% of the frame's width) or lie under it (their middle below the object's, within its
+// width). A mask over three times the object's area is the scene's shade, not the object's shadow.
+export function shadowBox(text) { // the box of the shadow row that the caption cites, [y_min, x_min, y_max, x_max] on 0..1000, or null
+  const [caption, rows] = splitTable(String(text ?? ""));
+  const row = (rows ?? []).find((r) => r && /shadow/i.test(`${r.id ?? ""} ${r.desc ?? ""}`) && caption.includes(`<${r.id}>`) && validBox(r.src_bbox));
+  return row ? row.src_bbox : null;
+}
+
+export function shadowOf({ object, shadows, box, w, h }) { // { bits, share } of the shadow that joins the object, or null
+  const n = count(object);
+  if (!n || !box) return null;
+  let x0 = w, x1 = -1, sy = 0;
+  for (let i = 0; i < w * h; i++) if (object[i]) { const x = i % w; x0 = Math.min(x0, x); x1 = Math.max(x1, x); sy += Math.floor(i / w); }
+  const near = grownBy(object, w, h, Math.max(1, Math.round(0.01 * w))), [by0, bx0, by1, bx1] = box.map((v, k) => (v / 1000) * (k % 2 ? w : h));
+  const kept = shadows.filter((m) => {
+    let c = 0, mx = 0, my = 0, touches = false, inBox = false;
+    for (let i = 0; i < w * h; i++) {
+      if (!m[i]) continue;
+      const x = i % w, y = Math.floor(i / w);
+      c++; mx += x; my += y;
+      touches ||= near[i] === 1;
+      inBox ||= x >= bx0 && x < bx1 && y >= by0 && y < by1;
+    }
+    return c > 0 && c <= 3 * n && inBox && (touches || (my / c > sy / n && mx / c >= x0 && mx / c <= x1));
+  });
+  if (!kept.length) return null;
+  const bits = new Uint8Array(w * h);
+  for (const m of kept) for (let i = 0; i < w * h; i++) if (m[i]) bits[i] = 1;
+  let added = 0;
+  for (let i = 0; i < w * h; i++) if (bits[i] && !object[i]) added++;
+  return { bits, share: added / n };
 }
 
 // An erase that took more than its object: Klein can remove a neighbour with it, as a fence in front of a barn. On the probes'
@@ -972,14 +1057,17 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
 // colour by name, its strength from the colour's brightness, its spread from the share of the frame it covers, its place),
 // one per shaded place, the person's words, then what must stay. `strokes`: { color, size, points }, the points as [x, y]
 // fractions of the frame and the size as a fraction of its width; `aspect`: the frame's width over its height. A light that
-// covers 8% of the frame or more is broad; under 1%, focused.
+// covers 8% of the frame or more is broad; under 1%, focused. A small light inside the frame shows its source where it is
+// drawn: its strokes of one colour that touch make one source, placed by a row of Klein's layout table (tgt_bbox, as a
+// paint's request places its object). A source spans under a fifth of the frame each way and stays 2% inside its edges; a
+// wash, or a light at the frame's edge, comes from outside the frame and shows no source.
 export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
   const place = (b) => { // b: [x0, y0, x1, y1] in fractions of the frame
     const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
     const v = cy < 1 / 3 ? "top" : cy > 2 / 3 ? "bottom" : "", h = cx < 1 / 3 ? "left" : cx > 2 / 3 ? "right" : "";
     return v && h ? `${v} ${h}` : v || h || "centre";
   };
-  const groups = new Map();
+  const groups = new Map(), lamps = [];
   for (const s of strokes) {
     const r = s.size / 2, rh = r * aspect, pts = s.points;
     let length = 0;
@@ -991,7 +1079,20 @@ export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
     g.cover += Math.min(1, ((length + 2 * rh) * 2 * rh) / aspect); // a round brush along its path, as a share of the frame
     g.box = [Math.min(g.box[0], box[0]), Math.min(g.box[1], box[1]), Math.max(g.box[2], box[2]), Math.max(g.box[3], box[3])];
     groups.set(key, g);
+    if (!g.shade) lamps.push({ name: key, box });
   }
+  const touch = (a, b) => a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3];
+  for (let joined = true; joined;) { // until no two touch: the sources do not depend on the strokes' order
+    joined = false;
+    for (let i = 0; i < lamps.length && !joined; i++) for (let j = i + 1; j < lamps.length && !joined; j++) {
+      const a = lamps[i], b = lamps[j];
+      if (a.name !== b.name || !touch(a.box, b.box)) continue;
+      a.box = [Math.min(a.box[0], b.box[0]), Math.min(a.box[1], b.box[1]), Math.max(a.box[2], b.box[2]), Math.max(a.box[3], b.box[3])];
+      lamps.splice(j, 1);
+      joined = true;
+    }
+  }
+  const shown = lamps.filter(({ box: b }) => b[2] - b[0] < 0.2 && b[3] - b[1] < 0.2 && Math.min(b[0], b[1]) > 0.02 && Math.max(b[2], b[3]) < 0.98);
   const said = ["Relight the whole scene with new light, as if it were photographed under that light."];
   for (const [name, g] of groups) {
     if (g.shade) { said.push(`The ${place(g.box)} of the frame falls into deep shadow.`); continue; }
@@ -1003,8 +1104,14 @@ export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
     "it casts soft shadows away from it, and the old highlights and shadows that disagree with it fade.");
   const w = String(words ?? "").trim();
   if (w) said.push(`${w[0].toUpperCase()}${w.slice(1)}${/[.!?]$/.test(w) ? "" : "."}`);
-  said.push("Keep every object, face and texture, the camera angle, the framing and the composition exactly as they are: only the light changes.");
-  return said.join(" ");
+  const rows = shown.map(({ name, box: b }, k) => {
+    said.push(`The ${name} light's source <light_${k + 1}> is visible in the frame: a small, very bright ${name} light.`);
+    return { id: `light_${k + 1}`, from: "target", src_bbox: null, tgt_bbox: [b[1], b[0], b[3], b[2]].map((v) => Math.round(v * 1000)),
+      desc: `the light's source: a small, very bright ${name} light` };
+  });
+  said.push("Keep every object, face and texture, the camera angle, the framing and the composition exactly as they are: only the light " +
+    `changes${rows.length ? ", and each light's source shows where it is placed" : ""}.`);
+  return rows.length ? `${said.join(" ")} ${pyJSON(rows)}` : said.join(" ");
 }
 
 // A fluid shot's own passes, shown from the Render panel with its keyframes open or closed: the control video LTX was

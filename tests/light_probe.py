@@ -13,7 +13,7 @@ web/logic.mjs, run by Node, as in tests/erase_probe.py.
 The ways, for each set:
 - words: the person's words alone, which Klein's prompt writer expands with the frame (its plain mode); Klein then gets the
   frame and the writer's prompt. A set with no words has no such way;
-- intent: what the page does (writeCaption and generate in web/app.mjs), the strokes read as intentions (logic.lightIntent: each light's colour, strength, spread and place, the shade),
+- intent: what the page does (writeCaption and generate in web/app.mjs), the strokes read as intentions (logic.lightIntent: each light's colour, strength, spread and place, the shade, and the source of a small light inside the frame, placed where it is drawn),
   with the words; Klein gets the frame and that prompt only;
 - intent_writer: that prompt given to the prompt writer with the frame (plain mode), which reads the plate and writes the
   prompt that Klein gets with the frame;
