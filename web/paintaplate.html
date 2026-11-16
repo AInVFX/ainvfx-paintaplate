@@ -318,8 +318,10 @@
         <div id="browse" class="browse" role="listbox" aria-label="Folders and plates"></div>
         <p id="browse-note" class="hint"></p>
         <p id="browse-info" class="browse-info" aria-live="polite"></p>
-        <label>Or type a path: in the input folder, or output:… for the output folder
-          <input id="path" placeholder="plates/shot010.mp4, output:video/ComfyUI_00001_.mp4 or output:frames/f_#####_.png"></label>
+        <label id="path-row">Or type the full path of a movie, a frame of a sequence or a folder of frames, on this machine
+          <input id="path" autocomplete="off" spellcheck="false" placeholder="/data/plates/shot010.mov or D:\plates\shot010\shot010.1001.exr"></label>
+        <p id="path-error" class="path-error" role="alert"></p>
+        <p id="path-remote" class="hint" hidden>ComfyUI runs on another machine. To open a file of this machine, upload it in the Upload tab.</p>
       </section>
       <section class="tab" data-tab="upload" role="tabpanel" hidden>
         <label id="drop" class="drop">Drop a video file, or the frames of one sequence, here. Or click to choose them.

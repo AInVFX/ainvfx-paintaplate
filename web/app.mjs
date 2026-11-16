@@ -18,7 +18,7 @@ import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, 
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { askedSeed } from "./logic.mjs"; // the tests: a seed asked for in the address
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
-import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
+import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, sameMachine, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
 import { readBack } from "./canvas.mjs"; // the viewer: a few pixels of the view, read without moving it off the GPU
 
 const $ = (q) => document.querySelector(q);
@@ -288,7 +288,7 @@ async function openPlate(list, typed, opts = {}) {
     }
     if (ctl.signal.aborted) throw new Error("cancelled");
     openStep("read", 0, "Decoding the frames");
-    const st = await fetch(`/paintaplate/stat?${new URLSearchParams({ path, config: S.ocio.config, cs: knownSpace(opts.cs) ?? "" })}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const st = opts.st ?? await fetch(`/paintaplate/stat?${new URLSearchParams({ path, config: S.ocio.config, cs: knownSpace(opts.cs) ?? "" })}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     headroom = st?.headroom ?? 1; // above 1.0 for a log encoding: an integer plate then holds SDR to HDR's values (logic.holdsHdr)
     setSalt(plateIdentity(path, st, INDEX_ON)); // the plate's identity: job index keys change when it does
     fileSpace = st?.color_space ?? null;
@@ -3211,6 +3211,7 @@ const ITEM_ICON = { folder: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d
 
 function openDialog() {
   for (const id of ["#files", "#scene", "#path"]) $(id).value = "";
+  $("#path-error").textContent = "";
   Object.assign(OPEN, { chosen: null, scene: null });
   $("#browse-sort").value = OPEN.by;
   for (const id of ["#files-note", "#browse-info"]) $(id).textContent = "";
@@ -4111,19 +4112,33 @@ for (const b of $$("#open [data-root]")) b.onclick = () => browse(b.dataset.root
 $("#browse-find").oninput = () => drawBrowse();
 $("#browse-sort").onchange = () => { keepOpen(); drawBrowse(); };
 $("#browse").onscroll = (e) => { const el = e.currentTarget; if (el.scrollTop + el.clientHeight > el.scrollHeight - 240 && OPEN.shown < browseList().length) drawBrowse(true); };
-$("#path").oninput = () => { OPEN.chosen = null; for (const x of $$("#browse .item.on")) x.classList.remove("on"); openGoUI(); };
+$("#path").oninput = () => { $("#path-error").textContent = ""; OPEN.chosen = null; for (const x of $$("#browse .item.on")) x.classList.remove("on"); openGoUI(); };
 $("#files").onchange = filesUI;
 $("#scene").onchange = () => { OPEN.scene = null; openGoUI(); };
 $("#drop").ondragover = (e) => { e.preventDefault(); e.currentTarget.classList.add("over"); };
 $("#drop").ondragleave = (e) => e.currentTarget.classList.remove("over");
 $("#drop").ondrop = (e) => { e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.remove("over"); $("#files").files = e.dataTransfer.files; filesUI(); };
-$("#open-go").onclick = () => { // what the tab on show holds
+// A typed path: the full path of a movie, a frame of a sequence or a folder of frames, when ComfyUI runs on this machine
+// (frames.sameMachine); a path in the input folder keeps its meaning. On another machine a note points to the Upload tab.
+// ?remote shows that case, for the tests.
+const PATHS_HERE = sameMachine(location.hostname) && !Q.has("remote");
+$("#path-row").hidden = !PATHS_HERE; $("#path-remote").hidden = PATHS_HERE;
+async function plateStat(path) { // the server's stat of a plate, or { error } with the one line that says why it cannot read it
+  const r = await fetch(`/paintaplate/stat?${new URLSearchParams({ path, config: S.ocio.config })}`).catch(() => null);
+  if (!r) return { error: "ComfyUI did not answer. Check that it runs." };
+  const body = await r.json().catch(() => ({}));
+  return r.ok ? body : { error: body.error ?? `ComfyUI cannot read this path (HTTP ${r.status}).` };
+}
+$("#open-go").onclick = async () => { // what the tab on show holds
   const t = OPEN.tab, typed = $("#path").value.trim(), it = OPEN.chosen, go = (job) => { $("#open").close(); job.catch(quiet); };
   if (t === "blank") return go(openBlank());
   if (t === "upload") return go(openPlate([...$("#files").files], ""));
   if (t === "scenes") return go(($("#scene").files[0]?.text() ?? fetch(`/paintaplate/scenes/${encodeURIComponent(OPEN.scene)}`).then((r) => r.text())).then(openScene));
   if (!typed && it?.kind === "scene") return go(fetch(sceneFile(it.path)).then((r) => r.text()).then(openScene));
-  return go(openPlate([], typed || it.path));
+  if (!typed) return go(openPlate([], it.path));
+  const st = await plateStat(typed); // the server reads the path first: the dialog stays open with its line when it cannot
+  if (st.error) return void ($("#path-error").textContent = st.error);
+  return go(openPlate([], typed, { st }));
 };
 
 const timeline = $("#timeline");
