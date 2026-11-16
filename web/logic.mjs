@@ -1192,23 +1192,30 @@ export const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sa
 // seconds. Measured on an RTX 4090 Laptop GPU (16 GB of VRAM, 52 GB of RAM), horse.mp4 at
 // 1920 x 1080 and 121 frames: the lead is what a job spent outside its sampler or its tracking loop in ComfyUI's trace,
 // and each factor makes the rest. SDR to HDR grows faster than its pixels (`grow`, the power of its scale): 172 s at
-// 1280 x 704 and 606 s at 1920 x 1088, 121 frames each, the same workflow for a fluid shot and a render. Other
+// 1280 x 704 and 606 s at 1920 x 1088, 121 frames each, the same workflow for a fluid shot and a render. The full-size shot grows the same way: 79.8 s at
+// 960 x 512, 156.6 s at 1280 x 704 and 576.4 s at 1920 x 1088. A composite also spends `fixed` seconds whatever its size:
+// comp took 7.8 s at 480 x 256 and 13.7 to 15.3 s at 960 x 544, review 13.5 s at 1280 x 704 and 23.2 to 26.0 s at
+// 1920 x 1088, 121 frames each. Other
 // profiles announce the references as they are. With SDR to HDR on, the full-size composite (review) and the export write
 // half-float EXR frames: `withHdr` multiplies their seconds (37.7 s and 14.6 s on the HDR test plate made from horse.mp4,
 // 1920 x 1080 and 121 frames). tests/js/render_estimates.test.mjs holds every measured step within 25%.
 export const SLOWER = {
   small: { lead: { ltx: 38, sam: 11, frames: 0 }, erase: 2.1, track: 1, trackfull: 1, clean: 3.35, shot: 1.64, cleanfull: 1.18,
-    full: 2.98, hdr: 1.166, comp: 1.3, review: 0.42, export: 0.235, grow: { hdr: 1.72 }, withHdr: { review: 1.9, export: 1.6 } },
+    full: 1.1, hdr: 1.166, comp: 0.42, review: 0.42, export: 0.235, grow: { hdr: 1.72, full: 1.72 }, withHdr: { review: 1.9, export: 1.6 },
+    fixed: { comp: 6.4, review: 3 } },
 };
 export const slower = (profile, id) => SLOWER[profile]?.[id] ?? 1;
-export const BIG_STEPS = ["full", "cleanfull", "hdr", "review", "export"]; // the steps made at the working size
+export const BIG_STEPS = ["full", "cleanfull", "cleanup", "hdr", "review", "export"]; // the steps made at the working size (cleanup: stageTwoGuess)
 export const stepSizeOf = (id, plate) => (BIG_STEPS.includes(id) ? plate.work : ["erase", "track", "trackfull"].includes(id) ? plate.track : plate.shot);
 const REF_SIZE = 928 * 512 * 97; // pixels times frames, where the references were measured
 export function stepGuess(id, ref, plate, profile, hdr = false) { // seconds: the reference scaled to this plate (BIG_STEPS at 0.73 of it), then to this GPU; hdr: the render makes SDR to HDR
   const [w, h] = stepSizeOf(id, plate), scale = (w * h * plate.frames) / REF_SIZE * (BIG_STEPS.includes(id) ? 0.73 : 1);
-  return (SLOWER[profile]?.lead?.[STEP_FAMILY[id]] ?? 0) + ref * Math.max(0.25, scale) ** (SLOWER[profile]?.grow?.[id] ?? 1) * slower(profile, id)
+  return (SLOWER[profile]?.lead?.[STEP_FAMILY[id]] ?? 0) + (SLOWER[profile]?.fixed?.[id] ?? 0) + ref * Math.max(0.25, scale) ** (SLOWER[profile]?.grow?.[id] ?? 1) * slower(profile, id)
     * (hdr ? SLOWER[profile]?.withHdr?.[id] ?? 1 : 1);
 }
+// The full-size clean plate pass when its first stage is the preview's own pass, made already: the pass less that stage
+// (ref: each step's reference, by id). Its seconds are kept as « cleanup », apart from the pass that makes both stages.
+export const stageTwoGuess = (ref, plate, profile) => Math.max(1, stepGuess("cleanfull", ref.cleanfull, plate, profile) - stepGuess("clean", ref.clean, plate, profile));
 // The name a step's seconds are kept under: with SDR to HDR on, the steps it slows (SLOWER's withHdr) are kept apart.
 export const timeId = (id, hdr) => (hdr && Object.values(SLOWER).some((p) => p.withHdr?.[id]) ? `${id}+hdr` : id);
 export function stepLeft({ est, run, first = null, last = null, tail = null }) { // seconds left in the step that runs; first and last: [seconds since its start, progress]

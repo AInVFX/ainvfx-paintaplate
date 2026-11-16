@@ -12,7 +12,7 @@ import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
 import { CACHE_LEAST, CACHE_MOST, askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, PREVIEW_PARTS, previewCap, memoryBytes, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, colorShares, paintColors, inHues, shadowBox, shadowOf } from "./logic.mjs";
-import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
+import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
@@ -2714,6 +2714,7 @@ const STAGES = [
   { id: "review", label: "Composite, full size", ref: 12, final: true },
   { id: "export", label: "Export", ref: 10, final: true, onDemand: true },
 ];
+const REF = Object.fromEntries(STAGES.map((x) => [x.id, x.ref])); // each step's reference in seconds, by id (logic.stepGuess)
 const previewOf = (r) => r?.previews?.[S.plate.shot.join("x")]; // what this preview size made for a set of edits
 const doneOf = (r, st) => (st.preview ? previewOf(r) : r)?.done?.[st.id]; // seconds a step took, if it ran
 S.took = {}; // measured seconds per step, for this plate: the next estimates use them
@@ -2736,13 +2737,15 @@ try { TIMES = JSON.parse(localStorage.getItem(TIMES_KEY) ?? "{}") ?? {}; } catch
 const stepSize = (id) => stepSizeOf(id, S.plate);
 const stepKey = (id, hdr = false) => timeKey(timeId(id, hdr), stepSize(id), S.plate.frames, S.memoryProfile.name);
 const makesHdr = (skip) => !!skip && !skip.has("hdr"); // a render makes SDR to HDR unless its plan leaves the step out
+const fromPreview = () => { const low = stageOne(S.plate.work); return S.plate.shot?.[0] === low[0] && S.plate.shot?.[1] === low[1]; }; // the full-size clean plate pass starts from the preview's own pass
+const timeStep = (id) => (id === "cleanfull" && fromPreview() ? "cleanup" : id); // the name a step's seconds go under: stage 2 alone apart from both stages
 
 function estimate(id, skip) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess. skip: the render's steps left out
-  const hdr = makesHdr(skip);
-  if (S.took[timeId(id, hdr)]) return S.took[timeId(id, hdr)];
-  const known = TIMES[stepKey(id, hdr)];
+  const hdr = makesHdr(skip), t = timeStep(id);
+  if (S.took[timeId(t, hdr)]) return S.took[timeId(t, hdr)];
+  const known = TIMES[stepKey(t, hdr)];
   if (known?.total) return known.total;
-  return stepGuess(id, STAGES.find((x) => x.id === id).ref, S.plate, S.memoryProfile.name, hdr);
+  return t === "cleanup" ? stageTwoGuess(REF, S.plate, S.memoryProfile.name) : stepGuess(id, REF[id], S.plate, S.memoryProfile.name, hdr);
 }
 
 async function step(r, id, work, store = r) { // run one step of a render, timed and shown; preview steps keep their result per size
@@ -2760,11 +2763,11 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
     stagesUI();
   });
   hideLive();
-  const dt = (performance.now() - t0) / 1000;
+  const dt = (performance.now() - t0) / 1000, t = timeStep(id);
   if (jobsNotRun() === notRun) { // a step whose jobs were answered without running (the job index, ComfyUI's cache) keeps no time
-    TIMES = remember(TIMES, stepKey(id, makesHdr(r.skip)), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
+    TIMES = remember(TIMES, stepKey(t, makesHdr(r.skip)), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
     try { localStorage.setItem(TIMES_KEY, JSON.stringify(TIMES)); } catch { /* a private window: the session's own times still serve */ }
-    S.took[timeId(id, makesHdr(r.skip))] = dt;
+    S.took[timeId(t, makesHdr(r.skip))] = dt;
   }
   (store.done ??= {})[id] = dt;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
@@ -3077,7 +3080,7 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
     if (skip.has(st.id) || doneOf(r, st) !== undefined || (st.onDemand && !exporting)) continue;
     const est = estimate(st.id, skip);
     if (S.stage?.id === st.id && S.stage.key === S.heroKey) {
-      t += stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(st.id, makesHdr(skip))]?.tail ?? null });
+      t += stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(timeStep(st.id), makesHdr(skip))]?.tail ?? null });
     } else t += est;
   }
   return t;
