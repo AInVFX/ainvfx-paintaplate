@@ -670,6 +670,17 @@ class Verdict(unittest.TestCase):
         for path, script in made.items():
             self.assertIn(os.path.basename(path), open(os.path.join(gpu_matrix.HERE, script)).read(), script)
 
+    def test_two_more_tries_paint_the_robotic_arm_on_the_same_exr_plate_outside_quick_and_all(self):
+        cases = gpu_matrix.load_cases()
+        arm, clean, rig = cases["tos_arm"], cases["tos_arm_clean"], cases["tos_arm_rig"]
+        for case in (clean, rig):
+            self.assertEqual((case["path"], case["seed"], case["hdr"]), (arm["path"], arm["seed"], True))
+        self.assertEqual([s[0] for s in clean["strokes"]], ["erase", "paint"])  # the rig goes first, then the same Paint
+        self.assertEqual((clean["strokes"][0][2], clean["strokes"][1]), (arm["strokes"][0][2], arm["strokes"][0]))
+        self.assertEqual(rig["strokes"][0][2], arm["strokes"][0][2])
+        self.assertGreater(rig["strokes"][0][3], arm["strokes"][0][3])  # a wider brush covers what is strapped on the arm
+        self.assertFalse({"tos_arm_clean", "tos_arm_rig"} & set(gpu_matrix.ALL + gpu_matrix.QUICK))
+
     def test_every_case_passes_on_its_export(self):
         """No case expects the page to stop before its shot: each one passes when its export downloads."""
         self.assertEqual([n for n, c in gpu_matrix.load_cases().items() if "expect" in c], [])
