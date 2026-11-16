@@ -152,9 +152,10 @@
     </section>
     <section id="render" class="render" hidden>
       <h2>Render <span id="render-left"></span></h2>
-      <label class="preview-size">Preview size
-        <select id="preview-size" title="The shot preview and its composite, in sizes this plate divides into, or Off. Smaller renders faster; Off renders the full size alone. The export stays at full size."></select>
+      <label class="preview-size">Preview pass
+        <select id="preview-size"></select>
       </label>
+      <p class="preview-note">A first pass of the whole shot at a smaller size, shown before the full size, to judge the motion early. Half size has a quarter of the pixels and a quarter size a sixteenth: smaller is quicker and less sharp. Off makes the full size only.</p>
       <ol id="stages"></ol>
       <p class="hint render-hint">Click a finished step to show it on every frame; click it again, or Esc, for the latest.</p>
       <button id="render-full" type="button" class="quiet render-full" hidden title="These edits took the frames of an earlier render whose other edits are far away: only the tracking and the composites ran. Render them in full, with their own shot, the same edits and seeds">Render in full</button>

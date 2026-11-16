@@ -87,19 +87,19 @@ export function previewSize(plate, work, cap, step = 32, tol = 0.025) {
   return fitSize(plate[0], plate[1], cap, step, tol);
 }
 
-export const PREVIEW_CAPS = [["Standard", 960], ["Fast", 640], ["Draft", 448]];
 
-// The Preview size menu for a plate: Full, then each cap below the working size, with the size it gives and the whole
-// number it divides the working size by (0 when it does not divide it). Two caps that give one size are listed once.
+// Preview pass: half and a quarter of the working size, each on the grid with the plate's aspect (previewSize). `div` is
+// the part of the working size's long side, `cap` that long side.
+export const PREVIEW_PARTS = [[2, "Half size"], [4, "Quarter size"]];
 export function previewSizes(plate, work, step = 32) {
-  const long = Math.max(...work), out = [];
-  for (const [label, cap] of [["Full", long], ...PREVIEW_CAPS.filter(([, c]) => c < long)]) {
-    const size = previewSize(plate, work, cap, step), k = work[0] / size[0];
-    if (out.some((o) => o.size[0] === size[0] && o.size[1] === size[1])) continue;
-    out.push({ label, cap, size, div: Number.isInteger(k) && work[1] / size[1] === k ? k : 0 });
+  const out = [];
+  for (const [div, label] of PREVIEW_PARTS) {
+    const cap = previewCap(work, div), size = previewSize(plate, work, cap, step);
+    if (!out.some((o) => o.size[0] === size[0] && o.size[1] === size[1])) out.push({ label, div, cap, size });
   }
   return out;
 }
+export const previewCap = (work, div) => (div ? Math.round(Math.max(...work) / div) : 0); // the shot preview's long side; 0: Off
 
 export const gb = (n) => (n > 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
 

@@ -1,4 +1,4 @@
-"""Preview size: Off. A render skips the four preview steps and starts with the full-size passes, the Render panel lists no
+"""Preview pass: Off. A render skips the four preview steps and starts with the full-size passes, the Render panel lists no
 preview row, and the viewer keeps the plate until the full-size composite is ready."""
 import re
 
@@ -11,8 +11,8 @@ def run(browser, port, U):
     page.wait_for_function(f"{STATUS}.startsWith('Ready')", timeout=60000)
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden", timeout=60000)
-    first = page.evaluate("[document.querySelector('#preview-size').options[0].value, document.querySelector('#preview-size').options[0].text]")
-    U.check(first[0] == "0" and first[1].startswith("Off"), f"Off is the first choice of Preview size: {first}")
+    last = page.evaluate("(() => { const o = [...document.querySelector('#preview-size').options].at(-1); return [o.value, o.text]; })()")
+    U.check(last == ["0", "Off"], f"Off is the last choice of the Preview pass: {last}")
     page.select_option("#preview-size", "0")
     U.check(page.text_content("#status") == "Shot preview: off. A render starts with the full-size passes.", f"the status line says so: {page.text_content('#status')}")
     page.evaluate(U.WATCH)

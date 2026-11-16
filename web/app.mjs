@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, PREVIEW_PARTS, previewCap, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -46,7 +46,9 @@ const INDEX_ON = Q.get("index") !== "0"; // ?index=0, for the tests: no job is t
 // The memory profile (logic.memoryProfile): the card decides, unless ?memory=small, medium or large in the address, or the
 // name kept under paintaplate.memory, asks for one
 const MEMORY_ASKED = Q.get("memory") || (() => { try { return localStorage.getItem("paintaplate.memory"); } catch { return null; } })();
-const PREVIEW_CAP = 640; // the preview size by default: Fast. The menu is built per plate (logic.previewSizes)
+const PREVIEW_DIV = 2; // Preview pass by default: half the working size (logic.previewSizes)
+const PREVIEW_PREF = "paintaplate.preview";
+let previewDiv = (() => { try { const v = localStorage.getItem(PREVIEW_PREF); return v !== null && [0, ...PREVIEW_PARTS.map(([d]) => d)].includes(+v) ? +v : PREVIEW_DIV; } catch { return PREVIEW_DIV; } })(); // 2, 4 or 0 (Off); the next session keeps it
 const PREFETCH_MS = 500; // quiet time after a keystroke before the prompt writer starts on the new words
 const UNDO_MAX = 60; // steps kept for undo
 const PAINT_GRID = 96; // cells across the frame for an erase's locked boxes and the check of its caption (logic.paintBoxes, erasesPaint)
@@ -106,7 +108,7 @@ const S = {
   fluid: null, clip: null, fluidReady: true, // a fluid shot on a blank plate, the last one, a copied keyframe
   shot: null, stage: null, run: 0, exported: null, wantDownload: null,
   ocio: { config: "", display: "", view: "", look: "", ...saved(OCIO_PREF), info: null }, // the OCIO config and the viewer's view, as in RV
-  previewCap: (() => { try { const v = localStorage.getItem("paintaplate.preview"); return v && Number.isFinite(+v) ? +v : PREVIEW_CAP; } catch { return PREVIEW_CAP; } })(), // 0: Off // long side of the shot preview: Fast by default
+  previewCap: 0, // the shot preview's long side for the plate open (logic.previewCap); 0: Off // 0: Off // long side of the shot preview: Fast by default
   deliver: { hdr: false }, // the Finish menu's passes for this plate, under the scene's key « deliver »; hdr: the deliberate SDR to HDR of a plate that holds nothing above 1.0
   heroKey: "", renders: new Map(), // set of edits -> what has been rendered for it
   erases: new Map(), // set of erases -> their matte and clean plates, for every render that has the same erases
@@ -319,8 +321,8 @@ async function openPlate(list, typed, opts = {}) {
     first: spec.kind === "video" ? 1 : spec.first_frame ?? 1,
     work: fitSize(w, h, WORK_SIDE, 32), prev: fitSize(w, h, EDIT_SIDE, 16),
     track: fitSize(w, h, TRACK_SIDE, 32), trackErase: fitSize(w, h, ERASE_TRACK_SIDE, 32) }; // SAM tracks at one size whatever the preview size
-  if (Q.get("shot") === "full") S.previewCap = Math.max(w, h);
-  S.plate.shot = previewSize([w, h], S.plate.work, S.previewCap || PREVIEW_CAP); // Off keeps a size, which no step uses
+  S.previewCap = Q.get("shot") === "full" ? Math.max(w, h) : previewCap(S.plate.work, previewDiv);
+  S.plate.shot = previewSize([w, h], S.plate.work, S.previewCap || previewCap(S.plate.work, PREVIEW_DIV)); // Off keeps a size, which no step uses
   S.original = snap(await loadImage(viewUrl(outputFile("ingest", out, "hero"))), S.plate.work);
   $("#prompt").value = "";
   Object.assign(S, { hero: S.original, running: null, live: null, halted: false, frame: 0, inPt: 0, outPt: S.plate.frames - 1, shot: null, exported: null,
@@ -2676,7 +2678,7 @@ function plan(r, active) { // the steps this set of edits needs: the erase pass 
   r.skip = new Set([!erase && "erase", !erase && "clean", !carry && "shot", !paint && "track", (onePass || !erase) && "cleanfull",
     (onePass || !carry) && "full", (onePass || !paint) && "trackfull",
     !(S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), hdrOfKey(r.key, holdsHdr(p.spec, p.headroom)))) && "hdr", // the switch is in the key
-    ...(S.previewCap ? [] : STAGES.filter((st) => st.preview).map((st) => st.id))].filter(Boolean)); // Preview size: Off
+    ...(S.previewCap ? [] : STAGES.filter((st) => st.preview).map((st) => st.id))].filter(Boolean)); // Preview pass: Off
   return r;
 }
 
@@ -2809,7 +2811,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     }, store);
     return carry ? store.shot : store.clean;
   };
-  const off = !S.previewCap; // Preview size: Off: the four preview steps are in r.skip (plan), and the viewer keeps the plate until the full-size composite
+  const off = !S.previewCap; // Preview pass: Off: the four preview steps are in r.skip (plan), and the viewer keeps the plate until the full-size composite
   const made = off ? null : await passes(pv, p.shot, sized, false);
   if (!off && here() && !S.pass && !pv.taken && !pv.comp && !r.review && S.shot?.url !== pv.raw) { // a rough look at once: the whole frame as the model made it, until the composite
     setShot(pv.raw, key, "@model");
@@ -3004,7 +3006,7 @@ async function exportLog() { // the log's export (logic.logReport): the log with
 $("#log-export").addEventListener("click", exportLog);
 
 function renderLeft(finalToo = false) { // seconds until the preview, or the full-size composite (and the export once asked for), is ready
-  finalToo ||= !S.previewCap; // with Preview size: Off, the next result is the full-size composite
+  finalToo ||= !S.previewCap; // with Preview pass: Off, the next result is the full-size composite
   const p = S.plate, r = S.renders.get(S.heroKey), exporting = !!S.wantDownload;
   if (!p || !S.heroKey || (finalToo ? (exporting ? r?.exported : r?.review) : previewOf(r)?.comp || r?.review)) return 0;
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
@@ -3110,24 +3112,24 @@ function timelineUI() {
   stagesUI();
 }
 
-function setPreview(cap) { // a smaller shot preview renders faster, and Off (0) renders the full size alone; the export stays at full size
-  S.previewCap = cap;
-  try { localStorage.setItem("paintaplate.preview", String(cap)); } catch { /* this session only */ }
+function setPreview(div) { // Preview pass: half or a quarter of the working size, or Off (0) for the full size alone; the export stays at full size
+  previewDiv = div;
+  try { localStorage.setItem(PREVIEW_PREF, String(div)); } catch { /* this session only */ }
   if (!S.plate) return;
-  S.plate.shot = previewSize([S.plate.spec.width, S.plate.spec.height], S.plate.work, cap || PREVIEW_CAP);
+  S.previewCap = previewCap(S.plate.work, div);
+  S.plate.shot = previewSize([S.plate.spec.width, S.plate.spec.height], S.plate.work, S.previewCap || previewCap(S.plate.work, PREVIEW_DIV));
   previewUI();
   S.heroKey = ""; recompose(); // what this size made already plays at once; the full size and its export never depend on it
-  status(cap ? `Shot preview: ${S.plate.shot[0]} x ${S.plate.shot[1]}. The export stays at full size.` : "Shot preview: off. A render starts with the full-size passes.");
+  status(div ? `Shot preview: ${S.plate.shot[0]} x ${S.plate.shot[1]}. The export stays at full size.` : "Shot preview: off. A render starts with the full-size passes.");
   stagesUI(); exportUI(); touch();
 }
 
-function previewUI() { // the Preview size menu: the sizes this plate can take, the one in use selected
+function previewUI() { // the Preview pass menu: half and a quarter of this plate's working size, then Off
   const sel = $("#preview-size"), p = S.plate;
   if (!p) return;
   const sizes = previewSizes([p.spec.width, p.spec.height], p.work);
-  sel.replaceChildren(new Option("Off · full size only", "0"), ...sizes.map((o) => new Option(`${o.label} · ${o.size[0]} × ${o.size[1]}${o.div > 1 ? ` (1/${o.div})` : o.label === "Full" ? " (slow)" : ""}`, String(o.cap))));
-  const on = sizes.find((o) => o.size[0] === p.shot[0] && o.size[1] === p.shot[1]) ?? sizes.at(-1);
-  sel.value = S.previewCap ? String(on.cap) : "0";
+  sel.replaceChildren(...sizes.map((o) => new Option(`${o.label} (${o.size[0]} x ${o.size[1]})`, String(o.div))), new Option("Off", "0"));
+  sel.value = String(S.previewCap ? previewDiv : 0);
 }
 
 function exportUI() {
@@ -3331,7 +3333,7 @@ async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it ag
   const blank = f?.blankPath;
   const scene = { ...SCENE, saved: new Date().toISOString(), work, ocio: { config, display, view, look: lk },
     plate: { path: blank ?? S.plate.path, color_space: blank ? modelSpace() : S.plate.cs, name: S.plate.name },
-    preview: S.previewCap, deliver: { ...S.deliver }, in: S.inPt, out: S.outPt,
+    preview: previewDiv, deliver: { ...S.deliver }, in: S.inPt, out: S.outPt,
     edits: S.edits.map((e) => ({ tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on,
       caption: e.caption?.text ?? "", strokes: packStrokes(e.strokes) })),
     ...(f ? { fluid: { prompt: keying() ? $("#prompt").value.trim() : f.prompt ?? "", seed: f.seed, depth: f.depth ?? 8, made: !!f.result, on: f.on !== false, keys: f.keys.map((k) => ({ frame: k.frame, strokes: packStrokes(k.strokes) })) } } : {}) };
@@ -3378,7 +3380,7 @@ async function openScene(text) { // the plate opens in its colour space, then ev
     S.ocio.look = info.looks.includes(o.look) ? o.look : "";
     look.setView(S.ocio); saveOcio();
   }
-  if (scene.preview) setPreview(scene.preview);
+  if (PREVIEW_PARTS.some(([d]) => d === scene.preview)) setPreview(scene.preview); // the Preview pass's part; an older scene's size in px keeps the choice in use
   const deliverHdr = scene.version >= 6 ? !!scene.deliver?.hdr : scene.version === 5 && scene.hdr === true; // 5: the old switch, on
   const from = scene.version >= 2 && Array.isArray(scene.work) ? scene.work : null; // strokes in pixels of this working size
   await openPlate([], scene.plate.path, { chosen: scene.fluid ? false : undefined, cs: scene.fluid ? modelSpace() // a blank plate, as openBlank opens it (1.4.0 saved the space under its edits)
@@ -4024,7 +4026,6 @@ $("#menu-btn").onclick = (e) => { // the same menu as a right-click, for touch s
 $("#play-btn").onclick = () => (S.playing ? pause() : play());
 $("#wipe-btn").onclick = () => setWipe(S.wipe === null);
 $("#export-btn").onclick = exportDialog;
-$("#preview-size").value = String(S.previewCap);
 $("#preview-size").onchange = (e) => setPreview(+e.target.value);
 
 $("#x-go").onclick = () => {

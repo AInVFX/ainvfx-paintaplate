@@ -187,7 +187,7 @@ h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; l
 .render { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
 .render h2 { display: flex; justify-content: space-between; gap: 8px; }
 #render-left { font-weight: 400; color: var(--gold); font-variant-numeric: tabular-nums; }
-.preview-size { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+.preview-size { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 4px; color: var(--muted); font-size: 12px; }
 .preview-size select { flex: 1; min-width: 0; max-width: 180px; font: inherit; color: var(--text); background: var(--surround); border: 1px solid var(--line); border-radius: var(--radius); padding: 3px 6px; }
 #stages { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
 #stages li { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: 6px; color: var(--faint); }
@@ -386,3 +386,4 @@ dialog.open { width: min(900px, 94vw); }
 /* Full screen: the plate alone, fitted, on the whole screen, or on the whole window where the browser refuses its full screen */
 body.plate-alone { grid-template: "stage" minmax(0, 1fr) / minmax(0, 1fr); }
 body.plate-alone :is(.top, .tools, .split-side, .side, .log), body.plate-alone .stage > :not(.viewport) { display: none; }
+.preview-note { margin: 0 0 10px; color: var(--faint); font-size: 11px; line-height: 1.35; } /* the line under Preview pass: what each choice costs and gives */

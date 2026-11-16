@@ -29,9 +29,9 @@ test("preview sizes come from the plate's size: exact divisions of the working s
   assert.deepEqual(previewSize([1280, 704], [1280, 704], 960), [928, 512]);
   assert.deepEqual(previewSize([1080, 1920], [1088, 1920], 640), [352, 640]); // portrait keeps its orientation
   const menu = previewSizes(...hd);
-  assert.deepEqual(menu.map((o) => [o.label, o.cap, o.size, o.div]),
-    [["Full", 1920, [1920, 1088], 1], ["Standard", 960, [960, 544], 2], ["Fast", 640, [640, 352], 0], ["Draft", 448, [448, 256], 0]]);
-  assert.deepEqual(previewSizes([640, 352], [640, 352]).map((o) => o.label), ["Full", "Draft"]); // caps at or above the plate are the plate: listed once
+  assert.deepEqual(menu.map((o) => [o.label, o.div, o.cap, o.size]), [["Half size", 2, 960, [960, 544]], ["Quarter size", 4, 480, [448, 256]]]);
+  assert.deepEqual(previewSizes([1280, 720], [1280, 704]).map((o) => o.size), [[640, 352], [288, 160]]); // the quarter keeps the plate's aspect within 2.5%
+  assert.deepEqual(previewSizes([3840, 2160], [3840, 2176]).map((o) => o.size), [[1920, 1088], [960, 544]]); // exact parts where the grid allows
   for (const o of [...menu, ...previewSizes([1920, 1012], [1920, 1024]), ...previewSizes([720, 480], [672, 448])]) {
     assert.ok(o.size[0] % 32 === 0 && o.size[1] % 32 === 0, String(o.size));
   }
