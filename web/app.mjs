@@ -38,7 +38,6 @@ const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-s
 // the erase matte only places the erase pass's box, grown by 1/24 of the width: 640 is enough, at half the time of 960
 const ERASE_TRACK_SIDE = 640;
 const LIVE = { every: 2 }; // the live preview while LTX samples, on every card: from step 1, every other step. Every pass hands its previews to showLive, which alone decides what shows
-const GRID_REACH = Q.get("grid") === "composite"; // ?grid=composite: the clean plate pass erases as far as the composite pastes (logic.gridGrow); by default one block more
 const TWO_STAGE_SHOT = Q.get("shot") === "2"; // ?shot=2: the full-size shot in two stages, at half the working size, then 2 steps at full size from it (shotup)
 const HDR_ON = Q.get("hdr") !== "0"; // SDR to HDR runs whenever its files and nodes are present; ?hdr=0 in the address turns it off
 const HDR_FRAMES = "ACES2065-1"; // the colour space of the SDR-to-HDR frames (HDR_SPACE in tools/build_workflows.py)
@@ -2701,7 +2700,7 @@ function idle() { // one render step at a time, from the render queue; the edits
 
 const grow = (w, erase) => Math.max(4, Math.round(w / (erase ? COMPOSITE_GROW.erase : COMPOSITE_GROW.other))); // pixels at width w
 const feather = (w) => Math.max(6, Math.round(w / COMPOSITE_FEATHER));
-const gridAt = (w) => (GRID_REACH ? gridGrow(w, S.plate.spec.width, grow(S.plate.spec.width, true) + feather(S.plate.spec.width)) : 1); // blocks grown at width w
+const gridAt = (w) => gridGrow(w, S.plate.spec.width, grow(S.plate.spec.width, true) + feather(S.plate.spec.width)); // blocks the clean plate pass grows its erased grid by at width w: as far as the composite pastes an erase
 
 // Every step of a render, in order. `preview` steps run at the preview size, once per size, so going back to a size plays what
 // it made at once. `final` steps run at full size right after them: the passes, then the full-size composite (the review) the viewer plays.
