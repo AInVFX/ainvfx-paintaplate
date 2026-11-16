@@ -5,7 +5,7 @@
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
 import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl } from "./comfy.mjs";
 import { Display } from "./display.mjs";
-import { DeepFrames, FrameCache } from "./frames.mjs";
+import { DeepFrames, FrameCache, outgrows } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
 import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
@@ -490,8 +490,8 @@ const CACHE_PREF = "paintaplate.cache";
 S.cache = (() => { try { const v = +localStorage.getItem(CACHE_PREF); return v >= CACHE_LEAST && v <= CACHE_MOST ? v : 0; } catch { return 0; } })(); // bytes, from the list or Custom…; 0: Auto
 const memoryText = (b) => (b >= 1e9 ? `${Math.round(b / 1e8) / 10} GB` : `${Math.round(b / 1e6)} MB`);
 const cacheBudget = () => (CACHE_MB ? CACHE_MB * 1e6 : S.cache || autoBudget({ host: location.hostname, profile: S.memoryProfile.name, deviceMemory: navigator.deviceMemory }));
-const planned = { key: "", said: "", timer: 0 };
-function planCaches() { // each cache's share and frame size, when the budget, the frame's size, the sources on show or the in and out points change
+const planned = { key: "", said: "", timer: 0, fit: null };
+function planCaches() { // each cache's share and frame size, when the budget, the sources on show or the in and out points change, or the view outgrows the frames
   const p = S.plate, fit = [S.fit.w, S.fit.h].map((v) => Math.round(v * devicePixelRatio));
   if (!p || !fit[0] || !fit[1]) return;
   const budget = cacheBudget(), frames = S.outPt - S.inPt + 1, shot = !!S.shot?.url, plateOn = !shot || S.wipe !== null;
@@ -503,15 +503,16 @@ function planCaches() { // each cache's share and frame size, when the budget, t
     S.shot?.frames && !DEEP_MB && { id: "deepShot", name: "the shot's EXR frames", cache: deepShot, movie: exact, show: true, bytes: 6 },
   ].filter(Boolean);
   if (!sources.length) return; // no movie has loaded yet
-  const key = JSON.stringify([budget, frames, fit, sources.map((s) => [s.id, s.movie, s.show])]);
-  if (key === planned.key) return;
-  planned.key = key;
+  const key = JSON.stringify([budget, frames, sources.map((s) => [s.id, s.movie, s.show])]);
+  if (key === planned.key && !outgrows(planned.fit, fit)) return; // a resize keeps the frames (frames.mjs: outgrows)
+  const fresh = key !== planned.key; // the log says what fits when the budget, the sources or the in and out points change
+  Object.assign(planned, { key, fit });
   const shares = cachePlan({ budget, frames, fit, sources });
   for (const s of sources) if (!s.show) s.cache.stopReader(); // the sources on show read first
   for (const s of sources.sort((a, b) => Number(!!b.show) - Number(!!a.show))) s.cache.plan(shares[s.id].budget, s.bytes ? null : [shares[s.id].width, shares[s.id].height]);
   const why = CACHE_MB ? "set in the address" : S.cache ? "set in View > Cache memory" : "Auto"; // the memory profile's line names the card
   const said = cacheLine(memoryText(budget), why, sources.map((s) => ({ name: s.name, frames, ...shares[s.id] })));
-  if (said !== planned.said) log((planned.said = said));
+  if (fresh && said !== planned.said) log((planned.said = said));
   cacheUI();
 }
 function planSoon() { if (!planned.timer) planned.timer = setTimeout(() => { planned.timer = 0; planCaches(); }, 300); }

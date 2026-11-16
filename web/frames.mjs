@@ -262,6 +262,12 @@ export function cachePlan({ budget, frames, fit, sources }) {
   return plan;
 }
 
+// A change of the view's size keeps the cached frames, drawn to the view's size: the caches plan again at the new size
+// only when the view is more than CACHE_GROW times wider or taller than the view they were planned for. A change of
+// the budget, of the sources on show or of the in and out points plans them again at once.
+export const CACHE_GROW = 1.25;
+export const outgrows = (planned, fit, grow = CACHE_GROW) => !planned || fit[0] > planned[0] * grow || fit[1] > planned[1] * grow;
+
 // The hidden reader's speed while it fills a cache. A 60 Hz screen presents 60 frames a second, so a 24 fps clip is read
 // 2.5 times faster than it plays, 4 times at most. Each frame the reader did not present halves the gain, down to 1.
 export const fillRate = (fps, missed = 0, refresh = 60) => Math.max(1, Math.min(4, refresh / fps) / 2 ** Math.min(missed, 8));

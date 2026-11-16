@@ -35,4 +35,10 @@ def run(browser, port, U):
     page.wait_for_function(OPEN, timeout=60000)
     U.check(U.poll(page, lambda: any(t.startswith("Frame cache: 1.5 GB (set in View > Cache memory)") for t in U.log_lines(page)), 10),
             f"the next session plans its frame cache on 1.5 GB: {[t for t in U.log_lines(page) if t.startswith('Frame cache')]}")
+    lines = lambda: [t for t in U.log_lines(page) if t.startswith("Frame cache:")]  # noqa: E731
+    before, size = lines(), page.viewport_size
+    for w in (size["width"] - 120, size["width"] - 240, size["width"] - 60):  # as the log panel opens and the window shrinks
+        page.set_viewport_size({"width": w, "height": size["height"]}); page.wait_for_timeout(700)
+    page.set_viewport_size(size); page.wait_for_timeout(700)
+    U.check(lines() == before, f"a resize keeps the frame cache and writes no line: {lines()[len(before):]}")
     page.close()
