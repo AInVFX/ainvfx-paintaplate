@@ -174,7 +174,7 @@ class PlateBrowser(unittest.TestCase):
         self.assertEqual(kinds["output:ComfyUI_#####_.png"], "sequence")  # core Save Image's names, one plate
         self.assertEqual(kinds["output:anim_00001_.webp"], "video")  # core Save Animated WEBP
         self.assertEqual(routes.browse("output:video")["parent"], "output:")
-        for bad in ("../", "output:../", "plates/shot.mov", "/etc"):
+        for bad in ("../", "output:../", "plates/shot.mov"):  # an absolute folder lists: test_plate_paths
             with self.assertRaises((FileNotFoundError, ValueError), msg=bad):
                 routes.browse(bad)
 
@@ -248,7 +248,7 @@ class PlateBrowser(unittest.TestCase):
             time.sleep(0.02)
             self.assertEqual(routes.thumbnail(rel, width=48), path)
             self.assertEqual(os.path.getmtime(path), first)  # reused, not rewritten
-        for bad in ("plates/notes.txt", "plates/link.mov", "../elsewhere.txt", "elsewhere.txt", "", os.path.join(INPUT, "plates", "shot.mov")):
+        for bad in ("plates/notes.txt", "plates/link.mov", "../elsewhere.txt", "elsewhere.txt", ""):
             with self.assertRaises((FileNotFoundError, StopIteration, ValueError, OSError), msg=bad):
                 routes.thumbnail(bad)
 
