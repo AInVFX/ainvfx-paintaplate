@@ -387,19 +387,8 @@ export function erasePrompt(captions) {
 // stage refines it at full size in 2 steps (8 steps at full size took 181 s on a 1080p plate, 28 Oct).
 export const stageOne = ([w, h], step = 32) => [Math.max(step, Math.round(w / 2 / step) * step), Math.max(step, Math.round(h / 2 / step) * step)];
 
-// ---------- The render queue ----------
-// Every set of edits shown since the plate opened is a render, with three classes of steps: its preview, its full-size passes
-// and its export. The next step comes from the render whose next class is the lowest, so every preview runs before any full
-// size, and every full size before any export; within a class, the set of edits on show first, then the most recently shown.
-// An export someone is waiting for counts as a full-size step.
-export const RENDER_CLASSES = ["preview", "full", "export"];
-export function nextRender(items) { // items: [{ id, cls, current, wanted, urgent }]; the id of the render to run, or null
-  const rank = (x) => RENDER_CLASSES.indexOf(x.cls === "export" && x.urgent ? "full" : x.cls);
-  const best = items.filter((x) => RENDER_CLASSES.includes(x.cls))
-    .sort((a, b) => rank(a) - rank(b) || Number(b.current) - Number(a.current) || b.wanted - a.wanted)[0];
-  return best ? best.id : null;
-}
 
+// ---------- A render step and a new edit ----------
 // Generate stops a running render step only where that wastes least: a full-size or an export step in its first half. A step
 // past halfway costs less to finish than to run again, and a preview step is short and often reused by the new edit's render.
 export const stopsForEdit = ({ cls, progress }) => cls !== "preview" && progress < 0.5;

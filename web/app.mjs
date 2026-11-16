@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { CACHE_LEAST, CACHE_MOST, askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, PREVIEW_PARTS, previewCap, memoryBytes, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, colorShares, paintColors, inHues, shadowBox, shadowOf } from "./logic.mjs";
+import { CACHE_LEAST, CACHE_MOST, askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, PREVIEW_PARTS, previewCap, memoryBytes, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, colorShares, paintColors, inHues, shadowBox, shadowOf } from "./logic.mjs";
 import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -71,7 +71,6 @@ const SIDE_W = 288, LOG_H = 180; // CSS px: the side panel's width and the open 
 const PANEL_LEAST = { side: 220, log: 60 }, STAGE_LEAST = { side: 320, log: 320 }; // a drag never makes them smaller
 const PANEL_STEP = 16; // CSS px per arrow key on a focused divider
 const LAYOUT_PREF = "paintaplate.layout"; // the dragged sizes, kept for the next session
-const RENDERS_WANTED = 6; // sets of edits whose renders go on in the background: the most recently shown
 // The light brush: soft dabs every LIGHT.spacing of their radius, which is LIGHT.spread times the brush's. One stroke adds
 // at most LIGHT.flow of its colour (LIGHT.shade of darkness for a dark colour), so light builds up stroke by stroke and
 // mixed colours add up to white only after a few passes (30 Oct: one stroke of the earlier brush reached white at once).
@@ -2604,13 +2603,12 @@ function touch(ms = IDLE_MS) { clearTimeout(idleTimer); idleTimer = setTimeout(i
 
 // ---------- The render queue ----------
 // Every set of edits shown since the plate opened is a render. Its steps fall in three classes: the preview, the full-size
-// passes with their composite (the review), and the export, which runs only when Export asks for it. One step runs at a time:
-// every preview before any full size, every full size before any export, and
-// within a class the render on show first, then the most recently shown (logic.nextRender). Nothing stops a step but
-// Generate: a bypass, an undo or another edit lets it finish, keeps its result, and the render resumes at its next step
-// later. Generate stops a full-size or export step in its first half (logic.stopsForEdit), and that step runs again later.
-// The last RENDERS_WANTED renders go on in the background; what every job made is also in the job index on disk.
-const YIELD = new Error("yield"); // a render step gives way to an edit, or to a step of a more urgent render
+// passes with their composite (the review), and the export, which runs only when Export asks for it. One step runs at a time,
+// for the set of edits on show alone (pickRender): its preview, then its full size, then its export. A set no longer on show
+// waits, and goes on at its next step when it shows again. Nothing stops a step but Generate: a bypass, an undo or another
+// edit lets it finish and keeps its result. Generate stops a full-size or export step in its first half (logic.stopsForEdit).
+// What every job made is also in the job index on disk.
+const YIELD = new Error("yield"); // a render step gives way to an edit, or to the render of another set of edits now on show
 
 function freeze(e) { // what a render needs of an edit, as it is now: a later change to the edit never reaches the render
   return { src: e, id: e.id, version: e.version, tool: e.tool, prompt: e.prompt, seed: e.seed, caption: e.caption?.text ?? "",
@@ -2665,11 +2663,9 @@ function nextClass(r) { // the class of a render's next step: "preview", "full" 
   return null;
 }
 
-function pickRender() { // the render whose step runs next, among the most recently shown
-  const recent = [...S.renders.values()].filter((r) => r.wanted).sort((a, b) => b.wanted - a.wanted).slice(0, RENDERS_WANTED);
-  const id = nextRender(recent.map((r) => ({ id: r.key, cls: nextClass(r), current: r.key === S.heroKey, wanted: r.wanted,
-    urgent: !!S.wantDownload && r.key === S.heroKey })));
-  return id === null ? null : S.renders.get(id);
+function pickRender() { // the render on show, while it has a step to make: no other set of edits renders
+  const r = S.renders.get(S.heroKey);
+  return r && nextClass(r) ? r : null;
 }
 
 function preempt() { // Generate: a full-size or export step in its first half stops for the new edit, and runs again later
@@ -2677,7 +2673,7 @@ function preempt() { // Generate: a full-size or export step in its first half s
   if (!st || !r) return;
   const def = STAGES.find((x) => x.id === st.id), cls = !def.final ? "preview" : st.id === "export" ? "export" : "full", pct = Math.round(st.progress * 100);
   if (!stopsForEdit({ cls, progress: st.progress })) return void log(`Render v${r.v}: ${def.label}: at ${pct}%, finishing before the new edit.`);
-  log(`Render v${r.v}: ${def.label}: stopped at ${pct}% for the new edit. It runs again after it.`);
+  log(`Render v${r.v}: ${def.label}: stopped at ${pct}% for the new edit. It goes on when its edits show again.`);
   cancel(...BACKGROUND);
 }
 
@@ -2750,10 +2746,10 @@ function estimate(id, skip) { // seconds: what this step took last time on this 
 async function step(r, id, work, store = r) { // run one step of a render, timed and shown; preview steps keep their result per size
   if (store.done?.[id] !== undefined || r.skip?.has(id)) return;
   if (S.running || S.queued || pickRender() !== r) throw YIELD; // an edit, or a step of a more urgent render, goes first
-  const t0 = performance.now(), behind = r.key === S.heroKey ? "" : ", in the background", guess = Math.round(estimate(id, r.skip)), notRun = jobsNotRun();
+  const t0 = performance.now(), guess = Math.round(estimate(id, r.skip)), notRun = jobsNotRun();
   S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step
   stagesUI();
-  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: about ${guess} s${behind}.`);
+  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: about ${guess} s.`);
   const stage = S.stage;
   await work((f) => {
     if (S.stage !== stage) return;
