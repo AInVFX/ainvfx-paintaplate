@@ -476,15 +476,6 @@ def erase_verdict(after, before, mask, size, first=1):
     return {**got, "text": f"Clean, frame {first}: {'left' if got['left'] else 'gone'}" + (f" ({detail})." if detail else ".")}
 
 
-def name_asked(marks, log, jobs):
-    """A case that expects the page to ask for an erase's object by name (gpu_matrix.json: « expect »: « name asked »,
-    logic.asksName) passes when the page asked and neither Klein nor LTX ran. (passed, why)."""
-    asked = any(m.startswith("name asked") for m in marks)
-    ran = [what for what, found in (("a Klein pass", re.search(r"Klein (?:edit preview|full size)", log)),
-                                    ("a shot", any(j["name"] == "shot" for j in jobs))) if found]
-    return asked and not ran, "" if asked and not ran else "the page did not ask for the name" if not asked else " and ".join(ran) + " ran"
-
-
 def matte_verdict(passed, why, mattes):
     """(passed, why) once the page's matte summaries are read: a case that passed fails on the first warning of its mattes
     (mathops.follow_summary writes « Warning: … » among its detail lines), and says where to look. Every step can run and
@@ -801,8 +792,6 @@ def run_case(a, name, case, folder):
     failed = [m for m in result["marks"] if m.startswith("FAILED")] or ([] if marks else ["ui_live.py wrote no marks"])
     done = any(m.startswith("downloaded") for m in result["marks"]) or not case.get("strokes")  # a fluid shot alone has no export
     result["passed"], result["why"] = not failed and done, (failed[0] if failed else "" if done else "the full-size composite was not reached: " + (result["marks"] or ["?"])[-1])
-    if case.get("expect") == "name asked":  # an erase with no words on another object: no Klein pass, no shot (logic.asksName)
-        result["passed"], result["why"] = name_asked(result["marks"], result["log"], result["jobs"])
     result["passed"], result["why"] = matte_verdict(result["passed"], result["why"], result["mattes"])
     if any(s[0] == "paint" for s in case.get("strokes", [])) and case.get("path"):
         try:  # the paint's verdict on the export: a paint that does not hold fails the case

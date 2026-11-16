@@ -653,11 +653,10 @@ class Verdict(unittest.TestCase):
         self.assertEqual((tree["path"], tree["seed"], tree.get("expect")), (plain["path"], plain["seed"], None))  # the tree goes, as the barn does
         self.assertEqual(tree["strokes"], [["erase", "", [[0.79, 0.26], [0.83, 0.25], [0.87, 0.27]], 36, {"whole": True}]])
         self.assertNotIn("horse_erase_tree", gpu_matrix.ALL + gpu_matrix.QUICK)
-        asked = ["page ready: Ready.", "name asked: Edit 2: the prompt writer took the stroke for another object, so nothing ran"]
-        self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: asking Klein's prompt writer", [{"name": "prompt"}]), (True, ""))
-        self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: Klein edit preview, 768 x 432, 16 steps.", []), (False, "a Klein pass ran"))
-        self.assertEqual(gpu_matrix.name_asked(asked, "Edit 2: Klein edit preview, 768 x 432, 16 steps.", []), (False, "a Klein pass ran"))
-        self.assertEqual(gpu_matrix.name_asked(asked[:1], "", [{"name": "shot"}]), (False, "the page did not ask for the name"))
+
+    def test_every_case_passes_on_its_export(self):
+        """No case expects the page to stop before its shot: each one passes when its export downloads."""
+        self.assertEqual([n for n, c in gpu_matrix.load_cases().items() if "expect" in c], [])
 
     def test_ui_live_ends_on_a_row_marked_left_even_behind_a_dialog(self):
         """The edit agent's dialog (« Render anyway » or « Cancel ») can keep its row busy: ui_live.py waits for the rows to
@@ -670,3 +669,4 @@ class Verdict(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
