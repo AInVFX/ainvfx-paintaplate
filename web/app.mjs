@@ -3095,9 +3095,9 @@ async function upscaleSet(set, progress) {
     ...windows.map((win, i) => ["upscale", values(keeps ? set.layer : set.result, set.space, win, {
       prefix: `${dir}/upscale/${keeps ? "layer" : "result"}/${n(i)}/f`, matte: set.matte ?? "", matte_prefix: set.matte ? `${dir}/4k/matte/matte` : "",
       ...(keeps ? { under: `output:${plateDir}/${n(i)}`, under_space: p.cs, comp_prefix: `${dir}/upscale/comp/${n(i)}/f` } : {}) }), win[1]]),
-    ["upscale_export", { shot: set.result, frames: `output:${dir}/upscale/${keeps ? "comp" : "result"}`, max_frames: p.frames, prefix: `${dir}/4k/export` }, size / 5],
-    ...(keeps ? [["upscale_export", { shot: set.layer, frames: `output:${dir}/upscale/layer`, max_frames: p.frames, prefix: `${dir}/4k/layer` }, size / 5],
-      ["upscale_export", { shot: p.path, frames: `output:${plateDir}`, max_frames: p.frames, prefix: `${dir}/4k/plate` }, size / 5]] : []),
+    ["upscale_export", { shot: set.result, frames: `output:${dir}/upscale/${keeps ? "comp" : "result"}`, max_frames: p.frames, count: size, prefix: `${dir}/4k/export` }, size / 5],
+    ...(keeps ? [["upscale_export", { shot: set.layer, frames: `output:${dir}/upscale/layer`, max_frames: p.frames, count: size, prefix: `${dir}/4k/layer` }, size / 5],
+      ["upscale_export", { shot: p.path, frames: `output:${plateDir}`, max_frames: p.frames, count: size, prefix: `${dir}/4k/plate` }, size / 5]] : []),
   ];
   const total = jobs.reduce((a, [, , wt]) => a + wt, 0);
   let before = 0;

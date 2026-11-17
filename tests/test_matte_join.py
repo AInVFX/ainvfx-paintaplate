@@ -62,5 +62,14 @@ class ExportWorkflow(unittest.TestCase):
         self.assertEqual((join["inputs"]["count"], join["inputs"]["max_frames"]), (0, 121))
 
 
+
+class PageSendsTheWindowSize(unittest.TestCase):
+    def test_each_upscale_export_job_of_the_page_sends_the_window_size(self):
+        with open(os.path.join(ROOT, "web", "app.mjs"), encoding="utf-8") as f:
+            jobs = [line for line in f if '["upscale_export", {' in line]
+        self.assertTrue(jobs)
+        for line in jobs:
+            self.assertIn("count: size", line)
+
 if __name__ == "__main__":
     unittest.main()
