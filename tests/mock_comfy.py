@@ -645,6 +645,12 @@ def download_routes():
     fp.get_input_directory = lambda: folder("input")
     fp.get_temp_directory = lambda: folder("temp")
     sys.modules["folder_paths"] = fp
+    # ComfyUI's own arguments, as folders.listens reads them: the mock listens on 127.0.0.1 alone, so a full path opens here as
+    # on a ComfyUI started without --listen, and routes.this_machine still refuses one in a request that a proxy passed on
+    cli = types.ModuleType("comfy.cli_args")
+    cli.args = types.SimpleNamespace(listen="127.0.0.1")
+    sys.modules.setdefault("comfy", types.ModuleType("comfy")).cli_args = cli
+    sys.modules["comfy.cli_args"] = cli
     server = types.SimpleNamespace(routes=web.RouteTableDef())
     importlib.import_module("routes").setup(server)
     return server.routes

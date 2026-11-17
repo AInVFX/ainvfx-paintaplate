@@ -401,20 +401,15 @@ test("a bypass takes the frames of a render of more edits when the edits left ou
 
 import * as fsp from "node:fs";
 
-test("a light's shade is an optional input of its edit, gone without shade strokes", () => {
+test("a light's relight is an optional part of its edit, with the frame as Klein's one reference", () => {
   const wf = parseWorkflow(JSON.parse(fsp.readFileSync(new URL("../../web/workflows/edit.json", import.meta.url))));
   const find = (w, test) => Object.values(w.prompt).find(test);
   const relit = (w) => find(w, (n) => n.class_type === "PaintAPlate_RelightTransfer");
-  const loader = (w, title) => find(w, (n) => n._meta?.title?.startsWith(title));
-  const plain = fillWorkflow(wf, { caption: "x", seed: 1 }); // not a light: no relight, no shade, and no error
+  const plain = fillWorkflow(wf, { caption: "x", seed: 1 }); // not a light: no relight, and no error
   assert.equal(relit(plain), undefined);
-  assert.equal(loader(plain, "Painted shade"), undefined);
-  const lit = fillWorkflow(wf, { caption: "x", seed: 1, relight: 1, shade: "s.png" });
-  assert.ok(Array.isArray(relit(lit).inputs.shade)); // the shade strokes, darkened as painted
+  const lit = fillWorkflow(wf, { caption: "x", seed: 1, relight: 1 });
+  assert.ok(relit(lit) && !("shade" in relit(lit).inputs)); // a shade stroke reaches Klein in words only
   assert.equal(find(lit, (n) => n.class_type === "ReferenceMultiLatent").inputs["images.image1"], undefined); // Klein's one reference: the frame
-  const bare = fillWorkflow(wf, { caption: "x", seed: 1, relight: 1 }); // a relight without shade strokes still runs
-  assert.ok(relit(bare) && !("shade" in relit(bare).inputs));
-  assert.equal(loader(bare, "Painted shade"), undefined);
 });
 
 import { viewerSpace, drawsDeep, fluidRun, passMovie, defaultDepth } from "../../web/logic.mjs";

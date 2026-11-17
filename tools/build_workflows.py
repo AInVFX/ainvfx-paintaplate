@@ -130,11 +130,11 @@ def load(name, folder=None):
 # no words for an erase: no search by name; not a relight: no light transfer on the edited frame;
 # an erase matte: no plate under a shot to compare with, and no changed pixels to start from; a video plate's review:
 # no EXR frames, its movie is the plate's own quality; no SDR-to-HDR shot: the SDR shot goes on as it is; SDR to HDR with
-# no plate size (a shot): its HDR frames go on as they are; a relight with no shade stroke: nothing to darken; no movie
+# no plate size (a shot): its HDR frames go on as they are; no movie
 # asked of a matte, an export's matte or a fluid shot's control video (the Render panel's rows show them; the ComfyUI
 # graph of the Export dialog leaves them out).
 OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",), "follow_erased": ("erased",),
-            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "plate_level": ("plate_width", "plate_height"), "relight_shade": ("shade",),
+            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "plate_level": ("plate_width", "plate_height"),
             "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",),
             "export_plate": ("prefix",), "export_exr": ("exr_prefix",)}
 
@@ -286,10 +286,8 @@ def edit():
     # a relight: the frame as the export will make it, light from Klein, detail from the plate (dropped otherwise).
     # Relight Transfer decodes the sRGB frames to linear light and encodes its result back itself
     relit = g("PaintAPlate_RelightTransfer", plate=base, source=half(g, base), relit=half(g, result), radius=1,
-              strength=Slot("relight", 0.0), align=True, plate_space="sRGB", shot_space="sRGB",
-              shade=g("LoadImage", _title="Painted shade (light edits)", image=Slot("shade", "")))
+              strength=Slot("relight", 0.0), align=True, plate_space="sRGB", shot_space="sRGB")
     g.link_slot(relit, "plate", "relit_frame")
-    g.link_slot(relit, "shade", "relight_shade")  # a light edit's shade strokes: Relight Transfer darkens the frame there
     g("SaveImage", _title="Relit frame", _output="relit", images=relit, filename_prefix=Slot("prefix", EDIT_PREFIX))
     g.save("edit")
 

@@ -21,7 +21,7 @@ const edit = (tool, k) => ({ tool, seed: k, caption: `${tool} caption`, quick: p
 test("an image of the graph is named after the plate, the edit and what it holds, and sits at the top of the input folder", () => {
   assert.equal(graphImageName("horse", 1, "mask", "a64a59080b03a6baa8d9aaef75719cfc"), "paintaplate_horse_e1_mask_a64a5908.png");
   assert.equal(graphImageName("my plate.v2", 2, "strokes", "4d19b271e717"), "paintaplate_my_plate_v2_e2_strokes_4d19b271.png");
-  assert.equal(graphImageName("shots/a b", 3, "shade", "0123456789"), "paintaplate_shots_a_b_e3_shade_01234567.png");
+  assert.equal(graphImageName("shots/a b", 3, "strokes", "0123456789"), "paintaplate_shots_a_b_e3_strokes_01234567.png");
 });
 
 test("every image loader reads a file at the top of the input folder, and the README names each file that must be there", () => {

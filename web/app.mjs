@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, PREVIEW_PARTS, previewCap, previewSize, previewSizes, reconcile, removedNames, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, fullPath, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_PARTS, previewCap, previewSize, previewSizes, reconcile, removedNames, renderKey, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -180,9 +180,6 @@ function dimFrame(e, before, size) {
   x.putImageData(img, 0, 0);
   return c;
 }
-
-// A light edit's shade strokes, white on black and softened: Relight Transfer darkens the frame there, in linear light, as a
-// compositor multiplies a shadow. Klein ignores a painted shadow (3 Nov test), so the shade is applied as painted.
 
 const maskAt = (e, size) => (e.tool === "light" ? snap(null, size, "#fff") : snap(e.mask, size, "#000"));
 
@@ -841,6 +838,7 @@ function setFinish(opt, on) { // each setting keeps its own renders: the render 
   if (opt.id === "hdr") S.deliver.hdr = on;
   confirmed(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Full-size shot: regenerated in scene-linear values, fitted to the plate.\n  Result: half-float EXR frames in ACES2065-1, in the viewer and in Export." : ""}` : `Finish: ${opt.name} off.`, 1500);
   finishUI(); recompose(); touch();
+  if (on && plateAlone(S.heroKey) && !S.renders.get(S.heroKey)) status(`Finish: ${opt.name} on. Generate runs it on the plate: about ${Math.round(estimate("hdr", plan({ key: S.heroKey }, []).skip))} s.`, "hint");
 }
 function openFinish(open = $("#finish").hidden) { // the menu opens under its button; Esc, a click outside or the button closes it
   if (!open) return closeFinish();
@@ -862,7 +860,8 @@ addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#finish").hid
 function recompose() {
   S.hero = layered();
   const edits = S.edits.filter((e) => e.on && e.patch && e.state !== "generating").map((e) => `${e.id}.${e.version}`).join(",");
-  const key = edits && hdrKey(edits, holdsHdr(S.plate?.spec, S.plate?.headroom), hdrWanted()); // Finish's SDR to HDR on an SDR plate: another render
+  const on = hdrWanted() && (!!edits || !(fluidOnly() || keying())); // with no edit, the plate alone; a fluid shot exports itself
+  const key = renderKey(edits, holdsHdr(S.plate?.spec, S.plate?.headroom), on); // Finish's SDR to HDR on an SDR plate: another render
   if (key === S.heroKey) return;
   S.heroKey = key;
   const r = S.renders.get(key); // a set of edits seen before plays at once (a bypass turned back on, for example)
@@ -875,7 +874,7 @@ function recompose() {
 function showLatest() { // the latest result of the edits on show: the full-size composite, else the full-size shot, else the preview
   const key = S.heroKey, r = S.renders.get(key), pv = previewOf(r), review = r?.play ?? r?.review;
   const best = review ?? r?.raw ?? pv?.comp ?? pv?.raw;
-  if (best) setShot(best, key, best === review ? (r.playSpace ?? r.reviewSpace) : "@model", best === review ? r.reviewFrames : null);
+  if (best) setShot(best, key, best === review ? (r.playSpace ?? r.reviewSpace) : "@model", best === review ? r.reviewFrames : null, { framesSpace: best === review ? r.reviewFramesSpace : null });
   else if (!key) setShot(null, key);
 }
 
@@ -2659,11 +2658,11 @@ function freeze(e) { // what a render needs of an edit, as it is now: a later ch
     hue: hueOf(e), patch: e.patch, mask: e.mask && snap(e.mask, S.plate.track), foot: e.foot };
 }
 
-function want(key) { // the set of edits on show becomes the most recently shown render, made from what it is now
+function want(key, asked = false) { // the set of edits on show becomes the most recently shown render, made from what it is now
   let r = S.renders.get(key);
   if (!r) {
     const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
-    if (!active.length) return null;
+    if (!active.length && !(asked && plateAlone(key))) return null; // asked: Generate or Export makes the plate alone's render, minutes of work
     r = { key, v: ++S.run, previews: {}, active: active.map(freeze), heroFrame: S.hero,
       cleanFrame: active.some((e) => e.tool === "erase") ? layered(S.edits.length, (e) => e.tool === "erase") : null };
     r.base = `paintaplate/${S.plate.id}/v${r.v}`;
@@ -2765,6 +2764,7 @@ function plan(r, active) { // the steps this set of edits needs: the erase pass 
   r.skip = new Set([!erase && "erase", !erase && "clean", !carry && "shot", !paint && "track", (onePass || !erase) && "cleanfull",
     (onePass || !carry) && "full", (onePass || !paint) && "trackfull",
     !(S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), hdrOfKey(r.key, holdsHdr(p.spec, p.headroom)))) && "hdr", // the switch is in the key
+    ...(active.length ? [] : ["comp", "review", "export"]), // the plate alone: SDR to HDR makes the result, and Export zips its frames
     ...(S.previewCap ? [] : STAGES.filter((st) => st.preview).map((st) => st.id))].filter(Boolean)); // Preview pass: Off
   return r;
 }
@@ -2823,10 +2823,49 @@ function reused(r, store, id, take) { // a step that a render with the same eras
   log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: reused from an earlier render (same Clean edits).`);
 }
 
+// SDR to HDR on a plate with no edit (logic.plateAlone): one step on the plate itself, at the working size, its frames brought
+// back to the plate's size and level by HDR Match in the workflow. The viewer plays them, and Export zips them as they are.
+async function plateHdr(r) {
+  const p = S.plate, key = r.key, base = r.base;
+  if (!r.told) { r.told = true; log(`Render v${r.v}: no edit, the plate through SDR to HDR.\n  Steps: SDR to HDR.`); }
+  await step(r, "hdr", async (progress) => {
+    const out = await run("hdr", { ...S.memoryProfile.slots, path: p.path, color_space: p.cs, config: S.ocio.config, max_frames: p.frames,
+      width: p.work[0], height: p.work[1], plate_width: p.spec.width, plate_height: p.spec.height, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps),
+      ...plateMovie(p), prefix: `${base}/hdr/f`, video_prefix: `${base}/hdr_movie`, view_space: logSpace(), movie_fps: p.fps, live: LIVE.every },
+      { kind: "hdr", progress, live: showLive }).done;
+    const hf = outputFile("hdr", out, "hdr"), m = outputFile("hdr", out, "movie"); // a job taken from the index keeps its own folder
+    Object.assign(r, { hdr: folderOf("hdr", out, "hdr"), hdrFrames: hf ? `output:${hf.subfolder}/${framePattern(hf.filename)}` : null,
+      hdrMovie: m ? viewUrl(m) : null, run: hf ? hf.subfolder.replace(/\/hdr$/, "") : base });
+    Object.assign(r, { review: r.hdrMovie, reviewSpace: logSpace(), reviewFrames: r.hdrFrames, reviewFramesSpace: HDR_FRAMES }); // the result on show
+  });
+  if (key !== S.heroKey) return log(`Render v${r.v}: SDR to HDR: ready, in the background.`);
+  if (!S.pass) setShot(r.review, key, r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace });
+  hud("SDR to HDR: the viewer plays it.", 2500);
+  stagesUI(); exportUI();
+  if (S.wantDownload) return exportAlone(r);
+  status("SDR to HDR: ready, in the viewer, its EXR frames at full precision as they load. Export writes them for compositing software.", "hint");
+}
+function exportAlone(r) { // Export on the plate alone: the frames SDR to HDR wrote, at the plate's size and level, in ACES2065-1
+  r.exported ??= { run: r.run, name: `${S.plate.name}_paintaplate_v${r.v}`, text: `${S.plate.frames} half-float EXR frames in ACES2065-1, in ${r.run}/hdr`, matte: null };
+  S.exported = r.exported;
+  S.wantDownload = null;
+  stagesUI(); exportUI();
+  confirmed(`Export: done, in ComfyUI's output folder: ${S.exported.text}.`);
+  download(["hdr"]);
+}
+function exportPlate() { // Export before SDR to HDR has run on the plate alone: the render runs first, then the zip downloads
+  const r = S.renders.get(S.heroKey) ?? want(S.heroKey, true);
+  if (r.done?.hdr !== undefined) return exportAlone(r);
+  S.wantDownload = ["hdr"];
+  status("Export: SDR to HDR runs first. The zip downloads when it is done.");
+  exportUI(); stagesUI(); touch();
+}
+
 async function pipeline(r) { // a render's steps in order; a step made already is skipped, so a render resumes where it stopped
   const p = S.plate, key = r.key, active = r.active, here = () => key === S.heroKey; // here: the render on show
   cancel("warm");
   plan(r, active);
+  if (!active.length) return plateHdr(r); // the plate alone
   const [sw, sh] = p.shot, sized = `${sw}x${sh}`, pv = (r.previews[sized] ??= {}), base = r.base;
   const relight = active.some((e) => e.tool === "light"), erases = active.filter((e) => e.tool === "erase"), erase = erases.length > 0;
   const carry = active.some((e) => e.tool !== "erase"); // paint and light: Ripple carries them through the shot
@@ -3125,11 +3164,11 @@ async function exportLog() { // the log's export (logic.logReport): the log with
 $("#log-export").addEventListener("click", exportLog);
 
 function renderLeft(finalToo = false) { // seconds until the preview, or the full-size composite (and the export once asked for), is ready
-  finalToo ||= !S.previewCap; // with Preview pass: Off, the next result is the full-size composite
+  finalToo ||= !S.previewCap || plateAlone(S.heroKey); // with Preview pass: Off, the next result is the full-size composite; the plate alone has no preview
   const p = S.plate, r = S.renders.get(S.heroKey), exporting = !!S.wantDownload;
   if (!p || !S.heroKey || (finalToo ? (exporting ? r?.exported : r?.review) : previewOf(r)?.comp || r?.review)) return 0;
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
-  const skip = r?.skip ?? plan({}, active).skip;
+  const skip = r?.skip ?? plan({ key: S.heroKey }, active).skip;
   let t = 0;
   for (const st of STAGES) {
     if (st.final && !finalToo) break;
@@ -3148,7 +3187,8 @@ function stagesUI() {
   const list = $("#stages"), p = S.plate, r = S.renders.get(S.heroKey);
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
   const fluid = p ? fluidPasses(S.fluid?.result, { log: logSpace() }) : []; // a made fluid shot's rows, keyframes open or closed
-  const edits = active.length && !keying(); // with the keyframes open, only the fluid shot's rows
+  const alone = plateAlone(S.heroKey); // the plate alone: its one step, SDR to HDR
+  const edits = (active.length || alone) && !keying(); // with the keyframes open, only the fluid shot's rows
   $("#render-full").hidden = !r?.donor || !edits; // a set that took another render's frames can still be made with its own shot
   $("#render").hidden = !p || (keying() && !fluid.length);
   list.hidden = !edits && !fluid.length;
@@ -3163,7 +3203,7 @@ function stagesUI() {
     return li;
   });
   if (!p || !edits) { list.replaceChildren(...fluidRows); $("#render-left").textContent = ""; return timelineBar(); }
-  const skip = r?.skip ?? plan({}, active).skip, later = (st) => st.onDemand && !S.wantDownload; // the export waits for Export
+  const skip = r?.skip ?? plan({ key: S.heroKey }, active).skip, later = (st) => st.onDemand && !S.wantDownload; // the export waits for Export
   const pick = (li, id, label) => { // a finished pass with a picture: a click shows it on every frame, a second click the latest
     li.classList.add("pick");
     li.title = `${label}: show it in the viewer. Click it again, or Esc, for the latest.`;
@@ -3174,7 +3214,7 @@ function stagesUI() {
   first.className = "done" + (S.pass === "first" ? " shown" : "");
   first.innerHTML = '<span class="dot"></span><span class="name">First frame</span><span class="time">edit</span>';
   pick(first, "first", "the first frame");
-  list.replaceChildren(...fluidRows, first, ...STAGES.filter((st) => !skip.has(st.id)).map((st) => {
+  list.replaceChildren(...fluidRows, ...(active.length ? [first] : []), ...STAGES.filter((st) => !skip.has(st.id)).map((st) => {
     const li = document.createElement("li"), took = doneOf(r, st), from = (st.preview ? previewOf(r) : r)?.taken?.[st.id];
     const now = S.stage?.id === st.id && S.stage.key === S.heroKey;
     li.className = took !== undefined ? "done" : now ? "now" : later(st) ? "later" : "";
@@ -3190,8 +3230,8 @@ function stagesUI() {
     return li;
   }));
   const pre = renderLeft(), all = renderLeft(true);
-  const busy = S.stage?.key === S.heroKey, what = S.wantDownload ? "export" : "full size";
-  $("#render-left").textContent = stale() || !(previewOf(r)?.comp || r?.review) ? (pre ? `${S.previewCap ? "preview" : "full size"} ${secs(pre)}` : busy ? `${S.previewCap ? "preview" : "full size"} almost ready` : "")
+  const busy = S.stage?.key === S.heroKey, what = S.wantDownload ? "export" : "full size", next = S.previewCap && !alone ? "preview" : "full size";
+  $("#render-left").textContent = stale() || !(previewOf(r)?.comp || r?.review) ? (pre ? `${next} ${secs(pre)}` : busy ? `${next} almost ready` : "")
     : r?.exported ? "exported" : r?.review && !S.wantDownload ? "full size ready" : all ? `${what} ${secs(all)}` : busy ? `${what} almost ready` : "";
   timelineBar();
 }
@@ -3253,7 +3293,7 @@ function previewUI() { // the Preview pass menu: half and a quarter of this plat
 
 function exportUI() {
   const b = $("#export-btn"), edits = S.edits.some((e) => e.on && e.patch);
-  b.disabled = !S.plate || !(edits || fluidOnly());
+  b.disabled = !S.plate || !(edits || fluidOnly() || plateAlone(S.heroKey));
   b.textContent = S.wantDownload ? `Exporting${renderLeft(true) ? `, ${secs(renderLeft(true))}` : ""}` : "Export";
   $("#save-btn").disabled = !S.plate;
 }
@@ -3276,13 +3316,15 @@ function downloadFluid() {
 }
 
 function exportDialog() {
-  const fluid = fluidOnly();
-  for (const k of ["matte", "review", "shot"]) $(`#x-${k}`).closest("label").hidden = fluid; // a fluid shot alone: its own files
+  const fluid = fluidOnly(), alone = plateAlone(S.heroKey);
+  for (const k of ["matte", "review", "shot"]) $(`#x-${k}`).closest("label").hidden = fluid || alone; // a fluid shot alone, or the plate alone: its own files
   if (fluid) return fluidExportDialog();
   const r = S.renders.get(S.heroKey), kind = S.plate.spec.kind;
   $("#x-format").textContent = exrResult(S.plate.spec, r?.hdr ?? hdrWanted(), S.plate.headroom) ? "half-float EXR frames, ACES2065-1" // an HDR result of a video plate
     : kind === "video" ? `${S.plate.spec.codec} movie` : `${S.plate.spec.ext.slice(1).toUpperCase()} ${kind}`;
-  $("#x-note").textContent = r?.exported ? "Written: the zip downloads at once."
+  $("#x-note").textContent = alone ? (r?.review ? "The plate in HDR: the half-float EXR frames that SDR to HDR wrote. The zip downloads at once."
+      : `The plate in HDR: SDR to HDR runs first, ${secs(renderLeft(true)) || "in a moment"}; then the zip downloads.`)
+    : r?.exported ? "Written: the zip downloads at once."
     : r?.review ? "Export writes the result and its matte from the full-size composite, in seconds, then the zip downloads."
     : `The full-size composite finishes first, ${secs(renderLeft(true)) || "in a moment"}; then the export is written and the zip downloads.`;
   $("#export").showModal();
@@ -3352,7 +3394,8 @@ async function browse(path) { // a folder of the input or output folder, listed 
   keepOpen();
   $("#crumbs").replaceChildren(...crumbs(got.path).map((c, i, all) => Object.assign(document.createElement("button"),
     { type: "button", textContent: c.label, disabled: i === all.length - 1, onclick: () => browse(c.path).catch(quiet) })));
-  for (const b of $$("#open [data-root]")) b.classList.toggle("on", got.path.startsWith("output:") === (b.dataset.root === "output:"));
+  const root = fullPath(got.path) ? null : got.path.startsWith("output:") ? "output:" : ""; // a folder of the machine is under neither root
+  for (const b of $$("#open [data-root]")) b.classList.toggle("on", b.dataset.root === root);
   $("#browse-info").textContent = "";
   drawBrowse();
   openGoUI();
@@ -3473,7 +3516,6 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
   for (const [i, e] of active.entries()) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, caption: e.caption?.text || templateCaption(e),
     mask: await uploadGraphImage(maskAt(e, p.work), i + 1, "mask"),
     layer: e.tool === "paint" ? await uploadGraphImage(snap(e.paint, p.work), i + 1, "strokes") : null,
-    shade: null, // a shade reaches Klein in words only, as on the page (generate)
     quick: editSettings(e, p.prev, QUICK), full: editSettings(e, p.work, FULL) });
   const erase = active.some((e) => e.tool === "erase");
   const graph = sceneGraph(WF, { edits, about: { version: S.version, name: p.name },
@@ -4159,6 +4201,7 @@ $("#preview-size").onchange = (e) => setPreview(+e.target.value);
 
 $("#x-go").onclick = () => {
   if (fluidOnly()) return void setTimeout(downloadFluid, 0); // once the dialog has closed
+  if (plateAlone(S.heroKey)) return void setTimeout(exportPlate, 0);
   const parts = ["export", ...["matte", "review", "shot"].filter((k) => $(`#x-${k}`).checked)];
   const r = S.renders.get(S.heroKey);
   if (r?.exported) return download(parts);
@@ -4253,6 +4296,7 @@ $("#open-go").onclick = async () => { // what the tab on show holds
   if (!typed && it?.kind === "scene") return go(fetch(sceneFile(it.path)).then((r) => r.text()).then(openScene));
   if (!typed) return go(openPlate([], it.path));
   const st = await plateStat(typed); // the server reads the path first: the dialog stays open with its line when it cannot
+  if (st.error && await browse(typed).then(() => true, () => false)) return void ($("#path").value = "", openGoUI()); // a folder of plates: the dialog lists it
   if (st.error) return void ($("#path-error").textContent = st.error);
   return go(openPlate([], typed, { st }));
 };
@@ -4351,7 +4395,8 @@ function enter(another) { // Generate (Enter): the edit in progress, then its sh
   if (resumed) queueWaiting(); // the viewer: with no edit in progress, the edits that waited at the stop run before the render goes on
   if (another) { const target = S.selected ?? S.edits.at(-1); if (target) again(target); return; }
   if (resumed || renderPending()) { // a stopped or failed render goes on
-    const r = S.renders.get(S.heroKey); if (r) r.failed = null; touch(0); return hud(resumed ? "Generating again from where it stopped." : "The shot renders now.", 2000);
+    const r = S.renders.get(S.heroKey) ?? (plateAlone(S.heroKey) ? want(S.heroKey, true) : null); if (r) r.failed = null; touch(0);
+    return hud(resumed ? "Generating again from where it stopped." : plateAlone(S.heroKey) ? "SDR to HDR starts now." : "The shot renders now.", 2000);
   }
   hud(S.edits.length ? "Nothing changed since the last result. Ctrl+Enter tries another seed." : "Paint on the frame first, then Generate.", 3000);
 }

@@ -379,18 +379,6 @@
   }
  },
  "27": {
-  "class_type": "LoadImage",
-  "inputs": {
-   "image": ""
-  },
-  "_meta": {
-   "title": "Painted shade (light edits)",
-   "slots": {
-    "image": "shade"
-   }
-  }
- },
- "28": {
   "class_type": "PaintAPlate_RelightTransfer",
   "inputs": {
    "plate": [
@@ -409,25 +397,20 @@
    "strength": 0.0,
    "align": true,
    "plate_space": "sRGB",
-   "shot_space": "sRGB",
-   "shade": [
-    "27",
-    0
-   ]
+   "shot_space": "sRGB"
   },
   "_meta": {
    "slots": {
     "strength": "relight",
-    "plate": "relit_frame",
-    "shade": "relight_shade"
+    "plate": "relit_frame"
    }
   }
  },
- "29": {
+ "28": {
   "class_type": "SaveImage",
   "inputs": {
    "images": [
-    "28",
+    "27",
     0
    ],
    "filename_prefix": "paintaplate/edits/edit"

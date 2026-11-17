@@ -7,7 +7,7 @@
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_erased: ["erased"], follow_element: ["seed"],
-  review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], plate_level: ["plate_width", "plate_height"], relight_shade: ["shade"],
+  review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], plate_level: ["plate_width", "plate_height"],
   matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"],
   export_plate: ["prefix"], export_exr: ["exr_prefix"] };
 
@@ -554,7 +554,15 @@ export function browseItems(items, { query = "", by = "name" } = {}) {
 }
 
 // A page path as breadcrumbs, the root first: "output:video/shot" gives Output, video, shot, each with the path it opens
-export function crumbs(path) {
+// A path on the machine itself, outside ComfyUI's folders: absolute, or in Windows' form (folders.absolute).
+const FULL = /^(\/|[A-Za-z]:[\\/])/;
+export const fullPath = (path) => FULL.test(String(path ?? ""));
+export function crumbs(path) { // the Open dialog's trail: Input or Output and the folders below, or for a full path the machine's own folders
+  const full = FULL.exec(path);
+  if (full) {
+    const root = full[0], sep = root.length > 1 && root.endsWith("\\") ? "\\" : "/", parts = path.slice(root.length).split(/[\\/]/).filter(Boolean);
+    return [{ label: root.length > 1 ? root.slice(0, 2) : root, path: root }, ...parts.map((p, i) => ({ label: p, path: root + parts.slice(0, i + 1).join(sep) }))];
+  }
   const out = path.startsWith("output:"), base = out ? "output:" : "", parts = path.slice(base.length).split("/").filter(Boolean);
   return [{ label: out ? "Output" : "Input", path: base }, ...parts.map((p, i) => ({ label: p, path: base + parts.slice(0, i + 1).join("/") }))];
 }
@@ -917,6 +925,11 @@ export const wantsHdr = (spec, tools, on) => !!spec && !!on && !tools.includes("
 // The switch away from the plate's default makes another render, so each setting keeps its own: "|hdr" or "|sdr".
 export const hdrKey = (edits, dflt, on) => (on === dflt ? edits : `${edits}|${on ? "hdr" : "sdr"}`);
 export const hdrOfKey = (key, dflt) => (key?.endsWith("|hdr") ? true : key?.endsWith("|sdr") ? false : dflt);
+// The render key of what is on show: the edits' key (hdrKey). A plate with no edit has a render only when the Finish menu asks
+// SDR to HDR of a plate whose format holds nothing above 1.0: the key PLATE_ALONE, whose one step is SDR to HDR on the plate.
+export const PLATE_ALONE = "|hdr";
+export const renderKey = (edits, dflt, on) => (edits ? hdrKey(edits, dflt, on) : on && !dflt ? PLATE_ALONE : "");
+export const plateAlone = (key) => key === PLATE_ALONE;
 // SDR to HDR on a plate whose format cannot hold values above 1.0 (Adrien, 2 Nov): asked before it turns on, then the result is
 // an EXR sequence, which the player shows at full precision and the export writes.
 export const exrResult = (spec, hdrRan, headroom = 1) => !!hdrRan && !holdsHdr(spec, headroom);
