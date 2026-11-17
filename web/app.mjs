@@ -1804,7 +1804,7 @@ function keysUI(force = false) { // the keyframe diamonds on the timeline, over 
       b.className = "tl-kf";
       b.dataset.frame = k.frame;
       b.style.left = pos(k.frame);
-      b.title = `Keyframe at frame ${p.first + k.frame}: drag it to move it, click to go to it`;
+      b.title = `Keyframe at frame ${p.first + k.frame}: drag it to move it, click to go to it.`;
       b.addEventListener("pointerdown", (e) => dragKey(e, k, b));
       return b;
     })] : []));
@@ -1944,7 +1944,7 @@ function fluidRow() { // the first edit of a blank plate: its fluid shot, which 
   const what = f.prompt || `${n} keyframe${n === 1 ? "" : "s"}`, small = li.querySelector("small");
   if (f.busy) { small.innerHTML = '<span class="state"></span>'; small.firstChild.textContent = `Generating ${Math.round((f.busy.progress ?? 0) * 100)}%`; }
   else small.textContent = !on ? `Bypassed: ${what}` : !f.result ? `${what}: Enter generates` : stale ? `${what}: keyframes changed` : `v${f.result.v}: ${what}`;
-  li.title = "The fluid shot of this blank plate: the next edits are painted on it";
+  li.title = "The fluid shot of this blank plate: the next edits are painted on it.";
   li.querySelector(".edit").onclick = () => editFluid();
   li.querySelector(".eye").onclick = () => toggleFluid().catch(quiet);
   li.querySelector(".again").onclick = () => { editFluid(); generateFluid(true).catch(quiet); };
@@ -3142,7 +3142,7 @@ function stagesUI() {
     li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time">fluid</span>';
     li.children[1].textContent = x.label;
     li.classList.add("pick");
-    li.title = `Show ${x.label.toLowerCase()} in the viewer. Click it again, or Esc, for the latest`;
+    li.title = `${x.label}: show it in the viewer. Click it again, or Esc, for the latest.`;
     li.onclick = () => choosePass(x.id);
     return li;
   });
@@ -3150,7 +3150,7 @@ function stagesUI() {
   const skip = r?.skip ?? plan({}, active).skip, later = (st) => st.onDemand && !S.wantDownload; // the export waits for Export
   const pick = (li, id, label) => { // a finished pass with a picture: a click shows it on every frame, a second click the latest
     li.classList.add("pick");
-    li.title = `Show ${label} in the viewer. Click it again, or Esc, for the latest`;
+    li.title = `${label}: show it in the viewer. Click it again, or Esc, for the latest.`;
     li.onclick = () => choosePass(id);
     compareRow(li, id); // the viewer's: Ctrl+click puts the pass on the wipe's left side
   };

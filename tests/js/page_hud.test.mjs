@@ -37,3 +37,9 @@ test("the Help's lines end with a full stop, and none repeats a tooltip word for
   const tips = new Set([...html.matchAll(/\btitle="([^"]*)"/g)].map((m) => m[1].replace(/\.$/, "")));
   assert.deepEqual(lines.filter((l) => tips.has(l.replace(/\.$/, ""))), []);
 });
+
+test("a tooltip the page sets in code ends with a full stop", () => {
+  const titles = [...app.matchAll(/\.title = (["`])((?:\\.|(?!\1)[^\\])*)\1;/g)].map((m) => m[2]);
+  assert.ok(titles.length >= 4, `tooltips set in code: ${titles.length}`);
+  assert.deepEqual(titles.filter((t) => !/[.?!]$/.test(t)), []);
+});
