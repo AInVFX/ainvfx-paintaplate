@@ -1,7 +1,7 @@
 // Upscale to 4K's rules: the target and source sizes, the windows by the machine's memory, the estimate, the row.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FAMILY, FINISH, freesBefore, upscaleAsk, upscaleKeeps, upscaleSeconds, upscaleSource, upscaleTarget, upscaleWindow, upscaleWindows } from "../../web/logic.mjs";
+import { FAMILY, FINISH, freesBefore, upscaleAsk, upscaleFolder, upscaleKeeps, upscaleSeconds, upscaleSource, upscaleTarget, upscaleWindow, upscaleWindows } from "../../web/logic.mjs";
 
 const UHD = [3840, 2160], HD = [1920, 1080];
 
@@ -57,4 +57,12 @@ test("the row: off by default in the Finish menu, its question in figures", () =
   assert.equal(upscaleAsk({ target: UHD, frames: 121, alone: 1360, edit: 2748 }),
     "Export then also writes a 4k folder at 3840 x 2160. On this GPU, 121 frames take about 23 min, or about 46 min with Paint or Clean, "
     + "whose plate and layer are restored too. Every pixel of an upscaled frame is new.");
+});
+
+test("a plate's 4K windows live in one folder per setting that changes their frames, the same on every export", () => {
+  const parts = ["plates/desk.mp4", "sRGB", "ocio://studio-config-latest", [3840, 2112], 21, "png16", "b1"];
+  const folder = upscaleFolder("desk_1a2b", parts);
+  assert.match(folder, /^paintaplate\/desk_1a2b\/upscale\/[0-9a-f]{8}$/);
+  assert.equal(upscaleFolder("desk_1a2b", [...parts]), folder);
+  for (let i = 0; i < parts.length; i++) assert.notEqual(upscaleFolder("desk_1a2b", parts.map((x, j) => (j === i ? `${x}!` : x))), folder, `part ${i}`);
 });

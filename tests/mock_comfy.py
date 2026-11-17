@@ -12,7 +12,7 @@ on a thread of their own, as ComfyUI runs its prompts beside its server: every r
 these waits (the page suite runs with it). The windows a check holds open keep their own time: /mock/slow, /mock/oom,
 /mock/hold and the second after /free.
 """
-import argparse, asyncio, importlib, io, json, os, re, struct, sys, threading, time, types, uuid
+import argparse, asyncio, glob, importlib, io, itertools, json, os, re, struct, sys, threading, time, types, uuid
 from fractions import Fraction
 
 import av
@@ -116,19 +116,22 @@ def save_png(img, kind, prefix, i=None):
 MOVIE = [0, 0]  # the movie size the job asks for (movie_width, movie_height), as Save Movie takes it; 0: the frames' own
 
 
-def save_mp4(frames, prefix, fps=24.0):
-    if all(MOVIE) and frames[0].shape[:2] != (MOVIE[1], MOVIE[0]):
-        frames = [np.asarray(Image.fromarray((np.clip(f, 0, 1) * 255).astype(np.uint8)).resize(tuple(MOVIE), Image.LANCZOS), np.float32) / 255 for f in frames]
+def save_mp4(frames, prefix, fps=24.0):  # frames: any iterable, each read as it is written (a 4K shot does not fit the mock's memory)
+    frames = iter(frames)
+    first = next(frames)
+    if all(MOVIE) and first.shape[:2] != (MOVIE[1], MOVIE[0]):
+        sized = lambda f: np.asarray(Image.fromarray((np.clip(f, 0, 1) * 255).astype(np.uint8)).resize(tuple(MOVIE), Image.LANCZOS), np.float32) / 255  # noqa: E731
+        first, frames = sized(first), map(sized, frames)
     sub, _, stem = prefix.rpartition("/")
     d = os.path.join(folder("output"), sub)
     os.makedirs(d, exist_ok=True)
     name = f"{stem}_00001_.webm"  # VP9: Playwright's Chromium has no H.264 decoder; ComfyUI itself writes H.264 MP4
-    h, w = frames[0].shape[:2]
+    h, w = first.shape[:2]
     out = av.open(os.path.join(d, name), "w")
     vs = out.add_stream("libvpx-vp9", rate=Fraction(fps).limit_denominator(1001))
     vs.width, vs.height, vs.pix_fmt = w - w % 2, h - h % 2, "yuv420p"
     vs.codec_context.options = {"deadline": "realtime", "cpu-used": "8", "crf": "34", "b": "0"}
-    for i, f in enumerate(frames):
+    for i, f in enumerate(itertools.chain([first], frames)):
         fr = av.VideoFrame.from_ndarray((np.clip(f[: h - h % 2, : w - w % 2, :3], 0, 1) * 255).astype(np.uint8), format="rgb24")
         fr.pts = i
         for p in vs.encode(fr):
@@ -291,6 +294,36 @@ async def execute(pid, prompt):
             else:
                 o[outs["named"]] = {"images": []}
         await steps(pid, 2, 0.5)
+    elif "color_fix" in v:  # upscale: a window at the target size, each frame flat in its mean colour (4K frames stay cheap here)
+        frames = read_plate(v["shot"], int(v["max_frames"]))[0]
+        first, count, w, h = int(v["first"]), int(v["count"]), int(v["width"]), int(v["height"])
+        await steps(pid, 1, 2.0)
+        def flat(c, prefix, i):  # one colour at the target size: PIL fills and writes it, with no float copy of a 4K frame
+            sub, _, stem = prefix.rpartition("/")
+            os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
+            name, grey = f"{stem}_{i + 1:05d}_.png", np.ndim(c) == 0
+            fill = round(float(c) * 255) if grey else tuple(round(float(x) * 255) for x in c)
+            Image.new("L" if grey else "RGB", (w, h), fill).save(os.path.join(folder("output"), sub, name), compress_level=1)
+            return {"filename": name, "subfolder": sub, "type": "output"}
+        layer = [frames[i][..., :3].reshape(-1, 3).mean(0) for i in range(first, min(first + count, len(frames)))]
+        o[outs["frames"]] = {"images": [flat(c, v["prefix"], i) for i, c in enumerate(layer)][:1]}
+        pngs = lambda path: sorted(glob.glob(os.path.join(resolve(path), "*.png")))  # noqa: E731
+        if {"comp", "matte"} & set(outs):
+            mattes = [float(np.asarray(Image.open(f).convert("L"), np.float32).mean()) / 255 for f in pngs(v["matte"])[first:first + count]]
+        if "comp" in outs:  # the 4K plate's window around the matte, the layer inside it
+            under = [np.asarray(Image.open(f).convert("RGB").getpixel((0, 0)), np.float32) / 255 for f in pngs(v["under"])]
+            o[outs["comp"]] = {"images": [flat(c * m + u * (1 - m), v["comp_prefix"], i) for i, (c, u, m) in enumerate(zip(layer, under, mattes))][:1]}
+        if "matte" in outs:  # numbered on from the frames its folder holds, as Save Frames counts
+            sub, _, stem = v["matte_prefix"].rpartition("/")
+            start = len(glob.glob(os.path.join(folder("output"), sub, f"{stem}_*_.png")))
+            o[outs["matte"]] = {"images": [flat(m, v["matte_prefix"], start + i) for i, m in enumerate(mattes)][:1]}
+    elif "export" in outs and "path" not in v:  # upscale_export: the windows joined in order, written as the export is (a movie here)
+        files = [f for d in sorted(glob.glob(os.path.join(resolve(v["frames"]), "*", ""))) for f in sorted(glob.glob(os.path.join(d, "*.png")))]
+        await steps(pid, 1, 1.0)
+        fps = read_plate(v["shot"], 1)[1]["fps"]
+        save_mp4((np.asarray(Image.open(f).convert("RGB"), np.float32) / 255 for f in files), f"{v['prefix']}/plate", fps)
+        o[outs["export"]] = {"text": [f"Save Plate: 1 file written to {v['prefix']}."],
+                             "files": [{"filename": "plate_00001_.webm", "subfolder": v["prefix"], "type": "output"}]}
     elif "hdr" in outs:  # SDR to HDR: the shot decoded from sRGB, its brightest values lifted above 1.0, as half-float EXR frames
         frames, spec = read_plate(v["path"], v.get("max_frames", 1024), pad=True)
         await steps(pid, 8, 2.0, live=(v.get("live") or 0, frames[0]))
@@ -401,10 +434,9 @@ async def execute(pid, prompt):
             os.makedirs(d, exist_ok=True)
             if "export" in outs:  # Save Plate: dropped for an HDR result of a video plate, which writes EXR frames instead
                 save_mp4(out, f"{v['prefix']}/plate", spec["fps"])
-            if "matte" in outs:
-                for i in range(n):
-                    save_png(resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w)),
-                             "output", v["matte_prefix"], i)
+            if "matte" in outs:  # Save Frames' record, as ComfyUI answers it: the first frame
+                o[outs["matte"]] = {"images": [save_png(resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w)),
+                                                        "output", v["matte_prefix"], i) for i in range(n)][:1]}
             if "matte_movie" in outs:  # the export's matte as a grey movie, for the Export row
                 greys = [np.dstack([resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w), np.float32)] * 3) for i in range(n)]
                 o[outs["matte_movie"]] = {"images": [save_mp4(greys, v["matte_video_prefix"], spec["fps"])], "animated": [True]}

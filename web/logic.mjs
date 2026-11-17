@@ -670,6 +670,14 @@ export function upscaleSeconds([tw, th], frames, { passes = 1, parts = 1, profil
   const t = UPSCALE_SECONDS[profile] ?? UPSCALE_SECONDS.large, scale = (tw * th) / (3840 * 2160);
   return scale * frames * (passes * t.frame + parts * t.part / 121);
 }
+// The folder of a plate's 4K windows: one per plate, under a key of everything that changes their frames (the plate, its
+// colour space and config, the sizes, the window, the format, the build), so a changed setting never adds frames to old
+// windows, and the next export of this plate finds them through the job index. FNV-1a, 32 bits, in hex.
+export function upscaleFolder(plateId, parts) {
+  let h = 0x811c9dc5;
+  for (const c of JSON.stringify(parts)) h = Math.imul(h ^ c.codePointAt(0), 0x01000193) >>> 0;
+  return `paintaplate/${plateId}/upscale/${h.toString(16).padStart(8, "0")}`;
+}
 export const upscaleKeeps = (tools) => tools.length > 0 && !tools.includes("light"); // Paint and Clean keep the plate's untouched pixels: the 4K plate, layer and matte come too
 export const UPSCALE_LARGE = "This plate is already large: it is brought down to half the export's size, then SeedVR2 restores its detail. Every pixel is new.";
 export function upscaleAsk({ target, frames, alone, edit }) { // the question before the row turns on: what Export writes, and how long on this GPU
