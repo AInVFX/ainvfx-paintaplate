@@ -122,11 +122,12 @@ def save_png(img, kind, prefix, i=None):
 MOVIE = [0, 0]  # the movie size the job asks for (movie_width, movie_height), as Save Movie takes it; 0: the frames' own
 
 
-def save_mp4(frames, prefix, fps=24.0):  # frames: any iterable, each read as it is written (a 4K shot does not fit the mock's memory)
+def save_mp4(frames, prefix, fps=24.0, side=0):  # frames: any iterable, each read as it is written (a 4K shot does not fit the mock's memory); side: px on the long side, else the job's movie size
     frames = iter(frames)
     first = next(frames)
-    if all(MOVIE) and first.shape[:2] != (MOVIE[1], MOVIE[0]):
-        sized = lambda f: np.asarray(Image.fromarray((np.clip(f, 0, 1) * 255).astype(np.uint8)).resize(tuple(MOVIE), Image.LANCZOS), np.float32) / 255  # noqa: E731
+    size = (max(2, round(side * first.shape[1] / max(first.shape[:2]))), max(2, round(side * first.shape[0] / max(first.shape[:2])))) if side else tuple(MOVIE)
+    if all(size) and first.shape[:2] != (size[1], size[0]):
+        sized = lambda f: np.asarray(Image.fromarray((np.clip(f, 0, 1) * 255).astype(np.uint8)).resize(size, Image.LANCZOS), np.float32) / 255  # noqa: E731
         first, frames = sized(first), map(sized, frames)
     sub, _, stem = prefix.rpartition("/")
     d = os.path.join(folder("output"), sub)
@@ -366,8 +367,8 @@ async def execute(pid, prompt):
             out.append(g * m + p * (1 - m))
             mattes.append(m.astype(np.float16))
         o[outs["review"]] = {"images": [save_mp4(out, v["review_prefix"], spec["fps"])], "animated": [True]}
-        if "matte_movie" in outs:  # the matte the composite used, as a grey movie, for the X-ray
-            o[outs["matte_movie"]] = {"images": [save_mp4([np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes], v["matte_video_prefix"], spec["fps"])], "animated": [True]}
+        if "matte_movie" in outs:  # the matte the composite used, as a grey movie, for the X-ray, which reads it small
+            o[outs["matte_movie"]] = {"images": [save_mp4([np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes], v["matte_video_prefix"], spec["fps"], side=320)], "animated": [True]}
         if "frames" in outs:
             sub, _, stem = v["frames_prefix"].rpartition("/")
             os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
@@ -442,8 +443,8 @@ async def execute(pid, prompt):
             frames[i] = None
         layer = [resize(shot[min(i, len(shot) - 1)], w, h) if not i else moved(resize(shot[min(i, len(shot) - 1)], w, h), back=True) for i in range(n)] if {"layer", "layer_exr"} & set(outs) else []
         del frames, shot
-        if "matte_movie" in outs:  # the matte the composite used, as a grey movie: the X-ray reads it, the Export row shows the export's
-            o[outs["matte_movie"]] = {"images": [save_mp4([np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes], v["matte_video_prefix"], spec["fps"])], "animated": [True]}
+        if "matte_movie" in outs:  # the matte the composite used, as a grey movie: the X-ray reads a composite's small, the Export row shows the export's
+            o[outs["matte_movie"]] = {"images": [save_mp4([np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes], v["matte_video_prefix"], spec["fps"], side=320 if "video" in outs else 0)], "animated": [True]}
         if "video" in outs:
             o[outs["video"]] = {"images": [save_mp4(out, v["video_prefix"], spec["fps"])], "animated": [True]}
         else:
