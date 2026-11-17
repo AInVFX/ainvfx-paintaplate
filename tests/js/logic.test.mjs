@@ -106,7 +106,7 @@ test("optional links drop with what fed them when their slots are empty", () => 
 test("every workflow names the outputs and the progress node the page reads", () => {
   const wanted = { ingest: ["hero", "proxy", "spec"], prompt: ["text"], edit: ["patch", "relit", "result"],
     snap: ["named", "point_0", "point_1", "point_2", "point_3", "point_4"], clean: ["frames", "video"], shot: ["frames", "video"],
-    matte: ["follow", "frames", "movie"], comp: ["video"], review: ["frames", "review", "view"], export: ["exr", "export", "matte", "matte_movie"], warm: ["frame"],
+    matte: ["follow", "frames", "movie"], comp: ["video"], review: ["frames", "review", "view"], export: ["exr", "export", "layer", "layer_exr", "matte", "matte_movie"], warm: ["frame"],
     fluid: ["control", "plate", "video"] };
   for (const [name, outs] of Object.entries(wanted)) {
     const wf = workflow(name);

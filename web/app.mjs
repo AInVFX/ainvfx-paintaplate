@@ -2977,11 +2977,12 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     const exr = exrResult(p.spec, r.hdr, p.headroom); // the result as half-float EXR frames instead of the plate's format
     const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr,
       ...r.full.values, relight, keep_untouched: !relight, prefix: exr ? "" : `${dir}/export`, exr_prefix: exr ? `${dir}/export/f` : "", matte_prefix: `${dir}/matte/matte`,
+      layer_prefix: exr || relight ? "" : `${dir}/layer`, layer_exr_prefix: exr && !relight ? `${dir}/layer/f` : "",
       matte_video_prefix: `${dir}/matte_movie/m`, ...plateMovie(p), grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
     const file = outputFile("export", done, exr ? "exr" : "export"), matte = outputFile("export", done, "matte_movie"); // a job taken from the index keeps its own folder
     r.exported = { run: file ? file.subfolder.replace(/\/export$/, "") : dir, name: `${p.name}_paintaplate_v${r.v}`,
       text: exr ? `${p.frames} half-float EXR frames in ACES2065-1, in ${file?.subfolder ?? `${dir}/export`}` : outputText("export", done, "export") ?? "",
-      matte: matte ? viewUrl(matte) : null }; // the Export row shows its matte
+      matte: matte ? viewUrl(matte) : null, layer: !!outputFile("export", done, exr ? "layer_exr" : "layer") }; // the Export row shows its matte
   });
   S.exported = r.exported;
   stagesUI(); exportUI();
@@ -2989,7 +2990,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   log(`Export v${r.v}: done.\n  ${S.exported.text.split("\n").join("\n  ")}`);
   const parts = S.wantDownload;
   S.wantDownload = null;
-  download(parts);
+  download(S.exported.layer ? [parts[0], "layer", ...parts.slice(1)] : parts); // the layer goes with the result it rebuilds
 }
 
 function elementOf(zones, size, hero = S.hero) { // where the edits changed the first frame, inside the paint zones: the paint matte starts here
@@ -3032,7 +3033,7 @@ function mattesOf(found) { // a missing matte is the other one again: the workfl
   return { found, any: !!a, values: { matte_a: a ?? "", matte_b: b ?? "" } };
 }
 
-const PARTS = { export: "the result in the plate's format", matte: "its matte", review: "a review movie", shot: "the regenerated shot",
+const PARTS = { export: "the result in the plate's format", layer: "its layer", matte: "its matte", review: "a review movie", shot: "the regenerated shot",
   hdr: "the HDR frames", plate: "the fluid shot", preview: "its preview movie" };
 
 // The models behind the result on show (models.workflowsFor, modelsBehind): Help > Models and licences shows them, and an

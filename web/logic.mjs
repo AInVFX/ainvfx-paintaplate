@@ -9,7 +9,7 @@
 export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_erased: ["erased"], follow_element: ["seed"],
   review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], plate_level: ["plate_width", "plate_height"], relight_shade: ["shade"],
   matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"],
-  export_plate: ["prefix"], export_exr: ["exr_prefix"] };
+  export_plate: ["prefix"], export_exr: ["exr_prefix"], export_layer: ["layer_prefix"], export_layer_exr: ["layer_exr_prefix"] };
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
   const slots = {}, outputs = {}, progress = new Set();

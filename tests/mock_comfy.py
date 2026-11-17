@@ -392,6 +392,7 @@ async def execute(pid, prompt):
             m = resize(matte[min(i, len(matte) - 1)][..., 0], w, h)[..., None] if has_matte else np.ones((h, w, 1), np.float32)
             out.append((g * m + p * (1 - m)).astype(np.float16))
             frames[i] = None
+        layer = [resize(shot[min(i, len(shot) - 1)], w, h) for i in range(n)] if {"layer", "layer_exr"} & set(outs) else []
         del frames, shot
         if "video" in outs:
             o[outs["video"]] = {"images": [save_mp4(out, v["video_prefix"], spec["fps"])], "animated": [True]}
@@ -413,6 +414,15 @@ async def execute(pid, prompt):
                 names = [f"f_{i + 1:05d}_.exr" for i in range(n)]
                 plateio.write_exrs(lambda i: out[i], [os.path.join(folder("output"), sub, f) for f in names])
                 o[outs["exr"]] = {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
+            if "layer" in outs:  # the shot as the composite blends it, in the plate's format
+                save_mp4(layer, f"{v['layer_prefix']}/plate", spec["fps"])
+                o[outs["layer"]] = {"files": [{"filename": "plate_00001_.webm", "subfolder": v["layer_prefix"], "type": "output"}]}
+            if "layer_exr" in outs:  # beside an EXR result: half-float EXR frames
+                sub = v["layer_exr_prefix"].rpartition("/")[0]
+                os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
+                names = [f"f_{i + 1:05d}_.exr" for i in range(n)]
+                plateio.write_exrs(lambda i: layer[i], [os.path.join(folder("output"), sub, f) for f in names])
+                o[outs["layer_exr"]] = {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
             if "export" not in outs:
                 return o
             o[outs["export"]] = {"text": [f"1 file(s) in {d}\nplate_00001_.webm"],

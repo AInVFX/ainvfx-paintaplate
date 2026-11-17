@@ -17,8 +17,8 @@
     GET  /paintaplate/ocio?config=...                  the OCIO config: colour spaces by family, displays and views, looks
     GET  /paintaplate/ocio/shader?config=&space=&display=&view=&look=   the viewer's GLSL and lookup tables for a source
     GET  /paintaplate/download?run=paintaplate/<plate>/v3&name=shot010_paintaplate_v3&parts=export,matte
-`parts` chooses what the zip holds (default: export,matte): export is the result in the plate's own format, matte where
-the plate changed, review the full-size review movie (else the preview composite), shot the whole frame as the model made
+`parts` chooses what the zip holds (default: export,matte): export is the result in the plate's own format, layer the
+shot as the composite blends it (result = plate x (1 - matte) + layer x matte), matte where the plate changed, review the full-size review movie (else the preview composite), shot the whole frame as the model made
 it (the full-size pass first). Only render folders under output/paintaplate are zipped, and only plain files inside them.
 Everything here is plain functions (tests/test_routes.py); setup() adds the routes to ComfyUI's server.
 """
@@ -72,7 +72,7 @@ THUMBS_AT_ONCE = asyncio.Semaphore(4)  # a folder of thousands of outputs asks f
 # part: (paths in the run folder, the first match wins for a file; its name in the zip, None for a folder).
 # The page keeps each preview size's composite and passes in a folder named after the size (640x352/), the
 # full-size passes in full/, and the export's review movie at the top; the last patterns read older runs.
-PARTS = {"export": (["export"], None), "matte": (["matte"], None),
+PARTS = {"export": (["export"], None), "layer": (["layer"], None), "matte": (["matte"], None),
          "review": (["review_*.mp4", "*/comp_*.mp4", "comp_*.mp4"], "review.mp4"),
          "shot": (["full/raw_*.mp4", "full/clean_*.mp4", "*/raw_*.mp4", "*/clean_*.mp4", "full_*.mp4", "raw_*.mp4"],
                   "regenerated_shot.mp4"),

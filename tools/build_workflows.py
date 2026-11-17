@@ -136,7 +136,8 @@ def load(name, folder=None):
 OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",), "follow_erased": ("erased",),
             "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "plate_level": ("plate_width", "plate_height"), "relight_shade": ("shade",),
             "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",),
-            "export_plate": ("prefix",), "export_exr": ("exr_prefix",)}
+            "export_plate": ("prefix",), "export_exr": ("exr_prefix",), "export_layer": ("layer_prefix",),
+            "export_layer_exr": ("layer_exr_prefix",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -675,7 +676,8 @@ def review():
 def export():
     """For compositing software, when Export is pressed: the composite the review shows, written by Save Plate in the
     plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers, the untouched
-    pixels exactly the source's), with the matte of where the plate changed."""
+    pixels exactly the source's), with the matte of where the plate changed and, for an edit that keeps the plate's
+    untouched pixels, the layer the composite blends in: result = plate x (1 - matte) + layer x matte."""
     g = Graph()
     load, fit, final = composite(g)
     plate_out = g("PaintAPlate_SavePlate", _title="Export", _output="export", images=final, plate=load[2],
@@ -688,6 +690,21 @@ def export():
             images=g("ImageFromBatch", image=colour(g, final, Slot("color_space", "@model"), HDR_SPACE, "The result in ACES2065-1"), batch_index=0, length=load[4]),
             filename_prefix=Slot("exr_prefix", ""))
     g.link_slot(exr, "images", "export_exr")
+    # The layer: the shot as the composite blends it. Composite Frames sizes its source to the plate with the bilinear
+    # filter of Image Scale, so this is the picture it blends. Written as the result is: in the plate's own format with no
+    # source pixel kept, or as half-float EXR frames in ACES2065-1 beside an EXR result. A relight leaves it out (Slots
+    # layer_prefix and layer_exr_prefix empty): every pixel of its result may change, so the result is the only layer.
+    size = g("GetImageSize", image=load[0])
+    layer = g("ImageScale", _title="Layer: the shot as the composite blends it", image=fit[0], upscale_method="bilinear",
+              width=size[0], height=size[1], crop="disabled")
+    layer_plate = g("PaintAPlate_SavePlate", _title="Layer", _output="layer", images=layer, plate=load[2],
+                    filename_prefix=Slot("layer_prefix", ""), keep_untouched=False)
+    g.link_slot(layer_plate, "images", "export_layer")
+    layer_exr = g("PaintAPlate_SaveFrames", _title="Layer as half-float EXR frames (an HDR result of a video plate)", _output="layer_exr",
+                  format="exr", fps=load[3], chromaticities="AP0", frames=load[4],
+                  images=colour(g, layer, Slot("color_space", "@model"), HDR_SPACE, "The layer in ACES2065-1"),
+                  filename_prefix=Slot("layer_exr_prefix", ""))
+    g.link_slot(layer_exr, "images", "export_layer_exr")
     matte_frames = g("ImageFromBatch", image=g("MaskToImage", mask=fit[1]), batch_index=0, length=load[4])
     g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed", _output="matte", images=matte_frames,
       filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))

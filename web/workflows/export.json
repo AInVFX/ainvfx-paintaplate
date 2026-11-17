@@ -522,6 +522,107 @@
   }
  },
  "30": {
+  "class_type": "GetImageSize",
+  "inputs": {
+   "image": [
+    "1",
+    0
+   ]
+  }
+ },
+ "31": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "image": [
+    "23",
+    0
+   ],
+   "upscale_method": "bilinear",
+   "width": [
+    "30",
+    0
+   ],
+   "height": [
+    "30",
+    1
+   ],
+   "crop": "disabled"
+  },
+  "_meta": {
+   "title": "Layer: the shot as the composite blends it"
+  }
+ },
+ "32": {
+  "class_type": "PaintAPlate_SavePlate",
+  "inputs": {
+   "images": [
+    "31",
+    0
+   ],
+   "plate": [
+    "1",
+    2
+   ],
+   "filename_prefix": "",
+   "keep_untouched": false
+  },
+  "_meta": {
+   "title": "Layer",
+   "slots": {
+    "filename_prefix": "layer_prefix",
+    "images": "export_layer"
+   },
+   "output": "layer"
+  }
+ },
+ "33": {
+  "class_type": "PaintAPlate_ColorSpace",
+  "inputs": {
+   "image": [
+    "31",
+    0
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "ACES2065-1"
+  },
+  "_meta": {
+   "title": "The layer in ACES2065-1",
+   "slots": {
+    "config": "config",
+    "source": "color_space"
+   }
+  }
+ },
+ "34": {
+  "class_type": "PaintAPlate_SaveFrames",
+  "inputs": {
+   "format": "exr",
+   "fps": [
+    "1",
+    3
+   ],
+   "chromaticities": "AP0",
+   "frames": [
+    "1",
+    4
+   ],
+   "images": [
+    "33",
+    0
+   ],
+   "filename_prefix": ""
+  },
+  "_meta": {
+   "title": "Layer as half-float EXR frames (an HDR result of a video plate)",
+   "slots": {
+    "filename_prefix": "layer_exr_prefix",
+    "images": "export_layer_exr"
+   },
+   "output": "layer_exr"
+  }
+ },
+ "35": {
   "class_type": "MaskToImage",
   "inputs": {
    "mask": [
@@ -530,11 +631,11 @@
    ]
   }
  },
- "31": {
+ "36": {
   "class_type": "ImageFromBatch",
   "inputs": {
    "image": [
-    "30",
+    "35",
     0
    ],
    "batch_index": 0,
@@ -544,11 +645,11 @@
    ]
   }
  },
- "32": {
+ "37": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
-    "31",
+    "36",
     0
    ],
    "filename_prefix": "paintaplate/plate/matte/matte"
@@ -561,13 +662,13 @@
    "output": "matte"
   }
  },
- "33": {
+ "38": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
    "width": 0,
    "height": 0,
    "images": [
-    "31",
+    "36",
     0
    ],
    "fps": [
