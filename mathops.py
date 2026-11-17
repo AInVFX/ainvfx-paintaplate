@@ -736,7 +736,9 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       returns that zone on its first frames before it finds the object (13 Nov 2026: 10 to 13 frames on each of five
       cow recordings, where the matte held the zone, 3.4 to 5.4 times the cow, then fell to a quarter in one frame).
       So with an element at most half the first-frame mask, a tracker's mask of two fifths of that mask or more is the
-      zone. With `base`, on those frames the matte of an object that stands still (see below) is its place of frame 0,
+      zone; so is a mask of twice the element or more while the tracker's masks still shrink from the zone to the object,
+      until the first one under that (a bald eagle in a zone 6.3 times its size: on the two frames before the eagle,
+      2.3 and 2.5 times it, under two fifths of the zone). With `base`, on those frames the matte of an object that stands still (see below) is its place of frame 0,
       moved with the background, and the search keeps the zone; frames before the object is known to stand still are
       set when it is. An object found to move in the scene is followed as before. One that moves inside its paint
       zone is not found to move (its first matte is the zone, as at 32ea0a4), so the matte keeps to its place there;
@@ -902,6 +904,10 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     line = el if el is not None and el.any() else seed  # the object's own region
     given = int(seed.sum())  # the first-frame mask the tracker was given
     zoned = line is el and 2 * int(el.sum()) <= given  # a paint zone at least twice the object: the tracker returns the zone first
+    first_size, shrinking = int(line.sum()), zoned  # the object's first area; whether the tracker's masks still shrink from the zone to it
+
+    def zone_sized(area):  # a tracker's mask this large is the zone: two fifths of it or more, or twice the object or more while the masks still shrink
+        return zoned and (5 * area >= 2 * given or (shrinking and area >= 2 * first_size))
     out, cores, prev = np.zeros((n, h, w), np.float32), np.zeros((n, h, w), bool), seed
     peak = int(line.sum())  # the object's largest size: its region on frame 0, then SAM's masks that are not the paint zone
     size, last = np.ones(n, np.int64), max(int(line.sum()), 1)  # the object's area on each frame
@@ -972,7 +978,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     core = in_view(core, hide)  # of an erased object's mask, a piece that lies mostly on covered places is on what stands in front
                 if core.any() and 20 * int(core.sum()) < last:  # a sliver of the object, as SAM 3.1 returns some: not a sighting
                     core = np.zeros((h, w), bool)
-                if not (zoned and 5 * int(core.sum()) >= 2 * given):  # a mask as large as the paint zone is the zone, not the object
+                if not zone_sized(int(core.sum())):  # a mask as large as the paint zone is the zone, not the object
                     peak = max(peak, int(core.sum()))
                 found, follows = core, True
                 if real and hide is not None:  # an erased object stands still: its place of frame 0, where the plate shows it thick, is the object, seen by SAM or not
@@ -1045,12 +1051,13 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                 else:  # the object is not seen: the last matte holds, and the search grows
                     f, lost = prev, lost + 1
                     holding[t] = prev.any()
-                if zoned and plates is not None and still is not False and 5 * int(s.sum()) >= 2 * given and 2 * int((s & zone_at).sum()) > int(s.sum()):  # the tracker's mask is the zone: as large, and mostly inside it
+                if zone_sized(int(s.sum())) and plates is not None and still is not False and 2 * int((s & zone_at).sum()) > int(s.sum()):  # the tracker's mask is the zone: as large, and mostly inside it
                     own = ndimage.binary_fill_holes(open0)  # the matte shows the object's place of frame 0; the search keeps the zone
                     if still:
                         f, zones = f & own, zones + 1
                     else:
                         waiting.append((t, own))
+                shrinking = shrinking and int(s.sum()) >= 2 * first_size  # the first mask within twice the object ends the shrink
                 out[t], prev = f, f
                 if plates is not None and t == 0:
                     home = f
