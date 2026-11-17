@@ -554,7 +554,15 @@ export function browseItems(items, { query = "", by = "name" } = {}) {
 }
 
 // A page path as breadcrumbs, the root first: "output:video/shot" gives Output, video, shot, each with the path it opens
-export function crumbs(path) {
+// A path on the machine itself, outside ComfyUI's folders: absolute, or in Windows' form (folders.absolute).
+const FULL = /^(\/|[A-Za-z]:[\\/])/;
+export const fullPath = (path) => FULL.test(String(path ?? ""));
+export function crumbs(path) { // the Open dialog's trail: Input or Output and the folders below, or for a full path the machine's own folders
+  const full = FULL.exec(path);
+  if (full) {
+    const root = full[0], sep = root.length > 1 && root.endsWith("\\") ? "\\" : "/", parts = path.slice(root.length).split(/[\\/]/).filter(Boolean);
+    return [{ label: root.length > 1 ? root.slice(0, 2) : root, path: root }, ...parts.map((p, i) => ({ label: p, path: root + parts.slice(0, i + 1).join(sep) }))];
+  }
   const out = path.startsWith("output:"), base = out ? "output:" : "", parts = path.slice(base.length).split("/").filter(Boolean);
   return [{ label: out ? "Output" : "Input", path: base }, ...parts.map((p, i) => ({ label: p, path: base + parts.slice(0, i + 1).join("/") }))];
 }
