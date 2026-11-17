@@ -36,6 +36,7 @@ class UpscaleWorkflow(unittest.TestCase):
         (cid, cut), = of(self.p, "ImageFromBatch")
         self.assertEqual(cut["inputs"]["image"], [lid, 0])
         self.assertEqual(cut["_meta"]["slots"], {"batch_index": "first", "length": "count"})
+        self.assertEqual(cut["inputs"]["length"], build_workflows.UPSCALE_CHUNK)
         (iid, into), (_, back) = of(self.p, "PaintAPlate_ColorSpace")
         self.assertEqual((into["inputs"]["image"], into["inputs"]["peak_of"], into["inputs"]["destination"]), ([cid, 0], [lid, 0], "@model"))
         self.assertEqual((back["inputs"]["source"], back["inputs"]["peak"], back["_meta"]["slots"]["destination"]), ("@model", [iid, 1], "color_space"))
@@ -102,7 +103,8 @@ class ExportJob(unittest.TestCase):
         self.assertEqual(set(upscale_plate.export_values("plates/horse.mp4", 121)), slots(p))
 
     def test_every_window_then_the_export(self):
-        self.assertEqual(upscale_plate.windows(121, every=True), [(0, 42), (42, 42), (84, 37)])
+        self.assertEqual(upscale_plate.windows(121, every=True), [(0, 21), (21, 21), (42, 21), (63, 21), (84, 21), (105, 16)])
+        self.assertEqual(upscale_plate.WINDOW, build_workflows.UPSCALE_CHUNK)
         self.assertEqual(upscale_plate.windows(121, 84, 42), [(84, 37)])
         self.assertEqual(upscale_plate.export_values("plates/horse.mp4", 121)["frames"], "output:upscale/upscale")
         with open(os.path.join(ROOT, "folders.py")) as f:

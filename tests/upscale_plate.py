@@ -1,7 +1,7 @@
 """Upscale to 4K on one window of a shot, as the page's Finish runs it, on a running ComfyUI: the seconds of the job and
 of each node, the peaks of the GPU's memory and of ComfyUI's RAM, and the count and size of the frames it writes.
 
-  python tests/upscale_plate.py --comfy /data/ComfyUI --shot plates/horse.mp4 --first 0 --count 42 --out ~/paintaplate_gpu/upscale
+  python tests/upscale_plate.py --comfy /data/ComfyUI --shot plates/horse.mp4 --first 0 --count 21 --out ~/paintaplate_gpu/upscale
   python tests/upscale_plate.py --comfy /workspace/ComfyUI --shot plates/horse.mp4 --all --out /workspace/gpu/upscale
 
 With --all, every window of the shot runs, then the upscale_export job writes the frames in the shot's own format.
@@ -25,6 +25,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 
 LONG_SIDE = 3840
 FACTOR = 2  # SeedVR2 restores from at most the target divided by this
+WINDOW = 21  # frames per job, one SeedVR2 chunk: with the 7B model held in RAM, as on a 16 GB GPU, a window of 42 frames
+#              at 3840 x 2160 went past 52 GB of RAM in the post-processing's colour correction
 OUTPUT = "output:"  # folders.OUTPUT: a path under ComfyUI's output folder, as Load Plate reads it
 
 
@@ -45,7 +47,7 @@ def source_size(width: int, height: int, target: tuple) -> tuple:
     return 2 * round(target[0] / FACTOR / 2), 2 * round(target[1] / FACTOR / 2)
 
 
-def windows(frames: int, first: int = 0, count: int = 42, every: bool = False) -> list:
+def windows(frames: int, first: int = 0, count: int = WINDOW, every: bool = False) -> list:
     """The windows to run, as (first, count): the one asked for, or with `every` the whole shot in windows of `count`."""
     if not every:
         return [(first, max(1, min(count, frames - first)))]
@@ -66,7 +68,7 @@ def frame_size(path: str) -> tuple:
         return struct.unpack(">II", f.read(24)[16:24])
 
 
-def values(shot: str, width: int, height: int, frames: int, label: str = "upscale", first: int = 0, count: int = 42,
+def values(shot: str, width: int, height: int, frames: int, label: str = "upscale", first: int = 0, count: int = WINDOW,
            color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16", seed: int = 42) -> dict:
     """The slots of the upscale workflow for one window of `frames` frames."""
     w, h = target_size(width, height)
@@ -76,7 +78,7 @@ def values(shot: str, width: int, height: int, frames: int, label: str = "upscal
             "prefix": f"{label}/upscale/f"}
 
 
-def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first: int = 0, count: int = 42,
+def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first: int = 0, count: int = WINDOW,
         every: bool = False, color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16") -> dict:
     import build_workflows
     from hdr_plate import _comfy_pid, _plate_info, node_rows, run_prompt
@@ -128,7 +130,7 @@ if __name__ == "__main__":
     ap.add_argument("--out", required=True, help="the folder of the report")
     ap.add_argument("--label", default="upscale", help="the report's name and the frames' folder under ComfyUI's output folder")
     ap.add_argument("--first", type=int, default=0, help="the window's first frame, from 0")
-    ap.add_argument("--count", type=int, default=42, help="the window's frame count")
+    ap.add_argument("--count", type=int, default=WINDOW, help="the window's frame count")
     ap.add_argument("--all", action="store_true", help="every window of the shot, then the export in the shot's own format")
     ap.add_argument("--color-space", default="@model", help="the shot's file colour space in the OCIO config")
     ap.add_argument("--color-fix", default="lab", choices=("lab", "none"), help="SeedVR2's colour correction")

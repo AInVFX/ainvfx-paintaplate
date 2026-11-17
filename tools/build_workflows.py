@@ -854,7 +854,8 @@ def upscale():
     and source_height; 0 x 0 keeps the window's size). A plate already at the target's size is then restored at its own.
 
     The page sends the export (Slot shot), in the plate's colour space (Slot color_space), and one job per window, so a
-    window bounds a job's RAM: 121 frames at 3840 x 2160 in one job reach 52 GB of RAM on a 96 GB GPU. The window goes
+    window bounds a job's RAM: 121 frames at 3840 x 2160 in one job reach 52 GB of RAM on a 96 GB GPU, and on a 16 GB GPU
+    the model's 15.7 GB stay in RAM as well. A window is one chunk, UPSCALE_CHUNK frames, its default. The window goes
     into the model space with the whole shot's peak (peak_of), so an HDR shot keeps one exposure from one window to the
     next, and comes back with that peak. Lanczos brings it to the target size; SeedVR2 restores it in chunks of
     UPSCALE_CHUNK frames, in one sampling step; its post-processing matches the colours to the Lanczos frames (Slot
@@ -864,7 +865,7 @@ def upscale():
     """
     g = Graph()
     load = g("PaintAPlate_LoadPlate", _title="Result", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
-    window = g("ImageFromBatch", _title="The window", image=load[0], batch_index=Slot("first", 0), length=Slot("count", 121))
+    window = g("ImageFromBatch", _title="The window", image=load[0], batch_index=Slot("first", 0), length=Slot("count", UPSCALE_CHUNK))
     model = colour(g, window, Slot("color_space", "@model"), "@model", "The window in the model space", peak_of=load[0])
     source = g("ImageScale", _title="The window at the size SeedVR2 restores from", image=model, upscale_method="lanczos",
                width=Slot("source_width", 0), height=Slot("source_height", 0), crop="disabled")
