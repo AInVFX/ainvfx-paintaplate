@@ -43,9 +43,15 @@ flags=(); [ "${FLUID:-1}" = 0 ] && flags+=(--no-fluid); [ "${HDR:-1}" = 0 ] && f
 ( HF_HUB_ENABLE_HF_TRANSFER=1 python "$PACK/get_models.py" "$M" ${flags[@]+"${flags[@]}"} || log "model files missing: see above"; log "models done" ) > "$W/models.log" 2>&1 &
 
 log "ComfyUI $COMFY_REF"
+# At the pin, a clone one commit deep from the pin's tag comes first: GitHub can reset a full clone of ComfyUI, and a
+# shallow clone of the tag passes. Another ref, or a tag that is not at the pin, takes the full clone.
+if [ ! -d "$W/ComfyUI" ] && [ "$COMFY_REF" = "$COMFY_PIN" ]; then
+  timeout 300 git -c advice.detachedHead=false clone -q --depth 1 --branch "$COMFY_TAG" https://github.com/comfyanonymous/ComfyUI "$W/ComfyUI" \
+    && [ "$(git -C "$W/ComfyUI" rev-parse --short=8 HEAD)" = "${COMFY_PIN:0:8}" ] || rm -rf "$W/ComfyUI"
+fi
 [ -d "$W/ComfyUI" ] || clone https://github.com/comfyanonymous/ComfyUI "$W/ComfyUI"
 cd "$W/ComfyUI"
-if [ -d .git ]; then
+if [ -d .git ] && [ "$(git rev-parse --short=8 HEAD)" != "${COMFY_REF:0:8}" ]; then  # a clone at the ref fetches nothing
   fetch
   git checkout -q "$COMFY_REF"
   git pull -q --ff-only 2>/dev/null || true  # moves a branch forward; a pinned commit stays as it is
