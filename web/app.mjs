@@ -12,7 +12,7 @@ import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
 import { CACHE_LEAST, CACHE_MOST, askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, PREVIEW_PARTS, previewCap, memoryBytes, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, colorShares, paintColors, inHues, shadowBox, shadowOf } from "./logic.mjs";
-import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
+import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
@@ -342,6 +342,7 @@ async function openPlate(list, typed, opts = {}) {
   Object.assign(sharp, { plate: null, shot: null });
   view.classList.add("painting");
   plateVid.src = viewUrl(outputFile("ingest", out, "proxy"));
+  S.plate.ingested = plateVid.src; // the ingest's own files: a saved scene keeps their folder (logic.foldersIn)
   shotVid.removeAttribute("src"); shotVid.load();
   for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = false;
   const kind = spec.kind === "video" ? spec.codec : `${spec.ext.slice(1).toUpperCase()} ${spec.kind}`;
@@ -513,6 +514,19 @@ function planCaches() { // each cache's share and frame size, when the budget, t
   cacheUI();
 }
 function planSoon() { if (!planned.timer) planned.timer = setTimeout(() => { planned.timer = 0; planCaches(); }, 300); }
+async function clearCache() { // View > Clear unused cache…: what no saved scene and no plate on screen uses (cache.py), cleared on Yes
+  const keep = foldersIn([S.plate, [...S.renders.values()], S.edits]);
+  const ask1 = async (clear) => { const r = await post("/paintaplate/cache", { keep, clear }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
+  try {
+    const found = await ask1(false);
+    if (!found.files) return status("No unused cache to clear.");
+    if (!(await ask(`Clear ${memoryText(found.bytes)} of unused cache? Saved scenes, exports and the plate on screen keep their files.`, "Yes, clear it", { enter: true }))) return;
+    const fact = `Unused cache cleared: ${memoryText((await ask1(true)).bytes)}.`;
+    hud(fact);
+    status(fact);
+  } catch (err) { told(`Error: the unused cache was not cleared (${err.message})`, "Restart ComfyUI after an update of Paint a plate."); }
+}
+
 function customCache() { // View > Cache memory > Custom…: a size in MB or GB; the next session keeps it
   ask("Memory for the frames the viewer keeps, in MB or GB.", "Set", { field: { value: S.cache ? memoryText(S.cache) : "", placeholder: "2 GB" } }).then((typed) => {
     if (typed === false) return;
@@ -3390,7 +3404,7 @@ async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it ag
   // a fluid scene keeps its blank plate, which opens in the model space (openBlank): the plate under its edits can be the
   // HDR fluid shot's EXR frames, in ACES2065-1, and the blank plate reopened in that space made its jobs again (2 Nov)
   const blank = f?.blankPath;
-  const scene = { ...SCENE, saved: new Date().toISOString(), build: S.build, work, ocio: { config, display, view, look: lk },
+  const scene = { ...SCENE, saved: new Date().toISOString(), build: S.build, folders: foldersIn([S.plate, S.renders.get(S.heroKey), S.edits.filter((e) => e.on)]), work, ocio: { config, display, view, look: lk },
     plate: { path: blank ?? S.plate.path, color_space: blank ? modelSpace() : S.plate.cs, name: S.plate.name },
     preview: previewDiv, deliver: { ...S.deliver }, in: S.inPt, out: S.outPt,
     edits: S.edits.map((e) => ({ tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on,
@@ -3832,6 +3846,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["X-ray", "X", () => setXray(!S.xray), !p, S.xray], ["Full screen", "`", fullScreen, !p, !!fullFrom],
       ["Cache memory", "", [["Auto", "", () => setCache(0), false, !S.cache], ...CACHE_CHOICES.filter(Boolean).map((b) => [memoryText(b), "", () => setCache(b), false, S.cache === b]),
         ["Custom…", "", customCache, false, !!S.cache && !CACHE_CHOICES.includes(S.cache)]], !!CACHE_MB],
+      ["Clear unused cache…", "", clearCache, false, false],
       ["Playback statistics", "", toggleStats, false, S.stats],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
     ["Help", [["Getting started", "", () => showHelp("start")], ["Keys", "?", () => showHelp("keys")], ["Models and licences", "", showModels]]],
