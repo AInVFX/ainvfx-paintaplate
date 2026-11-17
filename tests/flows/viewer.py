@@ -197,7 +197,7 @@ def fluid_wipe_and_models(page, U):
     page.wait_for_function("document.querySelector('#help').open && !document.querySelector('#models').hidden", timeout=10000)
     shown = page.get_attribute("#models", "data-shown").split(",")
     rows = page.eval_on_selector_all("#models-all tr", "els => els.length")
-    U.check({"fluid", "ltx", "ltx-text", "ltx-vae"} <= set(shown) and "klein" not in shown and rows == 15,
+    U.check({"fluid", "ltx", "ltx-text", "ltx-vae"} <= set(shown) and "klein" not in shown and rows == 17,
             f"Models and licences: the models behind the fluid shot, then every model: {shown}, {rows} rows")
     page.keyboard.press("Escape")
     page.keyboard.press("?")
