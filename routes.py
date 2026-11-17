@@ -778,7 +778,8 @@ def list_scenes() -> list[dict]:
     return out
 
 
-def save_scene(name: str, body: bytes) -> None:
+def save_scene(name: str, body: bytes) -> str:
+    """Writes the scene, then returns its file's full path on this machine."""
     if len(body) > SCENE_MAX:
         raise ValueError(f"Scene not saved: larger than {SCENE_MAX >> 20} MB.")
     scene = json.loads(body)
@@ -790,6 +791,7 @@ def save_scene(name: str, body: bytes) -> None:
     with open(tmp, "wb") as fh:
         fh.write(body)
     os.replace(tmp, path)
+    return path
 
 
 async def scenes(request: web.Request) -> web.Response:
@@ -808,10 +810,10 @@ async def scene_get(request: web.Request) -> web.StreamResponse:
 
 async def scene_post(request: web.Request) -> web.Response:
     try:
-        await asyncio.to_thread(save_scene, request.match_info["name"], await request.read())
+        path = await asyncio.to_thread(save_scene, request.match_info["name"], await request.read())
     except ValueError as exc:
         raise web.HTTPBadRequest(text=str(exc)) from exc
-    return web.json_response({"saved": request.match_info["name"]})
+    return web.json_response({"saved": request.match_info["name"], "path": path})
 
 
 # ---------- OpenColorIO, for the viewer ----------

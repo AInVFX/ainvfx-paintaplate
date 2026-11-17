@@ -64,11 +64,11 @@ test("time left reads in seconds, then minutes and seconds", () => {
 
 test("captions name the object when given and build only the chosen tool", () => {
   const bbox = [100, 200, 300, 400];
-  assert.match(caption({ tool: "erase", words: "black umbrella", colors: [], color: "#000000", bbox }), /^Remove the black umbrella inside <obj_1>/);
-  assert.match(caption({ tool: "erase", words: "", colors: [], color: "#000000", bbox }), /^Remove the object inside/);
-  assert.match(caption({ tool: "paint", words: "a cactus", colors: ["#3d7a35"], color: "#3d7a35", bbox }), /with a cactus, following the drawing's outline, pose and size, in exactly/); // a paint keeps the drawing's shape and the image's style
+  assert.match(caption({ tool: "erase", words: "black umbrella", bbox }), /^Remove the black umbrella inside <obj_1>/);
+  assert.match(caption({ tool: "erase", words: "", bbox }), /^Remove the object inside/);
+  assert.match(caption({ tool: "paint", words: "a cactus", bbox }), /with a cactus, following the drawing's outline, pose and size, in exactly/); // a paint keeps the drawing's shape and the image's style
   const strokes = [{ color: "#ffd890", size: 0.05, points: [[0.9, 0.2], [0.9, 0.4]] }, { color: "#000000", size: 0.1, points: [[0.1, 0.8]] }];
-  const light = caption({ tool: "light", words: "", colors: ["#ffd890", "#000000"], color: "#ffd890", bbox, strokes, aspect: 16 / 9 });
+  const light = caption({ tool: "light", words: "", bbox, strokes, aspect: 16 / 9 });
   assert.equal(light, lightIntent({ strokes, words: "", aspect: 16 / 9 })); // a relight's request is the page's own: its strokes read as intentions
 });
 

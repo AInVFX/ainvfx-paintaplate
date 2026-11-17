@@ -17,9 +17,9 @@ export function xrayPlan({ tools = [], r, pv, full = false }) {
   return { from: urls.length ? size : "none", urls };
 }
 
-export const XRAY_TEXT = { none: "X-ray: no matte yet for the edits on show", light: "X-ray: a light edit changes the whole frame",
-  export: "X-ray: where the edits change the plate, from the export's matte", full: "X-ray: where the edits change the plate, from the full-size tracking mattes",
-  preview: "X-ray: where the edits change the plate, from the preview's tracking mattes" };
+export const XRAY_TEXT = { none: "X-ray: no matte yet for the edits on show.", light: "X-ray: a Light edit changes the whole frame.",
+  export: "X-ray: where the edits change the plate, from the export's matte.", full: "X-ray: where the edits change the plate, from the full-size tracking mattes.",
+  preview: "X-ray: where the edits change the plate, from the preview's tracking mattes." };
 
 export function halfToFloat(h) { // IEEE 754 half precision, as the frames route sends it
   const s = h & 0x8000 ? -1 : 1, e = (h >> 10) & 31, m = h & 1023;

@@ -33,11 +33,12 @@ def run(browser, port, U):
     page.evaluate(U.WATCH)
     U.menu(page, "View", "Clear unused cache…")
     page.wait_for_function("document.querySelector('#ask').open", timeout=10000)
-    asked = page.text_content("#ask-text")
+    asked, buttons = page.text_content("#ask-text"), (page.text_content("#ask-no"), page.text_content("#ask-yes"))
     page.click("#ask-yes")
     U.wait_log(page, U.added_line("Unused cache cleared:"), 30000, "the unused cache cleared")
     U.check(asked.startswith("Clear ") and asked.endswith("of unused cache? Saved scenes, exports and the plate on screen keep their files."),
             f"the dialog says how much it clears and what stays: {asked}")
+    U.check(buttons == ("No, cancel", "Yes, clear it"), f"each button says what it does: {buttons}")
     U.check(page.text_content("#hud") == page.text_content("#status").strip(), "the HUD and the status line say the same")
     page.evaluate(U.WATCH)
     U.open_scene(page, name)

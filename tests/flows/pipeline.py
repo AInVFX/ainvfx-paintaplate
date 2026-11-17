@@ -163,7 +163,7 @@ def hdr_video(page, U):
     page.click("#finish-hdr-no")
     U.check(page.is_hidden("#finish-hdr-ask") and not page.is_checked("#finish-hdr"), "Cancel leaves it off")
     page.click("#finish-hdr"); page.click("#finish-hdr-yes")
-    U.check(page.is_hidden("#finish-hdr-ask") and page.is_checked("#finish-hdr"), "Turn on turns it on")
+    U.check(page.is_hidden("#finish-hdr-ask") and page.is_checked("#finish-hdr"), "« Yes, turn it on » turns it on")
     page.keyboard.press("Escape")  # the Finish menu closes
     page.evaluate("document.activeElement.blur()")
     page.evaluate(U.WATCH)

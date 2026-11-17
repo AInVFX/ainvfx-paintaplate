@@ -5,13 +5,13 @@
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
 import { WF, cancel, connect, hashHex, jobsNotRun, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl } from "./comfy.mjs";
 import { Display } from "./display.mjs";
-import { DeepFrames, FrameCache } from "./frames.mjs";
+import { DeepFrames, FrameCache, outgrows } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
 import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { CACHE_LEAST, CACHE_MOST, askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, PREVIEW_PARTS, previewCap, memoryBytes, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, colorShares, paintColors, inHues, shadowBox, shadowOf } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, PREVIEW_PARTS, previewCap, previewSize, previewSizes, reconcile, removedNames, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -481,8 +481,8 @@ const CACHE_PREF = "paintaplate.cache";
 S.cache = (() => { try { const v = +localStorage.getItem(CACHE_PREF); return v >= CACHE_LEAST && v <= CACHE_MOST ? v : 0; } catch { return 0; } })(); // bytes, from the list or Custom…; 0: Auto
 const memoryText = (b) => (b >= 1e9 ? `${Math.round(b / 1e8) / 10} GB` : `${Math.round(b / 1e6)} MB`);
 const cacheBudget = () => (CACHE_MB ? CACHE_MB * 1e6 : S.cache || autoBudget({ host: location.hostname, profile: S.memoryProfile.name, deviceMemory: navigator.deviceMemory }));
-const planned = { key: "", said: "", timer: 0 };
-function planCaches() { // each cache's share and frame size, when the budget, the frame's size, the sources on show or the in and out points change
+const planned = { key: "", said: "", timer: 0, fit: null };
+function planCaches() { // each cache's share and frame size, when the budget, the sources on show or the in and out points change, or the view outgrows the frames
   const p = S.plate, fit = [S.fit.w, S.fit.h].map((v) => Math.round(v * devicePixelRatio));
   if (!p || !fit[0] || !fit[1]) return;
   const budget = cacheBudget(), frames = S.outPt - S.inPt + 1, shot = !!S.shot?.url, plateOn = !shot || S.wipe !== null;
@@ -494,15 +494,16 @@ function planCaches() { // each cache's share and frame size, when the budget, t
     S.shot?.frames && !DEEP_MB && { id: "deepShot", name: "the shot's EXR frames", cache: deepShot, movie: exact, show: true, bytes: 6 },
   ].filter(Boolean);
   if (!sources.length) return; // no movie has loaded yet
-  const key = JSON.stringify([budget, frames, fit, sources.map((s) => [s.id, s.movie, s.show])]);
-  if (key === planned.key) return;
-  planned.key = key;
+  const key = JSON.stringify([budget, frames, sources.map((s) => [s.id, s.movie, s.show])]);
+  if (key === planned.key && !outgrows(planned.fit, fit)) return; // a resize keeps the frames (frames.mjs: outgrows)
+  const fresh = key !== planned.key; // the log says what fits when the budget, the sources or the in and out points change
+  Object.assign(planned, { key, fit });
   const shares = cachePlan({ budget, frames, fit, sources });
   for (const s of sources) if (!s.show) s.cache.stopReader(); // the sources on show read first
   for (const s of sources.sort((a, b) => Number(!!b.show) - Number(!!a.show))) s.cache.plan(shares[s.id].budget, s.bytes ? null : [shares[s.id].width, shares[s.id].height]);
   const why = CACHE_MB ? "set in the address" : S.cache ? "set in View > Cache memory" : "Auto"; // the memory profile's line names the card
   const said = cacheLine(memoryText(budget), why, sources.map((s) => ({ name: s.name, frames, ...shares[s.id] })));
-  if (said !== planned.said) log((planned.said = said));
+  if (fresh && said !== planned.said) log((planned.said = said));
   cacheUI();
 }
 function planSoon() { if (!planned.timer) planned.timer = setTimeout(() => { planned.timer = 0; planCaches(); }, 300); }
@@ -511,27 +512,25 @@ async function clearCache() { // View > Clear unused cache…: what no saved sce
   const ask1 = async (clear) => { const r = await post("/paintaplate/cache", { keep, clear }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
   try {
     const found = await ask1(false);
-    if (!found.files) return status("No unused cache to clear.");
-    if (!(await ask(`Clear ${memoryText(found.bytes)} of unused cache? Saved scenes, exports and the plate on screen keep their files.`, "Yes, clear it", { enter: true }))) return;
-    const fact = `Unused cache cleared: ${memoryText((await ask1(true)).bytes)}.`;
-    hud(fact);
-    status(fact);
+    if (!found.files) return confirmed("No unused cache to clear.");
+    if (!(await ask(`Clear ${memoryText(found.bytes)} of unused cache? Saved scenes, exports and the plate on screen keep their files.`, "Yes, clear it", { enter: true, no: "No, cancel" }))) return;
+    confirmed(`Unused cache cleared: ${memoryText((await ask1(true)).bytes)}.`);
   } catch (err) { told(`Error: the unused cache was not cleared (${err.message})`, "Restart ComfyUI after an update of Paint a plate."); }
 }
 
 function customCache() { // View > Cache memory > Custom…: a size in MB or GB; the next session keeps it
-  ask("Memory for the frames the viewer keeps, in MB or GB.", "Set", { field: { value: S.cache ? memoryText(S.cache) : "", placeholder: "2 GB" } }).then((typed) => {
+  ask("Memory for the frames the viewer keeps, in MB or GB.", "Set this size", { no: "Keep the current size", field: { value: S.cache ? memoryText(S.cache) : "", placeholder: "2 GB" } }).then((typed) => {
     if (typed === false) return;
     const bytes = memoryBytes(typed);
     if (bytes) setCache(bytes);
-    else status(`Cache memory: type a size from ${memoryText(CACHE_LEAST)} to ${memoryText(CACHE_MOST)}, such as 2 GB.`, "hint");
+    else stopped(`Cache memory not changed: "${typed.trim()}" is not a size from ${memoryText(CACHE_LEAST)} to ${memoryText(CACHE_MOST)}.`, "Type a size such as 2 GB.");
   });
 }
 function setCache(bytes) { // View > Cache memory; 0 is Auto
   S.cache = bytes;
   try { localStorage.setItem(CACHE_PREF, String(bytes)); } catch { /* private browsing: the setting lasts for this session */ }
   planCaches();
-  hud(`Cache memory: ${bytes ? memoryText(bytes) : `Auto, ${memoryText(cacheBudget())}`}`, 2500);
+  confirmed(`Cache memory: ${bytes ? memoryText(bytes) : `Auto, ${memoryText(cacheBudget())}`}.`);
 }
 
 function cacheUI() { // the green stripe along the top of the timeline: frames that draw at once
@@ -623,7 +622,7 @@ function endStats() { // one line in the log for the stretch just played along o
 }
 function toggleStats() {
   S.stats = !S.stats;
-  hud(S.stats ? "Playback statistics on: play, then pause. The log keeps the line" : "Playback statistics off", 3500);
+  hud(S.stats ? "Playback statistics on: play, then pause. The log keeps the line." : "Playback statistics off.", 3500);
 }
 
 function play() {
@@ -635,8 +634,8 @@ function play() {
   $("#play-btn").classList.add("playing");
   const left = renderLeft(), done = left ? `, the edited shot is ${secs(left)}` : "";
   if (S.edits.some((e) => e.on && e.patch)) {
-    if (!S.shot) hud(`Playing the plate${done}`, 2500);
-    else if (stale()) hud(`Playing the previous render${done}`, 2500);
+    if (!S.shot) hud(`Playing the plate${done}.`, 2500);
+    else if (stale()) hud(`Playing the previous render${done}.`, 2500);
   }
   requestAnimationFrame(tick);
 }
@@ -720,8 +719,8 @@ shotVid.addEventListener("loadeddata", () => {
 });
 shotVid.addEventListener("canplay", () => { if (!S.playing) render(); }); // a frame that arrives after "seeked" is drawn too
 
-function setIn(f) { S.inPt = Math.min(f, S.outPt); hud(`In point: frame ${S.plate.first + S.inPt}`); timelineUI(); }
-function setOut(f) { S.outPt = Math.max(f, S.inPt); hud(`Out point: frame ${S.plate.first + S.outPt}`); timelineUI(); }
+function setIn(f) { S.inPt = Math.min(f, S.outPt); hud(`In point: frame ${S.plate.first + S.inPt}.`); timelineUI(); }
+function setOut(f) { S.outPt = Math.max(f, S.inPt); hud(`Out point: frame ${S.plate.first + S.outPt}.`); timelineUI(); }
 
 // ---------- The picture ----------
 
@@ -805,7 +804,7 @@ function finishRow(opt) { // one row of the Finish menu: its switch and name, it
   const li = document.createElement("li");
   li.className = "finish-row";
   li.innerHTML = `<label><input type="checkbox" id="finish-${opt.id}"><span class="name"></span></label><small class="line"></small><small id="finish-${opt.id}-why" class="why" hidden></small>`
-    + (opt.ask ? `<div id="finish-${opt.id}-ask" class="finish-ask" hidden><p></p><button id="finish-${opt.id}-yes" type="button">Turn on</button> <button id="finish-${opt.id}-no" type="button" class="quiet">Cancel</button></div>` : "");
+    + (opt.ask ? `<div id="finish-${opt.id}-ask" class="finish-ask" hidden><p></p><button id="finish-${opt.id}-yes" type="button">Yes, turn it on</button> <button id="finish-${opt.id}-no" type="button" class="quiet">No, keep it off</button></div>` : "");
   li.querySelector(".name").textContent = opt.name;
   li.querySelector(".line").textContent = opt.line;
   li.querySelector("input").addEventListener("change", (e) => askFinish(opt, e.target.checked));
@@ -840,8 +839,7 @@ function askFinish(opt, on) { // a pass that changes what Export writes asks fir
 }
 function setFinish(opt, on) { // each setting keeps its own renders: the render key gains "|hdr"
   if (opt.id === "hdr") S.deliver.hdr = on;
-  log(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Full-size shot: regenerated in scene-linear values, fitted to the plate.\n  Result: half-float EXR frames in ACES2065-1, in the viewer and in Export." : ""}` : `Finish: ${opt.name} off.`);
-  hud(`Finish: ${opt.name} ${on ? "on" : "off"}.`, 1500);
+  confirmed(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Full-size shot: regenerated in scene-linear values, fitted to the plate.\n  Result: half-float EXR frames in ACES2065-1, in the viewer and in Export." : ""}` : `Finish: ${opt.name} off.`, 1500);
   finishUI(); recompose(); touch();
 }
 function openFinish(open = $("#finish").hidden) { // the menu opens under its button; Esc, a click outside or the button closes it
@@ -896,7 +894,7 @@ function choosePass(id) {
   const r = S.renders.get(S.heroKey), fluid = fluidPasses(S.fluid?.result, { log: logSpace(), hdr: HDR_FRAMES }).find((x) => x.id === id);
   const label = id === "first" ? "First frame" : fluid?.label ?? STAGES.find((x) => x.id === id)?.label;
   S.pass = S.pass === id ? null : id;
-  if (!S.pass) { fluidInput(); if (keying() && S.fluid.result) showFluid(); else showLatest(); hud("The latest result", 1500); return stagesUI(); }
+  if (!S.pass) { fluidInput(); if (keying() && S.fluid.result) showFluid(); else showLatest(); hud("The latest result.", 1500); return stagesUI(); }
   if (id === "first") { pause(); seek(0); render(); }
   else {
     const m = fluid ?? passMovie(id, r, previewOf(r), { log: logSpace(), data: matteSpace(), hdr: HDR_FRAMES });
@@ -905,7 +903,7 @@ function choosePass(id) {
     setShot(m.url, fluid && keying() ? "fluid" : S.heroKey, m.space, m.frames ?? null, { framesSpace: m.framesSpace }); // a pass's EXR frames and their space (passMovie, fluidPasses)
   }
   fluidInput();
-  hud(`${label}: on show. Click it again, or Esc, for the latest`, 3000);
+  hud(`${label}: on show. Click it again, or Esc, for the latest.`, 3000);
   log(`Viewer: ${label}.`);
   stagesUI();
 }
@@ -931,7 +929,7 @@ function passLabel(id) {
 function shownLabel() { // the pass on show, by its row's name: the one clicked, else the latest result
   if (S.pass) return passLabel(S.pass);
   const r = S.renders.get(S.heroKey), pv = previewOf(r);
-  return STAGES.find((x) => S.shot?.url && passMovie(x.id, r, pv, passSpaces())?.url === S.shot.url)?.label ?? (S.shot ? "Result" : "Plate");
+  return STAGES.find((x) => S.shot?.url && passMovie(x.id, r, pv, passSpaces())?.url === S.shot.url)?.label ?? (S.shot ? "Result" : S.edits.length ? "First frame" : "Plate");
 }
 // A fluid row on show with the wipe: its step's input on the wipe's left side (logic.fluidWipeLeft), as a comparison that
 // ends with the row or the wipe. A comparison picked by Ctrl+click stays as it is.
@@ -948,6 +946,7 @@ function fluidInput() {
 }
 function comparePass(id) {
   if (S.cmp?.id === id) return endCompare();
+  if (passLabel(id) === shownLabel()) return plateWipe(); // the pass on show against itself shows nothing: the plate takes the left side
   const r = S.renders.get(S.heroKey);
   const m = id === "first" ? { url: null, space: modelSpace(), frames: null } : passMovie(id, r, previewOf(r), passSpaces());
   if (!m) return;
@@ -958,8 +957,16 @@ function comparePass(id) {
   S.wipe ??= 0.5;
   $("#wipe-btn").setAttribute("aria-pressed", "true");
   placeWipe(); render(); stagesUI();
-  hud(`Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right. Ctrl+click it again, Esc or F6 ends it`, 3500);
+  hud(`Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right. Ctrl+click it again, Esc or F6 ends it.`, 3500);
   log(`Viewer: wipe, ${S.cmp.label} against ${shownLabel()}.`);
+}
+function plateWipe() { // the plain wipe: the plate on the left, the pass on show on the right
+  if (S.cmp) endCompare(false);
+  S.wipe ??= 0.5;
+  $("#wipe-btn").setAttribute("aria-pressed", "true");
+  placeWipe(); render(); stagesUI();
+  hud(`Wipe: Plate on the left, ${shownLabel()} on the right.`, 3500);
+  log(`Viewer: wipe, Plate against ${shownLabel()}.`);
 }
 // ---------- The X-ray (X): where the edits on show change the plate, tinted over the picture (xray.mjs) ----------
 // The overlay sits on the canvas with its zoom and pan, so the inspector and the picker read the picture without the tint.
@@ -974,7 +981,7 @@ function xrayNow() { // the mattes of the edits on show, at the size on show
 function setXray(on) {
   S.xray = on && !!S.plate;
   render();
-  hud(S.xray ? XRAY_TEXT[xrayNow().from] : "X-ray off", 3000);
+  hud(S.xray ? XRAY_TEXT[xrayNow().from] : "X-ray off.", 3000);
 }
 function xrayLater() { // the Render panel changed (a step finished, Export made its matte): the X-ray follows
   if (xrayLater.queued) return;
@@ -1002,7 +1009,7 @@ async function xrayLoad(path) { // every frame of a matte at XRAY_SIDE, XRAY_CHU
       for (let i = 0; i < count; i++) got.frames[at + i] = { width, height, alpha: alphaFromHalfs(halfs.subarray(i * size, (i + 1) * size)) };
     } catch (err) { // these frames have no matte: they show no tint from it, and the log says so once
       got.frames.fill(XRAY_NONE, at, at + count);
-      if (!got.told) { got.told = true; log(`Error: X-ray matte ${path}: frames ${S.plate.first + at} to ${S.plate.first + at + count - 1} unreadable (${err.message}).`); }
+      if (!got.told) { got.told = true; log(`Warning: X-ray matte ${path}: frames ${S.plate.first + at} to ${S.plate.first + at + count - 1} unreadable (${err.message}).`); }
     }
     if (!S.playing) drawXray();
   }
@@ -1037,7 +1044,7 @@ function endCompare(draw = true) { // the wipe goes back to the plate on its lef
   cmpVid.removeAttribute("src"); cmpVid.load();
   if (!wiped) { S.wipe = null; $("#wipe-btn").setAttribute("aria-pressed", "false"); }
   placeWipe(); stagesUI();
-  if (draw) { render(); hud(`${label}: out of the wipe`, 1500); }
+  if (draw) { render(); hud(`${label}: out of the wipe.`, 1500); }
 }
 
 // A live preview belongs to the render that sent it (S.stage.key, "fluid" for a fluid shot). It shows only while those
@@ -1061,7 +1068,7 @@ function showLive(d) {
       return;
     }
     Object.assign(S, { live: img, liveKey: key });
-    hud(`Live preview, ${at}: the shot follows`, 2000);
+    hud(`Live preview, ${at}: the shot follows.`, 2000);
     render();
   };
   img.src = viewUrl(d.image);
@@ -1081,7 +1088,7 @@ function escape() { // Esc: logic.escapeAction. On the edit being generated it s
   if (what === "cancelOpen") return cancelOpen();
   if (what === "discard") return discard();
   if (what === "reopen") return stopGenerating();
-  if (what === "deselect") { select(null); if (busy) hud("Deselected. Esc again stops generating", 2500); return; }
+  if (what === "deselect") { select(null); if (busy) hud("Deselected. Esc again stops generating.", 2500); return; }
   if (S.cmp) return endCompare(); // a comparison in the wipe ends before the pass on show
   if (what === "latest") return choosePass(S.pass); // a pass on show: back to the latest
   if (what === "stop") stopGenerating();
@@ -1096,7 +1103,7 @@ function stopGenerating() { // Esc on the edit being generated, or Stop: everyth
   dropLive();
   const waits = S.edits.filter((e) => e.state === "queued").map(num);
   log(`Stopped: ${edit ? `edit ${num(edit)} keeps its strokes, words and seed` : "what finished is kept"}${waits.length ? `, ${editList(waits)} ${waits.length > 1 ? "wait" : "waits"}` : ""}. Nothing starts until Enter.`);
-  hud(edit ? `Stopped. Enter generates edit ${num(edit)} again` : "Stopped. Enter goes on from where it stopped", 4000);
+  hud(edit ? `Stopped. Enter generates edit ${num(edit)} again.` : "Stopped. Enter goes on from where it stopped.", 4000);
   historyUI(); // before the status line: a waiting row says so, and the stop's sentence comes last
   stoppedUI(edit);
   stagesUI(); generateUI();
@@ -1169,7 +1176,7 @@ function render() {
   if (keying()) return renderFluid();
   if (S.cmp && S.cmp.key !== S.heroKey) endCompare(false); // other edits on show: the pass compared was the old edits'
   $("#wipe .label.left").textContent = S.cmp?.label ?? "Plate";
-  $("#wipe .label.right").textContent = S.cmp ? shownLabel() : "Result";
+  $("#wipe .label.right").textContent = shownLabel();
   wantDeep(); // once a colour value moves, the frames' own values load around the playhead, as OpenRV's cache does
   const W = view.width, H = view.height, still = !S.playing;
   const live = S.draft || stroke ? null : liveNow(); // while an edit is painted, the frame shows it, not the live preview of a render
@@ -1358,7 +1365,7 @@ function setWipe(on) {
   $("#wipe-btn").setAttribute("aria-pressed", String(on));
   fluidInput(); // a fluid row on show: its step's input on the left
   placeWipe(); render();
-  hud(!on ? "Wipe off" : S.cmp ? `Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right` : "Wipe: the plate on the left, the result on the right");
+  hud(!on ? "Wipe off." : `Wipe: ${S.cmp?.label ?? "Plate"} on the left, ${shownLabel()} on the right.`);
 }
 
 function nearWipe(e) { // a press this close to the wipe line moves the wipe: it never paints
@@ -1381,9 +1388,10 @@ function dragWipe(e, el) {
 $("#wipe .grip").addEventListener("pointerdown", (e) => dragWipe(e, e.currentTarget));
 
 let hudTimer;
-function hud(text, ms = 1600) {
+function hud(text, ms = 1600, corner = false) { // corner: full screen's frame number, in the bottom-right corner (app.css)
   const el = $("#hud");
   el.textContent = text;
+  el.classList.toggle("corner", corner);
   el.classList.add("on");
   clearTimeout(hudTimer);
   hudTimer = setTimeout(() => el.classList.remove("on"), ms);
@@ -1468,7 +1476,7 @@ function rubOut(e) { // the eraser works on the strokes in progress, or on the c
   let d = S.draft;
   const target = S.selected;
   if (!d && target?.strokes.length) d = busy(target) ? reopen(target) : reopenDone(target);
-  if (!d) return hud("Nothing to rub out: select an edit in History, or paint first");
+  if (!d) return hud("Nothing to rub out: select an edit in History, or paint first.");
   cancel("prefetch");
   clearTimeout(S.prefetchTimer);
   mark();
@@ -1526,7 +1534,8 @@ function rubStroke(layers, s, from = 0) { // an eraser stroke, taken out of ever
 
 function drawStroke(d, s, from = 0) {
   const pc = d.paint.getContext("2d"), mc = d.mask.getContext("2d");
-  if (s.tool === "rub") return rubStroke([pc, mc, d.shade?.getContext("2d")].filter(Boolean), s, from); // the eraser takes strokes away, whatever drew them: paint, light or shade
+  if (s.tool === "rub" && d.tool === "light") { rubStroke([mc], s, from); return rubLight(d, s, from); } // the mask, laid hard, goes hard; light and shade go soft
+  if (s.tool === "rub") return rubStroke([pc, mc, d.shade?.getContext("2d")].filter(Boolean), s, from); // the eraser takes strokes away, whatever drew them
   for (let i = from; i < s.points.length; i++) {
     const [x, y, p] = s.points[i], [px, py] = s.points[Math.max(i - 1, 0)], r = (s.size * (0.5 + p)) / 2;
     line(mc, px, py, x, y, r, "#fff");
@@ -1537,7 +1546,7 @@ function drawStroke(d, s, from = 0) {
 
 // The light brush: soft dabs at a fixed spacing along the stroke (logic.dabsAlong), so the light never depends on how fast
 // the hand moved. Light adds up ("lighter") at a flow that gives one stroke at most LIGHT.flow of its colour; a dark colour
-// lays shade on its own layer (d.shade) the same way. The eraser takes both away.
+// lays shade on its own layer (d.shade) the same way. The eraser takes both away in soft dabs (rubLight).
 const carried = new WeakMap(); // stroke -> the distance walked since its last dab, between two pointer moves
 function lightDabs(d, s, from) {
   const shade = dark(s.color), layer = shade ? (d.shade ??= canvas([d.paint.width, d.paint.height])) : d.paint;
@@ -1552,6 +1561,22 @@ function lightDabs(d, s, from) {
     c.fillStyle = g; c.fillRect(x - r, y - r, 2 * r, 2 * r);
   }
   c.globalCompositeOperation = "source-over";
+}
+
+// The eraser on a Light edit: soft dabs with the brush's spacing, reach and profile take light and shade away (logic.rubDabs).
+// A straight pass takes away all the light on its centre line, and less towards its edge: more than one pass of the brush
+// lays anywhere, so new light fills an erased place with no edge. redrawStrokes replays it the same way.
+function rubLight(d, s, from) {
+  const pts = s.points.map(([x, y, p]) => [x, y, ((s.size * (0.5 + p)) / 2) * LIGHT.spread]);
+  const { dabs, carry } = dabsAlong(pts, from, (r) => r * LIGHT.spacing, from ? carried.get(s) ?? 0 : 0);
+  carried.set(s, carry);
+  for (const layer of [d.paint, d.shade]) {
+    const box = layer && dabsBox(dabs, layer.width, layer.height);
+    if (!box) continue;
+    const c = layer.getContext("2d"), img = c.getImageData(box.x, box.y, box.w, box.h);
+    rubDabs(img.data, box, dabs, dabFlow(1, LIGHT.spacing));
+    c.putImageData(img, box.x, box.y);
+  }
 }
 
 const rgbOf = (hex) => { // "#rgb" or "#rrggbb" as "r, g, b"
@@ -1658,7 +1683,7 @@ function paintKey(e, rub) { // strokes go to the keyframe on the playhead's slot
   const f = S.fluid, slot = snapKey(S.frame, S.plate.frames);
   if (slot !== S.frame) { seek(slot); hud(keyframeSlotLine(S.plate.first + slot), 2500); }
   let key = f.keys.find((k) => k.frame === slot);
-  if (!key && rub) return hud("No keyframe on this frame to rub out");
+  if (!key && rub) return hud("No keyframe on this frame to rub out.");
   mark();
   if (!key) f.keys.push((key = newKey(slot)));
   f.view = "keys";
@@ -1709,13 +1734,13 @@ function staleFluid() { // the keyframes or the words changed: the shot on show 
 
 function copyKey() {
   const k = keyHere();
-  if (!k) return hud("No keyframe on this frame to copy");
+  if (!k) return hud("No keyframe on this frame to copy.");
   S.clip = k.strokes.map((s) => ({ ...s, points: s.points.slice() }));
-  hud(`Keyframe ${S.plate.first + k.frame} copied: Ctrl+V pastes it on another frame`);
+  hud(`Keyframe ${S.plate.first + k.frame} copied: Ctrl+V pastes it on another frame.`);
 }
 
 function pasteKey() {
-  if (!S.clip) return hud("Copy a keyframe first: Ctrl+C on its frame");
+  if (!S.clip) return hud("Copy a keyframe first: Ctrl+C on its frame.");
   const f = S.fluid, slot = snapKey(S.frame, S.plate.frames);
   mark();
   let k = f.keys.find((x) => x.frame === slot);
@@ -1724,20 +1749,20 @@ function pasteKey() {
   redrawKey(k);
   f.view = "keys";
   pause(); seek(slot); staleFluid(); render();
-  hud(`Keyframe pasted on frame ${S.plate.first + slot}`);
+  hud(`Keyframe pasted on frame ${S.plate.first + slot}.`);
 }
 
 function deleteKey(k = keyHere()) {
-  if (!k) return hud("No keyframe on this frame");
+  if (!k) return hud("No keyframe on this frame.");
   mark();
   S.fluid.keys.splice(S.fluid.keys.indexOf(k), 1);
   staleFluid(); render();
-  hud(`Keyframe ${S.plate.first + k.frame} deleted: Ctrl+Z brings it back`);
+  hud(`Keyframe ${S.plate.first + k.frame} deleted: Ctrl+Z brings it back.`);
 }
 
 function jumpKey(dir) {
   const { prev, next } = nearKeys(S.fluid.keys, S.frame), k = dir < 0 ? prev : next;
-  if (k) { pause(); seek(k.frame); } else hud(dir < 0 ? "No keyframe before this frame" : "No keyframe after this frame");
+  if (k) { pause(); seek(k.frame); } else hud(dir < 0 ? "No keyframe before this frame." : "No keyframe after this frame.");
 }
 
 function dragKey(e, key, el) { // a keyframe dragged along the timeline lands on the nearest free slot of the grid; a click goes to it
@@ -1760,7 +1785,7 @@ function dragKey(e, key, el) { // a keyframe dragged along the timeline lands on
   el.addEventListener("pointerup", () => {
     el.removeEventListener("pointermove", move);
     S.draggingKey = false;
-    if (moved) hud(`Keyframe moved to frame ${S.plate.first + key.frame}`); else { pause(); seek(key.frame); }
+    if (moved) hud(`Keyframe moved to frame ${S.plate.first + key.frame}.`); else { pause(); seek(key.frame); }
     keysUI(true);
   }, { once: true });
 }
@@ -1782,7 +1807,7 @@ function keysUI(force = false) { // the keyframe diamonds on the timeline, over 
       b.className = "tl-kf";
       b.dataset.frame = k.frame;
       b.style.left = pos(k.frame);
-      b.title = `Keyframe at frame ${p.first + k.frame}: drag it to move it, click to go to it`;
+      b.title = `Keyframe at frame ${p.first + k.frame}: drag it to move it, click to go to it.`;
       b.addEventListener("pointerdown", (e) => dragKey(e, k, b));
       return b;
     })] : []));
@@ -1796,7 +1821,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
   if (!f.keys.length) return status("Fluid shot: no keyframe. Paint flat colour blobs on the first frame and on the last frame.", "hint");
   if (another) f.seed = (Math.random() * 2 ** 31) | 0;
   else { // Enter again: a shot being made, or already made, from these keyframes, words and seed is not made twice
-    if (f.busy?.sig === fluidSig()) return hud(`Fluid shot v${f.busy.v} is being made from these keyframes and words`, 2500);
+    if (f.busy?.sig === fluidSig()) return hud(`Fluid shot v${f.busy.v} is being made from these keyframes and words.`, 2500);
     const made = f.made?.get(fluidSig());
     if (made) {
       if (f.result !== made) { f.result = made; showFluid(); log(`Fluid shot v${made.v}: from the job index (same keyframes, words and seed). Nothing runs.`); }
@@ -1922,7 +1947,7 @@ function fluidRow() { // the first edit of a blank plate: its fluid shot, which 
   const what = f.prompt || `${n} keyframe${n === 1 ? "" : "s"}`, small = li.querySelector("small");
   if (f.busy) { small.innerHTML = '<span class="state"></span>'; small.firstChild.textContent = `Generating ${Math.round((f.busy.progress ?? 0) * 100)}%`; }
   else small.textContent = !on ? `Bypassed: ${what}` : !f.result ? `${what}: Enter generates` : stale ? `${what}: keyframes changed` : `v${f.result.v}: ${what}`;
-  li.title = "The fluid shot of this blank plate: the next edits are painted on it";
+  li.title = "The fluid shot of this blank plate: the next edits are painted on it.";
   li.querySelector(".edit").onclick = () => editFluid();
   li.querySelector(".eye").onclick = () => toggleFluid().catch(quiet);
   li.querySelector(".again").onclick = () => { editFluid(); generateFluid(true).catch(quiet); };
@@ -2945,7 +2970,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   });
   if (!here()) return log(`Render v${r.v}: Composite, full size: ready, in the background.`);
   if (!S.pass) setShot(r.play ?? r.review, key, r.playSpace ?? r.reviewSpace, r.reviewFrames);
-  hud("Composite, full size: the viewer plays it", 2500);
+  hud("Composite, full size: the viewer plays it.", 2500);
   stagesUI(); exportUI();
   if (!S.wantDownload) return status(`Composite, full size: ready, in the viewer${deep ? ", its EXR frames at full precision as they load" : ""}. Export writes it for compositing software.`, "hint");
   await step(r, "export", async (progress) => { // only when Export asks: the plate's own format, and the matte, beside the review
@@ -2960,7 +2985,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   });
   S.exported = r.exported;
   stagesUI(); exportUI();
-  status(`Export: done, in ComfyUI's output folder: ${S.exported.text.split("\n")[0]}.`);
+  confirmed(`Export: done, in ComfyUI's output folder: ${S.exported.text.split("\n")[0]}.`);
   log(`Export v${r.v}: done.\n  ${S.exported.text.split("\n").join("\n  ")}`);
   const parts = S.wantDownload;
   S.wantDownload = null;
@@ -3038,9 +3063,24 @@ function explained(err, what) { // a failure writes one fact in the log; the err
   return Object.assign(new Error(`${fact} ${todo}`), { logged: true });
 }
 
+let statusLevel = ""; // the status line's colour, from its words (logic.logLevel): "error", "warn" or ""
+function showStatus(text, level = logLevel(text)) { // an error shows in red and a warning in amber, with their word, as in the log
+  const el = $("#status");
+  el.textContent = text;
+  el.classList.toggle("error", level === "error"); el.classList.toggle("warn", level === "warn");
+  statusLevel = level;
+}
+
 function status(text, level = "") { // the status line. A fact also goes to the log; a « hint », a sentence that says what to do next, shows here only
-  $("#status").textContent = text;
   if (level !== "hint") log(text);
+  showStatus(text);
+}
+
+function confirmed(text, ms = 2500) { // what the person just did, in the same words in the HUD, on the status line and in the log
+  const head = String(text).split("\n")[0];
+  hud(head, ms);
+  log(text);
+  showStatus(head);
 }
 
 function told(fact, next) { // what happened goes to the log, once; the status line shows it with what to do next
@@ -3063,6 +3103,8 @@ function log(text) { // the log panel only: what happened, one fact per message,
   while (list.children.length > 400) list.firstChild.remove();
   list.scrollTop = list.scrollHeight;
   if (li.className === "error" && list.hidden) $("#log-btn").classList.add("alert"); // an error while the log is closed: the button says so
+  const shown = statusOf(text, statusLevel); // a fault shows on the status line, and the next line that succeeds replaces it
+  if (shown) showStatus(shown.text, shown.level);
   const hint = missingFileHint(text); // a line that names a missing model file: the status line adds what to do
   if (hint) status(`${String(text).split("\n")[0]} ${hint}`, "hint");
 }
@@ -3116,7 +3158,7 @@ function stagesUI() {
     li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time">fluid</span>';
     li.children[1].textContent = x.label;
     li.classList.add("pick");
-    li.title = `Show ${x.label.toLowerCase()} in the viewer. Click it again, or Esc, for the latest`;
+    li.title = `${x.label}: show it in the viewer. Click it again, or Esc, for the latest.`;
     li.onclick = () => choosePass(x.id);
     return li;
   });
@@ -3124,7 +3166,7 @@ function stagesUI() {
   const skip = r?.skip ?? plan({}, active).skip, later = (st) => st.onDemand && !S.wantDownload; // the export waits for Export
   const pick = (li, id, label) => { // a finished pass with a picture: a click shows it on every frame, a second click the latest
     li.classList.add("pick");
-    li.title = `Show ${label} in the viewer. Click it again, or Esc, for the latest`;
+    li.title = `${label}: show it in the viewer. Click it again, or Esc, for the latest.`;
     li.onclick = () => choosePass(id);
     compareRow(li, id); // the viewer's: Ctrl+click puts the pass on the wipe's left side
   };
@@ -3181,7 +3223,7 @@ function timelineUI() {
   cacheUI();
   $("#tl-key").style.left = pos(0);
   $("#frame-now").textContent = p.first + S.frame;
-  if (fullFrom && fullFrom.frame !== S.frame) { fullFrom.frame = S.frame; hud(String(p.first + S.frame), 1000); } // full screen: the plate's own frame number, for a moment
+  if (fullFrom && fullFrom.frame !== S.frame) { fullFrom.frame = S.frame; hud(String(p.first + S.frame), 1000, true); } // full screen: the plate's own frame number, for a moment
   $("#frame-total").textContent = `/ ${p.first + n - 1}`;
   $("#fps").textContent = `${Math.round(p.fps * 100) / 100} fps`;
   const t = $("#timeline");
@@ -3248,7 +3290,7 @@ function exportDialog() {
 
 function setTool(t) {
   if (keying() && t !== "paint") { // another tool closes the fluid's keyframes: it works on the plate the fluid shot made
-    if (!S.fluid.result) return hud(`${NAME[t]} works on the fluid shot: generate it first (Enter)`, 3000);
+    if (!S.fluid.result) return hud(`${NAME[t]} works on the fluid shot: generate it first (Enter).`, 3000);
     leaveKeys();
   }
   S.tool = t;
@@ -3417,7 +3459,10 @@ async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it ag
     ...(f ? { fluid: { prompt: keying() ? $("#prompt").value.trim() : f.prompt ?? "", seed: f.seed, depth: f.depth ?? 8, made: !!f.result, on: f.on !== false, keys: f.keys.map((k) => ({ frame: k.frame, strokes: packStrokes(k.strokes) })) } } : {}) };
   const name = (S.plate.name || "scene").replace(/[^\w.-]/g, "_").slice(0, 100), r = await post(`/paintaplate/scenes/${encodeURIComponent(name)}`, scene);
   if (!r.ok) throw new Error(`The scene was not saved: ${await r.text()}`);
-  told(`Scene ${name} saved on this ComfyUI`, "Open plate > Scenes opens it again, or downloads it.");
+  const { path } = await r.json().catch(() => ({})); // the scene's file, on the machine that runs ComfyUI
+  const fact = `Scene ${name} saved${path ? `: ${path}` : ""}.`;
+  hud(fact, 3000);
+  told(fact, "Open plate > Scenes opens it again, or downloads it.");
 }
 
 async function saveGraph() { // the whole scene as one ComfyUI workflow, to open in ComfyUI and keep editing there
@@ -3486,7 +3531,7 @@ async function openScene(text) { // the plate opens in its colour space, then ev
   status(`Scene opened: ${scene.edits.length} edit${scene.edits.length === 1 ? "" : "s"} with their seeds and captions. ${scene.build && S.build && scene.build !== S.build ? "It was saved with other code or model files, so every edit and render runs again." : "Results made on this machine come from the job index; the rest regenerates."}`);
 }
 
-function clearRange() { S.inPt = 0; S.outPt = S.plate.frames - 1; hud("In and out points cleared"); timelineUI(); }
+function clearRange() { S.inPt = 0; S.outPt = S.plate.frames - 1; hud("In and out points cleared."); timelineUI(); }
 // Full screen (View > Full screen, or `): the plate alone fills the screen, fitted, with no panel, menu bar, timeline or
 // status line. The right-click menu and every key keep working. Esc or ` comes back to the zoom it came from. Where the
 // browser refuses its own full screen, the plate fills the window the same way. When the frame changes, its number shows
@@ -3539,7 +3584,7 @@ function setDisplay(change) {
   const d = S.display, on = colour.displayActive(d);
   $("#display-state").hidden = !on;
   $("#display-state").textContent = colour.displayLabel(d);
-  hud(S.mode ? `${colour.PARAMS[S.mode].label} ${colour.formatParam(S.mode, d[S.mode])}` : on ? colour.displayLabel(d) : "Colour as shot", 1400);
+  hud(S.mode ? `${colour.PARAMS[S.mode].label} ${colour.formatParam(S.mode, d[S.mode])}` : on ? colour.displayLabel(d) : "Colour as shot.", 1400);
   render();
 }
 
@@ -3556,7 +3601,7 @@ function leaveMode() {
   const name = S.mode;
   S.mode = S.scrub = null;
   view.classList.remove("scrub");
-  hud(colour.displayActive(S.display) ? colour.displayLabel(S.display) : `${colour.PARAMS[name].label} as shot`);
+  hud(colour.displayActive(S.display) ? colour.displayLabel(S.display) : `${colour.PARAMS[name].label} as shot.`);
 }
 
 const stepColor = (name, dir) => setDisplay({ [name]: colour.clampParam(name, S.display[name] + dir * colour.PARAMS[name].step) });
@@ -3594,21 +3639,20 @@ let registry = null;
 async function showModels() {
   const behind = await modelsOnShow(); // the pipeline's rule, as the export's MODELS.md (S.toHdr became the plate's own rule in 1.7.0)
   const link = (text, href) => Object.assign(document.createElement("a"), { textContent: text, href, target: "_blank", rel: "noopener" });
-  const table = (rows, uses) => {
-    const t = document.createElement("table");
-    t.append(...rows.map((m) => {
-      const tr = document.createElement("tr"), cell = (...kids) => { const td = document.createElement("td"); td.append(...kids); tr.append(td); };
-      cell(link(m.name, m.source), document.createElement("br"), Object.assign(document.createElement("small"), { textContent: `${m.file} at ${m.revision.slice(0, 7)}` }));
-      cell(uses ? `${m.use} (${m.workflows.join(", ")})` : m.use);
-      cell(link(m.licence, m.licence_url), ...(m.upstream ? [document.createElement("br"), Object.assign(document.createElement("small"), { textContent: "original: " }), link(m.upstream.licence, m.upstream.source)] : []),
-        ...(m.gated ? [document.createElement("br"), Object.assign(document.createElement("small"), { textContent: "accept on Hugging Face first" })] : []));
-      return tr;
-    }));
-    return t;
+  const used = new Map(behind.map((m) => [m.id, m])); // the models behind the result on show, with the workflows that used them
+  const small = (...kids) => { const e = document.createElement("small"); e.append(...kids); return e; };
+  const line = (...kids) => { const e = document.createElement("p"); e.append(...kids); return e; };
+  const card = (m) => { // one model: its name, what it does (and where, when it made the result on show), its licence, its file
+    const a = Object.assign(document.createElement("article"), { className: used.has(m.id) ? "behind" : "" });
+    a.dataset.id = m.id;
+    a.append(line(link(m.name, m.source)), line(used.has(m.id) ? `${m.use} (${used.get(m.id).workflows.join(", ")})` : m.use),
+      line(link(m.licence, m.licence_url), ...(m.upstream ? [small(" · original: "), link(m.upstream.licence, m.upstream.source)] : []),
+        ...(m.gated ? [small(" · accept on Hugging Face first")] : [])),
+      small(`${m.file} at ${m.revision.slice(0, 7)}`));
+    return a;
   };
-  const what = !S.plate ? "No plate is open." : behind.length ? `The result on show was made with ${behind.length} models:` : "The plate on show has no edits: no model made it.";
-  $("#models-shown").replaceChildren(Object.assign(document.createElement("p"), { textContent: what }), ...(behind.length ? [table(behind, true)] : []));
-  $("#models-all").replaceChildren(table(registry.models, false));
+  $("#models-shown").textContent = !S.plate ? "No plate is open." : behind.length ? `The result on show was made with ${behind.length} models, marked in gold.` : "The plate on show has no edits: no model made it.";
+  $("#models-all").replaceChildren(...registry.models.map(card));
   $("#models").dataset.shown = behind.map((m) => m.id).join(",");
   showHelp("models");
 }
@@ -3625,7 +3669,7 @@ function toggleInspector(on = !S.inspect.on) {
   i.on = on; i.avg = null;
   $("#inspector").hidden = $("#inspector-mark").hidden = !on;
   if (on) refreshInspector(true);
-  hud(on ? (i.pt ? "Color Inspector: Shift+click samples a pixel, Shift+drag averages, drag the box to move it. F5 hides it"
+  hud(on ? (i.pt ? "Color Inspector: Shift+click samples a pixel, Shift+drag averages, drag the box to move it. F5 hides it."
     : "Color Inspector: Shift+click the frame to sample a pixel. F5 hides it") : "Color Inspector hidden");
 }
 
@@ -3759,7 +3803,7 @@ async function setPlateSpace(cs, asked = false) { // the plate's colour space (R
   if (made && !asked) return askRemake("plate's colour space", made, () => setPlateSpace(cs, true).catch(quiet));
   log(`Plate colour space: ${cs}, was ${p.cs}.`);
   Object.assign(p, { cs, proxySpace: p.deep ? p.proxySpace : cs }); // a video plate's proxy holds its own values
-  hud(`Plate colour space: ${cs}`, 2000); render();
+  hud(`Plate colour space: ${cs}.`, 2000); render();
   const edits = made > 0;
   await openPlate([], p.path, { under: true, cs }); // the first frame in the model space again, and the edits made again on it
   if (edits) queue(regenerateDependents);
@@ -3772,11 +3816,12 @@ function regenerated() { return S.edits.filter((e) => e.on && e.state === "done"
 // erase can ask while the OCIO question is open, so a question that comes then waits for that answer, and is dropped (false)
 // when `still()` no longer holds by its turn.
 let asking = Promise.resolve();
-function ask(text, yes, { enter = false, still = () => true, field = null } = {}) { // with a field ({ value, placeholder }), the answer is the text typed, or false
+function ask(text, yes, { enter = false, still = () => true, field = null, no = "Cancel" } = {}) { // yes, no: what each button does. With a field ({ value, placeholder }), the answer is the text typed, or false
   const turn = asking.then(() => still() && new Promise((answer) => {
     const d = $("#ask"), ok = $("#ask-yes"), input = $("#ask-field");
     $("#ask-text").textContent = text;
     ok.textContent = yes;
+    $("#ask-no").textContent = no;
     input.hidden = !field;
     if (field) Object.assign(input, { value: field.value ?? "", placeholder: field.placeholder ?? "" });
     d.returnValue = "";
@@ -3788,8 +3833,8 @@ function ask(text, yes, { enter = false, still = () => true, field = null } = {}
   return turn;
 }
 $("#ask-field").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); $("#ask").close("yes"); } }; // Enter answers, as the button does
-function askRemake(what, made, change) { // an OCIO change that regenerates asks first: Continue goes on, Cancel or Esc changes nothing
-  ask(remakeQuestion(what, made), "Continue").then((yes) => yes && change());
+function askRemake(what, made, change) { // an OCIO change that regenerates asks first: « Yes, continue » goes on, « No, keep it » or Esc changes nothing
+  ask(remakeQuestion(what, made), "Yes, continue", { no: "No, keep it" }).then((yes) => yes && change());
 }
 
 async function setConfig(name, asked = false) { // RV's Change Config: the viewer and the workflows use another OCIO config
@@ -4050,12 +4095,12 @@ function pickAt(e) {
 function takeColor(hex, how = "") {
   if (S.tool === "erase") pickTool("paint");
   setColor(hex.toLowerCase());
-  hud(`${S.tool === "light" ? "Light" : "Paint"} colour ${S.color}${how}`, 2000);
+  hud(`${S.tool === "light" ? "Light" : "Paint"} colour ${S.color}${how}.`, 2000);
 }
 function setRub(on) {
   S.rub = on;
   $("#rub-btn").setAttribute("aria-pressed", String(on));
-  hud(on ? "Eraser: rub out the strokes you just painted" : NAME[S.tool]);
+  hud(on ? "Eraser: rub out the strokes you just painted." : NAME[S.tool]);
   render();
 }
 let eraserKey = null; // E held down: when it went down, the eraser before it, and whether a stroke was dragged since
@@ -4255,7 +4300,7 @@ addEventListener("keydown", (e) => {
   if (!$("#ctx").hidden) { if (k === "Escape") closeMenu(); return e.preventDefault(); } // the menu is open: Esc closes it
   if (k === "Escape" && openCtl) { cancelOpen(); return e.preventDefault(); } // a plate opening: Esc cancels it
   if (!S.plate && !["?", "F6"].includes(k)) return;
-  if (k === "Home" && e.shiftKey && !mod) { resetDisplay(); hud("Colour reset"); return e.preventDefault(); } // RV's Reset All Color
+  if (k === "Home" && e.shiftKey && !mod) { resetDisplay(); hud("Colour reset."); return e.preventDefault(); } // RV's Reset All Color
   if (S.mode && modeKey(k, combo)) return e.preventDefault();
   if (S.picking && k === "Escape") { pickFrame(false); return e.preventDefault(); }
   if (!mod && !e.altKey && combo === "i") { if (!e.repeat) pickColor(); return e.preventDefault(); } // the colour picker, as in Photoshop
@@ -4306,7 +4351,7 @@ function enter(another) { // Generate (Enter): the edit in progress, then its sh
   if (resumed) queueWaiting(); // the viewer: with no edit in progress, the edits that waited at the stop run before the render goes on
   if (another) { const target = S.selected ?? S.edits.at(-1); if (target) again(target); return; }
   if (resumed || renderPending()) { // a stopped or failed render goes on
-    const r = S.renders.get(S.heroKey); if (r) r.failed = null; touch(0); return hud(resumed ? "Generating again from where it stopped" : "The shot renders now", 2000);
+    const r = S.renders.get(S.heroKey); if (r) r.failed = null; touch(0); return hud(resumed ? "Generating again from where it stopped." : "The shot renders now.", 2000);
   }
   hud(S.edits.length ? "Nothing changed since the last result. Ctrl+Enter tries another seed." : "Paint on the frame first, then Generate.", 3000);
 }

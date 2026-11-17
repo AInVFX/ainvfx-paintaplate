@@ -196,16 +196,17 @@ def fluid_wipe_and_models(page, U):
     page.get_by_role("menuitem", name="Models and licences", exact=True).click()
     page.wait_for_function("document.querySelector('#help').open && !document.querySelector('#models').hidden", timeout=10000)
     shown = page.get_attribute("#models", "data-shown").split(",")
-    rows = page.eval_on_selector_all("#models-all tr", "els => els.length")
-    U.check({"fluid", "ltx", "ltx-text", "ltx-vae"} <= set(shown) and "klein" not in shown and rows == 15,
-            f"Models and licences: the models behind the fluid shot, then every model: {shown}, {rows} rows")
+    cards = page.eval_on_selector_all("#models-all article", "els => els.map((e) => [e.dataset.id, e.classList.contains('behind')])")
+    marked = {i for i, behind in cards if behind}
+    U.check({"fluid", "ltx", "ltx-text", "ltx-vae"} <= set(shown) and "klein" not in shown and len(cards) == 15 and marked == set(shown),
+            f"Models and licences: every model in cards, those behind the fluid shot marked: {shown}, {len(cards)} cards, marked {sorted(marked)}")
     page.keyboard.press("Escape")
     page.keyboard.press("?")
     shown = page.evaluate("[...document.querySelectorAll('#help .help-tab')].filter((t) => !t.hidden).map((t) => t.dataset.help)")
     page.click("#help [role=tab][data-help=start]")
     start = page.evaluate("[...document.querySelectorAll('#help .help-tab')].filter((t) => !t.hidden).map((t) => t.dataset.help)")
     tabs = page.eval_on_selector_all("#help [role=tab]", "els => els.map((e) => e.textContent)")
-    U.check(shown == ["keys"] and start == ["start"] and len(tabs) == 6,
+    U.check(shown == ["keys"] and start == ["start"] and len(tabs) == 7,
             f"Help is in tabs: ? opens Keys, a tab shows its part alone: {shown}, {start}, {tabs}")
     page.keyboard.press("Escape")
 
@@ -265,6 +266,16 @@ def wipe_compare(page, U):
     Ctrl+click, Esc or F6 ends it."""
     row = "#stages li.pick:has-text('Track the paint, preview')"
     names = lambda: [page.text_content("#wipe .label.left"), page.text_content("#wipe .label.right")]  # noqa: E731
+    compared = lambda: page.evaluate("document.querySelector('#view').dataset.compared")  # noqa: E731
+    page.keyboard.press("F6"); page.wait_for_timeout(300)
+    U.check(names() == ["Plate", "Composite, full size"], f"F6: the plate on the left, the pass on show on the right, both named: {names()}")
+    page.click(row); page.wait_for_timeout(500)
+    U.check(names() == ["Plate", "Track the paint, preview"], f"F6, then a click on a Render step: the right side takes the step's name: {names()}")
+    page.click(row, modifiers=["Control"]); page.wait_for_timeout(300)
+    said = page.evaluate("[...document.querySelectorAll('#log li span')].map((s) => s.textContent)")
+    U.check(names() == ["Plate", "Track the paint, preview"] and compared() == "" and "Viewer: wipe, Plate against Track the paint, preview." in said,
+            f"Ctrl+click on the pass on show compares it with the plate, never with itself: {names()}, {said[-1:]}")
+    page.click(row); page.wait_for_timeout(500); page.keyboard.press("F6"); page.wait_for_timeout(300)  # the latest result, and the wipe off
     before = page.evaluate(SUM, [0.5, 1.0])
     page.click(row, modifiers=["Control"])
     page.wait_for_function("document.querySelector('#view').dataset.compared === 'drawn'", timeout=30000)  # its own frame: the plate shows until then

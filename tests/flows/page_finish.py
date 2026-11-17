@@ -18,7 +18,7 @@ def run(browser, port, U):
     start = len(U.log_lines(page))
     page.click("#finish-hdr-yes")
     U.check(page.is_checked("#finish-hdr") and page.text_content("#finish-btn") == "Finish · 1" and any(t.startswith("Finish: SDR to HDR on.") for t in U.log_lines(page)[start:]),
-            f"« Turn on » turns it on: the button counts it and the log says so: {page.text_content('#finish-btn')!r}")
+            f"« Yes, turn it on » turns it on: the button counts it and the log says so: {page.text_content('#finish-btn')!r}")
     page.keyboard.press("Escape")
     U.check(not shown(), "Esc closes the menu")
     page.click("#finish-btn")

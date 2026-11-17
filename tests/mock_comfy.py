@@ -378,18 +378,21 @@ async def execute(pid, prompt):
                                                        v["control_prefix"], spec["fps"])], "animated": [True]}
         o[outs["video"]] = {"images": [save_mp4(shot, v["video_prefix"], spec["fps"])], "animated": [True]}
     elif "video" in outs or "export" in outs or "exr" in outs:  # comp and export: blend the shot over the plate through the matte
+        half = lambda fs: [f.astype(np.float16) for f in fs]  # noqa: E731  the plate, the shot, the matte and the result are held at once, in half floats
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
-        n = spec["frames"]
+        frames, n = half(frames), spec["frames"]
         h, w = (v["height"], v["width"]) if "video" in outs else frames[0].shape[:2]
-        shot, _ = read_plate(v.get("hdr") or v["shot"], 1024)
+        shot = half(read_plate(v.get("hdr") or v["shot"], 1024)[0])
         has_matte = bool(v.get("matte_a"))
-        matte = read_plate(v["matte_a"], 1024)[0] if has_matte else None
+        matte = half(read_plate(v["matte_a"], 1024)[0]) if has_matte else None
         await steps(pid, 6, 1.5 if "video" in outs else 3.0)
         out = []
         for i in range(n):
             p, g = resize(frames[i], w, h), resize(shot[min(i, len(shot) - 1)], w, h)
             m = resize(matte[min(i, len(matte) - 1)][..., 0], w, h)[..., None] if has_matte else np.ones((h, w, 1), np.float32)
-            out.append(g * m + p * (1 - m))
+            out.append((g * m + p * (1 - m)).astype(np.float16))
+            frames[i] = None
+        del frames, shot
         if "video" in outs:
             o[outs["video"]] = {"images": [save_mp4(out, v["video_prefix"], spec["fps"])], "animated": [True]}
         else:
