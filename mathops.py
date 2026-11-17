@@ -739,7 +739,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       zone; so is a mask of twice the element or more while the tracker's masks still shrink from the zone to the object,
       until the first one under that (a bald eagle in a zone 6.3 times its size: on the two frames before the eagle,
       2.3 and 2.5 times it, under two fifths of the zone). With `base`, on those frames the matte of an object that stands still (see below) is its place of frame 0,
-      moved with the background, and the search keeps the zone; frames before the object is known to stand still are
+      moved with the background, with what the shot changed joined to it (a part that moves out of the place, such as a
+      wing that opens, stays in), and the search keeps the zone; frames before the object is known to stand still are
       set when it is. An object found to move in the scene is followed as before. One that moves inside its paint
       zone is not found to move (its first matte is the zone, as at 32ea0a4), so the matte keeps to its place there;
     - an erased object (no `shot`, with `base`) is the plate's own: once it is known to stand still, its place of
@@ -985,6 +986,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     shows = bulk(open0 & ~hide) & ~found
                     if shows.any():
                         found, placed = found | shows, placed + 1
+                gain = None  # the areas the shot changed next to the object, on this frame
                 if block is not None and (core.any() or line.any()):
                     d, anchor = block[t - start], core | line
                     within = grow(anchor, reach)
@@ -1053,6 +1055,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     holding[t] = prev.any()
                 if zone_sized(int(s.sum())) and plates is not None and still is not False and 2 * int((s & zone_at).sum()) > int(s.sum()):  # the tracker's mask is the zone: as large, and mostly inside it
                     own = ndimage.binary_fill_holes(open0)  # the matte shows the object's place of frame 0; the search keeps the zone
+                    if gain is not None and gain.any():  # and what the shot changed, joined to that place: a part that moves out of it (a wing that opens) stays in
+                        own = own | touching(gain, grow(own, thin))
                     if still:
                         f, zones = f & own, zones + 1
                     else:
