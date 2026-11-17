@@ -558,6 +558,7 @@
   "inputs": {
    "format": "exr",
    "fps": 24.0,
+   "chromaticities": "AP0",
    "frames": [
     "1",
     4

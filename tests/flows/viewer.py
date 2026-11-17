@@ -198,7 +198,7 @@ def fluid_wipe_and_models(page, U):
     shown = page.get_attribute("#models", "data-shown").split(",")
     cards = page.eval_on_selector_all("#models-all article", "els => els.map((e) => [e.dataset.id, e.classList.contains('behind')])")
     marked = {i for i, behind in cards if behind}
-    U.check({"fluid", "ltx", "ltx-text", "ltx-vae"} <= set(shown) and "klein" not in shown and len(cards) == 15 and marked == set(shown),
+    U.check({"fluid", "ltx", "ltx-text", "ltx-vae"} <= set(shown) and "klein" not in shown and len(cards) == 17 and marked == set(shown),
             f"Models and licences: every model in cards, those behind the fluid shot marked: {shown}, {len(cards)} cards, marked {sorted(marked)}")
     page.keyboard.press("Escape")
     page.keyboard.press("?")

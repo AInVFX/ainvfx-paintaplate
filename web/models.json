@@ -196,6 +196,38 @@
    "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
    "optional": true,
    "revision": "6102c50e9629ab4bf32a36d184e705b7a829e4f3"
+  },
+  {
+   "id": "seedvr2",
+   "name": "SeedVR2 7B (fp16), ByteDance's video restoration model",
+   "file": "seedvr2_7b_fp16.safetensors",
+   "repo": "Comfy-Org/SeedVR2",
+   "source": "https://huggingface.co/Comfy-Org/SeedVR2",
+   "use": "Upscale to 4K: restores the result's detail at 3840 px",
+   "licence": "Apache-2.0",
+   "licence_url": "https://huggingface.co/Comfy-Org/SeedVR2/blob/main/README.md",
+   "upstream": {
+    "licence": "Apache-2.0",
+    "source": "https://huggingface.co/ByteDance-Seed/SeedVR2-7B"
+   },
+   "optional": true,
+   "revision": "df48879708206a403d2a61acd55578c2e80fd233"
+  },
+  {
+   "id": "seedvr2-vae",
+   "name": "SeedVR2's VAE",
+   "file": "seedvr2_ema_vae_fp16.safetensors",
+   "repo": "Comfy-Org/SeedVR2",
+   "source": "https://huggingface.co/Comfy-Org/SeedVR2",
+   "use": "Encodes and decodes the frames SeedVR2 7B restores",
+   "licence": "Apache-2.0",
+   "licence_url": "https://huggingface.co/Comfy-Org/SeedVR2/blob/main/README.md",
+   "upstream": {
+    "licence": "Apache-2.0",
+    "source": "https://huggingface.co/ByteDance-Seed/SeedVR2-7B"
+   },
+   "optional": true,
+   "revision": "df48879708206a403d2a61acd55578c2e80fd233"
   }
  ]
 }

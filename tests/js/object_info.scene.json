@@ -1659,6 +1659,12 @@
       {
        "default": 0
       }
+     ],
+     "chromaticities": [
+      "COMBO",
+      {
+       "default": "none"
+      }
      ]
     }
    },

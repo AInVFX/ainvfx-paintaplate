@@ -273,11 +273,33 @@ def probe_plate(path: str, fps_hint: float = 24.0) -> dict:
     raise ValueError(f"Plate not supported: {path}. Use a movie, an image or an image sequence.")
 
 
+CHROMATICITIES = {  # an EXR's chromaticities (red, green, blue and white, as x and y), and the scene-linear space they name
+    "AP0": ((0.7347, 0.2653, 0.0, 1.0, 0.0001, -0.077, 0.32168, 0.33767), "linear ACES2065-1"),
+    "AP1": ((0.713, 0.293, 0.165, 0.83, 0.128, 0.044, 0.32168, 0.33767), "linear ACEScg"),
+    "Rec.2020": ((0.708, 0.292, 0.17, 0.797, 0.131, 0.046, 0.3127, 0.329), "linear Rec.2020"),
+    "P3-D65": ((0.68, 0.32, 0.265, 0.69, 0.15, 0.06, 0.3127, 0.329), "linear P3-D65"),
+    "Rec.709": ((0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329), "linear"),
+}
+
+
+def gamut_of(chromaticities: str) -> str | None:
+    """The scene-linear space an EXR's chromaticities name, by its red primary and its white point; None for another."""
+    nums = [float(x) for x in re.findall(r"-?\d+\.\d+(?:[eE][-+]?\d+)?", chromaticities or "")]
+    if len(nums) < 8:
+        return None
+    seen = nums[0:2] + nums[6:8]
+    for xy, name in CHROMATICITIES.values():
+        if all(abs(a - b) < 0.002 for a, b in zip(seen, xy[0:2] + xy[6:8])):
+            return name
+    return None
+
+
 def guess_color_space(spec: dict) -> str:
     """A starting guess from the file; the user can always override it in the app.
 
-    EXR is scene-linear by convention: its chromaticities say which gamut.
-    ACEScg (AP1) has its red primary at (0.713, 0.293).
+    A movie tagged PQ, HLG or linear says so. EXR is scene-linear by convention, and its chromaticities name its gamut
+    (CHROMATICITIES): ACES2065-1, ACEScg, Rec.2020, P3-D65 or Rec.709. An EXR without them, or with other ones, reads as
+    linear Rec.709, and every other file as sRGB.
     """
     trc = spec.get("color_trc")  # FFmpeg's numbers: 16 SMPTE ST 2084, 18 ARIB STD-B67, 8 linear
     if spec.get("kind") == "video" and trc in (16, 18, 8):
@@ -285,9 +307,9 @@ def guess_color_space(spec: dict) -> str:
     if spec.get("ext") != ".exr":
         return "sRGB"
     for part in spec.get("exr", {}).get("parts", []):
-        nums = [float(x) for x in re.findall(r"-?\d+\.\d+", part.get("chromaticities", ""))]
-        if len(nums) >= 2 and abs(nums[0] - 0.713) < 0.002 and abs(nums[1] - 0.293) < 0.002:
-            return "linear ACEScg"
+        name = gamut_of(part.get("chromaticities", ""))
+        if name:
+            return name
     return "linear"
 
 
@@ -414,6 +436,32 @@ def write_exr_like(src_path: str, rgb: np.ndarray, alpha: np.ndarray | None, out
                      for i, p in enumerate(parts_out)]
             OpenEXR.File(parts).write(out_path)
 
+SIZED = ("channels", "dataWindow", "displayWindow", "chunkCount", "type", "name", "tiles", "version")  # header keys of one size
+
+
+def at_size(spec: dict, width: int, height: int) -> dict:
+    """The spec that writes the plate's frames at another size: the same format, codec, bit depth, frame numbers, colour
+    tags, timecode and audio. `scaled_from` holds the plate's size. No source pixel, other EXR channel or own alpha has
+    the new size, so none of them is written. At the plate's own size, the spec itself."""
+    if (width, height) == (spec.get("width"), spec.get("height")):
+        return spec
+    return dict(spec, width=width, height=height, scaled_from=(spec.get("width"), spec.get("height")))
+
+
+def write_exr_scaled(src_path: str, rgb: np.ndarray, alpha: np.ndarray | None, out_path: str) -> None:
+    """Write `rgb` (H, W, 3 float), a frame at another size than the source EXR frame, in the pixel type of the source's
+    RGB channels and with every header attribute of their part that holds at any size: compression, chromaticities,
+    frame rate, timecode and the others. Its windows take the new size."""
+    with OpenEXR.File(src_path, separate_channels=True) as f:
+        part = next(p for p in f.parts if set(RGB_NAMES) <= set(p.channels))
+        dtype = part.channels[RGB_NAMES[0]].pixels.dtype
+        header = {k: v for k, v in dict(part.header).items() if k not in SIZED}
+    chans = {name: np.ascontiguousarray(rgb[..., i], dtype=dtype) for i, name in enumerate(RGB_NAMES)}
+    if alpha is not None:
+        chans["A"] = np.ascontiguousarray(alpha, dtype=dtype)
+    OpenEXR.File(header, chans).write(out_path)
+
+
 def read_native(path: str, with_alpha: bool, eight: bool = False) -> np.ndarray:
     """Read one still frame exactly, as integers (RGB or RGBA): 8 bits for an 8-bit target, else 16.
 
@@ -458,7 +506,7 @@ def read_float(path: str) -> np.ndarray:
 
 
 # What core's decoder reads plane by plane as floats, and what it decodes to 8 bits then divides by 255 (comfy_api's
-# VideoFromFile at ComfyUI e6515b16, the pin in tools/pins.sh); every other format it converts to 32-bit float planes
+# VideoFromFile at ComfyUI 71096d1a, the pin in tools/pins.sh); every other format it converts to 32-bit float planes
 CORE_FLOATS = ("gbrpf16le", "gbrpf16be", "gbrapf16le", "gbrapf16be", "grayf16le", "grayf16be",
                "gbrpf32le", "gbrpf32be", "gbrapf32le", "gbrapf32be", "grayf32le", "grayf32be")
 CORE_BYTES = ("yuvj420p", "yuvj422p", "yuvj444p", "rgb24", "rgba", "pal8")
@@ -626,6 +674,20 @@ def untouched(changed: np.ndarray) -> np.ndarray:
     return np.asarray(changed) < MATTE_STEP
 
 
+def join_windows(folders: list, workers: int = 8) -> np.ndarray:
+    """The frames of a shot's windows, saved one folder each, joined in order into one float32 batch, one window read at
+    a time."""
+    files = [find_sequence(f) for f in folders]
+    out, pos = None, 0
+    for names in files:
+        rgb = decode_frames(names, False, workers)[0]
+        if out is None:
+            out = np.empty((sum(len(f) for f in files),) + rgb.shape[1:], np.float32)
+        out[pos:pos + len(rgb)] = rgb
+        pos += len(rgb)
+    return out
+
+
 def write_pngs(frame_at, paths: list, workers: int = 8, level: int = 1, tick=None) -> None:
     """Write frame_at(i), an (H, W, 3 or 4) uint8 or uint16 array, to paths[i] as an 8 or 16-bit PNG, several frames at
     once: PyAV releases the GIL
@@ -648,7 +710,7 @@ def write_pngs(frame_at, paths: list, workers: int = 8, level: int = 1, tick=Non
         list(pool.map(one, range(len(paths))))
 
 
-def write_exrs(frame_at, paths: list, workers: int = 8, tick=None, fps: float = 0.0) -> None:
+def write_exrs(frame_at, paths: list, workers: int = 8, tick=None, fps: float = 0.0, chromaticities: str | None = None) -> None:
     """Write frame_at(i), an (H, W, 3) float array, to paths[i] as a half-float EXR with lossless PIZ compression, several
     frames at once: OpenEXR releases the GIL while it compresses (a 1080p frame: 83 ms, 5.3 MB, 29 Oct). These are the
     review frames the viewer reads at full precision; the export keeps the plate's own EXR layers and header instead.
@@ -657,6 +719,8 @@ def write_exrs(frame_at, paths: list, workers: int = 8, tick=None, fps: float = 
     header = {"compression": OpenEXR.PIZ_COMPRESSION, "type": OpenEXR.scanlineimage}
     if fps:
         header["framesPerSecond"] = Fraction(fps).limit_denominator(1001)
+    if chromaticities:  # the gamut of the frames, a key of CHROMATICITIES: they then open in their colour space
+        header["chromaticities"] = CHROMATICITIES[chromaticities][0]
 
     def one(i):
         rgb = np.ascontiguousarray(np.nan_to_num(frame_at(i)[..., :3], nan=0.0, posinf=65504.0, neginf=-65504.0)
@@ -909,8 +973,16 @@ def write_still(spec: dict, index: int, rgb: np.ndarray, alpha: np.ndarray | Non
     the path. Where `keep` (H, W) holds, the source's exact pixels. The plate's own alpha stays sample for sample, since
     no edit works on it, unless a new `alpha` is given."""
     src, out = spec["files"][index], output_frame_name(spec, index, out_dir)
+    if "scaled_from" in spec and spec["ext"] == ".exr" and OpenEXR is not None:
+        write_exr_scaled(src, rgb, alpha, out)
+        return out
     if spec["ext"] == ".exr" and OpenEXR is not None:
         write_exr_like(src, rgb, alpha, out, keep=keep)
+        return out
+    if "scaled_from" in spec:  # another size: the new frame alone, in the plate's format
+        codec, pix_fmt, options = still_target(spec, alpha is not None)
+        with open(out, "wb") as f:
+            f.write(encode_still(rgb, alpha, codec, pix_fmt, options))
         return out
     own = alpha is None and carries_alpha(spec.get("pix_fmt", ""))
     codec, pix_fmt, options = still_target(spec, alpha is not None or own)

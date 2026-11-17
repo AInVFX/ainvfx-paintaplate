@@ -32,7 +32,7 @@ Planned next, and not there yet: shots up to 20 seconds, plates at LTX 2.5's lar
 - **ComfyUI** v0.43.0 or newer, with [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo). It is tested on ComfyUI v0.44.2: `tools/pins.sh` names the tested commits.
 - **An NVIDIA GPU with 16 GB of VRAM at least; 32 GB or more recommended.** Under 24 GB the models load one at a time and LTX works in tiles, so each step takes longer. From 32 GB every step finishes at 1920 x 1088 and 121 frames. A 96 GB card is the fastest and takes plates above 2K.
 - **64 GB of RAM.** This is what is tested.
-- **62 GB of disk** for the models.
+- **79 GB of disk** for the models.
 
 On a Mac or a smaller card, run it on Runpod (install option 3).
 
@@ -88,7 +88,7 @@ One command downloads them, on a local machine and on a pod. Run it in the pack'
 
    ```sh
    python get_models.py --list    # each file, its size, and whether it is in place
-   python get_models.py           # downloads what is missing: 62 GB in all
+   python get_models.py           # downloads what is missing: 79 GB in all
    ```
 
 | Your setup | The Python to use |
@@ -166,6 +166,7 @@ Paint a plate builds on the work of others:
 | [TAEHV tiny LTX decoder (taeltx2_3)](https://huggingface.co/Kijai/LTX2.3_comfy) | Decodes the live preview while a pass runs | [LTX-2 Community License Agreement](https://github.com/Lightricks/LTX-2/blob/main/LICENSE) |
 | [LTX 2.5 SDR-to-HDR IC-LoRA (Lightricks), Its fixed scene embeddings](https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR) | Turns the SDR shot into scene-linear HDR. The prompt SDR to HDR takes | [LTX-2.x Community License](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x) |
 | [ainvfx-fluid IC-LoRA (AInVFX)](https://huggingface.co/AInVFX/ainvfx-fluid) | Turns painted keyframes on a blank plate into smoke, steam or fire | [LTX-2.x Community License](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x) |
+| [SeedVR2 7B (fp16), ByteDance's video restoration model, SeedVR2's VAE](https://huggingface.co/Comfy-Org/SeedVR2) | Upscale to 4K: restores the result's detail at 3840 px. Encodes and decodes the frames SeedVR2 7B restores | [Apache-2.0](https://huggingface.co/Comfy-Org/SeedVR2/blob/main/README.md) |
 
 Two of these licences set a revenue threshold. The LTX-2.x Community License asks a company with annual revenues of 10 million USD or more to buy a licence from Lightricks for any use other than testing, evaluation and non-commercial research. The FLUX Kommunity License lets a person or a company whose yearly revenue, affiliates included, is under 5 million USD use what the model generates commercially, if the outputs pass content filters or a review before they are shown, and carry a notice that AI made them where the law asks for one; for any other commercial use, Black Forest Labs sells a licence. The tiny decoder is [TAEHV](https://github.com/madebyollin/taehv) by madebyollin, under the MIT licence; Paint a plate downloads it from a repository whose card names the LTX-2 Community License Agreement. The upsampler's system prompts in `web/upsampler.json` are Black Forest Labs' own text (Apache 2.0). The example plates are synthetic, made with LTX 2.5, MOSS-Image and FLUX 3 Image Klein, and published under CC BY 4.0. Paint a plate's own code is under the Apache 2.0 licence.
 

@@ -207,7 +207,8 @@ class SavePlate(io.ComfyNode):
             description="Writes frames in the plate's own format: same file type, bit depth, frame numbers, "
                         "colour tags, timecode and audio. For EXR, every other layer and header attribute "
                         "is kept, and the data window grows only to hold an edit outside it. The plate's own "
-                        "alpha is kept as it is. Outside 'changed', the exact source pixels are written back.",
+                        "alpha is kept as it is. Outside 'changed', the exact source pixels are written back. Frames of "
+                        "another size are written at their own size, in the same format, with none of the source's pixels.",
             is_output_node=True,
             inputs=[
                 io.Image.Input("images", tooltip="Frames in the plate's colour space."),
@@ -224,7 +225,8 @@ class SavePlate(io.ComfyNode):
 
     @classmethod
     def execute(cls, images, plate, filename_prefix, keep_untouched, changed=None, alpha=None) -> io.NodeOutput:
-        spec = plate
+        spec = plateio.at_size(plate, images.shape[2], images.shape[1])  # frames of another size: Upscale to 4K
+        keep_untouched = keep_untouched and "scaled_from" not in spec
         out_dir = output_folder(filename_prefix)
         os.makedirs(out_dir, exist_ok=True)
         count = min(images.shape[0], spec["frames"])
@@ -262,6 +264,8 @@ class SavePlate(io.ComfyNode):
                 written.append(plateio.write_still(spec, i, rgb, a, keep, out_dir))
             if spec["ext"] == ".exr" and plateio.OpenEXR is None:
                 notes.append("Extra EXR layers not copied: OpenEXR is not installed.")
+        if "scaled_from" in spec:
+            notes.append("Written at {} x {} from a {} x {} plate: no source pixel is kept.".format(spec["width"], spec["height"], *spec["scaled_from"]))
         lines = [f"Save Plate: {len(written)} {'file' if len(written) == 1 else 'files'} written to {out_dir}."] + notes
         if written:
             lines.append("First files: " + ", ".join(os.path.basename(p) for p in written[:3]) + ".")
@@ -707,18 +711,22 @@ class SaveFrames(io.ComfyNode):
                 io.Int.Input("frames", default=0, min=0, max=4096, optional=True,
                              tooltip="The frames to save, from the first: 0 saves them all. Load Plate's 'frames' leaves its "
                                      "8k+1 padding out."),
+                io.Combo.Input("chromaticities", options=["none", *plateio.CHROMATICITIES], default="none", optional=True,
+                               tooltip="exr only: the gamut written in each frame's header, so the frames open in their "
+                                       "colour space. none writes none, which reads as Rec.709."),
             ],
             is_output_node=True,
         )
 
     @classmethod
-    def execute(cls, images, filename_prefix, format="png", fps=0.0, frames=0) -> io.NodeOutput:
+    def execute(cls, images, filename_prefix, format="png", fps=0.0, frames=0, chromaticities="none") -> io.NodeOutput:
         n, h, w = min(frames, images.shape[0]) if frames else images.shape[0], images.shape[1], images.shape[2]
         folder, name, counter, sub, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory(), w, h)
         names = [f"{name}_{counter + i:05}_.{'png' if format == 'png16' else format}" for i in range(n)]
         paths, bar = [os.path.join(folder, f) for f in names], comfy.utils.ProgressBar(n)
         if format == "exr":
-            plateio.write_exrs(stoppable(lambda i: images[i].float().cpu().numpy()), paths, workers=WORKERS, tick=lambda: bar.update(1), fps=fps)
+            plateio.write_exrs(stoppable(lambda i: images[i].float().cpu().numpy()), paths, workers=WORKERS, tick=lambda: bar.update(1), fps=fps,
+                              chromaticities=None if chromaticities == "none" else chromaticities)
             return io.NodeOutput(ui={"images": [{"filename": f, "subfolder": sub, "type": "output"} for f in names]})
 
         def frame(i):  # as core Save Image: scaled by 255 and clipped, not rounded, so every pixel matches what it wrote
@@ -869,5 +877,30 @@ class KeepBlack(io.ComfyNode):
         return io.NodeOutput(to_image(out))
 
 
+class JoinWindows(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_JoinWindows",
+            display_name="Join Windows",
+            category=CATEGORY,
+            description="Joins the frames of a shot's windows, saved one subfolder each in 'folder' and read in the order "
+                        "of their names, into one batch.",
+            inputs=[
+                io.String.Input("folder", tooltip="The windows' parent folder, a path as Load Plate takes it."),
+            ],
+            outputs=[io.Image.Output(display_name="images")],
+        )
+
+    @classmethod
+    def execute(cls, folder) -> io.NodeOutput:
+        full = resolve(folder)
+        windows = sorted(os.path.join(full, d) for d in os.listdir(full) if os.path.isdir(os.path.join(full, d)))
+        if not windows:
+            raise ValueError(f"Join Windows: no window folder in {folder}.")
+        rgb = plateio.join_windows(windows, WORKERS)
+        return io.NodeOutput(torch.from_numpy(rgb).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()))
+
+
 NODES = [LoadPlate, SavePlate, ColorSpace, SaveFrames, SaveMovie, FitToPlate, CompositeFrames, RelightTransfer, FollowMatte, LevelFill, LivePreview,
-         KeyframeVideo, HDRMatch, KeepBlack]
+         KeyframeVideo, HDRMatch, KeepBlack, JoinWindows]
