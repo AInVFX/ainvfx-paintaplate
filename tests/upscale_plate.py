@@ -31,8 +31,9 @@ LONG_SIDE = 3840
 FACTOR = 2  # SeedVR2 restores from at most the target divided by this
 WINDOW = UPSCALE_CHUNK  # the smallest window: one chunk
 MODEL_RAM = 15.7  # GB the 7B model holds in RAM on a GPU under 32 GB, where dynamic VRAM stages it
-FRAME_COPIES = 12  # float32 copies of one frame at the target size that a window holds at its peak, colour correction
-#                    included: a window of 42 frames at 3840 x 2160 past a 52 GB cap on a 16 GB GPU means more than 7.5
+FRAME_COPIES = 8  # float32 copies of one frame at the target size that a window holds at its peak, colour correction
+#                   included: on a 16 GB GPU with the model in RAM, a window of 21 frames at 3840 x 2160 peaked at 36.2 GB
+#                   and one of 42 frames passed a 52 GB cap, 8 copies above what window_frames holds aside
 OUTPUT = "output:"  # folders.OUTPUT: a path under ComfyUI's output folder, as Load Plate reads it
 
 

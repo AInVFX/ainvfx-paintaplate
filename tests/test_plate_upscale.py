@@ -121,9 +121,9 @@ class ExportJob(unittest.TestCase):
 
     def test_a_window_is_sized_to_the_machines_ram_and_gpu(self):
         hd, uhd = (1920, 1080), (3840, 2160)
-        self.assertEqual(upscale_plate.window_frames(52.0, 15.6, uhd, hd, 121), 21)  # the 16 GB laptop under its cap
+        self.assertEqual(upscale_plate.window_frames(52.0, 15.6, uhd, hd, 121), 33)  # a 16 GB GPU under a 52 GB cap
         self.assertEqual(upscale_plate.window_frames(251.0, 95.0, uhd, hd, 121), 121)  # one job on a 96 GB GPU with RAM
-        self.assertEqual(upscale_plate.window_frames(125.0, 95.0, uhd, hd, 121), 93)
+        self.assertEqual(upscale_plate.window_frames(64.0, 95.0, uhd, hd, 121), 69)
         self.assertEqual(upscale_plate.window_frames(24.0, 8.0, uhd, hd, 121), 21)
 
 
