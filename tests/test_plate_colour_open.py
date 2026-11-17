@@ -2,6 +2,7 @@
 curve tag, an EXR's chromaticities) in that config, else sRGB for a movie or an image and linear Rec.709 for an EXR.
 A camera's log movie and a log DPX scan say nothing of their curve: they open as sRGB, and the person chooses the
 camera's log space in Open."""
+import json
 import os
 import sys
 import tempfile
@@ -77,6 +78,18 @@ class OpenedAs(unittest.TestCase):
 
     def test_an_exr_without_chromaticities_opens_as_linear_rec709(self):
         self.assertEqual(opened(self.exr("plain")), ("linear", "Linear Rec.709 (sRGB)"))
+
+    def test_the_packs_aces2065_1_frames_say_ap0_and_reopen_as_aces2065_1(self):
+        folder = os.path.join(self.tmp.name, "hdr")
+        os.makedirs(folder)
+        plateio.write_exrs(lambda i: np.full((36, 64, 3), 2.0, np.float32), [os.path.join(folder, "f_00001_.exr")], chromaticities="AP0")
+        self.assertEqual(opened(folder), ("linear ACES2065-1", "ACES2065-1"))
+        root = os.path.dirname(HERE)
+        for name in ("hdr", "export"):
+            with open(os.path.join(root, "web", "workflows", f"{name}.json")) as f:
+                saves = [n for n in json.load(f).values() if n["class_type"] == "PaintAPlate_SaveFrames" and n["inputs"].get("format") == "exr"]
+            self.assertTrue(saves, name)
+            self.assertEqual({n["inputs"].get("chromaticities") for n in saves}, {"AP0"}, name)
 
     def test_other_chromaticities_read_as_none_and_float_text_parses(self):
         self.assertIsNone(plateio.gamut_of("(0.7347, 0.2653)"))

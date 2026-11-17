@@ -696,7 +696,7 @@ def write_pngs(frame_at, paths: list, workers: int = 8, level: int = 1, tick=Non
         list(pool.map(one, range(len(paths))))
 
 
-def write_exrs(frame_at, paths: list, workers: int = 8, tick=None, fps: float = 0.0) -> None:
+def write_exrs(frame_at, paths: list, workers: int = 8, tick=None, fps: float = 0.0, chromaticities: str | None = None) -> None:
     """Write frame_at(i), an (H, W, 3) float array, to paths[i] as a half-float EXR with lossless PIZ compression, several
     frames at once: OpenEXR releases the GIL while it compresses (a 1080p frame: 83 ms, 5.3 MB, 29 Oct). These are the
     review frames the viewer reads at full precision; the export keeps the plate's own EXR layers and header instead.
@@ -705,6 +705,8 @@ def write_exrs(frame_at, paths: list, workers: int = 8, tick=None, fps: float = 
     header = {"compression": OpenEXR.PIZ_COMPRESSION, "type": OpenEXR.scanlineimage}
     if fps:
         header["framesPerSecond"] = Fraction(fps).limit_denominator(1001)
+    if chromaticities:  # the gamut of the frames, a key of CHROMATICITIES: they then open in their colour space
+        header["chromaticities"] = CHROMATICITIES[chromaticities][0]
 
     def one(i):
         rgb = np.ascontiguousarray(np.nan_to_num(frame_at(i)[..., :3], nan=0.0, posinf=65504.0, neginf=-65504.0)

@@ -711,18 +711,22 @@ class SaveFrames(io.ComfyNode):
                 io.Int.Input("frames", default=0, min=0, max=4096, optional=True,
                              tooltip="The frames to save, from the first: 0 saves them all. Load Plate's 'frames' leaves its "
                                      "8k+1 padding out."),
+                io.Combo.Input("chromaticities", options=["none", *plateio.CHROMATICITIES], default="none", optional=True,
+                               tooltip="exr only: the gamut written in each frame's header, so the frames open in their "
+                                       "colour space. none writes none, which reads as Rec.709."),
             ],
             is_output_node=True,
         )
 
     @classmethod
-    def execute(cls, images, filename_prefix, format="png", fps=0.0, frames=0) -> io.NodeOutput:
+    def execute(cls, images, filename_prefix, format="png", fps=0.0, frames=0, chromaticities="none") -> io.NodeOutput:
         n, h, w = min(frames, images.shape[0]) if frames else images.shape[0], images.shape[1], images.shape[2]
         folder, name, counter, sub, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory(), w, h)
         names = [f"{name}_{counter + i:05}_.{'png' if format == 'png16' else format}" for i in range(n)]
         paths, bar = [os.path.join(folder, f) for f in names], comfy.utils.ProgressBar(n)
         if format == "exr":
-            plateio.write_exrs(stoppable(lambda i: images[i].float().cpu().numpy()), paths, workers=WORKERS, tick=lambda: bar.update(1), fps=fps)
+            plateio.write_exrs(stoppable(lambda i: images[i].float().cpu().numpy()), paths, workers=WORKERS, tick=lambda: bar.update(1), fps=fps,
+                              chromaticities=None if chromaticities == "none" else chromaticities)
             return io.NodeOutput(ui={"images": [{"filename": f, "subfolder": sub, "type": "output"} for f in names]})
 
         def frame(i):  # as core Save Image: scaled by 255 and clipped, not rounded, so every pixel matches what it wrote
