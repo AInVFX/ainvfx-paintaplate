@@ -24,10 +24,11 @@ def budget(page, U, size):  # View > Cache memory > Custom…, the row found by 
 
 
 def line(page, U, size):  # the newest « Frame cache » line for this budget: (frames in, frames in all, width, height)
-    found = []
-    U.poll(page, lambda: bool(found := [m for t in U.log_lines(page) if (m := LINE.match(t)) and m[1] == size]) and found.append(found[-1]) is None, 10)
-    m = [m for t in U.log_lines(page) if (m := LINE.match(t)) and m[1] == size]
-    return tuple(int(x) for x in m[-1].groups()[1:]) if m else None
+    def newest():
+        found = [m for t in U.log_lines(page) if (m := LINE.match(t)) and m[1] == size]
+        return tuple(int(x) for x in found[-1].groups()[1:]) if found else None
+    U.poll(page, lambda: newest() is not None, 10)
+    return newest()
 
 
 def run(browser, port, U):
