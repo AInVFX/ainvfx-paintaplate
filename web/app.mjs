@@ -3026,18 +3026,19 @@ function upscaleGuess() { // seconds for Upscale to 4K on the render on show: Pa
   return upscaleKeeps((r?.active ?? []).map((e) => e.tool)) ? f.edit : f.alone;
 }
 
-// Finish > Upscale to 4K, at Export: SeedVR2 7B restores the export at 3840 px on the long side, in windows this machine's
-// memory holds (logic.upscaleWindow). Paint and Clean (the export kept the plate's untouched pixels and wrote a layer): the
-// plate's windows first, kept under the plate's folder for its next export (the job index); then the layer's, whose jobs
-// compose the 4K result from them and the matte, and write the 4K matte. Otherwise the result alone, with the 4K matte when
-// the export has one. Save Plate then writes each part in the format of its plate-size twin, under 4k/ in the render's
-// folder: the zip's part « 4k ». Its jobs are the export's (kind « export »): what stops the export stops them.
-async function upscaleExport(r, progress) {
-  const p = S.plate, x = r.exported, dir = x.run, [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]];
+// Finish > Upscale to 4K: SeedVR2 7B restores an export at 3840 px on the long side, in windows this machine's memory holds
+// (logic.upscaleWindow). With a layer and a matte (Paint and Clean kept the plate's untouched pixels): the plate's windows
+// first, kept under the plate's folder for its next export (the job index); then the layer's, whose jobs compose the 4K
+// result from them and the matte, and write the 4K matte. Otherwise the result alone, with the 4K matte when there is one.
+// Save Plate then writes each part in the format of its plate-size twin, under 4k/ in `dir`: the zip's part « 4k ». Its
+// jobs are the export's (kind « export »): what stops the export stops them. `set`: { dir, result, space, float, layer,
+// matte } as Load Plate takes the paths, with the plate (S.plate) giving the size, the frames and the plate itself.
+async function upscaleSet(set, progress) {
+  const p = S.plate, dir = set.dir, [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]];
   const stats = await fetch("/system_stats").then((res) => res.json()).catch(() => null), gib = 2 ** 30;
-  const target = upscaleTarget(w, h), [sw, sh] = upscaleSource(w, h, target), keeps = x.layer && !!x.layerPath && !!x.mattePath;
+  const target = upscaleTarget(w, h), [sw, sh] = upscaleSource(w, h, target), keeps = !!set.layer && !!set.matte;
   const size = upscaleWindow((stats?.system?.ram_total ?? 0) / gib, (stats?.devices?.[0]?.vram_total ?? 0) / gib, target, [w, h], p.frames);
-  const windows = upscaleWindows(p.frames, size), format = x.float ? "exr" : "png16", n = (i) => `w${String(i).padStart(3, "0")}`;
+  const windows = upscaleWindows(p.frames, size), format = set.float ? "exr" : "png16", n = (i) => `w${String(i).padStart(3, "0")}`;
   const plateDir = upscaleFolder(S.plate.id, [p.path, p.cs, S.ocio.config, target, size, format, S.build]);
   log(`Upscale to 4K: ${target.join(" x ")}${sw ? `, restored from ${sw} x ${sh}` : ""}, ${windows.length === 1 ? "1 job" : `${windows.length} windows of ${size} frames`}.\n  `
     + (keeps ? "SeedVR2 restores the plate and the layer; the 4K result is composed from them and the matte." : "SeedVR2 restores the result."));
@@ -3046,11 +3047,11 @@ async function upscaleExport(r, progress) {
     matte: "", comp_prefix: "", matte_prefix: "", ...more });
   const jobs = [ // [workflow, values, weight]: a window weighs its frames, a part written at 4K a fifth of a window
     ...(keeps ? windows.map((win, i) => ["upscale", values(p.path, p.cs, win, { prefix: `${plateDir}/${n(i)}/f` }), win[1]]) : []),
-    ...windows.map((win, i) => ["upscale", values(keeps ? x.layerPath : x.path, x.space, win, {
-      prefix: `${dir}/upscale/${keeps ? "layer" : "result"}/${n(i)}/f`, matte: x.mattePath ?? "", matte_prefix: x.mattePath ? `${dir}/4k/matte/matte` : "",
+    ...windows.map((win, i) => ["upscale", values(keeps ? set.layer : set.result, set.space, win, {
+      prefix: `${dir}/upscale/${keeps ? "layer" : "result"}/${n(i)}/f`, matte: set.matte ?? "", matte_prefix: set.matte ? `${dir}/4k/matte/matte` : "",
       ...(keeps ? { under: `output:${plateDir}/${n(i)}`, under_space: p.cs, comp_prefix: `${dir}/upscale/comp/${n(i)}/f` } : {}) }), win[1]]),
-    ["upscale_export", { shot: x.path, frames: `output:${dir}/upscale/${keeps ? "comp" : "result"}`, max_frames: p.frames, prefix: `${dir}/4k/export` }, size / 5],
-    ...(keeps ? [["upscale_export", { shot: x.layerPath, frames: `output:${dir}/upscale/layer`, max_frames: p.frames, prefix: `${dir}/4k/layer` }, size / 5],
+    ["upscale_export", { shot: set.result, frames: `output:${dir}/upscale/${keeps ? "comp" : "result"}`, max_frames: p.frames, prefix: `${dir}/4k/export` }, size / 5],
+    ...(keeps ? [["upscale_export", { shot: set.layer, frames: `output:${dir}/upscale/layer`, max_frames: p.frames, prefix: `${dir}/4k/layer` }, size / 5],
       ["upscale_export", { shot: p.path, frames: `output:${plateDir}`, max_frames: p.frames, prefix: `${dir}/4k/plate` }, size / 5]] : []),
   ];
   const total = jobs.reduce((a, [, , wt]) => a + wt, 0);
@@ -3060,6 +3061,10 @@ async function upscaleExport(r, progress) {
     before += wt;
     progress(before / total);
   }
+}
+async function upscaleExport(r, progress) { // the render's step: the export's parts, as the export step kept them
+  const x = r.exported;
+  await upscaleSet({ dir: x.run, result: x.path, space: x.space, float: x.float, layer: x.layer ? x.layerPath : null, matte: x.mattePath }, progress);
   x.uhd = true; // the zip takes the 4K set
 }
 
@@ -3339,11 +3344,24 @@ function fluidExportDialog() {
     : "The fluid shot in ProRes 4444, with its preview movie. The zip downloads at once.";
   $("#export").showModal();
 }
-function downloadFluid() {
-  const f = S.fluid.result;
+async function downloadFluid() {
+  const f = S.fluid.result, parts = f.hdr ? ["hdr", "plate", "preview"] : ["plate", "preview"];
   S.exported = { run: f.run ?? fluidRun(f.path), name: `fluid_v${f.v}`, text: "" };
   log(`Export: fluid shot v${f.v}${f.hdr ? " in HDR" : ""}, from ${S.exported.run}.`);
-  download(f.hdr ? ["hdr", "plate", "preview"] : ["plate", "preview"]);
+  if (S.deliver.upscale && S.upscaleReady) { // Finish > Upscale to 4K: the fluid shot alone, restored at 4K under 4k/ of its folder
+    const t0 = performance.now(), guess = Math.round(upscaleFigures().alone);
+    status(`Upscale to 4K: about ${guess} s.`);
+    try {
+      await upscaleSet({ dir: S.exported.run, result: f.path, space: f.hdr ? HDR_FRAMES : S.plate.cs, float: f.hdr, layer: null, matte: null },
+        (x) => showStatus(`Upscale to 4K: ${Math.round(x * 100)}%.`));
+    } catch (err) { // a stop says nothing more; a failure writes its fact in the log and what to do on the status line
+      const e = explained(err, "Upscale to 4K");
+      return e === err ? status("Upscale to 4K: stopped. The zip was not written.") : showStatus(e.message);
+    }
+    status(`Upscale to 4K: done in ${((performance.now() - t0) / 1000).toFixed(1)} s (estimate ${guess} s).`);
+    parts.push("4k");
+  }
+  download(parts);
 }
 
 function exportDialog() {
