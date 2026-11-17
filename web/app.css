@@ -365,15 +365,15 @@ dialog.open { width: min(900px, 94vw); }
 .inspector-mark { position: absolute; z-index: 6; width: 13px; height: 13px; margin: -7px 0 0 -7px; pointer-events: none;
   border: 1px solid #fff; box-shadow: 0 0 0 1px #000; border-radius: 2px; }
 #view.native { image-rendering: pixelated; }
-#help { width: min(980px, 94vw); }
-#help .help-keys { columns: 2 400px; column-gap: 32px; } /* the one table of keys, in two columns */
+#help { width: min(1200px, 94vw); }
+#help .help-keys { columns: 3 320px; column-gap: 28px; } /* the one table of keys, in three columns */
 #help .help-keys > div { break-inside: avoid; }
 #help .help-keys h3:first-child { margin-top: 0; }
 #help .tabs { flex-wrap: wrap; }
 .help-steps { margin: 0; padding-left: 20px; color: var(--muted); }
 .help-steps li { margin: 0 0 8px; }
 #help form { margin-top: 8px; }
-#help .model-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 20px; } /* every model in three columns, the size of the other tabs */
+#help .model-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 20px; } /* every model in four columns, the size of the other tabs */
 #help .model-cards article { border-top: 1px solid rgba(128, 128, 128, 0.25); padding-top: 4px; font-size: 12px; line-height: 1.35; }
 #help .model-cards article.behind { border-top: 2px solid var(--gold); } /* a model behind the result on show */
 #help .model-cards p { margin: 0 0 2px; }
