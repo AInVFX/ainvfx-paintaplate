@@ -90,7 +90,7 @@
     <div id="viewport" class="viewport">
       <canvas id="view"></canvas>
       <canvas id="xray" class="xray" hidden aria-hidden="true"></canvas>
-      <figure id="live-inset" class="live-inset" hidden><img alt="Live preview of the pass in progress"><figcaption></figcaption></figure>
+      <figure id="live" class="live" hidden><img alt="Live preview of the pass in progress"><figcaption></figcaption></figure>
       <div id="wipe" class="wipe" hidden>
         <span class="label left">Plate</span><span class="label right">Result</span><span class="grip" title="Drag to compare."></span>
       </div>
@@ -152,10 +152,10 @@
     </section>
     <section id="render" class="render" hidden>
       <h2>Render <span id="render-left"></span></h2>
-      <label class="preview-size">Preview pass
+      <label class="preview-size">Preview
         <select id="preview-size"></select>
       </label>
-      <p class="preview-note">A first pass of the whole shot at a smaller size, shown before the full size, to judge the motion early. Half size has a quarter of the pixels and a quarter size a sixteenth: smaller is quicker and less sharp. Off makes the full size only.</p>
+      <p class="preview-note">Off: the full size only, for a slow machine. Latent preview: each pass shows live in the player. Half or quarter size: a quicker first pass of the whole shot, then the full size.</p>
       <ol id="stages"></ol>
       <p class="hint render-hint">Click a finished step to show it on every frame; click it again, or Esc, for the latest.</p>
       <button id="render-full" type="button" class="quiet render-full" hidden title="These edits took the frames of an earlier render whose other edits are far away: only the tracking and the composites ran. Render them in full, with their own shot, the same edits and seeds.">Render in full</button>
@@ -232,7 +232,7 @@
     <section class="help-tab" data-help="render" role="tabpanel" hidden>
       <dl>
         <dt>Steps</dt><dd>Generate makes the edit on the first frame, then its shot through the plate. The Render panel shows each step with its time; a finished step, clicked, shows its pass alone.</dd>
-        <dt>Preview pass</dt><dd>View > Preview pass: the shot preview at half or a quarter of the working size, or off, when a render starts with the full-size passes. The export stays at full size.</dd>
+        <dt>Preview</dt><dd>Off: the full size only, with no live preview. Latent preview, the default: each pass shows live in the player. Half or quarter size: a first pass of the whole shot at that size, then the full size. The export stays at full size.</dd>
         <dt>Stop</dt><dd>Esc, or Stop beside Generate: what finished is kept, and Enter goes on from there.</dd>
         <dt>Status line</dt><dd>The latest event. An error shows in red and a warning in amber, until the next event that succeeds. The log keeps the details.</dd>
         <dt>Finish</dt><dd>SDR to HDR regenerates the full-size shot in scene-linear values, fitted to the plate. Its result is half-float EXR frames in ACES2065-1, in the viewer and in Export.</dd>

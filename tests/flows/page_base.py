@@ -85,9 +85,9 @@ def run(browser, port, U):
     page.keyboard.press("Control+z"); away()
     U.check(page.is_hidden("#editing") and note() == "" and not hidden(), f"an undo ends the selection and the note: {note()!r}, rows {hidden()}")
 
-    page.select_option("#preview-size", value="0")
+    page.select_option("#preview-size", value="latent")
     tool("erase"); U.stroke(page, E3); away()
     ok, seen = both()
-    U.check(ok and page.is_hidden("#editing"), f"with Preview size: Off, a new edit shows the same first frame: {seen}")
+    U.check(ok and page.is_hidden("#editing"), f"with no preview pass, a new edit shows the same first frame: {seen}")
     page.keyboard.press("Escape")
     page.close()

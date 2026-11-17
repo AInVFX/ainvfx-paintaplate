@@ -92,6 +92,21 @@ export function previewSize(plate, work, cap, step = 32, tol = 0.025) {
 // Preview pass: half and a quarter of the working size, each on the grid with the plate's aspect (previewSize). `div` is
 // the part of the working size's long side, `cap` that long side.
 export const PREVIEW_PARTS = [[2, "Half size"], [4, "Quarter size"]];
+// The Preview menu: Off (no preview pass and no live preview), Latent preview (no preview pass; each pass's live preview
+// shows in the player), then a preview pass at half or a quarter of the working size, with the live preview too.
+export const PREVIEW_DEFAULT = "latent";
+export function readPreview(v) { // a stored or saved choice: "off", "latent", 2 or 4; null for anything else, which keeps the choice in use
+  if (v === 0 || v === "0") return "latent"; // a scene saved 0 for no preview pass, which showed the live preview
+  if (v === "off" || v === "latent") return v;
+  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
+  return PREVIEW_PARTS.some(([d]) => d === n) ? n : null;
+}
+export const previewDivOf = (mode) => (typeof mode === "number" ? mode : 0); // the preview pass's part of the working size; 0: none
+export const liveEvery = (mode) => (mode === "off" ? 0 : 1); // the workflows' live preview: at every step, or never
+// A step's name. For a set of Light edits only, the composite is Relight Transfer: the light from the shot, the detail
+// from the plate. Its times stay under the step's id, so the estimates keep learning.
+const LIGHT_STEPS = { comp: "Light transfer, preview", review: "Light transfer, full size" };
+export const stepLabel = (st, lightOnly) => (lightOnly && LIGHT_STEPS[st.id]) || st.label;
 export function previewSizes(plate, work, step = 32) {
   const out = [];
   for (const [div, label] of PREVIEW_PARTS) {

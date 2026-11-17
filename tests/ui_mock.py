@@ -41,6 +41,23 @@ def check(ok, what):
 
 # ---------- What the flows share: a page, a plate, a stroke, the log ----------
 
+class HalfSize:
+    """The browser. Its pages start with the Preview menu on Half size, the preview pass that most flows check. A flow
+    that tests the menu's default opens its page with new_page(default_preview=True)."""
+
+    def __init__(self, browser):
+        self.browser = browser
+
+    def new_page(self, default_preview=False, **context):
+        page = self.browser.new_page(**context)
+        if not default_preview:
+            page.add_init_script("if (localStorage.getItem('paintaplate.preview-menu') === null) localStorage.setItem('paintaplate.preview-menu', '2');")
+        return page
+
+    def __getattr__(self, name):
+        return getattr(self.browser, name)
+
+
 def load(browser, port, query="?blank=0", errors=None, **context):
     """A new page with the app loaded. `errors` collects console errors, page errors and failed requests, from the load on."""
     page = browser.new_page(viewport=VIEWPORT, **context)
@@ -276,7 +293,7 @@ def open_flow(browser, port):
     page.wait_for_function("document.querySelector('#spec').textContent.includes('fps')", timeout=60000)
     page.wait_for_function("/Describe the edit|Plate ready/.test(document.querySelector('#status').textContent)", timeout=60000)
     menu = page.eval_on_selector_all("#preview-size option", "els => els.map(e => e.textContent)")
-    check(menu == ["Half size (640 x 352)", "Quarter size (288 x 160)", "Off"], f"the Preview pass menu comes from the plate: half and a quarter of its working size, then Off: {menu}")
+    check(menu == ["Off", "Latent preview", "Half size (640 x 352)", "Quarter size (288 x 160)"], f"the Preview menu: Off, Latent preview, then half and a quarter of the plate's working size: {menu}")
     page.screenshot(path=os.path.join(SHOTS, "1_open.png"))
     no_errors(errors, "in the Open dialog")
     page.close()
@@ -509,7 +526,7 @@ def history_flow(browser, port):
           f"three undos go back through the seed, the words and the removal: {row_titles(page)} {row_words(page)}")
     check(klein_passes(page) == made, f"undo gets the kept results back: no Klein pass runs again ({klein_passes(page) - made} ran)")
     page.select_option("#preview-size", "4")  # Quarter size
-    check("288 x 160" in page.text_content("#status"), "the Preview pass menu sets the shot size")
+    check("288 x 160" in page.text_content("#status"), "the Preview menu sets the shot size")
     no_errors(errors, "in History")
     page.close()
 
@@ -896,11 +913,11 @@ def hdr_flow(browser, port):
     page.keyboard.press("p")
     paint_once(page, "a red lamp", [(0.3, 0.6), (0.36, 0.7)])
     page.keyboard.press("Enter")
-    page.wait_for_function("!document.querySelector('#live-inset').hidden", timeout=240000)
-    caption = page.text_content("#live-inset figcaption")
+    page.wait_for_function("!document.querySelector('#live').hidden", timeout=240000)
+    caption = page.text_content("#live figcaption")
     wait_log(page, added_line(REVIEWED), 240000, "full-size composite")
-    check(bool(re.search(r"step \d+ of \d+", caption)) and page.is_hidden("#live-inset"),
-          f"a full-size pass shows its live preview in a corner while the preview plays, then it goes: {caption}")
+    check(bool(re.search(r"step \d+ of \d+", caption)) and page.is_hidden("#live"),
+          f"a pass shows its live preview in the player, then its result replaces it: {caption}")
     new = lines()
     at = lambda texts: next((i for i, line in enumerate(new) if any(x in line for x in texts)), None)  # noqa: E731
     check(at(("SDR to HDR took", "SDR to HDR: done in")) is not None and at(("SDR to HDR took", "SDR to HDR: done in")) < at(REVIEWED),
@@ -1178,7 +1195,7 @@ def run_flow(name, port, root, plates, speed):
         else:
             raise RuntimeError("the mock ComfyUI did not start")
         with sync_playwright() as p:
-            browser = p.chromium.launch(channel=os.environ.get("PLAYWRIGHT_CHANNEL") or None)
+            browser = HalfSize(p.chromium.launch(channel=os.environ.get("PLAYWRIGHT_CHANNEL") or None))
             (FLOWS.get(name) or module_flow(name))(browser, port)
             browser.close()
     finally:
