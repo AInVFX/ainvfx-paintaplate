@@ -130,7 +130,7 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
       `quick pass at ${by(plate.prev)} · `);
     const start = scale(`${t} start`, quick.result, plate.work);
     const full = add(instantiate(WF.edit, `${t} full`, { caption: e.caption, seed: e.seed, ...e.full, relight: e.tool === "light" ? 1 : 0,
-      ...(e.shade ? { shade: e.shade } : {}), level: e.tool === "erase" },
+      level: e.tool === "erase" },
       { base: frame, reference: e.tool === "erase" || e.tool === "light" ? start : ref, start, mask }, { drop: EDIT_OUT }),
       `full size at ${by(plate.work)} · `);
     frame = e.tool === "light" ? full.relit : full.result;
@@ -171,7 +171,7 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
     hdr_grow: render.grow + render.feather, prefix: out("export"), matte_prefix: out("matte/matte") },
     { shot: made, ...(hdr ? { hdr } : {}), ...(a ? { matte_a: a, matte_b: paintMatte ?? erasedMatte } : {}) }));
   const files = `output/${render.prefix}`, n = edits.length, painting = edits.filter((e) => e.tool === "paint").length;
-  const images = edits.flatMap((e) => [e.mask, e.layer, e.shade].filter(Boolean)); // what the graph reads from the input folder
+  const images = edits.flatMap((e) => [e.mask, e.layer].filter(Boolean)); // what the graph reads from the input folder
   const sections = [
     ["readme", "How this graph works", [`AInVFX Paint a plate${about.version ? ` ${about.version}` : ""}: the scene of ${about.name ?? plate.path}, as one ComfyUI workflow.`,
       [`It makes ${n} edit${n === 1 ? "" : "s"} on frame 0, then renders them through the whole shot at full size, as Paint a plate's Export does:`,
@@ -183,7 +183,7 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
     ["models", "MODELS", "The models, each loaded once and shared by every step that uses it: FLUX 3 Image Klein, its text encoder and VAE for the edits; LTX 2.5, Gemma, its VAEs and IC-LoRAs for the passes; SAM 3.1 for the tracking."],
     ...edits.map((e, k) => [`edit${k + 1}`, `EDIT ${k + 1} · ${TOOLS[e.tool]}${quoted(e.words)}`, [
       `${TOOLS[e.tool]}${quoted(e.words)}, seed ${e.seed}. Klein makes a quick pass at ${by(plate.prev)} in ${e.quick?.steps ?? "its"} steps, then the full size at ${by(plate.work)} in ${e.full?.steps ?? "its"} steps from it. Its caption is the node marked [caption].`,
-      `In: ${k ? `the frame EDIT ${k} made` : "frame 0"}, its mask (${e.mask})${e.layer ? `, its strokes (${e.layer})` : ""}${e.shade ? `, its shade mask (${e.shade})` : ""}, from ComfyUI's input folder.`,
+      `In: ${k ? `the frame EDIT ${k} made` : "frame 0"}, its mask (${e.mask})${e.layer ? `, its strokes (${e.layer})` : ""}, from ComfyUI's input folder.`,
       `Out: ${{ erase: "the frame without the object, for the next edit, and the patch the clean plate pass starts from.", paint: "the frame with the addition, for the next edit, and the area PAINT TRACKING follows.", light: "the relit frame, for the next edit and the shot." }[e.tool]}`].join("\n\n")]),
     ["eraseTrack", "OBJECT TRACKING", `SAM 3.1 follows the area${erased.length > 1 ? "s" : ""} to clean through the plate at ${by(plate.trackErase)}, and Follow Matte keeps the matte on the object.\n\nIn: the plate and the masks of the Clean edits. Out: the clean matte, every frame.`],
     ["erasePass", "CLEAN PLATE PASS", `Lightricks' in-outpainting IC-LoRA on LTX 2.5 regenerates the area to clean on every frame, in two stages: ${by(low)}, then 2 steps at ${by(plate.work)} from it. The prompt describes the scene as it stays, with the removed objects never named.\n\nIn: the plate, the clean matte and frame 0 with every Clean edit. Out: the clean plate, every frame.`],

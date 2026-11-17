@@ -181,9 +181,6 @@ function dimFrame(e, before, size) {
   return c;
 }
 
-// A light edit's shade strokes, white on black and softened: Relight Transfer darkens the frame there, in linear light, as a
-// compositor multiplies a shadow. Klein ignores a painted shadow (3 Nov test), so the shade is applied as painted.
-
 const maskAt = (e, size) => (e.tool === "light" ? snap(null, size, "#fff") : snap(e.mask, size, "#000"));
 
 const colorsOf = (e) => e.strokes.filter((s) => s.tool !== "rub").map((s) => s.color); // eraser strokes have no colour
@@ -3519,7 +3516,6 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
   for (const [i, e] of active.entries()) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, caption: e.caption?.text || templateCaption(e),
     mask: await uploadGraphImage(maskAt(e, p.work), i + 1, "mask"),
     layer: e.tool === "paint" ? await uploadGraphImage(snap(e.paint, p.work), i + 1, "strokes") : null,
-    shade: null, // a shade reaches Klein in words only, as on the page (generate)
     quick: editSettings(e, p.prev, QUICK), full: editSettings(e, p.work, FULL) });
   const erase = active.some((e) => e.tool === "erase");
   const graph = sceneGraph(WF, { edits, about: { version: S.version, name: p.name },
