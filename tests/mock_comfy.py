@@ -172,7 +172,9 @@ async def steps(pid, total, seconds, preview=None, live=None):
         if every and k % every == 0:  # as Live Preview: the first at step 1, then every few steps, a WebP in the temp folder
             name = f"{pid}_{k + 1:03d}.webp"
             os.makedirs(os.path.join(folder("temp"), "paintaplate_live"), exist_ok=True)
-            Image.fromarray((np.clip(frame, 0, 1) * 255).astype(np.uint8)).resize((160, 90)).save(os.path.join(folder("temp"), "paintaplate_live", name), "WEBP")
+            frames = [frame] + [frame * (0.5 + 0.5 * (k + 1) / total)] * 2  # a looping shot: frame 1 stays at every step, as a shot starts from the edited first frame
+            pics = [Image.fromarray((np.clip(f, 0, 1) * 255).astype(np.uint8)).resize((160, 90)) for f in frames]
+            pics[0].save(os.path.join(folder("temp"), "paintaplate_live", name), "WEBP", save_all=True, append_images=pics[1:], duration=100, loop=0)
             await send({"type": "paintaplate.live", "data": {"prompt_id": pid, "step": k + 1, "steps": total,
                                                               "image": {"filename": name, "subfolder": "paintaplate_live", "type": "temp"}}})
         if preview is not None:

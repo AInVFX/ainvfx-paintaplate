@@ -387,19 +387,8 @@ export function erasePrompt(captions) {
 // stage refines it at full size in 2 steps (8 steps at full size took 181 s on a 1080p plate, 28 Oct).
 export const stageOne = ([w, h], step = 32) => [Math.max(step, Math.round(w / 2 / step) * step), Math.max(step, Math.round(h / 2 / step) * step)];
 
-// ---------- The render queue ----------
-// Every set of edits shown since the plate opened is a render, with three classes of steps: its preview, its full-size passes
-// and its export. The next step comes from the render whose next class is the lowest, so every preview runs before any full
-// size, and every full size before any export; within a class, the set of edits on show first, then the most recently shown.
-// An export someone is waiting for counts as a full-size step.
-export const RENDER_CLASSES = ["preview", "full", "export"];
-export function nextRender(items) { // items: [{ id, cls, current, wanted, urgent }]; the id of the render to run, or null
-  const rank = (x) => RENDER_CLASSES.indexOf(x.cls === "export" && x.urgent ? "full" : x.cls);
-  const best = items.filter((x) => RENDER_CLASSES.includes(x.cls))
-    .sort((a, b) => rank(a) - rank(b) || Number(b.current) - Number(a.current) || b.wanted - a.wanted)[0];
-  return best ? best.id : null;
-}
 
+// ---------- A render step and a new edit ----------
 // Generate stops a running render step only where that wastes least: a full-size or an export step in its first half. A step
 // past halfway costs less to finish than to run again, and a preview step is short and often reused by the new edit's render.
 export const stopsForEdit = ({ cls, progress }) => cls !== "preview" && progress < 0.5;
@@ -1196,7 +1185,7 @@ export function freesBefore(profile, last, name, room = null) { // room: { free,
 // was the time run so far, scaled by the progress: 37 s into a preview shot whose first step of 8 had just ended, the
 // page said « 4 min 10 s » for a pass that ended 20 s later. Now the sampling is timed by its own pace, between its
 // first and its latest step, and the rest comes from what the step took the last time on this machine (the page keeps
-// each step's total, lead and tail per size, frame count and memory profile, in paintaplate.times).
+// each step's total, lead and tail per size, frame count and memory profile, in paintaplate.step-times).
 export const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
 // A step's time before it ever ran on this machine (stepGuess): the 96 GB card's reference (STAGES' ref, in seconds at
 // REF_SIZE), scaled to the plate, then to the card. A 16 GB card, the small profile, holds one family of models at a time,
@@ -1204,23 +1193,33 @@ export const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sa
 // seconds. Measured on an RTX 4090 Laptop GPU (16 GB of VRAM, 52 GB of RAM), horse.mp4 at
 // 1920 x 1080 and 121 frames: the lead is what a job spent outside its sampler or its tracking loop in ComfyUI's trace,
 // and each factor makes the rest. SDR to HDR grows faster than its pixels (`grow`, the power of its scale): 172 s at
-// 1280 x 704 and 606 s at 1920 x 1088, 121 frames each, the same workflow for a fluid shot and a render. Other
+// 1280 x 704 and 606 s at 1920 x 1088, 121 frames each, the same workflow for a fluid shot and a render. The full-size shot grows the same way: 79.8 s at
+// 960 x 512, 156.6 s at 1280 x 704 and 576.4 s at 1920 x 1088. A composite also spends `fixed` seconds whatever its size:
+// comp took 7.8 s at 480 x 256 and 13.7 to 15.3 s at 960 x 544, review 13.5 s at 1280 x 704 and 23.2 to 26.0 s at
+// 1920 x 1088, 121 frames each. Other
 // profiles announce the references as they are. With SDR to HDR on, the full-size composite (review) and the export write
 // half-float EXR frames: `withHdr` multiplies their seconds (37.7 s and 14.6 s on the HDR test plate made from horse.mp4,
 // 1920 x 1080 and 121 frames). tests/js/render_estimates.test.mjs holds every measured step within 25%.
 export const SLOWER = {
   small: { lead: { ltx: 38, sam: 11, frames: 0 }, erase: 2.1, track: 1, trackfull: 1, clean: 3.35, shot: 1.64, cleanfull: 1.18,
-    full: 2.98, hdr: 1.166, comp: 1.3, review: 0.42, export: 0.235, grow: { hdr: 1.72 }, withHdr: { review: 1.9, export: 1.6 } },
+    full: 1.1, hdr: 1.166, comp: 0.42, review: 0.42, export: 0.235, grow: { hdr: 1.72, full: 1.72 }, withHdr: { review: 1.9, export: 1.6 },
+    fixed: { comp: 6.4, review: 3 } },
 };
 export const slower = (profile, id) => SLOWER[profile]?.[id] ?? 1;
-export const BIG_STEPS = ["full", "cleanfull", "hdr", "review", "export"]; // the steps made at the working size
+export const BIG_STEPS = ["full", "cleanfull", "cleanup", "hdr", "review", "export"]; // the steps made at the working size (cleanup: stageTwoGuess)
 export const stepSizeOf = (id, plate) => (BIG_STEPS.includes(id) ? plate.work : ["erase", "track", "trackfull"].includes(id) ? plate.track : plate.shot);
 const REF_SIZE = 928 * 512 * 97; // pixels times frames, where the references were measured
 export function stepGuess(id, ref, plate, profile, hdr = false) { // seconds: the reference scaled to this plate (BIG_STEPS at 0.73 of it), then to this GPU; hdr: the render makes SDR to HDR
   const [w, h] = stepSizeOf(id, plate), scale = (w * h * plate.frames) / REF_SIZE * (BIG_STEPS.includes(id) ? 0.73 : 1);
-  return (SLOWER[profile]?.lead?.[STEP_FAMILY[id]] ?? 0) + ref * Math.max(0.25, scale) ** (SLOWER[profile]?.grow?.[id] ?? 1) * slower(profile, id)
+  return (SLOWER[profile]?.lead?.[STEP_FAMILY[id]] ?? 0) + (SLOWER[profile]?.fixed?.[id] ?? 0) + ref * Math.max(0.25, scale) ** (SLOWER[profile]?.grow?.[id] ?? 1) * slower(profile, id)
     * (hdr ? SLOWER[profile]?.withHdr?.[id] ?? 1 : 1);
 }
+// The full-size clean plate pass when its first stage is the preview's own pass, made already: the pass less that stage
+// (ref: each step's reference, by id). Its seconds are kept as « cleanup », apart from the pass that makes both stages.
+// Whether the full-size clean plate pass starts from the preview's own pass: the Preview pass is on (previewCap, 0 when Off)
+// and makes its clean pass at the size of stage 1, half the working size.
+export const startsFromPreview = (plate, previewCap) => { if (!plate?.work || !previewCap) return false; const low = stageOne(plate.work); return plate.shot?.[0] === low[0] && plate.shot?.[1] === low[1]; };
+export const stageTwoGuess = (ref, plate, profile) => Math.max(1, stepGuess("cleanfull", ref.cleanfull, plate, profile) - stepGuess("clean", ref.clean, plate, profile));
 // The name a step's seconds are kept under: with SDR to HDR on, the steps it slows (SLOWER's withHdr) are kept apart.
 export const timeId = (id, hdr) => (hdr && Object.values(SLOWER).some((p) => p.withHdr?.[id]) ? `${id}+hdr` : id);
 export function stepLeft({ est, run, first = null, last = null, tail = null }) { // seconds left in the step that runs; first and last: [seconds since its start, progress]
@@ -1267,4 +1266,29 @@ export function memoryBytes(text) {
   const m = /^\s*(\d+(?:[.,]\d+)?)\s*(mb|m|gb|g)?\s*$/i.exec(text ?? "");
   const b = m ? parseFloat(m[1].replace(",", ".")) * (/^g/i.test(m[2] ?? "") ? 1e9 : 1e6) : NaN;
   return b >= CACHE_LEAST && b <= CACHE_MOST ? Math.round(b) : null;
+}
+
+// ---------- The cache on disk ----------
+// The folders under ComfyUI's output folder that some values name: a render's (paintaplate/<plate>/v<n>), the edits'
+// (paintaplate/<plate>/edits) or a plate's own files (paintaplate/<plate>). A saved scene keeps those of what it shows,
+// and the page those of the plate on screen, so View > Clear unused cache (cache.py) leaves them. It walks arrays, plain
+// objects, maps and sets, and reads every string, decoded as a view address.
+export function foldersIn(values) {
+  const found = new Set(), seen = new WeakSet();
+  const walk = (v, depth) => {
+    if (typeof v === "string") {
+      let text = v;
+      try { text = decodeURIComponent(v); } catch { /* a lone % leaves the string as it is */ }
+      for (const [, id, rest] of text.matchAll(/paintaplate\/([a-z0-9]+)((?:\/[^/&"'\s?#]+)*)/g)) {
+        const parts = rest.split("/").filter(Boolean);
+        found.add(parts.length >= 2 || /^(v\d+|edits)$/.test(parts[0] ?? "") ? `paintaplate/${id}/${parts[0]}` : `paintaplate/${id}`);
+      }
+    } else if (v && typeof v === "object" && depth < 8 && !seen.has(v)
+      && (Array.isArray(v) || v instanceof Map || v instanceof Set || Object.getPrototypeOf(v) === Object.prototype)) {
+      seen.add(v);
+      for (const x of v instanceof Map || v instanceof Set ? v.values() : Object.values(v)) walk(x, depth + 1);
+    }
+  };
+  walk(values, 0);
+  return [...found].sort();
 }

@@ -3,7 +3,7 @@
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
-import { WF, cancel, connect, hashHex, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl } from "./comfy.mjs";
+import { WF, cancel, connect, hashHex, jobsNotRun, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
@@ -11,8 +11,8 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { CACHE_LEAST, CACHE_MOST, askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, nextRender, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, PREVIEW_PARTS, previewCap, memoryBytes, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, colorShares, paintColors, inHues, shadowBox, shadowOf } from "./logic.mjs";
-import { FAMILY, framesNeed, freesBefore, memoryProfile, remember, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
+import { CACHE_LEAST, CACHE_MOST, askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, caption, changedMask, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, panelSize, passMovie, pickedColor, pickObjects, plainError, previewSize, PREVIEW_PARTS, previewCap, memoryBytes, previewSizes, reconcile, removedNames, secs, shotPrompt, snapKey, splitTable, stageOne, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, colorShares, paintColors, inHues, shadowBox, shadowOf } from "./logic.mjs";
+import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
@@ -37,8 +37,7 @@ const DEEP_SIDE = 960; // their long side, the playback video's
 const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-size edits, quick edits, SAM tracking
 // the erase matte only places the erase pass's box, grown by 1/24 of the width: 640 is enough, at half the time of 960
 const ERASE_TRACK_SIDE = 640;
-const LIVE = { every: 2 }; // the live preview while LTX samples, on every card: from step 1, every other step. Every pass hands its previews to showLive, which alone decides what shows
-const GRID_REACH = Q.get("grid") === "composite"; // ?grid=composite: the clean plate pass erases as far as the composite pastes (logic.gridGrow); by default one block more
+const LIVE = { every: 1 }; // the live preview while LTX samples, on every card: at every step. Every pass hands its previews to showLive, which alone decides what shows
 const TWO_STAGE_SHOT = Q.get("shot") === "2"; // ?shot=2: the full-size shot in two stages, at half the working size, then 2 steps at full size from it (shotup)
 const HDR_ON = Q.get("hdr") !== "0"; // SDR to HDR runs whenever its files and nodes are present; ?hdr=0 in the address turns it off
 const HDR_FRAMES = "ACES2065-1"; // the colour space of the SDR-to-HDR frames (HDR_SPACE in tools/build_workflows.py)
@@ -72,7 +71,6 @@ const SIDE_W = 288, LOG_H = 180; // CSS px: the side panel's width and the open 
 const PANEL_LEAST = { side: 220, log: 60 }, STAGE_LEAST = { side: 320, log: 320 }; // a drag never makes them smaller
 const PANEL_STEP = 16; // CSS px per arrow key on a focused divider
 const LAYOUT_PREF = "paintaplate.layout"; // the dragged sizes, kept for the next session
-const RENDERS_WANTED = 6; // sets of edits whose renders go on in the background: the most recently shown
 // The light brush: soft dabs every LIGHT.spacing of their radius, which is LIGHT.spread times the brush's. One stroke adds
 // at most LIGHT.flow of its colour (LIGHT.shade of darkness for a dark colour), so light builds up stroke by stroke and
 // mixed colours add up to white only after a few passes (30 Oct: one stroke of the earlier brush reached white at once).
@@ -336,6 +334,7 @@ async function openPlate(list, typed, opts = {}) {
   Object.assign(sharp, { plate: null, shot: null });
   view.classList.add("painting");
   plateVid.src = viewUrl(outputFile("ingest", out, "proxy"));
+  S.plate.ingested = plateVid.src; // the ingest's own files: a saved scene keeps their folder (logic.foldersIn)
   shotVid.removeAttribute("src"); shotVid.load();
   for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = false;
   const kind = spec.kind === "video" ? spec.codec : `${spec.ext.slice(1).toUpperCase()} ${spec.kind}`;
@@ -507,6 +506,19 @@ function planCaches() { // each cache's share and frame size, when the budget, t
   cacheUI();
 }
 function planSoon() { if (!planned.timer) planned.timer = setTimeout(() => { planned.timer = 0; planCaches(); }, 300); }
+async function clearCache() { // View > Clear unused cache…: what no saved scene and no plate on screen uses (cache.py), cleared on Yes
+  const keep = foldersIn([S.plate, [...S.renders.values()], S.edits]);
+  const ask1 = async (clear) => { const r = await post("/paintaplate/cache", { keep, clear }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
+  try {
+    const found = await ask1(false);
+    if (!found.files) return status("No unused cache to clear.");
+    if (!(await ask(`Clear ${memoryText(found.bytes)} of unused cache? Saved scenes, exports and the plate on screen keep their files.`, "Yes, clear it", { enter: true }))) return;
+    const fact = `Unused cache cleared: ${memoryText((await ask1(true)).bytes)}.`;
+    hud(fact);
+    status(fact);
+  } catch (err) { told(`Error: the unused cache was not cleared (${err.message})`, "Restart ComfyUI after an update of Paint a plate."); }
+}
+
 function customCache() { // View > Cache memory > Custom…: a size in MB or GB; the next session keeps it
   ask("Memory for the frames the viewer keeps, in MB or GB.", "Set", { field: { value: S.cache ? memoryText(S.cache) : "", placeholder: "2 GB" } }).then((typed) => {
     if (typed === false) return;
@@ -1041,7 +1053,7 @@ function showLive(d) {
   const at = d.steps ? `step ${d.step} of ${d.steps}` : `step ${d.step}`, part = S.stage?.part ? `${S.stage.part}, ` : ""; // a pass in two stages names its stage
   img.onload = () => {
     if (S.halted || key !== onShow()) return;
-    if (S.shot?.key === key) { // a preview or a full-size shot already plays: the pass on its way shows as an inset over it
+    if (key !== "fluid" || S.shot?.key === key) { // a render's pass shows in the inset: its looping picture of the whole shot, new at each step (a canvas would draw one still frame, and frame 1 is the edited first frame at every step)
       const box = $("#live-inset");
       box.querySelector("img").src = img.src;
       box.querySelector("figcaption").textContent = `${label}: ${part}${at}`;
@@ -1432,6 +1444,7 @@ view.addEventListener("pointermove", (e) => {
   if (nav) return navigateMove(e);
   if (stroke && S.keyDraft) return addKeyPoint(S.keyDraft, e);
   if (stroke && S.draft) return addPoint(S.draft, e);
+  if (!S.plate) return; // no plate open: the pointer over the frame reads no pixel
   S.cursor = frameAt(e);
   view.classList.toggle("near-wipe", nearWipe(e));
   if (!S.playing) requestAnimationFrame(render);
@@ -2609,13 +2622,12 @@ function touch(ms = IDLE_MS) { clearTimeout(idleTimer); idleTimer = setTimeout(i
 
 // ---------- The render queue ----------
 // Every set of edits shown since the plate opened is a render. Its steps fall in three classes: the preview, the full-size
-// passes with their composite (the review), and the export, which runs only when Export asks for it. One step runs at a time:
-// every preview before any full size, every full size before any export, and
-// within a class the render on show first, then the most recently shown (logic.nextRender). Nothing stops a step but
-// Generate: a bypass, an undo or another edit lets it finish, keeps its result, and the render resumes at its next step
-// later. Generate stops a full-size or export step in its first half (logic.stopsForEdit), and that step runs again later.
-// The last RENDERS_WANTED renders go on in the background; what every job made is also in the job index on disk.
-const YIELD = new Error("yield"); // a render step gives way to an edit, or to a step of a more urgent render
+// passes with their composite (the review), and the export, which runs only when Export asks for it. One step runs at a time,
+// for the set of edits on show alone (pickRender): its preview, then its full size, then its export. A set no longer on show
+// waits, and goes on at its next step when it shows again. Nothing stops a step but Generate: a bypass, an undo or another
+// edit lets it finish and keeps its result. Generate stops a full-size or export step in its first half (logic.stopsForEdit).
+// What every job made is also in the job index on disk.
+const YIELD = new Error("yield"); // a render step gives way to an edit, or to the render of another set of edits now on show
 
 function freeze(e) { // what a render needs of an edit, as it is now: a later change to the edit never reaches the render
   return { src: e, id: e.id, version: e.version, tool: e.tool, prompt: e.prompt, seed: e.seed, caption: e.caption?.text ?? "",
@@ -2670,11 +2682,9 @@ function nextClass(r) { // the class of a render's next step: "preview", "full" 
   return null;
 }
 
-function pickRender() { // the render whose step runs next, among the most recently shown
-  const recent = [...S.renders.values()].filter((r) => r.wanted).sort((a, b) => b.wanted - a.wanted).slice(0, RENDERS_WANTED);
-  const id = nextRender(recent.map((r) => ({ id: r.key, cls: nextClass(r), current: r.key === S.heroKey, wanted: r.wanted,
-    urgent: !!S.wantDownload && r.key === S.heroKey })));
-  return id === null ? null : S.renders.get(id);
+function pickRender() { // the render on show, while it has a step to make: no other set of edits renders
+  const r = S.renders.get(S.heroKey);
+  return r && nextClass(r) ? r : null;
 }
 
 function preempt() { // Generate: a full-size or export step in its first half stops for the new edit, and runs again later
@@ -2682,7 +2692,7 @@ function preempt() { // Generate: a full-size or export step in its first half s
   if (!st || !r) return;
   const def = STAGES.find((x) => x.id === st.id), cls = !def.final ? "preview" : st.id === "export" ? "export" : "full", pct = Math.round(st.progress * 100);
   if (!stopsForEdit({ cls, progress: st.progress })) return void log(`Render v${r.v}: ${def.label}: at ${pct}%, finishing before the new edit.`);
-  log(`Render v${r.v}: ${def.label}: stopped at ${pct}% for the new edit. It runs again after it.`);
+  log(`Render v${r.v}: ${def.label}: stopped at ${pct}% for the new edit. It goes on when its edits show again.`);
   cancel(...BACKGROUND);
 }
 
@@ -2705,7 +2715,7 @@ function idle() { // one render step at a time, from the render queue; the edits
 
 const grow = (w, erase) => Math.max(4, Math.round(w / (erase ? COMPOSITE_GROW.erase : COMPOSITE_GROW.other))); // pixels at width w
 const feather = (w) => Math.max(6, Math.round(w / COMPOSITE_FEATHER));
-const gridAt = (w) => (GRID_REACH ? gridGrow(w, S.plate.spec.width, grow(S.plate.spec.width, true) + feather(S.plate.spec.width)) : 1); // blocks grown at width w
+const gridAt = (w) => gridGrow(w, S.plate.spec.width, grow(S.plate.spec.width, true) + feather(S.plate.spec.width)); // blocks the clean plate pass grows its erased grid by at width w: as far as the composite pastes an erase
 
 // Every step of a render, in order. `preview` steps run at the preview size, once per size, so going back to a size plays what
 // it made at once. `final` steps run at full size right after them: the passes, then the full-size composite (the review) the viewer plays.
@@ -2719,6 +2729,7 @@ const STAGES = [
   { id: "review", label: "Composite, full size", ref: 12, final: true },
   { id: "export", label: "Export", ref: 10, final: true, onDemand: true },
 ];
+const REF = Object.fromEntries(STAGES.map((x) => [x.id, x.ref])); // each step's reference in seconds, by id (logic.stepGuess)
 const previewOf = (r) => r?.previews?.[S.plate.shot.join("x")]; // what this preview size made for a set of edits
 const doneOf = (r, st) => (st.preview ? previewOf(r) : r)?.done?.[st.id]; // seconds a step took, if it ran
 S.took = {}; // measured seconds per step, for this plate: the next estimates use them
@@ -2735,28 +2746,29 @@ function plan(r, active) { // the steps this set of edits needs: the erase pass 
 
 // What each step took on this machine, kept between sessions (logic.remember): its total, its lead before the sampler's
 // first step and its tail after the last, per size, frame count and memory profile.
-const TIMES_KEY = "paintaplate.times";
+const TIMES_KEY = "paintaplate.step-times"; // what each step took on this machine (logic.remember, logic.timeKey): only steps whose jobs ran
 let TIMES = {};
 try { TIMES = JSON.parse(localStorage.getItem(TIMES_KEY) ?? "{}") ?? {}; } catch { TIMES = {}; }
 const stepSize = (id) => stepSizeOf(id, S.plate);
 const stepKey = (id, hdr = false) => timeKey(timeId(id, hdr), stepSize(id), S.plate.frames, S.memoryProfile.name);
 const makesHdr = (skip) => !!skip && !skip.has("hdr"); // a render makes SDR to HDR unless its plan leaves the step out
+const timeStep = (id) => (id === "cleanfull" && startsFromPreview(S.plate, S.previewCap) ? "cleanup" : id); // the name a step's seconds go under: stage 2 alone apart from both stages
 
 function estimate(id, skip) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess. skip: the render's steps left out
-  const hdr = makesHdr(skip);
-  if (S.took[timeId(id, hdr)]) return S.took[timeId(id, hdr)];
-  const known = TIMES[stepKey(id, hdr)];
+  const hdr = makesHdr(skip), t = timeStep(id);
+  if (S.took[timeId(t, hdr)]) return S.took[timeId(t, hdr)];
+  const known = TIMES[stepKey(t, hdr)];
   if (known?.total) return known.total;
-  return stepGuess(id, STAGES.find((x) => x.id === id).ref, S.plate, S.memoryProfile.name, hdr);
+  return t === "cleanup" ? stageTwoGuess(REF, S.plate, S.memoryProfile.name) : stepGuess(id, REF[id], S.plate, S.memoryProfile.name, hdr);
 }
 
 async function step(r, id, work, store = r) { // run one step of a render, timed and shown; preview steps keep their result per size
   if (store.done?.[id] !== undefined || r.skip?.has(id)) return;
   if (S.running || S.queued || pickRender() !== r) throw YIELD; // an edit, or a step of a more urgent render, goes first
-  const t0 = performance.now(), behind = r.key === S.heroKey ? "" : ", in the background", guess = Math.round(estimate(id, r.skip));
+  const t0 = performance.now(), guess = Math.round(estimate(id, r.skip)), notRun = jobsNotRun();
   S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step
   stagesUI();
-  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: about ${guess} s${behind}.`);
+  log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: about ${guess} s.`);
   const stage = S.stage;
   await work((f) => {
     if (S.stage !== stage) return;
@@ -2765,12 +2777,14 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
     stagesUI();
   });
   hideLive();
-  const dt = (performance.now() - t0) / 1000;
-  TIMES = remember(TIMES, stepKey(id, makesHdr(r.skip)), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
-  try { localStorage.setItem(TIMES_KEY, JSON.stringify(TIMES)); } catch { /* a private window: the session's own times still serve */ }
+  const dt = (performance.now() - t0) / 1000, t = timeStep(id);
+  if (jobsNotRun() === notRun) { // a step whose jobs were answered without running (the job index, ComfyUI's cache) keeps no time
+    TIMES = remember(TIMES, stepKey(t, makesHdr(r.skip)), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
+    try { localStorage.setItem(TIMES_KEY, JSON.stringify(TIMES)); } catch { /* a private window: the session's own times still serve */ }
+    S.took[timeId(t, makesHdr(r.skip))] = dt;
+  }
   (store.done ??= {})[id] = dt;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
-  S.took[timeId(id, makesHdr(r.skip))] = dt;
   S.stage = null;
   log(`Render v${r.v}: ${STAGES.find((x) => x.id === id).label}: done in ${dt.toFixed(1)} s (estimate ${guess} s).`);
   stagesUI();
@@ -3080,7 +3094,7 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
     if (skip.has(st.id) || doneOf(r, st) !== undefined || (st.onDemand && !exporting)) continue;
     const est = estimate(st.id, skip);
     if (S.stage?.id === st.id && S.stage.key === S.heroKey) {
-      t += stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(st.id, makesHdr(skip))]?.tail ?? null });
+      t += stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(timeStep(st.id), makesHdr(skip))]?.tail ?? null });
     } else t += est;
   }
   return t;
@@ -3395,7 +3409,7 @@ async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it ag
   // a fluid scene keeps its blank plate, which opens in the model space (openBlank): the plate under its edits can be the
   // HDR fluid shot's EXR frames, in ACES2065-1, and the blank plate reopened in that space made its jobs again (2 Nov)
   const blank = f?.blankPath;
-  const scene = { ...SCENE, saved: new Date().toISOString(), work, ocio: { config, display, view, look: lk },
+  const scene = { ...SCENE, saved: new Date().toISOString(), build: S.build, folders: foldersIn([S.plate, S.renders.get(S.heroKey), S.edits.filter((e) => e.on)]), work, ocio: { config, display, view, look: lk },
     plate: { path: blank ?? S.plate.path, color_space: blank ? modelSpace() : S.plate.cs, name: S.plate.name },
     preview: previewDiv, deliver: { ...S.deliver }, in: S.inPt, out: S.outPt,
     edits: S.edits.map((e) => ({ tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on,
@@ -3469,7 +3483,7 @@ async function openScene(text) { // the plate opens in its colour space, then ev
   if (Number.isInteger(scene.in) && Number.isInteger(scene.out)) [S.inPt, S.outPt] = [scene.in, scene.out];
   queue(regenerateDependents);
   historyUI(); timelineUI();
-  status(`Scene opened: ${scene.edits.length} edit${scene.edits.length === 1 ? "" : "s"} with their seeds and captions. Results made on this machine come from the job index; the rest regenerates.`);
+  status(`Scene opened: ${scene.edits.length} edit${scene.edits.length === 1 ? "" : "s"} with their seeds and captions. ${scene.build && S.build && scene.build !== S.build ? "It was saved with other code or model files, so every edit and render runs again." : "Results made on this machine come from the job index; the rest regenerates."}`);
 }
 
 function clearRange() { S.inPt = 0; S.outPt = S.plate.frames - 1; hud("In and out points cleared"); timelineUI(); }
@@ -3837,6 +3851,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["X-ray", "X", () => setXray(!S.xray), !p, S.xray], ["Full screen", "`", fullScreen, !p, !!fullFrom],
       ["Cache memory", "", [["Auto", "", () => setCache(0), false, !S.cache], ...CACHE_CHOICES.filter(Boolean).map((b) => [memoryText(b), "", () => setCache(b), false, S.cache === b]),
         ["Custom…", "", customCache, false, !!S.cache && !CACHE_CHOICES.includes(S.cache)]], !!CACHE_MB],
+      ["Clear unused cache…", "", clearCache, false, false],
       ["Playback statistics", "", toggleStats, false, S.stats],
       ["Log", "", () => $("#log-btn").click(), false, !$("#log").hidden]]],
     ["Help", [["Getting started", "", () => showHelp("start")], ["Keys", "?", () => showHelp("keys")], ["Models and licences", "", showModels]]],
@@ -3923,6 +3938,7 @@ async function boot() { // the version and the build, the workflows, the WebSock
   const served = () => fetch("/paintaplate/version").then((r) => r.json()).catch(() => ({})); // routes.version_route
   const { version = "", build = "" } = await served(); // pyproject.toml's version, and the build: a hash of what computes on the server
   setBuild(build); // a part of every job index key: a result made by other code or other model files is not taken back (comfy.mjs)
+  S.build = build; // a saved scene keeps it: opened with another build, its jobs run again, and the page says so
   let asked = false;
   onBack(async () => { // ComfyUI answers again after its WebSocket closed: a restart on other code or model files asks for a reload
     const now = (await served()).build || "";

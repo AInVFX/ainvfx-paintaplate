@@ -427,8 +427,8 @@ def generate_flow(browser, port):
 
 def history_flow(browser, port):
     """Edits in History. A whole-object erase as the second edit: SAM runs while the strokes rest. The first edit removed:
-    the numbers start again, the erase's matte and clean plate are used again, no render step stops, the render before
-    goes on in the background, the preview comes before any full-size step. Undo and redo of the removal. An edit
+    the numbers start again, the erase's matte and clean plate are used again, no render step stops, only the set on show
+    renders, its preview before its full size. Undo and redo of the removal. An edit
     selected: its words retyped, another seed. Three undos take the kept results back. The preview size menu."""
     errors = []
     page = load(browser, port, errors=errors)
@@ -467,10 +467,10 @@ def history_flow(browser, port):
     lines = log_lines(page)[seen:]
     stopped = [line for line in lines if re.match(r"^(clean|cleanup|shot|matte|comp|review|export) \S+: cancelled", line)]
     check(not stopped, f"a removal stops no render step: the render it leaves keeps what it made {stopped}")
-    behind = [line for line in lines if line.rstrip(".").endswith(", in the background")]
-    check(bool(behind), f"the render of the edits before the removal goes on in the background: {behind[:2]}")
+    shown = {re.match(r"^Render v(\d+):", line)[1] for line in lines if re.match(r"^Render v\d+: .*: about \d+ s", line)}
+    check(len(shown) == 1, f"only the set on show renders: the render of the edits before the removal waits (renders {sorted(shown)})")
     steps = [(i, line) for i, line in enumerate(lines) if re.match(r"^Render v\d+: .*(?: \(about |: about )\d+ s", line)]
-    comp = next((i for i, line in steps if re.search(r"Composite, preview(?: \(|: )about", line) and not line.rstrip(".").endswith("in the background")), None)
+    comp = next((i for i, line in steps if re.search(r"Composite, preview(?: \(|: )about", line)), None)
     full = next((i for i, line in steps if re.search(r"(, full size|Export)(?: \(|: )about", line)), None)
     check(comp is not None and (full is None or comp < full),
           f"the render queue: the preview of the edits on show runs before any full-size step (composite at {comp}, first full size at {full})")

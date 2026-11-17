@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { changedMask, erasePrompt, erasesPaint, indexValues, nextRender, paintBoxes, pickedColor, stageOne, stopsForEdit, blankSpec, caption, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, escapeAction } from "../../web/logic.mjs";
+import { changedMask, erasePrompt, erasesPaint, indexValues, paintBoxes, pickedColor, stageOne, stopsForEdit, blankSpec, caption, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, escapeAction } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -249,15 +249,6 @@ test("the full size's first stage is half the working size, in multiples of 32",
   assert.deepEqual(stageOne([1920, 800]), [960, 416]);
 });
 
-test("the render queue: every preview first, then every full size, then every export; the set on show first, then the newest", () => {
-  const r = (id, cls, current = false, wanted = 1, urgent = false) => ({ id, cls, current, wanted, urgent });
-  assert.equal(nextRender([r("on show", "full", true, 3), r("older", "preview", false, 2)]), "older", "a preview before any full size");
-  assert.equal(nextRender([r("a", "preview", false, 1), r("b", "preview", false, 2), r("c", "preview", true, 3)]), "c");
-  assert.equal(nextRender([r("a", "full", false, 1), r("b", "full", false, 2)]), "b", "then the most recently shown");
-  assert.equal(nextRender([r("other", "full", false, 2), r("on show", "export", true, 3)]), "other", "an export waits for the full sizes");
-  assert.equal(nextRender([r("other", "full", false, 2), r("on show", "export", true, 1, true)]), "on show", "unless someone waits for it");
-  assert.equal(nextRender([r("done", null), r("failed", undefined)]), null);
-});
 
 test("Generate stops only a full-size or export step in its first half", () => {
   assert.equal(stopsForEdit({ cls: "full", progress: 0.3 }), true);
@@ -737,7 +728,7 @@ test("the time left in a step follows the sampler's own pace, not the time the m
   assert.equal(stepLeft({ est: 42, run: 53, first: [37, 0.125], last: [51, 1], tail: 6 }), 4); // the sampling over: what is left of the tail
   assert.equal(stepLeft({ est: 42, run: 80, first: [37, 0.125], last: [51, 1], tail: 6 }), 1); // never less than a second
   assert.equal(stepLeft({ est: 42, run: 60 }), 4.2); // a step with no progress, past its estimate: a tenth of it
-  assert.equal(slower("small", "full"), 2.98); // render_estimates.test.mjs holds the laptop's steps
+  assert.equal(slower("small", "full"), 1.1); // render_estimates.test.mjs holds the laptop's steps
   assert.equal(slower("large", "full"), 1);
   const key = timeKey("shot", [640, 352], 121, "small");
   assert.equal(key, "shot|640x352x121|small");

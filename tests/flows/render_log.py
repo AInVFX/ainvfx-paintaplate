@@ -60,7 +60,7 @@ def run(browser, port, U):
     page.keyboard.press("Enter")
     U.wait_log(page, SHOT, 120000, "the preview shot's line, with the previews the page received")
     ltx = [p["live"] for p in mock(port, "/mock/posts")[before:] if p["live"] is not None]
-    U.check(len(ltx) >= 1 and all(every == 2 for every in ltx), f"a card under 24 GB: every LTX pass asks for its live previews, every other step: {ltx}")
+    U.check(len(ltx) >= 1 and all(every == 1 for every in ltx), f"a card under 24 GB: every LTX pass asks for its live previews, at every step: {ltx}")
     jobs = [t for t in page.evaluate("window.__lines") if re.match(r"^[a-z]+ [0-9a-f?]{1,8}: ", t)]
     done = [t.split(":")[0] for t in jobs if ": done in" in t]
     U.check(len(done) >= 3 and len(set(done)) == len(done) and all(LINE.match(t) for t in jobs),
