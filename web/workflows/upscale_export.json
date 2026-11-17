@@ -15,17 +15,16 @@
   }
  },
  "2": {
-  "class_type": "PaintAPlate_LoadPlate",
+  "class_type": "PaintAPlate_JoinWindows",
   "inputs": {
-   "path": "",
-   "max_frames": 121,
-   "pad_8n1": false
+   "folder": "",
+   "overlap": 4
   },
   "_meta": {
-   "title": "Upscaled frames",
+   "title": "Upscaled windows, joined",
    "slots": {
-    "path": "frames",
-    "max_frames": "max_frames"
+    "folder": "frames",
+    "overlap": "overlap"
    }
   }
  },

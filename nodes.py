@@ -877,5 +877,32 @@ class KeepBlack(io.ComfyNode):
         return io.NodeOutput(to_image(out))
 
 
+class JoinWindows(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_JoinWindows",
+            display_name="Join Windows",
+            category=CATEGORY,
+            description="Joins the frames of a shot's windows, saved one subfolder each in 'folder' and read in the order "
+                        "of their names, into one batch. Two neighbouring windows share 'overlap' frames: there a linear "
+                        "crossfade goes from the earlier window to the later one.",
+            inputs=[
+                io.String.Input("folder", tooltip="The windows' parent folder, a path as Load Plate takes it."),
+                io.Int.Input("overlap", default=4, min=0, max=64, tooltip="Frames that two neighbouring windows share."),
+            ],
+            outputs=[io.Image.Output(display_name="images")],
+        )
+
+    @classmethod
+    def execute(cls, folder, overlap) -> io.NodeOutput:
+        full = resolve(folder)
+        windows = sorted(os.path.join(full, d) for d in os.listdir(full) if os.path.isdir(os.path.join(full, d)))
+        if not windows:
+            raise ValueError(f"Join Windows: no window folder in {folder}.")
+        rgb = plateio.join_windows(windows, overlap, WORKERS)
+        return io.NodeOutput(torch.from_numpy(rgb).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()))
+
+
 NODES = [LoadPlate, SavePlate, ColorSpace, SaveFrames, SaveMovie, FitToPlate, CompositeFrames, RelightTransfer, FollowMatte, LevelFill, LivePreview,
-         KeyframeVideo, HDRMatch, KeepBlack]
+         KeyframeVideo, HDRMatch, KeepBlack, JoinWindows]

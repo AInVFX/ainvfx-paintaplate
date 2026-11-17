@@ -23,10 +23,11 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 
+from build_workflows import UPSCALE_CHUNK, UPSCALE_OVERLAP  # noqa: E402
+
 LONG_SIDE = 3840
 FACTOR = 2  # SeedVR2 restores from at most the target divided by this
-WINDOW = 21  # frames per job, one SeedVR2 chunk: with the 7B model held in RAM, as on a 16 GB GPU, a window of 42 frames
-#              at 3840 x 2160 went past 52 GB of RAM in the post-processing's colour correction
+WINDOW = UPSCALE_CHUNK  # the smallest window: one chunk
 OUTPUT = "output:"  # folders.OUTPUT: a path under ComfyUI's output folder, as Load Plate reads it
 
 
@@ -47,16 +48,23 @@ def source_size(width: int, height: int, target: tuple) -> tuple:
     return 2 * round(target[0] / FACTOR / 2), 2 * round(target[1] / FACTOR / 2)
 
 
-def windows(frames: int, first: int = 0, count: int = WINDOW, every: bool = False) -> list:
-    """The windows to run, as (first, count): the one asked for, or with `every` the whole shot in windows of `count`."""
+def windows(frames: int, first: int = 0, count: int = WINDOW, every: bool = False, overlap: int = UPSCALE_OVERLAP) -> list:
+    """The windows to run, as (first, count): the one asked for, or with `every` the whole shot in windows of `count`
+    frames, each sharing `overlap` frames with the one before."""
     if not every:
         return [(first, max(1, min(count, frames - first)))]
-    return [(f, min(count, frames - f)) for f in range(0, frames, count)]
+    out, start = [], 0
+    while True:
+        out.append((start, min(count, frames - start)))
+        if start + count >= frames:
+            return out
+        start += count - overlap
 
 
 def export_values(shot: str, frames: int, label: str = "upscale") -> dict:
     """The slots of the upscale_export workflow: the windows' frames, read under ComfyUI's output folder."""
-    return {"shot": shot, "frames": f"{OUTPUT}{label}/upscale", "max_frames": frames, "prefix": f"{label}/export"}
+    return {"shot": shot, "frames": f"{OUTPUT}{label}/upscale", "max_frames": frames, "prefix": f"{label}/export",
+            "overlap": UPSCALE_OVERLAP}
 
 
 def frame_size(path: str) -> tuple:
@@ -69,13 +77,13 @@ def frame_size(path: str) -> tuple:
 
 
 def values(shot: str, width: int, height: int, frames: int, label: str = "upscale", first: int = 0, count: int = WINDOW,
-           color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16", seed: int = 42) -> dict:
-    """The slots of the upscale workflow for one window of `frames` frames."""
+           color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16", seed: int = 42, window: int = 0) -> dict:
+    """The slots of the upscale workflow for window number `window` of a shot of `frames` frames: its own folder."""
     w, h = target_size(width, height)
     sw, sh = source_size(width, height, (w, h))
     return {"shot": shot, "max_frames": frames, "source_width": sw, "source_height": sh, "first": first, "count": max(1, min(count, frames - first)), "width": w,
             "height": h, "color_space": color_space, "color_fix": color_fix, "format": fmt, "seed": seed,
-            "prefix": f"{label}/upscale/f"}
+            "prefix": f"{label}/upscale/w{window:03}/f"}
 
 
 def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first: int = 0, count: int = WINDOW,
@@ -87,7 +95,8 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
         full = next(os.path.join(d, f) for d, _, fs in os.walk(comfy) for f in fs if f == os.path.basename(shot))
     w, h, n = _plate_info(full)
     shutil.rmtree(os.path.join(comfy, "output", label), ignore_errors=True)
-    jobs = [("upscale", values(shot, w, h, n, label, f, c, color_space, color_fix, fmt)) for f, c in windows(n, first, count, every)]
+    jobs = [("upscale", values(shot, w, h, n, label, f, c, color_space, color_fix, fmt, window=k))
+            for k, (f, c) in enumerate(windows(n, first, count, every))]
     if every:
         jobs.append(("upscale_export", export_values(shot, n, label)))
     gb = lambda x: "not read" if x is None else f"{x:.1f} GB"  # noqa: E731
@@ -100,11 +109,12 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
         rows.append(f"| {name} | {what} | {status} | {r['seconds']:.1f} | {gb(r['peaks']['vram'])} | {gb(r['peaks']['ram'])} |")
         nodes += [f"| {name}, {what} | {node} | {s:.1f} |" for node, s in node_rows(r["spent"], prompt)]
         seconds.append(r["seconds"])
-    files = sorted(glob.glob(os.path.join(comfy, "output", label, "upscale", "f_*")))
+    files = sorted(glob.glob(os.path.join(comfy, "output", label, "upscale", "w*", "f_*")))
     size = frame_size(files[0]) if files else None
     v = jobs[0][1]
     lines = [f"# Upscale to 4K: `{shot}`", "", "| | |", "| --- | --- |", f"| ComfyUI | {url} |",
-             f"| Shot | {w} x {h}, {n} frames |",
+             f"| Shot | {w} x {h}, {n} frames; {len(jobs) - every} " + ("window" if len(jobs) - every == 1 else "windows")
+             + f" of up to {count} frames" + (f", sharing {UPSCALE_OVERLAP} frames" if len(jobs) - every > 1 else "") + " |",
              f"| Target | {v['width']} x {v['height']}, from " + (f"{v['source_width']} x {v['source_height']}" if v["source_width"] else "the shot's size")
              + f", colour correction {color_fix}, {fmt} |",
              f"| Frames | {len(files)} files" + (f" at {size[0]} x {size[1]}" if size else "") + " |"]

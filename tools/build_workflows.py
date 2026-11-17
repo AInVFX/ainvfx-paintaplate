@@ -34,6 +34,7 @@ HDR_LORA = "ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors"  # Lightricks' SDR-t
 HDR_SCENE = "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors"  # its fixed scene embeddings: the prompt it takes (models/embeddings)
 SEEDVR2 = "seedvr2_7b_fp16.safetensors"  # SeedVR2 7B, a one-step video restoration model: Upscale to 4K (models/diffusion_models)
 SEEDVR2_VAE = "seedvr2_ema_vae_fp16.safetensors"  # its VAE (models/vae)
+UPSCALE_OVERLAP = 4  # frames two neighbouring chunks or windows share and crossfade: one latent frame of SeedVR2's VAE
 UPSCALE_CHUNK = 21  # frames SeedVR2 samples at once: one pass over 121 frames at 3840 x 2160 overflows the model's MLP
 HDR_SPACE = "ACES2065-1"  # the SDR-to-HDR frames are saved in it: the colour space the config's file rules give an EXR
 FLUID_NEGATIVE = "blurry, low quality, distorted, watermark"  # the negative prompt of its model card's samples
@@ -853,15 +854,18 @@ def upscale():
     SeedVR2 restores from at most half the target: a result larger than that first comes down to it (Slots source_width
     and source_height; 0 x 0 keeps the window's size). A plate already at the target's size is then restored at its own.
 
-    The page sends the export (Slot shot), in the plate's colour space (Slot color_space), and one job per window, so a
-    window bounds a job's RAM: 121 frames at 3840 x 2160 in one job reach 52 GB of RAM on a 96 GB GPU, and on a 16 GB GPU
-    the model's 15.7 GB stay in RAM as well. A window is one chunk, UPSCALE_CHUNK frames, its default. The window goes
-    into the model space with the whole shot's peak (peak_of), so an HDR shot keeps one exposure from one window to the
-    next, and comes back with that peak. Lanczos brings it to the target size; SeedVR2 restores it in chunks of
-    UPSCALE_CHUNK frames, in one sampling step; its post-processing matches the colours to the Lanczos frames (Slot
-    color_fix: lab, the node's default, or none). Save Frames writes the window: 16-bit PNG, or half-float EXR for a float
-    plate (Slot format). Core's file counter goes on from the files already in the folder, so the windows of one prefix
-    make one numbered sequence.
+    The page sends the export (Slot shot), in the plate's colour space (Slot color_space), and as many frames per job as
+    the machine's RAM holds: the whole shot where it can, else windows. 121 frames at 3840 x 2160 in one job reach 52 GB
+    of RAM on a 96 GB GPU; on a 16 GB GPU the model's 15.7 GB stay in RAM as well, and a window of 42 frames went past a
+    52 GB cap. Neighbouring windows share UPSCALE_OVERLAP frames, which upscale_export crossfades, and each window saves
+    into a folder of its own (Slot prefix). The window goes into the model space with the whole shot's peak (peak_of), so
+    an HDR shot keeps one exposure from one window to the next, and comes back with that peak.
+
+    Lanczos brings the window to the target size. SeedVR2 restores it in chunks of UPSCALE_CHUNK frames, in one sampling
+    step: one pass over 121 frames at 3840 x 2160 overflows the model's MLP, and core's automatic chunk size takes the
+    whole shot on a large GPU. Neighbouring chunks share one latent frame, UPSCALE_OVERLAP frames, which core's merge
+    crossfades. The post-processing matches the colours to the Lanczos frames (Slot color_fix: lab, the node's default,
+    or none). Save Frames writes the window: 16-bit PNG, or half-float EXR for a float plate (Slot format).
     """
     g = Graph()
     load = g("PaintAPlate_LoadPlate", _title="Result", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
@@ -875,7 +879,7 @@ def upscale():
     unet = g("UNETLoader", unet_name=SEEDVR2, weight_dtype="default")
     latent = g("VAEEncodeTiled", pixels=g("SeedVR2Preprocess", resized_images=resized), vae=vae, tile_size=512, overlap=128,
                temporal_size=64, temporal_overlap=8)
-    chunks = g("SeedVR2TemporalChunk", latent=latent, temporal_overlap=0, chunking_mode="manual",
+    chunks = g("SeedVR2TemporalChunk", latent=latent, temporal_overlap=UPSCALE_OVERLAP // 4, chunking_mode="manual",
                chunking_mode__frames_per_chunk=UPSCALE_CHUNK)
     cond = g("SeedVR2Conditioning", model=unet, vae_conditioning=chunks[0])
     sampled = g("KSampler", _progress=True, model=unet, seed=Slot("seed", 42), steps=1, cfg=1.0, sampler_name="euler",
@@ -890,14 +894,15 @@ def upscale():
 
 
 def upscale_export():
-    """Upscale to 4K's export, after the last window: the windows' frames (Slot frames) written by Save Plate at their own
-    size, in the format of the export at the plate's size (Slot shot), which Load Plate reads for its spec: the same file
-    type, codec, bit depth, frame numbers, colour tags, timecode and audio. The frames are in the plate's colour space
-    already, so nothing converts them."""
+    """Upscale to 4K's export, after the last window. Join Windows reads the windows' folders under one parent folder
+    (Slot frames) and crossfades the frames that neighbouring windows share (Slot overlap); a shot made in one job is one
+    window. Save Plate writes the joined frames at their own size, in the format of the export at the plate's size (Slot
+    shot), which Load Plate reads for its spec: the same file type, codec, bit depth, frame numbers, colour tags, timecode
+    and audio. The frames are in the plate's colour space already, so nothing converts them."""
     g = Graph()
     shot = g("PaintAPlate_LoadPlate", _title="Result: its format", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
-    frames = g("PaintAPlate_LoadPlate", _title="Upscaled frames", path=Slot("frames", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
-    g("PaintAPlate_SavePlate", _title="Upscaled export", _output="export", images=frames[0], plate=shot[2],
+    frames = g("PaintAPlate_JoinWindows", _title="Upscaled windows, joined", folder=Slot("frames", ""), overlap=Slot("overlap", UPSCALE_OVERLAP))
+    g("PaintAPlate_SavePlate", _title="Upscaled export", _output="export", images=frames, plate=shot[2],
       filename_prefix=Slot("prefix", "paintaplate/plate/upscaled"), keep_untouched=False)
     g.save("upscale_export")
 

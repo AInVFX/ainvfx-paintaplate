@@ -141,7 +141,7 @@
     "9",
     0
    ],
-   "temporal_overlap": 0,
+   "temporal_overlap": 1,
    "chunking_mode": "manual",
    "chunking_mode.frames_per_chunk": 21
   }
