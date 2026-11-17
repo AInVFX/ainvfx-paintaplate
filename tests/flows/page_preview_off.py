@@ -5,6 +5,9 @@ import re
 STATUS = "document.querySelector('#status').textContent"
 PICTURES = """() => { window.__pictures = []; const v = document.querySelector('#view');
   new MutationObserver(() => window.__pictures.push(v.dataset.picture)).observe(v, { attributes: true, attributeFilter: ['data-picture'] }); }"""
+INSET = """() => { window.__inset = []; const box = document.querySelector('#live-inset'), img = box.querySelector('img');
+  new MutationObserver(() => window.__inset.push([img.getAttribute('src'), box.querySelector('figcaption').textContent]))
+    .observe(img, { attributes: true, attributeFilter: ['src'] }); }"""
 
 
 def run(browser, port, U):
@@ -19,6 +22,7 @@ def run(browser, port, U):
     U.check(page.text_content("#status") == "Shot preview: off. A render starts with the full-size passes.", f"the status line says so: {page.text_content('#status')}")
     page.evaluate(U.WATCH)
     page.evaluate(PICTURES)
+    page.evaluate(INSET)
     page.keyboard.press("p")
     U.paint_once(page, "a lantern", [(0.3, 0.5), (0.34, 0.56)])
     page.keyboard.press("Enter")
@@ -30,7 +34,9 @@ def run(browser, port, U):
     U.check(any(t.startswith("Render v1: 1 edit (") and "shot preview off" in t for t in lines), "the render's line says that the shot preview is off")
     U.check(not any(t.startswith("Viewer: full-size shot") for t in lines), "the viewer keeps the plate until the full-size composite")
     pics = page.evaluate("window.__pictures")
-    U.check("live" in pics, f"while a full-size pass generates, its live preview shows in the frame: {sorted(set(pics))}")
+    U.check("live" not in pics, f"while a full-size pass generates, the frame keeps its picture: {sorted(set(pics))}")
+    shown = page.evaluate("window.__inset")
+    U.check(any("full size" in caption for _, caption in shown), f"and the pass's live preview shows in the inset: {[caption for _, caption in shown][:2]}")
     rows = page.evaluate("[...document.querySelectorAll('#stages li .name')].map((e) => e.textContent)")
     U.check(bool(rows) and not any(", preview" in r for r in rows), f"the Render panel lists no preview row: {rows}")
     page.close()
