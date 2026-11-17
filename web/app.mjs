@@ -3623,21 +3623,20 @@ let registry = null;
 async function showModels() {
   const behind = await modelsOnShow(); // the pipeline's rule, as the export's MODELS.md (S.toHdr became the plate's own rule in 1.7.0)
   const link = (text, href) => Object.assign(document.createElement("a"), { textContent: text, href, target: "_blank", rel: "noopener" });
-  const table = (rows, uses) => {
-    const t = document.createElement("table");
-    t.append(...rows.map((m) => {
-      const tr = document.createElement("tr"), cell = (...kids) => { const td = document.createElement("td"); td.append(...kids); tr.append(td); };
-      cell(link(m.name, m.source), document.createElement("br"), Object.assign(document.createElement("small"), { textContent: `${m.file} at ${m.revision.slice(0, 7)}` }));
-      cell(uses ? `${m.use} (${m.workflows.join(", ")})` : m.use);
-      cell(link(m.licence, m.licence_url), ...(m.upstream ? [document.createElement("br"), Object.assign(document.createElement("small"), { textContent: "original: " }), link(m.upstream.licence, m.upstream.source)] : []),
-        ...(m.gated ? [document.createElement("br"), Object.assign(document.createElement("small"), { textContent: "accept on Hugging Face first" })] : []));
-      return tr;
-    }));
-    return t;
+  const used = new Map(behind.map((m) => [m.id, m])); // the models behind the result on show, with the workflows that used them
+  const small = (...kids) => { const e = document.createElement("small"); e.append(...kids); return e; };
+  const line = (...kids) => { const e = document.createElement("p"); e.append(...kids); return e; };
+  const card = (m) => { // one model: its name, what it does (and where, when it made the result on show), its licence, its file
+    const a = Object.assign(document.createElement("article"), { className: used.has(m.id) ? "behind" : "" });
+    a.dataset.id = m.id;
+    a.append(line(link(m.name, m.source)), line(used.has(m.id) ? `${m.use} (${used.get(m.id).workflows.join(", ")})` : m.use),
+      line(link(m.licence, m.licence_url), ...(m.upstream ? [small(" · original: "), link(m.upstream.licence, m.upstream.source)] : []),
+        ...(m.gated ? [small(" · accept on Hugging Face first")] : [])),
+      small(`${m.file} at ${m.revision.slice(0, 7)}`));
+    return a;
   };
-  const what = !S.plate ? "No plate is open." : behind.length ? `The result on show was made with ${behind.length} models:` : "The plate on show has no edits: no model made it.";
-  $("#models-shown").replaceChildren(Object.assign(document.createElement("p"), { textContent: what }), ...(behind.length ? [table(behind, true)] : []));
-  $("#models-all").replaceChildren(table(registry.models, false));
+  $("#models-shown").textContent = !S.plate ? "No plate is open." : behind.length ? `The result on show was made with ${behind.length} models, marked in gold.` : "The plate on show has no edits: no model made it.";
+  $("#models-all").replaceChildren(...registry.models.map(card));
   $("#models").dataset.shown = behind.map((m) => m.id).join(",");
   showHelp("models");
 }

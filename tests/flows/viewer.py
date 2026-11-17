@@ -196,9 +196,10 @@ def fluid_wipe_and_models(page, U):
     page.get_by_role("menuitem", name="Models and licences", exact=True).click()
     page.wait_for_function("document.querySelector('#help').open && !document.querySelector('#models').hidden", timeout=10000)
     shown = page.get_attribute("#models", "data-shown").split(",")
-    rows = page.eval_on_selector_all("#models-all tr", "els => els.length")
-    U.check({"fluid", "ltx", "ltx-text", "ltx-vae"} <= set(shown) and "klein" not in shown and rows == 15,
-            f"Models and licences: the models behind the fluid shot, then every model: {shown}, {rows} rows")
+    cards = page.eval_on_selector_all("#models-all article", "els => els.map((e) => [e.dataset.id, e.classList.contains('behind')])")
+    marked = {i for i, behind in cards if behind}
+    U.check({"fluid", "ltx", "ltx-text", "ltx-vae"} <= set(shown) and "klein" not in shown and len(cards) == 15 and marked == set(shown),
+            f"Models and licences: every model in cards, those behind the fluid shot marked: {shown}, {len(cards)} cards, marked {sorted(marked)}")
     page.keyboard.press("Escape")
     page.keyboard.press("?")
     shown = page.evaluate("[...document.querySelectorAll('#help .help-tab')].filter((t) => !t.hidden).map((t) => t.dataset.help)")

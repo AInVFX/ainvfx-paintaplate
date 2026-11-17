@@ -372,12 +372,14 @@ dialog.open { width: min(900px, 94vw); }
 #help .tabs { flex-wrap: wrap; }
 .help-steps { margin: 0; padding-left: 20px; color: var(--muted); }
 .help-steps li { margin: 0 0 8px; }
-.models table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.3; }
-#help:has(#models:not([hidden])) { width: min(1280px, 96vw); }
-#help .models h3 { margin: 8px 0 4px; }
-#help form { margin-top: 8px; } /* the models' table, wide enough to fit one screen */
-.models td { padding: 2px 8px; border-top: 1px solid rgba(128, 128, 128, 0.25); vertical-align: top; }
-.models small { opacity: 0.7; }
+#help form { margin-top: 8px; }
+#help .model-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 20px; } /* every model in three columns, the size of the other tabs */
+#help .model-cards article { border-top: 1px solid rgba(128, 128, 128, 0.25); padding-top: 4px; font-size: 12px; line-height: 1.35; }
+#help .model-cards article.behind { border-top: 2px solid var(--gold); } /* a model behind the result on show */
+#help .model-cards p { margin: 0 0 2px; }
+#help .model-cards small { opacity: 0.7; overflow-wrap: anywhere; }
+#help .model-cards article > small { display: block; }
+@media (max-width: 760px) { #help .model-cards { grid-template-columns: 1fr; } }
 #stages li.compared .dot { box-shadow: 0 0 0 2px #fff; }
 .xray { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
 #stages li.compared .name { text-decoration: underline dotted; text-underline-offset: 3px; }
