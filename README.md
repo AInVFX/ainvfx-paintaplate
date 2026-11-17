@@ -20,8 +20,8 @@ Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com
 | **Light** | Relights the shot. Paint where the light comes from, in its colour. Paint in black to darken an area |
 | **A fluid shot** | Starts from a blank plate. Paint flat colour blobs on a few keyframes: ainvfx-fluid turns them into smoke, steam, fire, explosions, dust, fog or clouds. The shot becomes the plate for every edit |
 | **Review** | The viewer follows OpenRV: colour through OpenColorIO, the same keys, a wipe against the plate, the Color Inspector. |
-| **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers) with its matte, as one zip. **ComfyUI graph** saves the whole scene as one ComfyUI workflow in the editor's own format: one group per step, each with a note, to drop on ComfyUI's canvas |
-| **Finish** | The passes on the whole plate, in a menu between Save scene and Export. SDR to HDR turns an SDR result into half-float EXR frames |
+| **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers) with its matte, as one zip. For Paint and Clean the zip also holds `layer/`, the new pixels as the composite blends them: with the plate and the matte they rebuild the result. With Upscale to 4K, `4k/` holds the same set at 3840 px on the long side: for 121 frames, about 46 min for Paint or Clean on a 16 GB GPU, 23 min for the result alone, and about 14 min on a 96 GB GPU. Every pixel of an upscaled frame is new. **ComfyUI graph** saves the whole scene as one ComfyUI workflow in the editor's own format: one group per step, each with a note, to drop on ComfyUI's canvas |
+| **Finish** | The passes on the whole plate, in a menu between Save scene and Export. SDR to HDR turns an SDR result, or a plate with no edit, into half-float EXR frames. Upscale to 4K restores the result at 3840 px on the long side with SeedVR2 7B, and for Paint and Clean the plate, the new layer and the matte too |
 
 The limits that matter today: edits are painted on the first frame only; shots are tested up to 121 frames; edits are made at up to 1920 px on the long side; a plate can be up to 3840 x 2160.
 
@@ -129,7 +129,8 @@ Good to know:
 Known limits:
 
 - On a plate whose camera travels, a paint's matte can lose the painted object on some frames, when SAM 3.1 stops tracking it. The page then warns and names the frames to check. Another seed, other words or another stroke can help.
-- On such a plate, Clean can leave a faint dark shape of the removed object on some frames. Check the result frame by frame.
+- On such a plate, a paint added over a Clean edit can bring a faint shape of the removed object back on some frames. Check the result frame by frame.
+- A painted object that a foreground object hides can raise « object left its place » although the composite is right: check the picture.
 - A shadow painted with Light comes out soft: words can ask for a deeper one. A relight can leave a thin light or dark edge along bright outlines.
 - The check after Clean compares colours. An object of another colour that takes the removed object's place passes it, so look at the first frame.
 
