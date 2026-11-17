@@ -1255,3 +1255,28 @@ export function memoryBytes(text) {
   const b = m ? parseFloat(m[1].replace(",", ".")) * (/^g/i.test(m[2] ?? "") ? 1e9 : 1e6) : NaN;
   return b >= CACHE_LEAST && b <= CACHE_MOST ? Math.round(b) : null;
 }
+
+// ---------- The cache on disk ----------
+// The folders under ComfyUI's output folder that some values name: a render's (paintaplate/<plate>/v<n>), the edits'
+// (paintaplate/<plate>/edits) or a plate's own files (paintaplate/<plate>). A saved scene keeps those of what it shows,
+// and the page those of the plate on screen, so View > Clear unused cache (cache.py) leaves them. It walks arrays, plain
+// objects, maps and sets, and reads every string, decoded as a view address.
+export function foldersIn(values) {
+  const found = new Set(), seen = new WeakSet();
+  const walk = (v, depth) => {
+    if (typeof v === "string") {
+      let text = v;
+      try { text = decodeURIComponent(v); } catch { /* a lone % leaves the string as it is */ }
+      for (const [, id, rest] of text.matchAll(/paintaplate\/([a-z0-9]+)((?:\/[^/&"'\s?#]+)*)/g)) {
+        const parts = rest.split("/").filter(Boolean);
+        found.add(parts.length >= 2 || /^(v\d+|edits)$/.test(parts[0] ?? "") ? `paintaplate/${id}/${parts[0]}` : `paintaplate/${id}`);
+      }
+    } else if (v && typeof v === "object" && depth < 8 && !seen.has(v)
+      && (Array.isArray(v) || v instanceof Map || v instanceof Set || Object.getPrototypeOf(v) === Object.prototype)) {
+      seen.add(v);
+      for (const x of v instanceof Map || v instanceof Set ? v.values() : Object.values(v)) walk(x, depth + 1);
+    }
+  };
+  walk(values, 0);
+  return [...found].sort();
+}

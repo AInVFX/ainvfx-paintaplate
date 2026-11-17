@@ -12,6 +12,7 @@
     POST /paintaplate/blank {width, height, fps, frames}         a black ProRes 4444 plate for a fluid shot
     GET  /paintaplate/jobs/<key>, POST /paintaplate/jobs/<key>   the job index: a finished job's outputs by the hash of its inputs
     POST /paintaplate/live/<prompt>                       removes a finished prompt's live previews from ComfyUI's temp folder
+    POST /paintaplate/cache                               the unused cache under the output folder (cache.py): its size, or cleared
     GET  /paintaplate/scenes, GET|POST /paintaplate/scenes/<name>  scenes saved on this ComfyUI (output/paintaplate/scenes)
     GET  /paintaplate/ocio?config=...                  the OCIO config: colour spaces by family, displays and views, looks
     GET  /paintaplate/ocio/shader?config=&space=&display=&view=&look=   the viewer's GLSL and lookup tables for a source
@@ -42,9 +43,9 @@ import av
 import numpy as np
 
 try:
-    from . import folders, mathops, ocio, plateio
+    from . import cache, folders, mathops, ocio, plateio
 except ImportError:  # imported as a plain module by the tests, outside the package
-    import folders, mathops, ocio, plateio
+    import cache, folders, mathops, ocio, plateio
 
 BLANK = "paintaplate/blank"  # the folder under the input folder that holds the black canvases of fluid shots
 FOUND_MAX = 60  # plates the Open dialog lists at a root from the folders below it, newest first
@@ -511,6 +512,19 @@ async def live_clear(request: web.Request) -> web.Response:
     return web.json_response({"removed": clear_live(request.match_info["prompt"])})
 
 
+async def cache_route(request: web.Request) -> web.Response:
+    """POST /paintaplate/cache {keep, clear}: the unused cache under the output folder (cache.py), in files and bytes;
+    removed when clear is true. keep: the folders of the plate the page shows."""
+    body = await request.json() if request.can_read_body else {}
+    keep, out = [k for k in body.get("keep") or [] if isinstance(k, str)], folder_paths.get_output_directory()
+    if body.get("clear"):
+        files, size = cache.clear(out, keep)
+    else:
+        found = cache.unused(out, keep)
+        files, size = len(found), sum(s for _, s in found)
+    return web.json_response({"files": files, "bytes": size, "cleared": bool(body.get("clear"))})
+
+
 async def job_get(request: web.Request) -> web.Response:
     try:
         rec = await asyncio.to_thread(read_job, request.match_info["key"])
@@ -897,6 +911,7 @@ def setup(server) -> None:
     server.routes.get("/paintaplate/jobs/{key}")(job_get)
     server.routes.post("/paintaplate/jobs/{key}")(job_post)
     server.routes.post("/paintaplate/live/{prompt}")(live_clear)
+    server.routes.post("/paintaplate/cache")(cache_route)
     server.routes.get("/paintaplate/stat")(this_machine(stat))
     server.routes.get("/paintaplate/frames")(this_machine(frames))
     server.routes.get("/paintaplate/pixel")(this_machine(pixel_route))
