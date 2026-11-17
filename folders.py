@@ -92,13 +92,13 @@ def plate_path(rel: str, folder: bool = False) -> str:
     root, inner = base(rel), rel.removeprefix(OUTPUT)
     full = os.path.abspath(os.path.join(root, inner))
     if os.path.commonpath([full, root]) != root or (full == root and not folder):
-        raise ValueError(f"This path leaves ComfyUI's folders: {rel}")
+        raise ValueError(f"This path leaves ComfyUI's folders: {rel}.")
     pattern = plateio.split_pattern(full)
     on_disk = pattern[0] if pattern else full
     if full != root and os.path.islink(on_disk):
-        raise ValueError(f"Symbolic links are not followed: {rel}")
+        raise ValueError(f"Symbolic links are not followed: {rel}.")
     if not os.path.exists(on_disk):
-        raise FileNotFoundError(f"Nothing at {rel}")
+        raise FileNotFoundError(f"Nothing at {rel}.")
     return full
 
 
@@ -109,7 +109,7 @@ def page_path(full: str) -> str:
         if os.path.commonpath([os.path.abspath(full), root]) == root:
             rel = os.path.relpath(full, root)
             return prefix + ("" if rel == "." else rel.replace(os.sep, "/"))
-    raise ValueError("Outside ComfyUI's folders")
+    raise ValueError("Outside ComfyUI's folders.")
 
 
 def output_folder(prefix: str) -> str:
@@ -117,7 +117,7 @@ def output_folder(prefix: str) -> str:
     root = os.path.abspath(folder_paths.get_output_directory())
     full = os.path.abspath(os.path.join(root, prefix))
     if os.path.commonpath([full, root]) != root:
-        raise ValueError(f"Saving outside the output folder is not allowed: {prefix}")
+        raise ValueError(f"Saving outside the output folder is not allowed: {prefix}.")
     return full
 
 
@@ -130,5 +130,5 @@ def run_folder(rel: str) -> str:
     real_root, real = os.path.realpath(root), os.path.realpath(full)
     if (os.path.commonpath([full, root]) != root or full == root or not os.path.isdir(full)
             or os.path.commonpath([real, real_root]) != real_root or real == real_root):
-        raise FileNotFoundError("No render at this path")
+        raise FileNotFoundError("No render at this path.")
     return full

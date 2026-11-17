@@ -5,6 +5,7 @@ when ComfyUI answers this machine alone: a listener on the network refuses it, a
 proxy passed on."""
 import asyncio
 import os
+import re
 import sys
 import tempfile
 import types
@@ -77,6 +78,12 @@ class AbsolutePaths(unittest.TestCase):
         with self.assertRaises(FileNotFoundError) as e:
             routes.plate_info(path)
         self.assertEqual(str(e.exception), f"No plate in {path}.")
+
+    def test_every_error_of_folders_ends_with_a_full_stop(self):
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "folders.py")) as f:
+            said = re.findall(r'raise \w+\(f?"(.*)"\)', f.read())
+        self.assertGreaterEqual(len(said), 9)
+        self.assertEqual([m for m in said if not m.endswith(".")], [])
 
     def test_page_paths_still_stay_inside_comfyuis_folders(self):
         with self.assertRaises(ValueError):
