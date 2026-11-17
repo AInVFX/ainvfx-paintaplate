@@ -26,5 +26,7 @@ def run(browser, port, U):
         size = page.evaluate("(() => { const d = document.querySelector('#help'), r = d.getBoundingClientRect(); return [r.top, r.bottom, d.scrollHeight, d.clientHeight]; })()")
         if size[0] < 0 or size[1] > 900 or size[2] > size[3] + 1: over.append(f"{name} {size}")
     U.check(not over, f"each tab fits one screen at 1400 x 900, with no scroll: {over or 'all seven'}")
+    rule = "The plate's colour space comes from its file: change it only for a camera's log footage."
+    U.check(rule in page.text_content('#help .help-tab[data-help="colour"]'), "the Colour tab says where the plate's colour space comes from, and when to change it")
     page.keyboard.press("Escape")
     page.close()
