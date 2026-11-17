@@ -96,6 +96,12 @@ def load_image(name, mode="RGB"):
     return np.asarray(Image.open(path).convert(mode), np.float32) / 255
 
 
+def moved(img, back=False):  # the drift /mock/shift armed, by a fraction of the frame: forward for a shot and its tracking matte, back for the composite
+    fx, fy = STATE.get("shift", (0.0, 0.0))
+    dx, dy = round(fx * img.shape[1]), round(fy * img.shape[0])
+    return np.roll(img, (-dy, -dx) if back else (dy, dx), axis=(0, 1)) if dx or dy else img
+
+
 def resize(img, w, h):
     mode = "L" if img.ndim == 2 else ("RGBA" if img.shape[2] == 4 else "RGB")
     arr = (np.clip(img, 0, 1) * 255).astype(np.uint8)
@@ -351,12 +357,17 @@ async def execute(pid, prompt):
         shot, _ = read_plate(v.get("hdr") or v["shot"], 1024)
         matte = read_plate(v["matte_a"], 1024)[0] if v.get("matte_a") else None
         await steps(pid, 6, 2.0)
-        out = []
+        out, mattes = [], []
         for i in range(n):
             p, g = frames[i], resize(shot[min(i, len(shot) - 1)], w, h)
             m = resize(matte[min(i, len(matte) - 1)][..., 0], w, h)[..., None] if matte is not None else np.ones((h, w, 1), np.float32)
+            if i:  # Fit to Plate aligns the shot to the plate, and its matte with it
+                g, m = moved(g, back=True), moved(m, back=True)
             out.append(g * m + p * (1 - m))
+            mattes.append(m.astype(np.float16))
         o[outs["review"]] = {"images": [save_mp4(out, v["review_prefix"], spec["fps"])], "animated": [True]}
+        if "matte_movie" in outs:  # the matte the composite used, as a grey movie, for the X-ray
+            o[outs["matte_movie"]] = {"images": [save_mp4([np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes], v["matte_video_prefix"], spec["fps"])], "animated": [True]}
         if "frames" in outs:
             sub, _, stem = v["frames_prefix"].rpartition("/")
             os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
@@ -374,17 +385,18 @@ async def execute(pid, prompt):
         changed = np.asarray(Image.fromarray((changed * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(5)), np.float32)[..., None] / 255
         await steps(pid, v.get("steps", 8), 3.0, live=(v.get("live") or 0, hero))
         shot = [hero * changed + f * (1 - changed) for f in frames]
-        shot[0] = hero
+        shot = [hero] + [moved(f) for f in shot[1:]]  # the frames after the first drift by what /mock/shift armed
         o[outs["frames"]] = {"images": [save_png(f, "output", v["prefix"], i) for i, f in enumerate(shot)][:1]}
         o[outs["video"]] = {"images": [save_mp4(shot, v["video_prefix"], spec["fps"])], "animated": [True]}
     elif "frames" in outs:  # matte: the first mask on every frame
         frames, _ = read_plate(v["path"], v["max_frames"], pad=True)
         m = resize(load_image(v["mask"], "L"), v["width"], v["height"])
         await steps(pid, 4, 1.0)
-        o[outs["frames"]] = {"images": [save_png(m, "output", v["prefix"], i) for i in range(len(frames))][:1]}
+        ms = [m] + [moved(m) for _ in frames[1:]]  # the tracking matte follows the shot's drift
+        o[outs["frames"]] = {"images": [save_png(ms[i], "output", v["prefix"], i) for i in range(len(frames))][:1]}
         if "movie" in outs:  # its grey movie, for its row in the Render panel
-            grey = np.dstack([np.asarray(m, np.float32).reshape(m.shape[:2])] * 3)
-            o[outs["movie"]] = {"images": [save_mp4([grey] * len(frames), v["video_prefix"], v.get("fps", 24.0))], "animated": [True]}
+            greys = [np.dstack([np.asarray(x, np.float32).reshape(x.shape[:2])] * 3) for x in ms]
+            o[outs["movie"]] = {"images": [save_mp4(greys, v["video_prefix"], v.get("fps", 24.0))], "animated": [True]}
     elif "plate" in outs:  # fluid: each keyframe softened into a cloud, crossfaded to the next, written in the blank plate's format
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         h, w = frames[0].shape[:2]
@@ -419,14 +431,19 @@ async def execute(pid, prompt):
         has_matte = bool(v.get("matte_a"))
         matte = half(read_plate(v["matte_a"], 1024)[0]) if has_matte else None
         await steps(pid, 6, 1.5 if "video" in outs else 3.0)
-        out = []
+        out, mattes = [], []
         for i in range(n):
             p, g = resize(frames[i], w, h), resize(shot[min(i, len(shot) - 1)], w, h)
             m = resize(matte[min(i, len(matte) - 1)][..., 0], w, h)[..., None] if has_matte else np.ones((h, w, 1), np.float32)
+            if i:  # Fit to Plate aligns the shot to the plate, and its matte with it
+                g, m = moved(g, back=True), moved(m, back=True)
             out.append((g * m + p * (1 - m)).astype(np.float16))
+            mattes.append(m.astype(np.float16) if has_matte else np.zeros((h, w, 1), np.float16))
             frames[i] = None
-        layer = [resize(shot[min(i, len(shot) - 1)], w, h) for i in range(n)] if {"layer", "layer_exr"} & set(outs) else []
+        layer = [resize(shot[min(i, len(shot) - 1)], w, h) if not i else moved(resize(shot[min(i, len(shot) - 1)], w, h), back=True) for i in range(n)] if {"layer", "layer_exr"} & set(outs) else []
         del frames, shot
+        if "matte_movie" in outs:  # the matte the composite used, as a grey movie: the X-ray reads it, the Export row shows the export's
+            o[outs["matte_movie"]] = {"images": [save_mp4([np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes], v["matte_video_prefix"], spec["fps"])], "animated": [True]}
         if "video" in outs:
             o[outs["video"]] = {"images": [save_mp4(out, v["video_prefix"], spec["fps"])], "animated": [True]}
         else:
@@ -435,11 +452,7 @@ async def execute(pid, prompt):
             if "export" in outs:  # Save Plate: dropped for an HDR result of a video plate, which writes EXR frames instead
                 save_mp4(out, f"{v['prefix']}/plate", spec["fps"])
             if "matte" in outs:  # Save Frames' record, as ComfyUI answers it: the first frame
-                o[outs["matte"]] = {"images": [save_png(resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w)),
-                                                        "output", v["matte_prefix"], i) for i in range(n)][:1]}
-            if "matte_movie" in outs:  # the export's matte as a grey movie, for the Export row
-                greys = [np.dstack([resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w), np.float32)] * 3) for i in range(n)]
-                o[outs["matte_movie"]] = {"images": [save_mp4(greys, v["matte_video_prefix"], spec["fps"])], "animated": [True]}
+                o[outs["matte"]] = {"images": [save_png(mattes[i][..., 0].astype(np.float32), "output", v["matte_prefix"], i) for i in range(n)][:1]}
             if "exr" in outs:  # an HDR result of a video plate: half-float EXR frames instead of the plate's format
                 sub = v["exr_prefix"].rpartition("/")[0]
                 os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
@@ -617,6 +630,12 @@ async def oom_route(request):  # mock only: the next `times` jobs of `workflow` 
     return web.json_response({})
 
 
+async def shift_route(request):  # mock only: every shot's frames after the first drift by dx and dy, fractions of the frame; its tracking matte follows, and the composite moves both back, as Fit to Plate aligns a shot to the plate
+    body = await request.json()
+    STATE["shift"] = (float(body.get("dx", 0)), float(body.get("dy", 0)))
+    return web.json_response({})
+
+
 async def leave_route(request):  # mock only: the next `times` edit jobs answer with the frame as it was, as a Klein pass that leaves its object (an edit is two jobs)
     STATE["leave"] = int((await request.json()).get("times", 2))
     return web.json_response({})
@@ -720,6 +739,7 @@ async def start():
     app.router.add_post("/mock/card", card_route)
     app.router.add_post("/mock/version", pack_version_route)
     app.router.add_post("/mock/leave", leave_route)
+    app.router.add_post("/mock/shift", shift_route)
     app.router.add_post("/mock/spill", spill_route)
     app.router.add_post("/mock/writer", writer_route)
     app.router.add_post("/mock/snap", snap_route)

@@ -1,6 +1,6 @@
-// The X-ray (X), as PlateLock's: where the edits on show change the plate, tinted over the picture. Its mattes: the
-// export's once Export has made one, else the tracking mattes of the size on show; a light edit changes every pixel, so
-// it tints the whole frame. Pure functions, tested in tests/js/xray.test.mjs; app.mjs draws them on the #xray overlay,
+// The X-ray (X), as PlateLock's: where the edits on show change the plate, tinted over the picture. Its matte: the one
+// the composite of the size on show used (Fit to Plate's, aligned to the plate), or the export's once Export has made
+// one; before a composite exists, the tracking mattes. A light edit changes every pixel, so it tints the whole frame. Pure functions, tested in tests/js/xray.test.mjs; app.mjs draws them on the #xray overlay,
 // above the canvas, so the colour inspector and the colour picker read the picture without the tint.
 
 export const XRAY_TINT = [255, 0, 200]; // magenta, rare in plates
@@ -12,14 +12,16 @@ export function xrayPlan({ tools = [], r, pv, full = false }) {
   if (!tools.length) return { from: "none", urls: [] };
   if (tools.includes("light")) return { from: "light", urls: [] };
   if (r?.exported?.matte) return { from: "export", urls: [r.exported.matte] };
-  const size = full && r?.full ? "full" : "preview", found = { ...r?.erased?.found, ...(size === "full" ? r.full : pv?.mattes)?.found };
+  const size = full && r?.full ? "full" : "preview", comp = size === "full" ? r?.compMatte : pv?.compMatte;
+  if (comp) return { from: size, urls: [comp] };
+  const found = { ...r?.erased?.found, ...(size === "full" ? r.full : pv?.mattes)?.found };
   const urls = [found.movie_a, found.movie_b].filter(Boolean); // the erase matte, the paint matte
-  return { from: urls.length ? size : "none", urls };
+  return { from: urls.length ? "tracking" : "none", urls };
 }
 
 export const XRAY_TEXT = { none: "X-ray: no matte yet for the edits on show.", light: "X-ray: a Light edit changes the whole frame.",
-  export: "X-ray: where the edits change the plate, from the export's matte.", full: "X-ray: where the edits change the plate, from the full-size tracking mattes.",
-  preview: "X-ray: where the edits change the plate, from the preview's tracking mattes." };
+  export: "X-ray: the export's matte.", full: "X-ray: the full-size composite's matte.", preview: "X-ray: the preview composite's matte.",
+  tracking: "X-ray: the tracking mattes, until the composite is made." };
 
 export function halfToFloat(h) { // IEEE 754 half precision, as the frames route sends it
   const s = h & 0x8000 ? -1 : 1, e = (h >> 10) & 31, m = h & 1023;

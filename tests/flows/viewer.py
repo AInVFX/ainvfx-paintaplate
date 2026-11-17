@@ -316,14 +316,14 @@ XSTAT = """(() => { const x = document.querySelector('#xray'), d = x.getContext(
 
 
 def xray_view(page, U):
-    """X tints, over the picture, where the edits on show change the plate: the tracking mattes of the size on show, then
-    the export's matte once Export made one; a light edit tints the whole frame. The canvas itself stays the picture."""
+    """X tints, over the picture, where the edits on show change the plate: the matte the composite of the size on show
+    used, then the export's matte once Export made one; a light edit tints the whole frame. The canvas itself stays the picture."""
     page.keyboard.press("Home"); pic = page.evaluate(SUM, [0.0, 1.0])
     page.keyboard.press("x")
     page.wait_for_function("(() => { const x = document.querySelector('#xray'); return !x.hidden && x.dataset.frame === '0'; })()", timeout=30000)
     got = page.evaluate(XSTAT)
     U.check(got["from"] == "full" and 0 < got["share"] < 0.5 and got["at"][0] < 0.5 and page.evaluate(SUM, [0.0, 1.0])["sum"] == pic["sum"],
-            f"X tints where the paint changes the plate, from the full-size tracking mattes, and leaves the canvas's picture as it was: {got}")
+            f"X tints where the paint changes the plate, from the full-size composite's matte, and leaves the canvas's picture as it was: {got}")
     page.keyboard.press("ArrowRight")
     page.wait_for_function("document.querySelector('#xray').dataset.frame === '1'", timeout=30000)
     page.keyboard.press("Home")

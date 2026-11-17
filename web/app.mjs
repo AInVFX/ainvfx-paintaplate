@@ -3005,9 +3005,11 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   pv.mattes = mattesOf({ ...r.erased?.found, ...pv.painted?.found });
   if (!off) await step(r, "comp", async (progress) => {
     const comp = await run("comp", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, width: sw, height: sh, shot: made, ...plateMovie(p),
-      ...pv.mattes.values, relight, grow: grow(sw, erase), feather: feather(sw), grain: 0, video_prefix: `${base}/${sized}/comp` },
+      ...pv.mattes.values, relight, grow: grow(sw, erase), feather: feather(sw), grain: 0, video_prefix: `${base}/${sized}/comp`, matte_video_prefix: `${base}/${sized}/comp_matte/m` },
       { kind: "comp", progress }).done;
     pv.comp = viewUrl(outputFile("comp", comp, "video"));
+    const matte = outputFile("comp", comp, "matte_movie"); // the matte the composite used: the X-ray shows it
+    pv.compMatte = matte ? viewUrl(matte) : null;
   }, pv);
   if (!off && here() && !S.pass && !r.review && S.shot?.url !== pv.comp) {
     setShot(pv.comp, key, "@model");
@@ -3041,10 +3043,12 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   await step(r, "review", async (progress) => { // the full-size composite at the plate's quality, which the viewer plays once made
     const out = await run("review", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr, ...r.full.values, ...plateMovie(p),
       relight, grow: grow(p.spec.width, erase), feather: feather(p.spec.width), movie_space: deep ? "@model" : p.cs, view_space: logSpace(),
-      review_prefix: `${base}/review`, frames_prefix: deep ? `${base}/review/frames` : "", view_prefix: deep ? `${base}/review/view` : "" },
+      review_prefix: `${base}/review`, frames_prefix: deep ? `${base}/review/frames` : "", view_prefix: deep ? `${base}/review/view` : "", matte_video_prefix: `${base}/review/matte/m` },
       { kind: "review", progress }).done;
     const movie = outputFile("review", out, "review"), frame = deep ? outputFile("review", out, "frames") : null;
     const shown = deep ? outputFile("review", out, "view") : null; // an image sequence plays its log movie: the look of its EXR frames
+    const matte = outputFile("review", out, "matte_movie"); // the matte the composite used: the X-ray shows it
+    r.compMatte = matte ? viewUrl(matte) : null;
     Object.assign(r, { review: viewUrl(movie), reviewSpace: deep ? "@model" : p.cs, run: movie?.subfolder ?? base, // the render's folder,
       reviewFrames: frame ? `output:${frame.subfolder}/${framePattern(frame.filename)}` : null, // wherever the job index took it from
       play: viewUrl(shown ?? movie), playSpace: shown ? logSpace() : deep ? "@model" : p.cs });
