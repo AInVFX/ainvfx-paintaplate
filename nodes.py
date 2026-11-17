@@ -394,11 +394,6 @@ class RelightTransfer(io.ComfyNode):
                 io.Combo.Input("shot_space", options=["linear", "sRGB"], default="linear", optional=True,
                                tooltip="How 'source' and 'relit' are encoded: sRGB, as the model saw and made them, is "
                                        "decoded here."),
-                io.Image.Input("shade", optional=True,
-                               tooltip="A light edit's shade strokes, white where the shadow is full: the result is darkened "
-                                       "there, in linear light, by 'shade_density'. Klein ignores a painted shadow."),
-                io.Float.Input("shade_density", default=0.7, min=0.0, max=1.0, step=0.05, optional=True,
-                               tooltip="How much light the painted shade takes away where it is full."),
                 io.Float.Input("peak", optional=True, force_input=True,
                                tooltip="The plate's peak, as Color Space (OCIO) gives it. With 'shot_space' sRGB, the tone "
                                        "mapping of that peak, which brought 'source' and 'relit' into the model space, is "
@@ -409,7 +404,7 @@ class RelightTransfer(io.ComfyNode):
 
     @classmethod
     def execute(cls, plate, source, relit, radius, strength, align, plate_space="linear", shot_space="linear",
-                shade=None, shade_density=0.7, peak=None) -> io.NodeOutput:
+                peak=None) -> io.NodeOutput:
         n = min(plate.shape[0], source.shape[0], relit.shape[0])
         src, rel = list(frames_np(source[:n])), list(frames_np(relit[:n]))
         shift = (0.0, 0.0)
@@ -419,7 +414,6 @@ class RelightTransfer(io.ComfyNode):
                 shift = mathops.shot_shift(list(pool.map(lambda sr: mathops.frame_shift(*sr, width, shot_space), zip(src, rel))))
             if shift != (0.0, 0.0):
                 logging.info("[Paint a plate] Relight Transfer: shot realigned by x %+.2f px, y %+.2f px, over %d frames.", shift[1], shift[0], n)
-        shaded = list(frames_np(shade[:1]))[0] if shade is not None else None
         peak = peak if peak is not None and shot_space == "sRGB" else 1.0
         untone = peak > ocio.TONE_ABOVE  # a plate above 1.0: 'source' and 'relit' go back to its levels, frame by frame
         if untone:
@@ -433,8 +427,6 @@ class RelightTransfer(io.ComfyNode):
             if untone:  # the shift above was measured on the frames as the model saw them, as for any plate
                 s, r, space = ocio.out_of_model(s[..., :3], peak), ocio.out_of_model(r[..., :3], peak), "linear"
             out = mathops.relight_frame(p, s, r, radius, strength, shift, plate_space, space)
-            if shaded is not None:
-                out = mathops.shade_frame(out, shaded, shade_density, plate_space)
             bar.update(1)
             return out
 

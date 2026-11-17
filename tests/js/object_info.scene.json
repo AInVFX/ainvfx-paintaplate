@@ -1601,16 +1601,6 @@
        "default": "linear"
       }
      ],
-     "shade": [
-      "IMAGE",
-      {}
-     ],
-     "shade_density": [
-      "FLOAT",
-      {
-       "default": 0.7
-      }
-     ],
      "peak": [
       "FLOAT",
       {
