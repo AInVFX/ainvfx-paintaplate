@@ -1047,7 +1047,7 @@ function showLive(d) {
   const at = d.steps ? `step ${d.step} of ${d.steps}` : `step ${d.step}`, part = S.stage?.part ? `${S.stage.part}, ` : ""; // a pass in two stages names its stage
   img.onload = () => {
     if (S.halted || key !== onShow()) return;
-    if (S.shot?.key === key) { // a preview or a full-size shot already plays: the pass on its way shows as an inset over it
+    if (key !== "fluid" || S.shot?.key === key) { // a render's pass shows in the inset: its looping picture of the whole shot, new at each step (a canvas would draw one still frame, and frame 1 is the edited first frame at every step)
       const box = $("#live-inset");
       box.querySelector("img").src = img.src;
       box.querySelector("figcaption").textContent = `${label}: ${part}${at}`;
