@@ -1,5 +1,5 @@
 """The viewer's checks on a stop and what follows it. Esc or Stop on the edit being generated keeps the edit and its
-strokes; nothing of a stopped pass stays in the frame; an edit being changed shows without its old result; strokes replay
+strokes; nothing of a stopped pass stays on screen; an edit being changed shows without its old result; strokes replay
 in the order they were made. The mock holds a job open (/mock/hold), so every check meets the pass it stops."""
 import base64
 import io
@@ -94,11 +94,11 @@ def run(browser, port, U):
             f"rubbing a stroke of a made edit shows the plate there, not the old result: {pixel(kept).tolist()} against the plate's {plate.tolist()}")
     page.keyboard.press("Escape")  # the rub is dropped: the edit goes back to its result
 
-    # 4. Stop during an LTX pass whose live preview is in the frame: nothing of it stays, not after a stroke, not after Generate
-    page.wait_for_function(f"{PICTURE} === 'live'", timeout=60000)
+    # 4. Stop during an LTX pass whose live preview shows in the inset: nothing of it stays, not after a stroke, not after Generate
+    page.wait_for_function("!document.querySelector('#live-inset').hidden", timeout=60000)
     page.click("#stop"); page.wait_for_timeout(300)
-    U.check(page.evaluate(PICTURE) != "live" and status().startswith("Stopped") and not page.is_disabled("#generate"),
-            f"Stop during an LTX pass takes its live preview off the frame: it shows {page.evaluate(PICTURE)}")
+    U.check(page.is_hidden("#live-inset") and page.evaluate(PICTURE) != "live" and status().startswith("Stopped") and not page.is_disabled("#generate"),
+            f"Stop during an LTX pass takes its live preview off the screen: the frame shows {page.evaluate(PICTURE)}")
     U.paint_once(page, "a red fire", [(0.30, 0.45), (0.34, 0.45)]); away()
     U.check(page.evaluate(PICTURE) != "live", "a stroke after the stop shows the first frame and the strokes")
     hold(port, output="patch", seconds=6)
