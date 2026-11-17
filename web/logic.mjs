@@ -95,6 +95,13 @@ export const PREVIEW_PARTS = [[2, "Half size"], [4, "Quarter size"]];
 // The Preview menu: Off (no preview pass and no live preview), Latent preview (no preview pass; each pass's live preview
 // shows in the player), then a preview pass at half or a quarter of the working size, with the live preview too.
 export const PREVIEW_DEFAULT = "latent";
+// Save scene: a name the scenes route accepts (letters, digits, '.', '-' and '_', not starting with '.'), and the first
+// free name after one that is taken: horse, horse_2, horse_3; a name that ends in _2 goes on from _3.
+export const sceneName = (text) => String(text).replace(/[^\w.-]/g, "_").replace(/^\.+/, "").slice(0, 100);
+export function freeName(name, taken) {
+  const m = /^(.*)_(\d+)$/.exec(name), stem = m ? m[1] : name;
+  for (let n = m ? Number(m[2]) + 1 : 2; ; n++) if (!taken.has(`${stem}_${n}`)) return `${stem}_${n}`;
+}
 export function readPreview(v) { // a stored or saved choice: "off", "latent", 2 or 4; null for anything else, which keeps the choice in use
   if (v === 0 || v === "0") return "latent"; // a scene saved 0 for no preview pass, which showed the live preview
   if (v === "off" || v === "latent") return v;

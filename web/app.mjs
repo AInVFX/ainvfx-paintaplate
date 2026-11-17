@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, UPSCALE, UPSCALE_LARGE, upscaleFolder, upscaleKeeps, upscaleSeconds, upscaleSource, upscaleTarget, upscaleWindow, upscaleWindows, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, fullPath, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, liveEvery, PREVIEW_DEFAULT, previewCap, previewDivOf, readPreview, stepLabel, previewSize, previewSizes, reconcile, removedNames, renderKey, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, UPSCALE, UPSCALE_LARGE, upscaleFolder, upscaleKeeps, upscaleSeconds, upscaleSource, upscaleTarget, upscaleWindow, upscaleWindows, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, fullPath, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, freeName, liveEvery, PREVIEW_DEFAULT, sceneName, previewCap, previewDivOf, readPreview, stepLabel, previewSize, previewSizes, reconcile, removedNames, renderKey, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -3619,12 +3619,26 @@ async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it ag
     edits: S.edits.map((e) => ({ tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on,
       caption: e.caption?.text ?? "", strokes: packStrokes(e.strokes) })),
     ...(f ? { fluid: { prompt: keying() ? $("#prompt").value.trim() : f.prompt ?? "", seed: f.seed, depth: f.depth ?? 8, made: !!f.result, on: f.on !== false, keys: f.keys.map((k) => ({ frame: k.frame, strokes: packStrokes(k.strokes) })) } } : {}) };
-  const name = (S.plate.name || "scene").replace(/[^\w.-]/g, "_").slice(0, 100), r = await post(`/paintaplate/scenes/${encodeURIComponent(name)}`, scene);
+  const name = await sceneTarget(sceneName(S.plate.name || "scene"));
+  if (name === null) return; // Esc: nothing saved
+  const r = await post(`/paintaplate/scenes/${encodeURIComponent(name)}`, scene);
   if (!r.ok) throw new Error(`The scene was not saved: ${await r.text()}`);
   const { path } = await r.json().catch(() => ({})); // the scene's file, on the machine that runs ComfyUI
   const fact = `Scene ${name} saved${path ? `: ${path}` : ""}.`;
   hud(fact, 3000);
   told(fact, "Open plate > Scenes opens it again, or downloads it.");
+}
+
+async function sceneTarget(name) { // a scene of this name saved here: the page asks to replace it or to save under a free name; null for Esc
+  const taken = new Set((await (await fetch("/paintaplate/scenes")).json()).map((s) => s.name));
+  while (taken.has(name)) { // a name typed over another saved scene asks again
+    const free = freeName(name, taken);
+    const answer = await ask(`A scene named ${name} exists.`, `Save as ${free}`, { field: { value: free, label: (v) => `Save as ${sceneName(v) || free}` }, no: "Yes, replace it", other: "replace" });
+    if (answer === "replace") return name;
+    if (answer === false) return null;
+    name = sceneName(answer) || free;
+  }
+  return name;
 }
 
 async function saveGraph() { // the whole scene as one ComfyUI workflow, to open in ComfyUI and keep editing there
@@ -4011,7 +4025,7 @@ function regenerated() { return S.edits.filter((e) => e.on && e.state === "done"
 // erase can ask while the OCIO question is open, so a question that comes then waits for that answer, and is dropped (false)
 // when `still()` no longer holds by its turn.
 let asking = Promise.resolve();
-function ask(text, yes, { enter = false, still = () => true, field = null, no = "Cancel" } = {}) { // yes, no: what each button does. With a field ({ value, placeholder }), the answer is the text typed, or false
+function ask(text, yes, { enter = false, still = () => true, field = null, no = "Cancel", other = false } = {}) { // other: what the no button answers, when Esc must answer apart from it // yes, no: what each button does. With a field ({ value, placeholder }), the answer is the text typed, or false
   const turn = asking.then(() => still() && new Promise((answer) => {
     const d = $("#ask"), ok = $("#ask-yes"), input = $("#ask-field");
     $("#ask-text").textContent = text;
@@ -4019,8 +4033,9 @@ function ask(text, yes, { enter = false, still = () => true, field = null, no = 
     $("#ask-no").textContent = no;
     input.hidden = !field;
     if (field) Object.assign(input, { value: field.value ?? "", placeholder: field.placeholder ?? "" });
+    input.oninput = field?.label ? () => { ok.textContent = field.label(input.value); } : null; // the yes button names what it does with the field's text
     d.returnValue = "";
-    d.onclose = () => answer(d.returnValue === "yes" && (field ? input.value : true));
+    d.onclose = () => answer(d.returnValue === "yes" ? (field ? input.value : true) : d.returnValue === "no" ? other : false);
     d.showModal();
     if (field) input.select(); else if (enter) ok.focus();
   }));
