@@ -1,7 +1,7 @@
 """A check of an erase that took more than its object (tests/flows/README.md). After the edit, the page also compares the
 first frame with the frame under it in the band that the edit reaches beyond the object's mask (logic.eraseCheck,
 bandBeyond). When over 20% of that band changed, as when Klein removes a fence with the barn behind it, the page asks in its
-question dialog, with History's row marked in the question's words. « Render anyway » keeps the first frame and renders its
+question dialog, with History's row marked in the question's words. « Yes, render anyway » keeps the first frame and renders its
 shot. The mock's Klein reaches far beyond the object for the next erase (/mock/spill)."""
 import re
 
@@ -28,7 +28,7 @@ def run(browser, port, U):
     page.wait_for_selector("#ask[open]", timeout=90000)
     asked, row, lines = page.evaluate(ASKED), page.evaluate(ROW), page.evaluate("window.__lines")
     figure = FIGURE.search(asked[0]) if asked else None
-    U.check(bool(asked) and asked[0].startswith(ASKS) and asked[0].endswith(QUESTION) and asked[1] == "Render anyway"
+    U.check(bool(asked) and asked[0].startswith(ASKS) and asked[0].endswith(QUESTION) and asked[1] == "Yes, render anyway"
             and bool(figure) and int(figure.group(1)) > 20, f"the page asks about the area around the object, over 20% of it changed ({asked})")
     U.check(bool(row) and "failed" in row[0] and row[1] == "1" and row[2] == "The area around the object changed",
             f"History's row is marked, in the question's words ({row})")

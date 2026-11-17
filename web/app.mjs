@@ -185,14 +185,6 @@ function dimFrame(e, before, size) {
 
 // A light edit's shade strokes, white on black and softened: Relight Transfer darkens the frame there, in linear light, as a
 // compositor multiplies a shadow. Klein ignores a painted shadow (3 Nov test), so the shade is applied as painted.
-function shadeMask(e, size) {
-  const c = snap(null, size, "#000"), x = c.getContext("2d");
-  x.filter = `brightness(0) invert(1) blur(${Math.max(1, Math.round(size[0] / 400))}px)`;
-  for (let i = 0; i < 3; i++) x.drawImage(e.shade, 0, 0, size[0], size[1]); // the brush lays shade at a low flow: three coats
-  x.filter = "none";
-  return c;
-}
-const shaded = (e) => e.tool === "light" && !!e.shade && colorsOf(e).some(dark);
 
 const maskAt = (e, size) => (e.tool === "light" ? snap(null, size, "#fff") : snap(e.mask, size, "#000"));
 
@@ -1993,6 +1985,11 @@ function launch(edit, another = false) { // Generate: the edit on the first fram
     queueWaiting(() => queue(regenerateDependents));
     return;
   }
+  if (edit.refused?.record === recordOf(edit)) { // refused at the check's question and unchanged since: it stays as « No » left it
+    Object.assign(edit, { state: "failed", left: true });
+    recompose(); historyUI(); render(); timelineUI();
+    return status(edit.refused.said, "hint");
+  }
   preempt(); // Generate: a full-size or export step in its first half stops for this edit, and runs again later
   edit.state = "queued";
   edit.thumb ??= strokesThumb(edit);
@@ -2127,13 +2124,14 @@ async function baseUpload(below, before, size) { // the frame under an edit, upl
 async function generate(edit) {
   if (!S.edits.includes(edit) || !edit.on || edit.state === "drawing") return; // changed since it was queued: it waits for Generate
   if (S.halted) return; // a stop: no job is posted until Enter, which runs what waits, by its state (queueWaiting)
+  if (edit.refused?.record === recordOf(edit)) return; // « No » at the check's question: nothing of it runs until it changes (heldBack)
   const token = (edit.token = (edit.token ?? 0) + 1);
   const alive = () => edit.token === token && S.edits.includes(edit) && edit.on;
   const p = S.plate, light = edit.tool === "light", tag = `e${edit.id}_${token}`;
   cancel("warm"); // an edit never waits for the warm-up: what it needs loads now
   S.running = edit;
   edit.saw = activeBefore(edit).map(record); // the edits under it as it starts: a change to them restarts it (rebuild)
-  Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false, leftWhy: null, editAsked: false });
+  Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false, leftWhy: null, editAsked: false, refused: null });
   recompose(); historyUI(); render();
   log(`Edit ${num(edit)}: ${NAME[edit.tool]} ${edit.prompt ? `"${edit.prompt}"` : "with no words"}, seed ${edit.seed}${edit.tool === "erase" ? `, whole object ${edit.whole ? "on" : "off"}` : ""}, ${painted(edit)} stroke${painted(edit) === 1 ? "" : "s"}, over ${edit.saw.length} edit${edit.saw.length === 1 ? "" : "s"}.`);
   try {
@@ -2178,7 +2176,8 @@ async function generate(edit) {
       reference: edit.tool === "erase" || light ? startName : await uploadCanvas(editImage(edit, before, work), `${tag}_ref_full.png`),
       mask: await uploadCanvas(maskAt(edit, work), `${tag}_mask_full.png`), ...editSettings(edit, work, FULL),
       relight: light ? 1 : 0,
-      shade: shaded(edit) ? await uploadCanvas(shadeMask(edit, work), `${tag}_shade.png`) : "", level: edit.tool === "erase" }, { kind: "edit", front: true, progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
+      // a shade stroke reaches Klein in words only (logic.lightIntent): darkened where painted, it read as a streak
+      level: edit.tool === "erase" }, { kind: "edit", front: true, progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
     if (!alive()) return;
     // a relight shows the frame as the export will make it: Klein's light on the plate's own detail
     edit.patch = await loadImage(viewUrl(outputFile("edit", full, light ? "relit" : "patch")));
@@ -2216,22 +2215,25 @@ async function generate(edit) {
 
 // An erase that the check holds back (logic.eraseCheck, leftLines). History's row is marked as the question opens: tests/ui_live.py
 // ends a GPU case on #history li[data-left], so a case that nobody watches never waits on the dialog. The first frame shows
-// Klein's result under the question, under a version of its own, so no earlier render shows there. « Render anyway » (Enter)
-// keeps that first frame: true, and generate goes on to its shot, which takes the mark away. Cancel (Esc) drops the result:
-// Generate runs the erase again once its words, its strokes or its seed change. A question that is open (the OCIO one) is
-// answered first; another pass of this edit, or its removal, drops this question (`current`).
+// Klein's result under the question, under a version of its own, so no earlier render shows there. « Yes, render anyway »
+// (Enter) keeps that first frame: true, and generate goes on to its shot, which takes the mark away. « No, cancel » (Esc)
+// drops the result, and nothing of this edit runs again until its words, its strokes, its seed or its switch change
+// (`refused`): neither what Enter runs after a stop (queueWaiting) nor a rebuild. Generate on the unchanged edit says again
+// what to do. A question that is open (the OCIO one) is answered first; another pass of this edit, or its removal, drops
+// this question (`current`).
 async function heldBack(edit, check, alive) {
   const lines = leftLines(num(edit), check), patch = edit.patch, current = () => alive() && edit.patch === patch;
   Object.assign(edit, { preview: null, latent: null, state: "failed", left: true, leftWhy: check.why, force: false, version: ++S.vers });
   S.running = null;
   recompose(); historyUI(); render(); timelineUI();
   log(lines.fact);
-  const anyway = await ask(lines.question, "Render anyway", { enter: true, still: current });
+  const anyway = await ask(lines.question, "Yes, render anyway", { enter: true, still: current, no: "No, cancel" });
   if (!current()) return false;
   if (!anyway) {
-    edit.patch = null;
+    const said = `${lines.fact} ${leftHint(edit.prompt)}`;
+    Object.assign(edit, { patch: null, refused: { record: recordOf(edit), said } });
     recompose(); historyUI(); render(); timelineUI();
-    status(`${lines.fact} ${leftHint(edit.prompt)}`, "hint");
+    status(said, "hint");
     return false;
   }
   edit.left = false;
@@ -2265,7 +2267,8 @@ async function prepare(edit, index, kind) {
   let cap = edit.caption?.key === dimmed ? edit.caption.text : await captionFor(edit, reference, plain, kind);
   if (!cap && asksName(edit.tool, edit.prompt) && edit.caption?.key === plain)
     cap = await captionFor(edit, await uploadCanvas(dimFrame(edit, before, size), `e${edit.id}_${painted(edit)}_dim.png`), dimmed, kind, true);
-  if (cap && edit.tool === "erase" && edit.whole && edit.sam) await joinShadow(edit, before, kind); // its cast shadow, when the caption cites one
+  if (cap && edit.tool === "erase" && edit.whole && edit.sam && await joinShadow(edit, before, kind)) // its cast shadow, when the caption cites one
+    edit.caption.key = edit.caption.key === dimmed ? `${key()}|dimmed` : key(); // the caption that cites the shadow stays, under the key of the mask that now holds it
   return { before, below, base, reference, cap };
 }
 
@@ -2330,7 +2333,7 @@ function samMask(bits, size, edit) { // a SAM mask (0 or 1 per pixel at `size`) 
   return snap(c, [edit.mask.width, edit.mask.height]);
 }
 
-async function joinShadow(edit, before, kind) { // the object's cast shadow joins its SAM mask when the caption cites one (logic.shadowOf)
+async function joinShadow(edit, before, kind) { // the object's cast shadow joins its SAM mask when the caption cites one (logic.shadowOf): true when it joins
   const box = shadowBox(edit.caption?.text), found = edit.found;
   if (!box || !found || found.key !== snapKeyOf(edit) || found.shadow === JSON.stringify(box)) return;
   const [w, h] = found.size, name = edit.prompt || "object";
@@ -2339,11 +2342,12 @@ async function joinShadow(edit, before, kind) { // the object's cast shadow join
   const out = await run("snap", { image: frame, words: "shadow" }, { kind: kind === "edit" ? "snap" : kind, front: true }).done;
   const shadow = shadowOf({ object: found.bits, box, w, h, shadows: await Promise.all(outputFiles("snap", out, "named").slice(1).map((f) => maskBits(f, found.size))) });
   found.shadow = JSON.stringify(box); // looked for: Generate after a prefetch does not ask again
-  if (!shadow) return log(`Edit ${num(edit)}: no shadow of the ${name} next to it or under it.\n  Its SAM mask holds the ${name} alone.`);
+  if (!shadow) { log(`Edit ${num(edit)}: no shadow of the ${name} next to it or under it.\n  Its SAM mask holds the ${name} alone.`); return false; }
   edit.sam = samMask(found.bits.map((v, i) => v | shadow.bits[i]), found.size, edit);
   redrawStrokes(edit);
   render();
   log(`Edit ${num(edit)}: the ${name}'s shadow joins its SAM mask (${Math.round(100 * shadow.share)}% of the ${name}'s area).`);
+  return true;
 }
 
 function footprint(edit) { // where the edit changed the frame, on a coarse grid, one cell wider
@@ -3410,7 +3414,7 @@ async function saveGraph() { // the whole scene as one ComfyUI workflow, to open
   for (const [i, e] of active.entries()) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, caption: e.caption?.text || templateCaption(e),
     mask: await uploadGraphImage(maskAt(e, p.work), i + 1, "mask"),
     layer: e.tool === "paint" ? await uploadGraphImage(snap(e.paint, p.work), i + 1, "strokes") : null,
-    shade: shaded(e) ? await uploadGraphImage(shadeMask(e, p.work), i + 1, "shade") : null,
+    shade: null, // a shade reaches Klein in words only, as on the page (generate)
     quick: editSettings(e, p.prev, QUICK), full: editSettings(e, p.work, FULL) });
   const erase = active.some((e) => e.tool === "erase");
   const graph = sceneGraph(WF, { edits, about: { version: S.version, name: p.name },

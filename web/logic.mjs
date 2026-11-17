@@ -114,17 +114,6 @@ export function secs(t) { // "about 40 s left", "about 1 min 40 s left": rounded
 
 export const dark = (hex) => [1, 3, 5].reduce((a, i, k) => a + [0.2126, 0.7152, 0.0722][k] * parseInt(hex.slice(i, i + 2), 16), 0) < 60;
 
-export function colorName(hex) {
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  if (max - min < 0.12) return max > 0.6 ? "white" : "soft grey";
-  const h = (max === r ? (g - b) / (max - min) : max === g ? 2 + (b - r) / (max - min) : 4 + (r - g) / (max - min)) * 60;
-  return ["red", "warm orange", "golden yellow", "green", "cyan", "cool blue", "violet", "magenta"][Math.floor(((h + 360 + 22) % 360) / 45)];
-}
-
-// A light edit's colour, by name: its first light stroke's (dark strokes are shadow hints), else the tool's
-export const lightColor = (colors, color) => colorName(colors.find((c) => !dark(c)) ?? color);
-
 // An erase's words as its object's name after « the »: an article that was typed goes (the GPU case's « the barn » asked
 // Klein's prompt writer to « Remove the the barn », 12 Nov 2026).
 const objectName = (words) => String(words ?? "").trim().replace(/^(?:the|a|an)\s+/i, "");
@@ -136,7 +125,11 @@ const objectName = (words) => String(words ?? "").trim().replace(/^(?:the|a|an)\
 export const COLOR_WORDS = /\b(?:red|orange|yellow|green|cyan|blue|violet|purple|magenta|pink|brown|black|white|gr[ae]y|silver|gold(?:en)?|beige|tan|crimson|scarlet|maroon|navy|teal|turquoise|ivory)\b/i;
 const HUES = [[15, "red"], [40, "orange"], [70, "yellow"], [165, "green"], [195, "cyan"], [255, "blue"], [290, "violet"], [345, "magenta"], [361, "red"]];
 
-export function paintHue(hex) { // a painted colour in an object's words: « black », « brown », « dark blue », « pink »
+// A colour by name, one namer for a paint and a light: « black », « brown », « dark blue », « pink », « warm white ». Each
+// colour swatch of the page is named as its title names it, and a picked colour by the same rule. A colour is pale when
+// each of its channels is above 55%; a pale orange, as the swatch « Warm light », is « warm white », which reads well in a
+// light's sentence: « a strong, broad warm white light ».
+export function colorName(hex) {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
   const max = Math.max(r, g, b), min = Math.min(r, g, b), c = max - min;
   if (c < 0.12) return max < 0.2 ? "black" : max < 0.45 ? "dark grey" : max < 0.7 ? "grey" : max < 0.9 ? "light grey" : "white";
@@ -144,9 +137,16 @@ export function paintHue(hex) { // a painted colour in an object's words: « bla
   const name = HUES.find(([end]) => h < end)[1];
   if ((name === "orange" || name === "yellow") && max < 0.6) return "brown";
   if (max < 0.35) return `dark ${name}`;
-  if (min > 0.6) return name === "red" || name === "magenta" ? "pink" : `pale ${name}`;
+  if (min > 0.55) return name === "red" || name === "magenta" ? "pink" : name === "orange" ? "warm white" : `pale ${name}`;
   return name;
 }
+
+// A light edit's colour, by name: its first stroke that is not dark (a dark stroke is a shade), or the tool's colour when the
+// edit has no stroke. None when every colour is dark: a shade alone names no light.
+export const lightColor = (colors, color) => {
+  const c = colors.length ? colors.find((x) => !dark(x)) : color;
+  return c && !dark(c) ? colorName(c) : null;
+};
 
 // The pixels of each colour of `palette` (#rrggbb) in `rgba`, a canvas's bytes: a pixel counts when it is at least half
 // opaque and within 24 levels of that colour on every channel. Where two strokes blend, it counts for neither.
@@ -164,7 +164,7 @@ export function paintColors({ words, shares }) { // the names, largest share fir
   if (COLOR_WORDS.test(String(words ?? ""))) return [];
   const by = new Map();
   let total = 0;
-  for (const [hex, n] of Object.entries(shares ?? {})) if (n > 0) { const h = paintHue(hex); by.set(h, (by.get(h) ?? 0) + n); total += n; }
+  for (const [hex, n] of Object.entries(shares ?? {})) if (n > 0) { const h = colorName(hex); by.set(h, (by.get(h) ?? 0) + n); total += n; }
   return [...by].filter(([, n]) => n >= 0.05 * total).sort((a, b) => b[1] - a[1]).map(([h]) => h);
 }
 
@@ -839,8 +839,8 @@ export const leftHint = (words) =>
   (words ? "Use other words, then Generate, or Ctrl+Enter for another seed." : "Type its name in the prompt bar, then Generate.");
 
 // What the page says when the check holds an erase back. The check can be wrong on a thin or faint object, or on one behind a
-// fence, so the page asks: `fact`, a warning, goes to the log once and, after Cancel, to the status line before leftHint;
-// `question` opens the dialog, where « Render anyway » keeps the first frame and renders its shot; `rendered` is the log's
+// fence, so the page asks: `fact`, a warning, goes to the log once and, after « No, cancel », to the status line before leftHint;
+// `question` opens the dialog, where « Yes, render anyway » keeps the first frame and renders its shot; `rendered` is the log's
 // line then. A figure the check could not measure (null) is left out.
 export function leftLines(n, check) {
   if (check.why === "beyond") { // the object went, and the area around it changed too much: « of that area », so no reader takes it for the object's figure
@@ -1059,27 +1059,35 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
 // fractions of the frame and the size as a fraction of its width; `aspect`: the frame's width over its height. A light that
 // covers 8% of the frame or more is broad; under 1%, focused. A small light inside the frame shows its source where it is
 // drawn: its strokes of one colour that touch make one source, placed by a row of Klein's layout table (tgt_bbox, as a
-// paint's request places its object). A source spans under a fifth of the frame each way and stays 2% inside its edges; a
-// wash, or a light at the frame's edge, comes from outside the frame and shows no source.
+// paint's request places its object). A source is judged by its path, its points without the brush's width: the path
+// spans under a fifth of the frame each way and stays 2% inside its edges, so a dab of any brush size is a source. A
+// stroke dragged across the frame is a wash, and a light at the frame's edge comes from outside: neither shows a source.
+// A source is named by the words when they name a kind of light (« sun », « street lamp »). With no such word, a warm
+// source in the top third of the frame is the sun: so named, Klein draws it behind what stands in front of it, where « a
+// small, very bright light » washed the nearby buildings out in its glare. Any other source is a small, very bright light
+// of its colour.
+export const LIGHT_KINDS = /\b(sun|moon|street ?lamp|streetlight|lamp|lantern|candle|fire|torch|bulb|neon sign|spotlight)\b/i;
+const WARM = new Set(["red", "orange", "yellow", "warm white"]);
 export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
   const place = (b) => { // b: [x0, y0, x1, y1] in fractions of the frame
     const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
     const v = cy < 1 / 3 ? "top" : cy > 2 / 3 ? "bottom" : "", h = cx < 1 / 3 ? "left" : cx > 2 / 3 ? "right" : "";
     return v && h ? `${v} ${h}` : v || h || "centre";
   };
+  const union = (a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])];
   const groups = new Map(), lamps = [];
   for (const s of strokes) {
     const r = s.size / 2, rh = r * aspect, pts = s.points;
     let length = 0;
     for (let i = 1; i < pts.length; i++) length += Math.hypot((pts[i][0] - pts[i - 1][0]) * aspect, pts[i][1] - pts[i - 1][1]);
-    const box = [Math.min(...pts.map((p) => p[0])) - r, Math.min(...pts.map((p) => p[1])) - rh,
-      Math.max(...pts.map((p) => p[0])) + r, Math.max(...pts.map((p) => p[1])) + rh].map((v) => Math.min(1, Math.max(0, v)));
+    const path = [Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1])), Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))];
+    const box = [path[0] - r, path[1] - rh, path[2] + r, path[3] + rh].map((v) => Math.min(1, Math.max(0, v))); // its paint
     const key = dark(s.color) ? `shade ${place(box)}` : colorName(s.color);
     const g = groups.get(key) ?? { shade: dark(s.color), color: s.color, cover: 0, box };
     g.cover += Math.min(1, ((length + 2 * rh) * 2 * rh) / aspect); // a round brush along its path, as a share of the frame
-    g.box = [Math.min(g.box[0], box[0]), Math.min(g.box[1], box[1]), Math.max(g.box[2], box[2]), Math.max(g.box[3], box[3])];
+    g.box = union(g.box, box);
     groups.set(key, g);
-    if (!g.shade) lamps.push({ name: key, box });
+    if (!g.shade) lamps.push({ name: key, box, path });
   }
   const touch = (a, b) => a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3];
   for (let joined = true; joined;) { // until no two touch: the sources do not depend on the strokes' order
@@ -1087,12 +1095,13 @@ export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
     for (let i = 0; i < lamps.length && !joined; i++) for (let j = i + 1; j < lamps.length && !joined; j++) {
       const a = lamps[i], b = lamps[j];
       if (a.name !== b.name || !touch(a.box, b.box)) continue;
-      a.box = [Math.min(a.box[0], b.box[0]), Math.min(a.box[1], b.box[1]), Math.max(a.box[2], b.box[2]), Math.max(a.box[3], b.box[3])];
+      a.box = union(a.box, b.box);
+      a.path = union(a.path, b.path);
       lamps.splice(j, 1);
       joined = true;
     }
   }
-  const shown = lamps.filter(({ box: b }) => b[2] - b[0] < 0.2 && b[3] - b[1] < 0.2 && Math.min(b[0], b[1]) > 0.02 && Math.max(b[2], b[3]) < 0.98);
+  const shown = lamps.filter(({ path: p }) => p[2] - p[0] < 0.2 && p[3] - p[1] < 0.2 && Math.min(p[0], p[1]) > 0.02 && Math.max(p[2], p[3]) < 0.98);
   const said = ["Relight the whole scene with new light, as if it were photographed under that light."];
   for (const [name, g] of groups) {
     if (g.shade) { said.push(`The ${place(g.box)} of the frame falls into deep shadow.`); continue; }
@@ -1104,10 +1113,13 @@ export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
     "it casts soft shadows away from it, and the old highlights and shadows that disagree with it fade.");
   const w = String(words ?? "").trim();
   if (w) said.push(`${w[0].toUpperCase()}${w.slice(1)}${/[.!?]$/.test(w) ? "" : "."}`);
+  const kind = w.match(LIGHT_KINDS)?.[1].toLowerCase();
   const rows = shown.map(({ name, box: b }, k) => {
-    said.push(`The ${name} light's source <light_${k + 1}> is visible in the frame: a small, very bright ${name} light.`);
+    const what = kind ? `the ${kind}, small and very bright` : WARM.has(name) && place(b).startsWith("top") ? "the sun, small and very bright"
+      : `a small, very bright ${name} light`;
+    said.push(`The ${name} light's source <light_${k + 1}> is visible in the frame: ${what}.`);
     return { id: `light_${k + 1}`, from: "target", src_bbox: null, tgt_bbox: [b[1], b[0], b[3], b[2]].map((v) => Math.round(v * 1000)),
-      desc: `the light's source: a small, very bright ${name} light` };
+      desc: `the light's source: ${what}` };
   });
   said.push("Keep every object, face and texture, the camera angle, the framing and the composition exactly as they are: only the light " +
     `changes${rows.length ? ", and each light's source shows where it is placed" : ""}.`);
