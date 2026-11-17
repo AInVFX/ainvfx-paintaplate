@@ -1,4 +1,4 @@
-"""The render workstream's page checks for the log (tests/flows/README.md). The log says each fact once: the memory profile
+"""The page checks for the log (tests/flows/README.md). The log says each fact once: the memory profile
 is one entry, a job writes one line when it ends, and a blank plate writes no line of its own. On a card under 24 GB every
 LTX pass still asks for its live previews. The mock ComfyUI takes the card's size at /mock/card and lists the posts at
 /mock/posts."""
@@ -28,7 +28,7 @@ def mock(port, path, body=None):  # a route of the mock ComfyUI: a GET, or a POS
 
 def run(browser, port, U):
     address = f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html"
-    mock(port, "/mock/card", {"vram": 17.2e9, "ram": 65.5e9})  # what a 16 GB card in a 64 GB machine reports: the reference laptop
+    mock(port, "/mock/card", {"vram": 17.2e9, "ram": 65.5e9})  # what a 16 GB GPU in a 64 GB machine reports
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(address)  # the blank plate opens at start
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)

@@ -72,7 +72,7 @@ const PANEL_STEP = 16; // CSS px per arrow key on a focused divider
 const LAYOUT_PREF = "paintaplate.layout"; // the dragged sizes, kept for the next session
 // The light brush: soft dabs every LIGHT.spacing of their radius, which is LIGHT.spread times the brush's. One stroke adds
 // at most LIGHT.flow of its colour (LIGHT.shade of darkness for a dark colour), so light builds up stroke by stroke and
-// mixed colours add up to white only after a few passes (30 Oct: one stroke of the earlier brush reached white at once).
+// mixed colours add up to white only after a few passes, never in one stroke.
 const LIGHT = { flow: 0.3, shade: 0.35, spread: 1.6, spacing: 0.25 };
 const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "shotup", "matte", "comp", "review", "export", "warm", "fluid", "hdr", "upscale", "upscale_export"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "hdr", "review", "export"]; // the render's job kinds: Generate and a new plate stop them
@@ -236,7 +236,7 @@ async function writeCaption(e, reference, key, kind, dimmed = false) {
     text = (outputText("prompt", out, "text") ?? "").trim();
   } catch (err) { if (err?.message === "cancelled") throw err; quiet(err); }
   let made = text ? (ask.locked ? reconcile(text, ask.locked) : text) : "";
-  if (made && paint && !erasesPaint(made, ask.locked, paint)) { // it removed something the paint does not cover (an astronaut, 28 Oct)
+  if (made && paint && !erasesPaint(made, ask.locked, paint)) { // it removed something the paint does not cover (such as a person beside it)
     log(`Edit ${num(e)}: prompt writer's answer refused: it removes an object outside the paint.\n  ${splitTable(made)[0]}`);
     if (asksName(e.tool, e.prompt)) { // no words, and an answer about another object: the writer looks once more, at the dimmed frame (prepare), else the object's name comes first (generate)
       e.caption = { key, text: "", others: removedNames(made, ask.locked) };
@@ -1162,7 +1162,7 @@ function setShot(src, key, space = "@model", frames = null, { framesSpace = null
 
 // Once the shot of the current edits exists, it shows on every frame, playing or paused; the plate shows only in the wipe and
 // while O is held. Frame 0 shows the edited first frame with the strokes while edits are made. Paused, the viewer drew the plate
-// whenever the shot video had no frame ready, and frame 0 kept showing Klein's still (28 Oct).
+// whenever the shot video had no frame ready, and frame 0 kept showing Klein's still.
 const held = { canvas: canvas([1, 1]), url: "" }; // the last shot frame drawn while paused: shown while the shot video seeks
 const editingFirst = () => !!(S.draft || stroke || S.running || S.queued || S.hover || S.peek);
 
@@ -1936,7 +1936,7 @@ async function rebase() { // the plate under the edits: the fluid shot when it i
   const f = S.fluid, made = f.on !== false && f.result, path = made ? f.result.path : f.blankPath;
   if (!path || S.plate?.path === path) { historyUI(); return render(); }
   // an HDR fluid shot: the space the hdr workflow writes its EXR frames in (HDR_SPACE there). Read from the file, they
-  // opened as Linear Rec.709 (2 Nov), their AP0 values taken for Rec.709 ones
+  // opened as Linear Rec.709, their AP0 values taken for Rec.709 ones
   await openPlate([], path, { under: true, cs: made && f.result.hdr ? knownSpace(HDR_FRAMES) ?? undefined : modelSpace(), chosen: false });
   log(`Plate under the edits: ${made ? `the fluid shot v${f.result.v}` : "the blank plate"}.`); // once it is open
   if (S.edits.some((e) => e.on && e.state === "done")) queue(regenerateDependents); // made again on it, or taken back
@@ -2961,7 +2961,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     await step(r, id, async (progress) => {
       if (!final) return void Object.assign(store, await cleanAt(size, progress));
       // at full size, Lightricks' two stages: the erase pass at half the working size (the preview's own when it is that size),
-      // then 2 steps at full size from it, without the reference video. 8 steps at full size took 181 s on a 1080p plate (28 Oct)
+      // then 2 steps at full size from it, without the reference video. 8 steps at full size take 181 s on a 1080p plate
       const low = stageOne(p.work);
       if (S.stage) S.stage.part = `stage 1 of 2 at ${low.join(" × ")}`; // the live preview names the stage: each starts at step 1
       const first = await cleanAt(low, (f) => progress(f / 2));
@@ -3019,7 +3019,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const onePass = !off && sw === p.work[0] && sh === p.work[1];
   const final = onePass ? made : await passes(r, p.work, "full", true);
   if (!off && here() && !S.pass && !onePass && !r.taken && !r.review && r.raw && S.shot?.url !== r.raw) { // the full-size shot as LTX made it, until the full-size composite:
-    setShot(r.raw, key, "@model"); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640, 28 Oct)
+    setShot(r.raw, key, "@model"); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640 px)
     hud("Shot, full size: Space plays it as LTX made it. The full-size composite follows.", 2500);
     log("Viewer: full-size shot until the full-size composite is ready.");
   }
@@ -3630,7 +3630,7 @@ const unpackStrokes = (saved, [W, H], from) => { // `from`: the scene's own work
 async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it again, or downloads it
   const work = S.plate.work, f = S.fluid, { config, display, view, look: lk } = S.ocio;
   // a fluid scene keeps its blank plate, which opens in the model space (openBlank): the plate under its edits can be the
-  // HDR fluid shot's EXR frames, in ACES2065-1, and the blank plate reopened in that space made its jobs again (2 Nov)
+  // HDR fluid shot's EXR frames, in ACES2065-1, and the blank plate reopened in that space would make its jobs again
   const blank = f?.blankPath;
   const scene = { ...SCENE, saved: new Date().toISOString(), build: S.build, folders: foldersIn([S.plate, S.renders.get(S.heroKey), S.edits.filter((e) => e.on)]), work, ocio: { config, display, view, look: lk },
     plate: { path: blank ?? S.plate.path, color_space: blank ? modelSpace() : S.plate.cs, name: S.plate.name },
@@ -3901,8 +3901,8 @@ function toggleInspector(on = !S.inspect.on) {
   i.on = on; i.avg = null;
   $("#inspector").hidden = $("#inspector-mark").hidden = !on;
   if (on) refreshInspector(true);
-  hud(on ? (i.pt ? "Color Inspector: Shift+click samples a pixel, Shift+drag averages, drag the box to move it. F5 hides it."
-    : "Color Inspector: Shift+click the frame to sample a pixel. F5 hides it") : "Color Inspector hidden");
+  hud(on ? (i.pt ? "Colour Inspector: Shift+click samples a pixel, Shift+drag averages, drag the box to move it. F5 hides it."
+    : "Colour Inspector: Shift+click the frame to sample a pixel. F5 hides it.") : "Colour Inspector hidden.");
 }
 
 function inspectPoint(e) { // the plate pixel under a pointer event, and whether it falls on the frame
@@ -3934,7 +3934,7 @@ function refreshInspector(force = false) { // on every redraw: place the box, re
   const key = inspectKey();
   if (force || key !== i.key) { i.key = key; readPixel(); }
   // The last values with the point and frame they were read at: while a read is on its way, a redraw showed the new
-  // point with the old point's values, and CI's page test read them (3 Nov)
+  // point with the old point's values, which a page test would read
   else if (i.got) showInspector(i.got.pt, i.got.frame, i.got, i.got.key === key);
 }
 
@@ -4127,7 +4127,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
     ["View", [chan("rgb", "Shift+C"), chan("r", "Shift+R"), chan("g", "Shift+G"), chan("b", "Shift+B"), chan("l", "Shift+L"), "-",
       ["Fit", "F", () => zoomTo(1), !p], ["Frame width", "Ctrl+F", widthZoom, !p], ["1:1", "1", () => pixelZoom(1), !p],
       ["2:1", "2", () => pixelZoom(2), !p], ["4:1", "4", () => pixelZoom(4), !p], ["1:2", "Shift+2", () => pixelZoom(1 / 2), !p], ["1:4", "Shift+4", () => pixelZoom(1 / 4), !p],
-      ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null],
+      ["Colour Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null],
       ["Wipe: next on the left", ",", () => stepWipe("left"), S.wipe === null], ["Wipe: next on the right", ".", () => stepWipe("right"), S.wipe === null], ["X-ray", "X", () => setXray(!S.xray), !p, S.xray], ["Full screen", "`", fullScreen, !p, !!fullFrom],
       ["Cache memory", "", [["Auto", "", () => setCache(0), false, !S.cache], ...CACHE_CHOICES.filter(Boolean).map((b) => [memoryText(b), "", () => setCache(b), false, S.cache === b]),
         ["Custom…", "", customCache, false, !!S.cache && !CACHE_CHOICES.includes(S.cache)]], !!CACHE_MB],
@@ -4297,7 +4297,7 @@ function colorUI() { // the brush's colour is lit among the swatches, and none i
 $$(".swatches .sw[data-color]").forEach((b) => (b.onclick = () => setColor(b.dataset.color)));
 $("#color").oninput = (e) => setColor(e.target.value);
 // The colour picker (I, the pipette by the swatches, or Tools > Pick a colour): the next click on the frame takes its colour,
-// averaged over 5 x 5 pixels. One way in every browser: the browser's own eyedropper reads the screen, so it was dropped (11 Nov).
+// averaged over 5 x 5 pixels. One way in every browser: the browser's own eyedropper reads the screen, not the frame, so the page does not use it.
 const PICK_SIDE = 5;
 const pickCtx = Object.assign(document.createElement("canvas"), { width: PICK_SIDE, height: PICK_SIDE }).getContext("2d", { willReadFrequently: true });
 $("#pick").onclick = () => pickColor();
@@ -4538,7 +4538,7 @@ addEventListener("keydown", (e) => {
     if (e.key.toLowerCase() === "o") openDialog(); else if (S.plate) saveScene().catch(quiet);
     return;
   }
-  if (e.key === "F5" && !e.ctrlKey && !e.metaKey && !e.altKey) { if (S.plate) toggleInspector(); return e.preventDefault(); } // RV's Color Inspector; the page takes F5 from the browser's reload
+  if (e.key === "F5" && !e.ctrlKey && !e.metaKey && !e.altKey) { if (S.plate) toggleInspector(); return e.preventDefault(); } // RV's Color Inspector, here the Colour Inspector; the page takes F5 from the browser's reload
   if (e.target.matches("input, select, textarea")) {
     if (e.key === "Enter" && e.target.id === "prompt") { enter(e.ctrlKey || e.metaKey); e.target.blur(); e.preventDefault(); }
     else if (e.key === "Escape") e.target.blur();

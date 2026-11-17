@@ -272,7 +272,7 @@ export function reconcile(text, locked) {
 }
 
 // ---------- An erase: one locked box per painted part ----------
-// One box around a truss, a crane and a door took in an astronaut between them, and the upsampler removed him instead (28 Oct).
+// One box around a truss, a crane and a door took in an astronaut between them, and the upsampler removed him instead.
 // A few tight boxes cover the paint, so they hold what was painted and little else.
 // paint: { bits, w, h } on a coarse grid; boxes are [y_min, x_min, y_max, x_max] on 0..1000.
 export function paintBoxes({ bits, w, h }, { max = 4, fill = 0.4, gain = 0.25, margin = 8 } = {}) {
@@ -407,7 +407,7 @@ export function erasePrompt(captions) {
 }
 
 // The full size's first stage, as in Lightricks' two-stage LTX workflows: half the working size, in multiples of 32. The second
-// stage refines it at full size in 2 steps (8 steps at full size took 181 s on a 1080p plate, 28 Oct).
+// stage refines it at full size in 2 steps (8 steps at full size take 181 s on a 1080p plate).
 export const stageOne = ([w, h], step = 32) => [Math.max(step, Math.round(w / 2 / step) * step), Math.max(step, Math.round(h / 2 / step) * step)];
 
 
@@ -511,7 +511,7 @@ export function pickedColor(data) {
   return n ? `#${[r, g, b].map((v) => Math.round(v / n).toString(16).padStart(2, "0")).join("")}` : null;
 }
 
-// ---------- A fluid shot on a blank plate: AInVFX's ainvfx-fluid IC-LoRA (its model card, read 28 Oct 2026) ----------
+// ---------- A fluid shot on a blank plate: AInVFX's ainvfx-fluid IC-LoRA (its model card) ----------
 // Sides in multiples of 64 (the LoRA's reference downscale factor is 2), up to the app's 1920; 8k + 1 frames, 121 tested,
 // 33 and 321 seen in training; 24, 25 and 50 fps trained. Keyframes sit on frame 0, on the last frame, and between on
 // the first frame of each 8-frame group of the LTX VAE (8k + 1).
@@ -821,11 +821,11 @@ export function erasedShare(after, before, mask, w, h, { cell = 4, levels = 12 }
   return all ? changed / all : null;
 }
 
-// Whether an erase removed its object, as the page judges it (eraseCheck). The first rule (under 2% of it changed, at 12 levels)
-// let through a barn that Klein had only recoloured: 59% of its cells moved (12 Nov 2026). On the probe's 21 results of 13 Nov,
-// what went had 53 to 78% of its cells moved by more than 24 levels and its edges at -0.03 to 0.75 (a fence in front of the
-// barn kept some); what stayed had 0 to 1% and 0.93 to 0.98; a tree half changed had 17% and 0.62. So an object is left when
-// under 30% of it changed, or when its edges held above 0.85. A null figure: nothing to judge by it.
+// Whether an erase removed its object, as the page judges it (eraseCheck): the share of the object's cells moved by more
+// than 24 levels, and how well its edges held. On 21 erases, what went had 53 to 78% of its cells moved and its edges at
+// -0.03 to 0.75 (a fence in front of the object kept some); what stayed had 0 to 1% and 0.93 to 0.98; a tree half changed
+// had 17% and 0.62. A rule of under 2% at 12 levels lets through an object that Klein only recoloured (59% of its cells
+// moved). So an object is left when under 30% of it changed, or when its edges held above 0.85. A null figure: nothing to judge by it.
 export const objectLeft = ({ changed, edges }) => changed !== null && (changed < 0.3 || (edges !== null && edges > 0.85));
 
 // The correlation of the gradient's size inside the mask, before and after: 1, the same edges; near 0, none of them. Gray is the
@@ -981,7 +981,7 @@ export function warmEnd(seconds, missed, startShown) {
 // so a render with a light edit leaves it out. A blank plate asks its bit depth: 8-bit, or 16-bit half float, where its
 // fluid shot goes through it and becomes an EXR plate: 16-bit is the default once its files are found (?hdr=0 turns it off).
 export const HDR_DEPTH = 16;
-// New content at the plate's bit depth (Adrien, 2 Nov): a clean plate or a new element matches the plate. One rule per
+// New content at the plate's bit depth: a clean plate or a new element matches the plate. One rule per
 // kind of plate, read from its pixel format: `bits` (16 for half float, 32 for float), `frames`, the Save Frames format
 // a shot's frames pass through on their way to the export, and `hdr`, whether SDR to HDR is on by default. Its switch
 // shows for every plate:
@@ -999,7 +999,7 @@ export function plateDepth(spec) {
 // Whether a plate's own format holds the values above 1.0 that SDR to HDR makes: float samples do, and so does a plate whose
 // colour space decodes code value 1.0 above 1.0 (`headroom`, from the stat route: 222.9 for ACEScct, 100 for PQ, 1.0 for
 // sRGB), video or not: an HDR video in PQ or HLG, a log video, a 10-bit Cineon DPX, a camera log TIFF. Such a plate exports
-// in its own format with no extra files; only the others warn first and deliver an EXR sequence (Adrien, 3 Nov).
+// in its own format with no extra files; only the others warn first and deliver an EXR sequence.
 export const holdsHdr = (spec, headroom = 1) => !!spec && (plateDepth(spec).float || headroom > 1.001);
 export const hdrPlate = (spec) => plateDepth(spec).hdr; // SDR to HDR on by default for this plate
 export const wantsHdr = (spec, tools, on) => !!spec && !!on && !tools.includes("light");
@@ -1011,14 +1011,14 @@ export const hdrOfKey = (key, dflt) => (key?.endsWith("|hdr") ? true : key?.ends
 export const PLATE_ALONE = "|hdr";
 export const renderKey = (edits, dflt, on) => (edits ? hdrKey(edits, dflt, on) : on && !dflt ? PLATE_ALONE : "");
 export const plateAlone = (key) => key === PLATE_ALONE;
-// SDR to HDR on a plate whose format cannot hold values above 1.0 (Adrien, 2 Nov): asked before it turns on, then the result is
+// SDR to HDR on a plate whose format cannot hold values above 1.0: asked before it turns on, then the result is
 // an EXR sequence, which the player shows at full precision and the export writes.
 export const exrResult = (spec, hdrRan, headroom = 1) => !!hdrRan && !holdsHdr(spec, headroom);
 // SDR to HDR for a render: on its own when the plate holds values above 1.0, else when Deliver's bit-depth pass asks for it
 export const wantsHdrFor = (spec, headroom, deliverHdr) => holdsHdr(spec, headroom) || !!deliverHdr;
-// The 32 GB study, closed (Adrien, 3 Nov): every step finishes on a 32 GB card at 1920 x 1088 x 121, slower than on 96 GB,
-// but a 4K plate does not (its first erase still ran after 30 minutes on an RTX 5090). A plate above 2K on a card under
-// 48 GB warns when it opens: a 48 GB card reports about 47.5 GiB, a 40 GB one about 39.6.
+// On a 32 GB GPU every step finishes at 1920 x 1088 x 121, slower than on 96 GB, but a 4K plate does not (its first erase
+// still runs after 30 minutes on an RTX 5090). A plate above 2K on a GPU under 48 GB warns when it opens: a 48 GB GPU
+// reports about 47.5 GiB, a 40 GB one about 39.6.
 export const BIG_PLATE = { side: 2048, vram: 46 * 2 ** 30 };
 export const bigPlateWarning = (spec, vram) => (spec && vram > 0 && Math.max(spec.width, spec.height) > BIG_PLATE.side && vram < BIG_PLATE.vram
   ? `This plate is ${spec.width} x ${spec.height}, above 2K, and this GPU has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB GPU for now: its renders may not finish here.`
@@ -1030,7 +1030,7 @@ export const defaultDepth = (hdrReady) => (hdrReady ? HDR_DEPTH : 8); // a blank
 // the config has it, so they show what its full-precision frames show; a config without it keeps the model space.
 export const viewerSpace = (names, model) => (names.includes("ACEScct") ? "ACEScct" : model);
 // While a shot plays, one source shows one kind of frame: its full-precision frames once all of them are in, else its 8-bit
-// movie. Mixed, the two alternated as the frames arrived, with two different tone mappings (one cause of the flicker of 29 Oct).
+// movie. Mixed, the two alternated as the frames arrived, with two different tone mappings (a cause of flicker).
 export const drawsDeep = (playing, holdsAll) => !playing || holdsAll;
 // A fluid shot's folder, from its HDR frames or its shot in the blank plate's format: what its export zips.
 export const fluidRun = (path) => String(path ?? "").replace(/^output[:/]/, "").replace(/\/(hdr|plate)(\/[^/]*)?$/, "");
@@ -1072,7 +1072,7 @@ export function stopHint({ edit = null, waits = [] } = {}) {
     : `Stopped. Edit ${edit} keeps its strokes, words and seed.${wait} Enter generates again, Ctrl+Enter tries another seed, Esc drops the strokes.`;
 }
 
-// Edits are layers, after Generate (Adrien, 11 Nov). An edit above an edit that is made again stays hidden until its own
+// Edits are layers, after Generate. An edit above an edit that is made again stays hidden until its own
 // pass ends when it depends on that edit (dependsOnChange): it is generated again, over the new result. An edit that does
 // not depend on it stays on the frame and is not generated again. `edits`: History from the bottom, each { id, version,
 // tool, foot, basis, on, made, pending } (made: it has a result; pending: it waits for its turn or is being generated).
@@ -1249,8 +1249,7 @@ export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
 // A fluid shot's own passes, shown from the Render panel with its keyframes open or closed: the control video LTX was
 // guided by, the shot as LTX made it, and for a 16-bit plate its SDR-to-HDR frames as a movie in log values.
 // The wipe on a fluid row: the step's input on the left, its output on the right, so each step reads against what it was
-// given: the blank plate (black) before the keyframes, the keyframes before the shot, the SDR shot before SDR to HDR (Adrien,
-// 3 Nov: the left side showed the fluid shot, the plate under the edits, whatever the row).
+// given: the blank plate (black) before the keyframes, the keyframes before the shot, the SDR shot before SDR to HDR.
 export const fluidWipeLeft = (id) => ({ fluid_keys: "black", fluid_shot: "fluid_keys", fluid_hdr: "fluid_shot" })[id] ?? null;
 export const fluidPasses = (result, spaces = {}) => (result ? [
   result.control && { id: "fluid_keys", label: "Fluid: keyframes", url: result.control, space: "@model" },
@@ -1293,15 +1292,15 @@ export const MEMORY = {
 };
 // ComfyUI keeps the models of the jobs it has run in memory, ready for the next job. With 16 GB of VRAM under a cap of
 // 52 GB of RAM, a full-size shot left LTX and its text encoder there, 35 GB, and the tracking job after it took the rest:
-// the system stopped ComfyUI (11 Nov). A profile that `frees` holds one family of models at a time: the page asks
+// the system stopped ComfyUI. A profile that `frees` holds one family of models at a time: the page asks
 // ComfyUI to free its memory before a job whose family is not that of the job posted before it.
 export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", shotup: "ltx", clean: "ltx", cleanup: "ltx", fluid: "ltx", hdr: "ltx", warm: "ltx",
   matte: "sam", snap: "sam", ingest: "frames", comp: "frames", review: "frames", export: "frames", upscale: "seedvr2", upscale_export: "frames" }; // by workflow: the models it loads, or frames only
-// Speed first where there is room (Adrien, 11 Nov). Under 24 GB of VRAM the card cannot hold two families of models, so a
+// Speed first where there is room. Under 24 GB of VRAM the card cannot hold two families of models, so a
 // change of family frees ComfyUI's memory. On a larger card the models stay loaded, and the memory is freed only when
-// RAM is short for the next job's frames: a job that reads the plate can hold RAM_COPIES float32 copies of it (the
-// open of 1.11.8 held 8, measured on 11 Nov). The open itself holds the plate once since 1.11.9: 2.8 copies at its peak
-// on the laptop and 1.9 on a pod (12 Nov), so `ingest` counts RAM_COPIES_OPEN. A GPU that runs out of memory is retried
+// RAM is short for the next job's frames: a job that reads the plate can hold RAM_COPIES float32 copies of it. The open
+// itself holds 2.8 copies at its peak with a 16 GB GPU and 64 GB of RAM, 1.9 on an RTX PRO 6000 pod, so `ingest` counts
+// RAM_COPIES_OPEN. A GPU that runs out of memory is retried
 // once after a free, on every card (comfy.mjs).
 export const RAM_COPIES = 8, RAM_COPIES_OPEN = 3;
 export const framesNeed = (width, height, frames, name = "") => // bytes of RAM for the job `name`: the copies, and 4 GB to work in

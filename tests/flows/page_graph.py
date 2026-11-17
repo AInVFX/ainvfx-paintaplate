@@ -1,4 +1,4 @@
-"""The page workstream's check of the scene's ComfyUI graph and its images (tests/flows/README.md). ComfyUI's image loaders
+"""The check of the scene's ComfyUI graph and its images (tests/flows/README.md). ComfyUI's image loaders
 list only the files at the top of the input folder, and its editor marks any other file as missing. So every image loader
 of the saved graph reads a file at the top of input, the file is there, the README note names it, and the API graph in
 the same file reads the same files."""

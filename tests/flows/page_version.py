@@ -1,4 +1,4 @@
-"""The check of the job index across builds (tests/flows/README.md; the render workstream's in wave 5). A job made before
+"""The check of the job index across builds (tests/flows/README.md). A job made before
 with the same inputs is taken from the job index, not run again. The key holds the server's build, a hash of what computes
 made when ComfyUI starts (routes.build_parts), in place of the pack's version: a result made by other code never comes back,
 each build finds its own results again, and a new version number alone changes nothing. The mock answers another build or

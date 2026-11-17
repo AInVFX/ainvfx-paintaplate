@@ -1,4 +1,4 @@
-"""The codebase workstream's page checks for the log (tests/flows/README.md). The status line says what to do next and the
+"""The page checks for the log (tests/flows/README.md). The status line says what to do next and the
 log records what happened: a hint shows in the status line only, and a fact is written to the log once. A plate that
 opens writes two lines, and a blank plate keeps its fluid hint."""
 import re

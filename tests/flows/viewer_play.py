@@ -111,10 +111,10 @@ def run(browser, port, U):
     space(page)
     page.close()
 
-    # The reference laptop's card, 16 GB of VRAM: the small memory profile gives 512 MB, and the line names no card
+    # A 16 GB GPU: the small memory profile gives 512 MB, and the line names no GPU
     U.mock_route(port, "/mock/card", {"vram": 17.2e9, "ram": 65.5e9})
-    laptop = opened(browser, port, U)
-    U.wait_log(laptop, FULL, 150000, "frame cache with every frame of the plate, on the small memory profile")
-    said = plan_line(laptop)
+    small = opened(browser, port, U)
+    U.wait_log(small, FULL, 150000, "frame cache with every frame of the plate, on the small memory profile")
+    said = plan_line(small)
     U.check(re.fullmatch(r"Frame cache: 512 MB \(Auto\), (\d+) of \1 frames at \d+ x \d+", said) is not None, f"on a 16 GB card beside ComfyUI the Auto budget is 512 MB, and the line names no card: {said}")
-    laptop.close()
+    small.close()

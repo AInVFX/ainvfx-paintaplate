@@ -1,4 +1,4 @@
-"""The page workstream's check of the log's export (tests/flows/README.md). The small button beside the log downloads
+"""The check of the log's export (tests/flows/README.md). The small button beside the log downloads
 paintaplate_log_<plate>_<YYYYMMDD_HHMM>.txt: the pack's version and build, the machine that ComfyUI reports, the page,
 the plate, then the log with its times. Its title says what the file holds."""
 import re

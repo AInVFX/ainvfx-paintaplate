@@ -1,4 +1,4 @@
-"""The page workstream's check of the Finish menu (tests/flows/README.md): the passes on the whole plate after the
+"""The check of the Finish menu (tests/flows/README.md): the passes on the whole plate after the
 full-size composite. On desk.mp4, whose format holds nothing above 1.0, SDR to HDR is a switch that asks first, under its
 row. Turned on, the button counts it and the log says so. Esc or a click outside closes the menu. History holds no such
 switch."""

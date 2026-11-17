@@ -1,4 +1,4 @@
-"""The page workstream's check of a stop that lands between two jobs (tests/flows/README.md). A render step uploads its
+"""The check of a stop that lands between two jobs (tests/flows/README.md). A render step uploads its
 images, then posts its job. A stop cancels the jobs that exist, and the step that still uploads has none. The mock holds
 that upload open (/mock/slow), Stop is pressed, then the upload goes on (/mock/release): the step ends there, no job is
 posted until Enter, and Enter goes on from that step. While the preview shot before it writes its frames and movie, the

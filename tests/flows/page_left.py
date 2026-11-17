@@ -1,8 +1,6 @@
-"""The edit workstream's check of an erase that the page's check holds back (tests/flows/README.md). Klein can answer an
-erase with the frame as it was: on 12 November 2026 a stroke on a barn, with no words, left the barn in the whole shot, and
-nothing said so. After the edit the page compares the first frame with the frame under it inside the object's mask
-(logic.eraseCheck). The check can be wrong on a thin or faint object, or on one behind a fence, so the page asks (Adrien,
-13 Nov 2026) in its question dialog, with History's row marked as the question opens: tests/ui_live.py ends a GPU case on
+"""The check of an erase that the page's check holds back (tests/flows/README.md). Klein can answer an
+erase with the frame as it was: a stroke with no words can leave its object in the whole shot. After the edit the page compares the first frame with the frame under it inside the object's mask
+(logic.eraseCheck). The check can be wrong on a thin or faint object, or on one behind a fence, so the page asks in its question dialog, with History's row marked as the question opens: tests/ui_live.py ends a GPU case on
 that mark. Esc or « No, cancel » renders nothing and leaves what to do next in the status line, and the page goes on: another seed
 asks again. « Yes, render anyway », clicked or chosen by Enter, keeps the first frame and renders its shot. One question at a
 time: a second erase is held back while the OCIO question is open (/mock/hold keeps its passes running), and its question

@@ -1,4 +1,4 @@
-"""The page workstream's check of the OCIO menu (tests/flows/README.md). Two headings say which part affects generation
+"""The check of the OCIO menu (tests/flows/README.md). Two headings say which part affects generation
 and which is for display only, and each line shows its value. The plate's line ends with « from file » or « override ».
 With an edit that has a result, an OCIO change that regenerates asks first, with one question: a new config, then a new
 colour space. « No, keep it » changes nothing and keeps the menu's tick; « Yes, continue » goes on. A new view asks nothing. In the plate's tree the

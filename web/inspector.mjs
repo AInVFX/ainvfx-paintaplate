@@ -1,4 +1,4 @@
-// The colour inspector, as OpenRV's (src/lib/app/mu_rvui/inspector.mu at 0bd9675, read 2 Nov 2026): F5 shows it, as
+// The colour inspector, as OpenRV's (src/lib/app/mu_rvui/inspector.mu at 0bd9675): F5 shows it, as
 // toggleColorInspector in rvui.mu; Shift+click samples, Shift+drag averages, the box drags the point with it. RV lists the pixel in the image's own pixels (Native Pixel), its values as "%f", and
 // the average of the pixels sampled with Shift held. RV shows either the source colour or the final colour; this
 // inspector shows both: the source values at full precision and native size, read on the server from the file on show
@@ -60,8 +60,8 @@ export function inspectorRows({ x, y, inside = true, frame, value, final, averag
   if (line) rows.push(["Values", line]);
   if (error) return [...rows, ["Error", error]];
   const rgb = (label, v) => [[label, ""], ...["Red", "Green", "Blue", "Alpha"].slice(0, v.length).map((n, i) => [n, formatValue(v[i])])];
-  if (value) rows.push(...rgb("Source Color", value));
-  if (final) rows.push(...rgb("Final Color", final));
+  if (value) rows.push(...rgb("Source colour", value));
+  if (final) rows.push(...rgb("Final colour", final));
   if (average?.n > 1) rows.push(...rgb(`Average of ${average.n}`, average.sum.map((s) => s / average.n)));
   return rows;
 }

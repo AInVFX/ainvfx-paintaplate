@@ -1,4 +1,4 @@
-"""The viewer workstream's page checks: the colour on the canvas against OpenRV (tests/test_rv_parity.py), and the colour
+"""The viewer's page checks: the colour on the canvas against OpenRV (tests/test_rv_parity.py), and the colour
 inspector. Each colour check draws fixed half-float pixels through the real shader (display.mjs) and reads the canvas:
 a pixel sampled from a playing shot depends on the browser."""
 import json
@@ -74,7 +74,7 @@ def native_and_inspector(page, port, U):
     U.check(all(abs(a - b) > 200 for a, b in zip(checker, checker[1:])),
             f"one source pixel per canvas pixel: a one-pixel checker of 4.0 and 0.0 alternates on the canvas: {checker[:8]}")
     page.keyboard.press("F5")
-    U.check(page.is_visible("#inspector"), "F5 shows the Color Inspector")
+    U.check(page.is_visible("#inspector"), "F5 shows the Colour Inspector")
     ATTR = "(() => { const i = document.querySelector('#inspector'); return [i.dataset.pixel, i.dataset.value, i.dataset.frame]; })()"
 
     def client(x, y):
@@ -371,7 +371,7 @@ def run(browser, port, U):
         json.dump(rows, f)
     bad = [(r["case"], r["max_diff"]) for r in rows if r["max_diff"] is None or r["max_diff"] > 1]
     U.check(not bad, f"the canvas matches OpenRV within 1 code value: {len(rows)} cases, 12 pixels each; over 1: {bad}")
-    # F5 shows the Color Inspector and the browser does not reload
+    # F5 shows the Colour Inspector and the browser does not reload
     page.evaluate("window.__alive = 1")
     page.keyboard.press("F5")
     U.check(page.evaluate("window.__alive") == 1, "F5 is the page's: it does not reload")

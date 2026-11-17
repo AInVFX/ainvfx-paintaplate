@@ -1,4 +1,4 @@
-"""The pipeline workstream's page checks for memory and previews (tests/flows/README.md): the memory profile at page
+"""The page checks for memory and previews (tests/flows/README.md): the memory profile at page
 open, and what each post asks ComfyUI for. The mock ComfyUI lists the posts at /mock/posts."""
 import json
 import urllib.request

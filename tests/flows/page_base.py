@@ -1,4 +1,4 @@
-"""The page workstream's check of the first frame under a new edit (tests/flows/README.md). A Clean and a Paint are made
+"""The check of the first frame under a new edit (tests/flows/README.md). A Clean and a Paint are made
 and rendered on desk.mp4. A new edit shows the first frame as the edits below it made it: started by a tool, by a stroke
 on a later frame (the viewer goes back to the first frame, and the status line's note says why), after a click on a
 History row (the row shows that edit and selects nothing) and with Preview size: Off. The row's pencil selects an older

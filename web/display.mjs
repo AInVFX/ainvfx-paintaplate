@@ -7,7 +7,7 @@
 // while the shot plays. Frames of an image sequence (DeepFrames in frames.mjs, 960 px) and the paused frame on show at
 // native size (sharpFrame in app.mjs) arrive as RGB half floats, so values above 1.0 reach the shader; video frames and
 // canvases are 8 bits.
-// OpenRV read at 0bd9675 (main, 2 Nov 2026): src/lib/ip/IPBaseNodes/ColorIPNode.cpp, src/lib/ip/OCIONodes/OCIOIPNode.cpp,
+// OpenRV at 0bd9675 (main): src/lib/ip/IPBaseNodes/ColorIPNode.cpp, src/lib/ip/OCIONodes/OCIOIPNode.cpp,
 // src/lib/ip/IPCore/glsl/ColorGamma.glsl and ColorMatrix.glsl.
 
 // ---------- The plate's own size on the canvas (OpenRV shows a plate at its resolution; key 1 is 1:1) ----------
@@ -41,7 +41,7 @@ export const pointIn = (rect, clientX, clientY, w, h) => [((clientX - rect.left)
 // ---------- Which frame a playing source shows once the colour tools move ----------
 // At rest a playing source shows its 8-bit movie until all its EXR frames are in. That movie holds ACEScct codes in
 // H.264: pushed four stops up, a fluid shot's dark background moved by 4 display levels at the median and 24 at p99
-// against its EXR frames, with H.264's 8 px blocks visible (GPU check, 2 Nov). So once a colour tool moves, a source with
+// against its EXR frames, with H.264's 8 px blocks visible. So once a colour tool moves, a source with
 // EXR frames shows only those, as RV plays only what it has decoded: the frame on show if it is in, else the nearest
 // one before it, else the nearest after (the cache keeps frames ahead of the playhead). Null when none is in.
 export function exactFrame(frames, f) {
