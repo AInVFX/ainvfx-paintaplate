@@ -22,7 +22,7 @@ def mock_input():  # the mock ComfyUI's input folder as a full path: ui_mock.py 
 def run(browser, port, U):
     page = U.load(browser, port)
     page.click("#open-btn"); page.click("#open [data-tab=files]")
-    U.check(page.is_visible("#path") and page.is_hidden("#path-remote") and "full path" in page.text_content("#path-row"),
+    U.check(page.is_visible("#path") and page.is_hidden("#path-remote") and "full path" in page.text_content("#path-row").lower(),
             f"on this machine, the Files tab takes a full path: {page.text_content('#path-row').strip()[:60]!r}")
     page.fill("#path", "plates/no_such_plate.mp4"); page.click("#open-go")
     U.check(U.poll(page, lambda: page.text_content("#path-error").strip() != "", 10) and page.evaluate(SHOWN),

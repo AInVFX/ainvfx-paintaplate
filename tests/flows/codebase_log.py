@@ -38,8 +38,8 @@ def run(browser, port, U):
     U.check(fact.endswith(f"/{name}.paintaplate.json.") and f"{fact} {then}" in said and [t for t in lines if t.startswith(f"Scene {name} saved")] == [fact] and not any(then in t for t in lines),
             f"a save is one fact in the log, and the status line adds what to do next: {said} {[t for t in lines if 'Scene' in t]}")
     page.select_option("#preview-size", "4")  # Quarter size
-    page.wait_for_function("window.__said.some((t) => t.startsWith('Shot preview:'))", timeout=10000)
-    fact = next(t for t in page.evaluate("window.__said") if t.startswith("Shot preview:"))
+    page.wait_for_function("window.__said.some((t) => t.startsWith('Preview:'))", timeout=10000)
+    fact = next(t for t in page.evaluate("window.__said") if t.startswith("Preview:"))
     U.check(U.log_lines(page).count(fact) == 1, f"a fact with no instruction still shows in the status line and goes to the log, once: {fact!r}")
     page.evaluate("window.__playable = 0")
     page.click("#open-btn"); page.click("#open [data-tab=blank]"); page.click("#open-go")  # a blank plate, at the Blank tab's settings
