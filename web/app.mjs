@@ -2184,7 +2184,8 @@ async function generate(edit) {
       reference: edit.tool === "erase" || light ? startName : await uploadCanvas(editImage(edit, before, work), `${tag}_ref_full.png`),
       mask: await uploadCanvas(maskAt(edit, work), `${tag}_mask_full.png`), ...editSettings(edit, work, FULL),
       relight: light ? 1 : 0,
-      shade: shaded(edit) ? await uploadCanvas(shadeMask(edit, work), `${tag}_shade.png`) : "", level: edit.tool === "erase" }, { kind: "edit", front: true, progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
+      // a shade stroke reaches Klein in words only (logic.lightIntent): darkened where painted, it read as a streak
+      level: edit.tool === "erase" }, { kind: "edit", front: true, progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
     if (!alive()) return;
     // a relight shows the frame as the export will make it: Klein's light on the plate's own detail
     edit.patch = await loadImage(viewUrl(outputFile("edit", full, light ? "relit" : "patch")));
