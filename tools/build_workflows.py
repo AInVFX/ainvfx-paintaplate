@@ -934,12 +934,14 @@ def upscale():
 
 def upscale_export():
     """Upscale to 4K's export, after the last window. Join Windows reads the windows' folders under one parent folder
-    (Slot frames), in order; a shot made in one job is one window. Save Plate writes the joined frames at their own size, in the format of the export at the plate's size (Slot
+    (Slot frames), in order, each window its last frames (Slot count) and the last window what is left of the shot's
+    frames (Slot max_frames), so a window job that ran again counts once; a shot made in one job is one window. Save Plate writes the joined frames at their own size, in the format of the export at the plate's size (Slot
     shot), which Load Plate reads for its spec: the same file type, codec, bit depth, frame numbers, colour tags, timecode
     and audio. The frames are in the plate's colour space already, so nothing converts them."""
     g = Graph()
     shot = g("PaintAPlate_LoadPlate", _title="Result: its format", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
-    frames = g("PaintAPlate_JoinWindows", _title="Upscaled windows, joined", folder=Slot("frames", ""))
+    frames = g("PaintAPlate_JoinWindows", _title="Upscaled windows, joined", folder=Slot("frames", ""),
+               count=Slot("count", 0), max_frames=Slot("max_frames", 121))
     g("PaintAPlate_SavePlate", _title="Upscaled export", _output="export", images=frames, plate=shot[2],
       filename_prefix=Slot("prefix", "paintaplate/plate/upscaled"), keep_untouched=False)
     g.save("upscale_export")

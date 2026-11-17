@@ -674,10 +674,19 @@ def untouched(changed: np.ndarray) -> np.ndarray:
     return np.asarray(changed) < MATTE_STEP
 
 
-def join_windows(folders: list, workers: int = 8) -> np.ndarray:
+def join_windows(folders: list, workers: int = 8, count: int = 0, max_frames: int = 0) -> np.ndarray:
     """The frames of a shot's windows, saved one folder each, joined in order into one float32 batch, one window read at
-    a time."""
+    a time. With `count`, the frames in each window, and `max_frames`, the frames in the shot, window i reads its last
+    min(count, max_frames - i * count) frames: a window job that runs again numbers its frames on in its folder (as
+    Save Image does), so its newest frames are kept, and a folder beyond the shot reads none. With either at 0, every
+    frame of every window is read."""
     files = [find_sequence(f) for f in folders]
+    if count and max_frames:
+        own = [max(0, min(count, max_frames - i * count)) for i in range(len(files))]
+        for folder, names, k in zip(folders, files, own):
+            if len(names) < k:
+                raise ValueError(f"Join Windows: window {os.path.basename(os.path.normpath(folder))} holds {len(names)} of its {k} frames.")
+        files = [names[len(names) - k:] for names, k in zip(files, own) if k]
     out, pos = None, 0
     for names in files:
         rgb = decode_frames(names, False, workers)[0]

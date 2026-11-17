@@ -880,17 +880,21 @@ class JoinWindows(io.ComfyNode):
                         "of their names, into one batch.",
             inputs=[
                 io.String.Input("folder", tooltip="The windows' parent folder, a path as Load Plate takes it."),
+                io.Int.Input("count", default=0, min=0, max=4096, optional=True,
+                             tooltip="Frames in each window. Each window reads its last 'count' frames, so a window saved twice counts once. 0 reads every frame."),
+                io.Int.Input("max_frames", default=0, min=0, max=4096, optional=True,
+                             tooltip="Frames in the shot. The last window reads what is left after the others. 0 reads every frame."),
             ],
             outputs=[io.Image.Output(display_name="images")],
         )
 
     @classmethod
-    def execute(cls, folder) -> io.NodeOutput:
+    def execute(cls, folder, count=0, max_frames=0) -> io.NodeOutput:
         full = resolve(folder)
         windows = sorted(os.path.join(full, d) for d in os.listdir(full) if os.path.isdir(os.path.join(full, d)))
         if not windows:
             raise ValueError(f"Join Windows: no window folder in {folder}.")
-        rgb = plateio.join_windows(windows, WORKERS)
+        rgb = plateio.join_windows(windows, WORKERS, count, max_frames)
         return io.NodeOutput(torch.from_numpy(rgb).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()))
 
 
