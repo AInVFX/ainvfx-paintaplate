@@ -231,6 +231,7 @@ async function finish(id, error) {
     return job.submit();
   }
   live.delete(job);
+  if (job.previews) post(`/paintaplate/live/${id}`, {}).catch(() => {}); // its live previews served their pass: ComfyUI's temp folder keeps none
   if (error) { log(jobFailed(job, Date.now(), error)); return job.reject(new Error(error)); }
   let out = (await historyRecord(id))?.outputs ?? {};
   const fresh = files(out).length || Object.values(out).some((o) => o.text?.length);
