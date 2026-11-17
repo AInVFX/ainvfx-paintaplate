@@ -372,6 +372,7 @@ dialog.colours menu { margin-top: 10px; }
 #help .help-keys { columns: 3 320px; column-gap: 28px; } /* the one table of keys, in three columns */
 #help .help-keys > div { break-inside: avoid; }
 #help .help-keys h3:first-child { margin-top: 0; }
+#help .help-keys > div + div { margin-top: 18px; } /* room above each section's heading, so its keys read as one group */
 #help .tabs { flex-wrap: wrap; }
 .help-steps { margin: 0; padding-left: 20px; color: var(--muted); }
 .help-steps li { margin: 0 0 8px; }
