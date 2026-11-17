@@ -246,7 +246,8 @@ export function cacheSize({ budget, frames, movie: [mw, mh], fit: [fw, fh], byte
 }
 
 // One budget shared by the caches. The sources on show come first, in equal shares, each at the size it is shown. The
-// others share what is left, at the floor size. `sources`: [{ id, movie: [w, h], show, bytes }]. Returns, per id,
+// others share what is left, at the floor size. A source with a `size` keeps it: its share sets how many of its frames
+// fit, never their size. `sources`: [{ id, movie: [w, h], show, bytes, size }]. Returns, per id,
 // { width, height, fits, budget }: the size of its frames, how many fit, and its share in bytes.
 export function cachePlan({ budget, frames, fit, sources }) {
   const plan = {};
@@ -254,7 +255,9 @@ export function cachePlan({ budget, frames, fit, sources }) {
   for (const show of [true, false]) {
     const tier = sources.filter((s) => !!s.show === show);
     tier.forEach((s, i) => {
-      const size = cacheSize({ budget: Math.max(0, left) / (tier.length - i), frames, movie: s.movie, fit: show ? fit : [CACHE_FLOOR, CACHE_FLOOR], bytes: s.bytes });
+      const share = Math.max(0, left) / (tier.length - i), [w, h] = s.size ?? [];
+      const size = s.size ? { width: w, height: h, fits: Math.min(frames, Math.floor(share / (w * h * (s.bytes ?? 4)))) }
+        : cacheSize({ budget: share, frames, movie: s.movie, fit: show ? fit : [CACHE_FLOOR, CACHE_FLOOR], bytes: s.bytes });
       plan[s.id] = { ...size, budget: size.fits * size.width * size.height * (s.bytes ?? 4) };
       left -= plan[s.id].budget;
     });

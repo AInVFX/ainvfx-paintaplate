@@ -478,7 +478,7 @@ const CACHE_PREF = "paintaplate.cache";
 S.cache = (() => { try { const v = +localStorage.getItem(CACHE_PREF); return v >= CACHE_LEAST && v <= CACHE_MOST ? v : 0; } catch { return 0; } })(); // bytes, from the list or Custom…; 0: Auto
 const memoryText = (b) => (b >= 1e9 ? `${Math.round(b / 1e8) / 10} GB` : `${Math.round(b / 1e6)} MB`);
 const cacheBudget = () => (CACHE_MB ? CACHE_MB * 1e6 : S.cache || autoBudget({ host: location.hostname, profile: S.memoryProfile.name, deviceMemory: navigator.deviceMemory }));
-const planned = { key: "", said: "", timer: 0, fit: null };
+const planned = { key: "", rest: "", budget: 0, said: "", timer: 0, fit: null, shares: null };
 function planCaches() { // each cache's share and frame size, when the budget, the sources on show or the in and out points change, or the view outgrows the frames
   const p = S.plate, fit = [S.fit.w, S.fit.h].map((v) => Math.round(v * devicePixelRatio));
   if (!p || !fit[0] || !fit[1]) return;
@@ -491,11 +491,14 @@ function planCaches() { // each cache's share and frame size, when the budget, t
     S.shot?.frames && !DEEP_MB && { id: "deepShot", name: "the shot's EXR frames", cache: deepShot, movie: exact, show: true, bytes: 6 },
   ].filter(Boolean);
   if (!sources.length) return; // no movie has loaded yet
-  const key = JSON.stringify([budget, frames, sources.map((s) => [s.id, s.movie, s.show])]);
+  const rest = JSON.stringify([frames, sources.map((s) => [s.id, s.movie, s.show])]), key = JSON.stringify([budget, rest]);
   if (key === planned.key && !outgrows(planned.fit, fit)) return; // a resize keeps the frames (frames.mjs: outgrows)
   const fresh = key !== planned.key; // the log says what fits when the budget, the sources or the in and out points change
-  Object.assign(planned, { key, fit });
-  const shares = cachePlan({ budget, frames, fit, sources });
+  // A new budget alone keeps every cache's frame size: a larger budget drops no decoded frame, a smaller one drops only
+  // the frames that no longer fit. Anything else (a source, its size on show, the in and out points) plans the sizes again.
+  const keep = rest === planned.rest && budget !== planned.budget && !outgrows(planned.fit, fit) && !!planned.shares;
+  const shares = cachePlan({ budget, frames, fit, sources: keep ? sources.map((s) => (planned.shares[s.id] ? { ...s, size: [planned.shares[s.id].width, planned.shares[s.id].height] } : s)) : sources });
+  Object.assign(planned, { key, rest, budget, shares, fit: keep ? planned.fit : fit });
   for (const s of sources) if (!s.show) s.cache.stopReader(); // the sources on show read first
   for (const s of sources.sort((a, b) => Number(!!b.show) - Number(!!a.show))) s.cache.plan(shares[s.id].budget, s.bytes ? null : [shares[s.id].width, shares[s.id].height]);
   const why = CACHE_MB ? "set in the address" : S.cache ? "set in View > Cache memory" : "Auto"; // the memory profile's line names the card
