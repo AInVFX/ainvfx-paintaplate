@@ -1,4 +1,4 @@
-// The page workstream's check of the Open dialog's trail (logic.crumbs): Input or Output and the folders below, or for a
+// The Open dialog's trail (logic.crumbs): Input or Output and the folders below, or for a
 // full path the machine's own folders, each crumb with the path that browses it.
 import assert from "node:assert/strict";
 import { test } from "node:test";

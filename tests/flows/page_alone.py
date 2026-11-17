@@ -1,4 +1,4 @@
-"""The page workstream's check of SDR to HDR on a plate with no edit (logic.plateAlone, tests/flows/README.md). On desk.mp4,
+"""SDR to HDR on a plate with no edit (logic.plateAlone). On desk.mp4,
 whose format holds nothing above 1.0, Finish > SDR to HDR turns it on and starts nothing: Generate starts it. The Render
 panel shows one step, SDR to HDR, with no First frame row, and the job takes the plate itself, with the plate's size for
 HDR Match. Once it is done, the player shows its EXR frames at full precision, and Export downloads them as they are:

@@ -30,7 +30,7 @@ test("windows follow the machine: 21 frames on a 16 GB GPU under a 52 GB cap, on
 });
 
 test("a job that composes the 4K result holds 10 copies of a frame: the windows of Paint and Clean are sized for it", () => {
-  assert.equal(upscaleWindow(131.3, 95.0, UHD, HD, 121, 10), 121); // the pod that measured 116.8 GB: still one job
+  assert.equal(upscaleWindow(131.3, 95.0, UHD, HD, 121, 10), 121); // 131.3 GB of RAM and a 95 GB GPU, where the composing job peaks at 116.8 GB: still one job
   assert.equal(upscaleWindow(52.0, 15.6, UHD, HD, 121, 10), 21);
   assert.equal(upscaleWindow(115.0, 95.0, UHD, HD, 121), 121);
   assert.equal(upscaleWindow(115.0, 95.0, UHD, HD, 121, 10), 101); // one job by 8 copies, windows by 10

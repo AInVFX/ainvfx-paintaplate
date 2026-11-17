@@ -1,4 +1,4 @@
-// The page workstream's check of the render key (logic.renderKey): a plate with no edit has a render only when the Finish
+// The render key (logic.renderKey): a plate with no edit has a render only when the Finish
 // menu asks SDR to HDR of a plate whose format holds nothing above 1.0, and then its key is PLATE_ALONE (logic.plateAlone).
 import assert from "node:assert/strict";
 import { test } from "node:test";
