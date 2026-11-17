@@ -579,6 +579,7 @@ FOLLOW_SPIKE = 2.0  # a matte more than this many times the median of the 7 fram
 FOLLOW_WARN = 3.0  # the largest matte against the object's area: above it, the summary warns
 FOLLOW_SIDE = 320  # the plate's own move, and what it puts in front of the object, are read at about this width
 FOLLOW_FLICKER = 3  # frames: a piece of the matte that comes and goes within this many frames is a flicker (matte_flicker)
+FOLLOW_SHIFT = 1 / 320  # of the width (2 px at 640): a pixel of the shot within the plate's own range this far around it is no change
 FOLLOW_STILL = 8  # frames: an object that keeps its place in the scene this long stands still in it, so the plate can cover it
 
 
@@ -841,10 +842,12 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     compare = shot is not None and base is not None
     real = shot is None and base is not None  # an erase: the frames the tracker read are the plate, and the object is the plate's own
 
-    def differ(t):  # how far the shot is from the plate under it, per pixel, without one-pixel edges from a small shift
-        b = base[min(t, len(base) - 1)]
-        b = b if b.shape[:2] == (h, w) else resize_to(b, h, w)
-        return ndimage.gaussian_filter(np.abs(shot[min(t, len(shot) - 1)][..., :3] - b[..., :3]).max(axis=-1), 1.0)
+    def differ(t):  # how far the shot is from the plate under it, per pixel: from the plate's own range of values a few pixels
+        b = base[min(t, len(base) - 1)]  # around, so a road the shot only shifted is no change
+        b = (b if b.shape[:2] == (h, w) else resize_to(b, h, w))[..., :3]
+        s, size = shot[min(t, len(shot) - 1)][..., :3], (span, span, 1)
+        return ndimage.gaussian_filter(np.maximum(ndimage.minimum_filter(b, size) - s, s - ndimage.maximum_filter(b, size)).max(axis=-1).clip(0), 1.0)
+    span = 2 * max(1, round(FOLLOW_SHIFT * w)) + 1
     reach, thin = max(2.0, zone * w), max(1.0, w / 240)
 
     def bulk(m):  # a mask without its thin lines (an opening by `thin`), worked out in the mask's own box
