@@ -639,8 +639,11 @@ export function logFileName(plate, d) {
 // tests/upscale_plate.py, which runs the same workflows from a terminal (tests/test_upscale_rules.py keeps them equal).
 // long: the target's long side; factor: SeedVR2 restores from at most the target divided by it; chunk: the frames it
 // samples at once, and step the frames each further chunk adds (chunks share one latent frame); modelRam: the GB the 7B
-// model holds in RAM on a GPU under bigVram GB; copies: the float32 copies of one frame at the target size a job holds.
-export const UPSCALE = { long: 3840, factor: 2, chunk: 21, step: 20, modelRam: 15.7, bigVram: 32, copies: 8 };
+// model holds in RAM on a GPU under bigVram GB; copies: the float32 copies of one frame at the target size a job holds,
+// and composeCopies those of a job that also composes the 4K result (Paint and Clean). On a 96 GB GPU with 131 GB of RAM,
+// 121 frames at 3840 x 2160 in one job peaked at 108.3 GB for the plate and 116.8 GB for the layer, which composes: 9.2
+// and 10.0 copies. A window of 21 frames on a 16 GB GPU held 8.
+export const UPSCALE = { long: 3840, factor: 2, chunk: 21, step: 20, modelRam: 15.7, bigVram: 32, copies: 8, composeCopies: 10 };
 const roundEven = (x) => { const r = Math.round(x); return Math.abs(x % 1) === 0.5 && r % 2 ? r - 1 : r; }; // as Python's round()
 export function upscaleTarget(width, height, long = UPSCALE.long) { // long px on the long side with the plate's aspect, in even numbers; a larger plate keeps its size
   if (Math.max(width, height) >= long) return [width, height];
@@ -653,10 +656,10 @@ export function upscaleSource(width, height, [tw, th]) { // the size SeedVR2 res
 // Frames per job on this machine, from the GB of RAM and VRAM ComfyUI reports: the whole shot when 90% of the RAM holds it,
 // else the most that fit as whole chunks (21, 41, 61 frames and on): a part of a chunk samples in nearly the time of a
 // whole one. Held aside: 2 GB, the shot at the plate's size, and the model on a GPU under bigVram GB. 21 frames on a 16 GB
-// GPU under a 52 GB cap; one job for 121 frames on a 96 GB GPU with 175 GB of RAM.
-export function upscaleWindow(ramGb, vramGb, [tw, th], [pw, ph], frames) {
+// GPU under a 52 GB cap; one job for 121 frames on a 96 GB GPU with 131 GB of RAM, even at composeCopies.
+export function upscaleWindow(ramGb, vramGb, [tw, th], [pw, ph], frames, copies = UPSCALE.copies) {
   const gb = 2 ** 30, held = (vramGb < UPSCALE.bigVram ? UPSCALE.modelRam : 0) + 2 + frames * pw * ph * 12 / gb;
-  const fit = Math.trunc((0.9 * ramGb - held) / (UPSCALE.copies * tw * th * 12 / gb));
+  const fit = Math.trunc((0.9 * ramGb - held) / (copies * tw * th * 12 / gb));
   if (fit >= frames) return frames;
   return UPSCALE.chunk + UPSCALE.step * Math.max(0, Math.floor((fit - UPSCALE.chunk) / UPSCALE.step));
 }

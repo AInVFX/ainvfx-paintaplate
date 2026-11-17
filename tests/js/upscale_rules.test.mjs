@@ -29,6 +29,13 @@ test("windows follow the machine: 21 frames on a 16 GB GPU under a 52 GB cap, on
   assert.deepEqual(upscaleWindows(121, 121), [[0, 121]]);
 });
 
+test("a job that composes the 4K result holds 10 copies of a frame: the windows of Paint and Clean are sized for it", () => {
+  assert.equal(upscaleWindow(131.3, 95.0, UHD, HD, 121, 10), 121); // the pod that measured 116.8 GB: still one job
+  assert.equal(upscaleWindow(52.0, 15.6, UHD, HD, 121, 10), 21);
+  assert.equal(upscaleWindow(115.0, 95.0, UHD, HD, 121), 121);
+  assert.equal(upscaleWindow(115.0, 95.0, UHD, HD, 121, 10), 101); // one job by 8 copies, windows by 10
+});
+
 test("the estimate: about 23 min for one pass of 121 frames at 3840 x 2160 on a 16 GB GPU, about 46 min for Paint or Clean", () => {
   assert.equal(Math.round(upscaleSeconds(UHD, 121, { profile: "small" }) / 60), 23);
   assert.equal(Math.round(upscaleSeconds(UHD, 121, { passes: 2, parts: 3, profile: "small" }) / 60), 46);
