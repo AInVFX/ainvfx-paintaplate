@@ -1,4 +1,4 @@
-"""Follow Matte for an erase whose object comes out from behind what stands in front (matte workstream, wave 6, M7)."""
+"""Follow Matte for an erase whose object comes out from behind what stands in front."""
 import os, sys, unittest
 from _env import require
 require("numpy", "scipy")
@@ -11,7 +11,7 @@ import mathops as m  # noqa: E402
 def scene(n=121, h=182, w=320):
     """horse_erase_barn in small: a camera that pans 2 px per frame, a barn that is the plate's own and stands still in
     the scene, a front object that stands still in the frame, and a tracker that finds the barn again only 6 frames
-    after it comes out (12 Nov 2026: SAM found the barn again on frame 101)."""
+    after it comes out (SAM finds the barn again on frame 101)."""
     rng = np.random.default_rng(11)
     land = ndimage.gaussian_filter(rng.random((h, w + 2 * n, 3)).astype(np.float32), (2, 2, 0))
     land = np.clip(0.5 + 3 * (land - land.mean()), 0, 1)
@@ -41,7 +41,7 @@ class ErasedPlace(unittest.TestCase):
         self.assertEqual(int(matte[hidden].sum()), 0)  # empty while hidden
         self.assertEqual(int(matte[(slice(9, None),) + front].sum()), 0)  # what stands in front is never erased
         held = [int((matte[t] & shown[t]).sum()) / int(shown[t].sum()) for t in range(81, 83)]
-        self.assertGreaterEqual(min(held), 0.6, held)  # at e347bf0: nothing until SAM is back on frame 83
+        self.assertGreaterEqual(min(held), 0.6, held)  # without the plate's place: nothing until SAM is back on frame 83
         self.assertIn("\n  Object stands still: its place of frame 1 added where the plate shows it, on ", summary)
         print(f"erased place: frames 81 and 82 hold {min(held):.2f} to {max(held):.2f} of the barn in view, with no mask from SAM")
 

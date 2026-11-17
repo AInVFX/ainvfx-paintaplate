@@ -1,4 +1,4 @@
-"""Follow Matte when SAM's mask takes a piece of what stands in front (matte workstream, wave 5: the second proposal of wave 4)."""
+"""Follow Matte when SAM's mask takes a piece of what stands in front."""
 import os, sys, unittest
 from _env import require
 require("numpy", "scipy")
@@ -33,7 +33,7 @@ def scene(front_cols, walks=False, n=121, h=182, w=320):
 
 class PieceInFront(unittest.TestCase):
     """For a paint as for an erase (9dc8198), a piece of the tracker's mask that lies mostly on covered places is what
-    stands in front, and is left out (13 Nov 2026: pieces of SAM's mask on the horse's head, over the cow's place)."""
+    stands in front, and is left out (as pieces of SAM's mask on the horse's head, over the cow's place)."""
 
     def test_a_piece_of_the_mask_on_what_stands_in_front_is_left_out(self):
         sam, shown, shot, base, front = scene(slice(60, 184))

@@ -1,4 +1,4 @@
-"""Follow Matte's summary (matte workstream, wave 5: P3)."""
+"""Follow Matte's summary."""
 import os, sys, unittest
 from _env import require
 require("numpy", "scipy")

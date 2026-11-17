@@ -1,5 +1,5 @@
-"""The memory of core's composite, as the docstrings of tools/build_workflows.cleanup and mathops.composite state it
-(render workstream, wave 5): four copies of the shot and two of its mask, in float32."""
+"""The memory of core's composite, as the docstrings of tools/build_workflows.cleanup and mathops.composite state it:
+four copies of the shot and two of its mask, in float32."""
 import os
 import unittest
 

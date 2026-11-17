@@ -95,7 +95,7 @@ def pattern_of(prefix: str, suffix: str, ext: str, digits: int) -> str:
 # A group of numbered images is a frame sequence when at least one of every SPARSEST numbers between its first and its
 # last exists. Sparser than that, the numbers are not frames: ComfyUI's mask editor names its files by the millisecond
 # (clipspace-mask-1791816680123.png), and a walk from the first number to the last made billions of entries, 1.3 GB a
-# second, until ComfyUI's memory was gone (11 Nov). Such numbers count files: one frame per file, nothing missing.
+# second, until ComfyUI's memory was gone. Such numbers count files: one frame per file, nothing missing.
 SPARSEST = 100
 
 
@@ -171,7 +171,7 @@ def exr_rate(path: str) -> Fraction | None:
 def _fps_fields(path: str, fps_hint) -> dict:
     """The frame rate of a still plate, as a float and as an exact fraction: an EXR frame's own rate when its header
     holds one (exr_rate), else the hint. A 16-bit fluid shot made at 50 fps opened as a plate at 24 fps until its frames
-    said their rate (pod, 11 Nov)."""
+    said their rate (on a pod)."""
     rate = exr_rate(path) if path.lower().endswith(".exr") else None
     if rate is None:
         rate = fps_hint if isinstance(fps_hint, Fraction) else Fraction(float(fps_hint or 24.0)).limit_denominator(100000)
@@ -467,7 +467,7 @@ def read_native(path: str, with_alpha: bool, eight: bool = False) -> np.ndarray:
 
     Core decodes to float through swscale, which can move a 16-bit value by a few codes. The export copies untouched
     pixels from this exact read instead. An 8-bit frame is read at 8 bits: swscale's 16 to 8-bit step is not the
-    inverse of its 8 to 16-bit one, and moved 123 of the 256 levels up by one (29 Oct 2026).
+    inverse of its 8 to 16-bit one, and moved 123 of the 256 levels up by one.
     """
     with av.open(path) as c:
         frame = next(c.decode(video=0))
@@ -701,7 +701,7 @@ def write_pngs(frame_at, paths: list, workers: int = 8, level: int = 1, tick=Non
     """Write frame_at(i), an (H, W, 3 or 4) uint8 or uint16 array, to paths[i] as an 8 or 16-bit PNG, several frames at
     once: PyAV releases the GIL
     while it compresses. Core Save Image writes one frame after another at zlib level 4: 35.3 s for 121 frames at
-    1920 x 1088 on an RTX PRO 6000 pod (28 Oct). Level 1 compresses 3.5 times faster for files about 11% larger
+    1920 x 1088 on an RTX PRO 6000 pod. Level 1 compresses 3.5 times faster for files about 11% larger
     (one such frame: 111 ms against 392 ms, 3.08 MB against 2.78 MB)."""
     def one(i):
         a = np.ascontiguousarray(frame_at(i))
@@ -721,7 +721,7 @@ def write_pngs(frame_at, paths: list, workers: int = 8, level: int = 1, tick=Non
 
 def write_exrs(frame_at, paths: list, workers: int = 8, tick=None, fps: float = 0.0, chromaticities: str | None = None) -> None:
     """Write frame_at(i), an (H, W, 3) float array, to paths[i] as a half-float EXR with lossless PIZ compression, several
-    frames at once: OpenEXR releases the GIL while it compresses (a 1080p frame: 83 ms, 5.3 MB, 29 Oct). These are the
+    frames at once: OpenEXR releases the GIL while it compresses (a 1080p frame: 83 ms, 5.3 MB). These are the
     review frames the viewer reads at full precision; the export keeps the plate's own EXR layers and header instead.
     With `fps`, each header says the shot's frame rate (`framesPerSecond`, which exr_rate reads): the frames of a 16-bit
     fluid shot open as a plate, and a plate has a rate."""
@@ -784,7 +784,7 @@ def write_movie(frame_at, n: int, path: str, fps: float, workers: int = 8, crf: 
                 tick=None, size: tuple | None = None) -> None:
     """An H.264 movie for the page to play, as core Save Video makes it (crf 18, yuv420p, BT.709 matrix and primaries, the
     sRGB transfer tag, limited range), only faster: the frames convert to YUV several at once and x264 runs at preset
-    veryfast with its own threads. Core took 8.3 s for 121 frames at 1920 x 1088 on an RTX PRO 6000 pod (28 Oct). At most
+    veryfast with its own threads. Core took 8.3 s for 121 frames at 1920 x 1088 on an RTX PRO 6000 pod. At most
     twice `workers` frames are converted ahead of x264: Executor.map took the whole shot at once, and the converted frames
     waited in memory when x264 was slower than the conversion."""
     first = np.ascontiguousarray(frame_at(0))
@@ -853,7 +853,7 @@ def keep_samples(frame, source, keep: np.ndarray):
     """`frame` (planar YUV) with `source`'s own samples wherever `keep` (H, W) holds for every pixel a sample covers.
 
     Untouched pixels then reach the encoder as the source's YUV samples, with no RGB round trip: a 4:2:0 plate lost up
-    to 12/255 to that round trip, even with a lossless encode (42.25 dB, 28 Oct). A chroma sample shared by four pixels
+    to 12/255 to that round trip, even with a lossless encode (42.25 dB). A chroma sample shared by four pixels
     is kept only when all four are untouched.
     """
     itemsize = 2 if re.search(r"p1[0246]", frame.format.name) else 1

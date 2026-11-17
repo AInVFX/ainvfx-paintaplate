@@ -78,7 +78,7 @@ class MathOps(unittest.TestCase):
         print("relight in sRGB: ok (the same frame as core's conversions around it)")
 
     def test_relight_colour_of_light(self):
-        """One colour of light per area: a dark channel's noise never reaches single pixels (the lighthouse specks, 28 Oct)."""
+        """One colour of light per area: a dark channel's noise never reaches single pixels (the lighthouse specks)."""
         rng = np.random.default_rng(3)
         tex = rng.uniform(0.1, 1.5, (96, 128, 1)).astype(np.float32)
         warm = np.array([1.8, 1.3, 0.9], np.float32)
@@ -158,7 +158,7 @@ class MathOps(unittest.TestCase):
         self.assertEqual(float(video[1:8].max()), 0.0)
 
 class LevelFill(unittest.TestCase):
-    """An erase's fill evened with the background it continues (Level Fill), as checked on set_planet on 28 Oct."""
+    """An erase's fill evened with the background it continues (Level Fill), as on the set_planet plate."""
 
     def setUp(self):
         H, W = 48, 64
@@ -442,7 +442,7 @@ class KeepBlackTest(unittest.TestCase):
 
 
 class FollowMatteKeepsThePlate(unittest.TestCase):
-    """The paint matte over a shot that LTX regenerated everywhere (the review of 10 Nov 2026): only the object and the
+    """The paint matte over a shot that LTX regenerated everywhere: only the object and the
     generated pixels connected to it join the matte. A plate that pans one pixel a frame, an object of 60 x 40 px
     regenerated, the tracker's mask on the object on every frame."""
     N, H, W = 48, 270, 480
@@ -479,7 +479,7 @@ class FollowMatteKeepsThePlate(unittest.TestCase):
     def test_2_noise_on_every_frame(self):
         self.check(*self.follow(self.noisy)[:2])
 
-    def test_3_three_frames_come_out_brighter(self):  # at d95292c: 5.0 times the object on those frames, 42 px beyond it
+    def test_3_three_frames_come_out_brighter(self):  # without the frame's own level: 5.0 times the object on those frames, 42 px beyond it
         def brighter(shot, rng):
             shot = self.noisy(shot, rng)
             shot[[9, 20, 31]] = np.clip(shot[[9, 20, 31]] + 0.14, 0, 1)
@@ -526,7 +526,7 @@ class FollowMatteKeepsThePlate(unittest.TestCase):
 
 
 class FollowMatteBehindThePlate(unittest.TestCase):
-    """The cow behind the horse (11 Nov 2026), as a scene written here with the numbers measured on the real shot at
+    """The cow behind the horse, as a scene written here with the numbers measured on the real shot at
     320 px. The background moves 2 px a frame. A painted object of 86 x 20 px stands still in the scene. An object of
     the plate, 124 px wide (39% of the width), stays in the frame: the painted one goes behind it, is hidden from frame
     58 to frame 76 (19 frames) and comes out on its other side. The first mask is 4.9 times the element. The tracker
@@ -561,7 +561,7 @@ class FollowMatteBehindThePlate(unittest.TestCase):
         self.assertEqual([t for t in range(self.N) if not shown[t].any()], list(range(58, 77)))
         out, summary = m.follow_matte(sam, self.N, sam[0], shot=shot, base=base, zone=1 / 16, threshold=0.1, element=shown[0].astype(np.float32))
         matte = out > 0.5
-        self.assertEqual(int(matte[58:77].sum()), 0)  # hidden: nothing in the matte (at 16f5990 the last matte held, on what stands in front)
+        self.assertEqual(int(matte[58:77].sum()), 0)  # hidden: nothing in the matte (not the last matte, which lies on what stands in front)
         self.assertEqual(int(matte[(slice(None),) + self.FRONT].sum()), 0)  # what stands in front never enters it, changed by the shot or not
         for t in range(80, self.N):  # back on the other side with no mask from the tracker: from the fourth frame after it comes out (86% there), then nine tenths (91% from frame 82)
             self.assertGreaterEqual(int((matte[t] & shown[t]).sum()), (0.9 if t >= 94 else 0.5) * int(shown[t].sum()), f"frame {t}")
@@ -572,7 +572,7 @@ class FollowMatteBehindThePlate(unittest.TestCase):
 
 
 class FollowMatteLeftItsPlace(unittest.TestCase):
-    """The cow that walks away with the horse (12 Nov 2026, the laptop's preview), as a scene written here at 320 px.
+    """The cow that walks away with the horse, as a scene written here at 320 px.
     The background moves 2 px a frame. A painted object of 86 x 20 px stands still in the scene for 28 frames. An
     object of the plate, 124 px wide, stays in the frame and comes within 4 px of it on frame 28. From there the shot
     draws the painted object beside it, moving with it, and the tracker returns it on every frame. From frame 70 the
@@ -606,7 +606,7 @@ class FollowMatteLeftItsPlace(unittest.TestCase):
         matte = out > 0.5
         for t in range(12, 28):  # in its place, it is followed as before
             self.assertGreaterEqual(int((matte[t] & shown[t]).sum()), 0.9 * int(shown[t].sum()), f"frame {t}")
-        self.assertEqual(int(matte[80:].sum()), 0)  # once it has left its place, nothing: the plate shows there (at 9aa332a the matte went with it to the last frame)
+        self.assertEqual(int(matte[80:].sum()), 0)  # once it has left its place, nothing: the plate shows there
         self.assertEqual(int(matte[(slice(None),) + self.FRONT].sum()), 0)  # and never what stands in front
         self.assertIn("\n  Removed: pieces that left the object's place, on ", summary)
         self.assertNotIn("Warning: matte", summary)  # the matte never grows past the object
@@ -614,7 +614,7 @@ class FollowMatteLeftItsPlace(unittest.TestCase):
 
 
 class FollowMatteErasedBehindThePlate(unittest.TestCase):
-    """An erase: the object is the plate's own, and the frames the tracker read are the plate (12 Nov 2026: an erased
+    """An erase: the object is the plate's own, and the frames the tracker read are the plate (as when an erased
     barn passed behind the horse, the matte held its last 30 px at one place of the frame for 65 frames, and left the
     barn out as too far when the tracker found it again)."""
 
@@ -627,7 +627,7 @@ class FollowMatteErasedBehindThePlate(unittest.TestCase):
         sam[56:80] = 0  # the tracker loses it two frames before it is hidden, and finds it again three frames after it comes out
         out, summary = m.follow_matte(sam, n, sam[0], base=plate, zone=1 / 16)
         matte = out > 0.5
-        self.assertEqual(int(matte[58:80].sum()), 0)  # hidden, then not found: nothing held at a place of the frame (at 9aa332a the last matte stayed there to the last frame)
+        self.assertEqual(int(matte[58:80].sum()), 0)  # hidden, then not found: nothing held at a place of the frame
         for t in list(range(1, 56)) + list(range(80, n)):  # the tracker's mask before, and again from the frame it comes back, 39% of the width away
             self.assertTrue(np.array_equal(matte[t], shown[t]), f"frame {t}")
         self.assertIn("\n  Removed: areas where the plate stands in front of the object, on ", summary)
@@ -647,8 +647,8 @@ class FollowMatteErasedBehindThePlate(unittest.TestCase):
         self.assertIn("\n  Object moves from frame ", summary)
 
     def test_a_piece_of_the_mask_on_what_stands_in_front_is_left_out(self):
-        """12 Nov 2026, 1.11.10: while the horse hid the erased barn, SAM 3.1 also returned 43 to 55 px on the horse's
-        head, beside the barn's part in view. The matte took them, and the composite grew them to 1.2% of the frame."""
+        """While the horse hides the erased barn, SAM 3.1 can also return 43 to 55 px on the horse's
+        head, beside the barn's part in view. Without this rule the matte takes them, and the composite grows them to 1.2% of the frame."""
         rng = np.random.default_rng(17)
         n, h, w = 60, 200, 320
         land = np.clip(0.5 + 3 * (ndimage.gaussian_filter(rng.random((h, w, 3)).astype(np.float32), (2, 2, 0)) - 0.5), 0, 1)
@@ -665,7 +665,7 @@ class FollowMatteErasedBehindThePlate(unittest.TestCase):
         out, summary = m.follow_matte(sam, n, sam[0], base=plate, zone=1 / 16)
         matte = out > 0.5
         for t in range(42, 51):
-            self.assertEqual(int((matte[t] & front[t]).sum()), 0, f"frame {t}")  # at f752c2f: 60 px on what stands in front
+            self.assertEqual(int((matte[t] & front[t]).sum()), 0, f"frame {t}")  # without the rule: 60 px on what stands in front
             self.assertTrue(np.array_equal(matte[t], (sam[t] > 0.5) & ~front[t]), f"frame {t}")  # the object's part in view is kept whole
         self.assertNotIn("Object moves from frame", summary)
 

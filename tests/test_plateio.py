@@ -338,7 +338,7 @@ class Browser(unittest.TestCase):
 
     def test_exr_frames_say_their_frame_rate(self):
         """A sequence written at 50 fps is probed at 50 fps: the frames of a 16-bit fluid shot open as a plate, and that
-        plate took 24 fps (pod, 11 Nov). The rate is OpenEXR's standard attribute framesPerSecond, a rational number, so
+        plate took 24 fps (on a pod). The rate is OpenEXR's standard attribute framesPerSecond, a rational number, so
         24000/1001 is exact. Frames without it are probed as before: the hint, 24 by default."""
         frames = [np.full((6, 8, 3), v, np.float32) for v in (4.0, -0.5, 0.25)]
         with tempfile.TemporaryDirectory() as d:

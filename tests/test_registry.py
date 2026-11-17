@@ -12,7 +12,7 @@ class Registry(unittest.TestCase):
             self.project = tomllib.load(f)["project"]
 
     def test_dependencies_listed_as_requirements_txt_lists_them(self):
-        """The Registry reads only a static list: a dynamic one showed no dependencies (0.5.0, 29 Oct 2026). ComfyUI
+        """The Registry reads only a static list: a dynamic one showed no dependencies (at version 0.5.0). ComfyUI
         Manager and the Registry's node scan install requirements.txt."""
         with open(os.path.join(ROOT, "requirements.txt"), encoding="utf-8") as f:
             wanted = [line.strip() for line in f if line.strip() and not line.startswith("#")]
@@ -21,7 +21,7 @@ class Registry(unittest.TestCase):
 
     def test_no_accelerator_required(self):
         """The nodes run on a CPU, as the CI runs them. A GPU classifier made ComfyUI Manager report a conflict on any
-        machine without that GPU (29 Oct 2026)."""
+        machine without that GPU."""
         self.assertEqual([c for c in self.project.get("classifiers", []) if c.startswith("Environment ::")], [])
 
     def test_semantic_version(self):

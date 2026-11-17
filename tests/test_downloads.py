@@ -16,7 +16,7 @@ import get_plates  # noqa: E402
 
 KLEIN, LTX, HDR = "black-forest-labs/flux-3-image-klein-comfy", "Lightricks/LTX-2.5", "Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR"
 PLATES = {"horse.mp4": 6_500_000, "tea.mp4": 5_000_000}
-N = len(get_models.MODELS)  # the counts below follow the list: a model that another workstream adds changes nothing here
+N = len(get_models.MODELS)  # the counts below follow the list: a model added to the list changes nothing here
 LOCKED = sum(repo in (KLEIN, LTX) for repo, _, _ in get_models.MODELS)  # the files of the two repositories that one test refuses
 TOTAL = sum(get_models.SIZES[os.path.basename(path)] for _, path, _ in get_models.MODELS)
 

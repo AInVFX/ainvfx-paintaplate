@@ -28,7 +28,7 @@ import PyOpenColorIO as OCIO
 ENV = "$OCIO"  # the config name that means the file the OCIO environment variable names
 BUILTIN = "ocio://studio-config-latest"  # ACES 2.1 with the camera log spaces (ARRI, Sony, RED, Canon, ...)
 MODEL, LINEAR = "@model", "@linear"
-WORKERS = min(16, os.cpu_count() or 4)  # frames in parallel: OCIO releases the GIL while it converts (measured 29 Oct)
+WORKERS = min(16, os.cpu_count() or 4)  # frames in parallel: OCIO releases the GIL while it converts
 _POOL = ThreadPoolExecutor(WORKERS)
 # The model space's names and aliases in the ACES configs, then the roles that usually point at it
 MODEL_NAMES = ("srgb_tx", "sRGB Encoded Rec.709 (sRGB)", "sRGB - Texture", "Utility - sRGB - Texture",

@@ -140,7 +140,7 @@ class PlateBrowser(unittest.TestCase):
 
     def test_a_thumbnail_of_files_named_by_the_millisecond(self):
         """ComfyUI's clipspace files in the input folder: the Open dialog lists them as one pattern, the plate has as many
-        frames as files, and its thumbnail is the first file's picture. On 11 Nov this request took ComfyUI's memory."""
+        frames as files, and its thumbnail is the first file's picture. Without that, this request can take all of ComfyUI's memory."""
         import numpy as np
         from PIL import Image
         stamps = (1791816680123, 1791819680130, 1791821680123)
@@ -280,7 +280,7 @@ class PlateBrowser(unittest.TestCase):
 
 
 class Build(unittest.TestCase):
-    """/paintaplate/version's build (render workstream): a hash of what computes, made when ComfyUI starts. The page puts it
+    """/paintaplate/version's build: a hash of what computes, made when ComfyUI starts. The page puts it
     in every job index key in place of the version (comfy.indexParts)."""
 
     def setUp(self):
@@ -483,7 +483,7 @@ class FluidExport(unittest.TestCase):
                     f.write(b"x")
             names = [name for _, name in routes.collect(d, ["hdr", "plate", "preview"])]
             self.assertEqual(names, ["hdr/f_00001_.exr", "hdr/f_00002_.exr", "plate/blank_960x512.mov", "preview.mp4"])
-            import zipfile  # its zip needs no export folder (it answered 404 on 2 Nov, and the browser cancelled the download)
+            import zipfile  # its zip needs no export folder (without it, the request answers 404 and the browser cancels the download)
             with zipfile.ZipFile(routes.build_zip(d, "fluid_v1", ["hdr", "plate", "preview"])) as z:
                 self.assertEqual(sorted(z.namelist()), sorted(names))
             with self.assertRaises(FileNotFoundError):

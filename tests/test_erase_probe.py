@@ -89,7 +89,7 @@ class Boxes(unittest.TestCase):
         m = np.zeros((1088, 1920), np.uint8)
         m[398:520, 1400:] = 255  # a barn's mask whose top is three quarters of the way down the grid's row 19
         rows = np.nonzero((p.resized(m, (96, 54)) > 32).any(1))[0]
-        self.assertEqual(rows[0], 20)  # sampled at the cells' centres, as the page's canvas does: [362, ...] on 12 Nov
+        self.assertEqual(rows[0], 20)  # sampled at the cells' centres, as the page's canvas does: [362, ...]
 
     def test_names(self):
         p = probe()

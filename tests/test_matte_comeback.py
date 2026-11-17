@@ -1,4 +1,4 @@
-"""Follow Matte when the object comes out from behind what the plate holds in front (matte workstream, wave 5, M5)."""
+"""Follow Matte when the object comes out from behind what the plate holds in front."""
 import os, sys, unittest
 from _env import require
 require("numpy", "scipy")
@@ -44,7 +44,7 @@ class Comeback(unittest.TestCase):
         self.assertEqual(int(matte[hidden].sum()), 0)  # empty while hidden
         self.assertEqual(int(matte[(slice(20, None),) + front].sum()), 0)  # what stands in front never enters it
         held = [int((matte[t] & shown[t]).sum()) / int(shown[t].sum()) for t in range(66, 80)]
-        self.assertGreaterEqual(min(held), 0.7, held)  # from the fourth frame after it comes out (at b578542: the seventh, 69)
+        self.assertGreaterEqual(min(held), 0.7, held)  # from the fourth frame after it comes out
         self.assertGreaterEqual(float(np.mean(held)), 0.85, held)
         print(f"comeback: from frame 66, {min(held):.2f} to {max(held):.2f} of the object, {np.mean(held):.2f} on average")
 

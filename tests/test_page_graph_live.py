@@ -1,4 +1,4 @@
-"""The page workstream's rules of tests/graph_live.py, with no ComfyUI and no browser: links, values, nodes over each
+"""The rules of tests/graph_live.py, with no ComfyUI and no browser: links, values, nodes over each
 other, red nodes, image files, the layout, and the offline check of a saved graph."""
 import contextlib
 import io

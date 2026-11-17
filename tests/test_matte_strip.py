@@ -1,4 +1,4 @@
-"""Follow Matte when a piece leaves the object's place (matte workstream, wave 5: the first proposal of wave 4)."""
+"""Follow Matte when a piece leaves the object's place."""
 import os, sys, unittest
 from _env import require
 require("numpy", "scipy")
@@ -33,7 +33,7 @@ def scene(front_cols, walks=False, n=121, h=182, w=320):
 
 class LeavingPiece(unittest.TestCase):
     """When less than a quarter of the place holds the object, a found area that reaches beyond the place's margin is left
-    out whole: no strip of it stays inside the margin (13 Nov 2026: such a strip stayed on the horse's chest)."""
+    out whole: no strip of it stays inside the margin (such a strip can stay on a horse's chest)."""
 
     def test_a_piece_that_walks_off_with_what_stands_in_front_leaves_no_strip(self):
         sam, shown, shot, base, front = scene(slice(29, 153), walks=True)

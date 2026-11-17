@@ -1,4 +1,4 @@
-"""One GPU test for a pod and for a laptop: the real page over a list of cases, and one report.
+"""One GPU test for a pod and for a local machine: the real page over a list of cases, and one report.
 
     python tests/gpu_matrix.py --url http://127.0.0.1:8188 --comfy <ComfyUI folder> --out <folder> --cases quick
 
@@ -193,7 +193,7 @@ def node_times(events, graphs, names=None):
 
 def render_hdr(steps):
     """Whether a render ran SDR to HDR (« v1 SDR to HDR »): only a render's composite writes HDR Match's line. A fluid shot's
-    own pass (« fluid v1 SDR to HDR ») has no plate to match: fluid_720 of 13 Nov was told to look for a line that never was."""
+    own pass (« fluid v1 SDR to HDR ») has no plate to match, so no HDR Match line is looked for."""
     return any(re.match(r"v\d+ SDR to HDR\b", label) for label, _ in steps)
 
 
@@ -349,11 +349,11 @@ def read_log(text):
     }
 
 
-# ---------- The pictures: one sheet per case (wave 6, R10) ----------
-# On 12 Nov horse_erase passed with the barn still in its result, and nothing in the report showed it. The sheet puts the
+# ---------- The pictures: one sheet per case ----------
+# A case can pass with a wrong picture, and nothing in the report shows it. The sheet puts the
 # plate and the export side by side, cut around each edit's box, on four frames: the first, at a third, at two thirds and
 # the last. With one edit the box follows the export's matte from frame to frame; a relight shows the whole frame. For an
-# erase the sheet writes the page's own verdict (wave 7, R15): logic.eraseCheck, run with Node through tests/erase_probe.py,
+# erase the sheet writes the page's own verdict: logic.eraseCheck, run with Node through tests/erase_probe.py,
 # on the export's first frame against the plate's, inside the mask the page sent Klein, at the page's quick-pass size.
 SHEET_CELL = (360, 240)  # the largest picture of one frame on the sheet, in pixels
 IMAGES = (".exr", ".png", ".jpg", ".jpeg", ".tif", ".tiff")
@@ -1014,7 +1014,7 @@ def main():
             free(a.url)
         results.append(run_case(a, name, case, os.path.join(a.out, name)))
         print(f"{name}: {'passed' if results[-1]['passed'] else 'FAILED'} in {results[-1]['seconds']:.0f} s", flush=True)
-        if left and not answers(a.url):  # each case left would fail in 31 s with a traceback (the laptop, 12 Nov)
+        if left and not answers(a.url):  # each case left would fail in 31 s with a traceback
             print(f"ComfyUI has stopped. Not run: {', '.join(n for n, _ in left)}", flush=True)
             results += [{"name": n, "passed": False, "skipped": True} for n, _ in left]
             left = []

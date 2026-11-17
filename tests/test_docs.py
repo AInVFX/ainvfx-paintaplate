@@ -1,7 +1,7 @@
 """ARCHITECTURE.md and TESTING.md against the repository. Every file they name exists, the version and the pins they
 state are the code's, and every flow, mock hook and section of app.mjs they name exists. With DOCS_COMPLETE=1 it also
-checks the other way: every flow, hook and section is in the docs (the closing check before a version goes to main; the
-workstreams add flows and hooks on their own branches, and only one of them edits the docs)."""
+checks the other way: every flow, hook and section is in the docs (the closing check before a version goes to main: flows
+and hooks are added on branches, and the docs follow them in one edit)."""
 import os
 import re
 import unittest
