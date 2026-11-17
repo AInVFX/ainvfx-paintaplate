@@ -541,6 +541,14 @@ async def quit_route(request):  # the mock stops at once, as a ComfyUI that the 
     return web.json_response({})
 
 
+async def live_clear_route(request):  # as routes.live_clear: a finished prompt's live previews leave the temp folder
+    prompt, where = request.match_info["prompt"], os.path.join(folder("temp"), "paintaplate_live")
+    names = [n for n in os.listdir(where) if n.startswith(f"{prompt}_")] if os.path.isdir(where) else []
+    for name in names:
+        os.remove(os.path.join(where, name))
+    return web.json_response({"removed": len(names)})
+
+
 async def free_route(request):  # ComfyUI releases memory between prompts: here, one second after /free
     EVENTS.append(("free", time.time()))
     STATE["release_at"] = time.time() + 1.0
@@ -661,6 +669,7 @@ async def start():
     app.router.add_get("/object_info/{cls}", object_info_route)
     app.router.add_get("/system_stats", system_stats_route)
     app.router.add_post("/free", free_route)
+    app.router.add_post("/paintaplate/live/{prompt}", live_clear_route)
     app.router.add_post("/mock/quit", quit_route)
     app.router.add_post("/mock/oom", oom_route)
     app.router.add_post("/mock/slow", slow_route)

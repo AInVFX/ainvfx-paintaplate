@@ -108,7 +108,7 @@ class Routes(unittest.TestCase):
         app = types.SimpleNamespace(routes=web.RouteTableDef())
         routes.setup(app)
         self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/browse", "/paintaplate/thumb",
-                         "/paintaplate/blank", "/paintaplate/jobs/{key}", "/paintaplate/jobs/{key}", "/paintaplate/stat",
+                         "/paintaplate/blank", "/paintaplate/jobs/{key}", "/paintaplate/jobs/{key}", "/paintaplate/live/{prompt}", "/paintaplate/stat",
                          "/paintaplate/frames", "/paintaplate/pixel", "/paintaplate/scenes", "/paintaplate/scenes/{name}", "/paintaplate/scenes/{name}",
                          "/paintaplate/ocio", "/paintaplate/ocio/shader", "/paintaplate/version"])
         print("download route: folders, parts, symlinks, zip reuse, handler: ok")
