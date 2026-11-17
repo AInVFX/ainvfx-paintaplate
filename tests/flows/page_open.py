@@ -3,7 +3,8 @@ takes the full path of a movie, a frame of a sequence or a folder of frames, and
 opens. The full path of a folder of plates lists it in the dialog, with the machine's folders as its trail. A path that
 the server cannot read keeps the dialog open, with the server's one line; so does a full path in a request that a
 proxy passed on (its X-Forwarded-For header), with the line that points to the Upload tab. When ComfyUI runs on
-another machine, the field gives way to a note that points to the Upload tab."""
+another machine, the field gives way to a note that points to the Upload tab, and ui_live.py opens its plate through
+the list."""
 import json
 import os
 import sys
@@ -64,4 +65,9 @@ def run(browser, port, U):
     page.click("#open-btn"); page.click("#open [data-tab=files]")
     U.check(page.is_hidden("#path-row") and page.is_visible("#path-remote") and "Upload tab" in page.text_content("#path-remote"),
             f"when ComfyUI runs on another machine, a note points to the Upload tab: {page.text_content('#path-remote')!r}")
+    page.keyboard.press("Escape")
+    import ui_live  # the GPU runs open their plate this way through a proxy
+    ui_live.open_listed(page, "plates/desk.mp4")
+    U.check(U.poll(page, lambda: page.text_content("#spec").startswith("desk") and not page.evaluate(SHOWN), 60),
+            f"with the path field hidden, ui_live.py opens its plate through the list: {page.text_content('#spec')[:30]!r}")
     page.close()

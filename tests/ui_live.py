@@ -357,6 +357,24 @@ def fluid_shot(page, spec, shots, mark, wait_s=900):
     mark("fluid: shot ready | " + page.inner_text("#status"))
 
 
+def open_listed(page, path, timeout=30000):
+    """Opens `path`, a plate of ComfyUI's input folder or of its output folder (output:...), in the Open dialog's Files tab.
+    On ComfyUI's own machine the path field takes it. A page served through a proxy hides that field (frames.sameMachine):
+    then each folder down to the plate's opens in the list, and a double click opens the plate."""
+    page.click("#open-btn"); page.click("#open [data-tab=files]")
+    if page.is_visible("#path"):
+        page.fill("#path", path); page.click("#open-go")
+        return
+    base = "output:" if path.startswith("output:") else ""
+    if base:
+        page.click("#open [data-root='output:']")
+    parts = path[len(base):].split("/")
+    for i in range(1, len(parts)):
+        page.click(f"#browse .item.folder[data-path='{base + '/'.join(parts[:i])}']", timeout=timeout)
+        page.wait_for_function("(name) => document.querySelector('#crumbs button:last-child')?.textContent === name", arg=parts[i - 1], timeout=timeout)
+    page.dblclick(f"#browse .item[data-path='{path}']", timeout=timeout)
+
+
 def remote(a):
     """The real page, workflows and models on a remote ComfyUI: a timed mark for every stage."""
     shots = a.out
@@ -382,7 +400,7 @@ def remote(a):
             if fluid:  # a fluid shot first: once made, it is the plate the strokes are painted on
                 fluid_shot(page, fluid, shots, mark, wait_s=max(900, 4 * a.timeout))
             else:
-                page.click("#open-btn"); page.click("#open [data-tab=files]"); page.fill("#path", a.path); page.click("#open-go")
+                open_listed(page, a.path)
                 page.wait_for_function("document.querySelector('#spec').textContent && document.querySelector('#opening').hidden", timeout=300000)
             if strokes:
                 mark("plate open: " + page.inner_text("#spec")); page.screenshot(path=f"{shots}/1_open.png")
