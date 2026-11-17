@@ -917,6 +917,11 @@ export const wantsHdr = (spec, tools, on) => !!spec && !!on && !tools.includes("
 // The switch away from the plate's default makes another render, so each setting keeps its own: "|hdr" or "|sdr".
 export const hdrKey = (edits, dflt, on) => (on === dflt ? edits : `${edits}|${on ? "hdr" : "sdr"}`);
 export const hdrOfKey = (key, dflt) => (key?.endsWith("|hdr") ? true : key?.endsWith("|sdr") ? false : dflt);
+// The render key of what is on show: the edits' key (hdrKey). A plate with no edit has a render only when the Finish menu asks
+// SDR to HDR of a plate whose format holds nothing above 1.0: the key PLATE_ALONE, whose one step is SDR to HDR on the plate.
+export const PLATE_ALONE = "|hdr";
+export const renderKey = (edits, dflt, on) => (edits ? hdrKey(edits, dflt, on) : on && !dflt ? PLATE_ALONE : "");
+export const plateAlone = (key) => key === PLATE_ALONE;
 // SDR to HDR on a plate whose format cannot hold values above 1.0 (Adrien, 2 Nov): asked before it turns on, then the result is
 // an EXR sequence, which the player shows at full precision and the export writes.
 export const exrResult = (spec, hdrRan, headroom = 1) => !!hdrRan && !holdsHdr(spec, headroom);
