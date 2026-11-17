@@ -28,3 +28,12 @@ test("every tooltip ends with a full stop, but a colour swatch's, which is the c
   assert.ok(titles.length > 30, `tooltips found: ${titles.length}`);
   assert.deepEqual(titles.filter((t) => !/[.?!]$/.test(t)), []);
 });
+
+test("the Help's lines end with a full stop, and none repeats a tooltip word for word", () => {
+  const at = html.indexOf('<dialog id="help"'), help = html.slice(at, html.indexOf("</dialog>", at));
+  const lines = [...help.matchAll(/<(dd|li|p)[^>]*>([^<]*)<\/\1>/g)].map((m) => m[2].trim()).filter(Boolean);
+  assert.ok(lines.length > 40, `Help lines found: ${lines.length}`);
+  assert.deepEqual(lines.filter((l) => !/[.?!]$/.test(l)), []);
+  const tips = new Set([...html.matchAll(/\btitle="([^"]*)"/g)].map((m) => m[1].replace(/\.$/, "")));
+  assert.deepEqual(lines.filter((l) => tips.has(l.replace(/\.$/, ""))), []);
+});

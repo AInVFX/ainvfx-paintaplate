@@ -205,7 +205,7 @@ def fluid_wipe_and_models(page, U):
     page.click("#help [role=tab][data-help=start]")
     start = page.evaluate("[...document.querySelectorAll('#help .help-tab')].filter((t) => !t.hidden).map((t) => t.dataset.help)")
     tabs = page.eval_on_selector_all("#help [role=tab]", "els => els.map((e) => e.textContent)")
-    U.check(shown == ["keys"] and start == ["start"] and len(tabs) == 6,
+    U.check(shown == ["keys"] and start == ["start"] and len(tabs) == 7,
             f"Help is in tabs: ? opens Keys, a tab shows its part alone: {shown}, {start}, {tabs}")
     page.keyboard.press("Escape")
 
