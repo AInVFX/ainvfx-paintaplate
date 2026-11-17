@@ -102,7 +102,8 @@ def values(shot: str, width: int, height: int, frames: int, label: str = "upscal
     sw, sh = source_size(width, height, (w, h))
     return {"shot": shot, "max_frames": frames, "source_width": sw, "source_height": sh, "first": first, "count": max(1, min(count, frames - first)), "width": w,
             "height": h, "color_space": color_space, "color_fix": color_fix, "format": fmt, "seed": seed,
-            "prefix": f"{label}/upscale/w{window:03}/f"}
+            "prefix": f"{label}/upscale/w{window:03}/f", "under": "", "under_space": color_space, "matte": "", "comp_prefix": "",
+            "matte_prefix": ""}
 
 
 def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first: int = 0, count: int = WINDOW,

@@ -137,7 +137,7 @@ OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_fram
             "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "plate_level": ("plate_width", "plate_height"), "relight_shade": ("shade",),
             "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",),
             "export_plate": ("prefix",), "export_exr": ("exr_prefix",), "export_layer": ("layer_prefix",),
-            "export_layer_exr": ("layer_exr_prefix",)}
+            "export_layer_exr": ("layer_exr_prefix",), "upscale_comp": ("comp_prefix",), "upscale_matte": ("matte_prefix",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -883,6 +883,14 @@ def upscale():
     whole shot on a large GPU. Neighbouring chunks share one latent frame, UPSCALE_OVERLAP frames, which core's merge
     crossfades. The post-processing matches the colours to the Lanczos frames (Slot color_fix: lab, the node's default,
     or none). Save Frames writes the window: 16-bit PNG, or half-float EXR for a float plate (Slot format).
+
+    Two optional parts make the 4K set of an edit that keeps the plate's untouched pixels, where this window is the
+    export's layer. The 4K result (Slot comp_prefix): the same window of the 4K plate (Slot under, saved by an earlier job
+    of this workflow on the plate, in its colour space, Slot under_space) around the matte, the restored layer
+    inside it, through Composite Frames. The matte (Slot matte, the export's, at the plate's size) is cut to the window
+    and sized as Composite Frames sizes it, with a bilinear filter: never generated. The 4K matte (Slot matte_prefix):
+    that same picture as 16-bit PNG frames, so the 4K result, plate, layer and matte add up to one code value. Every
+    window saves its matte into one folder, numbered on from the frames already there.
     """
     g = Graph()
     load = g("PaintAPlate_LoadPlate", _title="Result", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
@@ -907,6 +915,20 @@ def upscale():
     back = colour(g, sharp, "@model", Slot("color_space", "@model"), "The window in the plate's colour space", peak=model[1])
     g("PaintAPlate_SaveFrames", _title="Upscaled frames", _output="frames", images=back, fps=load[3], format=Slot("format", "png16"),
       filename_prefix=Slot("prefix", "paintaplate/plate/upscale/f"))
+    size = g("GetImageSize", image=back)
+    matte = g("ImageFromBatch", _title="The window of the matte", batch_index=Slot("first", 0), length=Slot("count", UPSCALE_CHUNK),
+              image=g("PaintAPlate_LoadPlate", _title="Matte", path=Slot("matte", ""), max_frames=Slot("max_frames", 121), pad_8n1=False))
+    under = g("PaintAPlate_LoadPlate", _title="The window of the 4K plate", path=Slot("under", ""), max_frames=Slot("count", UPSCALE_CHUNK), pad_8n1=False)
+    under = colour(g, under, Slot("under_space", "@model"), Slot("color_space", "@model"), "The window of the 4K plate in the layer's colour space")
+    comp = g("PaintAPlate_CompositeFrames", _title="4K result: the plate's window around the matte, the layer inside it", destination=under,
+             source=back, mask=g("ImageToMask", image=matte, channel="red"), width=size[0], height=size[1])
+    saved = g("PaintAPlate_SaveFrames", _title="4K result frames", _output="comp", images=comp, fps=load[3], format=Slot("format", "png16"),
+              filename_prefix=Slot("comp_prefix", ""))
+    g.link_slot(saved, "images", "upscale_comp")
+    big = g("ImageScale", _title="The matte at the target size (bilinear, as Composite Frames sizes it)", image=matte, upscale_method="bilinear",
+            width=size[0], height=size[1], crop="disabled")
+    saved = g("PaintAPlate_SaveFrames", _title="4K matte", _output="matte", images=big, format="png16", filename_prefix=Slot("matte_prefix", ""))
+    g.link_slot(saved, "images", "upscale_matte")
     g.save("upscale")
 
 
