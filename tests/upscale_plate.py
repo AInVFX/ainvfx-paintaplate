@@ -13,10 +13,12 @@ output folder is emptied first, since core's file counter goes on from the files
 """
 import argparse
 import glob
+import json
 import os
 import shutil
 import struct
 import sys
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -28,6 +30,9 @@ from build_workflows import UPSCALE_CHUNK, UPSCALE_OVERLAP  # noqa: E402
 LONG_SIDE = 3840
 FACTOR = 2  # SeedVR2 restores from at most the target divided by this
 WINDOW = UPSCALE_CHUNK  # the smallest window: one chunk
+MODEL_RAM = 15.7  # GB the 7B model holds in RAM on a GPU under 32 GB, where dynamic VRAM stages it
+FRAME_COPIES = 12  # float32 copies of one frame at the target size that a window holds at its peak, colour correction
+#                    included: a window of 42 frames at 3840 x 2160 past a 52 GB cap on a 16 GB GPU means more than 7.5
 OUTPUT = "output:"  # folders.OUTPUT: a path under ComfyUI's output folder, as Load Plate reads it
 
 
@@ -59,6 +64,24 @@ def windows(frames: int, first: int = 0, count: int = WINDOW, every: bool = Fals
         if start + count >= frames:
             return out
         start += count - overlap
+
+
+def window_frames(ram_gb: float, vram_gb: float, target: tuple, plate: tuple, frames: int) -> int:
+    """Frames per job on this machine: the whole shot when its RAM holds it, else the most that fit as 4n+1, at least one
+    chunk. 90% of the RAM is used; the shot itself and 2 GB stay held, and the model too on a GPU under 32 GB."""
+    held = (MODEL_RAM if vram_gb < 32 else 0.0) + 2.0 + frames * plate[0] * plate[1] * 12 / 2 ** 30
+    fit = int((0.9 * ram_gb - held) / (FRAME_COPIES * target[0] * target[1] * 12 / 2 ** 30))
+    if fit >= frames:
+        return frames
+    return max(WINDOW, fit - (fit - 1) % 4)
+
+
+def machine(url: str) -> tuple:
+    """(RAM, VRAM) in GB as the running ComfyUI reports them: its RAM under a cgroup's cap, its first GPU's memory."""
+    with urllib.request.urlopen(f"{url}/system_stats", timeout=30) as r:
+        stats = json.load(r)
+    device = (stats.get("devices") or [{}])[0]
+    return stats["system"]["ram_total"] / 2 ** 30, device.get("vram_total", 0) / 2 ** 30
 
 
 def export_values(shot: str, frames: int, label: str = "upscale") -> dict:
@@ -95,6 +118,8 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
         full = next(os.path.join(d, f) for d, _, fs in os.walk(comfy) for f in fs if f == os.path.basename(shot))
     w, h, n = _plate_info(full)
     shutil.rmtree(os.path.join(comfy, "output", label), ignore_errors=True)
+    target = target_size(w, h)
+    count = count or window_frames(*machine(url), target, (w, h), n)
     jobs = [("upscale", values(shot, w, h, n, label, f, c, color_space, color_fix, fmt, window=k))
             for k, (f, c) in enumerate(windows(n, first, count, every))]
     if every:
@@ -140,7 +165,7 @@ if __name__ == "__main__":
     ap.add_argument("--out", required=True, help="the folder of the report")
     ap.add_argument("--label", default="upscale", help="the report's name and the frames' folder under ComfyUI's output folder")
     ap.add_argument("--first", type=int, default=0, help="the window's first frame, from 0")
-    ap.add_argument("--count", type=int, default=WINDOW, help="the window's frame count")
+    ap.add_argument("--count", type=int, default=0, help="the window's frame count; 0 sizes it to the machine's RAM and GPU")
     ap.add_argument("--all", action="store_true", help="every window of the shot, then the export in the shot's own format")
     ap.add_argument("--color-space", default="@model", help="the shot's file colour space in the OCIO config")
     ap.add_argument("--color-fix", default="lab", choices=("lab", "none"), help="SeedVR2's colour correction")
