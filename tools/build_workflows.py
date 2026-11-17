@@ -611,8 +611,8 @@ def comp():
               plate_space="sRGB", shot_space="sRGB", radius=Slot("radius", 1), strength=Slot("strength", 1.0), align=True)
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=small, on_true=relit)
     _, final = fitted(g, base, gen, union)
-    real = g("ImageFromBatch", image=final, batch_index=0, length=load[4])
-    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Composite preview", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/comp"), images=real, fps=load[3])
+    # the writer takes the composite as it is and saves the plate's own frames (`frames`): no second batch of the shot
+    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Composite preview", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/comp"), images=final, frames=load[4], fps=load[3])
     g.save("comp")
 
 
@@ -686,8 +686,10 @@ def export():
     g.link_slot(plate_out, "images", "export_plate")  # dropped for an EXR result: a video file cannot hold values above 1.0
     # SDR to HDR on a plate whose format cannot hold values above 1.0 (a video, an integer sequence): Adrien, 2 Nov, the export
     # is the result as half-float EXR frames, in ACES2065-1 as every HDR file here
+    # Each writer takes its batch as it is and saves the plate's own frames (`frames`, without Load Plate's padding): no
+    # second batch of the shot is held
     exr = g("PaintAPlate_SaveFrames", _title="Export as half-float EXR frames (an HDR result of a video plate)", _output="exr", format="exr", fps=load[3], chromaticities="AP0",
-            images=g("ImageFromBatch", image=colour(g, final, Slot("color_space", "@model"), HDR_SPACE, "The result in ACES2065-1"), batch_index=0, length=load[4]),
+            images=colour(g, final, Slot("color_space", "@model"), HDR_SPACE, "The result in ACES2065-1"), frames=load[4],
             filename_prefix=Slot("exr_prefix", ""))
     g.link_slot(exr, "images", "export_exr")
     # The layer: the shot as the composite blends it. Composite Frames sizes its source to the plate with the bilinear
@@ -705,11 +707,11 @@ def export():
                   images=colour(g, layer, Slot("color_space", "@model"), HDR_SPACE, "The layer in ACES2065-1"),
                   filename_prefix=Slot("layer_exr_prefix", ""))
     g.link_slot(layer_exr, "images", "export_layer_exr")
-    matte_frames = g("ImageFromBatch", image=g("MaskToImage", mask=fit[1]), batch_index=0, length=load[4])
-    g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed", _output="matte", images=matte_frames,
+    matte_frames = g("MaskToImage", mask=fit[1])
+    g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed", _output="matte", images=matte_frames, frames=load[4],
       filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))
     movie = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Matte movie (grey): the Export row shows it", _output="matte_movie", images=matte_frames,
-              fps=load[3], crf=18, filename_prefix=Slot("matte_video_prefix", ""))
+              frames=load[4], fps=load[3], crf=18, filename_prefix=Slot("matte_video_prefix", ""))
     g.link_slot(movie, "images", "export_matte_movie")
     g.save("export")
 
