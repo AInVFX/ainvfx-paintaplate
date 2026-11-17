@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import build_workflows  # noqa: E402
 import get_models  # noqa: E402
 import plateio  # noqa: E402
+import upscale_compare  # noqa: E402
 import upscale_plate  # noqa: E402
 
 
@@ -125,6 +126,15 @@ class ExportJob(unittest.TestCase):
         self.assertEqual(upscale_plate.window_frames(251.0, 95.0, uhd, hd, 121), 121)  # one job on a 96 GB GPU with RAM
         self.assertEqual(upscale_plate.window_frames(64.0, 95.0, uhd, hd, 121), 69)
         self.assertEqual(upscale_plate.window_frames(24.0, 8.0, uhd, hd, 121), 21)
+
+
+class Comparison(unittest.TestCase):
+    def test_steps_psnr_and_the_centre(self):
+        frames = np.zeros((3, 4, 6, 3), np.float32)
+        frames[2] += 0.5
+        self.assertEqual(upscale_compare.steps(frames), [0.0, 0.5])
+        self.assertAlmostEqual(upscale_compare.psnr(frames[0], frames[0] + 0.1), 20.0, places=4)
+        self.assertEqual(upscale_compare.centre(frames, 2, 2).shape, (3, 2, 2, 3))
 
 
 @unittest.skipUnless(plateio.av is not None, "PyAV missing")
