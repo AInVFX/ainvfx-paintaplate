@@ -919,6 +919,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     size, last = np.ones(n, np.int64), max(int(line.sum()), 1)  # the object's area on each frame
     at_place, all_left = np.zeros(n, bool), np.zeros(n, bool)  # frames where the object was seen at its place; frames where all that was found had left it
     seen = strays = held = added = alone = lost = guarded = smoothed = fronts = zones = placed = cleaned = 0
+    holding = np.zeros(n, bool)  # the frames where the last matte holds with no SAM mask, counted on the matte as it ends
     most, chunk = 1.0, 2 * max(1, workers)
     still = None  # does the object keep its place in the scene? Not known before frame FOLLOW_STILL
     waiting = []  # the zone's frames before it is known whether the object stands still, each with the object's place
@@ -1052,10 +1053,10 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     f = np.zeros((h, w), bool)
                 elif hide is not None:  # not seen: the last matte holds where its place is in view, and the search grows only around a place in view
                     f, lost = (bulk(prev & ~hide) if hidden else prev), lost + (2 * hidden < int(line.sum()))  # no crumbs of a matte that the plate covers
-                    held += bool(f.any())
+                    holding[t] = f.any()
                 else:  # the object is not seen: the last matte holds, and the search grows
                     f, lost = prev, lost + 1
-                    held += bool(prev.any())
+                    holding[t] = prev.any()
                 if zoned and plates is not None and still is not False and 5 * int(s.sum()) >= 2 * given and 2 * int((s & zone_at).sum()) > int(s.sum()):  # the tracker's mask is the zone: as large, and mostly inside it
                     own = ndimage.binary_fill_holes(open0)  # the matte shows the object's place of frame 0; the search keeps the zone
                     if still:
@@ -1091,6 +1092,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     calm |= out[j] > 0.5
             out[t] = cores[t] | ((out[t] > 0.5) & grow(calm, thin))
             smoothed += 1
+    held = int((holding & out.reshape(n, -1).any(1)).sum()) if n else 0  # a frame emptied after it held, as when the object never came back, holds nothing
     largest = above = flicker = None
     if n:
         ratio = out.reshape(n, -1).sum(1) / size
