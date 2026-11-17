@@ -249,6 +249,7 @@
           <dt>- and =</dt><dd>Brush size.</dd>
           <dt>E</dt><dd>Eraser: hold it while you drag, or tap it to switch the eraser on or off.</dd>
           <dt>I</dt><dd>Pick a colour from the frame.</dd>
+          <dt>S, W</dt><dd>Colours, words: in a dialog over the frame.</dd>
           <dt>Enter</dt><dd>Generate.</dd>
           <dt>Ctrl+Enter</dt><dd>Another seed for the selected edit, else the last one.</dd>
           <dt>Esc</dt><dd>Cancel, deselect, end a comparison, then stop generating.</dd>
@@ -275,6 +276,7 @@
           <dt>Wheel</dt><dd>Step through frames.</dd>
           <dt>F6</dt><dd>Wipe between the plate and the pass on show.</dd>
           <dt>Ctrl+click a Render step</dt><dd>Compare two passes in the wipe (Cmd+click on a Mac).</dd>
+          <dt>, and .</dt><dd>With the wipe on: the next pass on the left, on the right.</dd>
           <dt>X</dt><dd>X-ray.</dd>
           <dt>`</dt><dd>Full screen.</dd>
         </dl>
@@ -302,6 +304,7 @@
       <div>
         <h3>Everywhere</h3>
       <dl>
+          <dt>Ctrl+O, Ctrl+S</dt><dd>Open a plate, save the scene.</dd>
           <dt>Right-click</dt><dd>Every action, by menu, with its key.</dd>
           <dt>?</dt><dd>Show or hide the keys.</dd>
         </dl>
@@ -330,6 +333,17 @@
     </form>
   </dialog>
 
+  <dialog id="colours" class="colours" aria-label="Colours">
+    <h2>Colours</h2>
+    <menu><button id="colours-close" type="button">Close</button></menu>
+  </dialog>
+  <dialog id="words" class="words" aria-label="Words">
+    <form method="dialog">
+      <h2>Words</h2>
+      <input id="words-field" autocomplete="off" spellcheck="false" aria-label="Words of the edit">
+      <menu><button value="close">Close</button><button id="words-apply" type="button" class="primary">Apply</button></menu>
+    </form>
+  </dialog>
   <dialog id="ask" class="ask">
     <form method="dialog">
       <p id="ask-text"></p>

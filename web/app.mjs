@@ -929,6 +929,7 @@ S.cmp = null; // { id, label, url, space, frames, framesSpace, key, wiped }: the
 function compareRow(li, id) { // in the Render panel's pick helper: Ctrl+click compares, a plain click shows the pass
   const show = li.onclick;
   li.onclick = (e) => (e.ctrlKey || e.metaKey ? comparePass(id) : show(e));
+  li.dataset.compare = id;
   li.title += ". Ctrl+click (Cmd+click on a Mac) puts it on the wipe's left side, against the pass on show";
   li.classList.toggle("compared", S.cmp?.id === id);
   if (S.xray) xrayLater(); // the rows changed: a matte the X-ray reads may have come
@@ -972,6 +973,24 @@ function comparePass(id) {
   hud(`Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right. Ctrl+click it again, Esc or F6 ends it.`, 3500);
   log(`Viewer: wipe, ${S.cmp.label} against ${shownLabel()}.`);
 }
+// With the wipe on, comma steps its left side and period its right side through the passes on offer: on the left the
+// plate, the first frame and the Render panel's finished steps; on the right the latest result and the same steps. A pass
+// already on the other side is passed over: a pass against itself shows nothing.
+function stepWipe(side) {
+  if (S.wipe === null || !S.plate) return;
+  const left = side === "left", rows = [...$$(left ? "#stages li[data-compare]" : "#stages li[data-pass]")].map((li) => (left ? li.dataset.compare : li.dataset.pass));
+  const offers = [left ? "plate" : null, ...rows], at = Math.max(0, offers.indexOf(left ? S.cmp?.id ?? "plate" : S.pass));
+  for (let i = 1; i < offers.length; i++) {
+    const id = offers[(at + i) % offers.length];
+    if (left && id === "plate") { endCompare(); break; }
+    if (!left && id === null) { if (S.pass) choosePass(S.pass); break; } // the pinned row clicked again: the latest result
+    if (left ? passLabel(id) === shownLabel() : id === S.cmp?.id) continue;
+    if (left) comparePass(id); else choosePass(id);
+    break;
+  }
+  hud(`Wipe: ${S.cmp?.label ?? "Plate"} on the left, ${shownLabel()} on the right.`, 2500);
+}
+
 function plateWipe() { // the plain wipe: the plate on the left, the pass on show on the right
   if (S.cmp) endCompare(false);
   S.wipe ??= 0.5;
@@ -3293,6 +3312,7 @@ function stagesUI() {
     li.classList.add("pick");
     li.title = `${x.label}: show it in the viewer. Click it again, or Esc, for the latest.`;
     li.onclick = () => choosePass(x.id);
+    li.dataset.pass = x.id;
     return li;
   });
   if (!p || !edits) { list.replaceChildren(...fluidRows); $("#render-left").textContent = ""; return timelineBar(); }
@@ -3301,6 +3321,7 @@ function stagesUI() {
     li.classList.add("pick");
     li.title = `${label}: show it in the viewer. Click it again, or Esc, for the latest.`;
     li.onclick = () => choosePass(id);
+    li.dataset.pass = id;
     compareRow(li, id); // the viewer's: Ctrl+click puts the pass on the wipe's left side
   };
   const first = document.createElement("li"); // the edit on the first frame, as Klein made it
@@ -3758,6 +3779,39 @@ function modeKey(k, combo) { // the keys of an interactive edit, as RV's paramsc
 
 function resetDisplay() { leaveMode(); setDisplay({ ...colour.DISPLAY }); }
 
+// ---------- Colours… (S) and Words… (W): what an edit needs, also in full screen ----------
+// Colours… moves the panel's swatches, picker and pipette into a dialog over the frame, and puts them back when it closes.
+// It is not modal, so the pipette's click lands on the frame and the page's keys keep working. Words… shows the words of
+// the edit, or of the fluid shot, in a modal dialog: Enter applies them, as typing them in the prompt field does.
+
+const swatchHome = { parent: $(".swatches").parentElement, next: $(".swatches").nextSibling };
+function openColours() {
+  const d = $("#colours");
+  if (d.open) return d.close();
+  d.querySelector("menu").before($(".swatches"));
+  d.show();
+  document.activeElement?.blur(); // show() focuses Close: Space and Enter stay the page's keys
+}
+$("#colours").onclose = () => swatchHome.parent.insertBefore($(".swatches"), swatchHome.next);
+$("#colours-close").onclick = () => $("#colours").close();
+
+function openWords() {
+  const d = $("#words"), field = $("#words-field");
+  field.value = $("#prompt").value;
+  field.placeholder = $("#prompt").placeholder;
+  d.showModal();
+  field.select();
+}
+function applyWords() { // the dialog's words become the edit's, at once, as typing them in the prompt field does
+  const words = $("#words-field").value;
+  $("#words").close();
+  if (words === $("#prompt").value) return;
+  $("#prompt").value = words;
+  $("#prompt").dispatchEvent(new Event("input"));
+}
+$("#words-field").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); applyWords(); } };
+$("#words-apply").onclick = applyWords;
+
 // ---------- Help, in tabs: Getting started, Tools, Keys, Viewer and colour, Render and export, Models and licences ----------
 
 function showHelp(tab = "keys") {
@@ -4012,9 +4066,8 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
   const param = (name, key) => [`${colour.PARAMS[name].label}…`, key, () => colorMode(name), !p, S.mode === name];
   const step = (by) => () => { pause(); seek(S.frame + by); };
   const groups = [
-    ["File", [["Open plate…", "", openDialog], ["Fluid keyframes", "", editFluid, !S.fluid || keying()],
-      ["Save scene", "", () => saveScene().catch(quiet), !p], ["Export…", "", exportDialog, !edits],
-      ["ComfyUI graph", "", () => saveGraph().catch(quiet), !edits], "-", ["Close plate", "", () => closePlate(), !p && !openCtl]]],
+    ["File", [["Open plate…", "Ctrl+O", openDialog], ["Fluid keyframes", "", editFluid, !S.fluid || keying()],
+      ["Save scene", "Ctrl+S", () => saveScene().catch(quiet), !p], ["Export…", "", exportDialog, !edits], "-", ["Close plate", "", () => closePlate(), !p && !openCtl]]],
     ["Edit", [["Undo", "Ctrl+Z", undo, !S.past.length], ["Redo", "Ctrl+Shift+Z", redo, !S.future.length], "-",
       ["New edit", "N", nextEdit, !p || keying() || (!S.draft && !S.selected)], ["Generate", "Enter", () => enter(false), $("#generate").disabled], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
       ...(HDR_ON ? [["Finish: SDR to HDR", "", () => { openFinish(true); askFinish(FINISH[0], !S.deliver.hdr); }, !p || !S.hdrReady || holdsHdr(p.spec, p.headroom), !!p && !!S.deliver.hdr]] : []),
@@ -4022,7 +4075,8 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Render in full", "", renderInFull, !S.renders.get(S.heroKey)?.donor], ["Stop generating", "Esc", stopGenerating, !generating()],
       ["Deselect", "Esc", () => select(null), !S.selected]]],
     ["Tools", [["Paint", "P", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Clean", "C", () => pickTool("erase"), !p || (keying() && !S.fluid.result), S.tool === "erase" && !S.rub],
-      ["Light", "L", () => pickTool("light"), !p || (keying() && !S.fluid.result), S.tool === "light" && !S.rub], ["Eraser", "E", () => setRub(!S.rub), !p, S.rub], ["Pick a colour", "I", () => pickColor(), !p, !!S.picking], "-",
+      ["Light", "L", () => pickTool("light"), !p || (keying() && !S.fluid.result), S.tool === "light" && !S.rub], ["Eraser", "E", () => setRub(!S.rub), !p, S.rub], ["Pick a colour", "I", () => pickColor(), !p, !!S.picking],
+      ["Colours…", "S", openColours, !p, $("#colours").open], ["Words…", "W", openWords, !p], "-",
       ["Whole object", "", () => $("#whole").click(), !p, $("#whole").checked], ["Smaller brush", "-", () => setSize(S.size / 1.2), !p],
       ["Larger brush", "=", () => setSize(S.size * 1.2), !p]]],
     ["Control", [["Play or pause", "Space", () => (S.playing ? pause() : play()), !p, S.playing], ["Next frame", "Right", step(1), !p],
@@ -4035,7 +4089,8 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
     ["View", [chan("rgb", "Shift+C"), chan("r", "Shift+R"), chan("g", "Shift+G"), chan("b", "Shift+B"), chan("l", "Shift+L"), "-",
       ["Fit", "F", () => zoomTo(1), !p], ["Frame width", "Ctrl+F", widthZoom, !p], ["1:1", "1", () => pixelZoom(1), !p],
       ["2:1", "2", () => pixelZoom(2), !p], ["4:1", "4", () => pixelZoom(4), !p], ["1:2", "Shift+2", () => pixelZoom(1 / 2), !p], ["1:4", "Shift+4", () => pixelZoom(1 / 4), !p],
-      ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null], ["X-ray", "X", () => setXray(!S.xray), !p, S.xray], ["Full screen", "`", fullScreen, !p, !!fullFrom],
+      ["Color Inspector", "F5", toggleInspector, !p, S.inspect.on], ["Wipe", "F6", () => setWipe(S.wipe === null), !p, S.wipe !== null],
+      ["Wipe: next on the left", ",", () => stepWipe("left"), S.wipe === null], ["Wipe: next on the right", ".", () => stepWipe("right"), S.wipe === null], ["X-ray", "X", () => setXray(!S.xray), !p, S.xray], ["Full screen", "`", fullScreen, !p, !!fullFrom],
       ["Cache memory", "", [["Auto", "", () => setCache(0), false, !S.cache], ...CACHE_CHOICES.filter(Boolean).map((b) => [memoryText(b), "", () => setCache(b), false, S.cache === b]),
         ["Custom…", "", customCache, false, !!S.cache && !CACHE_CHOICES.includes(S.cache)]], !!CACHE_MB],
       ["Clear unused cache…", "", clearCache, false, false],
@@ -4438,6 +4493,13 @@ document.addEventListener("drop", (e) => {
 });
 
 addEventListener("keydown", (e) => {
+  const files = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && ["o", "s"].includes(e.key.toLowerCase());
+  if (files) { // Ctrl+O opens a plate and Ctrl+S saves the scene, also from the words' field; the page takes both from the browser
+    e.preventDefault();
+    if ($("dialog[open]:not(#colours)") || !$("#ctx").hidden) return;
+    if (e.key.toLowerCase() === "o") openDialog(); else if (S.plate) saveScene().catch(quiet);
+    return;
+  }
   if (e.key === "F5" && !e.ctrlKey && !e.metaKey && !e.altKey) { if (S.plate) toggleInspector(); return e.preventDefault(); } // RV's Color Inspector; the page takes F5 from the browser's reload
   if (e.target.matches("input, select, textarea")) {
     if (e.key === "Enter" && e.target.id === "prompt") { enter(e.ctrlKey || e.metaKey); e.target.blur(); e.preventDefault(); }
@@ -4445,11 +4507,12 @@ addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "?" && $("#help").open) { $("#help").close(); return e.preventDefault(); }
-  if ($("dialog[open]")) return;
+  if ($("dialog[open]:not(#colours)")) return; // Colours stays open while the page works: its keys close it
   const k = e.key, low = k.toLowerCase(), mod = e.ctrlKey || e.metaKey, combo = `${e.shiftKey && k.length === 1 ? "Shift+" : ""}${low}`;
   if (!$("#ctx").hidden) { if (k === "Escape") closeMenu(); return e.preventDefault(); } // the menu is open: Esc closes it
   if (k === "Escape" && openCtl) { cancelOpen(); return e.preventDefault(); } // a plate opening: Esc cancels it
   if (!S.plate && !["?", "F6"].includes(k)) return;
+  if ($("#colours").open && !mod && !e.altKey && (k === "Escape" || combo === "s")) { $("#colours").close(); return e.preventDefault(); }
   if (k === "Home" && e.shiftKey && !mod) { resetDisplay(); hud("Colour reset."); return e.preventDefault(); } // RV's Reset All Color
   if (S.mode && modeKey(k, combo)) return e.preventDefault();
   if (S.picking && k === "Escape") { pickFrame(false); return e.preventDefault(); }
@@ -4468,6 +4531,9 @@ addEventListener("keydown", (e) => {
   else if (k === "]") setOut(S.frame);
   else if (k === "\\") clearRange();
   else if (k === "F6") setWipe(S.wipe === null);
+  else if ((k === "," || k === ".") && !mod && !e.altKey) { if (S.wipe === null) hud("The wipe is off: F6 turns it on.", 2000); else stepWipe(k === "," ? "left" : "right"); }
+  else if (combo === "s" && !mod && !e.altKey) openColours();
+  else if (combo === "w" && !mod && !e.altKey) openWords();
   else if (combo === "x" && !mod && !e.altKey) setXray(!S.xray); // x is free in RV's rvui.mu (0bd9675), where Shift+X flops the image
   else if (low === "f" && !mod && !e.altKey) zoomTo(1);
   else if (low === "f" && mod && !e.shiftKey) widthZoom(); // RV's Frame Width; the page takes Ctrl+F from the browser's find

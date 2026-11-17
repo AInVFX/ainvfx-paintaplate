@@ -311,6 +311,10 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 
 /* the Open dialog: one tab per source; the browser lists folders, videos and sequences, drawn as they scroll into view */
 dialog.open { width: min(900px, 94vw); }
+dialog.colours { position: fixed; inset: 16px auto auto 16px; z-index: 30; width: auto; margin: 0; padding: 10px 12px; }
+dialog.colours h2 { margin: 0 0 8px; font-size: 13px; }
+dialog.colours .swatches { grid-template-columns: repeat(6, 26px); padding-top: 0; border: 0; }
+dialog.colours menu { margin-top: 10px; }
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 0 12px; }
 .tabs [role="tab"] { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted); padding: 8px 12px; }
 .tabs [role="tab"][aria-selected="true"] { color: var(--text); border-bottom-color: var(--gold); }
