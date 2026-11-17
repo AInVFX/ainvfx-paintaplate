@@ -136,7 +136,8 @@ def load(name, folder=None):
 OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",), "follow_erased": ("erased",),
             "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "plate_level": ("plate_width", "plate_height"),
             "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",),
-            "export_plate": ("prefix",), "export_exr": ("exr_prefix",)}
+            "export_plate": ("prefix",), "export_exr": ("exr_prefix",), "export_layer": ("layer_prefix",),
+            "export_layer_exr": ("layer_exr_prefix",), "upscale_comp": ("comp_prefix",), "upscale_matte": ("matte_prefix",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -608,8 +609,8 @@ def comp():
               plate_space="sRGB", shot_space="sRGB", radius=Slot("radius", 1), strength=Slot("strength", 1.0), align=True)
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=small, on_true=relit)
     _, final = fitted(g, base, gen, union)
-    real = g("ImageFromBatch", image=final, batch_index=0, length=load[4])
-    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Composite preview", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/comp"), images=real, fps=load[3])
+    # the writer takes the composite as it is and saves the plate's own frames (`frames`): no second batch of the shot
+    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Composite preview", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/comp"), images=final, frames=load[4], fps=load[3])
     g.save("comp")
 
 
@@ -673,7 +674,8 @@ def review():
 def export():
     """For compositing software, when Export is pressed: the composite the review shows, written by Save Plate in the
     plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers, the untouched
-    pixels exactly the source's), with the matte of where the plate changed."""
+    pixels exactly the source's), with the matte of where the plate changed and, for an edit that keeps the plate's
+    untouched pixels, the layer the composite blends in: result = plate x (1 - matte) + layer x matte."""
     g = Graph()
     load, fit, final = composite(g)
     plate_out = g("PaintAPlate_SavePlate", _title="Export", _output="export", images=final, plate=load[2],
@@ -682,15 +684,32 @@ def export():
     g.link_slot(plate_out, "images", "export_plate")  # dropped for an EXR result: a video file cannot hold values above 1.0
     # SDR to HDR on a plate whose format cannot hold values above 1.0 (a video, an integer sequence): Adrien, 2 Nov, the export
     # is the result as half-float EXR frames, in ACES2065-1 as every HDR file here
+    # Each writer takes its batch as it is and saves the plate's own frames (`frames`, without Load Plate's padding): no
+    # second batch of the shot is held
     exr = g("PaintAPlate_SaveFrames", _title="Export as half-float EXR frames (an HDR result of a video plate)", _output="exr", format="exr", fps=load[3], chromaticities="AP0",
-            images=g("ImageFromBatch", image=colour(g, final, Slot("color_space", "@model"), HDR_SPACE, "The result in ACES2065-1"), batch_index=0, length=load[4]),
+            images=colour(g, final, Slot("color_space", "@model"), HDR_SPACE, "The result in ACES2065-1"), frames=load[4],
             filename_prefix=Slot("exr_prefix", ""))
     g.link_slot(exr, "images", "export_exr")
-    matte_frames = g("ImageFromBatch", image=g("MaskToImage", mask=fit[1]), batch_index=0, length=load[4])
-    g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed", _output="matte", images=matte_frames,
+    # The layer: the shot as the composite blends it. Composite Frames sizes its source to the plate with the bilinear
+    # filter of Image Scale, so this is the picture it blends. Written as the result is: in the plate's own format with no
+    # source pixel kept, or as half-float EXR frames in ACES2065-1 beside an EXR result. A relight leaves it out (Slots
+    # layer_prefix and layer_exr_prefix empty): every pixel of its result may change, so the result is the only layer.
+    size = g("GetImageSize", image=load[0])
+    layer = g("ImageScale", _title="Layer: the shot as the composite blends it", image=fit[0], upscale_method="bilinear",
+              width=size[0], height=size[1], crop="disabled")
+    layer_plate = g("PaintAPlate_SavePlate", _title="Layer", _output="layer", images=layer, plate=load[2],
+                    filename_prefix=Slot("layer_prefix", ""), keep_untouched=False)
+    g.link_slot(layer_plate, "images", "export_layer")
+    layer_exr = g("PaintAPlate_SaveFrames", _title="Layer as half-float EXR frames (an HDR result of a video plate)", _output="layer_exr",
+                  format="exr", fps=load[3], chromaticities="AP0", frames=load[4],
+                  images=colour(g, layer, Slot("color_space", "@model"), HDR_SPACE, "The layer in ACES2065-1"),
+                  filename_prefix=Slot("layer_exr_prefix", ""))
+    g.link_slot(layer_exr, "images", "export_layer_exr")
+    matte_frames = g("MaskToImage", mask=fit[1])
+    g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed", _output="matte", images=matte_frames, frames=load[4],
       filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))
     movie = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Matte movie (grey): the Export row shows it", _output="matte_movie", images=matte_frames,
-              fps=load[3], crf=18, filename_prefix=Slot("matte_video_prefix", ""))
+              frames=load[4], fps=load[3], crf=18, filename_prefix=Slot("matte_video_prefix", ""))
     g.link_slot(movie, "images", "export_matte_movie")
     g.save("export")
 
@@ -864,6 +883,14 @@ def upscale():
     whole shot on a large GPU. Neighbouring chunks share one latent frame, UPSCALE_OVERLAP frames, which core's merge
     crossfades. The post-processing matches the colours to the Lanczos frames (Slot color_fix: lab, the node's default,
     or none). Save Frames writes the window: 16-bit PNG, or half-float EXR for a float plate (Slot format).
+
+    Two optional parts make the 4K set of an edit that keeps the plate's untouched pixels, where this window is the
+    export's layer. The 4K result (Slot comp_prefix): the same window of the 4K plate (Slot under, saved by an earlier job
+    of this workflow on the plate, in its colour space, Slot under_space) around the matte, the restored layer
+    inside it, through Composite Frames. The matte (Slot matte, the export's, at the plate's size) is cut to the window
+    and sized as Composite Frames sizes it, with a bilinear filter: never generated. The 4K matte (Slot matte_prefix):
+    that same picture as 16-bit PNG frames, so the 4K result, plate, layer and matte add up to one code value. Every
+    window saves its matte into one folder, numbered on from the frames already there.
     """
     g = Graph()
     load = g("PaintAPlate_LoadPlate", _title="Result", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
@@ -888,6 +915,20 @@ def upscale():
     back = colour(g, sharp, "@model", Slot("color_space", "@model"), "The window in the plate's colour space", peak=model[1])
     g("PaintAPlate_SaveFrames", _title="Upscaled frames", _output="frames", images=back, fps=load[3], format=Slot("format", "png16"),
       filename_prefix=Slot("prefix", "paintaplate/plate/upscale/f"))
+    size = g("GetImageSize", image=back)
+    matte = g("ImageFromBatch", _title="The window of the matte", batch_index=Slot("first", 0), length=Slot("count", UPSCALE_CHUNK),
+              image=g("PaintAPlate_LoadPlate", _title="Matte", path=Slot("matte", ""), max_frames=Slot("max_frames", 121), pad_8n1=False))
+    under = g("PaintAPlate_LoadPlate", _title="The window of the 4K plate", path=Slot("under", ""), max_frames=Slot("count", UPSCALE_CHUNK), pad_8n1=False)
+    under = colour(g, under, Slot("under_space", "@model"), Slot("color_space", "@model"), "The window of the 4K plate in the layer's colour space")
+    comp = g("PaintAPlate_CompositeFrames", _title="4K result: the plate's window around the matte, the layer inside it", destination=under,
+             source=back, mask=g("ImageToMask", image=matte, channel="red"), width=size[0], height=size[1])
+    saved = g("PaintAPlate_SaveFrames", _title="4K result frames", _output="comp", images=comp, fps=load[3], format=Slot("format", "png16"),
+              filename_prefix=Slot("comp_prefix", ""))
+    g.link_slot(saved, "images", "upscale_comp")
+    big = g("ImageScale", _title="The matte at the target size (bilinear, as Composite Frames sizes it)", image=matte, upscale_method="bilinear",
+            width=size[0], height=size[1], crop="disabled")
+    saved = g("PaintAPlate_SaveFrames", _title="4K matte", _output="matte", images=big, format="png16", filename_prefix=Slot("matte_prefix", ""))
+    g.link_slot(saved, "images", "upscale_matte")
     g.save("upscale")
 
 

@@ -8,6 +8,11 @@
   colour  Runs made at an original's size from a smaller copy: the PSNR (peak signal-to-noise ratio) of each frame
           against the original, the mean difference of each channel, and centre crops of one frame, for a sheet.
           python tests/upscale_compare.py colour --comfy /workspace/ComfyUI --original PATH --runs lab none --out DIR
+  parts   The 4K set of one export (4k/ of its zip, unpacked, or of the render's folder): for each frame, how far the 4K
+          result is from 4K plate x (1 - 4K matte) + 4K layer x 4K matte (the mean and the largest difference, and the
+          share of pixels more than 2 steps off, in 8-bit steps), and crops at 1:1 along the matte's edge on a few frames:
+          the result, the plate, the layer and the difference ten times brighter, one row per frame, for a sheet.
+          python tests/upscale_compare.py parts --set DIR/4k --frames 1 61 121 --out DIR
 """
 import argparse
 import csv
@@ -95,6 +100,46 @@ def colour(comfy: str, original: str, runs: list, out: str, frame: int = 61, cro
     return columns
 
 
+MOVIES = (".mp4", ".mov", ".mkv", ".webm", ".mxf")
+
+
+def part_frames(path: str):
+    """The frames of one part of the 4K set, one at a time, as float32 RGB: its movie, or its folder of frames."""
+    names = sorted(os.listdir(path))
+    movies = [n for n in names if n.lower().endswith(MOVIES)]
+    if movies:
+        import av
+        with av.open(os.path.join(path, movies[0])) as c:
+            stream = c.streams.video[0]
+            fmt, top = ("rgb24", 255.0) if plateio.eight_bit_rgb(stream.pix_fmt) else ("rgb48le", 65535.0)
+            for frame in c.decode(stream):
+                yield frame.to_ndarray(format=fmt).astype(np.float32) / top
+        return
+    for n in names:
+        if n.lower().endswith((".png", ".exr", ".tif", ".tiff", ".dpx")):
+            yield plateio.read_float(os.path.join(path, n))[..., :3]
+
+
+def parts(root: str, out: str, frames=(1, 61, 121), crop: int = 480) -> dict:
+    """See the module's docstring. `root` holds export/, plate/, layer/ and matte/."""
+    columns, rows = {"frame": [], "mean": [], "max": [], "over2": []}, []
+    for i, (res, plate, layer, matte) in enumerate(zip(*(part_frames(os.path.join(root, n)) for n in ("export", "plate", "layer", "matte"))), 1):
+        m = matte[..., :1]
+        diff = np.abs(res - (plate * (1 - m) + layer * m)) * 255
+        for key, value in (("frame", i), ("mean", float(diff.mean())), ("max", float(diff.max())), ("over2", float((diff > 2).mean()))):
+            columns[key].append(value)
+        if i in frames:  # around the middle of the matte's soft edge, or the frame's centre when it has none
+            edge = np.argwhere((m[..., 0] > 0.1) & (m[..., 0] < 0.9))
+            cy, cx = edge.mean(0).astype(int) if len(edge) else (res.shape[0] // 2, res.shape[1] // 2)
+            y, x = max(0, min(cy - crop // 2, res.shape[0] - crop)), max(0, min(cx - crop // 2, res.shape[1] - crop))
+            rows.append(np.concatenate([a[y:y + crop, x:x + crop] for a in (res, plate, layer, np.clip(diff * 10 / 255, 0, 1))], axis=1))
+    write_csv(os.path.join(out, "parts.csv"), columns)
+    if rows:
+        png8(np.concatenate(rows, axis=0), os.path.join(out, "parts_sheet.png"))
+    return {"frames": len(columns["frame"]), "mean": float(np.mean(columns["mean"])) if rows or columns["mean"] else 0.0,
+            "max": max(columns["max"], default=0.0), "over2": max(columns["over2"], default=0.0)}
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="what", required=True)
@@ -108,9 +153,15 @@ if __name__ == "__main__":
     c.add_argument("--original", required=True)
     c.add_argument("--runs", nargs="+", required=True)
     c.add_argument("--out", required=True)
+    p = sub.add_parser("parts")
+    p.add_argument("--set", required=True, help="the 4K set's folder, with export/, plate/, layer/ and matte/")
+    p.add_argument("--frames", type=int, nargs="+", default=[1, 61, 121], help="the frames of the sheet, from 1")
+    p.add_argument("--out", required=True)
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     if a.what == "seams":
         seams(a.comfy, a.runs, a.edge, a.out)
+    elif a.what == "parts":
+        print(parts(a.set, a.out, tuple(a.frames)))
     else:
         colour(a.comfy, a.original, a.runs, a.out)

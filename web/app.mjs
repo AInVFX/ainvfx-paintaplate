@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, fullPath, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_PARTS, previewCap, previewSize, previewSizes, reconcile, removedNames, renderKey, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, UPSCALE, UPSCALE_LARGE, upscaleFolder, upscaleKeeps, upscaleSeconds, upscaleSource, upscaleTarget, upscaleWindow, upscaleWindows, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, fullPath, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_PARTS, previewCap, previewSize, previewSizes, reconcile, removedNames, renderKey, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -75,7 +75,7 @@ const LAYOUT_PREF = "paintaplate.layout"; // the dragged sizes, kept for the nex
 // at most LIGHT.flow of its colour (LIGHT.shade of darkness for a dark colour), so light builds up stroke by stroke and
 // mixed colours add up to white only after a few passes (30 Oct: one stroke of the earlier brush reached white at once).
 const LIGHT = { flow: 0.3, shade: 0.35, spread: 1.6, spacing: 0.25 };
-const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "shotup", "matte", "comp", "review", "export", "warm", "fluid", "hdr"];
+const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "shotup", "matte", "comp", "review", "export", "warm", "fluid", "hdr", "upscale", "upscale_export"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "hdr", "review", "export"]; // the render's job kinds: Generate and a new plate stop them
 const STOPPED = ["edit", "fluid", "snap", "prefetch", ...BACKGROUND]; // the job kinds a stop ends: none of them is posted until Enter (design rule 13)
 const UPSAMPLER = {}; // Black Forest Labs' system prompts for Klein's upsampler (upsampler.json): table and plain
@@ -107,10 +107,11 @@ const S = {
   fit: { w: 0, h: 0, x: 0, y: 0 }, zoom: { k: 1, x: 0, y: 0 },
   display: { ...colour.DISPLAY }, mode: null, scrub: null, inspect: { on: false, pt: null, avg: null, busy: false, last: 0, key: null, got: null, final: null, sampling: false }, // the viewer's colour (display only), and its interactive edit as in RV
   fluid: null, clip: null, fluidReady: true, // a fluid shot on a blank plate, the last one, a copied keyframe
+  upscaleReady: false, // Finish > Upscale to 4K: SeedVR2's files and core's SeedVR2 nodes are here (boot)
   shot: null, stage: null, run: 0, exported: null, wantDownload: null,
   ocio: { config: "", display: "", view: "", look: "", ...saved(OCIO_PREF), info: null }, // the OCIO config and the viewer's view, as in RV
   previewCap: 0, // the shot preview's long side for the plate open (logic.previewCap); 0: Off
-  deliver: { hdr: false }, // the Finish menu's passes for this plate, under the scene's key « deliver »; hdr: the deliberate SDR to HDR of a plate that holds nothing above 1.0
+  deliver: { hdr: false, upscale: false }, // the Finish menu's passes for this plate, under the scene's key « deliver »; hdr: the deliberate SDR to HDR of a plate that holds nothing above 1.0; upscale: Upscale to 4K at Export
   heroKey: "", renders: new Map(), // set of edits -> what has been rendered for it
   erases: new Map(), // set of erases -> their matte and clean plates, for every render that has the same erases
   peek: null, // the History row picked: frame 0 shows its strokes over the edited first frame
@@ -260,7 +261,7 @@ async function openPlate(list, typed, opts = {}) {
   const began = performance.now();
   stopEverything();
   if (!opts.under) { S.halted = false; S.viewStopped = false; S.viewEpoch++; } // another plate, or a scene: what generates stops, a stop in force ends, and what waited for it is void
-  if (!opts.under) S.deliver = { hdr: false }; // a new plate: the Finish menu's passes off; the fluid shot under the edits keeps them
+  if (!opts.under) S.deliver = { hdr: false, upscale: false }; // a new plate: the Finish menu's passes off; the fluid shot under the edits keeps them
   if (openCtl) { openCtl.abort(); cancel("ingest"); } // a plate still opening gives way to this one
   const ctl = (openCtl = new AbortController()); // Cancel on the opening screen, or Esc, aborts it (cancelOpen)
   Object.assign(S, { plate: null, hero: null, original: null }); // nothing to draw while the new plate loads
@@ -789,8 +790,18 @@ function layered(upto = S.edits.length, keep = () => true) { // the first frame 
 // SDR to HDR runs on its own for new content on a plate that holds values above 1.0 (logic.holdsHdr). On any other plate it
 // runs only when the Finish menu asks for it, confirmed first, and its result is an EXR sequence.
 const hdrWanted = () => wantsHdrFor(S.plate?.spec, S.plate?.headroom, S.deliver.hdr);
+function upscaleFigures() { // Upscale to 4K on this plate: the export's size at 4K, and about how long one pass and Paint or Clean's two take on this GPU
+  const p = S.plate, target = upscaleTarget(p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]), profile = S.memoryProfile.name;
+  return { target, frames: p.frames, alone: upscaleSeconds(target, p.frames, { profile }), edit: upscaleSeconds(target, p.frames, { passes: 2, parts: 3, profile }) };
+}
+const FIGURES = { upscale: upscaleFigures }; // the figures of a Finish option whose question is a function of them
 function finishState(opt) { // a Finish option on this plate: on, disabled, and why: the line that says why it cannot change here
   const p = S.plate;
+  if (opt.id === "upscale") { // optional, as fluid shots and SDR to HDR are; a plate already that large keeps it, with what to expect
+    if (!S.upscaleReady) return { on: false, disabled: true, why: "Its model files or nodes are missing on this ComfyUI. Run python get_models.py for the files." };
+    const large = !!p && Math.max(p.spec.width ?? 0, p.spec.height ?? 0) >= UPSCALE.long;
+    return { on: !!S.deliver.upscale, disabled: false, why: large ? UPSCALE_LARGE : "" };
+  }
   if (opt.id !== "hdr") return { on: false, disabled: true, why: "" };
   if (!HDR_ON) return { on: false, disabled: true, why: "Off in this page's address (hdr=0)." };
   if (!S.hdrReady) return { on: false, disabled: true, why: "Its model files or nodes are missing on this ComfyUI. Run python get_models.py for the files." };
@@ -806,7 +817,7 @@ function finishRow(opt) { // one row of the Finish menu: its switch and name, it
   li.querySelector(".line").textContent = opt.line;
   li.querySelector("input").addEventListener("change", (e) => askFinish(opt, e.target.checked));
   if (opt.ask) {
-    li.querySelector(".finish-ask p").textContent = opt.ask;
+    li.querySelector(".finish-ask p").textContent = typeof opt.ask === "string" ? opt.ask : ""; // a function: written when the question opens
     li.querySelector(`#finish-${opt.id}-yes`).addEventListener("click", () => { $(`#finish-${opt.id}-ask`).hidden = true; setFinish(opt, true); });
     li.querySelector(`#finish-${opt.id}-no`).addEventListener("click", () => { $(`#finish-${opt.id}-ask`).hidden = true; finishUI(); });
   }
@@ -831,12 +842,15 @@ function askFinish(opt, on) { // a pass that changes what Export writes asks fir
   const ask = $(`#finish-${opt.id}-ask`);
   if (ask) ask.hidden = true;
   if (!on || !ask) return setFinish(opt, on);
+  if (typeof opt.ask === "function") ask.querySelector("p").textContent = opt.ask(FIGURES[opt.id]());
   $(`#finish-${opt.id}`).checked = false;
   ask.hidden = false;
 }
 function setFinish(opt, on) { // each setting keeps its own renders: the render key gains "|hdr"
   if (opt.id === "hdr") S.deliver.hdr = on;
-  confirmed(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Full-size shot: regenerated in scene-linear values, fitted to the plate.\n  Result: half-float EXR frames in ACES2065-1, in the viewer and in Export." : ""}` : `Finish: ${opt.name} off.`, 1500);
+  if (opt.id === "upscale") S.deliver.upscale = on; // the renders stay: Upscale to 4K runs at Export, after them
+  confirmed(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Full-size shot: regenerated in scene-linear values, fitted to the plate.\n  Result: half-float EXR frames in ACES2065-1, in the viewer and in Export."
+    : opt.id === "upscale" ? `\n  Export: a 4k folder too, at ${upscaleFigures().target.join(" x ")}.` : ""}` : `Finish: ${opt.name} off.`, 1500);
   finishUI(); recompose(); touch();
   if (on && plateAlone(S.heroKey) && !S.renders.get(S.heroKey)) status(`Finish: ${opt.name} on. Generate runs it on the plate: about ${Math.round(estimate("hdr", plan({ key: S.heroKey }, []).skip))} s.`, "hint");
 }
@@ -2752,6 +2766,7 @@ const STAGES = [
   { id: "trackfull", label: "Track the paint, full size", ref: 16, final: true }, { id: "hdr", label: "SDR to HDR", ref: 45, final: true },
   { id: "review", label: "Composite, full size", ref: 12, final: true },
   { id: "export", label: "Export", ref: 10, final: true, onDemand: true },
+  { id: "upscale", label: "Upscale to 4K", ref: 0, final: true, onDemand: true }, // Finish > Upscale to 4K: after the export, before the zip
 ];
 const REF = Object.fromEntries(STAGES.map((x) => [x.id, x.ref])); // each step's reference in seconds, by id (logic.stepGuess)
 const previewOf = (r) => r?.previews?.[S.plate.shot.join("x")]; // what this preview size made for a set of edits
@@ -2764,7 +2779,8 @@ function plan(r, active) { // the steps this set of edits needs: the erase pass 
   r.skip = new Set([!erase && "erase", !erase && "clean", !carry && "shot", !paint && "track", (onePass || !erase) && "cleanfull",
     (onePass || !carry) && "full", (onePass || !paint) && "trackfull",
     !(S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), hdrOfKey(r.key, holdsHdr(p.spec, p.headroom)))) && "hdr", // the switch is in the key
-    ...(active.length ? [] : ["comp", "review", "export"]), // the plate alone: SDR to HDR makes the result, and Export zips its frames
+    ...(active.length ? [] : ["comp", "review", "export", "upscale"]), // the plate alone: SDR to HDR makes the result; Export zips its frames, and restores them at 4K itself (exportAlone)
+    !(S.deliver.upscale && S.upscaleReady) && "upscale",
     ...(S.previewCap ? [] : STAGES.filter((st) => st.preview).map((st) => st.id))].filter(Boolean)); // Preview pass: Off
   return r;
 }
@@ -2780,6 +2796,7 @@ const makesHdr = (skip) => !!skip && !skip.has("hdr"); // a render makes SDR to 
 const timeStep = (id) => (id === "cleanfull" && startsFromPreview(S.plate, S.previewCap) ? "cleanup" : id); // the name a step's seconds go under: stage 2 alone apart from both stages
 
 function estimate(id, skip) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess. skip: the render's steps left out
+  if (id === "upscale") return upscaleGuess();
   const hdr = makesHdr(skip), t = timeStep(id);
   if (S.took[timeId(t, hdr)]) return S.took[timeId(t, hdr)];
   const known = TIMES[stepKey(t, hdr)];
@@ -2803,7 +2820,7 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   });
   hideLive();
   const dt = (performance.now() - t0) / 1000, t = timeStep(id);
-  if (jobsNotRun() === notRun) { // a step whose jobs were answered without running (the job index, ComfyUI's cache) keeps no time
+  if (jobsNotRun() === notRun && id !== "upscale") { // a step whose jobs were answered without running (the job index, ComfyUI's cache) keeps no time; Upscale to 4K's depends on the plate's windows the index holds (upscaleGuess)
     TIMES = remember(TIMES, stepKey(t, makesHdr(r.skip)), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
     try { localStorage.setItem(TIMES_KEY, JSON.stringify(TIMES)); } catch { /* a private window: the session's own times still serve */ }
     S.took[timeId(t, makesHdr(r.skip))] = dt;
@@ -2845,13 +2862,18 @@ async function plateHdr(r) {
   if (S.wantDownload) return exportAlone(r);
   status("SDR to HDR: ready, in the viewer, its EXR frames at full precision as they load. Export writes them for compositing software.", "hint");
 }
-function exportAlone(r) { // Export on the plate alone: the frames SDR to HDR wrote, at the plate's size and level, in ACES2065-1
+async function exportAlone(r) { // Export on the plate alone: the frames SDR to HDR wrote, at the plate's size and level, in ACES2065-1
   r.exported ??= { run: r.run, name: `${S.plate.name}_paintaplate_v${r.v}`, text: `${S.plate.frames} half-float EXR frames in ACES2065-1, in ${r.run}/hdr`, matte: null };
   S.exported = r.exported;
   S.wantDownload = null;
   stagesUI(); exportUI();
   confirmed(`Export: done, in ComfyUI's output folder: ${S.exported.text}.`);
-  download(["hdr"]);
+  const parts = ["hdr"];
+  if (S.deliver.upscale && S.upscaleReady) { // Finish > Upscale to 4K: there is no composite, so the end output alone is restored
+    if (!(await upscaleAlone(r.run, r.hdrFrames, true))) return;
+    parts.push("4k");
+  }
+  download(parts);
 }
 function exportPlate() { // Export before SDR to HDR has run on the plate alone: the render runs first, then the zip downloads
   const r = S.renders.get(S.heroKey) ?? want(S.heroKey, true);
@@ -3016,19 +3038,92 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     const exr = exrResult(p.spec, r.hdr, p.headroom); // the result as half-float EXR frames instead of the plate's format
     const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr,
       ...r.full.values, relight, keep_untouched: !relight, prefix: exr ? "" : `${dir}/export`, exr_prefix: exr ? `${dir}/export/f` : "", matte_prefix: `${dir}/matte/matte`,
+      layer_prefix: exr || relight ? "" : `${dir}/layer`, layer_exr_prefix: exr && !relight ? `${dir}/layer/f` : "",
       matte_video_prefix: `${dir}/matte_movie/m`, ...plateMovie(p), grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
     const file = outputFile("export", done, exr ? "exr" : "export"), matte = outputFile("export", done, "matte_movie"); // a job taken from the index keeps its own folder
     r.exported = { run: file ? file.subfolder.replace(/\/export$/, "") : dir, name: `${p.name}_paintaplate_v${r.v}`,
       text: exr ? `${p.frames} half-float EXR frames in ACES2065-1, in ${file?.subfolder ?? `${dir}/export`}` : outputText("export", done, "export") ?? "",
-      matte: matte ? viewUrl(matte) : null }; // the Export row shows its matte
+      matte: matte ? viewUrl(matte) : null, layer: !!outputFile("export", done, exr ? "layer_exr" : "layer"), // the Export row shows its matte
+      ...exportedParts(p, done, exr) }; // what Upscale to 4K reads
   });
   S.exported = r.exported;
   stagesUI(); exportUI();
   confirmed(`Export: done, in ComfyUI's output folder: ${S.exported.text.split("\n")[0]}.`);
   log(`Export v${r.v}: done.\n  ${S.exported.text.split("\n").join("\n  ")}`);
+  await step(r, "upscale", (progress) => upscaleExport(r, progress)); // Finish > Upscale to 4K: the 4K set, before the zip
   const parts = S.wantDownload;
   S.wantDownload = null;
-  download(parts);
+  download([parts[0], ...(S.exported.layer ? ["layer"] : []), ...parts.slice(1), ...(S.exported.uhd ? ["4k"] : [])]); // the layer goes with the result it rebuilds
+}
+
+// What the export wrote, as Load Plate reads it: a movie by its file, a sequence by its folder. space: the result's colour
+// space; float: the result holds floats (an EXR plate, or SDR to HDR's EXR frames), so the 4K windows are EXR too.
+function exportedParts(p, done, exr) {
+  const at = (f) => f && (p.spec.kind === "video" && !exr ? `output:${f.subfolder}/${f.filename}` : `output:${f.subfolder}`);
+  const matte = outputFile("export", done, "matte");
+  return { path: at(outputFile("export", done, exr ? "exr" : "export")), layerPath: at(outputFile("export", done, exr ? "layer_exr" : "layer")),
+    mattePath: matte ? `output:${matte.subfolder}` : null, space: exr ? HDR_FRAMES : p.cs, float: exr || /^\.exr$/i.test(p.spec.ext ?? "") };
+}
+
+function upscaleGuess() { // seconds for Upscale to 4K on the render on show: Paint and Clean restore the plate and the layer, and write three parts
+  const r = S.renders.get(S.heroKey), f = upscaleFigures();
+  return upscaleKeeps((r?.active ?? []).map((e) => e.tool)) ? f.edit : f.alone;
+}
+
+// Finish > Upscale to 4K: SeedVR2 7B restores an export at 3840 px on the long side, in windows this machine's memory holds
+// (logic.upscaleWindow). With a layer and a matte (Paint and Clean kept the plate's untouched pixels): the plate's windows
+// first, kept under the plate's folder for its next export (the job index); then the layer's, whose jobs compose the 4K
+// result from them and the matte, and write the 4K matte. Otherwise the result alone, with the 4K matte when there is one.
+// Save Plate then writes each part in the format of its plate-size twin, under 4k/ in `dir`: the zip's part « 4k ». Its
+// jobs are the export's (kind « export »): what stops the export stops them. `set`: { dir, result, space, float, layer,
+// matte } as Load Plate takes the paths, with the plate (S.plate) giving the size, the frames and the plate itself.
+async function upscaleSet(set, progress) {
+  const p = S.plate, dir = set.dir, [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]];
+  const stats = await fetch("/system_stats").then((res) => res.json()).catch(() => null), gib = 2 ** 30;
+  const target = upscaleTarget(w, h), [sw, sh] = upscaleSource(w, h, target), keeps = !!set.layer && !!set.matte;
+  const size = upscaleWindow((stats?.system?.ram_total ?? 0) / gib, (stats?.devices?.[0]?.vram_total ?? 0) / gib, target, [w, h], p.frames,
+    keeps ? UPSCALE.composeCopies : UPSCALE.copies); // the plate's windows and the layer's are the same: sized for the layer's, which composes
+  const windows = upscaleWindows(p.frames, size), format = set.float ? "exr" : "png16", n = (i) => `w${String(i).padStart(3, "0")}`;
+  const plateDir = upscaleFolder(S.plate.id, [p.path, p.cs, S.ocio.config, target, size, format, S.build]);
+  log(`Upscale to 4K: ${target.join(" x ")}${sw ? `, restored from ${sw} x ${sh}` : ""}, ${windows.length === 1 ? "1 job" : `${windows.length} windows of ${size} frames`}.\n  `
+    + (keeps ? "SeedVR2 restores the plate and the layer; the 4K result is composed from them and the matte." : "SeedVR2 restores the result."));
+  const values = (shot, space, [first, count], more) => ({ shot, max_frames: p.frames, source_width: sw, source_height: sh, first, count,
+    width: target[0], height: target[1], color_space: space, color_fix: "lab", format, seed: 42, config: S.ocio.config, under: "", under_space: space,
+    matte: "", comp_prefix: "", matte_prefix: "", ...more });
+  const jobs = [ // [workflow, values, weight]: a window weighs its frames, a part written at 4K a fifth of a window
+    ...(keeps ? windows.map((win, i) => ["upscale", values(p.path, p.cs, win, { prefix: `${plateDir}/${n(i)}/f` }), win[1]]) : []),
+    ...windows.map((win, i) => ["upscale", values(keeps ? set.layer : set.result, set.space, win, {
+      prefix: `${dir}/upscale/${keeps ? "layer" : "result"}/${n(i)}/f`, matte: set.matte ?? "", matte_prefix: set.matte ? `${dir}/4k/matte/matte` : "",
+      ...(keeps ? { under: `output:${plateDir}/${n(i)}`, under_space: p.cs, comp_prefix: `${dir}/upscale/comp/${n(i)}/f` } : {}) }), win[1]]),
+    ["upscale_export", { shot: set.result, frames: `output:${dir}/upscale/${keeps ? "comp" : "result"}`, max_frames: p.frames, prefix: `${dir}/4k/export` }, size / 5],
+    ...(keeps ? [["upscale_export", { shot: set.layer, frames: `output:${dir}/upscale/layer`, max_frames: p.frames, prefix: `${dir}/4k/layer` }, size / 5],
+      ["upscale_export", { shot: p.path, frames: `output:${plateDir}`, max_frames: p.frames, prefix: `${dir}/4k/plate` }, size / 5]] : []),
+  ];
+  const total = jobs.reduce((a, [, , wt]) => a + wt, 0);
+  let before = 0;
+  for (const [name, v, wt] of jobs) {
+    await run(name, v, { kind: "export", progress: (f) => progress((before + f * wt) / total) }).done;
+    before += wt;
+    progress(before / total);
+  }
+}
+async function upscaleAlone(dir, result, float) { // Upscale to 4K on a result with no plate and no layer (a fluid shot, the plate alone): restored at 4K under 4k/ of dir; false when it stopped or failed
+  const t0 = performance.now(), guess = Math.round(upscaleFigures().alone);
+  status(`Upscale to 4K: about ${guess} s.`);
+  try {
+    await upscaleSet({ dir, result, space: float ? HDR_FRAMES : S.plate.cs, float, layer: null, matte: null }, (x) => showStatus(`Upscale to 4K: ${Math.round(x * 100)}%.`));
+  } catch (err) { // a stop says nothing more; a failure writes its fact in the log and what to do on the status line
+    const e = explained(err, "Upscale to 4K");
+    if (e === err) status("Upscale to 4K: stopped. The zip was not written."); else showStatus(e.message);
+    return false;
+  }
+  status(`Upscale to 4K: done in ${((performance.now() - t0) / 1000).toFixed(1)} s (estimate ${guess} s).`);
+  return true;
+}
+async function upscaleExport(r, progress) { // the render's step: the export's parts, as the export step kept them
+  const x = r.exported;
+  await upscaleSet({ dir: x.run, result: x.path, space: x.space, float: x.float, layer: x.layer ? x.layerPath : null, matte: x.mattePath }, progress);
+  x.uhd = true; // the zip takes the 4K set
 }
 
 function elementOf(zones, size, hero = S.hero) { // where the edits changed the first frame, inside the paint zones: the paint matte starts here
@@ -3071,7 +3166,7 @@ function mattesOf(found) { // a missing matte is the other one again: the workfl
   return { found, any: !!a, values: { matte_a: a ?? "", matte_b: b ?? "" } };
 }
 
-const PARTS = { export: "the result in the plate's format", matte: "its matte", review: "a review movie", shot: "the regenerated shot",
+const PARTS = { export: "the result in the plate's format", layer: "its layer", matte: "its matte", "4k": "the 4K set", review: "a review movie", shot: "the regenerated shot",
   hdr: "the HDR frames", plate: "the fluid shot", preview: "its preview movie" };
 
 // The models behind the result on show (models.workflowsFor, modelsBehind): Help > Models and licences shows them, and an
@@ -3308,11 +3403,15 @@ function fluidExportDialog() {
     : "The fluid shot in ProRes 4444, with its preview movie. The zip downloads at once.";
   $("#export").showModal();
 }
-function downloadFluid() {
-  const f = S.fluid.result;
+async function downloadFluid() {
+  const f = S.fluid.result, parts = f.hdr ? ["hdr", "plate", "preview"] : ["plate", "preview"];
   S.exported = { run: f.run ?? fluidRun(f.path), name: `fluid_v${f.v}`, text: "" };
   log(`Export: fluid shot v${f.v}${f.hdr ? " in HDR" : ""}, from ${S.exported.run}.`);
-  download(f.hdr ? ["hdr", "plate", "preview"] : ["plate", "preview"]);
+  if (S.deliver.upscale && S.upscaleReady) { // Finish > Upscale to 4K: the fluid shot alone
+    if (!(await upscaleAlone(S.exported.run, f.path, f.hdr))) return;
+    parts.push("4k");
+  }
+  download(parts);
 }
 
 function exportDialog() {
@@ -3551,7 +3650,7 @@ async function openScene(text) { // the plate opens in its colour space, then ev
   await openPlate([], scene.plate.path, { chosen: scene.fluid ? false : undefined, cs: scene.fluid ? modelSpace() // a blank plate, as openBlank opens it (1.4.0 saved the space under its edits)
     : scene.version >= 3 ? scene.plate.color_space : undefined, // older scenes: read from the file
     ...(scene.fluid ? { fluid: { blankPath: scene.plate.path, seed: scene.fluid.seed, prompt: scene.fluid.prompt ?? "", on: scene.fluid.on !== false, depth: blankDepth(scene.fluid.depth) } } : {}) });
-  S.deliver = { hdr: deliverHdr }; // openPlate reset the Finish menu's passes
+  S.deliver = { hdr: deliverHdr, upscale: !!scene.deliver?.upscale }; // openPlate reset the Finish menu's passes
   if (scene.fluid) { // the fluid shot first: its keyframes, then the shot itself, the plate the edits were painted on
     S.fluid.keys = scene.fluid.keys.map((k) => { const key = newKey(k.frame); key.strokes = unpackStrokes(k.strokes, S.plate.work, from); redrawKey(key); return key; });
     fluidUI(); timelineUI(); historyUI(); render();
@@ -3919,6 +4018,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
     ["Edit", [["Undo", "Ctrl+Z", undo, !S.past.length], ["Redo", "Ctrl+Shift+Z", redo, !S.future.length], "-",
       ["New edit", "N", nextEdit, !p || keying() || (!S.draft && !S.selected)], ["Generate", "Enter", () => enter(false), $("#generate").disabled], ["Try another seed", "Ctrl+Enter", () => enter(true), !S.edits.length],
       ...(HDR_ON ? [["Finish: SDR to HDR", "", () => { openFinish(true); askFinish(FINISH[0], !S.deliver.hdr); }, !p || !S.hdrReady || holdsHdr(p.spec, p.headroom), !!p && !!S.deliver.hdr]] : []),
+      ["Finish: Upscale to 4K", "", () => { openFinish(true); askFinish(FINISH.find((o) => o.id === "upscale"), !S.deliver.upscale); }, !p || !S.upscaleReady, !!p && !!S.deliver.upscale],
       ["Render in full", "", renderInFull, !S.renders.get(S.heroKey)?.donor], ["Stop generating", "Esc", stopGenerating, !generating()],
       ["Deselect", "Esc", () => select(null), !S.selected]]],
     ["Tools", [["Paint", "P", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Clean", "C", () => pickTool("erase"), !p || (keying() && !S.fluid.result), S.tool === "erase" && !S.rub],
@@ -4053,7 +4153,8 @@ async function boot() { // the version and the build, the workflows, the WebSock
   for (const wf of Object.values(WF)) for (const n of Object.values(wf.prompt))
     for (const [k, v] of Object.entries(n.inputs)) if (typeof v === "string" && v.endsWith(".safetensors")) models.set(v, [n.class_type, k]);
   const HDR_NODES = workflowClasses(WF.hdr.prompt); // SDR to HDR is optional: it turns on when every node class of its workflow is present
-  const classes = [...new Set([...Object.keys(needs), ...[...models.values()].map(([cls]) => cls), "PaintAPlate_KeyframeVideo", ...HDR_NODES])];
+  const UPSCALE_NODES = [...new Set([...workflowClasses(WF.upscale.prompt), ...workflowClasses(WF.upscale_export.prompt)])]; // so is Upscale to 4K: core's SeedVR2 nodes
+  const classes = [...new Set([...Object.keys(needs), ...[...models.values()].map(([cls]) => cls), "PaintAPlate_KeyframeVideo", ...HDR_NODES, ...UPSCALE_NODES])];
   const info = Object.fromEntries(await Promise.all(classes.map(async (cls) => [cls, await objectInfo(cls)]))); // one round trip for all
   const missing = Object.entries(needs).filter(([cls]) => !info[cls]).map(([cls, from]) => `${cls} (${from})`);
   if (missing.length) return stopped(`Missing nodes: ${missing.join(", ")}`, "Install them, then reload this page.");
@@ -4068,8 +4169,13 @@ async function boot() { // the version and the build, the workflows, the WebSock
   S.hdrReady = HDR_ON && !absent.some(onlyHdr) && HDR_NODES.every((cls) => info[cls]);
   if (!HDR_ON) log("SDR to HDR: off (?hdr=0 in the address).");
   else if (!S.hdrReady) log(`Warning: SDR to HDR off${absent.filter(onlyHdr).length ? `, ${absent.filter(onlyHdr).join(", ")} missing` : ""}. ${HDR_MISSING}`);
+  const upscaleFiles = new Set(Object.values(WF.upscale.prompt).flatMap((n) => Object.values(n.inputs)).filter((v) => typeof v === "string" && v.endsWith(".safetensors")));
+  const onlyUpscale = (file) => upscaleFiles.has(file) && !Object.entries(WF).some(([name, wf]) => name !== "upscale" && JSON.stringify(wf.prompt).includes(file));
+  const noNodes = UPSCALE_NODES.filter((cls) => !info[cls]);
+  S.upscaleReady = !absent.some(onlyUpscale) && !noNodes.length;
+  if (!S.upscaleReady) log(`Warning: Upscale to 4K off, ${[...absent.filter(onlyUpscale), ...noNodes].join(", ")} missing.`);
   depthUI();
-  const missingFiles = absent.filter((file) => !only(file) && !onlyHdr(file));
+  const missingFiles = absent.filter((file) => !only(file) && !onlyHdr(file) && !onlyUpscale(file));
   if (missingFiles.length) return stopped(`Missing model files: ${missingFiles.join(", ")}`, "Run python get_models.py in this pack's folder, then reload this page.");
   log(`Page ready in ${Math.round(performance.now() - t0)} ms: ${WORKFLOWS.length} workflows, ${classes.length} node classes and ${models.size} model files checked.`);
   log(`OCIO: ${S.ocio.info.label}${S.ocio.config === "$OCIO" ? " ($OCIO)" : ""}, display ${S.ocio.display}, view ${S.ocio.view}.`);

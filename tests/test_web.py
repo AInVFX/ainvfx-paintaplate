@@ -43,10 +43,9 @@ class Page(unittest.TestCase):
                     self.assertRegex(source, rf"export (const|function|class|async function) {sym}\b", f"{name}: {sym} from {target}")
 
     def test_workflows_loaded_by_the_page_exist(self):
-        """The page loads every workflow the builder writes, but Upscale to 4K's two: tests/upscale_plate.py posts those,
-        and the page, which checks the model files of every workflow it loads, has no row for them."""
+        """The page loads every workflow the builder writes."""
         names = re.findall(r'"(\w+)"', re.search(r"const WORKFLOWS = \[([^\]]+)\]", read("app.mjs")).group(1))
-        self.assertEqual(sorted(names), sorted(set(build_workflows.NAMES) - {"upscale", "upscale_export"}))
+        self.assertEqual(sorted(names), sorted(build_workflows.NAMES))
 
     def test_menu_entry_does_not_load_the_app_into_the_graph_editor(self):
         """ComfyUI loads every .js file in web/ into the graph editor: the app's modules must stay .mjs."""

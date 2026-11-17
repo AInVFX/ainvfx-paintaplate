@@ -66,7 +66,7 @@ class Workflows(unittest.TestCase):
         wanted = {"ingest": {"hero", "proxy", "spec"}, "prompt": {"text"}, "edit": {"patch", "relit", "result"},
                   "snap": {"named"} | {f"point_{k}" for k in range(5)}, "clean": {"frames", "video"}, "cleanup": {"frames", "video"}, "shotup": {"frames", "video"}, "shot": {"frames", "video"},
                   "matte": {"follow", "frames", "movie"}, "comp": {"video"}, "review": {"review", "frames", "view"},
-                  "export": {"export", "exr", "matte", "matte_movie"}, "warm": {"frame"},
+                  "export": {"export", "exr", "layer", "layer_exr", "matte", "matte_movie"}, "warm": {"frame"},
                   "fluid": {"plate", "video", "control"}, "hdr": {"hdr", "movie"}}
         for name, keys in wanted.items():
             self.assertEqual(set(build_workflows.load(name, WORKFLOWS)[2]), keys, name)
@@ -143,12 +143,14 @@ class ViewerMovies(unittest.TestCase):
         [movie] = [n for n in wf.values() if n["class_type"] == "PaintAPlate_SaveMovie"]
         self.assertEqual((frames["_meta"]["slots"]["fps"], movie["_meta"]["slots"]["fps"]), ("movie_fps", "movie_fps"))
         self.assertEqual(frames["inputs"]["fps"], movie["inputs"]["fps"])
-        for name, fed, its in (("review", "PaintAPlate_SaveMovie", "fps"), ("export", "PaintAPlate_SavePlate", "plate")):
-            wf, [frames] = exr_frames(name)
-            loader, output = frames["inputs"]["fps"]
-            self.assertEqual((wf[loader]["class_type"], output), ("PaintAPlate_LoadPlate", 3), name)
-            plates = {n["inputs"][its][0] for n in wf.values() if n["class_type"] == fed}  # the plate's loader: it feeds these
-            self.assertEqual(plates, {loader}, f"{name}: the frames take the plate's rate")
+        for name, fed, its, count in (("review", "PaintAPlate_SaveMovie", "fps", 1), ("export", "PaintAPlate_SavePlate", "plate", 2)):
+            wf, frames = exr_frames(name)  # the export writes its result and its layer
+            self.assertEqual(len(frames), count, name)
+            for each in frames:
+                loader, output = each["inputs"]["fps"]
+                self.assertEqual((wf[loader]["class_type"], output), ("PaintAPlate_LoadPlate", 3), name)
+                plates = {n["inputs"][its][0] for n in wf.values() if n["class_type"] == fed}  # the plate's loader: it feeds these
+                self.assertEqual(plates, {loader}, f"{name}: the frames take the plate's rate")
 
     def test_hdr_decodes_in_128_frame_temporal_tiles(self):
         """64-frame temporal tiles with 8 of overlap made a 0.32-stop jump at frame 56 of a 121-frame HDR shot (2 Nov)."""

@@ -261,7 +261,7 @@ def command(a, case, folder):
     """ui_live.py's command for one case: its plate or its fluid shot, its strokes as written, its seed."""
     cmd = [sys.executable, os.path.join(HERE, "ui_live.py"), "--url", a.url, "--comfy", a.comfy, "--out", folder,
            "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2", *(["--memory", a.memory] if a.memory else []), *[f"--option={o}" for o in case.get("address", [])], *(["--graph"] if a.graph else []),
-           *(["--hdr"] if getattr(a, "hdr", False) or case.get("hdr") else [])]
+           *(["--hdr"] if getattr(a, "hdr", False) or case.get("hdr") else []), *(["--upscale"] if case.get("upscale") else [])]
     cmd += ["--fluid", json.dumps(case["fluid"])] if "fluid" in case else ["--path", case["path"]]
     if case.get("strokes"):
         cmd += ["--strokes", json.dumps(case["strokes"])]

@@ -33,8 +33,8 @@ def slots(prompt):
 
 
 class UpscaleWorkflow(unittest.TestCase):
-    def setUp(self):
-        self.p = workflow()
+    def setUp(self):  # the job of one window, as the page posts it for a plate: the 4K set's two optional parts dropped
+        self.p = build_workflows.fill("upscale", {})
 
     def test_the_window_is_cut_from_the_whole_shot_and_converted_with_its_peak(self):
         (lid, _), = of(self.p, "PaintAPlate_LoadPlate")
@@ -86,14 +86,14 @@ class WindowTool(unittest.TestCase):
         self.assertEqual(upscale_plate.source_size(3840, 2160, (3840, 2160)), (1920, 1080))
         self.assertEqual(upscale_plate.source_size(2560, 1440, (3840, 2160)), (1920, 1080))
         self.assertEqual(upscale_plate.source_size(4096, 1716, (4096, 1716)), (2048, 858))
-        p = workflow()
+        p = build_workflows.fill("upscale", {})  # the window alone
         (sid, source), (_, resized) = of(p, "ImageScale")
         self.assertEqual(source["_meta"]["slots"], {"width": "source_width", "height": "source_height"})
         self.assertEqual((source["inputs"]["width"], source["inputs"]["height"], resized["inputs"]["image"]), (0, 0, [sid, 0]))
 
     def test_its_values_fill_every_slot_but_the_config(self):
         v = upscale_plate.values("plates/horse.mp4", 1920, 1080, 121, first=84, count=42)
-        self.assertEqual(set(v) | {"config"}, slots(workflow()))
+        self.assertEqual(set(v) | {"config"}, slots(workflow()) - set(build_workflows.OPTIONAL))  # but its optional links' names
         self.assertEqual((v["first"], v["count"], v["width"], v["height"]), (84, 37, 3840, 2160))
 
 
