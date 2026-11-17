@@ -30,6 +30,7 @@ from build_workflows import UPSCALE_CHUNK, UPSCALE_OVERLAP  # noqa: E402
 LONG_SIDE = 3840
 FACTOR = 2  # SeedVR2 restores from at most the target divided by this
 WINDOW = UPSCALE_CHUNK  # the smallest window: one chunk
+CHUNK_STEP = 4 * ((UPSCALE_CHUNK - 1) // 4 + 1 - UPSCALE_OVERLAP // 4)  # 20: the frames each further chunk adds, chunks sharing one latent frame
 MODEL_RAM = 15.7  # GB the 7B model holds in RAM on a GPU under 32 GB, where dynamic VRAM stages it
 FRAME_COPIES = 8  # float32 copies of one frame at the target size that a window holds at its peak, colour correction
 #                   included: on a 16 GB GPU with the model in RAM, a window of 21 frames at 3840 x 2160 peaked at 36.2 GB
@@ -62,13 +63,13 @@ def windows(frames: int, first: int = 0, count: int = WINDOW, every: bool = Fals
 
 
 def window_frames(ram_gb: float, vram_gb: float, target: tuple, plate: tuple, frames: int) -> int:
-    """Frames per job on this machine: the whole shot when its RAM holds it, else the most that fit as 4n+1, at least one
-    chunk. 90% of the RAM is used; the shot itself and 2 GB stay held, and the model too on a GPU under 32 GB."""
+    """Frames per job on this machine: the whole shot when its RAM holds it, else the most that fit as whole chunks (21,
+    41, 61 frames and on), at least one: on a 16 GB GPU, a part of a chunk samples in nearly the time of a whole one. 90% of the RAM is used; the shot itself and 2 GB stay held, and the model too on a GPU under 32 GB."""
     held = (MODEL_RAM if vram_gb < 32 else 0.0) + 2.0 + frames * plate[0] * plate[1] * 12 / 2 ** 30
     fit = int((0.9 * ram_gb - held) / (FRAME_COPIES * target[0] * target[1] * 12 / 2 ** 30))
     if fit >= frames:
         return frames
-    return max(WINDOW, fit - (fit - 1) % 4)
+    return WINDOW + CHUNK_STEP * max(0, (fit - WINDOW) // CHUNK_STEP)
 
 
 def machine(url: str) -> tuple:

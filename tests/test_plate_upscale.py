@@ -113,7 +113,7 @@ class ExportJob(unittest.TestCase):
         self.assertEqual(upscale_plate.windows(121, every=True), [(0, 21), (21, 21), (42, 21), (63, 21), (84, 21), (105, 16)])
         self.assertEqual(upscale_plate.windows(121, 0, 121, every=True), [(0, 121)])
         self.assertEqual(upscale_plate.windows(121, 84, 42), [(84, 37)])
-        self.assertEqual(upscale_plate.WINDOW, build_workflows.UPSCALE_CHUNK)
+        self.assertEqual((upscale_plate.WINDOW, upscale_plate.CHUNK_STEP), (build_workflows.UPSCALE_CHUNK, 20))
         self.assertEqual(upscale_plate.values("plates/horse.mp4", 1920, 1080, 121, window=3)["prefix"], "upscale/upscale/w003/f")
         self.assertEqual(upscale_plate.export_values("plates/horse.mp4", 121)["frames"], "output:upscale/upscale")
         with open(os.path.join(ROOT, "folders.py")) as f:
@@ -121,9 +121,9 @@ class ExportJob(unittest.TestCase):
 
     def test_a_window_is_sized_to_the_machines_ram_and_gpu(self):
         hd, uhd = (1920, 1080), (3840, 2160)
-        self.assertEqual(upscale_plate.window_frames(52.0, 15.6, uhd, hd, 121), 33)  # a 16 GB GPU under a 52 GB cap
+        self.assertEqual(upscale_plate.window_frames(52.0, 15.6, uhd, hd, 121), 21)  # a 16 GB GPU under a 52 GB cap
         self.assertEqual(upscale_plate.window_frames(251.0, 95.0, uhd, hd, 121), 121)  # one job on a 96 GB GPU with RAM
-        self.assertEqual(upscale_plate.window_frames(64.0, 95.0, uhd, hd, 121), 69)
+        self.assertEqual(upscale_plate.window_frames(64.0, 95.0, uhd, hd, 121), 61)
         self.assertEqual(upscale_plate.window_frames(24.0, 8.0, uhd, hd, 121), 21)
 
 
