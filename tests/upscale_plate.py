@@ -54,17 +54,11 @@ def source_size(width: int, height: int, target: tuple) -> tuple:
     return 2 * round(target[0] / FACTOR / 2), 2 * round(target[1] / FACTOR / 2)
 
 
-def windows(frames: int, first: int = 0, count: int = WINDOW, every: bool = False, overlap: int = UPSCALE_OVERLAP) -> list:
-    """The windows to run, as (first, count): the one asked for, or with `every` the whole shot in windows of `count`
-    frames, each sharing `overlap` frames with the one before."""
+def windows(frames: int, first: int = 0, count: int = WINDOW, every: bool = False) -> list:
+    """The windows to run, as (first, count): the one asked for, or with `every` the whole shot in windows of `count`."""
     if not every:
         return [(first, max(1, min(count, frames - first)))]
-    out, start = [], 0
-    while True:
-        out.append((start, min(count, frames - start)))
-        if start + count >= frames:
-            return out
-        start += count - overlap
+    return [(f, min(count, frames - f)) for f in range(0, frames, count)]
 
 
 def window_frames(ram_gb: float, vram_gb: float, target: tuple, plate: tuple, frames: int) -> int:
@@ -85,10 +79,9 @@ def machine(url: str) -> tuple:
     return stats["system"]["ram_total"] / 2 ** 30, device.get("vram_total", 0) / 2 ** 30
 
 
-def export_values(shot: str, frames: int, label: str = "upscale", overlap: int = UPSCALE_OVERLAP) -> dict:
+def export_values(shot: str, frames: int, label: str = "upscale") -> dict:
     """The slots of the upscale_export workflow: the windows' frames, read under ComfyUI's output folder."""
-    return {"shot": shot, "frames": f"{OUTPUT}{label}/upscale", "max_frames": frames, "prefix": f"{label}/export",
-            "overlap": overlap}
+    return {"shot": shot, "frames": f"{OUTPUT}{label}/upscale", "max_frames": frames, "prefix": f"{label}/export"}
 
 
 def frame_size(path: str) -> tuple:
@@ -113,7 +106,7 @@ def values(shot: str, width: int, height: int, frames: int, label: str = "upscal
 
 def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first: int = 0, count: int = WINDOW,
         every: bool = False, color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16",
-        overlap: int = UPSCALE_OVERLAP, long_side: int = LONG_SIDE) -> dict:
+        long_side: int = LONG_SIDE) -> dict:
     import build_workflows
     from hdr_plate import _comfy_pid, _plate_info, node_rows, run_prompt
     full = os.path.join(comfy, "input", shot)
@@ -124,9 +117,9 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
     target = target_size(w, h, long_side)
     count = count or window_frames(*machine(url), target, (w, h), n)
     jobs = [("upscale", values(shot, w, h, n, label, f, c, color_space, color_fix, fmt, window=k, long_side=long_side))
-            for k, (f, c) in enumerate(windows(n, first, count, every, overlap))]
+            for k, (f, c) in enumerate(windows(n, first, count, every))]
     if every:
-        jobs.append(("upscale_export", export_values(shot, n, label, overlap)))
+        jobs.append(("upscale_export", export_values(shot, n, label)))
     gb = lambda x: "not read" if x is None else f"{x:.1f} GB"  # noqa: E731
     rows, nodes, seconds = [], [], []
     for name, v in jobs:
@@ -142,7 +135,7 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
     v = jobs[0][1]
     lines = [f"# Upscale to 4K: `{shot}`", "", "| | |", "| --- | --- |", f"| ComfyUI | {url} |",
              f"| Shot | {w} x {h}, {n} frames; {len(jobs) - every} " + ("window" if len(jobs) - every == 1 else "windows")
-             + f" of up to {count} frames" + (f", sharing {overlap} frames" if len(jobs) - every > 1 else "") + " |",
+             + f" of up to {count} frames |",
              f"| Target | {v['width']} x {v['height']}, from " + (f"{v['source_width']} x {v['source_height']}" if v["source_width"] else "the shot's size")
              + f", colour correction {color_fix}, {fmt} |",
              f"| Frames | {len(files)} files" + (f" at {size[0]} x {size[1]}" if size else "") + " |"]
@@ -173,8 +166,7 @@ if __name__ == "__main__":
     ap.add_argument("--color-space", default="@model", help="the shot's file colour space in the OCIO config")
     ap.add_argument("--color-fix", default="lab", choices=("lab", "none"), help="SeedVR2's colour correction")
     ap.add_argument("--format", default="png16", choices=("png", "png16", "exr"))
-    ap.add_argument("--overlap", type=int, default=UPSCALE_OVERLAP, help="frames two neighbouring windows share")
     ap.add_argument("--long-side", type=int, default=LONG_SIDE, help="the target's long side in px")
     a = ap.parse_args()
     run(a.url, a.comfy, a.shot, os.path.expanduser(a.out), a.label, a.first, a.count, a.all, a.color_space, a.color_fix, a.format,
-        a.overlap, a.long_side)
+        a.long_side)

@@ -674,25 +674,17 @@ def untouched(changed: np.ndarray) -> np.ndarray:
     return np.asarray(changed) < MATTE_STEP
 
 
-def join_windows(folders: list, overlap: int, workers: int = 8) -> np.ndarray:
-    """The frames of a shot's windows, saved one folder each, joined in order into one float32 batch. Two neighbouring
-    windows share `overlap` frames: there a linear crossfade goes from the earlier window to the later one, so no frame
-    jumps where a window ends. One window is read at a time."""
+def join_windows(folders: list, workers: int = 8) -> np.ndarray:
+    """The frames of a shot's windows, saved one folder each, joined in order into one float32 batch, one window read at
+    a time."""
     files = [find_sequence(f) for f in folders]
-    if any(len(names) <= overlap for names in files[1:]):
-        raise ValueError(f"Each window after the first needs more than its {overlap} shared frames.")
     out, pos = None, 0
-    for k, names in enumerate(files):
+    for names in files:
         rgb = decode_frames(names, False, workers)[0]
         if out is None:
-            n = sum(len(f) for f in files) - overlap * (len(files) - 1)
-            out = np.empty((n,) + rgb.shape[1:], np.float32)
-        head = overlap if k else 0
-        if head:
-            t = (np.arange(1, head + 1, dtype=np.float32) / (head + 1))[:, None, None, None]
-            out[pos - head:pos] = out[pos - head:pos] * (1.0 - t) + rgb[:head] * t
-        out[pos:pos + len(rgb) - head] = rgb[head:]
-        pos += len(rgb) - head
+            out = np.empty((sum(len(f) for f in files),) + rgb.shape[1:], np.float32)
+        out[pos:pos + len(rgb)] = rgb
+        pos += len(rgb)
     return out
 
 

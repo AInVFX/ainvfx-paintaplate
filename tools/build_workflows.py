@@ -34,7 +34,7 @@ HDR_LORA = "ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors"  # Lightricks' SDR-t
 HDR_SCENE = "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors"  # its fixed scene embeddings: the prompt it takes (models/embeddings)
 SEEDVR2 = "seedvr2_7b_fp16.safetensors"  # SeedVR2 7B, a one-step video restoration model: Upscale to 4K (models/diffusion_models)
 SEEDVR2_VAE = "seedvr2_ema_vae_fp16.safetensors"  # its VAE (models/vae)
-UPSCALE_OVERLAP = 4  # frames two neighbouring chunks or windows share and crossfade: one latent frame of SeedVR2's VAE
+UPSCALE_OVERLAP = 4  # frames two neighbouring chunks share, crossfaded by core's merge: one latent frame of SeedVR2's VAE
 UPSCALE_CHUNK = 21  # frames SeedVR2 samples at once: one pass over 121 frames at 3840 x 2160 overflows the model's MLP
 HDR_SPACE = "ACES2065-1"  # the SDR-to-HDR frames are saved in it: the colour space the config's file rules give an EXR
 FLUID_NEGATIVE = "blurry, low quality, distorted, watermark"  # the negative prompt of its model card's samples
@@ -857,8 +857,8 @@ def upscale():
     The page sends the export (Slot shot), in the plate's colour space (Slot color_space), and as many frames per job as
     the machine's RAM holds: the whole shot where it can, else windows. 121 frames at 3840 x 2160 in one job reach 52 GB
     of RAM on a 96 GB GPU; on a 16 GB GPU the model's 15.7 GB stay in RAM as well, and a window of 42 frames went past a
-    52 GB cap. Neighbouring windows share UPSCALE_OVERLAP frames, which upscale_export crossfades, and each window saves
-    into a folder of its own (Slot prefix). The window goes into the model space with the whole shot's peak (peak_of), so
+    52 GB cap. Each window saves into a folder of its own (Slot prefix). Windows share no frames: on a 96 GB GPU, the frames
+    of windows of 21 frames changed across a window's edge no more than within a window. The window goes into the model space with the whole shot's peak (peak_of), so
     an HDR shot keeps one exposure from one window to the next, and comes back with that peak.
 
     Lanczos brings the window to the target size. SeedVR2 restores it in chunks of UPSCALE_CHUNK frames, in one sampling
@@ -895,13 +895,12 @@ def upscale():
 
 def upscale_export():
     """Upscale to 4K's export, after the last window. Join Windows reads the windows' folders under one parent folder
-    (Slot frames) and crossfades the frames that neighbouring windows share (Slot overlap); a shot made in one job is one
-    window. Save Plate writes the joined frames at their own size, in the format of the export at the plate's size (Slot
+    (Slot frames), in order; a shot made in one job is one window. Save Plate writes the joined frames at their own size, in the format of the export at the plate's size (Slot
     shot), which Load Plate reads for its spec: the same file type, codec, bit depth, frame numbers, colour tags, timecode
     and audio. The frames are in the plate's colour space already, so nothing converts them."""
     g = Graph()
     shot = g("PaintAPlate_LoadPlate", _title="Result: its format", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
-    frames = g("PaintAPlate_JoinWindows", _title="Upscaled windows, joined", folder=Slot("frames", ""), overlap=Slot("overlap", UPSCALE_OVERLAP))
+    frames = g("PaintAPlate_JoinWindows", _title="Upscaled windows, joined", folder=Slot("frames", ""))
     g("PaintAPlate_SavePlate", _title="Upscaled export", _output="export", images=frames, plate=shot[2],
       filename_prefix=Slot("prefix", "paintaplate/plate/upscaled"), keep_untouched=False)
     g.save("upscale_export")

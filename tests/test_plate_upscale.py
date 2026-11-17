@@ -104,14 +104,13 @@ class ExportJob(unittest.TestCase):
         (sid, shot), = of(p, "PaintAPlate_LoadPlate")
         (jid, join), = of(p, "PaintAPlate_JoinWindows")
         (_, save), = of(p, "PaintAPlate_SavePlate")
-        self.assertEqual((shot["_meta"]["slots"]["path"], join["_meta"]["slots"]), ("shot", {"folder": "frames", "overlap": "overlap"}))
-        self.assertEqual(join["inputs"]["overlap"], build_workflows.UPSCALE_OVERLAP)
+        self.assertEqual((shot["_meta"]["slots"]["path"], join["_meta"]["slots"]), ("shot", {"folder": "frames"}))
         self.assertEqual((save["inputs"]["images"], save["inputs"]["plate"], save["inputs"]["keep_untouched"]), ([jid, 0], [sid, 2], False))
         self.assertEqual(save["_meta"]["output"], "export")
         self.assertEqual(set(upscale_plate.export_values("plates/horse.mp4", 121)), slots(p))
 
-    def test_windows_share_four_frames_and_save_one_folder_each(self):
-        self.assertEqual(upscale_plate.windows(121, every=True), [(0, 21), (17, 21), (34, 21), (51, 21), (68, 21), (85, 21), (102, 19)])
+    def test_windows_follow_one_another_and_save_one_folder_each(self):
+        self.assertEqual(upscale_plate.windows(121, every=True), [(0, 21), (21, 21), (42, 21), (63, 21), (84, 21), (105, 16)])
         self.assertEqual(upscale_plate.windows(121, 0, 121, every=True), [(0, 121)])
         self.assertEqual(upscale_plate.windows(121, 84, 42), [(84, 37)])
         self.assertEqual(upscale_plate.WINDOW, build_workflows.UPSCALE_CHUNK)
@@ -139,7 +138,7 @@ class Comparison(unittest.TestCase):
 
 @unittest.skipUnless(plateio.av is not None, "PyAV missing")
 class JoinedWindows(unittest.TestCase):
-    def test_the_shared_frames_crossfade_from_one_window_to_the_next(self):
+    def test_the_windows_are_joined_in_order(self):
         with tempfile.TemporaryDirectory() as tmp:
             folders = []
             for k, level in enumerate((0.2, 0.6)):
@@ -148,9 +147,9 @@ class JoinedWindows(unittest.TestCase):
                 plateio.write_pngs(lambda i, v=level: np.full((36, 64, 3), round(v * 65535), np.uint16),
                                    [os.path.join(folder, f"f_{n:05}_.png") for n in range(1, 7)])
                 folders.append(folder)
-            joined = plateio.join_windows(folders, 2)
-            self.assertEqual(joined.shape, (10, 36, 64, 3))
-            np.testing.assert_allclose(joined[:, 0, 0, 0], [0.2] * 4 + [0.2 * 2 / 3 + 0.6 / 3, 0.2 / 3 + 0.6 * 2 / 3] + [0.6] * 4, atol=1e-4)
+            joined = plateio.join_windows(folders)
+            self.assertEqual(joined.shape, (12, 36, 64, 3))
+            np.testing.assert_allclose(joined[:, 0, 0, 0], [0.2] * 6 + [0.6] * 6, atol=1e-4)
 
 
 if __name__ == "__main__":

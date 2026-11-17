@@ -17,14 +17,12 @@
  "2": {
   "class_type": "PaintAPlate_JoinWindows",
   "inputs": {
-   "folder": "",
-   "overlap": 4
+   "folder": ""
   },
   "_meta": {
    "title": "Upscaled windows, joined",
    "slots": {
-    "folder": "frames",
-    "overlap": "overlap"
+    "folder": "frames"
    }
   }
  },
