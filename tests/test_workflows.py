@@ -65,7 +65,7 @@ class Workflows(unittest.TestCase):
         """The page picks results by output name, not by position."""
         wanted = {"ingest": {"hero", "proxy", "spec"}, "prompt": {"text"}, "edit": {"patch", "relit", "result"},
                   "snap": {"named"} | {f"point_{k}" for k in range(5)}, "clean": {"frames", "video"}, "cleanup": {"frames", "video"}, "shotup": {"frames", "video"}, "shot": {"frames", "video"},
-                  "matte": {"follow", "frames", "movie"}, "comp": {"video"}, "review": {"review", "frames", "view"},
+                  "matte": {"follow", "frames", "movie"}, "comp": {"video", "matte_movie"}, "review": {"review", "frames", "view", "matte_movie"},
                   "export": {"export", "exr", "layer", "layer_exr", "matte", "matte_movie"}, "warm": {"frame"},
                   "fluid": {"plate", "video", "control"}, "hdr": {"hdr", "movie"}}
         for name, keys in wanted.items():
