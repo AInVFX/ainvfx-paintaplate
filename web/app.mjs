@@ -3390,7 +3390,7 @@ async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it ag
   // a fluid scene keeps its blank plate, which opens in the model space (openBlank): the plate under its edits can be the
   // HDR fluid shot's EXR frames, in ACES2065-1, and the blank plate reopened in that space made its jobs again (2 Nov)
   const blank = f?.blankPath;
-  const scene = { ...SCENE, saved: new Date().toISOString(), work, ocio: { config, display, view, look: lk },
+  const scene = { ...SCENE, saved: new Date().toISOString(), build: S.build, work, ocio: { config, display, view, look: lk },
     plate: { path: blank ?? S.plate.path, color_space: blank ? modelSpace() : S.plate.cs, name: S.plate.name },
     preview: previewDiv, deliver: { ...S.deliver }, in: S.inPt, out: S.outPt,
     edits: S.edits.map((e) => ({ tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on,
@@ -3464,7 +3464,7 @@ async function openScene(text) { // the plate opens in its colour space, then ev
   if (Number.isInteger(scene.in) && Number.isInteger(scene.out)) [S.inPt, S.outPt] = [scene.in, scene.out];
   queue(regenerateDependents);
   historyUI(); timelineUI();
-  status(`Scene opened: ${scene.edits.length} edit${scene.edits.length === 1 ? "" : "s"} with their seeds and captions. Results made on this machine come from the job index; the rest regenerates.`);
+  status(`Scene opened: ${scene.edits.length} edit${scene.edits.length === 1 ? "" : "s"} with their seeds and captions. ${scene.build && S.build && scene.build !== S.build ? "It was saved with other code or model files, so every edit and render runs again." : "Results made on this machine come from the job index; the rest regenerates."}`);
 }
 
 function clearRange() { S.inPt = 0; S.outPt = S.plate.frames - 1; hud("In and out points cleared"); timelineUI(); }
@@ -3918,6 +3918,7 @@ async function boot() { // the version and the build, the workflows, the WebSock
   const served = () => fetch("/paintaplate/version").then((r) => r.json()).catch(() => ({})); // routes.version_route
   const { version = "", build = "" } = await served(); // pyproject.toml's version, and the build: a hash of what computes on the server
   setBuild(build); // a part of every job index key: a result made by other code or other model files is not taken back (comfy.mjs)
+  S.build = build; // a saved scene keeps it: opened with another build, its jobs run again, and the page says so
   let asked = false;
   onBack(async () => { // ComfyUI answers again after its WebSocket closed: a restart on other code or model files asks for a reload
     const now = (await served()).build || "";
