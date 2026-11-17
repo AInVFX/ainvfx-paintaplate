@@ -37,7 +37,7 @@ const DEEP_SIDE = 960; // their long side, the playback video's
 const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-size edits, quick edits, SAM tracking
 // the erase matte only places the erase pass's box, grown by 1/24 of the width: 640 is enough, at half the time of 960
 const ERASE_TRACK_SIDE = 640;
-const LIVE = { every: 2 }; // the live preview while LTX samples, on every card: from step 1, every other step. Every pass hands its previews to showLive, which alone decides what shows
+const LIVE = { every: 1 }; // the live preview while LTX samples, on every card: at every step. Every pass hands its previews to showLive, which alone decides what shows
 const TWO_STAGE_SHOT = Q.get("shot") === "2"; // ?shot=2: the full-size shot in two stages, at half the working size, then 2 steps at full size from it (shotup)
 const HDR_ON = Q.get("hdr") !== "0"; // SDR to HDR runs whenever its files and nodes are present; ?hdr=0 in the address turns it off
 const HDR_FRAMES = "ACES2065-1"; // the colour space of the SDR-to-HDR frames (HDR_SPACE in tools/build_workflows.py)
