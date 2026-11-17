@@ -1452,6 +1452,7 @@ view.addEventListener("pointermove", (e) => {
   if (nav) return navigateMove(e);
   if (stroke && S.keyDraft) return addKeyPoint(S.keyDraft, e);
   if (stroke && S.draft) return addPoint(S.draft, e);
+  if (!S.plate) return; // no plate open: the pointer over the frame reads no pixel
   S.cursor = frameAt(e);
   view.classList.toggle("near-wipe", nearWipe(e));
   if (!S.playing) requestAnimationFrame(render);
