@@ -19,7 +19,7 @@ class ShallowClone(unittest.TestCase):
         self.assertLess(shallow, setup.index('clone https://github.com/comfyanonymous/ComfyUI "$W/ComfyUI"\ncd'))
         self.assertEqual(subprocess.run(["bash", "-n", os.path.join(ROOT, "tools", "pod_setup.sh")]).returncode, 0)
 
-    @unittest.skipUnless(os.path.isdir(os.path.join(os.environ.get("COMFYUI_DIR", ""), ".git")), "no ComfyUI clone in COMFYUI_DIR")
+    @unittest.skipUnless(os.environ.get("COMFYUI_DIR") and os.path.isdir(os.path.join(os.environ["COMFYUI_DIR"], ".git")), "no ComfyUI clone in COMFYUI_DIR")
     def test_the_tag_is_at_the_pin(self):
         pins = dict(re.findall(r"^(COMFY_\w+)=(\S+)", read("tools", "pins.sh"), re.M))
         head = subprocess.run(["git", "-C", os.environ["COMFYUI_DIR"], "rev-parse", f"{pins['COMFY_TAG']}^{{commit}}"],
