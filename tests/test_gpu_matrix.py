@@ -121,6 +121,16 @@ class Seeds(unittest.TestCase):
         self.assertEqual(gpu_matrix.seed_note(None, named), "Seed asked for: none, the page draws one. In the page's log: 1017942128.")
         self.assertEqual(gpu_matrix.read_log(LOG)["seeds"], [])
 
+    def test_a_two_edit_case_names_the_seed_asked_for_and_the_next_one(self):
+        log = ('04:35:35 PM Edit 1: Paint "a cow\'s head", seed 105, 1 stroke, over 0 edits.\n'
+               '04:36:10 PM Edit 2: Clean "", seed 106, whole object on, 1 stroke, over 1 edit.\n'
+               "04:37:02 PM Render v1: 2 edits (Paint 1, Clean 2), seed 105, shot preview at 640 x 352.\n")
+        named = gpu_matrix.read_log(log)["seeds"]
+        self.assertEqual(named, ["105", "106"])
+        self.assertEqual(gpu_matrix.seed_note(105, named), "Seed asked for: 105. In the page's log: 105, 106.")
+        for asked, seen in ((105, ["105", "731"]), (105, ["106"]), (105, [])):  # another number, the first one missing, none at all
+            self.assertIn("The page did not start from the seed asked for", gpu_matrix.seed_note(asked, seen), seen)
+
     def test_seeds_takes_the_whole_numbers_the_page_accepts(self):
         self.assertEqual(gpu_matrix.seeds_asked(""), [None])
         self.assertEqual(gpu_matrix.seeds_asked("7,8, 2147483647"), [7, 8, 2147483647])

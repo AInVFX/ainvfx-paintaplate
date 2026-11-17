@@ -272,9 +272,11 @@ def command(a, case, folder):
 
 def seed_note(asked, named):
     """A case's line on its seed: the one it asked the page for, and the seeds that the page's log names for its edits, its
-    fluid shot and its render."""
+    fluid shot and its render. The page starts the first edit and the fluid shot from the seed asked for, and each next
+    edit from the next number (logic.editSeed): a two-edit case names the seed asked for and the one after it."""
     said = f"Seed asked for: {'none, the page draws one' if asked is None else asked}. In the page's log: {', '.join(named) or 'none'}."
-    return said if asked is None or named == [str(asked)] else said + " The page did not start from the seed asked for: its version may not read ?seed= yet."
+    started = asked is None or named == [str(asked + i) for i in range(len(named))] and bool(named)
+    return said if started else said + " The page did not start from the seed asked for: its version may not read ?seed= yet."
 
 
 def matte_areas(comfy, since):
