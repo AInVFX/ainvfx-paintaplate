@@ -269,6 +269,11 @@ export function cachePlan({ budget, frames, fit, sources }) {
 // only when the view is more than CACHE_GROW times wider or taller than the view they were planned for. A change of
 // the budget, of the sources on show or of the in and out points plans them again at once.
 export const CACHE_GROW = 1.25;
+// A plan made again for other sources on show (the wipe, the pass on show) can give a cache a size a few pixels from its
+// own (1917 x 1078 against 1920 x 1080), and a new size reads every frame again. Within CACHE_NEAR of its own size on
+// each side, a cache keeps its size: its share then sets how many of its frames fit.
+export const CACHE_NEAR = 0.1;
+export const nearSize = ([w, h], [w2, h2], near = CACHE_NEAR) => Math.abs(w2 - w) <= w * near && Math.abs(h2 - h) <= h * near;
 export const outgrows = (planned, fit, grow = CACHE_GROW) => !planned || fit[0] > planned[0] * grow || fit[1] > planned[1] * grow;
 
 // The hidden reader's speed while it fills a cache. A 60 Hz screen presents 60 frames a second, so a 24 fps clip is read

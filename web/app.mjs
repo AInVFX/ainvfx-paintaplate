@@ -18,7 +18,7 @@ import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, 
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { askedSeed, editSeed, gridGrow } from "./logic.mjs"; // the tests: a seed asked for in the address, and each edit's seed from it
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
-import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, sameMachine, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
+import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, nearSize, sameMachine, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
 import { readBack } from "./canvas.mjs"; // the viewer: a few pixels of the view, read without moving it off the GPU
 
 const $ = (q) => document.querySelector(q);
@@ -497,7 +497,12 @@ function planCaches() { // each cache's share and frame size, when the budget, t
   // A new budget alone keeps every cache's frame size: a larger budget drops no decoded frame, a smaller one drops only
   // the frames that no longer fit. Anything else (a source, its size on show, the in and out points) plans the sizes again.
   const keep = rest === planned.rest && budget !== planned.budget && !outgrows(planned.fit, fit) && !!planned.shares;
-  const shares = cachePlan({ budget, frames, fit, sources: keep ? sources.map((s) => (planned.shares[s.id] ? { ...s, size: [planned.shares[s.id].width, planned.shares[s.id].height] } : s)) : sources });
+  const own = (s) => planned.shares?.[s.id] && [planned.shares[s.id].width, planned.shares[s.id].height]; // a cache's size in the last plan
+  let shares = cachePlan({ budget, frames, fit, sources: keep ? sources.map((s) => (own(s) ? { ...s, size: own(s) } : s)) : sources });
+  if (!keep) { // a size within CACHE_NEAR of a cache's own keeps its own, and its frames (frames.nearSize)
+    const near = sources.map((s) => (own(s) && nearSize(own(s), [shares[s.id].width, shares[s.id].height]) ? { ...s, size: own(s) } : s));
+    if (near.some((s, i) => s !== sources[i])) shares = cachePlan({ budget, frames, fit, sources: near });
+  }
   Object.assign(planned, { key, rest, budget, shares, fit: keep ? planned.fit : fit });
   for (const s of sources) if (!s.show) s.cache.stopReader(); // the sources on show read first
   for (const s of sources.sort((a, b) => Number(!!b.show) - Number(!!a.show))) s.cache.plan(shares[s.id].budget, s.bytes ? null : [shares[s.id].width, shares[s.id].height]);
