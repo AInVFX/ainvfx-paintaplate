@@ -378,7 +378,7 @@ dialog.colours menu { margin-top: 10px; }
 #help form { margin-top: 8px; }
 #help .model-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 20px; } /* every model in four columns, the size of the other tabs */
 #help .model-cards article { border-top: 1px solid rgba(128, 128, 128, 0.25); padding-top: 4px; font-size: 12px; line-height: 1.35; }
-#help .model-cards article.behind { border-top: 2px solid var(--gold); } /* a model behind the result on show */
+#help .model-cards article.behind { background: rgb(245 184 0 / 0.2); border-top-color: transparent; border-radius: 4px; padding: 4px 6px; margin: 0 -6px; } /* a model of the job on show: the whole card tinted */
 #help .model-cards p { margin: 0 0 2px; }
 #help .model-cards small { opacity: 0.7; overflow-wrap: anywhere; }
 #help .model-cards article > small { display: block; }

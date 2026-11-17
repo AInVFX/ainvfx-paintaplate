@@ -3193,17 +3193,28 @@ function mattesOf(found) { // a missing matte is the other one again: the workfl
 const PARTS = { export: "the result in the plate's format", layer: "its layer", matte: "its matte", "4k": "the 4K set", review: "a review movie", shot: "the regenerated shot",
   hdr: "the HDR frames", plate: "the fluid shot", preview: "its preview movie" };
 
-// The models behind the result on show (models.workflowsFor, modelsBehind): Help > Models and licences shows them, and an
-// export's zip lists them in MODELS.md, which the download route writes from web/models.json
-async function modelsOnShow() {
+// The models of the job on show, as planned from its start (models.modelsBehind): the edits on show and the one being
+// painted, every step their render will run (plan, STEP_FLOWS), Upscale to 4K and SDR to HDR when Finish asks for them, a
+// fluid shot. Help > Models and licences tints them. An export's zip lists the models behind its result instead, from the
+// workflows its render ran (r.flows), in MODELS.md, which the download route writes from web/models.json.
+function jobFlows() {
+  if (!S.plate) return [];
+  const edits = [...S.edits.filter((e) => e.on !== false && (e.patch || busy(e)) && e !== S.draft), ...(S.draft && painted(S.draft) > 0 ? [S.draft] : [])];
+  const f = S.fluid, fluid = !!f && (f.result ? f.on !== false : keying() && f.keys.length > 0);
+  const alone = !edits.length && plateAlone(S.heroKey), skip = edits.length || alone ? plan({ key: S.heroKey }, edits).skip : null;
+  const steps = skip ? STAGES.filter((st) => !skip.has(st.id)).flatMap((st) => STEP_FLOWS[st.id] ?? []) : [];
+  if (S.deliver.upscale && S.upscaleReady && !edits.length && (alone || fluid)) steps.push(...STEP_FLOWS.upscale); // their export restores itself at 4K
+  return resultFlows({ tools: edits.map((e) => e.tool), render: steps, fluid, fluidHdr: fluid && (f.result ? !!f.result.hdr : f.depth === HDR_DEPTH && S.hdrReady) });
+}
+async function modelsBehindResult() { // the models behind the result on show: the workflows its render ran, for the export's MODELS.md
   registry ??= await (await fetch(new URL("models.json", location.href), { cache: "no-store" })).json();
   const edits = S.edits.filter((e) => e.on !== false && e.patch), fluid = !!S.fluid?.result && S.fluid.on !== false;
-  const r = S.renders.get(S.heroKey); // the render on show, with its record of the workflows it ran (r.flows)
+  const r = S.renders.get(S.heroKey);
   const flows = resultFlows({ tools: edits.map((e) => e.tool), render: [...(r?.flows ?? [])], fluid, fluidHdr: fluid && !!S.fluid.result.hdr });
   return modelsBehind(registry, flows, (n) => WF[n]?.prompt);
 }
 async function download(parts = ["export", "matte"]) {
-  const models = (await modelsOnShow().catch(() => [])).map((m) => m.id).join(",");
+  const models = (await modelsBehindResult().catch(() => [])).map((m) => m.id).join(",");
   const a = Object.assign(document.createElement("a"), {
     href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, parts: parts.join(","), models })}`,
     download: `${S.exported.name}.zip` });
@@ -3302,6 +3313,7 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
 
 function stagesUI() {
   $("#stop").hidden = !generating();
+  if ($("#help").open && !$("#models").hidden) modelsUI().catch(quiet); // Models and licences follows the job's plan while it is open
   finishUI(); // the Render panel: every step, done, running or waiting, and the time left
   const list = $("#stages"), p = S.plate, r = S.renders.get(S.heroKey);
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
@@ -3852,13 +3864,16 @@ $("#help").addEventListener("click", (e) => { if (helpPress && e.target === $("#
 // The models behind the result on show, from the workflows that made it, then every model the pack downloads.
 
 let registry = null;
-async function showModels() {
-  const behind = await modelsOnShow(); // the pipeline's rule, as the export's MODELS.md (S.toHdr became the plate's own rule in 1.7.0)
+async function modelsUI(force = false) { // Help > Models and licences: every model the pack downloads, those of the job on show tinted
+  registry ??= await (await fetch(new URL("models.json", location.href), { cache: "no-store" })).json();
+  const flows = jobFlows(), key = JSON.stringify([!!S.plate, [...flows].sort()]);
+  if (!force && key === modelsUI.key) return; // the plan is the same: the tab stays as it is
+  modelsUI.key = key;
+  const used = new Map(modelsBehind(registry, flows, (n) => WF[n]?.prompt).map((m) => [m.id, m])); // with the workflows that use each
   const link = (text, href) => Object.assign(document.createElement("a"), { textContent: text, href, target: "_blank", rel: "noopener" });
-  const used = new Map(behind.map((m) => [m.id, m])); // the models behind the result on show, with the workflows that used them
   const small = (...kids) => { const e = document.createElement("small"); e.append(...kids); return e; };
   const line = (...kids) => { const e = document.createElement("p"); e.append(...kids); return e; };
-  const card = (m) => { // one model: its name, what it does (and where, when it made the result on show), its licence, its file
+  const card = (m) => { // one model: its name, what it does (and where, in the job on show), its licence, its file
     const a = Object.assign(document.createElement("article"), { className: used.has(m.id) ? "behind" : "" });
     a.dataset.id = m.id;
     a.append(line(link(m.name, m.source)), line(used.has(m.id) ? `${m.use} (${used.get(m.id).workflows.join(", ")})` : m.use),
@@ -3867,11 +3882,12 @@ async function showModels() {
       small(`${m.file} at ${m.revision.slice(0, 7)}`));
     return a;
   };
-  $("#models-shown").textContent = !S.plate ? "No plate is open." : behind.length ? `The result on show was made with ${behind.length} models, marked in gold.` : "The plate on show has no edits: no model made it.";
+  const n = used.size, what = flows.includes("edit") ? "these edits use" : flows.includes("fluid") ? "this fluid shot uses" : "SDR to HDR uses";
+  $("#models-shown").textContent = !S.plate ? "No plate is open." : n ? `In gold: the ${n} model${n === 1 ? "" : "s"} ${what}.` : "No edit on show: no model works on this plate yet.";
   $("#models-all").replaceChildren(...registry.models.map(card));
-  $("#models").dataset.shown = behind.map((m) => m.id).join(",");
-  showHelp("models");
+  $("#models").dataset.shown = [...used.keys()].join(",");
 }
+async function showModels() { await modelsUI(true); showHelp("models"); }
 
 // ---------- The colour inspector, as OpenRV's (F5; inspector.mjs) ----------
 // As RV's inspector.mu and its annotate mode: the inspector and the brush are both active at once. A click or a drag on

@@ -1258,11 +1258,12 @@ export const fluidPasses = (result, spaces = {}) => (result ? [
   result.hdr && result.movie && { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: result.movie, space: spaces.log ?? "@model",
     frames: result.hdrFrames ?? null, framesSpace: result.hdrFrames ? spaces.hdr ?? null : null },
 ].filter(Boolean) : []);
-// The workflows each render step runs (a full-size erase pass runs two). A render keeps the record of the steps it ran or
-// took again (r.flows), so Models and licences, and an export's MODELS.md, name the models that made the result on show,
-// rather than guess them from its tools (viewer report 3, request 2).
+// The workflows each render step runs (a full-size erase pass runs two). Models and licences plans with them from the
+// start of a job; a render also keeps the record of the steps it ran or took again (r.flows), so an export's MODELS.md
+// names the models that made its result.
 export const STEP_FLOWS = { erase: ["matte"], clean: ["clean"], shot: ["shot"], track: ["matte"], comp: ["comp"],
-  cleanfull: ["clean", "cleanup"], full: ["shot"], trackfull: ["matte"], hdr: ["hdr"], review: ["review"], export: ["export"] };
+  cleanfull: ["clean", "cleanup"], full: ["shot"], trackfull: ["matte"], hdr: ["hdr"], review: ["review"], export: ["export"],
+  upscale: ["upscale", "upscale_export"] };
 // The workflows behind a result: its edits' own (the prompt writer and Klein, SAM's object search for an erase), the
 // render's record, and a fluid shot's (with its SDR to HDR)
 export function resultFlows({ tools = [], render = [], fluid = false, fluidHdr = false } = {}) {
