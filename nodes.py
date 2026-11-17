@@ -98,7 +98,7 @@ class LoadPlate(io.ComfyNode):
             category=CATEGORY,
             description="Loads a video file or a folder of frames (EXR, PNG, TIFF, DPX) at full precision, "
                         "with the spec Save Plate needs. Pixels stay in the plate's colour space: convert "
-                        "them with Color Space (OCIO).",
+                        "them with Colour Space (OCIO).",
             search_aliases=["plate", "image sequence", "exr sequence", "load frames"],
             inputs=[
                 io.String.Input("path", tooltip="A file, a folder of frames or a frame pattern (shot.####.exr) in ComfyUI's "
@@ -158,7 +158,7 @@ class ColorSpace(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="PaintAPlate_ColorSpace",
-            display_name="Color Space (OCIO)",
+            display_name="Colour Space (OCIO)",
             category=CATEGORY,
             description="Converts frames between two colour spaces of an OpenColorIO config, several frames at once. "
                         "@model is the sRGB-encoded Rec.709 the models see, entered with core's tone mapping of values "
@@ -179,7 +179,7 @@ class ColorSpace(io.ComfyNode):
                                        "Out of @model, the plate the frames were made from, in 'destination': the tone "
                                        "mapping of its peak is undone, so new content comes back at the plate's levels."),
                 io.Float.Input("peak", optional=True, force_input=True,
-                               tooltip="That peak as a number: the second output of the plate's own Color Space (OCIO). "
+                               tooltip="That peak as a number: the second output of the plate's own Colour Space (OCIO). "
                                        "Used in place of 'peak_of', so the plate is read once."),
             ],
             outputs=[io.Image.Output(display_name="image"), io.Float.Output(display_name="peak")],
@@ -192,7 +192,7 @@ class ColorSpace(io.ComfyNode):
         if peak is None and peak_of is not None and ocio.MODEL in (source, destination):  # the plate's peak, in its own space
             peak = ocio.batch_peak(frames_np(peak_of), config, destination if source == ocio.MODEL else source)
         if source == ocio.MODEL and peak is not None and peak > ocio.TONE_ABOVE:
-            logging.info("[Paint a plate] Color Space (OCIO): model space's tone mapping undone, peak %.2f.", peak)
+            logging.info("[Paint a plate] Colour Space (OCIO): model space's tone mapping undone, peak %.2f.", peak)
         out, peak = ocio.convert_with_peak(frames_np(image), config, source, destination, peak)
         return io.NodeOutput(to_image(out), peak)
 
@@ -395,7 +395,7 @@ class RelightTransfer(io.ComfyNode):
                                tooltip="How 'source' and 'relit' are encoded: sRGB, as the model saw and made them, is "
                                        "decoded here."),
                 io.Float.Input("peak", optional=True, force_input=True,
-                               tooltip="The plate's peak, as Color Space (OCIO) gives it. With 'shot_space' sRGB, the tone "
+                               tooltip="The plate's peak, as Colour Space (OCIO) gives it. With 'shot_space' sRGB, the tone "
                                        "mapping of that peak, which brought 'source' and 'relit' into the model space, is "
                                        "undone after the decode: their light is measured at the plate's levels."),
             ],
@@ -755,11 +755,11 @@ class SaveMovie(io.ComfyNode):
                              tooltip="The frames to save, from the first: 0 saves them all. Load Plate's 'frames' leaves its "
                                      "8k+1 padding out."),
                 io.String.Input("config", default=ocio.BUILTIN, optional=True,
-                                tooltip="The OpenColorIO config of 'source' and 'destination', as in Color Space (OCIO)."),
+                                tooltip="The OpenColorIO config of 'source' and 'destination', as in Colour Space (OCIO)."),
                 io.String.Input("source", default="@model", optional=True, tooltip="The frames' colour space."),
                 io.String.Input("destination", default="@model", optional=True,
                                 tooltip="The movie's colour space. Each frame is converted as it is saved, to the values "
-                                        "Color Space (OCIO) gives the whole batch."),
+                                        "Colour Space (OCIO) gives the whole batch."),
                 io.Int.Input("largest_size", default=0, min=0, max=8192, optional=True,
                              tooltip="The frames' longer side before the movie is made, by area averaging as core's Scale "
                                      "Image to Max Dimension: 0 keeps their size. Each frame is sized as it is saved."),
