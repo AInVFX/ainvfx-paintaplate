@@ -87,6 +87,17 @@ class LayerInTheZip(unittest.TestCase):
             names = [arc for _, arc in routes.collect(run, ["matte", "layer", "export"])]
         self.assertEqual(names, ["export/export_00001_.png", "layer/layer_00001_.png", "matte/matte_00001_.png"])
 
+    def test_the_4k_set_is_one_folder_of_the_zip_and_its_windows_stay_out(self):
+        import test_routes
+        routes = test_routes.routes
+        with tempfile.TemporaryDirectory() as run:
+            for part in ("4k/export", "4k/plate", "4k/layer", "4k/matte", "upscale/comp/w000", "export"):
+                os.makedirs(os.path.join(run, part))
+                open(os.path.join(run, part, "f_00001_.png"), "w").close()
+            names = [arc for _, arc in routes.collect(run, ["export", "4k"])]
+        self.assertEqual(names, ["export/f_00001_.png", "4k/export/f_00001_.png", "4k/layer/f_00001_.png", "4k/matte/f_00001_.png",
+                                 "4k/plate/f_00001_.png"])
+
 
 if __name__ == "__main__":
     unittest.main()

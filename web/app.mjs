@@ -3033,7 +3033,7 @@ function mattesOf(found) { // a missing matte is the other one again: the workfl
   return { found, any: !!a, values: { matte_a: a ?? "", matte_b: b ?? "" } };
 }
 
-const PARTS = { export: "the result in the plate's format", layer: "its layer", matte: "its matte", review: "a review movie", shot: "the regenerated shot",
+const PARTS = { export: "the result in the plate's format", layer: "its layer", matte: "its matte", "4k": "the 4K set", review: "a review movie", shot: "the regenerated shot",
   hdr: "the HDR frames", plate: "the fluid shot", preview: "its preview movie" };
 
 // The models behind the result on show (models.workflowsFor, modelsBehind): Help > Models and licences shows them, and an
