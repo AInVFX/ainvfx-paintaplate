@@ -13,17 +13,17 @@
   <header class="top">
     <img class="logo" src="logo.png" alt="AInVFX">
     <img class="mark" src="brand/paint-a-plate.png" alt="Paint a plate">
-    <span id="version" class="version" title="The version of AInVFX Paint a plate on this ComfyUI"></span>
+    <span id="version" class="version" title="The version of AInVFX Paint a plate on this ComfyUI."></span>
     <span id="spec" class="spec"></span>
-    <button id="close-btn" class="quiet close-plate" type="button" hidden title="Close the plate: stop its renders and free its frames from the browser's memory" aria-label="Close the plate">×</button>
-    <button id="menu-btn" class="quiet menu-btn" title="Every action, with its key (or right-click on the frame)" aria-label="Menu" aria-haspopup="menu">
+    <button id="close-btn" class="quiet close-plate" type="button" hidden title="Close the plate: stop its renders and free its frames from the browser's memory." aria-label="Close the plate">×</button>
+    <button id="menu-btn" class="quiet menu-btn" title="Every action, with its key (or right-click on the frame)." aria-label="Menu" aria-haspopup="menu">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
-    <button id="help-btn" class="quiet" title="Keys (?)" aria-label="Keys">?</button>
+    <button id="help-btn" class="quiet" title="Keys (?)." aria-label="Keys">?</button>
     <button id="open-btn">Open plate</button>
-    <button id="save-btn" disabled title="Save the scene: the plate and every edit with its strokes, words and seed">Save scene</button>
+    <button id="save-btn" disabled title="Save the scene: the plate and every edit with its strokes, words and seed.">Save scene</button>
     <button id="finish-btn" type="button" disabled aria-haspopup="dialog" aria-expanded="false" title="Finish: the passes on the whole plate after the full-size composite.">Finish</button>
-    <button id="export-btn" class="primary" disabled title="Write the result in the plate's own format and its matte, then download one zip">Export</button>
+    <button id="export-btn" class="primary" disabled title="Write the result in the plate's own format and its matte, then download one zip.">Export</button>
   </header>
   <div id="finish" class="finish" role="dialog" aria-label="Finish" hidden>
     <h2>Finish</h2>
@@ -32,28 +32,28 @@
   </div>
 
   <nav class="tools" aria-label="Tools">
-    <button data-tool="paint" title="Paint something new (P)">
+    <button data-tool="paint" title="Paint something new (P).">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20c2 0 4-1 4-4 0-1.5 1-2.5 2.5-2.5S13 14.5 13 16c0 3-3 4-9 4zM12.5 12.5 20 5l-1-1-7.5 7.5"/></svg>
       <span>Paint</span>
     </button>
     <div class="tool-group">
-      <button data-tool="erase" title="Clean: remove an object, and the clean plate comes back behind it (C)">
+      <button data-tool="erase" title="Clean: remove an object, and the clean plate comes back behind it (C).">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4l5 5-9 9H6l-2-2 11-12zM9 18h11"/></svg>
         <span>Clean</span>
       </button>
-      <label class="whole" title="SAM 3.1 grows the stroke to the whole object under it">
+      <label class="whole" title="SAM 3.1 grows the stroke to the whole object under it.">
         <input id="whole" type="checkbox" checked><span>Whole object</span>
       </label>
     </div>
-    <button data-tool="light" title="Paint where the light comes from (L)">
+    <button data-tool="light" title="Paint where the light comes from (L).">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>
       <span>Light</span>
     </button>
     <div class="brush">
       <label for="size">Brush</label>
-      <input id="size" type="range" min="4" max="320" value="48" title="Brush size (- and =)">
+      <input id="size" type="range" min="4" max="320" value="48" title="Brush size (- and =).">
       <output id="size-out" for="size">48</output>
-      <button id="rub-btn" class="rub" aria-pressed="false" title="Eraser: rub out strokes you just painted. Hold E while you drag, or tap E to switch it on or off">
+      <button id="rub-btn" class="rub" aria-pressed="false" title="Eraser: rub out strokes you just painted. Hold E while you drag, or tap E to switch it on or off.">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3l5 5-10 10H6l-3-3L16 3zM9 9l6 6M6 21h14"/></svg>
         <span>Eraser</span>
       </button>
@@ -69,20 +69,20 @@
       <button class="sw" data-color="#1976d2" style="--c:#1976d2" title="Blue" aria-label="Blue"></button>
       <button class="sw" data-color="#6d4c41" style="--c:#6d4c41" title="Brown" aria-label="Brown"></button>
       <button class="sw" data-color="#ffd890" style="--c:#ffd890" title="Warm light" aria-label="Warm light"></button>
-      <button class="sw pick" id="pick" title="Pick a colour from the frame (I)" aria-label="Pick a colour from the frame" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.2 1.6a1.9 1.9 0 0 1 2.7 2.7l-1.6 1.6.7.7-1 1-.7-.7-5.6 5.6H3.6v-2.1l5.6-5.6-.7-.7 1-1 .7.7z"/></svg></button>
-      <label class="sw custom" title="Any colour"><input id="color" type="color" value="#000000" aria-label="Any colour"></label>
+      <button class="sw pick" id="pick" title="Pick a colour from the frame (I)." aria-label="Pick a colour from the frame" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.2 1.6a1.9 1.9 0 0 1 2.7 2.7l-1.6 1.6.7.7-1 1-.7-.7-5.6 5.6H3.6v-2.1l5.6-5.6-.7-.7 1-1 .7.7z"/></svg></button>
+      <label class="sw custom" title="Any colour."><input id="color" type="color" value="#000000" aria-label="Any colour"></label>
     </div>
   </nav>
 
   <main class="stage">
     <div class="promptbar">
       <label for="prompt" class="prompt-label">Prompt</label>
-      <button id="editing" class="editing" type="button" hidden title="This edit is selected: its words and strokes are yours to change. Click, or press Esc, to deselect"></button>
+      <button id="editing" class="editing" type="button" hidden title="This edit is selected: its words and strokes are yours to change. Click, or press Esc, to deselect."></button>
       <input id="prompt" autocomplete="off" spellcheck="false" aria-label="Describe the edit"
              placeholder="Describe what to paint, then paint it on the frame">
-      <button id="generate" class="primary generate" type="button" disabled title="Generate (Enter): the edit on the first frame, then its shot. What is already made never runs again">Generate</button>
-      <button id="stop" class="stop" type="button" hidden title="Stop generating (Esc): what finished is kept, and Generate goes on from there">Stop</button>
-      <button id="new-edit" class="new-edit" type="button" disabled title="New edit (N): this edit is done, the next strokes start a separate one">
+      <button id="generate" class="primary generate" type="button" disabled title="Generate (Enter): the edit on the first frame, then its shot. What is already made never runs again.">Generate</button>
+      <button id="stop" class="stop" type="button" hidden title="Stop generating (Esc): what finished is kept, and Generate goes on from there.">Stop</button>
+      <button id="new-edit" class="new-edit" type="button" disabled title="New edit (N): this edit is done, the next strokes start a separate one.">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span>New edit</span>
       </button>
@@ -92,17 +92,17 @@
       <canvas id="xray" class="xray" hidden aria-hidden="true"></canvas>
       <figure id="live-inset" class="live-inset" hidden><img alt="Live preview of the pass in progress"><figcaption></figcaption></figure>
       <div id="wipe" class="wipe" hidden>
-        <span class="label left">Plate</span><span class="label right">Result</span><span class="grip" title="Drag to compare"></span>
+        <span class="label left">Plate</span><span class="label right">Result</span><span class="grip" title="Drag to compare."></span>
       </div>
       <div id="inspector-mark" class="inspector-mark" hidden></div>
-      <div id="inspector" class="inspector" hidden aria-live="polite" title="Drag to move the point it reads"></div>
+      <div id="inspector" class="inspector" hidden aria-live="polite" title="Drag to move the point it reads."></div>
       <p id="hud" class="hud" aria-live="polite"></p>
       <div id="opening" class="opening" hidden>
         <p id="op-title" class="op-title">Opening the plate</p>
         <div class="op-bar"><div id="op-bar"></div></div>
         <p id="op-step" class="op-step"></p>
         <ol id="op-steps" class="op-steps"></ol>
-        <button id="op-cancel" type="button" class="op-cancel" title="Stop opening this plate (Esc)">Cancel</button>
+        <button id="op-cancel" type="button" class="op-cancel" title="Stop opening this plate (Esc).">Cancel</button>
       </div>
       <div id="empty" class="empty">
         <p>Open a plate to start: a video file, or a folder of EXR, PNG, TIFF or DPX frames. You can also drop it here.</p>
@@ -112,33 +112,33 @@
       <video id="shot-video" muted playsinline preload="auto" hidden></video>
     </div>
     <div class="transport">
-      <button id="play-btn" class="play" aria-label="Play (Space)" title="Play or pause (Space)" disabled>
+      <button id="play-btn" class="play" aria-label="Play (Space)" title="Play or pause (Space)." disabled>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-play" d="M8 5v14l11-7z"/><path class="i-pause" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
       </button>
-      <output id="frame-now" class="frame-now" title="Current frame">0</output>
+      <output id="frame-now" class="frame-now" title="Current frame.">0</output>
       <div id="timeline" class="timeline" role="slider" tabindex="0" aria-label="Frame" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
         <div id="tl-range" class="tl-range"></div>
-        <canvas id="tl-cache" class="tl-cache" title="Frames cached in memory: they show at once"></canvas>
+        <canvas id="tl-cache" class="tl-cache" title="Frames cached in memory: they show at once."></canvas>
         <div id="tl-render" class="tl-render"></div>
-        <div id="tl-key" class="tl-key" hidden title="Edits are painted on this frame"></div>
+        <div id="tl-key" class="tl-key" hidden title="Edits are painted on this frame."></div>
         <div id="tl-keys" class="tl-keys"></div>
         <div id="tl-head" class="tl-head"></div>
       </div>
       <output id="frame-total" class="frame-total"></output>
       <span id="fps" class="fps"></span>
-      <button id="display-state" class="display-state" hidden title="The viewer's colour, display only: the export never changes. Click to reset"></button>
-      <button id="wipe-btn" class="quiet" aria-pressed="false" title="Compare the plate and the result (F6)" disabled>Wipe</button>
+      <button id="display-state" class="display-state" hidden title="The viewer's colour, display only: the export never changes. Click to reset."></button>
+      <button id="wipe-btn" class="quiet" aria-pressed="false" title="Compare the plate and the result (F6)." disabled>Wipe</button>
     </div>
   </main>
 
   <div id="split-side" class="split split-side" role="separator" aria-orientation="vertical" aria-label="History width"
-       title="Drag to resize. Double-click: the first size" tabindex="0"></div>
+       title="Drag to resize. Double-click: the first size." tabindex="0"></div>
   <aside class="side">
     <div class="history-head">
       <h2>History</h2>
       <span class="undo">
-        <button id="undo-btn" class="quiet" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
-        <button id="redo-btn" class="quiet" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
+        <button id="undo-btn" class="quiet" title="Undo (Ctrl+Z)." aria-label="Undo" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+        <button id="redo-btn" class="quiet" title="Redo (Ctrl+Shift+Z)." aria-label="Redo" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
       </span>
     </div>
     <ol id="history"></ol>
@@ -147,7 +147,7 @@
       <h2>Fluid shot <span id="fluid-state"></span></h2>
       <p class="hint">Paint smoke, steam or fire on the keyframes, describe it, then Generate.</p>
       <div class="fluid-actions">
-        <button id="fluid-again" type="button" title="Generate with another seed (Ctrl+Enter)">Another seed</button>
+        <button id="fluid-again" type="button" title="Generate with another seed (Ctrl+Enter).">Another seed</button>
       </div>
     </section>
     <section id="render" class="render" hidden>
@@ -158,13 +158,13 @@
       <p class="preview-note">A first pass of the whole shot at a smaller size, shown before the full size, to judge the motion early. Half size has a quarter of the pixels and a quarter size a sixteenth: smaller is quicker and less sharp. Off makes the full size only.</p>
       <ol id="stages"></ol>
       <p class="hint render-hint">Click a finished step to show it on every frame; click it again, or Esc, for the latest.</p>
-      <button id="render-full" type="button" class="quiet render-full" hidden title="These edits took the frames of an earlier render whose other edits are far away: only the tracking and the composites ran. Render them in full, with their own shot, the same edits and seeds">Render in full</button>
+      <button id="render-full" type="button" class="quiet render-full" hidden title="These edits took the frames of an earlier render whose other edits are far away: only the tracking and the composites ran. Render them in full, with their own shot, the same edits and seeds.">Render in full</button>
     </section>
   </aside>
 
   <footer class="log">
     <div id="split-log" class="split split-log" role="separator" aria-orientation="horizontal" aria-label="Log height"
-         title="Drag to resize. Double-click: the first size" tabindex="0" hidden></div>
+         title="Drag to resize. Double-click: the first size." tabindex="0" hidden></div>
     <p id="status" role="status">Starting</p>
     <p id="status-note" hidden></p>
     <button id="log-export" class="quiet log-export" type="button" aria-label="Export the log" title="Export the log as a text file, to share for troubleshooting. It holds the log with its times, the versions of the pack, ComfyUI, Python and PyTorch, the operating system, each GPU and its VRAM, the RAM, the browser, the page's address options, the memory profile and the plate's two lines. Nothing else from this machine."><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
@@ -286,7 +286,7 @@
       <label class="check"><input id="x-shot" type="checkbox"> The regenerated shot <small>the whole frame as the model made it, MP4</small></label>
 
       <p id="x-note" class="hint"></p>
-      <menu><button id="x-graph" value="cancel" title="One ComfyUI workflow for the whole scene: the edits, their captions and seeds, and the render, to keep editing in ComfyUI">ComfyUI graph</button>
+      <menu><button id="x-graph" value="cancel" title="One ComfyUI workflow for the whole scene: the edits, their captions and seeds, and the render, to keep editing in ComfyUI.">ComfyUI graph</button>
         <button value="cancel">Cancel</button><button id="x-go" value="ok" class="primary">Export</button></menu>
     </form>
   </dialog>

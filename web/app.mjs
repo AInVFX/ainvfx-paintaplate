@@ -620,7 +620,7 @@ function endStats() { // one line in the log for the stretch just played along o
 }
 function toggleStats() {
   S.stats = !S.stats;
-  hud(S.stats ? "Playback statistics on: play, then pause. The log keeps the line" : "Playback statistics off", 3500);
+  hud(S.stats ? "Playback statistics on: play, then pause. The log keeps the line." : "Playback statistics off.", 3500);
 }
 
 function play() {
@@ -632,8 +632,8 @@ function play() {
   $("#play-btn").classList.add("playing");
   const left = renderLeft(), done = left ? `, the edited shot is ${secs(left)}` : "";
   if (S.edits.some((e) => e.on && e.patch)) {
-    if (!S.shot) hud(`Playing the plate${done}`, 2500);
-    else if (stale()) hud(`Playing the previous render${done}`, 2500);
+    if (!S.shot) hud(`Playing the plate${done}.`, 2500);
+    else if (stale()) hud(`Playing the previous render${done}.`, 2500);
   }
   requestAnimationFrame(tick);
 }
@@ -717,8 +717,8 @@ shotVid.addEventListener("loadeddata", () => {
 });
 shotVid.addEventListener("canplay", () => { if (!S.playing) render(); }); // a frame that arrives after "seeked" is drawn too
 
-function setIn(f) { S.inPt = Math.min(f, S.outPt); hud(`In point: frame ${S.plate.first + S.inPt}`); timelineUI(); }
-function setOut(f) { S.outPt = Math.max(f, S.inPt); hud(`Out point: frame ${S.plate.first + S.outPt}`); timelineUI(); }
+function setIn(f) { S.inPt = Math.min(f, S.outPt); hud(`In point: frame ${S.plate.first + S.inPt}.`); timelineUI(); }
+function setOut(f) { S.outPt = Math.max(f, S.inPt); hud(`Out point: frame ${S.plate.first + S.outPt}.`); timelineUI(); }
 
 // ---------- The picture ----------
 
@@ -892,7 +892,7 @@ function choosePass(id) {
   const r = S.renders.get(S.heroKey), fluid = fluidPasses(S.fluid?.result, { log: logSpace(), hdr: HDR_FRAMES }).find((x) => x.id === id);
   const label = id === "first" ? "First frame" : fluid?.label ?? STAGES.find((x) => x.id === id)?.label;
   S.pass = S.pass === id ? null : id;
-  if (!S.pass) { fluidInput(); if (keying() && S.fluid.result) showFluid(); else showLatest(); hud("The latest result", 1500); return stagesUI(); }
+  if (!S.pass) { fluidInput(); if (keying() && S.fluid.result) showFluid(); else showLatest(); hud("The latest result.", 1500); return stagesUI(); }
   if (id === "first") { pause(); seek(0); render(); }
   else {
     const m = fluid ?? passMovie(id, r, previewOf(r), { log: logSpace(), data: matteSpace(), hdr: HDR_FRAMES });
@@ -901,7 +901,7 @@ function choosePass(id) {
     setShot(m.url, fluid && keying() ? "fluid" : S.heroKey, m.space, m.frames ?? null, { framesSpace: m.framesSpace }); // a pass's EXR frames and their space (passMovie, fluidPasses)
   }
   fluidInput();
-  hud(`${label}: on show. Click it again, or Esc, for the latest`, 3000);
+  hud(`${label}: on show. Click it again, or Esc, for the latest.`, 3000);
   log(`Viewer: ${label}.`);
   stagesUI();
 }
@@ -955,7 +955,7 @@ function comparePass(id) {
   S.wipe ??= 0.5;
   $("#wipe-btn").setAttribute("aria-pressed", "true");
   placeWipe(); render(); stagesUI();
-  hud(`Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right. Ctrl+click it again, Esc or F6 ends it`, 3500);
+  hud(`Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right. Ctrl+click it again, Esc or F6 ends it.`, 3500);
   log(`Viewer: wipe, ${S.cmp.label} against ${shownLabel()}.`);
 }
 function plateWipe() { // the plain wipe: the plate on the left, the pass on show on the right
@@ -963,7 +963,7 @@ function plateWipe() { // the plain wipe: the plate on the left, the pass on sho
   S.wipe ??= 0.5;
   $("#wipe-btn").setAttribute("aria-pressed", "true");
   placeWipe(); render(); stagesUI();
-  hud(`Wipe: Plate on the left, ${shownLabel()} on the right`, 3500);
+  hud(`Wipe: Plate on the left, ${shownLabel()} on the right.`, 3500);
   log(`Viewer: wipe, Plate against ${shownLabel()}.`);
 }
 // ---------- The X-ray (X): where the edits on show change the plate, tinted over the picture (xray.mjs) ----------
@@ -979,7 +979,7 @@ function xrayNow() { // the mattes of the edits on show, at the size on show
 function setXray(on) {
   S.xray = on && !!S.plate;
   render();
-  hud(S.xray ? XRAY_TEXT[xrayNow().from] : "X-ray off", 3000);
+  hud(S.xray ? XRAY_TEXT[xrayNow().from] : "X-ray off.", 3000);
 }
 function xrayLater() { // the Render panel changed (a step finished, Export made its matte): the X-ray follows
   if (xrayLater.queued) return;
@@ -1007,7 +1007,7 @@ async function xrayLoad(path) { // every frame of a matte at XRAY_SIDE, XRAY_CHU
       for (let i = 0; i < count; i++) got.frames[at + i] = { width, height, alpha: alphaFromHalfs(halfs.subarray(i * size, (i + 1) * size)) };
     } catch (err) { // these frames have no matte: they show no tint from it, and the log says so once
       got.frames.fill(XRAY_NONE, at, at + count);
-      if (!got.told) { got.told = true; log(`Error: X-ray matte ${path}: frames ${S.plate.first + at} to ${S.plate.first + at + count - 1} unreadable (${err.message}).`); }
+      if (!got.told) { got.told = true; log(`Warning: X-ray matte ${path}: frames ${S.plate.first + at} to ${S.plate.first + at + count - 1} unreadable (${err.message}).`); }
     }
     if (!S.playing) drawXray();
   }
@@ -1042,7 +1042,7 @@ function endCompare(draw = true) { // the wipe goes back to the plate on its lef
   cmpVid.removeAttribute("src"); cmpVid.load();
   if (!wiped) { S.wipe = null; $("#wipe-btn").setAttribute("aria-pressed", "false"); }
   placeWipe(); stagesUI();
-  if (draw) { render(); hud(`${label}: out of the wipe`, 1500); }
+  if (draw) { render(); hud(`${label}: out of the wipe.`, 1500); }
 }
 
 // A live preview belongs to the render that sent it (S.stage.key, "fluid" for a fluid shot). It shows only while those
@@ -1066,7 +1066,7 @@ function showLive(d) {
       return;
     }
     Object.assign(S, { live: img, liveKey: key });
-    hud(`Live preview, ${at}: the shot follows`, 2000);
+    hud(`Live preview, ${at}: the shot follows.`, 2000);
     render();
   };
   img.src = viewUrl(d.image);
@@ -1086,7 +1086,7 @@ function escape() { // Esc: logic.escapeAction. On the edit being generated it s
   if (what === "cancelOpen") return cancelOpen();
   if (what === "discard") return discard();
   if (what === "reopen") return stopGenerating();
-  if (what === "deselect") { select(null); if (busy) hud("Deselected. Esc again stops generating", 2500); return; }
+  if (what === "deselect") { select(null); if (busy) hud("Deselected. Esc again stops generating.", 2500); return; }
   if (S.cmp) return endCompare(); // a comparison in the wipe ends before the pass on show
   if (what === "latest") return choosePass(S.pass); // a pass on show: back to the latest
   if (what === "stop") stopGenerating();
@@ -1101,7 +1101,7 @@ function stopGenerating() { // Esc on the edit being generated, or Stop: everyth
   dropLive();
   const waits = S.edits.filter((e) => e.state === "queued").map(num);
   log(`Stopped: ${edit ? `edit ${num(edit)} keeps its strokes, words and seed` : "what finished is kept"}${waits.length ? `, ${editList(waits)} ${waits.length > 1 ? "wait" : "waits"}` : ""}. Nothing starts until Enter.`);
-  hud(edit ? `Stopped. Enter generates edit ${num(edit)} again` : "Stopped. Enter goes on from where it stopped", 4000);
+  hud(edit ? `Stopped. Enter generates edit ${num(edit)} again.` : "Stopped. Enter goes on from where it stopped.", 4000);
   historyUI(); // before the status line: a waiting row says so, and the stop's sentence comes last
   stoppedUI(edit);
   stagesUI(); generateUI();
@@ -1363,7 +1363,7 @@ function setWipe(on) {
   $("#wipe-btn").setAttribute("aria-pressed", String(on));
   fluidInput(); // a fluid row on show: its step's input on the left
   placeWipe(); render();
-  hud(!on ? "Wipe off" : `Wipe: ${S.cmp?.label ?? "Plate"} on the left, ${shownLabel()} on the right`);
+  hud(!on ? "Wipe off." : `Wipe: ${S.cmp?.label ?? "Plate"} on the left, ${shownLabel()} on the right.`);
 }
 
 function nearWipe(e) { // a press this close to the wipe line moves the wipe: it never paints
@@ -1473,7 +1473,7 @@ function rubOut(e) { // the eraser works on the strokes in progress, or on the c
   let d = S.draft;
   const target = S.selected;
   if (!d && target?.strokes.length) d = busy(target) ? reopen(target) : reopenDone(target);
-  if (!d) return hud("Nothing to rub out: select an edit in History, or paint first");
+  if (!d) return hud("Nothing to rub out: select an edit in History, or paint first.");
   cancel("prefetch");
   clearTimeout(S.prefetchTimer);
   mark();
@@ -1680,7 +1680,7 @@ function paintKey(e, rub) { // strokes go to the keyframe on the playhead's slot
   const f = S.fluid, slot = snapKey(S.frame, S.plate.frames);
   if (slot !== S.frame) { seek(slot); hud(keyframeSlotLine(S.plate.first + slot), 2500); }
   let key = f.keys.find((k) => k.frame === slot);
-  if (!key && rub) return hud("No keyframe on this frame to rub out");
+  if (!key && rub) return hud("No keyframe on this frame to rub out.");
   mark();
   if (!key) f.keys.push((key = newKey(slot)));
   f.view = "keys";
@@ -1731,13 +1731,13 @@ function staleFluid() { // the keyframes or the words changed: the shot on show 
 
 function copyKey() {
   const k = keyHere();
-  if (!k) return hud("No keyframe on this frame to copy");
+  if (!k) return hud("No keyframe on this frame to copy.");
   S.clip = k.strokes.map((s) => ({ ...s, points: s.points.slice() }));
-  hud(`Keyframe ${S.plate.first + k.frame} copied: Ctrl+V pastes it on another frame`);
+  hud(`Keyframe ${S.plate.first + k.frame} copied: Ctrl+V pastes it on another frame.`);
 }
 
 function pasteKey() {
-  if (!S.clip) return hud("Copy a keyframe first: Ctrl+C on its frame");
+  if (!S.clip) return hud("Copy a keyframe first: Ctrl+C on its frame.");
   const f = S.fluid, slot = snapKey(S.frame, S.plate.frames);
   mark();
   let k = f.keys.find((x) => x.frame === slot);
@@ -1746,20 +1746,20 @@ function pasteKey() {
   redrawKey(k);
   f.view = "keys";
   pause(); seek(slot); staleFluid(); render();
-  hud(`Keyframe pasted on frame ${S.plate.first + slot}`);
+  hud(`Keyframe pasted on frame ${S.plate.first + slot}.`);
 }
 
 function deleteKey(k = keyHere()) {
-  if (!k) return hud("No keyframe on this frame");
+  if (!k) return hud("No keyframe on this frame.");
   mark();
   S.fluid.keys.splice(S.fluid.keys.indexOf(k), 1);
   staleFluid(); render();
-  hud(`Keyframe ${S.plate.first + k.frame} deleted: Ctrl+Z brings it back`);
+  hud(`Keyframe ${S.plate.first + k.frame} deleted: Ctrl+Z brings it back.`);
 }
 
 function jumpKey(dir) {
   const { prev, next } = nearKeys(S.fluid.keys, S.frame), k = dir < 0 ? prev : next;
-  if (k) { pause(); seek(k.frame); } else hud(dir < 0 ? "No keyframe before this frame" : "No keyframe after this frame");
+  if (k) { pause(); seek(k.frame); } else hud(dir < 0 ? "No keyframe before this frame." : "No keyframe after this frame.");
 }
 
 function dragKey(e, key, el) { // a keyframe dragged along the timeline lands on the nearest free slot of the grid; a click goes to it
@@ -1782,7 +1782,7 @@ function dragKey(e, key, el) { // a keyframe dragged along the timeline lands on
   el.addEventListener("pointerup", () => {
     el.removeEventListener("pointermove", move);
     S.draggingKey = false;
-    if (moved) hud(`Keyframe moved to frame ${S.plate.first + key.frame}`); else { pause(); seek(key.frame); }
+    if (moved) hud(`Keyframe moved to frame ${S.plate.first + key.frame}.`); else { pause(); seek(key.frame); }
     keysUI(true);
   }, { once: true });
 }
@@ -1818,7 +1818,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
   if (!f.keys.length) return status("Fluid shot: no keyframe. Paint flat colour blobs on the first frame and on the last frame.", "hint");
   if (another) f.seed = (Math.random() * 2 ** 31) | 0;
   else { // Enter again: a shot being made, or already made, from these keyframes, words and seed is not made twice
-    if (f.busy?.sig === fluidSig()) return hud(`Fluid shot v${f.busy.v} is being made from these keyframes and words`, 2500);
+    if (f.busy?.sig === fluidSig()) return hud(`Fluid shot v${f.busy.v} is being made from these keyframes and words.`, 2500);
     const made = f.made?.get(fluidSig());
     if (made) {
       if (f.result !== made) { f.result = made; showFluid(); log(`Fluid shot v${made.v}: from the job index (same keyframes, words and seed). Nothing runs.`); }
@@ -2954,7 +2954,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   });
   if (!here()) return log(`Render v${r.v}: Composite, full size: ready, in the background.`);
   if (!S.pass) setShot(r.play ?? r.review, key, r.playSpace ?? r.reviewSpace, r.reviewFrames);
-  hud("Composite, full size: the viewer plays it", 2500);
+  hud("Composite, full size: the viewer plays it.", 2500);
   stagesUI(); exportUI();
   if (!S.wantDownload) return status(`Composite, full size: ready, in the viewer${deep ? ", its EXR frames at full precision as they load" : ""}. Export writes it for compositing software.`, "hint");
   await step(r, "export", async (progress) => { // only when Export asks: the plate's own format, and the matte, beside the review
@@ -3274,7 +3274,7 @@ function exportDialog() {
 
 function setTool(t) {
   if (keying() && t !== "paint") { // another tool closes the fluid's keyframes: it works on the plate the fluid shot made
-    if (!S.fluid.result) return hud(`${NAME[t]} works on the fluid shot: generate it first (Enter)`, 3000);
+    if (!S.fluid.result) return hud(`${NAME[t]} works on the fluid shot: generate it first (Enter).`, 3000);
     leaveKeys();
   }
   S.tool = t;
@@ -3515,7 +3515,7 @@ async function openScene(text) { // the plate opens in its colour space, then ev
   status(`Scene opened: ${scene.edits.length} edit${scene.edits.length === 1 ? "" : "s"} with their seeds and captions. Results made on this machine come from the job index; the rest regenerates.`);
 }
 
-function clearRange() { S.inPt = 0; S.outPt = S.plate.frames - 1; hud("In and out points cleared"); timelineUI(); }
+function clearRange() { S.inPt = 0; S.outPt = S.plate.frames - 1; hud("In and out points cleared."); timelineUI(); }
 // Full screen (View > Full screen, or `): the plate alone fills the screen, fitted, with no panel, menu bar, timeline or
 // status line. The right-click menu and every key keep working. Esc or ` comes back to the zoom it came from. Where the
 // browser refuses its own full screen, the plate fills the window the same way. When the frame changes, its number shows
@@ -3568,7 +3568,7 @@ function setDisplay(change) {
   const d = S.display, on = colour.displayActive(d);
   $("#display-state").hidden = !on;
   $("#display-state").textContent = colour.displayLabel(d);
-  hud(S.mode ? `${colour.PARAMS[S.mode].label} ${colour.formatParam(S.mode, d[S.mode])}` : on ? colour.displayLabel(d) : "Colour as shot", 1400);
+  hud(S.mode ? `${colour.PARAMS[S.mode].label} ${colour.formatParam(S.mode, d[S.mode])}` : on ? colour.displayLabel(d) : "Colour as shot.", 1400);
   render();
 }
 
@@ -3585,7 +3585,7 @@ function leaveMode() {
   const name = S.mode;
   S.mode = S.scrub = null;
   view.classList.remove("scrub");
-  hud(colour.displayActive(S.display) ? colour.displayLabel(S.display) : `${colour.PARAMS[name].label} as shot`);
+  hud(colour.displayActive(S.display) ? colour.displayLabel(S.display) : `${colour.PARAMS[name].label} as shot.`);
 }
 
 const stepColor = (name, dir) => setDisplay({ [name]: colour.clampParam(name, S.display[name] + dir * colour.PARAMS[name].step) });
@@ -3654,7 +3654,7 @@ function toggleInspector(on = !S.inspect.on) {
   i.on = on; i.avg = null;
   $("#inspector").hidden = $("#inspector-mark").hidden = !on;
   if (on) refreshInspector(true);
-  hud(on ? (i.pt ? "Color Inspector: Shift+click samples a pixel, Shift+drag averages, drag the box to move it. F5 hides it"
+  hud(on ? (i.pt ? "Color Inspector: Shift+click samples a pixel, Shift+drag averages, drag the box to move it. F5 hides it."
     : "Color Inspector: Shift+click the frame to sample a pixel. F5 hides it") : "Color Inspector hidden");
 }
 
@@ -3788,7 +3788,7 @@ async function setPlateSpace(cs, asked = false) { // the plate's colour space (R
   if (made && !asked) return askRemake("plate's colour space", made, () => setPlateSpace(cs, true).catch(quiet));
   log(`Plate colour space: ${cs}, was ${p.cs}.`);
   Object.assign(p, { cs, proxySpace: p.deep ? p.proxySpace : cs }); // a video plate's proxy holds its own values
-  hud(`Plate colour space: ${cs}`, 2000); render();
+  hud(`Plate colour space: ${cs}.`, 2000); render();
   const edits = made > 0;
   await openPlate([], p.path, { under: true, cs }); // the first frame in the model space again, and the edits made again on it
   if (edits) queue(regenerateDependents);
@@ -4078,12 +4078,12 @@ function pickAt(e) {
 function takeColor(hex, how = "") {
   if (S.tool === "erase") pickTool("paint");
   setColor(hex.toLowerCase());
-  hud(`${S.tool === "light" ? "Light" : "Paint"} colour ${S.color}${how}`, 2000);
+  hud(`${S.tool === "light" ? "Light" : "Paint"} colour ${S.color}${how}.`, 2000);
 }
 function setRub(on) {
   S.rub = on;
   $("#rub-btn").setAttribute("aria-pressed", String(on));
-  hud(on ? "Eraser: rub out the strokes you just painted" : NAME[S.tool]);
+  hud(on ? "Eraser: rub out the strokes you just painted." : NAME[S.tool]);
   render();
 }
 let eraserKey = null; // E held down: when it went down, the eraser before it, and whether a stroke was dragged since
@@ -4283,7 +4283,7 @@ addEventListener("keydown", (e) => {
   if (!$("#ctx").hidden) { if (k === "Escape") closeMenu(); return e.preventDefault(); } // the menu is open: Esc closes it
   if (k === "Escape" && openCtl) { cancelOpen(); return e.preventDefault(); } // a plate opening: Esc cancels it
   if (!S.plate && !["?", "F6"].includes(k)) return;
-  if (k === "Home" && e.shiftKey && !mod) { resetDisplay(); hud("Colour reset"); return e.preventDefault(); } // RV's Reset All Color
+  if (k === "Home" && e.shiftKey && !mod) { resetDisplay(); hud("Colour reset."); return e.preventDefault(); } // RV's Reset All Color
   if (S.mode && modeKey(k, combo)) return e.preventDefault();
   if (S.picking && k === "Escape") { pickFrame(false); return e.preventDefault(); }
   if (!mod && !e.altKey && combo === "i") { if (!e.repeat) pickColor(); return e.preventDefault(); } // the colour picker, as in Photoshop
@@ -4334,7 +4334,7 @@ function enter(another) { // Generate (Enter): the edit in progress, then its sh
   if (resumed) queueWaiting(); // the viewer: with no edit in progress, the edits that waited at the stop run before the render goes on
   if (another) { const target = S.selected ?? S.edits.at(-1); if (target) again(target); return; }
   if (resumed || renderPending()) { // a stopped or failed render goes on
-    const r = S.renders.get(S.heroKey); if (r) r.failed = null; touch(0); return hud(resumed ? "Generating again from where it stopped" : "The shot renders now", 2000);
+    const r = S.renders.get(S.heroKey); if (r) r.failed = null; touch(0); return hud(resumed ? "Generating again from where it stopped." : "The shot renders now.", 2000);
   }
   hud(S.edits.length ? "Nothing changed since the last result. Ctrl+Enter tries another seed." : "Paint on the frame first, then Generate.", 3000);
 }

@@ -17,10 +17,10 @@ def run(browser, port, U):
     rub = lambda: page.get_attribute("#rub-btn", "aria-pressed") == "true"  # noqa: E731
 
     title = page.get_attribute("[data-tool=erase]", "title")
-    U.check(page.text_content("[data-tool=erase] span") == "Clean" and title.startswith("Clean: remove an object") and title.endswith("(C)"),
+    U.check(page.text_content("[data-tool=erase] span") == "Clean" and title.startswith("Clean: remove an object") and title.endswith("(C)."),
             f"the tool that removes an object is named Clean, and its tooltip gives the key C: {title!r}")
     paint = page.get_attribute("[data-tool=paint]", "title")
-    U.check(paint.endswith("(P)"), f"the Paint tooltip gives the key P: {paint!r}")
+    U.check(paint.endswith("(P)."), f"the Paint tooltip gives the key P: {paint!r}")
     page.keyboard.press("c")
     U.check(on("erase"), "C picks Clean")
     for key in ("b", "w"):
