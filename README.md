@@ -29,7 +29,7 @@ Planned next, and not there yet: shots up to 20 seconds, plates at LTX 2.5's lar
 
 ## What it needs
 
-- **ComfyUI** v0.43.0 or newer, with [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo). It is tested on ComfyUI v0.44.2: `tools/pins.sh` names the tested commits.
+- **ComfyUI** v0.43.0 or newer, with [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo). It is tested on ComfyUI v0.45.3: `tools/pins.sh` names the tested commits.
 - **An NVIDIA GPU with 16 GB of VRAM at least; 32 GB or more recommended.** Under 24 GB the models load one at a time and LTX works in tiles, so each step takes longer. From 32 GB every step finishes at 1920 x 1088 and 121 frames. A 96 GB card is the fastest and takes plates above 2K.
 - **64 GB of RAM.** This is what is tested.
 - **79 GB of disk** for the models.
@@ -124,6 +124,14 @@ Good to know:
 - To replace a head, paint the new head over the old one. A head removed with Clean comes back as a head.
 - Paint additions on open ground. An addition painted across a foreground object breaks up during the shot.
 - Judge an effect on the full-size shot, not on the fast preview.
+- Paint a plate reads each plate's colour space from its file, and the export writes every pixel back in that space. Change it in Open only for a camera's log footage, which no file tag describes: choose the camera's log space.
+
+Known limits:
+
+- On a plate whose camera travels, a paint's matte can lose the painted object on some frames, when SAM 3.1 stops tracking it. The page then warns and names the frames to check. Another seed, other words or another stroke can help.
+- On such a plate, Clean can leave a faint dark shape of the removed object on some frames. Check the result frame by frame.
+- A shadow painted with Light comes out soft: words can ask for a deeper one. A relight can leave a thin light or dark edge along bright outlines.
+- The check after Clean compares colours. An object of another colour that takes the removed object's place passes it, so look at the first frame.
 
 **Where the rest is.** Press `?` for the keys; the backquote key shows the plate alone, full screen. The right-click menu holds every action with its key, and the viewer's colour tools under **OCIO**. [`ARCHITECTURE.md`](ARCHITECTURE.md) explains how the pack works and how to change it. [`TESTING.md`](TESTING.md) describes every test.
 
