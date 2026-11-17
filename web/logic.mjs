@@ -634,13 +634,60 @@ export function logFileName(plate, d) {
   return `paintaplate_log_${name}_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}.txt`;
 }
 
+// ---------- Upscale to 4K ----------
+// Finish > Upscale to 4K: after the export, SeedVR2 7B restores it at 3840 px on the long side. The rules of
+// tests/upscale_plate.py, which runs the same workflows from a terminal (tests/test_upscale_rules.py keeps them equal).
+// long: the target's long side; factor: SeedVR2 restores from at most the target divided by it; chunk: the frames it
+// samples at once, and step the frames each further chunk adds (chunks share one latent frame); modelRam: the GB the 7B
+// model holds in RAM on a GPU under bigVram GB; copies: the float32 copies of one frame at the target size a job holds.
+export const UPSCALE = { long: 3840, factor: 2, chunk: 21, step: 20, modelRam: 15.7, bigVram: 32, copies: 8 };
+const roundEven = (x) => { const r = Math.round(x); return Math.abs(x % 1) === 0.5 && r % 2 ? r - 1 : r; }; // as Python's round()
+export function upscaleTarget(width, height, long = UPSCALE.long) { // long px on the long side with the plate's aspect, in even numbers; a larger plate keeps its size
+  if (Math.max(width, height) >= long) return [width, height];
+  return width >= height ? [long, 2 * roundEven(long * height / width / 2)] : [2 * roundEven(long * width / height / 2), long];
+}
+export function upscaleSource(width, height, [tw, th]) { // the size SeedVR2 restores from: [0, 0], the frames as they are, when the target is twice their size or more
+  if (Math.max(width, height) * UPSCALE.factor <= Math.max(tw, th)) return [0, 0];
+  return [2 * roundEven(tw / UPSCALE.factor / 2), 2 * roundEven(th / UPSCALE.factor / 2)];
+}
+// Frames per job on this machine, from the GB of RAM and VRAM ComfyUI reports: the whole shot when 90% of the RAM holds it,
+// else the most that fit as whole chunks (21, 41, 61 frames and on): a part of a chunk samples in nearly the time of a
+// whole one. Held aside: 2 GB, the shot at the plate's size, and the model on a GPU under bigVram GB. 21 frames on a 16 GB
+// GPU under a 52 GB cap; one job for 121 frames on a 96 GB GPU with 175 GB of RAM.
+export function upscaleWindow(ramGb, vramGb, [tw, th], [pw, ph], frames) {
+  const gb = 2 ** 30, held = (vramGb < UPSCALE.bigVram ? UPSCALE.modelRam : 0) + 2 + frames * pw * ph * 12 / gb;
+  const fit = Math.trunc((0.9 * ramGb - held) / (UPSCALE.copies * tw * th * 12 / gb));
+  if (fit >= frames) return frames;
+  return UPSCALE.chunk + UPSCALE.step * Math.max(0, Math.floor((fit - UPSCALE.chunk) / UPSCALE.step));
+}
+export const upscaleWindows = (frames, size) => // [first, count] of each job: windows that follow one another and share no frame
+  Array.from({ length: Math.ceil(frames / size) }, (_, i) => [i * size, Math.min(size, frames - i * size)]);
+// Seconds, from 121 frames of horse.mp4 at 3840 x 2160: a SeedVR2 pass took 1,332 s on a 16 GB GPU (six windows of 21
+// frames) and 388 s on a 96 GB GPU (one job); each part Save Plate writes at 4K took 28.5 s and 27.4 s. Scaled by the
+// target's pixels and the frames. Paint and Clean make two passes, the plate's and the layer's, and write three parts.
+export const UPSCALE_SECONDS = { small: { frame: 11.0, part: 28.5 }, large: { frame: 3.21, part: 27.4 } };
+export function upscaleSeconds([tw, th], frames, { passes = 1, parts = 1, profile = "large" } = {}) {
+  const t = UPSCALE_SECONDS[profile] ?? UPSCALE_SECONDS.large, scale = (tw * th) / (3840 * 2160);
+  return scale * frames * (passes * t.frame + parts * t.part / 121);
+}
+export const upscaleKeeps = (tools) => tools.length > 0 && !tools.includes("light"); // Paint and Clean keep the plate's untouched pixels: the 4K plate, layer and matte come too
+export const UPSCALE_LARGE = "This plate is already large: it is brought down to half the export's size, then SeedVR2 restores its detail. Every pixel is new.";
+export function upscaleAsk({ target, frames, alone, edit }) { // the question before the row turns on: what Export writes, and how long on this GPU
+  const min = (s) => `about ${Math.max(1, Math.round(s / 60))} min`;
+  return `Export then also writes a 4k folder at ${target[0]} x ${target[1]}. On this GPU, ${frames} ${frames === 1 ? "frame takes" : "frames take"} ${min(alone)}, `
+    + `or ${min(edit)} with Paint or Clean, whose plate and layer are restored too. Every pixel of an upscaled frame is new.`;
+}
+
 // The Finish menu: the passes on the whole plate after the full-size composite, in the order the render runs them. Each
 // option: its id (its switch is #finish-<id>), its name, the line that says what it does to the result, and the question
-// it asks before it turns on, when it changes what Export writes.
+// it asks before it turns on, when it changes what Export writes: its text, or a function of the plate's figures.
 export const FINISH = [
   { id: "hdr", name: "SDR to HDR",
     line: "The full-size shot is regenerated in scene-linear values, fitted to the plate. The result is half-float EXR frames in ACES2065-1, in the viewer and in Export.",
     ask: "This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1." },
+  { id: "upscale", name: "Upscale to 4K",
+    line: "Export also writes the result at 3840 px on the long side, restored by SeedVR2 7B. With Paint or Clean, the plate, the layer and the matte come at that size too.",
+    ask: upscaleAsk },
 ];
 export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on
 
