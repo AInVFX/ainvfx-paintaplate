@@ -822,6 +822,9 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     """
     if os.environ.get("PAINTAPLATE_RECORD"):
         record(os.environ["PAINTAPLATE_RECORD"], masks, n, first, shot, base, zone, threshold, element, erased, erased_edge, first_frame)
+    half = lambda a, image=False: a if a is None or not np.size(a) else (np.asarray(a)[..., :3] if image else np.asarray(a)).astype(np.float16).astype(np.float32)  # noqa: E731
+    masks, first, element, erased = half(masks), half(first), half(element), half(erased)  # in half floats, as a recording keeps them: a
+    shot, base = half(shot, True), half(base, True)  # recording replays this run exactly
     masks = np.asarray(masks, np.float32).reshape((-1,) + np.shape(masks)[-2:]) if np.size(masks) else np.zeros((0, 1, 1), np.float32)
     first = np.asarray(first, np.float32)
     first = first[0] if first.ndim == 3 else first
