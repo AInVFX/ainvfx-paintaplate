@@ -1062,6 +1062,12 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
 // paint's request places its object). A source is judged by its path, its points without the brush's width: the path
 // spans under a fifth of the frame each way and stays 2% inside its edges, so a dab of any brush size is a source. A
 // stroke dragged across the frame is a wash, and a light at the frame's edge comes from outside: neither shows a source.
+// A source is named by the words when they name a kind of light (« sun », « street lamp »). With no such word, a warm
+// source in the top third of the frame is the sun: so named, Klein draws it behind what stands in front of it, where « a
+// small, very bright light » washed the nearby buildings out in its glare. Any other source is a small, very bright light
+// of its colour.
+export const LIGHT_KINDS = /\b(sun|moon|street ?lamp|streetlight|lamp|lantern|candle|fire|torch|bulb|neon sign|spotlight)\b/i;
+const WARM = new Set(["red", "orange", "yellow", "warm white"]);
 export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
   const place = (b) => { // b: [x0, y0, x1, y1] in fractions of the frame
     const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
@@ -1107,10 +1113,13 @@ export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
     "it casts soft shadows away from it, and the old highlights and shadows that disagree with it fade.");
   const w = String(words ?? "").trim();
   if (w) said.push(`${w[0].toUpperCase()}${w.slice(1)}${/[.!?]$/.test(w) ? "" : "."}`);
+  const kind = w.match(LIGHT_KINDS)?.[1].toLowerCase();
   const rows = shown.map(({ name, box: b }, k) => {
-    said.push(`The ${name} light's source <light_${k + 1}> is visible in the frame: a small, very bright ${name} light.`);
+    const what = kind ? `the ${kind}, small and very bright` : WARM.has(name) && place(b).startsWith("top") ? "the sun, small and very bright"
+      : `a small, very bright ${name} light`;
+    said.push(`The ${name} light's source <light_${k + 1}> is visible in the frame: ${what}.`);
     return { id: `light_${k + 1}`, from: "target", src_bbox: null, tgt_bbox: [b[1], b[0], b[3], b[2]].map((v) => Math.round(v * 1000)),
-      desc: `the light's source: a small, very bright ${name} light` };
+      desc: `the light's source: ${what}` };
   });
   said.push("Keep every object, face and texture, the camera angle, the framing and the composition exactly as they are: only the light " +
     `changes${rows.length ? ", and each light's source shows where it is placed" : ""}.`);
