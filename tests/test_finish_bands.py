@@ -77,6 +77,21 @@ class Bands(unittest.TestCase):
         self.assertLess(r["controls"]["Columns"], 0.005)
         self.assertIn("Bands over 0.01 stops: 7 of 7 column bands and 0 of 4 row bands.", r["text"])
 
+    def test_the_sheet_shows_both_frames_3_stops_down_and_their_difference_with_a_gold_mark_over_each_band(self):
+        level = blended(W, (0.04, -0.04))
+        sheet = os.path.join(self.tmp.name, "sky.png")
+        r = self.measure([f * np.exp2(level)[None, :, None].astype(np.float32) for f in self.ref], sheet=sheet, rows=(0, 200))
+        a = np.asarray(Image.open(sheet).convert("RGB"))
+        self.assertEqual(a.shape, (3 * 200 + 8, W, 3))
+        for top in (0, 204, 408):
+            self.assertEqual(tuple(a[top + 2, 50]), hdr_plate.GOLD)  # the first column band, 48 to 64
+            self.assertEqual(tuple(a[top + 50, 2]), hdr_plate.GOLD)  # the first row band, 48 to 64
+        x = np.clip(self.ref[0][100, 200] * 2.0 ** -3, 0, 1)
+        self.assertTrue(np.allclose(a[204 + 100, 200], (1.055 * x ** (1 / 2.4) - 0.055) * 255, atol=1.5))
+        grey = a[408 + 100, 20:30, 0].astype(float)  # inside the first tile, 0.04 stops over: 0.5 + 0.04 / 0.2
+        self.assertTrue(np.allclose(grey, 0.7 * 255, atol=2))
+        self.assertIn("Sheet `sky.png`: frame 1, rows 0 to 200.", r["text"])
+
     def test_a_frame_with_no_band_reads_none_whatever_its_grain_and_its_gain(self):
         frames = [f * np.exp2(0.1 + self.rng.normal(0, 0.01, (H, W, 1))).astype(np.float32) for f in self.ref]
         r = self.measure(frames, out=os.path.join(self.tmp.name, "report", "bands.md"))

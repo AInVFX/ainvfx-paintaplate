@@ -167,6 +167,7 @@ def groups(plate: str, export: str, every: int = 30) -> dict:
 
 DARK = 2.0 ** -10  # a level under this is read as this, so the noise of black does not swing in stops
 LIMIT = {"stops": 0.01, "steps": 0.5}  # the swing from which a band shows
+GOLD = (255, 190, 0)  # the sheet's mark over each band
 
 
 def band_places(size: int, tile: int, overlap: int, work: int = 0) -> list:
@@ -192,12 +193,38 @@ def _middles(places: list) -> list:
             for (_, b0), (a1, _) in zip(places, places[1:]) if a1 - b0 >= width]
 
 
+def _sheet(path: str, test: np.ndarray, ref: np.ndarray, d: np.ndarray, places: dict, rows, steps: bool) -> tuple:
+    """One PNG to look at: the tested frame, the reference frame and their difference, one above the other, from row
+    rows[0] to rows[1], with a gold mark over each band. Scene-linear frames show 3 stops down through the sRGB curve,
+    display frames as they are. In the difference, mid-grey is 0, and white or black is 0.1 stops (4 steps) or more."""
+    from PIL import Image
+    top, bottom = rows[0], min(rows[1], d.shape[0])
+
+    def look(rgb):
+        x = np.clip(rgb[top:bottom] * (1.0 if steps else 2.0 ** -3), 0.0, 1.0)
+        if not steps:
+            x = np.where(x <= 0.0031308, 12.92 * x, 1.055 * np.power(x, 1 / 2.4) - 0.055)
+        return (x * 255 + 0.5).astype(np.uint8)
+    grey = (np.clip(0.5 + d[top:bottom] / (8.0 if steps else 0.2), 0.0, 1.0) * 255 + 0.5).astype(np.uint8)
+    strips = [look(test), look(ref), np.repeat(grey[..., None], 3, -1)]
+    for s in strips:
+        for a, b in places["Columns"]:
+            s[:6, a:b] = GOLD
+        for a, b in places["Rows"]:
+            if max(a, top) < min(b, bottom):
+                s[max(a, top) - top:min(b, bottom) - top, :6] = GOLD
+    gap = np.zeros((4, d.shape[1], 3), np.uint8)
+    Image.fromarray(np.concatenate([strips[0], gap, strips[1], gap, strips[2]])).save(path)
+    return top, bottom
+
+
 def bands(ref: str, test: str, tile: int = 256, overlap: int = 64, work: str = "", steps: bool = False, every: int = 10,
-          limit: float = 0.0, out: str = "") -> dict:
+          limit: float = 0.0, out: str = "", sheet: str = "", rows=(0, 432)) -> dict:
     """Where the tiles of a tiled decode show: the frames of `test` against those of `ref`, each a folder of frames or one
     frame. The column profile is the median over the frame of each column's difference, the row profile each row's. A
     band's swing is its profile's largest value minus its smallest across the band, read on every `every`th frame; the
-    same swing at the middle of each tile's own part is the level a band is read against."""
+    same swing at the middle of each tile's own part is the level a band is read against. `sheet` names a PNG of the
+    first frame read (_sheet), from row rows[0] to rows[1]."""
     refs, tests = _frames(ref), _frames(test)
     count = min(len(refs), len(tests))
     picks = range(0, count, every)
@@ -209,7 +236,8 @@ def bands(ref: str, test: str, tile: int = 256, overlap: int = 64, work: str = "
     swing = {side: [] for side in places}
     calm = {side: [] for side in places}
     for i in picks:
-        r, t = plateio.read_float(refs[i]).mean(-1), plateio.read_float(tests[i]).mean(-1)
+        rr, tt = plateio.read_float(refs[i]), plateio.read_float(tests[i])
+        r, t = rr.mean(-1), tt.mean(-1)
         if r.shape != t.shape:
             raise SystemExit(f"{refs[i]} is {r.shape[1]} x {r.shape[0]} and {tests[i]} is {t.shape[1]} x {t.shape[0]}")
         d = (t - r) * 255.0 if steps else np.log2(np.maximum(t, DARK) / np.maximum(r, DARK))
@@ -217,6 +245,8 @@ def bands(ref: str, test: str, tile: int = 256, overlap: int = 64, work: str = "
             profile = np.median(d, axis=axis)
             swing[side].append(_swings(profile, places[side]))
             calm[side] += _swings(profile, _middles(places[side]))
+        if sheet and i == picks[0]:
+            shown = _sheet(sheet, tt, rr, d, places, rows, steps)
     rows = [(side, a, b, float(np.median(s)), float(np.max(s)))
             for side in places for (a, b), s in zip(places[side], np.array(swing[side]).reshape(len(picks), -1).T)]
     shows = [row for row in rows if row[3] > limit]
@@ -238,6 +268,10 @@ def bands(ref: str, test: str, tile: int = 256, overlap: int = 64, work: str = "
                      f"{len(places['Rows'])} row bands. The largest: {top[3]:.3f} {unit}, {top[0].lower()} {top[1]} to {top[2]}.")
     else:
         lines.append(f"No band over {limit:g} {unit}: the largest swing is {top[3] if top else 0.0:.3f} {unit}.")
+    if sheet:
+        lines += ["", f"Sheet `{os.path.basename(sheet)}`: frame {picks[0] + 1}, rows {shown[0]} to {shown[1]}. From the top: the "
+                  "tested frame, the reference, their difference (mid-grey is 0, white or black "
+                  f"{'4 steps' if steps else '0.1 stops'} or more); a gold mark over each band."]
     text = "\n".join(lines) + "\n"
     if out:
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
@@ -438,6 +472,8 @@ if __name__ == "__main__":
     b.add_argument("--every", type=int, default=10, help="read every this many frames, from the first")
     b.add_argument("--limit", type=float, help="the swing from which a band shows: 0.01 stops, or 0.5 steps with --steps")
     b.add_argument("--out", default="", help="a Markdown file for the report")
+    b.add_argument("--sheet", default="", help="a PNG of the first frame read: the tested frame, the reference and their difference")
+    b.add_argument("--rows", type=int, nargs=2, default=(0, 432), help="the sheet's first row and the row after its last")
     fi = sub.add_parser("finish", help="SDR to HDR on a plate with no edit, timed node by node, on a running ComfyUI")
     fi.add_argument("--url", default="http://127.0.0.1:8188")
     fi.add_argument("--comfy", required=True, help="ComfyUI's folder: the plate under its input folder, the frames under its output folder")
@@ -457,7 +493,8 @@ if __name__ == "__main__":
     elif a.what == "groups":
         groups(a.plate, a.export, a.every)
     elif a.what == "bands":
-        bands(a.ref, a.test, a.tile, a.overlap, a.work, a.steps, a.every, a.limit or 0.0, os.path.expanduser(a.out) if a.out else "")
+        bands(a.ref, a.test, a.tile, a.overlap, a.work, a.steps, a.every, a.limit or 0.0, os.path.expanduser(a.out) if a.out else "",
+              os.path.expanduser(a.sheet) if a.sheet else "", a.rows)
     else:
         finish(a.url, a.comfy, a.plate, os.path.expanduser(a.out), a.label, a.width, a.height, a.tile,
                None if a.guide_tiled is None else bool(a.guide_tiled), a.color_space)
