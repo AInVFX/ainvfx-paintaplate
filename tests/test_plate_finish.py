@@ -29,7 +29,7 @@ class HdrOnAPlate(unittest.TestCase):
 
     def test_a_shot_goes_through_as_it_is(self):
         """With no plate size (a shot), the plate_level link goes with the nodes that set a plate's level, and the rest
-        passes the shot on with no copy: Color Space (OCIO) from @model to @model, Upscale Image at 0 x 0, HDR Match
+        passes the shot on with no copy: Colour Space (OCIO) from @model to @model, Upscale Image at 0 x 0, HDR Match
         with no plate."""
         p = filled({"path": "output/shot", "max_frames": 121})
         conv = p[titled(p, "SDR shot in the model space")]["inputs"]

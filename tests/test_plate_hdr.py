@@ -32,7 +32,7 @@ def codes(frames=3, h=24, w=32):
 
 
 def to_linear(x):
-    """The hdr workflow's chain on frames of codes: Color Space (OCIO) from ACEScct to ACEScg, then Keep Black where the
+    """The hdr workflow's chain on frames of codes: Colour Space (OCIO) from ACEScct to ACEScg, then Keep Black where the
     SDR shot is bright everywhere, which leaves only its floor at 0."""
     bright = np.ones(x.shape[1:], np.float32)
     return np.stack([mathops.keep_black(f, bright) for f in ocio.convert(list(x), ocio.BUILTIN, "ACEScct", "ACEScg")])

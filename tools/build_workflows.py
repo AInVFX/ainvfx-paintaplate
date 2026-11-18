@@ -185,7 +185,7 @@ def fill(name, values, folder=None):
 
 
 def colour(g, image, source, destination, title=None, peak_of=None, peak=None):
-    """Color Space (OCIO) in the config the page names (Slot config). Into @model, `peak_of` is the batch `image` is a
+    """Colour Space (OCIO) in the config the page names (Slot config). Into @model, `peak_of` is the batch `image` is a
     part of: the tone mapping takes that batch's peak. Out of @model, it is the plate in `destination`: the tone mapping of
     its peak is undone, so new content comes back at the plate's levels. `peak` is that peak as a number: the second
     output of the plate's own conversion, which read it (PL6)."""
@@ -195,7 +195,7 @@ def colour(g, image, source, destination, title=None, peak_of=None, peak=None):
 
 
 def plate(g, pad, path="path", progress=False, first=False):
-    """The plate in the model space: Load Plate, then Color Space (OCIO) from the plate's file colour space to @model.
+    """The plate in the model space: Load Plate, then Colour Space (OCIO) from the plate's file colour space to @model.
 
     The tone mapping of values above 1.0 shares one peak per batch, as core's did, so a different batch could change the
     exposure of an HDR plate between steps: every workflow converts the same whole plate. With `first`, the first frame
@@ -799,7 +799,7 @@ def hdr():
     pinned ComfyUI-LTXVideo): core Convert Image Color Space maps the shot from sRGB to ACEScct, the IC-LoRA's guide (not the
     creative SDR-to-HDR expand); fixed scene embeddings stand for the prompt, positive and negative, at CFG 1; the 8 distilled
     sigmas with euler; the video VAE in float32 encodes the guide and decodes the result, tiled (128-frame temporal tiles, as
-    Lightricks' Tiled Fusion graph); Color Space (OCIO) turns the decoded ACEScct codes into ACEScg scene-linear values with
+    Lightricks' Tiled Fusion graph); Colour Space (OCIO) turns the decoded ACEScct codes into ACEScg scene-linear values with
     the config's own conversion, the curve of Lightricks' LTXVHDRDecodePostprocess, frame by frame into one array and with
     no tone-mapped copy; Save Frames writes them. The conditioning frame rate is at most 30, as there.
 
@@ -811,7 +811,7 @@ def hdr():
     """
     g = Graph()
     load = g("PaintAPlate_LoadPlate", _title="Shot (SDR)", path=Slot("path", ""), max_frames=Slot("max_frames", 121), pad_8n1=True)
-    # a plate with no edit: Color Space (OCIO) from its file's colour space (Slot color_space) into the model space, then the
+    # a plate with no edit: Colour Space (OCIO) from its file's colour space (Slot color_space) into the model space, then the
     # working size (Slots width and height). A shot is in the model space at the working size already: both pass it on as
     # it is, with no copy (source equal to destination, and 0 x 0 in core's Upscale Image)
     sdr = colour(g, load[0], Slot("color_space", "@model"), "@model", "SDR shot in the model space")

@@ -802,7 +802,7 @@ def race_flow(browser, port):
 
 def oom_flow(browser, port):
     """The GPU runs out of memory once (the mock's /mock/oom): the page frees ComfyUI's memory, waits until it is released,
-    then runs the fluid shot again. Posted at once, the retry ran before ComfyUI freed anything and ran out again (29 Oct)."""
+    then runs the fluid shot again. Posted at once, the retry runs before ComfyUI frees anything and runs out again."""
     page = load(browser, port)
     base = page.url.split("/extensions/")[0]
     urllib.request.urlopen(urllib.request.Request(f"{base}/mock/oom", json.dumps({"workflow": "fluid", "times": 1}).encode(),
@@ -1043,8 +1043,7 @@ def layout_flow(browser, port):
 
 def close_flow(browser, port):
     """The × after the plate's name closes it: its renders stop, its frames leave memory, the page is empty and says so, also
-    when the model warm-up ends after the close (3 Nov: the warm-up's « Ready: every model loaded » replaced « Plate closed »
-    when it ended after the close). The mock holds the warm-up's first upload until the plate is closed, so the close lands
+    when the model warm-up ends after the close (its « Ready: every model loaded » must not replace « Plate closed »). The mock holds the warm-up's first upload until the plate is closed, so the close lands
     inside the warm-up every time, on any machine. A failed check prints the page's state."""
     base = f"http://127.0.0.1:{port}"
     urllib.request.urlopen(urllib.request.Request(f"{base}/mock/slow", json.dumps({"seconds": 120, "times": 1}).encode(),
@@ -1057,7 +1056,7 @@ def close_flow(browser, port):
     page.click("#open .tabs [data-tab='files']")
     page.fill("#path", "plates/desk.mp4")
     page.click("#open-go")
-    try:  # flows side by side, one per CPU (32 on the laptop in Chrome, 12 Nov): the open takes longer than alone
+    try:  # flows side by side, one per CPU (32 at once in Google Chrome): the open takes longer than alone
         page.wait_for_selector("#close-btn", state="visible", timeout=60000)
     except Exception as exc:  # Playwright's TimeoutError: the check says what the page and the mock show
         if type(exc).__name__ != "TimeoutError":

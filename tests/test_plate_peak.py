@@ -1,4 +1,4 @@
-"""PL6: the plate's peak read once. Color Space (OCIO)'s second output is the peak its tone mapping took on the way into
+"""PL6: the plate's peak read once. Colour Space (OCIO)'s second output is the peak its tone mapping took on the way into
 the model space (ocio.convert_with_peak). The composite's return and Relight Transfer take it as a number; until 1.11.14
 each read the whole plate again. It is the float they read, so their pictures are the same bytes."""
 import json

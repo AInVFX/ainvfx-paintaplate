@@ -230,8 +230,8 @@ def address(url, memory="", seed=None, options=()):
 
 
 def answers(url):
-    """Whether the ComfyUI at `url` still answers. On 11 Nov a memory cap stopped ComfyUI during a render, twice: the page
-    waited, this script with it, and no report was written."""
+    """Whether the ComfyUI at `url` still answers. When a memory cap stops ComfyUI during a render, the page waits, and this
+    script with it: without this check, no report is written."""
     try:
         urllib.request.urlopen(url + "/system_stats", timeout=5).close()
         return True

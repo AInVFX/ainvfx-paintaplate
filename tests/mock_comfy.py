@@ -235,7 +235,7 @@ async def execute(pid, prompt):
         text = writer["text"] if armed else v.get("request", "")
         wide = armed and writer.get("wide")
         if wide and min(locked_left(v.get("request", "")), default=1000) < wide["x_min_below"]:
-            text = wide["text"]  # a box that reaches the other object: the writer removes that one, as the laptop's did
+            text = wide["text"]  # a box that reaches the other object: the writer removes that one, as Klein's prompt writer does
         o[outs["text"]] = {"text": [text]}
         await steps(pid, 1, 0.2)
     elif "patch" in outs:  # edit: a tinted, softened copy of the reference inside the mask, with step previews
