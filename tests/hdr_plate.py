@@ -16,6 +16,10 @@ way back from the model space keeps the plate's levels (PLA), without a pod.
         Two runs of finish that differ only by --tile decode the same latent, since ComfyUI keeps the first run's results
         and runs again only the decode and the nodes after it.
         python tests/hdr_plate.py bands --ref /data/ComfyUI/output/whole/hdr --test /data/ComfyUI/output/t256/hdr --tile 256 --work 1920x1088
+  level  The HDR frames' level against the plate, frame by frame: as HDR Match reads it for the whole shot, the median of
+        log2(plate / HDR) over the plate's mid-tones in ACEScg, but per frame, with each frame's change of level beside
+        the plate's own and each frame's largest value.
+        python tests/hdr_plate.py level --plate /data/ComfyUI/input/plates/horse.mp4 --hdr /data/ComfyUI/output/finish/hdr
   finish  SDR to HDR on a plate with no edit, as the page's Finish runs it, on a running ComfyUI: the seconds of the job
         and of each node, the peaks of the GPU's memory and of ComfyUI's RAM, and the HDR frames' count and size.
         python tests/hdr_plate.py finish --comfy /data/ComfyUI --plate plates/horse.mp4 --out ~/paintaplate_gpu/w9_plate
@@ -281,6 +285,55 @@ def bands(ref: str, test: str, tile: int = 256, overlap: int = 64, work: str = "
     return {"rows": rows, "shows": shows, "largest": top[3] if top else 0.0, "controls": controls, "text": text}
 
 
+def _plate_frames(path: str, count: int):
+    """The first `count` frames of a movie or of a folder of frames, as float32 RGB in the file's own values."""
+    if os.path.isdir(path):
+        return [plateio.read_float(f) for f in plateio.find_sequence(path)[:count]]
+    import av
+    with av.open(path) as c:
+        return [f.to_ndarray(format="rgb24").astype(np.float32) / 255.0 for _, f in zip(range(count), c.decode(video=0))]
+
+
+def level(plate: str, hdr: str, color_space: str = "@model", step: int = 8, first: int = 8, out: str = "") -> dict:
+    """The HDR frames (ACES2065-1) against the plate (`color_space`), both in ACEScg, sampled every `step` px: per frame,
+    the level (the mean over R, G and B of mathops.hdr_level, which HDR Match reads over the whole shot), its change from
+    the frame before beside the change of the plate's mean luminance, and the HDR frame's largest value."""
+    import mathops
+    import ocio
+    files = plateio.find_sequence(hdr)
+    plates = _plate_frames(plate, len(files))
+    h, w = plates[0].shape[:2]
+    ys, xs = np.arange(step // 2, h, step), np.arange(step // 2, w, step)
+    p = ocio.convert([f[ys[:, None], xs[None, :]] for f in plates], ocio.BUILTIN, color_space, "ACEScg")
+    rows = []
+    for i, name in enumerate(files[:len(plates)]):
+        f = plateio.read_float(name)
+        s = ocio.convert([f[(ys * f.shape[0] // h)[:, None], (xs * f.shape[1] // w)[None, :]]], ocio.BUILTIN, "ACES2065-1", "ACEScg")[0]
+        stops = mathops.hdr_level(s.reshape(-1, 3), p[i].reshape(-1, 3), least=64)
+        rows.append((i + 1, None if stops is None else float(np.mean(stops)), float((p[i] @ LUMA).mean()),
+                     float((s @ LUMA).mean()), float(f.max())))
+    known = [r[1] for r in rows if r[1] is not None]
+    mid = float(np.median(known)) if known else float("nan")
+    lines = [f"# The level of `{hdr}` against `{plate}`", "",
+             f"Both in ACEScg, every {step} px. Level: the median of log2(plate / HDR) over the plate's mid-tones, the mean "
+             f"of R, G and B; 0 is the plate's level. The shot's median level: {mid:+.3f} stops.", "",
+             "| Frame | Level, stops | From the shot's median, stops | HDR's change, stops | Plate's change, stops | Largest value |",
+             "| --- | --- | --- | --- | --- | --- |"]
+    for k, (n, lv, pm, sm, top) in enumerate(rows):
+        dh = "" if k == 0 else f"{np.log2(sm / rows[k - 1][3]):+.3f}"
+        dp = "" if k == 0 else f"{np.log2(pm / rows[k - 1][2]):+.3f}"
+        if k < first or k == len(rows) - 1:
+            lines.append(f"| {n} | {'' if lv is None else f'{lv:+.3f}'} | {'' if lv is None else f'{lv - mid:+.3f}'} | {dh} | {dp} | {top:.2f} |")
+    off = [(n, lv - mid) for n, lv, *_ in rows if lv is not None and abs(lv - mid) > 0.02]
+    lines += ["", f"Frames more than 0.02 stops from the shot's median: {', '.join(f'{n} ({d:+.3f})' for n, d in off) or 'none'}."]
+    text = "\n".join(lines) + "\n"
+    if out:
+        with open(out, "w") as fh:
+            fh.write(text)
+    print(text)
+    return {"rows": rows, "median": mid, "off": off, "text": text}
+
+
 def _plate_info(path: str):
     """(width, height, frames) of a movie or of a folder of frames."""
     if os.path.isdir(path):
@@ -496,6 +549,11 @@ if __name__ == "__main__":
     b.add_argument("--out", default="", help="a Markdown file for the report")
     b.add_argument("--sheet", default="", help="a PNG of the first frame read: the tested frame, the reference and their difference")
     b.add_argument("--rows", type=int, nargs=2, default=(0, 432), help="the sheet's first row and the row after its last")
+    lv = sub.add_parser("level", help="the HDR frames' level against the plate, frame by frame")
+    lv.add_argument("--plate", required=True, help="the plate: a movie or a folder of frames")
+    lv.add_argument("--hdr", required=True, help="the folder of the HDR frames, in ACES2065-1")
+    lv.add_argument("--color-space", default="@model", help="the plate's file colour space in the OCIO config")
+    lv.add_argument("--out", default="", help="a Markdown file for the report")
     fi = sub.add_parser("finish", help="SDR to HDR on a plate with no edit, timed node by node, on a running ComfyUI")
     fi.add_argument("--url", default="http://127.0.0.1:8188")
     fi.add_argument("--comfy", required=True, help="ComfyUI's folder: the plate under its input folder, the frames under its output folder")
@@ -516,6 +574,8 @@ if __name__ == "__main__":
         seam(a.plate, a.export, a.ring, a.every)
     elif a.what == "groups":
         groups(a.plate, a.export, a.every)
+    elif a.what == "level":
+        level(a.plate, a.hdr, a.color_space, out=os.path.expanduser(a.out) if a.out else "")
     elif a.what == "bands":
         bands(a.ref, a.test, a.tile, a.overlap, a.work, a.steps, a.every, a.limit or 0.0, os.path.expanduser(a.out) if a.out else "",
               os.path.expanduser(a.sheet) if a.sheet else "", a.rows)
