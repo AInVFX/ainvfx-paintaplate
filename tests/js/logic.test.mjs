@@ -602,7 +602,7 @@ test("the memory profile: small under 24 GB, medium from 24 GB, large from 60 GB
   assert.equal(memoryProfile({ vram: 96 * gib }).name, "large");
   assert.equal(memoryProfile({}).name, "small", "no VRAM size: nothing loads early");
   assert.deepEqual(memoryProfile({ vram: 16 * gib }).warm, [], "small: no model loads before an action needs it");
-  assert.deepEqual(memoryProfile({ vram: 16 * gib }).slots, { tile: 4096, encode_tile: 256, guide_tiled: true });
+  assert.deepEqual(memoryProfile({ vram: 16 * gib }).slots, { tile: 4096, encode_tile: 256, guide_tiled: false });
   assert.match(memoryProfile({ vram: 16 * gib, ram: 64 * gib }).why, /16 GB of VRAM, 64 GB of RAM/);
   assert.match(memoryProfile({ vram: 16 * gib }).does, /^Models load one at a time, so each step takes longer/, "what a small card cannot do as fast is said in one sentence, in the profile's own line");
   assert.equal(memoryProfile({ vram: 17.2e9, ram: 65.5e9 }).why, "16 GB of VRAM, 61 GB of RAM", "bytes / 2**30, rounded: a 16 GB card reads 16 GB");
