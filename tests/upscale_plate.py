@@ -5,6 +5,8 @@ of each node, the peaks of the GPU's memory and of ComfyUI's RAM, and the count 
   python tests/upscale_plate.py --comfy /workspace/ComfyUI --shot plates/horse.mp4 --all --out /workspace/gpu/upscale
 
 With --all, every window of the shot runs, then the upscale_export job writes the frames in the shot's own format.
+--decode-tile T/O sets the tile and the overlap of SeedVR2's decode: 4096/128 decodes the whole frame in one piece. A run
+that differs from the one before only by it decodes the same latent, since ComfyUI keeps the earlier nodes' results.
 
 The shot is a movie or a frame sequence as Load Plate takes it. The target size is 3840 px on the long side with the
 shot's aspect, in even numbers, or the shot's own size when it is larger. The frames land under ComfyUI's output folder
@@ -107,9 +109,17 @@ def values(shot: str, width: int, height: int, frames: int, label: str = "upscal
             "matte_prefix": ""}
 
 
+def decode_tiles(prompt: dict, tile: int, overlap: int) -> int:
+    """Set the tile and the overlap, in px, of every VAE Decode (Tiled) of a filled workflow; the count of nodes set."""
+    nodes = [n for n in prompt.values() if n.get("class_type") == "VAEDecodeTiled"]
+    for n in nodes:
+        n["inputs"].update(tile_size=tile, overlap=overlap)
+    return len(nodes)
+
+
 def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first: int = 0, count: int = WINDOW,
         every: bool = False, color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16",
-        long_side: int = LONG_SIDE) -> dict:
+        long_side: int = LONG_SIDE, decode_tile: str = "") -> dict:
     import build_workflows
     from hdr_plate import _comfy_pid, _plate_info, node_rows, run_prompt
     full = os.path.join(comfy, "input", shot)
@@ -127,6 +137,8 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
     rows, nodes, seconds = [], [], []
     for name, v in jobs:
         prompt = build_workflows.fill(name, v)
+        if decode_tile and name == "upscale":
+            decode_tiles(prompt, *(int(x) for x in decode_tile.split("/")))
         r = run_prompt(url, prompt, pid=_comfy_pid())
         status = (r["history"].get("status") or {}).get("status_str", "no status")
         what = f"frames {v['first'] + 1} to {v['first'] + v['count']}" if name == "upscale" else "the export"
@@ -170,6 +182,7 @@ if __name__ == "__main__":
     ap.add_argument("--color-fix", default="lab", choices=("lab", "none"), help="SeedVR2's colour correction")
     ap.add_argument("--format", default="png16", choices=("png", "png16", "exr"))
     ap.add_argument("--long-side", type=int, default=LONG_SIDE, help="the target's long side in px")
+    ap.add_argument("--decode-tile", default="", help="T/O: the tile and the overlap of SeedVR2's decode in px; 4096/128 decodes whole")
     a = ap.parse_args()
     run(a.url, a.comfy, a.shot, os.path.expanduser(a.out), a.label, a.first, a.count, a.all, a.color_space, a.color_fix, a.format,
-        a.long_side)
+        a.long_side, a.decode_tile)
