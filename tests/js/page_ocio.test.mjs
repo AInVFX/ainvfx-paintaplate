@@ -1,4 +1,4 @@
-// The page workstream's rules for the OCIO menu (web/logic.mjs): the plate's line, and the one question before an OCIO
+// The rules for the OCIO menu (web/logic.mjs): the plate's line, and the one question before an OCIO
 // change that regenerates (the plate's colour space or the OCIO config), and the families of the plate's tree.
 import { test } from "node:test";
 import assert from "node:assert/strict";

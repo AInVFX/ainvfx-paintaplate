@@ -1,4 +1,4 @@
-// The page workstream's check of the status line (logic.statusOf): a fault shows there with its word and its colour, and
+// Tests of the status line (logic.statusOf): a fault shows there with its word and its colour, and
 // the next line that succeeds replaces it; bookkeeping stays in the log.
 import assert from "node:assert/strict";
 import { test } from "node:test";

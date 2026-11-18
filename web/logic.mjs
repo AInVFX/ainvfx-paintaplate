@@ -137,8 +137,8 @@ export function secs(t) { // "about 40 s left", "about 1 min 40 s left": rounded
 
 export const dark = (hex) => [1, 3, 5].reduce((a, i, k) => a + [0.2126, 0.7152, 0.0722][k] * parseInt(hex.slice(i, i + 2), 16), 0) < 60;
 
-// An erase's words as its object's name after « the »: an article that was typed goes (the GPU case's « the barn » asked
-// Klein's prompt writer to « Remove the the barn », 12 Nov 2026).
+// An erase's words as its object's name after « the »: an article that was typed goes, or « the barn » would ask Klein's
+// prompt writer to « Remove the the barn ».
 const objectName = (words) => String(words ?? "").trim().replace(/^(?:the|a|an)\s+/i, "");
 
 // A paint's colours by name. Klein sees the strokes on the frame, but words alone (« saddle ») leave the prompt writer free to
@@ -307,8 +307,8 @@ export function paintBoxes({ bits, w, h }, { max = 4, fill = 0.4, gain = 0.25, m
 }
 
 // Whether a caption erases what was painted: it cites a locked row (<obj_1>), or the rows it removes and cites hold most of the
-// paint. `paint`: { bits, w, h }, the painted area on a coarse grid. On 28 Oct the bad caption removed person_1, a box with none
-// of the paint in it; the good one never cited <obj_1> but removed four rows that held nearly all of it.
+// paint. `paint`: { bits, w, h }, the painted area on a coarse grid. A bad caption can remove person_1, a box with none of the
+// paint in it; a good one may never cite <obj_1> but remove four rows that hold nearly all of it.
 // The rows of an answer that removes objects, apart from the locked ones: named in its caption, with a box in the frame and none
 // in the result.
 const removedRows = (caption, rows, locked) => {
@@ -331,8 +331,8 @@ export function erasesPaint(text, locked, paint, share = 0.5) {
 }
 
 // An erase with no words whose prompt writer took the stroke for another object (erasesPaint refused its answer) asks for
-// the object's name before Klein runs. On 12 November 2026 the page's own caption went to Klein instead, Klein left the barn,
-// and the shot rendered. With words, the page's own caption carries them, and Klein runs.
+// the object's name before Klein runs: given the page's own caption instead, Klein can leave the object, and the shot
+// renders. With words, the page's own caption carries them, and Klein runs.
 export const asksName = (tool, words) => tool === "erase" && !String(words ?? "").trim();
 
 // ---------- An erase with no words: the box the prompt writer gets ----------
@@ -804,8 +804,8 @@ export function changedMask(a, b, z, threshold = 24) {
   return out;
 }
 
-// An erase that left its object. Klein can answer an erase with the frame as it was: on 12 November 2026 a stroke on a
-// barn, with no words, got the page's own caption, and the barn stayed through the whole shot. So after the edit the page
+// An erase that left its object. Klein can answer an erase with the frame as it was: a stroke on a barn with no words,
+// given the page's own caption, can leave the barn through the whole shot. So after the edit the page
 // compares the first frame (`after`) with the frame under the edit (`before`) inside the object's mask (`mask`: painted
 // where its red is 128 or more), all three RGBA at `w` x `h`, on cells of `cell` pixels. A cell's mean colour holds under
 // Klein's softness and under the few levels its fill can sit off the frame (4 to 6, measured for Level Fill on 28
@@ -962,8 +962,8 @@ export function panelSize(kind, wanted, view, { least, stage, around }) {
 // ---------- A plate's name ----------
 // The name the page, scenes and exports give a plate: its file name without the extension and, for an image sequence only,
 // without the frame number. Trailing digits are a frame number only in an image sequence: « train_v2.mp4 » is train_v2 and
-// « room.1001.exr » is room (3 Nov: train_v2.mp4 and chalet_v2.mp4 showed as « train_v » and « chalet_v », so two movies
-// could share a name in the page, in scenes and in exports).
+// « room.1001.exr » is room. Read as a frame number, the digits would show train_v2.mp4 and chalet_v2.mp4 as « train_v » and
+// « chalet_v », so two movies could share a name in the page, in scenes and in exports.
 export function plateStem(file, sequence) {
   const base = String(file ?? "").split(/[\\/]/).pop().replace(/\.[^.]+$/, "");
   return (sequence ? base.replace(/[._]?\d+$/, "") : base) || "plate";
@@ -973,7 +973,7 @@ export function plateStem(file, sequence) {
 // warmAll's last line. It goes to the status line only while that line still says what the page said at start: once a plate
 // was opened or closed, the status line holds a newer message, and the log keeps this one. A warm-up job that an opening, an
 // edit or a close cancelled (stopEverything) has not loaded its model, so the line then says so, never « every model loaded ».
-// 3 Nov: a close that cancelled the warm-up's last job showed « Ready: every model loaded » in place of « Plate closed ».
+// A close that cancels the warm-up's last job shows « Plate closed », never « Ready: every model loaded ».
 export function warmEnd(seconds, missed, startShown) {
   const s = Math.round(seconds);
   if (missed) return { status: false, text: `Model warm-up done in ${s} s: ${missed} of its jobs did not finish, so the first edit loads their models.` };
@@ -1284,18 +1284,26 @@ export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? nu
 // ---------- Pipeline: the memory profile ----------
 // What the page does on the GPU it runs on, from the VRAM and RAM in ComfyUI's /system_stats. Three profiles to start from;
 // the borders move with measurements (tests/gpu_matrix.py writes each case's peak VRAM and RAM).
-// - small, under 24 GB of VRAM (the reference is an RTX 4090 Laptop with 16 GB): no model loads before an action needs it,
-//   so the prompt writer, Klein and LTX take turns; every LTX pass encodes its guide in tiles and decodes in 256 px tiles
-//   (in the SDR-to-HDR decode, 512 px tiles ran out of memory on 16 GB).
-// - medium, from 24 GB: the edit models load at start, LTX with the first shot; 512 px tiles.
+// - small, under 24 GB of VRAM (measured on a 16 GB GPU with 52 GB of RAM): no model loads before an action needs it,
+//   so the prompt writer, Klein and LTX take turns.
+// - medium, from 24 GB: the edit models load at start, LTX with the first shot.
 // - large, from 60 GB: every model loads at start and stays loaded.
-// `slots` are workflow slot values (tile, guide_tiled): one set of workflows serves every profile.
+// From 16 GB (WHOLE_FROM), every LTX decode takes the whole frame in one piece (tile WHOLE) and every IC-LoRA guide is
+// encoded whole (guide_tiled false). In tiles, each tile comes out brighter near its edges, and the blend of two tiles
+// leaves a band of 0.1 to 0.2 stops where they overlap; a guide encoded in tiles leaves its lines in the shot sampled from
+// it. 121 frames at 1920 x 1088 decode whole in 13 s at a peak of 10.3 GiB in float32, against 45 to 99 s in tiles
+// (RTX PRO 6000). Under 16 GB, LTX decodes in 256 px tiles and encodes its guides in tiles, which leave those bands. The
+// full-size passes encode in each profile's tiles.
+// `slots` are workflow slot values (tile, encode_tile, guide_tiled): one set of workflows serves every profile.
 export const MEMORY_FROM = { medium: 24e9, large: 60e9 }; // bytes of VRAM: a 24 GB GPU reports about 25.7e9, a 16 GB one about 17.2e9
+export const WHOLE = 4096; // a tile larger than any working frame: VAE Decode (Tiled) decodes the whole frame in one piece
+export const WHOLE_FROM = 16e9; // bytes of VRAM from which every LTX decode is whole; a 12 GB GPU reports about 12.9e9
 export const MEMORY = {
-  small: { warm: [], frees: true, slots: { tile: 256, guide_tiled: true }, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger GPU" },
-  medium: { warm: ["edit", "prompt"], frees: false, slots: { tile: 512, guide_tiled: false }, does: "The edit models load now, LTX with the first shot" },
-  large: { warm: ["edit", "prompt", "warm"], frees: false, slots: { tile: 512, guide_tiled: false }, does: "Every model loads now and stays loaded" },
+  small: { warm: [], frees: true, slots: { tile: WHOLE, encode_tile: 256, guide_tiled: false }, does: "Models load one at a time, so each step takes longer than on a larger GPU" },
+  medium: { warm: ["edit", "prompt"], frees: false, slots: { tile: WHOLE, encode_tile: 512, guide_tiled: false }, does: "The edit models load now, LTX with the first shot" },
+  large: { warm: ["edit", "prompt", "warm"], frees: false, slots: { tile: WHOLE, encode_tile: 512, guide_tiled: false }, does: "Every model loads now and stays loaded" },
 };
+const TILED = { slots: { tile: 256, guide_tiled: true }, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger GPU" }; // under WHOLE_FROM
 // ComfyUI keeps the models of the jobs it has run in memory, ready for the next job. With 16 GB of VRAM under a cap of
 // 52 GB of RAM, a full-size shot left LTX and its text encoder there, 35 GB, and the tracking job after it took the rest:
 // the system stopped ComfyUI. A profile that `frees` holds one family of models at a time: the page asks
@@ -1318,16 +1326,16 @@ export function freesBefore(profile, last, name, room = null) { // room: { free,
 
 // ---------- How long a render step takes ----------
 // A step's time has three parts: a lead before the sampler's first step (models load, frames are read), the sampling,
-// whose progress the page receives, and a tail after it (the decode, the frames, the movie). Until 11 Nov the time left
-// was the time run so far, scaled by the progress: 37 s into a preview shot whose first step of 8 had just ended, the
-// page said « 4 min 10 s » for a pass that ended 20 s later. Now the sampling is timed by its own pace, between its
-// first and its latest step, and the rest comes from what the step took the last time on this machine (the page keeps
+// whose progress the page receives, and a tail after it (the decode, the frames, the movie). The time run so far, scaled
+// by the progress, says « 4 min 10 s » 37 s into a preview shot whose first step of 8 has just ended, for a pass that ends
+// 20 s later. So the sampling is timed by its own pace, between its first and its latest step, and the rest comes from
+// what the step took the last time on this machine (the page keeps
 // each step's total, lead and tail per size, frame count and memory profile, in paintaplate.step-times).
 export const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
 // A step's time before it ever ran on this machine (stepGuess): the 96 GB card's reference (STAGES' ref, in seconds at
 // REF_SIZE), scaled to the plate, then to the card. A 16 GB card, the small profile, holds one family of models at a time,
 // so each job loads its models again: a lead in seconds per family, then a factor per step on the reference's scaled
-// seconds. Measured on an RTX 4090 Laptop GPU (16 GB of VRAM, 52 GB of RAM), horse.mp4 at
+// seconds. Measured on a 16 GB GPU with 52 GB of RAM, horse.mp4 at
 // 1920 x 1080 and 121 frames: the lead is what a job spent outside its sampler or its tracking loop in ComfyUI's trace,
 // and each factor makes the rest. SDR to HDR grows faster than its pixels (`grow`, the power of its scale): 172 s at
 // 1280 x 704 and 606 s at 1920 x 1088, 121 frames each, the same workflow for a fluid shot and a render. The full-size shot grows the same way: 79.8 s at
@@ -1378,7 +1386,9 @@ export function memoryProfile({ vram = 0, ram = 0, force = null } = {}) { // `fo
   const auto = vram >= MEMORY_FROM.large ? "large" : vram >= MEMORY_FROM.medium ? "medium" : "small";
   const forced = Object.hasOwn(MEMORY, force ?? ""), name = forced ? force : auto, gib = (n) => Math.round(n / 2 ** 30);
   const card = vram > 0 ? `${gib(vram)} GB of VRAM${ram > 0 ? `, ${gib(ram)} GB of RAM` : ""}` : "ComfyUI gave no VRAM size";
-  return { name, why: forced ? `asked for; with ${card}, the page would choose ${auto}` : card, ...MEMORY[name] };
+  const profile = { name, why: forced ? `asked for; with ${card}, the page would choose ${auto}` : card, ...MEMORY[name] };
+  if (vram >= WHOLE_FROM) return profile;
+  return { ...profile, slots: { ...profile.slots, ...TILED.slots }, does: name === "small" ? TILED.does : profile.does };
 }
 
 // ---------- A seed asked for in the address ----------

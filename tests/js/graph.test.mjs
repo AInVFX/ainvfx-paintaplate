@@ -86,7 +86,7 @@ test("the graph reads by sections: numbered ids, a README note opening each, the
   assert.ok(titled("CLIPTextEncode").some((t) => t === 'EDIT 1 · Clean "red umbrella" · both passes · Caption [caption]'), "an edit's caption, one node for its two passes");
 });
 
-// ---------- The page workstream, wave 3: the scene in the editor's own format ----------
+// ---------- the scene in the editor's own format ----------
 import { editorGraph, widgetsOf } from "../../web/graph.mjs";
 
 const INFO = JSON.parse(readFileSync(new URL("./object_info.scene.json", import.meta.url))).nodes; // what /object_info says: tests/js/object_info.scene.json

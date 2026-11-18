@@ -1,4 +1,4 @@
-// The page workstream's check of the Finish menu's options (logic.FINISH, logic.finishLabel): one row per option, in the
+// Tests of the Finish menu's options (logic.FINISH, logic.finishLabel): one row per option, in the
 // order the render runs them, and a button that counts the options that are on.
 import assert from "node:assert/strict";
 import { test } from "node:test";

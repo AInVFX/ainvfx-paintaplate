@@ -85,7 +85,7 @@ def native_and_inspector(page, port, U):
         page.keyboard.down("Shift"); page.mouse.click(*client(x, y)); page.keyboard.up("Shift")
         page.wait_for_function(f"document.querySelector('#inspector').dataset.pixel === '{x},{y}' && !!document.querySelector('#inspector').dataset.value", timeout=20000)
         return [float(v) for v in page.evaluate(ATTR)[1].split(",")]
-    def inspect_held(x, y):  # the same, with the read held open while the frame redraws: the race CI met on 3 Nov
+    def inspect_held(x, y):  # the same, with the read held open while the frame redraws: a race that CI can meet
         hold = {"on": True, "routes": []}
         page.route("**/paintaplate/pixel?*", lambda r: hold["routes"].append(r) if hold["on"] else r.continue_())
         page.evaluate(PAIRS)

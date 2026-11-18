@@ -1,4 +1,4 @@
-// The edit workstream's tests of what the page says when its check holds an erase back (web/logic.mjs: leftLines, leftHint).
+// Tests of what the page says when its check holds an erase back (web/logic.mjs: leftLines, leftHint).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { beyondDetail, leftHint, leftLines } from "../../web/logic.mjs";

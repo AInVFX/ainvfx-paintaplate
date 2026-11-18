@@ -1,5 +1,5 @@
-// The edit workstream's tests of the box the prompt writer gets for an erase with no words (web/logic.mjs: coreBox,
-// writerBoxes), with the laptop's answers of 12 and 13 November 2026 for a stroke on the barn of horse.mp4.
+// Tests of the box the prompt writer gets for an erase with no words (web/logic.mjs: coreBox,
+// writerBoxes), with recorded answers of the prompt writer for a stroke on the barn of horse.mp4.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { coreBox, writerBoxes, erasesPaint, reconcile, upsampleRequest } from "../../web/logic.mjs";

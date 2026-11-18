@@ -1111,6 +1111,8 @@ GRAIN_UNIT = _grain_unit()
 # ---------- SDR to HDR: the HDR shot's level fitted to the plate ----------
 HDR_FLOOR = 2.0 ** -14  # the smallest normal half float: darker values carry no usable ratio
 HDR_MIDTONES = (2.0 ** -6, 2.0 ** -0.5)  # plate luminance where the level is measured: above the noise, below SDR's white
+HDR_SPAN = 9  # frames over which each frame's gain is smoothed (smooth_gains)
+HDR_FRAME_LEAST = 256  # untouched mid-tone samples a frame needs for a gain of its own
 
 
 def hdr_level(shot: np.ndarray, plate: np.ndarray, band=HDR_MIDTONES, least: int = 2048):
@@ -1133,21 +1135,40 @@ def apply_level(img: np.ndarray, stops) -> np.ndarray:
     return np.where(good, out * np.exp2(np.asarray(stops, np.float32)), 0.0).astype(np.float32)
 
 
+def smooth_gains(gains: list, span: int = HDR_SPAN) -> list:
+    """Each frame's gain (stops per channel) as the value at that frame of a straight line fitted, by least squares, to the
+    gains of the frames within span // 2 of it. A line follows a drift to the shot's first and last frames, where a mean
+    would lag, and a frame whose own gain is off by noise moves its result by a fraction of that. A frame with no gain of its
+    own (None) takes the line of its neighbours; None where no frame in reach has one."""
+    n, half, out = len(gains), span // 2, []
+    for i in range(n):
+        near = [(j - i, gains[j]) for j in range(max(0, i - half), min(n, i + half + 1)) if gains[j] is not None]
+        if not near:
+            out.append(None)
+            continue
+        x, y = np.array([d for d, _ in near], np.float64), np.array([g for _, g in near], np.float64)
+        out.append(y.mean(axis=0) if len(near) < 2 else np.polyfit(x, y, 1)[1])
+    return out
+
+
 def hdr_match(n: int, shot_at, plate_at, changed_at, *, grow: float = 24.0, step: int = 8, samples: int = 1_500_000,
               workers: int = 8):
     """The HDR shot at the level of the plate it is composited onto: (frames, report).
 
-    SDR to HDR picks its own exposure and white balance, while the plate's untouched pixels hold the scene's real values.
-    One gain per channel (hdr_level) is measured where the edits changed nothing (outside `changed_at(i)`, a mask at any
-    size, grown by `grow` plate pixels), on a grid every `step` plate pixels, over the whole shot, so the level cannot
-    flicker; the mid-tones decide it, then every pixel is scaled by it. A gain keeps every ratio, so new content keeps the
-    range SDR to HDR gave it above the plate's white. Frames may differ in size: samples are taken at the same places of
-    each frame. Too few untouched mid-tones (an edit over the whole frame) leave the shot as it was made."""
+    SDR to HDR picks its own exposure and white balance, and its level drifts over a shot (0.2 stops over 121 frames of
+    horse.mp4), while the plate's untouched pixels hold the scene's real values. Each frame's gain per channel (hdr_level)
+    is measured where the edits changed nothing (outside `changed_at(i)`, a mask at any size, grown by `grow` plate pixels),
+    on a grid every `step` plate pixels; the mid-tones decide it. The gains are smoothed over HDR_SPAN frames
+    (smooth_gains), so the level follows the plate with no flicker, then every pixel of a frame is scaled by its gain. A
+    frame with too few untouched mid-tones takes its neighbours' line, or the whole shot's gain. A gain keeps every ratio,
+    so new content keeps the range SDR to HDR gave it above the plate's white. Frames may differ in size: samples are taken
+    at the same places of each frame. Too few untouched mid-tones over the whole shot (an edit over the whole frame) leave
+    the shot as it was made."""
     first = plate_at(0)
     hp, wp = first.shape[:2]
     ys = np.minimum(np.arange(step // 2, hp, step), hp - 1)
     xs = np.minimum(np.arange(step // 2, wp, step), wp - 1)
-    stride = max(1, int(np.ceil(n * len(ys) * len(xs) / samples)))
+    cap = max(HDR_FRAME_LEAST, samples // max(1, n))  # samples kept per frame
 
     def sample(i):
         s, p, m = shot_at(i), plate_at(i), changed_at(i)
@@ -1155,10 +1176,12 @@ def hdr_match(n: int, shot_at, plate_at, changed_at, *, grow: float = 24.0, step
         hm, wm = m.shape[:2]
         near = dilate((m > 0.02).astype(np.float32), grow * hm / hp)
         keep = near[(ys * hm // hp)[:, None], (xs * wm // wp)[None, :]] < 0.5
-        return s[(ys * hs // hp)[:, None], (xs * ws // wp)[None, :], :3][keep], p[ys[:, None], xs[None, :], :3][keep]
+        a, b = s[(ys * hs // hp)[:, None], (xs * ws // wp)[None, :], :3][keep], p[ys[:, None], xs[None, :], :3][keep]
+        pick = np.linspace(0, len(a) - 1, cap).astype(int) if len(a) > cap else slice(None)
+        return a[pick], b[pick]
 
     with ThreadPoolExecutor(max(1, workers)) as pool:  # numpy releases the GIL
-        parts = list(pool.map(sample, range(0, n, stride)))
+        parts = list(pool.map(sample, range(n)))
     shot = np.concatenate([a for a, _ in parts]) if parts else np.zeros((0, 3), np.float32)
     plate = np.concatenate([b for _, b in parts]) if parts else np.zeros((0, 3), np.float32)
     stops = hdr_level(shot, plate)
@@ -1166,14 +1189,21 @@ def hdr_match(n: int, shot_at, plate_at, changed_at, *, grow: float = 24.0, step
         return [np.array(shot_at(i)[..., :3], np.float32) for i in range(n)], {
             "samples": len(shot), "fitted": False,
             "text": f"HDR shot kept as made.\n  Untouched samples: {len(shot):,}, too few mid-tones to measure."}
-    fitted, lum = apply_level(shot, stops), plate @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    gains = smooth_gains([hdr_level(a, b, least=HDR_FRAME_LEAST) for a, b in parts])
+    gains = [stops if g is None else np.asarray(g, np.float32) for g in gains]
+    fitted = np.concatenate([apply_level(a, g) for (a, _), g in zip(parts, gains)])
+    lum = plate @ np.array([0.2126, 0.7152, 0.0722], np.float32)
     mid = np.all((fitted > HDR_FLOOR) & (plate > HDR_FLOOR), axis=-1) & (lum >= HDR_MIDTONES[0]) & (lum <= HDR_MIDTONES[1])
     error = float(np.median(np.abs(np.log2(fitted[mid] / plate[mid])))) if mid.any() else float("nan")
     with ThreadPoolExecutor(max(1, workers)) as pool:
-        frames = list(pool.map(lambda i: apply_level(shot_at(i), stops), range(n)))
+        frames = list(pool.map(lambda i: apply_level(shot_at(i), gains[i]), range(n)))
+    means = [float(np.mean(g)) for g in gains]
     return frames, {"samples": len(shot), "fitted": True, "stops": [float(x) for x in stops], "error": error,
-                    "text": f"HDR shot fitted to the plate on {len(shot):,} untouched samples.\n  Level change (R, G, B): "
-                            f"{', '.join(f'{x:+.2f}' for x in stops)} stops.\n  Nothing compressed.\n"
+                    "frames": [[float(x) for x in g] for g in gains],
+                    "text": f"HDR shot fitted to the plate frame by frame on {len(shot):,} untouched samples, each frame's gain "
+                            f"smoothed over {HDR_SPAN} frames.\n  Level change (R, G, B) over the shot: "
+                            f"{', '.join(f'{x:+.2f}' for x in stops)} stops; by frame, the mean of R, G and B from "
+                            f"{min(means):+.2f} to {max(means):+.2f} stops.\n  Nothing compressed.\n"
                             f"  Median mid-tone error after the fit: {error:.3f} stops."}
 
 AP1_TO_REC709 = np.array([[1.70505, -0.62179, -0.08326], [-0.13026, 1.14080, -0.01055], [-0.02400, -0.12897, 1.15297]], np.float32)

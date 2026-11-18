@@ -37,7 +37,7 @@ def run(browser, port, U):
     line = logged(page, "Memory profile: small (") or logged(page, "Memory profile small:")  # the line's two forms
     U.check(line.startswith(("Memory profile small: asked for", "Memory profile: small (asked for")) and "would choose medium" in line,
             f"the log names the memory profile and why: {line}")
-    U.check(line.rstrip(".").endswith(tuple(f"Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger {w}" for w in ("GPU", "card"))),
+    U.check(line.rstrip(".").endswith(tuple(f"Models load one at a time, so each step takes longer than on a larger {w}" for w in ("GPU", "card"))),
             "a small card: the same line says what it means, in one sentence")
     page.wait_for_timeout(3000)
     U.check(len(posts(port)) == before, "a small card: no model loads at page open (no job is posted)")

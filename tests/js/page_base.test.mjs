@@ -1,4 +1,4 @@
-// The page workstream's check of the status line's note while an edit with active edits above it changes
+// Tests of the status line's note while an edit with active edits above it changes
 // (logic.hidesNote): the first frame shows the edits below it only, and the note names the edits it hides.
 import assert from "node:assert/strict";
 import { test } from "node:test";

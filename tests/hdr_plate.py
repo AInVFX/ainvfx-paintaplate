@@ -10,6 +10,17 @@ way back from the model space keeps the plate's levels (PLA), without a pod.
   groups  Each frame folder in the export's zip with its file count and, for a folder of EXR frames as many as the plate's,
         the largest difference from the plate where the delivered matte shows 0. The export copies those pixels exactly;
         a folder that blends there is not the export.
+  bands  Where the tiles of a tiled decode show: its frames against the same latent decoded whole, by column and by row,
+        in stops (log2 of the ratio of the channels' mean) or, with --steps, in 8-bit steps for display frames. For each
+        band where two tiles blend, how far the difference swings across it: a decode with no band reads 0 everywhere.
+        Two runs of finish that differ only by --tile decode the same latent, since ComfyUI keeps the first run's results
+        and runs again only the decode and the nodes after it. With no --ref, the frames' own level is read over --rows,
+        its slow changes removed: a band shows where it swings twice as much as the tiles' middles and over the limit.
+        python tests/hdr_plate.py bands --ref /data/ComfyUI/output/whole/hdr --test /data/ComfyUI/output/t256/hdr --tile 256 --work 1920x1088
+  level  The HDR frames' level against the plate, frame by frame: as HDR Match measures each frame's gain, the median of
+        log2(plate / HDR) over the plate's mid-tones in ACEScg, with each frame's change of level beside the plate's own and
+        each frame's largest value.
+        python tests/hdr_plate.py level --plate /data/ComfyUI/input/plates/horse.mp4 --hdr /data/ComfyUI/output/finish/hdr
   finish  SDR to HDR on a plate with no edit, as the page's Finish runs it, on a running ComfyUI: the seconds of the job
         and of each node, the peaks of the GPU's memory and of ComfyUI's RAM, and the HDR frames' count and size.
         python tests/hdr_plate.py finish --comfy /data/ComfyUI --plate plates/horse.mp4 --out ~/paintaplate_gpu/w9_plate
@@ -25,6 +36,7 @@ import os
 import sys
 import tempfile
 import time
+import warnings
 import zipfile
 
 import numpy as np
@@ -159,6 +171,187 @@ def groups(plate: str, export: str, every: int = 30) -> dict:
     return {"rows": rows, "text": text}
 
 
+DARK = 2.0 ** -10  # a level under this is read as this, so the noise of black does not swing in stops
+LIMIT = {"stops": 0.01, "steps": 0.5}  # the swing from which a band shows
+GOLD = (255, 190, 0)  # the sheet's mark over each band
+
+
+def band_places(size: int, tile: int, overlap: int, work: int = 0) -> list:
+    """The bands of a tiled decode along one side of a frame `size` px long, as (first, end) px: core's
+    tiled_scale_multidim starts a tile every (tile - overlap) px of the decoded frame, `work` px long (0 for `size`), and
+    blends two tiles over the `overlap` px from the later tile's edge. A frame brought to another size carries its bands."""
+    work, step = work or size, tile - overlap
+    return [(round(x * size / work), round((x + overlap) * size / work)) for x in range(step, work - overlap, step)]
+
+
+def _frames(path: str) -> list:
+    return plateio.find_sequence(path) if os.path.isdir(path) else [path]
+
+
+def _swings(profile: np.ndarray, places: list) -> list:
+    return [float(profile[a:b].max() - profile[a:b].min()) for a, b in places]
+
+
+def _middles(places: list) -> list:
+    """Windows as wide as a band at the middle of each tile's own part, between two bands, where it has room for one."""
+    width = places[0][1] - places[0][0] if places else 0
+    return [((b0 + a1) // 2 - width // 2, (b0 + a1) // 2 - width // 2 + width)
+            for (_, b0), (a1, _) in zip(places, places[1:]) if a1 - b0 >= width]
+
+
+def _sheet(path: str, test: np.ndarray, ref: np.ndarray, d: np.ndarray, places: dict, rows, steps: bool) -> tuple:
+    """One PNG to look at: the tested frame, the reference frame and their difference, one above the other, from row
+    rows[0] to rows[1], with a gold mark over each band. Scene-linear frames show 3 stops down through the sRGB curve,
+    display frames as they are. In the difference, mid-grey is 0, and white or black is 0.1 stops (4 steps) or more."""
+    from PIL import Image
+    top, bottom = rows[0], min(rows[1], d.shape[0])
+
+    def look(rgb):
+        x = np.clip(rgb[top:bottom] * (1.0 if steps else 2.0 ** -3), 0.0, 1.0)
+        if not steps:
+            x = np.where(x <= 0.0031308, 12.92 * x, 1.055 * np.power(x, 1 / 2.4) - 0.055)
+        return (x * 255 + 0.5).astype(np.uint8)
+    grey = (np.clip(0.5 + d[top:bottom] / (8.0 if steps else 0.2), 0.0, 1.0) * 255 + 0.5).astype(np.uint8)
+    strips = [look(test)] + ([] if ref is None else [look(ref)]) + [np.repeat(grey[..., None], 3, -1)]
+    for s in strips:
+        for a, b in places["Columns"]:
+            s[:6, a:b] = GOLD
+        for a, b in places["Rows"]:
+            if max(a, top) < min(b, bottom):
+                s[max(a, top) - top:min(b, bottom) - top, :6] = GOLD
+    gap = np.zeros((4, d.shape[1], 3), np.uint8)
+    Image.fromarray(np.concatenate([x for s in strips for x in (s, gap)][:-1])).save(path)
+    return top, bottom
+
+
+def bands(ref: str, test: str, tile: int = 256, overlap: int = 64, work: str = "", steps: bool = False, every: int = 10,
+          limit: float = 0.0, out: str = "", sheet: str = "", rows=(0, 432)) -> dict:
+    """Where the tiles of a tiled decode show: the frames of `test` against those of `ref`, each a folder of frames or one
+    frame. The column profile is the median over the frame of each column's difference, the row profile each row's. A
+    band's swing is its profile's largest value minus its smallest across the band, read on every `every`th frame; the
+    same swing at the middle of each tile's own part is the level a band is read against. `sheet` names a PNG of the
+    first frame read (_sheet), from row rows[0] to rows[1]."""
+    region, refs, tests = tuple(rows), (_frames(ref) if ref else None), _frames(test)
+    count = len(tests) if refs is None else min(len(refs), len(tests))
+    picks = range(0, count, every)
+    unit = "steps" if steps else "stops"
+    limit = limit or LIMIT[unit]
+    h, w = plateio.read_float(tests[0]).shape[:2]
+    ww, wh = (int(v) for v in work.lower().split("x")) if work else (w, h)
+    places = {"Columns": band_places(w, tile, overlap, ww), "Rows": band_places(h, tile, overlap, wh)}
+    if refs is None:  # only the row bands inside the rows read
+        places["Rows"] = [(a, b) for a, b in places["Rows"] if a >= region[0] and b <= region[1]]
+    swing = {side: [] for side in places}
+    calm = {side: [] for side in places}
+    for i in picks:
+        tt = plateio.read_float(tests[i])
+        t, rr = tt.mean(-1), None
+        if refs is None:  # the frame's own level over `rows`, its slow changes removed: the bands against the picture
+            d = t * 255.0 if steps else np.log2(np.maximum(t, DARK))
+            k = 2 * round((tile - overlap) * w / ww) + 1
+            d = d - ndimage.uniform_filter(d, size=k, mode="nearest")
+            d[:region[0]], d[region[1]:] = np.nan, np.nan
+        else:
+            rr = plateio.read_float(refs[i])
+            r = rr.mean(-1)
+            if r.shape != t.shape:
+                raise SystemExit(f"{refs[i]} is {r.shape[1]} x {r.shape[0]} and {tests[i]} is {t.shape[1]} x {t.shape[0]}")
+            d = (t - r) * 255.0 if steps else np.log2(np.maximum(t, DARK) / np.maximum(r, DARK))
+        for side, axis in (("Columns", 0), ("Rows", 1)):
+            if refs is None:
+                with warnings.catch_warnings():  # the rows outside the rows read have no value
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    profile = np.nan_to_num(np.nanmedian(d, axis=axis))
+            else:
+                profile = np.median(d, axis=axis)
+            swing[side].append(_swings(profile, places[side]))
+            calm[side] += _swings(profile, _middles(places[side]))
+        if sheet and i == picks[0]:
+            shown = _sheet(sheet, tt, rr, np.nan_to_num(d), places, region, steps)
+    rows = [(side, a, b, float(np.median(s)), float(np.max(s)))
+            for side in places for (a, b), s in zip(places[side], np.array(swing[side]).reshape(len(picks), -1).T)]
+    controls = {side: float(np.median(v)) if v else None for side, v in calm.items()}
+    shows = [row for row in rows if row[3] > limit and (refs is not None or row[3] > 2 * (controls[row[0]] or 0.0))]
+    top = max(rows, key=lambda row: row[3], default=None)
+    what = "8-bit levels" if steps else "log2 of the ratio of the channels' mean"
+    against = f"against `{ref}`" if ref else f"against its own level over rows {region[0]} to {region[1]}, slow changes removed"
+    lines = [f"# The bands of `{test}` {against}", "",
+             f"Tiles of {tile} px with {overlap} px of overlap on a decode of {ww} x {wh}: a tile every {tile - overlap} px. "
+             f"Frames of {w} x {h}: {len(picks)} of {count} read, every {every}th from the first. The difference is in "
+             f"{unit} ({what}); 0 is the reference's level. A band's swing is its profile's largest value minus its smallest "
+             "across the band." + ("" if ref else " With no reference, a band shows from twice the swing at the tiles' middles."), "",
+             f"| Side | Band, px | Swing, median over the frames, {unit} | Largest swing, {unit} |", "| --- | --- | --- | --- |"]
+    lines += [f"| {side} | {a} to {b} | {med:.3f} | {big:.3f} |" for side, a, b, med, big in rows]
+    lines += ["", "The same swing at the middle of each tile's own part, the median: " + ", ".join(
+        f"{side.lower()} {'no room' if v is None else f'{v:.3f} {unit}'}" for side, v in controls.items()) + ".", ""]
+    if shows:
+        n = {side: sum(1 for row in shows if row[0] == side) for side in places}
+        lines.append(f"Bands over {limit:g} {unit}: {n['Columns']} of {len(places['Columns'])} column bands and {n['Rows']} of "
+                     f"{len(places['Rows'])} row bands. The largest: {top[3]:.3f} {unit}, {top[0].lower()} {top[1]} to {top[2]}.")
+    else:
+        lines.append(f"No band over {limit:g} {unit}: the largest swing is {top[3] if top else 0.0:.3f} {unit}.")
+    if sheet:
+        lines += ["", f"Sheet `{os.path.basename(sheet)}`: frame {picks[0] + 1}, rows {shown[0]} to {shown[1]}. From the top: the "
+                  f"tested frame, {'the reference, their difference' if ref else 'its level with slow changes removed'} (mid-grey is 0, white or black "
+                  f"{'4 steps' if steps else '0.1 stops'} or more); a gold mark over each band."]
+    text = "\n".join(lines) + "\n"
+    if out:
+        os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+        with open(out, "w") as f:
+            f.write(text)
+    print(text)
+    return {"rows": rows, "shows": shows, "largest": top[3] if top else 0.0, "controls": controls, "text": text}
+
+
+def _plate_frames(path: str, count: int):
+    """The first `count` frames of a movie or of a folder of frames, as float32 RGB in the file's own values."""
+    if os.path.isdir(path):
+        return [plateio.read_float(f) for f in plateio.find_sequence(path)[:count]]
+    import av
+    with av.open(path) as c:
+        return [f.to_ndarray(format="rgb24").astype(np.float32) / 255.0 for _, f in zip(range(count), c.decode(video=0))]
+
+
+def level(plate: str, hdr: str, color_space: str = "@model", step: int = 8, first: int = 8, out: str = "") -> dict:
+    """The HDR frames (ACES2065-1) against the plate (`color_space`), both in ACEScg, sampled every `step` px: per frame,
+    the level (the mean over R, G and B of mathops.hdr_level, HDR Match's gain of a frame), its change from
+    the frame before beside the change of the plate's mean luminance, and the HDR frame's largest value."""
+    import mathops
+    import ocio
+    files = plateio.find_sequence(hdr)
+    plates = _plate_frames(plate, len(files))
+    h, w = plates[0].shape[:2]
+    ys, xs = np.arange(step // 2, h, step), np.arange(step // 2, w, step)
+    p = ocio.convert([f[ys[:, None], xs[None, :]] for f in plates], ocio.BUILTIN, color_space, "ACEScg")
+    rows = []
+    for i, name in enumerate(files[:len(plates)]):
+        f = plateio.read_float(name)
+        s = ocio.convert([f[(ys * f.shape[0] // h)[:, None], (xs * f.shape[1] // w)[None, :]]], ocio.BUILTIN, "ACES2065-1", "ACEScg")[0]
+        stops = mathops.hdr_level(s.reshape(-1, 3), p[i].reshape(-1, 3), least=64)
+        rows.append((i + 1, None if stops is None else float(np.mean(stops)), float((p[i] @ LUMA).mean()),
+                     float((s @ LUMA).mean()), float(f.max())))
+    known = [r[1] for r in rows if r[1] is not None]
+    mid = float(np.median(known)) if known else float("nan")
+    lines = [f"# The level of `{hdr}` against `{plate}`", "",
+             f"Both in ACEScg, every {step} px. Level: the median of log2(plate / HDR) over the plate's mid-tones, the mean "
+             f"of R, G and B; 0 is the plate's level. The shot's median level: {mid:+.3f} stops.", "",
+             "| Frame | Level, stops | From the shot's median, stops | HDR's change, stops | Plate's change, stops | Largest value |",
+             "| --- | --- | --- | --- | --- | --- |"]
+    for k, (n, lv, pm, sm, top) in enumerate(rows):
+        dh = "" if k == 0 else f"{np.log2(sm / rows[k - 1][3]):+.3f}"
+        dp = "" if k == 0 else f"{np.log2(pm / rows[k - 1][2]):+.3f}"
+        if k < first or k == len(rows) - 1:
+            lines.append(f"| {n} | {'' if lv is None else f'{lv:+.3f}'} | {'' if lv is None else f'{lv - mid:+.3f}'} | {dh} | {dp} | {top:.2f} |")
+    off = [(n, lv - mid) for n, lv, *_ in rows if lv is not None and abs(lv - mid) > 0.02]
+    lines += ["", f"Frames more than 0.02 stops from the shot's median: {', '.join(f'{n} ({d:+.3f})' for n, d in off) or 'none'}."]
+    text = "\n".join(lines) + "\n"
+    if out:
+        with open(out, "w") as fh:
+            fh.write(text)
+    print(text)
+    return {"rows": rows, "median": mid, "off": off, "text": text}
+
+
 def _plate_info(path: str):
     """(width, height, frames) of a movie or of a folder of frames."""
     if os.path.isdir(path):
@@ -285,8 +478,25 @@ def node_rows(spent: dict, prompt: dict, top: int = 8) -> list:
     return rows + [(k.capitalize(), spent[k]) for k in (BEFORE, AFTER) if k in spent]
 
 
+def decode_overlap(prompt: dict, overlap: int) -> int:
+    """Set the overlap, in px, of every VAE Decode (Tiled) of a filled workflow; the count of nodes set."""
+    nodes = [n for n in prompt.values() if n.get("class_type") == "VAEDecodeTiled"]
+    for n in nodes:
+        n["inputs"]["overlap"] = overlap
+    return len(nodes)
+
+
+def save_latent(prompt: dict, prefix: str) -> str:
+    """Add core's Save Latent on the latent that the tiled decode reads, so tests/decode_cost.py can decode it again; the
+    new node's id."""
+    link = next(n["inputs"]["samples"] for n in prompt.values() if n.get("class_type") == "VAEDecodeTiled")
+    key = str(max(int(k) for k in prompt) + 1)
+    prompt[key] = {"class_type": "SaveLatent", "inputs": {"samples": link, "filename_prefix": prefix}}
+    return key
+
+
 def finish(url: str, comfy: str, plate: str, out: str, label: str = "finish", width: int = 0, height: int = 0,
-           tile=None, guide_tiled=None, color_space: str = "@model") -> dict:
+           tile=None, guide_tiled=None, color_space: str = "@model", overlap=None, latent: bool = False) -> dict:
     """SDR to HDR on a plate with no edit, as the page's Finish runs it, timed node by node: a report in `out`."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
     import build_workflows
@@ -300,6 +510,11 @@ def finish(url: str, comfy: str, plate: str, out: str, label: str = "finish", wi
               "plate_height": h, "prefix": f"{label}/hdr/f", "video_prefix": f"{label}/hdr_movie"}
     values.update({k: v for k, v in (("tile", tile), ("guide_tiled", guide_tiled)) if v is not None})
     prompt = build_workflows.fill("hdr", values)
+    if overlap is not None:
+        decode_overlap(prompt, overlap)
+    if latent:
+        save_latent(prompt, f"{label}/latent")
+    ov = next((n["inputs"]["overlap"] for n in prompt.values() if n.get("class_type") == "VAEDecodeTiled"), None)
     r = run_prompt(url, prompt, pid=_comfy_pid())
     exrs = sorted(glob.glob(os.path.join(comfy, "output", label, "hdr", "*.exr")))
     size = plateio.read_float(exrs[0]).shape[:2] if exrs else None
@@ -309,7 +524,7 @@ def finish(url: str, comfy: str, plate: str, out: str, label: str = "finish", wi
     lines = [f"# SDR to HDR on a plate with no edit: `{plate}`", "", "| | |", "| --- | --- |",
              f"| ComfyUI | {url}, job {r['job'][:8]}: {status} |",
              f"| Plate | {w} x {h}, {count} frames, working size {ww} x {wh} |",
-             f"| Slots | tile {values.get('tile', 'default')}, guide_tiled {values.get('guide_tiled', 'default')}, colour space {color_space} |",
+             f"| Slots | tile {values.get('tile', 'default')}, the decode's overlap {ov} px, guide_tiled {values.get('guide_tiled', 'default')}, colour space {color_space} |",
              f"| Seconds | {r['seconds']:.1f} |", f"| Peak VRAM | {gb(r['peaks']['vram'])}, the GPU's memory in use |",
              f"| Peak RAM | {gb(r['peaks']['ram'])}, ComfyUI's process |",
              f"| HDR frames | {len(exrs)} EXR frames" + (f" at {size[1]} x {size[0]}" if size else "") + " |", "",
@@ -340,6 +555,23 @@ if __name__ == "__main__":
     gr.add_argument("--plate", required=True)
     gr.add_argument("--export", required=True, help="the export.zip that tests/ui_live.py downloads")
     gr.add_argument("--every", type=int, default=30)
+    b = sub.add_parser("bands", help="where a tiled decode's tiles show: its frames against the same latent decoded whole")
+    b.add_argument("--ref", default="", help="the frames decoded whole: a folder of frames or one frame; with none, the frames' own level over --rows, which should be a smooth area such as a sky")
+    b.add_argument("--test", required=True, help="the frames decoded in tiles: a folder of frames or one frame")
+    b.add_argument("--tile", type=int, default=256, help="the tiled decode's tile in px")
+    b.add_argument("--overlap", type=int, default=64, help="the tiled decode's overlap in px")
+    b.add_argument("--work", default="", help="the decode's size, such as 1920x1088, when the frames were brought to another size")
+    b.add_argument("--steps", action="store_true", help="the difference in 8-bit steps, for display frames; in stops otherwise")
+    b.add_argument("--every", type=int, default=10, help="read every this many frames, from the first")
+    b.add_argument("--limit", type=float, help="the swing from which a band shows: 0.01 stops, or 0.5 steps with --steps")
+    b.add_argument("--out", default="", help="a Markdown file for the report")
+    b.add_argument("--sheet", default="", help="a PNG of the first frame read: the tested frame, the reference and their difference")
+    b.add_argument("--rows", type=int, nargs=2, default=(0, 432), help="the sheet's rows, and with no --ref the rows read: the first and the one after the last")
+    lv = sub.add_parser("level", help="the HDR frames' level against the plate, frame by frame")
+    lv.add_argument("--plate", required=True, help="the plate: a movie or a folder of frames")
+    lv.add_argument("--hdr", required=True, help="the folder of the HDR frames, in ACES2065-1")
+    lv.add_argument("--color-space", default="@model", help="the plate's file colour space in the OCIO config")
+    lv.add_argument("--out", default="", help="a Markdown file for the report")
     fi = sub.add_parser("finish", help="SDR to HDR on a plate with no edit, timed node by node, on a running ComfyUI")
     fi.add_argument("--url", default="http://127.0.0.1:8188")
     fi.add_argument("--comfy", required=True, help="ComfyUI's folder: the plate under its input folder, the frames under its output folder")
@@ -349,6 +581,8 @@ if __name__ == "__main__":
     fi.add_argument("--width", type=int, default=0, help="the working width: 0 is the plate's, up to a multiple of 32")
     fi.add_argument("--height", type=int, default=0, help="the working height: 0 is the plate's, up to a multiple of 32")
     fi.add_argument("--tile", type=int, help="the decode's tile in px, as the page's memory profile sends it")
+    fi.add_argument("--overlap", type=int, help="the decode's overlap in px; VAE Decode (Tiled) takes at most a quarter of the tile")
+    fi.add_argument("--latent", action="store_true", help="also save the latent the decode reads, under the frames' folder")
     fi.add_argument("--guide-tiled", type=int, choices=(0, 1), help="1 encodes the guide in tiles, as the page's small profile does")
     fi.add_argument("--color-space", default="@model", help="the plate's file colour space in the OCIO config")
     a = ap.parse_args()
@@ -358,6 +592,11 @@ if __name__ == "__main__":
         seam(a.plate, a.export, a.ring, a.every)
     elif a.what == "groups":
         groups(a.plate, a.export, a.every)
+    elif a.what == "level":
+        level(a.plate, a.hdr, a.color_space, out=os.path.expanduser(a.out) if a.out else "")
+    elif a.what == "bands":
+        bands(a.ref, a.test, a.tile, a.overlap, a.work, a.steps, a.every, a.limit or 0.0, os.path.expanduser(a.out) if a.out else "",
+              os.path.expanduser(a.sheet) if a.sheet else "", a.rows)
     else:
         finish(a.url, a.comfy, a.plate, os.path.expanduser(a.out), a.label, a.width, a.height, a.tile,
-               None if a.guide_tiled is None else bool(a.guide_tiled), a.color_space)
+               None if a.guide_tiled is None else bool(a.guide_tiled), a.color_space, a.overlap, a.latent)

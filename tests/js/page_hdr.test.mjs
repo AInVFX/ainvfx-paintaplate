@@ -1,4 +1,4 @@
-// The page workstream's check that SDR to HDR asks for the node classes its workflow holds (logic.workflowClasses):
+// Tests that SDR to HDR asks for the node classes its workflow holds (logic.workflowClasses):
 // the page turns SDR to HDR on when every class of web/workflows/hdr.json is present in ComfyUI.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

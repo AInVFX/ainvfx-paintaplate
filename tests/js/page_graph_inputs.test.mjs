@@ -1,4 +1,4 @@
-// The page workstream's check of what a scene's ComfyUI graph needs on disk (graph.sceneGraph, logic.graphImageName).
+// Tests of what a scene's ComfyUI graph needs on disk (graph.sceneGraph, logic.graphImageName).
 // ComfyUI's editor marks an image input as missing when its file is not in the loader's list (ComfyUI_frontend,
 // missingMediaScan.ts), and LoadImage lists only the files at the top of the input folder (ComfyUI, nodes.py). The laptop's
 // graph of 12 Nov read paintaplate/up/<hash>.png, so the editor said both of its images had no file selected.

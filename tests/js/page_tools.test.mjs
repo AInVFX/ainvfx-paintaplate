@@ -1,4 +1,4 @@
-// The page workstream's rule for the eraser's key (web/logic.mjs, eraserAfterKey). X held while a stroke is dragged rubs
+// The rule for the eraser's key (web/logic.mjs, eraserAfterKey). X held while a stroke is dragged rubs
 // the stroke out, and the eraser goes back as it was when X comes up. A tap, shorter than 0.3 s with no stroke, switches it.
 import { test } from "node:test";
 import assert from "node:assert/strict";

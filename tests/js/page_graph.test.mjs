@@ -1,4 +1,4 @@
-// The page workstream's check that a saved editor graph carries the page's API graph (graph.editorGraph): tests/graph_live.py
+// Tests that a saved editor graph carries the page's API graph (graph.editorGraph): tests/graph_live.py
 // compares it with app.graphToPrompt() in ComfyUI's own editor. The README notes stay out: the editor draws them as
 // MarkdownNote, which sends nothing.
 import assert from "node:assert/strict";

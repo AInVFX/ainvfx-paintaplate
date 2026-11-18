@@ -1,4 +1,4 @@
-// The page workstream's check of choice 1 on the HUD and the tooltips: every sentence there ends with a full stop.
+// Tests of choice 1 on the HUD and the tooltips: every sentence there ends with a full stop.
 // A label or a readout (a frame number, a zoom, « Plate ») keeps its form.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -1,5 +1,5 @@
-// The edit workstream's tests of the check after an erase (web/logic.mjs: eraseCheck, objectLeft): a removed object
-// passes; an object that stayed, or that Klein only recoloured as it did the barn on 12 November 2026, is left.
+// Tests of the check after an erase (web/logic.mjs: eraseCheck, objectLeft): a removed object
+// passes; an object that stayed, or that Klein only recoloured, is left.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";

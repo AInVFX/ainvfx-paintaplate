@@ -602,9 +602,9 @@ test("the memory profile: small under 24 GB, medium from 24 GB, large from 60 GB
   assert.equal(memoryProfile({ vram: 96 * gib }).name, "large");
   assert.equal(memoryProfile({}).name, "small", "no VRAM size: nothing loads early");
   assert.deepEqual(memoryProfile({ vram: 16 * gib }).warm, [], "small: no model loads before an action needs it");
-  assert.deepEqual(memoryProfile({ vram: 16 * gib }).slots, { tile: 256, guide_tiled: true });
+  assert.deepEqual(memoryProfile({ vram: 16 * gib }).slots, { tile: 4096, encode_tile: 256, guide_tiled: false });
   assert.match(memoryProfile({ vram: 16 * gib, ram: 64 * gib }).why, /16 GB of VRAM, 64 GB of RAM/);
-  assert.match(memoryProfile({ vram: 16 * gib }).does, /^Models load one at a time and LTX works in 256 px tiles, so each step takes longer/, "what a small card cannot do as fast is said in one sentence, in the profile's own line");
+  assert.match(memoryProfile({ vram: 16 * gib }).does, /^Models load one at a time, so each step takes longer/, "what a small card cannot do as fast is said in one sentence, in the profile's own line");
   assert.equal(memoryProfile({ vram: 17.2e9, ram: 65.5e9 }).why, "16 GB of VRAM, 61 GB of RAM", "bytes / 2**30, rounded: a 16 GB card reads 16 GB");
   assert.equal(memoryProfile({ vram: 32e9 }).why, "30 GB of VRAM", "no RAM size from ComfyUI: none is written");
   assert.deepEqual(memoryProfile({ vram: 32 * gib }).warm, ["edit", "prompt"]);
@@ -616,13 +616,13 @@ test("the memory profile: small under 24 GB, medium from 24 GB, large from 60 GB
   assert.equal(memoryProfile({ vram: 96 * gib, force: "toString" }).name, "large");
 });
 
-test("a memory profile changes slot values only: one set of workflows, tiles of 256 px and a tiled guide on a small card", () => {
+test("a memory profile changes slot values only: one set of workflows, whole decodes from 16 GB, 256 px tiles and a tiled guide under it", () => {
   const flow = (name) => parseFor(JSON.parse(readFlow(new URL(`../../web/workflows/${name}.json`, import.meta.url), "utf8")));
   const nodes = (wf, cls) => Object.values(wf.prompt).filter((n) => n.class_type === cls);
   for (const name of ["clean", "cleanup", "shot", "fluid", "hdr"]) {
-    const large = fillFor(flow(name), { ...MEMORY.large.slots }), small = fillFor(flow(name), { ...MEMORY.small.slots });
+    const large = fillFor(flow(name), { ...MEMORY.large.slots }), small = fillFor(flow(name), { ...memoryProfile({ vram: 12.9e9 }).slots });
     assert.deepEqual(Object.keys(small.prompt), Object.keys(large.prompt), `${name}: the same nodes on every card`);
-    for (const n of nodes(large, "VAEDecodeTiled")) assert.equal(n.inputs.tile_size, 512, name);
+    for (const n of nodes(large, "VAEDecodeTiled")) assert.equal(n.inputs.tile_size, 4096, name);
     for (const n of nodes(small, "VAEDecodeTiled")) assert.equal(n.inputs.tile_size, 256, name);
     for (const n of nodes(large, "LTXAddVideoICLoRAGuide")) assert.equal(n.inputs.use_tiled_encode, false, name);
     for (const n of nodes(small, "LTXAddVideoICLoRAGuide")) assert.equal(n.inputs.use_tiled_encode, true, name);
@@ -735,7 +735,7 @@ test("the time left in a step follows the sampler's own pace, not the time the m
   assert.equal(times[key], undefined);
 });
 
-// ---------- The render workstream, wave 4 [cross]: a seed asked for in the address ----------
+// ---------- a seed asked for in the address ----------
 import { askedSeed } from "../../web/logic.mjs";
 
 test("a seed asked for in the address is a whole number under 2^31, and anything else is not a seed", () => {
@@ -745,7 +745,7 @@ test("a seed asked for in the address is a whole number under 2^31, and anything
   for (const text of [null, "", "abc", "-1", "1.5", "1e3", " 7", "7 ", "2147483648", "99999999999"]) assert.equal(askedSeed(text), null, String(text));
 });
 
-// ---------- The render workstream, wave 4 [cross]: no job index when the address says ?index=0 ----------
+// ---------- no job index when the address says ?index=0 ----------
 import { plateIdentity } from "../../web/logic.mjs";
 import { indexParts } from "../../web/comfy.mjs";
 

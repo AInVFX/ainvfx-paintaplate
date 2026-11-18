@@ -2916,8 +2916,8 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const [sw, sh] = p.shot, sized = `${sw}x${sh}`, pv = (r.previews[sized] ??= {}), base = r.base;
   const relight = active.some((e) => e.tool === "light"), erases = active.filter((e) => e.tool === "erase"), erase = erases.length > 0;
   const carry = active.some((e) => e.tool !== "erase"); // paint and light: Ripple carries them through the shot
-  // what the erases make depends on the erases alone: kept by them, so a render with the same erases uses it again (a paint
-  // added over an erase tracked and cleaned it all a second time, 28 Oct)
+  // what the erases make depends on the erases alone: kept by them, so a render with the same erases uses it again, and a
+  // paint added over an erase does not track and clean it all a second time
   const ekey = erases.map((e) => `${e.id}.${e.version}`).join(",");
   const E = erase ? S.erases.get(ekey) ?? S.erases.set(ekey, { sizes: {} }).get(ekey) : null;
   r.hero ??= await uploadCanvas(r.heroFrame, `hero_v${r.v}.png`);

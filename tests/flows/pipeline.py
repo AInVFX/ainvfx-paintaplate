@@ -190,8 +190,8 @@ def hdr_video(page, U):
 
 
 def movie_name(page, U):
-    """A movie keeps its trailing digits in its name: desk_v2.mp4 is « desk_v2 », not « desk_v » (3 Nov: train_v2.mp4 showed
-    as « train_v »). Trailing digits are a frame number only in an image sequence."""
+    """A movie keeps its trailing digits in its name: desk_v2.mp4 is « desk_v2 », not « desk_v » (read as a frame
+    number, train_v2.mp4 would show as « train_v »). Trailing digits are a frame number only in an image sequence."""
     base = page.url.split("/extensions/")[0]
     movie = page.request.get(f"{base}/view?filename=desk.mp4&subfolder=plates&type=input").body()
     page.request.post(f"{base}/upload/image", multipart={"image": {"name": "desk_v2.mp4", "mimeType": "video/mp4", "buffer": movie},
