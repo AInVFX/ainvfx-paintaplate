@@ -19,7 +19,7 @@ Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com
 | **Paint** | Adds what you describe where you paint, in the style of the image. It follows your drawing's outline, pose and colours |
 | **Light** | Relights the shot. Paint where the light comes from, in its colour. Paint in black to darken an area |
 | **A fluid shot** | Starts from a blank plate. Paint flat colour blobs on a few keyframes: ainvfx-fluid turns them into smoke, steam, fire, explosions, dust, fog or clouds. The shot becomes the plate for every edit |
-| **Review** | The viewer follows OpenRV: colour through OpenColorIO, the same keys, a wipe against the plate, the Color Inspector. |
+| **Review** | The viewer follows OpenRV: colour through OpenColorIO, the same keys, a wipe against the plate, the Colour Inspector. |
 | **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers) with its matte, as one zip. For Paint and Clean the zip also holds `layer/`, the new pixels as the composite blends them: with the plate and the matte they rebuild the result. With Upscale to 4K, `4k/` holds the same set at 3840 px on the long side: for 121 frames, about 46 min for Paint or Clean on a 16 GB GPU, 23 min for the result alone, and about 14 min on a 96 GB GPU. Every pixel of an upscaled frame is new. **ComfyUI graph** saves the whole scene as one ComfyUI workflow in the editor's own format: one group per step, each with a note, to drop on ComfyUI's canvas |
 | **Finish** | The passes on the whole plate, in a menu between Save scene and Export. SDR to HDR turns an SDR result, or a plate with no edit, into half-float EXR frames. Upscale to 4K restores the result at 3840 px on the long side with SeedVR2 7B, and for Paint and Clean the plate, the new layer and the matte too |
 
@@ -112,7 +112,7 @@ The plates are synthetic shots from the dataset [AInVFX/ainvfx-paintaplate](http
 1. Press **Open plate**, then double-click a plate, for example `plates/horse.mp4`. When ComfyUI runs on your own machine, you can also type the full path of a movie, a frame of a sequence or a folder of frames.
 2. Type a few words at the top, for example "a campfire".
 3. Pick **Paint**, **Clean** or **Light** (keys P, C and L), and paint on the first frame.
-4. Press **Generate** (or Enter). The edit appears on the first frame, then the shot renders by itself: a quick preview first, then the full size.
+4. Press **Generate** (or Enter). The edit appears on the first frame, then the shot renders by itself at full size, and each pass shows live in the player. **Render > Preview** can add a quicker first pass at half or a quarter of the size.
 5. Press **Export** to write the result in the plate's own format.
 
 Each edit stays in History: click one to change it, and add as many as you need. **Save scene** keeps the plate and its edits on this ComfyUI.
@@ -123,7 +123,7 @@ Good to know:
 - Clean with **Whole object** on also takes the object's cast shadow when Klein's prompt writer points at one. If a shadow stays, clean it with a second stroke, **Whole object** off.
 - To replace a head, paint the new head over the old one. A head removed with Clean comes back as a head.
 - Paint additions on open ground. An addition painted across a foreground object breaks up during the shot.
-- Judge an effect on the full-size shot, not on the fast preview.
+- With Preview on Half size or Quarter size, judge an effect on the full-size shot, not on the preview pass.
 - Paint a plate reads each plate's colour space from its file, and the export writes every pixel back in that space. Change it in Open only for a camera's log footage, which no file tag describes: choose the camera's log space.
 
 Known limits:
@@ -134,7 +134,7 @@ Known limits:
 - A shadow painted with Light comes out soft: words can ask for a deeper one. A relight can leave a thin light or dark edge along bright outlines.
 - The check after Clean compares colours. An object of another colour that takes the removed object's place passes it, so look at the first frame.
 
-**Where the rest is.** Press `?` for the keys; the backquote key shows the plate alone, full screen. The right-click menu holds every action with its key, and the viewer's colour tools under **OCIO**. [`ARCHITECTURE.md`](ARCHITECTURE.md) explains how the pack works and how to change it. [`TESTING.md`](TESTING.md) describes every test.
+**Where the rest is.** Press `?` for the keys; the backquote key shows the plate alone, full screen, where S opens the colours and W the edit's words. The right-click menu holds every action with its key, and the viewer's colour tools under **OCIO**. [`ARCHITECTURE.md`](ARCHITECTURE.md) explains how the pack works and how to change it. [`TESTING.md`](TESTING.md) describes every test.
 
 ## When something goes wrong
 
@@ -161,7 +161,7 @@ Every step is a ComfyUI workflow from `web/workflows`: the page fills its slots 
 
 Paint a plate builds on the work of others:
 
-- **[OpenRV](https://github.com/AcademySoftwareFoundation/OpenRV)** (Academy Software Foundation). The viewer follows it: colour tools, keys, wipe and Color Inspector. **[OpenColorIO](https://github.com/AcademySoftwareFoundation/OpenColorIO)** does the colour.
+- **[OpenRV](https://github.com/AcademySoftwareFoundation/OpenRV)** (Academy Software Foundation). The viewer follows it: colour tools, keys, wipe and Colour Inspector. **[OpenColorIO](https://github.com/AcademySoftwareFoundation/OpenColorIO)** does the colour.
 - **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** runs every step, with **[ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo)** by Lightricks.
 - **The models**, each under its own licence. Read a model's licence before you use it.
 
