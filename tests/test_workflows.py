@@ -153,7 +153,7 @@ class ViewerMovies(unittest.TestCase):
                 self.assertEqual(plates, {loader}, f"{name}: the frames take the plate's rate")
 
     def test_hdr_decodes_in_128_frame_temporal_tiles(self):
-        """64-frame temporal tiles with 8 of overlap made a 0.32-stop jump at frame 56 of a 121-frame HDR shot (2 Nov)."""
+        """64-frame temporal tiles with 8 of overlap made a 0.32-stop jump at frame 56 of a 121-frame HDR shot."""
         prompt, _, _ = build_workflows.load("hdr")
         tiled = [n["inputs"] for n in prompt.values() if n["class_type"] == "VAEDecodeTiled"]
         self.assertEqual([(t["temporal_size"], t["temporal_overlap"]) for t in tiled], [(128, 32)])
@@ -176,7 +176,7 @@ class MemorySlots(unittest.TestCase):
             self.assertEqual("tile" in slots, bool(tiles), name)
 
     def test_cleanup_makes_its_start_one_frame_at_a_time(self):
-        """The second stage of the erase pass stopped ComfyUI on a 52 GB machine (12 Nov): Image Scale and Image Composite
+        """The second stage of the erase pass stopped ComfyUI on a 52 GB machine: Image Scale and Image Composite
         Masked held the whole shot at full size nine times before LTX started. Composite Frames takes the plate, the first
         stage and the blocks at their own sizes."""
         with open(os.path.join(WORKFLOWS, "cleanup.json")) as f:

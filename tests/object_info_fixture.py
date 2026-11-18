@@ -1,4 +1,4 @@
-"""The page workstream's copy of what a running ComfyUI's /object_info says about the node classes of a scene's graph:
+"""A copy of what a running ComfyUI's /object_info says about the node classes of a scene's graph:
 tests/js/object_info.scene.json, which graph.editorGraph's Node tests and the mock ComfyUI read. Nothing is queued.
 
     python tests/object_info_fixture.py --url http://127.0.0.1:8188

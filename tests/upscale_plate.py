@@ -80,9 +80,10 @@ def machine(url: str) -> tuple:
     return stats["system"]["ram_total"] / 2 ** 30, device.get("vram_total", 0) / 2 ** 30
 
 
-def export_values(shot: str, frames: int, label: str = "upscale") -> dict:
-    """The slots of the upscale_export workflow: the windows' frames, read under ComfyUI's output folder."""
-    return {"shot": shot, "frames": f"{OUTPUT}{label}/upscale", "max_frames": frames, "prefix": f"{label}/export"}
+def export_values(shot: str, frames: int, label: str = "upscale", count: int = WINDOW) -> dict:
+    """The slots of the upscale_export workflow: the windows' frames, read under ComfyUI's output folder, `count` frames
+    in each window."""
+    return {"shot": shot, "frames": f"{OUTPUT}{label}/upscale", "max_frames": frames, "count": count, "prefix": f"{label}/export"}
 
 
 def frame_size(path: str) -> tuple:
@@ -121,7 +122,7 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
     jobs = [("upscale", values(shot, w, h, n, label, f, c, color_space, color_fix, fmt, window=k, long_side=long_side))
             for k, (f, c) in enumerate(windows(n, first, count, every))]
     if every:
-        jobs.append(("upscale_export", export_values(shot, n, label)))
+        jobs.append(("upscale_export", export_values(shot, n, label, count)))
     gb = lambda x: "not read" if x is None else f"{x:.1f} GB"  # noqa: E731
     rows, nodes, seconds = [], [], []
     for name, v in jobs:

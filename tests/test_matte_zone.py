@@ -1,4 +1,4 @@
-"""Follow Matte while the tracker returns the paint zone it was given (matte workstream, wave 5, M4)."""
+"""Follow Matte while the tracker returns the paint zone it was given."""
 import os, sys, unittest
 from _env import require
 require("numpy", "scipy")
@@ -10,7 +10,7 @@ import mathops as m  # noqa: E402
 
 def scene(n=24, h=72, w=128):
     """A camera that pans 1 px per frame, an object painted in a paint zone 3.6 times its size and within its reach, and a tracker that
-    returns the zone for 10 frames before it finds the object (13 Nov 2026: 10 to 13 frames on each of five cow
+    returns the zone for 10 frames before it finds the object (10 to 13 frames on each of five cow
     recordings)."""
     rng = np.random.default_rng(7)
     wide = (ndimage.gaussian_filter(rng.random((h, w + n, 3)), (0.7, 0.7, 0)) * 0.6 + 0.2).astype(np.float32)
@@ -32,7 +32,7 @@ class PaintZone(unittest.TestCase):
         out, summary = m.follow_matte(sam, len(sam), sam[0], shot=shot, base=base, element=obj[0].astype(np.float32))
         matte = out > 0.5
         areas, tight = matte.reshape(len(matte), -1).sum(1), int(obj[10].sum())
-        self.assertLessEqual(int(areas[:13].max()), 1.5 * tight, areas[:14])  # at 32ea0a4: the whole zone, 3.6 times
+        self.assertLessEqual(int(areas[:13].max()), 1.5 * tight, areas[:14])  # without the rule: the whole zone, 3.6 times
         for t in range(13):  # no step where the tracker leaves the zone
             self.assertLess(abs(int(areas[t + 1]) - int(areas[t])), 0.3 * max(int(areas[t]), int(areas[t + 1])), (t, areas[:14]))
         for t in range(len(sam)):  # and the object is in the matte on every frame

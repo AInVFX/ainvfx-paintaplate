@@ -1,4 +1,4 @@
-"""A figure for a matte that flickers (matte workstream, wave 7, backlog D9)."""
+"""A figure for a matte that flickers."""
 import os, sys, unittest
 from _env import require
 require("numpy", "scipy")

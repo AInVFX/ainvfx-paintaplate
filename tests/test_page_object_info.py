@@ -1,4 +1,4 @@
-"""The page workstream's rules of tests/object_info_fixture.py, with no ComfyUI: what a class keeps of /object_info."""
+"""The rules of tests/object_info_fixture.py, with no ComfyUI: what a class keeps of /object_info."""
 import json
 import unittest
 

@@ -194,7 +194,7 @@ def frames_apart(a, b):
 def lossless(prompt):
     """The same workflow with its movies written without loss (crf 0): their decoded pixels are then the frames Save Movie
     was handed. With loss, x264 does not always make the same movie from the same frames (its MB-tree, in assembly: up to
-    7 different movies in 12 from 17 frames of 960 x 540 at crf 12, on 12 Nov), so two such movies cannot be compared
+    7 different movies in 12 from 17 frames of 960 x 540 at crf 12), so two such movies cannot be compared
     pixel for pixel."""
     for node in prompt.values():
         if node["class_type"] == "PaintAPlate_SaveMovie":

@@ -1,4 +1,4 @@
-"""tests/hdr_plate.py: the HDR test plate the laptop makes from horse.mp4, and its measure of the seam."""
+"""tests/hdr_plate.py: the HDR test plate made from horse.mp4, and its measure of the seam."""
 import os
 import sys
 import tempfile

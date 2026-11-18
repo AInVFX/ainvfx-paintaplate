@@ -133,7 +133,7 @@ def same(video_from_file, path: str, max_frames: int):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--comfy", required=True, help="ComfyUI's folder: its core decoder is imported from there")
-    ap.add_argument("--plates", nargs="*", default=[], help="more movies to compare, such as the laptop's plates")
+    ap.add_argument("--plates", nargs="*", default=[], help="more movies to compare, such as another machine's plates")
     ap.add_argument("--max-frames", type=int, nargs="+", default=[17, 121])
     a = ap.parse_args()
     gone = [p for p in a.plates if not os.path.isfile(p)]

@@ -1,4 +1,4 @@
-"""The build line that routes.py writes when ComfyUI starts (render workstream, wave 7, R16): ComfyUI-LTXVideo's figure says
+"""The build line that routes.py writes when ComfyUI starts: ComfyUI-LTXVideo's figure says
 whether it is a commit or the hash of its Python files. The job index key (build_parts) keeps its value as it is."""
 import json
 import os

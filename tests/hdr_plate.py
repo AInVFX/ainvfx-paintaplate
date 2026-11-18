@@ -1,5 +1,5 @@
-"""An HDR test plate made from an SDR movie, and the level of an edit against it at the seam: the laptop's proof that the
-way back from the model space keeps the plate's levels (PLA, the colour review's proposal A), without a pod.
+"""An HDR test plate made from an SDR movie, and the level of an edit against it at the seam: a local proof that the
+way back from the model space keeps the plate's levels (PLA), without a pod.
 
   make  The movie becomes half-float EXR frames in scene-linear Rec.709, lifted by the inverse of core's tone mapping to
         a peak near `--peak`. The models then see the movie as it was, so the same seed and strokes make the edit of the

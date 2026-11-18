@@ -163,7 +163,7 @@ def raw(a):
 def resized(img, size):
     """An image (H x W [x C], 8 bits) drawn at `size` (width, height) as the page's canvas draws it: bilinear, sampled at each
     new pixel's centre, with no average over a wider area. An average (Pillow's resize) grew the barn's grid by a row on top,
-    and the probe asked with [343, 721, 490, 1000] where the page asked with [362, 721, 490, 1000] (12 and 13 Nov 2026)."""
+    and the probe asked with [343, 721, 490, 1000] where the page asked with [362, 721, 490, 1000]."""
     h, w = img.shape[:2]
     W, H = size
     if (w, h) == (W, H):

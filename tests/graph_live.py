@@ -1,4 +1,4 @@
-"""The page workstream's check of a scene's graph in ComfyUI's own editor, on Adrien's laptop. Nothing is queued.
+"""A check of a scene's graph in ComfyUI's own editor, on the machine that runs ComfyUI. Nothing is queued.
 
     python tests/graph_live.py --url http://127.0.0.1:8188 --graph <scene.comfyui.json> --out ~/paintaplate_gpu/graph_live
 
@@ -28,7 +28,7 @@ import urllib.parse
 import urllib.request
 
 FRONTEND_ONLY = {"MarkdownNote", "Note", "Reroute", "PrimitiveNode"}  # nodes the editor draws with no class in /object_info
-FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "js", "object_info.scene.json")  # --offline: the laptop's copy
+FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "js", "object_info.scene.json")  # --offline: a copy saved from a running ComfyUI
 TITLE, SLOT, LONG = 30, 20, 1500  # px: LiteGraph's title bar and slot row; a link longer than LONG crosses most of a screen
 LOADERS = ("LoadImage", "LoadImageMask")
 APP = "(window.app ?? window.comfyAPI?.app?.app)"

@@ -29,8 +29,8 @@ LOG = """15:02:31ingest ef88a8f3: done in 2.0 s (10 nodes, 3 from ComfyUI's cach
 
 class Report(unittest.TestCase):
     def test_a_retry_is_counted_by_its_own_line(self):
-        """The laptop's erase of 12 Nov showed one out-of-memory retry where none happened: ComfyUI had stopped, and the
-        page's message for a stop also says « ran out of memory »."""
+        """A stop of ComfyUI counts no out-of-memory retry, although the page's message for a stop also says « ran out of
+        memory »."""
         stopped = ("09:14:58Erase pass, full size failed: ComfyUI stopped answering. Its terminal says why: most often the machine "
                    "ran out of memory. Start ComfyUI again. Generate tries again.\n")
         self.assertEqual(gpu_matrix.read_log(stopped)["oom"], 0)
@@ -65,8 +65,8 @@ class Seeds(unittest.TestCase):
     """A case runs from its own seed with its strokes as written, so a wrong picture comes back at the next run."""
 
     def test_every_case_holds_a_seed(self):
-        """The laptop's erase of 12 Nov (1.11.10) left its object in the picture. The page had drawn its seed, 1017942128,
-        and the GPU test had moved the strokes: the next run would have made another picture."""
+        """A case paints the same strokes from its own seed (horse_erase: 1017942128) at every run, so a wrong picture comes
+        back at the next run."""
         cases = gpu_matrix.load_cases()
         for name in gpu_matrix.ALL:
             self.assertIsInstance(cases[name].get("seed"), int, name)
@@ -76,8 +76,7 @@ class Seeds(unittest.TestCase):
         self.assertEqual(cases["uhd_erase"]["strokes"][0][3], 2 * cases["horse_erase"]["strokes"][0][3], "and its strokes, the brush scaled")
 
     def test_the_erase_with_its_object_named_is_the_erase_with_two_words(self):
-        """With no words, Klein's prompt writer named the horse and the barn stayed (the laptop, 12 Nov, at 1.11.9 and at
-        1.11.10). The same stroke from the same seed with « the barn » says whether a name is enough."""
+        """With no words, Klein's prompt writer can name the horse, and the barn stays. The same stroke from the same seed with « the barn » says whether a name is enough."""
         cases = gpu_matrix.load_cases()
         plain, named = cases["horse_erase"], cases["horse_erase_barn"]
         self.assertEqual((plain["strokes"][0][1], named["strokes"][0][1]), ("", "the barn"))
@@ -165,7 +164,7 @@ class Run(unittest.TestCase):
                 return calls, code, f.read()
 
     def test_a_run_stops_when_comfyui_has_stopped(self):
-        """On the laptop (12 Nov) ComfyUI stopped in horse_erase, and the two cases left each failed in 31 s with a traceback."""
+        """When ComfyUI stops in a case, the cases left are not started: each would fail in 31 s with a traceback."""
         calls, code, report = self.matrix("horse_cow,horse_erase,horse_light,fluid_720", [True, False])
         self.assertEqual((calls, code), (["horse_cow", "horse_erase"], 1))
         for name in ("horse_light", "fluid_720"):
@@ -175,7 +174,7 @@ class Run(unittest.TestCase):
 
     def test_the_report_is_written_when_a_job_ran(self):
         """A job's row gives its seconds in ComfyUI. The report kept them under the name of its list of cases: it stopped
-        after the first case whose last job had run, and the cases left were not started (the laptop, 12 Nov, 1.11.10)."""
+        after the first case whose last job had run, and the cases left were not started."""
         GB = gpu_matrix.GB
         ran = {"name": "cleanup", "id": "5b938984", "seconds": 88.3, "run": 88.0, "vram": 15 * GB, "ram": 38 * GB, "own": 38 * GB,
                "cached": 13, "nodes": 36, "previews": 1}
@@ -228,7 +227,7 @@ class Run(unittest.TestCase):
             self.assertEqual(len(r["live_off"]), 1)
 
     def test_fresh_frees_comfyui_before_each_case(self):
-        """On the pod of 11 Nov a case's first job read the 138 GB that the case before it had left."""
+        """Without --fresh, a case's first job can read the memory that the case before it left (138 GB on a pod)."""
         calls, _, report = self.matrix("horse_cow,horse_erase", [True], "--fresh")
         self.assertEqual(calls, ["free", "horse_cow", "free", "horse_erase"])
         self.assertIn("| Before each case | ComfyUI is freed (--fresh) |", report)
@@ -329,7 +328,7 @@ class PodStart(unittest.TestCase):
 
 
 class Tools(unittest.TestCase):
-    """The GPU tools do not depend on the page's words and keys (wave 5, R8). A stroke names its tool by its button's
+    """The GPU tools do not depend on the page's words and keys. A stroke names its tool by its button's
     data-tool, which stays when a label or a key changes, and a matte line is read whatever word comes before « matte »."""
 
     def test_every_stroke_names_a_tool_the_page_has(self):
@@ -381,13 +380,13 @@ class ReportLines(unittest.TestCase):
     def test_an_erase_gives_the_page_s_figure(self):
         log = "11:02:06 PM Edit 1: the object left the first frame (59% of it changed)\n"
         self.assertEqual(gpu_matrix.read_log(log)["figures"], ["Edit 1: the object left the first frame (59% of it changed)"])
-        held = "11:02:06 PM Edit 1: the object may still be there (17% of it changed, edges held at 0.62)\n"  # the page's line since wave 7 (logic.leftLines)
+        held = "11:02:06 PM Edit 1: the object may still be there (17% of it changed, edges held at 0.62)\n"  # the page's line (logic.leftLines)
         self.assertEqual(gpu_matrix.read_log(held)["figures"], ["Edit 1: the object may still be there (17% of it changed, edges held at 0.62)"])
         warned = "11:02:06 PM Warning: edit 1, the object may still be there (17% of it changed, edges held at 0.62).\n"  # the page's line as a warning
         self.assertEqual(gpu_matrix.read_log(warned)["figures"], ["Warning: edit 1, the object may still be there (17% of it changed, edges held at 0.62)"])
 
     def test_without_fresh_a_first_job_can_read_the_case_before(self):
-        """horse_erase_barn's ingest on the laptop, 12 Nov: 30.3 GB of peak RAM for a 2.6 s job, the case before's memory."""
+        """An ingest of 2.6 s with 30.3 GB of peak RAM: the memory the case before left, not its own."""
         r, gb = {"jobs": [{"name": "ingest", "id": "69cce02d", "run": 2.6, "ram": 30.3e9}]}, (lambda x: f"{x / 1e9:.1f} GB")
         note = gpu_matrix.carried(r, False, gb)
         self.assertTrue(len(note) == 1 and "ingest 69cce02d" in note[0] and "--fresh" in note[0], note)
@@ -395,8 +394,8 @@ class ReportLines(unittest.TestCase):
 
 
 class MatteCases(unittest.TestCase):
-    """Two cases for the matte agent (wave 5, R4), outside quick and all: a paint on a moving object, and an object that
-    stands still for 12 frames or more, then leaves by itself (Adrien accepted that the matte loses it and wants a recording)."""
+    """Two cases that record the follow matte, outside quick and all: a paint on a moving object, and an object that
+    stands still for 12 frames or more, then leaves by itself (the matte loses it: a known limit)."""
 
     def test_two_paint_cases_outside_quick_and_all(self):
         cases = gpu_matrix.load_cases()
@@ -412,7 +411,7 @@ class MatteCases(unittest.TestCase):
 
 
 class Estimates(unittest.TestCase):
-    """Each step beside what the page announced before it started (wave 5, R2): a GPU run checks the estimates."""
+    """Each step beside what the page announced before it started: a GPU run checks the estimates."""
 
     def test_the_report_holds_each_step_against_its_announcement(self):
         log = ("11:02:07 PM Render v1: Track the erase (about 12 s)\n11:02:36 PM Render v1: Track the erase took 28.7 s\n"
@@ -423,7 +422,7 @@ class Estimates(unittest.TestCase):
 
 
 class NodeClock(unittest.TestCase):
-    """Where a job's time goes (wave 5, D7): ui_live.py keeps ComfyUI's « executing » messages, gpu_matrix.py sums them by node."""
+    """Where a job's time goes: ui_live.py keeps ComfyUI's « executing » messages, gpu_matrix.py sums them by node."""
 
     def test_each_node_s_seconds_from_comfyui_s_executing_messages(self):
         pid = "b05b5b84-7022-4f56-a1c9-cf9dc1a678cd"
@@ -449,7 +448,7 @@ class NodeClock(unittest.TestCase):
 
 
 class Hdr(unittest.TestCase):
-    """--hdr (wave 6, R13, the plate workstream's proposal): SDR to HDR on for a run, so HDR Match's line can be read."""
+    """--hdr: SDR to HDR on for a run, so HDR Match's line can be read."""
 
     def test_hdr_reaches_ui_live_for_a_run_or_a_case(self):
         a = argparse.Namespace(url="http://127.0.0.1:8188", comfy="/comfy", channel="chrome", timeout=900, memory="", graph=False)
@@ -484,7 +483,7 @@ class Hdr(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec("av") and importlib.util.find_spec("PIL"), "the sheet reads movies with PyAV, draws with Pillow")
 class Sheet(unittest.TestCase):
-    """The pictures (wave 6, R10): the plate and the export around each edit, on four frames, from an export.zip laid out as
+    """The pictures: the plate and the export around each edit, on four frames, from an export.zip laid out as
     the page writes it: export/<plate>.mp4, matte/matte_00001_.png and on, MODELS.md."""
 
     def test_the_sheet_follows_the_matte_and_shows_what_the_export_lost(self):
@@ -566,7 +565,7 @@ class Sheet(unittest.TestCase):
         self.assertIn("no verdict", gpu_matrix.sheet(case, tmp, plate)["verdict"]["text"], "no mask from the page, no verdict")
 
 class StoppedComfy(unittest.TestCase):
-    """hdr_cow on the laptop, 13 Nov: ComfyUI stopped in SDR to HDR, its /history went with it, and the report named nodes
+    """When ComfyUI stops in a case, its /history goes with it, and the report would name nodes
     « node 26 ». The pack's own workflows name them; the node that had no end is the one running at the stop."""
 
     def test_nodes_are_named_from_the_pack_s_workflow_when_history_is_gone(self):
@@ -718,7 +717,7 @@ class Verdict(unittest.TestCase):
         self.assertEqual([n for n, c in gpu_matrix.load_cases().items() if "expect" in c], [])
 
     def test_ui_live_ends_on_a_row_marked_left_even_behind_a_dialog(self):
-        """The edit agent's dialog (« Render anyway » or « Cancel ») can keep its row busy: ui_live.py waits for the rows to
+        """The page's dialog (« Render anyway » or « Cancel ») can keep its row busy: ui_live.py waits for the rows to
         finish or for a row marked left, whichever comes first, and tells a name asked from an object left."""
         tool = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui_live.py"), encoding="utf-8").read()
         self.assertIn("|| !!document.querySelector('{LEFT}')", tool)

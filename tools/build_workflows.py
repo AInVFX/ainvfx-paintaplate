@@ -325,7 +325,7 @@ def erased_grid(g, matte):
 
     Blocks hide the object's outline: shown its own outline moving, LTX drew a car back where the van had been. They keep the
     background around the object in view, so LTX continues it. One grown box per frame also hid the outline, but around a
-    truss, a crane and a door it covered the whole backdrop, and LTX animated a faint fill there into smoke (28 Oct).
+    truss, a crane and a door it covered the whole backdrop, and LTX animated a faint fill there into smoke.
     """
     cells = g("GrowMask", _title="One block more on every side", expand=Slot("grid_grow", 1), tapered_corners=False,
               mask=g("ThresholdMask", _title="Every block the matte touches", value=0.02,
@@ -393,14 +393,14 @@ def cleanup():
     The first stage is the erase pass at half the working size (`clean`). Its frames, enlarged, go inside the erased blocks
     over the plate at full size, and LTX refines them in 2 steps from sigma 0.725, with the IC-LoRA and without the reference
     video, as the official workflow does. The erased first frame is kept as it is (strength 1). 8 steps at full size took
-    181 s on a 1080p plate, this stage 82.8 s, 30.1 s of it saving the frames (28 Oct).
+    181 s on a 1080p plate, this stage 82.8 s, 30.1 s of it saving the frames.
 
     Composite Frames makes that start one frame at a time and holds it once: 2.8 GB for 121 frames at 1920 x 1088. Image
     Scale and Image Composite Masked made the same pictures from the whole shot: the plate, the first stage and the blocks
     at full size (9.4 GB), then core's composite, which holds four copies of the shot and two of its mask at its peak:
     13.2 GB. On a 16 GB card with 52 GB of RAM, ComfyUI stopped there, 16.5 GB above the 32.0 GB it held after the first
-    stage (12 Nov). With Composite Frames, the laptop measured this stage posted at 28.5 GB, 31.8 GB before LTX loaded,
-    and 38.3 GB at its peak (1.11.10).
+    stage. With Composite Frames, this stage measured 28.5 GB when posted, 31.8 GB before LTX loaded,
+    and 38.3 GB at its peak, on a 16 GB GPU under a cap of 52 GB.
     """
     g = Graph()
     load, model = plate(g, pad=True)
@@ -428,7 +428,7 @@ def cleanup():
                 sampler=g("KSamplerSelect", sampler_name="euler"), sigmas=g("ManualSigmas", sigmas=REFINE_SIGMAS),
                 latent_image=g("LTXVConcatAVLatent", video_latent=latent, audio_latent=audio))
     # Tiled as the hdr workflow (128-frame temporal tiles, 32 of overlap), on every card: on a 32 GB card a whole 1920 x 1088
-    # x 121 decode ran out of memory and ComfyUI retried with its own default tiles (2 Nov), whose 64-frame tiles made SDR to
+    # x 121 decode ran out of memory and ComfyUI retried with its own default tiles, whose 64-frame tiles made SDR to
     # HDR's frames jump at frame 56
     decoded = g("VAEDecodeTiled", tile_size=Slot("tile", 512), overlap=64, temporal_size=128, temporal_overlap=32, vae=vae, samples=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])
     g("PaintAPlate_SaveFrames", _title="Clean frames", _output="frames", images=decoded, format=Slot("frames_format", "png"),
@@ -473,7 +473,7 @@ def shot():
     video_latent = g("LTXVSeparateAVLatent", av_latent=sampled[0])
     cropped = g("LTXVCropGuides", positive=guide[0], negative=guide[1], latent=video_latent[0])
     # Tiled as the hdr workflow (128-frame temporal tiles, 32 of overlap), on every card: on a 32 GB card a whole 1920 x 1088
-    # x 121 decode ran out of memory and ComfyUI retried with its own default tiles (2 Nov), whose 64-frame tiles made SDR to
+    # x 121 decode ran out of memory and ComfyUI retried with its own default tiles, whose 64-frame tiles made SDR to
     # HDR's frames jump at frame 56
     decoded = g("VAEDecodeTiled", tile_size=Slot("tile", 512), overlap=64, temporal_size=128, temporal_overlap=32, samples=cropped[2], vae=vae)
     g("PaintAPlate_SaveFrames", _title="Shot frames", _output="frames", images=decoded, format=Slot("frames_format", "png"),
@@ -568,7 +568,7 @@ def mattes(g):
     """The erase and paint mattes as one mask, at the paint matte's size. A missing matte is the other one again (the page
     sets both). The erase is tracked smaller (ERASE_TRACK_SIDE in app.mjs: 576 x 320 for a 1080p plate, the paint at
     960 x 544), and Combine Masks crops its source to its destination instead of scaling it: the paint matte kept only its
-    top-left corner, stretched, so a boat painted on a plate with an erase vanished from the composite (29 Oct)."""
+    top-left corner, stretched, so a boat painted on a plate with an erase vanished from the composite."""
     erase = g("PaintAPlate_LoadPlate", _title="Clean matte", path=Slot("matte_a", ""), max_frames=1024, pad_8n1=False)
     add = g("PaintAPlate_LoadPlate", _title="Paint matte", path=Slot("matte_b", ""), max_frames=1024, pad_8n1=False)
     size = g("GetImageSize", image=add)
@@ -691,7 +691,7 @@ def export():
                   filename_prefix=Slot("prefix", "paintaplate/plate/export"), keep_untouched=Slot("keep_untouched", True),
                   changed=fit[1])
     g.link_slot(plate_out, "images", "export_plate")  # dropped for an EXR result: a video file cannot hold values above 1.0
-    # SDR to HDR on a plate whose format cannot hold values above 1.0 (a video, an integer sequence): Adrien, 2 Nov, the export
+    # SDR to HDR on a plate whose format cannot hold values above 1.0 (a video, an integer sequence): the export
     # is the result as half-float EXR frames, in ACES2065-1 as every HDR file here
     # Each writer takes its batch as it is and saves the plate's own frames (`frames`, without Load Plate's padding): no
     # second batch of the shot is held
@@ -778,7 +778,7 @@ def fluid():
                 sampler=g("KSamplerSelect", sampler_name="euler_ancestral"), sigmas=g("ManualSigmas", sigmas=INPAINT_SIGMAS),
                 latent_image=g("LTXVConcatAVLatent", video_latent=guide[2], audio_latent=audio))
     # Tiled as the hdr workflow (128-frame temporal tiles, 32 of overlap), on every card: on a 32 GB card a whole 1920 x 1088
-    # x 121 decode ran out of memory and ComfyUI retried with its own default tiles (2 Nov), whose 64-frame tiles made SDR to
+    # x 121 decode ran out of memory and ComfyUI retried with its own default tiles, whose 64-frame tiles made SDR to
     # HDR's frames jump at frame 56
     decoded = g("VAEDecodeTiled", tile_size=Slot("tile", 512), overlap=64, temporal_size=128, temporal_overlap=32, vae=vae, samples=g("LTXVCropGuides", positive=guide[0], negative=guide[1],
                                                  latent=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])[2])
@@ -840,7 +840,7 @@ def hdr():
     video = g("LTXVCropGuides", positive=guided[0], negative=guided[1], latent=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])
     # 128-frame temporal tiles with 32 frames of overlap, as Lightricks' Tiled Fusion SDR-to-HDR graph. The distilled graph's
     # 64 with 8 made the HDR frames of a 121-frame fluid shot jump 0.32 stops at frame 56, where the second tile starts; with
-    # 128 and 32 the largest step was 0.07 stops, the SDR shot's own (RTX PRO 6000, 2 Nov 2026).
+    # 128 and 32 the largest step was 0.07 stops, the SDR shot's own (RTX PRO 6000).
     decoded = g("VAEDecodeTiled", samples=video[2], vae=vae, tile_size=Slot("tile", 512), overlap=64, temporal_size=128, temporal_overlap=32)
     linear = colour(g, decoded, "ACEScct", "ACEScg", "ACEScct to ACEScg scene-linear")
     # where the SDR shot is black, its own black: the IC-LoRA's frames are noisy there (mathops.keep_black). Keep Black
@@ -862,7 +862,7 @@ def hdr():
         g.link_slot(matched, key, "plate_level")
     linear = matched
     # each frame says the shot's frame rate, the one the page sends for the movie below: a 16-bit fluid shot's frames open
-    # as a plate, and that plate took 24 fps for a shot made at 50 (pod, 11 Nov)
+    # as a plate, and that plate took 24 fps for a shot made at 50 (on a pod)
     g("PaintAPlate_SaveFrames", _title="HDR frames (half-float EXR, ACES2065-1)", _output="hdr", format="exr", fps=Slot("movie_fps", 24.0), chromaticities="AP0", frames=load[4],
       images=colour(g, linear, "ACEScg", HDR_SPACE, "ACEScg to ACES2065-1"), filename_prefix=Slot("prefix", "paintaplate/plate/hdr/f"))
     # the same frames as an 8-bit movie for the viewer, in log values (ACEScct, `view_space`): the look of the EXR frames
@@ -943,12 +943,14 @@ def upscale():
 
 def upscale_export():
     """Upscale to 4K's export, after the last window. Join Windows reads the windows' folders under one parent folder
-    (Slot frames), in order; a shot made in one job is one window. Save Plate writes the joined frames at their own size, in the format of the export at the plate's size (Slot
+    (Slot frames), in order, each window its last frames (Slot count) and the last window what is left of the shot's
+    frames (Slot max_frames), so a window job that ran again counts once; a shot made in one job is one window. Save Plate writes the joined frames at their own size, in the format of the export at the plate's size (Slot
     shot), which Load Plate reads for its spec: the same file type, codec, bit depth, frame numbers, colour tags, timecode
     and audio. The frames are in the plate's colour space already, so nothing converts them."""
     g = Graph()
     shot = g("PaintAPlate_LoadPlate", _title="Result: its format", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
-    frames = g("PaintAPlate_JoinWindows", _title="Upscaled windows, joined", folder=Slot("frames", ""))
+    frames = g("PaintAPlate_JoinWindows", _title="Upscaled windows, joined", folder=Slot("frames", ""),
+               count=Slot("count", 0), max_frames=Slot("max_frames", 121))
     g("PaintAPlate_SavePlate", _title="Upscaled export", _output="export", images=frames, plate=shot[2],
       filename_prefix=Slot("prefix", "paintaplate/plate/upscaled"), keep_untouched=False)
     g.save("upscale_export")
