@@ -1,4 +1,4 @@
-"""The edit workstream's check of « No, cancel » on an erase that the page's check holds back (tests/flows/README.md). After a
+"""The check of « No, cancel » on an erase that the page's check holds back (tests/flows/README.md). After a
 stop, Enter runs the edit that was stopped, then every edit that waited and every edit with no result (queueWaiting). An
 erase refused at the question has no result. After « No »: no job of this edit runs, the question does not come back until
 the edit changes, and the status line says what to do. Another seed changes the edit: it runs, and the check asks again.

@@ -597,6 +597,13 @@ def half(g, image):
     return g("ImageScaleBy", image=image, upscale_method="area", scale_by=0.5)
 
 
+def xray_matte(g, fit, load):
+    """The matte the composite blends the shot in with (Fit to Plate's, aligned to the plate), as a grey movie: the X-ray
+    shows it, so its tint covers what the composite changes."""
+    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Matte movie (grey): the X-ray shows it",
+      _output="matte_movie", images=g("MaskToImage", mask=fit[1]), frames=load[4], fps=load[3], crf=18, filename_prefix=Slot("matte_video_prefix", ""))
+
+
 def comp():
     """The composite at preview size, as an MP4 to play in the page: what the export will look like."""
     g = Graph()
@@ -608,7 +615,8 @@ def comp():
     relit = g("PaintAPlate_RelightTransfer", plate=small, source=half(g, small), relit=half(g, gen),
               plate_space="sRGB", shot_space="sRGB", radius=Slot("radius", 1), strength=Slot("strength", 1.0), align=True)
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=small, on_true=relit)
-    _, final = fitted(g, base, gen, union)
+    fit, final = fitted(g, base, gen, union)
+    xray_matte(g, fit, load)
     # the writer takes the composite as it is and saves the plate's own frames (`frames`): no second batch of the shot
     g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Composite preview", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/comp"), images=final, frames=load[4], fps=load[3])
     g.save("comp")
@@ -653,7 +661,8 @@ def review():
     plate's own colour space, which the viewer reads at full precision. It runs right after the full-size passes;
     nothing here is written for compositing software (that is export, when Export is pressed)."""
     g = Graph()
-    load, _, final = composite(g)
+    load, fit, final = composite(g)
+    xray_matte(g, fit, load)
     # Each writer takes the composite as it is: it saves the plate's own frames (`frames`, without Load Plate's padding) and
     # converts each frame as it saves it, so no second batch of the shot is held
     g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Review movie (full-size composite, H.264)", _output="review", images=final, frames=load[4],

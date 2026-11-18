@@ -1,4 +1,4 @@
-"""The edit workstream's check of a relight with a shade stroke (tests/flows/README.md). A dark stroke of the light brush is
+"""The check of a relight with a shade stroke (tests/flows/README.md). A dark stroke of the light brush is
 a shade: it reaches Klein in words (logic.lightIntent: « The … of the frame falls into deep shadow. »), and the page uploads
 no picture of it, so Relight Transfer darkens nothing in the stroke's shape. Darkened where painted, a shade read as a streak
 of paint; Klein, told where the shadow falls, darkens that part of the frame as the scene's light would."""

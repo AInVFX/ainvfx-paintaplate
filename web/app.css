@@ -208,11 +208,10 @@ dialog .check small { color: var(--muted); }
 .hdr-switch { display: flex; gap: 6px; align-items: center; margin: 0 0 8px; color: var(--muted); font-size: 12px; cursor: pointer; }
 .hdr-switch[hidden] { display: none; }
 
-.live-inset { position: absolute; right: 12px; bottom: 12px; z-index: 4; width: min(30%, 320px); margin: 0; overflow: hidden; pointer-events: none;
-  background: #000; border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: 0 6px 18px #000a; }
-.live-inset[hidden] { display: none; }
-.live-inset img { display: block; width: 100%; height: auto; }
-.live-inset figcaption { padding: 3px 8px; font-size: 11px; color: var(--muted); background: var(--panel); }
+.live { position: absolute; z-index: 4; margin: 0; overflow: hidden; pointer-events: none; background: #000; }
+.live[hidden] { display: none; }
+.live img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.live figcaption { position: absolute; left: 8px; bottom: 8px; padding: 3px 8px; font-size: 11px; color: var(--muted); background: var(--panel); }
 
 /* Log */
 /* Dividers: the side panel's width and the open log's height drag (app.mjs, layoutUI) */
@@ -312,6 +311,10 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 
 /* the Open dialog: one tab per source; the browser lists folders, videos and sequences, drawn as they scroll into view */
 dialog.open { width: min(900px, 94vw); }
+dialog.colours { position: fixed; inset: 16px auto auto 16px; z-index: 30; width: auto; margin: 0; padding: 10px 12px; }
+dialog.colours h2 { margin: 0 0 8px; font-size: 13px; }
+dialog.colours .swatches { grid-template-columns: repeat(6, 26px); padding-top: 0; border: 0; }
+dialog.colours menu { margin-top: 10px; }
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 0 12px; }
 .tabs [role="tab"] { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted); padding: 8px 12px; }
 .tabs [role="tab"][aria-selected="true"] { color: var(--text); border-bottom-color: var(--gold); }
@@ -357,7 +360,7 @@ dialog.open { width: min(900px, 94vw); }
 #stages li.shown .dot { box-shadow: 0 0 0 2px var(--gold); }
 .render-hint { margin: 6px 0 0; font-size: 12px; }
 
-/* ---------- Viewer: colour, OCIO, the colour inspector (the viewer workstream adds its rules below) ---------- */
+/* ---------- Viewer: colour, OCIO, the colour inspector ---------- */
 .inspector { position: absolute; left: 12px; top: 12px; z-index: 6; min-width: 220px; padding: 8px 10px; border-radius: 6px;
   background: rgba(10, 10, 12, 0.82); color: #e8e8e8; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; cursor: move; touch-action: none; user-select: none; }
 .inspector div { display: flex; justify-content: space-between; gap: 16px; }
@@ -369,13 +372,14 @@ dialog.open { width: min(900px, 94vw); }
 #help .help-keys { columns: 3 320px; column-gap: 28px; } /* the one table of keys, in three columns */
 #help .help-keys > div { break-inside: avoid; }
 #help .help-keys h3:first-child { margin-top: 0; }
+#help .help-keys > div + div { margin-top: 18px; } /* room above each section's heading, so its keys read as one group */
 #help .tabs { flex-wrap: wrap; }
 .help-steps { margin: 0; padding-left: 20px; color: var(--muted); }
 .help-steps li { margin: 0 0 8px; }
 #help form { margin-top: 8px; }
 #help .model-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 20px; } /* every model in four columns, the size of the other tabs */
 #help .model-cards article { border-top: 1px solid rgba(128, 128, 128, 0.25); padding-top: 4px; font-size: 12px; line-height: 1.35; }
-#help .model-cards article.behind { border-top: 2px solid var(--gold); } /* a model behind the result on show */
+#help .model-cards article.behind { background: rgb(245 184 0 / 0.2); border-top-color: transparent; border-radius: 4px; padding: 4px 6px; margin: 0 -6px; } /* a model of the job on show: the whole card tinted */
 #help .model-cards p { margin: 0 0 2px; }
 #help .model-cards small { opacity: 0.7; overflow-wrap: anywhere; }
 #help .model-cards article > small { display: block; }
@@ -384,7 +388,7 @@ dialog.open { width: min(900px, 94vw); }
 .xray { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
 #stages li.compared .name { text-decoration: underline dotted; text-underline-offset: 3px; }
 
-/* ---------- Render, Deliver, passes (the pipeline workstream adds its rules below) ---------- */
+/* ---------- Render, Deliver, passes ---------- */
 .finish { position: fixed; z-index: 40; width: 380px; max-width: calc(100vw - 16px); box-sizing: border-box; padding: 12px 14px; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }
 .finish h2 { margin: 0 0 4px; }
 .finish ol { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 12px; }

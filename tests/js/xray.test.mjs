@@ -5,13 +5,13 @@ import { XRAY_ALPHA, alphaFromHalfs, halfToFloat, tintPixels, xrayPlan } from ".
 const r = { erased: { found: { movie_a: "a" } }, full: { found: { movie_a: "a", movie_b: "bf" } }, exported: null };
 const pv = { mattes: { found: { movie_a: "a", movie_b: "bp" } } };
 
-test("the X-ray's mattes: a light edit tints the whole frame, the export's matte once made, else the size on show", () => {
+test("the X-ray's mattes: a light edit tints the whole frame, the export's matte once made, else the tracking mattes of the size on show until its composite", () => {
   assert.deepEqual(xrayPlan({ tools: [] }), { from: "none", urls: [] });
   assert.deepEqual(xrayPlan({ tools: ["paint", "light"], r, pv, full: true }), { from: "light", urls: [] });
-  assert.deepEqual(xrayPlan({ tools: ["paint", "erase"], r, pv, full: true }), { from: "full", urls: ["a", "bf"] });
-  assert.deepEqual(xrayPlan({ tools: ["paint", "erase"], r, pv, full: false }), { from: "preview", urls: ["a", "bp"] });
+  assert.deepEqual(xrayPlan({ tools: ["paint", "erase"], r, pv, full: true }), { from: "tracking", urls: ["a", "bf"] });
+  assert.deepEqual(xrayPlan({ tools: ["paint", "erase"], r, pv, full: false }), { from: "tracking", urls: ["a", "bp"] });
   assert.deepEqual(xrayPlan({ tools: ["paint"], r: { ...r, exported: { matte: "m" } }, pv, full: false }), { from: "export", urls: ["m"] });
-  assert.deepEqual(xrayPlan({ tools: ["erase"], r: { erased: r.erased }, pv: null, full: true }), { from: "preview", urls: ["a"] }); // no full-size mattes yet
+  assert.deepEqual(xrayPlan({ tools: ["erase"], r: { erased: r.erased }, pv: null, full: true }), { from: "tracking", urls: ["a"] }); // no full-size mattes yet
   assert.deepEqual(xrayPlan({ tools: ["paint"], r: {}, pv: null }), { from: "none", urls: [] });
 });
 

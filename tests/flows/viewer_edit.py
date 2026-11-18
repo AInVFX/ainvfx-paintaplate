@@ -94,16 +94,16 @@ def run(browser, port, U):
             f"rubbing a stroke of a made edit shows the plate there, not the old result: {pixel(kept).tolist()} against the plate's {plate.tolist()}")
     page.keyboard.press("Escape")  # the rub is dropped: the edit goes back to its result
 
-    # 4. Stop during an LTX pass whose live preview shows in the inset: nothing of it stays, not after a stroke, not after Generate
-    page.wait_for_function("!document.querySelector('#live-inset').hidden", timeout=60000)
+    # 4. Stop during an LTX pass whose live preview shows in the player: nothing of it stays, not after a stroke, not after Generate
+    page.wait_for_function("!document.querySelector('#live').hidden", timeout=60000)
     page.click("#stop"); page.wait_for_timeout(300)
-    U.check(page.is_hidden("#live-inset") and page.evaluate(PICTURE) != "live" and status().startswith("Stopped") and not page.is_disabled("#generate"),
+    U.check(page.is_hidden("#live") and status().startswith("Stopped") and not page.is_disabled("#generate"),
             f"Stop during an LTX pass takes its live preview off the screen: the frame shows {page.evaluate(PICTURE)}")
     U.paint_once(page, "a red fire", [(0.30, 0.45), (0.34, 0.45)]); away()
-    U.check(page.evaluate(PICTURE) != "live", "a stroke after the stop shows the first frame and the strokes")
+    U.check(page.is_hidden("#live"), "a stroke after the stop shows the first frame and the strokes")
     hold(port, output="patch", seconds=6)
     page.keyboard.press("Enter"); page.wait_for_function(f"/edit preview/.test({STATUS})", timeout=30000); page.wait_for_timeout(1000)
-    U.check(page.evaluate(PICTURE) != "live", "Generate after the stop never brings the stopped pass's preview back")
+    U.check(page.is_hidden("#live"), "Generate after the stop never brings the stopped pass's preview back")
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
 
     # 5. Paint, rub, paint over the rubbed place: the last stroke is in the masks the page uploads

@@ -64,7 +64,7 @@ test("with SDR to HDR on, the full-size composite and the export announce their 
   assert.deepEqual([timeId("review", true), timeId("review", false), timeId("shot", true)], ["review+hdr", "review", "shot"]);
 });
 
-test("the full-size clean plate pass starts from the preview's own pass only when the Preview pass makes it at half the working size", () => {
+test("the full-size clean plate pass starts from the preview's own pass only when the preview pass runs at half the working size", () => {
   const quarter = { ...HORSE, shot: [480, 288] };
   assert.deepEqual([startsFromPreview(HALF, 960), startsFromPreview(quarter, 480), startsFromPreview(HALF, 0)], [true, false, false]); // Off keeps a size
 });

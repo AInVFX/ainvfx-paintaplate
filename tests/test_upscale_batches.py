@@ -19,7 +19,7 @@ class NoClone(unittest.TestCase):
             self.assertFalse([n for n in graph.values() if n["class_type"] == "ImageFromBatch"], name)
 
     def test_every_writer_saves_the_plates_own_frames(self):
-        for name, writers in (("export", 4), ("comp", 1)):  # Save Plate leaves the padding out by the plate's own frame count
+        for name, writers in (("export", 4), ("comp", 2)):  # Save Plate leaves the padding out by the plate's own frame count; comp also writes its matte movie
             graph = load(name)
             plate = next(k for k, n in graph.items() if n["class_type"] == "PaintAPlate_LoadPlate" and n["_meta"].get("title") == "Plate")
             saved = [n for n in graph.values() if n["class_type"] in ("PaintAPlate_SaveFrames", "PaintAPlate_SaveMovie")]

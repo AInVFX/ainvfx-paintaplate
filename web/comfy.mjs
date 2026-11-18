@@ -20,7 +20,7 @@ const infos = new Map(); // class -> /object_info answer, asked once
 // that matches takes them back instead of running, in this session or a later one on the same machine. Only workflows whose
 // outputs are saved files take part: the warm-up exists for its side effect, and SAM's object search keeps previews.
 // SDR to HDR takes part too: run again, it rewrote a 16-bit fluid shot's EXR frames, the plate under its edits, so the
-// plate's time changed and every job on it missed the index when its scene was opened again (2 Nov). Upscale to 4K's window
+// plate's time changed and every job on it missed the index when its scene was opened again. Upscale to 4K's window
 // jobs take part, so a plate's 4K windows serve its next export; its export job does not: a key leaves the prefixes out,
 // and each render's 4K set is written in its own folder.
 const INDEXED = new Set(["ingest", "prompt", "edit", "clean", "cleanup", "shot", "shotup", "matte", "comp", "review", "export", "fluid", "hdr", "upscale"]);
@@ -98,7 +98,7 @@ export function jobStopped(job, now, heard = true) { // `heard` false: the WebSo
 }
 
 // A server's answer as JSON, whatever its status (ComfyUI explains a refused job in JSON). An error page, such as a proxy's
-// HTML while ComfyUI restarts, or an empty answer, says so plainly instead of the browser's "Unexpected token '<'" (29 Oct)
+// HTML while ComfyUI restarts, or an empty answer, says so plainly instead of the browser's "Unexpected token '<'"
 export async function answer(r) {
   const text = await r.text();
   try { return JSON.parse(text); } catch { /* not JSON: said below */ }
@@ -229,7 +229,7 @@ async function finish(id, error) {
     job.freed = true;
     notice("The GPU ran out of memory: freeing ComfyUI's memory, then trying once more.");
     await post("/free", { unload_models: true, free_memory: true }).catch(() => {}); // unanswered, the retry still runs
-    await released(); // ComfyUI frees between prompts: a job posted at once ran first, with every model still loaded (29 Oct)
+    await released(); // ComfyUI frees between prompts: a job posted at once ran first, with every model still loaded
     return job.submit();
   }
   live.delete(job);
@@ -306,7 +306,7 @@ function message({ data }) {
 }
 
 // ComfyUI can stop while a job runs: a memory limit, a crash, a closed terminal. Its socket closes and it answers nothing,
-// so a job would wait for ever and the page with it (11 Nov, twice, on a 16 GB card under a memory cap). After GONE_POLLS
+// so a job would wait for ever and the page with it (as on a 16 GB GPU under a memory cap). After GONE_POLLS
 // polls in a row with the socket closed and no answer, every job ComfyUI held fails, with what to do in its error.
 export const GONE = "ComfyUI stopped answering"; // logic.plainError says what to do
 const GONE_POLLS = 10; // 15 s

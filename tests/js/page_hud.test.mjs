@@ -18,7 +18,7 @@ test("a HUD line given as one string ends with a full stop", () => {
 test("the X-ray's lines end with a full stop", () => {
   const block = xray.slice(xray.indexOf("XRAY_TEXT = {"), xray.indexOf("};", xray.indexOf("XRAY_TEXT = {")));
   const lines = [...block.matchAll(/"([^"]*)"/g)].map((m) => m[1]);
-  assert.equal(lines.length, 5);
+  assert.equal(lines.length, 6);
   assert.deepEqual(lines.filter((t) => !/[.?!]$/.test(t)), []);
 });
 

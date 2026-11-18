@@ -15,7 +15,7 @@
     <img class="mark" src="brand/paint-a-plate.png" alt="Paint a plate">
     <span id="version" class="version" title="The version of AInVFX Paint a plate on this ComfyUI."></span>
     <span id="spec" class="spec"></span>
-    <button id="close-btn" class="quiet close-plate" type="button" hidden title="Close the plate: stop its renders and free its frames from the browser's memory." aria-label="Close the plate">×</button>
+    <button id="close-btn" class="quiet close-plate" type="button" hidden title="Close the plate: stops its renders and frees its frames from the browser's memory." aria-label="Close the plate">×</button>
     <button id="menu-btn" class="quiet menu-btn" title="Every action, with its key (or right-click on the frame)." aria-label="Menu" aria-haspopup="menu">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
@@ -23,7 +23,7 @@
     <button id="open-btn">Open plate</button>
     <button id="save-btn" disabled title="Save the scene: the plate and every edit with its strokes, words and seed.">Save scene</button>
     <button id="finish-btn" type="button" disabled aria-haspopup="dialog" aria-expanded="false" title="Finish: the passes on the whole plate after the full-size composite.">Finish</button>
-    <button id="export-btn" class="primary" disabled title="Write the result in the plate's own format and its matte, then download one zip.">Export</button>
+    <button id="export-btn" class="primary" disabled title="Export: the result in the plate's own format, with its matte, in one zip.">Export</button>
   </header>
   <div id="finish" class="finish" role="dialog" aria-label="Finish" hidden>
     <h2>Finish</h2>
@@ -53,7 +53,7 @@
       <label for="size">Brush</label>
       <input id="size" type="range" min="4" max="320" value="48" title="Brush size (- and =).">
       <output id="size-out" for="size">48</output>
-      <button id="rub-btn" class="rub" aria-pressed="false" title="Eraser: rub out strokes you just painted. Hold E while you drag, or tap E to switch it on or off.">
+      <button id="rub-btn" class="rub" aria-pressed="false" title="Eraser (E): rubs out strokes. Hold E while you drag, or tap E to switch it on or off.">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3l5 5-10 10H6l-3-3L16 3zM9 9l6 6M6 21h14"/></svg>
         <span>Eraser</span>
       </button>
@@ -77,12 +77,12 @@
   <main class="stage">
     <div class="promptbar">
       <label for="prompt" class="prompt-label">Prompt</label>
-      <button id="editing" class="editing" type="button" hidden title="This edit is selected: its words and strokes are yours to change. Click, or press Esc, to deselect."></button>
+      <button id="editing" class="editing" type="button" hidden title="Selected edit: its words and strokes can change. Click or Esc deselects it."></button>
       <input id="prompt" autocomplete="off" spellcheck="false" aria-label="Describe the edit"
              placeholder="Describe what to paint, then paint it on the frame">
-      <button id="generate" class="primary generate" type="button" disabled title="Generate (Enter): the edit on the first frame, then its shot. What is already made never runs again.">Generate</button>
-      <button id="stop" class="stop" type="button" hidden title="Stop generating (Esc): what finished is kept, and Generate goes on from there.">Stop</button>
-      <button id="new-edit" class="new-edit" type="button" disabled title="New edit (N): this edit is done, the next strokes start a separate one.">
+      <button id="generate" class="primary generate" type="button" disabled title="Generate (Enter): the edit on the first frame, then its shot. Nothing already made runs again.">Generate</button>
+      <button id="stop" class="stop" type="button" hidden title="Stop (Esc): what finished is kept, and Generate goes on from there.">Stop</button>
+      <button id="new-edit" class="new-edit" type="button" disabled title="New edit (N): the next strokes start a separate edit.">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span>New edit</span>
       </button>
@@ -90,7 +90,7 @@
     <div id="viewport" class="viewport">
       <canvas id="view"></canvas>
       <canvas id="xray" class="xray" hidden aria-hidden="true"></canvas>
-      <figure id="live-inset" class="live-inset" hidden><img alt="Live preview of the pass in progress"><figcaption></figcaption></figure>
+      <figure id="live" class="live" hidden><img alt="Live preview of the pass in progress"><figcaption></figcaption></figure>
       <div id="wipe" class="wipe" hidden>
         <span class="label left">Plate</span><span class="label right">Result</span><span class="grip" title="Drag to compare."></span>
       </div>
@@ -126,7 +126,7 @@
       </div>
       <output id="frame-total" class="frame-total"></output>
       <span id="fps" class="fps"></span>
-      <button id="display-state" class="display-state" hidden title="The viewer's colour, display only: the export never changes. Click to reset."></button>
+      <button id="display-state" class="display-state" hidden title="Display only: the export keeps its colours. Click to reset."></button>
       <button id="wipe-btn" class="quiet" aria-pressed="false" title="Compare the plate and the result (F6)." disabled>Wipe</button>
     </div>
   </main>
@@ -152,10 +152,10 @@
     </section>
     <section id="render" class="render" hidden>
       <h2>Render <span id="render-left"></span></h2>
-      <label class="preview-size">Preview pass
+      <label class="preview-size">Preview
         <select id="preview-size"></select>
       </label>
-      <p class="preview-note">A first pass of the whole shot at a smaller size, shown before the full size, to judge the motion early. Half size has a quarter of the pixels and a quarter size a sixteenth: smaller is quicker and less sharp. Off makes the full size only.</p>
+      <p class="preview-note">Off: the full size only, for a slow machine. Latent preview: each pass shows live in the player. Half or quarter size: a quicker first pass of the whole shot, then the full size.</p>
       <ol id="stages"></ol>
       <p class="hint render-hint">Click a finished step to show it on every frame; click it again, or Esc, for the latest.</p>
       <button id="render-full" type="button" class="quiet render-full" hidden title="These edits took the frames of an earlier render whose other edits are far away: only the tracking and the composites ran. Render them in full, with their own shot, the same edits and seeds.">Render in full</button>
@@ -211,7 +211,7 @@
       <dl>
         <dt>On show</dt><dd>Once the shot of the edits exists, it shows on every frame; the plate shows in the wipe and while O is held. A finished Render step, clicked, shows its pass alone; a second click, or Esc, brings back the latest.</dd>
         <dt>Wipe</dt><dd>The plate on the left and the pass on show on the right, both named. A click on a Render step or a History row changes the right side. Ctrl+click on another step puts it on the left; Ctrl+click on the pass on show brings the plate back.</dd>
-        <dt>X-ray</dt><dd>Tints, over the picture, where the edits on show change the plate: from the export's matte once Export made one, else from the tracking mattes of the size on show. A Light edit tints the whole frame.</dd>
+        <dt>X-ray</dt><dd>Tints where the edits on show change the plate: the matte the composite of the size on show uses, or the export's once made. Before the composite, the tracking mattes. A Light edit tints the whole frame.</dd>
         <dt>Full screen</dt><dd>The plate alone fills the screen, with no panel. The frame number shows in the bottom-right corner while the frame changes.</dd>
         <dt>Zoom</dt><dd>As in RV, in plate pixels to screen pixels. Chrome keeps RV's Ctrl+2 to Ctrl+8 for its tabs, so Shift+2 to Shift+8 give 1:2 to 1:8.</dd>
         <dt>Cache memory</dt><dd>View > Cache memory: the memory that keeps decoded frames, so the plate and the shot play smoothly. Auto sets it from this machine's memory; Custom… takes a size from 128 MB to 32 GB. A resize of the window keeps the frames.</dd>
@@ -219,10 +219,10 @@
       </dl>
     </section>
     <section class="help-tab" data-help="colour" role="tabpanel" hidden>
-      <h3>Colour, as in RV: the viewer only, the export never changes</h3>
+      <h3>Colour (as in RV): display only</h3>
       <p>Exposure, contrast, gamma, saturation, hue, the channels and invert change what the viewer shows, never the export. The values are RV's: contrast is 0 at rest and turns about 0.5, gamma acts before the other tools, invert before exposure. RV uses E, C, R, G, B and L without Shift; here P, C and L pick the tools, so the colour keys take Shift.</p>
-      <p>The Color Inspector reads the plate's own pixels and values, and the values on screen, on every frame. The brush still paints with a plain click. The page takes F5, so it does not reload.</p>
-      <h3>OCIO, as in RV: right-click, then OCIO</h3>
+      <p>The Colour Inspector reads the plate's own pixels and values, and the values on screen, on every frame. The brush still paints with a plain click. The page takes F5, so it does not reload.</p>
+      <h3>OCIO (as in RV): right-click > OCIO</h3>
     <dl>
       <dt>Plate (affects generation)</dt><dd>Colour space: the plate colour space, what the file's numbers mean, by family (RV calls it File Color Space). The plate's colour space comes from its file: change it only for a camera's log footage. The line ends with "from file" when the value is the file's own, and "override" once you choose another. The models and the export use it, so a change regenerates the first frame and the edits. When an edit has a result, the page asks first. Display-referred: the family of the spaces encoded for a display, which RV and Nuke show as Display. The family ITU (International Telecommunication Union) is the one that RV and Nuke show as ITU.</dd>
       <dt>View (display only)</dt><dd>View: the views of the display in use. Display: the other displays. Look: only when the config has looks. The viewer only, also while the shot plays.</dd>
@@ -232,12 +232,12 @@
     <section class="help-tab" data-help="render" role="tabpanel" hidden>
       <dl>
         <dt>Steps</dt><dd>Generate makes the edit on the first frame, then its shot through the plate. The Render panel shows each step with its time; a finished step, clicked, shows its pass alone.</dd>
-        <dt>Preview pass</dt><dd>View > Preview pass: the shot preview at half or a quarter of the working size, or off, when a render starts with the full-size passes. The export stays at full size.</dd>
+        <dt>Preview</dt><dd>Off: the full size only, with no live preview. Latent preview, the default: each pass shows live in the player. Half or quarter size: a first pass of the whole shot at that size, then the full size. The export stays at full size.</dd>
         <dt>Stop</dt><dd>Esc, or Stop beside Generate: what finished is kept, and Enter goes on from there.</dd>
         <dt>Status line</dt><dd>The latest event. An error shows in red and a warning in amber, until the next event that succeeds. The log keeps the details.</dd>
         <dt>Finish</dt><dd>SDR to HDR regenerates the full-size shot in scene-linear values, fitted to the plate. Its result is half-float EXR frames in ACES2065-1, in the viewer and in Export.</dd>
         <dt>Export</dt><dd>Writes the result in the plate's own format, with its matte, in ComfyUI's output folder, then downloads one zip, with the list of the models behind the result.</dd>
-        <dt>Save scene</dt><dd>Keeps the plate and every edit, with its strokes, words and seed, on this ComfyUI. The log, the status line and the HUD give the scene file's full path; Open > Scenes opens it again.</dd>
+        <dt>Save scene</dt><dd>Keeps the plate and every edit, with its strokes, words and seed, on this ComfyUI. The log, the status line and the HUD give the scene file's full path; Open > Scenes opens it again. It asks before it replaces a scene of the same name.</dd>
       </dl>
     </section>
     <section class="help-tab help-keys" data-help="keys" role="tabpanel" hidden>
@@ -249,6 +249,7 @@
           <dt>- and =</dt><dd>Brush size.</dd>
           <dt>E</dt><dd>Eraser: hold it while you drag, or tap it to switch the eraser on or off.</dd>
           <dt>I</dt><dd>Pick a colour from the frame.</dd>
+          <dt>S, W</dt><dd>Colours, words: in a dialog over the frame.</dd>
           <dt>Enter</dt><dd>Generate.</dd>
           <dt>Ctrl+Enter</dt><dd>Another seed for the selected edit, else the last one.</dd>
           <dt>Esc</dt><dd>Cancel, deselect, end a comparison, then stop generating.</dd>
@@ -265,7 +266,7 @@
         </dl>
       </div>
       <div>
-        <h3>Playback, as in RV</h3>
+        <h3>Playback (as in RV)</h3>
       <dl>
           <dt>Space, Down</dt><dd>Play or pause.</dd>
           <dt>Left, Right</dt><dd>Step one frame.</dd>
@@ -275,12 +276,13 @@
           <dt>Wheel</dt><dd>Step through frames.</dd>
           <dt>F6</dt><dd>Wipe between the plate and the pass on show.</dd>
           <dt>Ctrl+click a Render step</dt><dd>Compare two passes in the wipe (Cmd+click on a Mac).</dd>
+          <dt>, and .</dt><dd>With the wipe on: the next pass on the left, on the right.</dd>
           <dt>X</dt><dd>X-ray.</dd>
           <dt>`</dt><dd>Full screen.</dd>
         </dl>
       </div>
       <div>
-        <h3>Zoom and pan, as in RV</h3>
+        <h3>Zoom and pan (as in RV)</h3>
       <dl>
           <dt>Alt + drag, middle drag</dt><dd>Pan. Shift keeps to one axis.</dd>
           <dt>Ctrl + drag</dt><dd>Zoom about the point pressed: right to zoom in, left to zoom out.</dd>
@@ -289,19 +291,20 @@
         </dl>
       </div>
       <div>
-        <h3>Colour, as in RV</h3>
+        <h3>Colour (as in RV)</h3>
       <dl>
           <dt>Shift+E, K, Y</dt><dd>Exposure, contrast, gamma: then drag on the frame, or use the wheel, - and =.</dd>
           <dt>Shift+S, H</dt><dd>Saturation, hue, the same way. Backspace resets the one you edit; Esc leaves.</dd>
           <dt>Shift+C, R, G, B, L</dt><dd>All channels, red, green, blue, luminance.</dd>
           <dt>Shift+I</dt><dd>Invert.</dd>
           <dt>Shift+Home</dt><dd>Reset all colour.</dd>
-          <dt>F5</dt><dd>Color Inspector.</dd>
+          <dt>F5</dt><dd>Colour Inspector.</dd>
         </dl>
       </div>
       <div>
         <h3>Everywhere</h3>
       <dl>
+          <dt>Ctrl+O, Ctrl+S</dt><dd>Open a plate, save the scene.</dd>
           <dt>Right-click</dt><dd>Every action, by menu, with its key.</dd>
           <dt>?</dt><dd>Show or hide the keys.</dd>
         </dl>
@@ -330,6 +333,17 @@
     </form>
   </dialog>
 
+  <dialog id="colours" class="colours" aria-label="Colours">
+    <h2>Colours</h2>
+    <menu><button id="colours-close" type="button">Close</button></menu>
+  </dialog>
+  <dialog id="words" class="words" aria-label="Words">
+    <form method="dialog">
+      <h2>Words</h2>
+      <input id="words-field" autocomplete="off" spellcheck="false" aria-label="Words of the edit">
+      <menu><button value="close">Close</button><button id="words-apply" type="button" class="primary">Apply</button></menu>
+    </form>
+  </dialog>
   <dialog id="ask" class="ask">
     <form method="dialog">
       <p id="ask-text"></p>
@@ -357,13 +371,13 @@
         <div id="browse" class="browse" role="listbox" aria-label="Folders and plates"></div>
         <p id="browse-note" class="hint"></p>
         <p id="browse-info" class="browse-info" aria-live="polite"></p>
-        <label id="path-row">Or type the full path of a movie, a frame of a sequence or a folder of frames, on this machine
+        <label id="path-row">Full path on this machine: a movie, a frame of a sequence or a folder of frames
           <input id="path" autocomplete="off" spellcheck="false" placeholder="/data/plates/shot010.mov or D:\plates\shot010\shot010.1001.exr"></label>
         <p id="path-error" class="path-error" role="alert"></p>
         <p id="path-remote" class="hint" hidden>ComfyUI runs on another machine. To open a file of this machine, upload it in the Upload tab.</p>
       </section>
       <section class="tab" data-tab="upload" role="tabpanel" hidden>
-        <label id="drop" class="drop">Drop a video file, or the frames of one sequence, here. Or click to choose them.
+        <label id="drop" class="drop">Drop a video file or the frames of one sequence here, or click to choose them.
           <input id="files" type="file" multiple accept=".exr,.png,.tif,.tiff,.dpx,.mov,.mp4,.mkv,.mxf,.webm,.webp,.gif"></label>
         <p id="files-note" class="hint"></p>
         <p class="hint">The files go to ComfyUI's input folder, then open as the plate.</p>
@@ -372,7 +386,7 @@
         <p class="hint">Scenes saved on this ComfyUI with Save scene. A scene opens its plate, then makes every edit again: what this machine made already comes back from the job index.</p>
         <ul id="scenes" class="scenes"></ul>
         <p id="scenes-empty" class="hint" hidden>No scene saved on this ComfyUI yet.</p>
-        <label>Or a scene file from this computer <input id="scene" type="file" accept=".json,application/json"></label>
+        <label>A scene file from this computer <input id="scene" type="file" accept=".json,application/json"></label>
       </section>
       <section class="tab" data-tab="blank" role="tabpanel" hidden>
         <p class="hint">A fluid shot: paint flat colour keyframes, and AInVFX's ainvfx-fluid IC-LoRA turns them into smoke, steam or fire, as a new plate. Sides in multiples of 64, 8k + 1 frames, 24, 25 or 50 fps.</p>

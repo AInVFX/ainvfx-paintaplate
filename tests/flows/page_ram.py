@@ -1,4 +1,4 @@
-"""The page workstream's check of the RAM-short rule (tests/flows/README.md). A card of 24 GB or more keeps its models
+"""The check of the RAM-short rule (tests/flows/README.md). A card of 24 GB or more keeps its models
 loaded. At a change of model family the page reads the free RAM in ComfyUI's /system_stats, and it frees ComfyUI's memory
 only when that is less than the next job's frames can take (logic.framesNeed). The log's line names that reason. The mock
 ComfyUI takes the free RAM at /mock/card, and /mock/events lists each /free the page posted."""

@@ -246,7 +246,8 @@ export function cacheSize({ budget, frames, movie: [mw, mh], fit: [fw, fh], byte
 }
 
 // One budget shared by the caches. The sources on show come first, in equal shares, each at the size it is shown. The
-// others share what is left, at the floor size. `sources`: [{ id, movie: [w, h], show, bytes }]. Returns, per id,
+// others share what is left, at the floor size. A source with a `size` keeps it: its share sets how many of its frames
+// fit, never their size. `sources`: [{ id, movie: [w, h], show, bytes, size }]. Returns, per id,
 // { width, height, fits, budget }: the size of its frames, how many fit, and its share in bytes.
 export function cachePlan({ budget, frames, fit, sources }) {
   const plan = {};
@@ -254,7 +255,9 @@ export function cachePlan({ budget, frames, fit, sources }) {
   for (const show of [true, false]) {
     const tier = sources.filter((s) => !!s.show === show);
     tier.forEach((s, i) => {
-      const size = cacheSize({ budget: Math.max(0, left) / (tier.length - i), frames, movie: s.movie, fit: show ? fit : [CACHE_FLOOR, CACHE_FLOOR], bytes: s.bytes });
+      const share = Math.max(0, left) / (tier.length - i), [w, h] = s.size ?? [];
+      const size = s.size ? { width: w, height: h, fits: Math.min(frames, Math.floor(share / (w * h * (s.bytes ?? 4)))) }
+        : cacheSize({ budget: share, frames, movie: s.movie, fit: show ? fit : [CACHE_FLOOR, CACHE_FLOOR], bytes: s.bytes });
       plan[s.id] = { ...size, budget: size.fits * size.width * size.height * (s.bytes ?? 4) };
       left -= plan[s.id].budget;
     });
@@ -266,6 +269,11 @@ export function cachePlan({ budget, frames, fit, sources }) {
 // only when the view is more than CACHE_GROW times wider or taller than the view they were planned for. A change of
 // the budget, of the sources on show or of the in and out points plans them again at once.
 export const CACHE_GROW = 1.25;
+// A plan made again for other sources on show (the wipe, the pass on show) can give a cache a size a few pixels from its
+// own (1917 x 1078 against 1920 x 1080), and a new size reads every frame again. Within CACHE_NEAR of its own size on
+// each side, a cache keeps its size: its share then sets how many of its frames fit.
+export const CACHE_NEAR = 0.1;
+export const nearSize = ([w, h], [w2, h2], near = CACHE_NEAR) => Math.abs(w2 - w) <= w * near && Math.abs(h2 - h) <= h * near;
 export const outgrows = (planned, fit, grow = CACHE_GROW) => !planned || fit[0] > planned[0] * grow || fit[1] > planned[1] * grow;
 
 // The hidden reader's speed while it fills a cache. A 60 Hz screen presents 60 frames a second, so a 24 fps clip is read

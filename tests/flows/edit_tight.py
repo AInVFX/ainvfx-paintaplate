@@ -1,9 +1,9 @@
-"""The edit workstream's check of the box the prompt writer gets for an erase with no words (tests/flows/README.md). On 12
-November 2026 two of SAM's five masks for a stroke on a barn took in the horse's nose; with a box around them all, the
-prompt writer removed the horse, the page refused, and the barn stayed. With the box cut to the stroke and to what most
-masks agree on (logic.coreBox, writerBoxes), it removed the barn (the probe, 13 November). Here the mock's SAM takes
+"""The check of the box the prompt writer gets for an erase with no words (tests/flows/README.md). Two of SAM's
+five masks for a stroke can take in a neighbouring object; with a box around them all, the prompt writer can remove the
+neighbour, the page refuses, and the painted object stays. With the box cut to the stroke and to what most masks agree on
+(logic.coreBox, writerBoxes), it removes the painted object. Here the mock's SAM takes
 another object into two of its five masks, left of the stroke (/mock/snap), and the mock's writer removes that other
-object when its box reaches it, the painted bottle otherwise (/mock/writer), as the laptop's writer did."""
+object when its box reaches it, the painted bottle otherwise (/mock/writer), as a real prompt writer can."""
 import re
 
 BOTTLE = ('Remove the red bottle <bottle_1> completely, with its shadow. [{"id": "bottle_1", "from": "ref_image_0", '

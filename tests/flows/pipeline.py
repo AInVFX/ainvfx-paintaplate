@@ -1,4 +1,4 @@
-"""The pipeline workstream's page checks (tests/flows/README.md): renders, passes, bit depth, scenes."""
+"""The page checks (tests/flows/README.md): renders, passes, bit depth, scenes."""
 import time
 
 
@@ -12,7 +12,7 @@ def settled(page, limit=240):  # Generate reads Generate for three seconds runni
 def fluid16_scene(page, U):
     """A 16-bit fluid shot with a paint edit on it, saved as a scene and opened again: every job comes back from the job
     index, the fluid shot's SDR to HDR included, and none is posted twice. Before the fix, SDR to HDR ran again on reopen
-    and rewrote the EXR frames under the edits: the plate's time changed, so every job on it missed the index (2 Nov)."""
+    and rewrote the EXR frames under the edits: the plate's time changed, so every job on it missed the index."""
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.click("#open-btn"); page.click("#open [data-tab=blank]")
@@ -149,7 +149,7 @@ def pass_rows(page, U):
 
 
 def hdr_video(page, U):
-    """SDR to HDR on a video plate, from Deliver's bit-depth pass (Adrien, 2 and 3 Nov): off by default; turning it on asks first; once on, the result is an EXR
+    """SDR to HDR on a video plate, from Deliver's bit-depth pass: off by default; turning it on asks first; once on, the result is an EXR
     sequence that the player reads at full precision, and Export writes that sequence instead of a video file."""
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
