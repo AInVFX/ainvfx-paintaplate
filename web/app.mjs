@@ -13,7 +13,7 @@ import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePa
 import { editorGraph, sceneGraph } from "./graph.mjs";
 import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, UPSCALE, UPSCALE_LARGE, upscaleFolder, upscaleKeeps, upscaleSeconds, upscaleSource, upscaleTarget, upscaleWindow, upscaleWindows, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, fullPath, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, freeName, liveEvery, PREVIEW_DEFAULT, sceneName, previewCap, previewDivOf, readPreview, stepLabel, previewSize, previewSizes, reconcile, removedNames, renderKey, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
-import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
+import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { askedSeed, editSeed, gridGrow } from "./logic.mjs"; // the tests: a seed asked for in the address, and each edit's seed from it
@@ -2888,11 +2888,11 @@ async function plateHdr(r) {
   status("SDR to HDR: ready, in the viewer, its EXR frames at full precision as they load. Export writes them for compositing software.", "hint");
 }
 async function exportAlone(r) { // Export on the plate alone: the frames SDR to HDR wrote, at the plate's size and level, in ACES2065-1
-  r.exported ??= { run: r.run, name: `${S.plate.name}_paintaplate_v${r.v}`, text: `${S.plate.frames} half-float EXR frames in ACES2065-1, in ${r.run}/hdr`, matte: null };
+  r.exported ??= { run: r.run, name: `${S.plate.name}_paintaplate_v${r.v}`, text: `${S.plate.frames} half-float EXR frames in ACES2065-1, in ${r.run}/hdr.`, matte: null };
   S.exported = r.exported;
   S.wantDownload = null;
   stagesUI(); exportUI();
-  confirmed(`Export: done, in ComfyUI's output folder: ${S.exported.text}.`);
+  confirmed(exportDone(S.exported.text));
   const parts = ["hdr"];
   if (S.deliver.upscale && S.upscaleReady) { // Finish > Upscale to 4K: there is no composite, so the end output alone is restored
     if (!(await upscaleAlone(r.run, r.hdrFrames, true))) return;
@@ -3071,13 +3071,13 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       matte_video_prefix: `${dir}/matte_movie/m`, ...plateMovie(p), grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
     const file = outputFile("export", done, exr ? "exr" : "export"), matte = outputFile("export", done, "matte_movie"); // a job taken from the index keeps its own folder
     r.exported = { run: file ? file.subfolder.replace(/\/export$/, "") : dir, name: `${p.name}_paintaplate_v${r.v}`,
-      text: exr ? `${p.frames} half-float EXR frames in ACES2065-1, in ${file?.subfolder ?? `${dir}/export`}` : outputText("export", done, "export") ?? "",
+      text: exr ? `${p.frames} half-float EXR frames in ACES2065-1, in ${file?.subfolder ?? `${dir}/export`}.` : outputText("export", done, "export") ?? "",
       matte: matte ? viewUrl(matte) : null, layer: !!outputFile("export", done, exr ? "layer_exr" : "layer"), // the Export row shows its matte
       ...exportedParts(p, done, exr) }; // what Upscale to 4K reads
   });
   S.exported = r.exported;
   stagesUI(); exportUI();
-  confirmed(`Export: done, in ComfyUI's output folder: ${S.exported.text.split("\n")[0]}.`);
+  confirmed(exportDone(S.exported.text));
   log(`Export v${r.v}: done.\n  ${S.exported.text.split("\n").join("\n  ")}`);
   await step(r, "upscale", (progress) => upscaleExport(r, progress)); // Finish > Upscale to 4K: the 4K set, before the zip
   const parts = S.wantDownload;

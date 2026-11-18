@@ -612,6 +612,12 @@ export function plainError(message) { // a failure in plain words: why, the fact
   return says("ComfyUI stopped with an error");
 }
 
+// The status line once the export is written: the first line of the writer's summary, ending with one full stop whether
+// that line brings its own or not.
+export function exportDone(text) {
+  const first = String(text ?? "").split("\n")[0].trim().replace(/\.+$/, "");
+  return `Export: done, in ComfyUI's output folder${first ? `: ${first}` : ""}.`;
+}
 export function logLevel(text) { // a log message's colour, from its words: red when a line starts « Error: », amber when one starts « Warning: »
   const starts = (word) => String(text).split("\n").some((line) => line.trimStart().startsWith(word));
   return starts("Error: ") ? "error" : starts("Warning: ") ? "warn" : "";
