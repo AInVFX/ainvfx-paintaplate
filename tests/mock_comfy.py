@@ -367,8 +367,8 @@ async def execute(pid, prompt):
             out.append(g * m + p * (1 - m))
             mattes.append(m.astype(np.float16))
         o[outs["review"]] = {"images": [save_mp4(out, v["review_prefix"], spec["fps"])], "animated": [True]}
-        if "matte_movie" in outs:  # the matte the composite used, as a grey movie, for the X-ray, which reads it small
-            o[outs["matte_movie"]] = {"images": [save_mp4([np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes], v["matte_video_prefix"], spec["fps"], side=320)], "animated": [True]}
+        if "matte_movie" in outs:  # the matte the composite used, as a grey movie, for the X-ray, which reads it small; one frame at a time, so the mattes are never held twice
+            o[outs["matte_movie"]] = {"images": [save_mp4((np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes), v["matte_video_prefix"], spec["fps"], side=320)], "animated": [True]}
         if "frames" in outs:
             sub, _, stem = v["frames_prefix"].rpartition("/")
             os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
@@ -444,7 +444,7 @@ async def execute(pid, prompt):
         layer = [resize(shot[min(i, len(shot) - 1)], w, h) if not i else moved(resize(shot[min(i, len(shot) - 1)], w, h), back=True) for i in range(n)] if {"layer", "layer_exr"} & set(outs) else []
         del frames, shot
         if "matte_movie" in outs:  # the matte the composite used, as a grey movie: the X-ray reads a composite's small, the Export row shows the export's
-            o[outs["matte_movie"]] = {"images": [save_mp4([np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes], v["matte_video_prefix"], spec["fps"], side=320 if "video" in outs else 0)], "animated": [True]}
+            o[outs["matte_movie"]] = {"images": [save_mp4((np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes), v["matte_video_prefix"], spec["fps"], side=320 if "video" in outs else 0)], "animated": [True]}
         if "video" in outs:
             o[outs["video"]] = {"images": [save_mp4(out, v["video_prefix"], spec["fps"])], "animated": [True]}
         else:
