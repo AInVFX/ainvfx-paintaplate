@@ -260,7 +260,7 @@ def seeds_asked(text):
 def command(a, case, folder):
     """ui_live.py's command for one case: its plate or its fluid shot, its strokes as written, its seed."""
     cmd = [sys.executable, os.path.join(HERE, "ui_live.py"), "--url", a.url, "--comfy", a.comfy, "--out", folder,
-           "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2", *(["--memory", a.memory] if a.memory else []), *[f"--option={o}" for o in case.get("address", [])], *(["--graph"] if a.graph else []),
+           "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2", *(["--memory", a.memory] if a.memory else []), *(["--preview", a.preview] if getattr(a, "preview", "") else []), *[f"--option={o}" for o in case.get("address", [])], *(["--graph"] if a.graph else []),
            *(["--hdr"] if getattr(a, "hdr", False) or case.get("hdr") else []), *(["--upscale"] if case.get("upscale") else [])]
     cmd += ["--fluid", json.dumps(case["fluid"])] if "fluid" in case else ["--path", case["path"]]
     if case.get("strokes"):
@@ -880,6 +880,7 @@ def report(a, machine, results):
              f"| Seeds | {a.seeds.replace(' ', '').replace(',', ', ') + ' (--seeds): each case runs once per seed' if a.seeds else 'each case runs from its own (gpu_matrix.json)'} |",
              "| Job index | left alone: the page is opened with `?index=0`, so every job runs |",
              f"| Memory profile asked for | {a.memory or 'none: the GPU decides'} |",
+             f"| Preview menu asked for | {getattr(a, 'preview', '') or 'none: the page keeps its own choice, Latent preview by default'} |",
              f"| Before each case | {'ComfyUI is freed (--fresh)' if a.fresh else 'ComfyUI stays as the case before left it: a first job can read its RAM'} |",
              f"| RAM read from | {a.source} |", "",
              "GB means 2^30 bytes. Peak RAM is the most that was held; « no file » is the part of it that no file backs, which a memory cap cannot take back. "
@@ -973,6 +974,7 @@ def main():
     ap.add_argument("--channel", default="chrome", help="the browser channel: Google Chrome plays H.264")
     ap.add_argument("--timeout", type=int, default=900, help="ui_live.py's --timeout: it waits 8 times this many seconds for a render, 4 times for a fluid shot, twice for an edit")
     ap.add_argument("--memory", default="", choices=("", "small", "medium", "large"), help="ask the page for this memory profile; by default the GPU decides")
+    ap.add_argument("--preview", default="", choices=("", "off", "latent", "half", "quarter"), help="the Preview menu's choice for every case, stored before the page loads")
     ap.add_argument("--hdr", action="store_true", help="turn SDR to HDR on in every case (ui_live.py --hdr); a case asks for it with « hdr »: true")
     ap.add_argument("--graph", action="store_true", help="after each case's export, also save the scene's ComfyUI graph as scene.comfyui.json in the case's folder")
     ap.add_argument("--seeds", default="", help="whole numbers with commas: each case runs once per seed, as <case>_s<seed>, in place of its own seed")

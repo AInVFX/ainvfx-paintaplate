@@ -220,6 +220,14 @@ def stage(note):
     return note.split(" about ")[0].split(" almost ")[0]
 
 
+PREVIEW = {"off": "off", "latent": "latent", "half": "2", "quarter": "4"}  # the Preview menu's choices, as the page stores them (logic.readPreview)
+
+
+def preview_script(choice: str) -> str:
+    """The script that stores the Preview menu's choice before the page loads, where the page keeps it between sessions."""
+    return f"localStorage.setItem('paintaplate.preview-menu', '{PREVIEW[choice]}');"
+
+
 def address(url, memory="", seed=None, options=()):
     """The page's address for a run on real models. ?index=0: the page leaves its job index alone, so every job runs, and
     each time and each peak of memory is a measured one, on a machine that ran the same strokes before too. ?seed=: the
@@ -255,6 +263,7 @@ def main():
     ap.add_argument("--graph", action="store_true", help="after the export, also save the scene's ComfyUI graph")
     ap.add_argument("--option", action="append", default=[], help="with --url: one more option of the page's address, such as shot=2 (the full-size shot in two stages)")
     ap.add_argument("--memory", default="", help="with --url: the page's memory profile, small, medium or large (by default the card decides)")
+    ap.add_argument("--preview", default="", choices=("", *PREVIEW), help="with --url: the Preview menu's choice, stored before the page loads (by default the page's own)")
     ap.add_argument("--upscale", action="store_true", help="with --url: turn Finish > Upscale to 4K on before painting, so Export "
                     "writes the 4K set too; the zip waits up to 3 hours")
     ap.add_argument("--hdr", action="store_true", help="with --url: turn SDR to HDR on in Deliver before painting, so the render makes "
@@ -412,6 +421,8 @@ def remote(a):
         page.on("pageerror", lambda e: errors.append(str(e)))
         status = lambda: page.inner_text("#status")  # noqa: E731
         try:
+            if a.preview:
+                page.add_init_script(preview_script(a.preview))
             page.goto(address(a.url, a.memory, a.seed, a.option))
             page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
             mark("page ready: " + status())
