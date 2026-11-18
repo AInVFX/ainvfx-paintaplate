@@ -48,7 +48,7 @@ class ShotUp(unittest.TestCase):
     def test_shotup_takes_the_shot_s_values_and_the_first_stage_s_frames(self):
         up, shot = self.workflow("shotup"), self.workflow("shot")
         slots = lambda w: {s for n in w.values() for s in n.get("_meta", {}).get("slots", {}).values()}  # noqa: E731
-        self.assertEqual(slots(up), slots(shot) - {"steps"} | {"low"})  # 2 fixed steps instead of the shot's 8
+        self.assertEqual(slots(up), slots(shot) - {"steps"} | {"low", "encode_tile"})  # 2 fixed steps instead of the shot's 8; it encodes the first stage
         kinds = [n["class_type"] for n in up.values()]
         sigmas = [n["inputs"]["sigmas"] for n in up.values() if n["class_type"] == "ManualSigmas"]
         self.assertEqual((sigmas, kinds.count("LTXAddVideoICLoRAGuide"), kinds.count("BasicScheduler")), (["0.725, 0.421875, 0.0"], 1, 0))

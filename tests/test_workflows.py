@@ -160,18 +160,22 @@ class ViewerMovies(unittest.TestCase):
 
 
 class MemorySlots(unittest.TestCase):
-    def test_the_memory_profile_slots_default_to_the_large_cards_values(self):
-        """`tile` and `guide_tiled` (logic.memoryProfile on the page): unfilled, a workflow runs as on a large card."""
+    def test_the_memory_profile_slots_default_to_a_large_gpus_values(self):
+        """`tile`, `encode_tile` and `guide_tiled` (logic.memoryProfile on the page): unfilled, a workflow runs as on a large
+        GPU, every LTX decode whole (WHOLE) and the erase pass's encode in 512 px tiles."""
         import json
         folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web", "workflows")
-        for name, tiles, guides in (("clean", 0, 1), ("cleanup", 2, 0), ("shot", 1, 1), ("shotup", 2, 1), ("fluid", 1, 1), ("hdr", 1, 1)):
+        for name, tiles, encodes, guides in (("clean", 0, 0, 1), ("cleanup", 1, 1, 0), ("shot", 1, 0, 1), ("shotup", 1, 1, 1),
+                                             ("fluid", 1, 0, 1), ("hdr", 1, 0, 1)):
             with open(os.path.join(folder, f"{name}.json")) as f:
                 prompt = json.load(f)
             slots = {slot: (node["class_type"], node["inputs"][key]) for node in prompt.values() for key, slot in node.get("_meta", {}).get("slots", {}).items()}
             tile = [n for n in prompt.values() if n.get("_meta", {}).get("slots", {}).get("tile_size") == "tile"]
+            encode = [n for n in prompt.values() if n.get("_meta", {}).get("slots", {}).get("tile_size") == "encode_tile"]
             guide = [n for n in prompt.values() if n.get("_meta", {}).get("slots", {}).get("use_tiled_encode") == "guide_tiled"]
-            self.assertEqual((len(tile), len(guide)), (tiles, guides), name)
-            self.assertTrue(all(n["inputs"]["tile_size"] == 512 for n in tile), name)
+            self.assertEqual((len(tile), len(encode), len(guide)), (tiles, encodes, guides), name)
+            self.assertTrue(all(n["class_type"] == "VAEDecodeTiled" and n["inputs"]["tile_size"] == 4096 for n in tile), name)
+            self.assertTrue(all(n["class_type"] == "VAEEncodeTiled" and n["inputs"]["tile_size"] == 512 for n in encode), name)
             self.assertTrue(all(n["inputs"]["use_tiled_encode"] is False for n in guide), name)
             self.assertEqual("tile" in slots, bool(tiles), name)
 

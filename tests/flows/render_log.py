@@ -8,7 +8,7 @@ import urllib.request
 
 import ui_live
 
-PROFILE = ("Memory profile: small (16 GB of VRAM, 61 GB of RAM).\n  Models load one at a time and LTX works in 256 px tiles, so each step takes longer "
+PROFILE = ("Memory profile: small (16 GB of VRAM, 61 GB of RAM).\n  Models load one at a time, so each step takes longer "
            "than on a larger GPU.")
 DONE = r"done in [\d.]+ s \(\d+ nodes?(, \d+ from ComfyUI's cache)?(, \d+ previews?)?\)\."
 JOB = re.compile(rf"^[a-z]+ [0-9a-f]{{8}}: {DONE}$")  # the one line of a job that ended

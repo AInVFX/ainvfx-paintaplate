@@ -299,7 +299,7 @@
   },
   "_meta": {
    "slots": {
-    "tile_size": "tile"
+    "tile_size": "encode_tile"
    }
   }
  },
@@ -490,7 +490,7 @@
  "32": {
   "class_type": "VAEDecodeTiled",
   "inputs": {
-   "tile_size": 512,
+   "tile_size": 4096,
    "overlap": 64,
    "temporal_size": 128,
    "temporal_overlap": 32,

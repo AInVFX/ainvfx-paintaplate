@@ -1285,17 +1285,23 @@ export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? nu
 // What the page does on the GPU it runs on, from the VRAM and RAM in ComfyUI's /system_stats. Three profiles to start from;
 // the borders move with measurements (tests/gpu_matrix.py writes each case's peak VRAM and RAM).
 // - small, under 24 GB of VRAM (the reference is an RTX 4090 Laptop with 16 GB): no model loads before an action needs it,
-//   so the prompt writer, Klein and LTX take turns; every LTX pass encodes its guide in tiles and decodes in 256 px tiles
-//   (in the SDR-to-HDR decode, 512 px tiles ran out of memory on 16 GB).
-// - medium, from 24 GB: the edit models load at start, LTX with the first shot; 512 px tiles.
+//   so the prompt writer, Klein and LTX take turns; every LTX pass encodes its guide in tiles.
+// - medium, from 24 GB: the edit models load at start, LTX with the first shot.
 // - large, from 60 GB: every model loads at start and stays loaded.
-// `slots` are workflow slot values (tile, guide_tiled): one set of workflows serves every profile.
+// From 16 GB (WHOLE_FROM), every LTX decode takes the whole frame in one piece (tile WHOLE). In tiles, each tile comes out
+// brighter near its edges, and the blend of two tiles leaves a band of 0.1 to 0.2 stops where they overlap. 121 frames at
+// 1920 x 1088 decode whole in 13 s at a peak of 10.3 GiB in float32, against 45 to 99 s in tiles (RTX PRO 6000). Under
+// 16 GB, LTX decodes in 256 px tiles, which leave those bands. The full-size passes encode in each profile's tiles.
+// `slots` are workflow slot values (tile, encode_tile, guide_tiled): one set of workflows serves every profile.
 export const MEMORY_FROM = { medium: 24e9, large: 60e9 }; // bytes of VRAM: a 24 GB GPU reports about 25.7e9, a 16 GB one about 17.2e9
+export const WHOLE = 4096; // a tile larger than any working frame: VAE Decode (Tiled) decodes the whole frame in one piece
+export const WHOLE_FROM = 16e9; // bytes of VRAM from which every LTX decode is whole; a 12 GB GPU reports about 12.9e9
 export const MEMORY = {
-  small: { warm: [], frees: true, slots: { tile: 256, guide_tiled: true }, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger GPU" },
-  medium: { warm: ["edit", "prompt"], frees: false, slots: { tile: 512, guide_tiled: false }, does: "The edit models load now, LTX with the first shot" },
-  large: { warm: ["edit", "prompt", "warm"], frees: false, slots: { tile: 512, guide_tiled: false }, does: "Every model loads now and stays loaded" },
+  small: { warm: [], frees: true, slots: { tile: WHOLE, encode_tile: 256, guide_tiled: true }, does: "Models load one at a time, so each step takes longer than on a larger GPU" },
+  medium: { warm: ["edit", "prompt"], frees: false, slots: { tile: WHOLE, encode_tile: 512, guide_tiled: false }, does: "The edit models load now, LTX with the first shot" },
+  large: { warm: ["edit", "prompt", "warm"], frees: false, slots: { tile: WHOLE, encode_tile: 512, guide_tiled: false }, does: "Every model loads now and stays loaded" },
 };
+const TILED = { tile: 256, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger GPU" }; // under WHOLE_FROM
 // ComfyUI keeps the models of the jobs it has run in memory, ready for the next job. With 16 GB of VRAM under a cap of
 // 52 GB of RAM, a full-size shot left LTX and its text encoder there, 35 GB, and the tracking job after it took the rest:
 // the system stopped ComfyUI. A profile that `frees` holds one family of models at a time: the page asks
@@ -1378,7 +1384,9 @@ export function memoryProfile({ vram = 0, ram = 0, force = null } = {}) { // `fo
   const auto = vram >= MEMORY_FROM.large ? "large" : vram >= MEMORY_FROM.medium ? "medium" : "small";
   const forced = Object.hasOwn(MEMORY, force ?? ""), name = forced ? force : auto, gib = (n) => Math.round(n / 2 ** 30);
   const card = vram > 0 ? `${gib(vram)} GB of VRAM${ram > 0 ? `, ${gib(ram)} GB of RAM` : ""}` : "ComfyUI gave no VRAM size";
-  return { name, why: forced ? `asked for; with ${card}, the page would choose ${auto}` : card, ...MEMORY[name] };
+  const profile = { name, why: forced ? `asked for; with ${card}, the page would choose ${auto}` : card, ...MEMORY[name] };
+  if (vram >= WHOLE_FROM) return profile;
+  return { ...profile, slots: { ...profile.slots, tile: TILED.tile }, does: name === "small" ? TILED.does : profile.does };
 }
 
 // ---------- A seed asked for in the address ----------
