@@ -799,11 +799,12 @@ class HDRMatch(io.ComfyNode):
             display_name="HDR Match",
             category=CATEGORY,
             description="Sets an HDR shot's level to the plate it is composited onto. SDR to HDR picks its own exposure and "
-                        "white balance, while the plate's untouched pixels hold the scene's real values: one gain per "
-                        "channel, measured on the untouched mid-tones over the whole shot (no flicker), scales every pixel. "
+                        "white balance, and its level drifts over a shot, while the plate's untouched pixels hold the scene's "
+                        "real values: one gain per channel and per frame, measured on the frame's untouched mid-tones and "
+                        "smoothed over 9 frames (no flicker), scales every pixel of the frame. "
                         "A gain keeps every ratio, so the range SDR to HDR made above the plate's white stays for grading. "
                         "Without an HDR shot or a plate the image passes through; without a matte the HDR shot does. An empty "
-                        "matte (a plate with no edit) leaves every pixel untouched: the whole plate's mid-tones set the level.",
+                        "matte (a plate with no edit) leaves every pixel untouched: each frame's mid-tones set its level.",
             inputs=[
                 io.Image.Input("image", tooltip="The shot in the plate's colour space as the SDR pass made it: the output without an HDR shot."),
                 io.Image.Input("plate", optional=True,

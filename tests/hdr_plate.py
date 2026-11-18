@@ -16,9 +16,9 @@ way back from the model space keeps the plate's levels (PLA), without a pod.
         Two runs of finish that differ only by --tile decode the same latent, since ComfyUI keeps the first run's results
         and runs again only the decode and the nodes after it.
         python tests/hdr_plate.py bands --ref /data/ComfyUI/output/whole/hdr --test /data/ComfyUI/output/t256/hdr --tile 256 --work 1920x1088
-  level  The HDR frames' level against the plate, frame by frame: as HDR Match reads it for the whole shot, the median of
-        log2(plate / HDR) over the plate's mid-tones in ACEScg, but per frame, with each frame's change of level beside
-        the plate's own and each frame's largest value.
+  level  The HDR frames' level against the plate, frame by frame: as HDR Match measures each frame's gain, the median of
+        log2(plate / HDR) over the plate's mid-tones in ACEScg, with each frame's change of level beside the plate's own and
+        each frame's largest value.
         python tests/hdr_plate.py level --plate /data/ComfyUI/input/plates/horse.mp4 --hdr /data/ComfyUI/output/finish/hdr
   finish  SDR to HDR on a plate with no edit, as the page's Finish runs it, on a running ComfyUI: the seconds of the job
         and of each node, the peaks of the GPU's memory and of ComfyUI's RAM, and the HDR frames' count and size.
@@ -296,7 +296,7 @@ def _plate_frames(path: str, count: int):
 
 def level(plate: str, hdr: str, color_space: str = "@model", step: int = 8, first: int = 8, out: str = "") -> dict:
     """The HDR frames (ACES2065-1) against the plate (`color_space`), both in ACEScg, sampled every `step` px: per frame,
-    the level (the mean over R, G and B of mathops.hdr_level, which HDR Match reads over the whole shot), its change from
+    the level (the mean over R, G and B of mathops.hdr_level, HDR Match's gain of a frame), its change from
     the frame before beside the change of the plate's mean luminance, and the HDR frame's largest value."""
     import mathops
     import ocio
