@@ -407,8 +407,16 @@ def node_rows(spent: dict, prompt: dict, top: int = 8) -> list:
     return rows + [(k.capitalize(), spent[k]) for k in (BEFORE, AFTER) if k in spent]
 
 
+def decode_overlap(prompt: dict, overlap: int) -> int:
+    """Set the overlap, in px, of every VAE Decode (Tiled) of a filled workflow; the count of nodes set."""
+    nodes = [n for n in prompt.values() if n.get("class_type") == "VAEDecodeTiled"]
+    for n in nodes:
+        n["inputs"]["overlap"] = overlap
+    return len(nodes)
+
+
 def finish(url: str, comfy: str, plate: str, out: str, label: str = "finish", width: int = 0, height: int = 0,
-           tile=None, guide_tiled=None, color_space: str = "@model") -> dict:
+           tile=None, guide_tiled=None, color_space: str = "@model", overlap=None) -> dict:
     """SDR to HDR on a plate with no edit, as the page's Finish runs it, timed node by node: a report in `out`."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
     import build_workflows
@@ -422,6 +430,9 @@ def finish(url: str, comfy: str, plate: str, out: str, label: str = "finish", wi
               "plate_height": h, "prefix": f"{label}/hdr/f", "video_prefix": f"{label}/hdr_movie"}
     values.update({k: v for k, v in (("tile", tile), ("guide_tiled", guide_tiled)) if v is not None})
     prompt = build_workflows.fill("hdr", values)
+    if overlap is not None:
+        decode_overlap(prompt, overlap)
+    ov = next((n["inputs"]["overlap"] for n in prompt.values() if n.get("class_type") == "VAEDecodeTiled"), None)
     r = run_prompt(url, prompt, pid=_comfy_pid())
     exrs = sorted(glob.glob(os.path.join(comfy, "output", label, "hdr", "*.exr")))
     size = plateio.read_float(exrs[0]).shape[:2] if exrs else None
@@ -431,7 +442,7 @@ def finish(url: str, comfy: str, plate: str, out: str, label: str = "finish", wi
     lines = [f"# SDR to HDR on a plate with no edit: `{plate}`", "", "| | |", "| --- | --- |",
              f"| ComfyUI | {url}, job {r['job'][:8]}: {status} |",
              f"| Plate | {w} x {h}, {count} frames, working size {ww} x {wh} |",
-             f"| Slots | tile {values.get('tile', 'default')}, guide_tiled {values.get('guide_tiled', 'default')}, colour space {color_space} |",
+             f"| Slots | tile {values.get('tile', 'default')}, the decode's overlap {ov} px, guide_tiled {values.get('guide_tiled', 'default')}, colour space {color_space} |",
              f"| Seconds | {r['seconds']:.1f} |", f"| Peak VRAM | {gb(r['peaks']['vram'])}, the GPU's memory in use |",
              f"| Peak RAM | {gb(r['peaks']['ram'])}, ComfyUI's process |",
              f"| HDR frames | {len(exrs)} EXR frames" + (f" at {size[1]} x {size[0]}" if size else "") + " |", "",
@@ -483,6 +494,7 @@ if __name__ == "__main__":
     fi.add_argument("--width", type=int, default=0, help="the working width: 0 is the plate's, up to a multiple of 32")
     fi.add_argument("--height", type=int, default=0, help="the working height: 0 is the plate's, up to a multiple of 32")
     fi.add_argument("--tile", type=int, help="the decode's tile in px, as the page's memory profile sends it")
+    fi.add_argument("--overlap", type=int, help="the decode's overlap in px; VAE Decode (Tiled) takes at most a quarter of the tile")
     fi.add_argument("--guide-tiled", type=int, choices=(0, 1), help="1 encodes the guide in tiles, as the page's small profile does")
     fi.add_argument("--color-space", default="@model", help="the plate's file colour space in the OCIO config")
     a = ap.parse_args()
@@ -497,4 +509,4 @@ if __name__ == "__main__":
               os.path.expanduser(a.sheet) if a.sheet else "", a.rows)
     else:
         finish(a.url, a.comfy, a.plate, os.path.expanduser(a.out), a.label, a.width, a.height, a.tile,
-               None if a.guide_tiled is None else bool(a.guide_tiled), a.color_space)
+               None if a.guide_tiled is None else bool(a.guide_tiled), a.color_space, a.overlap)
