@@ -1,4 +1,4 @@
-// The page workstream's check of the native frames' failure (logic.nativeCause): one log line per cause, so a message
+// Tests of the native frames' failure (logic.nativeCause): one log line per cause, so a message
 // that names its file counts once for every file of a sequence.
 import assert from "node:assert/strict";
 import { test } from "node:test";

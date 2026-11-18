@@ -1,4 +1,4 @@
-// Render workstream, wave 5 (RX1): the job index's key holds what computes. The server answers a build, a hash made when
+// the job index's key holds what computes. The server answers a build, a hash made when
 // ComfyUI starts (routes.build_parts). The key takes it in place of the pack's version, and the page reads it again when
 // ComfyUI comes back after a stop.
 import { test } from "node:test";

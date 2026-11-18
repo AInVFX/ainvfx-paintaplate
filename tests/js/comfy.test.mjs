@@ -125,7 +125,7 @@ test("a job cancelled while the page reads ComfyUI's free RAM is not posted", as
   }
 });
 
-// ---------- The page workstream, wave 3: the job index key holds the pack's version ----------
+// ---------- the job index key holds the pack's version ----------
 import { indexParts, hashHex } from "../../web/comfy.mjs";
 
 test("the job index key holds the pack's version: a result made by another version never comes back", async () => {

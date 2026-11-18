@@ -735,7 +735,7 @@ test("the time left in a step follows the sampler's own pace, not the time the m
   assert.equal(times[key], undefined);
 });
 
-// ---------- The render workstream, wave 4 [cross]: a seed asked for in the address ----------
+// ---------- a seed asked for in the address ----------
 import { askedSeed } from "../../web/logic.mjs";
 
 test("a seed asked for in the address is a whole number under 2^31, and anything else is not a seed", () => {
@@ -745,7 +745,7 @@ test("a seed asked for in the address is a whole number under 2^31, and anything
   for (const text of [null, "", "abc", "-1", "1.5", "1e3", " 7", "7 ", "2147483648", "99999999999"]) assert.equal(askedSeed(text), null, String(text));
 });
 
-// ---------- The render workstream, wave 4 [cross]: no job index when the address says ?index=0 ----------
+// ---------- no job index when the address says ?index=0 ----------
 import { plateIdentity } from "../../web/logic.mjs";
 import { indexParts } from "../../web/comfy.mjs";
 

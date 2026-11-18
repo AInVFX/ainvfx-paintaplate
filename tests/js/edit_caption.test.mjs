@@ -1,4 +1,4 @@
-// The edit workstream's tests of the first frame's caption (web/logic.mjs: caption, upsampleRequest).
+// Tests of the first frame's caption (web/logic.mjs: caption, upsampleRequest).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { caption, upsampleRequest } from "../../web/logic.mjs";

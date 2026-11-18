@@ -1,4 +1,4 @@
-// The page workstream's check of the log's export (logic.logReport, logic.logFileName): the versions, the machine that
+// Tests of the log's export (logic.logReport, logic.logFileName): the versions, the machine that
 // ComfyUI reports, the page and the plate, then the log with its times; no command line and no path of this machine.
 import assert from "node:assert/strict";
 import { test } from "node:test";

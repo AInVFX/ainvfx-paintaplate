@@ -1,4 +1,4 @@
-// The page workstream's check of the hint that a line naming a missing model file adds on the status line
+// Tests of the hint that a line naming a missing model file adds on the status line
 // (logic.missingFileHint): the log keeps the fact, and the status line adds what to do.
 import assert from "node:assert/strict";
 import { test } from "node:test";

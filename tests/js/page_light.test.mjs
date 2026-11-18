@@ -1,4 +1,4 @@
-// The page workstream's check of the eraser on a Light edit (logic.rubDabs): soft dabs with the light brush's own profile,
+// Tests of the eraser on a Light edit (logic.rubDabs): soft dabs with the light brush's own profile,
 // so paint, erase and the same paint again leave one paint, with no edge.
 import assert from "node:assert/strict";
 import { test } from "node:test";
