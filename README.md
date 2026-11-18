@@ -30,7 +30,7 @@ Planned next, and not there yet: shots up to 20 seconds, plates at LTX 2.5's lar
 ## What it needs
 
 - **ComfyUI** v0.43.0 or newer, with [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo). It is tested on ComfyUI v0.45.3: `tools/pins.sh` names the tested commits.
-- **An NVIDIA GPU with 16 GB of VRAM at least; 32 GB or more recommended.** Under 24 GB the models load one at a time and LTX works in tiles, so each step takes longer. From 32 GB every step finishes at 1920 x 1088 and 121 frames. A 96 GB card is the fastest and takes plates above 2K.
+- **An NVIDIA GPU with 16 GB of VRAM at least; 32 GB or more recommended.** Under 24 GB the models load one at a time, so each step takes longer. From 32 GB every step finishes at 1920 x 1088 and 121 frames. A 96 GB card is the fastest and takes plates above 2K.
 - **64 GB of RAM.** This is what is tested.
 - **79 GB of disk** for the models.
 
@@ -133,13 +133,15 @@ Known limits:
 - A painted object that a foreground object hides can raise « object left its place » although the composite is right: check the picture.
 - A shadow painted with Light comes out soft: words can ask for a deeper one. A relight can leave a thin light or dark edge along bright outlines.
 - The check after Clean compares colours. An object of another colour that takes the removed object's place passes it, so look at the first frame.
+- On a paint's first frames, the matte can take in a change that the shot made to an object right beside the painted one. It was seen on a Half size preview, where the full-size result was right: check the first frames.
+- Under 16 GB of VRAM, LTX works in 256 px tiles, and a soft band can show where two tiles overlap, most in SDR to HDR's frames. From 16 GB every frame is decoded in one piece.
 
 **Where the rest is.** Press `?` for the keys; the backquote key shows the plate alone, full screen, where S opens the colours and W the edit's words. The right-click menu holds every action with its key, and the viewer's colour tools under **OCIO**. [`ARCHITECTURE.md`](ARCHITECTURE.md) explains how the pack works and how to change it. [`TESTING.md`](TESTING.md) describes every test.
 
 ## When something goes wrong
 
 - **The log.** The **Log** button opens it. It records what happened, one line per fact, and the button is highlighted when an error arrives. The download icon beside it saves the log as a text file, with the versions and the machine as ComfyUI reports them: attach it when you ask for help. It holds no path of your machine.
-- **The memory profile.** Its line in the log says how the page uses your card. Small, under 24 GB of VRAM: models load one at a time and LTX runs in tiles. Medium: the edit models load when the page opens. Large, from 60 GB: LTX 2.5 loads at start too.
+- **The memory profile.** Its line in the log says how the page uses your card. Small, under 24 GB of VRAM: models load one at a time; under 16 GB, LTX also works in 256 px tiles. Medium: the edit models load when the page opens. Large, from 60 GB: LTX 2.5 loads at start too.
 - **Stop.** Esc, or **Stop** beside Generate, stops what generates. What finished is kept, and Enter goes on from there.
 - **ComfyUI's memory grows, or the page waits and nothing runs.** Start ComfyUI with `PAINTAPLATE_TRACE=1` in its environment. Every request then writes a line in ComfyUI's terminal when it starts and when it ends, with the memory the process holds. Add these lines to your report.
 - **A model or a node is missing.** The page names it at start. `python get_models.py --list` shows what is in place.
