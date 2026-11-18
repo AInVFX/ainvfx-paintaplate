@@ -10,6 +10,12 @@ way back from the model space keeps the plate's levels (PLA), without a pod.
   groups  Each frame folder in the export's zip with its file count and, for a folder of EXR frames as many as the plate's,
         the largest difference from the plate where the delivered matte shows 0. The export copies those pixels exactly;
         a folder that blends there is not the export.
+  bands  Where the tiles of a tiled decode show: its frames against the same latent decoded whole, by column and by row,
+        in stops (log2 of the ratio of the channels' mean) or, with --steps, in 8-bit steps for display frames. For each
+        band where two tiles blend, how far the difference swings across it: a decode with no band reads 0 everywhere.
+        Two runs of finish that differ only by --tile decode the same latent, since ComfyUI keeps the first run's results
+        and runs again only the decode and the nodes after it.
+        python tests/hdr_plate.py bands --ref /data/ComfyUI/output/whole/hdr --test /data/ComfyUI/output/t256/hdr --tile 256 --work 1920x1088
   finish  SDR to HDR on a plate with no edit, as the page's Finish runs it, on a running ComfyUI: the seconds of the job
         and of each node, the peaks of the GPU's memory and of ComfyUI's RAM, and the HDR frames' count and size.
         python tests/hdr_plate.py finish --comfy /data/ComfyUI --plate plates/horse.mp4 --out ~/paintaplate_gpu/w9_plate
@@ -157,6 +163,88 @@ def groups(plate: str, export: str, every: int = 30) -> dict:
     text = "\n".join(lines) + "\n"
     print(text)
     return {"rows": rows, "text": text}
+
+
+DARK = 2.0 ** -10  # a level under this is read as this, so the noise of black does not swing in stops
+LIMIT = {"stops": 0.01, "steps": 0.5}  # the swing from which a band shows
+
+
+def band_places(size: int, tile: int, overlap: int, work: int = 0) -> list:
+    """The bands of a tiled decode along one side of a frame `size` px long, as (first, end) px: core's
+    tiled_scale_multidim starts a tile every (tile - overlap) px of the decoded frame, `work` px long (0 for `size`), and
+    blends two tiles over the `overlap` px from the later tile's edge. A frame brought to another size carries its bands."""
+    work, step = work or size, tile - overlap
+    return [(round(x * size / work), round((x + overlap) * size / work)) for x in range(step, work - overlap, step)]
+
+
+def _frames(path: str) -> list:
+    return plateio.find_sequence(path) if os.path.isdir(path) else [path]
+
+
+def _swings(profile: np.ndarray, places: list) -> list:
+    return [float(profile[a:b].max() - profile[a:b].min()) for a, b in places]
+
+
+def _middles(places: list) -> list:
+    """Windows as wide as a band at the middle of each tile's own part, between two bands, where it has room for one."""
+    width = places[0][1] - places[0][0] if places else 0
+    return [((b0 + a1) // 2 - width // 2, (b0 + a1) // 2 - width // 2 + width)
+            for (_, b0), (a1, _) in zip(places, places[1:]) if a1 - b0 >= width]
+
+
+def bands(ref: str, test: str, tile: int = 256, overlap: int = 64, work: str = "", steps: bool = False, every: int = 10,
+          limit: float = 0.0, out: str = "") -> dict:
+    """Where the tiles of a tiled decode show: the frames of `test` against those of `ref`, each a folder of frames or one
+    frame. The column profile is the median over the frame of each column's difference, the row profile each row's. A
+    band's swing is its profile's largest value minus its smallest across the band, read on every `every`th frame; the
+    same swing at the middle of each tile's own part is the level a band is read against."""
+    refs, tests = _frames(ref), _frames(test)
+    count = min(len(refs), len(tests))
+    picks = range(0, count, every)
+    unit = "steps" if steps else "stops"
+    limit = limit or LIMIT[unit]
+    h, w = plateio.read_float(tests[0]).shape[:2]
+    ww, wh = (int(v) for v in work.lower().split("x")) if work else (w, h)
+    places = {"Columns": band_places(w, tile, overlap, ww), "Rows": band_places(h, tile, overlap, wh)}
+    swing = {side: [] for side in places}
+    calm = {side: [] for side in places}
+    for i in picks:
+        r, t = plateio.read_float(refs[i]).mean(-1), plateio.read_float(tests[i]).mean(-1)
+        if r.shape != t.shape:
+            raise SystemExit(f"{refs[i]} is {r.shape[1]} x {r.shape[0]} and {tests[i]} is {t.shape[1]} x {t.shape[0]}")
+        d = (t - r) * 255.0 if steps else np.log2(np.maximum(t, DARK) / np.maximum(r, DARK))
+        for side, axis in (("Columns", 0), ("Rows", 1)):
+            profile = np.median(d, axis=axis)
+            swing[side].append(_swings(profile, places[side]))
+            calm[side] += _swings(profile, _middles(places[side]))
+    rows = [(side, a, b, float(np.median(s)), float(np.max(s)))
+            for side in places for (a, b), s in zip(places[side], np.array(swing[side]).reshape(len(picks), -1).T)]
+    shows = [row for row in rows if row[3] > limit]
+    top = max(rows, key=lambda row: row[3], default=None)
+    controls = {side: float(np.median(v)) if v else None for side, v in calm.items()}
+    what = "8-bit levels" if steps else "log2 of the ratio of the channels' mean"
+    lines = [f"# The bands of `{test}` against `{ref}`", "",
+             f"Tiles of {tile} px with {overlap} px of overlap on a decode of {ww} x {wh}: a tile every {tile - overlap} px. "
+             f"Frames of {w} x {h}: {len(picks)} of {count} read, every {every}th from the first. The difference is in "
+             f"{unit} ({what}); 0 is the reference's level. A band's swing is its profile's largest value minus its smallest "
+             "across the band.", "",
+             f"| Side | Band, px | Swing, median over the frames, {unit} | Largest swing, {unit} |", "| --- | --- | --- | --- |"]
+    lines += [f"| {side} | {a} to {b} | {med:.3f} | {big:.3f} |" for side, a, b, med, big in rows]
+    lines += ["", "The same swing at the middle of each tile's own part, the median: " + ", ".join(
+        f"{side.lower()} {'no room' if v is None else f'{v:.3f} {unit}'}" for side, v in controls.items()) + ".", ""]
+    if shows:
+        n = {side: sum(1 for row in shows if row[0] == side) for side in places}
+        lines.append(f"Bands over {limit:g} {unit}: {n['Columns']} of {len(places['Columns'])} column bands and {n['Rows']} of "
+                     f"{len(places['Rows'])} row bands. The largest: {top[3]:.3f} {unit}, {top[0].lower()} {top[1]} to {top[2]}.")
+    else:
+        lines.append(f"No band over {limit:g} {unit}: the largest swing is {top[3] if top else 0.0:.3f} {unit}.")
+    text = "\n".join(lines) + "\n"
+    if out:
+        os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+        with open(out, "w") as f:
+            f.write(text)
+    print(text)
+    return {"rows": rows, "shows": shows, "largest": top[3] if top else 0.0, "controls": controls, "text": text}
 
 
 def _plate_info(path: str):
@@ -340,6 +428,16 @@ if __name__ == "__main__":
     gr.add_argument("--plate", required=True)
     gr.add_argument("--export", required=True, help="the export.zip that tests/ui_live.py downloads")
     gr.add_argument("--every", type=int, default=30)
+    b = sub.add_parser("bands", help="where a tiled decode's tiles show: its frames against the same latent decoded whole")
+    b.add_argument("--ref", required=True, help="the frames decoded whole: a folder of frames or one frame")
+    b.add_argument("--test", required=True, help="the frames decoded in tiles: a folder of frames or one frame")
+    b.add_argument("--tile", type=int, default=256, help="the tiled decode's tile in px")
+    b.add_argument("--overlap", type=int, default=64, help="the tiled decode's overlap in px")
+    b.add_argument("--work", default="", help="the decode's size, such as 1920x1088, when the frames were brought to another size")
+    b.add_argument("--steps", action="store_true", help="the difference in 8-bit steps, for display frames; in stops otherwise")
+    b.add_argument("--every", type=int, default=10, help="read every this many frames, from the first")
+    b.add_argument("--limit", type=float, help="the swing from which a band shows: 0.01 stops, or 0.5 steps with --steps")
+    b.add_argument("--out", default="", help="a Markdown file for the report")
     fi = sub.add_parser("finish", help="SDR to HDR on a plate with no edit, timed node by node, on a running ComfyUI")
     fi.add_argument("--url", default="http://127.0.0.1:8188")
     fi.add_argument("--comfy", required=True, help="ComfyUI's folder: the plate under its input folder, the frames under its output folder")
@@ -358,6 +456,8 @@ if __name__ == "__main__":
         seam(a.plate, a.export, a.ring, a.every)
     elif a.what == "groups":
         groups(a.plate, a.export, a.every)
+    elif a.what == "bands":
+        bands(a.ref, a.test, a.tile, a.overlap, a.work, a.steps, a.every, a.limit or 0.0, os.path.expanduser(a.out) if a.out else "")
     else:
         finish(a.url, a.comfy, a.plate, os.path.expanduser(a.out), a.label, a.width, a.height, a.tile,
                None if a.guide_tiled is None else bool(a.guide_tiled), a.color_space)
