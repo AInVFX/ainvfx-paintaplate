@@ -415,8 +415,17 @@ def decode_overlap(prompt: dict, overlap: int) -> int:
     return len(nodes)
 
 
+def save_latent(prompt: dict, prefix: str) -> str:
+    """Add core's Save Latent on the latent that the tiled decode reads, so tests/decode_cost.py can decode it again; the
+    new node's id."""
+    link = next(n["inputs"]["samples"] for n in prompt.values() if n.get("class_type") == "VAEDecodeTiled")
+    key = str(max(int(k) for k in prompt) + 1)
+    prompt[key] = {"class_type": "SaveLatent", "inputs": {"samples": link, "filename_prefix": prefix}}
+    return key
+
+
 def finish(url: str, comfy: str, plate: str, out: str, label: str = "finish", width: int = 0, height: int = 0,
-           tile=None, guide_tiled=None, color_space: str = "@model", overlap=None) -> dict:
+           tile=None, guide_tiled=None, color_space: str = "@model", overlap=None, latent: bool = False) -> dict:
     """SDR to HDR on a plate with no edit, as the page's Finish runs it, timed node by node: a report in `out`."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
     import build_workflows
@@ -432,6 +441,8 @@ def finish(url: str, comfy: str, plate: str, out: str, label: str = "finish", wi
     prompt = build_workflows.fill("hdr", values)
     if overlap is not None:
         decode_overlap(prompt, overlap)
+    if latent:
+        save_latent(prompt, f"{label}/latent")
     ov = next((n["inputs"]["overlap"] for n in prompt.values() if n.get("class_type") == "VAEDecodeTiled"), None)
     r = run_prompt(url, prompt, pid=_comfy_pid())
     exrs = sorted(glob.glob(os.path.join(comfy, "output", label, "hdr", "*.exr")))
@@ -495,6 +506,7 @@ if __name__ == "__main__":
     fi.add_argument("--height", type=int, default=0, help="the working height: 0 is the plate's, up to a multiple of 32")
     fi.add_argument("--tile", type=int, help="the decode's tile in px, as the page's memory profile sends it")
     fi.add_argument("--overlap", type=int, help="the decode's overlap in px; VAE Decode (Tiled) takes at most a quarter of the tile")
+    fi.add_argument("--latent", action="store_true", help="also save the latent the decode reads, under the frames' folder")
     fi.add_argument("--guide-tiled", type=int, choices=(0, 1), help="1 encodes the guide in tiles, as the page's small profile does")
     fi.add_argument("--color-space", default="@model", help="the plate's file colour space in the OCIO config")
     a = ap.parse_args()
@@ -509,4 +521,4 @@ if __name__ == "__main__":
               os.path.expanduser(a.sheet) if a.sheet else "", a.rows)
     else:
         finish(a.url, a.comfy, a.plate, os.path.expanduser(a.out), a.label, a.width, a.height, a.tile,
-               None if a.guide_tiled is None else bool(a.guide_tiled), a.color_space, a.overlap)
+               None if a.guide_tiled is None else bool(a.guide_tiled), a.color_space, a.overlap, a.latent)

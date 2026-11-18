@@ -25,5 +25,14 @@ class Overlap(unittest.TestCase):
         self.assertEqual(json.dumps(prompt, sort_keys=True), before)
 
 
+class Latent(unittest.TestCase):
+    def test_save_latent_reads_the_latent_that_the_tiled_decode_reads(self):
+        prompt = build_workflows.fill("hdr", {"path": "plates/horse.mp4"})
+        key = hdr_plate.save_latent(prompt, "lat/latent")
+        decode = next(n for n in prompt.values() if n["class_type"] == "VAEDecodeTiled")
+        self.assertEqual(prompt[key], {"class_type": "SaveLatent", "inputs": {"samples": decode["inputs"]["samples"],
+                                                                              "filename_prefix": "lat/latent"}})
+
+
 if __name__ == "__main__":
     unittest.main()
