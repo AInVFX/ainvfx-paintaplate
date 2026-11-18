@@ -14,7 +14,8 @@ way back from the model space keeps the plate's levels (PLA), without a pod.
         in stops (log2 of the ratio of the channels' mean) or, with --steps, in 8-bit steps for display frames. For each
         band where two tiles blend, how far the difference swings across it: a decode with no band reads 0 everywhere.
         Two runs of finish that differ only by --tile decode the same latent, since ComfyUI keeps the first run's results
-        and runs again only the decode and the nodes after it.
+        and runs again only the decode and the nodes after it. With no --ref, the frames' own level is read over --rows,
+        its slow changes removed: a band shows where it swings twice as much as the tiles' middles and over the limit.
         python tests/hdr_plate.py bands --ref /data/ComfyUI/output/whole/hdr --test /data/ComfyUI/output/t256/hdr --tile 256 --work 1920x1088
   level  The HDR frames' level against the plate, frame by frame: as HDR Match measures each frame's gain, the median of
         log2(plate / HDR) over the plate's mid-tones in ACEScg, with each frame's change of level beside the plate's own and
@@ -35,6 +36,7 @@ import os
 import sys
 import tempfile
 import time
+import warnings
 import zipfile
 
 import numpy as np
@@ -210,7 +212,7 @@ def _sheet(path: str, test: np.ndarray, ref: np.ndarray, d: np.ndarray, places: 
             x = np.where(x <= 0.0031308, 12.92 * x, 1.055 * np.power(x, 1 / 2.4) - 0.055)
         return (x * 255 + 0.5).astype(np.uint8)
     grey = (np.clip(0.5 + d[top:bottom] / (8.0 if steps else 0.2), 0.0, 1.0) * 255 + 0.5).astype(np.uint8)
-    strips = [look(test), look(ref), np.repeat(grey[..., None], 3, -1)]
+    strips = [look(test)] + ([] if ref is None else [look(ref)]) + [np.repeat(grey[..., None], 3, -1)]
     for s in strips:
         for a, b in places["Columns"]:
             s[:6, a:b] = GOLD
@@ -218,7 +220,7 @@ def _sheet(path: str, test: np.ndarray, ref: np.ndarray, d: np.ndarray, places: 
             if max(a, top) < min(b, bottom):
                 s[max(a, top) - top:min(b, bottom) - top, :6] = GOLD
     gap = np.zeros((4, d.shape[1], 3), np.uint8)
-    Image.fromarray(np.concatenate([strips[0], gap, strips[1], gap, strips[2]])).save(path)
+    Image.fromarray(np.concatenate([x for s in strips for x in (s, gap)][:-1])).save(path)
     return top, bottom
 
 
@@ -229,39 +231,55 @@ def bands(ref: str, test: str, tile: int = 256, overlap: int = 64, work: str = "
     band's swing is its profile's largest value minus its smallest across the band, read on every `every`th frame; the
     same swing at the middle of each tile's own part is the level a band is read against. `sheet` names a PNG of the
     first frame read (_sheet), from row rows[0] to rows[1]."""
-    refs, tests = _frames(ref), _frames(test)
-    count = min(len(refs), len(tests))
+    region, refs, tests = tuple(rows), (_frames(ref) if ref else None), _frames(test)
+    count = len(tests) if refs is None else min(len(refs), len(tests))
     picks = range(0, count, every)
     unit = "steps" if steps else "stops"
     limit = limit or LIMIT[unit]
     h, w = plateio.read_float(tests[0]).shape[:2]
     ww, wh = (int(v) for v in work.lower().split("x")) if work else (w, h)
     places = {"Columns": band_places(w, tile, overlap, ww), "Rows": band_places(h, tile, overlap, wh)}
+    if refs is None:  # only the row bands inside the rows read
+        places["Rows"] = [(a, b) for a, b in places["Rows"] if a >= region[0] and b <= region[1]]
     swing = {side: [] for side in places}
     calm = {side: [] for side in places}
     for i in picks:
-        rr, tt = plateio.read_float(refs[i]), plateio.read_float(tests[i])
-        r, t = rr.mean(-1), tt.mean(-1)
-        if r.shape != t.shape:
-            raise SystemExit(f"{refs[i]} is {r.shape[1]} x {r.shape[0]} and {tests[i]} is {t.shape[1]} x {t.shape[0]}")
-        d = (t - r) * 255.0 if steps else np.log2(np.maximum(t, DARK) / np.maximum(r, DARK))
+        tt = plateio.read_float(tests[i])
+        t, rr = tt.mean(-1), None
+        if refs is None:  # the frame's own level over `rows`, its slow changes removed: the bands against the picture
+            d = t * 255.0 if steps else np.log2(np.maximum(t, DARK))
+            k = 2 * round((tile - overlap) * w / ww) + 1
+            d = d - ndimage.uniform_filter(d, size=k, mode="nearest")
+            d[:region[0]], d[region[1]:] = np.nan, np.nan
+        else:
+            rr = plateio.read_float(refs[i])
+            r = rr.mean(-1)
+            if r.shape != t.shape:
+                raise SystemExit(f"{refs[i]} is {r.shape[1]} x {r.shape[0]} and {tests[i]} is {t.shape[1]} x {t.shape[0]}")
+            d = (t - r) * 255.0 if steps else np.log2(np.maximum(t, DARK) / np.maximum(r, DARK))
         for side, axis in (("Columns", 0), ("Rows", 1)):
-            profile = np.median(d, axis=axis)
+            if refs is None:
+                with warnings.catch_warnings():  # the rows outside the rows read have no value
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    profile = np.nan_to_num(np.nanmedian(d, axis=axis))
+            else:
+                profile = np.median(d, axis=axis)
             swing[side].append(_swings(profile, places[side]))
             calm[side] += _swings(profile, _middles(places[side]))
         if sheet and i == picks[0]:
-            shown = _sheet(sheet, tt, rr, d, places, rows, steps)
+            shown = _sheet(sheet, tt, rr, np.nan_to_num(d), places, region, steps)
     rows = [(side, a, b, float(np.median(s)), float(np.max(s)))
             for side in places for (a, b), s in zip(places[side], np.array(swing[side]).reshape(len(picks), -1).T)]
-    shows = [row for row in rows if row[3] > limit]
-    top = max(rows, key=lambda row: row[3], default=None)
     controls = {side: float(np.median(v)) if v else None for side, v in calm.items()}
+    shows = [row for row in rows if row[3] > limit and (refs is not None or row[3] > 2 * (controls[row[0]] or 0.0))]
+    top = max(rows, key=lambda row: row[3], default=None)
     what = "8-bit levels" if steps else "log2 of the ratio of the channels' mean"
-    lines = [f"# The bands of `{test}` against `{ref}`", "",
+    against = f"against `{ref}`" if ref else f"against its own level over rows {region[0]} to {region[1]}, slow changes removed"
+    lines = [f"# The bands of `{test}` {against}", "",
              f"Tiles of {tile} px with {overlap} px of overlap on a decode of {ww} x {wh}: a tile every {tile - overlap} px. "
              f"Frames of {w} x {h}: {len(picks)} of {count} read, every {every}th from the first. The difference is in "
              f"{unit} ({what}); 0 is the reference's level. A band's swing is its profile's largest value minus its smallest "
-             "across the band.", "",
+             "across the band." + ("" if ref else " With no reference, a band shows from twice the swing at the tiles' middles."), "",
              f"| Side | Band, px | Swing, median over the frames, {unit} | Largest swing, {unit} |", "| --- | --- | --- | --- |"]
     lines += [f"| {side} | {a} to {b} | {med:.3f} | {big:.3f} |" for side, a, b, med, big in rows]
     lines += ["", "The same swing at the middle of each tile's own part, the median: " + ", ".join(
@@ -274,7 +292,7 @@ def bands(ref: str, test: str, tile: int = 256, overlap: int = 64, work: str = "
         lines.append(f"No band over {limit:g} {unit}: the largest swing is {top[3] if top else 0.0:.3f} {unit}.")
     if sheet:
         lines += ["", f"Sheet `{os.path.basename(sheet)}`: frame {picks[0] + 1}, rows {shown[0]} to {shown[1]}. From the top: the "
-                  "tested frame, the reference, their difference (mid-grey is 0, white or black "
+                  f"tested frame, {'the reference, their difference' if ref else 'its level with slow changes removed'} (mid-grey is 0, white or black "
                   f"{'4 steps' if steps else '0.1 stops'} or more); a gold mark over each band."]
     text = "\n".join(lines) + "\n"
     if out:
@@ -538,7 +556,7 @@ if __name__ == "__main__":
     gr.add_argument("--export", required=True, help="the export.zip that tests/ui_live.py downloads")
     gr.add_argument("--every", type=int, default=30)
     b = sub.add_parser("bands", help="where a tiled decode's tiles show: its frames against the same latent decoded whole")
-    b.add_argument("--ref", required=True, help="the frames decoded whole: a folder of frames or one frame")
+    b.add_argument("--ref", default="", help="the frames decoded whole: a folder of frames or one frame; with none, the frames' own level over --rows, which should be a smooth area such as a sky")
     b.add_argument("--test", required=True, help="the frames decoded in tiles: a folder of frames or one frame")
     b.add_argument("--tile", type=int, default=256, help="the tiled decode's tile in px")
     b.add_argument("--overlap", type=int, default=64, help="the tiled decode's overlap in px")
@@ -548,7 +566,7 @@ if __name__ == "__main__":
     b.add_argument("--limit", type=float, help="the swing from which a band shows: 0.01 stops, or 0.5 steps with --steps")
     b.add_argument("--out", default="", help="a Markdown file for the report")
     b.add_argument("--sheet", default="", help="a PNG of the first frame read: the tested frame, the reference and their difference")
-    b.add_argument("--rows", type=int, nargs=2, default=(0, 432), help="the sheet's first row and the row after its last")
+    b.add_argument("--rows", type=int, nargs=2, default=(0, 432), help="the sheet's rows, and with no --ref the rows read: the first and the one after the last")
     lv = sub.add_parser("level", help="the HDR frames' level against the plate, frame by frame")
     lv.add_argument("--plate", required=True, help="the plate: a movie or a folder of frames")
     lv.add_argument("--hdr", required=True, help="the folder of the HDR frames, in ACES2065-1")

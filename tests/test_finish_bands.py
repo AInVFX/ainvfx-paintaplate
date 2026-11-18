@@ -92,6 +92,18 @@ class Bands(unittest.TestCase):
         self.assertTrue(np.allclose(grey, 0.7 * 255, atol=2))
         self.assertIn("Sheet `sky.png`: frame 1, rows 0 to 200.", r["text"])
 
+    def test_with_no_reference_the_frames_own_level_shows_its_bands_and_a_frame_with_none_reads_none(self):
+        y, x = np.mgrid[0:H, 0:W]
+        smooth = ((0.2 + 0.8 * x / W) * np.exp(self.rng.normal(0, 0.01, (H, W))))[..., None].repeat(3, -1).astype(np.float32)
+        banded = smooth * np.exp2(blended(W, (0.04, -0.04)))[None, :, None].astype(np.float32)
+        for frames, found in (([banded], 7), ([smooth], 0)):
+            folder = exrs(os.path.join(self.tmp.name, f"self{found}"), frames)
+            r = hdr_plate.bands("", folder, TILE, OVERLAP, every=1, rows=(0, H), sheet=os.path.join(self.tmp.name, f"s{found}.png"))
+            self.assertEqual(len([row for row in r["shows"] if row[0] == "Columns"]), found)
+            self.assertEqual([row for row in r["shows"] if row[0] == "Rows"], [])
+        self.assertIn("against its own level over rows 0 to 240", r["text"])
+        self.assertEqual(np.asarray(Image.open(os.path.join(self.tmp.name, "s0.png"))).shape[0], 2 * H + 4)
+
     def test_a_frame_with_no_band_reads_none_whatever_its_grain_and_its_gain(self):
         frames = [f * np.exp2(0.1 + self.rng.normal(0, 0.01, (H, W, 1))).astype(np.float32) for f in self.ref]
         r = self.measure(frames, out=os.path.join(self.tmp.name, "report", "bands.md"))
