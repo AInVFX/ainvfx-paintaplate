@@ -1,4 +1,5 @@
-"""The numpy maths behind the nodes: fitting generated frames to the plate, filling, relighting.
+"""The numpy maths behind the nodes: fitting generated frames to the plate, compositing, filling an erase, relighting,
+mattes that follow an object, the HDR level and the keyframe video.
 
 Frames are (H, W, C) float arrays and masks (H, W); stacks add a first axis. Nothing here imports
 torch or ComfyUI, so every function is tested in plain Python (tests/test_mathops.py).
