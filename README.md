@@ -97,7 +97,7 @@ One command downloads them, on a local machine and on a pod. Run it in the pack'
 | Comfy Desktop | `python`, in its terminal panel |
 | Windows, portable ComfyUI | `..\..\..\python_embeded\python.exe` |
 
-Each file goes to its folder under `models/`, at the revision that was tested. A file already in place is skipped, so you can run the command again. When Hugging Face refuses a file, its line says why and names the page to open. The last line counts the files downloaded, already there and missing. If your models live in another folder, name it: `python get_models.py path/to/models`. `--no-fluid` skips ainvfx-fluid and `--no-hdr` skips SDR to HDR: that feature is then off, and the rest works.
+Each file goes to its folder under `models/`, at the revision that was tested. A file already in place is skipped, so you can run the command again. When Hugging Face refuses a file, its line says why and names the page to open. The last line counts the files downloaded, already there and missing. If your models live in another folder, name it: `python get_models.py path/to/models`. `--no-fluid` skips ainvfx-fluid, `--no-hdr` skips SDR to HDR and `--no-upscale` skips SeedVR2 7B (Upscale to 4K): that feature is then off, and the rest works.
 
 ## Get the example plates
 
@@ -124,7 +124,7 @@ Good to know:
 - To replace a head, paint the new head over the old one. A head removed with Clean comes back as a head.
 - Paint additions on open ground. An addition painted across a foreground object breaks up during the shot.
 - With Preview on Half size or Quarter size, judge an effect on the full-size shot, not on the preview pass.
-- Paint a plate reads each plate's colour space from its file, and the export writes every pixel back in that space. Change it in Open only for a camera's log footage, which no file tag describes: choose the camera's log space.
+- Paint a plate reads each plate's colour space from its file, and the export writes every pixel back in that space. Change it only for a camera's log footage, which no file tag describes: right-click > OCIO > Plate, then the camera's log space.
 
 Known limits:
 
