@@ -362,7 +362,7 @@ def level(plate: str, hdr: str = "", color_space: str = "", step: int = 8, first
           folder: str = "", matte: str = "", hdr_space: str = "") -> dict:
     """The result's frames against the plate, both in ACEScg, sampled every `step` px, where the matte shows 0 and one
     sample in from its edge. The result is `hdr`, a folder of frames with `matte` a folder of the matte's, or the export's
-    zip: its folder `folder`, else its result as _group finds it, with its matte. Each side's colour space is `color_space`
+    zip: its EXR frames whose paths begin with `folder`, else its result as _group finds it, with its matte. Each side's colour space is `color_space`
     and `hdr_space` when given, else what its files say (_space; ACES2065-1, SDR to HDR's, for an EXR that names none).
     Per frame: the level (the mean over R, G and B of mathops.hdr_level, HDR Match's gain of a frame) and each channel's,
     the saturation of the plate and of the result on the same mid-tones, the change of level from the frame before beside
@@ -378,7 +378,7 @@ def level(plate: str, hdr: str = "", color_space: str = "", step: int = 8, first
         try:
             if z:
                 names, count = z.namelist(), _plate_info(plate)[2]
-                files = (sorted(n for n in names if os.path.dirname(n) == folder.strip("/") and n.lower().endswith(".exr"))
+                files = (sorted(n for n in names if n.startswith(folder) and n.lower().endswith(".exr"))
                          if folder else _group(names, count, False))
                 mattes = _group(names, count, True) if any("matte" in n.lower() for n in names) else []
                 where, fetch = os.path.dirname(files[0]) if files else folder, lambda n: z.extract(n, tmp)
@@ -690,7 +690,7 @@ if __name__ == "__main__":
     lv.add_argument("--hdr", default="", help="a folder of the result's frames, such as SDR to HDR's EXR frames")
     lv.add_argument("--matte", default="", help="with --hdr, a folder of the matte's frames: where it shows above 0 is left out")
     lv.add_argument("--export", default="", help="the export's zip, in place of --hdr: its result's frames and its matte")
-    lv.add_argument("--folder", default="", help="with --export, the zip's folder of the result's frames, such as the upscaled set's")
+    lv.add_argument("--folder", default="", help="with --export, the beginning of the zip's paths of the result's frames: export/ for the result, 4k/export for the upscaled one")
     lv.add_argument("--color-space", default="", help="the plate's file colour space in the OCIO config; by default what its files say")
     lv.add_argument("--hdr-space", default="", help="the result's colour space; by default its header's gamut, else ACES2065-1")
     lv.add_argument("--out", default="", help="a Markdown file for the report")

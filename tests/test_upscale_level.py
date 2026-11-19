@@ -87,9 +87,9 @@ class Level(unittest.TestCase):
         self.assertLess(r["channels"][1], -0.5, "the edited half, three stops up, reaches the median")
 
     def test_the_export_zip_and_its_upscaled_folder_read_as_the_folders(self):
-        for folder in ("export/hdr", "export/4k/hdr"):
+        for folder, read in (("export/hdr/", "export/hdr"), ("export/4k/hdr/f", "export/4k/hdr")):  # a folder, or a name's start
             r = hdr_plate.level(self.dirs["plate"], color_space="ACEScg", step=4, export=self.zipped, folder=folder)
-            self.assertEqual(r["folder"], folder)
+            self.assertEqual(r["folder"], read)
             self.check(r)
 
 
