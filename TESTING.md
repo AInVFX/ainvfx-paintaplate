@@ -179,8 +179,9 @@ The mock's own routes, for the checks that need a window held open or a look at 
 | `page_cache_near` | `tests/flows/page_cache_near.py`. A switch of the sources on show keeps a cache's frames when its new size is near its own: with the wipe on, the shot keeps its size and the frames that still fit; with the wipe off, its own size comes back with its frames. |
 | `page_xray_matte` | `tests/flows/page_xray_matte.py`. The X-ray shows the matte the composite uses: the mock's shot drifts against the plate (`/mock/shift`) and its tracking matte follows, the composite moves both back, and on a frame where the shot drifted the tint covers where the composite differs from the plate. |
 | `page_models_job` | `tests/flows/page_models_job.py`. Models and licences tints the models of the job on show, as planned from its start: a Paint edit being painted, not generated yet, already shows Klein, LTX, the Ripple IC-LoRA and SAM 3.1, each card tinted over its whole surface, and the same models stay tinted once the render is done. |
+| `review_deep_error` | An image sequence whose full-precision frames get no answer: the log says so once, in red (« Error: full-precision frames of lamp: stopped (…). Viewer: 8-bit movie. ») |
 
-Every module of `tests/flows` is a flow, named after its file (`tests/flows/README.md`). The suite has 72 flows. The runner starts each flow's page on Half size (`HalfSize` in `tests/ui_mock.py`), the preview pass most flows check; a flow that tests the default opens its page with `new_page(default_preview=True)`. On one CPU, `pipeline` takes about five minutes at `--speed 16`.
+Every module of `tests/flows` is a flow, named after its file (`tests/flows/README.md`). The suite has 73 flows. The runner starts each flow's page on Half size (`HalfSize` in `tests/ui_mock.py`), the preview pass most flows check; a flow that tests the default opens its page with `new_page(default_preview=True)`. On one CPU, `pipeline` takes about five minutes at `--speed 16`.
 
 ## CI
 
