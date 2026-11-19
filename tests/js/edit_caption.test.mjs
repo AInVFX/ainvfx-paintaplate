@@ -6,7 +6,7 @@ import { caption, upsampleRequest } from "../../web/logic.mjs";
 const bbox = [362, 794, 490, 1000];
 
 test("an erase names its object once, whether its words start with an article or not", () => {
-  // the GPU case horse_erase_barn types « the barn »: the request said « Remove the the barn » (12 Nov 2026)
+  // the GPU case horse_erase_barn types « the barn »: without objectName, the request would read « Remove the the barn »
   for (const words of ["the barn", "The barn", "a barn", "barn", "  the barn "]) {
     const text = caption({ tool: "erase", words, colors: [], color: "#000000", bbox });
     assert.match(text, /^Remove the barn inside <obj_1> completely/, words);
