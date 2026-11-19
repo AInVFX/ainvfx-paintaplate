@@ -19,8 +19,8 @@ const infos = new Map(); // class -> /object_info answer, asked once
 // The job index (routes.py): a finished job's outputs on disk, by the hash of its workflow, the plate and its values. A job
 // that matches takes them back instead of running, in this session or a later one on the same machine. Only workflows whose
 // outputs are saved files take part: the warm-up exists for its side effect, and SAM's object search keeps previews.
-// SDR to HDR takes part too: run again, it rewrote a 16-bit fluid shot's EXR frames, the plate under its edits, so the
-// plate's time changed and every job on it missed the index when its scene was opened again. Upscale to 4K's window
+// SDR to HDR takes part too: run again, it would rewrite a 16-bit fluid shot's EXR frames, the plate under its edits; the
+// plate's time would then change, and every job on it would miss the index when its scene opens again. Upscale to 4K's window
 // jobs take part, so a plate's 4K windows serve its next export; its export job does not: a key leaves the prefixes out,
 // and each render's 4K set is written in its own folder.
 const INDEXED = new Set(["ingest", "prompt", "edit", "clean", "cleanup", "shot", "shotup", "matte", "comp", "review", "export", "fluid", "hdr", "upscale"]);
@@ -39,7 +39,7 @@ export async function hashHex(data) { // SHA-256 of a string or a Blob, in hex; 
 // What a job index key is made of: the server's build, the workflow file's hash, the plate's identity and the job's values.
 // The build is a hash of what computes, made when ComfyUI starts (routes.build_parts): the pack's Python files, ComfyUI's
 // version, ComfyUI-LTXVideo's commit, and each model file's name, size and time. Other code can change what a node makes
-// from the same workflow file and the same values (1.11.9's matte rule did), and so can a new model file under an old
+// from the same workflow file and the same values, and so can a new model file under an old
 // name: a result made by other code or other weights never comes back. A new version number alone changes nothing. null:
 // no index for this job (the build is not known, the workflow has no hash, or the plate could not be checked).
 export const indexParts = (build, workflow, plate, values) =>
@@ -109,7 +109,7 @@ export async function answer(r) {
 // ComfyUI sends a sampler's step previews only when it was started with --preview-method, and by default it sends none.
 // So every job says what it wants in its own post (extra_data.preview_method, read by ComfyUI's execution.py): for a job
 // that shows its steps, latent2rgb, which needs no decoder file (taesd needs one in models/vae_approx, which the pack
-// does not download), costs one small matrix product per step, and is what the pod script asked for until now; for every
+// does not download) and costs one small matrix product per step; for every
 // other job, none, so an LTX pass, which has its own Live Preview node, never pays for ComfyUI's previews as well.
 export const PREVIEW_METHOD = "latent2rgb";
 export const promptBody = (prompt, { front = false, preview = false } = {}) =>
@@ -229,7 +229,7 @@ async function finish(id, error) {
     job.freed = true;
     notice("The GPU ran out of memory: freeing ComfyUI's memory, then trying once more.");
     await post("/free", { unload_models: true, free_memory: true }).catch(() => {}); // unanswered, the retry still runs
-    await released(); // ComfyUI frees between prompts: a job posted at once ran first, with every model still loaded
+    await released(); // ComfyUI frees between prompts: a job posted at once would run first, with every model still loaded
     return job.submit();
   }
   live.delete(job);
@@ -249,7 +249,7 @@ async function finish(id, error) {
 
 // ComfyUI reports success from inside the run and records the history just after (execution.py, then main.py's
 // task_done): read too early, the record is missing and the outputs look empty. So wait for the record. A read that
-// fails (a dropped connection, a proxy's error page) is asked again: thrown from finish(), it left a done job waiting.
+// fails (a dropped connection, a proxy's error page) is asked again: thrown from finish(), it would leave a done job waiting.
 export async function historyRecord(id, { tries = 100, wait = 100 } = {}) {
   for (let i = 0; i < tries; i++) {
     const record = await fetch(`/history/${id}`).then((r) => r.json()).then((h) => h?.[id]).catch(() => undefined);
