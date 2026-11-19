@@ -60,7 +60,7 @@ export function merge(parts, onShare = () => {}) {
 
 // ---------- The graph laid out for a person ----------
 // ComfyUI places the nodes of an API workflow itself, so the ids and the titles carry the structure. Each section takes a
-// hundred of ids (the plate 200, the first edit 400) and opens with a README note: core Primitive String Multiline, which
+// hundred ids (the plate 200, the first edit 400) and opens with a README note: core Primitive String Multiline, which
 // no node reads, so it never runs. Every title starts with its section; the values the page set show in brackets. Model
 // loaders go in MODELS, whichever step first used them, as one loader serves every step. The page saves this graph in the
 // editor's own format (editorGraph, below), where each README becomes the note of its section's group.
