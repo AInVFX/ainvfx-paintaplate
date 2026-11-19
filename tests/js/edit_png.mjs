@@ -1,4 +1,4 @@
-// The edit workstream's PNG reader for its Node tests: the frames and masks of its fixture, as PIL writes them.
+// The PNG reader of the edit tests: the frames and masks of their fixture, as PIL writes them.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { inflateSync } from "node:zlib";
