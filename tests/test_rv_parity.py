@@ -1,6 +1,6 @@
 """The viewer's colour against OpenRV, value for value.
 
-The reference is OpenRV's colour math, written here from its source (OpenRV at 0bd9675, main on 2 Nov 2026):
+The reference is OpenRV's colour math, written here from its source (OpenRV at 0bd9675):
 ColorIPNode.cpp builds RVColor's 4 x 4 matrix (invert, exposure, contrast, hue, saturation, each multiplied on the left)
 and its shader applies gamma before that matrix (ColorMatrix(ColorGamma(source))); OCIOIPNode.cpp makes the OCIO
 functions from getOptimizedGPUProcessor(OPTIMIZATION_DEFAULT) and floods the channel after the display. PyOpenColorIO's
