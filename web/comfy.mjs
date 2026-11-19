@@ -11,7 +11,6 @@ const early = new Map(); // results that arrived before /prompt answered
 const memo = new Map(); // prompt -> outputs, for prompts ComfyUI serves entirely from its cache
 const MEMO_MAX = 64;
 const QUIET_MS = 15000; // a prompt not heard of for this long is looked up in /history
-let running = null; // the prompt ComfyUI is executing now
 let socket = false; // the WebSocket is open: when it is not, finished prompts are found by polling /history
 let notice = () => {};
 let log = () => {};
@@ -218,7 +217,6 @@ function rejection(j) {
 }
 
 async function finish(id, error) {
-  if (id === running) running = null;
   const job = byId.get(id);
   if (!job) return void early.set(id, error);
   byId.delete(id);
@@ -290,7 +288,7 @@ function message({ data }) {
   const { type, data: d } = JSON.parse(data);
   const job = byId.get(d?.prompt_id);
   if (job) job.heard = Date.now();
-  if (type === "execution_start") { running = d.prompt_id; job?.progress?.(0); if (job) { job.started = Date.now(); const waited = jobWaited(job, job.started); if (waited) log(waited); } }
+  if (type === "execution_start") { job?.progress?.(0); if (job) { job.started = Date.now(); const waited = jobWaited(job, job.started); if (waited) log(waited); } }
   else if (type === "execution_cached" && job) job.cached = d.nodes?.length ?? 0; // folded into the job's line when it ends
   else if (type === "executing" && d.node) {
     job?.step?.(d.node);
