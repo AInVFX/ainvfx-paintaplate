@@ -379,7 +379,7 @@ dialog.colours menu { margin-top: 10px; }
 .xray { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
 #stages li.compared .name { text-decoration: underline dotted; text-underline-offset: 3px; }
 
-/* ---------- Render, Deliver, passes ---------- */
+/* ---------- The Finish menu ---------- */
 .finish { position: fixed; z-index: 40; width: 380px; max-width: calc(100vw - 16px); box-sizing: border-box; padding: 12px 14px; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }
 .finish h2 { margin: 0 0 4px; }
 .finish ol { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 12px; }
