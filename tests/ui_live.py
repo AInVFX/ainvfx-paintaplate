@@ -8,7 +8,7 @@ core nodes only (same slots and outputs, no models), so the whole flow runs on a
 an edit, let the idle time render the shot, the composite and the export, wipe, then download the zip.
 `ingest`, `comp` and `export` are the real workflows. Screenshots go to /tmp/paintaplate_ui.
 """
-import argparse, glob, json, os, shutil, subprocess, sys, time, urllib.request, zipfile
+import argparse, glob, json, os, re, shutil, subprocess, sys, time, urllib.request, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -115,8 +115,10 @@ def deliver_hdr(page):
     return "SDR to HDR: on, asked for by --hdr"
 
 
-def deliver_upscale(page):
-    """--upscale: Finish > Upscale to 4K on for this run, before any edit. Export then writes the 4K set too, and the zip
+def deliver_upscale(page, size: str = ""):
+    """--upscale: Finish > Upscale to 4K on for this run, before any edit, at `size`: a width in px or a height followed by p,
+    as Custom… takes it. The row's list gives the size when one of its entries has that width, else Custom… does;
+    with no size, the page's own. Export then writes the 4K set too, and the zip
     holds it under 4k/. The switch asks first."""
     page.click("#finish-btn")
     if page.is_disabled("#finish-upscale"):
@@ -128,7 +130,21 @@ def deliver_upscale(page):
         page.click("#finish-upscale-yes")
     page.wait_for_function("document.querySelector('#finish-upscale').checked", timeout=10000)
     page.keyboard.press("Escape")
-    return "Upscale to 4K: on, asked for by --upscale"
+    if size:
+        listed = page.evaluate("""(size) => [...document.querySelectorAll('#finish-upscale-size option')]
+          .find((o) => !/p$/i.test(size) && o.textContent.startsWith(`${size} x `))?.value ?? null""", size)
+        page.select_option("#finish-upscale-size", listed or "custom")
+        if not listed:
+            page.wait_for_selector("#ask-field", state="visible", timeout=10000)
+            page.fill("#ask-field", size)
+            page.keyboard.press("Enter")
+            page.wait_for_selector("#ask", state="hidden", timeout=10000)
+    chosen = page.evaluate("() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }")
+    px = re.fullmatch(r"(\d+)(p?)", size.strip().lower()) if size else None
+    want = None if not px else (f"x {2 * round(int(px[1]) / 2)}" if px[2] else f"{2 * round(int(px[1]) / 2)} x")
+    if want and want not in chosen:
+        raise RuntimeError(f"--upscale {size}: the page kept {chosen or 'no size'}")
+    return f"Upscale to 4K: on at {chosen or 'the page size'}, asked for by --upscale"
 
 
 def pick(page, tool):
@@ -264,7 +280,7 @@ def main():
     ap.add_argument("--option", action="append", default=[], help="with --url: one more option of the page's address, such as shot=2 (the full-size shot in two stages)")
     ap.add_argument("--memory", default="", help="with --url: the page's memory profile, small, medium or large (by default the card decides)")
     ap.add_argument("--preview", default="", choices=("", *PREVIEW), help="with --url: the Preview menu's choice, stored before the page loads (by default the page's own)")
-    ap.add_argument("--upscale", action="store_true", help="with --url: turn Finish > Upscale to 4K on before painting, so Export "
+    ap.add_argument("--upscale", nargs="?", const="on", default="", help="with --url, at the size given (a width in px, or a height followed by p, as Custom… takes it; alone, the page's own): turn Finish > Upscale to 4K on before painting, so Export "
                     "writes the 4K set too; the zip waits up to 3 hours")
     ap.add_argument("--hdr", action="store_true", help="with --url: turn SDR to HDR on in Deliver before painting, so the render makes "
                     "its full-size shot again in scene-linear values and HDR Match fits it to the plate")
@@ -436,7 +452,7 @@ def remote(a):
                 if a.hdr:
                     mark(deliver_hdr(page))
                 if a.upscale:
-                    mark(deliver_upscale(page))
+                    mark(deliver_upscale(page, "" if a.upscale == "on" else a.upscale))
                 box = page.locator("#view").bounding_box()
                 page.wait_for_timeout(a.think * 1000)  # a person looks at the frame before painting
                 for i, (tool, words, pts, *size) in enumerate(strokes):
