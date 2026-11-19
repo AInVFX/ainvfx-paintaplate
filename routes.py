@@ -1,4 +1,5 @@
-"""The page's HTTP routes. Every path is a page path (folders.py): under the input folder, or the output folder with output:.
+"""The page's HTTP routes. Every path is a page path (folders.py): under the input folder, under the output folder with
+output:, or, on a ComfyUI that answers this machine alone, an absolute path.
     GET  /paintaplate/browse?path=output:video        a folder for the Open dialog: subfolders, videos, sequences, scenes;
                                                       at a root, also the newest plates of the folders below it
     GET  /paintaplate/version                         the pack's version, from pyproject.toml: the page's top bar and log;
@@ -197,7 +198,7 @@ def model_path(name: str) -> str | None:
     for kind in list(getattr(folder_paths, "folder_names_and_paths", {})):
         try:
             path = folder_paths.get_full_path(kind, name)
-        except Exception:  # a folder kind that holds no such file
+        except Exception:  # build_parts runs this at import, where a raise would stop the pack loading
             path = None
         if path:
             return path
