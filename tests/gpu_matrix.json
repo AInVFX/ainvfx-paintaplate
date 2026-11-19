@@ -27,5 +27,6 @@
 "horse_cow_own": {"path": "plates/horse.mp4", "like": "horse_cow", "scale": 1, "upscale": "1920"},
 "horse_erase_2000": {"path": "plates/horse.mp4", "like": "horse_erase", "scale": 1, "upscale": "2000"},
 "fluid_720_4k": {"seed": 104, "fluid": {"size": [1280, 704], "fps": 24, "frames": 121, "words": "a wild fire, flames rising", "keys": [[0, "#f57c00", [[0.45, 0.82], [0.5, 0.74], [0.55, 0.82]], 64], [-1, "#f57c00", [[0.4, 0.6], [0.5, 0.36], [0.6, 0.6]], 96]]}, "upscale": true},
-"uhd_light_4k": {"path": "plates/horse_3840x2160_50fps.mp4", "like": "horse_light", "scale": 2, "upscale": true}
+"uhd_light_4k": {"path": "plates/horse_3840x2160_50fps.mp4", "like": "horse_light", "scale": 2, "upscale": true},
+"hdr_cow_4k": {"path": "plates/horse_hdr", "like": "horse_cow", "scale": 1, "hdr": true, "upscale": true}
 }
