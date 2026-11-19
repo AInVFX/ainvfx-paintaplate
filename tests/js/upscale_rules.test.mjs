@@ -13,11 +13,12 @@ test("the target is 3840 px on the long side with the plate's aspect, and a larg
   assert.deepEqual(upscaleTarget(4096, 2160), [4096, 2160]);
 });
 
-test("SeedVR2 restores from half the target: a plate that large comes down to it first", () => {
-  assert.deepEqual(upscaleSource(1920, 1080, UHD), [0, 0]);
+test("SeedVR2 restores from a third of the target: a larger shot comes down to it first, a smaller one goes in as it is", () => {
+  assert.deepEqual(upscaleSource(1920, 1080, UHD), [1280, 720]);
   assert.deepEqual(upscaleSource(1280, 720, UHD), [0, 0]);
-  assert.deepEqual(upscaleSource(3840, 2160, UHD), HD);
-  assert.deepEqual(upscaleSource(2560, 1440, UHD), HD);
+  assert.deepEqual(upscaleSource(3840, 2160, UHD), [1280, 720]);
+  assert.deepEqual(upscaleSource(2560, 1440, UHD), [1280, 720]);
+  assert.deepEqual(upscaleSource(1920, 1080, [2560, 1440]), [854, 480]);
 });
 
 test("windows follow the machine: 21 frames on a 16 GB GPU under a 52 GB cap, one job on a 96 GB GPU with 175 GB of RAM", () => {

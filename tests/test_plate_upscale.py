@@ -80,12 +80,12 @@ class WindowTool(unittest.TestCase):
         self.assertEqual(upscale_plate.target_size(3840, 1600), (3840, 1600))
         self.assertEqual(upscale_plate.target_size(4096, 2160), (4096, 2160))
 
-    def test_a_shot_larger_than_half_the_target_comes_down_to_it_first(self):
-        self.assertEqual(upscale_plate.source_size(1920, 1080, (3840, 2160)), (0, 0))
+    def test_a_shot_larger_than_a_third_of_the_target_comes_down_to_it_first(self):
+        self.assertEqual(upscale_plate.source_size(1920, 1080, (3840, 2160)), (1280, 720))
         self.assertEqual(upscale_plate.source_size(1280, 720, (3840, 2160)), (0, 0))
-        self.assertEqual(upscale_plate.source_size(3840, 2160, (3840, 2160)), (1920, 1080))
-        self.assertEqual(upscale_plate.source_size(2560, 1440, (3840, 2160)), (1920, 1080))
-        self.assertEqual(upscale_plate.source_size(4096, 1716, (4096, 1716)), (2048, 858))
+        self.assertEqual(upscale_plate.source_size(3840, 2160, (3840, 2160)), (1280, 720))
+        self.assertEqual(upscale_plate.source_size(2560, 1440, (3840, 2160)), (1280, 720))
+        self.assertEqual(upscale_plate.source_size(4096, 1716, (4096, 1716)), (1366, 572))
         p = build_workflows.fill("upscale", {})  # the window alone
         (sid, source), (_, resized) = of(p, "ImageScale")
         self.assertEqual(source["_meta"]["slots"], {"width": "source_width", "height": "source_height"})

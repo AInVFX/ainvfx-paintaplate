@@ -33,7 +33,7 @@ LONG_SIDE = 3840
 MOST = (3840, 2160)  # the largest target: its long side and its short side
 SIZES = (2560, 3840)  # the long sides the page's menu lists beside the shot's own size
 LEAST = 640  # the smallest long side the page's Custom… takes
-FACTOR = 2  # SeedVR2 restores from at most the target divided by this
+FACTOR = 3  # SeedVR2 restores from at most the target divided by this: a third
 WINDOW = UPSCALE_CHUNK  # the smallest window: one chunk
 CHUNK_STEP = 4 * ((UPSCALE_CHUNK - 1) // 4 + 1 - UPSCALE_OVERLAP // 4)  # 20: the frames each further chunk adds, chunks sharing one latent frame
 MODEL_RAM = 15.7  # GB the 7B model holds in RAM on a GPU under 32 GB, where dynamic VRAM stages it
@@ -202,7 +202,7 @@ if __name__ == "__main__":
     ap.add_argument("--long-side", type=int, default=LONG_SIDE, help="the target's long side in px")
     ap.add_argument("--width", type=int, default=0, help="the target's width in px, in place of --long-side; the height follows the shot")
     ap.add_argument("--height", type=int, default=0, help="the target's height in px, in place of --long-side; the width follows the shot")
-    ap.add_argument("--factor", type=int, default=FACTOR, help="SeedVR2 restores from the target divided by this: 2, the page's, or 3 for a third")
+    ap.add_argument("--factor", type=int, default=FACTOR, help="SeedVR2 restores from the target divided by this: 3, the page's, or 2 for a half")
     ap.add_argument("--decode-tile", default="", help="T/O: the tile and the overlap of SeedVR2's decode in px; 4096/128 decodes whole")
     a = ap.parse_args()
     run(a.url, a.comfy, a.shot, os.path.expanduser(a.out), a.label, a.first, a.count, a.all, a.color_space, a.color_fix, a.format,

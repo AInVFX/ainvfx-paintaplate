@@ -681,7 +681,7 @@ export function logFileName(plate, d) {
 // and 10.0 copies. A window of 21 frames on a 16 GB GPU held 8.
 // most: the largest target, its long and short sides; sizes: the long sides the menu lists beside the plate's own; least:
 // the smallest long side Custom… takes.
-export const UPSCALE = { long: 3840, most: [3840, 2160], sizes: [2560, 3840], least: 640, factor: 2, chunk: 21, step: 20, modelRam: 15.7,
+export const UPSCALE = { long: 3840, most: [3840, 2160], sizes: [2560, 3840], least: 640, factor: 3, chunk: 21, step: 20, modelRam: 15.7,
   bigVram: 32, copies: 8, composeCopies: 10 };
 // The size a person asks for: { side, px }, side "long", "width" or "height". The default is 3840 px on the long side, and a
 // scene saved before sizes, with the switch on (true), asks for it too.
@@ -720,7 +720,7 @@ export function upscaleAskOf(saved) {
   const ok = saved && typeof saved === "object" && ["long", "width", "height"].includes(saved.side) && Number.isInteger(saved.px) && saved.px > 0;
   return ok ? { side: saved.side, px: saved.px } : false;
 }
-export function upscaleSource(width, height, [tw, th]) { // the size SeedVR2 restores from: [0, 0], the frames as they are, when the target is twice their size or more
+export function upscaleSource(width, height, [tw, th]) { // the size SeedVR2 restores from: [0, 0], the frames as they are, when the target is UPSCALE.factor times their size or more
   if (Math.max(width, height) * UPSCALE.factor <= Math.max(tw, th)) return [0, 0];
   return [2 * roundEven(tw / UPSCALE.factor / 2), 2 * roundEven(th / UPSCALE.factor / 2)];
 }
