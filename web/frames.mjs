@@ -228,7 +228,7 @@ export function autoBudget({ host = "", profile = "small", deviceMemory = 0 }) {
 // The frame cache's line of the log: the budget and where it comes from, then what fits. A size appears once, and one
 // source needs no name. `sources`: [{ name, fits, frames, width, height }].
 export const cacheLine = (budget, why, sources) =>
-  `Frame cache: ${budget} (${why}), ${sources.map((s) => `${s.fits} of ${s.frames} frames${sources.length > 1 ? ` of ${s.name}` : ""} at ${s.width} x ${s.height}`).join("; ")}`;
+  `Frame cache: ${budget} (${why}), ${sources.map((s) => `${s.fits} of ${s.frames} frames${sources.length > 1 ? ` of ${s.name}` : ""} at ${s.width} x ${s.height}`).join("; ")}.`;
 
 // The size a source's frames are kept at, and how many fit. `movie`: the movie's own size; `fit`: the size the frame is
 // shown at, in device pixels; `bytes`: per pixel (4 for an ImageBitmap). Frames are kept at the size on show (its width

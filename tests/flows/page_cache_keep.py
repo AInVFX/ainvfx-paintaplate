@@ -4,7 +4,7 @@ longer fit, and a larger one drops no decoded frame: the green stripe of the fra
 import re
 
 OPEN = "document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden"
-LINE = re.compile(r"^Frame cache: (.+?) \(set in View > Cache memory\), (\d+) of (\d+) frames at (\d+) x (\d+)$")
+LINE = re.compile(r"^Frame cache: (.+?) \(set in View > Cache memory\), (\d+) of (\d+) frames at (\d+) x (\d+)\.$")
 STRIPE = """(() => { const c = document.querySelector('#tl-cache'), d = c.getContext('2d').getImageData(0, 0, c.width, 1).data;
   let lit = 0; for (let i = 0; i < c.width; i++) if (d[i * 4 + 1] > 120) lit++; return lit / c.width; })()"""
 WATCH = """(() => { window.__least = 1; const c = document.querySelector('#tl-cache');

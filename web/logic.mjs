@@ -611,11 +611,11 @@ export function plainError(message) { // a failure in plain words: why, the fact
   return says("ComfyUI stopped with an error");
 }
 
-// The status line once the export is written: the first line of the writer's summary, ending with one full stop whether
-// that line brings its own or not.
+// The confirmation once the export is written: its headline, which the HUD and the status line show, then the writer's
+// summary as detail lines for the log, each ending with one full stop whether it brings its own or not.
 export function exportDone(text) {
-  const first = String(text ?? "").split("\n")[0].trim().replace(/\.+$/, "");
-  return `Export: done, in ComfyUI's output folder${first ? `: ${first}` : ""}.`;
+  const details = String(text ?? "").split("\n").map((line) => line.trim().replace(/\.+$/, "")).filter(Boolean);
+  return ["Export: done, in ComfyUI's output folder.", ...details.map((line) => `  ${line}.`)].join("\n");
 }
 export function logLevel(text) { // a log message's colour, from its words: red when a line starts « Error: », amber when one starts « Warning: »
   const starts = (word) => String(text).split("\n").some((line) => line.trimStart().startsWith(word));
@@ -784,10 +784,13 @@ export function upscaleWhy(width, height, ask = UPSCALE_ASK) {
   const restore = `the result is brought down to ${part} that size, then SeedVR2 restores its detail. Every pixel is new.`;
   return tw === width && th === height ? `At the plate's own size, ${restore}` : `This size is smaller than the plate, so the frames come out smaller: ${restore}`;
 }
-export function upscaleAsk({ target, frames, alone, edit }) { // the question before the row turns on: what Export writes, and how long on this GPU
+// The question before the row turns on: what Export writes, and how long on this GPU. `hdr`: SDR to HDR is on, so Upscale
+// takes its result alone (upscaleComposes).
+export function upscaleAsk({ target, frames, alone, edit, hdr = false }) {
   const min = (s) => `about ${Math.max(1, Math.round(s / 60))} min`;
-  return `Export then also writes an upscaled set at ${target[0]} x ${target[1]}. On this GPU, ${frames} ${frames === 1 ? "frame takes" : "frames take"} ${min(alone)}, `
-    + `or ${min(edit)} with Paint or Clean, whose plate and layer are restored too. Every pixel of an upscaled frame is new.`;
+  const start = `Export then also writes an upscaled set at ${target[0]} x ${target[1]}. On this GPU, ${frames} ${frames === 1 ? "frame takes" : "frames take"} ${min(alone)}`;
+  return (hdr ? `${start}. SeedVR2 upscales the HDR result.` : `${start}, or ${min(edit)} with Paint or Clean, where the plate and the layer are upscaled too.`)
+    + " Every pixel of an upscaled frame is new.";
 }
 
 // The Finish menu: the passes on the whole plate after the full-size composite, in the order the render runs them. Each
@@ -795,10 +798,10 @@ export function upscaleAsk({ target, frames, alone, edit }) { // the question be
 // it asks before it turns on, when it changes what Export writes: its text, or a function of the plate's figures.
 export const FINISH = [
   { id: "hdr", name: "SDR to HDR",
-    line: "The full-size shot is regenerated in scene-linear values, fitted to the plate. The result is half-float EXR frames in ACES2065-1, in the viewer and in Export.",
+    line: "The result is regenerated in scene-linear values, fitted to the plate. It becomes half-float EXR frames in ACES2065-1, in the viewer and in Export.",
     ask: "This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1." },
   { id: "upscale", name: "Upscale",
-    line: "Export also writes the result at the size chosen, up to 3840 x 2160, restored by SeedVR2 7B. With Paint or Clean, the plate, the layer and the matte come at that size too.",
+    line: "Export also writes the result at the size chosen, up to 3840 x 2160, restored by SeedVR2 7B. With Paint or Clean, the plate, the layer and the matte come at that size too; with SDR to HDR, the result and its matte.",
     ask: upscaleAsk },
 ];
 export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on
@@ -1044,7 +1047,7 @@ export function plateStem(file, sequence) {
 export function warmEnd(seconds, missed, startShown) {
   const s = Math.round(seconds);
   if (missed) return { status: false, text: `Model warm-up done in ${s} s: ${missed} of its jobs did not finish, so the first edit loads their models.` };
-  if (startShown) return { status: true, text: `Ready: every model loaded in ${s} s, so the first edit starts at once. Open a plate.` };
+  if (startShown) return { status: true, text: `Ready: every model loaded in ${s} s. The first edit starts immediately.`, next: "Open a plate." };
   return { status: false, text: `Model warm-up done in ${s} s: every model loaded.` };
 }
 

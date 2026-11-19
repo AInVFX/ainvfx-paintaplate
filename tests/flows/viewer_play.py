@@ -116,5 +116,5 @@ def run(browser, port, U):
     small = opened(browser, port, U)
     U.wait_log(small, FULL, 150000, "frame cache with every frame of the plate, on the small memory profile")
     said = plan_line(small)
-    U.check(re.fullmatch(r"Frame cache: 512 MB \(Auto\), (\d+) of \1 frames at \d+ x \d+", said) is not None, f"on a 16 GB card beside ComfyUI the Auto budget is 512 MB, and the line names no card: {said}")
+    U.check(re.fullmatch(r"Frame cache: 512 MB \(Auto\), (\d+) of \1 frames at \d+ x \d+\.", said) is not None, f"on a 16 GB card beside ComfyUI the Auto budget is 512 MB, and the line names no card: {said}")
     small.close()

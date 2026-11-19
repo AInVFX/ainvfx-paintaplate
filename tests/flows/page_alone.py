@@ -68,7 +68,7 @@ def run(browser, port, U):
             f"the zip holds the 49 EXR frames at the plate's size, 1280 x 704, and the models behind them: {len(exrs)} frames, {size}, {names[:2]}")
     status = page.text_content("#status") or ""
     U.check(status.startswith("Download: ") and status.endswith("with the HDR frames.") and any(
-        t.startswith("Export: done, in ComfyUI's output folder: 49 half-float EXR frames in ACES2065-1") for t in U.log_lines(page)),
+        t.startswith("Export: done, in ComfyUI's output folder.") and "49 half-float EXR frames in ACES2065-1" in t for t in U.log_lines(page)),
         f"the status line and the log say what Export wrote: {status!r}")
     page.click("#finish-btn")
     page.click("#finish-hdr")

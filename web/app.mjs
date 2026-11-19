@@ -230,7 +230,7 @@ async function writeCaption(e, reference, key, kind, dimmed = false) {
   const hues = paintHues(e), ask = upsampleRequest({ tool: e.tool, words: e.prompt, hues,
     ...writerBoxes({ tool: e.tool, words: e.prompt, parts: paint && paintBoxes(paint), core: e.editCore, bbox: bounds(e.mask) }) });
   const where = ask.locked?.length > 1 ? `boxes ${JSON.stringify(ask.locked.map((r) => r.src_bbox))}` : `box ${JSON.stringify(ask.locked?.[0]?.src_bbox ?? bounds(e.mask))}`;
-  log(`Edit ${num(e)}: asking Klein's prompt writer (${ask.mode} mode)${e.prompt ? ` for "${e.prompt}"` : ", with no text prompt,"}${inHues(hues)}${hues.length ? "," : ""} in ${where}${dimmed ? ", on the frame with all but the object dimmed" : ""}.`);
+  log(`Edit ${num(e)}: asking Klein's prompt writer${e.prompt ? ` for "${e.prompt}"` : ", with no text prompt,"}${inHues(hues)}${hues.length ? "," : ""} in ${where}${dimmed ? ", on the frame with all but the object dimmed" : ""}.`);
   if (kind === "edit") status(`Edit ${num(e)}: ${NAME[e.tool]}, prompt writer running.`); // the status line names the writer while Generate waits for it; a prefetch asks it behind the strokes' own lines
   let text = "";
   try {
@@ -247,7 +247,7 @@ async function writeCaption(e, reference, key, kind, dimmed = false) {
     made = "";
   }
   e.caption = { key, text: made || templateCaption(e) };
-  log(`Edit ${num(e)}: ${made ? "caption from the prompt writer" : "the page's own caption"}${dimmed ? ", on the frame with all but the object dimmed" : ""}.\n  ${e.caption.text}`); // the caption as Klein gets it, as a detail line
+  log(`Edit ${num(e)}: ${made ? "caption from the prompt writer" : "the page's own caption"}${dimmed ? ", on the frame with all but the object dimmed" : ""}.\n  ${e.caption.text.split("\n").join("\n  ")}`); // the caption as Klein gets it, as detail lines
   return e.caption.text;
 }
 
@@ -336,7 +336,7 @@ async function openPlate(list, typed, opts = {}) {
   shotVid.removeAttribute("src"); shotVid.load();
   for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = false;
   const kind = spec.kind === "video" ? spec.codec : `${spec.ext.slice(1).toUpperCase()} ${spec.kind}`;
-  $("#spec").textContent = `${S.plate.name}: ${kind}, ${w} × ${h}, ${Math.round(S.plate.fps * 1000) / 1000} fps, ${spec.frames} frames, ${cs}`;
+  $("#spec").textContent = `${S.plate.name}: ${kind}, ${w} x ${h}, ${Math.round(S.plate.fps * 1000) / 1000} fps, ${spec.frames} frames, ${cs}`;
   document.activeElement?.blur();
   S.took = {};
   $("#close-btn").hidden = false;
@@ -352,7 +352,7 @@ async function openPlate(list, typed, opts = {}) {
   const big = bigPlateWarning(spec, S.vram); // above 2K on a GPU under BIG_PLATE.vram: renders may not finish (README, GPU)
   if (big) { log(big); setTimeout(() => status(big), 80); }
   const next = "Describe the edit at the top, paint on the frame, then Generate.", plate = S.plate;
-  const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", from file"} (right-click > OCIO > Colour space changes it). ${next}`;
+  const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", from file"} (right-click > OCIO > Plate changes it). ${next}`;
   status(opened, "hint");
   if (keying()) enterFluid(); else fluidUI();
   plateVid.addEventListener("canplaythrough", () => { // the playback video is loaded. It says so only while the open's own sentence is on show: a blank plate keeps its fluid hint
@@ -438,7 +438,7 @@ async function warmAll() { // every model loads while the person looks at the pa
   let missed = 0; // jobs an opening, an edit or a close cancelled (stopEverything), or that failed: their models are not loaded
   for (const [name, cls, values] of jobs) if (!used.has(cls)) await run(name, values, { kind: "warm" }).done.catch(() => { missed += 1; }); // SAM loads in a second
   const end = warmEnd((performance.now() - t0) / 1000, missed, !S.plate && $("#status").textContent === start);
-  if (end.status) status(end.text); else log(end.text);
+  if (end.status) told(end.text, end.next); else log(end.text);
 }
 
 // What opening a plate does, in order. Ingest's nodes tell the page which step runs.
@@ -800,7 +800,7 @@ function layered(upto = S.edits.length, keep = () => true) { // the first frame 
 const hdrWanted = () => wantsHdrFor(S.plate?.spec, S.plate?.headroom, S.deliver.hdr);
 function upscaleFigures() { // Upscale on this plate: the export's upscaled size, and about how long one pass and Paint or Clean's two take on this GPU
   const p = S.plate, target = upscaleTarget(p.spec.width ?? p.work[0], p.spec.height ?? p.work[1], S.upscaleAsk), profile = S.memoryProfile.name;
-  return { target, frames: p.frames, alone: upscaleSeconds(target, p.frames, { profile }), edit: upscaleSeconds(target, p.frames, { passes: 2, parts: 3, profile }) };
+  return { target, frames: p.frames, alone: upscaleSeconds(target, p.frames, { profile }), edit: upscaleSeconds(target, p.frames, { passes: 2, parts: 3, profile }), hdr: !!S.deliver.hdr };
 }
 const FIGURES = { upscale: upscaleFigures }; // the figures of a Finish option whose question is a function of them
 function finishState(opt) { // a Finish option on this plate: on, disabled, and why: the line that says why it cannot change here
@@ -858,7 +858,7 @@ function askFinish(opt, on) { // a pass that changes what Export writes asks fir
 function setFinish(opt, on) { // each setting keeps its own renders: the render key gains "|hdr"
   if (opt.id === "hdr") S.deliver.hdr = on;
   if (opt.id === "upscale") S.deliver.upscale = on ? S.upscaleAsk : false; // the renders stay: Upscale runs at Export, after them
-  confirmed(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Full-size shot: regenerated in scene-linear values, fitted to the plate.\n  Result: half-float EXR frames in ACES2065-1, in the viewer and in Export."
+  confirmed(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Result: regenerated in scene-linear values, fitted to the plate.\n  Format: half-float EXR frames in ACES2065-1, in the viewer and in Export."
     : opt.id === "upscale" ? `\n  Export: an upscaled set too, at ${upscaleFigures().target.join(" x ")}.` : ""}` : `Finish: ${opt.name} off.`, 1500);
   finishUI(); recompose(); touch();
   if (on && plateAlone(S.heroKey) && !S.renders.get(S.heroKey)) status(`Finish: ${opt.name} on. Generate runs it on the plate: about ${Math.round(estimate("hdr", plan({ key: S.heroKey }, []).skip))} s.`, "hint");
@@ -1894,7 +1894,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     if (f.busy?.sig === fluidSig()) return hud(`Fluid shot v${f.busy.v} is being made from these keyframes and this text prompt.`, 2500);
     const made = f.made?.get(fluidSig());
     if (made) {
-      if (f.result !== made) { f.result = made; showFluid(); log(`Fluid shot v${made.v}: from the job index (same keyframes, text prompt and seed). Nothing runs.`); }
+      if (f.result !== made) { f.result = made; showFluid(); log(`Fluid shot v${made.v}: reused, already made from the same keyframes, text prompt and seed.`); }
       f.view = "result"; fluidUI(); render();
       return hud(`Fluid shot v${made.v} is already made from these keyframes and this text prompt. Ctrl+Enter tries another seed.`, 3000);
     }
@@ -2035,7 +2035,7 @@ const blankForm = () => blankSpec({ width: $("#b-width").value, height: $("#b-he
 
 function blankNote() { // what the blank plate will be, snapped to what LTX and ainvfx-fluid take
   const s = blankForm();
-  $("#b-note").textContent = `${s.width} × ${s.height}, ${s.frames} frames at ${s.fps} fps: ${(s.frames / s.fps).toFixed(2)} s.` +
+  $("#b-note").textContent = `${s.width} x ${s.height}, ${s.frames} frames at ${s.fps} fps: ${(s.frames / s.fps).toFixed(2)} s.` +
     (s.frames === FLUID.tested ? "" : ` ${FLUID.tested} frames is the tested length.`) + (S.fluidReady ? "" : ` ${FLUID_MISSING}`) +
     (blankDepth($("#b-depth").value) === HDR_DEPTH ? (S.hdrReady ? " 16-bit: SDR to HDR turns the fluid shot and every edit on it into half-float EXR." : ` ${HDR_MISSING}`) : "");
   openGoUI();
@@ -2060,7 +2060,7 @@ function fluidUI() { // the panel, the tools and the help of a fluid shot; none 
   for (const t of ["erase", "light"]) $(`.tools [data-tool="${t}"]`).disabled = on && !f.result; // they work on the fluid shot
   if (!on) return generateUI();
   const n = f.keys.length, busy = f.busy, r = f.result, stale = !!r && r.sig !== fluidSig();
-  $("#spec").textContent = `Fluid shot on a blank plate: ${S.plate.spec.width} × ${S.plate.spec.height}, ${S.plate.fps} fps, ${S.plate.frames} frames`;
+  $("#spec").textContent = `Fluid shot on a blank plate: ${S.plate.spec.width} x ${S.plate.spec.height}, ${S.plate.fps} fps, ${S.plate.frames} frames`;
   $("#fluid-state").textContent = busy ? `generating ${Math.round((busy.progress ?? 0) * 100)}%`
     : r ? (stale ? "keyframes changed" : `v${r.v} ready`) : `${n} keyframe${n === 1 ? "" : "s"}`;
   $("#fluid-again").disabled = !n || !S.fluidReady;
@@ -2429,7 +2429,7 @@ async function findWhole(edit, before, kind) { // SAM 3.1 finds the whole object
   edit.sam = samMask(bits, size, edit);
   redrawStrokes(edit);
   render();
-  status(`Edit ${num(edit)}: ${edit.prompt || "object"} found under the stroke. Clean takes the whole object.`, "hint");
+  status(`Edit ${num(edit)}: ${edit.prompt && found ? edit.prompt : "object"} found under the stroke. Clean takes the whole object.`, "hint"); // its name only when SAM 3.1 found it by that name
 }
 
 function samMask(bits, size, edit) { // a SAM mask (0 or 1 per pixel at `size`) as a canvas at the edit's mask size
@@ -2964,7 +2964,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     r.told = true;
     log(`Render v${r.v}: ${active.length} edit${active.length === 1 ? "" : "s"} (${active.map((e) => `${NAME[e.tool]} ${num(e.src)}`).join(", ")}), seed ${common.seed}, ${S.previewCap ? `shot preview at ${sw} x ${sh}` : "shot preview off"}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
     if (carry) log(`Render v${r.v}: LTX prompt: ${prompt}`);
-    if (erase) log(`Render v${r.v}: Clean plate pass prompt: ${scene || "none"}`);
+    if (erase) log(`Render v${r.v}: Clean plate pass prompt: ${scene || "none."}`);
   }
   // the erase is tracked on the plate first: the erase pass regenerates its areas, the composite keeps them
   if (E?.erased) reused(r, r, "erase", () => { r.erased = E.erased; });
@@ -3001,9 +3001,9 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       // at full size, Lightricks' two stages: the erase pass at half the working size (the preview's own when it is that size),
       // then 2 steps at full size from it, without the reference video. 8 steps at full size take 181 s on a 1080p plate
       const low = stageOne(p.work);
-      if (S.stage) S.stage.part = `stage 1 of 2 at ${low.join(" × ")}`; // the live preview names the stage: each starts at step 1
+      if (S.stage) S.stage.part = `stage 1 of 2 at ${low.join(" x ")}`; // the live preview names the stage: each starts at step 1
       const first = await cleanAt(low, (f) => progress(f / 2));
-      if (S.stage) S.stage.part = `stage 2 of 2, upscaled to ${size.join(" × ")}`;
+      if (S.stage) S.stage.part = `stage 2 of 2, upscaled to ${size.join(" x ")}`;
       log(`Render v${r.v}: Clean plate pass, full size: stage 2 of 2, 2 steps at ${size.join(" x ")} from stage 1 at ${low.join(" x ")}.`);
       const out = await run("cleanup", { ...common, seed: erases[0].seed, path: p.path, hero: r.clean0, hole: r.erased.found.matte_a, prompt: scene,
         low: first.clean, width: size[0], height: size[1], grid_grow: gridAt(size[0]), prefix: `${base}/${dir}/clean/f`, video_prefix: `${base}/${dir}/clean`, live: liveEvery(previewMode) },
@@ -3025,7 +3025,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const made = off ? null : await passes(pv, p.shot, sized, false);
   if (!off && here() && !S.pass && !pv.taken && !pv.comp && !r.review && S.shot?.url !== pv.raw) { // a rough look at once: the whole frame as the model made it, until the composite
     setShot(pv.raw, key, "@model");
-    hud("Rough preview: Space plays it. The composite follows.", 2500);
+    hud("Shot, preview: Space plays it. The composite follows.", 2500);
   }
   if (!off) await step(r, "track", async (progress) => { pv.painted = await track(active, made, base, `_${sized}`, progress, null, ["paint"],
     underOf(pv), r.heroFrame, r.erased?.found.matte_a); }, pv);
@@ -3040,7 +3040,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   }, pv);
   if (!off && here() && !S.pass && !r.review && S.shot?.url !== pv.comp) {
     setShot(pv.comp, key, "@model");
-    hud("The preview is ready: Space plays it. The full-size composite follows.", 2500);
+    hud("Composite, preview: Space plays it. The full-size composite follows.", 2500);
     status("Composite, preview: ready. The full-size passes follow; Export writes the result at any time.", "hint");
   }
   const onePass = !off && sw === p.work[0] && sh === p.work[1];
@@ -3112,7 +3112,6 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   S.exported = r.exported;
   stagesUI(); exportUI();
   confirmed(exportDone(S.exported.text));
-  log(`Export v${r.v}: done.\n  ${S.exported.text.split("\n").join("\n  ")}`);
   await step(r, "upscale", (progress) => upscaleExport(r, progress)); // Finish > Upscale: the upscaled set, before the zip
   const parts = S.wantDownload;
   S.wantDownload = null;
@@ -3259,7 +3258,7 @@ async function download(parts = ["export", "matte"]) {
     href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, parts: parts.join(","), models })}`,
     download: `${S.exported.name}.zip` });
   document.body.append(a); a.click(); a.remove();
-  const what = parts.map((k) => PARTS[k]);
+  const what = parts.map((k) => (k === "export" && S.exported.space === HDR_FRAMES ? "the result as half-float EXR frames" : PARTS[k])); // SDR to HDR's result of a plate whose format holds nothing above 1.0
   status(`Download: ${S.exported.name}.zip, with ${what.slice(0, -1).join(", ")}${what.length > 1 ? " and " : ""}${what.at(-1)}.`);
 }
 
@@ -3493,11 +3492,13 @@ async function downloadFluid() {
   download(parts);
 }
 
+const exportsExr = (r) => exrResult(S.plate.spec, r?.skip ? !r.skip.has("hdr") : hdrWanted(), S.plate.headroom); // the render's own plan (plan) decides: an HDR result of a plate whose format holds nothing above 1.0
 function exportDialog() {
   const fluid = fluidOnly(), alone = plateAlone(S.heroKey), r = S.renders.get(S.heroKey), kind = S.plate.spec.kind, relitHdr = !!r?.hdrAfter;
   for (const k of ["matte", "review", "shot"]) $(`#x-${k}`).closest("label").hidden = fluid || alone || relitHdr; // a fluid shot alone, the plate alone, a relit result in HDR: their own files
   if (fluid) return fluidExportDialog();
-  $("#x-format").textContent = exrResult(S.plate.spec, r?.skip ? !r.skip.has("hdr") : hdrWanted(), S.plate.headroom) ? "half-float EXR frames, ACES2065-1" // the render's own plan (plan) decides: an HDR result of a video plate
+  $("#x-hint").textContent = `The viewer already plays the full-size composite. Export writes the result ${exportsExr(r) ? "as half-float EXR frames in ACES2065-1" : "in the plate's own format"} and its matte, in ComfyUI's output folder, then downloads one zip.`;
+  $("#x-format").textContent = exportsExr(r) ? "half-float EXR frames, ACES2065-1"
     : kind === "video" ? `${S.plate.spec.codec} movie` : `${S.plate.spec.ext.slice(1).toUpperCase()} ${kind}`;
   $("#x-note").textContent = alone ? (r?.review ? "The plate in HDR: the half-float EXR frames that SDR to HDR wrote. The zip downloads at once."
       : `The plate in HDR: SDR to HDR runs first, ${secs(renderLeft(true)) || "in a moment"}; then the zip downloads.`)
@@ -3625,7 +3626,7 @@ async function chooseItem(it, b) { // one click: the item's details, read from t
   const r = await fetch(`/paintaplate/stat?${new URLSearchParams({ path: it.path, config: S.ocio.config })}`), st = await r.json();
   if (OPEN.chosen !== it) return;
   const fmt = st.kind === "video" ? `${st.codec} ${st.pix_fmt ?? ""}`.trim() : `${(st.ext ?? "").slice(1).toUpperCase()} frames`;
-  info.textContent = r.ok ? `${it.name}: ${st.width} × ${st.height}, ${st.frames} frames${st.kind === "video" ? ` at ${Math.round(st.fps * 1000) / 1000} fps` : ""}, ${fmt}, ${gb(st.size)}. Colour space: ${st.color_space}.`
+  info.textContent = r.ok ? `${it.name}: ${st.width} x ${st.height}, ${st.frames} frames${st.kind === "video" ? ` at ${Math.round(st.fps * 1000) / 1000} fps` : ""}, ${fmt}, ${gb(st.size)}. Colour space: ${st.color_space}.`
     : `${it.name} cannot be opened: ${st.error ?? r.status}`;
 }
 
@@ -4452,7 +4453,7 @@ $("#x-go").onclick = () => {
   const parts = ["export", ...["matte", "review", "shot"].filter((k) => $(`#x-${k}`).checked)];
   if (r?.exported) return download(parts);
   S.wantDownload = parts;
-  status("Export: writing in the plate's own format. The zip downloads when it is done.");
+  status(`Export: writing ${exportsExr(r) ? "half-float EXR frames in ACES2065-1" : "in the plate's own format"}. The zip downloads when it is done.`);
   exportUI(); stagesUI(); touch();
 };
 $("#log-btn").onclick = () => {

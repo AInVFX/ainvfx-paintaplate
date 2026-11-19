@@ -253,7 +253,7 @@ def start_flow(browser, port):
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     spec = page.text_content("#spec")
-    check("960 × 512, 25 fps, 121 frames" in spec and page.input_value("#b-depth") == "16" and not page.is_hidden("#fluid"),
+    check("960 x 512, 25 fps, 121 frames" in spec and page.input_value("#b-depth") == "16" and not page.is_hidden("#fluid"),
           f"a blank plate opens at start, 16-bit, its keyframes ready to paint: {spec}")
     page.close()
 
@@ -285,7 +285,7 @@ def open_flow(browser, port):
     page.click("#browse .item:has-text('desk.mp4')")
     page.wait_for_function("document.querySelector('#browse-info').textContent.includes('Colour space')", timeout=10000)
     info = page.text_content("#browse-info")
-    check("1280 × 704" in info and "49 frames" in info and "sRGB Encoded Rec.709 (sRGB)" in info and not page.is_disabled("#open-go"),
+    check("1280 x 704" in info and "49 frames" in info and "sRGB Encoded Rec.709 (sRGB)" in info and not page.is_disabled("#open-go"),
           f"one click reads the plate and its colour space in the OCIO config: {info}")
     shown = {}
     for t in ("upload", "scenes", "blank", "files"):
@@ -407,13 +407,13 @@ def generate_flow(browser, port):
     lines = log_lines(page)
     full = [i for i, line in enumerate(lines) if "plays the full-size shot" in line or line.startswith("Viewer: full-size shot")]
     done = [i for i, line in enumerate(lines) if any(r in line for r in REVIEWED)]
-    check(bool(full and done) and full[-1] < done[-1] and not any(line.startswith("Export v") for line in lines),
+    check(bool(full and done) and full[-1] < done[-1] and not any(line.startswith("Export: done") for line in lines),
           f"Generate makes the full-size composite and nothing for compositing software: the full-size shot plays, then the review: {full} {done}")
     with page.expect_download(timeout=120000) as dl:
         page.click("#export-btn"); page.click("#x-go")
     zipped = zipfile.ZipFile(dl.value.path()).namelist()
     lines = log_lines(page)
-    check(any(n.startswith("export/") for n in zipped) and any(n.startswith("matte/") for n in zipped) and any(line.startswith("Export v") for line in lines),
+    check(any(n.startswith("export/") for n in zipped) and any(n.startswith("matte/") for n in zipped) and any(line.startswith("Export: done") for line in lines),
           f"Export writes the result and its matte when pressed, then the zip downloads: {sorted({n.split('/')[0] for n in zipped})}")
     # The ComfyUI graph: the scene in the editor's own format, one group per section in the order they run, each opening with its note
     with page.expect_download(timeout=60000) as dl:
@@ -592,7 +592,7 @@ def fluid_flow(browser, port):
     page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.select_option("#b-fps", "24"); page.fill("#b-frames", "33")
     page.dispatch_event("#b-frames", "input")
     note = page.text_content("#b-note")
-    check(note.startswith("512 × 320, 33 frames at 24 fps"), f"the blank plate form says what it will make: {note}")
+    check(note.startswith("512 x 320, 33 frames at 24 fps"), f"the blank plate form says what it will make: {note}")
     page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     check(not page.is_hidden("#fluid") and page.is_disabled("[data-tool=erase]") and page.is_disabled("[data-tool=light]"),

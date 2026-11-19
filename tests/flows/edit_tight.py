@@ -12,7 +12,7 @@ HORSE = ('Remove the horse <horse_1> completely. [{"id": "horse_1", "from": "ref
          '"src_bbox": [80, 40, 300, 260], "tgt_bbox": null, "desc": "a brown horse"}]')
 NOSE = [0.53, 0.42, 0.04, 0.05]  # another object, left of the stroke: its centre and radii, as fractions of the frame
 EDGE = 530  # the writer removes the horse when a locked box starts left of this (0 to 1000)
-ASKED = re.compile(r'prompt writer \(table mode\), with no text prompt, in box \[(\d+),(\d+),(\d+),(\d+)\]')
+ASKED = re.compile(r'prompt writer, with no text prompt, in box \[(\d+),(\d+),(\d+),(\d+)\]')
 
 
 def run(browser, port, U):

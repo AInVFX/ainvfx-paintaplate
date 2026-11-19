@@ -64,7 +64,9 @@ test("the row: off by default in the Finish menu, its question in figures", () =
   assert.equal(typeof row.ask, "function");
   assert.equal(upscaleAsk({ target: UHD, frames: 121, alone: 1360, edit: 2748 }),
     "Export then also writes an upscaled set at 3840 x 2160. On this GPU, 121 frames take about 23 min, or about 46 min with Paint or Clean, "
-    + "whose plate and layer are restored too. Every pixel of an upscaled frame is new.");
+    + "where the plate and the layer are upscaled too. Every pixel of an upscaled frame is new.");
+  assert.equal(upscaleAsk({ target: UHD, frames: 121, alone: 1360, edit: 2748, hdr: true }), // with SDR to HDR on, its result alone
+    "Export then also writes an upscaled set at 3840 x 2160. On this GPU, 121 frames take about 23 min. SeedVR2 upscales the HDR result. Every pixel of an upscaled frame is new.");
 });
 
 test("a plate's 4K windows live in one folder per setting that changes their frames, the same on every export", () => {

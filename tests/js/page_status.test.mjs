@@ -22,7 +22,7 @@ test("with no fault on show, the log leaves the status line to the code that mak
 });
 
 test("bookkeeping never replaces a fault", () => {
-  assert.equal(statusOf("Frame cache: 2 GB (set in View > Cache memory), 121 of 121 frames at 1472 x 828", "error"), null);
+  assert.equal(statusOf("Frame cache: 2 GB (set in View > Cache memory), 121 of 121 frames at 1472 x 828.", "error"), null);
   assert.equal(statusOf("Viewer: wipe, Plate against First frame.", "warn"), null);
   assert.equal(statusOf("Played 121 frames in 2.42 s: 49.6 fps of 50, 0 late, 0 skipped", "error"), null);
 });

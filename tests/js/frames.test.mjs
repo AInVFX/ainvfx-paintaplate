@@ -104,9 +104,9 @@ test("the Auto budget: 512 MB beside ComfyUI on the small memory profile, 1 GB o
 
 test("the frame cache's line of the log: the budget and where it comes from, then what fits, with no card size", () => {
   const line = viewerFrames.cacheLine;
-  assert.equal(line("512 MB", "Auto", [{ name: "the plate", fits: 121, frames: 121, width: 960, height: 512 }]), "Frame cache: 512 MB (Auto), 121 of 121 frames at 960 x 512");
+  assert.equal(line("512 MB", "Auto", [{ name: "the plate", fits: 121, frames: 121, width: 960, height: 512 }]), "Frame cache: 512 MB (Auto), 121 of 121 frames at 960 x 512.");
   assert.equal(line("8 MB", "set in the address", [{ name: "the plate", fits: 3, frames: 49, width: 960, height: 528 }, { name: "the shot", fits: 3, frames: 49, width: 960, height: 528 }]),
-    "Frame cache: 8 MB (set in the address), 3 of 49 frames of the plate at 960 x 528; 3 of 49 frames of the shot at 960 x 528");
+    "Frame cache: 8 MB (set in the address), 3 of 49 frames of the plate at 960 x 528; 3 of 49 frames of the shot at 960 x 528.");
 });
 
 test("frames are kept at the size on show, smaller when the range does not fit, never under 960 px", () => {

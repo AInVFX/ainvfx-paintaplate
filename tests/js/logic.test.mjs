@@ -321,7 +321,7 @@ test("a plate's name keeps a movie's trailing digits and drops only an image seq
 import { warmEnd } from "../../web/logic.mjs";
 
 test("the model warm-up's last line: on the status line only while the start's message is there, and never « every model loaded » after a cancel", () => {
-  assert.deepEqual(warmEnd(12.4, 0, true), { status: true, text: "Ready: every model loaded in 12 s, so the first edit starts at once. Open a plate." });
+  assert.deepEqual(warmEnd(12.4, 0, true), { status: true, text: "Ready: every model loaded in 12 s. The first edit starts immediately.", next: "Open a plate." });
   assert.deepEqual(warmEnd(12.4, 0, false), { status: false, text: "Model warm-up done in 12 s: every model loaded." }); // a plate opened or closed since
   const stopped = warmEnd(3, 1, true); // a close cancelled one job: its model is not loaded
   assert.equal(stopped.status, false);
