@@ -311,7 +311,7 @@ class FitToPlate(io.ComfyNode):
         if mask is None or not bool(mask.any()):  # nothing to composite (a relight alone): the plate stands, nothing is fitted
             return io.NodeOutput(plate[:n], torch.zeros((n, h, w), dtype=torch.float32))
         image = image[:n]  # at its own size: Fit to Plate enlarges only the window around the matte, with a Lanczos-3
-        masks = np.zeros((1, 8, 8), np.float32) if mask is None else mask[:n].float().cpu().numpy()
+        masks = mask[:n].float().cpu().numpy()
         bar = comfy.utils.ProgressBar(2 * n)
         images, out = mathops.fit_to_plate(
             n, h, w, stoppable(lambda i: plate[i].float().cpu().numpy()), lambda i: image[i].float().cpu().numpy(), masks,
