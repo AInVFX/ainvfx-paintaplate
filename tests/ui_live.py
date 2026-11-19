@@ -129,8 +129,7 @@ def deliver_upscale(page, size: str = ""):
     if page.is_visible("#finish-upscale-ask"):
         page.click("#finish-upscale-yes")
     page.wait_for_function("document.querySelector('#finish-upscale').checked", timeout=10000)
-    page.keyboard.press("Escape")
-    if size:
+    if size:  # the list sits in the Finish menu: chosen while the menu is open
         listed = page.evaluate("""(size) => [...document.querySelectorAll('#finish-upscale-size option')]
           .find((o) => o.value !== 'custom' && Math.max(...(o.textContent.match(/\\d+/g) ?? []).slice(0, 2).map(Number)) === +size)?.value ?? null""", size)
         page.select_option("#finish-upscale-size", listed or "custom")
@@ -140,6 +139,7 @@ def deliver_upscale(page, size: str = ""):
             page.keyboard.press("Enter")
             page.wait_for_selector("#ask", state="hidden", timeout=10000)
     chosen = page.evaluate("() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }")
+    page.keyboard.press("Escape")
     want = str(2 * round(int(size) / 2)) if size.strip().isdigit() else None
     if want and want not in re.findall(r"\d+", chosen):
         raise RuntimeError(f"--upscale {size}: the page kept {chosen or 'no size'}")
