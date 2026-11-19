@@ -3,7 +3,7 @@
 // one; before a composite exists, the tracking mattes. A light edit changes every pixel, so it tints the whole frame. Pure functions, tested in tests/js/xray.test.mjs; app.mjs draws them on the #xray overlay,
 // above the canvas, so the colour inspector and the colour picker read the picture without the tint.
 
-export const XRAY_TINT = [255, 0, 200]; // magenta, rare in plates
+const XRAY_TINT = [255, 0, 200]; // magenta, rare in plates
 export const XRAY_ALPHA = 0.5; // the tint's opacity where a matte is white
 export const XRAY_SIDE = 512; // px on the long side of the mattes it reads: where the model touched, not a measure
 
