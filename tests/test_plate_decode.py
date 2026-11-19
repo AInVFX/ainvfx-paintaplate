@@ -1,7 +1,7 @@
-"""PL7: our decoder without torch. A movie: the trim, the 8k+1 padding, the 8-bit path with alpha, 10 bits and a width
+"""Our decoder without torch. A movie: the trim, the 8k+1 padding, the 8-bit path with alpha, 10 bits and a width
 that is not a multiple of 32. An image sequence: each file in its place, half floats above 1.0, alpha that must hold for
 every file. Its pictures against core's: tests/decode_parity.py, which tests/comfy_live.py runs; a path given to its
---plates that is not a file stops it in one line (PL11)."""
+--plates that is not a file stops it in one line."""
 import os
 import subprocess
 import sys
@@ -84,7 +84,7 @@ class Sequence(unittest.TestCase):
 
 
 class Plates(unittest.TestCase):
-    """PL11: decode_parity.py checks the paths given to --plates before any work: one line, exit code 2, no traceback."""
+    """decode_parity.py checks the paths given to --plates before any work: one line, exit code 2, no traceback."""
 
     def run_parity(self, tmp, *plates):
         return subprocess.run([sys.executable, os.path.join(ROOT, "tests", "decode_parity.py"), "--comfy", tmp,
