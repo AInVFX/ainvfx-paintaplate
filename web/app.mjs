@@ -1939,7 +1939,7 @@ async function rebase() { // the plate under the edits: the fluid shot when it i
   const f = S.fluid, made = f.on !== false && f.result, path = made ? f.result.path : f.blankPath;
   if (!path || S.plate?.path === path) { historyUI(); return render(); }
   // an HDR fluid shot: the space the hdr workflow writes its EXR frames in (HDR_SPACE there). Read from the file, they
-  // opened as Linear Rec.709, their AP0 values taken for Rec.709 ones
+  // would open as Linear Rec.709, their AP0 values taken for Rec.709 ones
   await openPlate([], path, { under: true, cs: made && f.result.hdr ? knownSpace(HDR_FRAMES) ?? undefined : modelSpace(), chosen: false });
   log(`Plate under the edits: ${made ? `the fluid shot v${f.result.v}` : "the blank plate"}.`); // once it is open
   if (S.edits.some((e) => e.on && e.state === "done")) queue(regenerateDependents); // made again on it, or taken back
@@ -2244,12 +2244,12 @@ async function generate(edit) {
     start.getContext("2d").drawImage(edit.preview, 0, 0, work[0], work[1]);
     const startName = await uploadCanvas(start, `${tag}_start.png`);
     const full = await run("edit", { ...values, base: await baseUpload(below, before, work), start: startName,
-      // an erase refines the edit preview, which has no object left: shown the original, Klein drew part of it back
+      // an erase refines the edit preview, which has no object left: shown the original, Klein draws part of it back
       // a relight refines its edit preview at full size
       reference: edit.tool === "erase" || light ? startName : await uploadCanvas(editImage(edit, before, work), `${tag}_ref_full.png`),
       mask: await uploadCanvas(maskAt(edit, work), `${tag}_mask_full.png`), ...editSettings(edit, work, FULL),
       relight: light ? 1 : 0,
-      // a shade stroke reaches Klein in words only (logic.lightIntent): darkened where painted, it read as a streak
+      // a shade stroke reaches Klein in words only (logic.lightIntent): darkened where painted, it reads as a streak
       level: edit.tool === "erase" }, { kind: "edit", front: true, progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
     if (!alive()) return;
     // a relight shows the frame as the export will make it: Klein's light on the plate's own detail
@@ -2921,7 +2921,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   if (erase) r.clean0 ??= E.clean0 ??= await uploadCanvas(r.cleanFrame, `clean_v${r.v}.png`);
   // frames_format: the shot's and the erase pass's frames at the plate's depth (logic.plateDepth): 8-bit PNG, 16-bit PNG or half-float EXR
   const common = { ...S.memoryProfile.slots, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, seed: active[0].seed, frames_format: plateDepth(p.spec).frames,
-    ...plateMovie(p) }; // every pass movie at the plate's native size (the viewer's contract 1)
+    ...plateMovie(p) }; // every pass movie at the plate's native size, the size of the viewer's canvas
   const prompt = shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt, hue: e.hue ?? hueOf(e.src ?? e) })));
   const scene = erase ? erasePrompt(erases.map((e) => e.caption)) : ""; // the scene as it stays, never the erased object
   if (!r.told) {
