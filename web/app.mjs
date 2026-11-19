@@ -1905,7 +1905,6 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     showFluid();
     log(`Fluid shot v${v}: done in ${((performance.now() - t0) / 1000).toFixed(1)} s.\n  ${(outputText("fluid", out, "plate") ?? "").split("\n")[0]}`);
     f.editing = false; // the shot is made: it becomes the plate under the next edits, and the viewer plays it
-    f.busy = null;
     await rebase();
     status(`Fluid shot v${v}: done, now the plate under the next edits. Space plays it; Paint, Clean and Light work on it.`, "hint");
   } catch (err) {
