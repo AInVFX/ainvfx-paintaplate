@@ -239,7 +239,7 @@ def ltx_label(ltx: str, value: str) -> str:
         return "not found"
     if git_commit(ltx):
         return value[:7]
-    version = pack_version(ltx) or ""
+    version = pack_version(ltx)
     return (f"{version}, " if version[:1].isdigit() else "") + f"files {value[:7]} (not a git clone)"
 
 
@@ -390,7 +390,7 @@ async def thumb(request: web.Request) -> web.StreamResponse:
     try:
         async with THUMBS_AT_ONCE:
             path = await asyncio.to_thread(thumbnail, request.query.get("path", ""))
-    except (FileNotFoundError, StopIteration, ValueError, OSError) as exc:
+    except (StopIteration, ValueError, OSError) as exc:
         raise web.HTTPNotFound(text=f"No thumbnail: {exc}") from exc
     return web.FileResponse(path, headers={"Cache-Control": "max-age=3600"})
 
