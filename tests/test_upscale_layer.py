@@ -91,12 +91,12 @@ class LayerInTheZip(unittest.TestCase):
         import test_routes
         routes = test_routes.routes
         with tempfile.TemporaryDirectory() as run:
-            for part in ("4k/export", "4k/plate", "4k/layer", "4k/matte", "upscale/comp/w000", "export"):
+            for part in ("upscaled/export", "upscaled/plate", "upscaled/layer", "upscaled/matte", "upscale/comp/w000", "export"):
                 os.makedirs(os.path.join(run, part))
                 open(os.path.join(run, part, "f_00001_.png"), "w").close()
-            names = [arc for _, arc in routes.collect(run, ["export", "4k"])]
-        self.assertEqual(names, ["export/f_00001_.png", "4k/export/f_00001_.png", "4k/layer/f_00001_.png", "4k/matte/f_00001_.png",
-                                 "4k/plate/f_00001_.png"])
+            names = [arc for _, arc in routes.collect(run, ["export", "upscaled"])]
+        self.assertEqual(names, ["export/f_00001_.png", "upscaled/export/f_00001_.png", "upscaled/layer/f_00001_.png", "upscaled/matte/f_00001_.png",
+                                 "upscaled/plate/f_00001_.png"])
 
 
 if __name__ == "__main__":

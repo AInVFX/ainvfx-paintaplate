@@ -1,4 +1,4 @@
-"""Upscale to 4K on one window of a shot, as the page's Finish runs it, on a running ComfyUI: the seconds of the job and
+"""Upscale on one window of a shot, as the page's Finish runs it, on a running ComfyUI: the seconds of the job and
 of each node, the peaks of the GPU's memory and of ComfyUI's RAM, and the count and size of the frames it writes.
 
   python tests/upscale_plate.py --comfy /data/ComfyUI --shot plates/horse.mp4 --first 0 --count 21 --out ~/paintaplate_gpu/upscale
@@ -158,7 +158,7 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
     files = sorted(glob.glob(os.path.join(comfy, "output", label, "upscale", "w*", "f_*")))
     size = frame_size(files[0]) if files else None
     v = jobs[0][1]
-    lines = [f"# Upscale to 4K: `{shot}`", "", "| | |", "| --- | --- |", f"| ComfyUI | {url} |",
+    lines = [f"# Upscale: `{shot}`", "", "| | |", "| --- | --- |", f"| ComfyUI | {url} |",
              f"| Shot | {w} x {h}, {n} frames; {len(jobs) - every} " + ("window" if len(jobs) - every == 1 else "windows")
              + f" of up to {count} frames |",
              f"| Target | {v['width']} x {v['height']}, from " + (f"{v['source_width']} x {v['source_height']}" if v["source_width"] else "the shot's size")

@@ -337,7 +337,7 @@
    "pad_8n1": false
   },
   "_meta": {
-   "title": "The window of the 4K plate",
+   "title": "The window of the upscaled plate",
    "slots": {
     "path": "under",
     "max_frames": "count"
@@ -356,7 +356,7 @@
    "destination": "@model"
   },
   "_meta": {
-   "title": "The window of the 4K plate in the layer's colour space",
+   "title": "The window of the upscaled plate in the layer's colour space",
    "slots": {
     "config": "config",
     "source": "under_space",
@@ -399,7 +399,7 @@
    ]
   },
   "_meta": {
-   "title": "4K result: the plate's window around the matte, the layer inside it"
+   "title": "Upscaled result: the plate's window around the matte, the layer inside it"
   }
  },
  "25": {
@@ -417,7 +417,7 @@
    "filename_prefix": ""
   },
   "_meta": {
-   "title": "4K result frames",
+   "title": "Upscaled result frames",
    "slots": {
     "format": "format",
     "filename_prefix": "comp_prefix",
@@ -459,7 +459,7 @@
    "filename_prefix": ""
   },
   "_meta": {
-   "title": "4K matte",
+   "title": "Upscaled matte",
    "slots": {
     "filename_prefix": "matte_prefix",
     "images": "upscale_matte"

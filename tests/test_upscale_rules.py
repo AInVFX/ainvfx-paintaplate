@@ -1,4 +1,4 @@
-"""Upscale to 4K's rules exist twice: in web/logic.mjs for the page, and in tests/upscale_plate.py, which runs the same
+"""Upscale's rules exist twice: in web/logic.mjs for the page, and in tests/upscale_plate.py, which runs the same
 workflows from a terminal. Both give the same sizes and windows for the same machines."""
 import json
 import os

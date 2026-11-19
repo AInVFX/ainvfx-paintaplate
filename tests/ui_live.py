@@ -116,15 +116,15 @@ def deliver_hdr(page):
 
 
 def deliver_upscale(page, size: str = ""):
-    """--upscale: Finish > Upscale to 4K on for this run, before any edit, at `size`: a width in px or a height followed by p,
-    as Custom… takes it. The row's list gives the size when one of its entries has that width, else Custom… does;
-    with no size, the page's own. Export then writes the 4K set too, and the zip
-    holds it under 4k/. The switch asks first."""
+    """--upscale: Finish > Upscale on for this run, before any edit, at `size`: the long side in px, as Custom… takes
+    it. The row's list gives the size when one of its entries has that long side, else Custom… does;
+    with no size, the page's own. Export then writes the upscaled set too, and the zip
+    holds it under upscaled/. The switch asks first."""
     page.click("#finish-btn")
     if page.is_disabled("#finish-upscale"):
         why = page.text_content("#finish-upscale-why")
         page.keyboard.press("Escape")
-        raise RuntimeError(f"--upscale: the Finish menu offers no Upscale to 4K on this page: {why}")
+        raise RuntimeError(f"--upscale: the Finish menu offers no Upscale on this page: {why}")
     page.click("#finish-upscale")
     if page.is_visible("#finish-upscale-ask"):
         page.click("#finish-upscale-yes")
@@ -132,7 +132,7 @@ def deliver_upscale(page, size: str = ""):
     page.keyboard.press("Escape")
     if size:
         listed = page.evaluate("""(size) => [...document.querySelectorAll('#finish-upscale-size option')]
-          .find((o) => !/p$/i.test(size) && o.textContent.startsWith(`${size} x `))?.value ?? null""", size)
+          .find((o) => o.value !== 'custom' && Math.max(...(o.textContent.match(/\\d+/g) ?? []).slice(0, 2).map(Number)) === +size)?.value ?? null""", size)
         page.select_option("#finish-upscale-size", listed or "custom")
         if not listed:
             page.wait_for_selector("#ask-field", state="visible", timeout=10000)
@@ -140,11 +140,10 @@ def deliver_upscale(page, size: str = ""):
             page.keyboard.press("Enter")
             page.wait_for_selector("#ask", state="hidden", timeout=10000)
     chosen = page.evaluate("() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }")
-    px = re.fullmatch(r"(\d+)(p?)", size.strip().lower()) if size else None
-    want = None if not px else (f"x {2 * round(int(px[1]) / 2)}" if px[2] else f"{2 * round(int(px[1]) / 2)} x")
-    if want and want not in chosen:
+    want = str(2 * round(int(size) / 2)) if size.strip().isdigit() else None
+    if want and want not in re.findall(r"\d+", chosen):
         raise RuntimeError(f"--upscale {size}: the page kept {chosen or 'no size'}")
-    return f"Upscale to 4K: on at {chosen or 'the page size'}, asked for by --upscale"
+    return f"Upscale: on at {chosen or 'the page size'}, asked for by --upscale"
 
 
 def pick(page, tool):
@@ -280,8 +279,8 @@ def main():
     ap.add_argument("--option", action="append", default=[], help="with --url: one more option of the page's address, such as shot=2 (the full-size shot in two stages)")
     ap.add_argument("--memory", default="", help="with --url: the page's memory profile, small, medium or large (by default the card decides)")
     ap.add_argument("--preview", default="", choices=("", *PREVIEW), help="with --url: the Preview menu's choice, stored before the page loads (by default the page's own)")
-    ap.add_argument("--upscale", nargs="?", const="on", default="", help="with --url, at the size given (a width in px, or a height followed by p, as Custom… takes it; alone, the page's own): turn Finish > Upscale to 4K on before painting, so Export "
-                    "writes the 4K set too; the zip waits up to 3 hours")
+    ap.add_argument("--upscale", nargs="?", const="on", default="", help="with --url, at the size given (the long side in px, as Custom… takes it; alone, the page's own): turn Finish > Upscale on before painting, so Export "
+                    "writes the upscaled set too; the zip waits up to 3 hours")
     ap.add_argument("--hdr", action="store_true", help="with --url: turn SDR to HDR on in Deliver before painting, so the render makes "
                     "its full-size shot again in scene-linear values and HDR Match fits it to the plate")
     ap.add_argument("--seed", type=int, default=None, help="with --url: the page's ?seed=: the first new edit and each fluid shot start from it, each next edit from the next number (by default the page draws each seed)")
@@ -499,7 +498,7 @@ def remote(a):
                 page.keyboard.press("F6"); page.keyboard.press("Home"); page.keyboard.press("Space"); time.sleep(2)
                 page.keyboard.press("Space"); page.screenshot(path=f"{shots}/4_played.png")
                 if page.inner_text("#render-left") == "full size ready":  # Export writes the result, then the zip downloads
-                    with page.expect_download(timeout=3 * 3600000 if a.upscale else 600000) as dl:  # the 4K set: about 45 min on a 16 GB GPU
+                    with page.expect_download(timeout=3 * 3600000 if a.upscale else 600000) as dl:  # the upscaled set: about 45 min on a 16 GB GPU
                         page.click("#export-btn")
                         page.click("#x-go")
                     dl.value.save_as(f"{shots}/export.zip")

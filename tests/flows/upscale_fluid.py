@@ -1,5 +1,5 @@
-"""Finish > Upscale to 4K on a fluid shot: Export restores the shot alone at 4K (3840 x 2400 for a 512 x 320 blank plate)
-and the zip holds it under 4k/, beside the shot in the blank plate's format."""
+"""Finish > Upscale on a fluid shot: Export restores the shot alone upscaled (3840 x 2400 for a 512 x 320 blank plate)
+and the zip holds it under upscaled/, beside the shot in the blank plate's format."""
 import zipfile
 
 
@@ -16,7 +16,7 @@ def run(browser, port, U):
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("under the edits: the fluid shot v"), 240000, "the fluid shot")
     page.click("#finish-btn"); page.click("#finish-upscale")
-    U.check("3840 x 2400" in (page.text_content("#finish-upscale-ask p") or ""), "the question gives the fluid shot's 4K size")
+    U.check("3840 x 2400" in (page.text_content("#finish-upscale-ask p") or ""), "the question gives the fluid shot's upscaled size")
     page.click("#finish-upscale-yes"); page.keyboard.press("Escape")
     start = len(U.log_lines(page))
     page.click("#export-btn")
@@ -24,8 +24,8 @@ def run(browser, port, U):
         page.click("#x-go")
     names = zipfile.ZipFile(dl.value.path()).namelist()
     lines = U.log_lines(page)[start:]
-    U.check(any(t.startswith("Upscale to 4K: 3840 x 2400, 1 job.") for t in lines) and any(t.startswith("Upscale to 4K: done in ") for t in lines),
-            f"Export restores the fluid shot alone, in one job: {[t for t in lines if t.startswith('Upscale to 4K')]}")
-    U.check(any(n.startswith("4k/export/") for n in names) and any(n.startswith("plate/") for n in names) and not any(n.startswith("4k/plate/") for n in names),
-            f"the zip holds the 4K shot beside the shot in the blank plate's format: {sorted({n.split('/')[0] + '/' + n.split('/')[1] for n in names if '/' in n})}")
+    U.check(any(t.startswith("Upscale: 3840 x 2400, 1 job.") for t in lines) and any(t.startswith("Upscale: done in ") for t in lines),
+            f"Export restores the fluid shot alone, in one job: {[t for t in lines if t.startswith('Upscale')]}")
+    U.check(any(n.startswith("upscaled/export/") for n in names) and any(n.startswith("plate/") for n in names) and not any(n.startswith("upscaled/plate/") for n in names),
+            f"the zip holds the upscaled shot beside the shot in the blank plate's format: {sorted({n.split('/')[0] + '/' + n.split('/')[1] for n in names if '/' in n})}")
     page.close()

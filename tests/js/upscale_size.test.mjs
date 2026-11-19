@@ -31,12 +31,13 @@ test("the menu lists the plate's own size, then each larger one", () => {
   for (const { ask, size } of upscaleSizes(1920, 1080)) assert.deepEqual(upscaleTarget(1920, 1080, ask), size);
 });
 
-test("Custom… takes a width, or a height followed by p, from the least long side to 3840 x 2160", () => {
+test("Custom… takes one number, the long side, from the least long side to 3840 px", () => {
   assert.deepEqual(upscaleCustom("3000", 1920, 1080), { side: "width", px: 3000 });
-  assert.deepEqual(upscaleCustom(" 3000 px ", 1920, 1080), { side: "width", px: 3000 });
-  assert.deepEqual(upscaleCustom("1600p", 1920, 1080), { side: "height", px: 1600 });
-  assert.deepEqual(upscaleCustom("1080P", 1920, 1080), { side: "height", px: 1080 });
-  for (const no of ["", "abc", "3000 x 1700", "5000", "2200p", `${UPSCALE.least - 2}`]) assert.equal(upscaleCustom(no, 1920, 1080), null, no);
+  assert.deepEqual(upscaleCustom(" 3000 ", 1080, 1920), { side: "height", px: 3000 }); // a portrait plate's long side is its height
+  assert.deepEqual(upscaleCustom(`${UPSCALE.least}`, 1920, 1080), { side: "width", px: UPSCALE.least });
+  for (const no of ["", "abc", "3000 px", "1600p", "3000 x 1700", "5000", `${UPSCALE.least - 2}`]) assert.equal(upscaleCustom(no, 1920, 1080), null, no);
+  assert.deepEqual(upscaleTarget(1440, 1080, upscaleCustom("3840", 1440, 1080)), [2880, 2160]); // the short side holds a 4:3 plate at 2160
+  assert.deepEqual(upscaleTarget(1920, 1080, upscaleCustom("1280", 1920, 1080)), [1280, 720]); // under the plate's size
 });
 
 test("a scene's switch: true asks for the default, a size is kept, anything else is off", () => {

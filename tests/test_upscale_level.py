@@ -48,7 +48,7 @@ def shot(tmp):
         Image.fromarray(m, "L").save(os.path.join(dirs["matte"], f"m_{i:04d}.png"))
     zipped = os.path.join(tmp, "export.zip")
     with zipfile.ZipFile(zipped, "w") as z:
-        for k, folder in (("result", "export/hdr"), ("big", "export/4k/hdr"), ("matte", "export/matte")):
+        for k, folder in (("result", "export/hdr"), ("big", "export/upscaled/hdr"), ("matte", "export/matte")):
             for name in sorted(os.listdir(dirs[k])):
                 z.write(os.path.join(dirs[k], name), f"{folder}/{name}")
     return dirs, zipped
@@ -87,7 +87,7 @@ class Level(unittest.TestCase):
         self.assertLess(r["channels"][1], -0.5, "the edited half, three stops up, reaches the median")
 
     def test_the_export_zip_and_its_upscaled_folder_read_as_the_folders(self):
-        for folder, read in (("export/hdr/", "export/hdr"), ("export/4k/hdr/f", "export/4k/hdr")):  # a folder, or a name's start
+        for folder, read in (("export/hdr/", "export/hdr"), ("export/upscaled/hdr/f", "export/upscaled/hdr")):  # a folder, or a name's start
             r = hdr_plate.level(self.dirs["plate"], color_space="ACEScg", step=4, export=self.zipped, folder=folder)
             self.assertEqual(r["folder"], read)
             self.check(r)

@@ -1,4 +1,4 @@
-// Upscale to 4K's rules: the target and source sizes, the windows by the machine's memory, the estimate, the row.
+// Upscale's rules: the target and source sizes, the windows by the machine's memory, the estimate, the row.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { FAMILY, FINISH, freesBefore, upscaleAsk, upscaleFolder, upscaleKeeps, upscaleSeconds, upscaleSource, upscaleTarget, upscaleWindow, upscaleWindows } from "../../web/logic.mjs";
@@ -59,10 +59,10 @@ test("on a 16 GB GPU, SeedVR2's model leaves the memory before the 4K export and
 
 test("the row: off by default in the Finish menu, its question in figures", () => {
   const row = FINISH.find((o) => o.id === "upscale");
-  assert.equal(row.name, "Upscale to 4K");
+  assert.equal(row.name, "Upscale");
   assert.equal(typeof row.ask, "function");
   assert.equal(upscaleAsk({ target: UHD, frames: 121, alone: 1360, edit: 2748 }),
-    "Export then also writes a 4k folder at 3840 x 2160. On this GPU, 121 frames take about 23 min, or about 46 min with Paint or Clean, "
+    "Export then also writes an upscaled set at 3840 x 2160. On this GPU, 121 frames take about 23 min, or about 46 min with Paint or Clean, "
     + "whose plate and layer are restored too. Every pixel of an upscaled frame is new.");
 });
 

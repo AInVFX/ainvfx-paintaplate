@@ -670,13 +670,13 @@ export function logFileName(plate, d) {
   return `paintaplate_log_${name}_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}.txt`;
 }
 
-// ---------- Upscale to 4K ----------
-// Finish > Upscale to 4K: after the export, SeedVR2 7B restores it at 3840 px on the long side. The rules of
+// ---------- Upscale ----------
+// Finish > Upscale: after the export, SeedVR2 7B restores it at the size asked for, up to 3840 x 2160. The rules of
 // tests/upscale_plate.py, which runs the same workflows from a terminal (tests/test_upscale_rules.py keeps them equal).
 // long: the target's long side; factor: SeedVR2 restores from at most the target divided by it; chunk: the frames it
 // samples at once, and step the frames each further chunk adds (chunks share one latent frame); modelRam: the GB the 7B
 // model holds in RAM on a GPU under bigVram GB; copies: the float32 copies of one frame at the target size a job holds,
-// and composeCopies those of a job that also composes the 4K result (Paint and Clean). On a 96 GB GPU with 131 GB of RAM,
+// and composeCopies those of a job that also composes the upscaled result (Paint and Clean). On a 96 GB GPU with 131 GB of RAM,
 // 121 frames at 3840 x 2160 in one job peaked at 108.3 GB for the plate and 116.8 GB for the layer, which composes: 9.2
 // and 10.0 copies. A window of 21 frames on a 16 GB GPU held 8.
 // most: the largest target, its long and short sides; sizes: the long sides the menu lists beside the plate's own; least:
@@ -708,15 +708,11 @@ export function upscaleSizes(width, height) {
   }
   return out;
 }
-// Finish > Upscale > Custom…: a width in px (3000), or a height followed by p, as video names heights (1600p). The ask, or
-// null when its size falls outside UPSCALE.least on the long side and UPSCALE.most.
+// Finish > Upscale > Custom…: one number, the long side in px, from UPSCALE.least to UPSCALE.most's long side: the ask for
+// that side, the width or the height (the other follows the plate, within UPSCALE.most), or null.
 export function upscaleCustom(text, width, height) {
-  const m = String(text ?? "").trim().toLowerCase().match(/^(\d+)\s*(px|p)?$/);
-  if (!m) return null;
-  const ask = { side: m[2] === "p" ? "height" : "width", px: +m[1] };
-  const size = ask.side === "width" ? [even(ask.px), even(ask.px * height / width)] : [even(ask.px * width / height), even(ask.px)];
-  const ok = Math.max(...size) >= UPSCALE.least && Math.max(...size) <= UPSCALE.most[0] && Math.min(...size) <= UPSCALE.most[1];
-  return ok ? ask : null;
+  const m = String(text ?? "").trim().match(/^\d+$/), px = m ? +m[0] : 0;
+  return px >= UPSCALE.least && px <= UPSCALE.most[0] ? { side: width >= height ? "width" : "height", px } : null;
 }
 // The ask a scene holds under deliver.upscale: true, a scene saved before sizes, asks for the default; false when off.
 export function upscaleAskOf(saved) {
@@ -748,7 +744,7 @@ export function upscaleSeconds([tw, th], frames, { passes = 1, parts = 1, profil
   const t = UPSCALE_SECONDS[profile] ?? UPSCALE_SECONDS.large, scale = (tw * th) / (3840 * 2160);
   return scale * frames * (passes * t.frame + parts * t.part / 121);
 }
-// The folder of a plate's 4K windows: one per plate, under a key of everything that changes their frames (the plate, its
+// The folder of a plate's upscaled windows: one per plate, under a key of everything that changes their frames (the plate, its
 // colour space and config, the sizes, the window, the format, the build), so a changed setting never adds frames to old
 // windows, and the next export of this plate finds them through the job index. FNV-1a, 32 bits, in hex.
 export function upscaleFolder(plateId, parts) {
@@ -756,7 +752,7 @@ export function upscaleFolder(plateId, parts) {
   for (const c of JSON.stringify(parts)) h = Math.imul(h ^ c.codePointAt(0), 0x01000193) >>> 0;
   return `paintaplate/${plateId}/upscale/${h.toString(16).padStart(8, "0")}`;
 }
-export const upscaleKeeps = (tools) => tools.length > 0 && !tools.includes("light"); // Paint and Clean keep the plate's untouched pixels: the 4K plate, layer and matte come too
+export const upscaleKeeps = (tools) => tools.length > 0 && !tools.includes("light"); // Paint and Clean keep the plate's untouched pixels: the upscaled plate, layer and matte come too
 // What the row says when the size asked for is no larger than the plate: the plate's own size, or a smaller one.
 export function upscaleWhy(width, height, ask = UPSCALE_ASK) {
   const [tw, th] = upscaleTarget(width, height, ask), part = { 2: "half", 3: "a third of" }[UPSCALE.factor] ?? `1/${UPSCALE.factor} of`;
@@ -766,7 +762,7 @@ export function upscaleWhy(width, height, ask = UPSCALE_ASK) {
 }
 export function upscaleAsk({ target, frames, alone, edit }) { // the question before the row turns on: what Export writes, and how long on this GPU
   const min = (s) => `about ${Math.max(1, Math.round(s / 60))} min`;
-  return `Export then also writes a 4k folder at ${target[0]} x ${target[1]}. On this GPU, ${frames} ${frames === 1 ? "frame takes" : "frames take"} ${min(alone)}, `
+  return `Export then also writes an upscaled set at ${target[0]} x ${target[1]}. On this GPU, ${frames} ${frames === 1 ? "frame takes" : "frames take"} ${min(alone)}, `
     + `or ${min(edit)} with Paint or Clean, whose plate and layer are restored too. Every pixel of an upscaled frame is new.`;
 }
 
@@ -777,8 +773,8 @@ export const FINISH = [
   { id: "hdr", name: "SDR to HDR",
     line: "The full-size shot is regenerated in scene-linear values, fitted to the plate. The result is half-float EXR frames in ACES2065-1, in the viewer and in Export.",
     ask: "This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1." },
-  { id: "upscale", name: "Upscale to 4K",
-    line: "Export also writes the result at 3840 px on the long side, restored by SeedVR2 7B. With Paint or Clean, the plate, the layer and the matte come at that size too.",
+  { id: "upscale", name: "Upscale",
+    line: "Export also writes the result at the size chosen, up to 3840 x 2160, restored by SeedVR2 7B. With Paint or Clean, the plate, the layer and the matte come at that size too.",
     ask: upscaleAsk },
 ];
 export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on

@@ -690,7 +690,7 @@ if __name__ == "__main__":
     lv.add_argument("--hdr", default="", help="a folder of the result's frames, such as SDR to HDR's EXR frames")
     lv.add_argument("--matte", default="", help="with --hdr, a folder of the matte's frames: where it shows above 0 is left out")
     lv.add_argument("--export", default="", help="the export's zip, in place of --hdr: its result's frames and its matte")
-    lv.add_argument("--folder", default="", help="with --export, the beginning of the zip's paths of the result's frames: export/ for the result, 4k/export for the upscaled one")
+    lv.add_argument("--folder", default="", help="with --export, the beginning of the zip's paths of the result's frames: export/ for the result, upscaled/export for the upscaled set (4k/export in a zip made before this name)")
     lv.add_argument("--color-space", default="", help="the plate's file colour space in the OCIO config; by default what its files say")
     lv.add_argument("--hdr-space", default="", help="the result's colour space; by default its header's gamut, else ACES2065-1")
     lv.add_argument("--out", default="", help="a Markdown file for the report")

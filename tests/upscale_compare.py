@@ -1,4 +1,4 @@
-"""Two measures of Upscale to 4K's results, on the machine that made them, for a report's sheets.
+"""Two measures of Upscale's results, on the machine that made them, for a report's sheets.
 
   seams   Runs of tests/upscale_plate.py --all on one shot, given by their labels. For each run, the change from one
           frame to the next (mean absolute difference over the frame's centre): a window's edge that jumps shows as a
@@ -8,11 +8,11 @@
   colour  Runs made at an original's size from a smaller copy: the PSNR (peak signal-to-noise ratio) of each frame
           against the original, the mean difference of each channel, and centre crops of one frame, for a sheet.
           python tests/upscale_compare.py colour --comfy /workspace/ComfyUI --original PATH --runs lab none --out DIR
-  parts   The 4K set of one export (4k/ of its zip, unpacked, or of the render's folder): for each frame, how far the 4K
-          result is from 4K plate x (1 - 4K matte) + 4K layer x 4K matte (the mean and the largest difference, and the
+  parts   The upscaled set of one export (upscaled/ of its zip, unpacked, or of the render's folder): for each frame, how far the upscaled
+          result is from upscaled plate x (1 - upscaled matte) + upscaled layer x upscaled matte (the mean and the largest difference, and the
           share of pixels more than 2 steps off, in 8-bit steps), and crops at 1:1 along the matte's edge on a few frames:
           the result, the plate, the layer and the difference ten times brighter, one row per frame, for a sheet.
-          python tests/upscale_compare.py parts --set DIR/4k --frames 1 61 121 --out DIR
+          python tests/upscale_compare.py parts --set DIR/upscaled --frames 1 61 121 --out DIR
 """
 import argparse
 import csv
@@ -104,7 +104,7 @@ MOVIES = (".mp4", ".mov", ".mkv", ".webm", ".mxf")
 
 
 def part_frames(path: str):
-    """The frames of one part of the 4K set, one at a time, as float32 RGB: its movie, or its folder of frames."""
+    """The frames of one part of the upscaled set, one at a time, as float32 RGB: its movie, or its folder of frames."""
     names = sorted(os.listdir(path))
     movies = [n for n in names if n.lower().endswith(MOVIES)]
     if movies:
@@ -154,7 +154,7 @@ if __name__ == "__main__":
     c.add_argument("--runs", nargs="+", required=True)
     c.add_argument("--out", required=True)
     p = sub.add_parser("parts")
-    p.add_argument("--set", required=True, help="the 4K set's folder, with export/, plate/, layer/ and matte/")
+    p.add_argument("--set", required=True, help="the upscaled set's folder, with export/, plate/, layer/ and matte/")
     p.add_argument("--frames", type=int, nargs="+", default=[1, 61, 121], help="the frames of the sheet, from 1")
     p.add_argument("--out", required=True)
     a = ap.parse_args()

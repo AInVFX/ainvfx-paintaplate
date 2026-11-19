@@ -1,4 +1,4 @@
-"""Upscale to 4K: the workflow's window and colour round trip, its model files, and the window tool's slots and size."""
+"""Upscale: the workflow's window and colour round trip, its model files, and the window tool's slots and size."""
 import json
 import os
 import sys
@@ -33,7 +33,7 @@ def slots(prompt):
 
 
 class UpscaleWorkflow(unittest.TestCase):
-    def setUp(self):  # the job of one window, as the page posts it for a plate: the 4K set's two optional parts dropped
+    def setUp(self):  # the job of one window, as the page posts it for a plate: the upscaled set's two optional parts dropped
         self.p = build_workflows.fill("upscale", {})
 
     def test_the_window_is_cut_from_the_whole_shot_and_converted_with_its_peak(self):
