@@ -435,8 +435,8 @@ def generate_flow(browser, port):
     check(page.get_attribute("#view", "data-picture") == "shot", "paused, on frame 3 and on frame 0, the viewer shows the shot, not the plate")
     made, renders = klein_passes(page), page.locator("#log li:has-text('Render v')").count()
     page.keyboard.press("Enter")
-    until(page, "document.querySelector('#hud').textContent.includes('Nothing changed')")
-    check(klein_passes(page) == made and page.locator("#log li:has-text('Render v')").count() == renders and "Nothing changed" in page.text_content("#hud"),
+    until(page, "document.querySelector('#hud').textContent.includes('The result is up to date')")
+    check(klein_passes(page) == made and page.locator("#log li:has-text('Render v')").count() == renders and "The result is up to date" in page.text_content("#hud"),
           "Enter again with nothing changed runs nothing twice: no Klein pass, no render step")
     log = log_lines(page)
     for key in (": done in", "prompt writer", "Klein edit preview"):
