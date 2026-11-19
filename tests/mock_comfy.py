@@ -417,7 +417,7 @@ async def execute(pid, prompt):
         for f in shot:
             writer.write(f)
         writer.close()
-        o[outs["plate"]] = {"text": [f"1 file(s) in {d}\n{os.path.basename(writer.path)}"]}
+        o[outs["plate"]] = {"text": [f"Save Plate: 1 file written to {d}.\n  First files: {os.path.basename(writer.path)}."]}
         if "control" in outs:  # the control video: black, each keyframe at its frame
             at = {k["frame"]: np.asarray(Image.open(resolve(k["image"])).convert("RGB").resize((w, h)), np.float32) / 255 for k in keys}
             o[outs["control"]] = {"images": [save_mp4([at.get(i, np.zeros((h, w, 3), np.float32)) for i in range(len(frames))],
@@ -471,7 +471,7 @@ async def execute(pid, prompt):
                 o[outs["layer_exr"]] = {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
             if "export" not in outs:
                 return o
-            o[outs["export"]] = {"text": [f"1 file(s) in {d}\nplate_00001_.webm"],
+            o[outs["export"]] = {"text": [f"Save Plate: 1 file written to {d}.\n  First files: plate_00001_.webm."],
                                  "files": [{"filename": "plate_00001_.webm", "subfolder": v["prefix"], "type": "output"}]}
     else:
         await steps(pid, 1, 0.2)
