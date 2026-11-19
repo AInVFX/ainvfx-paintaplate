@@ -53,8 +53,8 @@ let previewMode = (() => { try { return readPreview(localStorage.getItem(PREVIEW
 const PREFETCH_MS = 500; // quiet time after a keystroke before the prompt writer starts on the new words
 const UNDO_MAX = 60; // steps kept for undo
 const PAINT_GRID = 96; // cells across the frame for an erase's locked boxes and the check of its caption (logic.paintBoxes, erasesPaint)
-// An edit mask grows by the frame width over this: 27 px at 1280, enough for the object's edge. At 24 an erase reached
-// what stood next to the object, and Klein sometimes took it too (a head under an umbrella, one seed in five).
+// An edit mask grows by the frame width over this: 27 px at 1280, enough for the object's edge. At 24 an erase reaches
+// what stands next to the object, and Klein sometimes takes it too (a head under an umbrella, one seed in five).
 const EDIT_GROW = 48;
 const PAINT_ZONE = 10; // paint may change the frame within the width over this of its strokes: room for an explosion and its glow
 const ZONE_SOFT = { feather: 31, sigma: 10 }; // the zone's edge: Blur Image's largest radius and sigma
@@ -82,7 +82,7 @@ const SCENE = { format: "paintaplate-scene", version: 6 }; // 3: the OCIO config
 const OCIO_PREF = "paintaplate.ocio"; // the config, display, view and look, kept for the next session as RV keeps them
 const saved = (key) => { try { return JSON.parse(localStorage.getItem(key)) ?? {}; } catch { return {}; } };
 
-const TOOLS = { p: "paint", c: "erase", l: "light" }; // the keys P, C and L; "erase" stays the code's name for Clean until app.mjs is split
+const TOOLS = { p: "paint", c: "erase", l: "light" }; // the keys P, C and L; "erase" is the code's name for Clean
 // The viewer's colour keys, after OpenRV's rvui.mu: exposure e, gamma y, contrast k, saturation S, hue h; channels c r g b l.
 // Here P, C and L pick tools, so the channels take Shift, and exposure with them.
 const COLOR_KEYS = { "Shift+e": "exposure", y: "gamma", k: "contrast", "Shift+s": "saturation", h: "hue" };
@@ -166,7 +166,7 @@ const folderOf = (name, out, key) => { // the folder a workflow saved its frames
 
 function editImage(e, before, size) { // what Klein sees: the strokes over the frame; an erase, the frame itself; a light, the frame with its light
   const c = snap(before, size);
-  if (e.tool === "erase") return c; // told to remove the object, Klein cleans it; shown a filled hole, it drew a new object there
+  if (e.tool === "erase") return c; // told to remove the object, Klein cleans it; shown a filled hole, it draws a new object there
   if (e.tool === "light") return c; // a relight: the frame as it is; its strokes reach Klein in words (logic.lightIntent)
   c.getContext("2d").drawImage(e.paint, 0, 0, size[0], size[1]);
   return c;
@@ -899,7 +899,7 @@ function showLatest() { // the latest result of the edits on show: the full-size
 }
 
 // Every movie the page plays comes at the plate's native size, up to NATIVE_SIDE on the long side, the size of the viewer's
-// canvas (contract 1 of the parallel work), even sides for H.264: Save Movie scales it with Lanczos while it encodes.
+// canvas, with even sides for H.264: Save Movie scales it with Lanczos while it encodes.
 const movieDims = (w, h) => ({ movie_width: w - (w % 2), movie_height: h - (h % 2) });
 const plateMovie = (p) => movieDims(...colour.nativeSize(p.spec.width, p.spec.height, NATIVE_SIDE));
 // A matte row shows the matte through the config's data colour space: its own values, with no view's tone mapping.
@@ -1153,8 +1153,8 @@ function stoppedUI(edit = null) { // the status line under a stop (logic.stopHin
   status([stopHint({ edit: edit && num(edit), waits }), hiddenNote()].filter(Boolean).join(" "), "hint");
 }
 
-// The shot on show: its movie and the colour space of the movie's values, its EXR frames, and (the contract's fifth
-// argument) options: framesSpace, the colour space the EXR frames are stored in, when it is not the plate's (the SDR-to-HDR
+// The shot on show: its movie and the colour space of the movie's values, its EXR frames, and, as its fifth
+// argument, options: framesSpace, the colour space the EXR frames are stored in, when it is not the plate's (the SDR-to-HDR
 // pass writes ACES2065-1). The viewer draws and inspects the frames in that space.
 function setShot(src, key, space = "@model", frames = null, { framesSpace = null } = {}) {
   dropLive(); // the shot itself, rough or composited, replaces the live preview
@@ -1165,8 +1165,7 @@ function setShot(src, key, space = "@model", frames = null, { framesSpace = null
 }
 
 // Once the shot of the current edits exists, it shows on every frame, playing or paused; the plate shows only in the wipe and
-// while O is held. Frame 0 shows the edited first frame with the strokes while edits are made. Paused, the viewer drew the plate
-// whenever the shot video had no frame ready, and frame 0 kept showing Klein's still.
+// while O is held. Frame 0 shows the edited first frame with the strokes while edits are made.
 const held = { canvas: canvas([1, 1]), url: "" }; // the last shot frame drawn while paused: shown while the shot video seeks
 const editingFirst = () => !!(S.draft || stroke || S.running || S.queued || S.hover || S.peek);
 
