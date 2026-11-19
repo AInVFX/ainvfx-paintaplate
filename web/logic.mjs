@@ -503,7 +503,7 @@ export function frameUse(f, { frame, inPt, outPt }, behind = 3) {
 }
 
 // ---------- The colour picker ----------
-// The in-frame colour picker (Firefox, Safari): the average of the pixels under the click as #rrggbb, for the brush. `data`
+// The in-frame colour picker: the average of the pixels under the click as #rrggbb, for the brush. `data`
 // holds RGBA bytes, as getImageData returns them; transparent pixels, outside the frame, do not count.
 export function pickedColor(data) {
   let r = 0, g = 0, b = 0, n = 0;

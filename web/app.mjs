@@ -4049,12 +4049,14 @@ async function setPlateSpace(cs, asked = false) { // the plate's colour space (R
 }
 
 function regenerated() { return S.edits.filter((e) => e.on && e.state === "done").length; } // the edits a new colour space or config regenerates
-// The page's one question dialog (#ask): `text`, then Cancel and the button `yes`. It resolves true for `yes`, false for Cancel
-// or Esc. Enter chooses the button that has the focus: Cancel, or `yes` when `enter` is true. One question at a time: a held-back
-// erase can ask while the OCIO question is open, so a question that comes then waits for that answer, and is dropped (false)
-// when `still()` no longer holds by its turn.
+// The page's one question dialog (#ask): `text`, then two buttons that say what they do, `no` and `yes`. It resolves true
+// for `yes`, false for Esc, and false for `no`, or `other` when Esc must answer apart from it. With a `field` ({ value,
+// placeholder, label }), `yes` answers the text typed, and `label` names the yes button from it. Enter chooses the button
+// that has the focus: `no`, or `yes` when `enter` is true. One question at a time: a held-back erase can ask while the OCIO
+// question is open, so a question that comes then waits for that answer, and is dropped (false) when `still()` no longer
+// holds by its turn.
 let asking = Promise.resolve();
-function ask(text, yes, { enter = false, still = () => true, field = null, no = "Cancel", other = false } = {}) { // other: what the no button answers, when Esc must answer apart from it // yes, no: what each button does. With a field ({ value, placeholder }), the answer is the text typed, or false
+function ask(text, yes, { enter = false, still = () => true, field = null, no = "Cancel", other = false } = {}) {
   const turn = asking.then(() => still() && new Promise((answer) => {
     const d = $("#ask"), ok = $("#ask-yes"), input = $("#ask-field");
     $("#ask-text").textContent = text;
@@ -4254,7 +4256,7 @@ async function boot() { // the version and the build, the workflows, the WebSock
   const HDR_NODES = workflowClasses(WF.hdr.prompt); // SDR to HDR is optional: it turns on when every node class of its workflow is present
   const UPSCALE_NODES = [...new Set([...workflowClasses(WF.upscale.prompt), ...workflowClasses(WF.upscale_export.prompt)])]; // so is Upscale to 4K: core's SeedVR2 nodes
   const classes = [...new Set([...Object.keys(needs), ...[...models.values()].map(([cls]) => cls), "PaintAPlate_KeyframeVideo", ...HDR_NODES, ...UPSCALE_NODES])];
-  const info = Object.fromEntries(await Promise.all(classes.map(async (cls) => [cls, await objectInfo(cls)]))); // one round trip for all
+  const info = Object.fromEntries(await Promise.all(classes.map(async (cls) => [cls, await objectInfo(cls)]))); // all at once, in parallel
   const missing = Object.entries(needs).filter(([cls]) => !info[cls]).map(([cls, from]) => `${cls} (${from})`);
   if (missing.length) return stopped(`Missing nodes: ${missing.join(", ")}`, "Install them, then reload this page.");
   const absent = []; // only lists count: a file named in a text input is optional (the live preview's decoder)
@@ -4307,7 +4309,7 @@ $("#color").oninput = (e) => setColor(e.target.value);
 const PICK_SIDE = 5;
 const pickCtx = Object.assign(document.createElement("canvas"), { width: PICK_SIDE, height: PICK_SIDE }).getContext("2d", { willReadFrequently: true });
 $("#pick").onclick = () => pickColor();
-function pickColor() { pickFrame(!S.picking); } // the pipette, or I: the next click on the frame takes its colour. The browser's own eyedropper reads the screen, never the frame's values
+function pickColor() { pickFrame(!S.picking); } // the pipette, or I: on, or off again
 function pickFrame(on) {
   S.picking = on && !!S.plate;
   view.classList.toggle("picking", S.picking);
