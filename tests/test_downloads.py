@@ -110,7 +110,7 @@ class Models(unittest.TestCase):
         self.assertEqual((code, lines[-1]), (0, f"1 of 1 model files in place in {self.models}"))
 
     def test_every_file_has_its_size_and_the_docstring_its_total(self):
-        names = [os.path.basename(path) for _, path, _ in get_models.MODELS + [get_models.NVFP4]]
+        names = [os.path.basename(path) for _, path, _ in get_models.MODELS]
         self.assertEqual(sorted(names), sorted(get_models.SIZES))
         total = sum(get_models.SIZES[os.path.basename(path)] for _, path, _ in get_models.MODELS)
         self.assertIn(f"about {total / 1e9:.0f} GB in all", " ".join(get_models.__doc__.split()))

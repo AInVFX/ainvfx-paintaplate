@@ -1,5 +1,5 @@
-// Tests of a relight's strokes read as intentions (web/logic.mjs: lightIntent), the prompt that
-// tests/light_probe.py gives Klein with the frame alone.
+// Tests of a relight's strokes read as intentions (web/logic.mjs: lightIntent), the request that
+// the page gives Klein with the frame alone.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { lightIntent } from "../../web/logic.mjs";

@@ -56,7 +56,6 @@ FLUID = "ainvfx-fluid.safetensors"
 HDR = ("ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors", "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors")  # gated
 UPSCALE = ("seedvr2_7b_fp16.safetensors", "seedvr2_ema_vae_fp16.safetensors")
 OPTIONAL = (FLUID, *HDR, *UPSCALE)  # without them, fluid shots, SDR to HDR or Upscale switch off and the rest works
-NVFP4 = ("black-forest-labs/flux-3-image-klein-comfy", "diffusion_models/flux3-image-klein-nvfp4.safetensors", "diffusion_models")
 SIZES = {  # bytes of each file at its revision, as Hugging Face lists it: --list prints them and adds them up
     "seedvr2_7b_fp16.safetensors": 16480583960,
     "seedvr2_ema_vae_fp16.safetensors": 501324814,
@@ -75,7 +74,6 @@ SIZES = {  # bytes of each file at its revision, as Hugging Face lists it: --lis
     "ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors": 1308787472,
     "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors": 12614165,
     "ainvfx-fluid.safetensors": 654446320,
-    "flux3-image-klein-nvfp4.safetensors": 5277685632,
 }
 STAGING = ".paintaplate_downloads"  # inside the destination folder, so a finished file moves into place without a copy
 TOKENS = "https://huggingface.co/settings/tokens"
@@ -170,11 +168,10 @@ def main(argv=None) -> int:
     ap.add_argument("--no-fluid", action="store_true", help="skip ainvfx-fluid: fluid shots from a blank plate switch off")
     ap.add_argument("--no-hdr", action="store_true", help="skip the SDR-to-HDR IC-LoRA (gated): SDR to HDR switches off")
     ap.add_argument("--no-upscale", action="store_true", help="skip SeedVR2 7B and its VAE (17.0 GB): Upscale switches off")
-    ap.add_argument("--nvfp4", action="store_true", help=argparse.SUPPRESS)  # FLUX 3 Image Klein's nvfp4 file: tests/gpu_bench.py only
     ap.add_argument("--only", nargs="+", metavar="FILE", help="these files only")
     ap.add_argument("--list", action="store_true", help="print each file with its size and whether it is in place, then stop")
     a = ap.parse_args(argv)
-    todo = [m for m in MODELS + ([NVFP4] if a.nvfp4 else [])
+    todo = [m for m in MODELS
             if not (a.no_fluid and m[1].endswith(FLUID)) and not (a.no_hdr and os.path.basename(m[1]) in HDR) and not (a.no_upscale and os.path.basename(m[1]) in UPSCALE) and (not a.only or os.path.basename(m[1]) in a.only)]
     if not a.models or not os.path.isdir(a.models):
         print("Name ComfyUI's models folder: python get_models.py path/to/ComfyUI/models", file=sys.stderr)

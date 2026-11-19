@@ -15,17 +15,15 @@ W=${WORKDIR:-/workspace}; VENV=${VENV:-/opt/venv}
 COMFY_REF=${1:-${COMFY_REF:-$COMFY_PIN}}; LTX_REF=${2:-${LTX_REF:-$LTX_PIN}}
 PACK=${PACK:-$(cd "$(dirname "$0")/.." && pwd)}
 log() { echo "[$(date +%H:%M:%S)] $*"; }
-# Code comes from GitHub, or from an upload when a pod cannot reach it (tools/offline_bundle.sh).
-# A copy without git history is used as it is; git never waits more than a minute for GitHub.
+# Code comes from GitHub. A copy without git history is used as it is; git never waits more than a minute for GitHub.
 fetch() { timeout 60 git fetch -q origin || log "git fetch failed: using the local copy"; }
 pin() { # name: record the version of the folder we are in
   if [ -d .git ]; then echo "$1 $(git rev-parse --short HEAD) $(git log -1 --format=%cd)"
-  else echo "$1 $(cat PINNED 2>/dev/null || echo "copy without git history")"; fi
+  else echo "$1 copy without git history"; fi
 }
 clone() { # url, folder
   timeout 300 git clone -q "$1" "$2" && return
   log "cannot clone $1: GitHub does not answer from this machine."
-  log "Upload the offline bundle instead: see the comments at the top of tools/offline_bundle.sh"
   exit 1
 }
 
@@ -38,8 +36,8 @@ pip install -q -U pip uv huggingface_hub hf_transfer
 log "models (in the background)"
 M=$W/models; mkdir -p "$M"
 # get_models.py, at the root of the pack, holds every model file and its tested revision: FLUID=0 skips ainvfx-fluid, HDR=0 the SDR-to-HDR IC-LoRA,
-# WITH_NVFP4=1 adds FLUX 3 Image Klein's nvfp4 file (only tests/gpu_bench.py compares it)
-flags=(); [ "${FLUID:-1}" = 0 ] && flags+=(--no-fluid); [ "${HDR:-1}" = 0 ] && flags+=(--no-hdr); [ "${WITH_NVFP4:-0}" = 1 ] && flags+=(--nvfp4)
+# UPSCALE=0 SeedVR2 7B and its VAE. The feature that needs a skipped file is then off, and the rest works
+flags=(); [ "${FLUID:-1}" = 0 ] && flags+=(--no-fluid); [ "${HDR:-1}" = 0 ] && flags+=(--no-hdr); [ "${UPSCALE:-1}" = 0 ] && flags+=(--no-upscale)
 ( HF_HUB_ENABLE_HF_TRANSFER=1 python "$PACK/get_models.py" "$M" ${flags[@]+"${flags[@]}"} || log "model files missing: see above"; log "models done" ) > "$W/models.log" 2>&1 &
 
 log "ComfyUI $COMFY_REF"

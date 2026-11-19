@@ -5,7 +5,6 @@
 #   bash /workspace/ainvfx-paintaplate/tools/runpod_start.sh
 # After updating the code on a pod where ComfyUI already runs, --restart stops it first, so the new
 # nodes load:  cd /workspace/ainvfx-paintaplate && git pull && bash tools/runpod_start.sh --restart
-# When the pod cannot reach GitHub, upload the offline bundle instead (tools/offline_bundle.sh).
 # PLATES=1 adds the example plates to ComfyUI's input/plates folder, where the Open plate dialog lists them:
 #   PLATES=1 bash tools/runpod_start.sh         (or, on a pod that is already running: python get_plates.py)
 # Each start keeps the log of the ComfyUI that ran before, as comfyui.<date>-<time>.log: after a stop, it holds what ran.

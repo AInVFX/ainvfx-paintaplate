@@ -110,11 +110,6 @@ def slots_of(prompt):
     return slots
 
 
-def progress_of(prompt):
-    """The ids of the nodes marked `_meta.progress`: the page shows their progress only."""
-    return [nid for nid, node in prompt.items() if node.get("_meta", {}).get("progress")]
-
-
 def outputs_of(prompt):
     """{output name: node id} from `_meta.output`."""
     return {node["_meta"]["output"]: nid for nid, node in prompt.items() if node.get("_meta", {}).get("output")}

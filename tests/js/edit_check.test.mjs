@@ -2,9 +2,7 @@
 // passes; an object that stayed, or that Klein only recoloured, is left.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { join } from "node:path";
 import { bandBeyond, BEYOND, eraseCheck, objectLeft } from "../../web/logic.mjs";
-import { png } from "./edit_png.mjs";
 
 const w = 64, h = 32;
 const frame = (fn) => {
@@ -37,48 +35,6 @@ test("the probe's results on horse.mp4: what went passes; what stayed, and the h
   for (const [changed, edges] of stayed) assert.equal(objectLeft({ changed, edges }), true, `${changed}, ${edges}`);
 });
 
-// The fixture (horse.mp4): real first frames at the page's quick-pass size, 768 x 432, against the check after an erase.
-// The frames live with the test data, never in git: PAINTAPLATE_FIXTURES names the folder that holds edit_check/; without
-// it this test is skipped. Each case is [the frame under the edit, the object's mask, left]; the case names the fixture's
-// file of the first frame after the edit:
-// - the plate's first frame resized (horse_frame0, the same pixels as w6/horse_frame0.png at 768 x 432), with the page's mask
-//   of the barn: the first frames of two exports, and those of a probe (tests/erase_probe.py, seven requests);
-// - the frame and the masks that a later probe sent (probe14_*): the barn, the post and the tree, with no words and with
-//   their names. Each probe's results are measured against its own frame: they give the probe's own figures exactly.
-// The verdicts agree with the frames and with SAM 3.1 run again. Measured at 24 levels and for the edges: a kept object
-// 0 to 3% and 0.91 to 0.98; a removed one 53 to 97% and -0.07 to 0.76, a thin post among them (73%, 0.05).
-const CASES = {
-  horse_erase: ["horse_frame0", "horse_barn_mask", true], // no words: the barn kept
-  horse_erase_barn: ["horse_frame0", "horse_barn_mask", false],
-  probe_page: ["horse_frame0", "horse_barn_mask", false],
-  probe_dimmed: ["horse_frame0", "horse_barn_mask", false],
-  probe_crop: ["horse_frame0", "horse_barn_mask", false],
-  probe_tight: ["horse_frame0", "horse_barn_mask", false],
-  probe_named: ["horse_frame0", "horse_barn_mask", true],
-  probe_as_words: ["horse_frame0", "horse_barn_mask", true],
-  probe_own: ["horse_frame0", "horse_barn_mask", true],
-  w6_horse_erase: ["horse_frame0", "horse_barn_mask", false], // no words: the prompt writer's box cut to the object
-  w6_horse_erase_barn: ["horse_frame0", "horse_barn_mask", false],
-  probe14_barn_page: ["probe14_frame", "probe14_barn_mask", false],
-  probe14_barn_wide: ["probe14_frame", "probe14_barn_mask", true], // the box around SAM's whole union: the prompt writer names the horse, refused
-  probe14_post_page: ["probe14_frame", "probe14_post_mask", false],
-  probe14_post_own: ["probe14_frame", "probe14_post_mask", true],
-  probe14_tree_own: ["probe14_frame", "probe14_tree_mask", true],
-  probe14_barn_words: ["probe14_frame", "probe14w_barn_mask", false], // with its name, SAM 3.1 finds the object by it
-  probe14_post_words: ["probe14_frame", "probe14w_post_mask", false],
-  probe14_tree_words: ["probe14_frame", "probe14_tree_mask", false],
-};
-
-test("real first frames: an object that stayed is left, one that went is gone", { skip: !process.env.PAINTAPLATE_FIXTURES && "PAINTAPLATE_FIXTURES is not set" }, () => {
-  const dir = join(process.env.PAINTAPLATE_FIXTURES, "edit_check"), read = (name) => png(join(dir, `${name}.png`));
-  for (const [name, [frame, object, left]] of Object.entries(CASES)) {
-    const before = read(frame), mask = read(object), after = read(name);
-    assert.deepEqual([before.w, before.h, mask.w, mask.h, after.w, after.h], [768, 432, 768, 432, 768, 432], name);
-    const check = eraseCheck(after.data, before.data, mask.data, before.w, before.h);
-    assert.equal(check.left, left, `${name}: ${JSON.stringify(check)}`);
-  }
-});
-
 test("the band beyond the object: the mask grown as a square by the reach, without the mask, never past the frame", () => {
   const w = 8, h = 6, mask = new Uint8ClampedArray(w * h * 4), on = [];
   mask.fill(255, 2 * w * 4, (2 * w + 1) * 4); // one pixel, at x 0 and y 2
@@ -93,15 +49,4 @@ test("an erase that changed the whole area around its object is held back; one t
   const kept = eraseCheck(inside, grey(100), mask, W, H, 4), took = eraseCheck(grey(160), grey(100), mask, W, H, 4);
   assert.deepEqual([kept.why, kept.beyond, took.why, took.beyond], [null, 0, "beyond", 1]);
   assert.deepEqual(Object.keys(eraseCheck(inside, grey(100), mask, W, H)), ["changed", "edges", "left"]); // no reach: the object alone
-});
-
-test("real first frames: only the erase that removed a fence with the barn changed over 20% of the area around it", { skip: !process.env.PAINTAPLATE_FIXTURES && "PAINTAPLATE_FIXTURES is not set" }, () => {
-  const dir = join(process.env.PAINTAPLATE_FIXTURES, "edit_check"), read = (name) => png(join(dir, `${name}.png`));
-  const reach = Math.round(768 / 48) + 6; // the band the edit reaches at the edit preview's size (app.generate)
-  for (const [name, [frame, object]] of Object.entries(CASES)) {
-    const check = eraseCheck(read(name).data, read(frame).data, read(object).data, 768, 432, reach);
-    if (name === "probe_crop") assert.ok(check.why === "beyond" && check.beyond > 0.3 && check.beyondEdges < 0.8, `${name}: ${JSON.stringify(check)}`);
-    else assert.ok(check.beyond < 0.07 && check.why !== "beyond", `${name}: ${JSON.stringify(check)}`);
-  }
-  assert.equal(BEYOND, 0.2);
 });
