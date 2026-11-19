@@ -1407,7 +1407,8 @@ export const editSeed = (asked, made) => (asked === null ? null : (asked + made)
 export const gridGrow = (sizeW, plateW, reach) => 1 + Math.ceil((reach * sizeW) / plateW / 32);
 
 // View > Cache memory > Custom…: a size a person types, in MB or GB (a number alone is MB), as bytes, or null outside
-// CACHE_LEAST to CACHE_MOST. The page counts 1 GB as 10^9 bytes, as its other memory lines do.
+// CACHE_LEAST to CACHE_MOST. The page counts 1 GB as 10^9 bytes, as the frame cache's other
+// lines and the file sizes do (app.memoryText, gb); the lines of a card's VRAM and RAM count 2^30 bytes.
 export const CACHE_LEAST = 128e6;
 export const CACHE_MOST = 32e9;
 export function memoryBytes(text) {
