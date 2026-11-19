@@ -989,9 +989,9 @@ export function warmEnd(seconds, missed, startShown) {
 
 // ---------- SDR to HDR ----------
 // Lightricks' LTX 2.5 SDR-to-HDR IC-LoRA makes 16-bit HDR from an SDR shot, at full size. It is on by default for a plate
-// with float samples, such as EXR (plateDepth's `hdr`); on another plate, the Finish menu turns it on. A relight keeps the
-// plate's own values under a smooth light ratio, which stay HDR,
-// so a render with a light edit leaves it out. A blank plate asks its bit depth: 8-bit, or 16-bit half float, where its
+// with float samples, such as EXR (plateDepth's `hdr`); on another plate, the Finish menu turns it on. On a plate that holds values above 1.0, a
+// relight keeps the plate's own values under a smooth light ratio, which stay HDR, so a render with a light edit leaves it
+// out; on another plate, SDR to HDR runs on the relit composite instead (hdrAfterComposite). A blank plate asks its bit depth: 8-bit, or 16-bit half float, where its
 // fluid shot goes through it and becomes an EXR plate: 16-bit is the default once its files are found (?hdr=0 turns it off).
 export const HDR_DEPTH = 16;
 // New content at the plate's bit depth: a clean plate or a new element matches the plate. One rule per
@@ -1015,6 +1015,11 @@ export function plateDepth(spec) {
 // in its own format with no extra files; only the others warn first and deliver an EXR sequence.
 export const holdsHdr = (spec, headroom = 1) => !!spec && (plateDepth(spec).float || headroom > 1.001);
 export const wantsHdr = (spec, tools, on) => !!spec && !!on && !tools.includes("light");
+// SDR to HDR on the composite, once it is made: a set with a Light edit, on a plate whose format holds nothing above 1.0, when
+// SDR to HDR is on. Relight Transfer relights the plate's own pixels, and the shot's HDR frames reach the result only inside
+// the mattes, so the new light would stay SDR: the relit composite goes through SDR to HDR whole, as a plate with no edit
+// does (app.plateHdr), and its frames are the result. A plate that holds values above 1.0 keeps them under the relight.
+export const hdrAfterComposite = (spec, tools, on, headroom = 1) => !!spec && !!on && tools.includes("light") && !holdsHdr(spec, headroom);
 // The switch away from the plate's default makes another render, so each setting keeps its own: "|hdr" or "|sdr".
 export const hdrKey = (edits, dflt, on) => (on === dflt ? edits : `${edits}|${on ? "hdr" : "sdr"}`);
 export const hdrOfKey = (key, dflt) => (key?.endsWith("|hdr") ? true : key?.endsWith("|sdr") ? false : dflt);
