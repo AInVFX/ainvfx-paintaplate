@@ -190,7 +190,7 @@ def colour(g, image, source, destination, title=None, peak_of=None, peak=None):
     """Colour Space (OCIO) in the config the page names (Slot config). Into @model, `peak_of` is the batch `image` is a
     part of: the tone mapping takes that batch's peak. Out of @model, it is the plate in `destination`: the tone mapping of
     its peak is undone, so new content comes back at the plate's levels. `peak` is that peak as a number: the second
-    output of the plate's own conversion, which read it (PL6)."""
+    output of the plate's own conversion, which read it."""
     part = {k: v for k, v in (("peak_of", peak_of), ("peak", peak)) if v is not None}
     return g("PaintAPlate_ColorSpace", _title=title, image=image, config=Slot("config", OCIO_CONFIG), source=source,
              destination=destination, **part)
