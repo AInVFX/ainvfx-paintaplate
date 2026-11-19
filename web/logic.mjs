@@ -773,7 +773,7 @@ export function eraserAfterKey(was, held, dragged) { return !dragged && held < E
 export function plateSpaceLine(plate) {
   return plate ? `Colour space: ${plate.cs}, ${plate.pageSpaceChosen ? "override" : "from file"}` : "Colour space: no plate";
 }
-// The one question before an OCIO change that regenerates: the cause and the cost, then the question (Continue, Cancel).
+// The one question before an OCIO change that regenerates: the cause and the cost, then the question, answered « Yes, continue » or « No, keep it » (app.askRemake).
 // `what`: « plate's colour space » or « OCIO config ». The first frame is the page's own step: the question counts the edits.
 export function remakeQuestion(what, edits) { return `Changing the ${what} affects generation: ${edits} edit${edits === 1 ? "" : "s"} will be regenerated. Continue?`; }
 // The HUD's line when a fluid keyframe moves to the nearest frame it can sit on; `frame` is the plate's own number
