@@ -209,7 +209,7 @@ def saved(entry, output_dir):
 
 
 def whole_plate_open(path, cs, prefix):
-    """The open as 1.11.8 made it: the whole plate converted as one batch, then its first frame taken; the real frames
+    """The heavy open, for reference: the whole plate converted as one batch, then its first frame taken; the real frames
     copied, converted and sized as batches. The pictures the lighter `ingest` must make, with the proxy written without
     loss (see `lossless`)."""
     g = Graph()
