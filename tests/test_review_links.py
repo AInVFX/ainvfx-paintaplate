@@ -44,3 +44,8 @@ class Links(unittest.TestCase):
         self.assertEqual(cache.clear(self.output), (1, 1))
         self.assertTrue(all(os.path.islink(link) for link in links))
         self.assertTrue(os.path.isfile(os.path.join(self.outside, "keep.mov")) and os.path.isfile(os.path.join(self.outside, "v1", "frame.exr")))
+
+    def test_the_scenes_list_skips_a_link_that_leads_nowhere(self):
+        touch(routes.scene_path("shot010"), b'{"format": "paintaplate-scene", "plate": {"path": "plates/boat.mov"}, "edits": []}')
+        os.symlink(os.path.join(self.dir, "nowhere"), routes.scene_path("gone"))
+        self.assertEqual([s["name"] for s in routes.list_scenes()], ["shot010"])

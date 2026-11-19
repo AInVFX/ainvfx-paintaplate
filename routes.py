@@ -769,7 +769,7 @@ def list_scenes() -> list[dict]:
     """Scenes saved here, newest first, with what the Open dialog shows: the plate's name and the number of edits."""
     folder = os.path.join(folder_paths.get_output_directory(), SCENES)
     out = []
-    for e in sorted(os.scandir(folder), key=lambda e: -e.stat().st_mtime) if os.path.isdir(folder) else []:
+    for e in sorted(os.scandir(folder), key=lambda e: -e.stat(follow_symlinks=False).st_mtime) if os.path.isdir(folder) else []:
         if not e.name.endswith(".paintaplate.json") or e.is_symlink():
             continue
         try:
