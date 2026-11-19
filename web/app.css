@@ -141,7 +141,7 @@ body.plate-alone .hud.corner { left: auto; top: auto; right: 14px; bottom: 10px;
 .tl-range.full { border-color: transparent; }
 .tl-cache { position: absolute; left: 0; top: 0; width: 100%; height: 3px; pointer-events: none; }
 .tl-render { position: absolute; left: 0; bottom: 0; height: 3px; width: 0; background: var(--gold); }
-.tl-render.export { background: var(--muted); }
+.tl-render.final { background: var(--muted); }
 .tl-render.ready { background: var(--ok); width: 100% !important; opacity: .55; }
 .tl-render.stale { background: var(--faint); width: 100% !important; }
 .tl-keys { position: absolute; inset: 0; pointer-events: none; }

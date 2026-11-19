@@ -3381,7 +3381,7 @@ function timelineBar() { // the line under the timeline: the preview in gold, th
   if (S.stage?.key === S.heroKey) done += estimate(S.stage.id, r.skip) * S.stage.progress;
   bar.style.width = `${Math.round((done / Math.max(1, total)) * 100)}%`;
   if (r.review) bar.classList.add("ready");
-  else if (previewOf(r)?.comp) bar.classList.add("export");
+  else if (previewOf(r)?.comp) bar.classList.add("final"); // the preview is made: the full-size passes run
 }
 
 function timelineUI() {
