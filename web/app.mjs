@@ -3286,7 +3286,7 @@ function log(text) { // the log panel only: what happened, one fact per message,
 async function exportLog() { // the log's export (logic.logReport): the log with its times, and what ComfyUI reports of its versions and machine
   const [served, stats] = await Promise.all([fetch("/paintaplate/version").then((r) => r.json()).catch(() => ({})), fetch("/system_stats").then((r) => r.json()).catch(() => null)]);
   const now = new Date(), p = S.plate, name = p?.path?.split("/").filter(Boolean).pop()?.replace(/\.[^.]+$/, "") ?? "";
-  const text = logReport({ version: served.version ?? S.version, build: served.build, stats, browser: navigator.userAgent, address: location.search.slice(1),
+  const text = logReport({ version: served.version ?? S.version, build: served.build, folder: served.folder, stats, browser: navigator.userAgent, address: location.search.slice(1),
     memory: S.memoryProfile ? `${S.memoryProfile.name} (${S.memoryProfile.why})` : "", plate: p ? [$("#spec").textContent.trim(), plateSpaceLine(p)] : [],
     lines: [...$("#log").children].map((li) => [li.firstChild.textContent, li.lastChild.textContent]), now });
   const a = document.createElement("a");

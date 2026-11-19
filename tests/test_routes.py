@@ -205,7 +205,7 @@ class PlateBrowser(unittest.TestCase):
         import json, tomllib
         with open(os.path.join(ROOT, "pyproject.toml"), "rb") as f:
             self.assertEqual(routes.VERSION, tomllib.load(f)["project"]["version"])
-        self.assertEqual(json.loads(asyncio.run(routes.version_route(None)).text), {"version": routes.VERSION, "build": routes.BUILD})
+        self.assertEqual(json.loads(asyncio.run(routes.version_route(None)).text), {"version": routes.VERSION, "build": routes.BUILD, "folder": ""})  # the stub has no base_path
 
     def test_plate_info_names_the_colour_space_in_the_config(self):
         info = routes.plate_info("plates/exr_shot")

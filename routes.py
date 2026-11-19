@@ -2,7 +2,8 @@
     GET  /paintaplate/browse?path=output:video        a folder for the Open dialog: subfolders, videos, sequences, scenes;
                                                       at a root, also the newest plates of the folders below it
     GET  /paintaplate/version                         the pack's version, from pyproject.toml: the page's top bar and log;
-                                                      and its build, a hash of what computes (build_parts): job index keys
+                                                      and its build, a hash of what computes (build_parts): job index keys;
+                                                      and ComfyUI's folder, from which the log's export writes the paths it holds
     GET  /paintaplate/thumb?path=output:a.mp4         the first frame of a plate as a small JPEG, made once, kept in temp
     GET  /paintaplate/stat?path=plates/boat.mp4&config=ocio://studio-config-latest
                                                       a plate's size and time (job index keys change with them), its spec
@@ -375,7 +376,9 @@ def thumbnail(rel: str, width: int = THUMB_WIDTH) -> str:
 
 
 async def version_route(request: web.Request) -> web.Response:
-    return web.json_response({"version": VERSION, "build": BUILD})
+    # ComfyUI's folder: the log's export writes a path under it from it (web/logic.mjs: plainPaths). A folder_paths
+    # without it, as the mock's, gives none, and the export then writes every path by its last two parts.
+    return web.json_response({"version": VERSION, "build": BUILD, "folder": getattr(folder_paths, "base_path", "")})
 
 
 async def browse_route(request: web.Request) -> web.Response:
