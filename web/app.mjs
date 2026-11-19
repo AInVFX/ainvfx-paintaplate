@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind, workflowsFor } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleSeconds, upscaleSizes, upscaleSource, upscaleWhy, upscaleTarget, upscaleWindow, upscaleWindows, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, fullPath, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, freeName, liveEvery, PREVIEW_DEFAULT, sceneName, previewCap, previewDivOf, readPreview, stepLabel, previewSize, previewSizes, reconcile, removedNames, renderKey, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleComposes, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleSeconds, upscaleSizes, upscaleSource, upscaleWhy, upscaleTarget, upscaleWindow, upscaleWindows, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, fullPath, gb, HDR_DEPTH, hdrFps, hdrPlate, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, freeName, liveEvery, PREVIEW_DEFAULT, sceneName, previewCap, previewDivOf, readPreview, stepLabel, previewSize, previewSizes, reconcile, removedNames, renderKey, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
 import { dataSpace, fluidPasses, plateDepth, hdrKey, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -3128,9 +3128,9 @@ function exportedParts(p, done, exr) {
     mattePath: matte ? `output:${matte.subfolder}` : null, space: exr ? HDR_FRAMES : p.cs, float: exr || /^\.exr$/i.test(p.spec.ext ?? "") };
 }
 
-function upscaleGuess() { // seconds for Upscale on the render on show: Paint and Clean restore the plate and the layer, and write three parts
+function upscaleGuess() { // seconds for Upscale on the render on show: Paint and Clean restore the plate and the layer, and write three parts, but not with SDR to HDR
   const r = S.renders.get(S.heroKey), f = upscaleFigures();
-  return upscaleKeeps((r?.active ?? []).map((e) => e.tool)) ? f.edit : f.alone;
+  return upscaleKeeps((r?.active ?? []).map((e) => e.tool)) && !S.deliver.hdr ? f.edit : f.alone; // SDR to HDR's result is restored itself
 }
 
 // Finish > Upscale: SeedVR2 7B restores an export at 3840 px on the long side, in windows this machine's memory holds
@@ -3143,7 +3143,7 @@ function upscaleGuess() { // seconds for Upscale on the render on show: Paint an
 async function upscaleSet(set, progress) {
   const p = S.plate, dir = set.dir, [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]];
   const stats = await fetch("/system_stats").then((res) => res.json()).catch(() => null), gib = 2 ** 30;
-  const target = upscaleTarget(w, h, S.deliver.upscale || S.upscaleAsk), [sw, sh] = upscaleSource(w, h, target), keeps = !!set.layer && !!set.matte;
+  const target = upscaleTarget(w, h, S.deliver.upscale || S.upscaleAsk), [sw, sh] = upscaleSource(w, h, target), keeps = upscaleComposes(set, p.cs);
   const sized = target.join("x"); // each size keeps its own windows
   const size = upscaleWindow((stats?.system?.ram_total ?? 0) / gib, (stats?.devices?.[0]?.vram_total ?? 0) / gib, target, [w, h], p.frames,
     keeps ? UPSCALE.composeCopies : UPSCALE.copies); // the plate's windows and the layer's are the same: sized for the layer's, which composes

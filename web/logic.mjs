@@ -752,6 +752,10 @@ export function upscaleFolder(plateId, parts) {
   for (const c of JSON.stringify(parts)) h = Math.imul(h ^ c.codePointAt(0), 0x01000193) >>> 0;
   return `paintaplate/${plateId}/upscale/${h.toString(16).padStart(8, "0")}`;
 }
+// The upscaled result is composed from the upscaled plate, layer and matte when it is in the plate's own colour space, so
+// that its untouched pixels are the plate's (Paint and Clean). SDR to HDR's EXR frames regenerate every pixel: their result
+// is restored itself, with its matte, and keeps its values above 1.0 everywhere.
+export const upscaleComposes = ({ layer, matte, space }, plateSpace) => !!layer && !!matte && space === plateSpace;
 export const upscaleKeeps = (tools) => tools.length > 0 && !tools.includes("light"); // Paint and Clean keep the plate's untouched pixels: the upscaled plate, layer and matte come too
 // What the row says when the size asked for is no larger than the plate: the plate's own size, or a smaller one.
 export function upscaleWhy(width, height, ask = UPSCALE_ASK) {
