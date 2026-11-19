@@ -1,4 +1,4 @@
-"""Our decoder against core's, frame for frame (PL7): plateio.decode_video and decode_frames against core's VideoFromFile
+"""Our decoder against core's, frame for frame: plateio.decode_video and decode_frames against core's VideoFromFile
 as Load Plate called it, on a movie and on an image sequence file by file, must make the same bytes. Run it with ComfyUI's Python, which has core and torch:
 
   /data/ComfyUI/.venv/bin/python tests/decode_parity.py --comfy /data/ComfyUI [--plates FILE ...] [--max-frames 17 121]
