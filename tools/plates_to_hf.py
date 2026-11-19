@@ -10,8 +10,8 @@ What it does, in order:
    repository was created with.
 3. Creates the dataset repository if needed, uploads the folder in one commit and lists what arrived.
 
-Needs huggingface_hub (pip install huggingface_hub) and PyAV (the pack's own requirement). A `hf download` of the
-dataset into ComfyUI/input/plates is what tools/pod_setup.sh does with PLATES=1.
+Needs huggingface_hub (pip install huggingface_hub) and PyAV (the pack's own requirement). get_plates.py downloads the
+dataset into ComfyUI/input/plates; tools/pod_setup.sh runs it with PLATES=1.
 """
 from __future__ import annotations
 
