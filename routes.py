@@ -602,8 +602,9 @@ PLANAR_YUV = re.compile(r"^yuva?4(20|22|44)p(\d+)?(le)?$")
 def _video_rgb(frame) -> np.ndarray:
     """A decoded video frame as float32 RGB, in its own values (0 to 1, or beyond for out-of-range codes). Planar YUV goes
     through the file's own matrix and range in float, from its samples at their bit depth, as OpenRV converts a source's
-    YUV in its shader; swscale's 16-bit output was 0.77 of an 8-bit level off on a BT.709 red. Chroma is repeated
-    over the pixels it covers. Other formats (RGB, NV12) go through swscale at 16 bits."""
+    YUV in its shader. swscale's 16-bit output is less exact: with PyAV 19.0.2, a BT.709 limited-range red (Y 63, Cb 102,
+    Cr 240) comes out 2.5 8-bit levels low on red. Chroma is repeated over the pixels it covers. Other formats (RGB, NV12)
+    go through swscale at 16 bits."""
     m = PLANAR_YUV.match(frame.format.name)
     if not m:
         return frame.to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
@@ -701,8 +702,7 @@ def pixel(rel: str, frame: int, x: int, y: int, size: int = 1, of: str = "") -> 
     half floats as stored, above 1.0 and below 0), and the mean of the `size` x `size` pixels around it.
 
     `of` is the size of the grid (x, y) is in, as "3840x2160": the plate's. A frame of another size, such as a preview
-    pass, is read at the same place of the picture in its own pixels, which the reply names (1.7.0 read the plate's
-    pixel numbers in a 640 x 352 preview and failed)."""
+    pass, is read at the same place of the picture in its own pixels, which the reply names."""
     full = folders.plate_path(rel)
     stamp = os.path.getmtime(full if os.path.exists(full) else os.path.dirname(full))
     rgb = _frame_cached(full, max(0, frame), stamp)
@@ -858,8 +858,8 @@ async def trace(request: web.Request, handler):
     """One line in ComfyUI's log when a request starts and one when it ends: its method and address, the seconds, and the
     memory the process holds. Every request to ComfyUI passes here, the pack's routes and the others. A request that
     starts and never ends is one that ran when ComfyUI stopped. A front end's own file is said only when it is slow or
-    heavy. On with PAINTAPLATE_TRACE=1 in ComfyUI's environment (ComfyUI can reach a 40 GB cap with the page open
-    and no job posted, and nothing in its log says which request ran)."""
+    heavy. On with PAINTAPLATE_TRACE=1 in ComfyUI's environment: ComfyUI's own log names no request, so memory that
+    grows while no job runs shows no cause there."""
     what, t0, before = f"{request.method} {request.path_qs[:240]}", time.perf_counter(), held()
     quiet = request.method == "GET" and request.path.endswith(TRACE_QUIET) and not request.path.startswith("/paintaplate/")
     if not quiet:
