@@ -679,11 +679,50 @@ export function logFileName(plate, d) {
 // and composeCopies those of a job that also composes the 4K result (Paint and Clean). On a 96 GB GPU with 131 GB of RAM,
 // 121 frames at 3840 x 2160 in one job peaked at 108.3 GB for the plate and 116.8 GB for the layer, which composes: 9.2
 // and 10.0 copies. A window of 21 frames on a 16 GB GPU held 8.
-export const UPSCALE = { long: 3840, factor: 2, chunk: 21, step: 20, modelRam: 15.7, bigVram: 32, copies: 8, composeCopies: 10 };
+// most: the largest target, its long and short sides; sizes: the long sides the menu lists beside the plate's own; least:
+// the smallest long side Custom… takes.
+export const UPSCALE = { long: 3840, most: [3840, 2160], sizes: [2560, 3840], least: 640, factor: 2, chunk: 21, step: 20, modelRam: 15.7,
+  bigVram: 32, copies: 8, composeCopies: 10 };
+// The size a person asks for: { side, px }, side "long", "width" or "height". The default is 3840 px on the long side, and a
+// scene saved before sizes, with the switch on (true), asks for it too.
+export const UPSCALE_ASK = { side: "long", px: UPSCALE.long };
 const roundEven = (x) => { const r = Math.round(x); return Math.abs(x % 1) === 0.5 && r % 2 ? r - 1 : r; }; // as Python's round()
-export function upscaleTarget(width, height, long = UPSCALE.long) { // long px on the long side with the plate's aspect, in even numbers; a larger plate keeps its size
-  if (Math.max(width, height) >= long) return [width, height];
-  return width >= height ? [long, 2 * roundEven(long * height / width / 2)] : [2 * roundEven(long * width / height / 2), long];
+const even = (x) => 2 * roundEven(x / 2);
+// The asked side at its px and the other side from the plate's aspect, both in even numbers (a movie in 4:2:0 needs even
+// sides), within UPSCALE.most with the aspect kept. A plate at least as large as a long side asked for keeps its size.
+// A number is a long side.
+export function upscaleTarget(width, height, ask = UPSCALE_ASK) {
+  const a = typeof ask === "number" ? { side: "long", px: ask } : ask, wide = width >= height;
+  if (a.side === "long" && Math.max(width, height) >= a.px) return [width, height];
+  const side = a.side === "long" ? (wide ? "width" : "height") : a.side, [long, short] = UPSCALE.most;
+  const mostW = wide ? Math.min(long, short * width / height) : Math.min(short, long * width / height);
+  const px = Math.min(a.px, side === "width" ? mostW : mostW * height / width);
+  return side === "width" ? [even(px), even(px * height / width)] : [even(px * width / height), even(px)];
+}
+// The sizes the Finish menu lists for a plate: its own, then each long side of UPSCALE.sizes that gives a larger size.
+export function upscaleSizes(width, height) {
+  const out = [{ ask: { side: "long", px: Math.max(width, height) }, size: [width, height] }];
+  for (const px of UPSCALE.sizes) {
+    const size = upscaleTarget(width, height, { side: "long", px });
+    if (size[0] > out.at(-1).size[0]) out.push({ ask: { side: "long", px }, size });
+  }
+  return out;
+}
+// Finish > Upscale > Custom…: a width in px (3000), or a height followed by p, as video names heights (1600p). The ask, or
+// null when its size falls outside UPSCALE.least on the long side and UPSCALE.most.
+export function upscaleCustom(text, width, height) {
+  const m = String(text ?? "").trim().toLowerCase().match(/^(\d+)\s*(px|p)?$/);
+  if (!m) return null;
+  const ask = { side: m[2] === "p" ? "height" : "width", px: +m[1] };
+  const size = ask.side === "width" ? [even(ask.px), even(ask.px * height / width)] : [even(ask.px * width / height), even(ask.px)];
+  const ok = Math.max(...size) >= UPSCALE.least && Math.max(...size) <= UPSCALE.most[0] && Math.min(...size) <= UPSCALE.most[1];
+  return ok ? ask : null;
+}
+// The ask a scene holds under deliver.upscale: true, a scene saved before sizes, asks for the default; false when off.
+export function upscaleAskOf(saved) {
+  if (saved === true) return UPSCALE_ASK;
+  const ok = saved && typeof saved === "object" && ["long", "width", "height"].includes(saved.side) && Number.isInteger(saved.px) && saved.px > 0;
+  return ok ? { side: saved.side, px: saved.px } : false;
 }
 export function upscaleSource(width, height, [tw, th]) { // the size SeedVR2 restores from: [0, 0], the frames as they are, when the target is twice their size or more
   if (Math.max(width, height) * UPSCALE.factor <= Math.max(tw, th)) return [0, 0];
@@ -718,7 +757,13 @@ export function upscaleFolder(plateId, parts) {
   return `paintaplate/${plateId}/upscale/${h.toString(16).padStart(8, "0")}`;
 }
 export const upscaleKeeps = (tools) => tools.length > 0 && !tools.includes("light"); // Paint and Clean keep the plate's untouched pixels: the 4K plate, layer and matte come too
-export const UPSCALE_LARGE = "This plate is already large: it is brought down to half the export's size, then SeedVR2 restores its detail. Every pixel is new.";
+// What the row says when the size asked for is no larger than the plate: the plate's own size, or a smaller one.
+export function upscaleWhy(width, height, ask = UPSCALE_ASK) {
+  const [tw, th] = upscaleTarget(width, height, ask), part = { 2: "half", 3: "a third of" }[UPSCALE.factor] ?? `1/${UPSCALE.factor} of`;
+  if (tw > width || th > height) return "";
+  const restore = `the result is brought down to ${part} that size, then SeedVR2 restores its detail. Every pixel is new.`;
+  return tw === width && th === height ? `At the plate's own size, ${restore}` : `This size is smaller than the plate, so the frames come out smaller: ${restore}`;
+}
 export function upscaleAsk({ target, frames, alone, edit }) { // the question before the row turns on: what Export writes, and how long on this GPU
   const min = (s) => `about ${Math.max(1, Math.round(s / 60))} min`;
   return `Export then also writes a 4k folder at ${target[0]} x ${target[1]}. On this GPU, ${frames} ${frames === 1 ? "frame takes" : "frames take"} ${min(alone)}, `

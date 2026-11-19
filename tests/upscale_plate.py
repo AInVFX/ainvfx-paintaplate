@@ -30,6 +30,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 from build_workflows import UPSCALE_CHUNK, UPSCALE_OVERLAP  # noqa: E402
 
 LONG_SIDE = 3840
+MOST = (3840, 2160)  # the largest target: its long side and its short side
+SIZES = (2560, 3840)  # the long sides the page's menu lists beside the shot's own size
+LEAST = 640  # the smallest long side the page's Custom… takes
 FACTOR = 2  # SeedVR2 restores from at most the target divided by this
 WINDOW = UPSCALE_CHUNK  # the smallest window: one chunk
 CHUNK_STEP = 4 * ((UPSCALE_CHUNK - 1) // 4 + 1 - UPSCALE_OVERLAP // 4)  # 20: the frames each further chunk adds, chunks sharing one latent frame
@@ -40,13 +43,20 @@ FRAME_COPIES = 8  # float32 copies of one frame at the target size that a window
 OUTPUT = "output:"  # folders.OUTPUT: a path under ComfyUI's output folder, as Load Plate reads it
 
 
-def target_size(width: int, height: int, long_side: int = LONG_SIDE) -> tuple:
-    """`long_side` px on the long side with the shot's aspect, in even numbers; the shot's own size when it is larger."""
-    if max(width, height) >= long_side:
+def _even(x: float) -> int:
+    return 2 * round(x / 2)
+
+
+def target_size(width: int, height: int, px: int = LONG_SIDE, side: str = "long") -> tuple:
+    """The asked side (`side`: long, width or height) at `px` and the other from the shot's aspect, both in even numbers,
+    within MOST with the aspect kept; a shot at least as large as a long side asked for keeps its size."""
+    if side == "long" and max(width, height) >= px:
         return width, height
-    if width >= height:
-        return long_side, 2 * round(long_side * height / width / 2)
-    return 2 * round(long_side * width / height / 2), long_side
+    wide = width >= height
+    asked = ("width" if wide else "height") if side == "long" else side
+    most_w = min(MOST[0], MOST[1] * width / height) if wide else min(MOST[1], MOST[0] * width / height)
+    px = min(px, most_w if asked == "width" else most_w * height / width)
+    return (_even(px), _even(px * height / width)) if asked == "width" else (_even(px * width / height), _even(px))
 
 
 def source_size(width: int, height: int, target: tuple) -> tuple:
@@ -99,9 +109,9 @@ def frame_size(path: str) -> tuple:
 
 def values(shot: str, width: int, height: int, frames: int, label: str = "upscale", first: int = 0, count: int = WINDOW,
            color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16", seed: int = 42, window: int = 0,
-           long_side: int = LONG_SIDE) -> dict:
+           px: int = LONG_SIDE, side: str = "long") -> dict:
     """The slots of the upscale workflow for window number `window` of a shot of `frames` frames: its own folder."""
-    w, h = target_size(width, height, long_side)
+    w, h = target_size(width, height, px, side)
     sw, sh = source_size(width, height, (w, h))
     return {"shot": shot, "max_frames": frames, "source_width": sw, "source_height": sh, "first": first, "count": max(1, min(count, frames - first)), "width": w,
             "height": h, "color_space": color_space, "color_fix": color_fix, "format": fmt, "seed": seed,
@@ -119,7 +129,7 @@ def decode_tiles(prompt: dict, tile: int, overlap: int) -> int:
 
 def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first: int = 0, count: int = WINDOW,
         every: bool = False, color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16",
-        long_side: int = LONG_SIDE, decode_tile: str = "") -> dict:
+        px: int = LONG_SIDE, decode_tile: str = "", side: str = "long") -> dict:
     import build_workflows
     from hdr_plate import _comfy_pid, _plate_info, node_rows, run_prompt
     full = os.path.join(comfy, "input", shot)
@@ -127,9 +137,9 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
         full = next(os.path.join(d, f) for d, _, fs in os.walk(comfy) for f in fs if f == os.path.basename(shot))
     w, h, n = _plate_info(full)
     shutil.rmtree(os.path.join(comfy, "output", label), ignore_errors=True)
-    target = target_size(w, h, long_side)
+    target = target_size(w, h, px, side)
     count = count or window_frames(*machine(url), target, (w, h), n)
-    jobs = [("upscale", values(shot, w, h, n, label, f, c, color_space, color_fix, fmt, window=k, long_side=long_side))
+    jobs = [("upscale", values(shot, w, h, n, label, f, c, color_space, color_fix, fmt, window=k, px=px, side=side))
             for k, (f, c) in enumerate(windows(n, first, count, every))]
     if every:
         jobs.append(("upscale_export", export_values(shot, n, label, count)))
@@ -182,7 +192,9 @@ if __name__ == "__main__":
     ap.add_argument("--color-fix", default="lab", choices=("lab", "none"), help="SeedVR2's colour correction")
     ap.add_argument("--format", default="png16", choices=("png", "png16", "exr"))
     ap.add_argument("--long-side", type=int, default=LONG_SIDE, help="the target's long side in px")
+    ap.add_argument("--width", type=int, default=0, help="the target's width in px, in place of --long-side; the height follows the shot")
+    ap.add_argument("--height", type=int, default=0, help="the target's height in px, in place of --long-side; the width follows the shot")
     ap.add_argument("--decode-tile", default="", help="T/O: the tile and the overlap of SeedVR2's decode in px; 4096/128 decodes whole")
     a = ap.parse_args()
     run(a.url, a.comfy, a.shot, os.path.expanduser(a.out), a.label, a.first, a.count, a.all, a.color_space, a.color_fix, a.format,
-        a.long_side, a.decode_tile)
+        a.width or a.height or a.long_side, a.decode_tile, "width" if a.width else "height" if a.height else "long")

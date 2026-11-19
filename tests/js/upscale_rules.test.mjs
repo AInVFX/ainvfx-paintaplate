@@ -9,7 +9,7 @@ test("the target is 3840 px on the long side with the plate's aspect, and a larg
   assert.deepEqual(upscaleTarget(1920, 1080), UHD);
   assert.deepEqual(upscaleTarget(1080, 1920), [2160, 3840]);
   assert.deepEqual(upscaleTarget(2048, 858), [3840, 1608]);
-  assert.deepEqual(upscaleTarget(1920, 1088), [3840, 2176]);
+  assert.deepEqual(upscaleTarget(1920, 1088), [3812, 2160]); // the short side at most 2160
   assert.deepEqual(upscaleTarget(4096, 2160), [4096, 2160]);
 });
 

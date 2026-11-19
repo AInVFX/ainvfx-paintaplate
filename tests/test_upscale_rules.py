@@ -31,6 +31,14 @@ class SameRules(unittest.TestCase):
         self.assertEqual((u["long"], u["factor"], u["chunk"], u["step"], u["modelRam"], u["copies"]),
                          (upscale_plate.LONG_SIDE, upscale_plate.FACTOR, build_workflows.UPSCALE_CHUNK, upscale_plate.CHUNK_STEP,
                           upscale_plate.MODEL_RAM, upscale_plate.FRAME_COPIES))
+        self.assertEqual((tuple(u["most"]), tuple(u["sizes"]), u["least"]), (upscale_plate.MOST, upscale_plate.SIZES, upscale_plate.LEAST))
+
+    def test_every_size_asked_for_is_the_tools(self):
+        asks = [("long", 3840), ("long", 2560), ("long", 1920), ("width", 2000), ("width", 2001), ("height", 1500), ("width", 5000), ("height", 700)]
+        cases = [[w, h, side, px] for w, h in PLATES for side, px in asks]
+        page = self.page(f"{json.dumps(cases)}.map(([w, h, side, px]) => m.upscaleTarget(w, h, {{ side, px }}))")
+        for (w, h, side, px), target in zip(cases, page):
+            self.assertEqual(tuple(target), upscale_plate.target_size(w, h, px, side), (w, h, side, px))
 
     def test_sizes_and_windows_are_the_tools(self):
         cases = [[w, h, ram, vram] for w, h in PLATES for ram, vram in MACHINES]
