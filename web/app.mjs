@@ -345,7 +345,7 @@ async function openPlate(list, typed, opts = {}) {
   log(`Plate ${S.plate.name}: opened in ${((performance.now() - began) / 1000).toFixed(1)} s.\n  ${w} x ${h}, ${spec.frames} frame${spec.frames === 1 ? "" : "s"}, ${depth.float ? "float" : `${depth.bits}-bit`}, ${cs}${opts.cs ? "" : ", from file"}.`);
   log(`Working sizes: edits at ${S.plate.work.join(" x ")}, edit preview at ${S.plate.prev.join(" x ")}, ${S.previewCap ? `shot preview at ${S.plate.shot.join(" x ")}` : "shot preview off"}, tracking at ${S.plate.track.join(" x ")}.`);
 
-  const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).map((n) => n).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
+  const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the frame before holds, as in RV.` : "";
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
   const big = bigPlateWarning(spec, S.vram); // above 2K on a GPU under BIG_PLATE.vram: renders may not finish (README, GPU)
   if (big) { log(big); setTimeout(() => status(big), 80); }
