@@ -1,4 +1,4 @@
-"""PL8: plateio.decode_video sizes its array by what the file holds, not by max_frames, and keeps core's pictures when
+"""plateio.decode_video sizes its array by what the file holds, not by max_frames, and keeps core's pictures when
 the file's header says another count."""
 import os
 import sys
