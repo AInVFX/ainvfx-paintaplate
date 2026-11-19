@@ -8,6 +8,8 @@
   colour  Runs made at an original's size from a smaller copy: the PSNR (peak signal-to-noise ratio) of each frame
           against the original, the mean difference of each channel, and centre crops of one frame, for a sheet.
           python tests/upscale_compare.py colour --comfy /workspace/ComfyUI --original PATH --runs lab none --out DIR
+  crops   One frame of several results (--result label=folder, once for each), the same box (--box X Y W H) of each
+          at full size, side by side with its label: the sheet of a half against a third.
   parts   The upscaled set of one export (upscaled/ of its zip, unpacked, or of the render's folder): for each frame, how far the upscaled
           result is from upscaled plate x (1 - upscaled matte) + upscaled layer x upscaled matte (the mean and the largest difference, and the
           share of pixels more than 2 steps off, in 8-bit steps), and crops at 1:1 along the matte's edge on a few frames:
@@ -15,6 +17,7 @@
           python tests/upscale_compare.py parts --set DIR/upscaled --frames 1 61 121 --out DIR
 """
 import argparse
+import itertools
 import csv
 import glob
 import os
@@ -140,6 +143,26 @@ def parts(root: str, out: str, frames=(1, 61, 121), crop: int = 480) -> dict:
             "max": max(columns["max"], default=0.0), "over2": max(columns["over2"], default=0.0)}
 
 
+def crops(results: list, frame: int, box: tuple, out: str) -> str:
+    """The same frame of several results, the same box of each at full size, side by side with its label, in one PNG.
+    `results`: (label, folder) pairs, a folder of frames or a movie's folder, all at one size; `frame` from 1; `box`: x, y,
+    width and height in px."""
+    from PIL import Image, ImageDraw
+    x, y, w, h = box
+    tiles = []
+    for label, path in results:
+        f = next(itertools.islice(part_frames(path), frame - 1, None))
+        tile = Image.fromarray((np.clip(f[y:y + h, x:x + w, :3], 0, 1) * 255 + 0.5).astype(np.uint8))
+        ImageDraw.Draw(tile).text((12, 10), label, fill=(255, 190, 0))
+        tiles.append(tile)
+    sheet = Image.new("RGB", (w * len(tiles) + 8 * (len(tiles) - 1), h))
+    for i, tile in enumerate(tiles):
+        sheet.paste(tile, (i * (w + 8), 0))
+    name = os.path.join(out, f"crops_f{frame}.png")
+    sheet.save(name)
+    return name
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="what", required=True)
@@ -157,10 +180,17 @@ if __name__ == "__main__":
     p.add_argument("--set", required=True, help="the upscaled set's folder, with export/, plate/, layer/ and matte/")
     p.add_argument("--frames", type=int, nargs="+", default=[1, 61, 121], help="the frames of the sheet, from 1")
     p.add_argument("--out", required=True)
+    k = sub.add_parser("crops")
+    k.add_argument("--result", action="append", required=True, help="label=folder: a result's frames or its movie's folder, once for each")
+    k.add_argument("--frame", type=int, default=61, help="the frame, from 1")
+    k.add_argument("--box", type=int, nargs=4, required=True, metavar=("X", "Y", "W", "H"), help="the box in px")
+    k.add_argument("--out", required=True)
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     if a.what == "seams":
         seams(a.comfy, a.runs, a.edge, a.out)
+    elif a.what == "crops":
+        print(crops([r.split("=", 1) for r in a.result], a.frame, tuple(a.box), a.out))
     elif a.what == "parts":
         print(parts(a.set, a.out, tuple(a.frames)))
     else:

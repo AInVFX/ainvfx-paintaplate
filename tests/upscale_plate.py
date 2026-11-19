@@ -59,12 +59,12 @@ def target_size(width: int, height: int, px: int = LONG_SIDE, side: str = "long"
     return (_even(px), _even(px * height / width)) if asked == "width" else (_even(px * width / height), _even(px))
 
 
-def source_size(width: int, height: int, target: tuple) -> tuple:
-    """The size SeedVR2 restores from: 0 x 0 (the shot as it is) when the target is FACTOR times its size or more, else
-    the target divided by FACTOR, in even numbers."""
-    if max(width, height) * FACTOR <= max(target):
+def source_size(width: int, height: int, target: tuple, factor: int = FACTOR) -> tuple:
+    """The size SeedVR2 restores from: 0 x 0 (the shot as it is) when the target is `factor` times its size or more, else
+    the target divided by `factor`, in even numbers."""
+    if max(width, height) * factor <= max(target):
         return 0, 0
-    return 2 * round(target[0] / FACTOR / 2), 2 * round(target[1] / FACTOR / 2)
+    return 2 * round(target[0] / factor / 2), 2 * round(target[1] / factor / 2)
 
 
 def windows(frames: int, first: int = 0, count: int = WINDOW, every: bool = False) -> list:
@@ -109,10 +109,10 @@ def frame_size(path: str) -> tuple:
 
 def values(shot: str, width: int, height: int, frames: int, label: str = "upscale", first: int = 0, count: int = WINDOW,
            color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16", seed: int = 42, window: int = 0,
-           px: int = LONG_SIDE, side: str = "long") -> dict:
+           px: int = LONG_SIDE, side: str = "long", factor: int = FACTOR) -> dict:
     """The slots of the upscale workflow for window number `window` of a shot of `frames` frames: its own folder."""
     w, h = target_size(width, height, px, side)
-    sw, sh = source_size(width, height, (w, h))
+    sw, sh = source_size(width, height, (w, h), factor)
     return {"shot": shot, "max_frames": frames, "source_width": sw, "source_height": sh, "first": first, "count": max(1, min(count, frames - first)), "width": w,
             "height": h, "color_space": color_space, "color_fix": color_fix, "format": fmt, "seed": seed,
             "prefix": f"{label}/upscale/w{window:03}/f", "under": "", "under_space": color_space, "matte": "", "comp_prefix": "",
@@ -129,7 +129,7 @@ def decode_tiles(prompt: dict, tile: int, overlap: int) -> int:
 
 def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first: int = 0, count: int = WINDOW,
         every: bool = False, color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16",
-        px: int = LONG_SIDE, decode_tile: str = "", side: str = "long") -> dict:
+        px: int = LONG_SIDE, decode_tile: str = "", side: str = "long", factor: int = FACTOR) -> dict:
     import build_workflows
     from hdr_plate import _comfy_pid, _plate_info, node_rows, run_prompt
     full = os.path.join(comfy, "input", shot)
@@ -139,7 +139,7 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
     shutil.rmtree(os.path.join(comfy, "output", label), ignore_errors=True)
     target = target_size(w, h, px, side)
     count = count or window_frames(*machine(url), target, (w, h), n)
-    jobs = [("upscale", values(shot, w, h, n, label, f, c, color_space, color_fix, fmt, window=k, px=px, side=side))
+    jobs = [("upscale", values(shot, w, h, n, label, f, c, color_space, color_fix, fmt, window=k, px=px, side=side, factor=factor))
             for k, (f, c) in enumerate(windows(n, first, count, every))]
     if every:
         jobs.append(("upscale_export", export_values(shot, n, label, count)))
@@ -194,7 +194,8 @@ if __name__ == "__main__":
     ap.add_argument("--long-side", type=int, default=LONG_SIDE, help="the target's long side in px")
     ap.add_argument("--width", type=int, default=0, help="the target's width in px, in place of --long-side; the height follows the shot")
     ap.add_argument("--height", type=int, default=0, help="the target's height in px, in place of --long-side; the width follows the shot")
+    ap.add_argument("--factor", type=int, default=FACTOR, help="SeedVR2 restores from the target divided by this: 2, the page's, or 3 for a third")
     ap.add_argument("--decode-tile", default="", help="T/O: the tile and the overlap of SeedVR2's decode in px; 4096/128 decodes whole")
     a = ap.parse_args()
     run(a.url, a.comfy, a.shot, os.path.expanduser(a.out), a.label, a.first, a.count, a.all, a.color_space, a.color_fix, a.format,
-        a.width or a.height or a.long_side, a.decode_tile, "width" if a.width else "height" if a.height else "long")
+        a.width or a.height or a.long_side, a.decode_tile, "width" if a.width else "height" if a.height else "long", factor=a.factor)
