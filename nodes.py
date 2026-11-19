@@ -684,7 +684,7 @@ class SaveFrames(io.ComfyNode):
             category=CATEGORY,
             description="Saves a batch as numbered frames, named as core Save Image names them, several frames at once: "
                         "8-bit PNG, as core saves them, or half-float EXR with lossless PIZ compression, values above 1.0 "
-                        "kept. Core writes one frame after another: 35 s for 121 PNG frames at 1920 x 1088, where this node "
+                        "kept. Core writes one frame after another: 35.3 s for 121 PNG frames at 1920 x 1088 on an RTX PRO 6000 pod, where this node "
                         "takes about a second on a pod with 16 cores.",
             inputs=[
                 io.Image.Input("images"),
@@ -734,7 +734,7 @@ class SaveMovie(io.ComfyNode):
             category=CATEGORY,
             description="Saves a batch as an H.264 movie for the page, as core Save Video makes it (crf 18, BT.709, "
                         "limited range), with the frames converted several at once and x264 at preset veryfast: core "
-                        "took 8.3 s for 121 frames at 1920 x 1088. With 'destination' or 'largest_size', each frame is "
+                        "takes 8.3 s for 121 frames at 1920 x 1088 on an RTX PRO 6000 pod. With 'destination' or 'largest_size', each frame is "
                         "converted and sized as it is saved: no second batch of the frames is held in memory.",
             inputs=[
                 io.Image.Input("images"),
