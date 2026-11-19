@@ -14,7 +14,7 @@ const or = (...ms) => ms.reduce((a, m) => a.map((v, i) => v | m[i]));
 
 test("the core box holds the stroke and what most of SAM's masks agree on, with no margin", () => {
   const barn = rect(20, 6, 40, 12), nose = rect(14, 9, 20, 12), painted = rect(26, 8, 38, 9);
-  // two of five masks take in the horse's nose, as on 12 Nov 2026: it stays out
+  // two of five masks take in the horse's nose: it stays out
   assert.deepEqual(coreBox({ painted, masks: [or(barn, nose), or(barn, nose), barn, barn, barn], w, h }), [300, 500, 600, 1000]);
   // two of three masks hold it: most of them, so it stays in
   assert.deepEqual(coreBox({ painted, masks: [or(barn, nose), or(barn, nose), barn], w, h }), [300, 350, 600, 1000]);
@@ -27,13 +27,13 @@ test("an erase with no words, painted in one part, gets its core box; otherwise 
   assert.deepEqual(writerBoxes({ tool: "erase", words: "", parts, core, bbox }), { bbox: core, boxes: [core] });
   assert.deepEqual(writerBoxes({ tool: "erase", words: "  ", parts, core, bbox }), { bbox: core, boxes: [core] });
   assert.deepEqual(writerBoxes({ tool: "erase", words: "the barn", parts, core, bbox }), { bbox, boxes: parts });
-  const two = [[1, 2, 300, 400], [500, 600, 700, 800]]; // a truss and a crane: one box each, as on 28 Oct
+  const two = [[1, 2, 300, 400], [500, 600, 700, 800]]; // a truss and a crane: one box each
   assert.deepEqual(writerBoxes({ tool: "erase", words: "", parts: two, core, bbox }), { bbox, boxes: two });
   assert.deepEqual(writerBoxes({ tool: "erase", words: "", parts, core: null, bbox }), { bbox, boxes: parts });
   assert.deepEqual(writerBoxes({ tool: "paint", words: "", parts: null, core, bbox }), { bbox, boxes: null });
 });
 
-test("the core box's answer of 13 Nov is kept; the answer of 12 Nov to the box around SAM's whole union is refused", () => {
+test("the core box's answer is kept; the answer to the box around SAM's whole union is refused", () => {
   const W = 96, H = 54, bits = new Uint8Array(W * H); // the paint on the page's grid: the barn, x 0.73 to 1, y 0.37 to 0.49
   for (let y = 20; y <= 26; y++) for (let x = 70; x <= 95; x++) bits[y * W + x] = 1;
   const paint = { bits, w: W, h: H };
