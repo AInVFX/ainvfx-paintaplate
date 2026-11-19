@@ -77,8 +77,8 @@ const LIGHT = { flow: 0.3, shade: 0.35, spread: 1.6, spacing: 0.25 };
 const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "shotup", "matte", "comp", "review", "export", "warm", "fluid", "hdr", "upscale", "upscale_export"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "hdr", "review", "export"]; // the render's job kinds: Generate and a new plate stop them
 const STOPPED = ["edit", "fluid", "snap", "prefetch", ...BACKGROUND]; // the job kinds a stop ends: none of them is posted until Enter (design rule 13)
-const UPSAMPLER = {}; // Black Forest Labs' system prompts for Klein's upsampler (upsampler.json): table and plain
-const SCENE = { format: "paintaplate-scene", version: 6 }; // 3: the OCIO config, the plate's colour space by its OCIO name, the display and view; 4: the SDR-to-HDR switch, the blank plate's bit depth; 5: the switch as set, null for the plate's default; 6: Deliver's passes, the switch gone
+const UPSAMPLER = {}; // Black Forest Labs' system prompts for the prompt writer (upsampler.json): table and plain
+const SCENE = { format: "paintaplate-scene", version: 6 }; // 3: the OCIO config, the plate's colour space by its OCIO name, the display and view; 4: the SDR-to-HDR switch, the blank plate's bit depth; 5: the switch as set, null for the plate's default; 6: the Finish menu's passes (key « deliver »), the switch gone
 const OCIO_PREF = "paintaplate.ocio"; // the config, display, view and look, kept for the next session as RV keeps them
 const saved = (key) => { try { return JSON.parse(localStorage.getItem(key)) ?? {}; } catch { return {}; } };
 
@@ -195,7 +195,7 @@ const hueOf = (e) => (e.tool === "light" ? lightColor(colorsOf(e), e.color) : nu
 const lightStrokes = (e) => e.strokes.filter((s) => s.tool !== "rub")
   .map((s) => ({ color: s.color, size: s.size / S.plate.work[0], points: s.points.map(([x, y]) => [x / S.plate.work[0], y / S.plate.work[1]]) }));
 
-function templateCaption(e) { // the page's own caption: a relight's always, another edit's when the upsampler gives nothing back
+function templateCaption(e) { // the page's own caption: a relight's always, another edit's when the prompt writer gives nothing back
   return caption({ tool: e.tool, words: e.prompt, bbox: bounds(e.mask), hues: paintHues(e),
     ...(e.tool === "light" ? { strokes: lightStrokes(e), aspect: S.plate.work[0] / S.plate.work[1] } : {}) });
 }
@@ -207,7 +207,7 @@ function paintGrid(e) { // the painted area on a coarse grid: an erase's locked 
   return { bits, w, h };
 }
 
-async function captionFor(e, reference, key, kind = "edit", dimmed = false) { // Klein's own upsampler writes the caption Klein was trained on; the page keeps its boxes
+async function captionFor(e, reference, key, kind = "edit", dimmed = false) { // the prompt writer writes the caption in the format Klein was trained on; the page keeps its boxes
   if (e.caption?.key === key) return e.caption.text;
   if (e.caption?.key === "scene") { e.caption.key = key; log(`Edit ${num(e)}: caption from the scene, used unchanged.`); return e.caption.text; }
   if (e.captioning?.key === key) { // the same request is on its way (the strokes rested, then Generate): wait for it rather than ask twice
@@ -248,7 +248,6 @@ async function writeCaption(e, reference, key, kind, dimmed = false) {
   log(`Edit ${num(e)}: ${made ? "caption from the prompt writer" : "the page's own caption"}${dimmed ? ", on the frame with all but the object dimmed" : ""}.\n  ${e.caption.text}`); // the caption as Klein gets it, as a detail line
   return e.caption.text;
 }
-
 
 // ---------- Plate ----------
 
@@ -899,15 +898,15 @@ function showLatest() { // the latest result of the edits on show: the full-size
   else if (!key) setShot(null, key);
 }
 
-// The Render panel's finished rows: a click shows that pass on every frame (the First frame row, the edit as Klein made it),
-// so a fault can be traced to the step that made it; the wipe compares it with the plate. A second click, or Esc, goes back
-// to the latest result, which the viewer follows again as steps finish.
 // Every movie the page plays comes at the plate's native size, up to NATIVE_SIDE on the long side, the size of the viewer's
 // canvas (contract 1 of the parallel work), even sides for H.264: Save Movie scales it with Lanczos while it encodes.
 const movieDims = (w, h) => ({ movie_width: w - (w % 2), movie_height: h - (h % 2) });
 const plateMovie = (p) => movieDims(...colour.nativeSize(p.spec.width, p.spec.height, NATIVE_SIDE));
 // A matte row shows the matte through the config's data colour space: its own values, with no view's tone mapping.
 const matteSpace = () => dataSpace(S.ocio.info?.spaces) ?? modelSpace();
+// The Render panel's finished rows: a click shows that pass on every frame (the First frame row, the edit as Klein made it),
+// so a fault can be traced to the step that made it; the wipe compares it with the plate. A second click, or Esc, goes back
+// to the latest result, which the viewer follows again as steps finish.
 // A fluid shot's rows (logic.fluidPasses) show with its keyframes open or closed; open, the viewer leaves the keyframes for
 // the pass, and the latest is the fluid shot itself.
 function choosePass(id) {
