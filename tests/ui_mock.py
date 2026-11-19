@@ -249,7 +249,7 @@ def drag(page, selector, dx, dy):
 def start_flow(browser, port):
     """With no plate open, the page opens a blank plate at start, at the Blank tab's settings, in 16-bit when SDR to HDR can
     run, its keyframes ready to paint (?blank=0 starts empty, as every other flow does)."""
-    page = browser.new_page(viewport={"width": 1400, "height": 900})
+    page = browser.new_page(viewport=VIEWPORT)
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     spec = page.text_content("#spec")
