@@ -198,7 +198,7 @@ export class Display {
       if (!r.ok) throw new Error(s.error ?? `OCIO shader: ${r.status}`);
       Object.assign(entry, this.compile(s), { identity: s.identity, ready: true });
       this.onready();
-    }).catch((err) => { entry.failed = true; this.onerror(err.message); });
+    }).catch((err) => this.onerror(err.message));
     return null;
   }
 
