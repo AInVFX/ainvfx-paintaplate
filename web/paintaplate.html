@@ -21,7 +21,7 @@
     </button>
     <button id="help-btn" class="quiet" title="Keys (?)." aria-label="Keys">?</button>
     <button id="open-btn">Open plate</button>
-    <button id="save-btn" disabled title="Save the scene: the plate and every edit with its strokes, words and seed.">Save scene</button>
+    <button id="save-btn" disabled title="Save the scene: the plate and every edit with its strokes, text prompt and seed.">Save scene</button>
     <button id="finish-btn" type="button" disabled aria-haspopup="dialog" aria-expanded="false" title="Finish: the passes on the whole plate after the full-size composite.">Finish</button>
     <button id="export-btn" class="primary" disabled title="Export: the result in the plate's own format, with its matte, in one zip.">Export</button>
   </header>
@@ -76,9 +76,9 @@
 
   <main class="stage">
     <div class="promptbar">
-      <label for="prompt" class="prompt-label">Prompt</label>
-      <button id="editing" class="editing" type="button" hidden title="Selected edit: its words and strokes can change. Click or Esc deselects it."></button>
-      <input id="prompt" autocomplete="off" spellcheck="false" aria-label="Describe the edit"
+      <label for="prompt" class="prompt-label">Text prompt</label>
+      <button id="editing" class="editing" type="button" hidden title="Selected edit: its text prompt and strokes can change. Click or Esc deselects it."></button>
+      <input id="prompt" autocomplete="off" spellcheck="false" aria-label="Text prompt"
              placeholder="Describe what to paint, then paint it on the frame">
       <button id="generate" class="primary generate" type="button" disabled title="Generate (Enter): the edit on the first frame, then its shot. Nothing already made runs again.">Generate</button>
       <button id="stop" class="stop" type="button" hidden title="Stop (Esc): what finished is kept, and Generate goes on from there.">Stop</button>
@@ -142,7 +142,7 @@
       </span>
     </div>
     <ol id="history"></ol>
-    <p id="history-empty" class="history-empty">Your edits appear here. Describe, paint on the frame, then Generate. Click an edit to change its words or strokes.</p>
+    <p id="history-empty" class="history-empty">Your edits appear here. Describe, paint on the frame, then Generate. Click an edit to change its text prompt or strokes.</p>
     <section id="fluid" class="render fluid" hidden>
       <h2>Fluid shot <span id="fluid-state"></span></h2>
       <p class="hint">Paint smoke, steam or fire on the keyframes, describe it, then Generate.</p>
@@ -195,13 +195,13 @@
     </section>
     <section class="help-tab" data-help="tools" role="tabpanel" hidden>
       <dl>
-        <dt>Paint</dt><dd>Something new where you paint, as your words describe it, following the drawing's outline, pose and size.</dd>
+        <dt>Paint</dt><dd>Something new where you paint, as your text prompt describes it, following the drawing's outline, pose and size.</dd>
         <dt>Clean</dt><dd>Removes an object, and the clean plate comes back behind it. Whole object hands the stroke to SAM 3.1, which finds the whole object under it.</dd>
         <dt>Light</dt><dd>Light in the colour you pick, laid where it comes from; a dark colour lays shade. The eraser takes light away as softly as the brush lays it, so new light fills an erased place with no edge.</dd>
         <dt>Eraser</dt><dd>Rubs out strokes of the edit in progress, or of the edit selected in History. A pen's eraser end rubs out too.</dd>
         <dt>Pipette</dt><dd>On the first frame, the brush takes the frame's own colour where you click, so a stroke of it shows as the picture does.</dd>
-        <dt>History</dt><dd>One row per edit. Click a row to change its edit: its words come back; retype them, paint more or rub strokes out, then Generate. While it changes, the first frame shows the edits under it. Another tool starts a new edit.</dd>
-        <dt>Undo</dt><dd>One step per stroke, per removal, per change of words or seed.</dd>
+        <dt>History</dt><dd>One row per edit. Click a row to change its edit: its text prompt comes back; retype it, paint more or rub strokes out, then Generate. While it changes, the first frame shows the edits under it. Another tool starts a new edit.</dd>
+        <dt>Undo</dt><dd>One step per stroke, per removal, per change of text prompt or seed.</dd>
         <dt>Fluid shot</dt><dd>On a blank plate: flat colour blobs on keyframes, such as light grey smoke, white steam, orange and yellow fire, and the shot described at the top. Keyframes snap to the first frame, the last frame and the 8-frame grid; drag a diamond on the timeline to move one.</dd>
         <dt>Close the plate</dt><dd>× after the plate's name, or right-click > File > Close plate: every render stops, and its frames leave the browser's memory.</dd>
         <dt>Touch screen</dt><dd>Two fingers pan and zoom the frame. ☰ at the top holds every action.</dd>
@@ -237,7 +237,7 @@
         <dt>Status line</dt><dd>The latest event. An error shows in red and a warning in amber, until the next event that succeeds. The log keeps the details.</dd>
         <dt>Finish</dt><dd>SDR to HDR regenerates the full-size shot in scene-linear values, fitted to the plate. Its result is half-float EXR frames in ACES2065-1, in the viewer and in Export.</dd>
         <dt>Export</dt><dd>Writes the result in the plate's own format, with its matte, in ComfyUI's output folder, then downloads one zip, with the list of the models behind the result.</dd>
-        <dt>Save scene</dt><dd>Keeps the plate and every edit, with its strokes, words and seed, on this ComfyUI. The log, the status line and the HUD give the scene file's full path; Open > Scenes opens it again. It asks before it replaces a scene of the same name.</dd>
+        <dt>Save scene</dt><dd>Keeps the plate and every edit, with its strokes, text prompt and seed, on this ComfyUI. The log, the status line and the HUD give the scene file's full path; Open > Scenes opens it again. It asks before it replaces a scene of the same name.</dd>
       </dl>
     </section>
     <section class="help-tab help-keys" data-help="keys" role="tabpanel" hidden>
@@ -249,7 +249,7 @@
           <dt>- and =</dt><dd>Brush size.</dd>
           <dt>E</dt><dd>Eraser: hold it while you drag, or tap it to switch the eraser on or off.</dd>
           <dt>I</dt><dd>Pick a colour from the frame.</dd>
-          <dt>S, W</dt><dd>Colours, words: in a dialog over the frame.</dd>
+          <dt>S, T</dt><dd>Colours, text prompt: in a dialog over the frame.</dd>
           <dt>Enter</dt><dd>Generate.</dd>
           <dt>Ctrl+Enter</dt><dd>Another seed for the selected edit, else the last one.</dd>
           <dt>Esc</dt><dd>Cancel, deselect, end a comparison, then stop generating.</dd>
@@ -337,10 +337,10 @@
     <h2>Colours</h2>
     <menu><button id="colours-close" type="button">Close</button></menu>
   </dialog>
-  <dialog id="words" class="words" aria-label="Words">
+  <dialog id="words" class="words" aria-label="Text prompt">
     <form method="dialog">
-      <h2>Words</h2>
-      <input id="words-field" autocomplete="off" spellcheck="false" aria-label="Words of the edit">
+      <h2>Text prompt</h2>
+      <input id="words-field" autocomplete="off" spellcheck="false" aria-label="Text prompt">
       <menu><button value="close">Close</button><button id="words-apply" type="button" class="primary">Apply</button></menu>
     </form>
   </dialog>

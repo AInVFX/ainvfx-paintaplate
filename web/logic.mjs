@@ -931,7 +931,7 @@ export const beyondDetail = ({ beyond, beyondEdges }) => (beyond === null || bey
 
 // What to do next, for the status line: an object with no name gets one; a named object gets other words or another seed.
 export const leftHint = (words) =>
-  (words ? "Use other words, then Generate, or Ctrl+Enter for another seed." : "Type its name in the prompt bar, then Generate.");
+  (words ? "Use another text prompt, then Generate, or Ctrl+Enter for another seed." : "Type its name in the text prompt, then Generate.");
 
 // What the page says when the check holds an erase back. The check can be wrong on a thin or faint object, or on one behind a
 // fence, so the page asks: `fact`, a warning, goes to the log once and, after « No, cancel », to the status line before leftHint;
@@ -1075,7 +1075,7 @@ export function stopHint({ edit = null, waits = [] } = {}) {
   const list = waits.length ? editList(waits) : "";
   const wait = list ? ` ${list[0].toUpperCase()}${list.slice(1)} ${waits.length > 1 ? "wait" : "waits"}.` : "";
   return edit === null ? `Stopped.${wait} Enter goes on from where it stopped.`
-    : `Stopped. Edit ${edit} keeps its strokes, words and seed.${wait} Enter generates again, Ctrl+Enter tries another seed, Esc drops the strokes.`;
+    : `Stopped. Edit ${edit} keeps its strokes, text prompt and seed.${wait} Enter generates again, Ctrl+Enter tries another seed, Esc drops the strokes.`;
 }
 
 // Edits are layers, after Generate. An edit above an edit that is made again stays hidden until its own

@@ -32,7 +32,7 @@ class LeftItsPlace(unittest.TestCase):
     def test_lost_for_good_holds_nothing_and_warns(self):
         path = [40 if t < 14 else min(40 + 6 * (t - 13), W - 12) for t in range(N)]
         matte, summary = mathops.follow_matte(**shot_of(path, residue=24))
-        start = int(re.search(r"Warning: object left its place at frame (\d+)\. Try another seed, other words or another stroke\.", summary)[1])
+        start = int(re.search(r"Warning: object left its place at frame (\d+)\. Try another seed, another text prompt or another stroke\.", summary)[1])
         empty = int(re.search(r"\n  Removed: whole matte from frame (\d+) \(object out of its place\)\.", summary)[1])
         start, empty = start - 1, empty - 1  # indices: the summary names a movie's frames from 1
         self.assertTrue(14 <= start <= empty <= 24, summary)

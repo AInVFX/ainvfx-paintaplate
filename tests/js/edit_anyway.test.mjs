@@ -28,8 +28,8 @@ test("after « Render anyway » the log says why the shot rendered", () => {
 
 test("after Cancel the status line is the fact, then what to do next", () => {
   const { fact } = leftLines(1, check);
-  assert.equal(`${fact} ${leftHint("")}`, "Warning: edit 1, the object may still be there (17% of it changed, edges held at 0.62). Type its name in the prompt bar, then Generate.");
-  assert.equal(`${fact} ${leftHint("barn")}`, "Warning: edit 1, the object may still be there (17% of it changed, edges held at 0.62). Use other words, then Generate, or Ctrl+Enter for another seed.");
+  assert.equal(`${fact} ${leftHint("")}`, "Warning: edit 1, the object may still be there (17% of it changed, edges held at 0.62). Type its name in the text prompt, then Generate.");
+  assert.equal(`${fact} ${leftHint("barn")}`, "Warning: edit 1, the object may still be there (17% of it changed, edges held at 0.62). Use another text prompt, then Generate, or Ctrl+Enter for another seed.");
 });
 
 test("an erase held back for the area around its object: the warning, the question, the kept line, and the detail line", () => {
