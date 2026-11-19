@@ -515,7 +515,7 @@ def _core_frames(path: str, duration: float = 0.0):
             raise ValueError(f"Plate has no video stream: {path}. Use a movie file that holds video.")
         stream = container.streams.video[0]
         stream.thread_type = "AUTO"
-        end_pts = int((0.0 + duration) / stream.time_base)
+        end_pts = int(duration / stream.time_base)
         fmt, byte8, has_alpha, align = "", False, False, None
         for packet in container.demux(stream):
             try:
