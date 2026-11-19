@@ -3622,7 +3622,7 @@ const sceneFile = (path) => { // a scene found by browsing, read through ComfyUI
 
 // Strokes as drawn, in pixels of the working size the scene names (`work`, scene version 2): opened again on the same
 // plate they come back exactly, so the images made from them are the same files and the job index knows their jobs.
-// Version 1 kept fractions of the frame rounded to five places, which moved a stroke by a few thousandths of a pixel.
+// A version 1 scene holds fractions of the frame rounded to five places, which move a stroke by a few thousandths of a pixel.
 const packStrokes = (strokes) => strokes.map((s) => ({ tool: s.tool, color: s.color, size: s.size, points: s.points.map(([x, y, pr]) => [x, y, pr]) }));
 const unpackStrokes = (saved, [W, H], from) => { // `from`: the scene's own working size; none for a version 1 scene
   const [kx, ky] = from ? [W / from[0], H / from[1]] : [W, H];
@@ -3703,7 +3703,7 @@ async function openScene(text) { // the plate opens in its colour space, then ev
   if (preview !== null) setPreview(preview);
   const deliverHdr = scene.version >= 6 ? !!scene.deliver?.hdr : scene.version === 5 && scene.hdr === true; // 5: the old switch, on
   const from = scene.version >= 2 && Array.isArray(scene.work) ? scene.work : null; // strokes in pixels of this working size
-  await openPlate([], scene.plate.path, { chosen: scene.fluid ? false : undefined, cs: scene.fluid ? modelSpace() // a blank plate, as openBlank opens it (1.4.0 saved the space under its edits)
+  await openPlate([], scene.plate.path, { chosen: scene.fluid ? false : undefined, cs: scene.fluid ? modelSpace() // a blank plate, as openBlank opens it, whatever space an older scene holds for it
     : scene.version >= 3 ? scene.plate.color_space : undefined, // older scenes: read from the file
     ...(scene.fluid ? { fluid: { blankPath: scene.plate.path, seed: scene.fluid.seed, prompt: scene.fluid.prompt ?? "", on: scene.fluid.on !== false, depth: blankDepth(scene.fluid.depth) } } : {}) });
   S.deliver = { hdr: deliverHdr, upscale: !!scene.deliver?.upscale }; // openPlate reset the Finish menu's passes
@@ -3939,7 +3939,7 @@ function refreshInspector(force = false) { // on every redraw: place the box, re
   i.final = [...readBack(view, cx, cy).slice(0, 3)].map((v) => v / 255); // the final colour, as drawn
   const key = inspectKey();
   if (force || key !== i.key) { i.key = key; readPixel(); }
-  // The last values with the point and frame they were read at: while a read is on its way, a redraw showed the new
+  // The last values with the point and frame they were read at: while a read is on its way, a redraw would show the new
   // point with the old point's values, which a page test would read
   else if (i.got) showInspector(i.got.pt, i.got.frame, i.got, i.got.key === key);
 }
