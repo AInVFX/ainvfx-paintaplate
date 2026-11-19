@@ -818,12 +818,12 @@ function finishState(opt) { // a Finish option on this plate: on, disabled, and 
 function finishRow(opt) { // one row of the Finish menu: its switch and name, its line, why it cannot change here, and its question
   const li = document.createElement("li");
   li.className = "finish-row";
-  li.innerHTML = `<label><input type="checkbox" id="finish-${opt.id}"><span class="name"></span></label>${opt.id === "upscale" ? '<select id="finish-upscale-size" hidden></select>' : ""}<small class="line"></small><small id="finish-${opt.id}-why" class="why" hidden></small>`
+  li.innerHTML = `<label><input type="checkbox" id="finish-${opt.id}"><span class="name"></span></label>${opt.id === "upscale" ? `<select id="finish-${opt.id}-size" hidden></select>` : ""}<small class="line"></small><small id="finish-${opt.id}-why" class="why" hidden></small>`
     + (opt.ask ? `<div id="finish-${opt.id}-ask" class="finish-ask" hidden><p></p><button id="finish-${opt.id}-yes" type="button">Yes, turn it on</button> <button id="finish-${opt.id}-no" type="button" class="quiet">No, keep it off</button></div>` : "");
   li.querySelector(".name").textContent = opt.name;
   li.querySelector(".line").textContent = opt.line;
   li.querySelector("input").addEventListener("change", (e) => askFinish(opt, e.target.checked));
-  li.querySelector("#finish-upscale-size")?.addEventListener("change", (e) => pickUpscaleSize(e.target.value));
+  li.querySelector(`#finish-${opt.id}-size`)?.addEventListener("change", (e) => pickUpscaleSize(e.target.value));
   if (opt.ask) {
     li.querySelector(".finish-ask p").textContent = typeof opt.ask === "string" ? opt.ask : ""; // a function: written when the question opens
     li.querySelector(`#finish-${opt.id}-yes`).addEventListener("click", () => { $(`#finish-${opt.id}-ask`).hidden = true; setFinish(opt, true); });
@@ -842,7 +842,7 @@ function finishUI() { // the Finish button and its menu: each row as this plate 
     box.checked = st.on; box.disabled = st.disabled;
     why.textContent = st.why; why.hidden = !st.why;
     if (st.on && !st.disabled) on.push(opt.name);
-    if (opt.id === "upscale") upscaleSizeUI(st.on && !st.disabled);
+    if (opt.id === "upscale") upscaleSizeUI(opt, st.on && !st.disabled);
   }
   btn.textContent = finishLabel(on.length);
   btn.title = `Finish: the passes on the whole plate after the full-size composite.${on.length ? ` On: ${on.join(", ")}.` : ""}`;
@@ -863,8 +863,8 @@ function setFinish(opt, on) { // each setting keeps its own renders: the render 
   finishUI(); recompose(); touch();
   if (on && plateAlone(S.heroKey) && !S.renders.get(S.heroKey)) status(`Finish: ${opt.name} on. Generate runs it on the plate: about ${Math.round(estimate("hdr", plan({ key: S.heroKey }, []).skip))} s.`, "hint");
 }
-function upscaleSizeUI(show) { // Finish > Upscale's size: the plate's sizes, then Custom…, with the size asked for chosen; shown while the row is on
-  const sel = $("#finish-upscale-size"), p = S.plate;
+function upscaleSizeUI(opt, show) { // Finish > Upscale's size: the plate's sizes, then Custom…, with the size asked for chosen; shown while the row is on
+  const sel = $(`#finish-${opt.id}-size`), p = S.plate;
   if (!sel) return;
   sel.hidden = !show || !p;
   if (sel.hidden) return;
