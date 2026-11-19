@@ -285,7 +285,7 @@ def main():
     ap.add_argument("--preview", default="", choices=("", *PREVIEW), help="with --url: the Preview menu's choice, stored before the page loads (by default the page's own)")
     ap.add_argument("--upscale", nargs="?", const="on", default="", help="with --url, at the size given (the long side in px, as Custom… takes it; alone, the page's own): turn Finish > Upscale on before painting, so Export "
                     "writes the upscaled set too; the zip waits up to 3 hours")
-    ap.add_argument("--hdr", action="store_true", help="with --url: turn SDR to HDR on in Deliver before painting, so the render makes "
+    ap.add_argument("--hdr", action="store_true", help="with --url: turn SDR to HDR on in the Finish menu before painting, so the render makes "
                     "its full-size shot again in scene-linear values and HDR Match fits it to the plate")
     ap.add_argument("--seed", type=int, default=None, help="with --url: the page's ?seed=: the first new edit and each fluid shot start from it, each next edit from the next number (by default the page draws each seed)")
     ap.add_argument("--channel", default="", help="a browser channel, such as chrome (it plays H.264; Playwright's Chromium does not)")

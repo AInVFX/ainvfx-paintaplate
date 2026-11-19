@@ -2816,6 +2816,7 @@ const STAGES = [
 const REF = Object.fromEntries(STAGES.map((x) => [x.id, x.ref])); // each step's reference in seconds, by id (logic.stepGuess)
 const previewOf = (r) => r?.previews?.[S.plate.shot.join("x")]; // what this preview size made for a set of edits
 const doneOf = (r, st) => (st.preview ? previewOf(r) : r)?.done?.[st.id]; // seconds a step took, if it ran
+const fullSizeMade = (r) => !!r?.review && !(r.hdrAfter && r.done?.hdr === undefined); // the full-size result is made: the composite, and SDR to HDR on it when a Light edit takes it (logic.hdrAfterComposite)
 S.took = {}; // measured seconds per step, for this plate: the next estimates use them
 
 function plan(r, active) { // the steps this set of edits needs: the erase pass for erases, Ripple for paint and light, no second size when the preview is full size
@@ -3325,7 +3326,7 @@ $("#log-export").addEventListener("click", exportLog);
 function renderLeft(finalToo = false) { // seconds until the preview, or the full-size composite (and the export once asked for), is ready
   finalToo ||= !S.previewCap || plateAlone(S.heroKey); // with no preview pass, the next result is the full-size composite; the plate alone has no preview
   const p = S.plate, r = S.renders.get(S.heroKey), exporting = !!S.wantDownload;
-  if (!p || !S.heroKey || (finalToo ? (exporting ? r?.exported : r?.review) : previewOf(r)?.comp || r?.review)) return 0;
+  if (!p || !S.heroKey || (finalToo ? (exporting ? r?.exported : fullSizeMade(r)) : previewOf(r)?.comp || r?.review)) return 0;
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
   const skip = r?.skip ?? plan({ key: S.heroKey }, active).skip;
   let t = 0;
@@ -3394,7 +3395,7 @@ function stagesUI() {
   const pre = renderLeft(), all = renderLeft(true);
   const busy = S.stage?.key === S.heroKey, what = S.wantDownload ? "export" : "full size", next = S.previewCap && !alone ? "preview" : "full size";
   $("#render-left").textContent = stale() || !(previewOf(r)?.comp || r?.review) ? (pre ? `${next} ${secs(pre)}` : busy ? `${next} almost ready` : "")
-    : r?.exported ? "exported" : r?.review && !S.wantDownload ? "full size ready" : all ? `${what} ${secs(all)}` : busy ? `${what} almost ready` : "";
+    : r?.exported ? "exported" : fullSizeMade(r) && !S.wantDownload ? "full size ready" : all ? `${what} ${secs(all)}` : busy ? `${what} almost ready` : "";
   timelineBar();
 }
 

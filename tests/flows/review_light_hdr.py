@@ -12,7 +12,14 @@ def run(browser, port, U):
     U.open_plate(page)
     page.click('.tools [data-tool="light"]'); U.paint_once(page, "warm sunset light", [(0.70, 0.30), (0.74, 0.34)])
     page.keyboard.press("Enter"); settle("the Light edit's render")
-    page.click("#finish-btn"); page.click("#finish-hdr"); page.click("#finish-hdr-yes"); page.keyboard.press("Escape"); settle("SDR to HDR")
+    page.click("#finish-btn"); page.click("#finish-hdr"); page.click("#finish-hdr-yes"); page.keyboard.press("Escape")
+    left = page.evaluate("""() => new Promise((done) => { const t0 = Date.now(), tick = () => {
+      const now = document.querySelector('#stages li.now');
+      if (now && now.textContent.includes('SDR to HDR')) return done(document.querySelector('#render-left').textContent);
+      if (Date.now() - t0 > 90000) return done(null);
+      setTimeout(tick, 20); }; tick(); })""")  # the Render panel's note at the moment SDR to HDR runs on the composite
+    U.check(left is not None and "ready" not in left, f"while SDR to HDR runs on the relit composite, the Render panel does not say the full size is ready: {left!r}")
+    settle("SDR to HDR")
     log = page.evaluate(LOG)
     hdr = [i for i, t in enumerate(log) if ": SDR to HDR: done in " in t]
     comp = [i for i, t in enumerate(log) if ": Composite, full size: done in " in t or ": Light transfer, full size: done in " in t]  # Light edits alone: Relight Transfer
