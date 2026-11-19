@@ -23,7 +23,7 @@ def run(browser, port, U):
     U.check(paint.endswith("(P)."), f"the Paint tooltip gives the key P: {paint!r}")
     page.keyboard.press("c")
     U.check(on("erase"), "C picks Clean")
-    for key in ("b", "j"):  # W opens Words…, S Colours…
+    for key in ("b", "j"):  # T opens Text prompt…, S Colours…
         page.keyboard.press(key)
         U.check(on("erase") and not on("paint") and not rub() and page.is_hidden("#xray"),
                 f"{key.upper()} is free: Clean stays picked, the eraser stays off and the X-ray stays hidden")

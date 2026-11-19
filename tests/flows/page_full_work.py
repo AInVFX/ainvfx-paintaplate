@@ -1,5 +1,5 @@
 """Full screen does the work. There, the right-click menu and the keys reach what an edit needs: Colours… (S) shows the
-swatches, the picker and the pipette in a dialog over the frame, and Words… (W) the edit's words, which Enter applies.
+swatches, the picker and the pipette in a dialog over the frame, and Text prompt… (T) the edit's text prompt, which Enter applies.
 Ctrl+O opens a plate and Ctrl+S saves the scene, both taken from the browser. With the wipe on, comma steps its left side
 and period its right side through the plate, the first frame and the finished Render steps. The File menu has no ComfyUI
 graph: the Export dialog writes it."""
@@ -22,8 +22,8 @@ def run(browser, port, U):
     page.mouse.click(v["x"] + v["width"] / 2, v["y"] + v["height"] / 2, button="right")
     items = page.evaluate(MENU)
     has = lambda label, key: any(t.startswith(label) and t.endswith(key) for t in items)  # noqa: E731
-    U.check(has("Colours…", "S") and has("Words…", "W") and has("Open plate…", "Ctrl+O") and has("Save scene", "Ctrl+S"),
-            "full screen: the right-click menu has Colours… (S), Words… (W), Open plate… (Ctrl+O) and Save scene (Ctrl+S)")
+    U.check(has("Colours…", "S") and has("Text prompt…", "T") and has("Open plate…", "Ctrl+O") and has("Save scene", "Ctrl+S"),
+            "full screen: the right-click menu has Colours… (S), Text prompt… (T), Open plate… (Ctrl+O) and Save scene (Ctrl+S)")
     U.check(not any(t.startswith("ComfyUI graph") for t in items), "the File menu has no ComfyUI graph: the Export dialog writes it")
     page.keyboard.press("Escape")
 
@@ -38,11 +38,11 @@ def run(browser, port, U):
     U.check(page.is_hidden("#colours") and page.evaluate("!!document.querySelector('.tools .swatches')"),
             "S again closes it, and the swatches go back to the panel")
 
-    page.keyboard.press("w")
-    U.check(page.is_visible("#words"), "W shows the edit's words in a dialog")
+    page.keyboard.press("t")
+    U.check(page.is_visible("#words"), "T shows the edit's text prompt in a dialog")
     page.fill("#words-field", "a brass lantern")
     page.keyboard.press("Enter")
-    U.check(page.is_hidden("#words") and page.input_value("#prompt") == "a brass lantern", f"Enter applies the words: {page.input_value('#prompt')!r}")
+    U.check(page.is_hidden("#words") and page.input_value("#prompt") == "a brass lantern", f"Enter applies the text prompt: {page.input_value('#prompt')!r}")
 
     page.evaluate(PREVENTED)
     page.keyboard.press("Control+o")

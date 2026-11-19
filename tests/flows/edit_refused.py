@@ -10,7 +10,7 @@ import urllib.request
 ASKS = "Edit 1: the object may still be there ("  # the dialog's question
 QUESTION = ". Render the shot anyway?"
 FACT = "Warning: edit 1, the object may still be there ("  # the log's line, once per question
-NAME = "Type its name in the prompt bar, then Generate."
+NAME = "Type its name in the text prompt, then Generate."
 YES, NO = ("Yes, render anyway",), ("Cancel", "No, cancel")  # the page's dialog takes the « No » label of its caller
 KLEIN = "Edit 1: Klein edit preview"  # one line per pass of the edit
 COUNT = "(t) => window.__lines.filter((l) => l.includes(t)).length"

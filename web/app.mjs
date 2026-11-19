@@ -228,7 +228,7 @@ async function writeCaption(e, reference, key, kind, dimmed = false) {
   const hues = paintHues(e), ask = upsampleRequest({ tool: e.tool, words: e.prompt, hues,
     ...writerBoxes({ tool: e.tool, words: e.prompt, parts: paint && paintBoxes(paint), core: e.editCore, bbox: bounds(e.mask) }) });
   const where = ask.locked?.length > 1 ? `boxes ${JSON.stringify(ask.locked.map((r) => r.src_bbox))}` : `box ${JSON.stringify(ask.locked?.[0]?.src_bbox ?? bounds(e.mask))}`;
-  log(`Edit ${num(e)}: asking Klein's prompt writer (${ask.mode} mode) for "${e.prompt || "no words"}"${inHues(hues)}${hues.length ? "," : ""} in ${where}${dimmed ? ", on the frame with all but the object dimmed" : ""}.`);
+  log(`Edit ${num(e)}: asking Klein's prompt writer (${ask.mode} mode)${e.prompt ? ` for "${e.prompt}"` : ", with no text prompt,"}${inHues(hues)}${hues.length ? "," : ""} in ${where}${dimmed ? ", on the frame with all but the object dimmed" : ""}.`);
   if (kind === "edit") status(`Edit ${num(e)}: ${NAME[e.tool]}, prompt writer running.`); // the status line names the writer while Generate waits for it; a prefetch asks it behind the strokes' own lines
   let text = "";
   try {
@@ -1142,7 +1142,7 @@ function stopGenerating() { // Esc on the edit being generated, or Stop: everyth
   cancel(...STOPPED);
   dropLive();
   const waits = S.edits.filter((e) => e.state === "queued").map(num);
-  log(`Stopped: ${edit ? `edit ${num(edit)} keeps its strokes, words and seed` : "what finished is kept"}${waits.length ? `, ${editList(waits)} ${waits.length > 1 ? "wait" : "waits"}` : ""}. Nothing starts until Enter.`);
+  log(`Stopped: ${edit ? `edit ${num(edit)} keeps its strokes, text prompt and seed` : "what finished is kept"}${waits.length ? `, ${editList(waits)} ${waits.length > 1 ? "wait" : "waits"}` : ""}. Nothing starts until Enter.`);
   hud(edit ? `Stopped. Enter generates edit ${num(edit)} again.` : "Stopped. Enter goes on from where it stopped.", 4000);
   historyUI(); // before the status line: a waiting row says so, and the stop's sentence comes last
   stoppedUI(edit);
@@ -1763,8 +1763,8 @@ function staleFluid() { // the keyframes or the words changed: the shot on show 
   const f = S.fluid;
   if (f?.busy && f.busy.sig !== fluidSig()) {
     cancel("fluid");
-    log(`Fluid shot v${f.busy.v}: stopped. Keyframes or words changed.`);
-    hud("Stopped: the keyframes or the words changed. Generate starts again.", 2500);
+    log(`Fluid shot v${f.busy.v}: stopped. Keyframes or text prompt changed.`);
+    hud("Stopped: the keyframes or the text prompt changed. Generate starts again.", 2500);
   }
   fluidUI(); timelineUI();
 }
@@ -1858,12 +1858,12 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
   if (!f.keys.length) return status("Fluid shot: no keyframe. Paint flat colour blobs on the first frame and on the last frame.", "hint");
   if (another) f.seed = (Math.random() * 2 ** 31) | 0;
   else { // Enter again: a shot being made, or already made, from these keyframes, words and seed is not made twice
-    if (f.busy?.sig === fluidSig()) return hud(`Fluid shot v${f.busy.v} is being made from these keyframes and words.`, 2500);
+    if (f.busy?.sig === fluidSig()) return hud(`Fluid shot v${f.busy.v} is being made from these keyframes and this text prompt.`, 2500);
     const made = f.made?.get(fluidSig());
     if (made) {
-      if (f.result !== made) { f.result = made; showFluid(); log(`Fluid shot v${made.v}: from the job index (same keyframes, words and seed). Nothing runs.`); }
+      if (f.result !== made) { f.result = made; showFluid(); log(`Fluid shot v${made.v}: from the job index (same keyframes, text prompt and seed). Nothing runs.`); }
       f.view = "result"; fluidUI(); render();
-      return hud(`Fluid shot v${made.v} is already made from these keyframes and words. Ctrl+Enter tries another seed.`, 3000);
+      return hud(`Fluid shot v${made.v} is already made from these keyframes and this text prompt. Ctrl+Enter tries another seed.`, 3000);
     }
   }
   cancel("fluid");
@@ -1975,7 +1975,7 @@ function fluidRow() { // the first edit of a blank plate: its fluid shot, which 
   li.dataset.id = "fluid";
   li.className = [on ? "" : "off", f.busy ? "busy" : "", keying() ? "selected" : ""].join(" ").trim();
   li.innerHTML = `<img class="thumb" alt=""><div class="what"><span class="title"></span><small></small></div>
-    <div class="acts"><button class="edit" title="Edit its keyframes and words">${ICON.edit}</button>
+    <div class="acts"><button class="edit" title="Edit its keyframes and text prompt.">${ICON.edit}</button>
     <button class="eye" aria-pressed="${on}" title="${on ? "Bypass the fluid shot: the blank plate" : "Turn the fluid shot back on"}">${on ? ICON.eye : ICON.off}</button>
     <button class="again" title="Try another seed">${ICON.again}</button><button class="del" title="Remove the fluid shot">${ICON.del}</button></div>`;
   const first = [...f.keys].sort((x, y) => x.frame - y.frame)[0], img = li.querySelector(".thumb");
@@ -2121,7 +2121,7 @@ function select(edit) { // a History row becomes the current edit: its words in 
   S.peek = edit; // frame 0 shows its strokes until playback starts or an edit is launched
   if (edit) { setTool(edit.tool); $("#prompt").value = edit.prompt; if (edit.tool === "erase") $("#whole").checked = !!edit.whole; }
   else if (!S.draft) $("#prompt").value = "";
-  if (edit) hud(`Edit ${num(edit)} selected: retype its words, paint more or rub strokes out, then Generate. N starts a new edit.`, 3500);
+  if (edit) hud(`Edit ${num(edit)} selected: retype its text prompt, paint more or rub strokes out, then Generate. N starts a new edit.`, 3500);
   historyUI(); render();
 }
 
@@ -2208,7 +2208,7 @@ async function generate(edit) {
   edit.saw = activeBefore(edit).map(record); // the edits under it as it starts: a change to them restarts it (rebuild)
   Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false, leftWhy: null, editAsked: false, refused: null });
   recompose(); historyUI(); render();
-  log(`Edit ${num(edit)}: ${NAME[edit.tool]} ${edit.prompt ? `"${edit.prompt}"` : "with no words"}, seed ${edit.seed}${edit.tool === "erase" ? `, whole object ${edit.whole ? "on" : "off"}` : ""}, ${painted(edit)} stroke${painted(edit) === 1 ? "" : "s"}, over ${edit.saw.length} edit${edit.saw.length === 1 ? "" : "s"}.`);
+  log(`Edit ${num(edit)}: ${NAME[edit.tool]} ${edit.prompt ? `"${edit.prompt}"` : "with no text prompt"}, seed ${edit.seed}${edit.tool === "erase" ? `, whole object ${edit.whole ? "on" : "off"}` : ""}, ${painted(edit)} stroke${painted(edit) === 1 ? "" : "s"}, over ${edit.saw.length} edit${edit.saw.length === 1 ? "" : "s"}.`);
   try {
     await edit.preparing; // the snap and the caption started when the strokes stopped: reused when nothing changed since
     if (!alive()) return;
@@ -2641,13 +2641,13 @@ function historyUI() {
     if (asked) li.dataset.asked = "1";
     if (left) li.dataset.left = "1";
     li.innerHTML = `<img class="thumb" alt=""><div class="what"><span class="title"></span><small></small></div>
-      <div class="acts"><button class="edit" title="Change this edit: its strokes and words come back on the first frame.">${ICON.edit}</button><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
+      <div class="acts"><button class="edit" title="Change this edit: its strokes and text prompt come back on the first frame.">${ICON.edit}</button><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
       <button class="again" title="Try another">${ICON.again}</button><button class="del" title="Remove this edit">${ICON.del}</button></div>`;
     const img = li.querySelector(".thumb");
     if (e.thumb) img.src = e.thumb; else img.removeAttribute("src");
     li.title = "Show this edit's strokes on the first frame. Its pencil changes it.";
     li.querySelector(".title").textContent = `${num(e)}. ${NAME[e.tool]}`;
-    const what = e.tool === "erase" ? (e.whole ? "Whole object" : "Painted area") : e.prompt || (e.tool === "light" ? "From the strokes" : "No words");
+    const what = e.tool === "erase" ? (e.whole ? "Whole object" : "Painted area") : e.prompt || (e.tool === "light" ? "From the strokes" : "No text prompt");
     const small = li.querySelector("small");
     const forEnter = S.halted && e.on && e !== S.draft && (e.state === "queued" || e.force || (e.state === "generating" && e !== S.running)); // under a stop its turn comes at Enter: launched, another try, or marked by an undo step
     if (hidden.has(e)) small.textContent = `Hidden until edit ${num(S.draft)} is generated`;
@@ -3286,7 +3286,7 @@ function log(text) { // the log panel only: what happened, one fact per message,
 async function exportLog() { // the log's export (logic.logReport): the log with its times, and what ComfyUI reports of its versions and machine
   const [served, stats] = await Promise.all([fetch("/paintaplate/version").then((r) => r.json()).catch(() => ({})), fetch("/system_stats").then((r) => r.json()).catch(() => null)]);
   const now = new Date(), p = S.plate, name = p?.path?.split("/").filter(Boolean).pop()?.replace(/\.[^.]+$/, "") ?? "";
-  const text = logReport({ version: served.version ?? S.version, build: served.build, stats, browser: navigator.userAgent, address: location.search.slice(1),
+  const text = logReport({ version: served.version ?? S.version, build: served.build, folder: served.folder, stats, browser: navigator.userAgent, address: location.search.slice(1),
     memory: S.memoryProfile ? `${S.memoryProfile.name} (${S.memoryProfile.why})` : "", plate: p ? [$("#spec").textContent.trim(), plateSpaceLine(p)] : [],
     lines: [...$("#log").children].map((li) => [li.firstChild.textContent, li.lastChild.textContent]), now });
   const a = document.createElement("a");
@@ -4119,7 +4119,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Deselect", "Esc", () => select(null), !S.selected]]],
     ["Tools", [["Paint", "P", () => pickTool("paint"), !p, S.tool === "paint" && !S.rub], ["Clean", "C", () => pickTool("erase"), !p || (keying() && !S.fluid.result), S.tool === "erase" && !S.rub],
       ["Light", "L", () => pickTool("light"), !p || (keying() && !S.fluid.result), S.tool === "light" && !S.rub], ["Eraser", "E", () => setRub(!S.rub), !p, S.rub], ["Pick a colour", "I", () => pickColor(), !p, !!S.picking],
-      ["Colours…", "S", openColours, !p, $("#colours").open], ["Words…", "W", openWords, !p], "-",
+      ["Colours…", "S", openColours, !p, $("#colours").open], ["Text prompt…", "T", openWords, !p], "-",
       ["Whole object", "", () => $("#whole").click(), !p, $("#whole").checked], ["Smaller brush", "-", () => setSize(S.size / 1.2), !p],
       ["Larger brush", "=", () => setSize(S.size * 1.2), !p]]],
     ["Control", [["Play or pause", "Space", () => (S.playing ? pause() : play()), !p, S.playing], ["Next frame", "Right", step(1), !p],
@@ -4537,7 +4537,7 @@ document.addEventListener("drop", (e) => {
 
 addEventListener("keydown", (e) => {
   const files = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && ["o", "s"].includes(e.key.toLowerCase());
-  if (files) { // Ctrl+O opens a plate and Ctrl+S saves the scene, also from the words' field; the page takes both from the browser
+  if (files) { // Ctrl+O opens a plate and Ctrl+S saves the scene, also from the text prompt; the page takes both from the browser
     e.preventDefault();
     if ($("dialog[open]:not(#colours)") || !$("#ctx").hidden) return;
     if (e.key.toLowerCase() === "o") openDialog(); else if (S.plate) saveScene().catch(quiet);
@@ -4576,7 +4576,7 @@ addEventListener("keydown", (e) => {
   else if (k === "F6") setWipe(S.wipe === null);
   else if ((k === "," || k === ".") && !mod && !e.altKey) { if (S.wipe === null) hud("The wipe is off: F6 turns it on.", 2000); else stepWipe(k === "," ? "left" : "right"); }
   else if (combo === "s" && !mod && !e.altKey) openColours();
-  else if (combo === "w" && !mod && !e.altKey) openWords();
+  else if (combo === "t" && !mod && !e.altKey) openWords(); // the text prompt: RV's t toggles a heads-up timeline, which the page does not have (rvui.mu, 0bd9675)
   else if (combo === "x" && !mod && !e.altKey) setXray(!S.xray); // x is free in RV's rvui.mu (0bd9675), where Shift+X flops the image
   else if (low === "f" && !mod && !e.altKey) zoomTo(1);
   else if (low === "f" && mod && !e.shiftKey) widthZoom(); // RV's Frame Width; the page takes Ctrl+F from the browser's find

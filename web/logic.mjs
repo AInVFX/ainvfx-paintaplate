@@ -646,9 +646,25 @@ export function askedText(asked) {
 // The native frames' failure is said once per cause: a message that names its file counts once for every file.
 export const nativeCause = (message, path) => String(message).split(path).join("the file").trim();
 
+// The log's export holds no path of the person's machine. A path under ComfyUI's folder (`folder`, from
+// /paintaplate/version) is written from that folder, as output/paintaplate/…; any other absolute path by its last two
+// parts. A Windows path counts: a drive (C:\ or C:/, in any case) or a share (\\server\share). The status line and the
+// Log panel keep the full path, which the person needs there.
+const PATH_START = String.raw`(?<=^|[\s"'«(=])`;
+const ABSOLUTE = new RegExp(String.raw`${PATH_START}(?:[A-Za-z]:[\\/]|\\\\|/)[^\s"'«»<>|]+`, "g");
+export function plainPaths(text, folder = "") {
+  const base = String(folder || "").replace(/[\\/]+$/, ""), parts = base.split(/[\\/]+/).map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const under = base ? new RegExp(PATH_START + parts.join(String.raw`[\\/]+`) + String.raw`[\\/]+`, /^(?:[A-Za-z]:|\\\\)/.test(base) ? "gi" : "g") : null;
+  return (under ? String(text).replace(under, "") : String(text)).replace(ABSOLUTE, (path) => {
+    const [, body, end] = path.match(/^(.*?)([.,;:!?)\]]*)$/), sep = body.includes("\\") ? "\\" : "/";
+    return body.split(/[\\/]+/).filter((part) => part && !/^[A-Za-z]:$/.test(part)).slice(-2).join(sep) + end;
+  });
+}
+
 // The log's export: the text of paintaplate_log_<plate>_<YYYYMMDD_HHMM>.txt, to share for troubleshooting. It holds the
-// log and what ComfyUI reports of its versions and its machine (/system_stats): no command line and no path.
-export function logReport({ version, build, stats, browser, address, memory, plate, lines, now }) {
+// log and what ComfyUI reports of its versions and its machine (/system_stats): no command line, and its plate and log
+// lines through plainPaths.
+export function logReport({ version, build, stats, browser, address, memory, plate, lines, now, folder = "" }) {
   const sys = stats?.system ?? {}, two = (n) => String(n).padStart(2, "0"), devices = stats?.devices ?? [];
   const gb = (bytes) => (+bytes > 0 ? `${(bytes / 2 ** 30).toFixed(1)} GB` : "unknown");
   const when = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())} ${two(now.getHours())}:${two(now.getMinutes())}`;
@@ -659,8 +675,8 @@ export function logReport({ version, build, stats, browser, address, memory, pla
     ...(devices.length ? devices.map((d, i) => `  GPU ${i}: ${d.name || "unknown"}, ${gb(d.vram_total)} of VRAM.`) : ["  GPU: none reported."]),
     `  RAM: ${gb(sys.ram_total)}.`, "",
     "Page", `  Browser: ${browser}.`, `  Address options: ${address || "none"}.`, `  Memory profile: ${memory || "unknown"}.`, "",
-    "Plate", ...(plate.length ? plate.map((l) => `  ${l}`) : ["  No plate open."]), "",
-    "Log", ...lines.map(([time, text]) => `${time}  ${String(text).replaceAll("\n", `\n${" ".repeat(String(time).length + 2)}`)}`),
+    "Plate", ...(plate.length ? plate.map((l) => `  ${plainPaths(l, folder)}`) : ["  No plate open."]), "",
+    "Log", ...lines.map(([time, text]) => `${time}  ${plainPaths(text, folder).replaceAll("\n", `\n${" ".repeat(String(time).length + 2)}`)}`),
   ].join("\n") + "\n";
 }
 
@@ -931,7 +947,7 @@ export const beyondDetail = ({ beyond, beyondEdges }) => (beyond === null || bey
 
 // What to do next, for the status line: an object with no name gets one; a named object gets other words or another seed.
 export const leftHint = (words) =>
-  (words ? "Use other words, then Generate, or Ctrl+Enter for another seed." : "Type its name in the prompt bar, then Generate.");
+  (words ? "Use another text prompt, then Generate, or Ctrl+Enter for another seed." : "Type its name in the text prompt, then Generate.");
 
 // What the page says when the check holds an erase back. The check can be wrong on a thin or faint object, or on one behind a
 // fence, so the page asks: `fact`, a warning, goes to the log once and, after « No, cancel », to the status line before leftHint;
@@ -1075,7 +1091,7 @@ export function stopHint({ edit = null, waits = [] } = {}) {
   const list = waits.length ? editList(waits) : "";
   const wait = list ? ` ${list[0].toUpperCase()}${list.slice(1)} ${waits.length > 1 ? "wait" : "waits"}.` : "";
   return edit === null ? `Stopped.${wait} Enter goes on from where it stopped.`
-    : `Stopped. Edit ${edit} keeps its strokes, words and seed.${wait} Enter generates again, Ctrl+Enter tries another seed, Esc drops the strokes.`;
+    : `Stopped. Edit ${edit} keeps its strokes, text prompt and seed.${wait} Enter generates again, Ctrl+Enter tries another seed, Esc drops the strokes.`;
 }
 
 // Edits are layers, after Generate. An edit above an edit that is made again stays hidden until its own

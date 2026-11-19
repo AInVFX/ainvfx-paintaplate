@@ -8,7 +8,7 @@ writer answers the next two requests, the first look and the look at the dimmed 
 
 ASK = "the prompt writer took the stroke for another object"
 DIMMED = ", on the frame with all but the object dimmed."
-NEXT = "Type its name in the prompt bar, then Generate."
+NEXT = "Type its name in the text prompt, then Generate."
 HORSE = ('Remove the horse <horse_1> completely, including its bridle. [{"id": "horse_1", "from": "ref_image_0", '
          '"src_bbox": [80, 40, 300, 260], "tgt_bbox": null, "desc": "a brown horse"}]')
 ROW = """(() => { const li = document.querySelector('#history li');

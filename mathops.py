@@ -683,7 +683,7 @@ def follow_summary(n: int, seen=None, zones=0, placed=0, strays=0, held=0, added
         else:
             lines.insert(0, f"Warning: matte {largest[0]:.1f}x the object at frame {at(largest[1])}. Check the composite there.")
     if left is not None:
-        lines.insert(0, f"Warning: object left its place at frame {at(left[0])}. Try another seed, other words or another stroke.")
+        lines.insert(0, f"Warning: object left its place at frame {at(left[0])}. Try another seed, another text prompt or another stroke.")
     return "\n  ".join([f"tracked on {seen or 0} of {n} frames."] + lines)
 
 

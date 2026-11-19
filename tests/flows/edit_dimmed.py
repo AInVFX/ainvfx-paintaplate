@@ -12,7 +12,7 @@ REFUSED = "prompt writer's answer refused: it removes an object outside the pain
 ASKING = "asking Klein's prompt writer"
 DIMMED = ", on the frame with all but the object dimmed."
 ASK = "the prompt writer took the stroke for another object"
-BOX = re.compile(r'for "no words" in box (\[[0-9,]+\])')
+BOX = re.compile(r'with no text prompt, in box (\[[0-9,]+\])')
 ROW = """(() => { const li = document.querySelector('#history li');
   return li ? [li.className, li.dataset.left ?? ''] : null; })()"""
 
