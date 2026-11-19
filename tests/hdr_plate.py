@@ -303,53 +303,171 @@ def bands(ref: str, test: str, tile: int = 256, overlap: int = 64, work: str = "
     return {"rows": rows, "shows": shows, "largest": top[3] if top else 0.0, "controls": controls, "text": text}
 
 
-def _plate_frames(path: str, count: int):
-    """The first `count` frames of a movie or of a folder of frames, as float32 RGB in the file's own values."""
+WHITE = 0.99  # a plate's file value from which a sample is at the plate's white, in every channel
+
+
+def _plate_iter(path: str):
+    """The frames of a movie or of a folder of frames, one at a time, as float32 RGB in the file's own values."""
     if os.path.isdir(path):
-        return [plateio.read_float(f) for f in plateio.find_sequence(path)[:count]]
+        for f in plateio.find_sequence(path):
+            yield plateio.read_float(f)[..., :3]
+        return
     import av
     with av.open(path) as c:
-        return [f.to_ndarray(format="rgb24").astype(np.float32) / 255.0 for _, f in zip(range(count), c.decode(video=0))]
+        for f in c.decode(video=0):
+            yield f.to_ndarray(format="rgb24").astype(np.float32) / 255.0
 
 
-def level(plate: str, hdr: str, color_space: str = "@model", step: int = 8, first: int = 8, out: str = "") -> dict:
-    """The HDR frames (ACES2065-1) against the plate (`color_space`), both in ACEScg, sampled every `step` px: per frame,
-    the level (the mean over R, G and B of mathops.hdr_level, HDR Match's gain of a frame), its change from
-    the frame before beside the change of the plate's mean luminance, and the HDR frame's largest value."""
+def _space(path: str, name: str = "", fallback: str = "") -> str:
+    """The colour space of a plate or a frame in the built-in OCIO config: `name` when given, else what its files say. An
+    EXR's chromaticities name its gamut (plateio.gamut_of); without them it reads as `fallback`, else linear Rec.709. A
+    movie's tags give HDR or linear; any other file is sRGB, read as @model."""
+    import ocio
+    if name:
+        return name
+    exr = path if path.lower().endswith(".exr") else None
+    if exr is None and os.path.isdir(path):
+        exr = next((f for f in plateio.find_sequence(path)[:1] if f.lower().endswith(".exr")), None)
+    if exr:
+        named = next((g for g in (plateio.gamut_of(p.get("chromaticities", "")) for p in plateio.exr_info(exr).get("parts", [])) if g), None)
+        return ocio.guess(ocio.BUILTIN, named, exr) if named else fallback or ocio.guess(ocio.BUILTIN, "linear", exr)
+    familiar = plateio.guess_color_space(plateio.probe_plate(path))
+    return "@model" if familiar == "sRGB" else ocio.guess(ocio.BUILTIN, familiar, path)
+
+
+def _to_size(f: np.ndarray, w: int, h: int) -> np.ndarray:
+    """A frame larger than the plate at the plate's size, each pixel the mean of the block it covers (PIL's box filter)."""
+    from PIL import Image
+    return np.stack([np.asarray(Image.fromarray(np.ascontiguousarray(f[..., c], np.float32), "F").resize((w, h), Image.BOX))
+                     for c in range(3)], axis=-1)
+
+
+def _midtones(shot: np.ndarray, plate: np.ndarray) -> np.ndarray:
+    """The samples that mathops.hdr_level reads: finite, above HDR_FLOOR, the plate's luminance in HDR_MIDTONES."""
+    import mathops
+    ok = np.all(np.isfinite(shot) & np.isfinite(plate) & (shot > mathops.HDR_FLOOR) & (plate > mathops.HDR_FLOOR), axis=-1)
+    lum = plate @ LUMA
+    return ok & (lum >= mathops.HDR_MIDTONES[0]) & (lum <= mathops.HDR_MIDTONES[1])
+
+
+def _saturation(x: np.ndarray) -> float:
+    """The median over (K, 3) samples of (largest - smallest) / largest of R, G and B: 0 for a grey."""
+    if not len(x):
+        return float("nan")
+    hi = x.max(axis=-1)
+    return float(np.median((hi - x.min(axis=-1)) / hi))
+
+
+def level(plate: str, hdr: str = "", color_space: str = "", step: int = 8, first: int = 8, out: str = "", export: str = "",
+          folder: str = "", matte: str = "", hdr_space: str = "") -> dict:
+    """The result's frames against the plate, both in ACEScg, sampled every `step` px, where the matte shows 0 and one
+    sample in from its edge. The result is `hdr`, a folder of frames with `matte` a folder of the matte's, or the export's
+    zip: its folder `folder`, else its result as _group finds it, with its matte. Each side's colour space is `color_space`
+    and `hdr_space` when given, else what its files say (_space; ACES2065-1, SDR to HDR's, for an EXR that names none).
+    Per frame: the level (the mean over R, G and B of mathops.hdr_level, HDR Match's gain of a frame) and each channel's,
+    the saturation of the plate and of the result on the same mid-tones, the change of level from the frame before beside
+    the change of the plate's mean luminance, and the result's largest value. Where the plate's file values reach WHITE in
+    every channel: the result's luminance over the plate's there."""
     import mathops
     import ocio
-    files = plateio.find_sequence(hdr)
-    plates = _plate_frames(plate, len(files))
-    h, w = plates[0].shape[:2]
-    ys, xs = np.arange(step // 2, h, step), np.arange(step // 2, w, step)
-    p = ocio.convert([f[ys[:, None], xs[None, :]] for f in plates], ocio.BUILTIN, color_space, "ACEScg")
-    rows = []
-    for i, name in enumerate(files[:len(plates)]):
-        f = plateio.read_float(name)
-        s = ocio.convert([f[(ys * f.shape[0] // h)[:, None], (xs * f.shape[1] // w)[None, :]]], ocio.BUILTIN, "ACES2065-1", "ACEScg")[0]
-        stops = mathops.hdr_level(s.reshape(-1, 3), p[i].reshape(-1, 3), least=64)
-        rows.append((i + 1, None if stops is None else float(np.mean(stops)), float((p[i] @ LUMA).mean()),
-                     float((s @ LUMA).mean()), float(f.max())))
+    if not (hdr or export):
+        raise SystemExit("level: give --hdr or --export")
+    rows, white_ratios, white_tops, shares = [], [], [], []
+    with tempfile.TemporaryDirectory() as tmp:
+        z = zipfile.ZipFile(export) if export else None
+        try:
+            if z:
+                names, count = z.namelist(), _plate_info(plate)[2]
+                files = (sorted(n for n in names if os.path.dirname(n) == folder.strip("/") and n.lower().endswith(".exr"))
+                         if folder else _group(names, count, False))
+                mattes = _group(names, count, True) if any("matte" in n.lower() for n in names) else []
+                where, fetch = os.path.dirname(files[0]) if files else folder, lambda n: z.extract(n, tmp)
+            else:
+                files, mattes = plateio.find_sequence(hdr), plateio.find_sequence(matte) if matte else []
+                where, fetch = hdr, lambda n: n
+            if not files:
+                raise SystemExit(f"level: no EXR frames in {folder or hdr}")
+            pspace, rspace = _space(plate, color_space), _space(fetch(files[0]), hdr_space, fallback="ACES2065-1")
+            for i, pf in enumerate(_plate_iter(plate)):
+                if i >= len(files):
+                    break
+                h, w = pf.shape[:2]
+                ys, xs = np.arange(step // 2, h, step), np.arange(step // 2, w, step)
+                at = lambda a: a[(ys * a.shape[0] // h)[:, None], (xs * a.shape[1] // w)[None, :]]  # noqa: E731
+                pf, name = pf[ys[:, None], xs[None, :]], fetch(files[i])
+                f = plateio.read_float(name)[..., :3]
+                top = float(f.max())
+                if z:
+                    os.remove(name)
+                p = ocio.convert([pf], ocio.BUILTIN, pspace, "ACEScg")[0]
+                s = ocio.convert([at(_to_size(f, w, h) if f.shape[1] >= 1.5 * w else f)], ocio.BUILTIN, rspace, "ACEScg")[0]
+                keep = np.ones(p.shape[:2], bool)
+                if mattes:
+                    name = fetch(mattes[min(i, len(mattes) - 1)])
+                    m = plateio.read_float(name)
+                    keep = ndimage.binary_erosion(plateio.untouched(at(m[..., 0] if m.ndim == 3 else m)), border_value=1)
+                    if z:
+                        os.remove(name)
+                stops = mathops.hdr_level(s[keep], p[keep], least=64)
+                mid, white = _midtones(s, p) & keep, keep & np.all(pf >= WHITE, axis=-1)
+                if white.any():
+                    white_ratios.append(np.log2(np.maximum(s[white] @ LUMA, mathops.HDR_FLOOR) / np.maximum(p[white] @ LUMA, mathops.HDR_FLOOR)))
+                    white_tops.append(float(s[white].max()))
+                shares.append(float(white.mean()))
+                rows.append((i + 1, None if stops is None else float(np.mean(stops)), float((p @ LUMA).mean()), float((s @ LUMA).mean()),
+                             top, None if stops is None else tuple(float(v) for v in stops), _saturation(p[mid]), _saturation(s[mid])))
+        finally:
+            if z:
+                z.close()
     known = [r[1] for r in rows if r[1] is not None]
     mid = float(np.median(known)) if known else float("nan")
-    lines = [f"# The level of `{hdr}` against `{plate}`", "",
-             f"Both in ACEScg, every {step} px. Level: the median of log2(plate / HDR) over the plate's mid-tones, the mean "
-             f"of R, G and B; 0 is the plate's level. The shot's median level: {mid:+.3f} stops.", "",
-             "| Frame | Level, stops | From the shot's median, stops | HDR's change, stops | Plate's change, stops | Largest value |",
+    lines = [f"# The level of `{where}` against `{plate}`", "",
+             f"Both in ACEScg, the plate from {pspace} and the result from {rspace}, every {step} px"
+             f"{', where the matte shows 0, one sample in from its edge' if mattes else ''}. Level: the median of log2(plate / "
+             f"result) over the plate's mid-tones, the mean of R, G and B; 0 is the plate's level. The shot's median level: "
+             f"{mid:+.3f} stops.", "",
+             "| Frame | Level, stops | From the shot's median, stops | Result's change, stops | Plate's change, stops | Largest value |",
              "| --- | --- | --- | --- | --- | --- |"]
-    for k, (n, lv, pm, sm, top) in enumerate(rows):
+    for k, (n, lv, pm, sm, top, *_) in enumerate(rows):
         dh = "" if k == 0 else f"{np.log2(sm / rows[k - 1][3]):+.3f}"
         dp = "" if k == 0 else f"{np.log2(pm / rows[k - 1][2]):+.3f}"
         if k < first or k == len(rows) - 1:
             lines.append(f"| {n} | {'' if lv is None else f'{lv:+.3f}'} | {'' if lv is None else f'{lv - mid:+.3f}'} | {dh} | {dp} | {top:.2f} |")
     off = [(n, lv - mid) for n, lv, *_ in rows if lv is not None and abs(lv - mid) > 0.02]
     lines += ["", f"Frames more than 0.02 stops from the shot's median: {', '.join(f'{n} ({d:+.3f})' for n, d in off) or 'none'}."]
+    chans = np.array([r[5] for r in rows if r[5] is not None]).reshape(-1, 3)
+    channels = np.median(chans, axis=0) if len(chans) else np.full(3, np.nan)
+    sat = (float(np.nanmedian([r[6] for r in rows])), float(np.nanmedian([r[7] for r in rows]))) if rows else (np.nan, np.nan)
+    spread = [(r[0], max(r[5]) - min(r[5])) for r in rows if r[5] is not None and max(r[5]) - min(r[5]) > 0.05]
+    lines += ["", "## Each channel and the saturation", "",
+              "The same samples. Each channel's level, read as the level above, and the saturation: the median of (largest - "
+              "smallest) / largest of R, G and B. A gain changes no saturation; a change of colour does.", "",
+              "| Frame | R, stops | G, stops | B, stops | Saturation, plate | Saturation, result |", "| --- | --- | --- | --- | --- | --- |"]
+    for k, r in enumerate(rows):
+        if k < first or k == len(rows) - 1:
+            cells = [f"{v:+.3f}" for v in r[5]] if r[5] else ["", "", ""]
+            lines.append(f"| {r[0]} | {' | '.join(cells)} | {r[6]:.3f} | {r[7]:.3f} |")
+    lines += ["", f"The shot's median: R {channels[0]:+.3f}, G {channels[1]:+.3f}, B {channels[2]:+.3f} stops; the saturation "
+              f"{sat[1]:.3f} against the plate's {sat[0]:.3f}. Frames whose channels spread more than 0.05 stops: "
+              f"{', '.join(f'{n} ({d:.3f})' for n, d in spread) or 'none'}.", "", "## Where the plate is at its white", ""]
+    white = None
+    if white_ratios:
+        rw = np.concatenate(white_ratios)
+        white = {"share": float(np.median(shares)), "frames": len(white_ratios), "median": float(np.median(rw)),
+                 "p90": float(np.percentile(rw, 90)), "top": max(white_tops)}
+        lines.append(f"Samples where the plate's file values reach {WHITE} in every channel"
+                     f"{', where the matte shows 0' if mattes else ''}: {white['share']:.2%} of a frame's samples on the median, "
+                     f"in {white['frames']} of {len(rows)} frames. The result's luminance there over the plate's: median "
+                     f"{white['median']:+.2f} stops, 90th percentile {white['p90']:+.2f}; its largest value there {white['top']:.2f}.")
+    else:
+        lines.append(f"No sample of the plate reaches {WHITE} in every channel{' where the matte shows 0' if mattes else ''}.")
     text = "\n".join(lines) + "\n"
     if out:
         with open(out, "w") as fh:
             fh.write(text)
     print(text)
-    return {"rows": rows, "median": mid, "off": off, "text": text}
+    return {"rows": rows, "median": mid, "off": off, "channels": [float(v) for v in channels], "saturation": sat,
+            "white": white, "folder": where, "spaces": (pspace, rspace), "text": text}
 
 
 def _plate_info(path: str):
@@ -567,10 +685,14 @@ if __name__ == "__main__":
     b.add_argument("--out", default="", help="a Markdown file for the report")
     b.add_argument("--sheet", default="", help="a PNG of the first frame read: the tested frame, the reference and their difference")
     b.add_argument("--rows", type=int, nargs=2, default=(0, 432), help="the sheet's rows, and with no --ref the rows read: the first and the one after the last")
-    lv = sub.add_parser("level", help="the HDR frames' level against the plate, frame by frame")
+    lv = sub.add_parser("level", help="the result's level, each channel and the saturation against the plate, frame by frame")
     lv.add_argument("--plate", required=True, help="the plate: a movie or a folder of frames")
-    lv.add_argument("--hdr", required=True, help="the folder of the HDR frames, in ACES2065-1")
-    lv.add_argument("--color-space", default="@model", help="the plate's file colour space in the OCIO config")
+    lv.add_argument("--hdr", default="", help="a folder of the result's frames, such as SDR to HDR's EXR frames")
+    lv.add_argument("--matte", default="", help="with --hdr, a folder of the matte's frames: where it shows above 0 is left out")
+    lv.add_argument("--export", default="", help="the export's zip, in place of --hdr: its result's frames and its matte")
+    lv.add_argument("--folder", default="", help="with --export, the zip's folder of the result's frames, such as the upscaled set's")
+    lv.add_argument("--color-space", default="", help="the plate's file colour space in the OCIO config; by default what its files say")
+    lv.add_argument("--hdr-space", default="", help="the result's colour space; by default its header's gamut, else ACES2065-1")
     lv.add_argument("--out", default="", help="a Markdown file for the report")
     fi = sub.add_parser("finish", help="SDR to HDR on a plate with no edit, timed node by node, on a running ComfyUI")
     fi.add_argument("--url", default="http://127.0.0.1:8188")
@@ -593,7 +715,8 @@ if __name__ == "__main__":
     elif a.what == "groups":
         groups(a.plate, a.export, a.every)
     elif a.what == "level":
-        level(a.plate, a.hdr, a.color_space, out=os.path.expanduser(a.out) if a.out else "")
+        level(a.plate, a.hdr, a.color_space, out=os.path.expanduser(a.out) if a.out else "", export=a.export, folder=a.folder,
+              matte=a.matte, hdr_space=a.hdr_space)
     elif a.what == "bands":
         bands(a.ref, a.test, a.tile, a.overlap, a.work, a.steps, a.every, a.limit or 0.0, os.path.expanduser(a.out) if a.out else "",
               os.path.expanduser(a.sheet) if a.sheet else "", a.rows)
