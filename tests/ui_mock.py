@@ -309,7 +309,7 @@ def colour_flow(browser, port):
     errors = []
     page = load(browser, port, errors=errors)
     hdr = page.evaluate("""async () => { // an EXR through the frame route and the viewer's shader, as the colour tools see it
-      const { Display, DISPLAY } = await import(new URL("display.mjs", location.href).href); // the colour model lives in display.mjs since 1.5.0
+      const { Display, DISPLAY } = await import(new URL("display.mjs", location.href).href); // the colour model lives in display.mjs
       const r = await fetch("/paintaplate/frames?path=paintaplate/hdr_test&first=0&count=1&side=64");
       const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number), out = document.createElement("canvas");
       const frame = { width, height, data: new Uint16Array(await r.arrayBuffer()) }, space = "Linear Rec.709 (sRGB)";
@@ -347,7 +347,7 @@ def colour_flow(browser, port):
     page.evaluate("document.activeElement.blur()")
     cx, cy = box["x"] + box["w"] * 0.5, box["y"] + box["h"] * 0.5
     page.mouse.move(cx, cy)
-    # the viewer's colour lives in the canvas pixels now (a WebGL2 shader), so the checks read them
+    # the viewer's colour is in the canvas pixels (a WebGL2 shader), so the checks read them
     pixel = lambda fx=0.5, fy=0.5: page.evaluate("""([fx, fy]) => { const c = document.querySelector('#view'), s = [0, 0, 0];
       const d = c.getContext('2d').getImageData(Math.round(c.width * fx) - 2, Math.round(c.height * fy) - 2, 5, 5).data;
       for (let i = 0; i < d.length; i += 4) for (let k = 0; k < 3; k++) s[k] += d[i + k] / 25; return s; }""", [fx, fy])
@@ -763,9 +763,8 @@ def ocio_flow(browser, port):
 
 
 def race_flow(browser, port):
-    """Generate pressed while the render of the edit before it starts, before its first step. On a plate just opened, the
-    page's running step was a stale { phase } object, so preempt() threw, and the new edit was listed but never made
-    (from 0.4.10; the live CI job of 0.5.7). The mock holds the render's first upload for 4 s, so the press lands there.
+    """Generate pressed while the render of the edit before it starts, before its first step: no page error, and the new edit
+    is made. The mock holds the render's first upload for 4 s, so the press lands there.
     The flow's mock serves this page alone, so no other page's upload takes the hold."""
     page = load(browser, port)
     errors = []
@@ -791,7 +790,7 @@ def race_flow(browser, port):
         raise AssertionError("the render's first upload never reached the mock: the race was not set up")
     page.keyboard.press("n")
     edit("a green bottle", [(0.2, 0.7), (0.28, 0.74)])
-    poll(page, lambda: errors or klein_passes(page) >= made + 2, 60)  # the new edit's Klein pass, or the page error the old code threw
+    poll(page, lambda: errors or klein_passes(page) >= made + 2, 60)  # the new edit's Klein pass, or a page error
     check(not errors, f"Generate while the render before it starts, before its first step: no page error {errors}")
     page.wait_for_function(DONE.format(n=2), timeout=120000)
     page.wait_for_function(f"[...document.querySelectorAll('#log li span')].filter((e) => /Klein edit preview/.test(e.textContent)).length >= {made + 2}",
