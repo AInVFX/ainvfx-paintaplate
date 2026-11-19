@@ -43,9 +43,9 @@ size_categories:
 - n<1K
 ---
 
-# AInVFX PaintAPlate example plates
+# AInVFX Paint a plate example plates
 
-**Work in progress.** The plates of [AInVFX PaintAPlate](https://github.com/AInVFX/ainvfx-paintaplate), the ComfyUI
+**Work in progress.** The plates of [AInVFX Paint a plate](https://github.com/AInVFX/ainvfx-paintaplate), the ComfyUI
 node pack and page that lets you paint on the first frame of a shot to erase, add or relight, and get the shot back in
 the plate's own format. These are the shots the app is tested and demonstrated on.
 
@@ -53,7 +53,7 @@ Every plate is synthetic, made in ComfyUI. **LTX 2.5** (Lightricks) made each sh
 frame by **MOSS-Image** or **FLUX 3 Image Klein** (Black Forest Labs), or from text alone. No real people, no real
 locations, no stock footage. All are AI-generated: please say so when you show them.
 
-## Use them with PaintAPlate
+## Use them with Paint a plate
 
 On a Runpod pod: `PLATES=1 bash tools/runpod_start.sh`, or `python get_plates.py` once ComfyUI runs. Either
 puts them in ComfyUI's `input/plates` folder, and the Open plate dialog lists them with a thumbnail. On your own machine:
@@ -143,7 +143,7 @@ def main() -> int:
     url = api.create_repo(a.repo, repo_type="dataset", private=a.private, exist_ok=True)
     print(f"Repository: {url}")
     api.upload_folder(folder_path=work, repo_id=a.repo, repo_type="dataset",
-                      commit_message=f"PaintAPlate example plates: {len(names)} synthetic shots, metadata replaced, WIP card")
+                      commit_message=f"Paint a plate example plates: {len(names)} synthetic shots, metadata replaced, WIP card")
     arrived = sorted(f for f in api.list_repo_files(a.repo, repo_type="dataset") if f.endswith(".mp4"))
     missing = sorted(set(names) - set(arrived))
     print(f"Uploaded: {len(arrived)} plates at https://huggingface.co/datasets/{a.repo}")
