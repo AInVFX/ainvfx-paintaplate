@@ -4,7 +4,7 @@
 
 import { fillWorkflow, stageOne } from "./logic.mjs";
 
-const LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]); // the nodes a link can stand in for
+const LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]); // the input loaders: a link can stand in for one, and none is a model
 const EDIT_OUT = ["result", "patch", "relit"]; // an edit's saved images: inside one scene, links carry them
 const OUTPUTS = new Set(["SaveImage", "PreviewImage", "SaveVideo", "PreviewAny", "PaintAPlate_SavePlate", "PaintAPlate_SaveFrames"]); // never shared
 
@@ -42,7 +42,7 @@ export function instantiate(wf, tag, values, links = {}, { plate = "plate", drop
 
 // One prompt from the parts, identical nodes shared: each model loads once, the plate decodes once. `onShare(kept, gone)`
 // hears of each node folded into an identical one.
-export function merge(parts, onShare = () => {}) {
+function merge(parts, onShare = () => {}) {
   const prompt = Object.assign({}, ...parts);
   for (let shared = true; shared;) {
     shared = false;
@@ -64,12 +64,11 @@ export function merge(parts, onShare = () => {}) {
 // no node reads, so it never runs. Every title starts with its section; the values the page set show in brackets. Model
 // loaders go in MODELS, whichever step first used them, as one loader serves every step. The page saves this graph in the
 // editor's own format (editorGraph, below), where each README becomes the note of its section's group.
-const INPUT_LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]);
-const isModel = (n) => /Loader/.test(n.class_type) && !INPUT_LOADERS.has(n.class_type);
+const isModel = (n) => /Loader/.test(n.class_type) && !LOADERS.has(n.class_type);
 const modelName = (n) => n.inputs.unet_name ?? n.inputs.ckpt_name ?? n.inputs.clip_name ?? n.inputs.vae_name ?? n.inputs.lora_name ??
   n.inputs.model_name ?? n.inputs.text_encoder ?? "";
 
-export function organise(prompt, where, sections) { // sections: [key, name, README text], in the order they run
+function organise(prompt, where, sections) { // sections: [key, name, README text], in the order they run
   const index = new Map(sections.map(([key], i) => [key, i])), members = sections.map(() => []);
   for (const [id, n] of Object.entries(prompt)) members[index.get(isModel(n) ? "models" : where[id]?.sec) ?? index.get("input")].push(id);
   const ids = new Map(), placed = [];
