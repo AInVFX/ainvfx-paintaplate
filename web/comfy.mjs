@@ -56,7 +56,7 @@ async function indexed(key) { // the outputs a finished job with this key made, 
   try { const r = await fetch(`/paintaplate/jobs/${key}`); return r.ok ? (await r.json()).outputs : null; } catch { return null; }
 }
 
-export const onNotice = (fn) => { notice = fn; };
+export const onNotice = (fn) => { notice = fn; }; // what the client has to tell the person (a retry, for example)
 let freeFirst = () => null, lastPosted = null; // the page's rule (logic.freesBefore): why ComfyUI's memory is freed before this job, or null; and the workflow of the last job posted
 export const onFree = (fn) => { freeFirst = fn; };
 let stopped = () => false; // the page's rule (design rule 13): whether a stop is in force for a job of this kind. Such a job is not posted
@@ -69,7 +69,7 @@ async function released(limit = 15000) {
     const gpu = (await fetch("/system_stats").then((r) => r.json()).catch(() => null))?.devices?.[0];
     if (!gpu?.vram_total || gpu.vram_free > gpu.vram_total / 2) return;
   }
-} // what the client has to tell the person (a retry, for example)
+}
 export const onLog = (fn) => { log = fn; }; // a job's lines (below), and why a live preview could not be made
 
 // ---------- A job's lines in the log ----------
@@ -88,8 +88,8 @@ export function jobWaited(job, now) { // null for a job that starts within QUEUE
   const how = [job.number != null ? `number ${job.number}` : "", job.front ? "posted at the front" : ""].filter(Boolean).join(", ");
   return `${head(job)}: started after ${secs(now - job.sent)} in ComfyUI's queue${how ? ` (${how})` : ""}`;
 }
-// `fresh` false: ComfyUI ran nothing and listed no output, so the page took the outputs this prompt gave before
 const stop = (s) => (/[.!?]$/.test(s) ? s : `${s}.`); // every line ends with a full stop
+// `fresh` false: ComfyUI ran nothing and listed no output, so the page took the outputs this prompt gave before
 export const jobDone = (job, now, fresh = true) => `${head(job)}: done in ${secs(now - job.posted)} (${folded(job, fresh ? "" : "outputs as it made them before")}).`;
 export const jobFailed = (job, now, error) => `${head(job)}: failed after ${secs(now - job.posted)}. ${stop(error)}`; // ComfyUI's error names the node
 export function jobStopped(job, now, heard = true) { // `heard` false: the WebSocket is closed, so the page does not know whether the job had started
@@ -125,7 +125,7 @@ function liveOff(reason) {
 export const post = (path, body) =>
   fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-export async function loadWorkflows(names) { // all at once: ten small files, one round trip
+export async function loadWorkflows(names) { // all at once: the small files load in parallel
   const loaded = await Promise.all(names.map(async (name) => {
     const text = await (await fetch(`workflows/${name}.json`)).text();
     return [name, parseWorkflow(JSON.parse(text)), await hashHex(text)];
