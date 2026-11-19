@@ -1,4 +1,4 @@
-// Upscale to 4K's rules: the target and source sizes, the windows by the machine's memory, the estimate, the row.
+// Upscale's rules: the target and source sizes, the windows by the machine's memory, the estimate, the row.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { FAMILY, FINISH, freesBefore, upscaleAsk, upscaleFolder, upscaleKeeps, upscaleSeconds, upscaleSource, upscaleTarget, upscaleWindow, upscaleWindows } from "../../web/logic.mjs";
@@ -9,15 +9,16 @@ test("the target is 3840 px on the long side with the plate's aspect, and a larg
   assert.deepEqual(upscaleTarget(1920, 1080), UHD);
   assert.deepEqual(upscaleTarget(1080, 1920), [2160, 3840]);
   assert.deepEqual(upscaleTarget(2048, 858), [3840, 1608]);
-  assert.deepEqual(upscaleTarget(1920, 1088), [3840, 2176]);
+  assert.deepEqual(upscaleTarget(1920, 1088), [3812, 2160]); // the short side at most 2160
   assert.deepEqual(upscaleTarget(4096, 2160), [4096, 2160]);
 });
 
-test("SeedVR2 restores from half the target: a plate that large comes down to it first", () => {
-  assert.deepEqual(upscaleSource(1920, 1080, UHD), [0, 0]);
+test("SeedVR2 restores from a third of the target: a larger shot comes down to it first, a smaller one goes in as it is", () => {
+  assert.deepEqual(upscaleSource(1920, 1080, UHD), [1280, 720]);
   assert.deepEqual(upscaleSource(1280, 720, UHD), [0, 0]);
-  assert.deepEqual(upscaleSource(3840, 2160, UHD), HD);
-  assert.deepEqual(upscaleSource(2560, 1440, UHD), HD);
+  assert.deepEqual(upscaleSource(3840, 2160, UHD), [1280, 720]);
+  assert.deepEqual(upscaleSource(2560, 1440, UHD), [1280, 720]);
+  assert.deepEqual(upscaleSource(1920, 1080, [2560, 1440]), [854, 480]);
 });
 
 test("windows follow the machine: 21 frames on a 16 GB GPU under a 52 GB cap, one job on a 96 GB GPU with 175 GB of RAM", () => {
@@ -59,10 +60,10 @@ test("on a 16 GB GPU, SeedVR2's model leaves the memory before the 4K export and
 
 test("the row: off by default in the Finish menu, its question in figures", () => {
   const row = FINISH.find((o) => o.id === "upscale");
-  assert.equal(row.name, "Upscale to 4K");
+  assert.equal(row.name, "Upscale");
   assert.equal(typeof row.ask, "function");
   assert.equal(upscaleAsk({ target: UHD, frames: 121, alone: 1360, edit: 2748 }),
-    "Export then also writes a 4k folder at 3840 x 2160. On this GPU, 121 frames take about 23 min, or about 46 min with Paint or Clean, "
+    "Export then also writes an upscaled set at 3840 x 2160. On this GPU, 121 frames take about 23 min, or about 46 min with Paint or Clean, "
     + "whose plate and layer are restored too. Every pixel of an upscaled frame is new.");
 });
 

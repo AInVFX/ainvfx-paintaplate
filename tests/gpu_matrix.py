@@ -261,7 +261,7 @@ def command(a, case, folder):
     """ui_live.py's command for one case: its plate or its fluid shot, its strokes as written, its seed."""
     cmd = [sys.executable, os.path.join(HERE, "ui_live.py"), "--url", a.url, "--comfy", a.comfy, "--out", folder,
            "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2", *(["--memory", a.memory] if a.memory else []), *(["--preview", a.preview] if getattr(a, "preview", "") else []), *[f"--option={o}" for o in case.get("address", [])], *(["--graph"] if a.graph else []),
-           *(["--hdr"] if getattr(a, "hdr", False) or case.get("hdr") else []), *(["--upscale"] if case.get("upscale") else [])]
+           *(["--hdr"] if getattr(a, "hdr", False) or case.get("hdr") else []), *(["--upscale" if case.get("upscale") is True else f"--upscale={case['upscale']}"] if case.get("upscale") else [])]
     cmd += ["--fluid", json.dumps(case["fluid"])] if "fluid" in case else ["--path", case["path"]]
     if case.get("strokes"):
         cmd += ["--strokes", json.dumps(case["strokes"])]
@@ -367,14 +367,19 @@ def frames_source(path):
 
 
 def image_rgb(path):
-    """One image file as 8-bit RGB. An EXR's values are clipped at 1.0 under a plain 2.2 gamma: enough to see what is there."""
+    """One image file as 8-bit RGB. An EXR goes from the colour space its header names (plateio.guess_color_space: its
+    chromaticities, else linear Rec.709) to linear Rec.709 through the built-in OCIO config, then to sRGB as core encodes
+    it, clipped at 1.0: the frame in display colours, its highlights at white."""
     import numpy as np
     from PIL import Image
     if path.lower().endswith(".exr"):
         if REPO not in sys.path:
             sys.path.insert(0, REPO)
+        import ocio
         import plateio
-        return (np.clip(plateio.read_float(path)[..., :3], 0, 1) ** (1 / 2.2) * 255).astype(np.uint8)
+        src = ocio.guess(ocio.BUILTIN, plateio.guess_color_space({"ext": ".exr", "exr": plateio.exr_info(path)}), path)
+        lin = ocio.convert([plateio.read_float(path)[..., :3]], ocio.BUILTIN, src, ocio.guess(ocio.BUILTIN, "linear"))[0]
+        return (np.clip(ocio.encode(lin), 0, 1) * 255 + 0.5).astype(np.uint8)
     with Image.open(path) as im:
         return np.asarray(im.convert("RGB"))
 

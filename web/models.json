@@ -203,7 +203,7 @@
    "file": "seedvr2_7b_fp16.safetensors",
    "repo": "Comfy-Org/SeedVR2",
    "source": "https://huggingface.co/Comfy-Org/SeedVR2",
-   "use": "Upscale to 4K: restores the result's detail at 3840 px",
+   "use": "Upscale: restores the result's detail at the size chosen, up to 3840 x 2160",
    "licence": "Apache-2.0",
    "licence_url": "https://huggingface.co/Comfy-Org/SeedVR2/blob/main/README.md",
    "upstream": {

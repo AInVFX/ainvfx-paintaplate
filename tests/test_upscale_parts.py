@@ -1,5 +1,5 @@
-"""The checks of a 4K set: tests/upscale_compare.py parts measures how far the 4K result is from plate x (1 - matte) +
-layer x matte, and the GPU cases with « upscale » turn Finish > Upscale to 4K on through ui_live.py."""
+"""The checks of an upscaled set: tests/upscale_compare.py parts measures how far the upscaled result is from plate x (1 - matte) +
+layer x matte, and the GPU cases with « upscale » turn Finish > Upscale on through ui_live.py."""
 import argparse
 import json
 import os

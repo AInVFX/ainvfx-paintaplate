@@ -49,13 +49,13 @@ MODELS = [  # (repository, file in the repository, folder under models/)
     ("Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR", "ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors", "loras"),  # SDR to HDR
     ("Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR", "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors", "embeddings"),  # its prompt
     ("AInVFX/ainvfx-fluid", "ltx-2.5/ainvfx-fluid.safetensors", "loras"),  # optional: fluid shots from a blank plate
-    ("Comfy-Org/SeedVR2", "diffusion_models/seedvr2_7b_fp16.safetensors", "diffusion_models"),  # optional: Upscale to 4K
+    ("Comfy-Org/SeedVR2", "diffusion_models/seedvr2_7b_fp16.safetensors", "diffusion_models"),  # optional: Upscale
     ("Comfy-Org/SeedVR2", "vae/seedvr2_ema_vae_fp16.safetensors", "vae"),  # its VAE
 ]
 FLUID = "ainvfx-fluid.safetensors"
 HDR = ("ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors", "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors")  # gated
 UPSCALE = ("seedvr2_7b_fp16.safetensors", "seedvr2_ema_vae_fp16.safetensors")
-OPTIONAL = (FLUID, *HDR, *UPSCALE)  # without them, fluid shots, SDR to HDR or Upscale to 4K switch off and the rest works
+OPTIONAL = (FLUID, *HDR, *UPSCALE)  # without them, fluid shots, SDR to HDR or Upscale switch off and the rest works
 NVFP4 = ("black-forest-labs/flux-3-image-klein-comfy", "diffusion_models/flux3-image-klein-nvfp4.safetensors", "diffusion_models")
 SIZES = {  # bytes of each file at its revision, as Hugging Face lists it: --list prints them and adds them up
     "seedvr2_7b_fp16.safetensors": 16480583960,
@@ -169,7 +169,7 @@ def main(argv=None) -> int:
     ap.add_argument("models", nargs="?", default=comfy_folder("models"), help="ComfyUI's models folder (default: the one this pack is in)")
     ap.add_argument("--no-fluid", action="store_true", help="skip ainvfx-fluid: fluid shots from a blank plate switch off")
     ap.add_argument("--no-hdr", action="store_true", help="skip the SDR-to-HDR IC-LoRA (gated): SDR to HDR switches off")
-    ap.add_argument("--no-upscale", action="store_true", help="skip SeedVR2 7B and its VAE (17.0 GB): Upscale to 4K switches off")
+    ap.add_argument("--no-upscale", action="store_true", help="skip SeedVR2 7B and its VAE (17.0 GB): Upscale switches off")
     ap.add_argument("--nvfp4", action="store_true", help=argparse.SUPPRESS)  # FLUX 3 Image Klein's nvfp4 file: tests/gpu_bench.py only
     ap.add_argument("--only", nargs="+", metavar="FILE", help="these files only")
     ap.add_argument("--list", action="store_true", help="print each file with its size and whether it is in place, then stop")
@@ -185,7 +185,7 @@ def main(argv=None) -> int:
     else:
         missing = download(files, a.models, "model files")
     missing = {os.path.basename(rel) for rel in missing}
-    off = [name for name, group in (("fluid shots", (FLUID,)), ("SDR to HDR", HDR), ("Upscale to 4K", UPSCALE)) if missing & set(group)]
+    off = [name for name, group in (("fluid shots", (FLUID,)), ("SDR to HDR", HDR), ("Upscale", UPSCALE)) if missing & set(group)]
     if off and not a.list:
         print(f"Off while their files are missing: {', '.join(off)}. The rest works without them.")
     return 1 if missing - set(OPTIONAL) else 0

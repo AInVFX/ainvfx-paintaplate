@@ -686,22 +686,57 @@ export function logFileName(plate, d) {
   return `paintaplate_log_${name}_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}.txt`;
 }
 
-// ---------- Upscale to 4K ----------
-// Finish > Upscale to 4K: after the export, SeedVR2 7B restores it at 3840 px on the long side. The rules of
+// ---------- Upscale ----------
+// Finish > Upscale: after the export, SeedVR2 7B restores it at the size asked for, up to 3840 x 2160. The rules of
 // tests/upscale_plate.py, which runs the same workflows from a terminal (tests/test_upscale_rules.py keeps them equal).
 // long: the target's long side; factor: SeedVR2 restores from at most the target divided by it; chunk: the frames it
 // samples at once, and step the frames each further chunk adds (chunks share one latent frame); modelRam: the GB the 7B
 // model holds in RAM on a GPU under bigVram GB; copies: the float32 copies of one frame at the target size a job holds,
-// and composeCopies those of a job that also composes the 4K result (Paint and Clean). On a 96 GB GPU with 131 GB of RAM,
+// and composeCopies those of a job that also composes the upscaled result (Paint and Clean). On a 96 GB GPU with 131 GB of RAM,
 // 121 frames at 3840 x 2160 in one job peaked at 108.3 GB for the plate and 116.8 GB for the layer, which composes: 9.2
 // and 10.0 copies. A window of 21 frames on a 16 GB GPU held 8.
-export const UPSCALE = { long: 3840, factor: 2, chunk: 21, step: 20, modelRam: 15.7, bigVram: 32, copies: 8, composeCopies: 10 };
+// most: the largest target, its long and short sides; sizes: the long sides the menu lists beside the plate's own; least:
+// the smallest long side Custom… takes.
+export const UPSCALE = { long: 3840, most: [3840, 2160], sizes: [2560, 3840], least: 640, factor: 3, chunk: 21, step: 20, modelRam: 15.7,
+  bigVram: 32, copies: 8, composeCopies: 10 };
+// The size a person asks for: { side, px }, side "long", "width" or "height". The default is 3840 px on the long side, and a
+// scene saved before sizes, with the switch on (true), asks for it too.
+export const UPSCALE_ASK = { side: "long", px: UPSCALE.long };
 const roundEven = (x) => { const r = Math.round(x); return Math.abs(x % 1) === 0.5 && r % 2 ? r - 1 : r; }; // as Python's round()
-export function upscaleTarget(width, height, long = UPSCALE.long) { // long px on the long side with the plate's aspect, in even numbers; a larger plate keeps its size
-  if (Math.max(width, height) >= long) return [width, height];
-  return width >= height ? [long, 2 * roundEven(long * height / width / 2)] : [2 * roundEven(long * width / height / 2), long];
+const even = (x) => 2 * roundEven(x / 2);
+// The asked side at its px and the other side from the plate's aspect, both in even numbers (a movie in 4:2:0 needs even
+// sides), within UPSCALE.most with the aspect kept. A plate at least as large as a long side asked for keeps its size.
+// A number is a long side.
+export function upscaleTarget(width, height, ask = UPSCALE_ASK) {
+  const a = typeof ask === "number" ? { side: "long", px: ask } : ask, wide = width >= height;
+  if (a.side === "long" && Math.max(width, height) >= a.px) return [width, height];
+  const side = a.side === "long" ? (wide ? "width" : "height") : a.side, [long, short] = UPSCALE.most;
+  const mostW = wide ? Math.min(long, short * width / height) : Math.min(short, long * width / height);
+  const px = Math.min(a.px, side === "width" ? mostW : mostW * height / width);
+  return side === "width" ? [even(px), even(px * height / width)] : [even(px * width / height), even(px)];
 }
-export function upscaleSource(width, height, [tw, th]) { // the size SeedVR2 restores from: [0, 0], the frames as they are, when the target is twice their size or more
+// The sizes the Finish menu lists for a plate: its own, then each long side of UPSCALE.sizes that gives a larger size.
+export function upscaleSizes(width, height) {
+  const out = [{ ask: { side: "long", px: Math.max(width, height) }, size: [width, height] }];
+  for (const px of UPSCALE.sizes) {
+    const size = upscaleTarget(width, height, { side: "long", px });
+    if (size[0] > out.at(-1).size[0]) out.push({ ask: { side: "long", px }, size });
+  }
+  return out;
+}
+// Finish > Upscale > Custom…: one number, the long side in px, from UPSCALE.least to UPSCALE.most's long side: the ask for
+// that side, the width or the height (the other follows the plate, within UPSCALE.most), or null.
+export function upscaleCustom(text, width, height) {
+  const m = String(text ?? "").trim().match(/^\d+$/), px = m ? +m[0] : 0;
+  return px >= UPSCALE.least && px <= UPSCALE.most[0] ? { side: width >= height ? "width" : "height", px } : null;
+}
+// The ask a scene holds under deliver.upscale: true, a scene saved before sizes, asks for the default; false when off.
+export function upscaleAskOf(saved) {
+  if (saved === true) return UPSCALE_ASK;
+  const ok = saved && typeof saved === "object" && ["long", "width", "height"].includes(saved.side) && Number.isInteger(saved.px) && saved.px > 0;
+  return ok ? { side: saved.side, px: saved.px } : false;
+}
+export function upscaleSource(width, height, [tw, th]) { // the size SeedVR2 restores from: [0, 0], the frames as they are, when the target is UPSCALE.factor times their size or more
   if (Math.max(width, height) * UPSCALE.factor <= Math.max(tw, th)) return [0, 0];
   return [2 * roundEven(tw / UPSCALE.factor / 2), 2 * roundEven(th / UPSCALE.factor / 2)];
 }
@@ -725,7 +760,7 @@ export function upscaleSeconds([tw, th], frames, { passes = 1, parts = 1, profil
   const t = UPSCALE_SECONDS[profile] ?? UPSCALE_SECONDS.large, scale = (tw * th) / (3840 * 2160);
   return scale * frames * (passes * t.frame + parts * t.part / 121);
 }
-// The folder of a plate's 4K windows: one per plate, under a key of everything that changes their frames (the plate, its
+// The folder of a plate's upscaled windows: one per plate, under a key of everything that changes their frames (the plate, its
 // colour space and config, the sizes, the window, the format, the build), so a changed setting never adds frames to old
 // windows, and the next export of this plate finds them through the job index. FNV-1a, 32 bits, in hex.
 export function upscaleFolder(plateId, parts) {
@@ -733,11 +768,21 @@ export function upscaleFolder(plateId, parts) {
   for (const c of JSON.stringify(parts)) h = Math.imul(h ^ c.codePointAt(0), 0x01000193) >>> 0;
   return `paintaplate/${plateId}/upscale/${h.toString(16).padStart(8, "0")}`;
 }
-export const upscaleKeeps = (tools) => tools.length > 0 && !tools.includes("light"); // Paint and Clean keep the plate's untouched pixels: the 4K plate, layer and matte come too
-export const UPSCALE_LARGE = "This plate is already large: it is brought down to half the export's size, then SeedVR2 restores its detail. Every pixel is new.";
+// The upscaled result is composed from the upscaled plate, layer and matte when it is in the plate's own colour space, so
+// that its untouched pixels are the plate's (Paint and Clean). SDR to HDR's EXR frames regenerate every pixel: their result
+// is restored itself, with its matte, and keeps its values above 1.0 everywhere.
+export const upscaleComposes = ({ layer, matte, space }, plateSpace) => !!layer && !!matte && space === plateSpace;
+export const upscaleKeeps = (tools) => tools.length > 0 && !tools.includes("light"); // Paint and Clean keep the plate's untouched pixels: the upscaled plate, layer and matte come too
+// What the row says when the size asked for is no larger than the plate: the plate's own size, or a smaller one.
+export function upscaleWhy(width, height, ask = UPSCALE_ASK) {
+  const [tw, th] = upscaleTarget(width, height, ask), part = { 2: "half", 3: "a third of" }[UPSCALE.factor] ?? `1/${UPSCALE.factor} of`;
+  if (tw > width || th > height) return "";
+  const restore = `the result is brought down to ${part} that size, then SeedVR2 restores its detail. Every pixel is new.`;
+  return tw === width && th === height ? `At the plate's own size, ${restore}` : `This size is smaller than the plate, so the frames come out smaller: ${restore}`;
+}
 export function upscaleAsk({ target, frames, alone, edit }) { // the question before the row turns on: what Export writes, and how long on this GPU
   const min = (s) => `about ${Math.max(1, Math.round(s / 60))} min`;
-  return `Export then also writes a 4k folder at ${target[0]} x ${target[1]}. On this GPU, ${frames} ${frames === 1 ? "frame takes" : "frames take"} ${min(alone)}, `
+  return `Export then also writes an upscaled set at ${target[0]} x ${target[1]}. On this GPU, ${frames} ${frames === 1 ? "frame takes" : "frames take"} ${min(alone)}, `
     + `or ${min(edit)} with Paint or Clean, whose plate and layer are restored too. Every pixel of an upscaled frame is new.`;
 }
 
@@ -748,8 +793,8 @@ export const FINISH = [
   { id: "hdr", name: "SDR to HDR",
     line: "The full-size shot is regenerated in scene-linear values, fitted to the plate. The result is half-float EXR frames in ACES2065-1, in the viewer and in Export.",
     ask: "This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1." },
-  { id: "upscale", name: "Upscale to 4K",
-    line: "Export also writes the result at 3840 px on the long side, restored by SeedVR2 7B. With Paint or Clean, the plate, the layer and the matte come at that size too.",
+  { id: "upscale", name: "Upscale",
+    line: "Export also writes the result at the size chosen, up to 3840 x 2160, restored by SeedVR2 7B. With Paint or Clean, the plate, the layer and the matte come at that size too.",
     ask: upscaleAsk },
 ];
 export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on
@@ -1304,22 +1349,23 @@ export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? nu
 //   so the prompt writer, Klein and LTX take turns.
 // - medium, from 24 GB: the edit models load at start, LTX with the first shot.
 // - large, from 60 GB: every model loads at start and stays loaded.
-// From 16 GB (WHOLE_FROM), every LTX decode takes the whole frame in one piece (tile WHOLE) and every IC-LoRA guide is
-// encoded whole (guide_tiled false). In tiles, each tile comes out brighter near its edges, and the blend of two tiles
-// leaves a band of 0.1 to 0.2 stops where they overlap; a guide encoded in tiles leaves its lines in the shot sampled from
-// it. 121 frames at 1920 x 1088 decode whole in 13 s at a peak of 10.3 GiB in float32, against 45 to 99 s in tiles
-// (RTX PRO 6000). Under 16 GB, LTX decodes in 256 px tiles and encodes its guides in tiles, which leave those bands. The
-// full-size passes encode in each profile's tiles.
+// From 16 GB (WHOLE_FROM), every LTX decode takes the whole frame in one piece (tile WHOLE), and every LTX encode is whole:
+// each IC-LoRA guide (guide_tiled false) and the first stage that the full-size passes refine (encode_tile WHOLE). In
+// tiles, each tile comes out brighter near its edges, and the blend of two tiles leaves a band of 0.1 to 0.2 stops where
+// they overlap; a guide encoded in tiles leaves its lines in the shot sampled from it, and a full-size pass encoded in
+// 256 px tiles shows bands of 0.3 to 1.2 steps in 8 bits, up to 0.05 stops through SDR to HDR. 121 frames at 1920 x 1088
+// decode whole in 13 s at a peak of 10.3 GiB in float32, against 45 to 99 s in tiles (RTX PRO 6000). Under 16 GB, LTX
+// decodes and encodes in 256 px tiles, which leave those bands.
 // `slots` are workflow slot values (tile, encode_tile, guide_tiled): one set of workflows serves every profile.
 export const MEMORY_FROM = { medium: 24e9, large: 60e9 }; // bytes of VRAM: a 24 GB GPU reports about 25.7e9, a 16 GB one about 17.2e9
 export const WHOLE = 4096; // a tile larger than any working frame: VAE Decode (Tiled) decodes the whole frame in one piece
 export const WHOLE_FROM = 16e9; // bytes of VRAM from which every LTX decode is whole; a 12 GB GPU reports about 12.9e9
 export const MEMORY = {
-  small: { warm: [], frees: true, slots: { tile: WHOLE, encode_tile: 256, guide_tiled: false }, does: "Models load one at a time, so each step takes longer than on a larger GPU" },
-  medium: { warm: ["edit", "prompt"], frees: false, slots: { tile: WHOLE, encode_tile: 512, guide_tiled: false }, does: "The edit models load now, LTX with the first shot" },
-  large: { warm: ["edit", "prompt", "warm"], frees: false, slots: { tile: WHOLE, encode_tile: 512, guide_tiled: false }, does: "Every model loads now and stays loaded" },
+  small: { warm: [], frees: true, slots: { tile: WHOLE, encode_tile: WHOLE, guide_tiled: false }, does: "Models load one at a time, so each step takes longer than on a larger GPU" },
+  medium: { warm: ["edit", "prompt"], frees: false, slots: { tile: WHOLE, encode_tile: WHOLE, guide_tiled: false }, does: "The edit models load now, LTX with the first shot" },
+  large: { warm: ["edit", "prompt", "warm"], frees: false, slots: { tile: WHOLE, encode_tile: WHOLE, guide_tiled: false }, does: "Every model loads now and stays loaded" },
 };
-const TILED = { slots: { tile: 256, guide_tiled: true }, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger GPU" }; // under WHOLE_FROM
+const TILED = { slots: { tile: 256, encode_tile: 256, guide_tiled: true }, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger GPU" }; // under WHOLE_FROM
 // ComfyUI keeps the models of the jobs it has run in memory, ready for the next job. With 16 GB of VRAM under a cap of
 // 52 GB of RAM, a full-size shot left LTX and its text encoder there, 35 GB, and the tracking job after it took the rest:
 // the system stopped ComfyUI. A profile that `frees` holds one family of models at a time: the page asks

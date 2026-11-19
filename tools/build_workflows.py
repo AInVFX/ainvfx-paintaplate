@@ -22,8 +22,8 @@ UPSAMPLER = "qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors"
 INOUTPAINT = "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors"
 SAM = "sam3.1_multiplex_fp16.safetensors"
 # The memory profile's slots (logic.memoryProfile on the page): `tile`, the tile size of every LTX decode, WHOLE for the
-# whole frame in one piece; `encode_tile`, the tile size of the full-size passes' encode (cleanup, shotup); and `guide_tiled`, the
-# IC-LoRA guide encoded in tiles. Their defaults are a large GPU's.
+# whole frame in one piece; `encode_tile`, the tile size of the full-size passes' encode (cleanup, shotup), WHOLE in the same
+# way; and `guide_tiled`, the IC-LoRA guide encoded in tiles. Their defaults are a large GPU's.
 WHOLE = 4096  # a tile larger than any working frame: VAE Decode (Tiled) decodes the whole frame in one piece
 TINY = "taeltx2_3.safetensors"  # the tiny LTX 2.5 decoder of the live preview (models/vae_approx)
 FLUID = "ainvfx-fluid.safetensors"  # AInVFX's IC-LoRA: painted keyframes become smoke, steam or fire (models/loras)
@@ -34,7 +34,7 @@ LTX_AUDIO_VAE = "ltx-2.5-audio-vae-bf16.safetensors"  # its audio VAE (models/va
 RIPPLE_LORA = "LTX25_Ripple_v11.safetensors"  # WepeNerd's Ripple IC-LoRA, which carries paint and light (models/loras)
 HDR_LORA = "ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors"  # Lightricks' SDR-to-HDR IC-LoRA (models/loras, gated)
 HDR_SCENE = "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors"  # its fixed scene embeddings: the prompt it takes (models/embeddings)
-SEEDVR2 = "seedvr2_7b_fp16.safetensors"  # SeedVR2 7B, a one-step video restoration model: Upscale to 4K (models/diffusion_models)
+SEEDVR2 = "seedvr2_7b_fp16.safetensors"  # SeedVR2 7B, a one-step video restoration model: Upscale (models/diffusion_models)
 SEEDVR2_VAE = "seedvr2_ema_vae_fp16.safetensors"  # its VAE (models/vae)
 UPSCALE_OVERLAP = 4  # frames two neighbouring chunks share, crossfaded by core's merge: one latent frame of SeedVR2's VAE
 UPSCALE_CHUNK = 21  # frames SeedVR2 samples at once: one pass over 121 frames at 3840 x 2160 overflows the model's MLP
@@ -423,7 +423,7 @@ def cleanup():
     first = g("ImageScale", image=g("LoadImage", _title="Cleaned first frame", image=Slot("hero", "")), upscale_method="lanczos",
               width=size[0], height=size[1], crop="disabled")
     latent = g("LTXVImgToVideoInplace", vae=vae, image=first, strength=1.0, bypass=False,
-               latent=g("VAEEncodeTiled", pixels=start, vae=vae, tile_size=Slot("encode_tile", 512), overlap=64, temporal_size=500, temporal_overlap=64))
+               latent=g("VAEEncodeTiled", pixels=start, vae=vae, tile_size=Slot("encode_tile", WHOLE), overlap=64, temporal_size=500, temporal_overlap=64))
     audio = g("LTXVEmptyLatentAudio", audio_vae=audio_vae, frames_number=size[2], frame_rate=load[3], batch_size=1)
     sampled = g("SamplerCustomAdvanced", _progress=True, noise=g("RandomNoise", noise_seed=Slot("seed", 0)),
                 guider=g("CFGGuider", model=live(g, model, size, load), positive=cond[0], negative=cond[1], cfg=1.0),
@@ -508,7 +508,7 @@ def shotup():
     cond = g("LTXVConditioning", positive=g("CLIPTextEncode", text=Slot("prompt", RIPPLE_PROMPT), clip=clip),
              negative=g("CLIPTextEncode", text=NEGATIVE, clip=clip), frame_rate=load[3])
     latent = g("LTXVImgToVideoInplace", vae=vae, image=hero, strength=1.0, bypass=False,
-               latent=g("VAEEncodeTiled", pixels=start, vae=vae, tile_size=Slot("encode_tile", 512), overlap=64, temporal_size=500, temporal_overlap=64))
+               latent=g("VAEEncodeTiled", pixels=start, vae=vae, tile_size=Slot("encode_tile", WHOLE), overlap=64, temporal_size=500, temporal_overlap=64))
     guide = g("LTXAddVideoICLoRAGuide", positive=cond[0], negative=cond[1], vae=vae, latent=latent,
               image=reference, frame_idx=0, strength=1.0, latent_downscale_factor=1.0, crop="disabled",
               use_tiled_encode=Slot("guide_tiled", False), tile_size=256, tile_overlap=64, use_streaming=False, tile_frames=97)
@@ -874,7 +874,7 @@ def hdr():
 
 
 def upscale():
-    """Upscale to 4K: one window of the result, frames `first` to `first + count - 1` (Slots first and count), made sharp
+    """Upscale: one window of the result, frames `first` to `first + count - 1` (Slots first and count), made sharp
     at the size the page sends (Slots width and height) by SeedVR2 7B, with core's SeedVR2 nodes wired as core's blueprint
     wires them.
 
@@ -894,12 +894,12 @@ def upscale():
     crossfades. The post-processing matches the colours to the Lanczos frames (Slot color_fix: lab, the node's default,
     or none). Save Frames writes the window: 16-bit PNG, or half-float EXR for a float plate (Slot format).
 
-    Two optional parts make the 4K set of an edit that keeps the plate's untouched pixels, where this window is the
-    export's layer. The 4K result (Slot comp_prefix): the same window of the 4K plate (Slot under, saved by an earlier job
+    Two optional parts make the upscaled set of an edit that keeps the plate's untouched pixels, where this window is the
+    export's layer. The upscaled result (Slot comp_prefix): the same window of the upscaled plate (Slot under, saved by an earlier job
     of this workflow on the plate, in its colour space, Slot under_space) around the matte, the restored layer
     inside it, through Composite Frames. The matte (Slot matte, the export's, at the plate's size) is cut to the window
-    and sized as Composite Frames sizes it, with a bilinear filter: never generated. The 4K matte (Slot matte_prefix):
-    that same picture as 16-bit PNG frames, so the 4K result, plate, layer and matte add up to one code value. Every
+    and sized as Composite Frames sizes it, with a bilinear filter: never generated. The upscaled matte (Slot matte_prefix):
+    that same picture as 16-bit PNG frames, so the upscaled result, plate, layer and matte add up to one code value. Every
     window saves its matte into one folder, numbered on from the frames already there.
     """
     g = Graph()
@@ -928,22 +928,22 @@ def upscale():
     size = g("GetImageSize", image=back)
     matte = g("ImageFromBatch", _title="The window of the matte", batch_index=Slot("first", 0), length=Slot("count", UPSCALE_CHUNK),
               image=g("PaintAPlate_LoadPlate", _title="Matte", path=Slot("matte", ""), max_frames=Slot("max_frames", 121), pad_8n1=False))
-    under = g("PaintAPlate_LoadPlate", _title="The window of the 4K plate", path=Slot("under", ""), max_frames=Slot("count", UPSCALE_CHUNK), pad_8n1=False)
-    under = colour(g, under, Slot("under_space", "@model"), Slot("color_space", "@model"), "The window of the 4K plate in the layer's colour space")
-    comp = g("PaintAPlate_CompositeFrames", _title="4K result: the plate's window around the matte, the layer inside it", destination=under,
+    under = g("PaintAPlate_LoadPlate", _title="The window of the upscaled plate", path=Slot("under", ""), max_frames=Slot("count", UPSCALE_CHUNK), pad_8n1=False)
+    under = colour(g, under, Slot("under_space", "@model"), Slot("color_space", "@model"), "The window of the upscaled plate in the layer's colour space")
+    comp = g("PaintAPlate_CompositeFrames", _title="Upscaled result: the plate's window around the matte, the layer inside it", destination=under,
              source=back, mask=g("ImageToMask", image=matte, channel="red"), width=size[0], height=size[1])
-    saved = g("PaintAPlate_SaveFrames", _title="4K result frames", _output="comp", images=comp, fps=load[3], format=Slot("format", "png16"),
+    saved = g("PaintAPlate_SaveFrames", _title="Upscaled result frames", _output="comp", images=comp, fps=load[3], format=Slot("format", "png16"),
               filename_prefix=Slot("comp_prefix", ""))
     g.link_slot(saved, "images", "upscale_comp")
     big = g("ImageScale", _title="The matte at the target size (bilinear, as Composite Frames sizes it)", image=matte, upscale_method="bilinear",
             width=size[0], height=size[1], crop="disabled")
-    saved = g("PaintAPlate_SaveFrames", _title="4K matte", _output="matte", images=big, format="png16", filename_prefix=Slot("matte_prefix", ""))
+    saved = g("PaintAPlate_SaveFrames", _title="Upscaled matte", _output="matte", images=big, format="png16", filename_prefix=Slot("matte_prefix", ""))
     g.link_slot(saved, "images", "upscale_matte")
     g.save("upscale")
 
 
 def upscale_export():
-    """Upscale to 4K's export, after the last window. Join Windows reads the windows' folders under one parent folder
+    """Upscale's export, after the last window. Join Windows reads the windows' folders under one parent folder
     (Slot frames), in order, each window its last frames (Slot count) and the last window what is left of the shot's
     frames (Slot max_frames), so a window job that ran again counts once; a shot made in one job is one window. Save Plate writes the joined frames at their own size, in the format of the export at the plate's size (Slot
     shot), which Load Plate reads for its spec: the same file type, codec, bit depth, frame numbers, colour tags, timecode

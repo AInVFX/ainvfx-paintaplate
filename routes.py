@@ -20,7 +20,7 @@
     GET  /paintaplate/download?run=paintaplate/<plate>/v3&name=shot010_paintaplate_v3&parts=export,matte
 `parts` chooses what the zip holds (default: export,matte): export is the result in the plate's own format, layer the
 shot as the composite blends it (result = plate x (1 - matte) + layer x matte), matte where the plate changed, review the full-size review movie (else the preview composite), shot the whole frame as the model made
-it (the full-size pass first), 4k the set Upscale to 4K made (4k/export, 4k/plate, 4k/layer, 4k/matte). Only render folders under output/paintaplate are zipped, and only plain files inside them.
+it (the full-size pass first), upscaled the set that Upscale made (upscaled/export, upscaled/plate, upscaled/layer, upscaled/matte). Only render folders under output/paintaplate are zipped, and only plain files inside them.
 Everything here is plain functions (tests/test_routes.py); setup() adds the routes to ComfyUI's server.
 """
 from __future__ import annotations
@@ -79,9 +79,9 @@ PARTS = {"export": (["export"], None), "layer": (["layer"], None), "matte": (["m
                   "regenerated_shot.mp4"),
          # a fluid shot exported by itself: its HDR frames, the shot in the blank plate's format, its preview movie
          "hdr": (["hdr"], None), "plate": (["plate"], None), "preview": (["preview_*.mp4"], "preview.mp4"),
-         # Upscale to 4K: the result, the plate, the layer and the matte at 4K, each in its folder under 4k/ (its windows
+         # Upscale: the result, the plate, the layer and the matte upscaled, each in its folder under upscaled/ (its windows
          # are saved elsewhere, so they stay out)
-         "4k": (["4k"], None)}
+         "upscaled": (["upscaled"], None)}
 DEFAULT_PARTS = ["export", "matte"]
 
 
