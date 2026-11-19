@@ -1,18 +1,12 @@
-"""Plate input and output helpers that core ComfyUI does not provide.
+"""Files: what a plate needs that core ComfyUI does not read or write.
 
-Core already decodes EXR, 16-bit PNG and video frames to float (Load Image and
-Load Video go through PyAV) and writes single-layer EXR and PNG (Save Image
-(Advanced)). This module fills the remaining gaps only:
+Image sequences and frame patterns, the plate spec and its colour guess, the plate browser's folder scan, video and
+sequence decoding with core's pictures (each frame written into its place in one array), EXR writing that keeps every
+untouched channel, layer, part and header attribute (OpenEXR, optional), stills in the plate's format, video in the
+source codec, pixel format, colour tags and timecode with the source audio copied, PNG, EXR and H.264 writers that work
+on several frames at once, a shot's windows joined, and the blank canvas of a fluid shot.
 
-* image sequences (a folder of numbered frames) and their spec,
-* the source spec of a plate, so the export can match it,
-* EXR export that keeps every untouched channel, layer, part and header
-  attribute of the source frame (OpenEXR, optional),
-* video export in the source codec, pixel format, colour tags and timecode,
-  with the source audio copied.
-
-Everything here is plain Python with numpy, PyAV and (optionally) OpenEXR, so
-it runs and is tested outside ComfyUI.
+Everything here is plain Python with numpy, PyAV and (optionally) OpenEXR, so it runs and is tested outside ComfyUI.
 """
 from __future__ import annotations
 
@@ -94,8 +88,8 @@ def pattern_of(prefix: str, suffix: str, ext: str, digits: int) -> str:
 
 # A group of numbered images is a frame sequence when at least one of every SPARSEST numbers between its first and its
 # last exists. Sparser than that, the numbers are not frames: ComfyUI's mask editor names its files by the millisecond
-# (clipspace-mask-1791816680123.png), and a walk from the first number to the last made billions of entries, 1.3 GB a
-# second, until ComfyUI's memory was gone. Such numbers count files: one frame per file, nothing missing.
+# (clipspace-mask-1791816680123.png), and a walk from the first number to the last would hold billions of entries.
+# Such numbers count files: one frame per file, nothing missing.
 SPARSEST = 100
 
 
@@ -170,8 +164,7 @@ def exr_rate(path: str) -> Fraction | None:
 
 def _fps_fields(path: str, fps_hint) -> dict:
     """The frame rate of a still plate, as a float and as an exact fraction: an EXR frame's own rate when its header
-    holds one (exr_rate), else the hint. A 16-bit fluid shot made at 50 fps opened as a plate at 24 fps until its frames
-    said their rate (on a pod)."""
+    holds one (exr_rate), else the hint."""
     rate = exr_rate(path) if path.lower().endswith(".exr") else None
     if rate is None:
         rate = fps_hint if isinstance(fps_hint, Fraction) else Fraction(float(fps_hint or 24.0)).limit_denominator(100000)
@@ -328,7 +321,7 @@ def pad_count_8n1(n: int) -> int:
 
 def largest_side(width: int, height: int, largest: int) -> tuple[int, int]:
     """(width, height) with the longer side at `largest`, rounded as core's Scale Image to Max Dimension rounds them
-    (comfy_extras/nodes_images.py at v0.44.2). 0 keeps the size."""
+    (comfy_extras/nodes_images.py at ComfyUI v0.45.3, the pin). 0 keeps the size."""
     if not largest:
         return width, height
     if height > width:
@@ -466,8 +459,8 @@ def read_native(path: str, with_alpha: bool, eight: bool = False) -> np.ndarray:
     """Read one still frame exactly, as integers (RGB or RGBA): 8 bits for an 8-bit target, else 16.
 
     Core decodes to float through swscale, which can move a 16-bit value by a few codes. The export copies untouched
-    pixels from this exact read instead. An 8-bit frame is read at 8 bits: swscale's 16 to 8-bit step is not the
-    inverse of its 8 to 16-bit one, and moved 123 of the 256 levels up by one.
+    pixels from this exact read instead. An 8-bit frame is read at 8 bits, so no step to 8 bits follows: from the
+    exact 16-bit value k x 257, swscale's step to 8 bits moves 123 of the 256 levels up by one (PyAV 19.0.2).
     """
     with av.open(path) as c:
         frame = next(c.decode(video=0))
@@ -501,7 +494,7 @@ def read_float(path: str) -> np.ndarray:
             g, b, r = planes
             return np.stack([r, g, b], -1).astype(np.float32)
         if max(c.bits for c in frame.format.components) <= 8:  # at its own depth: swscale's 16-bit output of an 8-bit
-            return frame.to_ndarray(format="rgb24").astype(np.float32) / 255.0  # level k is k * 256, and white reads 0.9962
+            return frame.to_ndarray(format="rgb24").astype(np.float32) / 255.0  # level k is near k * 256, not k * 257: white reads 0.9962
         return frame.to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
 
 
@@ -522,7 +515,7 @@ def _core_frames(path: str, duration: float = 0.0):
             raise ValueError(f"Plate has no video stream: {path}. Use a movie file that holds video.")
         stream = container.streams.video[0]
         stream.thread_type = "AUTO"
-        end_pts = int((0.0 + duration) / stream.time_base)
+        end_pts = int(duration / stream.time_base)
         fmt, byte8, has_alpha, align = "", False, False, None
         for packet in container.demux(stream):
             try:
@@ -607,13 +600,12 @@ def decode_video(path: str, max_frames: int, fps: float, pad_8n1: bool = False):
     """A video's first `max_frames` frames as core's decoder gives them, each written into its place in one array.
 
     Core (VideoFromFile(path, duration=max_frames / fps).get_components()) holds the plate twice: its list of frames,
-    then their stack, and Load Plate's 8k+1 padding made one more copy for a moment. Returns (RGB float32 (N, H, W, 3),
+    then their stack, and padding that stack to 8k+1 frames copies it once more. Returns (RGB float32 (N, H, W, 3),
     alpha float32 (N, H, W) or None, the frames decoded); with `pad_8n1`, N also counts the padding. The live tests compare
     it with core's decoder (tests/decode_parity.py), so a ComfyUI pin that changes core's pictures fails a test.
 
     The array holds what the file's header says it holds (_frames_said), up to `max_frames`, not `max_frames` rows: the
-    node allows 1,024, and a short clip loaded with more reserved rows for frames that do not exist, which Windows
-    commits. A file that holds more grows the array as its frames come; one that holds fewer shrinks it in place. Either
+    node allows 1,024, and on Windows a row reserved for a frame that does not exist still takes memory. A file that holds more grows the array as its frames come; one that holds fewer shrinks it in place. Either
     way the pictures are core's."""
     expected = min(max_frames, _frames_said(path)) or min(max_frames, 8)
     limit = pad_count_8n1(max_frames) if pad_8n1 else max_frames
@@ -638,7 +630,7 @@ def decode_video(path: str, max_frames: int, fps: float, pad_8n1: bool = False):
 
 def decode_frames(files: list, pad_8n1: bool = False, workers: int = 8, each=None):
     """An image sequence as core's decoder gives it file by file (VideoFromFile(file).get_components(), then joined),
-    each file written into its place in one array, the padding too: core's join held the frames twice. Files decode in
+    each file written into its place in one array, the padding too: core's join holds the frames twice. Files decode in
     parallel; `each(i)` runs before file i (Load Plate's stop and progress). Returns what decode_video returns."""
     def one(i):
         if each:
@@ -784,9 +776,8 @@ def write_movie(frame_at, n: int, path: str, fps: float, workers: int = 8, crf: 
                 tick=None, size: tuple | None = None) -> None:
     """An H.264 movie for the page to play, as core Save Video makes it (crf 18, yuv420p, BT.709 matrix and primaries, the
     sRGB transfer tag, limited range), only faster: the frames convert to YUV several at once and x264 runs at preset
-    veryfast with its own threads. Core took 8.3 s for 121 frames at 1920 x 1088 on an RTX PRO 6000 pod. At most
-    twice `workers` frames are converted ahead of x264: Executor.map took the whole shot at once, and the converted frames
-    waited in memory when x264 was slower than the conversion."""
+    veryfast with its own threads. Core takes 8.3 s for 121 frames at 1920 x 1088 on an RTX PRO 6000 pod. At most
+    twice `workers` frames are converted ahead of x264, so converted frames never wait in memory for a slower x264."""
     first = np.ascontiguousarray(frame_at(0))
     h, w = first.shape[:2]
     if size and all(size):  # (width, height): scaled with swscale's Lanczos while converting, as the viewer's canvas wants it
@@ -832,7 +823,7 @@ def write_movie(frame_at, n: int, path: str, fps: float, workers: int = 8, crf: 
 def core_uint8(frame: np.ndarray, rows: int = 64) -> np.ndarray:
     """A float frame as core's Save Image and Save Video write it: scaled by 255, clipped to 0 to 255, truncated to 8 bits.
     The bytes of np.clip(255.0 * frame, 0, 255).astype(np.uint8), made `rows` lines at a time: the float32 temporary is a
-    strip, where that expression makes two the size of the frame, and Save Movie's 16 threads each held them."""
+    strip, where that expression makes two the size of the frame in each of Save Movie's threads."""
     out = np.empty(frame.shape, np.uint8)
     strip = np.empty((min(rows, len(frame)),) + frame.shape[1:], np.float32)
     for y in range(0, len(frame), rows):
@@ -852,7 +843,7 @@ def plane_array(plane, itemsize: int) -> np.ndarray:
 def keep_samples(frame, source, keep: np.ndarray):
     """`frame` (planar YUV) with `source`'s own samples wherever `keep` (H, W) holds for every pixel a sample covers.
 
-    Untouched pixels then reach the encoder as the source's YUV samples, with no RGB round trip: a 4:2:0 plate lost up
+    Untouched pixels then reach the encoder as the source's YUV samples, with no RGB round trip: a 4:2:0 plate loses up
     to 12/255 to that round trip, even with a lossless encode (42.25 dB). A chroma sample shared by four pixels
     is kept only when all four are untouched.
     """
@@ -1043,8 +1034,8 @@ def write_blank(path: str, width: int, height: int, fps: float, frames: int) -> 
 def encoder_pix_fmt(encoder: str, want: str) -> str:
     """The pixel format nearest `want` that `encoder` writes: the same chroma layout at the highest depth it offers.
 
-    FFmpeg's ProRes decoder reports a 4444 plate as yuv444p12le, and prores_ks writes yuv444p10le: asked to open with
-    the decoder's format, the encoder refused it and the export failed.
+    FFmpeg's ProRes decoder reports a 4444 plate as yuv444p12le, and prores_ks writes yuv444p10le: it refuses to open
+    with the decoder's format.
     """
     try:
         offered = [f.name for f in (av.codec.Codec(encoder, "w").video_formats or [])]
@@ -1132,7 +1123,7 @@ class VideoWriter:
     def write(self, rgb: np.ndarray, keep: np.ndarray | None = None, source=None) -> None:
         """`rgb` is display-referred float (H, W, 3) in 0..1, as decoded by core. Where `keep` (H, W) holds, the source
         frame's own YUV samples are written instead (`keep_samples`)."""
-        if self.eight:  # 8-bit RGB: rounded here, since swscale's 16 to 8-bit step moves most levels up by one
+        if self.eight:  # 8-bit RGB: rounded here, since swscale's step to 8 bits moves 123 of the 256 levels up by one (read_native)
             frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(to_uint8(rgb)), format="rgb24")
         else:
             frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(to_uint16(rgb)), format="rgb48le")

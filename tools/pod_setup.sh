@@ -7,7 +7,7 @@
 # The refs default to the tested commits, in tools/pins.sh. The pack is the repo this script lives in.
 # Code, models and pins live in $WORKDIR (a network volume survives the pod); the Python env
 # goes on the fast container disk. Accept the Hugging Face licences of FLUX 3 Image Klein,
-# LTX 2.5 and the LTX in-outpainting IC-LoRA first: the downloads use your token.
+# LTX 2.5, the LTX in-outpainting IC-LoRA and the SDR-to-HDR IC-LoRA first: the downloads use your token.
 set -euo pipefail
 W=${WORKDIR:-/workspace}; VENV=${VENV:-/opt/venv}
 # shellcheck source-path=SCRIPTDIR source=pins.sh

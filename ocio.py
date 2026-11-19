@@ -8,7 +8,7 @@ into the model space, and the edited pixels back into the plate's colour space f
 The model space is the sRGB-encoded Rec.709 the models were trained on (FLUX 3 Image Klein, LTX 2.5, SAM 3.1). Into it,
 values above 1.0 are tone-mapped as core ComfyUI's Convert Image Color Space maps them to sRGB: an extended Reinhard on
 luminance with the batch's peak as white point, then the same gamut compression (comfy_extras/nodes_images.py at
-v0.43.0). A plate's model inputs are the ones core made. Out of the model space, values are decoded as they are, as core
+ComfyUI v0.45.3, the pin). A plate's model inputs are the ones core made. Out of the model space, values are decoded as they are, as core
 decodes sRGB.
 
 Two names stand for spaces derived from the model space, so every config works: "@model", the model space entered through
@@ -26,7 +26,7 @@ import numpy as np
 import PyOpenColorIO as OCIO
 
 ENV = "$OCIO"  # the config name that means the file the OCIO environment variable names
-BUILTIN = "ocio://studio-config-latest"  # ACES 2.1 with the camera log spaces (ARRI, Sony, RED, Canon, ...)
+BUILTIN = "ocio://studio-config-latest"  # with PyOpenColorIO 2.6: ACES 2.1 with the camera log spaces (ARRI, Sony, RED, Canon, ...)
 MODEL, LINEAR = "@model", "@linear"
 WORKERS = min(16, os.cpu_count() or 4)  # frames in parallel: OCIO releases the GIL while it converts
 _POOL = ThreadPoolExecutor(WORKERS)
@@ -303,8 +303,8 @@ def convert(frames, name: str, src: str, dst: str, peak: float | None = None) ->
 
 def convert_with_peak(frames, name: str, src: str, dst: str, peak: float | None = None) -> tuple[np.ndarray | list[np.ndarray], float]:
     """convert's frames, in one array, and the peak of its tone mapping: into @model, `peak` or the peak of these frames, read on the way
-    in with no second pass; out of @model, the `peak` whose tone mapping is undone; 1.0 when there is none. Color Space
-    (OCIO) gives it as its second output, so the nodes after it take the plate's peak as a number (PL6). It is the float
+    in with no second pass; out of @model, the `peak` whose tone mapping is undone; 1.0 when there is none. Colour Space
+    (OCIO) gives it as its second output, so the nodes after it take the plate's peak as a number. It is the float
     batch_peak reads: the same way into linear Rec.709 (_route), the same frames."""
     frames = list(frames)
     if src == dst or not frames:

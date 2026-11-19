@@ -1,6 +1,6 @@
-"""PL6: the plate's peak read once. Colour Space (OCIO)'s second output is the peak its tone mapping took on the way into
-the model space (ocio.convert_with_peak). The composite's return and Relight Transfer take it as a number; until 1.11.14
-each read the whole plate again. It is the float they read, so their pictures are the same bytes."""
+"""The plate's peak read once. Colour Space (OCIO)'s second output is the peak its tone mapping took on the way into
+the model space (ocio.convert_with_peak). The composite's return and Relight Transfer take it as a number
+instead of reading the whole plate again. It is the float that reading gives, so their pictures are the same bytes."""
 import json
 import os
 import sys
@@ -17,7 +17,7 @@ SPACES = ("ACEScg", "Linear Rec.709 (sRGB)", "sRGB Encoded Rec.709 (sRGB)", "ACE
 
 
 def relight_read(plate, src):
-    """What Relight Transfer read until 1.11.14 (ocio.linear_peak, gone in PL6): the peak of the plate in @linear."""
+    """The plate's peak read the long way, from the whole plate in @linear: what the number stands in for."""
     lin = ocio.convert(plate, ocio.BUILTIN, src, ocio.LINEAR)
     return max(1.0, max(float(np.max(f[..., :3] @ ocio.REC709_LUMA, initial=0.0)) for f in lin))
 

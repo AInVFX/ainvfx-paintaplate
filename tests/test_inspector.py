@@ -23,8 +23,8 @@ def exr(path, rgb):
 
 class Pixel(unittest.TestCase):
     def test_a_plate_point_reads_a_smaller_pass_at_the_same_place(self):
-        """The inspector's point is in the plate's pixels, and a preview pass has fewer: 1.7.0 failed with « Pixel 358, 359
-        outside the frame (640 x 352). ». With `of`, the plate's size, the route reads the pass's own pixel there."""
+        """The inspector's point is in the plate's pixels, and a preview pass has fewer: without `of`, the plate's point
+        (358, 359) lies outside a 640 x 352 pass. With `of`, the plate's size, the route reads the pass's own pixel there."""
         os.makedirs(os.path.join(INPUT, "pv_seq"), exist_ok=True)
         rgb = np.zeros((32, 64, 3), np.float32)
         rgb[16, 40] = [2.0, 0.5, 0.25]

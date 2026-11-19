@@ -1,4 +1,5 @@
-"""The page's HTTP routes. Every path is a page path (folders.py): under the input folder, or the output folder with output:.
+"""The page's HTTP routes. Every path is a page path (folders.py): under the input folder, under the output folder with
+output:, or, on a ComfyUI that answers this machine alone, an absolute path.
     GET  /paintaplate/browse?path=output:video        a folder for the Open dialog: subfolders, videos, sequences, scenes;
                                                       at a root, also the newest plates of the folders below it
     GET  /paintaplate/version                         the pack's version, from pyproject.toml: the page's top bar and log;
@@ -198,7 +199,7 @@ def model_path(name: str) -> str | None:
     for kind in list(getattr(folder_paths, "folder_names_and_paths", {})):
         try:
             path = folder_paths.get_full_path(kind, name)
-        except Exception:  # a folder kind that holds no such file
+        except Exception:  # build_parts runs this at import, where a raise would stop the pack loading
             path = None
         if path:
             return path
@@ -239,7 +240,7 @@ def ltx_label(ltx: str, value: str) -> str:
         return "not found"
     if git_commit(ltx):
         return value[:7]
-    version = pack_version(ltx) or ""
+    version = pack_version(ltx)
     return (f"{version}, " if version[:1].isdigit() else "") + f"files {value[:7]} (not a git clone)"
 
 
@@ -343,7 +344,7 @@ def first_image(first: str, still: bool) -> np.ndarray:
     animated image. Float formats keep their values (plateio.read_float); 8-bit ones come back from 0 to 1."""
     if still:
         return plateio.read_float(first)
-    with plateio.av.open(first) as c:
+    with av.open(first) as c:
         return next(c.decode(video=0)).to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
 
 
@@ -365,7 +366,7 @@ def thumbnail(rel: str, width: int = THUMB_WIDTH) -> str:
     h, w = rgb.shape[:2]
     k = min(1.0, width / max(h, w))
     small = mathops.resize_to(rgb, max(1, round(h * k)), max(1, round(w * k))) if k < 1.0 else rgb
-    spec = {"ext": os.path.splitext(first)[1].lower(), "kind": "sequence" if plateio.is_sequence(full) else "video"}
+    spec = {"ext": os.path.splitext(first)[1].lower(), "kind": "sequence" if still else "video"}
     if spec["ext"] == ".exr":
         spec["exr"] = plateio.exr_info(first)
     shown = ocio.display_rgb(small, "", ocio.guess("", plateio.guess_color_space(spec), first))
@@ -392,7 +393,7 @@ async def thumb(request: web.Request) -> web.StreamResponse:
     try:
         async with THUMBS_AT_ONCE:
             path = await asyncio.to_thread(thumbnail, request.query.get("path", ""))
-    except (FileNotFoundError, StopIteration, ValueError, OSError) as exc:
+    except (StopIteration, ValueError, OSError) as exc:
         raise web.HTTPNotFound(text=f"No thumbnail: {exc}") from exc
     return web.FileResponse(path, headers={"Cache-Control": "max-age=3600"})
 
@@ -605,8 +606,9 @@ PLANAR_YUV = re.compile(r"^yuva?4(20|22|44)p(\d+)?(le)?$")
 def _video_rgb(frame) -> np.ndarray:
     """A decoded video frame as float32 RGB, in its own values (0 to 1, or beyond for out-of-range codes). Planar YUV goes
     through the file's own matrix and range in float, from its samples at their bit depth, as OpenRV converts a source's
-    YUV in its shader; swscale's 16-bit output was 0.77 of an 8-bit level off on a BT.709 red. Chroma is repeated
-    over the pixels it covers. Other formats (RGB, NV12) go through swscale at 16 bits."""
+    YUV in its shader. swscale's 16-bit output is less exact: with PyAV 19.0.2, a BT.709 limited-range red (Y 63, Cb 102,
+    Cr 240) comes out 2.5 8-bit levels low on red. Chroma is repeated over the pixels it covers. Other formats (RGB, NV12)
+    go through swscale at 16 bits."""
     m = PLANAR_YUV.match(frame.format.name)
     if not m:
         return frame.to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
@@ -704,8 +706,7 @@ def pixel(rel: str, frame: int, x: int, y: int, size: int = 1, of: str = "") -> 
     half floats as stored, above 1.0 and below 0), and the mean of the `size` x `size` pixels around it.
 
     `of` is the size of the grid (x, y) is in, as "3840x2160": the plate's. A frame of another size, such as a preview
-    pass, is read at the same place of the picture in its own pixels, which the reply names (1.7.0 read the plate's
-    pixel numbers in a 640 x 352 preview and failed)."""
+    pass, is read at the same place of the picture in its own pixels, which the reply names."""
     full = folders.plate_path(rel)
     stamp = os.path.getmtime(full if os.path.exists(full) else os.path.dirname(full))
     rgb = _frame_cached(full, max(0, frame), stamp)
@@ -771,7 +772,7 @@ def list_scenes() -> list[dict]:
     """Scenes saved here, newest first, with what the Open dialog shows: the plate's name and the number of edits."""
     folder = os.path.join(folder_paths.get_output_directory(), SCENES)
     out = []
-    for e in sorted(os.scandir(folder), key=lambda e: -e.stat().st_mtime) if os.path.isdir(folder) else []:
+    for e in sorted(os.scandir(folder), key=lambda e: -e.stat(follow_symlinks=False).st_mtime) if os.path.isdir(folder) else []:
         if not e.name.endswith(".paintaplate.json") or e.is_symlink():
             continue
         try:
@@ -861,8 +862,8 @@ async def trace(request: web.Request, handler):
     """One line in ComfyUI's log when a request starts and one when it ends: its method and address, the seconds, and the
     memory the process holds. Every request to ComfyUI passes here, the pack's routes and the others. A request that
     starts and never ends is one that ran when ComfyUI stopped. A front end's own file is said only when it is slow or
-    heavy. On with PAINTAPLATE_TRACE=1 in ComfyUI's environment (ComfyUI can reach a 40 GB cap with the page open
-    and no job posted, and nothing in its log says which request ran)."""
+    heavy. On with PAINTAPLATE_TRACE=1 in ComfyUI's environment: ComfyUI's own log names no request, so memory that
+    grows while no job runs shows no cause there."""
     what, t0, before = f"{request.method} {request.path_qs[:240]}", time.perf_counter(), held()
     quiet = request.method == "GET" and request.path.endswith(TRACE_QUIET) and not request.path.startswith("/paintaplate/")
     if not quiet:

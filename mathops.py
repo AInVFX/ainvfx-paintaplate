@@ -1,4 +1,5 @@
-"""The numpy maths behind the nodes: fitting generated frames to the plate, filling, relighting.
+"""The numpy maths behind the nodes: fitting generated frames to the plate, compositing, filling an erase, relighting,
+mattes that follow an object, the HDR level and the keyframe video.
 
 Frames are (H, W, C) float arrays and masks (H, W); stacks add a first axis. Nothing here imports
 torch or ComfyUI, so every function is tested in plain Python (tests/test_mathops.py).
@@ -181,9 +182,9 @@ def resize_lanczos(img: np.ndarray, h: int, w: int, window: tuple | None = None)
 def resize_to(img: np.ndarray, h: int, w: int) -> np.ndarray:
     """Resample the first two axes to exactly (h, w): separable bilinear, pixel centres aligned, edges clamped.
 
-    The same result as scipy's zoom (order 1, grid_mode) and torch's bilinear interpolate without align_corners,
-    in a quarter of the time: two gathers and two blends in numpy, no spline machinery. Enlarging the masks and
-    colour fields to full size was the composite's largest cost.
+    The same result as scipy's zoom (order 1, grid_mode) and torch's bilinear interpolate without align_corners, in
+    about a fifth of the time (a 480 x 270 field to 1920 x 1088 on one CPU: 63 ms against 295 ms): two gathers and two
+    blends in numpy, no spline machinery. fit_to_plate enlarges every mask and colour field to full size with it.
     """
     if img.shape[:2] == (h, w):
         return img
@@ -241,7 +242,7 @@ def level_fill(fill: np.ndarray, alpha: np.ndarray, base: np.ndarray, paint: np.
     """An erase's fill, levelled with the background it continues: (the fill, how far it moved on average, in levels).
 
     Klein's fill can sit a few levels off the background around it: a pale, soft shape where the object was, which LTX
-    then animated into smoke (+4 to +6 levels on a backdrop at 18). The background inside the fill is estimated
+    then animates into smoke (+4 to +6 levels on a backdrop at 18). The background inside the fill is estimated
     from the frame around it on a grid of `cell` pixels, per brightness band, so a backdrop continues the backdrop and not
     the lit floor below it, with `push_pull`. Where the fill is flat and close to that estimate, the difference goes, low
     frequencies only. Where they differ a lot (an edge, a revealed object) or the fill is textured, nothing changes. The
@@ -476,8 +477,8 @@ def keyframe_video(keys, width: int, height: int, frames: int, read) -> np.ndarr
 # The change of light is the log of the frame's luminance over the plate's, smoothed by a Gaussian of `radius` pixels, plus
 # the change of each channel's share of the luminance, smoothed over LIGHT_COLOUR_SPREAD radii, with a channel never counted
 # below CHANNEL_FLOOR of the luminance, so a dark channel cannot swing the colour. The filters are fixed: nothing depends on
-# a frame's own figures, so a steady shot gives a steady result (an edge-aware filter and anchor gains in the
-# composite made a steady full-size shot flicker).
+# a frame's own figures, so a steady shot gives a steady result (an edge-aware filter, or gains anchored on each
+# frame, makes a steady full-size shot flicker).
 LIGHT_EPS = 1.0 / 512.0  # linear light: darker than this counts as this dark when the change is measured
 LIGHT_COLOUR_SPREAD = 4.0
 CHANNEL_FLOOR = 0.1

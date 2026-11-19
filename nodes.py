@@ -1,10 +1,11 @@
-"""The twelve Paint a plate nodes. Each one does what core ComfyUI cannot.
+"""The Paint a plate nodes, listed in NODES at the end. Each one does what core ComfyUI cannot, or holds less memory.
 
-Compositing, masks, Klein, LTX and SAM 3.1 stay in core nodes. These nodes load and save plates in their own format,
-convert colour with OpenColorIO, fit generated frames to the plate, transfer a new light onto it, keep a matte on what an
-edit made, level an erase's fill, fit an HDR shot to the plate, save frames and movies several at once, show a shot while LTX samples it, and build the
-keyframe control video of a fluid shot. Each node converts tensors and calls plateio (files), mathops (pixels) or ocio
-(colour), which are tested without torch or ComfyUI.
+Masks, Klein, LTX and SAM 3.1 stay in core nodes. These nodes load and save plates in their own format, convert colour
+with OpenColorIO, fit generated frames to the plate, composite them one frame at a time, transfer a new light onto the
+plate, keep a matte on what an edit made, level an erase's fill, fit an HDR shot to the plate and keep its blacks, save
+frames and movies several at once, show a shot while LTX samples it, build the keyframe control video of a fluid shot,
+and join the windows of a shot. Each node converts tensors and calls plateio (files), mathops (pixels) or ocio (colour),
+which are tested without torch or ComfyUI.
 """
 from __future__ import annotations
 
@@ -32,10 +33,6 @@ from . import folders, mathops, ocio, plateio
 Plate = io.Custom("PAINTAPLATE_PLATE")
 WORKERS = min(16, os.cpu_count() or 4)  # frames in parallel: numpy, scipy and PyAV release the GIL
 CATEGORY = "AInVFX/Paint a plate"
-
-
-
-resolve, output_folder = folders.plate_path, folders.output_folder
 
 
 class Stop:
@@ -121,20 +118,18 @@ class LoadPlate(io.ComfyNode):
 
     @classmethod
     def fingerprint_inputs(cls, path, max_frames, pad_8n1):
-        full = resolve(path)
+        full = folders.plate_path(path)
         files = plateio.find_sequence(full) if plateio.is_sequence(full) else [full]
         return f"{path}|{max_frames}|{pad_8n1}|{len(files)}|{max(os.path.getmtime(f) for f in files)}"
 
     @classmethod
     def execute(cls, path, max_frames, pad_8n1) -> io.NodeOutput:
-        full = resolve(path)
+        full = folders.plate_path(path)
         spec = plateio.probe_plate(full)
         if spec["kind"] == "video":  # our decoder: core's pictures, each frame into its place, the padding too
             bar = comfy.utils.ProgressBar(1)
             rgb, a, count = plateio.decode_video(full, max_frames, spec["fps"], pad_8n1)
             bar.update(1)
-            images, extra = torch.from_numpy(rgb), rgb.shape[0] - count
-            alpha = None if a is None else torch.from_numpy(a)
         else:  # an image sequence: the files decode in parallel, each into its place, the padding too
             files = spec["files"][:max_frames]
             bar, stop = comfy.utils.ProgressBar(len(files)), Stop()
@@ -143,8 +138,8 @@ class LoadPlate(io.ComfyNode):
                 stop()
                 bar.update(1)
             rgb, a, count = plateio.decode_frames(files, pad_8n1, WORKERS, each)
-            images, extra = torch.from_numpy(rgb), rgb.shape[0] - count
-            alpha = None if a is None else torch.from_numpy(a)
+        images, extra = torch.from_numpy(rgb), rgb.shape[0] - count
+        alpha = None if a is None else torch.from_numpy(a)
         if alpha is None:  # an opaque plate: one frame of ones stands for every frame, and takes one frame of memory
             alpha = torch.ones((1, *images.shape[1:3]), dtype=images.dtype, device=images.device).expand(count + extra, -1, -1)
         spec.update(frames=count, color_space_guess=plateio.guess_color_space(spec))
@@ -227,7 +222,7 @@ class SavePlate(io.ComfyNode):
     def execute(cls, images, plate, filename_prefix, keep_untouched, changed=None, alpha=None) -> io.NodeOutput:
         spec = plateio.at_size(plate, images.shape[2], images.shape[1])  # frames of another size: Upscale to 4K
         keep_untouched = keep_untouched and "scaled_from" not in spec
-        out_dir = output_folder(filename_prefix)
+        out_dir = folders.output_folder(filename_prefix)
         os.makedirs(out_dir, exist_ok=True)
         count = min(images.shape[0], spec["frames"])
         written, notes = [], []
@@ -316,7 +311,7 @@ class FitToPlate(io.ComfyNode):
         if mask is None or not bool(mask.any()):  # nothing to composite (a relight alone): the plate stands, nothing is fitted
             return io.NodeOutput(plate[:n], torch.zeros((n, h, w), dtype=torch.float32))
         image = image[:n]  # at its own size: Fit to Plate enlarges only the window around the matte, with a Lanczos-3
-        masks = np.zeros((1, 8, 8), np.float32) if mask is None else mask[:n].float().cpu().numpy()
+        masks = mask[:n].float().cpu().numpy()
         bar = comfy.utils.ProgressBar(2 * n)
         images, out = mathops.fit_to_plate(
             n, h, w, stoppable(lambda i: plate[i].float().cpu().numpy()), lambda i: image[i].float().cpu().numpy(), masks,
@@ -413,7 +408,8 @@ class RelightTransfer(io.ComfyNode):
             with ThreadPoolExecutor(WORKERS) as pool:
                 shift = mathops.shot_shift(list(pool.map(lambda sr: mathops.frame_shift(*sr, width, shot_space), zip(src, rel))))
             if shift != (0.0, 0.0):
-                logging.info("[Paint a plate] Relight Transfer: shot realigned by x %+.2f px, y %+.2f px, over %d frames.", shift[1], shift[0], n)
+                logging.info("[Paint a plate] Relight Transfer: shot realigned by x %+.2f px, y %+.2f px, over %d %s.", shift[1], shift[0], n,
+                             "frame" if n == 1 else "frames")
         peak = peak if peak is not None and shot_space == "sRGB" else 1.0
         untone = peak > ocio.TONE_ABOVE  # a plate above 1.0: 'source' and 'relit' go back to its levels, frame by frame
         if untone:
@@ -511,7 +507,7 @@ class KeyframeVideo(io.ComfyNode):
         stamps = []
         for key in json.loads(keys or "[]"):  # a keyframe image replaced under the same name runs again
             try:
-                stamps.append(os.path.getmtime(resolve(key["image"])))
+                stamps.append(os.path.getmtime(folders.plate_path(key["image"])))
             except (OSError, ValueError, KeyError, TypeError):
                 stamps.append(None)
         return f"{width}|{height}|{frames}|{keys}|{stamps}"
@@ -519,7 +515,7 @@ class KeyframeVideo(io.ComfyNode):
     @classmethod
     def execute(cls, width, height, frames, keys) -> io.NodeOutput:
         def read(name):
-            with Image.open(resolve(name)) as im:
+            with Image.open(folders.plate_path(name)) as im:
                 im = im.convert("RGB")
                 if im.size != (width, height):
                     im = im.resize((width, height), Image.NEAREST)  # flat colours stay flat
@@ -688,7 +684,7 @@ class SaveFrames(io.ComfyNode):
             category=CATEGORY,
             description="Saves a batch as numbered frames, named as core Save Image names them, several frames at once: "
                         "8-bit PNG, as core saves them, or half-float EXR with lossless PIZ compression, values above 1.0 "
-                        "kept. Core writes one frame after another: 35 s for 121 PNG frames at 1920 x 1088, where this node "
+                        "kept. Core writes one frame after another: 35.3 s for 121 PNG frames at 1920 x 1088 on an RTX PRO 6000 pod, where this node "
                         "takes about a second on a pod with 16 cores.",
             inputs=[
                 io.Image.Input("images"),
@@ -738,7 +734,7 @@ class SaveMovie(io.ComfyNode):
             category=CATEGORY,
             description="Saves a batch as an H.264 movie for the page, as core Save Video makes it (crf 18, BT.709, "
                         "limited range), with the frames converted several at once and x264 at preset veryfast: core "
-                        "took 8.3 s for 121 frames at 1920 x 1088. With 'destination' or 'largest_size', each frame is "
+                        "takes 8.3 s for 121 frames at 1920 x 1088 on an RTX PRO 6000 pod. With 'destination' or 'largest_size', each frame is "
                         "converted and sized as it is saved: no second batch of the frames is held in memory.",
             inputs=[
                 io.Image.Input("images"),
@@ -891,7 +887,7 @@ class JoinWindows(io.ComfyNode):
 
     @classmethod
     def execute(cls, folder, count=0, max_frames=0) -> io.NodeOutput:
-        full = resolve(folder)
+        full = folders.plate_path(folder)
         windows = sorted(os.path.join(full, d) for d in os.listdir(full) if os.path.isdir(os.path.join(full, d)))
         if not windows:
             raise ValueError(f"Join Windows: no window folder in {folder}.")

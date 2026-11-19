@@ -1,11 +1,12 @@
-"""Where Paint a plate reads and writes: every path the page sends resolves under ComfyUI's input or output folder.
+"""Where Paint a plate reads and writes, and how a path the page sends resolves.
 
 A path that starts with "output:" names something in the output folder; any other path names something in the input
-folder. A frame pattern (shot.####.exr, ComfyUI_#####_.png) names one image sequence in a folder. A symbolic link, or a
-path that leaves its folder, is refused. An absolute path names a place on the machine itself (machine_path): a movie, a
-frame of a sequence (the whole sequence) or a folder, read only when it has a plate's extension. It opens only when
-ComfyUI answers this machine alone (on_this_machine): on a server that listens on the network, a file goes through the
-page's upload. Nothing is written outside the output folder. nodes.py and routes.py both resolve through here.
+folder. A frame pattern (shot.####.exr, ComfyUI_#####_.png) names one image sequence in a folder. A path that leaves its
+folder is refused, whether by its name or through a symbolic link above it, and so is a path that names a link (for
+a frame pattern, its folder). An absolute path names a place on the machine itself (machine_path): a movie, a frame of a
+sequence (the whole sequence) or a folder, read only when it has a plate's extension. It opens only when ComfyUI answers
+this machine alone (on_this_machine): on a server that listens on the network, a file goes through the page's upload.
+nodes.py and routes.py both resolve through here.
 """
 from __future__ import annotations
 
@@ -32,7 +33,7 @@ def absolute(rel: str) -> bool:
 
 
 def listens() -> list:
-    """The addresses ComfyUI listens on, its --listen (several, with commas). None outside ComfyUI."""
+    """The addresses ComfyUI listens on, its --listen (several, with commas). An empty list outside ComfyUI."""
     try:
         from comfy.cli_args import args  # ComfyUI's own arguments, read when a path asks
     except ImportError:
@@ -95,7 +96,8 @@ def plate_path(rel: str, folder: bool = False) -> str:
         raise ValueError(f"This path leaves ComfyUI's folders: {rel}.")
     pattern = plateio.split_pattern(full)
     on_disk = pattern[0] if pattern else full
-    if full != root and os.path.islink(on_disk):
+    real_root = os.path.realpath(root)  # the input or output folder may itself be a link, to a bigger disk
+    if full != root and (os.path.islink(on_disk) or os.path.commonpath([os.path.realpath(on_disk), real_root]) != real_root):
         raise ValueError(f"Symbolic links are not followed: {rel}.")
     if not os.path.exists(on_disk):
         raise FileNotFoundError(f"Nothing at {rel}.")

@@ -30,7 +30,7 @@ if curl -s -m 3 -o /dev/null http://127.0.0.1:8188/system_stats; then
   log "ComfyUI is already running: $APP"
   if [ "${PLATES:-0}" != 0 ]; then "$VENV/bin/python" "$HERE/get_plates.py" "$W/ComfyUI/input/plates" || log "example plates missing"; fi
 else
-  log "setup: ComfyUI, ComfyUI-LTXVideo, this pack and 62 GB of models (log: $W/setup.log)"
+  log "setup: ComfyUI, ComfyUI-LTXVideo, this pack and 79 GB of models (log: $W/setup.log)"
   bash "$HERE/tools/pod_setup.sh" > "$W/setup.log" 2>&1 &
   setup=$!
   shown=0; last=0
@@ -39,7 +39,7 @@ else
     if [ "$n" -gt "$shown" ]; then sed -n "$((shown + 1)),${n}p" "$W/setup.log" | sed 's/^/    /'; shown=$n; fi
     if [ $((SECONDS - last)) -ge 15 ] && ! grep -q "models done" "$W/models.log" 2>/dev/null; then
       last=$SECONDS
-      log "models: $(du -sb "$W/models" 2>/dev/null | awk '{printf "%.1f", $1 / 1e9}') of 62 GB"
+      log "models: $(du -sb "$W/models" 2>/dev/null | awk '{printf "%.1f", $1 / 1e9}') of 79 GB"
     fi
   }
   while kill -0 "$setup" 2>/dev/null; do report; sleep 2; done
@@ -56,7 +56,7 @@ else
   log "models ready: $(du -sb "$W/models" 2>/dev/null | awk '{printf "%.1f", $1 / 1e9}') GB"
   flags=(--listen 0.0.0.0 --port 8188)
   vram=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n 1)
-  if [ "${vram:-0}" -ge 80000 ]; then flags+=(--highvram); fi  # every model stays loaded on a 96 GB card
+  if [ "${vram:-0}" -ge 80000 ]; then flags+=(--highvram); fi  # every model stays loaded on a 96 GB GPU
   read -r -a extra <<< "${COMFY_ARGS:-}"  # more ComfyUI flags, such as COMFY_ARGS=--disable-dynamic-vram
   flags+=("${extra[@]}")
   cd "$W/ComfyUI" || exit 1

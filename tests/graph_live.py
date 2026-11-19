@@ -187,7 +187,7 @@ def main():
         graph = json.load(f)
     api = ((graph.get("extra") or {}).get("paintaplate") or {}).get("prompt")
     if not api:
-        sys.exit("This file holds no API graph (extra.paintaplate.prompt): save the scene's graph again with a page from feat/page-w5 or later.")
+        sys.exit("This file holds no API graph (extra.paintaplate.prompt): save the scene's graph again from the page.")
     out = os.path.expanduser(a.out)
     os.makedirs(out, exist_ok=True)
     if a.rebuild:

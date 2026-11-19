@@ -31,21 +31,24 @@ def scene_folders(out: str) -> set:
 
 
 def unused(out: str, keep=()) -> list:
-    """The files of the unused cache under out/paintaplate, as (path, bytes). keep: folders the page still uses."""
+    """The files of the unused cache under out/paintaplate, as (path, bytes). keep: folders the page still uses.
+    A symbolic link is never followed nor listed, so clearing removes no file through a link, and no link."""
     root, kept, found = os.path.join(out, ROOT), set(keep) | scene_folders(out), []
     for plate in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         home = os.path.join(root, plate)
-        if plate in (SCENES, JOBS) or not os.path.isdir(home):
+        if plate in (SCENES, JOBS) or os.path.islink(home) or not os.path.isdir(home):
             continue
         entries = sorted(os.listdir(home))
         if not any(PART.fullmatch(e) and os.path.isdir(os.path.join(home, e)) for e in entries):
             continue  # not a plate's folder: it holds no render and no edit
         for e in entries:
             path = os.path.join(home, e)
+            if os.path.islink(path):
+                continue
             if os.path.isdir(path):
                 if PART.fullmatch(e) and f"{ROOT}/{plate}/{e}" not in kept:
                     found += [(p, os.path.getsize(p)) for top, _, names in os.walk(path) for p in (os.path.join(top, n) for n in names)
-                              if not is_export(p)]
+                              if not os.path.islink(p) and not is_export(p)]
             elif f"{ROOT}/{plate}" not in kept and not is_export(path):
                 found.append((path, os.path.getsize(path)))
     return found

@@ -3,7 +3,7 @@
     python tests/mock_comfy.py --root /tmp/mock --port 8199 [--plate] [--speed 8]
 
 It serves web/ at /extensions/ainvfx-paintaplate/, answers /object_info, /upload/image, /prompt, /history,
-/view, /queue, /interrupt and /ws, and runs each workflow with numpy instead of models: an edit tints and
+/view, /queue, /interrupt, /system_stats, /free and /ws, and runs each workflow with numpy instead of models: an edit tints and
 blurs the reference inside the mask and streams step previews, the shot pastes the edited first frame over
 every frame, the matte repeats the first mask, the composite and the export blend through the matte. The
 download route and the plate browser are the pack's own routes.py. --plate writes a 1280 x 704 test plate to input/plates/desk.mp4.
@@ -114,7 +114,7 @@ def save_png(img, kind, prefix, i=None):
     os.makedirs(d, exist_ok=True)
     name = f"{stem}_{(i or 0) + 1:05d}_.png"
     mode = "L" if img.ndim == 2 else ("RGBA" if img.shape[2] == 4 else "RGB")
-    # the fastest compression: a PNG keeps every pixel at any level, and level 6, the default, was a third of a page flow's time
+    # the fastest compression: a PNG keeps every pixel at any level
     Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8), mode).save(os.path.join(d, name), compress_level=1)
     return {"filename": name, "subfolder": sub, "type": kind}
 
@@ -278,7 +278,7 @@ async def execute(pid, prompt):
         img = load_image(v["image"])
         h, w = img.shape[:2]
         yy, xx = np.mgrid[0:h, 0:w]
-        extra = STATE.get("snap")  # armed by /mock/snap: another object that some masks take in, as SAM took in a horse's nose
+        extra = STATE.get("snap")  # armed by /mock/snap: another object that some masks take in, as SAM can take in part of a neighbour
         armed = bool(extra) and extra["times"] > 0
         if armed:
             extra["times"] -= 1
@@ -417,7 +417,7 @@ async def execute(pid, prompt):
         for f in shot:
             writer.write(f)
         writer.close()
-        o[outs["plate"]] = {"text": [f"1 file(s) in {d}\n{os.path.basename(writer.path)}"]}
+        o[outs["plate"]] = {"text": [f"Save Plate: 1 file written to {d}.\n  First files: {os.path.basename(writer.path)}."]}
         if "control" in outs:  # the control video: black, each keyframe at its frame
             at = {k["frame"]: np.asarray(Image.open(resolve(k["image"])).convert("RGB").resize((w, h)), np.float32) / 255 for k in keys}
             o[outs["control"]] = {"images": [save_mp4([at.get(i, np.zeros((h, w, 3), np.float32)) for i in range(len(frames))],
@@ -471,7 +471,7 @@ async def execute(pid, prompt):
                 o[outs["layer_exr"]] = {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
             if "export" not in outs:
                 return o
-            o[outs["export"]] = {"text": [f"1 file(s) in {d}\nplate_00001_.webm"],
+            o[outs["export"]] = {"text": [f"Save Plate: 1 file written to {d}.\n  First files: plate_00001_.webm."],
                                  "files": [{"filename": "plate_00001_.webm", "subfolder": v["prefix"], "type": "output"}]}
     else:
         await steps(pid, 1, 0.2)
@@ -673,7 +673,7 @@ async def pack_version_route(request):  # mock only: the version and the build /
     return web.json_response({})
 
 
-async def card_route(request):  # mock only: the card /system_stats reports from now on, in bytes: {"vram": 17.2e9, "ram": 65.5e9} is a 16 GB card with 61 GB of RAM; "ram_free" is the RAM it reports as free
+async def card_route(request):  # mock only: the card /system_stats reports from now on, in bytes: {"vram": 17.2e9, "ram": 65.5e9} is a 16 GB GPU with 61 GB of RAM; "ram_free" is the RAM it reports as free
     STATE["card"] = await request.json()
     return web.json_response({})
 
@@ -682,7 +682,7 @@ async def system_stats_route(request):  # once armed, the GPU's memory: nearly f
     if STATE.get("armed"):
         low = time.time() < STATE.get("release_at", float("inf"))
         return web.json_response({"system": {}, "devices": [{"name": "mock", "vram_total": 96e9, "vram_free": 2e9 if low else 90e9}]})
-    card = STATE.get("card", {})  # set by /mock/card; else a 32 GB card: the medium profile, no LTX warm-up
+    card = STATE.get("card", {})  # set by /mock/card; else a 32 GB GPU: the medium profile, no LTX warm-up
     vram = float(card.get("vram", 32e9))
     system = {name: float(card[key]) for key, name in (("ram", "ram_total"), ("ram_free", "ram_free")) if key in card}  # under ComfyUI's own names
     return web.json_response({"system": system, "devices": [{"name": "mock", "vram_total": vram, "vram_free": vram - 2e9}]})

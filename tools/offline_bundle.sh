@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # An offline bundle, for a GPU machine that cannot reach GitHub (Hugging Face and PyPI still needed).
 #   bash tools/offline_bundle.sh [paintaplate_offline.tar.gz]
-# Run it where GitHub answers (a laptop). The bundle holds ComfyUI and ComfyUI-LTXVideo at the tested
+# Run it on a machine that reaches GitHub. The bundle holds ComfyUI and ComfyUI-LTXVideo at the tested
 # commits and this repo as committed, laid out as in /workspace. On the GPU machine:
 #   1. In JupyterLab, open the workspace folder and drag the bundle into it.
 #   2. In a terminal: cd /workspace && tar xzf paintaplate_offline.tar.gz
