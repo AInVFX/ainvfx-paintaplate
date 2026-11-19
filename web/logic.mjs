@@ -645,6 +645,11 @@ export function askedText(asked) {
 // The native frames' failure is said once per cause: a message that names its file counts once for every file.
 export const nativeCause = (message, path) => String(message).split(path).join("the file").trim();
 
+// The full-precision frames' failure (app.fetchDeep): refused, unanswered or malformed, the cache stops (frames.fillDeep) and
+// the viewer keeps the 8-bit movie. One line per source, an error, so the log and the status line show it in red.
+export const deepStopped = (what, why) =>
+  `Error: full-precision frames of ${what}: stopped (${String(why ?? "").replace(/\s+/g, " ").trim() || "no reason given"}). Viewer: 8-bit movie.`;
+
 // The log's export: the text of paintaplate_log_<plate>_<YYYYMMDD_HHMM>.txt, to share for troubleshooting. It holds the
 // log and what ComfyUI reports of its versions and its machine (/system_stats): no command line and no path.
 export function logReport({ version, build, stats, browser, address, memory, plate, lines, now }) {

@@ -20,6 +20,7 @@ import { askedSeed, editSeed, gridGrow } from "./logic.mjs"; // the tests: a see
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
 import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, nearSize, sameMachine, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
 import { readBack } from "./canvas.mjs"; // the viewer: a few pixels of the view, read without moving it off the GPU
+import { deepStopped } from "./logic.mjs"; // the viewer: the full-precision frames' failure, in red
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -3764,13 +3765,17 @@ function wantDeep() { // an image sequence's own values around the playhead: the
 
 function fetchDeep(cache, path, what) { // frames as RGB half floats from the frame route, ranked like the 8-bit cache
   const fresh = cache.fillDeep(async (first, count) => {
-    const r = await fetch(`/paintaplate/frames?${new URLSearchParams({ path, first, count, side: DEEP_SIDE })}`);
-    if (!r.ok) {
-      log(`Full-precision frames of ${what}: stopped (${await r.text()}). Viewer: 8-bit movie.`);
-      throw new Error("frames");
+    try {
+      const r = await fetch(`/paintaplate/frames?${new URLSearchParams({ path, first, count, side: DEEP_SIDE })}`);
+      if (!r.ok) throw new Error(await r.text());
+      const size = r.headers.get("X-Frame-Size");
+      if (!size) throw new Error("the answer holds no frame size");
+      const [width, height] = size.split("x").map(Number);
+      return { width, height, data: new Uint16Array(await r.arrayBuffer()) };
+    } catch (err) { // refused, unanswered or malformed: the cache stops (frames.fillDeep); said once, for the source still on show
+      if (cache.path === path) log(deepStopped(what, err.message));
+      throw err;
     }
-    const [width, height] = r.headers.get("X-Frame-Size").split("x").map(Number);
-    return { width, height, data: new Uint16Array(await r.arrayBuffer()) };
   }, path);
   if (fresh) log(`Full-precision frames of ${what}: loading in the background, ${DEEP_SIDE} px on the long side, ${S.plate.cs}.`);
 }
