@@ -32,6 +32,14 @@ class Crops(unittest.TestCase):
         self.assertEqual(sheet.shape, (20, 48, 3))
         self.assertEqual((int(sheet[19, 2, 1]), int(sheet[19, 30, 1])), (80, 80))  # frame 2's box, in each result
 
+    def test_a_shot_under_the_output_folder_or_the_input_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "input", "plates"))
+            open(os.path.join(tmp, "input", "plates", "horse.mp4"), "w").close()
+            self.assertEqual(upscale_plate.shot_path(tmp, "output:u3/hdr"), os.path.join(tmp, "output", "u3", "hdr"))
+            self.assertEqual(upscale_plate.shot_path(tmp, "plates/horse.mp4"), os.path.join(tmp, "input", "plates", "horse.mp4"))
+            self.assertEqual(upscale_plate.shot_path(tmp, "elsewhere/horse.mp4"), os.path.join(tmp, "input", "plates", "horse.mp4"))
+
     def test_the_source_at_a_third(self):
         self.assertEqual(upscale_plate.source_size(1920, 1080, (3840, 2160)), (0, 0))  # twice the shot: it goes in as it is
         self.assertEqual(upscale_plate.source_size(1920, 1080, (3840, 2160), 3), (1280, 720))

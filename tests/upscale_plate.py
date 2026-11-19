@@ -98,6 +98,17 @@ def export_values(shot: str, frames: int, label: str = "upscale", count: int = W
     return {"shot": shot, "frames": f"{OUTPUT}{label}/upscale", "max_frames": frames, "count": count, "prefix": f"{label}/export"}
 
 
+def shot_path(comfy: str, shot: str) -> str:
+    """The file or folder of `shot` as Load Plate takes it: under ComfyUI's output folder after « output: », else under
+    its input folder, else the file of that name anywhere under ComfyUI."""
+    if shot.startswith(OUTPUT):
+        return os.path.join(comfy, "output", shot[len(OUTPUT):])
+    full = os.path.join(comfy, "input", shot)
+    if os.path.exists(full):
+        return full
+    return next(os.path.join(d, f) for d, _, fs in os.walk(comfy) for f in fs if f == os.path.basename(shot))
+
+
 def frame_size(path: str) -> tuple:
     """(width, height) of a PNG or EXR frame."""
     if path.endswith(".exr"):
@@ -132,10 +143,7 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
         px: int = LONG_SIDE, decode_tile: str = "", side: str = "long", factor: int = FACTOR) -> dict:
     import build_workflows
     from hdr_plate import _comfy_pid, _plate_info, node_rows, run_prompt
-    full = os.path.join(comfy, "input", shot)
-    if not os.path.exists(full):
-        full = next(os.path.join(d, f) for d, _, fs in os.walk(comfy) for f in fs if f == os.path.basename(shot))
-    w, h, n = _plate_info(full)
+    w, h, n = _plate_info(shot_path(comfy, shot))
     shutil.rmtree(os.path.join(comfy, "output", label), ignore_errors=True)
     target = target_size(w, h, px, side)
     count = count or window_frames(*machine(url), target, (w, h), n)
