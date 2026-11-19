@@ -22,8 +22,8 @@ UPSAMPLER = "qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors"
 INOUTPAINT = "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors"
 SAM = "sam3.1_multiplex_fp16.safetensors"
 # The memory profile's slots (logic.memoryProfile on the page): `tile`, the tile size of every LTX decode, WHOLE for the
-# whole frame in one piece; `encode_tile`, the tile size of the full-size passes' encode (cleanup, shotup); and `guide_tiled`, the
-# IC-LoRA guide encoded in tiles. Their defaults are a large GPU's.
+# whole frame in one piece; `encode_tile`, the tile size of the full-size passes' encode (cleanup, shotup), WHOLE in the same
+# way; and `guide_tiled`, the IC-LoRA guide encoded in tiles. Their defaults are a large GPU's.
 WHOLE = 4096  # a tile larger than any working frame: VAE Decode (Tiled) decodes the whole frame in one piece
 TINY = "taeltx2_3.safetensors"  # the tiny LTX 2.5 decoder of the live preview (models/vae_approx)
 FLUID = "ainvfx-fluid.safetensors"  # AInVFX's IC-LoRA: painted keyframes become smoke, steam or fire (models/loras)
@@ -423,7 +423,7 @@ def cleanup():
     first = g("ImageScale", image=g("LoadImage", _title="Cleaned first frame", image=Slot("hero", "")), upscale_method="lanczos",
               width=size[0], height=size[1], crop="disabled")
     latent = g("LTXVImgToVideoInplace", vae=vae, image=first, strength=1.0, bypass=False,
-               latent=g("VAEEncodeTiled", pixels=start, vae=vae, tile_size=Slot("encode_tile", 512), overlap=64, temporal_size=500, temporal_overlap=64))
+               latent=g("VAEEncodeTiled", pixels=start, vae=vae, tile_size=Slot("encode_tile", WHOLE), overlap=64, temporal_size=500, temporal_overlap=64))
     audio = g("LTXVEmptyLatentAudio", audio_vae=audio_vae, frames_number=size[2], frame_rate=load[3], batch_size=1)
     sampled = g("SamplerCustomAdvanced", _progress=True, noise=g("RandomNoise", noise_seed=Slot("seed", 0)),
                 guider=g("CFGGuider", model=live(g, model, size, load), positive=cond[0], negative=cond[1], cfg=1.0),
@@ -508,7 +508,7 @@ def shotup():
     cond = g("LTXVConditioning", positive=g("CLIPTextEncode", text=Slot("prompt", RIPPLE_PROMPT), clip=clip),
              negative=g("CLIPTextEncode", text=NEGATIVE, clip=clip), frame_rate=load[3])
     latent = g("LTXVImgToVideoInplace", vae=vae, image=hero, strength=1.0, bypass=False,
-               latent=g("VAEEncodeTiled", pixels=start, vae=vae, tile_size=Slot("encode_tile", 512), overlap=64, temporal_size=500, temporal_overlap=64))
+               latent=g("VAEEncodeTiled", pixels=start, vae=vae, tile_size=Slot("encode_tile", WHOLE), overlap=64, temporal_size=500, temporal_overlap=64))
     guide = g("LTXAddVideoICLoRAGuide", positive=cond[0], negative=cond[1], vae=vae, latent=latent,
               image=reference, frame_idx=0, strength=1.0, latent_downscale_factor=1.0, crop="disabled",
               use_tiled_encode=Slot("guide_tiled", False), tile_size=256, tile_overlap=64, use_streaming=False, tile_frames=97)

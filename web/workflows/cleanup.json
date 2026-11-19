@@ -322,7 +322,7 @@
     "16",
     0
    ],
-   "tile_size": 512,
+   "tile_size": 4096,
    "overlap": 64,
    "temporal_size": 500,
    "temporal_overlap": 64
