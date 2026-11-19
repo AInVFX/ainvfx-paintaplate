@@ -1,5 +1,5 @@
 // The memory profile's decode and guide: from 16 GB of VRAM every LTX decode takes the whole frame in one piece and every
-// IC-LoRA guide is encoded whole; under it, 256 px tiles and a tiled guide. The full-size passes' encode follows the decode.
+// IC-LoRA guide is encoded whole; under it, 256 px tiles and a tiled guide. The encode of the full-size clean plate pass follows the decode.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { memoryProfile, MEMORY_FROM, WHOLE, WHOLE_FROM } from "../../web/logic.mjs";

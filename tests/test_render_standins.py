@@ -1,7 +1,6 @@
 """The stand-ins of tests/ui_live.py. Its flow runs on a ComfyUI whose model files are empty, so each workflow that loads a
 model and that the flow posts needs a stand-in built from core nodes. A second stage is posted whenever the preview is
-smaller than the working size: the full-size clean plate pass posts `cleanup` after `clean`, and the full-size shot in two
-stages posts `shotup` after `shot`."""
+smaller than the working size: the full-size clean plate pass posts `cleanup` after `clean`."""
 import json
 import os
 import sys
@@ -27,7 +26,7 @@ class StandIns(unittest.TestCase):
             cls.made = {name[:-5]: nodes(os.path.join(out, name)) for name in os.listdir(out)}
 
     def test_a_second_stage_has_the_stand_in_of_its_first_stage(self):
-        for first, second in (("clean", "cleanup"), ("shot", "shotup")):
+        for first, second in (("clean", "cleanup"),):
             self.assertIn(second, sorted(self.made), f"`{second}` would run its real graph on empty model files")
             self.assertEqual(self.made[second], self.made[first])
 

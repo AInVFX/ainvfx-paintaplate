@@ -64,7 +64,7 @@ class Workflows(unittest.TestCase):
     def test_outputs_the_page_reads(self):
         """The page picks results by output name, not by position."""
         wanted = {"ingest": {"hero", "proxy", "spec"}, "prompt": {"text"}, "edit": {"patch", "relit", "result"},
-                  "snap": {"named"} | {f"point_{k}" for k in range(5)}, "clean": {"frames", "video"}, "cleanup": {"frames", "video"}, "shotup": {"frames", "video"}, "shot": {"frames", "video"},
+                  "snap": {"named"} | {f"point_{k}" for k in range(5)}, "clean": {"frames", "video"}, "cleanup": {"frames", "video"}, "shot": {"frames", "video"},
                   "matte": {"follow", "frames", "movie"}, "comp": {"video", "matte_movie"}, "review": {"review", "frames", "view", "matte_movie"},
                   "export": {"export", "exr", "layer", "layer_exr", "matte", "matte_movie"}, "warm": {"frame"},
                   "fluid": {"plate", "video", "control"}, "hdr": {"hdr", "movie"}}
@@ -162,10 +162,10 @@ class ViewerMovies(unittest.TestCase):
 class MemorySlots(unittest.TestCase):
     def test_the_memory_profile_slots_default_to_a_large_gpus_values(self):
         """`tile`, `encode_tile` and `guide_tiled` (logic.memoryProfile on the page): unfilled, a workflow runs as on a large
-        GPU, every LTX decode and the full-size passes' encode whole (WHOLE)."""
+        GPU, every LTX decode and the encode of the full-size clean plate pass whole (WHOLE)."""
         import json
         folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web", "workflows")
-        for name, tiles, encodes, guides in (("clean", 0, 0, 1), ("cleanup", 1, 1, 0), ("shot", 1, 0, 1), ("shotup", 1, 1, 1),
+        for name, tiles, encodes, guides in (("clean", 0, 0, 1), ("cleanup", 1, 1, 0), ("shot", 1, 0, 1),
                                              ("fluid", 1, 0, 1), ("hdr", 1, 0, 1)):
             with open(os.path.join(folder, f"{name}.json")) as f:
                 prompt = json.load(f)

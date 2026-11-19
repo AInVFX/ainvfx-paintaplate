@@ -1361,9 +1361,9 @@ export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? nu
 // - medium, from 24 GB: the edit models load at start, LTX with the first shot.
 // - large, from 60 GB: every model loads at start and stays loaded.
 // From 16 GB (WHOLE_FROM), every LTX decode takes the whole frame in one piece (tile WHOLE), and every LTX encode is whole:
-// each IC-LoRA guide (guide_tiled false) and the first stage that the full-size passes refine (encode_tile WHOLE). In
+// each IC-LoRA guide (guide_tiled false) and the first stage that the full-size clean plate pass refines (encode_tile WHOLE). In
 // tiles, each tile comes out brighter near its edges, and the blend of two tiles leaves a band of 0.1 to 0.2 stops where
-// they overlap; a guide encoded in tiles leaves its lines in the shot sampled from it, and a full-size pass encoded in
+// they overlap; a guide encoded in tiles leaves its lines in the shot sampled from it, and a full-size clean plate pass encoded in
 // 256 px tiles shows bands of 0.3 to 1.2 steps in 8 bits, up to 0.05 stops through SDR to HDR. 121 frames at 1920 x 1088
 // decode whole in 13 s at a peak of 10.3 GiB in float32, against 45 to 99 s in tiles (RTX PRO 6000). Under 16 GB, LTX
 // decodes and encodes in 256 px tiles, which leave those bands.
@@ -1381,7 +1381,7 @@ const TILED = { slots: { tile: 256, encode_tile: 256, guide_tiled: true }, does:
 // 52 GB of RAM, a full-size shot left LTX and its text encoder there, 35 GB, and the tracking job after it took the rest:
 // the system stopped ComfyUI. A profile that `frees` holds one family of models at a time: the page asks
 // ComfyUI to free its memory before a job whose family is not that of the job posted before it.
-export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", shotup: "ltx", clean: "ltx", cleanup: "ltx", fluid: "ltx", hdr: "ltx", warm: "ltx",
+export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", clean: "ltx", cleanup: "ltx", fluid: "ltx", hdr: "ltx", warm: "ltx",
   matte: "sam", snap: "sam", ingest: "frames", comp: "frames", review: "frames", export: "frames", upscale: "seedvr2", upscale_export: "frames" }; // by workflow: the models it loads, or frames only
 // Speed first where there is room. Under 24 GB of VRAM the card cannot hold two families of models, so a
 // change of family frees ComfyUI's memory. On a larger card the models stay loaded, and the memory is freed only when

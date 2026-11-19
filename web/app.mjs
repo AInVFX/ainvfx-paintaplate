@@ -39,7 +39,6 @@ const DEEP_SIDE = 960; // their long side, the playback video's
 const WORK_SIDE = 1920, EDIT_SIDE = 768, TRACK_SIDE = 960; // long sides: full-size edits, quick edits, SAM tracking
 // the erase matte only places the erase pass's box, grown by 1/24 of the width: 640 is enough, at half the time of 960
 const ERASE_TRACK_SIDE = 640;
-const TWO_STAGE_SHOT = Q.get("shot") === "2"; // ?shot=2: the full-size shot in two stages, at half the working size, then 2 steps at full size from it (shotup)
 const HDR_ON = Q.get("hdr") !== "0"; // SDR to HDR runs whenever its files and nodes are present; ?hdr=0 in the address turns it off
 const HDR_FRAMES = "ACES2065-1"; // the colour space of the SDR-to-HDR frames (HDR_SPACE in tools/build_workflows.py)
 const BLANK_AT_START = Q.get("blank") !== "0"; // with no plate open, a blank plate opens at start, ready for a fluid shot; ?blank=0 starts empty
@@ -76,7 +75,7 @@ const LAYOUT_PREF = "paintaplate.layout"; // the dragged sizes, kept for the nex
 // at most LIGHT.flow of its colour (LIGHT.shade of darkness for a dark colour), so light builds up stroke by stroke and
 // mixed colours add up to white only after a few passes, never in one stroke.
 const LIGHT = { flow: 0.3, shade: 0.35, spread: 1.6, spacing: 0.25 };
-const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "shotup", "matte", "comp", "review", "export", "warm", "fluid", "hdr", "upscale", "upscale_export"];
+const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid", "hdr", "upscale", "upscale_export"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "hdr", "review", "export"]; // the render's job kinds: Generate and a new plate stop them
 const STOPPED = ["edit", "fluid", "snap", "prefetch", ...BACKGROUND]; // the job kinds a stop ends: none of them is posted until Enter (design rule 13)
 const UPSAMPLER = {}; // Black Forest Labs' system prompts for the prompt writer (upsampler.json): table and plain
@@ -3016,20 +3015,9 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     await step(r, final ? "full" : "shot", async (progress) => {
       const plate = erase ? { path: store.clean, color_space: "@model" } : { path: p.path };
       const values = { ...common, ...plate, hero: r.hero, prompt, prefix: `${base}/${dir}/shot/f`, video_prefix: `${base}/${dir}/raw`, live: liveEvery(previewMode) };
-      let name = "shot", out;
-      if (final && TWO_STAGE_SHOT) { // Lightricks' two stages: the shot at half the working size, then 2 steps at full size from it
-        const low = stageOne(p.work);
-        if (S.stage) S.stage.part = `stage 1 of 2 at ${low.join(" × ")}`;
-        const first = await run("shot", { ...values, width: low[0], height: low[1], prefix: `${base}/${dir}/shot_low/f`, video_prefix: `${base}/${dir}/raw_low` },
-          { kind: "shot", progress: (f) => progress(f / 2), live: showLive }).done;
-        if (S.stage) S.stage.part = `stage 2 of 2, upscaled to ${size.join(" × ")}`;
-        log(`Render v${r.v}: Shot, full size: stage 2 of 2, 2 steps at ${size.join(" x ")} from stage 1 at ${low.join(" x ")}.`);
-        name = "shotup";
-        out = await run(name, { ...values, low: folderOf("shot", first, "frames"), width: size[0], height: size[1] },
-          { kind: "shot", progress: (f) => progress(0.5 + f / 2), live: showLive }).done;
-      } else out = await run(name, { ...values, width: size[0], height: size[1] }, { kind: "shot", progress, live: showLive }).done;
-      store.shot = folderOf(name, out, "frames");
-      store.raw = viewUrl(outputFile(name, out, "video"));
+      const out = await run("shot", { ...values, width: size[0], height: size[1] }, { kind: "shot", progress, live: showLive }).done;
+      store.shot = folderOf("shot", out, "frames");
+      store.raw = viewUrl(outputFile("shot", out, "video"));
     }, store);
     return carry ? store.shot : store.clean;
   };

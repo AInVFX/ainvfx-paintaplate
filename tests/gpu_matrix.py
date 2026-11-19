@@ -586,7 +586,7 @@ def fluid_movies(comfy, jobs, history):
     return {}
 
 
-STAGE_JOBS = (("Clean matte", ("matte",), "matte_a"), ("Clean plate pass", ("cleanup",), None), ("Shot", ("shot", "shotup"), None),
+STAGE_JOBS = (("Clean matte", ("matte",), "matte_a"), ("Clean plate pass", ("cleanup",), None), ("Shot", ("shot",), None),
               ("Paint matte", ("matte",), "matte_b"))  # (title, its jobs, the folder of its files where one job serves two stages)
 STAGES_SHOWN = (*(title for title, *_ in STAGE_JOBS), "Composite")  # the composite is the export, from the case's export.zip
 
@@ -597,8 +597,7 @@ def stage_movies(comfy, jobs, history):
     its frames (PaintAPlate_SaveFrames: the files of its folder whose names start as the first one's). A stage is the last
     job of its name; for the two mattes, the last « matte » job whose files sit in its folder: the page tracks a Clean's
     edits into matte_a, at the size it tracks an erase (the hole the clean plate pass fills), and the paint into matte_b,
-    the last one at full size. The shot at full size is the last « shot » or « shotup » job (the second stage of a shot
-    in two stages, ?shot=2). A render of fewer edits that the page finishes in the background can run after them: its
+    the last one at full size. The shot at full size is the last « shot » job. A render of fewer edits that the page finishes in the background can run after them: its
     jobs have other names, and its composite is never read, since the sheet's composite is the export. A stage whose job
     did not run in this ComfyUI is left out."""
     found = {}

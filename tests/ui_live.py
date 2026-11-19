@@ -3,7 +3,7 @@
     python tests/ui_live.py --comfy /path/to/ComfyUI --python /path/to/python
 
 The pack is copied to a temporary folder where the workflows that load a model and that this flow posts (`edit`, `snap`,
-`prompt`, `matte`, `shot`, `clean`, and the second stages `shotup` and `cleanup`) are replaced by stand-ins built from
+`prompt`, `matte`, `shot`, `clean` and its second stage `cleanup`) are replaced by stand-ins built from
 core nodes only (same slots and outputs, no models), so the whole flow runs on a CPU, the full-size passes included: open a plate, play it, paint, erase and light, start each edit with Generate (Enter), bypass and bring back
 an edit, let the idle time render the shot, the composite and the export, wipe, then download the zip.
 `ingest`, `comp` and `export` are the real workflows. Screenshots go to /tmp/paintaplate_ui.
@@ -46,7 +46,7 @@ def stand_ins(out):
     g("SaveVideo", _output="video", video=g("CreateVideo", images=ref, fps=load[3], bit_depth=8, color_space="sRGB", codec="none"),
       filename_prefix=Slot("video_prefix", "x/v"), format="auto", format__codec="auto")
     g.save("shot", out)
-    for name in ("clean", "cleanup", "shotup"):  # the erase pass and both second stages: the same stand-in, saved under each name
+    for name in ("clean", "cleanup"):  # the erase pass and its second stage: the same stand-in, saved under each name
         g.save(name, out)
 
     g = Graph()  # matte: the first-frame mask repeated over every frame
@@ -276,7 +276,7 @@ def main():
     ap.add_argument("--out", default=SHOTS, help="folder for screenshots and timings")
     ap.add_argument("--think", type=float, default=0, help="seconds between opening the plate and the first stroke")
     ap.add_argument("--graph", action="store_true", help="after the export, also save the scene's ComfyUI graph")
-    ap.add_argument("--option", action="append", default=[], help="with --url: one more option of the page's address, such as shot=2 (the full-size shot in two stages)")
+    ap.add_argument("--option", action="append", default=[], help="with --url: one more option of the page's address, such as hdr=0 (SDR to HDR off)")
     ap.add_argument("--memory", default="", help="with --url: the page's memory profile, small, medium or large (by default the card decides)")
     ap.add_argument("--preview", default="", choices=("", *PREVIEW), help="with --url: the Preview menu's choice, stored before the page loads (by default the page's own)")
     ap.add_argument("--upscale", nargs="?", const="on", default="", help="with --url, at the size given (the long side in px, as Custom… takes it; alone, the page's own): turn Finish > Upscale on before painting, so Export "

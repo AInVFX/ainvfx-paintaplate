@@ -12,7 +12,7 @@ import json
 import os
 
 OUT = os.environ.get("PAINTAPLATE_WORKFLOWS_OUT") or os.path.join(os.path.dirname(__file__), "..", "web", "workflows")
-NAMES = ("ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "shotup", "matte", "comp", "review", "export", "warm", "fluid", "hdr", "upscale", "upscale_export")
+NAMES = ("ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid", "hdr", "upscale", "upscale_export")
 OCIO_CONFIG = "ocio://studio-config-latest"  # the page fills the config in use: $OCIO when it is set, as in RV
 
 KLEIN = "flux3-image-klein-int8-convrot.safetensors"
@@ -22,7 +22,7 @@ UPSAMPLER = "qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors"
 INOUTPAINT = "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors"
 SAM = "sam3.1_multiplex_fp16.safetensors"
 # The memory profile's slots (logic.memoryProfile on the page): `tile`, the tile size of every LTX decode, WHOLE for the
-# whole frame in one piece; `encode_tile`, the tile size of the full-size passes' encode (cleanup, shotup), WHOLE in the same
+# whole frame in one piece; `encode_tile`, the tile size of the encode in the full-size clean plate pass (cleanup), WHOLE in the same
 # way; and `guide_tiled`, the IC-LoRA guide encoded in tiles. Their defaults are a large GPU's.
 WHOLE = 4096  # a tile larger than any working frame: VAE Decode (Tiled) decodes the whole frame in one piece
 TINY = "taeltx2_3.safetensors"  # the tiny LTX 2.5 decoder of the live preview (models/vae_approx)
@@ -480,52 +480,6 @@ def shot():
     g.save("shot")
 
 
-def shotup():
-    """The shot at full size in two stages, as Lightricks' two-stage LTX 2.5 workflows make one: the second stage.
-
-    The first stage is the shot at half the working size (`shot`). Its frames, enlarged, are encoded at full size with the
-    edited first frame kept as it is (strength 1), and LTX refines them in 2 steps from sigma 0.725 with the Ripple IC-LoRA
-    and its reference at full size: the plate, its first frame replaced by the edited one.
-    """
-    g = Graph()
-    load, model = plate(g, pad=True)
-    scaled = g("ImageScale", image=model, upscale_method="lanczos", width=Slot("width", 1920),
-               height=Slot("height", 1088), crop="disabled")
-    size = g("GetImageSize", image=scaled)
-    hero = g("ImageScale", image=g("LoadImage", _title="Edited first frame", image=Slot("hero", "")),
-             upscale_method="lanczos", width=size[0], height=size[1], crop="disabled")
-    rest = g("ImageFromBatch", image=scaled, batch_index=1, length=4096)
-    reference = g("BatchImagesNode", _title="Reference: first frame replaced", images__image0=hero,
-                  images__image1=rest)
-    start = g("ImageScale", image=g("PaintAPlate_LoadPlate", _title="Shot at half size", path=Slot("low", ""), max_frames=1024,
-                                    pad_8n1=False), upscale_method="lanczos", width=size[0], height=size[1], crop="disabled")
-    model = live(g, g("LoraLoaderModelOnly", _title="Ripple IC-LoRA",
-                      model=g("UNETLoader", unet_name=Slot("ltx", LTX), weight_dtype="default"),
-                      lora_name=Slot("ripple", RIPPLE_LORA), strength_model=Slot("strength", 1.35)), size, load)
-    clip = g("CLIPLoader", clip_name=Slot("gemma", GEMMA), type="ltxv", device="default")
-    vae = g("VAELoader", vae_name=Slot("video_vae", LTX_VAE))
-    audio_vae = g("VAELoader", vae_name=LTX_AUDIO_VAE)
-    cond = g("LTXVConditioning", positive=g("CLIPTextEncode", text=Slot("prompt", RIPPLE_PROMPT), clip=clip),
-             negative=g("CLIPTextEncode", text=NEGATIVE, clip=clip), frame_rate=load[3])
-    latent = g("LTXVImgToVideoInplace", vae=vae, image=hero, strength=1.0, bypass=False,
-               latent=g("VAEEncodeTiled", pixels=start, vae=vae, tile_size=Slot("encode_tile", WHOLE), overlap=64, temporal_size=500, temporal_overlap=64))
-    guide = g("LTXAddVideoICLoRAGuide", positive=cond[0], negative=cond[1], vae=vae, latent=latent,
-              image=reference, frame_idx=0, strength=1.0, latent_downscale_factor=1.0, crop="disabled",
-              use_tiled_encode=Slot("guide_tiled", False), tile_size=256, tile_overlap=64, use_streaming=False, tile_frames=97)
-    audio = g("LTXVEmptyLatentAudio", audio_vae=audio_vae, frames_number=size[2], frame_rate=load[3], batch_size=1)
-    sampled = g("SamplerCustomAdvanced", _progress=True, noise=g("RandomNoise", noise_seed=Slot("seed", 0)),
-                guider=g("CFGGuider", model=model, positive=guide[0], negative=guide[1], cfg=1.0),
-                sampler=g("KSamplerSelect", sampler_name="euler"), sigmas=g("ManualSigmas", sigmas=REFINE_SIGMAS),
-                latent_image=g("LTXVConcatAVLatent", video_latent=guide[2], audio_latent=audio))
-    video_latent = g("LTXVSeparateAVLatent", av_latent=sampled[0])
-    cropped = g("LTXVCropGuides", positive=guide[0], negative=guide[1], latent=video_latent[0])
-    decoded = g("VAEDecodeTiled", tile_size=Slot("tile", WHOLE), overlap=64, temporal_size=128, temporal_overlap=32, samples=cropped[2], vae=vae)
-    g("PaintAPlate_SaveFrames", _title="Shot frames", _output="frames", images=decoded, format=Slot("frames_format", "png"),
-      filename_prefix=Slot("prefix", "paintaplate/plate/shot/f"))
-    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Shot video (whole frame regenerated)", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/shot"), images=decoded, fps=load[3])
-    g.save("shotup")
-
-
 def matte():
     """SAM 3.1 follows a painted or erased area through the frames from the first frame, then Follow Matte makes the
     track safe: one matte per frame even when SAM returns none, the last matte where SAM loses the object, and for
@@ -958,6 +912,6 @@ def upscale_export():
 
 
 if __name__ == "__main__":
-    for build in (ingest, prompt, edit, snap, clean, cleanup, shot, shotup, matte, comp, review, export, warm, fluid, hdr, upscale, upscale_export):
+    for build in (ingest, prompt, edit, snap, clean, cleanup, shot, matte, comp, review, export, warm, fluid, hdr, upscale, upscale_export):
         build()
     print("wrote", sorted(os.listdir(OUT)))

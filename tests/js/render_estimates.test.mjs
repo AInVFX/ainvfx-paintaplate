@@ -27,12 +27,12 @@ const MEASURED = [ // [case, step, seconds, plate, SDR to HDR on]
   ["fluid_720 0.45.3", "hdr", 172.1, FLUID], ["hdr_cow", "hdr", 606.4], // SDR to HDR at 1280 x 704 and at 1920 x 1088
   // the preview at half the working size, on horse.mp4, the Tears of Steel EXR plate (SDR to HDR on) and 1280p_car.mp4
   ["horse_cow half", "comp", 13.9, HALF], ["horse_erase half", "comp", 14.9, HALF], ["horse_light half", "comp", 13.7, HALF],
-  ["horse_erase_grid half", "comp", 15.3, HALF], ["horse_cow_two half", "comp", 13.9, HALF], ["tos_arm", "comp", 7.8, TOS],
+  ["horse_erase_grid half", "comp", 15.3, HALF], ["horse_cow half", "comp", 13.9, HALF], ["tos_arm", "comp", 7.8, TOS],
   ["car_trees", "comp", 11.9, CAR], ["car_trees v1", "comp", 8.1, CAR],
   ["horse_erase half", "cleanup", 111.5, HALF], ["horse_erase_grid half", "cleanup", 110.9, HALF], ["car_trees", "cleanup", 50.5, CAR],
   ["horse_cow half", "full", 576.4, HALF], ["horse_light half", "full", 576.8, HALF], ["tos_arm", "full", 79.8, TOS], ["car_trees", "full", 156.6, CAR],
   ["horse_cow half", "review", 25.0, HALF], ["horse_erase half", "review", 26.0, HALF], ["horse_light half", "review", 23.2, HALF],
-  ["horse_erase_grid half", "review", 25.8, HALF], ["horse_cow_two half", "review", 26.0, HALF], ["tos_arm", "review", 13.9, TOS, true],
+  ["horse_erase_grid half", "review", 25.8, HALF], ["horse_cow half", "review", 26.0, HALF], ["tos_arm", "review", 13.9, TOS, true],
   ["car_trees", "review", 13.5, CAR], ["car_trees v1", "review", 9.9, CAR],
 ];
 const OUTSIDE = { "horse_light export": "a relight's export writes no matte: 19 nodes against 27, 6.1 s against 9.3 to 10.0 s" };

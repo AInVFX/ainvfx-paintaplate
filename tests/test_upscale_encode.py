@@ -1,4 +1,4 @@
-"""The full-size passes (cleanup, shotup) encode their first stage whole by default: core's VAE Encode (Tiled) with a tile of
+"""The full-size clean plate pass (cleanup) encodes its first stage whole by default: core's VAE Encode (Tiled) with a tile of
 WHOLE px, larger than any working frame, encodes the frames in one piece."""
 import json
 import os
@@ -16,10 +16,10 @@ def whole(path, pattern):
 
 
 class FullSizeEncode(unittest.TestCase):
-    def test_the_full_size_passes_encode_whole_by_default(self):
+    def test_the_full_size_clean_plate_pass_encodes_whole_by_default(self):
         tile = whole("tools/build_workflows.py", r"^WHOLE = (\d+)")
         self.assertEqual(tile, whole("web/logic.mjs", r"^export const WHOLE = (\d+);"))
-        for name in ("cleanup", "shotup"):
+        for name in ("cleanup",):
             with open(os.path.join(ROOT, "web", "workflows", f"{name}.json")) as f:
                 prompt = json.load(f)
             encodes = [n for n in prompt.values() if n.get("_meta", {}).get("slots", {}).get("tile_size") == "encode_tile"]

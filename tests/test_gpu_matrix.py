@@ -691,19 +691,16 @@ class Verdict(unittest.TestCase):
         self.assertEqual(arm["stage_frames"], clean["stage_frames"])
         self.assertFalse({"tos_arm", "tos_arm_clean"} & set(gpu_matrix.ALL + gpu_matrix.QUICK))
 
-    def test_the_two_stage_shot_case_is_horse_cow_with_shot_2_and_horse_cow_beside_it(self):
+    def test_a_case_adds_options_to_the_address_and_sets_another_case_s_export_beside_its_own(self):
         import ui_live
-        cases = gpu_matrix.load_cases()
-        two, cow = cases["horse_cow_two"], cases["horse_cow"]
-        self.assertEqual((two["path"], two["seed"], two["strokes"], two["address"], two["beside"]), (cow["path"], cow["seed"], cow["strokes"], ["shot=2"], "horse_cow"))
-        self.assertNotIn("horse_cow_two", gpu_matrix.ALL + gpu_matrix.QUICK)
-        self.assertTrue(ui_live.address("http://h", seed=101, options=["shot=2"]).endswith("seed=101&shot=2"))
+        two = {"beside": "horse_cow"}
+        self.assertTrue(ui_live.address("http://h", seed=101, options=["hdr=0"]).endswith("seed=101&hdr=0"))
         tmp = tempfile.mkdtemp(prefix="beside_")
         self.addCleanup(shutil.rmtree, tmp, True)
         os.makedirs(os.path.join(tmp, "horse_cow"))
-        self.assertEqual(gpu_matrix.beside(two, os.path.join(tmp, "horse_cow_two")), [])  # horse_cow made no export
+        self.assertEqual(gpu_matrix.beside(two, os.path.join(tmp, "horse_cow_beside")), [])  # horse_cow made no export
         open(os.path.join(tmp, "horse_cow", "export.zip"), "w").close()
-        self.assertEqual(gpu_matrix.beside(two, os.path.join(tmp, "horse_cow_two")), [("horse_cow", os.path.join(tmp, "horse_cow", "export.zip"))])
+        self.assertEqual(gpu_matrix.beside(two, os.path.join(tmp, "horse_cow_beside")), [("horse_cow", os.path.join(tmp, "horse_cow", "export.zip"))])
 
     def test_horse_erase_draws_stages_and_no_case_asks_for_the_erased_grid_by_an_option(self):
         """The clean plate pass erases as far as the composite pastes at every size, with no option in the address."""
