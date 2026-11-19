@@ -1,18 +1,12 @@
-"""Plate input and output helpers that core ComfyUI does not provide.
+"""Files: what a plate needs that core ComfyUI does not read or write.
 
-Core already decodes EXR, 16-bit PNG and video frames to float (Load Image and
-Load Video go through PyAV) and writes single-layer EXR and PNG (Save Image
-(Advanced)). This module fills the remaining gaps only:
+Image sequences and frame patterns, the plate spec and its colour guess, the plate browser's folder scan, video and
+sequence decoding with core's pictures (each frame written into its place in one array), EXR writing that keeps every
+untouched channel, layer, part and header attribute (OpenEXR, optional), stills in the plate's format, video in the
+source codec, pixel format, colour tags and timecode with the source audio copied, PNG, EXR and H.264 writers that work
+on several frames at once, a shot's windows joined, and the blank canvas of a fluid shot.
 
-* image sequences (a folder of numbered frames) and their spec,
-* the source spec of a plate, so the export can match it,
-* EXR export that keeps every untouched channel, layer, part and header
-  attribute of the source frame (OpenEXR, optional),
-* video export in the source codec, pixel format, colour tags and timecode,
-  with the source audio copied.
-
-Everything here is plain Python with numpy, PyAV and (optionally) OpenEXR, so
-it runs and is tested outside ComfyUI.
+Everything here is plain Python with numpy, PyAV and (optionally) OpenEXR, so it runs and is tested outside ComfyUI.
 """
 from __future__ import annotations
 
