@@ -90,7 +90,7 @@ export function previewSize(plate, work, cap, step = 32, tol = 0.025) {
 
 // Preview pass: half and a quarter of the working size, each on the grid with the plate's aspect (previewSize). `div` is
 // the part of the working size's long side, `cap` that long side.
-export const PREVIEW_PARTS = [[2, "Half size"], [4, "Quarter size"]];
+const PREVIEW_PARTS = [[2, "Half size"], [4, "Quarter size"]];
 // The Preview menu: Off (no preview pass and no live preview), Latent preview (no preview pass; each pass's live preview
 // shows in the player), then a preview pass at half or a quarter of the working size, with the live preview too.
 export const PREVIEW_DEFAULT = "latent";
@@ -144,7 +144,7 @@ const objectName = (words) => String(words ?? "").trim().replace(/^(?:the|a|an)\
 // give the object its usual colour. When the words name no colour, the writer's request and the page's own caption name the
 // colours that the strokes show, by their share of the painted pixels, largest first; a colour under 5% of them is an edge
 // where two strokes meet. Words that name a colour win, and then the page names none.
-export const COLOR_WORDS = /\b(?:red|orange|yellow|green|cyan|blue|violet|purple|magenta|pink|brown|black|white|gr[ae]y|silver|gold(?:en)?|beige|tan|crimson|scarlet|maroon|navy|teal|turquoise|ivory)\b/i;
+const COLOR_WORDS = /\b(?:red|orange|yellow|green|cyan|blue|violet|purple|magenta|pink|brown|black|white|gr[ae]y|silver|gold(?:en)?|beige|tan|crimson|scarlet|maroon|navy|teal|turquoise|ivory)\b/i;
 const HUES = [[15, "red"], [40, "orange"], [70, "yellow"], [165, "green"], [195, "cyan"], [255, "blue"], [290, "violet"], [345, "magenta"], [361, "red"]];
 
 // A colour by name, one namer for a paint and a light: « black », « brown », « dark blue », « pink », « warm white ». Each
@@ -215,7 +215,7 @@ export function caption({ tool, words, bbox, strokes = [], aspect, hues = [] }) 
 // own (lightIntent), and never reaches the prompt writer. Boxes are [y_min, x_min, y_max, x_max] on 0..1000.
 
 const pyJSON = (v) => JSON.stringify(v).replace(/("(?:[^"\\]|\\.)*")|([,:])/g, (m, s, p) => s ?? `${p} `); // json.dumps spacing
-export const KEEP_TOUCHED = " Where the drawing touches an object, the new element acts on that object itself (it burns it, rests on it, " +
+const KEEP_TOUCHED = " Where the drawing touches an object, the new element acts on that object itself (it burns it, rests on it, " +
   "wets it or lights it); add no props, fuel or supports that were not asked for."; // without it, a fire on a towel comes with logs
 
 export function upsampleRequest({ tool, words, bbox, boxes = null, hues = [] }) { // hues: a paint's colours by name (paintColors)
@@ -245,7 +245,7 @@ export function splitTable(text) { // [caption, rows]: from the last "[" where t
 }
 
 const ROW_ID = /^[A-Za-z][A-Za-z0-9_]*$/;
-export function validBox(b) {
+function validBox(b) {
   if (!Array.isArray(b) || b.length !== 4 || b.some((v) => typeof v !== "number" || !Number.isFinite(v))) return null;
   const [y1, x1, y2, x2] = b;
   return y1 < 0 || x1 < 0 || y2 <= y1 || x2 <= x1 || y2 > 1000 || x2 > 1000 || Math.max(...b) <= 1 ? null : b;
@@ -1009,7 +1009,6 @@ export function plateDepth(spec) {
 // sRGB), video or not: an HDR video in PQ or HLG, a log video, a 10-bit Cineon DPX, a camera log TIFF. Such a plate exports
 // in its own format with no extra files; only the others warn first and deliver an EXR sequence.
 export const holdsHdr = (spec, headroom = 1) => !!spec && (plateDepth(spec).float || headroom > 1.001);
-export const hdrPlate = (spec) => plateDepth(spec).hdr; // SDR to HDR on by default for this plate
 export const wantsHdr = (spec, tools, on) => !!spec && !!on && !tools.includes("light");
 // The switch away from the plate's default makes another render, so each setting keeps its own: "|hdr" or "|sdr".
 export const hdrKey = (edits, dflt, on) => (on === dflt ? edits : `${edits}|${on ? "hdr" : "sdr"}`);
@@ -1177,7 +1176,7 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
   // SDR to HDR: its 8-bit movie in log values, and its EXR frames in their own space (ACES2065-1, `spaces.hdr`), for the viewer
   // to draw and inspect them as they are (setShot's fifth argument, framesSpace)
   if (id === "hdr") return { url, space: spaces.log ?? "@model", frames: store.hdrFrames ?? null, framesSpace: store.hdrFrames ? spaces.hdr ?? null : null };
-  return { url, space: MATTE_PASSES.has(id) ? spaces.data ?? "@model" : id === "hdr" ? spaces.log ?? "@model" : "@model", frames: null };
+  return { url, space: MATTE_PASSES.has(id) ? spaces.data ?? "@model" : "@model", frames: null };
 }
 
 // ---------- A relight: Klein gets the frame and the prompt that its strokes make (lightIntent) ----------
@@ -1333,7 +1332,7 @@ export function freesBefore(profile, last, name, room = null) { // room: { free,
 // 20 s later. So the sampling is timed by its own pace, between its first and its latest step, and the rest comes from
 // what the step took the last time on this machine (the page keeps
 // each step's total, lead and tail per size, frame count and memory profile, in paintaplate.step-times).
-export const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
+const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
 // A step's time before it ever ran on this machine (stepGuess): the 96 GB card's reference (STAGES' ref, in seconds at
 // REF_SIZE), scaled to the plate, then to the card. A 16 GB card, the small profile, holds one family of models at a time,
 // so each job loads its models again: a lead in seconds per family, then a factor per step on the reference's scaled
@@ -1353,7 +1352,7 @@ export const SLOWER = {
     fixed: { comp: 6.4, review: 3 } },
 };
 export const slower = (profile, id) => SLOWER[profile]?.[id] ?? 1;
-export const BIG_STEPS = ["full", "cleanfull", "cleanup", "hdr", "review", "export"]; // the steps made at the working size (cleanup: stageTwoGuess)
+const BIG_STEPS = ["full", "cleanfull", "cleanup", "hdr", "review", "export"]; // the steps made at the working size (cleanup: stageTwoGuess)
 export const stepSizeOf = (id, plate) => (BIG_STEPS.includes(id) ? plate.work : ["erase", "track", "trackfull"].includes(id) ? plate.track : plate.shot);
 const REF_SIZE = 928 * 512 * 97; // pixels times frames, where the references were measured
 export function stepGuess(id, ref, plate, profile, hdr = false) { // seconds: the reference scaled to this plate (BIG_STEPS at 0.73 of it), then to this GPU; hdr: the render makes SDR to HDR

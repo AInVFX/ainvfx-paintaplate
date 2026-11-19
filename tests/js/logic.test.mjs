@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { changedMask, erasePrompt, erasesPaint, indexValues, paintBoxes, pickedColor, stageOne, stopsForEdit, blankSpec, caption, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize, hdrPlate, wantsHdr, hdrFps, blankDepth, escapeAction } from "../../web/logic.mjs";
+import { changedMask, erasePrompt, erasesPaint, indexValues, paintBoxes, pickedColor, stageOne, stopsForEdit, blankSpec, caption, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize, wantsHdr, hdrFps, blankDepth, escapeAction } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -331,9 +331,9 @@ test("the model warm-up's last line: on the status line only while the start's m
 
 test("SDR to HDR: on by default for an EXR plate, off for the others, its switch for every plate; relit, never; 16-bit blank plates; 30 fps at most", () => {
   const exr = { kind: "sequence", ext: ".EXR" }, png = { kind: "sequence", ext: ".png" }, mp4 = { kind: "video", ext: ".mp4" };
-  assert.equal(hdrPlate(exr), true);
-  assert.equal(hdrPlate(png), false);
-  assert.equal(hdrPlate(mp4), false);
+  assert.equal(plateDepth(exr).hdr, true);
+  assert.equal(plateDepth(png).hdr, false);
+  assert.equal(plateDepth(mp4).hdr, false);
   assert.equal(wantsHdr(exr, ["paint", "erase"], true), true);
   assert.equal(wantsHdr(exr, ["paint"], false), false);
   assert.equal(wantsHdr(exr, ["paint", "light"], true), false); // a relight keeps the plate's own values
