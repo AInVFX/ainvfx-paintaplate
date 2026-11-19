@@ -408,7 +408,8 @@ class RelightTransfer(io.ComfyNode):
             with ThreadPoolExecutor(WORKERS) as pool:
                 shift = mathops.shot_shift(list(pool.map(lambda sr: mathops.frame_shift(*sr, width, shot_space), zip(src, rel))))
             if shift != (0.0, 0.0):
-                logging.info("[Paint a plate] Relight Transfer: shot realigned by x %+.2f px, y %+.2f px, over %d frames.", shift[1], shift[0], n)
+                logging.info("[Paint a plate] Relight Transfer: shot realigned by x %+.2f px, y %+.2f px, over %d %s.", shift[1], shift[0], n,
+                             "frame" if n == 1 else "frames")
         peak = peak if peak is not None and shot_space == "sRGB" else 1.0
         untone = peak > ocio.TONE_ABOVE  # a plate above 1.0: 'source' and 'relit' go back to its levels, frame by frame
         if untone:
