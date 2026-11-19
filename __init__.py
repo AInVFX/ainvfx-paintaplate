@@ -12,7 +12,7 @@ from server import PromptServer
 from . import routes
 from .nodes import NODES
 
-routes.setup(PromptServer.instance)  # the page's routes: download, plate list, thumbnails, blank plate
+routes.setup(PromptServer.instance)  # the page's routes, listed in routes.py's docstring
 logging.info("AInVFX Paint a plate %s: open it from the Extensions menu, or at /extensions/ainvfx-paintaplate/paintaplate.html",
              routes.VERSION)
 
