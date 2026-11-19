@@ -130,8 +130,6 @@ class LoadPlate(io.ComfyNode):
             bar = comfy.utils.ProgressBar(1)
             rgb, a, count = plateio.decode_video(full, max_frames, spec["fps"], pad_8n1)
             bar.update(1)
-            images, extra = torch.from_numpy(rgb), rgb.shape[0] - count
-            alpha = None if a is None else torch.from_numpy(a)
         else:  # an image sequence: the files decode in parallel, each into its place, the padding too
             files = spec["files"][:max_frames]
             bar, stop = comfy.utils.ProgressBar(len(files)), Stop()
@@ -140,8 +138,8 @@ class LoadPlate(io.ComfyNode):
                 stop()
                 bar.update(1)
             rgb, a, count = plateio.decode_frames(files, pad_8n1, WORKERS, each)
-            images, extra = torch.from_numpy(rgb), rgb.shape[0] - count
-            alpha = None if a is None else torch.from_numpy(a)
+        images, extra = torch.from_numpy(rgb), rgb.shape[0] - count
+        alpha = None if a is None else torch.from_numpy(a)
         if alpha is None:  # an opaque plate: one frame of ones stands for every frame, and takes one frame of memory
             alpha = torch.ones((1, *images.shape[1:3]), dtype=images.dtype, device=images.device).expand(count + extra, -1, -1)
         spec.update(frames=count, color_space_guess=plateio.guess_color_space(spec))
