@@ -181,7 +181,7 @@ test("a failed step says why in plain words", () => {
     "the paint matte saved no frames, so there was nothing to read");
   assert.equal(plainError("PaintAPlate_LoadPlate: No image frames found in /w/output/paintaplate/a1/v2/640x352/clean").why, "the clean plate pass saved no frames, so there was nothing to read");
   assert.equal(plainError("KSampler: CUDA out of memory. Tried to allocate 2 GiB").why, "the GPU ran out of memory");
-  const gone = "ComfyUI did not answer: it may be restarting, or the connection dropped"; // a pod restarted under the page (29 Oct)
+  const gone = "ComfyUI did not answer: it may be restarting, or the connection dropped"; // a pod that restarts under the page
   assert.equal(plainError(`Unexpected token '<', "<!DOCTYPE "... is not valid JSON`).why, gone);
   assert.equal(plainError("No answer from ComfyUI (HTTP 502, an error page): it may be restarting, or the connection dropped").why, gone);
   assert.equal(plainError("Failed to fetch").why, gone);
@@ -528,7 +528,7 @@ test("SDR to HDR on a plate that cannot hold values above 1.0 makes its result a
   assert.equal(holdsHdr(dpx10, 16.3), true, "a 10-bit DPX in a log encoding holds them through its curve");
   assert.equal(holdsHdr(tif16, 222.9), true, "a 16-bit TIFF in ACEScct too");
   assert.equal(holdsHdr(tif16, 1), false, "a 16-bit TIFF in sRGB does not: its result becomes an EXR sequence");
-  assert.equal(holdsHdr(mp4, 100), true, "an HDR video (PQ) keeps them in its own file: no extra files (Adrien, 3 Nov)");
+  assert.equal(holdsHdr(mp4, 100), true, "an HDR video (PQ) keeps them in its own file: no extra files");
   assert.equal(holdsHdr({ kind: "video", ext: ".mov", pix_fmt: "yuv444p12le" }, 55.1), true, "a log video (LogC) too");
   assert.equal(holdsHdr(mp4, 1), false, "an SDR video does not: it warns first and delivers an EXR sequence");
   assert.deepEqual([exrResult(dpx10, true, 16.3), exrResult(tif16, true, 1)], [false, true]);
@@ -595,7 +595,7 @@ import { MEMORY, memoryProfile, fillWorkflow as fillFor, parseWorkflow as parseF
 
 test("the memory profile: small under 24 GB, medium from 24 GB, large from 60 GB, or the one asked for", () => {
   const gib = 2 ** 30;
-  assert.equal(memoryProfile({ vram: 16 * gib, ram: 64 * gib }).name, "small", "the reference laptop, an RTX 4090 Laptop with 16 GB");
+  assert.equal(memoryProfile({ vram: 16 * gib, ram: 64 * gib }).name, "small", "a 16 GB GPU with 64 GB of RAM");
   assert.equal(memoryProfile({ vram: 23.99 * gib }).name, "medium", "a 24 GB card reports about 25.7e9 bytes");
   assert.equal(memoryProfile({ vram: 20e9 }).name, "small");
   assert.equal(memoryProfile({ vram: 32 * gib }).name, "medium");
@@ -670,7 +670,7 @@ test("awaitingPass: an edit above an edit made again waits for its own pass when
   assert.deepEqual(awaitingPass([a, b, { ...c, pending: true }, d, light]), [4]); // a light depends on every edit under it
 });
 
-// ---------- The orchestrator, 11 Nov: one family of models in memory at a time on the small profile ----------
+// ---------- One family of models in memory at a time on the small profile ----------
 test("every workflow has a family, and the small profile frees ComfyUI's memory when the family changes", async () => {
   const { FAMILY, freesBefore, memoryProfile } = await import("../../web/logic.mjs");
   const { readdirSync } = await import("node:fs");
@@ -704,7 +704,7 @@ test("a larger card keeps its models, and frees ComfyUI's memory only when RAM i
 
 test("the open counts 3 copies of the plate, and every other job 8", async () => {
   const { framesNeed, freesBefore, memoryProfile } = await import("../../web/logic.mjs");
-  // 1.11.9 on 12 Nov: the open of horse.mp4 holds 2.8 copies of the plate at its peak on the laptop (9.1 GB), 1.9 on a pod
+  // the open of horse.mp4 holds 2.8 copies of the plate at its peak with a 16 GB GPU and 64 GB of RAM (9.1 GB), 1.9 on an RTX PRO 6000 pod
   const open = framesNeed(1920, 1080, 121, "ingest"), other = framesNeed(1920, 1080, 121, "review");
   assert.equal(Math.round(open / 2 ** 30), 12); // 3 copies of 2.8 GB, and 4 GB to work in
   assert.equal(other, framesNeed(1920, 1080, 121)); // 8 copies, as for a job without a name
@@ -715,7 +715,7 @@ test("the open counts 3 copies of the plate, and every other job 8", async () =>
 
 test("the time left in a step follows the sampler's own pace, not the time the models took to load", async () => {
   const { stepLeft, remember, slower, timeKey } = await import("../../web/logic.mjs");
-  // the laptop's preview shot of 11 Nov: 57.6 s in all, the sampler's first step of 8 ended 37 s in, then one step every 2 s
+  // a preview shot on a 16 GB GPU: 57.6 s in all, the sampler's first step of 8 ended 37 s in, then one step every 2 s
   assert.equal(stepLeft({ est: 42, run: 20 }), 22); // before the sampler starts: what is expected, less what has run
   assert.equal(stepLeft({ est: 42, run: 37, first: [37, 0.125], last: [37, 0.125] }), 5); // one step: no pace yet (the old rule said 259 s)
   const mid = stepLeft({ est: 42, run: 43, first: [37, 0.125], last: [43, 0.5], tail: 6 }); // 4 steps to go at 2 s, then the tail
@@ -723,7 +723,7 @@ test("the time left in a step follows the sampler's own pace, not the time the m
   assert.equal(stepLeft({ est: 42, run: 53, first: [37, 0.125], last: [51, 1], tail: 6 }), 4); // the sampling over: what is left of the tail
   assert.equal(stepLeft({ est: 42, run: 80, first: [37, 0.125], last: [51, 1], tail: 6 }), 1); // never less than a second
   assert.equal(stepLeft({ est: 42, run: 60 }), 4.2); // a step with no progress, past its estimate: a tenth of it
-  assert.equal(slower("small", "full"), 1.1); // render_estimates.test.mjs holds the laptop's steps
+  assert.equal(slower("small", "full"), 1.1); // render_estimates.test.mjs holds the steps measured on a 16 GB GPU
   assert.equal(slower("large", "full"), 1);
   const key = timeKey("shot", [640, 352], 121, "small");
   assert.equal(key, "shot|640x352x121|small");
@@ -739,7 +739,7 @@ test("the time left in a step follows the sampler's own pace, not the time the m
 import { askedSeed } from "../../web/logic.mjs";
 
 test("a seed asked for in the address is a whole number under 2^31, and anything else is not a seed", () => {
-  assert.equal(askedSeed("1017942128"), 1017942128); // the laptop's erase of 12 Nov that left its object: the page had drawn this seed
+  assert.equal(askedSeed("1017942128"), 1017942128); // the seed of an erase that left its object, as the page drew it
   assert.equal(askedSeed("0"), 0);
   assert.equal(askedSeed("2147483647"), 2 ** 31 - 1); // the largest seed the page draws: (Math.random() * 2 ** 31) | 0
   for (const text of [null, "", "abc", "-1", "1.5", "1e3", " 7", "7 ", "2147483648", "99999999999"]) assert.equal(askedSeed(text), null, String(text));
@@ -766,7 +766,7 @@ test("an erase that left its object: the share of the object that changed on the
   const mist = rgba(() => [150, 150, 150]);
   const before = rgba((x) => (x >= 4 && x < 12 ? [60, 40, 30] : [150, 150, 150])); // a dark barn, 8 pixels wide, in the mist
   const mask = rgba((x) => (x >= 2 && x < 14 ? [255, 255, 255] : [0, 0, 0])); // its mask, 2 pixels wider on each side
-  assert.equal(erasedShare(before, before, mask, w, h), 0); // Klein answered with the frame as it was (12 Nov 2026)
+  assert.equal(erasedShare(before, before, mask, w, h), 0); // Klein can answer with the frame as it was
   // the same barn, softened (10 levels up and down from pixel to pixel) and 6 levels off, as Klein's fill can sit: unchanged
   const soft = rgba((x, y) => (x >= 4 && x < 12 ? [66 + ((x + y) % 2) * 20 - 10, 46, 36] : [156, 156, 156]));
   assert.equal(erasedShare(soft, before, mask, w, h), 0);
