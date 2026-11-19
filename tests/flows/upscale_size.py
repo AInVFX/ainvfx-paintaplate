@@ -24,13 +24,13 @@ def run(browser, port, U):
     U.check(page.is_visible("#ask-field") and (page.text_content("#ask-text") or "").startswith("The long side in px, such as 3000."),
             "Custom… asks for the long side")
     page.fill("#ask-field", "3000 px"); page.keyboard.press("Enter")
-    page.wait_for_selector("#ask", state="hidden")
+    refused = 'Upscale size not changed: "3000 px" is not a long side from 640 to 3840 px.'
+    U.poll(page, lambda: refused in (page.text_content("#status") or ""))  # the answer reaches the page one task after the dialog closes
     status = page.text_content("#status") or ""
-    U.check('Upscale size not changed: "3000 px" is not a long side from 640 to 3840 px.' in status and chosen(page) == "2560 x 1408",
-            f"Custom… refuses anything but a number and keeps the size: {status!r}")
+    U.check(refused in status and chosen(page) == "2560 x 1408", f"Custom… refuses anything but a number and keeps the size: {status!r}")
     page.select_option("#finish-upscale-size", "custom")
     page.fill("#ask-field", "3000"); page.keyboard.press("Enter")
-    page.wait_for_selector("#ask", state="hidden")
+    U.poll(page, lambda: chosen(page) == "Custom: 3000 x 1650")
     U.check(chosen(page) == "Custom: 3000 x 1650", f"Custom… takes the long side, the other side from the plate: {chosen(page)}")
     page.click("#finish-upscale")
     page.click("#finish-upscale")

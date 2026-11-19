@@ -138,9 +138,13 @@ def deliver_upscale(page, size: str = ""):
             page.fill("#ask-field", size)
             page.keyboard.press("Enter")
             page.wait_for_selector("#ask", state="hidden", timeout=10000)
-    chosen = page.evaluate("() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }")
-    page.keyboard.press("Escape")
+    read = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
     want = str(2 * round(int(size) / 2)) if size.strip().isdigit() else None
+    end = time.time() + 10  # Custom…'s answer reaches the page one task after its dialog closes: wait for the size it sets
+    while want and want not in re.findall(r"\d+", page.evaluate(read)) and time.time() < end:
+        page.wait_for_timeout(50)
+    chosen = page.evaluate(read)
+    page.keyboard.press("Escape")
     if want and want not in re.findall(r"\d+", chosen):
         raise RuntimeError(f"--upscale {size}: the page kept {chosen or 'no size'}")
     return f"Upscale: on at {chosen or 'the page size'}, asked for by --upscale"
