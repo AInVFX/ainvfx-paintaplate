@@ -1,10 +1,11 @@
-"""The twelve Paint a plate nodes. Each one does what core ComfyUI cannot.
+"""The Paint a plate nodes, listed in NODES at the end. Each one does what core ComfyUI cannot, or holds less memory.
 
-Compositing, masks, Klein, LTX and SAM 3.1 stay in core nodes. These nodes load and save plates in their own format,
-convert colour with OpenColorIO, fit generated frames to the plate, transfer a new light onto it, keep a matte on what an
-edit made, level an erase's fill, fit an HDR shot to the plate, save frames and movies several at once, show a shot while LTX samples it, and build the
-keyframe control video of a fluid shot. Each node converts tensors and calls plateio (files), mathops (pixels) or ocio
-(colour), which are tested without torch or ComfyUI.
+Masks, Klein, LTX and SAM 3.1 stay in core nodes. These nodes load and save plates in their own format, convert colour
+with OpenColorIO, fit generated frames to the plate, composite them one frame at a time, transfer a new light onto the
+plate, keep a matte on what an edit made, level an erase's fill, fit an HDR shot to the plate and keep its blacks, save
+frames and movies several at once, show a shot while LTX samples it, build the keyframe control video of a fluid shot,
+and join the windows of a shot. Each node converts tensors and calls plateio (files), mathops (pixels) or ocio (colour),
+which are tested without torch or ComfyUI.
 """
 from __future__ import annotations
 
