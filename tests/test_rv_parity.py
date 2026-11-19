@@ -121,7 +121,7 @@ class RVParity(unittest.TestCase):
             np.testing.assert_allclose(u["offset"], C[:3, 3], atol=1e-6, err_msg=str(d))
             self.assertAlmostEqual(u["exponent"], 1 / d["gamma"])
 
-    def test_table_covers_the_handover(self):
+    def test_table_covers_every_tool_display_and_look(self):
         cs = cases()
         names = " ".join(c["name"] for c in cs)
         for want in ("exposure -2", "exposure 2", "contrast", "gamma 2.2", "saturation 0", "saturation 2", "hue", "channel r",
