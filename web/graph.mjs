@@ -4,7 +4,7 @@
 
 import { fillWorkflow, stageOne } from "./logic.mjs";
 
-const LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]); // the nodes a link can stand in for
+const LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]); // the input loaders: a link can stand in for one, and none is a model
 const EDIT_OUT = ["result", "patch", "relit"]; // an edit's saved images: inside one scene, links carry them
 const OUTPUTS = new Set(["SaveImage", "PreviewImage", "SaveVideo", "PreviewAny", "PaintAPlate_SavePlate", "PaintAPlate_SaveFrames"]); // never shared
 
@@ -42,7 +42,7 @@ export function instantiate(wf, tag, values, links = {}, { plate = "plate", drop
 
 // One prompt from the parts, identical nodes shared: each model loads once, the plate decodes once. `onShare(kept, gone)`
 // hears of each node folded into an identical one.
-export function merge(parts, onShare = () => {}) {
+function merge(parts, onShare = () => {}) {
   const prompt = Object.assign({}, ...parts);
   for (let shared = true; shared;) {
     shared = false;
@@ -60,16 +60,15 @@ export function merge(parts, onShare = () => {}) {
 
 // ---------- The graph laid out for a person ----------
 // ComfyUI places the nodes of an API workflow itself, so the ids and the titles carry the structure. Each section takes a
-// hundred of ids (the plate 200, the first edit 400) and opens with a README note: core Primitive String Multiline, which
+// hundred ids (the plate 200, the first edit 400) and opens with a README note: core Primitive String Multiline, which
 // no node reads, so it never runs. Every title starts with its section; the values the page set show in brackets. Model
 // loaders go in MODELS, whichever step first used them, as one loader serves every step. The page saves this graph in the
 // editor's own format (editorGraph, below), where each README becomes the note of its section's group.
-const INPUT_LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]);
-const isModel = (n) => /Loader/.test(n.class_type) && !INPUT_LOADERS.has(n.class_type);
+const isModel = (n) => /Loader/.test(n.class_type) && !LOADERS.has(n.class_type);
 const modelName = (n) => n.inputs.unet_name ?? n.inputs.ckpt_name ?? n.inputs.clip_name ?? n.inputs.vae_name ?? n.inputs.lora_name ??
   n.inputs.model_name ?? n.inputs.text_encoder ?? "";
 
-export function organise(prompt, where, sections) { // sections: [key, name, README text], in the order they run
+function organise(prompt, where, sections) { // sections: [key, name, README text], in the order they run
   const index = new Map(sections.map(([key], i) => [key, i])), members = sections.map(() => []);
   for (const [id, n] of Object.entries(prompt)) members[index.get(isModel(n) ? "models" : where[id]?.sec) ?? index.get("input")].push(id);
   const ids = new Map(), placed = [];
@@ -168,7 +167,8 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
     cond_fps: Math.min(30, fps), prefix: out("hdr/f") }, { path: made }, { drop: ["hdr"] })).hdr : null;
   sec = "output";
   add(instantiate(WF.export, "export", { ...common, relight, keep_untouched: !relight, grow: render.grow, feather: render.feather,
-    hdr_grow: render.grow + render.feather, prefix: out("export"), matte_prefix: out("matte/matte") },
+    hdr_grow: render.grow + render.feather, prefix: render.exr ? "" : out("export"), exr_prefix: render.exr ? out("export/f") : "",
+    matte_prefix: out("matte/matte") }, // render.exr: SDR to HDR's values in half-float EXR, as Export writes them (logic.exrResult)
     { shot: made, ...(hdr ? { hdr } : {}), ...(a ? { matte_a: a, matte_b: paintMatte ?? erasedMatte } : {}) }));
   const files = `output/${render.prefix}`, n = edits.length, painting = edits.filter((e) => e.tool === "paint").length;
   const images = edits.flatMap((e) => [e.mask, e.layer].filter(Boolean)); // what the graph reads from the input folder
@@ -176,7 +176,7 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
     ["readme", "How this graph works", [`AInVFX Paint a plate${about.version ? ` ${about.version}` : ""}: the scene of ${about.name ?? plate.path}, as one ComfyUI workflow.`,
       [`It makes ${n} edit${n === 1 ? "" : "s"} on frame 0, then renders them through the whole shot at full size, as Paint a plate's Export does:`,
         ...edits.map((e, k) => `- Edit ${k + 1}: ${TOOLS[e.tool]}${quoted(e.words)}, seed ${e.seed}.`)].join("\n"),
-      `To run it, press Run. These files must be in ComfyUI's input folder, where Paint a plate put them when it saved this graph: the plate, ${plate.path}, and ${images.join(", ")}. The images sit at the top of that folder, because ComfyUI's image loaders list only the files there. If ComfyUI was already open when Paint a plate saved this graph, choose Edit > Refresh Node Definitions in ComfyUI first: it reads those lists again. The model files are the ones MODELS loads. It writes the result in the plate's own format to ${files}/export, and its matte to ${files}/matte.`,
+      `To run it, press Run. These files must be in ComfyUI's input folder, where Paint a plate put them when it saved this graph: the plate, ${plate.path}, and ${images.join(", ")}. The images sit at the top of that folder, because ComfyUI's image loaders list only the files there. If ComfyUI was already open when Paint a plate saved this graph, choose Edit > Refresh Node Definitions in ComfyUI first: it reads those lists again. The model files are the ones MODELS loads. It writes the result ${render.exr ? "as half-float EXR frames in ACES2065-1" : "in the plate's own format"} to ${files}/export, and its matte to ${files}/matte.`,
       "To read it: each section takes a hundred node ids and opens with a README note like this one, and every node title starts with its section. Brackets list the values Paint a plate set on a node. Model loaders sit in MODELS, shared by every step.",
       "To change an edit: in its section, change the node marked [caption] or [seed], then Run. The edits after it, and the render, follow."].join("\n\n")],
     ["input", "INPUT", `The plate. Load Plate reads ${plate.path}${plate.frames ? `, ${plate.frames} frames` : ""}${plate.fps ? ` at ${plate.fps} fps` : ""}. Colour Space turns it from ${plate.cs} into the sRGB the models work in. Frame 0, scaled to ${by(plate.work)}, is the frame the edits paint on.\n\nOut: the plate, every frame, and frame 0.`],
@@ -189,8 +189,8 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
     ["erasePass", "CLEAN PLATE PASS", `Lightricks' in-outpainting IC-LoRA on LTX 2.5 regenerates the area to clean on every frame, in two stages: ${by(low)}, then 2 steps at ${by(plate.work)} from it. The prompt describes the scene as it stays, with the removed objects never named.\n\nIn: the plate, the clean matte and frame 0 with every Clean edit. Out: the clean plate, every frame.`],
     ["shot", "SHOT", `LTX 2.5 with WepeNerd's Ripple IC-LoRA carries the edited frame 0 through the shot, over ${clean ? "the clean plate" : "the plate"}, seed ${render.seed}. Its prompt is the node marked [prompt].\n\nIn: the edited frame 0 and ${clean ? "the clean plate" : "the plate"}. Out: the shot, every frame.`],
     ["paintTrack", "PAINT TRACKING", `SAM 3.1 follows the painted area${painting > 1 ? "s" : ""} through the shot at ${by(plate.track)}, and Follow Matte adds what the shot changed near it.\n\nIn: the shot and the painted areas. Out: the paint matte, every frame.`],
-    ["hdr", "SDR TO HDR", "Lightricks' SDR-to-HDR IC-LoRA turns the shot into scene-linear values for an EXR plate.\n\nIn: the shot. Out: the HDR shot, every frame."],
-    ["output", "OUTPUT", `Fit to Plate puts the shot over the plate inside the mattes, grown by ${render.grow} px and feathered by ${render.feather} px, and matches its colour at their edge${relight ? "; Relight Transfer carries the new light over the plate" : ""}. Save Plate writes the result to ${files}/export in the plate's own format${relight ? "" : ", every pixel outside the mattes the plate's own"}, and the matte to ${files}/matte.\n\nIn: the plate, the shot and the mattes. Out: the files.`],
+    ["hdr", "SDR TO HDR", `Lightricks' SDR-to-HDR IC-LoRA turns the shot into scene-linear values.${render.exr ? " The plate's format holds nothing above 1.0, so OUTPUT writes them as half-float EXR frames in ACES2065-1." : ""}\n\nIn: the shot. Out: the HDR shot, every frame.`],
+    ["output", "OUTPUT", `Fit to Plate puts the shot over the plate inside the mattes, grown by ${render.grow} px and feathered by ${render.feather} px, and matches its colour at their edge${relight ? "; Relight Transfer carries the new light over the plate" : ""}. ${render.exr ? `Save Frames writes the result to ${files}/export as half-float EXR frames in ACES2065-1` : `Save Plate writes the result to ${files}/export in the plate's own format${relight ? "" : ", every pixel outside the mattes the plate's own"}`}, and the matte to ${files}/matte.\n\nIn: the plate, the shot and the mattes. Out: the files.`],
   ];
   const shared = (kept, gone) => { // one node serving both passes of an edit, or both stages of the erase pass, says so
     const [sa, ...ra] = (where[kept]?.label ?? "").split(" · "), [, ...rb] = (where[gone]?.label ?? "").split(" · ");

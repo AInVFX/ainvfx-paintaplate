@@ -88,10 +88,9 @@ export function previewSize(plate, work, cap, step = 32, tol = 0.025) {
   return fitSize(plate[0], plate[1], cap, step, tol);
 }
 
-
 // Preview pass: half and a quarter of the working size, each on the grid with the plate's aspect (previewSize). `div` is
 // the part of the working size's long side, `cap` that long side.
-export const PREVIEW_PARTS = [[2, "Half size"], [4, "Quarter size"]];
+const PREVIEW_PARTS = [[2, "Half size"], [4, "Quarter size"]];
 // The Preview menu: Off (no preview pass and no live preview), Latent preview (no preview pass; each pass's live preview
 // shows in the player), then a preview pass at half or a quarter of the working size, with the live preview too.
 export const PREVIEW_DEFAULT = "latent";
@@ -133,7 +132,7 @@ export function secs(t) { // "about 40 s left", "about 1 min 40 s left": rounded
   return m >= 10 || !s ? `about ${Math.round(t / 60)} min left` : `about ${m} min ${s} s left`;
 }
 
-// ---------- Captions: the text and table FLUX 3 Image Layout Prompt writes, per edit ----------
+// ---------- Captions: the page's own text and table for an edit (app.templateCaption) ----------
 
 export const dark = (hex) => [1, 3, 5].reduce((a, i, k) => a + [0.2126, 0.7152, 0.0722][k] * parseInt(hex.slice(i, i + 2), 16), 0) < 60;
 
@@ -145,7 +144,7 @@ const objectName = (words) => String(words ?? "").trim().replace(/^(?:the|a|an)\
 // give the object its usual colour. When the words name no colour, the writer's request and the page's own caption name the
 // colours that the strokes show, by their share of the painted pixels, largest first; a colour under 5% of them is an edge
 // where two strokes meet. Words that name a colour win, and then the page names none.
-export const COLOR_WORDS = /\b(?:red|orange|yellow|green|cyan|blue|violet|purple|magenta|pink|brown|black|white|gr[ae]y|silver|gold(?:en)?|beige|tan|crimson|scarlet|maroon|navy|teal|turquoise|ivory)\b/i;
+const COLOR_WORDS = /\b(?:red|orange|yellow|green|cyan|blue|violet|purple|magenta|pink|brown|black|white|gr[ae]y|silver|gold(?:en)?|beige|tan|crimson|scarlet|maroon|navy|teal|turquoise|ivory)\b/i;
 const HUES = [[15, "red"], [40, "orange"], [70, "yellow"], [165, "green"], [195, "cyan"], [255, "blue"], [290, "violet"], [345, "magenta"], [361, "red"]];
 
 // A colour by name, one namer for a paint and a light: « black », « brown », « dark blue », « pink », « warm white ». Each
@@ -210,13 +209,14 @@ export function caption({ tool, words, bbox, strokes = [], aspect, hues = [] }) 
   return `${text} ${JSON.stringify([{ id: "obj_1", bbox, desc }])}`;
 }
 
-// ---------- What FLUX 3 Image Klein's upsampler reads, and what the page keeps of its answer ----------
-// Black Forest Labs' own format (src/flux3/pup.py and bbox.py): an erase or a paint edit is a request with one locked row
-// in the table Klein was trained on; a relight is a plain request. Boxes are [y_min, x_min, y_max, x_max] on 0..1000.
+// ---------- What the prompt writer reads, and what the page keeps of its answer ----------
+// Black Forest Labs' own format (src/flux3/pup.py and bbox.py): an erase or a paint edit is a request with locked rows in
+// the table Klein was trained on, one per painted part of an erase and one for a paint. A relight's request is the page's
+// own (lightIntent), and never reaches the prompt writer. Boxes are [y_min, x_min, y_max, x_max] on 0..1000.
 
 const pyJSON = (v) => JSON.stringify(v).replace(/("(?:[^"\\]|\\.)*")|([,:])/g, (m, s, p) => s ?? `${p} `); // json.dumps spacing
-export const KEEP_TOUCHED = " Where the drawing touches an object, the new element acts on that object itself (it burns it, rests on it, " +
-  "wets it or lights it); add no props, fuel or supports that were not asked for."; // a fire on a towel came with logs without it
+const KEEP_TOUCHED = " Where the drawing touches an object, the new element acts on that object itself (it burns it, rests on it, " +
+  "wets it or lights it); add no props, fuel or supports that were not asked for."; // without it, a fire on a towel comes with logs
 
 export function upsampleRequest({ tool, words, bbox, boxes = null, hues = [] }) { // hues: a paint's colours by name (paintColors)
   const parts = tool === "erase" && boxes?.length > 1 ? boxes : null; // several painted parts: one locked row each
@@ -245,13 +245,13 @@ export function splitTable(text) { // [caption, rows]: from the last "[" where t
 }
 
 const ROW_ID = /^[A-Za-z][A-Za-z0-9_]*$/;
-export function validBox(b) {
+function validBox(b) {
   if (!Array.isArray(b) || b.length !== 4 || b.some((v) => typeof v !== "number" || !Number.isFinite(v))) return null;
   const [y1, x1, y2, x2] = b;
   return y1 < 0 || x1 < 0 || y2 <= y1 || x2 <= x1 || y2 > 1000 || x2 > 1000 || Math.max(...b) <= 1 ? null : b;
 }
 
-function addedRow(row, caption) { // a row the upsampler added: kept when it is cited as <id> and well formed
+function addedRow(row, caption) { // a row the prompt writer added: kept when it is cited as <id> and well formed
   if (!row || typeof row !== "object" || !ROW_ID.test(row.id ?? "") || !caption.includes(`<${row.id}>`) || !String(row.desc ?? "").trim()) return null;
   const desc = row.desc.trim(), box = validBox(row.bbox);
   if (box) return { id: row.id, bbox: box, desc };
@@ -261,8 +261,8 @@ function addedRow(row, caption) { // a row the upsampler added: kept when it is 
   return { id: row.id, from: row.from, src_bbox: src, tgt_bbox: tgt, desc };
 }
 
-// The upsampler's answer with the page's own rows put back, as Black Forest Labs' reconcile(): each locked row verbatim with
-// the upsampler's description of it, then the rows it added. A cut-off table leaves the caption and the locked rows.
+// The prompt writer's answer with the page's own rows put back, as Black Forest Labs' reconcile(): each locked row verbatim
+// with the prompt writer's description of it, then the rows it added. A cut-off table leaves the caption and the locked rows.
 export function reconcile(text, locked) {
   const [caption, rows] = splitTable(text);
   const byId = new Map((rows ?? []).filter((r) => r && typeof r.id === "string").map((r) => [r.id, r]));
@@ -272,8 +272,8 @@ export function reconcile(text, locked) {
 }
 
 // ---------- An erase: one locked box per painted part ----------
-// One box around a truss, a crane and a door took in an astronaut between them, and the upsampler removed him instead.
-// A few tight boxes cover the paint, so they hold what was painted and little else.
+// One box around several painted parts can take in an object that stands between them, and the prompt writer then
+// removes that object instead. A few tight boxes cover the paint, so they hold what was painted and little else.
 // paint: { bits, w, h } on a coarse grid; boxes are [y_min, x_min, y_max, x_max] on 0..1000.
 export function paintBoxes({ bits, w, h }, { max = 4, fill = 0.4, gain = 0.25, margin = 8 } = {}) {
   // a box: the painted cells in it and their tight bounds. The emptiest box splits in two, along its long side, where the two
@@ -303,12 +303,9 @@ export function paintBoxes({ bits, w, h }, { max = 4, fill = 0.4, gain = 0.25, m
   }
   const box = (b) => [Math.max(0, Math.floor((b.y1 / h) * 1000) - margin), Math.max(0, Math.floor((b.x1 / w) * 1000) - margin),
     Math.min(1000, Math.ceil(((b.y2 + 1) / h) * 1000) + margin), Math.min(1000, Math.ceil(((b.x2 + 1) / w) * 1000) + margin)];
-  return boxes.sort((a, z) => a.x1 - z.x1 || a.y1 - z.y1).map(box); // numbered left to right, as the upsampler numbers its rows
+  return boxes.sort((a, z) => a.x1 - z.x1 || a.y1 - z.y1).map(box); // numbered left to right, as the prompt writer numbers its rows
 }
 
-// Whether a caption erases what was painted: it cites a locked row (<obj_1>), or the rows it removes and cites hold most of the
-// paint. `paint`: { bits, w, h }, the painted area on a coarse grid. A bad caption can remove person_1, a box with none of the
-// paint in it; a good one may never cite <obj_1> but remove four rows that hold nearly all of it.
 // The rows of an answer that removes objects, apart from the locked ones: named in its caption, with a box in the frame and none
 // in the result.
 const removedRows = (caption, rows, locked) => {
@@ -316,6 +313,9 @@ const removedRows = (caption, rows, locked) => {
   return (rows ?? []).filter((r) => r && !ids.has(r.id) && r.tgt_bbox == null && validBox(r.src_bbox) && caption.includes(`<${r.id}>`));
 };
 
+// Whether a caption erases what was painted: it cites a locked row (<obj_1>), or the rows it removes and cites hold most of the
+// paint. `paint`: { bits, w, h }, the painted area on a coarse grid. A bad caption can remove person_1, a box with none of the
+// paint in it; a good one may never cite <obj_1> but remove four rows that hold nearly all of it.
 export function erasesPaint(text, locked, paint, share = 0.5) {
   const [caption, rows] = splitTable(text);
   if (locked.some((r) => caption.includes(`<${r.id}>`))) return true;
@@ -389,9 +389,9 @@ export function dimOutside(rgba, bits, keep = DIM) {
   return out;
 }
 
-// The erase pass's prompt: the scene as it stays, in the upsampler's own words for what it kept (rows with a box in the
+// The erase pass's prompt: the scene as it stays, in the prompt writer's own words for what it kept (rows with a box in the
 // result). People and text stay out (a pose in words fights the plate's own motion), and the erased object is never named
-// (named, the umbrella came back). Nothing kept: no prompt, as LTX's inpainting guide recommends.
+// (named, it comes back). Nothing kept: no prompt, as LTX's inpainting guide recommends.
 const UNNAMED = /^(?:person|people|man|woman|child|boy|girl|crowd|en_text)$/i;
 export function erasePrompt(captions) {
   const descs = [];
@@ -409,7 +409,6 @@ export function erasePrompt(captions) {
 // The full size's first stage, as in Lightricks' two-stage LTX workflows: half the working size, in multiples of 32. The second
 // stage refines it at full size in 2 steps (8 steps at full size take 181 s on a 1080p plate).
 export const stageOne = ([w, h], step = 32) => [Math.max(step, Math.round(w / 2 / step) * step), Math.max(step, Math.round(h / 2 / step) * step)];
-
 
 // ---------- A render step and a new edit ----------
 // Generate stops a running render step only where that wastes least: a full-size or an export step in its first half. A step
@@ -429,8 +428,9 @@ export const plateIdentity = (path, st, on = true) => (st && on ? JSON.stringify
 export const RIPPLE = "Use the reference video for motion, timing, camera movement, framing and lighting changes; " +
   "follow the edited first frame for every change of content, light and style.";
 
-// The Ripple sentence, then one line per paint or light edit (its card: a short description of the change helps; an explosion
-// then stayed and grew instead of driving off with the car). An erase is never named: named, the umbrella came back.
+// The Ripple sentence, then one line per paint or light edit (its card: a short description of the change helps; without
+// it, an explosion added on a car can stay and grow instead of driving off with the car). An erase is never named: named,
+// it comes back.
 export function shotPrompt(edits) { // a light edit names its colour (`hue`), with or without words
   return [RIPPLE, ...edits.filter((e) => (e.tool === "paint" && e.words) || e.tool === "light").map((e) => (e.tool === "paint"
     ? `Added in the first frame: ${e.words}; it keeps moving naturally and stays in place on what it touches for the whole shot.`
@@ -439,7 +439,7 @@ export function shotPrompt(edits) { // a light edit names its colour (`hue`), wi
 
 // ---------- Whole object: which of SAM's masks belong to the erase ----------
 // Masks are Uint8Arrays of 0 and 1 over `area` pixels. Found by name: the instances the stroke touches. Else one mask per stroke
-// point: objects only (not the sky or the road), kept when two points agree (a point that slipped onto the road found a strip of
+// point: objects only (not the sky or the road), kept when two points agree (a point that slips onto the road finds a strip of
 // it). A thin pole under a wide brush covers little of the stroke, so a touch counts from either side.
 const count = (m) => { let n = 0; for (let i = 0; i < m.length; i++) n += m[i]; return n; };
 const shared = (a, b) => { let n = 0; for (let i = 0; i < a.length; i++) n += a[i] & b[i]; return n; };
@@ -503,7 +503,7 @@ export function frameUse(f, { frame, inPt, outPt }, behind = 3) {
 }
 
 // ---------- The colour picker ----------
-// The in-frame colour picker (Firefox, Safari): the average of the pixels under the click as #rrggbb, for the brush. `data`
+// The in-frame colour picker: the average of the pixels under the click as #rrggbb, for the brush. `data`
 // holds RGBA bytes, as getImageData returns them; transparent pixels, outside the frame, do not count.
 export function pickedColor(data) {
   let r = 0, g = 0, b = 0, n = 0;
@@ -548,10 +548,6 @@ export function nearKeys(keys, frame) { // the keyframes before and after a fram
   return { prev, next };
 }
 
-// One edit at a time: the strokes in progress, else the current edit (the one just started, or picked in History).
-// What a failed step's ComfyUI message means, in one plain sentence. The page puts it after "<step> failed:", and the
-// log keeps ComfyUI's own words.
-const SAVED = { matte_a: "the clean matte", matte_b: "the paint matte", clean: "the clean plate pass", shot: "the shot", plate: "the fluid shot" };
 // ---------- OCIO, as RV's menu shows it ----------
 
 // The colour spaces as RV's OCIO menu builds its File Color Space tree (ocio_source_setup.py): each family path, such as
@@ -576,10 +572,10 @@ export function browseItems(items, { query = "", by = "name" } = {}) {
     (a.kind === "folder") !== (b.kind === "folder") ? (a.kind === "folder" ? -1 : 1) : by === "newest" ? b.mtime - a.mtime || name(a, b) : name(a, b));
 }
 
-// A page path as breadcrumbs, the root first: "output:video/shot" gives Output, video, shot, each with the path it opens
 // A path on the machine itself, outside ComfyUI's folders: absolute, or in Windows' form (folders.absolute).
 const FULL = /^(\/|[A-Za-z]:[\\/])/;
 export const fullPath = (path) => FULL.test(String(path ?? ""));
+// A page path as breadcrumbs, the root first: "output:video/shot" gives Output, video, shot, each with the path it opens
 export function crumbs(path) { // the Open dialog's trail: Input or Output and the folders below, or for a full path the machine's own folders
   const full = FULL.exec(path);
   if (full) {
@@ -593,6 +589,9 @@ export function crumbs(path) { // the Open dialog's trail: Input or Output and t
 // The frame pattern of a sequence from one of its file names: core's f_00001_.exr gives f_#####_.exr
 export const framePattern = (name) => name.replace(/(\d+)(\D*)$/, (_, d, rest) => "#".repeat(d.length) + rest);
 
+// What a failed step's ComfyUI message means, in one plain sentence. The page puts it after "<step> failed:", and the
+// log keeps ComfyUI's own words.
+const SAVED = { matte_a: "the clean matte", matte_b: "the paint matte", clean: "the clean plate pass", shot: "the shot", plate: "the fluid shot" };
 export function plainError(message) { // a failure in plain words: why, the fact for the log; todo, the action for the status line
   const m = String(message ?? ""), again = "Press Generate to try again.";
   const says = (why, todo = again) => ({ why, todo });
@@ -623,7 +622,7 @@ export function logLevel(text) { // a log message's colour, from its words: red 
   return starts("Error: ") ? "error" : starts("Warning: ") ? "warn" : "";
 }
 
-// What the status line shows once the log writes `text` (choices 24 and 25), or null to leave it as it is. An error or a
+// What the status line shows once the log writes `text`, or null to leave it as it is. An error or a
 // warning shows by its first line that starts with its word, in its colour (logLevel). A line that succeeds replaces a
 // fault that is over (`shown`: the status line's level), in the normal colour, unless it is bookkeeping. Every other event
 // reaches the status line from the code that makes it, with what to do next.
@@ -660,6 +659,11 @@ export function plainPaths(text, folder = "") {
     return body.split(/[\\/]+/).filter((part) => part && !/^[A-Za-z]:$/.test(part)).slice(-2).join(sep) + end;
   });
 }
+
+// The full-precision frames' failure (app.fetchDeep): refused, unanswered or malformed, the cache stops (frames.fillDeep) and
+// the viewer keeps the 8-bit movie. One line per source, an error, so the log and the status line show it in red.
+export const deepStopped = (what, why) =>
+  `Error: full-precision frames of ${what}: stopped (${String(why ?? "").replace(/\s+/g, " ").trim() || "no reason given"}). Viewer: 8-bit movie.`;
 
 // The log's export: the text of paintaplate_log_<plate>_<YYYYMMDD_HHMM>.txt, to share for troubleshooting. It holds the
 // log and what ComfyUI reports of its versions and its machine (/system_stats): no command line, and its plate and log
@@ -799,9 +803,11 @@ export const FINISH = [
 ];
 export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on
 
-// What to do when a line names a missing model file: the status line adds it after the line, and the log keeps the fact.
+// What to do when a line names a missing file of models/vae_approx, which holds the live preview's decoder that
+// get_models.py downloads: the status line adds it after the line, and the log keeps the fact.
 export const missingFileHint = (text) => (/models\/vae_approx/.test(String(text).split("\n")[0]) ? "Run python get_models.py." : "");
 
+// One edit at a time: the strokes in progress, else the current edit (the one just started, or picked in History).
 export function strokeTarget({ draft, current, tool }) { // where a new stroke goes: "draft", "current" or "new"
   if (draft) return "draft";
   return current?.tool === tool ? "current" : "new";
@@ -820,7 +826,7 @@ export function toolEndsEdit({ draft, current }, tool) { // picking another tool
   return !!work && work.tool !== tool;
 }
 
-// The eraser's key, X. Held while a stroke is dragged, the eraser lasts as long as the key is down; a tap, shorter than
+// The eraser's key, E. Held while a stroke is dragged, the eraser lasts as long as the key is down; a tap, shorter than
 // ERASER_TAP seconds with no stroke, switches it on or off. The eraser's state once the key comes up.
 export const ERASER_TAP = 0.3;
 export function eraserAfterKey(was, held, dragged) { return !dragged && held < ERASER_TAP ? !was : was; }
@@ -828,7 +834,7 @@ export function eraserAfterKey(was, held, dragged) { return !dragged && held < E
 export function plateSpaceLine(plate) {
   return plate ? `Colour space: ${plate.cs}, ${plate.pageSpaceChosen ? "override" : "from file"}` : "Colour space: no plate";
 }
-// The one question before an OCIO change that regenerates: the cause and the cost, then the question (Continue, Cancel).
+// The one question before an OCIO change that regenerates: the cause and the cost, then the question, answered « Yes, continue » or « No, keep it » (app.askRemake).
 // `what`: « plate's colour space » or « OCIO config ». The first frame is the page's own step: the question counts the edits.
 export function remakeQuestion(what, edits) { return `Changing the ${what} affects generation: ${edits} edit${edits === 1 ? "" : "s"} will be regenerated. Continue?`; }
 // The HUD's line when a fluid keyframe moves to the nearest frame it can sit on; `frame` is the plate's own number
@@ -854,7 +860,7 @@ export function fluidPrompt(words) { // the trigger first, as the model card ask
 
 // The paint matte's seed: the pixels where the edited first frame (a) differs from the plate's (b) by more than
 // `threshold` (0 to 255, on the largest channel), inside the paint zones (z, white). RGBA arrays of one size; 1 or 0 per
-// pixel. The zone is wider than what was painted, and a matte started from all of it followed whatever stood nearby.
+// pixel. The zone is wider than what was painted, and a matte started from all of it follows whatever stands nearby.
 export function changedMask(a, b, z, threshold = 24) {
   const n = a.length >> 2, out = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
@@ -869,8 +875,8 @@ export function changedMask(a, b, z, threshold = 24) {
 // given the page's own caption, can leave the barn through the whole shot. So after the edit the page
 // compares the first frame (`after`) with the frame under the edit (`before`) inside the object's mask (`mask`: painted
 // where its red is 128 or more), all three RGBA at `w` x `h`, on cells of `cell` pixels. A cell's mean colour holds under
-// Klein's softness and under the few levels its fill can sit off the frame (4 to 6, measured for Level Fill on 28
-// October), and it moves when the object goes. Returns the share of the object, from 0 to 1, whose cells moved by more
+// Klein's softness and under the few levels its fill can sit off the frame (4 to 6, measured for Level Fill), and it
+// moves when the object goes. Returns the share of the object, from 0 to 1, whose cells moved by more
 // than `levels` of 255; null when the mask is empty.
 export function erasedShare(after, before, mask, w, h, { cell = 4, levels = 12 } = {}) {
   let all = 0, changed = 0;
@@ -912,10 +918,6 @@ export function edgesHeld(after, before, mask, w, h) {
   return n < 16 || va <= 0 || vb <= 0 ? null : (sab - (sa * sb) / n) / Math.sqrt(va * vb);
 }
 
-// The band that an erase reaches beyond its object: the object's mask grown by `reach` pixels each way, as a square (along
-// the rows, then the columns, never past the frame's edge), without the mask itself. The edit's mask grows by about as much
-// before Klein's pass (app.editSettings: grow, then feather). mask: RGBA at w x h, painted where its red is 128 or more.
-// Returns RGBA, white in the band, as erasedShare and edgesHeld read a mask.
 function grownBy(m, w, h, reach) { // `m` (0 or 1 per pixel) grown by `reach` pixels each way, as a square brush
   const rows = new Uint8Array(w * h), out = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (m[y * w + x]) rows.fill(1, y * w + Math.max(0, x - reach), y * w + Math.min(w - 1, x + reach) + 1);
@@ -923,6 +925,10 @@ function grownBy(m, w, h, reach) { // `m` (0 or 1 per pixel) grown by `reach` pi
   return out;
 }
 
+// The band that an erase reaches beyond its object: the object's mask grown by `reach` pixels each way, as a square (along
+// the rows, then the columns, never past the frame's edge), without the mask itself. The edit's mask grows by about as much
+// before Klein's pass (app.editSettings: grow, then feather). mask: RGBA at w x h, painted where its red is 128 or more.
+// Returns RGBA, white in the band, as erasedShare and edgesHeld read a mask.
 export function bandBeyond(mask, w, h, reach) {
   const m = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) m[i] = mask[i * 4] >= 128 ? 1 : 0;
@@ -1043,9 +1049,10 @@ export function warmEnd(seconds, missed, startShown) {
 }
 
 // ---------- SDR to HDR ----------
-// Lightricks' LTX 2.5 SDR-to-HDR IC-LoRA makes 16-bit HDR from an SDR shot. It runs at full size for an EXR plate, unless
-// switched off; a video plate stays SDR. A relight keeps the plate's own values under a smooth light ratio, which stay HDR,
-// so a render with a light edit leaves it out. A blank plate asks its bit depth: 8-bit, or 16-bit half float, where its
+// Lightricks' LTX 2.5 SDR-to-HDR IC-LoRA makes 16-bit HDR from an SDR shot, at full size. It is on by default for a plate
+// with float samples, such as EXR (plateDepth's `hdr`); on another plate, the Finish menu turns it on. On a plate that holds values above 1.0, a
+// relight keeps the plate's own values under a smooth light ratio, which stay HDR, so a render with a light edit leaves it
+// out; on another plate, SDR to HDR runs on the relit composite instead (hdrAfterComposite). A blank plate asks its bit depth: 8-bit, or 16-bit half float, where its
 // fluid shot goes through it and becomes an EXR plate: 16-bit is the default once its files are found (?hdr=0 turns it off).
 export const HDR_DEPTH = 16;
 // New content at the plate's bit depth: a clean plate or a new element matches the plate. One rule per
@@ -1055,7 +1062,7 @@ export const HDR_DEPTH = 16;
 //   8-bit video or images: 8-bit PNG frames; SDR to HDR off by default.
 //   10-bit or 12-bit video (ProRes among them), 16-bit PNG and TIFF, 10-bit DPX: 16-bit PNG frames; off by default.
 //   Half and float samples (EXR, and a float TIFF or DPX: FFmpeg's decoders read 32-bit float): half-float EXR frames; on by
-//   default (a light edit stays out while the relight is on hold).
+//   default.
 export function plateDepth(spec) {
   const fmt = String(spec?.pix_fmt ?? "").toLowerCase(), exr = !!spec && spec.kind !== "video" && /^\.exr$/i.test(spec.ext ?? "");
   const float = exr || /f(16|32)(le|be)?$/.test(fmt);
@@ -1068,8 +1075,12 @@ export function plateDepth(spec) {
 // sRGB), video or not: an HDR video in PQ or HLG, a log video, a 10-bit Cineon DPX, a camera log TIFF. Such a plate exports
 // in its own format with no extra files; only the others warn first and deliver an EXR sequence.
 export const holdsHdr = (spec, headroom = 1) => !!spec && (plateDepth(spec).float || headroom > 1.001);
-export const hdrPlate = (spec) => plateDepth(spec).hdr; // SDR to HDR on by default for this plate
 export const wantsHdr = (spec, tools, on) => !!spec && !!on && !tools.includes("light");
+// SDR to HDR on the composite, once it is made: a set with a Light edit, on a plate whose format holds nothing above 1.0, when
+// SDR to HDR is on. Relight Transfer relights the plate's own pixels, and the shot's HDR frames reach the result only inside
+// the mattes, so the new light would stay SDR: the relit composite goes through SDR to HDR whole, as a plate with no edit
+// does (app.plateHdr), and its frames are the result. A plate that holds values above 1.0 keeps them under the relight.
+export const hdrAfterComposite = (spec, tools, on, headroom = 1) => !!spec && !!on && tools.includes("light") && !holdsHdr(spec, headroom);
 // The switch away from the plate's default makes another render, so each setting keeps its own: "|hdr" or "|sdr".
 export const hdrKey = (edits, dflt, on) => (on === dflt ? edits : `${edits}|${on ? "hdr" : "sdr"}`);
 export const hdrOfKey = (key, dflt) => (key?.endsWith("|hdr") ? true : key?.endsWith("|sdr") ? false : dflt);
@@ -1081,7 +1092,7 @@ export const plateAlone = (key) => key === PLATE_ALONE;
 // SDR to HDR on a plate whose format cannot hold values above 1.0: asked before it turns on, then the result is
 // an EXR sequence, which the player shows at full precision and the export writes.
 export const exrResult = (spec, hdrRan, headroom = 1) => !!hdrRan && !holdsHdr(spec, headroom);
-// SDR to HDR for a render: on its own when the plate holds values above 1.0, else when Deliver's bit-depth pass asks for it
+// SDR to HDR for a render: on its own when the plate holds values above 1.0, else when the Finish menu turns it on (deliverHdr)
 export const wantsHdrFor = (spec, headroom, deliverHdr) => holdsHdr(spec, headroom) || !!deliverHdr;
 // On a 32 GB GPU every step finishes at 1920 x 1088 x 121, slower than on 96 GB, but a 4K plate does not (its first erase
 // still runs after 30 minutes on an RTX 5090). A plate above 2K on a GPU under 48 GB warns when it opens: a 48 GB GPU
@@ -1097,7 +1108,7 @@ export const defaultDepth = (hdrReady) => (hdrReady ? HDR_DEPTH : 8); // a blank
 // the config has it, so they show what its full-precision frames show; a config without it keeps the model space.
 export const viewerSpace = (names, model) => (names.includes("ACEScct") ? "ACEScct" : model);
 // While a shot plays, one source shows one kind of frame: its full-precision frames once all of them are in, else its 8-bit
-// movie. Mixed, the two alternated as the frames arrived, with two different tone mappings (a cause of flicker).
+// movie. Mixed, the two would alternate as the frames arrive, with two different tone mappings, and the shot would flicker.
 export const drawsDeep = (playing, holdsAll) => !playing || holdsAll;
 // A fluid shot's folder, from its HDR frames or its shot in the blank plate's format: what its export zips.
 export const fluidRun = (path) => String(path ?? "").replace(/^output[:/]/, "").replace(/\/(hdr|plate)(\/[^/]*)?$/, "");
@@ -1236,7 +1247,7 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
   // SDR to HDR: its 8-bit movie in log values, and its EXR frames in their own space (ACES2065-1, `spaces.hdr`), for the viewer
   // to draw and inspect them as they are (setShot's fifth argument, framesSpace)
   if (id === "hdr") return { url, space: spaces.log ?? "@model", frames: store.hdrFrames ?? null, framesSpace: store.hdrFrames ? spaces.hdr ?? null : null };
-  return { url, space: MATTE_PASSES.has(id) ? spaces.data ?? "@model" : id === "hdr" ? spaces.log ?? "@model" : "@model", frames: null };
+  return { url, space: MATTE_PASSES.has(id) ? spaces.data ?? "@model" : "@model", frames: null };
 }
 
 // ---------- A relight: Klein gets the frame and the prompt that its strokes make (lightIntent) ----------
@@ -1251,7 +1262,7 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
 // stroke dragged across the frame is a wash, and a light at the frame's edge comes from outside: neither shows a source.
 // A source is named by the words when they name a kind of light (« sun », « street lamp »). With no such word, a warm
 // source in the top third of the frame is the sun: so named, Klein draws it behind what stands in front of it, where « a
-// small, very bright light » washed the nearby buildings out in its glare. Any other source is a small, very bright light
+// small, very bright light » washes the nearby buildings out in its glare. Any other source is a small, very bright light
 // of its colour.
 export const LIGHT_KINDS = /\b(sun|moon|street ?lamp|streetlight|lamp|lantern|candle|fire|torch|bulb|neon sign|spotlight)\b/i;
 const WARM = new Set(["red", "orange", "yellow", "warm white"]);
@@ -1313,19 +1324,19 @@ export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
   return rows.length ? `${said.join(" ")} ${pyJSON(rows)}` : said.join(" ");
 }
 
-// A fluid shot's own passes, shown from the Render panel with its keyframes open or closed: the control video LTX was
-// guided by, the shot as LTX made it, and for a 16-bit plate its SDR-to-HDR frames as a movie in log values.
 // The wipe on a fluid row: the step's input on the left, its output on the right, so each step reads against what it was
 // given: the blank plate (black) before the keyframes, the keyframes before the shot, the SDR shot before SDR to HDR.
 export const fluidWipeLeft = (id) => ({ fluid_keys: "black", fluid_shot: "fluid_keys", fluid_hdr: "fluid_shot" })[id] ?? null;
+// A fluid shot's own passes, shown from the Render panel with its keyframes open or closed: the control video LTX was
+// guided by, the shot as LTX made it, and for a 16-bit plate its SDR-to-HDR frames as a movie in log values.
 export const fluidPasses = (result, spaces = {}) => (result ? [
   result.control && { id: "fluid_keys", label: "Fluid: keyframes", url: result.control, space: "@model" },
   result.preview && { id: "fluid_shot", label: "Fluid: shot", url: result.preview, space: "@model" },
   result.hdr && result.movie && { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: result.movie, space: spaces.log ?? "@model",
     frames: result.hdrFrames ?? null, framesSpace: result.hdrFrames ? spaces.hdr ?? null : null },
 ].filter(Boolean) : []);
-// The workflows each render step runs (a full-size erase pass runs two). Models and licences plans with them from the
-// start of a job; a render also keeps the record of the steps it ran or took again (r.flows), so an export's MODELS.md
+// The workflows each render step runs (a full-size erase pass runs two). The Models and licences dialog plans with them
+// from the start of a job; a render also keeps the record of the steps it ran or took again (r.flows), so an export's MODELS.md
 // names the models that made its result.
 export const STEP_FLOWS = { erase: ["matte"], clean: ["clean"], shot: ["shot"], track: ["matte"], comp: ["comp"],
   cleanfull: ["clean", "cleanup"], full: ["shot"], trackfull: ["matte"], hdr: ["hdr"], review: ["review"], export: ["export"],
@@ -1393,7 +1404,7 @@ export function freesBefore(profile, last, name, room = null) { // room: { free,
 // 20 s later. So the sampling is timed by its own pace, between its first and its latest step, and the rest comes from
 // what the step took the last time on this machine (the page keeps
 // each step's total, lead and tail per size, frame count and memory profile, in paintaplate.step-times).
-export const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
+const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
 // A step's time before it ever ran on this machine (stepGuess): the 96 GB card's reference (STAGES' ref, in seconds at
 // REF_SIZE), scaled to the plate, then to the card. A 16 GB card, the small profile, holds one family of models at a time,
 // so each job loads its models again: a lead in seconds per family, then a factor per step on the reference's scaled
@@ -1413,7 +1424,7 @@ export const SLOWER = {
     fixed: { comp: 6.4, review: 3 } },
 };
 export const slower = (profile, id) => SLOWER[profile]?.[id] ?? 1;
-export const BIG_STEPS = ["full", "cleanfull", "cleanup", "hdr", "review", "export"]; // the steps made at the working size (cleanup: stageTwoGuess)
+const BIG_STEPS = ["full", "cleanfull", "cleanup", "hdr", "review", "export"]; // the steps made at the working size (cleanup: stageTwoGuess)
 export const stepSizeOf = (id, plate) => (BIG_STEPS.includes(id) ? plate.work : ["erase", "track", "trackfull"].includes(id) ? plate.track : plate.shot);
 const REF_SIZE = 928 * 512 * 97; // pixels times frames, where the references were measured
 export function stepGuess(id, ref, plate, profile, hdr = false) { // seconds: the reference scaled to this plate (BIG_STEPS at 0.73 of it), then to this GPU; hdr: the render makes SDR to HDR
@@ -1421,11 +1432,11 @@ export function stepGuess(id, ref, plate, profile, hdr = false) { // seconds: th
   return (SLOWER[profile]?.lead?.[STEP_FAMILY[id]] ?? 0) + (SLOWER[profile]?.fixed?.[id] ?? 0) + ref * Math.max(0.25, scale) ** (SLOWER[profile]?.grow?.[id] ?? 1) * slower(profile, id)
     * (hdr ? SLOWER[profile]?.withHdr?.[id] ?? 1 : 1);
 }
-// The full-size clean plate pass when its first stage is the preview's own pass, made already: the pass less that stage
-// (ref: each step's reference, by id). Its seconds are kept as « cleanup », apart from the pass that makes both stages.
 // Whether the full-size clean plate pass starts from the preview's own pass: the Preview pass is on (previewCap, 0 when Off)
 // and makes its clean pass at the size of stage 1, half the working size.
 export const startsFromPreview = (plate, previewCap) => { if (!plate?.work || !previewCap) return false; const low = stageOne(plate.work); return plate.shot?.[0] === low[0] && plate.shot?.[1] === low[1]; };
+// The full-size clean plate pass when its first stage is the preview's own pass, made already: the pass less that stage
+// (ref: each step's reference, by id). Its seconds are kept as « cleanup », apart from the pass that makes both stages.
 export const stageTwoGuess = (ref, plate, profile) => Math.max(1, stepGuess("cleanfull", ref.cleanfull, plate, profile) - stepGuess("clean", ref.clean, plate, profile));
 // The name a step's seconds are kept under: with SDR to HDR on, the steps it slows (SLOWER's withHdr) are kept apart.
 export const timeId = (id, hdr) => (hdr && Object.values(SLOWER).some((p) => p.withHdr?.[id]) ? `${id}+hdr` : id);
@@ -1468,7 +1479,8 @@ export const editSeed = (asked, made) => (asked === null ? null : (asked + made)
 export const gridGrow = (sizeW, plateW, reach) => 1 + Math.ceil((reach * sizeW) / plateW / 32);
 
 // View > Cache memory > Custom…: a size a person types, in MB or GB (a number alone is MB), as bytes, or null outside
-// CACHE_LEAST to CACHE_MOST. The page counts 1 GB as 10^9 bytes, as its other memory lines do.
+// CACHE_LEAST to CACHE_MOST. The page counts 1 GB as 10^9 bytes, as the frame cache's other
+// lines and the file sizes do (app.memoryText, gb); the lines of a card's VRAM and RAM count 2^30 bytes.
 export const CACHE_LEAST = 128e6;
 export const CACHE_MOST = 32e9;
 export function memoryBytes(text) {

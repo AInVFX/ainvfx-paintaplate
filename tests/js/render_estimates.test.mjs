@@ -8,7 +8,7 @@ import { SLOWER, stageTwoGuess, startsFromPreview, stepGuess, stepSizeOf, timeId
 
 const app = readFileSync(new URL("../../web/app.mjs", import.meta.url), "utf8");
 const REF = Object.fromEntries([...app.matchAll(/\{ id: "(\w+)", label: "[^"]*", ref: (\d+)/g)].map((m) => [m[1], Number(m[2])]));
-// the working sizes in the laptop's logs: horse.mp4 at 1920 x 1080, and the fluid shot at 1280 x 704, 121 frames each
+// the working sizes in those runs' logs: horse.mp4 at 1920 x 1080, and the fluid shot at 1280 x 704, 121 frames each
 const HORSE = { work: [1920, 1088], track: [960, 544], shot: [640, 352], frames: 121 };
 const FLUID = { work: [1280, 704], track: [928, 512], shot: [640, 352], frames: 121 };
 const HALF = { ...HORSE, shot: [960, 544] }, TOS = { work: [960, 512], track: [960, 512], shot: [480, 256], frames: 121 }, CAR = FLUID;

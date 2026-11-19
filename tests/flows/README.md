@@ -1,6 +1,6 @@
-# Page flows by workstream
+# Page flows, one file each
 
-`tests/ui_mock.py` runs its own flows, then one flow per `tests/flows/*.py` module, named after its file. So a workstream adds a file here instead of editing `ui_mock.py`: `viewer_<topic>.py`, `pipeline_<topic>.py`, `render_<topic>.py`, `codebase_<topic>.py`, `page_<topic>.py`. A file whose name starts with `_` is not a flow. A module defines one function:
+`tests/ui_mock.py` runs its own flows, then one flow per `tests/flows/*.py` module, named after its file. So a new flow is a file here, not an edit of `ui_mock.py`, named after what it checks: `page_<topic>.py`, `viewer_<topic>.py`, `edit_<topic>.py` and so on. A file whose name starts with `_` is not a flow. A module defines one function:
 
 ```python
 def run(browser, port, U):

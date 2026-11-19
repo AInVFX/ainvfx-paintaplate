@@ -9,7 +9,7 @@
 </tr>
 </table>
 
-Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com/comfyanonymous/ComfyUI), on your own machine, with open weights only. Paint on the first frame of a shot to erase, add or relight: the edit appears on that frame in seconds, then carries through the whole shot. The result comes back in the plate's own format, with every untouched pixel identical to the plate.
+Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com/comfyanonymous/ComfyUI), on your own machine, with open weights only. Paint on the first frame of a plate to erase, add or relight, watch the edit carry through the shot, and export it in the plate's own format, layers and untouched pixels. The edit appears on the first frame in seconds, and every untouched pixel of the result is identical to the plate.
 
 ## What it can do
 
@@ -21,7 +21,7 @@ Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com
 | **A fluid shot** | Starts from a blank plate. Paint flat colour blobs on a few keyframes: ainvfx-fluid turns them into smoke, steam, fire, explosions, dust, fog or clouds. The shot becomes the plate for every edit |
 | **Review** | The viewer follows OpenRV: colour through OpenColorIO, the same keys, a wipe against the plate, the Colour Inspector. |
 | **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers) with its matte, as one zip. For Paint and Clean the zip also holds `layer/`, the new pixels as the composite blends them: with the plate and the matte they rebuild the result. With Upscale to 4K, `4k/` holds the same set at 3840 px on the long side: for 121 frames, about 46 min for Paint or Clean on a 16 GB GPU, 23 min for the result alone, and about 14 min on a 96 GB GPU. Every pixel of an upscaled frame is new. **ComfyUI graph** saves the whole scene as one ComfyUI workflow in the editor's own format: one group per step, each with a note, to drop on ComfyUI's canvas |
-| **Finish** | The passes on the whole plate, in a menu between Save scene and Export. SDR to HDR turns an SDR result, or a plate with no edit, into half-float EXR frames. Upscale to 4K restores the result at 3840 px on the long side with SeedVR2 7B, and for Paint and Clean the plate, the new layer and the matte too |
+| **Finish** | The passes on the whole plate, in a menu between Save scene and Export. SDR to HDR turns an SDR result, or a plate with no edit, into half-float EXR frames in ACES2065-1, the colour space OCIO's file rules give EXR. Set it where you open them, in a viewer or in compositing software: read with a plain gamma, they look darker and less saturated than the plate. Upscale to 4K restores the result at 3840 px on the long side with SeedVR2 7B, and for Paint and Clean the plate, the new layer and the matte too |
 
 The limits that matter today: edits are painted on the first frame only; shots are tested up to 121 frames; edits are made at up to 1920 px on the long side; a plate can be up to 3840 x 2160.
 
@@ -97,7 +97,7 @@ One command downloads them, on a local machine and on a pod. Run it in the pack'
 | Comfy Desktop | `python`, in its terminal panel |
 | Windows, portable ComfyUI | `..\..\..\python_embeded\python.exe` |
 
-Each file goes to its folder under `models/`, at the revision that was tested. A file already in place is skipped, so you can run the command again. When Hugging Face refuses a file, its line says why and names the page to open. The last line counts the files downloaded, already there and missing. If your models live in another folder, name it: `python get_models.py path/to/models`. `--no-fluid` skips ainvfx-fluid and `--no-hdr` skips SDR to HDR: that feature is then off, and the rest works.
+Each file goes to its folder under `models/`, at the revision that was tested. A file already in place is skipped, so you can run the command again. When Hugging Face refuses a file, its line says why and names the page to open. The last line counts the files downloaded, already there and missing. If your models live in another folder, name it: `python get_models.py path/to/models`. `--no-fluid` skips ainvfx-fluid, `--no-hdr` skips SDR to HDR and `--no-upscale` skips SeedVR2 7B (Upscale to 4K): that feature is then off, and the rest works.
 
 ## Get the example plates
 
@@ -124,7 +124,7 @@ Good to know:
 - To replace a head, paint the new head over the old one. A head removed with Clean comes back as a head.
 - Paint additions on open ground. An addition painted across a foreground object breaks up during the shot.
 - With Preview on Half size or Quarter size, judge an effect on the full-size shot, not on the preview pass.
-- Paint a plate reads each plate's colour space from its file, and the export writes every pixel back in that space. Change it in Open only for a camera's log footage, which no file tag describes: choose the camera's log space.
+- Paint a plate reads each plate's colour space from its file, and the export writes every pixel back in that space. Change it only for a camera's log footage, which no file tag describes: right-click > OCIO > Plate, then the camera's log space.
 
 Known limits:
 

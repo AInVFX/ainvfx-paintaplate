@@ -297,7 +297,7 @@ def wipe_compare(page, U):
     pv = inspect(0.95, 0.95, "Shot, preview")
     size = [r for r in pv[2] if r.startswith("Size")]
     U.check(not any(r.startswith("Error") for r in pv[2]) and pv[1] and size,
-            f"a preview pass reads at its own size, in its own pixels, at the plate's point (1.7.0: « outside the 640 x 352 frame »): {size}, {pv[1]}")
+            f"a preview pass reads at its own size, in its own pixels, at the plate's point: {size}, {pv[1]}")
     page.keyboard.press("F5")
     page.keyboard.press("Escape"); page.wait_for_timeout(400)
     U.check(page.is_hidden("#wipe") and page.evaluate("document.querySelector('#view').dataset.compared") == "" and "compared" not in (page.get_attribute(row, "class") or ""),

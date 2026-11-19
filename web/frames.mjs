@@ -211,7 +211,7 @@ export class DeepFrames extends FrameCache {
 // with a quarter kept behind the playhead (Options.cpp: maxlram, lookback). Here the 8-bit frames are ImageBitmaps, which
 // Chrome can keep on the GPU, next to ComfyUI's models when ComfyUI runs on this machine.
 export const CACHE_CHOICES = [0, 512e6, 1e9, 2e9, 4e9, 8e9]; // bytes, for View > Cache memory; 0 is Auto
-export const CACHE_FLOOR = 960; // px on the long side: frames are never kept smaller than this to make more of them fit
+const CACHE_FLOOR = 960; // px on the long side: frames are never kept smaller than this to make more of them fit
 const LOCAL = ["localhost", "127.0.0.1", "::1", "[::1]"];
 export const sameMachine = (host) => LOCAL.includes(host); // ComfyUI serves the page: this host is its machine
 
