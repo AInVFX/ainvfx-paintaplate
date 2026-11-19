@@ -199,7 +199,7 @@ def colour(g, image, source, destination, title=None, peak_of=None, peak=None):
 def plate(g, pad, path="path", progress=False, first=False):
     """The plate in the model space: Load Plate, then Colour Space (OCIO) from the plate's file colour space to @model.
 
-    The tone mapping of values above 1.0 shares one peak per batch, as core's did, so a different batch could change the
+    The tone mapping of values above 1.0 shares one peak per batch, as core's does, so a different batch could change the
     exposure of an HDR plate between steps: every workflow converts the same whole plate. With `first`, the first frame
     alone is converted, with the whole plate's peak: it has the values it has in the whole plate converted, and no second
     copy of the plate is made. The conversion's second output is that peak: composite() hands it on, so the plate is read
@@ -300,7 +300,7 @@ def snap():
     g = Graph()
     sam = g("CheckpointLoaderSimple", ckpt_name=Slot("sam", SAM))
     image = g("LoadImage", _title="First frame", image=Slot("image", ""))
-    for k in range(SNAP_POINTS):  # one prompt per point: given together, the points asked SAM for one region holding them all
+    for k in range(SNAP_POINTS):  # one prompt per point: given together, the points ask SAM for one region that holds them all
         found = g("SAM3_Detect", model=sam, image=image, positive_coords=Slot(f"point_{k}", "[]"), threshold=0.5,
                   refine_iterations=2, individual_masks=False)
         g("PreviewImage", _title=f"Object at point {k + 1}", _output=f"point_{k}", images=g("MaskToImage", mask=found))
@@ -325,9 +325,9 @@ def erased_grid(g, matte):
     """The erase matte as blocks of LTX's 32 px grid, grown by one block: (the grid as a mask, the grid as an image).
     `matte` is at the size LTX works at.
 
-    Blocks hide the object's outline: shown its own outline moving, LTX drew a car back where the van had been. They keep the
-    background around the object in view, so LTX continues it. One grown box per frame also hid the outline, but around a
-    truss, a crane and a door it covered the whole backdrop, and LTX animated a faint fill there into smoke.
+    Blocks hide the object's outline: shown its own outline moving, LTX draws an object back where it was. They keep the
+    background around the object in view, so LTX continues it. One grown box per frame also hides the outline, but around a
+    truss, a crane or a door it covers the whole backdrop, and LTX animates a faint fill there into smoke.
     """
     cells = g("GrowMask", _title="One block more on every side", expand=Slot("grid_grow", 1), tapered_corners=False,
               mask=g("ThresholdMask", _title="Every block the matte touches", value=0.02,
@@ -350,7 +350,7 @@ def clean():
     The reference is the plate with each erased area painted the green the LoRA was trained on, as blocks of LTX's grid
     (`erased_blocks`). The erased first frame starts the shot at strength 0.7 (the official workflow's start image). The
     prompt describes the scene as it stays, in the prompt writer's own words for what it kept (`erasePrompt` on the page);
-    it never names the erased object: named, an object came back. At full size this pass is the first stage, at half the
+    it never names the erased object: named, the object comes back. At full size this pass is the first stage, at half the
     working size, and `cleanup` the second.
     """
     g = Graph()
@@ -565,8 +565,8 @@ def matte():
 def mattes(g):
     """The erase and paint mattes as one mask, at the paint matte's size. A missing matte is the other one again (the page
     sets both). The erase is tracked smaller (ERASE_TRACK_SIDE in app.mjs: 576 x 320 for a 1080p plate, the paint at
-    960 x 544), and Combine Masks crops its source to its destination instead of scaling it: the paint matte kept only its
-    top-left corner, stretched, so a boat painted on a plate with an erase vanished from the composite."""
+    960 x 544), and Combine Masks crops its source to its destination instead of scaling it: with the smaller erase matte as its
+    destination, the paint matte would keep only its top-left corner, and a painted object could leave the composite."""
     erase = g("PaintAPlate_LoadPlate", _title="Clean matte", path=Slot("matte_a", ""), max_frames=1024, pad_8n1=False)
     add = g("PaintAPlate_LoadPlate", _title="Paint matte", path=Slot("matte_b", ""), max_frames=1024, pad_8n1=False)
     size = g("GetImageSize", image=add)
@@ -839,9 +839,9 @@ def hdr():
     # of 0.1 to 0.2 stops where they overlap. 121 frames at 1920 x 1088 in float32 decode whole in 13 s at a peak of 10.3 GiB,
     # against 45 to 99 s in tiles of 256 to 1024 px (RTX PRO 6000); the page sends 256 px tiles under 16 GB of VRAM only
     # (logic.WHOLE_FROM). VAE Decode (Tiled) has no retry after an out-of-memory error, so core's default tiles never take
-    # over. 128-frame temporal tiles with 32 frames of overlap, as Lightricks' Tiled Fusion SDR-to-HDR graph: the distilled
-    # graph's 64 with 8 made the HDR frames of a 121-frame fluid shot jump 0.32 stops at frame 56, where the second tile
-    # starts; with 128 and 32 the largest step was 0.07 stops, the SDR shot's own (RTX PRO 6000).
+    # over. 128-frame temporal tiles with 32 frames of overlap, as Lightricks' Tiled Fusion SDR-to-HDR graph: with the distilled
+    # graph's 64 and 8, the HDR frames of a 121-frame fluid shot jump 0.32 stops at frame 56, where the second tile
+    # starts; with 128 and 32 the largest step is 0.07 stops, the SDR shot's own (RTX PRO 6000).
     decoded = g("VAEDecodeTiled", samples=video[2], vae=vae, tile_size=Slot("tile", WHOLE), overlap=64, temporal_size=128, temporal_overlap=32)
     linear = colour(g, decoded, "ACEScct", "ACEScg", "ACEScct to ACEScg scene-linear")
     # where the SDR shot is black, its own black: the IC-LoRA's frames are noisy there (mathops.keep_black). Keep Black
@@ -862,8 +862,8 @@ def hdr():
     for key in ("plate", "mask", "hdr"):
         g.link_slot(matched, key, "plate_level")
     linear = matched
-    # each frame says the shot's frame rate, the one the page sends for the movie below: a 16-bit fluid shot's frames open
-    # as a plate, and that plate took 24 fps for a shot made at 50 (on a pod)
+    # each frame says the shot's frame rate, the one the page sends for the movie below, so a 16-bit fluid shot's frames
+    # open as a plate at that rate
     g("PaintAPlate_SaveFrames", _title="HDR frames (half-float EXR, ACES2065-1)", _output="hdr", format="exr", fps=Slot("movie_fps", 24.0), chromaticities="AP0", frames=load[4],
       images=colour(g, linear, "ACEScg", HDR_SPACE, "ACEScg to ACES2065-1"), filename_prefix=Slot("prefix", "paintaplate/plate/hdr/f"))
     # the same frames as an 8-bit movie for the viewer, in log values (ACEScct, `view_space`): the look of the EXR frames
