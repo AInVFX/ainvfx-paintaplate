@@ -49,3 +49,12 @@ class Links(unittest.TestCase):
         touch(routes.scene_path("shot010"), b'{"format": "paintaplate-scene", "plate": {"path": "plates/boat.mov"}, "edits": []}')
         os.symlink(os.path.join(self.dir, "nowhere"), routes.scene_path("gone"))
         self.assertEqual([s["name"] for s in routes.list_scenes()], ["shot010"])
+
+    def test_a_page_path_never_leaves_its_folder_through_a_link(self):
+        touch(os.path.join(self.outside, "sub", "shot.0001.exr"))
+        os.symlink(self.outside, os.path.join(self.input, "footage"))
+        for rel in ("footage", "footage/keep.mov", "footage/sub", "footage/sub/shot.####.exr"):
+            with self.subTest(rel), self.assertRaisesRegex(ValueError, "Symbolic links are not followed"):
+                folders.plate_path(rel, folder=True)
+        touch(os.path.join(self.input, "plates", "boat.mov"))  # the input folder itself is a link: its plates still open
+        self.assertEqual(folders.plate_path("plates/boat.mov"), os.path.join(self.input, "plates", "boat.mov"))
