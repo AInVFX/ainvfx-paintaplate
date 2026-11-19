@@ -20,8 +20,8 @@ Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com
 | **Light** | Relights the shot. Paint where the light comes from, in its colour. Paint in black to darken an area |
 | **A fluid shot** | Starts from a blank plate. Paint flat colour blobs on a few keyframes: ainvfx-fluid turns them into smoke, steam, fire, explosions, dust, fog or clouds. The shot becomes the plate for every edit |
 | **Review** | The viewer follows OpenRV: colour through OpenColorIO, the same keys, a wipe against the plate, the Colour Inspector. |
-| **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers) with its matte, as one zip. For Paint and Clean the zip also holds `layer/`, the new pixels as the composite blends them: with the plate and the matte they rebuild the result. With Upscale to 4K, `4k/` holds the same set at 3840 px on the long side: for 121 frames, about 46 min for Paint or Clean on a 16 GB GPU, 23 min for the result alone, and about 14 min on a 96 GB GPU. Every pixel of an upscaled frame is new. **ComfyUI graph** saves the whole scene as one ComfyUI workflow in the editor's own format: one group per step, each with a note, to drop on ComfyUI's canvas |
-| **Finish** | The passes on the whole plate, in a menu between Save scene and Export. SDR to HDR turns an SDR result, or a plate with no edit, into half-float EXR frames in ACES2065-1, the colour space OCIO's file rules give EXR. Set it where you open them, in a viewer or in compositing software: read with a plain gamma, they look darker and less saturated than the plate. Upscale to 4K restores the result at 3840 px on the long side with SeedVR2 7B, and for Paint and Clean the plate, the new layer and the matte too |
+| **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers) with its matte, as one zip. For Paint and Clean the zip also holds `layer/`, the new pixels as the composite blends them: with the plate and the matte they rebuild the result. With Upscale, `upscaled/` holds the same set at the size you choose: at 3840 x 2160, for 121 frames, about 46 min for Paint or Clean on a 16 GB GPU, 23 min for the result alone, and about 14 min on a 96 GB GPU. Every pixel of an upscaled frame is new. **ComfyUI graph** saves the whole scene as one ComfyUI workflow in the editor's own format: one group per step, each with a note, to drop on ComfyUI's canvas |
+| **Finish** | The passes on the whole plate, in a menu between Save scene and Export. SDR to HDR turns an SDR result, or a plate with no edit, into half-float EXR frames in ACES2065-1, the colour space OCIO's file rules give EXR. Set it where you open them, in a viewer or in compositing software: read with a plain gamma, they look darker and less saturated than the plate. Upscale makes Export also write the result at the size you choose, up to 3840 x 2160, restored by SeedVR2 7B: the plate's own size, 2560 or 3840 px on the long side, or a size you type. For Paint and Clean, the plate, the new layer and the matte come at that size too; with SDR to HDR, the result and its matte |
 
 The limits that matter today: edits are painted on the first frame only; shots are tested up to 121 frames; edits are made at up to 1920 px on the long side; a plate can be up to 3840 x 2160.
 
@@ -30,11 +30,11 @@ Planned next, and not there yet: shots up to 20 seconds, plates at LTX 2.5's lar
 ## What it needs
 
 - **ComfyUI** v0.43.0 or newer, with [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo). It is tested on ComfyUI v0.45.3: `tools/pins.sh` names the tested commits.
-- **An NVIDIA GPU with 16 GB of VRAM at least; 32 GB or more recommended.** Under 24 GB the models load one at a time, so each step takes longer. From 32 GB every step finishes at 1920 x 1088 and 121 frames. A 96 GB card is the fastest and takes plates above 2K.
+- **An NVIDIA GPU with 16 GB of VRAM at least; 32 GB or more recommended.** Under 24 GB the models load one at a time, so each step takes longer. From 32 GB every step finishes at 1920 x 1088 and 121 frames. A 96 GB GPU is the fastest and takes plates above 2K.
 - **64 GB of RAM.** This is what is tested.
 - **79 GB of disk** for the models.
 
-On a Mac or a smaller card, run it on Runpod (install option 3).
+On a Mac or a smaller GPU, run it on Runpod (install option 3).
 
 ## Install
 
@@ -97,7 +97,7 @@ One command downloads them, on a local machine and on a pod. Run it in the pack'
 | Comfy Desktop | `python`, in its terminal panel |
 | Windows, portable ComfyUI | `..\..\..\python_embeded\python.exe` |
 
-Each file goes to its folder under `models/`, at the revision that was tested. A file already in place is skipped, so you can run the command again. When Hugging Face refuses a file, its line says why and names the page to open. The last line counts the files downloaded, already there and missing. If your models live in another folder, name it: `python get_models.py path/to/models`. `--no-fluid` skips ainvfx-fluid, `--no-hdr` skips SDR to HDR and `--no-upscale` skips SeedVR2 7B (Upscale to 4K): that feature is then off, and the rest works.
+Each file goes to its folder under `models/`, at the revision that was tested. A file already in place is skipped, so you can run the command again. When Hugging Face refuses a file, its line says why and names the page to open. The last line counts the files downloaded, already there and missing. If your models live in another folder, name it: `python get_models.py path/to/models`. `--no-fluid` skips ainvfx-fluid, `--no-hdr` skips SDR to HDR and `--no-upscale` skips SeedVR2 7B (Upscale): that feature is then off, and the rest works.
 
 ## Get the example plates
 
@@ -110,7 +110,7 @@ The plates are synthetic shots from the dataset [AInVFX/ainvfx-paintaplate](http
 ## A first edit
 
 1. Press **Open plate**, then double-click a plate, for example `plates/horse.mp4`. When ComfyUI runs on your own machine, you can also type the full path of a movie, a frame of a sequence or a folder of frames.
-2. Type a few words at the top, for example "a campfire".
+2. Type a text prompt at the top, for example "a campfire".
 3. Pick **Paint**, **Clean** or **Light** (keys P, C and L), and paint on the first frame.
 4. Press **Generate** (or Enter). The edit appears on the first frame, then the shot renders by itself at full size, and each pass shows live in the player. **Render > Preview** can add a quicker first pass at half or a quarter of the size.
 5. Press **Export** to write the result in the plate's own format.
@@ -125,23 +125,24 @@ Good to know:
 - Paint additions on open ground. An addition painted across a foreground object breaks up during the shot.
 - With Preview on Half size or Quarter size, judge an effect on the full-size shot, not on the preview pass.
 - Paint a plate reads each plate's colour space from its file, and the export writes every pixel back in that space. Change it only for a camera's log footage, which no file tag describes: right-click > OCIO > Plate, then the camera's log space.
+- A symbolic link inside ComfyUI's input or output folder is not followed. A plate behind one opens by its full path, when ComfyUI runs on your own machine. The input or output folder itself can be a link, or set with ComfyUI's `--input-directory` and `--output-directory`.
 
 Known limits:
 
-- On a plate whose camera travels, a paint's matte can lose the painted object on some frames, when SAM 3.1 stops tracking it. The page then warns and names the frames to check. Another seed, other words or another stroke can help.
+- On a plate whose camera travels, a paint's matte can lose the painted object on some frames, when SAM 3.1 stops tracking it. The page then warns and names the frames to check. Another seed, another text prompt or another stroke can help.
 - On such a plate, a paint added over a Clean edit can bring a faint shape of the removed object back on some frames. Check the result frame by frame.
 - A painted object that a foreground object hides can raise « object left its place » although the composite is right: check the picture.
-- A shadow painted with Light comes out soft: words can ask for a deeper one. A relight can leave a thin light or dark edge along bright outlines.
+- A shadow painted with Light comes out soft: a text prompt can ask for a deeper one. A relight can leave a thin light or dark edge along bright outlines.
 - The check after Clean compares colours. An object of another colour that takes the removed object's place passes it, so look at the first frame.
 - On a paint's first frames, the matte can take in a change that the shot made to an object right beside the painted one. It was seen on a Half size preview, where the full-size result was right: check the first frames.
-- Under 16 GB of VRAM, LTX works in 256 px tiles, and a soft band can show where two tiles overlap, most in SDR to HDR's frames. From 16 GB every frame is decoded in one piece.
+- Under 16 GB of VRAM, LTX works in 256 px tiles, and a soft band can show where two tiles overlap, most in SDR to HDR's frames. From 16 GB every frame is encoded and decoded in one piece.
 
-**Where the rest is.** Press `?` for the keys; the backquote key shows the plate alone, full screen, where S opens the colours and W the edit's words. The right-click menu holds every action with its key, and the viewer's colour tools under **OCIO**. [`ARCHITECTURE.md`](ARCHITECTURE.md) explains how the pack works and how to change it. [`TESTING.md`](TESTING.md) describes every test.
+**Where the rest is.** Press `?` for the keys; the backquote key shows the plate alone, full screen, where S opens the colours and T the edit's text prompt. The right-click menu holds every action with its key, and the viewer's colour tools under **OCIO**. [`ARCHITECTURE.md`](ARCHITECTURE.md) explains how the pack works and how to change it. [`TESTING.md`](TESTING.md) describes every test.
 
 ## When something goes wrong
 
-- **The log.** The **Log** button opens it. It records what happened, one line per fact, and the button is highlighted when an error arrives. The download icon beside it saves the log as a text file, with the versions and the machine as ComfyUI reports them: attach it when you ask for help. It holds no path of your machine.
-- **The memory profile.** Its line in the log says how the page uses your card. Small, under 24 GB of VRAM: models load one at a time; under 16 GB, LTX also works in 256 px tiles. Medium: the edit models load when the page opens. Large, from 60 GB: LTX 2.5 loads at start too.
+- **The log.** The **Log** button opens it. It records what happened, one line per fact, and the button is highlighted when an error arrives. The download icon beside it saves the log as a text file, with the versions and the machine as ComfyUI reports them: attach it when you ask for help. It holds no path of your machine: a file under ComfyUI's folder is named from that folder, as `output/paintaplate/…`.
+- **The memory profile.** Its line in the log says how the page uses your GPU. Small, under 24 GB of VRAM: models load one at a time; under 16 GB, LTX also works in 256 px tiles. Medium: the edit models load when the page opens. Large, from 60 GB: LTX 2.5 loads at start too.
 - **Stop.** Esc, or **Stop** beside Generate, stops what generates. What finished is kept, and Enter goes on from there.
 - **ComfyUI's memory grows, or the page waits and nothing runs.** Start ComfyUI with `PAINTAPLATE_TRACE=1` in its environment. Every request then writes a line in ComfyUI's terminal when it starts and when it ends, with the memory the process holds. Add these lines to your report.
 - **A model or a node is missing.** The page names it at start. `python get_models.py --list` shows what is in place.
@@ -177,9 +178,9 @@ Paint a plate builds on the work of others:
 | [TAEHV tiny LTX decoder (taeltx2_3)](https://huggingface.co/Kijai/LTX2.3_comfy) | Decodes the live preview while a pass runs | [LTX-2 Community License Agreement](https://github.com/Lightricks/LTX-2/blob/main/LICENSE) |
 | [LTX 2.5 SDR-to-HDR IC-LoRA (Lightricks), Its fixed scene embeddings](https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR) | Turns the SDR shot into scene-linear HDR. The prompt SDR to HDR takes | [LTX-2.x Community License](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x) |
 | [ainvfx-fluid IC-LoRA (AInVFX)](https://huggingface.co/AInVFX/ainvfx-fluid) | Turns painted keyframes on a blank plate into smoke, steam or fire | [LTX-2.x Community License](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x) |
-| [SeedVR2 7B (fp16), ByteDance's video restoration model, SeedVR2's VAE](https://huggingface.co/Comfy-Org/SeedVR2) | Upscale to 4K: restores the result's detail at 3840 px. Encodes and decodes the frames SeedVR2 7B restores | [Apache-2.0](https://huggingface.co/Comfy-Org/SeedVR2/blob/main/README.md) |
+| [SeedVR2 7B (fp16), ByteDance's video restoration model, SeedVR2's VAE](https://huggingface.co/Comfy-Org/SeedVR2) | Upscale: restores the result's detail at the size chosen, up to 3840 x 2160. Encodes and decodes the frames SeedVR2 7B restores | [Apache-2.0](https://huggingface.co/Comfy-Org/SeedVR2/blob/main/README.md) |
 
-Two of these licences set a revenue threshold. The LTX-2.x Community License asks a company with annual revenues of 10 million USD or more to buy a licence from Lightricks for any use other than testing, evaluation and non-commercial research. The FLUX Kommunity License lets a person or a company whose yearly revenue, affiliates included, is under 5 million USD use what the model generates commercially, if the outputs pass content filters or a review before they are shown, and carry a notice that AI made them where the law asks for one; for any other commercial use, Black Forest Labs sells a licence. The tiny decoder is [TAEHV](https://github.com/madebyollin/taehv) by madebyollin, under the MIT licence; Paint a plate downloads it from a repository whose card names the LTX-2 Community License Agreement. The upsampler's system prompts in `web/upsampler.json` are Black Forest Labs' own text (Apache 2.0). The example plates are synthetic, made with LTX 2.5, MOSS-Image and FLUX 3 Image Klein, and published under CC BY 4.0. Paint a plate's own code is under the Apache 2.0 licence.
+Two of these licences set a revenue threshold. The LTX-2.x Community License asks a company with annual revenues of 10 million USD or more to buy a licence from Lightricks for any use other than testing, evaluation and non-commercial research. The FLUX Kommunity License lets a person or a company whose yearly revenue, affiliates included, is under 5 million USD use what the model generates commercially, if the outputs pass content filters or a review before they are shown, and carry a notice that AI made them where the law asks for one; for any other commercial use, Black Forest Labs sells a licence. The tiny decoder is [TAEHV](https://github.com/madebyollin/taehv) by madebyollin, under the MIT licence; Paint a plate downloads it from a repository whose card names the LTX-2 Community License Agreement. The prompt writer's system prompt in `web/upsampler.json` is Black Forest Labs' own text (Apache 2.0). The example plates are synthetic, made with LTX 2.5, MOSS-Image and FLUX 3 Image Klein, and published under CC BY 4.0. Paint a plate's own code is under the Apache 2.0 licence.
 
 ## Links
 
