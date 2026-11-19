@@ -465,8 +465,8 @@ def read_native(path: str, with_alpha: bool, eight: bool = False) -> np.ndarray:
     """Read one still frame exactly, as integers (RGB or RGBA): 8 bits for an 8-bit target, else 16.
 
     Core decodes to float through swscale, which can move a 16-bit value by a few codes. The export copies untouched
-    pixels from this exact read instead. An 8-bit frame is read at 8 bits: swscale's 16 to 8-bit step is not the
-    inverse of its 8 to 16-bit one, and moved 123 of the 256 levels up by one.
+    pixels from this exact read instead. An 8-bit frame is read at 8 bits, so no step to 8 bits follows: from the
+    exact 16-bit value k x 257, swscale's step to 8 bits moves 123 of the 256 levels up by one (PyAV 19.0.2).
     """
     with av.open(path) as c:
         frame = next(c.decode(video=0))
@@ -500,7 +500,7 @@ def read_float(path: str) -> np.ndarray:
             g, b, r = planes
             return np.stack([r, g, b], -1).astype(np.float32)
         if max(c.bits for c in frame.format.components) <= 8:  # at its own depth: swscale's 16-bit output of an 8-bit
-            return frame.to_ndarray(format="rgb24").astype(np.float32) / 255.0  # level k is k * 256, and white reads 0.9962
+            return frame.to_ndarray(format="rgb24").astype(np.float32) / 255.0  # level k is near k * 256, not k * 257: white reads 0.9962
         return frame.to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
 
 
@@ -1129,7 +1129,7 @@ class VideoWriter:
     def write(self, rgb: np.ndarray, keep: np.ndarray | None = None, source=None) -> None:
         """`rgb` is display-referred float (H, W, 3) in 0..1, as decoded by core. Where `keep` (H, W) holds, the source
         frame's own YUV samples are written instead (`keep_samples`)."""
-        if self.eight:  # 8-bit RGB: rounded here, since swscale's 16 to 8-bit step moves most levels up by one
+        if self.eight:  # 8-bit RGB: rounded here, since swscale's step to 8 bits moves 123 of the 256 levels up by one (read_native)
             frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(to_uint8(rgb)), format="rgb24")
         else:
             frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(to_uint16(rgb)), format="rgb48le")
