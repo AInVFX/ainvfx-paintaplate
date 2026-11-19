@@ -35,10 +35,6 @@ WORKERS = min(16, os.cpu_count() or 4)  # frames in parallel: numpy, scipy and P
 CATEGORY = "AInVFX/Paint a plate"
 
 
-
-resolve, output_folder = folders.plate_path, folders.output_folder
-
-
 class Stop:
     """ComfyUI's interrupt check for a frame loop, called before each frame: it raises as soon as the person stops the job.
     ComfyUI clears its flag when the check raises, and frames are made in worker threads: the first raise is remembered,
@@ -122,13 +118,13 @@ class LoadPlate(io.ComfyNode):
 
     @classmethod
     def fingerprint_inputs(cls, path, max_frames, pad_8n1):
-        full = resolve(path)
+        full = folders.plate_path(path)
         files = plateio.find_sequence(full) if plateio.is_sequence(full) else [full]
         return f"{path}|{max_frames}|{pad_8n1}|{len(files)}|{max(os.path.getmtime(f) for f in files)}"
 
     @classmethod
     def execute(cls, path, max_frames, pad_8n1) -> io.NodeOutput:
-        full = resolve(path)
+        full = folders.plate_path(path)
         spec = plateio.probe_plate(full)
         if spec["kind"] == "video":  # our decoder: core's pictures, each frame into its place, the padding too
             bar = comfy.utils.ProgressBar(1)
@@ -228,7 +224,7 @@ class SavePlate(io.ComfyNode):
     def execute(cls, images, plate, filename_prefix, keep_untouched, changed=None, alpha=None) -> io.NodeOutput:
         spec = plateio.at_size(plate, images.shape[2], images.shape[1])  # frames of another size: Upscale to 4K
         keep_untouched = keep_untouched and "scaled_from" not in spec
-        out_dir = output_folder(filename_prefix)
+        out_dir = folders.output_folder(filename_prefix)
         os.makedirs(out_dir, exist_ok=True)
         count = min(images.shape[0], spec["frames"])
         written, notes = [], []
@@ -512,7 +508,7 @@ class KeyframeVideo(io.ComfyNode):
         stamps = []
         for key in json.loads(keys or "[]"):  # a keyframe image replaced under the same name runs again
             try:
-                stamps.append(os.path.getmtime(resolve(key["image"])))
+                stamps.append(os.path.getmtime(folders.plate_path(key["image"])))
             except (OSError, ValueError, KeyError, TypeError):
                 stamps.append(None)
         return f"{width}|{height}|{frames}|{keys}|{stamps}"
@@ -520,7 +516,7 @@ class KeyframeVideo(io.ComfyNode):
     @classmethod
     def execute(cls, width, height, frames, keys) -> io.NodeOutput:
         def read(name):
-            with Image.open(resolve(name)) as im:
+            with Image.open(folders.plate_path(name)) as im:
                 im = im.convert("RGB")
                 if im.size != (width, height):
                     im = im.resize((width, height), Image.NEAREST)  # flat colours stay flat
@@ -892,7 +888,7 @@ class JoinWindows(io.ComfyNode):
 
     @classmethod
     def execute(cls, folder, count=0, max_frames=0) -> io.NodeOutput:
-        full = resolve(folder)
+        full = folders.plate_path(folder)
         windows = sorted(os.path.join(full, d) for d in os.listdir(full) if os.path.isdir(os.path.join(full, d)))
         if not windows:
             raise ValueError(f"Join Windows: no window folder in {folder}.")
