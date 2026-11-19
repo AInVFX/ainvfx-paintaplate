@@ -76,7 +76,7 @@ def wait(url, pid, limit=240):
 
 def settle(url, pid, limit=60):
     """Wait for a cancelled prompt to leave ComfyUI's queue. A prompt deleted before it started never reaches the history,
-    so waiting for its record would only run out the clock (60 s a workflow, before 0.5.0)."""
+    so waiting for its record would only run out the clock."""
     t0 = time.time()
     while time.time() - t0 < limit:
         q, _ = http(f"{url}/queue")
@@ -401,7 +401,7 @@ def main():
     finally:
         if proc:
             proc.terminate(); proc.wait(20)
-    # PL7: our video decoder against core's, frame for frame, in ComfyUI's own Python (8 and 10 bits, alpha, trims)
+    # our video decoder against core's, frame for frame, in ComfyUI's own Python (8 and 10 bits, alpha, trims)
     r = subprocess.run([a.python, os.path.join(os.path.dirname(os.path.abspath(__file__)), "decode_parity.py"), "--comfy", a.comfy],
                        capture_output=True, text=True, timeout=600)
     check("DECODE SAME" in r.stdout, "our video decoder makes core's pictures: " + ((r.stdout.strip().splitlines() or [""])[-1] or r.stderr[-300:]))
