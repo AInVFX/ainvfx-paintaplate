@@ -15,7 +15,7 @@ words, the probe goes on as the page does (prepare in web/app.mjs): the writer g
 frame with all but the object dimmed (logic.dimOutside). Klein then runs the page's edit preview once per mask and caption that differ;
 --full adds the page's full-size pass. With no --stroke: three strokes on horse.mp4 with no words, the barn of the GPU case
 horse_erase, the fence post under it and the tree above it. The jobs are grouped by model, so that each model loads few
-times on a 16 GB card: SAM 3.1 at every stroke's points, the writer's name for every object, SAM 3.1 by that name, the
+times on a 16 GB GPU: SAM 3.1 at every stroke's points, the writer's name for every object, SAM 3.1 by that name, the
 writer for every request, Klein for every caption, then SAM 3.1 on every result.
 
 Each result is measured inside the mask Klein got, at the edit preview's size:
@@ -162,8 +162,8 @@ def raw(a):
 
 def resized(img, size):
     """An image (H x W [x C], 8 bits) drawn at `size` (width, height) as the page's canvas draws it: bilinear, sampled at each
-    new pixel's centre, with no average over a wider area. An average (Pillow's resize) grew the barn's grid by a row on top,
-    and the probe asked with [343, 721, 490, 1000] where the page asked with [362, 721, 490, 1000]."""
+    new pixel's centre, with no average over a wider area. An average (Pillow's resize) can grow a mask's grid by a row, and
+    the probe's boxes then differ from the page's."""
     h, w = img.shape[:2]
     W, H = size
     if (w, h) == (W, H):
