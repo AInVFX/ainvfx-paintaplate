@@ -76,7 +76,7 @@ class Seeds(unittest.TestCase):
         self.assertEqual(cases["uhd_erase"]["strokes"][0][3], 2 * cases["horse_erase"]["strokes"][0][3], "and its strokes, the brush scaled")
 
     def test_the_erase_with_its_object_named_is_the_erase_with_two_words(self):
-        """With no words, Klein's prompt writer can name the horse, and the barn stays. The same stroke from the same seed with « the barn » says whether a name is enough."""
+        """With no text prompt, Klein's prompt writer can name the horse, and the barn stays. The same stroke from the same seed with « the barn » says whether a name is enough."""
         cases = gpu_matrix.load_cases()
         plain, named = cases["horse_erase"], cases["horse_erase_barn"]
         self.assertEqual((plain["strokes"][0][1], named["strokes"][0][1]), ("", "the barn"))

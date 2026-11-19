@@ -3,8 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { asksName, erasesPaint, reconcile, removedNames, writerSaw } from "../../web/logic.mjs";
 
-test("a prompt writer's answer that takes the stroke for another object is refused, and an erase with no words then asks for its object's name", () => {
-  // a stroke on the barn of horse.mp4, with no words: the prompt writer removed the horse, which holds none of the paint
+test("a prompt writer's answer that takes the stroke for another object is refused, and an erase with no text prompt then asks for its object's name", () => {
+  // a stroke on the barn of horse.mp4, with no text prompt: the prompt writer removed the horse, which holds none of the paint
   const locked = [{ id: "obj_1", from: "ref_image_0", src_bbox: [362, 721, 490, 1000], tgt_bbox: null, desc: "the object to remove" }];
   const answer = "Remove the horse <horse_1> completely, including its bridle, tack, cast shadow. " +
     '[{"id": "horse_1", "from": "ref_image_0", "src_bbox": [150, 120, 950, 715], "tgt_bbox": null, "desc": "a brown horse"}]';

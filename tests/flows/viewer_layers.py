@@ -16,7 +16,6 @@ def run(browser, port, U):
     page.wait_for_function(f"{STATUS}.startsWith('Ready')", timeout=60000)
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function(OPEN, timeout=60000)
-    status = lambda: page.text_content("#status")
     away = lambda: (page.mouse.move(5, 5), page.wait_for_timeout(250))
     pixel = lambda at: np.array(page.evaluate(PIXEL, list(at)))
     hidden = lambda: page.eval_on_selector_all("#history li.hidden-above", "els => els.map((e) => `${e.querySelector('.title').textContent}: ${e.querySelector('small').textContent}`)")
@@ -40,8 +39,8 @@ def run(browser, port, U):
     U.check(np.abs(pixel(p3) - plate3).max() <= 16,
             f"while edit 2 is changed, the frame shows the plate where only edit 3 painted: {pixel(p3).tolist()} against the plate's {plate3.tolist()}")
     U.check(np.abs(pixel(p1) - shown1).max() <= 16, f"the edit under it stays on the frame: {pixel(p1).tolist()}, as before ({shown1.tolist()})")
-    U.check(U.until(page, f"{STATUS} === 'Edit 2 is being changed: edit 3 is hidden until it is generated.'", 3000),
-            f"the status line names the hidden edit: {status()}")
+    U.check(U.until(page, "(() => { const n = document.querySelector('#status-note'); return !n.hidden && n.textContent === 'Edit 2 changes: Edit 3 hides until Generate. Esc cancels the change.'; })()", 3000),
+            f"the status line's note names the hidden edit: {page.text_content('#status-note')}")
     U.check(hidden() == ["3. Paint: Hidden until edit 2 is generated"], f"History dims the hidden row and says why: {hidden()}")
 
     # 3. Generate: the edit above shows again. The first LTX pass is held, so the frame shows the edits, not a new shot

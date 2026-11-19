@@ -1,4 +1,4 @@
-"""A check of an erase with no words whose prompt writer names another object than the one under the stroke
+"""A check of an erase with no text prompt whose prompt writer names another object than the one under the stroke
 (tests/flows/README.md). The page refuses that answer and asks the writer once more, with the same box, on the frame with
 all but the object dimmed; that answer removes the object under the stroke. Klein runs, the shot renders, and the page
 never asks for the object's name. The mock's prompt writer answers the first request by removing a barn elsewhere
@@ -24,7 +24,7 @@ def run(browser, port, U):
     page.evaluate(U.WATCH)
     U.mock_route(port, "/mock/writer", {"times": 1, "text": BARN})
     page.click('.tools [data-tool="erase"]')
-    U.paint_once(page, "", [(0.6, 0.4), (0.62, 0.45)])  # one stroke on the bottle, with no words
+    U.paint_once(page, "", [(0.6, 0.4), (0.62, 0.45)])  # one stroke on the bottle, with no text prompt
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("Render v1"), 120000, "render of the erase once the writer looked at the dimmed frame")
     lines, row = page.evaluate("window.__lines"), page.evaluate(ROW)

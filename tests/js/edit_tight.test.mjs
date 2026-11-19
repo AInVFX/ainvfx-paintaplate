@@ -1,4 +1,4 @@
-// Tests of the box the prompt writer gets for an erase with no words (web/logic.mjs: coreBox,
+// Tests of the box the prompt writer gets for an erase with no text prompt (web/logic.mjs: coreBox,
 // writerBoxes), with recorded answers of the prompt writer for a stroke on the barn of horse.mp4.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -22,7 +22,7 @@ test("the core box holds the stroke and what most of SAM's masks agree on, with 
   assert.equal(coreBox({ painted: new Uint8Array(w * h), masks: [], w, h }), null);
 });
 
-test("an erase with no words, painted in one part, gets its core box; otherwise one box per painted part", () => {
+test("an erase with no text prompt, painted in one part, gets its core box; otherwise one box per painted part", () => {
   const core = [368, 732, 479, 1000], parts = [[362, 721, 490, 1000]], bbox = [366, 730, 483, 1000];
   assert.deepEqual(writerBoxes({ tool: "erase", words: "", parts, core, bbox }), { bbox: core, boxes: [core] });
   assert.deepEqual(writerBoxes({ tool: "erase", words: "  ", parts, core, bbox }), { bbox: core, boxes: [core] });

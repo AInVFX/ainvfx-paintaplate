@@ -369,7 +369,7 @@ export const writerBoxes = ({ tool, words, parts, core, bbox }) =>
 // What the prompt writer saw when the page asks for an object's name (app.generate, edit.editAsked): the objects that its
 // last answer removes, as « barn » or « old car, sign and fence », or true when that answer names none.
 export const writerSaw = (names = []) =>
-  !names?.length ? true : names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  (!names?.length ? true : andList(names));
 
 // The objects that an answer removes, apart from the locked ones, as SAM 3.1 reads a name: the row « barn_1 » is « barn ».
 export function removedNames(text, locked = []) {
@@ -759,7 +759,7 @@ export const upscaleWindows = (frames, size) => // [first, count] of each job: w
 // Seconds, from 121 frames of horse.mp4 at 3840 x 2160: a SeedVR2 pass took 1,332 s on a 16 GB GPU (six windows of 21
 // frames) and 388 s on a 96 GB GPU (one job); each part Save Plate writes at 4K took 28.5 s and 27.4 s. Scaled by the
 // target's pixels and the frames. Paint and Clean make two passes, the plate's and the layer's, and write three parts.
-export const UPSCALE_SECONDS = { small: { frame: 11.0, part: 28.5 }, large: { frame: 3.21, part: 27.4 } };
+const UPSCALE_SECONDS = { small: { frame: 11.0, part: 28.5 }, large: { frame: 3.21, part: 27.4 } };
 export function upscaleSeconds([tw, th], frames, { passes = 1, parts = 1, profile = "large" } = {}) {
   const t = UPSCALE_SECONDS[profile] ?? UPSCALE_SECONDS.large, scale = (tw * th) / (3840 * 2160);
   return scale * frames * (passes * t.frame + parts * t.part / 121);
@@ -1140,10 +1140,6 @@ export const hiddenAbove = (edits, at) => (edits[at]?.on ? edits.flatMap((e, i) 
 // Edit numbers in a sentence: "edit 3", "edits 3 and 4", "edits 3, 4 and 5".
 export const editList = (nums) => (nums.length === 1 ? `edit ${nums[0]}` : `edits ${nums.slice(0, -1).join(", ")} and ${nums.at(-1)}`);
 
-// The status line while edits are hidden: "Edit 2 is being changed: edits 3 and 4 are hidden until it is generated."
-export const layersHint = (n, hidden) =>
-  (hidden.length ? `Edit ${n} is being changed: ${editList(hidden)} ${hidden.length > 1 ? "are" : "is"} hidden until it is generated.` : "");
-
 // The status line after a stop: nothing starts until Enter. The edit that was being generated keeps its strokes, and the
 // edits that waited for their turn stay queued. `edit`: the stopped edit's number, null when no edit was being generated.
 export function stopHint({ edit = null, waits = [] } = {}) {
@@ -1381,8 +1377,8 @@ export const MEMORY = {
 };
 const TILED = { slots: { tile: 256, encode_tile: 256, guide_tiled: true }, does: "Models load one at a time and LTX works in 256 px tiles, so each step takes longer than on a larger GPU" }; // under WHOLE_FROM
 // ComfyUI keeps the models of the jobs it has run in memory, ready for the next job. With 16 GB of VRAM under a cap of
-// 52 GB of RAM, a full-size shot left LTX and its text encoder there, 35 GB, and the tracking job after it took the rest:
-// the system stopped ComfyUI. A profile that `frees` holds one family of models at a time: the page asks
+// 52 GB of RAM, a full-size shot leaves LTX and its text encoder there, 35 GB, and a tracking job after it can take the rest:
+// the system then stops ComfyUI. A profile that `frees` holds one family of models at a time: the page asks
 // ComfyUI to free its memory before a job whose family is not that of the job posted before it.
 export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", clean: "ltx", cleanup: "ltx", fluid: "ltx", hdr: "ltx", warm: "ltx",
   matte: "sam", snap: "sam", ingest: "frames", comp: "frames", review: "frames", export: "frames", upscale: "seedvr2", upscale_export: "frames" }; // by workflow: the models it loads, or frames only

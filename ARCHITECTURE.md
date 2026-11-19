@@ -343,7 +343,7 @@ Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), 
 | The Open dialog | The four tabs, the plate browser, the scenes list, the upload, and the path field on the machine that runs ComfyUI. |
 | Scenes | Saving on this ComfyUI and opening a scene; `saveGraph` (the scene as one ComfyUI workflow, in the editor's format). |
 | The viewer's colour | The full-precision frames (`wantDeep`), and exposure, contrast, gamma, saturation, hue, channels and invert, as RV's interactive edits. |
-| Colours… (S) and Words… (W) | The two dialogs that let full screen do the work. Colours… moves the panel's swatches, picker and pipette into a dialog over the frame, which takes no focus, and puts them back when it closes. Words… shows the edit's words, or a fluid shot's, and Enter applies them through the prompt field's own handler. |
+| Colours… (S) and Text prompt… (T) | The two dialogs that let full screen do the work. Colours… moves the panel's swatches, picker and pipette into a dialog over the frame, which takes no focus, and puts them back when it closes. Words… shows the edit's words, or a fluid shot's, and Enter applies them through the prompt field's own handler. |
 | Help | The Help dialog, in tabs: Getting started, Tools, Keys, Viewer and colour, Render and export, Models and licences. |
 | Models and licences | The models of the job on show, planned from its start (`jobFlows`), and every model with its licence (`models.mjs`). |
 | The colour inspector | F5, as OpenRV's: the values under the pointer (`inspector.mjs`). |

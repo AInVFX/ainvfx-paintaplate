@@ -393,11 +393,11 @@ def cleanup():
     181 s on a 1080p plate, this stage 82.8 s, 30.1 s of it saving the frames.
 
     Composite Frames makes that start one frame at a time and holds it once: 2.8 GB for 121 frames at 1920 x 1088. Image
-    Scale and Image Composite Masked made the same pictures from the whole shot: the plate, the first stage and the blocks
+    Scale and Image Composite Masked make the same pictures from the whole shot: the plate, the first stage and the blocks
     at full size (9.4 GB), then core's composite, which holds four copies of the shot and two of its mask at its peak:
-    13.2 GB. On a 16 GB card with 52 GB of RAM, ComfyUI stopped there, 16.5 GB above the 32.0 GB it held after the first
-    stage. With Composite Frames, this stage measured 28.5 GB when posted, 31.8 GB before LTX loaded,
-    and 38.3 GB at its peak, on a 16 GB GPU under a cap of 52 GB.
+    13.2 GB. That is 16.5 GB above the 32.0 GB that ComfyUI holds after the first stage, more than a 16 GB GPU with 52 GB of
+    RAM has. With Composite Frames, this stage holds 28.5 GB when posted, 31.8 GB before LTX loads, and 38.3 GB at its peak,
+    on a 16 GB GPU under a cap of 52 GB.
     """
     g = Graph()
     load, model = plate(g, pad=True)
@@ -832,9 +832,9 @@ def upscale():
 
     The page sends the export (Slot shot), in the plate's colour space (Slot color_space), and as many frames per job as
     the machine's RAM holds: the whole shot where it can, else windows. 121 frames at 3840 x 2160 in one job reach 52 GB
-    of RAM on a 96 GB GPU; on a 16 GB GPU the model's 15.7 GB stay in RAM as well, and a window of 42 frames went past a
+    of RAM on a 96 GB GPU; on a 16 GB GPU the model's 15.7 GB stay in RAM as well, and a window of 42 frames goes past a
     52 GB cap. Each window saves into a folder of its own (Slot prefix). Windows share no frames: on a 96 GB GPU, the frames
-    of windows of 21 frames changed across a window's edge no more than within a window. The window goes into the model space with the whole shot's peak (peak_of), so
+    of windows of 21 frames change across a window's edge no more than within a window. The window goes into the model space with the whole shot's peak (peak_of), so
     an HDR shot keeps one exposure from one window to the next, and comes back with that peak.
 
     Lanczos brings the window to the target size. SeedVR2 restores it in chunks of UPSCALE_CHUNK frames, in one sampling
@@ -894,7 +894,7 @@ def upscale():
 def upscale_export():
     """Upscale's export, after the last window. Join Windows reads the windows' folders under one parent folder
     (Slot frames), in order, each window its last frames (Slot count) and the last window what is left of the shot's
-    frames (Slot max_frames), so a window job that ran again counts once; a shot made in one job is one window. Save Plate writes the joined frames at their own size, in the format of the export at the plate's size (Slot
+    frames (Slot max_frames), so a window job that runs again counts once; a shot made in one job is one window. Save Plate writes the joined frames at their own size, in the format of the export at the plate's size (Slot
     shot), which Load Plate reads for its spec: the same file type, codec, bit depth, frame numbers, colour tags, timecode
     and audio. The frames are in the plate's colour space already, so nothing converts them."""
     g = Graph()

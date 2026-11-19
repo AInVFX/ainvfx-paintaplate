@@ -12,9 +12,9 @@ import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
 import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleComposes, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleSeconds, upscaleSizes, upscaleSource, upscaleWhy, upscaleTarget, upscaleWindow, upscaleWindows, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, freeName, liveEvery, PREVIEW_DEFAULT, sceneName, previewCap, previewDivOf, readPreview, stepLabel, previewSize, previewSizes, reconcile, removedNames, renderKey, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
-import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the paint matte's report, the memory profile
+import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, fluidPasses, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
-import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, layersHint, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
+import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { askedSeed, editSeed, gridGrow } from "./logic.mjs"; // the tests: a seed asked for in the address, and each edit's seed from it
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
@@ -951,7 +951,7 @@ function choosePass(id) {
   if (!S.pass) { fluidInput(); if (keying() && S.fluid.result) showFluid(); else showLatest(); hud("The latest result.", 1500); return stagesUI(); }
   if (id === "first") { pause(); seek(0); render(); }
   else {
-    const m = fluid ?? passMovie(id, r, previewOf(r), { log: logSpace(), data: matteSpace(), hdr: HDR_FRAMES });
+    const m = fluid ?? passMovie(id, r, previewOf(r), passSpaces());
     if (!m) { S.pass = null; return stagesUI(); }
     if (fluid && keying()) S.fluid.view = "result"; // the keyframes stay as painted; the viewer shows the pass
     setShot(m.url, fluid && keying() ? "fluid" : S.heroKey, m.space, m.frames ?? null, { framesSpace: m.framesSpace }); // a pass's EXR frames and their space (passMovie, fluidPasses)
@@ -1176,16 +1176,16 @@ function stopGenerating() { // Esc on the edit being generated, or Stop: everyth
   cancel(...STOPPED);
   dropLive();
   const waits = S.edits.filter((e) => e.state === "queued").map(num);
-  log(`Stopped: ${edit ? `edit ${num(edit)} keeps its strokes, text prompt and seed` : "what finished is kept"}${waits.length ? `, ${editList(waits)} ${waits.length > 1 ? "wait" : "waits"}` : ""}. Nothing starts until Enter.`);
+  log(`Stopped: ${edit ? `edit ${num(edit)} keeps its strokes, text prompt and seed` : "what finished is kept"}${waits.length ? `, ${editList(waits)} ${waits.length > 1 ? "wait" : "waits"}` : ""}. Everything waits for Enter.`);
   hud(edit ? `Stopped. Enter generates edit ${num(edit)} again.` : "Stopped. Enter goes on from where it stopped.", 4000);
   historyUI(); // before the status line: a waiting row says so, and the stop's sentence comes last
   stoppedUI(edit);
   stagesUI(); generateUI();
 }
 
-function stoppedUI(edit = null) { // the status line under a stop (logic.stopHint): what keeps its strokes, what waits and what Enter does, then what is hidden
+function stoppedUI(edit = null) { // the status line under a stop (logic.stopHint): what keeps its strokes, what waits and what Enter does
   const waits = S.edits.filter((e) => e.state === "queued").map(num);
-  status([stopHint({ edit: edit && num(edit), waits }), hiddenNote()].filter(Boolean).join(" "), "hint");
+  status(stopHint({ edit: edit && num(edit), waits }), "hint");
 }
 
 // The shot on show: its movie and the colour space of the movie's values, its EXR frames, and, as its fifth
@@ -1208,12 +1208,10 @@ const editingFirst = () => !!(S.draft || stroke || S.running || S.queued || S.ho
 // its strokes. Its own old result is hidden, so a rubbed stroke leaves no generated paint behind, and so is every edit above
 // it, which is likely to be generated again. The shot on show keeps them on the other frames until Generate.
 const under = { key: "", canvas: null };
-S.viewHidden = ""; // what the status line last said about hidden edits
 S.viewEpoch = 0; // moves at a stop and at the Enter that lifts it: what was queued before is void (queue)
 S.viewStopped = false; // a stop waits for Enter to run what waited (queueWaiting)
 const changing = () => (S.draft?.on ? S.edits.indexOf(S.draft) : -1); // the place in History of the edit being changed: -1 for a new edit, or none
 const hiddenEdits = () => hiddenAbove(S.edits.map((e) => ({ on: e.on, made: !!e.patch })), changing()).map((i) => S.edits[i]);
-const hiddenNote = () => layersHint(num(S.draft), hiddenEdits().map(num));
 // After Generate (logic.awaitingPass): an edit above the edit made again waits for its own pass when it depends on it, and
 // stays hidden until that pass ends. Only while a pass is on its way or a stop holds it: else nothing would bring it back.
 const pendingPass = (e) => e.on && (e.state === "queued" || e.state === "generating");
@@ -2251,7 +2249,7 @@ async function generate(edit) {
       Object.assign(edit, { patch: null, preview: null, latent: null, state: "failed", left: true, editAsked: writerSaw(edit.caption?.others), force: false }); // History marks its row (data-asked) with what the writer saw
       S.running = null;
       recompose(); historyUI(); render(); timelineUI();
-      const fact = `Error: edit ${num(edit)}, the prompt writer took the stroke for another object. Nothing ran.`; // tests/ui_live.py reads « took the stroke for another object »
+      const fact = `Error: edit ${num(edit)}, the prompt writer took the stroke for another object. The edit stopped.`; // tests/ui_live.py reads « took the stroke for another object »
       log(fact);
       return status(`${fact} ${leftHint(edit.prompt)}`, "hint");
     }
@@ -2650,13 +2648,6 @@ function strokesThumb(edit) { // the frame with the strokes, until the edit has 
   return t.toDataURL("image/jpeg", 0.8);
 }
 
-function hiddenUI() { // edits are layers: the status line says once which edits the edit being changed hides (firstFrame)
-  const note = hiddenNote();
-  if (note === S.viewHidden) return;
-  S.viewHidden = note;
-  if (note) status(note, "hint");
-}
-
 function historyUI() {
   editingUI();
   const list = $("#history"), hidden = new Set(hiddenEdits()), awaits = new Set(awaiting());
@@ -2698,7 +2689,6 @@ function historyUI() {
     li.onclick = (ev) => { if (!ev.target.closest("button")) { if (keying()) leaveKeys(); pause(); seek(0); show(S.peek === e && !S.selected ? null : e); } };
     return li;
   }), ...fluid);
-  hiddenUI();
   undoUI();
   exportUI(); timelineUI();
 }
@@ -3858,10 +3848,10 @@ function modeKey(k, combo) { // the keys of an interactive edit, as RV's paramsc
 
 function resetDisplay() { leaveMode(); setDisplay({ ...colour.DISPLAY }); }
 
-// ---------- Colours… (S) and Words… (W): what an edit needs, also in full screen ----------
+// ---------- Colours… (S) and Text prompt… (T): what an edit needs, also in full screen ----------
 // Colours… moves the panel's swatches, picker and pipette into a dialog over the frame, and puts them back when it closes.
-// It is not modal, so the pipette's click lands on the frame and the page's keys keep working. Words… shows the words of
-// the edit, or of the fluid shot, in a modal dialog: Enter applies them, as typing them in the prompt field does.
+// It is not modal, so the pipette's click lands on the frame and the page's keys keep working. Text prompt… shows the edit's
+// text prompt, or the fluid shot's, in a modal dialog: Enter applies it, as typing in the field does.
 
 const swatchHome = { parent: $(".swatches").parentElement, next: $(".swatches").nextSibling };
 function openColours() {
@@ -4096,7 +4086,7 @@ function regenerated() { return S.edits.filter((e) => e.on && e.state === "done"
 // question is open, so a question that comes then waits for that answer, and is dropped (false) when `still()` no longer
 // holds by its turn.
 let asking = Promise.resolve();
-function ask(text, yes, { enter = false, still = () => true, field = null, no = "Cancel", other = false } = {}) {
+function ask(text, yes, { enter = false, still = () => true, field = null, no = "No, cancel", other = false } = {}) {
   const turn = asking.then(() => still() && new Promise((answer) => {
     const d = $("#ask"), ok = $("#ask-yes"), input = $("#ask-field");
     $("#ask-text").textContent = text;
@@ -4656,7 +4646,7 @@ function enter(another) { // Generate (Enter): the edit in progress, then its sh
     const r = S.renders.get(S.heroKey) ?? (plateAlone(S.heroKey) ? want(S.heroKey, true) : null); if (r) r.failed = null; touch(0);
     return hud(resumed ? "Generating again from where it stopped." : plateAlone(S.heroKey) ? "SDR to HDR starts now." : "The shot renders now.", 2000);
   }
-  hud(S.edits.length ? "Nothing changed since the last result. Ctrl+Enter tries another seed." : "Paint on the frame first, then Generate.", 3000);
+  hud(S.edits.length ? "The result is up to date. Ctrl+Enter tries another seed." : "Paint on the frame first, then Generate.", 3000);
 }
 
 function renderPending() { // the render of the edits on show failed, or never started: Generate starts it again

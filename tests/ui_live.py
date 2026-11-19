@@ -105,7 +105,7 @@ def deliver_hdr(page):
         if page.is_visible("#deliver-auto"):
             return "SDR to HDR: on its own for this plate"
         if not page.is_visible(box):
-            raise RuntimeError("--hdr: Deliver offers no SDR to HDR on this page (?hdr=0, or its model files or nodes are missing)")
+            raise RuntimeError("--hdr: the Finish menu offers no SDR to HDR on this page (?hdr=0, or its model files or nodes are missing)")
     page.click(box)
     if page.is_visible(ask):
         page.click(yes)
@@ -174,7 +174,7 @@ DONE = "document.querySelectorAll('#history li').length === {n} && !document.que
 LEFT = "#history li:is([data-left], [data-asked])"  # History's marks: an erase that the page's check holds back (logic.eraseCheck, data-left), or an edit that asks for its object's name (data-asked)
 ASKED = "document.querySelector('#ask').open"  # the page's question dialog: while it is open, the page behind it takes no click
 ENDED = ("Export: done", "Download: ")  # the status line once the export is written, then once its zip downloads
-NAME_ASKED = "took the stroke for another object"  # the page's line when an erase with no words asks for its object's name (logic.asksName)
+NAME_ASKED = "took the stroke for another object"  # the page's line when an erase with no text prompt asks for its object's name (logic.asksName)
 
 
 class NameAsked(Exception):
@@ -472,7 +472,7 @@ def remote(a):
                     mark(f"{tool} stroke")
                     page.keyboard.press("Enter")  # Generate
                     page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)
-                    # a small card loads its models in turn. A row marked left ends the wait at once: behind the page's dialog
+                    # a small GPU loads its models in turn. A row marked left ends the wait at once: behind the page's dialog
                     # (« Render anyway » or « Cancel ») the row can stay busy, which held the wait to its timeout
                     page.wait_for_function(f"({DONE.format(n=rows(i, fluid))}) || !!document.querySelector('{LEFT}')", timeout=max(300, 2 * a.timeout) * 1000)
                     if page.query_selector(LEFT):  # no shot will render: without this the run waited 8 times --timeout for one

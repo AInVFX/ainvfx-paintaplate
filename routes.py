@@ -522,14 +522,18 @@ async def live_clear(request: web.Request) -> web.Response:
 async def cache_route(request: web.Request) -> web.Response:
     """POST /paintaplate/cache {keep, clear}: the unused cache under the output folder (cache.py), in files and bytes;
     removed when clear is true. keep: the folders of the plate the page shows."""
-    body = await request.json() if request.can_read_body else {}
-    keep, out = [k for k in body.get("keep") or [] if isinstance(k, str)], folder_paths.get_output_directory()
-    if body.get("clear"):
-        files, size = cache.clear(out, keep)
+    try:
+        body = await request.json() if request.can_read_body else {}
+        keep, clear = [k for k in body.get("keep") or [] if isinstance(k, str)], bool(body.get("clear"))
+    except (ValueError, AttributeError, TypeError) as e:  # a malformed body is refused, never a server error
+        return web.json_response({"error": str(e)}, status=400)
+    out = folder_paths.get_output_directory()
+    if clear:  # the walk and the removals leave ComfyUI's event loop free, as every route that touches files does
+        files, size = await asyncio.to_thread(cache.clear, out, keep)
     else:
-        found = cache.unused(out, keep)
+        found = await asyncio.to_thread(cache.unused, out, keep)
         files, size = len(found), sum(s for _, s in found)
-    return web.json_response({"files": files, "bytes": size, "cleared": bool(body.get("clear"))})
+    return web.json_response({"files": files, "bytes": size, "cleared": clear})
 
 
 async def job_get(request: web.Request) -> web.Response:

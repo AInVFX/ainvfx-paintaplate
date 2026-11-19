@@ -35,7 +35,7 @@ def run(browser, port, U):
 
     # 1. A stop: Esc while the erase's first pass runs
     U.mock_route(port, "/mock/hold", {"output": "patch", "seconds": 6, "times": 1})
-    U.paint_once(page, "", [(0.6, 0.4), (0.62, 0.45)])  # one stroke on the bottle, with no words
+    U.paint_once(page, "", [(0.6, 0.4), (0.62, 0.45)])  # one stroke on the bottle, with no text prompt
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(KLEIN), 60000, "the erase's first pass")
     page.keyboard.press("Escape")

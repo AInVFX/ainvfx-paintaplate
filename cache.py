@@ -15,6 +15,8 @@ PART = re.compile(r"v\d+|edits")  # the folders of a plate's folder: a render's,
 
 
 def is_export(path: str) -> bool:
+    """Whether a file is an export: inside a folder named export, or a file whose name holds « export ». `path` is
+    given from out/paintaplate, so a folder above ComfyUI that happens to be named export counts for nothing."""
     return "export" in os.path.basename(path) or "export" in path.replace(os.sep, "/").split("/")[:-1]
 
 
@@ -48,8 +50,8 @@ def unused(out: str, keep=()) -> list:
             if os.path.isdir(path):
                 if PART.fullmatch(e) and f"{ROOT}/{plate}/{e}" not in kept:
                     found += [(p, os.path.getsize(p)) for top, _, names in os.walk(path) for p in (os.path.join(top, n) for n in names)
-                              if not os.path.islink(p) and not is_export(p)]
-            elif f"{ROOT}/{plate}" not in kept and not is_export(path):
+                              if not os.path.islink(p) and not is_export(os.path.relpath(p, root))]
+            elif f"{ROOT}/{plate}" not in kept and not is_export(os.path.relpath(path, root)):
                 found.append((path, os.path.getsize(path)))
     return found
 

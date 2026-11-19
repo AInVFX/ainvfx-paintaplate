@@ -13,8 +13,6 @@ import os
 import sys
 import urllib.parse
 import urllib.request
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FILE = os.path.join(HERE, "js", "object_info.scene.json")
@@ -75,11 +73,10 @@ def main():
             if cls in old:
                 nodes[cls] = old[cls]
     version = (get("/system_stats").get("system") or {}).get("comfyui_version") or "of unknown version"
-    when = datetime.now(ZoneInfo("America/Toronto")).strftime("%-d %B %Y")
     about = ("What ComfyUI's /object_info says about the node classes of a scene's graph (with and without SDR to HDR), in the fields "
              "graph.editorGraph reads: each input in order with its type and six of its options (default, forceInput, "
              "control_after_generate, image_upload, multiline, dynamicPrompts), and the outputs. A combo's choices are left out. "
-             f"Read from a running ComfyUI {version} at {a.url} on {when} (Toronto), by tests/object_info_fixture.py.")
+             f"Read from a running ComfyUI {version} by tests/object_info_fixture.py.")
     if missing:
         about += f" Not in that ComfyUI, kept as they were: {', '.join(missing)}."
     with open(a.out, "w") as f:

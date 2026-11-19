@@ -18,7 +18,7 @@ def run(browser, port, U):
     U.mock_route(port, "/mock/writer", {"times": 1, "text": CAPTION})
     U.mock_route(port, "/mock/named", {"times": 1, "ellipse": SHADOW})
     page.click('.tools [data-tool="erase"]')
-    U.paint_once(page, "", [(0.6, 0.4), (0.62, 0.45)])  # one stroke, with no words: Clean takes the whole object
+    U.paint_once(page, "", [(0.6, 0.4), (0.62, 0.45)])  # one stroke, with no text prompt: Clean takes the whole object
     U.wait_log(page, U.added_line("Edit 1: the object's shadow joins its SAM mask ("), 60000, "the shadow joins as the strokes rest")
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("Render v1"), 120000, "render of the erase with its shadow")

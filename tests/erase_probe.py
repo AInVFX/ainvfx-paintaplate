@@ -13,7 +13,7 @@ web/app.mjs), with the page's own workflows (snap, prompt and edit in tools/buil
 in each way of REQUESTS. When the writer's answer to the page's request removes another object, for a stroke with no
 words, the probe goes on as the page does (prepare in web/app.mjs): the writer gets the same request once more, on the
 frame with all but the object dimmed (logic.dimOutside). Klein then runs the page's edit preview once per mask and caption that differ;
---full adds the page's full-size pass. With no --stroke: three strokes on horse.mp4 with no words, the barn of the GPU case
+--full adds the page's full-size pass. With no --stroke: three strokes on horse.mp4 with no text prompt, the barn of the GPU case
 horse_erase, the fence post under it and the tree above it. The jobs are grouped by model, so that each model loads few
 times on a 16 GB GPU: SAM 3.1 at every stroke's points, the writer's name for every object, SAM 3.1 by that name, the
 writer for every request, Klein for every caption, then SAM 3.1 on every result.
@@ -73,7 +73,7 @@ NAME_SYSTEM = ("You see an image in which one object keeps its full colour and e
                "answer with its common name only, in one to three words, with no article and no sentence.")
 NAME_REQUEST = "Name the object that keeps its full colour."
 REQUESTS = {  # how each one asks for Klein's caption: what the prompt writer sees, and the boxes it gets
-    "page": "the page's own request (logic.writerBoxes): with no words and one painted part, one box cut to the stroke and to "
+    "page": "the page's own request (logic.writerBoxes): with no text prompt and one painted part, one box cut to the stroke and to "
             "what most of SAM's masks hold (logic.coreBox); otherwise one box per painted part. An answer about another "
             "object: the writer asked once more, on the frame with all but the object dimmed (logic.dimOutside)",
     "wide": "the wide request: one box per painted part, around SAM's whole union (logic.paintBoxes)",
@@ -539,7 +539,7 @@ def report(path, objs, asked, head):
     for o in objs:
         s = o["stroke"]
         lines += ["", f"## {s['name']}", "", f"The stroke: {len(s['points'])} points from {s['points'][0]} to {s['points'][-1]}, "
-                  f"{s['size']:g} pixels across, " + (f"with « {s['words']} »." if s["words"] else "with no words.")]
+                  f"{s['size']:g} pixels across, " + (f"with « {s['words']} »." if s["words"] else "with no text prompt.")]
         if "error" in o:
             lines += ["", o["error"]]
             continue

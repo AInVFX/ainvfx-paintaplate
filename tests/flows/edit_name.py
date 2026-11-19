@@ -1,4 +1,4 @@
-"""A check of an erase with no words that Klein's prompt writer takes for another object (tests/flows/README.md). The page
+"""A check of an erase with no text prompt that Klein's prompt writer takes for another object (tests/flows/README.md). The page
 refuses an answer that removes an object outside the paint and asks the writer once more, on the frame with all but the
 object dimmed. When that answer removes another object too, the page asks for the object's name before Klein runs: the
 status line says so and what to do next, the log says it once, no Klein pass and no shot run, and History's row says that
@@ -22,7 +22,7 @@ def run(browser, port, U):
     page.evaluate(U.WATCH)
     U.mock_route(port, "/mock/writer", {"times": 2, "text": HORSE})  # the first look, then the look at the dimmed frame
     page.click('.tools [data-tool="erase"]')
-    U.paint_once(page, "", [(0.6, 0.4), (0.62, 0.45)])  # one stroke on the bottle, with no words
+    U.paint_once(page, "", [(0.6, 0.4), (0.62, 0.45)])  # one stroke on the bottle, with no text prompt
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(ASK), 90000, "line that says the prompt writer took the stroke for another object")
     U.settled(page)

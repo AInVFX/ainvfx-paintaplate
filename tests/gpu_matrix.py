@@ -548,7 +548,7 @@ def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
         draw, cells = ImageDraw.Draw(out), []
         for e, (s, boxes) in enumerate(edits):
             x = left + e * span
-            draw.text((x, 4), f"Edit {e + 1}: {TOOL_NAMES.get(s[0], s[0])} " + (f'"{s[1][:40]}"' if s[1] else "(no words)"), fill="white", font=font)
+            draw.text((x, 4), f"Edit {e + 1}: {TOOL_NAMES.get(s[0], s[0])} " + (f'"{s[1][:40]}"' if s[1] else "(no text prompt)"), fill="white", font=font)
             for c, (title, _) in enumerate(columns):
                 draw.text((x + c * (cw + gap), head + 2), title, fill=(200, 200, 200), font=font)
             for r, i in enumerate(rows):

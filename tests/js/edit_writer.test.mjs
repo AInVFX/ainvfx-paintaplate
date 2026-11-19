@@ -1,4 +1,4 @@
-// Tests of what Klein's prompt writer gets and gives for an erase stroke with no words (web/logic.mjs: corePixels, boxOf,
+// Tests of what Klein's prompt writer gets and gives for an erase stroke with no text prompt (web/logic.mjs: corePixels, boxOf,
 // coreBox, removedNames, dimOutside): the box cut to the object's core, the names of the objects that an answer removes,
 // and the frame with all but the object dimmed that the writer gets for a second look.
 import { test } from "node:test";
@@ -18,7 +18,7 @@ const inside = (m, box, w, h) => { // the pixels of `m` in `box`, and the box's 
   return [n, (y1 - y0) * (x1 - x0)];
 };
 
-// The answer of Klein's prompt writer for a stroke on the tree of horse.mp4, with no words: it removes the barn below it.
+// The answer of Klein's prompt writer for a stroke on the tree of horse.mp4, with no text prompt: it removes the barn below it.
 const locked = [{ id: "obj_1", from: "ref_image_0", src_bbox: [218, 759, 431, 902], tgt_bbox: null, desc: "the object to remove" }];
 const BARN = "Remove the distant barn <barn_1> in the upper-right background completely, including its roof, walls, and any " +
   "shadow or reflection it casts. Keep the horse, fence, vegetation, and every other region exactly unchanged. " +

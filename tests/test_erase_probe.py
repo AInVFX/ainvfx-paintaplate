@@ -161,7 +161,7 @@ class AgainstTheMock(unittest.TestCase):
         # as_words names the object, then runs as if the name had been typed: SAM 3.1 by that name, and a mask of its own
         self.assertEqual((o["requests"]["as_words"]["path"], o["paths"]["name"]["words"]), ("name", o["object"]))
         self.assertIn(f"Remove the {o['object']} <obj_1>", o["requests"]["as_words"]["request"])
-        self.assertEqual(o["paths"]["page"]["chosen"]["boxes"], [o["paths"]["page"]["core"]])  # no words, one part: the core box
+        self.assertEqual(o["paths"]["page"]["chosen"]["boxes"], [o["paths"]["page"]["core"]])  # no text prompt, one part: the core box
         for cap, e in o["edits"].items():
             self.assertGreater(e["share"][0], 0.5, cap[:60])
             self.assertEqual(e["sam"], 1.0)

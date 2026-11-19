@@ -1,5 +1,5 @@
 """The check of an erase that the page's check holds back (tests/flows/README.md). Klein can answer an
-erase with the frame as it was: a stroke with no words can leave its object in the whole shot. After the edit the page compares the first frame with the frame under it inside the object's mask
+erase with the frame as it was: a stroke with no text prompt can leave its object in the whole shot. After the edit the page compares the first frame with the frame under it inside the object's mask
 (logic.eraseCheck). The check can be wrong on a thin or faint object, or on one behind a fence, so the page asks in its question dialog, with History's row marked as the question opens: tests/ui_live.py ends a GPU case on
 that mark. Esc or « No, cancel » renders nothing and leaves what to do next in the status line, and the page goes on: another seed
 asks again. « Yes, render anyway », clicked or chosen by Enter, keeps the first frame and renders its shot. One question at a
@@ -58,7 +58,7 @@ def run(browser, port, U):
     page.evaluate(U.WATCH)
     page.click('.tools [data-tool="erase"]')
 
-    def stroke():  # one stroke on the bottle, with no words
+    def stroke():  # one stroke on the bottle, with no text prompt
         U.paint_once(page, "", [(0.6, 0.4), (0.62, 0.45)])
         page.keyboard.press("Enter")
 
@@ -70,7 +70,7 @@ def run(browser, port, U):
         page.fill("#prompt", "bottle"); page.evaluate("document.activeElement.blur()")
         page.keyboard.press("Enter")
 
-    asked = held(page, port, U, stroke, "an erase with no words that the check holds back")
+    asked = held(page, port, U, stroke, "an erase with no text prompt that the check holds back")
     page.keyboard.press("Escape")
     cancelled(page, U, asked, 1, "Esc chooses Cancel")
     asked = held(page, port, U, another, "after Esc, another seed")  # Esc closed the question and stopped nothing

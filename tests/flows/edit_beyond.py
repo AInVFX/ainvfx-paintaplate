@@ -23,7 +23,7 @@ def run(browser, port, U):
     page.evaluate(U.WATCH)
     U.mock_route(port, "/mock/spill", {"times": 2})  # the erase's edit preview and its full-size pass
     page.click('.tools [data-tool="erase"]')
-    U.paint_once(page, "", [(0.6, 0.4), (0.62, 0.45)])  # one stroke on the bottle, with no words
+    U.paint_once(page, "", [(0.6, 0.4), (0.62, 0.45)])  # one stroke on the bottle, with no text prompt
     page.keyboard.press("Enter")
     page.wait_for_selector("#ask[open]", timeout=90000)
     asked, row, lines = page.evaluate(ASKED), page.evaluate(ROW), page.evaluate("window.__lines")

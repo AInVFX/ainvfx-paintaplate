@@ -1,4 +1,4 @@
-"""A relight with no words (tests/flows/README.md). Its request is the page's own, written from the strokes
+"""A relight with no text prompt (tests/flows/README.md). Its request is the page's own, written from the strokes
 (logic.lightIntent): no prompt writer runs, and no line of the log or the status line names one. The stroke is a small light
 inside the frame, so the request shows its source where it is drawn. Klein runs, and the shot renders."""
 WRITER = "prompt writer"
@@ -10,7 +10,7 @@ def run(browser, port, U):
     U.open_plate(page)
     page.evaluate(U.WATCH)
     page.click('.tools [data-tool="light"]')
-    U.paint_once(page, "", [(0.3, 0.3), (0.34, 0.32)])  # one light stroke, with no words
+    U.paint_once(page, "", [(0.3, 0.3), (0.34, 0.32)])  # one light stroke, with no text prompt
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("Render v1"), 120000, "render of the relight")
     lines = page.evaluate("window.__lines")
@@ -20,5 +20,5 @@ def run(browser, port, U):
     asked = [t for t in lines if "relight request: " in t]
     U.check(bool(asked) and "<light_1>" in asked[-1] and '"tgt_bbox": [' in asked[-1],
             "a small light inside the frame shows its source: the request places it with a row of Klein's layout table")
-    U.no_errors(errors, "after a relight with no words")
+    U.no_errors(errors, "after a relight with no text prompt")
     page.close()

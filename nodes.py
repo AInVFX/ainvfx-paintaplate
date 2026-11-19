@@ -220,7 +220,7 @@ class SavePlate(io.ComfyNode):
 
     @classmethod
     def execute(cls, images, plate, filename_prefix, keep_untouched, changed=None, alpha=None) -> io.NodeOutput:
-        spec = plateio.at_size(plate, images.shape[2], images.shape[1])  # frames of another size: Upscale to 4K
+        spec = plateio.at_size(plate, images.shape[2], images.shape[1])  # frames of another size: Upscale
         keep_untouched = keep_untouched and "scaled_from" not in spec
         out_dir = folders.output_folder(filename_prefix)
         os.makedirs(out_dir, exist_ok=True)
