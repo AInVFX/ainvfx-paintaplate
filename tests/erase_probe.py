@@ -76,7 +76,7 @@ REQUESTS = {  # how each one asks for Klein's caption: what the prompt writer se
     "page": "the page's own request (logic.writerBoxes): with no words and one painted part, one box cut to the stroke and to "
             "what most of SAM's masks hold (logic.coreBox); otherwise one box per painted part. An answer about another "
             "object: the writer asked once more, on the frame with all but the object dimmed (logic.dimOutside)",
-    "wide": "the request before 1.11.14: one box per painted part, around SAM's whole union (logic.paintBoxes)",
+    "wide": "the wide request: one box per painted part, around SAM's whole union (logic.paintBoxes)",
     "dimmed": "the page's request, on the frame with all but the object dimmed to 30% of its light",
     "crop": "the page's request on the object's own crop (its box, and half its size on each side); "
             "the boxes of the answer come back to the frame",
@@ -545,7 +545,7 @@ def report(path, objs, asked, head):
             continue
         P, Q = o["paths"]["page"], o["paths"].get("name")
         lines += ["", f"SAM 3.1 kept {len(P['kept'])} mask(s) ({', '.join(P['kept']) or 'none'}). The object's box {P['bbox']}; "
-                  f"the writer's boxes {P['chosen']['boxes']}; the boxes before 1.11.14 {P['parts']}; the crop {P['crop']}."]
+                  f"the writer's boxes {P['chosen']['boxes']}; the wide boxes {P['parts']}; the crop {P['crop']}."]
         if "naming" in o:
             lines += ["", f"The writer names it « {o.get('object') or 'nothing'} » (its answer: « {short(o['naming'].get('answer'), 80)} »)."
                       + (f" SAM 3.1 by that name kept {len(Q['kept'])} mask(s) ({', '.join(Q['kept']) or 'none'}); the object's "
@@ -633,7 +633,7 @@ def main(argv=None):
             continue
         P["seconds"] = seconds
         say(f"{s['name']}: SAM 3.1 kept {len(P['kept'])} mask(s) in {seconds:.1f} s; the object's box {P['bbox']}, "
-            f"the writer's boxes {P['chosen']['boxes']}, before 1.11.14 {P['parts']}")
+            f"the writer's boxes {P['chosen']['boxes']}, the wide boxes {P['parts']}")
     live = [o for o in objs if "page" in o["paths"]]
 
     # 2. The frame with all but the object dimmed (dimmed, and the page's second look); the writer names each object on it
