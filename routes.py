@@ -343,7 +343,7 @@ def first_image(first: str, still: bool) -> np.ndarray:
     animated image. Float formats keep their values (plateio.read_float); 8-bit ones come back from 0 to 1."""
     if still:
         return plateio.read_float(first)
-    with plateio.av.open(first) as c:
+    with av.open(first) as c:
         return next(c.decode(video=0)).to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
 
 
@@ -365,7 +365,7 @@ def thumbnail(rel: str, width: int = THUMB_WIDTH) -> str:
     h, w = rgb.shape[:2]
     k = min(1.0, width / max(h, w))
     small = mathops.resize_to(rgb, max(1, round(h * k)), max(1, round(w * k))) if k < 1.0 else rgb
-    spec = {"ext": os.path.splitext(first)[1].lower(), "kind": "sequence" if plateio.is_sequence(full) else "video"}
+    spec = {"ext": os.path.splitext(first)[1].lower(), "kind": "sequence" if still else "video"}
     if spec["ext"] == ".exr":
         spec["exr"] = plateio.exr_info(first)
     shown = ocio.display_rgb(small, "", ocio.guess("", plateio.guess_color_space(spec), first))
