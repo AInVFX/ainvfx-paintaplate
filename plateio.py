@@ -321,7 +321,7 @@ def pad_count_8n1(n: int) -> int:
 
 def largest_side(width: int, height: int, largest: int) -> tuple[int, int]:
     """(width, height) with the longer side at `largest`, rounded as core's Scale Image to Max Dimension rounds them
-    (comfy_extras/nodes_images.py at v0.44.2). 0 keeps the size."""
+    (comfy_extras/nodes_images.py at ComfyUI v0.45.3, the pin). 0 keeps the size."""
     if not largest:
         return width, height
     if height > width:
