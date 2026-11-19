@@ -1214,7 +1214,7 @@ function render() {
   if (S.cmp && S.cmp.key !== S.heroKey) endCompare(false); // other edits on show: the pass compared was the old edits'
   $("#wipe .label.left").textContent = S.cmp?.label ?? "Plate";
   $("#wipe .label.right").textContent = shownLabel();
-  wantDeep(); // once a colour value moves, the frames' own values load around the playhead, as OpenRV's cache does
+  wantDeep(); // an image sequence's own values load around the playhead, as OpenRV's cache does
   const W = view.width, H = view.height, still = !S.playing;
   const first = still && S.frame === 0 && (!S.shot?.url || stale() || editingFirst());
   const pic = first || !S.shot?.url ? null : shotFrame();
@@ -1458,7 +1458,7 @@ view.addEventListener("pointerdown", (e) => {
   if (e.button === 0 && nearWipe(e)) return dragWipe(e, view);
   const rub = S.rub || (e.pointerType === "pen" && (e.buttons & 32)); // the eraser tool, or a pen's eraser end
   if (e.button !== 0 && !rub) return;
-  if (rub && eraserKey) eraserKey.dragged = true; // a stroke while X is held: at the release the eraser goes back as it was
+  if (rub && eraserKey) eraserKey.dragged = true; // a stroke while E is held: at the release the eraser goes back as it was
   if (S.playing) pause();
   if (keying()) return paintKey(e, rub);
   const jumped = S.frame !== 0; // a stroke on another frame: the viewer goes back to the first frame, where edits are painted
@@ -2285,7 +2285,6 @@ async function generate(edit) {
   }
 }
 
-
 // An erase that the check holds back (logic.eraseCheck, leftLines). History's row is marked as the question opens: tests/ui_live.py
 // ends a GPU case on #history li[data-left], so a case that nobody watches never waits on the dialog. The first frame shows
 // Klein's result under the question, under a version of its own, so no earlier render shows there. « Yes, render anyway »
@@ -2810,7 +2809,7 @@ function plan(r, active) { // the steps this set of edits needs: the erase pass 
 
 // What each step took on this machine, kept between sessions (logic.remember): its total, its lead before the sampler's
 // first step and its tail after the last, per size, frame count and memory profile.
-const TIMES_KEY = "paintaplate.step-times"; // what each step took on this machine (logic.remember, logic.timeKey): only steps whose jobs ran
+const TIMES_KEY = "paintaplate.step-times"; // only the steps whose jobs ran (logic.timeKey)
 let TIMES = {};
 try { TIMES = JSON.parse(localStorage.getItem(TIMES_KEY) ?? "{}") ?? {}; } catch { TIMES = {}; }
 const stepSize = (id) => stepSizeOf(id, S.plate);
