@@ -38,7 +38,7 @@ export const pointIn = (rect, clientX, clientY, w, h) => [((clientX - rect.left)
 
 // ---------- Which frame a playing source shows once the colour tools move ----------
 // At rest a playing source shows its 8-bit movie until all its EXR frames are in. That movie holds ACEScct codes in
-// H.264: pushed four stops up, a fluid shot's dark background moved by 4 display levels at the median and 24 at p99
+// H.264: pushed four stops up, a fluid shot's dark background moves by 4 display levels at the median and 24 at p99
 // against its EXR frames, with H.264's 8 px blocks visible. So once a colour tool moves, a source with
 // EXR frames shows only those, as RV plays only what it has decoded: the frame on show if it is in, else the nearest
 // one before it, else the nearest after (the cache keeps frames ahead of the playhead). Null when none is in.
