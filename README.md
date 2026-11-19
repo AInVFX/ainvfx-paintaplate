@@ -9,7 +9,7 @@
 </tr>
 </table>
 
-Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com/comfyanonymous/ComfyUI), on your own machine, with open weights only. Paint on the first frame of a shot to erase, add or relight: the edit appears on that frame in seconds, then carries through the whole shot. The result comes back in the plate's own format, with every untouched pixel identical to the plate.
+Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com/comfyanonymous/ComfyUI), on your own machine, with open weights only. Paint on the first frame of a plate to erase, add or relight, watch the edit carry through the shot, and export it in the plate's own format, layers and untouched pixels. The edit appears on the first frame in seconds, and every untouched pixel of the result is identical to the plate.
 
 ## What it can do
 
