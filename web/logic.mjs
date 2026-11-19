@@ -1291,9 +1291,10 @@ export const dataSpace = (spaces = []) => spaces.find((c) => c.data)?.name ?? nu
 // From 16 GB (WHOLE_FROM), every LTX decode takes the whole frame in one piece (tile WHOLE), and every LTX encode is whole:
 // each IC-LoRA guide (guide_tiled false) and the first stage that the full-size passes refine (encode_tile WHOLE). In
 // tiles, each tile comes out brighter near its edges, and the blend of two tiles leaves a band of 0.1 to 0.2 stops where
-// they overlap; a guide encoded in tiles leaves its lines in the shot sampled from it. 121 frames at 1920 x 1088 decode
-// whole in 13 s at a peak of 10.3 GiB in float32, against 45 to 99 s in tiles (RTX PRO 6000). Under 16 GB, LTX decodes
-// and encodes in 256 px tiles, which leave those bands.
+// they overlap; a guide encoded in tiles leaves its lines in the shot sampled from it, and a full-size pass encoded in
+// 256 px tiles shows bands of 0.3 to 1.2 steps in 8 bits, up to 0.05 stops through SDR to HDR. 121 frames at 1920 x 1088
+// decode whole in 13 s at a peak of 10.3 GiB in float32, against 45 to 99 s in tiles (RTX PRO 6000). Under 16 GB, LTX
+// decodes and encodes in 256 px tiles, which leave those bands.
 // `slots` are workflow slot values (tile, encode_tile, guide_tiled): one set of workflows serves every profile.
 export const MEMORY_FROM = { medium: 24e9, large: 60e9 }; // bytes of VRAM: a 24 GB GPU reports about 25.7e9, a 16 GB one about 17.2e9
 export const WHOLE = 4096; // a tile larger than any working frame: VAE Decode (Tiled) decodes the whole frame in one piece
