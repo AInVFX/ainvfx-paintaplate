@@ -1,4 +1,4 @@
-"""PL5: comp, review and export composite with Composite Frames, one frame at a time, in place of core's Image Composite
+"""Comp, review and export composite with Composite Frames, one frame at a time, in place of core's Image Composite
 Masked on the whole batch. The same pixels: mathops.composite against core's equation (comfy_extras/nodes_mask.py,
 composite(), 0.44.2: mask * source + (1 - mask) * destination, with the mask at the source's size), written again here."""
 import json
