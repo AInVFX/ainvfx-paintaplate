@@ -1,4 +1,4 @@
-"""PL4: Save Movie's memory. plateio.core_uint8 makes core's 8-bit bytes with a strip as its temporary, and
+"""Save Movie's memory. plateio.core_uint8 makes core's 8-bit bytes with a strip as its temporary, and
 plateio.write_movie converts at most twice its workers ahead of x264, the frames in their order."""
 import os
 import sys
