@@ -216,7 +216,7 @@ export function caption({ tool, words, bbox, strokes = [], aspect, hues = [] }) 
 
 const pyJSON = (v) => JSON.stringify(v).replace(/("(?:[^"\\]|\\.)*")|([,:])/g, (m, s, p) => s ?? `${p} `); // json.dumps spacing
 export const KEEP_TOUCHED = " Where the drawing touches an object, the new element acts on that object itself (it burns it, rests on it, " +
-  "wets it or lights it); add no props, fuel or supports that were not asked for."; // a fire on a towel came with logs without it
+  "wets it or lights it); add no props, fuel or supports that were not asked for."; // without it, a fire on a towel comes with logs
 
 export function upsampleRequest({ tool, words, bbox, boxes = null, hues = [] }) { // hues: a paint's colours by name (paintColors)
   const parts = tool === "erase" && boxes?.length > 1 ? boxes : null; // several painted parts: one locked row each
@@ -272,8 +272,8 @@ export function reconcile(text, locked) {
 }
 
 // ---------- An erase: one locked box per painted part ----------
-// One box around a truss, a crane and a door took in an astronaut between them, and the upsampler removed him instead.
-// A few tight boxes cover the paint, so they hold what was painted and little else.
+// One box around several painted parts can take in an object that stands between them, and the prompt writer then
+// removes that object instead. A few tight boxes cover the paint, so they hold what was painted and little else.
 // paint: { bits, w, h } on a coarse grid; boxes are [y_min, x_min, y_max, x_max] on 0..1000.
 export function paintBoxes({ bits, w, h }, { max = 4, fill = 0.4, gain = 0.25, margin = 8 } = {}) {
   // a box: the painted cells in it and their tight bounds. The emptiest box splits in two, along its long side, where the two
@@ -391,7 +391,7 @@ export function dimOutside(rgba, bits, keep = DIM) {
 
 // The erase pass's prompt: the scene as it stays, in the prompt writer's own words for what it kept (rows with a box in the
 // result). People and text stay out (a pose in words fights the plate's own motion), and the erased object is never named
-// (named, the umbrella came back). Nothing kept: no prompt, as LTX's inpainting guide recommends.
+// (named, it comes back). Nothing kept: no prompt, as LTX's inpainting guide recommends.
 const UNNAMED = /^(?:person|people|man|woman|child|boy|girl|crowd|en_text)$/i;
 export function erasePrompt(captions) {
   const descs = [];
@@ -428,8 +428,9 @@ export const plateIdentity = (path, st, on = true) => (st && on ? JSON.stringify
 export const RIPPLE = "Use the reference video for motion, timing, camera movement, framing and lighting changes; " +
   "follow the edited first frame for every change of content, light and style.";
 
-// The Ripple sentence, then one line per paint or light edit (its card: a short description of the change helps; an explosion
-// then stayed and grew instead of driving off with the car). An erase is never named: named, the umbrella came back.
+// The Ripple sentence, then one line per paint or light edit (its card: a short description of the change helps; without
+// it, an explosion added on a car can stay and grow instead of driving off with the car). An erase is never named: named,
+// it comes back.
 export function shotPrompt(edits) { // a light edit names its colour (`hue`), with or without words
   return [RIPPLE, ...edits.filter((e) => (e.tool === "paint" && e.words) || e.tool === "light").map((e) => (e.tool === "paint"
     ? `Added in the first frame: ${e.words}; it keeps moving naturally and stays in place on what it touches for the whole shot.`
@@ -438,7 +439,7 @@ export function shotPrompt(edits) { // a light edit names its colour (`hue`), wi
 
 // ---------- Whole object: which of SAM's masks belong to the erase ----------
 // Masks are Uint8Arrays of 0 and 1 over `area` pixels. Found by name: the instances the stroke touches. Else one mask per stroke
-// point: objects only (not the sky or the road), kept when two points agree (a point that slipped onto the road found a strip of
+// point: objects only (not the sky or the road), kept when two points agree (a point that slips onto the road finds a strip of
 // it). A thin pole under a wide brush covers little of the stroke, so a touch counts from either side.
 const count = (m) => { let n = 0; for (let i = 0; i < m.length; i++) n += m[i]; return n; };
 const shared = (a, b) => { let n = 0; for (let i = 0; i < a.length; i++) n += a[i] & b[i]; return n; };
@@ -621,7 +622,7 @@ export function logLevel(text) { // a log message's colour, from its words: red 
   return starts("Error: ") ? "error" : starts("Warning: ") ? "warn" : "";
 }
 
-// What the status line shows once the log writes `text` (choices 24 and 25), or null to leave it as it is. An error or a
+// What the status line shows once the log writes `text`, or null to leave it as it is. An error or a
 // warning shows by its first line that starts with its word, in its colour (logLevel). A line that succeeds replaces a
 // fault that is over (`shown`: the status line's level), in the normal colour, unless it is bookkeeping. Every other event
 // reaches the status line from the code that makes it, with what to do next.
@@ -793,7 +794,7 @@ export function fluidPrompt(words) { // the trigger first, as the model card ask
 
 // The paint matte's seed: the pixels where the edited first frame (a) differs from the plate's (b) by more than
 // `threshold` (0 to 255, on the largest channel), inside the paint zones (z, white). RGBA arrays of one size; 1 or 0 per
-// pixel. The zone is wider than what was painted, and a matte started from all of it followed whatever stood nearby.
+// pixel. The zone is wider than what was painted, and a matte started from all of it follows whatever stands nearby.
 export function changedMask(a, b, z, threshold = 24) {
   const n = a.length >> 2, out = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
@@ -808,8 +809,8 @@ export function changedMask(a, b, z, threshold = 24) {
 // given the page's own caption, can leave the barn through the whole shot. So after the edit the page
 // compares the first frame (`after`) with the frame under the edit (`before`) inside the object's mask (`mask`: painted
 // where its red is 128 or more), all three RGBA at `w` x `h`, on cells of `cell` pixels. A cell's mean colour holds under
-// Klein's softness and under the few levels its fill can sit off the frame (4 to 6, measured for Level Fill on 28
-// October), and it moves when the object goes. Returns the share of the object, from 0 to 1, whose cells moved by more
+// Klein's softness and under the few levels its fill can sit off the frame (4 to 6, measured for Level Fill), and it
+// moves when the object goes. Returns the share of the object, from 0 to 1, whose cells moved by more
 // than `levels` of 255; null when the mask is empty.
 export function erasedShare(after, before, mask, w, h, { cell = 4, levels = 12 } = {}) {
   let all = 0, changed = 0;
@@ -1037,7 +1038,7 @@ export const defaultDepth = (hdrReady) => (hdrReady ? HDR_DEPTH : 8); // a blank
 // the config has it, so they show what its full-precision frames show; a config without it keeps the model space.
 export const viewerSpace = (names, model) => (names.includes("ACEScct") ? "ACEScct" : model);
 // While a shot plays, one source shows one kind of frame: its full-precision frames once all of them are in, else its 8-bit
-// movie. Mixed, the two alternated as the frames arrived, with two different tone mappings (a cause of flicker).
+// movie. Mixed, the two would alternate as the frames arrive, with two different tone mappings, and the shot would flicker.
 export const drawsDeep = (playing, holdsAll) => !playing || holdsAll;
 // A fluid shot's folder, from its HDR frames or its shot in the blank plate's format: what its export zips.
 export const fluidRun = (path) => String(path ?? "").replace(/^output[:/]/, "").replace(/\/(hdr|plate)(\/[^/]*)?$/, "");
@@ -1191,7 +1192,7 @@ export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of
 // stroke dragged across the frame is a wash, and a light at the frame's edge comes from outside: neither shows a source.
 // A source is named by the words when they name a kind of light (« sun », « street lamp »). With no such word, a warm
 // source in the top third of the frame is the sun: so named, Klein draws it behind what stands in front of it, where « a
-// small, very bright light » washed the nearby buildings out in its glare. Any other source is a small, very bright light
+// small, very bright light » washes the nearby buildings out in its glare. Any other source is a small, very bright light
 // of its colour.
 export const LIGHT_KINDS = /\b(sun|moon|street ?lamp|streetlight|lamp|lantern|candle|fire|torch|bulb|neon sign|spotlight)\b/i;
 const WARM = new Set(["red", "orange", "yellow", "warm white"]);
