@@ -11,8 +11,8 @@ def settled(page, limit=240):  # Generate reads Generate for three seconds runni
 
 def fluid16_scene(page, U):
     """A 16-bit fluid shot with a paint edit on it, saved as a scene and opened again: every job comes back from the job
-    index, the fluid shot's SDR to HDR included, and none is posted twice. Before the fix, SDR to HDR ran again on reopen
-    and rewrote the EXR frames under the edits: the plate's time changed, so every job on it missed the index."""
+    index, the fluid shot's SDR to HDR included, and none is posted twice. Run again on reopen, SDR to HDR would rewrite
+    the EXR frames under the edits: the plate's time would change, and every job on it would miss the index."""
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.click("#open-btn"); page.click("#open [data-tab=blank]")
