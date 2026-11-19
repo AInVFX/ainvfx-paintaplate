@@ -760,7 +760,7 @@ export function toolEndsEdit({ draft, current }, tool) { // picking another tool
   return !!work && work.tool !== tool;
 }
 
-// The eraser's key, X. Held while a stroke is dragged, the eraser lasts as long as the key is down; a tap, shorter than
+// The eraser's key, E. Held while a stroke is dragged, the eraser lasts as long as the key is down; a tap, shorter than
 // ERASER_TAP seconds with no stroke, switches it on or off. The eraser's state once the key comes up.
 export const ERASER_TAP = 0.3;
 export function eraserAfterKey(was, held, dragged) { return !dragged && held < ERASER_TAP ? !was : was; }
