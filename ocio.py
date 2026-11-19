@@ -303,8 +303,8 @@ def convert(frames, name: str, src: str, dst: str, peak: float | None = None) ->
 
 def convert_with_peak(frames, name: str, src: str, dst: str, peak: float | None = None) -> tuple[np.ndarray | list[np.ndarray], float]:
     """convert's frames, in one array, and the peak of its tone mapping: into @model, `peak` or the peak of these frames, read on the way
-    in with no second pass; out of @model, the `peak` whose tone mapping is undone; 1.0 when there is none. Color Space
-    (OCIO) gives it as its second output, so the nodes after it take the plate's peak as a number (PL6). It is the float
+    in with no second pass; out of @model, the `peak` whose tone mapping is undone; 1.0 when there is none. Colour Space
+    (OCIO) gives it as its second output, so the nodes after it take the plate's peak as a number. It is the float
     batch_peak reads: the same way into linear Rec.709 (_route), the same frames."""
     frames = list(frames)
     if src == dst or not frames:
