@@ -1654,7 +1654,8 @@ const rgbOf = (hex) => { // "#rgb" or "#rrggbb" as "r, g, b"
   return [0, 2, 4].map((i) => parseInt(f.slice(i, i + 2), 16) || 0).join(", ");
 };
 
-function line(c, x0, y0, x1, y1, r, color) {
+function line(c, x0, y0, x1, y1, r, color) { // a stroke's segment; a press with no move is one dab of the brush, since a canvas draws no zero-length line
+  if (x0 === x1 && y0 === y1) { c.fillStyle = color; c.beginPath(); c.arc(x0, y0, r, 0, 2 * Math.PI); c.fill(); return; }
   Object.assign(c, { strokeStyle: color, lineWidth: 2 * r, lineCap: "round", lineJoin: "round" });
   c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
 }
