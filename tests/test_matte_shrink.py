@@ -15,7 +15,7 @@ RATIOS = [6.3, 5.6, 5.6, 5.4, 5.0, 4.7, 3.65, 2.86, 2.31, 2.45]
 def scene(n=24, h=72, w=128, grown=(), wing=()):
     """A camera that pans 1 px per frame, an object that stands still in the scene, painted in a zone 6.3 times its
     size, and a tracker whose mask shrinks from the zone to the object over 10 frames; on the frames `grown`, after it
-    found the object, its mask is 2.4 times the object; on the frames `wing`, the shot shows a wing that opens out of
+    found the object, the object grows to 2.4 times its size in the shot, and the tracker's mask with it; on the frames `wing`, the shot shows a wing that opens out of
     the object's place, joined to it. Returns the wing's pixels too."""
     rng = np.random.default_rng(7)
     wide = (ndimage.gaussian_filter(rng.random((h, w + n, 3)), (0.7, 0.7, 0)) * 0.6 + 0.2).astype(np.float32)
@@ -31,6 +31,8 @@ def scene(n=24, h=72, w=128, grown=(), wing=()):
     for t in wing:
         wings[t, 31:37, 78 - t:86 - t] = ~obj[t, 31:37, 78 - t:86 - t]
     shot[wings] = (0.95, 0.9, 0.85)
+    for t in grown:
+        shot[t][ellipse(t, 2.4)] = (0.95, 0.9, 0.85)
     sam = np.stack([ellipse(t, RATIOS[t]) if t < len(RATIOS) else ellipse(t, 2.4) if t in grown else obj[t] for t in range(n)])
     return sam.astype(np.float32), obj, shot, base, wings
 

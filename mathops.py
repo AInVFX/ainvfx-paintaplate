@@ -759,6 +759,12 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       pixel, so a frame that comes out brighter, softer or shifted differs from the plate everywhere: that raises its
       own level and adds nothing (without it, three frames brighter by 0.14 give a matte of 5 times the object). A
       generated element stays in where the tracker dropped it, and the region moves with it;
+    - with `shot` and `base`, the matte keeps, of what was found, what the shot changed joined to the region within a
+      zone. A tracker can return a whole object for a paint on a small part of it (SAM 3.1 returns a whole horse for a
+      paint on its body), and the region, which follows what was found, then holds the whole object within a few frames;
+      a part of that object that the shot leaves as the plate goes back to the plate. The region, and where the object
+      stands and whether it moves, still follow what was found: a region cut to the changed areas finds a bird that
+      lands and stands, then holds it as standing still and loses it when it flies;
     - with `shot` and `base`, the plate also says when something it holds stands in front of the object (as with
       a cow painted behind a fence, a camera that pans, a horse that walks in front of the cow; SAM then returned
       nothing in one run and the horse in another, and LTX made the horse again where the cow went behind it). The
@@ -987,7 +993,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     shows = bulk(open0 & ~hide) & ~found
                     if shows.any():
                         found, placed = found | shows, placed + 1
-                gain = None  # the areas the shot changed next to the object, on this frame
+                gain = made = None  # the areas the shot changed next to the object, and of what was found what the shot changed, on this frame
                 if block is not None and (core.any() or line.any()):
                     d, anchor = block[t - start], core | line
                     within = grow(anchor, reach)
@@ -1022,6 +1028,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                         else:
                             alone += 1  # SAM returned nothing here: no ratio to SAM's mask
                     found = core | gain
+                    made = ndimage.binary_opening(d > threshold + level, structure=eight)  # what the shot changed on this frame
                 left = False  # whether all that was found has left the object's place
                 if hide is not None and not real and found.any():  # a painted object that stands still: a piece that has left its place, with what stands in front or alone, is not the object
                     whole = found
@@ -1040,7 +1047,11 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                 size[t], cores[t] = last, core
                 fronts += blocked or (hide is not None and 2 * hidden >= max(int(line.sum()), 1))
                 if found.any():
-                    f, region = ndimage.binary_fill_holes(found), (found if follows else core)
+                    keep = found  # a paint's matte keeps, of what was found, what the shot changed joined to the region
+                    joined = touching(made & found, grow(line, reach)) if made is not None and line.any() and (made & found).any() else None
+                    if joined is not None and joined.any():
+                        keep = grow(joined, thin) & found
+                    f, region = ndimage.binary_fill_holes(keep), (found if follows else core)
                     thick = bulk(region)  # the object without its thin lines: the region never creeps along them
                     kept = line & hide if hide is not None else None
                     line, lost = (ndimage.binary_fill_holes(thick) if thick.any() else ndimage.binary_fill_holes(region)), 0
@@ -1065,7 +1076,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                 shrinking = shrinking and int(s.sum()) >= 2 * first_size  # the first mask within twice the object ends the shrink
                 out[t], prev = f, f
                 if plates is not None and t == 0:
-                    home = f
+                    home = ndimage.binary_fill_holes(found) if found.any() else f  # where the object was found: it stands still or moves from there
                 elif plates is not None and still is None:
                     body = bulk(found)  # without thin lines: a changed area that a thin line joins to the object is not the object moving
                     if body.any() and bulk(touching(body, grow(home, thin)) & ~grow(home, reach / 2) & inside).any():
