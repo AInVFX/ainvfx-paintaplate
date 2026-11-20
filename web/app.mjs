@@ -2059,6 +2059,7 @@ async function openBlank() { // a black canvas LTX and ainvfx-fluid take, then a
 
 function fluidUI() { // the panel, the tools and the help of a fluid shot; none of it outside one
   const f = S.fluid, on = keying();
+  promptHint(); // a plate that opens, or keyframes that open or close
   $("#fluid").hidden = !on;
   if (S.plate) $("#render").hidden = on;
   $("#history-empty").textContent = on ? FLUID_HELP : HISTORY_HELP;
@@ -3531,10 +3532,12 @@ function setTool(t) {
   S.rub = false;
   $("#rub-btn").setAttribute("aria-pressed", "false");
   $$(".tools [data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === t));
-  $("#prompt").placeholder = keying() ? FLUID_HINT : HINT[t];
+  promptHint();
   colorUI();
   render();
 }
+
+function promptHint() { $("#prompt").placeholder = keying() ? FLUID_HINT : HINT[S.tool]; } // the fluid's while its keyframes are open, else the tool's
 
 function setSize(v) {
   S.size = Math.max(4, Math.min(320, Math.round(v)));
