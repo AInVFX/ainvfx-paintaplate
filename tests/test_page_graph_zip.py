@@ -1,5 +1,6 @@
 """Export's ComfyUI graph in its zip: POST /paintaplate/graph writes the page's graph into the run's folder as
-scene.comfyui.json, refuses a body that is not JSON and a folder outside output/paintaplate, and the zip takes the file."""
+scene.comfyui.json, and the zip takes the file. It refuses a folder outside output/paintaplate and a body that is not
+JSON, is not a ComfyUI workflow or is larger than 16 MB, and it never writes through a symbolic link."""
 import asyncio
 import json
 import os
@@ -29,8 +30,8 @@ class Request:  # what graph_post reads of a request: its query and its body
     def __init__(self, query, body):
         self.query, self.body = query, body
 
-    async def text(self):
-        return self.body
+    async def read(self):
+        return self.body if isinstance(self.body, bytes) else self.body.encode()
 
 
 class GraphInZip(unittest.TestCase):
@@ -60,6 +61,31 @@ class GraphInZip(unittest.TestCase):
         with self.assertRaises(web.HTTPNotFound):
             asyncio.run(routes.graph_post(Request({"run": "../elsewhere"}, "{}")))
         self.assertFalse(os.path.exists(os.path.join(self.folder, "scene.comfyui.json")))
+
+    def test_a_body_that_is_no_workflow_or_is_too_large_is_refused(self):
+        for body in ("{}", "[]", '{"nodes": 3}', "7"):  # JSON, but not a workflow in the editor's format: no list of nodes
+            with self.assertRaises(web.HTTPBadRequest, msg=body):
+                asyncio.run(routes.graph_post(Request({"run": self.rel}, body)))
+        large = b'{"nodes": [], "pad": "' + b"x" * routes.GRAPH_MAX + b'"}'
+        with self.assertRaises(web.HTTPBadRequest) as refused:
+            asyncio.run(routes.graph_post(Request({"run": self.rel}, large)))
+        self.assertIn("larger than 16 MB", refused.exception.text)
+        self.assertEqual(os.listdir(self.folder), ["export"])  # nothing written, and no part file left
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "needs symbolic links")
+    def test_a_link_of_the_graphs_name_is_replaced_not_written_through(self):
+        outside = os.path.join(tempfile.mkdtemp(), "kept.txt")
+        self.addCleanup(shutil.rmtree, os.path.dirname(outside), True)
+        open(outside, "w").write("kept")
+        try:
+            os.symlink(outside, os.path.join(self.folder, "scene.comfyui.json"))
+        except OSError:
+            self.skipTest("this account cannot make symbolic links")
+        asyncio.run(routes.graph_post(Request({"run": self.rel}, '{"nodes": []}')))
+        self.assertEqual(open(outside).read(), "kept")  # the file behind the link is as it was
+        self.assertFalse(os.path.islink(os.path.join(self.folder, "scene.comfyui.json")))
+        with open(os.path.join(self.folder, "scene.comfyui.json")) as f:
+            self.assertEqual(json.load(f), {"nodes": []})
 
 
 if __name__ == "__main__":

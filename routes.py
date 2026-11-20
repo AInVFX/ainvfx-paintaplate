@@ -76,6 +76,7 @@ THUMBS_AT_ONCE = asyncio.Semaphore(4)  # a folder of thousands of outputs asks f
 # The page keeps each preview size's composite and passes in a folder named after the size (640x352/), the
 # full-size passes in full/, and the export's review movie at the top; the last patterns read older runs.
 GRAPH = "scene.comfyui.json"  # Export's ComfyUI graph, in its run's folder and in its zip
+GRAPH_MAX = 16 << 20  # bytes: a scene's graph is far smaller
 PARTS = {"export": (["export"], None), "layer": (["layer"], None), "matte": (["matte"], None),
          "review": (["review_*.mp4", "*/comp_*.mp4", "comp_*.mp4"], "review.mp4"),
          "shot": (["full/raw_*.mp4", "full/clean_*.mp4", "*/raw_*.mp4", "*/clean_*.mp4", "full_*.mp4", "raw_*.mp4"],
@@ -300,25 +301,39 @@ async def download(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(path, headers={"Content-Disposition": f'attachment; filename="{name}.zip"'})
 
 
+def save_graph(folder: str, body: bytes) -> None:
+    """Writes Export's ComfyUI graph into its run's folder. ValueError for a body larger than GRAPH_MAX, or that is not a
+    ComfyUI workflow in the editor's format. The new file takes the old one's place whole, so a symbolic link of that
+    name is replaced, never written through."""
+    if len(body) > GRAPH_MAX:
+        raise ValueError(f"ComfyUI graph not written: larger than {GRAPH_MAX >> 20} MB.")
+    try:
+        graph = json.loads(body)
+    except ValueError as exc:
+        raise ValueError(f"ComfyUI graph not written: not JSON ({exc}).") from exc
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+        raise ValueError("ComfyUI graph not written: not a ComfyUI workflow.")
+    path = os.path.join(folder, GRAPH)
+    part = f"{path}.{uuid.uuid4().hex}.part"
+    try:
+        with open(part, "wb") as fh:
+            fh.write(body)
+        os.replace(part, path)
+    finally:
+        if os.path.exists(part):
+            os.remove(part)
+
 
 async def graph_post(request: web.Request) -> web.Response:
     """Export's ComfyUI graph, written into its run's folder as scene.comfyui.json, so that its zip takes it (PARTS)."""
     try:
         folder = folders.run_folder(request.query.get("run", ""))
+        await asyncio.to_thread(save_graph, folder, await request.read())
     except FileNotFoundError as exc:
         raise web.HTTPNotFound(text=str(exc)) from exc
-    text = await request.text()
-    try:
-        json.loads(text)
     except ValueError as exc:
-        raise web.HTTPBadRequest(text=f"Not a ComfyUI graph: {exc}") from exc
-    await asyncio.to_thread(write_text, os.path.join(folder, GRAPH), text)
+        raise web.HTTPBadRequest(text=str(exc)) from exc
     return web.json_response({"file": GRAPH})
-
-
-def write_text(path: str, text: str) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
 
 
 # ---------- The plate browser ----------
