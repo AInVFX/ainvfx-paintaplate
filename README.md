@@ -15,8 +15,8 @@ Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com
 
 | | |
 | --- | --- |
-| **Clean** | Removes the object under your stroke, and the clean plate comes back behind it. With **Whole object**, SAM 3.1 finds all of it: name it ("red umbrella") |
-| **Paint** | Adds what you describe where you paint, in the style of the image. It follows your drawing's outline, pose and colours |
+| **Clean** | Removes the object under your stroke and regenerates the background behind it. With **Whole object**, SAM 3.1 finds all of it: name it ("red umbrella") |
+| **Paint** | Adds what the text prompt describes where you paint, in the style of the image. It follows the outline, pose and colours of your strokes |
 | **Light** | Relights the shot. Paint where the light comes from, in its colour. Paint in black to darken an area |
 | **A fluid shot** | Starts from a blank plate. Paint your fluid (smoke, fire, water and more) in flat colours on a few keyframes, and ainvfx-fluid generates the shot. The shot becomes the plate for every edit |
 | **Review** | The viewer follows OpenRV: colour through OpenColorIO, the same keys, a wipe against the plate, the Colour Inspector. |
@@ -109,13 +109,13 @@ The plates are synthetic shots from the dataset [AInVFX/ainvfx-paintaplate](http
 
 ## A first edit
 
-1. Press **Open plate**, then double-click a plate, for example `plates/horse.mp4`. When ComfyUI runs on your own machine, you can also type the full path of a movie, a frame of a sequence or a folder of frames.
-2. Type a text prompt at the top, for example "a campfire".
+1. Press **Open plate**, then double-click a plate, for example `plates/horse.mp4`. Sequence files and folders of frames are supported.
+2. Describe the edit in the text prompt, for example "a campfire".
 3. Pick **Paint**, **Clean** or **Light** (keys P, C and L), and paint on the first frame.
-4. Press **Generate** (or Enter). The edit appears on the first frame, then the shot renders by itself at full size, and each pass shows live in the player. **Render > Preview** can add a quicker first pass at half or a quarter of the size.
+4. Press **Generate** (or Enter): the edit on the first frame followed by the shot. The Render panel shows each step as it runs, and each pass displays live. **Render > Preview** can add a quick pass of the whole shot at half or a quarter of the size first.
 5. Press **Export** to write the result in the plate's own format.
 
-Each edit stays in History: click one to change it, and add as many as you need. **Save scene** keeps the plate and its edits on this ComfyUI.
+Each edit stays in History: click its pencil to change it, and add as many as you need. **Save scene** keeps the plate and its edits on this ComfyUI.
 
 Good to know:
 
@@ -134,16 +134,16 @@ Known limits:
 - A painted object that a foreground object hides can raise « object left its place » although the composite is right: check the picture.
 - A shadow painted with Light comes out soft: a text prompt can ask for a deeper one. A relight can leave a thin light or dark edge along bright outlines.
 - The check after Clean compares colours. An object of another colour that takes the removed object's place passes it, so look at the first frame.
-- On a paint's first frames, the matte can take in a change that the shot made to an object right beside the painted one. It was seen on a Half size preview, where the full-size result was right: check the first frames.
+- On a paint's first frames, the matte can take in a change that the shot made to an object right beside the painted one, most on a Half size preview: check the first frames.
 - Under 16 GB of VRAM, LTX works in 256 px tiles, and a soft band can show where two tiles overlap, most in SDR to HDR's frames. From 16 GB every frame is encoded and decoded in one piece.
 
-**Where the rest is.** Press `?` for the keys; the backquote key shows the plate alone, full screen, where S opens the colours and T the edit's text prompt. The right-click menu holds every action with its key, and the viewer's colour tools under **OCIO**. [`ARCHITECTURE.md`](ARCHITECTURE.md) explains how the pack works and how to change it. [`TESTING.md`](TESTING.md) describes every test.
+**Where the rest is.** Press `?` for the keys; the backquote key shows the viewer full screen, where S opens the colours and T the edit's text prompt. The right-click menu lists every action with its keyboard shortcut, and the viewer's colour tools under **OCIO**. [`ARCHITECTURE.md`](ARCHITECTURE.md) explains how the pack works and how to change it. [`TESTING.md`](TESTING.md) describes every test.
 
 ## When something goes wrong
 
 - **The log.** The **Log** button opens it. It records what happened, one line per fact, and the button is highlighted when an error arrives. The download icon beside it saves the log as a text file, with the versions and the machine as ComfyUI reports them: attach it when you ask for help. It holds no path of your machine: a file under ComfyUI's folder is named from that folder, as `output/paintaplate/…`.
 - **The memory profile.** Its line in the log says how the page uses your GPU. Small, under 24 GB of VRAM: models load one at a time; under 16 GB, LTX also works in 256 px tiles. Medium: the edit models load when the page opens. Large, from 60 GB: LTX 2.5 loads at start too.
-- **Stop.** Esc, or **Stop** beside Generate, stops what generates. What finished is kept, and Enter goes on from there.
+- **Stop.** Esc, or **Stop** beside Generate, stops what generates. Finished steps are kept, and Enter continues from there.
 - **ComfyUI's memory grows, or the page waits and nothing runs.** Start ComfyUI with `PAINTAPLATE_TRACE=1` in its environment. Every request then writes a line in ComfyUI's terminal when it starts and when it ends, with the memory the process holds. Add these lines to your report.
 - **A model or a node is missing.** The page names it at start. `python get_models.py --list` shows what is in place.
 - **Report a fault** in the [issues](https://github.com/AInVFX/ainvfx-paintaplate/issues), with the log's lines, your GPU and your ComfyUI version.
