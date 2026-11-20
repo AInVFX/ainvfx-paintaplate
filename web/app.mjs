@@ -2025,7 +2025,7 @@ function fluidRow() { // the first edit of a blank plate: its fluid shot, which 
   li.querySelector(".edit").onclick = () => editFluid();
   li.querySelector(".eye").onclick = () => toggleFluid().catch(quiet);
   li.querySelector(".again").onclick = () => { editFluid(); generateFluid(true).catch(quiet); };
-  li.querySelector(".again").disabled = !n || !!f.busy;
+  li.querySelector(".again").disabled = !n || !S.fluidReady; // as an edit's arrow, it also works while the shot is being made
   li.querySelector(".del").onclick = () => removeFluid().catch(quiet);
   li.onclick = (ev) => { if (!ev.target.closest("button")) editFluid(); };
   return li;
@@ -2069,7 +2069,6 @@ function fluidUI() { // the panel, the tools and the help of a fluid shot; none 
   $("#spec").textContent = `Fluid shot on a blank plate: ${S.plate.spec.width} x ${S.plate.spec.height}, ${S.plate.fps} fps, ${S.plate.frames} frames`;
   $("#fluid-state").textContent = busy ? `generating ${Math.round((busy.progress ?? 0) * 100)}%`
     : r ? (stale ? "keyframes changed" : `v${r.v} ready`) : `${n} keyframe${n === 1 ? "" : "s"}`;
-  $("#fluid-again").disabled = !n || !S.fluidReady;
   generateUI();
 }
 
@@ -4201,7 +4200,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
   ];
   const f = S.fluid;
   if (f && keying()) groups.splice(2, 0, ["Fluid", [["Generate", "Enter", () => generateFluid().catch(quiet), !f.keys.length],
-    ["Another seed", "Ctrl+Enter", () => generateFluid(true).catch(quiet), !f.keys.length], "-",
+    ["Try another seed", "Ctrl+Enter", () => generateFluid(true).catch(quiet), !f.keys.length], "-",
     ["Copy keyframe", "Ctrl+C", copyKey, !keyHere()], ["Paste keyframe", "Ctrl+V", pasteKey, !S.clip], ["Delete keyframe", "Delete", () => deleteKey(), !keyHere()], "-",
     ["Previous keyframe", "Alt+Left", () => jumpKey(-1)], ["Next keyframe", "Alt+Right", () => jumpKey(1)]]]);
   return groups;
@@ -4439,7 +4438,6 @@ $("#new-edit").onclick = () => nextEdit();
 
 for (const id of ["#b-width", "#b-height", "#b-fps", "#b-frames"]) $(id).oninput = blankNote;
 $("#generate").onclick = () => enter(false);
-$("#fluid-again").onclick = () => generateFluid(true).catch(quiet);
 $("#display-state").onclick = () => resetDisplay();
 $("#undo-btn").onclick = () => undo();
 $("#redo-btn").onclick = () => redo();

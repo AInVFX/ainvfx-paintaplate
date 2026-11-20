@@ -149,7 +149,6 @@ body.plate-alone .hud.corner { left: auto; top: auto; right: 14px; bottom: 10px;
 .tl-kf { position: absolute; top: 50%; width: 11px; height: 11px; margin: -6px 0 0 -6px; padding: 0; border: 1px solid #141414; border-radius: 1px; background: var(--gold); transform: rotate(45deg); cursor: grab; pointer-events: auto; }
 .tl-kf:hover:not(:disabled) { background: #ffd34d; border-color: #141414; }
 .tl-kf.on { box-shadow: 0 0 0 2px var(--text); }
-.fluid-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .blank-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .blank-row label { margin: 4px 0; }
 .tl-key { position: absolute; top: 50%; width: 9px; height: 9px; margin: -5px 0 0 -4px; background: var(--gold); transform: rotate(45deg); }
