@@ -17,7 +17,7 @@ import ui_live  # noqa: E402
 class Preview(unittest.TestCase):
     def test_each_choice_is_stored_as_the_page_keeps_it(self):
         self.assertEqual(ui_live.PREVIEW, {"off": "off", "latent": "latent", "half": "2", "quarter": "4"})
-        self.assertEqual(ui_live.preview_script("half"), "localStorage.setItem('paintaplate.preview-menu', '2');")
+        self.assertEqual(ui_live.preview_script("half"), "sessionStorage.setItem('paintaplate.preview-menu', '2');")
 
     def test_a_gpu_case_passes_the_choice_to_ui_live_and_none_when_not_asked(self):
         with open(os.path.join(ROOT, "tests", "gpu_matrix.json")) as f:

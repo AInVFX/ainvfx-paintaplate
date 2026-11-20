@@ -101,8 +101,7 @@ export function freeName(name, taken) {
   const m = /^(.*)_(\d+)$/.exec(name), stem = m ? m[1] : name;
   for (let n = m ? Number(m[2]) + 1 : 2; ; n++) if (!taken.has(`${stem}_${n}`)) return `${stem}_${n}`;
 }
-export function readPreview(v) { // a stored or saved choice: "off", "latent", 2 or 4; null for anything else, which keeps the choice in use
-  if (v === 0 || v === "0") return "latent"; // a scene saved 0 for no preview pass, which showed the live preview
+export function readPreview(v) { // a choice stored for the session, or the menu's value: "off", "latent", 2 or 4; null for anything else
   if (v === "off" || v === "latent") return v;
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return PREVIEW_PARTS.some(([d]) => d === n) ? n : null;

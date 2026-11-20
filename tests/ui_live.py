@@ -243,8 +243,8 @@ PREVIEW = {"off": "off", "latent": "latent", "half": "2", "quarter": "4"}  # the
 
 
 def preview_script(choice: str) -> str:
-    """The script that stores the Preview menu's choice before the page loads, where the page keeps it between sessions."""
-    return f"localStorage.setItem('paintaplate.preview-menu', '{PREVIEW[choice]}');"
+    """The script that stores the Preview menu's choice before the page loads, where the page keeps it for the session."""
+    return f"sessionStorage.setItem('paintaplate.preview-menu', '{PREVIEW[choice]}');"
 
 
 def address(url, memory="", seed=None, options=()):

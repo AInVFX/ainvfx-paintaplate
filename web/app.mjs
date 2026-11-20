@@ -49,8 +49,8 @@ const INDEX_ON = Q.get("index") !== "0"; // ?index=0, for the tests: no job is t
 // name kept under paintaplate.memory, asks for one
 const MEMORY_ASKED = Q.get("memory") || (() => { try { return localStorage.getItem("paintaplate.memory"); } catch { return null; } })();
 const PREVIEW_DIV = 2; // the shot preview's size when no preview pass runs, which no step uses: half the working size (logic.previewSizes)
-const PREVIEW_PREF = "paintaplate.preview-menu"; // the Preview menu's choice (logic.readPreview); the next session keeps it
-let previewMode = (() => { try { return readPreview(localStorage.getItem(PREVIEW_PREF)) ?? PREVIEW_DEFAULT; } catch { return PREVIEW_DEFAULT; } })();
+const PREVIEW_PREF = "paintaplate.preview-menu"; // the Preview menu's choice (logic.readPreview), kept for this session: a new one opens on Latent preview
+let previewMode = (() => { try { return readPreview(sessionStorage.getItem(PREVIEW_PREF)) ?? PREVIEW_DEFAULT; } catch { return PREVIEW_DEFAULT; } })();
 const PREFETCH_MS = 500; // quiet time after a keystroke before the prompt writer starts on the new words
 const UNDO_MAX = 60; // steps kept for undo
 const PAINT_GRID = 96; // cells across the frame for an erase's locked boxes and the check of its caption (logic.paintBoxes, erasesPaint)
@@ -2061,7 +2061,7 @@ function fluidUI() { // the panel, the tools and the help of a fluid shot; none 
   const f = S.fluid, on = keying();
   promptHint(); // a plate that opens, or keyframes that open or close
   $("#fluid").hidden = !on;
-  if (S.plate) $("#render").hidden = on;
+  if (S.plate) { previewUI(); stagesUI(); } // with the keyframes open: no half or quarter size, and the fluid shot's rows alone
   $("#history-empty").textContent = on ? FLUID_HELP : HISTORY_HELP;
   for (const t of ["erase", "light"]) $(`.tools [data-tool="${t}"]`).disabled = on && !f.result; // they work on the fluid shot
   if (!on) return generateUI();
@@ -3373,7 +3373,7 @@ function stagesUI() {
   const alone = plateAlone(S.heroKey); // the plate alone: its one step, SDR to HDR
   const edits = (active.length || alone) && !keying(); // with the keyframes open, only the fluid shot's rows
   $("#render-full").hidden = !r?.donor || !edits; // a set that took another render's frames can still be made with its own shot
-  $("#render").hidden = !p || (keying() && !fluid.length);
+  $("#render").hidden = !p; // its Preview menu shows from a blank plate on
   list.hidden = !edits && !fluid.length;
   const fluidRows = fluid.map((x) => {
     const li = document.createElement("li");
@@ -3458,7 +3458,7 @@ function timelineUI() {
 
 function setPreview(mode) { // the Preview menu (logic.readPreview): Off, Latent preview, or the preview pass at half or a quarter of the working size
   previewMode = mode;
-  try { localStorage.setItem(PREVIEW_PREF, String(mode)); } catch { /* this session only */ }
+  try { sessionStorage.setItem(PREVIEW_PREF, String(mode)); } catch { /* this page only */ }
   if (!S.plate) return;
   S.previewCap = previewCap(S.plate.work, previewDivOf(mode));
   S.plate.shot = previewSize([S.plate.spec.width, S.plate.spec.height], S.plate.work, S.previewCap || previewCap(S.plate.work, PREVIEW_DIV));
@@ -3472,9 +3472,11 @@ function setPreview(mode) { // the Preview menu (logic.readPreview): Off, Latent
 function previewUI() { // the Preview menu: Off, Latent preview, then half and a quarter of this plate's working size
   const sel = $("#preview-size"), p = S.plate;
   if (!p) return;
-  const sizes = previewSizes([p.spec.width, p.spec.height], p.work);
+  const fluid = keying() || (!!S.fluid && p.path !== S.fluid.result?.path); // a fluid shot's keyframes, or the blank plate: no preview pass
+  const sizes = fluid ? [] : previewSizes([p.spec.width, p.spec.height], p.work);
   sel.replaceChildren(new Option("Off", "off"), new Option("Latent preview", "latent"), ...sizes.map((o) => new Option(`${o.label} (${o.size[0]} x ${o.size[1]})`, String(o.div))));
-  sel.value = String(previewMode);
+  sel.value = String(fluid && typeof previewMode === "number" ? "latent" : previewMode); // a size chosen comes back with the fluid shot as the plate
+  $("#preview-parts").hidden = fluid;
 }
 
 function exportUI() {
@@ -3691,7 +3693,7 @@ async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it ag
   const blank = f?.blankPath;
   const scene = { ...SCENE, saved: new Date().toISOString(), build: S.build, folders: foldersIn([S.plate, S.renders.get(S.heroKey), S.edits.filter((e) => e.on)]), work, ocio: { config, display, view, look: lk },
     plate: { path: blank ?? S.plate.path, color_space: blank ? modelSpace() : S.plate.cs, name: S.plate.name },
-    preview: previewMode, deliver: { ...S.deliver }, in: S.inPt, out: S.outPt,
+    deliver: { ...S.deliver }, in: S.inPt, out: S.outPt,
     edits: S.edits.map((e) => ({ tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on,
       caption: e.caption?.text ?? "", strokes: packStrokes(e.strokes) })),
     ...(f ? { fluid: { prompt: keying() ? $("#prompt").value.trim() : f.prompt ?? "", seed: f.seed, depth: f.depth ?? 8, made: !!f.result, on: f.on !== false, keys: f.keys.map((k) => ({ frame: k.frame, strokes: packStrokes(k.strokes) })) } } : {}) };
@@ -3754,8 +3756,6 @@ async function openScene(text) { // the plate opens in its colour space, then ev
     S.ocio.look = info.looks.includes(o.look) ? o.look : "";
     look.setView(S.ocio); saveOcio();
   }
-  const preview = readPreview(scene.preview); // the scene's Preview choice; a size in px, saved by older scenes, keeps the choice in use
-  if (preview !== null) setPreview(preview);
   const deliverHdr = scene.version >= 6 ? !!scene.deliver?.hdr : scene.version === 5 && scene.hdr === true; // 5: the old switch, on
   const from = scene.version >= 2 && Array.isArray(scene.work) ? scene.work : null; // strokes in pixels of this working size
   await openPlate([], scene.plate.path, { chosen: scene.fluid ? false : undefined, cs: scene.fluid ? modelSpace() // a blank plate, as openBlank opens it, whatever space an older scene holds for it

@@ -51,7 +51,7 @@ class HalfSize:
     def new_page(self, default_preview=False, **context):
         page = self.browser.new_page(**context)
         if not default_preview:
-            page.add_init_script("if (localStorage.getItem('paintaplate.preview-menu') === null) localStorage.setItem('paintaplate.preview-menu', '2');")
+            page.add_init_script("if (sessionStorage.getItem('paintaplate.preview-menu') === null) sessionStorage.setItem('paintaplate.preview-menu', '2');")
         return page
 
     def __getattr__(self, name):
