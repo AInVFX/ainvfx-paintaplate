@@ -45,7 +45,7 @@ const BLANK_AT_START = Q.get("blank") !== "0"; // with no plate open, a blank pl
 const SEED_ASKED = askedSeed(Q.get("seed")); // ?seed=<whole number>, for the tests: the first new edit and every new fluid shot start from it, each next edit from the next number (logic.editSeed), so a run makes the same pictures again. Without it the page draws each seed
 let editsSeeded = 0; // the new edits that took a seed from ?seed= so far
 const INDEX_ON = Q.get("index") !== "0"; // ?index=0, for the tests: no job is taken from the job index and none is written to it, so every job runs and is timed
-// The memory profile (logic.memoryProfile): the card decides, unless ?memory=small, medium or large in the address, or the
+// The memory profile (logic.memoryProfile): the GPU decides, unless ?memory=small, medium or large in the address, or the
 // name kept under paintaplate.memory, asks for one
 const MEMORY_ASKED = Q.get("memory") || (() => { try { return localStorage.getItem("paintaplate.memory"); } catch { return null; } })();
 const PREVIEW_DIV = 2; // the shot preview's size when no preview pass runs, which no step uses: half the working size (logic.previewSizes)
@@ -429,7 +429,7 @@ async function warmAll() { // every model loads while the person looks at the pa
   const stats = await (await fetch("/system_stats")).json();
   S.vram = stats.devices?.[0]?.vram_total ?? 0;
   S.memoryProfile = memoryProfile({ vram: S.vram, ram: stats.system?.ram_total ?? 0, force: MEMORY_ASKED });
-  log(`Memory profile: ${S.memoryProfile.name} (${S.memoryProfile.why}).\n  ${S.memoryProfile.does}.`); // the profile and the card, then what the page does on it
+  log(`Memory profile: ${S.memoryProfile.name} (${S.memoryProfile.why}).\n  ${S.memoryProfile.does}.`); // the profile and the GPU, then what the page does on it
   if (!S.memoryProfile.warm.length) return; // a small GPU: no model loads before an action needs it
   // ComfyUI keeps its history in memory until it restarts: a model that a prompt in it used is still loaded
   const history = Object.values(await (await fetch("/history?max_items=200")).json());
@@ -511,7 +511,7 @@ function planCaches() { // each cache's share and frame size, when the budget, t
   Object.assign(planned, { key, rest, budget, shares, fit: keep ? planned.fit : fit });
   for (const s of sources) if (!s.show) s.cache.stopReader(); // the sources on show read first
   for (const s of sources.sort((a, b) => Number(!!b.show) - Number(!!a.show))) s.cache.plan(shares[s.id].budget, s.bytes ? null : [shares[s.id].width, shares[s.id].height]);
-  const why = CACHE_MB ? "set in the address" : S.cache ? "set in View > Cache memory" : "Auto"; // the memory profile's line names the card
+  const why = CACHE_MB ? "set in the address" : S.cache ? "set in View > Cache memory" : "Auto"; // the memory profile's line names the GPU
   const said = cacheLine(memoryText(budget), why, sources.map((s) => ({ name: s.name, frames, ...shares[s.id] })));
   if (fresh && said !== planned.said) log((planned.said = said));
   cacheUI();
