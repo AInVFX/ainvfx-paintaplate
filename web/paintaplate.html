@@ -186,58 +186,57 @@
     </div>
     <section class="help-tab" data-help="start" role="tabpanel">
       <ol class="help-steps">
-        <li>Open a plate: Open, then ComfyUI files, Upload, Scenes or Blank plate. When ComfyUI runs on this machine, ComfyUI files also takes the full path of a movie, a frame of a sequence or a folder of frames. A blank plate starts a fluid shot.</li>
-        <li>Pick a tool, Paint, Clean or Light, describe the change at the top, then paint it on the first frame.</li>
-        <li>Generate: the edit on the first frame, then its shot through the whole plate. The Render panel shows each step as it runs.</li>
+        <li>Open a plate: Open, then ComfyUI files, Upload, Scenes or Blank plate. Sequence files and folders of frames are supported. A blank plate starts a fluid shot.</li>
+        <li>Pick a tool (Paint, Clean or Light), describe the change in the text prompt, then paint it on the first frame.</li>
+        <li>Generate: the edit on the first frame followed by the shot. The Render panel shows each step as it runs.</li>
         <li>Play the shot, compare it with the plate in the wipe, then Export.</li>
       </ol>
-      <p class="hint">Every action is in the right-click menu, with its key. The Keys tab lists them all.</p>
+      <p class="hint">Every action is in the right-click menu, with its keyboard shortcut. The Keys tab lists them all.</p>
     </section>
     <section class="help-tab" data-help="tools" role="tabpanel" hidden>
       <dl>
-        <dt>Paint</dt><dd>Something new where you paint, as your text prompt describes it, following the drawing's outline, pose and size.</dd>
-        <dt>Clean</dt><dd>Removes an object, and the clean plate comes back behind it. Whole object hands the stroke to SAM 3.1, which finds the whole object under it.</dd>
-        <dt>Light</dt><dd>Light in the colour you pick, laid where it comes from; a dark colour lays shade. The eraser takes light away as softly as the brush lays it, so new light fills an erased place with no edge.</dd>
-        <dt>Eraser</dt><dd>Rubs out strokes of the edit in progress, or of the edit selected in History. A pen's eraser end rubs out too.</dd>
-        <dt>Pipette</dt><dd>On the first frame, the brush takes the frame's own colour where you click, so a stroke of it shows as the picture does.</dd>
-        <dt>History</dt><dd>One row per edit. Click a row to change its edit: its text prompt comes back; retype it, paint more or rub strokes out, then Generate. While it changes, the first frame shows the edits under it. Another tool starts a new edit.</dd>
+        <dt>Paint</dt><dd>Adds what the text prompt describes, with the outline, pose and size of your strokes.</dd>
+        <dt>Clean</dt><dd>Removes what you paint over and regenerates the background. With Whole object, SAM 3.1 finds the whole object under the stroke.</dd>
+        <dt>Light</dt><dd>Paint where the light comes from, in its colour. A dark colour paints shade.</dd>
+        <dt>Eraser</dt><dd>Erases strokes of the edit in progress, or of the selected edit.</dd>
+        <dt>Pipette</dt><dd>Click the frame to take its colour, then paint with it.</dd>
+        <dt>History</dt><dd>One row per edit. Click a row to see its strokes, or its pencil to change the edit. Another tool starts a new edit.</dd>
         <dt>Undo</dt><dd>One step per stroke, per removal, per change of text prompt or seed.</dd>
-        <dt>Fluid shot</dt><dd>On a blank plate: flat colour blobs on keyframes, such as light grey smoke, white steam, orange and yellow fire, and the shot described at the top. Keyframes snap to the first frame, the last frame and the 8-frame grid; drag a diamond on the timeline to move one.</dd>
-        <dt>Close the plate</dt><dd>× after the plate's name, or right-click > File > Close plate: every render stops, and its frames leave the browser's memory.</dd>
-        <dt>Touch screen</dt><dd>Two fingers pan and zoom the frame. ☰ at the top holds every action.</dd>
+        <dt>Fluid shot</dt><dd>On a blank plate: paint your fluid (smoke, fire, water and more) on keyframes in flat colours, and describe it in the text prompt. Drag a keyframe's diamond on the timeline to move it.</dd>
+        <dt>Close the plate</dt><dd>× after the plate's name, or right-click > File > Close plate. It stops every render and frees the browser's memory.</dd>
+        <dt>Touch screen</dt><dd>Two fingers pan and zoom the frame. ☰ at the top lists every action.</dd>
       </dl>
     </section>
     <section class="help-tab" data-help="viewer" role="tabpanel" hidden>
       <dl>
-        <dt>On show</dt><dd>Once the shot of the edits exists, it shows on every frame; the plate shows in the wipe and while O is held. A finished Render step, clicked, shows its pass alone; a second click, or Esc, brings back the latest.</dd>
-        <dt>Wipe</dt><dd>The plate on the left and the pass on show on the right, both named. A click on a Render step or a History row changes the right side. Ctrl+click on another step puts it on the left; Ctrl+click on the pass on show brings the plate back.</dd>
-        <dt>X-ray</dt><dd>Tints where the edits on show change the plate: the matte the composite of the size on show uses, or the export's once made. Before the composite, the tracking mattes. A Light edit tints the whole frame.</dd>
-        <dt>Full screen</dt><dd>The plate alone fills the screen, with no panel. The frame number shows in the bottom-right corner while the frame changes.</dd>
-        <dt>Zoom</dt><dd>As in RV, in plate pixels to screen pixels. Chrome keeps RV's Ctrl+2 to Ctrl+8 for its tabs, so Shift+2 to Shift+8 give 1:2 to 1:8.</dd>
-        <dt>Cache memory</dt><dd>View > Cache memory: the memory that keeps decoded frames, so the plate and the shot play smoothly. Auto sets it from this machine's memory; Custom… takes a size from 128 MB to 32 GB. A resize of the window keeps the frames.</dd>
-        <dt>Playback statistics</dt><dd>View > Playback statistics: play, then pause, and the log keeps a line on the playback.</dd>
+        <dt>What the viewer displays</dt><dd>The latest result of the edits turned on. Hold O to see the plate. Click a finished Render step to display it alone.</dd>
+        <dt>Wipe</dt><dd>The plate on the left, the displayed result on the right. Click a Render step or a History row to change the right side; Ctrl+click a step to put it on the left.</dd>
+        <dt>X-ray</dt><dd>Tints where the edits turned on change the plate. A Light edit tints the whole frame.</dd>
+        <dt>Full screen</dt><dd>The viewer fills the screen. The frame number shows in a corner while the frame changes.</dd>
+        <dt>Cache memory</dt><dd>View > Cache memory: memory for decoded frames, for smooth playback. Auto sets it from this machine's RAM.</dd>
+        <dt>Playback statistics</dt><dd>View > Playback statistics: play, then pause, for one line of figures in the log.</dd>
       </dl>
     </section>
     <section class="help-tab" data-help="colour" role="tabpanel" hidden>
-      <h3>Colour (as in RV): display only</h3>
-      <p>Exposure, contrast, gamma, saturation, hue, the channels and invert change what the viewer shows, never the export. The values are RV's: contrast is 0 at rest and turns about 0.5, gamma acts before the other tools, invert before exposure. RV uses E, C, R, G, B and L without Shift; here P, C and L pick the tools, so the colour keys take Shift.</p>
-      <p>The Colour Inspector reads the plate's own pixels and values, and the values on screen, on every frame. The brush still paints with a plain click. The page takes F5, so it does not reload.</p>
-      <h3>OCIO (as in RV): right-click > OCIO</h3>
+      <h3>Colour: display only</h3>
+      <p>Exposure, contrast, gamma, saturation, hue, the channels and invert change the display only. The export keeps the plate's colours.</p>
+      <p>Use the Colour Inspector (F5) to read the plate's pixel values.</p>
+      <h3>OCIO (OpenColorIO): right-click > OCIO</h3>
     <dl>
-      <dt>Plate (affects generation)</dt><dd>Colour space: the plate colour space, what the file's numbers mean, by family (RV calls it File Color Space). The plate's colour space comes from its file: change it only for a camera's log footage. The line ends with "from file" when the value is the file's own, and "override" once you choose another. The models and the export use it, so a change regenerates the first frame and the edits. When an edit has a result, the page asks first. Display-referred: the family of the spaces encoded for a display, which RV and Nuke show as Display. The family ITU (International Telecommunication Union) is the one that RV and Nuke show as ITU.</dd>
-      <dt>View (display only)</dt><dd>View: the views of the display in use. Display: the other displays. Look: only when the config has looks. The viewer only, also while the shot plays.</dd>
-      <dt>Config</dt><dd>The config named by $OCIO when it is set, as in RV, else OCIO's built-in configs. It holds the plate colour space and the view, so a change regenerates the first frame and the edits. When an edit has a result, the page asks first.</dd>
+      <dt>Plate (affects generation)</dt><dd>The plate's colour space, read from its file. Change it only for a camera's log footage. A change regenerates the first frame and the edits; when an edit has a result, the page asks first.</dd>
+      <dt>View (display only)</dt><dd>The view, the display and the look (when the config has looks).</dd>
+      <dt>Config</dt><dd>The config that $OCIO names, or else OCIO's built-in configs. A change regenerates the first frame and the edits, as Plate does.</dd>
     </dl>
     </section>
     <section class="help-tab" data-help="render" role="tabpanel" hidden>
       <dl>
-        <dt>Steps</dt><dd>Generate makes the edit on the first frame, then its shot through the plate. The Render panel shows each step with its time; a finished step, clicked, shows its pass alone.</dd>
-        <dt>Preview</dt><dd>Off: the full size only, with no live preview. Latent preview, the default: each pass shows live in the player. Half or quarter size: a first pass of the whole shot at that size, then the full size. The export stays at full size.</dd>
-        <dt>Stop</dt><dd>Esc, or Stop beside Generate: what finished is kept, and Enter goes on from there.</dd>
-        <dt>Status line</dt><dd>The latest event. An error shows in red and a warning in amber, until the next event that succeeds. The log keeps the details.</dd>
-        <dt>Finish</dt><dd>SDR to HDR regenerates the result in scene-linear values, fitted to the plate. It writes half-float EXR frames in ACES2065-1, with AP0 chromaticities in each frame's header, in the viewer and in Export. Upscale makes Export also write the result at the size chosen, up to 3840 x 2160, restored by SeedVR2 7B.</dd>
-        <dt>Export</dt><dd>Writes the result in the plate's own format, with its matte, in ComfyUI's output folder, then downloads one zip, with the list of the models behind the result. With SDR to HDR on a plate whose format holds nothing above 1.0, the result is half-float EXR frames in ACES2065-1.</dd>
-        <dt>Save scene</dt><dd>Keeps the plate and every edit, with its strokes, text prompt and seed, on this ComfyUI. The log, the status line and the HUD give the scene file's full path; Open > Scenes opens it again. It asks before it replaces a scene of the same name.</dd>
+        <dt>Steps</dt><dd>The Render panel lists each step of Generate with its time.</dd>
+        <dt>Preview</dt><dd>Latent preview, the default: each pass displays live. Half or Quarter size: a quick pass of the whole shot first, then the full size. Off: the full size only. Export is always full size.</dd>
+        <dt>Stop</dt><dd>Esc, or Stop beside Generate. Finished steps are kept; Enter continues from there.</dd>
+        <dt>Status line</dt><dd>The latest event: an error in red, a warning in amber. The log has the details.</dd>
+        <dt>Finish</dt><dd>SDR to HDR (standard to high dynamic range) regenerates the result as scene-linear, half-float EXR frames in ACES2065-1. Upscale makes Export also write a larger result, up to 3840 x 2160, with SeedVR2 7B.</dd>
+        <dt>Export</dt><dd>Writes the files you tick to ComfyUI's output folder, then downloads one zip. The result keeps the plate's format; with SDR to HDR, a movie or another SDR format gives half-float EXR frames.</dd>
+        <dt>Save scene</dt><dd>Saves the plate and every edit on this ComfyUI. Open > Scenes opens it again.</dd>
       </dl>
     </section>
     <section class="help-tab help-keys" data-help="keys" role="tabpanel" hidden>
@@ -247,11 +246,11 @@
           <dt>P, C, L</dt><dd>Paint, Clean, Light.</dd>
           <dt>N</dt><dd>New edit: the next strokes start a separate edit.</dd>
           <dt>- and =</dt><dd>Brush size.</dd>
-          <dt>E</dt><dd>Eraser: hold it while you drag, or tap it to switch the eraser on or off.</dd>
+          <dt>E</dt><dd>Eraser: hold E while you drag, or tap E to turn it on or off.</dd>
           <dt>I</dt><dd>Pick a colour from the frame.</dd>
           <dt>S, T</dt><dd>Colours, text prompt: in a dialog over the frame.</dd>
           <dt>Enter</dt><dd>Generate.</dd>
-          <dt>Ctrl+Enter</dt><dd>Another seed for the selected edit, else the last one.</dd>
+          <dt>Ctrl+Enter</dt><dd>Another seed for the selected edit, or for the last edit.</dd>
           <dt>Esc</dt><dd>Cancel, deselect, end a comparison, then stop generating.</dd>
           <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo. Ctrl+Y redoes too.</dd>
           <dt>Hold O</dt><dd>See the plate.</dd>
@@ -266,7 +265,7 @@
         </dl>
       </div>
       <div>
-        <h3>Playback (as in RV)</h3>
+        <h3>Playback</h3>
       <dl>
           <dt>Space, Down</dt><dd>Play or pause.</dd>
           <dt>Left, Right</dt><dd>Step one frame.</dd>
@@ -274,27 +273,27 @@
           <dt>[ and ]</dt><dd>Set the in point, the out point.</dd>
           <dt>\</dt><dd>Clear the in and out points.</dd>
           <dt>Wheel</dt><dd>Step through frames.</dd>
-          <dt>F6</dt><dd>Wipe between the plate and the pass on show.</dd>
-          <dt>Ctrl+click a Render step</dt><dd>Compare two passes in the wipe (Cmd+click on a Mac).</dd>
-          <dt>, and .</dt><dd>With the wipe on: the next pass on the left, on the right.</dd>
+          <dt>F6</dt><dd>Wipe: the plate against the displayed result.</dd>
+          <dt>Ctrl+click a Render step</dt><dd>Compare two steps in the wipe (Cmd+click on a Mac).</dd>
+          <dt>, and .</dt><dd>With the wipe on: the next step on the left, on the right.</dd>
           <dt>X</dt><dd>X-ray.</dd>
           <dt>`</dt><dd>Full screen.</dd>
         </dl>
       </div>
       <div>
-        <h3>Zoom and pan (as in RV)</h3>
+        <h3>Zoom and pan</h3>
       <dl>
           <dt>Alt + drag, middle drag</dt><dd>Pan. Shift keeps to one axis.</dd>
-          <dt>Ctrl + drag</dt><dd>Zoom about the point pressed: right to zoom in, left to zoom out.</dd>
+          <dt>Ctrl + drag</dt><dd>Zoom around the point you press: drag right to zoom in, left to zoom out.</dd>
           <dt>f, Ctrl+F</dt><dd>Fit the frame, fit its width.</dd>
           <dt>1 to 8, Shift+2 to Shift+8</dt><dd>1:1 to 8:1, then 1:2 to 1:8, plate pixels to screen pixels.</dd>
         </dl>
       </div>
       <div>
-        <h3>Colour (as in RV)</h3>
+        <h3>Colour</h3>
       <dl>
           <dt>Shift+E, K, Y</dt><dd>Exposure, contrast, gamma: then drag on the frame, or use the wheel, - and =.</dd>
-          <dt>Shift+S, H</dt><dd>Saturation, hue, the same way. Backspace resets the one you edit; Esc leaves.</dd>
+          <dt>Shift+S, H</dt><dd>Saturation, hue, the same way. Backspace resets the value; Esc closes it.</dd>
           <dt>Shift+C, R, G, B, L</dt><dd>All channels, red, green, blue, luminance.</dd>
           <dt>Shift+I</dt><dd>Invert.</dd>
           <dt>Shift+Home</dt><dd>Reset all colour.</dd>
@@ -305,7 +304,7 @@
         <h3>Everywhere</h3>
       <dl>
           <dt>Ctrl+O, Ctrl+S</dt><dd>Open a plate, save the scene.</dd>
-          <dt>Right-click</dt><dd>Every action, by menu, with its key.</dd>
+          <dt>Right-click</dt><dd>Every action, with its keyboard shortcut.</dd>
           <dt>?</dt><dd>Show or hide the keys.</dd>
         </dl>
       </div>
