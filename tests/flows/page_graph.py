@@ -3,6 +3,7 @@ list only the files at the top of the input folder, and its editor marks any oth
 of the saved graph reads a file at the top of input, the file is there, the README note names it, and the API graph in
 the same file reads the same files."""
 import json
+import zipfile
 import urllib.parse
 import urllib.request
 
@@ -18,10 +19,9 @@ def run(browser, port, U):
     page.evaluate("document.activeElement.blur()")
     page.keyboard.press("Enter")
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
-    with page.expect_download(timeout=60000) as dl:
-        page.click("#export-btn"); page.click("#x-graph")
-    with open(dl.value.path()) as f:
-        graph = json.load(f)
+    with page.expect_download(timeout=180000) as dl:  # the graph comes in Export's zip
+        page.click("#export-btn"); page.check("#x-graph"); page.click("#x-go")
+    graph = json.loads(zipfile.ZipFile(dl.value.path()).read("scene.comfyui.json"))
     loaders = {n["title"]: n["widgets_values"][0] for n in graph["nodes"] if n["type"] in ("LoadImage", "LoadImageMask")}
     readme = next(n for n in graph["nodes"] if n["type"] == "MarkdownNote")["widgets_values"][0]
 

@@ -51,7 +51,7 @@ class HalfSize:
     def new_page(self, default_preview=False, **context):
         page = self.browser.new_page(**context)
         if not default_preview:
-            page.add_init_script("if (localStorage.getItem('paintaplate.preview-menu') === null) localStorage.setItem('paintaplate.preview-menu', '2');")
+            page.add_init_script("if (sessionStorage.getItem('paintaplate.preview-menu') === null) sessionStorage.setItem('paintaplate.preview-menu', '2');")
         return page
 
     def __getattr__(self, name):
@@ -214,6 +214,9 @@ def save_scene(page):
     before = page.evaluate(saved)
     page.click("#save-btn")
     page.wait_for_function(f"{saved} > {before} || document.querySelector('#ask').open", timeout=20000)
+    if page.evaluate("document.querySelector('#ask').open") and page.text_content("#ask-text") == "Name this scene.":  # a blank plate's scene: its first save names it
+        page.click("#ask-yes")
+        page.wait_for_function(f"{saved} > {before} || document.querySelector('#ask').open", timeout=20000)
     if page.evaluate("document.querySelector('#ask').open"):  # a scene of this name is saved already: replace it
         page.click("#ask-no")
     page.wait_for_function(f"{saved} > {before}", timeout=20000)  # the log keeps the fact: a later sentence can replace it in the status line
@@ -416,9 +419,9 @@ def generate_flow(browser, port):
     check(any(n.startswith("export/") for n in zipped) and any(n.startswith("matte/") for n in zipped) and any(line.startswith("Export: done") for line in lines),
           f"Export writes the result and its matte when pressed, then the zip downloads: {sorted({n.split('/')[0] for n in zipped})}")
     # The ComfyUI graph: the scene in the editor's own format, one group per section in the order they run, each opening with its note
-    with page.expect_download(timeout=60000) as dl:
-        page.click("#export-btn"); page.click("#x-graph")
-    graph = json.load(open(dl.value.path()))
+    with page.expect_download(timeout=60000) as dl:  # the graph comes in Export's zip
+        page.click("#export-btn"); page.check("#x-graph"); page.click("#x-go")
+    graph = json.loads(zipfile.ZipFile(dl.value.path()).read("scene.comfyui.json"))
     groups, notes = [g["title"] for g in graph["groups"]], [n for n in graph["nodes"] if n["type"] == "MarkdownNote"]
     overview = notes[0]["widgets_values"][0]
     rects = [(n["pos"][0], n["pos"][1] - 30, n["pos"][0] + n["size"][0], n["pos"][1] + n["size"][1]) for n in graph["nodes"]]  # each with its title bar

@@ -10,7 +10,7 @@ def run(browser, port, U):
     page.evaluate(U.WATCH)  # the log's new lines, for the composite's wait
     page.click("#finish-btn")
     page.click("#finish-hdr"); page.click("#finish-hdr-yes")
-    page.click("#finish-upscale"); page.click("#finish-upscale-yes")
+    page.click("#finish-upscale")
     page.keyboard.press("Escape")
     page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(U.REVIEWED), 240000, "the full-size composite of the paint, SDR to HDR among its steps")

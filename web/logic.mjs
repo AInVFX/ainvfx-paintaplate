@@ -101,8 +101,7 @@ export function freeName(name, taken) {
   const m = /^(.*)_(\d+)$/.exec(name), stem = m ? m[1] : name;
   for (let n = m ? Number(m[2]) + 1 : 2; ; n++) if (!taken.has(`${stem}_${n}`)) return `${stem}_${n}`;
 }
-export function readPreview(v) { // a stored or saved choice: "off", "latent", 2 or 4; null for anything else, which keeps the choice in use
-  if (v === 0 || v === "0") return "latent"; // a scene saved 0 for no preview pass, which showed the live preview
+export function readPreview(v) { // a choice stored for the session, or the menu's value: "off", "latent", 2 or 4; null for anything else
   if (v === "off" || v === "latent") return v;
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return PREVIEW_PARTS.some(([d]) => d === n) ? n : null;
@@ -580,7 +579,7 @@ export function crumbs(path) { // the Open dialog's trail: Input or Output and t
   const full = FULL.exec(path);
   if (full) {
     const root = full[0], sep = root.length > 1 && root.endsWith("\\") ? "\\" : "/", parts = path.slice(root.length).split(/[\\/]/).filter(Boolean);
-    return [{ label: root.length > 1 ? root.slice(0, 2) : root, path: root }, ...parts.map((p, i) => ({ label: p, path: root + parts.slice(0, i + 1).join(sep) }))];
+    return [{ label: root.length > 1 ? root.slice(0, 2) : "This machine", path: root }, ...parts.map((p, i) => ({ label: p, path: root + parts.slice(0, i + 1).join(sep) }))];
   }
   const out = path.startsWith("output:"), base = out ? "output:" : "", parts = path.slice(base.length).split("/").filter(Boolean);
   return [{ label: out ? "Output" : "Input", path: base }, ...parts.map((p, i) => ({ label: p, path: base + parts.slice(0, i + 1).join("/") }))];
@@ -784,26 +783,39 @@ export function upscaleWhy(width, height, ask = UPSCALE_ASK) {
   const restore = `the result is brought down to ${part} that size, then SeedVR2 restores its detail. Every pixel is new.`;
   return tw === width && th === height ? `At the plate's own size, ${restore}` : `This size is smaller than the plate, so the frames come out smaller: ${restore}`;
 }
-// The question before the row turns on: what Export writes, and how long on this GPU. `hdr`: SDR to HDR is on, so Upscale
-// takes its result alone (upscaleComposes).
-export function upscaleAsk({ target, frames, alone, edit, hdr = false }) {
-  const min = (s) => `about ${Math.max(1, Math.round(s / 60))} min`;
-  const start = `Export then also writes an upscaled set at ${target[0]} x ${target[1]}. On this GPU, ${frames} ${frames === 1 ? "frame takes" : "frames take"} ${min(alone)}`;
-  return (hdr ? `${start}. SeedVR2 upscales the HDR result.` : `${start}, or ${min(edit)} with Paint or Clean, where the plate and the layer are upscaled too.`)
-    + " Every pixel of an upscaled frame is new.";
-}
+// Finish > Upscale's note under its size list: about how long the upscaled set takes on this GPU, for the size chosen and
+// the edits on show (upscaleFigures).
+export const upscaleNote = (seconds) => `About ${Math.max(1, Math.round(seconds / 60))} min on this GPU.`;
 
 // The Finish menu: the passes on the whole plate after the full-size composite, in the order the render runs them. Each
 // option: its id (its switch is #finish-<id>), its name, the line that says what it does to the result, and the question
-// it asks before it turns on, when it changes what Export writes: its text, or a function of the plate's figures.
+// it asks before it turns on, when it changes what Export writes.
 export const FINISH = [
   { id: "hdr", name: "SDR to HDR",
     line: "The result is regenerated in scene-linear values, fitted to the plate. It becomes half-float EXR frames in ACES2065-1, in the viewer and in Export.",
     ask: "This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1." },
   { id: "upscale", name: "Upscale",
-    line: "Export also writes the result at the size chosen, up to 3840 x 2160, restored by SeedVR2 7B. With Paint or Clean, the plate, the layer and the matte come at that size too; with SDR to HDR, the result and its matte.",
-    ask: upscaleAsk },
+    line: "Export also writes an upscaled set at the size chosen, with SeedVR2 7B, including layers and mattes." },
 ];
+// The Render panel's rows in the order things happen: the steps done, in the order they finished (a step reused from an
+// earlier render is done at once, so it comes first), then the step running, then the steps to come in their planned
+// order. steps: ids in plan order; done(id): it finished; at(id): its place in the order steps finished, if known; now: the
+// id running, or null. A step done with no place known (made before this page) keeps its place among the done ones.
+export function stepOrder(steps, { done, at = () => undefined, now = null }) {
+  const rank = (id) => (done(id) ? [0, at(id) ?? 0] : id === now ? [1, 0] : [2, 0]);
+  return steps.map((id, i) => ({ id, i, k: rank(id) })).sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.i - b.i).map((x) => x.id);
+}
+
+// The Export dialog's words for every kind of result, from one source: the line above its parts, the result's format, and
+// the note under them. kind: "edits", "plate" (SDR to HDR on the plate, with no edit), "relit" (a Light edit in HDR) or
+// "fluid". ready: what Export takes its files from is made; left: the time until it is, such as "about 10 min", or "".
+export function exportWords({ kind, ready = true, left = "", exr = false, hdr = false, movie = "" }) {
+  const first = (step) => `${step} first${left ? `: ${left}` : ""}.`, inHdr = (what) => (ready ? `${what} in HDR, from SDR to HDR.` : `${what} in HDR. ${first("SDR to HDR runs")}`);
+  const note = kind === "fluid" ? (hdr ? "The fluid shot in HDR, with the SDR shot in ProRes 4444 and its preview movie." : "The fluid shot in ProRes 4444, with its preview movie.")
+    : kind === "plate" ? inHdr("The plate") : kind === "relit" ? inHdr("The relit result") : ready ? "" : first("The full-size composite renders");
+  return { hint: "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.",
+    format: (kind === "fluid" ? hdr : exr) ? "half-float EXR frames, ACES2065-1" : kind === "fluid" ? "ProRes 4444 movie" : movie, note };
+}
 export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on
 
 // What to do when a line names a missing file of models/vae_approx, which holds the live preview's decoder that

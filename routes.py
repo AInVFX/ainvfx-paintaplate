@@ -19,6 +19,7 @@ output:, or, on a ComfyUI that answers this machine alone, an absolute path.
     GET  /paintaplate/ocio?config=...                  the OCIO config: colour spaces by family, displays and views, looks
     GET  /paintaplate/ocio/shader?config=&space=&display=&view=&look=   the viewer's GLSL and lookup tables for a source
     GET  /paintaplate/download?run=paintaplate/<plate>/v3&name=shot010_paintaplate_v3&parts=export,matte
+    POST /paintaplate/graph?run=paintaplate/<plate>/v3     Export's ComfyUI graph, into the run's folder for its zip
 `parts` chooses what the zip holds (default: export,matte): export is the result in the plate's own format, layer the
 shot as the composite blends it (result = plate x (1 - matte) + layer x matte), matte where the plate changed, review the full-size review movie (else the preview composite), shot the whole frame as the model made
 it (the full-size pass first), upscaled the set that Upscale made (upscaled/export, upscaled/plate, upscaled/layer, upscaled/matte). Only render folders under output/paintaplate are zipped, and only plain files inside them.
@@ -74,6 +75,7 @@ THUMBS_AT_ONCE = asyncio.Semaphore(4)  # a folder of thousands of outputs asks f
 # part: (paths in the run folder, the first match wins for a file; its name in the zip, None for a folder).
 # The page keeps each preview size's composite and passes in a folder named after the size (640x352/), the
 # full-size passes in full/, and the export's review movie at the top; the last patterns read older runs.
+GRAPH = "scene.comfyui.json"  # Export's ComfyUI graph, in its run's folder and in its zip
 PARTS = {"export": (["export"], None), "layer": (["layer"], None), "matte": (["matte"], None),
          "review": (["review_*.mp4", "*/comp_*.mp4", "comp_*.mp4"], "review.mp4"),
          "shot": (["full/raw_*.mp4", "full/clean_*.mp4", "*/raw_*.mp4", "*/clean_*.mp4", "full_*.mp4", "raw_*.mp4"],
@@ -82,7 +84,9 @@ PARTS = {"export": (["export"], None), "layer": (["layer"], None), "matte": (["m
          "hdr": (["hdr"], None), "plate": (["plate"], None), "preview": (["preview_*.mp4"], "preview.mp4"),
          # Upscale: the result, the plate, the layer and the matte upscaled, each in its folder under upscaled/ (its windows
          # are saved elsewhere, so they stay out)
-         "upscaled": (["upscaled"], None)}
+         "upscaled": (["upscaled"], None),
+         # Export's ComfyUI graph: the scene as one workflow, which the page writes into the run's folder (graph_post)
+         "graph": ([GRAPH], GRAPH)}
 DEFAULT_PARTS = ["export", "matte"]
 
 
@@ -294,6 +298,27 @@ async def download(request: web.Request) -> web.StreamResponse:
     except FileNotFoundError as exc:
         raise web.HTTPNotFound(text=str(exc)) from exc
     return web.FileResponse(path, headers={"Content-Disposition": f'attachment; filename="{name}.zip"'})
+
+
+
+async def graph_post(request: web.Request) -> web.Response:
+    """Export's ComfyUI graph, written into its run's folder as scene.comfyui.json, so that its zip takes it (PARTS)."""
+    try:
+        folder = folders.run_folder(request.query.get("run", ""))
+    except FileNotFoundError as exc:
+        raise web.HTTPNotFound(text=str(exc)) from exc
+    text = await request.text()
+    try:
+        json.loads(text)
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=f"Not a ComfyUI graph: {exc}") from exc
+    await asyncio.to_thread(write_text, os.path.join(folder, GRAPH), text)
+    return web.json_response({"file": GRAPH})
+
+
+def write_text(path: str, text: str) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
 
 
 # ---------- The plate browser ----------
@@ -918,6 +943,7 @@ def setup(server) -> None:
         app.on_startup.append(_pulse)
         logging.info("[Paint a plate] Trace: on.\n  One line per request to ComfyUI, at its start and at its end.")
     server.routes.get("/paintaplate/download")(download)
+    server.routes.post("/paintaplate/graph")(graph_post)
     server.routes.get("/paintaplate/browse")(this_machine(browse_route))
     server.routes.get("/paintaplate/thumb")(this_machine(thumb))
     server.routes.post("/paintaplate/blank")(blank)

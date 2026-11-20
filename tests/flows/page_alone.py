@@ -54,7 +54,7 @@ def run(browser, port, U):
     page.click("#export-btn")
     hidden = page.evaluate("['matte', 'review', 'shot'].every((k) => document.querySelector(`#x-${k}`).closest('label').hidden)")
     fmt, note = page.text_content("#x-format") or "", page.text_content("#x-note") or ""
-    U.check(hidden and fmt == "half-float EXR frames, ACES2065-1" and note.startswith("The plate in HDR:"),
+    U.check(hidden and fmt == "half-float EXR frames, ACES2065-1" and note.startswith("The plate in HDR"),
             f"the Export dialog offers the plate in HDR alone: {fmt!r}, {note!r}")
     with page.expect_download(timeout=60000) as dl:
         page.click("#x-go")

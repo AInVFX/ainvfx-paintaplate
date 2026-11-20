@@ -243,8 +243,8 @@ PREVIEW = {"off": "off", "latent": "latent", "half": "2", "quarter": "4"}  # the
 
 
 def preview_script(choice: str) -> str:
-    """The script that stores the Preview menu's choice before the page loads, where the page keeps it between sessions."""
-    return f"localStorage.setItem('paintaplate.preview-menu', '{PREVIEW[choice]}');"
+    """The script that stores the Preview menu's choice before the page loads, where the page keeps it for the session."""
+    return f"sessionStorage.setItem('paintaplate.preview-menu', '{PREVIEW[choice]}');"
 
 
 def address(url, memory="", seed=None, options=()):
@@ -504,15 +504,15 @@ def remote(a):
                 if page.inner_text("#render-left") == "full size ready":  # Export writes the result, then the zip downloads
                     with page.expect_download(timeout=3 * 3600000 if a.upscale else 600000) as dl:  # the upscaled set: about 45 min on a 16 GB GPU
                         page.click("#export-btn")
+                        if a.graph:  # the scene as one ComfyUI workflow, in the same zip
+                            page.check("#x-graph")
                         page.click("#x-go")
                     dl.value.save_as(f"{shots}/export.zip")
                     mark(f"downloaded {len(zipfile.ZipFile(f'{shots}/export.zip').namelist())} files")
-                    if a.graph:  # the scene as one ComfyUI workflow, from the Export dialog. A case does not depend on it
+                    if a.graph:  # the scene as one ComfyUI workflow, from the export's zip. A case does not depend on it
                         try:
-                            page.click("#export-btn")
-                            with page.expect_download(timeout=120000) as dl:
-                                page.click("#x-graph")
-                            dl.value.save_as(f"{shots}/scene.comfyui.json")
+                            with open(f"{shots}/scene.comfyui.json", "wb") as f:
+                                f.write(zipfile.ZipFile(f"{shots}/export.zip").read("scene.comfyui.json"))
                             mark(f"ComfyUI graph saved: {len(json.load(open(f'{shots}/scene.comfyui.json'))['nodes'])} nodes and notes")
                         except Exception as exc:
                             mark(f"ComfyUI graph not saved: {type(exc).__name__}: {str(exc).splitlines()[0][:120]} | status: {status()}")

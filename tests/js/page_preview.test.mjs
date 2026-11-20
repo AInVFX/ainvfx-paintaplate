@@ -23,8 +23,7 @@ test("a stored or saved choice reads back; a scene's 0, no preview pass, opens a
   assert.equal(readPreview("latent"), "latent");
   assert.equal(readPreview("2"), 2);
   assert.equal(readPreview(4), 4);
-  assert.equal(readPreview(0), "latent");
-  assert.equal(readPreview("0"), "latent");
+  assert.equal(readPreview(0), null); // a scene keeps no Preview choice
 });
 
 test("anything else keeps the choice in use: an older scene's size in px, nothing stored", () => {

@@ -12,7 +12,7 @@ def run(browser, port, U):
     U.open_plate(page)
     page.click("#finish-btn")
     U.check(page.is_hidden("#finish-upscale-size"), "the size list waits for the row to turn on")
-    page.click("#finish-upscale"); page.click("#finish-upscale-yes")
+    page.click("#finish-upscale")
     options = page.eval_on_selector_all("#finish-upscale-size option", "os => os.map((o) => o.textContent)")
     U.check(options == ["1280 x 704 (the plate's size)", "2560 x 1408", "3840 x 2112", "Custom…"] and chosen(page) == "3840 x 2112",
             f"the row lists the plate's sizes, the largest chosen, Custom… last: {options}")
@@ -34,7 +34,5 @@ def run(browser, port, U):
     U.check(chosen(page) == "Custom: 3000 x 1650", f"Custom… takes the long side, the other side from the plate: {chosen(page)}")
     page.click("#finish-upscale")
     page.click("#finish-upscale")
-    U.check("an upscaled set at 3000 x 1650" in (page.text_content("#finish-upscale-ask p") or ""), "turned on again, the question gives the size asked for")
-    page.click("#finish-upscale-yes")
     U.check(chosen(page) == "Custom: 3000 x 1650", "and the row keeps it")
     page.close()
