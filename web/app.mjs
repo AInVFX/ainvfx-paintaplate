@@ -4082,11 +4082,18 @@ async function loadOcio(name) { // the config's colour spaces, displays, views a
   return info;
 }
 
-function setOcio(change) { // the display, the view or the look: the viewer only, at once, also while the shot plays
+function setOcio(change, said = "") { // the display, the view or the look: the viewer only, at once, also while the shot plays
   Object.assign(S.ocio, change);
   look.setView(S.ocio); saveOcio();
   const v = `${S.ocio.display}: ${S.ocio.view}${S.ocio.look ? `, look ${S.ocio.look}` : ""}`;
-  hud(v, 1800); log(`OCIO view: ${v}.`); render();
+  if (said) confirmed(said, 1800); else { hud(v, 1800); log(`OCIO view: ${v}.`); }
+  render();
+}
+
+function resetOcio() { // right-click > OCIO > Reset OCIO (Shift+End): the config's own display and view, and no look. The config and the
+  // plate's colour space stay: they change what the models get and what Export writes
+  const info = S.ocio.info;
+  if (info) setOcio({ display: info.display, view: info.view, look: "" }, `OCIO reset: display ${info.display}, view ${info.view}.`);
 }
 
 async function setPlateSpace(cs, asked = false) { // the plate's colour space (RV's File Color Space): the viewer at once, then the models and the export
@@ -4156,7 +4163,8 @@ function ocioItems() { // what affects generation (the plate's colour space), th
     [`View: ${o.view}`, "", shown.views.map((v) => [v, "", () => setOcio({ display: shown.name, view: v }), false, o.view === v])],
     [`Display: ${o.display}`, "", info.displays.map((d) => [d.name, "", () => setOcio({ display: d.name, view: d.views.includes(o.view) ? o.view : d.views[0] }), false, o.display === d.name])],
     ...(info.looks.length ? [[`Look: ${o.look || "None"}`, "", [["None", "", () => setOcio({ look: "" }), false, !o.look], ...info.looks.map((lk) => [lk, "", () => setOcio({ look: lk }), false, o.look === lk])]]] : []),
-    "-", [`Config: ${info.label}`, "", info.configs.map((c) => [c.label, "", () => setConfig(c.name).catch(quiet), false, c.name === info.config])]];
+    "-", [`Config: ${info.label}`, "", info.configs.map((c) => [c.label, "", () => setConfig(c.name).catch(quiet), false, c.name === info.config])],
+    ["Reset OCIO", "Shift+End", resetOcio, o.display === info.display && o.view === info.view && !o.look]];
 }
 
 // ---------- The right-click menu, as RV's: every action of the page, with its key ----------
@@ -4619,6 +4627,7 @@ addEventListener("keydown", (e) => {
   if (!S.plate && !["?", "F6"].includes(k)) return;
   if ($("#colours").open && !mod && !e.altKey && (k === "Escape" || combo === "s")) { $("#colours").close(); return e.preventDefault(); }
   if (k === "Home" && e.shiftKey && !mod) { resetDisplay(); hud("Colour reset."); return e.preventDefault(); } // RV's Reset All Color
+  if (k === "End" && e.shiftKey && !mod) { resetOcio(); return e.preventDefault(); } // the OCIO menu's Reset OCIO
   if (S.mode && modeKey(k, combo)) return e.preventDefault();
   if (S.picking && k === "Escape") { pickFrame(false); return e.preventDefault(); }
   if (!mod && !e.altKey && combo === "i") { if (!e.repeat) pickColor(); return e.preventDefault(); } // the colour picker, as in Photoshop

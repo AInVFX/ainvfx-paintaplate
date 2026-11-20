@@ -38,9 +38,9 @@ def run(browser, port, U):
 
     first = rows()
     U.check(first[:5] == ["# Plate (affects generation)", f"Colour space: {FILE}, from file", "# View (display only)", "View: Un-tone-mapped", "Display: sRGB - Display"]
-            and all(r.startswith("Look: ") for r in first[5:-2]) and first[-2] == "-" and first[-1].startswith("Config: "),
+            and all(r.startswith("Look: ") for r in first[5:-3]) and first[-3] == "-" and first[-2].startswith("Config: ") and first[-1] == "Reset OCIOShift+End",
             f"two headings say what affects generation and what is display only, and each line shows its value: {first}")
-    config = first[-1]
+    config = first[-2]
     page.click("#view", button="right")
     families = page.evaluate(FAMILIES, f"Colour space: {FILE}, from file")
     page.keyboard.press("Escape")
