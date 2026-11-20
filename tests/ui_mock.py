@@ -214,6 +214,9 @@ def save_scene(page):
     before = page.evaluate(saved)
     page.click("#save-btn")
     page.wait_for_function(f"{saved} > {before} || document.querySelector('#ask').open", timeout=20000)
+    if page.evaluate("document.querySelector('#ask').open") and page.text_content("#ask-text") == "Name this scene.":  # a blank plate's scene: its first save names it
+        page.click("#ask-yes")
+        page.wait_for_function(f"{saved} > {before} || document.querySelector('#ask').open", timeout=20000)
     if page.evaluate("document.querySelector('#ask').open"):  # a scene of this name is saved already: replace it
         page.click("#ask-no")
     page.wait_for_function(f"{saved} > {before}", timeout=20000)  # the log keeps the fact: a later sentence can replace it in the status line

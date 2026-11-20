@@ -3698,11 +3698,15 @@ async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it ag
     edits: S.edits.map((e) => ({ tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on,
       caption: e.caption?.text ?? "", strokes: packStrokes(e.strokes) })),
     ...(f ? { fluid: { prompt: keying() ? $("#prompt").value.trim() : f.prompt ?? "", seed: f.seed, depth: f.depth ?? 8, made: !!f.result, on: f.on !== false, keys: f.keys.map((k) => ({ frame: k.frame, strokes: packStrokes(k.strokes) })) } } : {}) };
-  const name = await sceneTarget(sceneName(S.plate.name || "scene"));
+  const named = f && !f.sceneName // a scene of a blank plate is named once, at its first save
+    ? await ask("Name this scene.", "Save as fluid_shot", { field: { value: "fluid_shot", label: (v) => `Save as ${sceneName(v) || "fluid_shot"}` } }) : null;
+  if (named === false) return; // « No, cancel »: nothing saved
+  const name = await sceneTarget(f ? sceneName(named ?? f.sceneName) || "fluid_shot" : sceneName(S.plate.name || "scene"));
   if (name === null) return; // Esc: nothing saved
   const r = await post(`/paintaplate/scenes/${encodeURIComponent(name)}`, scene);
   if (!r.ok) throw new Error(`The scene was not saved: ${await r.text()}`);
   const { path } = await r.json().catch(() => ({})); // the scene's file, on the machine that runs ComfyUI
+  if (f) f.sceneName = name; // its next save keeps the name
   const fact = `Scene ${name} saved${path ? `: ${path}` : ""}.`;
   hud(fact, 3000);
   told(fact, "Open plate > Scenes opens it again, or downloads it.");
@@ -3741,7 +3745,7 @@ async function graphFile() { // the whole scene as one ComfyUI workflow, for Exp
   return { file: editorGraph(graph, Object.fromEntries(classes.map((c, i) => [c, specs[i]]))) }; // the editor's own format: groups, notes, places and links
 }
 
-async function openScene(text) { // the plate opens in its colour space, then every edit runs again with its own seed and words
+async function openScene(text, name = null) { // the plate opens in its colour space, then every edit runs again with its own seed and words
   const scene = JSON.parse(text), o = scene.ocio;
   if (scene.format !== SCENE.format || !(scene.version <= SCENE.version)) throw new Error("This file is not a Paint a plate scene.");
   if (o) { // its OCIO config and view, where this ComfyUI has them
@@ -3757,6 +3761,7 @@ async function openScene(text) { // the plate opens in its colour space, then ev
     : scene.version >= 3 ? scene.plate.color_space : undefined, // older scenes: read from the file
     ...(scene.fluid ? { fluid: { blankPath: scene.plate.path, seed: scene.fluid.seed, prompt: scene.fluid.prompt ?? "", on: scene.fluid.on !== false, depth: blankDepth(scene.fluid.depth) } } : {}) });
   S.deliver = { hdr: deliverHdr, upscale: upscaleAskOf(scene.deliver?.upscale) }; S.upscaleAsk = S.deliver.upscale || UPSCALE_ASK; // openPlate reset the Finish menu's passes
+  if (S.fluid && name) S.fluid.sceneName = name; // a blank plate's scene opened by its name keeps it
   if (scene.fluid) { // the fluid shot first: its keyframes, then the shot itself, the plate the edits were painted on
     S.fluid.keys = scene.fluid.keys.map((k) => { const key = newKey(k.frame); key.strokes = unpackStrokes(k.strokes, S.plate.work, from); redrawKey(key); return key; });
     fluidUI(); timelineUI(); historyUI(); render();
@@ -4553,7 +4558,7 @@ $("#open-go").onclick = async () => { // what the tab on show holds
   const t = OPEN.tab, typed = $("#path").value.trim(), it = OPEN.chosen, go = (job) => { $("#open").close(); job.catch(quiet); };
   if (t === "blank") return go(openBlank());
   if (t === "upload") return go(openPlate([...$("#files").files], ""));
-  if (t === "scenes") return go(($("#scene").files[0]?.text() ?? fetch(`/paintaplate/scenes/${encodeURIComponent(OPEN.scene)}`).then((r) => r.text())).then(openScene));
+  if (t === "scenes") return go(($("#scene").files[0]?.text() ?? fetch(`/paintaplate/scenes/${encodeURIComponent(OPEN.scene)}`).then((r) => r.text())).then((text) => openScene(text, $("#scene").files.length ? null : OPEN.scene)));
   if (!typed && it?.kind === "scene") return go(fetch(sceneFile(it.path)).then((r) => r.text()).then(openScene));
   if (!typed) return go(openPlate([], it.path));
   const st = await plateStat(typed); // the server reads the path first: the dialog stays open with its line when it cannot
