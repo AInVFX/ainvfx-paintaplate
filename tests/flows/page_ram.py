@@ -1,10 +1,10 @@
-"""The check of the RAM-short rule (tests/flows/README.md). A card of 24 GB or more keeps its models
+"""The check of the RAM-short rule (tests/flows/README.md). A GPU of 24 GB or more keeps its models
 loaded. At a change of model family the page reads the free RAM in ComfyUI's /system_stats, and it frees ComfyUI's memory
 only when that is less than the next job's frames can take (logic.framesNeed). The log's line names that reason. The mock
 ComfyUI takes the free RAM at /mock/card, and /mock/events lists each /free the page posted."""
 import re
 
-CARD = {"vram": 32e9, "ram": 256e9}  # a 32 GB card: the medium profile, which keeps its models loaded
+CARD = {"vram": 32e9, "ram": 256e9}  # a 32 GB GPU: the medium profile, which keeps its models loaded
 ROOM, SHORT = 200e9, 1e9  # bytes of free RAM: far over and far under what the frames of the 1280 x 704 plate can take, whatever logic.RAM_COPIES is
 LOGGED = "(starts) => [...document.querySelectorAll('#log li span')].some((e) => [].concat(starts).some((s) => e.textContent.startsWith(s)))"
 OPEN = "document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden"
@@ -15,14 +15,14 @@ WHY = re.compile(r"^(?:[a-z]+: ComfyUI's memory freed first: 1 GB of RAM are fre
 
 
 def edit(browser, port, U, free, words, pts):
-    """A paint edit on the 32 GB card with `free` bytes of RAM free, through its preview shot and the tracking job after it.
+    """A paint edit on the 32 GB GPU with `free` bytes of RAM free, through its preview shot and the tracking job after it.
     Returns the log's lines up to the tracking job's, and how many times the page asked ComfyUI to free its memory."""
     U.mock_route(port, "/mock/card", {**CARD, "ram_free": free})  # before the page loads: every job of this edit meets the same free RAM
     asked = lambda: sum(e[0] == "free" for e in U.mock_route(port, "/mock/events"))  # noqa: E731
     before = asked()
     page = U.load(browser, port)
     U.check(U.until(page, LOGGED, 20000, ["Memory profile medium:", "Memory profile: medium ("]),
-            f"a 32 GB card takes the medium profile, which keeps its models loaded ({round(free / 2 ** 30)} GB of RAM free)")
+            f"a 32 GB GPU takes the medium profile, which keeps its models loaded ({round(free / 2 ** 30)} GB of RAM free)")
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function(OPEN, timeout=60000)
     page.evaluate(U.WATCH)

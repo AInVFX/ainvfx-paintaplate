@@ -216,7 +216,7 @@ const LOCAL = ["localhost", "127.0.0.1", "::1", "[::1]"];
 export const sameMachine = (host) => LOCAL.includes(host); // ComfyUI serves the page: this host is its machine
 
 // The budget when the setting is Auto. With ComfyUI on this machine: 1 GB, as RV's look-ahead cache, and 512 MB on the
-// small memory profile (its borders live in logic.MEMORY_FROM; the page starts on it until the card is known), because the
+// small memory profile (its borders live in logic.MEMORY_FROM; the page starts on it until the GPU is known), because the
 // models need that memory. With ComfyUI on another machine: a
 // quarter of the device's memory as the browser reports it (navigator.deviceMemory, 8 GB at most), from 512 MB to 2 GB;
 // 1 GB where the browser does not say (Firefox, Safari).

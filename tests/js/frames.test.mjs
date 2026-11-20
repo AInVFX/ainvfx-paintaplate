@@ -94,7 +94,7 @@ import * as viewerFrames from "../../web/frames.mjs";
 test("the Auto budget: 512 MB beside ComfyUI on the small memory profile, 1 GB on the others, up to 2 GB with ComfyUI elsewhere", () => {
   const auto = viewerFrames.autoBudget;
   assert.equal(auto({ host: "127.0.0.1", profile: "small" }), 512e6);
-  assert.equal(auto({ host: "localhost" }), 512e6); // the card is not known yet: the page starts on the small profile
+  assert.equal(auto({ host: "localhost" }), 512e6); // the GPU is not known yet: the page starts on the small profile
   assert.equal(auto({ host: "[::1]", profile: "medium" }), 1e9);
   assert.equal(auto({ host: "[::1]", profile: "large" }), 1e9);
   assert.equal(auto({ host: "abc-8188.proxy.runpod.net", profile: "large", deviceMemory: 8 }), 2e9);
@@ -102,7 +102,7 @@ test("the Auto budget: 512 MB beside ComfyUI on the small memory profile, 1 GB o
   assert.equal(auto({ host: "abc-8188.proxy.runpod.net" }), 1e9); // Firefox and Safari do not report the device's memory
 });
 
-test("the frame cache's line of the log: the budget and where it comes from, then what fits, with no card size", () => {
+test("the frame cache's line of the log: the budget and where it comes from, then what fits, with no GPU size", () => {
   const line = viewerFrames.cacheLine;
   assert.equal(line("512 MB", "Auto", [{ name: "the plate", fits: 121, frames: 121, width: 960, height: 512 }]), "Frame cache: 512 MB (Auto), 121 of 121 frames at 960 x 512.");
   assert.equal(line("8 MB", "set in the address", [{ name: "the plate", fits: 3, frames: 49, width: 960, height: 528 }, { name: "the shot", fits: 3, frames: 49, width: 960, height: 528 }]),

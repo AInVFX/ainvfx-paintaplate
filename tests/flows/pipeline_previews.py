@@ -32,21 +32,21 @@ def run(browser, port, U):
     address = f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0"
     before = len(posts(port))
     page = browser.new_page(viewport={"width": 1400, "height": 900})
-    page.goto(address + "&memory=small")  # a small card, asked for: the mock's card has 32 GB
+    page.goto(address + "&memory=small")  # a small GPU, asked for: the mock's GPU has 32 GB
     page.wait_for_function(READY, timeout=60000)
     line = logged(page, "Memory profile: small (") or logged(page, "Memory profile small:")  # the line's two forms
     U.check(line.startswith(("Memory profile small: asked for", "Memory profile: small (asked for")) and "would choose medium" in line,
             f"the log names the memory profile and why: {line}")
     U.check(line.rstrip(".").endswith(tuple(f"Models load one at a time, so each step takes longer than on a larger {w}" for w in ("GPU", "card"))),
-            "a small card: the same line says what it means, in one sentence")
+            "a small GPU: the same line says what it means, in one sentence")
     page.wait_for_timeout(3000)
-    U.check(len(posts(port)) == before, "a small card: no model loads at page open (no job is posted)")
+    U.check(len(posts(port)) == before, "a small GPU: no model loads at page open (no job is posted)")
     page.close()
 
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(address)
     page.wait_for_function(READY, timeout=60000)
-    U.check((logged(page, "Memory profile: medium (") or logged(page, "Memory profile medium:")) != "", "the mock's 32 GB card: the medium profile")
+    U.check((logged(page, "Memory profile: medium (") or logged(page, "Memory profile medium:")) != "", "the mock's 32 GB GPU: the medium profile")
     warm = posted(port, before + 2, page)[before:]
     U.check(len(warm) == 2 and all(p["extra_data"] == {"preview_method": "none"} for p in warm),
             f"medium: the two edit models load at page open, and a warm-up asks for no preview: {warm}")

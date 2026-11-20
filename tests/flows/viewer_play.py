@@ -1,7 +1,7 @@
 """The viewer's checks on playback. The frame cache fills inside one memory budget, at the size the frame is shown. Once
 every frame between the in and out points is in memory, the plate and the shot play from memory, on a clock, with the
 videos paused. A pause writes one line of statistics. A budget too small for the range keeps a window of frames, and the
-videos play. The mock serves VP9 and the sandbox draws WebGL in software: these checks prove the logic, a GPU the speed.
+videos play. The mock serves VP9 and the headless browser draws WebGL in software: these checks prove the logic, a GPU the speed.
 A playback check waits until the playhead has shown four new frames (MOVES), however slow the machine draws."""
 import re
 
@@ -116,5 +116,5 @@ def run(browser, port, U):
     small = opened(browser, port, U)
     U.wait_log(small, FULL, 150000, "frame cache with every frame of the plate, on the small memory profile")
     said = plan_line(small)
-    U.check(re.fullmatch(r"Frame cache: 512 MB \(Auto\), (\d+) of \1 frames at \d+ x \d+\.", said) is not None, f"on a 16 GB card beside ComfyUI the Auto budget is 512 MB, and the line names no card: {said}")
+    U.check(re.fullmatch(r"Frame cache: 512 MB \(Auto\), (\d+) of \1 frames at \d+ x \d+\.", said) is not None, f"on a 16 GB GPU beside ComfyUI the Auto budget is 512 MB, and the line names no GPU: {said}")
     small.close()

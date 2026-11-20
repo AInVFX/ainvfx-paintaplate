@@ -26,7 +26,7 @@ SAM = "sam3.1_multiplex_fp16.safetensors"
 # way; and `guide_tiled`, the IC-LoRA guide encoded in tiles. Their defaults are a large GPU's.
 WHOLE = 4096  # a tile larger than any working frame: VAE Decode (Tiled) decodes the whole frame in one piece
 TINY = "taeltx2_3.safetensors"  # the tiny LTX 2.5 decoder of the live preview (models/vae_approx)
-FLUID = "ainvfx-fluid.safetensors"  # AInVFX's IC-LoRA: painted keyframes become smoke, steam or fire (models/loras)
+FLUID = "ainvfx-fluid.safetensors"  # AInVFX's IC-LoRA: painted keyframes become a fluid: smoke, fire, water and more (models/loras)
 KLEIN_TEXT = "qwen3vl_4b_int8_convrot.safetensors"  # FLUX 3 Image Klein's text encoder (models/text_encoders)
 KLEIN_VAE = "flux2-vae.safetensors"  # its VAE (models/vae)
 LTX_VAE = "ltx-2.5-video-vae-conv-bf16.safetensors"  # LTX 2.5's video VAE (models/vae)

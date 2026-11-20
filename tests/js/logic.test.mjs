@@ -536,15 +536,15 @@ test("SDR to HDR on a plate that cannot hold values above 1.0 makes its result a
 
 import { bigPlateWarning } from "../../web/logic.mjs";
 
-test("a plate above 2K warns when it opens on a card under 48 GB", () => {
+test("a plate above 2K warns when it opens on a GPU under 48 GB", () => {
   const uhd = { width: 3840, height: 2160 }, hd = { width: 1920, height: 1080 }, dci = { width: 2048, height: 1080 };
   assert.match(bigPlateWarning(uhd, 32 * 2 ** 30), /3840 x 2160, above 2K, and this GPU has 32 GB/);
-  assert.equal(bigPlateWarning(uhd, 47.5 * 2 ** 30), null, "a 48 GB card: no warning");
+  assert.equal(bigPlateWarning(uhd, 47.5 * 2 ** 30), null, "a 48 GB GPU: no warning");
   assert.equal(bigPlateWarning(uhd, 95 * 2 ** 30), null, "a 96 GB GPU");
   assert.equal(bigPlateWarning(hd, 24 * 2 ** 30), null, "1920 wide is not above 2K");
   assert.equal(bigPlateWarning(dci, 24 * 2 ** 30), null, "2048 is 2K itself");
-  assert.equal(bigPlateWarning(uhd, 0), null, "the card's memory not yet known: no warning");
-  assert.match(bigPlateWarning({ width: 2160, height: 3840 }, 39.6 * 2 ** 30), /40 GB/, "a portrait 4K plate on a 40 GB card");
+  assert.equal(bigPlateWarning(uhd, 0), null, "the GPU's memory not yet known: no warning");
+  assert.match(bigPlateWarning({ width: 2160, height: 3840 }, 39.6 * 2 ** 30), /40 GB/, "a portrait 4K plate on a 40 GB GPU");
 });
 
 import { STEP_FLOWS, resultFlows } from "../../web/logic.mjs";
@@ -596,7 +596,7 @@ import { MEMORY, memoryProfile, fillWorkflow as fillFor, parseWorkflow as parseF
 test("the memory profile: small under 24 GB, medium from 24 GB, large from 60 GB, or the one asked for", () => {
   const gib = 2 ** 30;
   assert.equal(memoryProfile({ vram: 16 * gib, ram: 64 * gib }).name, "small", "a 16 GB GPU with 64 GB of RAM");
-  assert.equal(memoryProfile({ vram: 23.99 * gib }).name, "medium", "a 24 GB card reports about 25.7e9 bytes");
+  assert.equal(memoryProfile({ vram: 23.99 * gib }).name, "medium", "a 24 GB GPU reports about 25.7e9 bytes");
   assert.equal(memoryProfile({ vram: 20e9 }).name, "small");
   assert.equal(memoryProfile({ vram: 32 * gib }).name, "medium");
   assert.equal(memoryProfile({ vram: 96 * gib }).name, "large");
@@ -604,8 +604,8 @@ test("the memory profile: small under 24 GB, medium from 24 GB, large from 60 GB
   assert.deepEqual(memoryProfile({ vram: 16 * gib }).warm, [], "small: no model loads before an action needs it");
   assert.deepEqual(memoryProfile({ vram: 16 * gib }).slots, { tile: 4096, encode_tile: 4096, guide_tiled: false });
   assert.match(memoryProfile({ vram: 16 * gib, ram: 64 * gib }).why, /16 GB of VRAM, 64 GB of RAM/);
-  assert.match(memoryProfile({ vram: 16 * gib }).does, /^Models load one at a time, so each step takes longer/, "what a small card cannot do as fast is said in one sentence, in the profile's own line");
-  assert.equal(memoryProfile({ vram: 17.2e9, ram: 65.5e9 }).why, "16 GB of VRAM, 61 GB of RAM", "bytes / 2**30, rounded: a 16 GB card reads 16 GB");
+  assert.match(memoryProfile({ vram: 16 * gib }).does, /^Models load one at a time, so each step takes longer/, "what a small GPU cannot do as fast is said in one sentence, in the profile's own line");
+  assert.equal(memoryProfile({ vram: 17.2e9, ram: 65.5e9 }).why, "16 GB of VRAM, 61 GB of RAM", "bytes / 2**30, rounded: a 16 GB GPU reads 16 GB");
   assert.equal(memoryProfile({ vram: 32e9 }).why, "30 GB of VRAM", "no RAM size from ComfyUI: none is written");
   assert.deepEqual(memoryProfile({ vram: 32 * gib }).warm, ["edit", "prompt"]);
   assert.deepEqual(memoryProfile({ vram: 96 * gib }).warm, ["edit", "prompt", "warm"]);
@@ -621,7 +621,7 @@ test("a memory profile changes slot values only: one set of workflows, whole dec
   const nodes = (wf, cls) => Object.values(wf.prompt).filter((n) => n.class_type === cls);
   for (const name of ["clean", "cleanup", "shot", "fluid", "hdr"]) {
     const large = fillFor(flow(name), { ...MEMORY.large.slots }), small = fillFor(flow(name), { ...memoryProfile({ vram: 12.9e9 }).slots });
-    assert.deepEqual(Object.keys(small.prompt), Object.keys(large.prompt), `${name}: the same nodes on every card`);
+    assert.deepEqual(Object.keys(small.prompt), Object.keys(large.prompt), `${name}: the same nodes on every GPU`);
     for (const n of nodes(large, "VAEDecodeTiled")) assert.equal(n.inputs.tile_size, 4096, name);
     for (const n of nodes(small, "VAEDecodeTiled")) assert.equal(n.inputs.tile_size, 256, name);
     for (const n of nodes(large, "LTXAddVideoICLoRAGuide")) assert.equal(n.inputs.use_tiled_encode, false, name);
@@ -690,7 +690,7 @@ test("a ComfyUI that stopped is said in plain words, with what to do", async () 
   assert.equal(plainError("Upload failed: patch.png").why, "the browser could not send a picture to ComfyUI"); // ComfyUI answered, and refused the file
 });
 
-test("a larger card keeps its models, and frees ComfyUI's memory only when RAM is short for the job's frames", async () => {
+test("a larger GPU keeps its models, and frees ComfyUI's memory only when RAM is short for the job's frames", async () => {
   const { freesBefore, framesNeed, memoryProfile } = await import("../../web/logic.mjs");
   const large = memoryProfile({ vram: 100e9 }), need = framesNeed(1920, 1080, 121);
   assert.equal(Math.round(need / 2 ** 30), 26); // 8 copies of 2.8 GB, and 4 GB to work in

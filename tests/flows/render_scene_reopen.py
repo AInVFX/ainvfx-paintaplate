@@ -10,7 +10,7 @@ ROWS = """(() => { const t = [...document.querySelectorAll('#history li .title')
 
 def run(browser, port, U):
     errors = []
-    page = U.load(browser, port, "?blank=0&memory=small", errors=errors)  # a 16 GB card: no model warms up when the page loads
+    page = U.load(browser, port, "?blank=0&memory=small", errors=errors)  # a 16 GB GPU: no model warms up when the page loads
     U.open_plate(page)
     page.evaluate(U.WATCH)
     page.keyboard.press("p")

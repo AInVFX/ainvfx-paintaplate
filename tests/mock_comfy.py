@@ -673,7 +673,7 @@ async def pack_version_route(request):  # mock only: the version and the build /
     return web.json_response({})
 
 
-async def card_route(request):  # mock only: the card /system_stats reports from now on, in bytes: {"vram": 17.2e9, "ram": 65.5e9} is a 16 GB GPU with 61 GB of RAM; "ram_free" is the RAM it reports as free
+async def card_route(request):  # mock only: the GPU /system_stats reports from now on, in bytes: {"vram": 17.2e9, "ram": 65.5e9} is a 16 GB GPU with 61 GB of RAM; "ram_free" is the RAM it reports as free
     STATE["card"] = await request.json()
     return web.json_response({})
 

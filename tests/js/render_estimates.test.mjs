@@ -37,19 +37,19 @@ const MEASURED = [ // [case, step, seconds, plate, SDR to HDR on]
 ];
 const OUTSIDE = { "horse_light export": "a relight's export writes no matte: 19 nodes against 27, 6.1 s against 9.3 to 10.0 s" };
 
-test("before a step ever ran on a 16 GB card, its announcement holds within 25% of what it took", () => {
+test("before a step ever ran on a 16 GB GPU, its announcement holds within 25% of what it took", () => {
   assert.equal(Object.keys(REF).filter((id) => id !== "upscale").length, 11, "a reference for every step of STAGES but Upscale, whose estimate is logic.upscaleSeconds");
   const guess = (id, plate, hdr) => (id === "cleanup" ? stageTwoGuess(REF, plate, "small") : stepGuess(id, REF[id], plate, "small", hdr));
   const off = MEASURED.filter(([, id, took, plate = HORSE, hdr = false]) => Math.abs(guess(id, plate, hdr) - took) > 0.25 * took);
   assert.deepEqual(off.map(([where, id]) => `${where} ${id}`), Object.keys(OUTSIDE));
 });
 
-test("other cards announce the references as they are", () => {
+test("other GPUs announce the references as they are", () => {
   assert.equal(Math.round(stepGuess("full", REF.full, HORSE, "large")), 180); // the pod measured 141 to 152 s
   assert.equal(Math.round(stepGuess("clean", REF.clean, HORSE, "medium")), 6);
 });
 
-test("on a 16 GB card a step pays its models' load, so a short plate does not make a short step", () => {
+test("on a 16 GB GPU a step pays its models' load, so a short plate does not make a short step", () => {
   const short = { ...HORSE, frames: 25 };
   assert.ok(stepGuess("clean", REF.clean, short, "small") > SLOWER.small.lead.ltx);
   assert.deepEqual([stepSizeOf("trackfull", HORSE), stepSizeOf("review", HORSE), stepSizeOf("shot", HORSE)], [[960, 544], [1920, 1088], [640, 352]]);
