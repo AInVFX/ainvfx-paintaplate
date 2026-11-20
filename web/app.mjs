@@ -3,7 +3,7 @@
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
-import { WF, cancel, connect, hashHex, jobsNotRun, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl } from "./comfy.mjs";
+import { cancel, cancelQuietly, connect, hashHex, jobsNotRun, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl, WF } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache, outgrows } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
@@ -230,11 +230,13 @@ async function writeCaption(e, reference, key, kind, dimmed = false) {
   const hues = paintHues(e), ask = upsampleRequest({ tool: e.tool, words: e.prompt, hues,
     ...writerBoxes({ tool: e.tool, words: e.prompt, parts: paint && paintBoxes(paint), core: e.editCore, bbox: bounds(e.mask) }) });
   const where = ask.locked?.length > 1 ? `boxes ${JSON.stringify(ask.locked.map((r) => r.src_bbox))}` : `box ${JSON.stringify(ask.locked?.[0]?.src_bbox ?? bounds(e.mask))}`;
-  log(`Edit ${num(e)}: asking Klein's prompt writer${e.prompt ? ` for "${e.prompt}"` : ", with no text prompt,"}${inHues(hues)}${hues.length ? "," : ""} in ${where}${dimmed ? ", on the frame with all but the object dimmed" : ""}.`);
+  const asked = `Edit ${num(e)}: asking Klein's prompt writer${e.prompt ? ` for "${e.prompt}"` : ", with no text prompt,"}${inHues(hues)}${hues.length ? "," : ""} in ${where}${dimmed ? ", on the frame with all but the object dimmed" : ""}.`;
+  if (kind !== "prefetch") log(asked); // a prefetch's request is written once its caption arrives: one the next stroke replaces writes nothing
   if (kind === "edit") status(`Edit ${num(e)}: ${NAME[e.tool]}, prompt writer running.`); // the status line names the writer while Generate waits for it; a prefetch asks it behind the strokes' own lines
   let text = "";
   try {
     const out = await run("prompt", { image: reference, request: ask.request, system: UPSAMPLER[ask.mode] }, { kind, front: true }).done;
+    if (kind === "prefetch") log(asked);
     text = (outputText("prompt", out, "text") ?? "").trim();
   } catch (err) { if (err?.message === "cancelled") throw err; quiet(err); }
   let made = text ? (ask.locked ? reconcile(text, ask.locked) : text) : "";
@@ -2401,7 +2403,7 @@ const recordOf = (e) => JSON.stringify({ base: S.plate?.path, strokes: strokesSi
 
 function prefetch(edit) { // the snap and the prompt writer start as the strokes stop: by the time the edit starts, they are often done
   if (!edit || !painted(edit) || !S.plate || S.halted) return; // under a stop no job is posted: Generate prepares the edit
-  cancel("warm", "prefetch");
+  cancel("warm"); cancelQuietly("prefetch"); // this stroke's request replaces the last one: its stop is no fact for the log
   edit.preparing = prepare(edit, S.edits.indexOf(edit), "prefetch").catch(() => {});
 }
 

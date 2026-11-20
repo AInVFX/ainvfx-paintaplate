@@ -263,14 +263,18 @@ function drop(job) { // remove it from the queue, and stop it if it is the one r
   post("/interrupt", { prompt_id: job.id });
 }
 
-export function cancel(...kinds) {
+export function cancel(...kinds) { stopJobs(kinds, true); }
+// A newer request of the same kind replaces these jobs, as the next stroke's prefetch does: they stop with no line, since
+// the log says each fact once and a request replaced before its answer is none
+export function cancelQuietly(...kinds) { stopJobs(kinds, false); }
+function stopJobs(kinds, said) {
   for (const job of live) {
     if (!kinds.includes(job.kind)) continue;
     job.cancelled = true;
     live.delete(job);
     byId.delete(job.id);
     job.reject(new Error("cancelled"));
-    log(jobStopped(job, Date.now(), socket));
+    if (said) log(jobStopped(job, Date.now(), socket));
     drop(job);
   }
 }
