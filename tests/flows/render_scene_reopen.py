@@ -34,6 +34,6 @@ def run(browser, port, U):
     posted = {k: v for k, v in grew.items() if k.endswith("posted") and v}
     U.check(not posted, f"the scene opened again in a new session posts no job: {posted}; from the index: {[k for k, v in grew.items() if k.endswith('before') and v]}")
     said = page.evaluate("window.__lines.filter((t) => t.startsWith('Scene opened'))")
-    U.check(any("come from the job index" in t for t in said), f"the scene's line says where its results come from: {said}")
+    U.check(any("already made on this machine are reused" in t for t in said), f"the scene's line says where its results come from: {said}")
     U.no_errors(errors, "in the scene opened again")
     page.close()

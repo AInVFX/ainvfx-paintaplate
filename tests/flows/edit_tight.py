@@ -32,6 +32,6 @@ def run(browser, port, U):
             f"the writer gets one box cut to the stroke and to what most masks agree on, without the other object ({[m[0] for m in asked]})")
     U.check((any("caption from the prompt writer." in t for t in lines) and any("Remove the red bottle <bottle_1>" in t for t in lines))
             and not any("another object" in t for t in lines), "the writer names the painted object, and the page keeps its answer")
-    U.check(any("Edit 1: the object left the first frame" in t for t in lines), "Klein removes it, and its shot renders")
+    U.check(any("Edit 1: the object is gone from the first frame" in t for t in lines), "Klein removes it, and its shot renders")
     U.no_errors(errors, "after an erase with no text prompt")
     page.close()

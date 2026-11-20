@@ -934,7 +934,7 @@ def hdr_flow(browser, port):
           f"every finished pass with a picture is a row to click, the latest on show: {rows()}, {shown()}")
     page.click("#stages li.pick:has-text('SDR to HDR')")
     poll(page, lambda: shown() == ["SDR to HDR"])
-    check(shown() == ["SDR to HDR"] and "on show" in (page.text_content("#hud") or ""), f"a click shows that pass in the viewer: {shown()}")
+    check(shown() == ["SDR to HDR"] and ": displayed." in (page.text_content("#hud") or ""), f"a click displays that pass in the viewer: {shown()}")
     page.click("#stages li.pick:has-text('First frame')")
     poll(page, lambda: shown() == ["First frame"] and picture() == "hero")
     check(shown() == ["First frame"] and picture() == "hero", f"the First frame row shows the edit as Klein made it: {shown()}, {picture()}")

@@ -853,7 +853,7 @@ export function plateSpaceLine(plate) {
 // `what`: « plate's colour space » or « OCIO config ». The first frame is the page's own step: the question counts the edits.
 export function remakeQuestion(what, edits) { return `Changing the ${what} affects generation: ${edits} edit${edits === 1 ? "" : "s"} will be regenerated. Continue?`; }
 // The HUD's line when a fluid keyframe moves to the nearest frame it can sit on; `frame` is the plate's own number
-export const keyframeSlotLine = (frame) => `Keyframes sit on the first frame, on the last frame, or every 8 frames between: frame ${frame}.`;
+export const keyframeSlotLine = (frame) => `Keyframes snap to the first frame, the last frame or every 8 frames between: frame ${frame}.`;
 
 // A family of the plate's colour-space tree, named for a person. The config's « Display », the spaces encoded for a
 // display, reads « Display-referred ». « ITU » is spelled out: the International Telecommunication Union publishes the
@@ -1114,7 +1114,7 @@ export const wantsHdrFor = (spec, headroom, deliverHdr) => holdsHdr(spec, headro
 // reports about 47.5 GiB, a 40 GB one about 39.6.
 export const BIG_PLATE = { side: 2048, vram: 46 * 2 ** 30 };
 export const bigPlateWarning = (spec, vram) => (spec && vram > 0 && Math.max(spec.width, spec.height) > BIG_PLATE.side && vram < BIG_PLATE.vram
-  ? `This plate is ${spec.width} x ${spec.height}, above 2K, and this GPU has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB GPU for now: its renders may not finish here.`
+  ? `This plate is ${spec.width} x ${spec.height}, above 2K, and this GPU has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB GPU: its renders may run out of memory here.`
   : null);
 export const hdrFps = (fps) => Math.min(30, +fps || 24); // the conditioning frame rate: at most 30, as in Lightricks' workflow
 export const blankDepth = (v) => (+v === HDR_DEPTH ? HDR_DEPTH : 8);
@@ -1157,8 +1157,8 @@ export const editList = (nums) => (nums.length === 1 ? `edit ${nums[0]}` : `edit
 export function stopHint({ edit = null, waits = [] } = {}) {
   const list = waits.length ? editList(waits) : "";
   const wait = list ? ` ${list[0].toUpperCase()}${list.slice(1)} ${waits.length > 1 ? "wait" : "waits"}.` : "";
-  return edit === null ? `Stopped.${wait} Enter goes on from where it stopped.`
-    : `Stopped. Edit ${edit} keeps its strokes, text prompt and seed.${wait} Enter generates again, Ctrl+Enter tries another seed, Esc drops the strokes.`;
+  return edit === null ? `Stopped.${wait} Enter continues from there.`
+    : `Stopped. Edit ${edit} keeps its strokes, text prompt and seed.${wait} Enter generates again, Ctrl+Enter tries another seed, Esc removes the strokes.`;
 }
 
 // Edits are layers, after Generate. An edit above an edit that is made again stays hidden until its own
@@ -1394,15 +1394,22 @@ const TILED = { slots: { tile: 256, encode_tile: 256, guide_tiled: true }, does:
 // ComfyUI to free its memory before a job whose family is not that of the job posted before it.
 export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", clean: "ltx", cleanup: "ltx", fluid: "ltx", hdr: "ltx", warm: "ltx",
   matte: "sam", snap: "sam", ingest: "frames", comp: "frames", review: "frames", export: "frames", upscale: "seedvr2", upscale_export: "frames" }; // by workflow: the models it loads, or frames only
-// Speed first where there is room. Under 24 GB of VRAM the card cannot hold two families of models, so a
-// change of family frees ComfyUI's memory. On a larger card the models stay loaded, and the memory is freed only when
+// Speed first where there is room. Under 24 GB of VRAM the GPU cannot hold two families of models, so a
+// change of family frees ComfyUI's memory. On a larger GPU the models stay loaded, and the memory is freed only when
 // RAM is short for the next job's frames: a job that reads the plate can hold RAM_COPIES float32 copies of it. The open
 // itself holds 2.8 copies at its peak with a 16 GB GPU and 64 GB of RAM, 1.9 on an RTX PRO 6000 pod, so `ingest` counts
 // RAM_COPIES_OPEN. A GPU that runs out of memory is retried
-// once after a free, on every card (comfy.mjs).
+// once after a free, on every GPU (comfy.mjs).
 export const RAM_COPIES = 8, RAM_COPIES_OPEN = 3;
 export const framesNeed = (width, height, frames, name = "") => // bytes of RAM for the job `name`: the copies, and 4 GB to work in
   (name === "ingest" ? RAM_COPIES_OPEN : RAM_COPIES) * width * height * frames * 12 + 4 * 2 ** 30;
+// Each job's name in a line a person reads, as the Render panel names it where it can: « Memory freed before the shot: the
+// edit's models unloaded. »
+export const JOB_NAME = { ingest: "opening the plate", prompt: "the prompt writer", prefetch: "the prompt writer", edit: "the edit",
+  snap: "the SAM mask", clean: "the clean plate pass", cleanup: "the clean plate pass", shot: "the shot", matte: "the matte",
+  comp: "the composite", review: "the review movie", export: "Export", warm: "the warm-up", fluid: "the fluid shot", hdr: "SDR to HDR",
+  upscale: "Upscale", upscale_export: "the upscaled export" };
+
 export function freesBefore(profile, last, name, room = null) { // room: { free, need } in bytes of RAM, where ComfyUI gives it
   if (!last || FAMILY[name] === FAMILY[last]) return false;
   return !!profile?.frees || (!!room && room.free < room.need);
@@ -1416,8 +1423,8 @@ export function freesBefore(profile, last, name, room = null) { // room: { free,
 // what the step took the last time on this machine (the page keeps
 // each step's total, lead and tail per size, frame count and memory profile, in paintaplate.step-times).
 const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
-// A step's time before it ever ran on this machine (stepGuess): the 96 GB card's reference (STAGES' ref, in seconds at
-// REF_SIZE), scaled to the plate, then to the card. A 16 GB card, the small profile, holds one family of models at a time,
+// A step's time before it ever ran on this machine (stepGuess): the 96 GB GPU's reference (STAGES' ref, in seconds at
+// REF_SIZE), scaled to the plate, then to the GPU. A 16 GB GPU, the small profile, holds one family of models at a time,
 // so each job loads its models again: a lead in seconds per family, then a factor per step on the reference's scaled
 // seconds. Measured on a 16 GB GPU with 52 GB of RAM, horse.mp4 at
 // 1920 x 1080 and 121 frames: the lead is what a job spent outside its sampler or its tracking loop in ComfyUI's trace,
@@ -1491,7 +1498,7 @@ export const gridGrow = (sizeW, plateW, reach) => 1 + Math.ceil((reach * sizeW) 
 
 // View > Cache memory > Custom…: a size a person types, in MB or GB (a number alone is MB), as bytes, or null outside
 // CACHE_LEAST to CACHE_MOST. The page counts 1 GB as 10^9 bytes, as the frame cache's other
-// lines and the file sizes do (app.memoryText, gb); the lines of a card's VRAM and RAM count 2^30 bytes.
+// lines and the file sizes do (app.memoryText, gb); the lines of a GPU's VRAM and RAM count 2^30 bytes.
 export const CACHE_LEAST = 128e6;
 export const CACHE_MOST = 32e9;
 export function memoryBytes(text) {

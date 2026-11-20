@@ -9,9 +9,9 @@ ROOM, SHORT = 200e9, 1e9  # bytes of free RAM: far over and far under what the f
 LOGGED = "(starts) => [...document.querySelectorAll('#log li span')].some((e) => [].concat(starts).some((s) => e.textContent.startsWith(s)))"
 OPEN = "document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden"
 TRACKED = re.compile(r"^matte [0-9a-f]{8}: done in ")  # the line of the tracking job that follows the preview shot
-FREED = ("ComfyUI's memory freed first", "Memory freed before")  # the line's two forms: « shot: ComfyUI's memory freed first: … », « Memory freed before shot: … »
+FREED = ("ComfyUI's memory freed first", "Memory freed before")  # the line's two forms: « shot: ComfyUI's memory freed first: … », « Memory freed before the shot: … »
 WHY = re.compile(r"^(?:[a-z]+: ComfyUI's memory freed first: 1 GB of RAM are free, and this job's frames can take \d+ GB|"
-                 r"Memory freed before [a-z]+: 1 GB of RAM free, \d+ GB needed for its frames\.)$")
+                 r"Memory freed before [a-zA-Z' ]+: 1 GB of RAM free, \d+ GB needed for its frames\.)$")
 
 
 def edit(browser, port, U, free, words, pts):
@@ -44,10 +44,10 @@ def run(browser, port, U):
 
     lines, frees = edit(browser, port, U, SHORT, "a red kite", [(0.6, 0.4), (0.64, 0.46)])
     said = [t for t in lines if any(f in t for f in FREED)]
-    freed = [t.split(":")[0].removeprefix(f"{FREED[1]} ") for t in said]
+    freed = [t.split(":")[0].removeprefix(f"{FREED[1]} ").removeprefix("the ") for t in said]  # the job: « shot », or its name « the shot »
     at = lambda start: next((i for i, t in enumerate(lines) if t.startswith(start)), -1)  # noqa: E731
     U.check(freed.count("shot") == 1 and freed.count("matte") == 1 and frees >= len(said)
-            and 0 <= max(at(f"shot: {FREED[0]}"), at(f"{FREED[1]} shot:")) < at("shot ") < max(at(f"matte: {FREED[0]}"), at(f"{FREED[1]} matte:")) < at("matte "),
+            and 0 <= max(at(f"shot: {FREED[0]}"), at(f"{FREED[1]} the shot:")) < at("shot ") < max(at(f"matte: {FREED[0]}"), at(f"{FREED[1]} the matte:")) < at("matte "),
             f"with RAM short, the page frees ComfyUI's memory at a change of model family, once before the preview shot and once before its tracking job: freed before {freed}, /free posted {frees} times")
     U.check(all(WHY.match(t) for t in said),
             f"the log's line names the reason that applied, the free RAM against what the job's frames can take: {said}")

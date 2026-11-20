@@ -19,7 +19,7 @@ export function xrayPlan({ tools = [], r, pv, full = false }) {
   return { from: urls.length ? "tracking" : "none", urls };
 }
 
-export const XRAY_TEXT = { none: "X-ray: no matte yet for the edits on show.", light: "X-ray: a Light edit changes the whole frame.",
+export const XRAY_TEXT = { none: "X-ray: no matte yet for the edits turned on.", light: "X-ray: a Light edit changes the whole frame.",
   export: "X-ray: the export's matte.", full: "X-ray: the full-size composite's matte.", preview: "X-ray: the preview composite's matte.",
   tracking: "X-ray: the tracking mattes, until the composite is made." };
 

@@ -35,8 +35,8 @@ def run(browser, port, U):
     page.click('#colours .sw[data-color="#d32f2f"]')
     U.check(page.get_attribute('.sw[data-color="#d32f2f"]', "aria-pressed") == "true", "a swatch in the dialog sets the colour")
     page.keyboard.press("s")
-    U.check(page.is_hidden("#colours") and page.evaluate("!!document.querySelector('.tools .swatches')"),
-            "S again closes it, and the swatches go back to the panel")
+    U.check(U.poll(page, lambda: page.is_hidden("#colours") and page.evaluate("!!document.querySelector('.tools .swatches')")),
+            "S again closes it, and the swatches go back to the panel, in the dialog's close event")
 
     page.keyboard.press("t")
     U.check(page.is_visible("#words"), "T shows the edit's text prompt in a dialog")
