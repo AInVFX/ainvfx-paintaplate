@@ -15,5 +15,5 @@ def run(browser, port, U):
     U.check(re.fullmatch(r"paintaplate_log_desk_\d{8}_\d{4}\.txt", got.suggested_filename) is not None, f"the file's name: {got.suggested_filename}")
     U.check(text.startswith("AInVFX Paint a plate ") and "\n  GPU 0: mock, " in text and "\nLog\n" in text and re.search(r"\n\S.*  Plate desk: opened in", text) is not None,
             f"the file holds the version, the machine, then the log with its times: {text[:160]!r}")
-    U.check("Nothing else from this machine." in (page.get_attribute("#log-export", "title") or ""), "the button's title says what the file holds")
+    U.check("It contains only the log, " in (page.get_attribute("#log-export", "title") or ""), "the button's title says what the file holds")
     page.close()

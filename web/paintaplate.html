@@ -16,14 +16,14 @@
     <span id="version" class="version" title="The version of AInVFX Paint a plate on this ComfyUI."></span>
     <span id="spec" class="spec"></span>
     <button id="close-btn" class="quiet close-plate" type="button" hidden title="Close the plate: stops its renders and frees its frames from the browser's memory." aria-label="Close the plate">×</button>
-    <button id="menu-btn" class="quiet menu-btn" title="Every action, with its key (or right-click on the frame)." aria-label="Menu" aria-haspopup="menu">
+    <button id="menu-btn" class="quiet menu-btn" title="Every action, with its keyboard shortcut (or right-click the frame)." aria-label="Menu" aria-haspopup="menu">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
     <button id="help-btn" class="quiet" title="Keys (?)." aria-label="Keys">?</button>
     <button id="open-btn">Open plate</button>
     <button id="save-btn" disabled title="Save the scene: the plate and every edit with its strokes, text prompt and seed.">Save scene</button>
-    <button id="finish-btn" type="button" disabled aria-haspopup="dialog" aria-expanded="false" title="Finish: the passes on the whole plate after the full-size composite.">Finish</button>
-    <button id="export-btn" class="primary" disabled title="Export: the result in the plate's own format, with its matte, in one zip.">Export</button>
+    <button id="finish-btn" type="button" disabled aria-haspopup="dialog" aria-expanded="false" title="Finish: SDR to HDR and Upscale, after the full-size composite.">Finish</button>
+    <button id="export-btn" class="primary" disabled title="Export: the result and its matte, in one zip.">Export</button>
   </header>
   <div id="finish" class="finish" role="dialog" aria-label="Finish" hidden>
     <h2>Finish</h2>
@@ -37,11 +37,11 @@
       <span>Paint</span>
     </button>
     <div class="tool-group">
-      <button data-tool="erase" title="Clean: remove an object, and the clean plate comes back behind it (C).">
+      <button data-tool="erase" title="Clean: remove an object and regenerate the background behind it (C).">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4l5 5-9 9H6l-2-2 11-12zM9 18h11"/></svg>
         <span>Clean</span>
       </button>
-      <label class="whole" title="SAM 3.1 grows the stroke to the whole object under it.">
+      <label class="whole" title="SAM 3.1 extends the stroke to the whole object under it.">
         <input id="whole" type="checkbox" checked><span>Whole object</span>
       </label>
     </div>
@@ -53,7 +53,7 @@
       <label for="size">Brush</label>
       <input id="size" type="range" min="4" max="320" value="48" title="Brush size (- and =).">
       <output id="size-out" for="size">48</output>
-      <button id="rub-btn" class="rub" aria-pressed="false" title="Eraser (E): rubs out strokes. Hold E while you drag, or tap E to switch it on or off.">
+      <button id="rub-btn" class="rub" aria-pressed="false" title="Eraser (E): erases strokes. Hold E while you drag, or tap E to turn it on or off.">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3l5 5-10 10H6l-3-3L16 3zM9 9l6 6M6 21h14"/></svg>
         <span>Eraser</span>
       </button>
@@ -77,11 +77,11 @@
   <main class="stage">
     <div class="promptbar">
       <label for="prompt" class="prompt-label">Text prompt</label>
-      <button id="editing" class="editing" type="button" hidden title="Selected edit: its text prompt and strokes can change. Click or Esc deselects it."></button>
+      <button id="editing" class="editing" type="button" hidden title="Selected edit: change its text prompt or strokes. Click here or press Esc to deselect it."></button>
       <input id="prompt" autocomplete="off" spellcheck="false" aria-label="Text prompt"
              placeholder="Describe what to paint, then paint it on the frame">
-      <button id="generate" class="primary generate" type="button" disabled title="Generate (Enter): the edit on the first frame, then its shot. Nothing already made runs again.">Generate</button>
-      <button id="stop" class="stop" type="button" hidden title="Stop (Esc): what finished is kept, and Generate goes on from there.">Stop</button>
+      <button id="generate" class="primary generate" type="button" disabled title="Generate (Enter): the edit on the first frame, then the shot. Steps already made are reused.">Generate</button>
+      <button id="stop" class="stop" type="button" hidden title="Stop (Esc): finished steps are kept. Generate continues from there.">Stop</button>
       <button id="new-edit" class="new-edit" type="button" disabled title="New edit (N): the next strokes start a separate edit.">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span>New edit</span>
@@ -118,7 +118,7 @@
       <output id="frame-now" class="frame-now" title="Current frame.">0</output>
       <div id="timeline" class="timeline" role="slider" tabindex="0" aria-label="Frame" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
         <div id="tl-range" class="tl-range"></div>
-        <canvas id="tl-cache" class="tl-cache" title="Frames cached in memory: they show at once."></canvas>
+        <canvas id="tl-cache" class="tl-cache" title="Frames cached in memory: they display immediately."></canvas>
         <div id="tl-render" class="tl-render"></div>
         <div id="tl-key" class="tl-key" hidden title="Edits are painted on this frame."></div>
         <div id="tl-keys" class="tl-keys"></div>
@@ -132,7 +132,7 @@
   </main>
 
   <div id="split-side" class="split split-side" role="separator" aria-orientation="vertical" aria-label="History width"
-       title="Drag to resize. Double-click: the first size." tabindex="0"></div>
+       title="Drag to resize. Double-click to reset the size." tabindex="0"></div>
   <aside class="side">
     <div class="history-head">
       <h2>History</h2>
@@ -142,7 +142,7 @@
       </span>
     </div>
     <ol id="history"></ol>
-    <p id="history-empty" class="history-empty">Your edits appear here. Describe, paint on the frame, then Generate. Click an edit to change its text prompt or strokes.</p>
+    <p id="history-empty" class="history-empty">Your edits appear here. Describe the edit in the text prompt, paint it on the frame, then Generate. Click an edit's pencil to change it.</p>
     <section id="fluid" class="render fluid" hidden>
       <h2>Fluid shot <span id="fluid-state"></span></h2>
       <p class="hint">Paint smoke, steam or fire on the keyframes, describe it, then Generate.</p>
@@ -155,19 +155,19 @@
       <label class="preview-size">Preview
         <select id="preview-size"></select>
       </label>
-      <p class="preview-note">Off: the full size only, for a slow machine. Latent preview: each pass shows live in the player. Half or quarter size: a quicker first pass of the whole shot, then the full size.</p>
+      <p class="preview-note">Latent preview, the default: each pass displays live. Half or Quarter size: a quick pass of the whole shot first, then the full size. Off: the full size only. Export is always full size.</p>
       <ol id="stages"></ol>
-      <p class="hint render-hint">Click a finished step to show it on every frame; click it again, or Esc, for the latest.</p>
-      <button id="render-full" type="button" class="quiet render-full" hidden title="These edits took the frames of an earlier render whose other edits are far away: only the tracking and the composites ran. Render them in full, with their own shot, the same edits and seeds.">Render in full</button>
+      <p class="hint render-hint">Click a finished step to display it. Click it again, or press Esc, to display the latest result.</p>
+      <button id="render-full" type="button" class="quiet render-full" hidden title="These edits reused the shot of an earlier render: only their tracking and composites ran. Click to render their own shot, with the same edits and seeds.">Render in full</button>
     </section>
   </aside>
 
   <footer class="log">
     <div id="split-log" class="split split-log" role="separator" aria-orientation="horizontal" aria-label="Log height"
-         title="Drag to resize. Double-click: the first size." tabindex="0" hidden></div>
+         title="Drag to resize. Double-click to reset the size." tabindex="0" hidden></div>
     <p id="status" role="status">Starting</p>
     <p id="status-note" hidden></p>
-    <button id="log-export" class="quiet log-export" type="button" aria-label="Export the log" title="Export the log as a text file, to share for troubleshooting. It holds the log with its times, the versions of the pack, ComfyUI, Python and PyTorch, the operating system, each GPU and its VRAM, the RAM, the browser, the page's address options, the memory profile and the plate's two lines. Nothing else from this machine."><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
+    <button id="log-export" class="quiet log-export" type="button" aria-label="Export the log" title="Export the log as a text file, to share for troubleshooting. It contains only the log, the software and system versions, the GPU, the RAM, the browser and the page's settings."><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
     <button id="log-btn" class="quiet" aria-expanded="false" aria-controls="log">Log</button>
     <ol id="log" hidden></ol>
   </footer>
@@ -231,7 +231,7 @@
     <section class="help-tab" data-help="render" role="tabpanel" hidden>
       <dl>
         <dt>Steps</dt><dd>The Render panel lists each step of Generate with its time.</dd>
-        <dt>Preview</dt><dd>Latent preview, the default: each pass displays live. Half or Quarter size: a quick pass of the whole shot first, then the full size. Off: the full size only. Export is always full size.</dd>
+        <dt>Preview</dt><dd id="help-preview"></dd>
         <dt>Stop</dt><dd>Esc, or Stop beside Generate. Finished steps are kept; Enter continues from there.</dd>
         <dt>Status line</dt><dd>The latest event: an error in red, a warning in amber. The log has the details.</dd>
         <dt>Finish</dt><dd>SDR to HDR (standard to high dynamic range) regenerates the result as scene-linear, half-float EXR frames in ACES2065-1. Upscale makes Export also write a larger result, up to 3840 x 2160, with SeedVR2 7B.</dd>
@@ -373,7 +373,7 @@
         <label id="path-row">Full path on this machine: a movie, a frame of a sequence or a folder of frames
           <input id="path" autocomplete="off" spellcheck="false" placeholder="/data/plates/shot010.mov or D:\plates\shot010\shot010.1001.exr"></label>
         <p id="path-error" class="path-error" role="alert"></p>
-        <p id="path-remote" class="hint" hidden>ComfyUI runs on another machine. To open a file of this machine, upload it in the Upload tab.</p>
+        <p id="path-remote" class="hint" hidden>ComfyUI runs on another machine. To open a file from this computer, use the Upload tab.</p>
       </section>
       <section class="tab" data-tab="upload" role="tabpanel" hidden>
         <label id="drop" class="drop">Drop a video file or the frames of one sequence here, or click to choose them.
@@ -382,7 +382,7 @@
         <p class="hint">The files go to ComfyUI's input folder, then open as the plate.</p>
       </section>
       <section class="tab" data-tab="scenes" role="tabpanel" hidden>
-        <p class="hint">Scenes saved on this ComfyUI with Save scene. A scene opens its plate, then makes every edit again: what this machine made already comes back from the job index.</p>
+        <p class="hint">Scenes saved on this ComfyUI with Save scene.</p>
         <ul id="scenes" class="scenes"></ul>
         <p id="scenes-empty" class="hint" hidden>No scene saved on this ComfyUI yet.</p>
         <label>A scene file from this computer <input id="scene" type="file" accept=".json,application/json"></label>

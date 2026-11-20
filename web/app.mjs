@@ -129,6 +129,8 @@ let fullFrom = null; // full screen (fullScreen): the zoom it came from and the 
 S.xray = false;
 const fx = document.createElement("canvas"); // scratch layer for masked overlays
 const HISTORY_HELP = $("#history-empty").textContent;
+const FINISH_TIP = $("#finish-btn").title; // the Finish button's tooltip, written once in the page
+$("#help-preview").textContent = $(".preview-note").textContent; // the Help's Preview entry is the Render panel's note
 const FLUID_HELP = "A fluid shot: paint flat colour blobs (light grey smoke, white steam, orange and yellow fire) on the first frame and on the " +
   "last frame, and on the 8-frame grid between if you want. Ctrl+C and Ctrl+V copy a keyframe; drag its diamond to move it. Describe " +
   "the fluid, then Enter.";
@@ -845,7 +847,7 @@ function finishUI() { // the Finish button and its menu: each row as this plate 
     if (opt.id === "upscale") upscaleSizeUI(opt, st.on && !st.disabled);
   }
   btn.textContent = finishLabel(on.length);
-  btn.title = `Finish: the passes on the whole plate after the full-size composite.${on.length ? ` On: ${on.join(", ")}.` : ""}`;
+  btn.title = `${FINISH_TIP}${on.length ? ` On: ${on.join(", ")}.` : ""}`;
 }
 function askFinish(opt, on) { // a pass that changes what Export writes asks first, under its row
   const ask = $(`#finish-${opt.id}-ask`);
