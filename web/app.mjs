@@ -1578,7 +1578,7 @@ function prepareSoon(typing = false) { // the draft waits for Generate; SAM and 
   if (!S.draft) return generateUI();
   takeInputs(S.draft); // the prefetch sees them: SAM finds the whole object first, then the prompt writer writes for its box
   if (typing) S.prefetchTimer = setTimeout(() => prefetch(S.draft), PREFETCH_MS); // not on every keystroke
-  else { prefetch(S.draft); hud("Generate (Enter) makes the edit, then its shot. Esc cancels.", 2500); }
+  else { prefetch(S.draft); hud("Generate (Enter) makes the edit, then the shot. Esc cancels.", 2500); }
   generateUI();
 }
 
@@ -2298,7 +2298,7 @@ async function generate(edit) {
       if (check.why && !(await heldBack(edit, check, alive))) return;
       if (!alive()) return;
       const said = [check.changed === null ? "" : `${Math.round(check.changed * 100)}% of it changed`, check.edges === null ? "" : `edges held at ${check.edges.toFixed(2)}`];
-      if (said[0] && !check.left) log(`Edit ${num(edit)}: the object left the first frame (${said.filter(Boolean).join(", ")}).${beyondDetail(check)}`); // tests/gpu_matrix.py reads « (N% of it changed »
+      if (said[0] && !check.left) log(`Edit ${num(edit)}: the object is gone from the first frame (${said.filter(Boolean).join(", ")}).${beyondDetail(check)}`); // tests/gpu_matrix.py reads « (N% of it changed »
     }
     Object.assign(edit, { preview: null, latent: null, state: "done", version: ++S.vers, force: false, kept: undefined }); // versions are unique: a kept result never meets a new one
     edit.foot = footprint(edit);
@@ -3036,7 +3036,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   if (!off && here() && !S.pass && !r.review && S.shot?.url !== pv.comp) {
     setShot(pv.comp, key, "@model");
     hud("Composite, preview: Space plays it. The full-size composite follows.", 2500);
-    status("Composite, preview: ready. The full-size passes follow; Export writes the result at any time.", "hint");
+    status("Composite, preview: ready. The full-size passes follow; Export can write the result now.", "hint");
   }
   const onePass = !off && sw === p.work[0] && sh === p.work[1];
   const final = onePass ? made : await passes(r, p.work, "full", true);
@@ -3144,7 +3144,7 @@ async function upscaleSet(set, progress) {
   const windows = upscaleWindows(p.frames, size), format = set.float ? "exr" : "png16", n = (i) => `w${String(i).padStart(3, "0")}`;
   const plateDir = upscaleFolder(S.plate.id, [p.path, p.cs, S.ocio.config, target, size, format, S.build]);
   log(`Upscale: ${target.join(" x ")}${sw ? `, upscaled from ${sw} x ${sh}` : ""}, ${windows.length === 1 ? "1 job" : `${windows.length} windows of ${size} frames`}.\n  `
-    + (keeps ? "SeedVR2 upscales the plate and the layer; the upscaled result is composited from them and the matte." : "SeedVR2 restores the result."));
+    + (keeps ? "SeedVR2 upscales the plate and the layer; the upscaled result is composited from them and the matte." : "SeedVR2 upscales the result."));
   const values = (shot, space, [first, count], more) => ({ shot, max_frames: p.frames, source_width: sw, source_height: sh, first, count,
     width: target[0], height: target[1], color_space: space, color_fix: "lab", format, seed: 42, config: S.ocio.config, under: "", under_space: space,
     matte: "", comp_prefix: "", matte_prefix: "", ...more });

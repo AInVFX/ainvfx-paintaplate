@@ -25,3 +25,8 @@ test("every workflow the page posts has a name for the log", () => {
   assert.deepEqual(kinds.filter((k) => !logic.JOB_NAME?.[k]), []);
   assert.match(all, /Memory freed before \$\{JOB_NAME\[name\] \?\? name\}: /);
 });
+
+test("an erase that worked says the object is gone, and SeedVR2 upscales the result", () => {
+  assert.ok(app.includes("the object is gone from the first frame ("));
+  assert.ok(app.includes('"SeedVR2 upscales the result."') && !app.includes("SeedVR2 restores"));
+});

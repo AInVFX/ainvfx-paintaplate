@@ -21,6 +21,6 @@ def run(browser, port, U):
     lines = U.log_lines(page)[start:]
     names = zipfile.ZipFile(dl.value.path()).namelist()
     parts = {n.split("/")[1] for n in names if n.startswith("upscaled/")}
-    U.check(any("SeedVR2 restores the result." in t for t in lines), f"Export restores SDR to HDR's result itself: {[t for t in lines if t.startswith('Upscale')]}")
+    U.check(any("SeedVR2 upscales the result." in t for t in lines), f"Export upscales SDR to HDR's result alone: {[t for t in lines if t.startswith('Upscale')]}")
     U.check(parts == {"export", "matte"}, f"the upscaled set holds the result and its matte, no plate and no layer: {sorted(parts)}")
     page.close()
