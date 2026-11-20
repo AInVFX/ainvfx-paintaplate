@@ -18,7 +18,7 @@ def run(browser, port, U):
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function(OPEN, timeout=60000)
     named, line = models(page)
-    U.check(named == set() and line == "No edit on show: no model works on this plate yet.", f"a plate with no edit: {line!r}, {sorted(named)}")
+    U.check(named == set() and line == "No edit turned on: no model works on this plate yet.", f"a plate with no edit: {line!r}, {sorted(named)}")
     page.keyboard.press("Escape")
     page.keyboard.press("p")
     U.paint_once(page, "a red lantern", [(0.3, 0.5), (0.34, 0.56)])

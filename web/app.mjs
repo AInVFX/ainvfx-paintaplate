@@ -131,6 +131,8 @@ const fx = document.createElement("canvas"); // scratch layer for masked overlay
 const HISTORY_HELP = $("#history-empty").textContent;
 const FINISH_TIP = $("#finish-btn").title; // the Finish button's tooltip, written once in the page
 $("#help-preview").textContent = $(".preview-note").textContent; // the Help's Preview entry is the Render panel's note
+const BACK_TO_LATEST = "Click it again, or press Esc, to display the latest result"; // after a click on a finished step
+$(".render-hint").textContent = `Click a finished step to display it. ${BACK_TO_LATEST}.`;
 const FLUID_HELP = "A fluid shot: paint your fluid (smoke, fire, water and more) in flat colours on the first and last frames, " +
   "and every 8 frames between if you want. Ctrl+C and Ctrl+V copy a keyframe; drag its diamond to move it. Describe the fluid in " +
   "the text prompt, then press Enter.";
@@ -959,7 +961,7 @@ function choosePass(id) {
     setShot(m.url, fluid && keying() ? "fluid" : S.heroKey, m.space, m.frames ?? null, { framesSpace: m.framesSpace }); // a pass's EXR frames and their space (passMovie, fluidPasses)
   }
   fluidInput();
-  hud(`${label}: on show. Click it again, or Esc, for the latest.`, 3000);
+  hud(`${label}: displayed. ${BACK_TO_LATEST}.`, 3000);
   log(`Viewer: ${label}.`);
   stagesUI();
 }
@@ -974,7 +976,7 @@ function compareRow(li, id) { // in the Render panel's pick helper: Ctrl+click c
   const show = li.onclick;
   li.onclick = (e) => (e.ctrlKey || e.metaKey ? comparePass(id) : show(e));
   li.dataset.compare = id;
-  li.title += ". Ctrl+click (Cmd+click on a Mac) puts it on the wipe's left side, against the pass on show";
+  li.title += " Ctrl+click (Cmd+click on a Mac) puts it on the wipe's left side, against the displayed result.";
   li.classList.toggle("compared", S.cmp?.id === id);
   if (S.xray) xrayLater(); // the rows changed: a matte the X-ray reads may have come
 }
@@ -2161,7 +2163,7 @@ function show(edit) { // a click on a History row: frame 0 shows that edit's str
   if (S.selected && !S.draft) $("#prompt").value = "";
   S.selected = null;
   S.peek = edit; // frame 0 shows its strokes until playback starts or an edit is launched
-  if (edit) hud(`Edit ${num(edit)} shown. A stroke starts a new edit on top; the pencil changes Edit ${num(edit)}.`, 3500);
+  if (edit) hud(`Edit ${num(edit)}: strokes displayed. A stroke starts a new edit on top; the pencil changes edit ${num(edit)}.`, 3500);
   historyUI(); render();
 }
 
@@ -3361,7 +3363,7 @@ function stagesUI() {
     li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time">fluid</span>';
     li.children[1].textContent = x.label;
     li.classList.add("pick");
-    li.title = `${x.label}: show it in the viewer. Click it again, or Esc, for the latest.`;
+    li.title = `${x.label}: click to display it. ${BACK_TO_LATEST}.`;
     li.onclick = () => choosePass(x.id);
     li.dataset.pass = x.id;
     return li;
@@ -3370,7 +3372,7 @@ function stagesUI() {
   const skip = r?.skip ?? plan({ key: S.heroKey }, active).skip, later = (st) => st.onDemand && !S.wantDownload; // the export waits for Export
   const pick = (li, id, label) => { // a finished pass with a picture: a click shows it on every frame, a second click the latest
     li.classList.add("pick");
-    li.title = `${label}: show it in the viewer. Click it again, or Esc, for the latest.`;
+    li.title = `${label}: click to display it. ${BACK_TO_LATEST}.`;
     li.onclick = () => choosePass(id);
     li.dataset.pass = id;
     compareRow(li, id); // the viewer's: Ctrl+click puts the pass on the wipe's left side
@@ -3922,7 +3924,7 @@ async function modelsUI(force = false) { // Help > Models and licences: every mo
     return a;
   };
   const n = used.size, what = flows.includes("edit") ? "these edits use" : flows.includes("fluid") ? "this fluid shot uses" : "SDR to HDR uses";
-  $("#models-shown").textContent = !S.plate ? "No plate is open." : n ? `In gold: the ${n} model${n === 1 ? "" : "s"} ${what}.` : "No edit on show: no model works on this plate yet.";
+  $("#models-shown").textContent = !S.plate ? "No plate is open." : n ? `In gold: the ${n} model${n === 1 ? "" : "s"} ${what}.` : "No edit turned on: no model works on this plate yet.";
   $("#models-all").replaceChildren(...registry.models.map(card));
   $("#models").dataset.shown = [...used.keys()].join(",");
 }
