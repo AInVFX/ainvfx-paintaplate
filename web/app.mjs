@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleComposes, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleSeconds, upscaleSizes, upscaleSource, upscaleWhy, upscaleTarget, upscaleWindow, upscaleWindows, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, freeName, liveEvery, PREVIEW_DEFAULT, sceneName, previewCap, previewDivOf, readPreview, stepLabel, previewSize, previewSizes, reconcile, removedNames, renderKey, rubDabs, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleComposes, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, fluidPasses, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -803,7 +803,6 @@ function upscaleFigures() { // Upscale on this plate: the export's upscaled size
   const p = S.plate, target = upscaleTarget(p.spec.width ?? p.work[0], p.spec.height ?? p.work[1], S.upscaleAsk), profile = S.memoryProfile.name;
   return { target, frames: p.frames, alone: upscaleSeconds(target, p.frames, { profile }), edit: upscaleSeconds(target, p.frames, { passes: 2, parts: 3, profile }), hdr: !!S.deliver.hdr };
 }
-const FIGURES = { upscale: upscaleFigures }; // the figures of a Finish option whose question is a function of them
 function finishState(opt) { // a Finish option on this plate: on, disabled, and why: the line that says why it cannot change here
   const p = S.plate;
   if (opt.id === "upscale") { // optional, as fluid shots and SDR to HDR are; a plate already that large keeps it, with what to expect
@@ -819,14 +818,14 @@ function finishState(opt) { // a Finish option on this plate: on, disabled, and 
 function finishRow(opt) { // one row of the Finish menu: its switch and name, its line, why it cannot change here, and its question
   const li = document.createElement("li");
   li.className = "finish-row";
-  li.innerHTML = `<label><input type="checkbox" id="finish-${opt.id}"><span class="name"></span></label>${opt.id === "upscale" ? `<select id="finish-${opt.id}-size" hidden></select>` : ""}<small class="line"></small><small id="finish-${opt.id}-why" class="why" hidden></small>`
+  li.innerHTML = `<label><input type="checkbox" id="finish-${opt.id}"><span class="name"></span></label>${opt.id === "upscale" ? `<select id="finish-${opt.id}-size" hidden></select><small id="finish-${opt.id}-time" hidden></small>` : ""}<small class="line"></small><small id="finish-${opt.id}-why" class="why" hidden></small>`
     + (opt.ask ? `<div id="finish-${opt.id}-ask" class="finish-ask" hidden><p></p><button id="finish-${opt.id}-yes" type="button">Yes, turn it on</button> <button id="finish-${opt.id}-no" type="button" class="quiet">No, keep it off</button></div>` : "");
   li.querySelector(".name").textContent = opt.name;
   li.querySelector(".line").textContent = opt.line;
   li.querySelector("input").addEventListener("change", (e) => askFinish(opt, e.target.checked));
   li.querySelector(`#finish-${opt.id}-size`)?.addEventListener("change", (e) => pickUpscaleSize(e.target.value));
   if (opt.ask) {
-    li.querySelector(".finish-ask p").textContent = typeof opt.ask === "string" ? opt.ask : ""; // a function: written when the question opens
+    li.querySelector(".finish-ask p").textContent = opt.ask;
     li.querySelector(`#finish-${opt.id}-yes`).addEventListener("click", () => { $(`#finish-${opt.id}-ask`).hidden = true; setFinish(opt, true); });
     li.querySelector(`#finish-${opt.id}-no`).addEventListener("click", () => { $(`#finish-${opt.id}-ask`).hidden = true; finishUI(); });
   }
@@ -852,7 +851,6 @@ function askFinish(opt, on) { // a pass that changes what Export writes asks fir
   const ask = $(`#finish-${opt.id}-ask`);
   if (ask) ask.hidden = true;
   if (!on || !ask) return setFinish(opt, on);
-  if (typeof opt.ask === "function") ask.querySelector("p").textContent = opt.ask(FIGURES[opt.id]());
   $(`#finish-${opt.id}`).checked = false;
   ask.hidden = false;
 }
@@ -868,22 +866,28 @@ function upscaleSizeUI(opt, show) { // Finish > Upscale's size: the plate's size
   const sel = $(`#finish-${opt.id}-size`), p = S.plate;
   if (!sel) return;
   sel.hidden = !show || !p;
-  if (sel.hidden) return;
+  if (sel.hidden) return void ($(`#finish-${opt.id}-time`).hidden = true);
   const [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]], now = upscaleTarget(w, h, S.upscaleAsk), sizes = upscaleSizes(w, h);
   const at = sizes.findIndex((s) => s.size[0] === now[0] && s.size[1] === now[1]);
   sel.replaceChildren(...sizes.map((s, i) => new Option(`${s.size.join(" x ")}${i ? "" : " (the plate's size)"}`, String(i))),
-    new Option(at < 0 ? `Custom: ${now.join(" x ")}` : "Custom…", "custom"));
-  sel.value = at < 0 ? "custom" : String(at);
+    ...(at < 0 ? [new Option(`Custom: ${now.join(" x ")}`, "now")] : []), new Option("Custom…", "custom")); // Custom… opens its dialog each time
+  sel.value = at < 0 ? "now" : String(at);
+  const f = upscaleFigures(), seconds = !f.hdr && S.edits.some((e) => e.on && e.patch && ["paint", "erase"].includes(e.tool)) ? f.edit : f.alone; // Paint or Clean: the plate and the layer too
+  const time = $(`#finish-${opt.id}-time`);
+  time.textContent = seconds > 0 ? upscaleNote(seconds) : "";
+  time.hidden = !(seconds > 0);
 }
 function pickUpscaleSize(value) { // a size of the list, or Custom…
   const p = S.plate;
   if (value === "custom") return customUpscale();
+  if (value === "now") return; // the custom size in use
   setUpscaleAsk(upscaleSizes(p.spec.width ?? p.work[0], p.spec.height ?? p.work[1])[+value].ask);
 }
 function customUpscale() { // Finish > Upscale > Custom…: the long side in px; the other side follows the plate
-  const p = S.plate, [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]];
+  const p = S.plate, [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]], now = upscaleTarget(w, h, S.upscaleAsk);
+  const custom = !upscaleSizes(w, h).some((s) => s.size[0] === now[0] && s.size[1] === now[1]); // the dialog opens on the custom size in use
   ask("The long side in px, such as 3000. The other side follows the plate.", "Set this size",
-    { no: "Keep the current size", field: { value: "", placeholder: "3000" } }).then((typed) => {
+    { no: "Keep the current size", field: { value: custom ? String(Math.max(...now)) : "", placeholder: "3000" } }).then((typed) => {
     const asked = typed === false ? null : upscaleCustom(typed, w, h);
     if (asked) return setUpscaleAsk(asked);
     if (typed !== false) stopped(`Upscale size not changed: "${typed.trim()}" is not a long side from ${UPSCALE.least} to ${UPSCALE.most[0]} px.`, "Type a number such as 3000.");

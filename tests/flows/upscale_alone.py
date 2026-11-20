@@ -10,8 +10,9 @@ def run(browser, port, U):
     page.click("#finish-btn")
     page.click("#finish-hdr"); page.click("#finish-hdr-yes")
     page.click("#finish-upscale")
-    U.check("3840 x 2112" in (page.text_content("#finish-upscale-ask p") or ""), "the question gives the plate's upscaled size")
-    page.click("#finish-upscale-yes"); page.keyboard.press("Escape")
+    U.check("3840 x 2112" in page.evaluate("() => { const s = document.querySelector('#finish-upscale-size'); return s.options[s.selectedIndex].textContent; }"),
+            "the size list chooses the plate's upscaled size")
+    page.keyboard.press("Escape")
     page.click("#generate")
     U.wait_log(page, "[...document.querySelectorAll('#log li span')].some((e) => /Render v\\d+: SDR to HDR: done in/.test(e.textContent))",
                120000, "SDR to HDR on the plate")

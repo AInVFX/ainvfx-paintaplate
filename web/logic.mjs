@@ -783,25 +783,19 @@ export function upscaleWhy(width, height, ask = UPSCALE_ASK) {
   const restore = `the result is brought down to ${part} that size, then SeedVR2 restores its detail. Every pixel is new.`;
   return tw === width && th === height ? `At the plate's own size, ${restore}` : `This size is smaller than the plate, so the frames come out smaller: ${restore}`;
 }
-// The question before the row turns on: what Export writes, and how long on this GPU. `hdr`: SDR to HDR is on, so Upscale
-// takes its result alone (upscaleComposes).
-export function upscaleAsk({ target, frames, alone, edit, hdr = false }) {
-  const min = (s) => `about ${Math.max(1, Math.round(s / 60))} min`;
-  const start = `Export then also writes an upscaled set at ${target[0]} x ${target[1]}. On this GPU, ${frames} ${frames === 1 ? "frame takes" : "frames take"} ${min(alone)}`;
-  return (hdr ? `${start}. SeedVR2 upscales the HDR result.` : `${start}, or ${min(edit)} with Paint or Clean, where the plate and the layer are upscaled too.`)
-    + " Every pixel of an upscaled frame is new.";
-}
+// Finish > Upscale's note under its size list: about how long the upscaled set takes on this GPU, for the size chosen and
+// the edits on show (upscaleFigures).
+export const upscaleNote = (seconds) => `About ${Math.max(1, Math.round(seconds / 60))} min on this GPU.`;
 
 // The Finish menu: the passes on the whole plate after the full-size composite, in the order the render runs them. Each
 // option: its id (its switch is #finish-<id>), its name, the line that says what it does to the result, and the question
-// it asks before it turns on, when it changes what Export writes: its text, or a function of the plate's figures.
+// it asks before it turns on, when it changes what Export writes.
 export const FINISH = [
   { id: "hdr", name: "SDR to HDR",
     line: "The result is regenerated in scene-linear values, fitted to the plate. It becomes half-float EXR frames in ACES2065-1, in the viewer and in Export.",
     ask: "This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1." },
   { id: "upscale", name: "Upscale",
-    line: "Export also writes the result at the size chosen, up to 3840 x 2160, restored by SeedVR2 7B. With Paint or Clean, the plate, the layer and the matte come at that size too; with SDR to HDR, the result and its matte.",
-    ask: upscaleAsk },
+    line: "Export also writes an upscaled set at the size chosen, with SeedVR2 7B, including layers and mattes." },
 ];
 export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on
 

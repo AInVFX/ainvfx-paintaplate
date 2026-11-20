@@ -16,8 +16,9 @@ def run(browser, port, U):
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("under the edits: the fluid shot v"), 240000, "the fluid shot")
     page.click("#finish-btn"); page.click("#finish-upscale")
-    U.check("3456 x 2160" in (page.text_content("#finish-upscale-ask p") or ""), "the question gives the fluid shot's upscaled size")
-    page.click("#finish-upscale-yes"); page.keyboard.press("Escape")
+    U.check("3456 x 2160" in page.evaluate("() => { const s = document.querySelector('#finish-upscale-size'); return s.options[s.selectedIndex].textContent; }"),
+            "the size list chooses the fluid shot's upscaled size")
+    page.keyboard.press("Escape")
     start = len(U.log_lines(page))
     page.click("#export-btn")
     with page.expect_download(timeout=240000) as dl:

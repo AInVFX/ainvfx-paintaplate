@@ -14,14 +14,12 @@ def run(browser, port, U):
     page.evaluate(U.WATCH)
     page.click("#finish-btn")
     U.check(page.is_enabled("#finish-upscale") and not page.is_checked("#finish-upscale"), "Upscale is a row of the Finish menu, off")
-    page.click("#finish-upscale")
-    ask = page.text_content("#finish-upscale-ask p") or ""
-    U.check(page.is_visible("#finish-upscale-ask") and "an upscaled set at 3840 x 2112" in ask and "49 frames take about" in ask and "Every pixel" in ask,
-            f"turning it on asks first, in figures: {ask!r}")
     start = len(U.log_lines(page))
-    page.click("#finish-upscale-yes")
-    U.check(page.is_checked("#finish-upscale") and page.text_content("#finish-btn") == "Finish · 1"
-            and any(t.startswith("Finish: Upscale on.") for t in U.log_lines(page)[start:]), "« Yes, turn it on » turns it on, and the log says so")
+    page.click("#finish-upscale")
+    note = page.text_content("#finish-upscale-time") or ""
+    U.check(page.is_hidden("#finish-upscale-ask") and page.is_checked("#finish-upscale") and page.text_content("#finish-btn") == "Finish · 1"
+            and any(t.startswith("Finish: Upscale on.") for t in U.log_lines(page)[start:]), "its switch turns it on with no question, and the log says so")
+    U.check(note.startswith("About ") and note.endswith(" min on this GPU."), f"the note under the size list gives the time on this GPU: {note!r}")
     page.keyboard.press("Escape")
     page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(U.REVIEWED), 240000, "the full-size composite of the paint")
