@@ -124,11 +124,11 @@ export const previewCap = (work, div) => (div ? Math.round(Math.max(...work) / d
 
 export const gb = (n) => (n > 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
 
-export function secs(t) { // "about 40 s left", "about 1 min 40 s left": rounded to 10 s past a minute
+export function secs(t, tail = " left") { // "about 40 s left", "about 1 min 40 s left": rounded to 10 s past a minute; with tail "", the time alone
   if (t == null || !isFinite(t)) return "";
-  if (t < 60) return `about ${Math.max(1, Math.round(t))} s left`;
+  if (t < 60) return `about ${Math.max(1, Math.round(t))} s${tail}`;
   const r = Math.round(t / 10) * 10, m = Math.floor(r / 60), s = r % 60;
-  return m >= 10 || !s ? `about ${Math.round(t / 60)} min left` : `about ${m} min ${s} s left`;
+  return m >= 10 || !s ? `about ${Math.round(t / 60)} min${tail}` : `about ${m} min ${s} s${tail}`;
 }
 
 // ---------- Captions: the page's own text and table for an edit (app.templateCaption) ----------

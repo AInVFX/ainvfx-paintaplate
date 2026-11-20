@@ -3261,6 +3261,9 @@ function mattesOf(found) { // a missing matte is the other one again: the workfl
 
 const PARTS = { export: "the result in the plate's format", layer: "its layer", matte: "its matte", "upscaled": "the upscaled set", review: "a review movie", shot: "the regenerated shot",
   hdr: "the HDR frames", plate: "the fluid shot", preview: "its preview movie", graph: "the ComfyUI graph" };
+// Export with ComfyUI graph ticked, on a ComfyUI that does not write the graph (the pack updated, ComfyUI not yet restarted):
+// the fact, for the log, and what to do, which the status line adds (told)
+const GRAPH_UNWRITTEN = ["Warning: the ComfyUI graph was not written. The zip holds the other files.", "Restart ComfyUI after an update of Paint a plate, then export again."];
 
 // The models of the job on show, as planned from its start (models.modelsBehind): the edits on show and the one being
 // painted, every step their render will run (plan, STEP_FLOWS), Upscale and SDR to HDR when Finish asks for them, a
@@ -3284,8 +3287,9 @@ async function modelsBehindResult() { // the models behind the result on show: t
 }
 async function download(parts = ["export", "matte"]) {
   const graph = await S.graph; S.graph = null; // Export's ComfyUI graph, written beside the result so the zip takes it
-  if (graph && await fetch(`/paintaplate/graph?${new URLSearchParams({ run: S.exported.run })}`, { method: "POST", body: JSON.stringify(graph.file, null, 1) })
-    .then((r) => r.ok, () => false)) parts = [...parts, "graph"];
+  const written = graph ? await fetch(`/paintaplate/graph?${new URLSearchParams({ run: S.exported.run })}`, { method: "POST", body: JSON.stringify(graph.file, null, 1) })
+    .then((r) => r.ok, () => false) : null; // null: no graph asked for, or none to write, which graphFile said
+  if (written) parts = [...parts, "graph"];
   const models = (await modelsBehindResult().catch(() => [])).map((m) => m.id).join(",");
   const a = Object.assign(document.createElement("a"), {
     href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, parts: parts.join(","), models })}`,
@@ -3293,6 +3297,7 @@ async function download(parts = ["export", "matte"]) {
   document.body.append(a); a.click(); a.remove();
   const what = parts.map((k) => (k === "export" && S.exported.space === HDR_FRAMES ? "the result as half-float EXR frames" : PARTS[k])); // SDR to HDR's result of a plate whose format holds nothing above 1.0
   status(`Download: ${S.exported.name}.zip, with ${what.slice(0, -1).join(", ")}${what.length > 1 ? " and " : ""}${what.at(-1)}.`);
+  if (written === false) told(...GRAPH_UNWRITTEN); // after the download's line, so the status line keeps the warning and what to do
 }
 
 // ---------- Interface ----------
@@ -3535,7 +3540,7 @@ function exportDialog() { // its words come from one source for every kind of re
   $("#x-graph").closest("label").hidden = fluid || alone || !S.edits.some((e) => e.on && e.patch && e.state === "done"); // the edits on show, as one ComfyUI workflow
   const kind = fluid ? "fluid" : alone ? "plate" : relitHdr ? "relit" : "edits";
   const ready = fluid || (alone ? !!r?.review : relitHdr ? !!r.hdrFrames : !!(r?.exported || r?.review));
-  const words = exportWords({ kind, ready, left: ready ? "" : secs(renderLeft(true)), hdr: fluid && !!S.fluid.result.hdr, exr: !fluid && exportsExr(r),
+  const words = exportWords({ kind, ready, left: ready ? "" : secs(renderLeft(true), ""), hdr: fluid && !!S.fluid.result.hdr, exr: !fluid && exportsExr(r),
     movie: fluid ? "" : spec.kind === "video" ? `${spec.codec} movie` : `${spec.ext.slice(1).toUpperCase()} ${spec.kind}` }); // a fluid shot names its own formats
   $("#x-hint").textContent = words.hint; $("#x-format").textContent = words.format; $("#x-note").textContent = words.note;
   $("#export").showModal();
