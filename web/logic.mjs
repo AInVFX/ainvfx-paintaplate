@@ -797,6 +797,15 @@ export const FINISH = [
   { id: "upscale", name: "Upscale",
     line: "Export also writes an upscaled set at the size chosen, with SeedVR2 7B, including layers and mattes." },
 ];
+// The Render panel's rows in the order things happen: the steps done, in the order they finished (a step reused from an
+// earlier render is done at once, so it comes first), then the step running, then the steps to come in their planned
+// order. steps: ids in plan order; done(id): it finished; at(id): its place in the order steps finished, if known; now: the
+// id running, or null. A step done with no place known (made before this page) keeps its place among the done ones.
+export function stepOrder(steps, { done, at = () => undefined, now = null }) {
+  const rank = (id) => (done(id) ? [0, at(id) ?? 0] : id === now ? [1, 0] : [2, 0]);
+  return steps.map((id, i) => ({ id, i, k: rank(id) })).sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.i - b.i).map((x) => x.id);
+}
+
 // The Export dialog's words for every kind of result, from one source: the line above its parts, the result's format, and
 // the note under them. kind: "edits", "plate" (SDR to HDR on the plate, with no edit), "relit" (a Light edit in HDR) or
 // "fluid". ready: what Export takes its files from is made; left: the time until it is, such as "about 10 min", or "".

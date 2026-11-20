@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleComposes, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, defaultDepth, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleComposes, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, fluidPasses, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -2852,6 +2852,7 @@ const previewOf = (r) => r?.previews?.[S.plate.shot.join("x")]; // what this pre
 const doneOf = (r, st) => (st.preview ? previewOf(r) : r)?.done?.[st.id]; // seconds a step took, if it ran
 const fullSizeMade = (r) => !!r?.review && !(r.hdrAfter && r.done?.hdr === undefined); // the full-size result is made: the composite, and SDR to HDR on it when a Light edit takes it (logic.hdrAfterComposite)
 S.took = {}; // measured seconds per step, for this plate: the next estimates use them
+let stepSeq = 0; // the order in which steps finish, kept per render (store.at): the Render panel lists them so (stepsInOrder)
 
 function plan(r, active) { // the steps this set of edits needs: the erase pass for erases, Ripple for paint and light, no second size when the preview is full size
   const p = S.plate, [sw, sh] = p.shot, onePass = sw === p.work[0] && sh === p.work[1];
@@ -2908,7 +2909,7 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
     try { localStorage.setItem(TIMES_KEY, JSON.stringify(TIMES)); } catch { /* a private window: the session's own times still serve */ }
     S.took[timeId(t, makesHdr(r.skip))] = dt;
   }
-  (store.done ??= {})[id] = dt;
+  (store.done ??= {})[id] = dt; (store.at ??= {})[id] = ++stepSeq;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
   S.stage = null;
   log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: done in ${dt.toFixed(1)} s (estimate ${guess} s).`);
@@ -2918,7 +2919,7 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
 function reused(r, store, id, take) { // a step that a render with the same erases made already: its result is used again
   if (store.done?.[id] !== undefined) return;
   take();
-  (store.done ??= {})[id] = 0;
+  (store.done ??= {})[id] = 0; (store.at ??= {})[id] = ++stepSeq;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // taken again: its workflows made it
   log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: reused from an earlier render (same Clean edits).`);
 }
@@ -3006,7 +3007,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     const from = final ? d : d.previews[sized];
     for (const id of final ? ["cleanfull", "full"] : ["clean", "shot"]) {
       if (r.skip.has(id) || store.done?.[id] !== undefined) continue;
-      (store.done ??= {})[id] = 0;
+      (store.done ??= {})[id] = 0; (store.at ??= {})[id] = ++stepSeq;
       (store.taken ??= {})[id] = d.v;
       log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: reused from render v${d.v}, whose other edits are far from these.`);
     }
@@ -3378,6 +3379,14 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
   return t;
 }
 
+// The Render panel's rows in the order things happen: the steps done, in the order they finished (a step reused from an
+// earlier render is done first), then the step running, then the steps to come in their planned order
+function stepsInOrder(r, skip) {
+  const steps = STAGES.filter((st) => !skip.has(st.id)), of = Object.fromEntries(steps.map((st) => [st.id, st]));
+  return stepOrder(steps.map((st) => st.id), { done: (id) => doneOf(r, of[id]) !== undefined, at: (id) => (of[id].preview ? previewOf(r) : r)?.at?.[id],
+    now: S.stage?.key === S.heroKey ? S.stage.id : null }).map((id) => of[id]);
+}
+
 function stagesUI() {
   $("#stop").hidden = !generating();
   if ($("#help").open && !$("#models").hidden) modelsUI().catch(quiet); // Models and licences follows the job's plan while it is open
@@ -3414,7 +3423,7 @@ function stagesUI() {
   first.className = "done" + (S.pass === "first" ? " shown" : "");
   first.innerHTML = '<span class="dot"></span><span class="name">First frame</span><span class="time">edit</span>';
   pick(first, "first", "the first frame");
-  list.replaceChildren(...fluidRows, ...(active.length ? [first] : []), ...STAGES.filter((st) => !skip.has(st.id)).map((st) => {
+  list.replaceChildren(...fluidRows, ...(active.length ? [first] : []), ...stepsInOrder(r, skip).map((st) => {
     const li = document.createElement("li"), took = doneOf(r, st), from = (st.preview ? previewOf(r) : r)?.taken?.[st.id];
     const now = S.stage?.id === st.id && S.stage.key === S.heroKey;
     li.className = took !== undefined ? "done" : now ? "now" : later(st) ? "later" : "";
