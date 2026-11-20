@@ -841,7 +841,7 @@ export function plateSpaceLine(plate) {
 // `what`: « plate's colour space » or « OCIO config ». The first frame is the page's own step: the question counts the edits.
 export function remakeQuestion(what, edits) { return `Changing the ${what} affects generation: ${edits} edit${edits === 1 ? "" : "s"} will be regenerated. Continue?`; }
 // The HUD's line when a fluid keyframe moves to the nearest frame it can sit on; `frame` is the plate's own number
-export const keyframeSlotLine = (frame) => `Keyframes sit on the first frame, on the last frame, or every 8 frames between: frame ${frame}.`;
+export const keyframeSlotLine = (frame) => `Keyframes snap to the first frame, the last frame or every 8 frames between: frame ${frame}.`;
 
 // A family of the plate's colour-space tree, named for a person. The config's « Display », the spaces encoded for a
 // display, reads « Display-referred ». « ITU » is spelled out: the International Telecommunication Union publishes the
@@ -1102,7 +1102,7 @@ export const wantsHdrFor = (spec, headroom, deliverHdr) => holdsHdr(spec, headro
 // reports about 47.5 GiB, a 40 GB one about 39.6.
 export const BIG_PLATE = { side: 2048, vram: 46 * 2 ** 30 };
 export const bigPlateWarning = (spec, vram) => (spec && vram > 0 && Math.max(spec.width, spec.height) > BIG_PLATE.side && vram < BIG_PLATE.vram
-  ? `This plate is ${spec.width} x ${spec.height}, above 2K, and this GPU has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB GPU for now: its renders may not finish here.`
+  ? `This plate is ${spec.width} x ${spec.height}, above 2K, and this GPU has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB GPU: its renders may run out of memory here.`
   : null);
 export const hdrFps = (fps) => Math.min(30, +fps || 24); // the conditioning frame rate: at most 30, as in Lightricks' workflow
 export const blankDepth = (v) => (+v === HDR_DEPTH ? HDR_DEPTH : 8);
@@ -1391,6 +1391,13 @@ export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", clean: "ltx
 export const RAM_COPIES = 8, RAM_COPIES_OPEN = 3;
 export const framesNeed = (width, height, frames, name = "") => // bytes of RAM for the job `name`: the copies, and 4 GB to work in
   (name === "ingest" ? RAM_COPIES_OPEN : RAM_COPIES) * width * height * frames * 12 + 4 * 2 ** 30;
+// Each job's name in a line a person reads, as the Render panel names it where it can: « Memory freed before the shot: the
+// edit's models unloaded. »
+export const JOB_NAME = { ingest: "opening the plate", prompt: "the prompt writer", prefetch: "the prompt writer", edit: "the edit",
+  snap: "the SAM mask", clean: "the clean plate pass", cleanup: "the clean plate pass", shot: "the shot", matte: "the matte",
+  comp: "the composite", review: "the review movie", export: "Export", warm: "the warm-up", fluid: "the fluid shot", hdr: "SDR to HDR",
+  upscale: "Upscale", upscale_export: "the upscaled export" };
+
 export function freesBefore(profile, last, name, room = null) { // room: { free, need } in bytes of RAM, where ComfyUI gives it
   if (!last || FAMILY[name] === FAMILY[last]) return false;
   return !!profile?.frees || (!!room && room.free < room.need);

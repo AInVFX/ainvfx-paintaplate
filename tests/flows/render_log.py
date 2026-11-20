@@ -72,6 +72,6 @@ def run(browser, port, U):
     lines = page.evaluate("window.__lines")
     freed = [t.split(":")[0].removeprefix("Memory freed before ") for t in lines if t.startswith("Memory freed before ")]
     at = lambda start: next((i for i, t in enumerate(lines) if t.startswith(start)), -1)  # noqa: E731
-    U.check(freed.count("shot") == 1 and freed.count("matte") == 1 and 0 <= at("Memory freed before shot:") < at("shot ") < at("Memory freed before matte:") < at("matte "),
+    U.check(freed.count("the shot") == 1 and freed.count("the matte") == 1 and 0 <= at("Memory freed before the shot:") < at("shot ") < at("Memory freed before the matte:") < at("matte "),
             f"a card under 24 GB holds one family of models at a time: memory freed before {freed}")
     page.close()
