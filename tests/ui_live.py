@@ -504,11 +504,14 @@ def remote(a):
                 if page.inner_text("#render-left") == "full size ready":  # Export writes the result, then the zip downloads
                     with page.expect_download(timeout=3 * 3600000 if a.upscale else 600000) as dl:  # the upscaled set: about 45 min on a 16 GB GPU
                         page.click("#export-btn")
+                        page.check("#x-review")  # the review movie too, as the flow asks: a real ComfyUI writes it as an MP4
                         if a.graph:  # the scene as one ComfyUI workflow, in the same zip
                             page.check("#x-graph")
                         page.click("#x-go")
                     dl.value.save_as(f"{shots}/export.zip")
-                    mark(f"downloaded {len(zipfile.ZipFile(f'{shots}/export.zip').namelist())} files")
+                    names = zipfile.ZipFile(f"{shots}/export.zip").namelist()
+                    movies = [n for n in names if n.lower().endswith((".mp4", ".mov", ".webm"))]
+                    mark(f"downloaded {len(names)} files; movies: {', '.join(movies) or 'none'}")
                     if a.graph:  # the scene as one ComfyUI workflow, from the export's zip. A case does not depend on it
                         try:
                             with open(f"{shots}/scene.comfyui.json", "wb") as f:
