@@ -3549,19 +3549,19 @@ function setSize(v) {
 // each thumbnail is fetched only when it shows, so a folder of thousands of outputs opens at once. A click reads one item.
 // At the input or output root, the newest plates of the folders below are listed too, each with its folder.
 const BROWSE_PAGE = 120;
-const OPEN = { tab: "files", at: "", by: "name", ...saved("paintaplate.open"), items: [], shown: 0, chosen: null, scene: null };
-const keepOpen = () => { try { localStorage.setItem("paintaplate.open", JSON.stringify({ tab: OPEN.tab, at: OPEN.at, by: $("#browse-sort").value })); } catch { /* this session only */ } };
+const OPEN = { tab: "files", by: "name", ...saved("paintaplate.open"), at: "", items: [], shown: 0, chosen: null, scene: null };
+const keepOpen = () => { try { localStorage.setItem("paintaplate.open", JSON.stringify({ tab: OPEN.tab, by: $("#browse-sort").value })); } catch { /* this session only */ } };
 const ITEM_ICON = { folder: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/></svg>',
   scene: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM4 9h16M9 5l-2 4M15 5l-2 4"/></svg>' };
 
 function openDialog() {
-  for (const id of ["#files", "#scene", "#path"]) $(id).value = "";
+  for (const id of ["#files", "#scene", "#path", "#browse-find"]) $(id).value = "";
   $("#path-error").textContent = "";
   Object.assign(OPEN, { chosen: null, scene: null });
   $("#browse-sort").value = OPEN.by;
   for (const id of ["#files-note", "#browse-info"]) $(id).textContent = "";
   blankNote(); showTab(OPEN.tab); $("#open").showModal();
-  browse(OPEN.at).catch(() => browse("").catch(quiet));
+  browse("").catch(quiet); // ComfyUI files opens on Input, whatever was opened last
   listScenes().catch(quiet);
 }
 
@@ -4532,6 +4532,11 @@ $("#browse-sort").onchange = () => { keepOpen(); drawBrowse(); };
 $("#browse").onscroll = (e) => { const el = e.currentTarget; if (el.scrollTop + el.clientHeight > el.scrollHeight - 240 && OPEN.shown < browseList().length) drawBrowse(true); };
 $("#path").oninput = () => { $("#path-error").textContent = ""; OPEN.chosen = null; for (const x of $$("#browse .item.on")) x.classList.remove("on"); openGoUI(); };
 $("#files").onchange = filesUI;
+$("#open").addEventListener("keydown", (e) => { // Enter in a field does what Open does: the form's first button is Cancel, which would take it
+  if (e.key !== "Enter" || e.isComposing || e.target.tagName !== "INPUT" || e.target.type === "file") return;
+  e.preventDefault();
+  if (!$("#open-go").disabled) $("#open-go").click();
+});
 $("#scene").onchange = () => { OPEN.scene = null; openGoUI(); };
 $("#drop").ondragover = (e) => { e.preventDefault(); e.currentTarget.classList.add("over"); };
 $("#drop").ondragleave = (e) => e.currentTarget.classList.remove("over");
