@@ -232,7 +232,7 @@
         <dt>Stop</dt><dd>Esc, or Stop beside Generate. Finished steps are kept; Enter continues from there.</dd>
         <dt>Status line</dt><dd>The latest event: an error in red, a warning in amber. The log has the details.</dd>
         <dt>Finish</dt><dd>SDR to HDR (standard to high dynamic range) regenerates the result as scene-linear, half-float EXR frames in ACES2065-1. Upscale makes Export also write a larger result, up to 3840 x 2160, with SeedVR2 7B.</dd>
-        <dt>Export</dt><dd>Writes the files you tick to ComfyUI's output folder, then downloads one zip. The result keeps the plate's format; with SDR to HDR, a movie or another SDR format gives half-float EXR frames.</dd>
+        <dt>Export</dt><dd><span id="help-export"></span> The result keeps the plate's format; with SDR to HDR, a movie or another SDR format gives half-float EXR frames.</dd>
         <dt>Save scene</dt><dd>Saves the plate and every edit on this ComfyUI. Open > Scenes opens it again.</dd>
       </dl>
     </section>
@@ -318,7 +318,7 @@
   <dialog id="export">
     <form method="dialog">
       <h2>Export</h2>
-      <p id="x-hint" class="hint">The viewer already plays the full-size composite. Export writes the result in the plate's own format and its matte, in ComfyUI's output folder, then downloads one zip.</p>
+      <p id="x-hint" class="hint"></p>
       <label class="check"><input type="checkbox" checked disabled> The result <small id="x-format"></small></label>
       <label class="check"><input id="x-matte" type="checkbox" checked> Its matte <small>where the plate changed, PNG frames</small></label>
       <label class="check"><input id="x-review" type="checkbox"> The review movie <small>H.264 MP4 of the full-size composite</small></label>

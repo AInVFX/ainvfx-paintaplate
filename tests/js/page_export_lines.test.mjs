@@ -1,5 +1,5 @@
-// The Export dialog's words for every kind of result, from one source (logic.exportWords). Then two lines that two places of
-// the page share: the key that resets OCIO, in the OCIO menu and in the Help's Keys tab, and the warning of an Export whose
+// The Export dialog's words for every kind of result, from one source (logic.exportWords), which the Help's Export entry
+// opens with. Then two lines that two places of the page share: the key that resets OCIO, in the OCIO menu and in the Help's Keys tab, and the warning of an Export whose
 // ComfyUI graph was not written, in the log and on the status line.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -20,6 +20,14 @@ test("the Export dialog: one line above its parts for every kind of result, and 
   assert.equal(said({ kind: "relit", ready: false, left: secs(610, ""), exr: true }), "The relit result in HDR. SDR to HDR runs first: about 10 min.");
   assert.equal(said({ kind: "fluid" }), "The fluid shot in ProRes 4444, with its preview movie.");
   assert.equal(said({ kind: "fluid", hdr: true }), "The fluid shot in HDR, with the SDR shot in ProRes 4444 and its preview movie.");
+});
+
+test("the Help's Export entry opens with the Export dialog's own line, which is written once", () => {
+  const html = read("paintaplate.html"), app = read("app.mjs");
+  assert.match(html, /<dt>Export<\/dt><dd><span id="help-export"><\/span> The result keeps the plate's format;/);
+  assert.ok(html.includes('<p id="x-hint" class="hint"></p>')); // the dialog's line comes from the code, never from the page's file
+  assert.ok(app.includes('$("#help-export").textContent = exportWords({ kind: "edits" }).hint;'));
+  for (const src of [html, app, read("logic.mjs")]) assert.equal(src.split("then downloads").length - 1, src === read("logic.mjs") ? 1 : 0);
 });
 
 test("the dialog names the result's format once: the plate's own, EXR frames with SDR to HDR, a fluid shot's own", () => {

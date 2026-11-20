@@ -131,6 +131,7 @@ const fx = document.createElement("canvas"); // scratch layer for masked overlay
 const HISTORY_HELP = $("#history-empty").textContent;
 const FINISH_TIP = $("#finish-btn").title; // the Finish button's tooltip, written once in the page
 $("#help-preview").textContent = $(".preview-note").textContent; // the Help's Preview entry is the Render panel's note
+$("#help-export").textContent = exportWords({ kind: "edits" }).hint; // the Help's Export entry opens with the Export dialog's own line
 const BACK_TO_LATEST = "Click it again, or press Esc, to display the latest result"; // after a click on a finished step
 $(".render-hint").textContent = `Click a finished step to display it. ${BACK_TO_LATEST}.`;
 const FLUID_HELP = "A fluid shot: paint your fluid (smoke, fire, water and more) in flat colours on the first and last frames, " +

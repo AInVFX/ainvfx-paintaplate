@@ -1,5 +1,6 @@
 """Export: « ComfyUI graph » is a tick box among Export's parts, and the scene's graph comes in the zip, beside the result.
-The dialog's words come from one source, and none says « The zip downloads at once »."""
+The dialog's words come from one source, none says « The zip downloads at once », and the Help's Export entry opens with
+the dialog's own line."""
 import json
 import zipfile
 
@@ -16,6 +17,8 @@ def run(browser, port, U):
             "ComfyUI graph is a tick box among Export's parts, off")
     U.check("downloads at once" not in (page.text_content("#export") or "") and page.text_content("#x-hint").startswith("Export writes the selected files"),
             f"the dialog says what Export does: {page.text_content('#x-hint')!r}, {page.text_content('#x-note')!r}")
+    U.check(page.text_content("#help-export") == page.text_content("#x-hint") == "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.",
+            f"the Help's Export entry opens with the same line: {page.text_content('#help-export')!r}")
     page.check("#x-graph")
     with page.expect_download(timeout=180000) as dl:
         page.click("#x-go")
