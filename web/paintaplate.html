@@ -145,7 +145,7 @@
     <p id="history-empty" class="history-empty">Your edits appear here. Describe the edit in the text prompt, paint it on the frame, then Generate. Click an edit's pencil to change it.</p>
     <section id="fluid" class="render fluid" hidden>
       <h2>Fluid shot <span id="fluid-state"></span></h2>
-      <p class="hint">Paint smoke, steam or fire on the keyframes, describe it, then Generate.</p>
+      <p class="hint">Paint your fluid (smoke, fire, water and more) on the keyframes, describe it in the text prompt, then Generate.</p>
       <div class="fluid-actions">
         <button id="fluid-again" type="button" title="Generate with another seed (Ctrl+Enter).">Another seed</button>
       </div>
@@ -388,7 +388,7 @@
         <label>A scene file from this computer <input id="scene" type="file" accept=".json,application/json"></label>
       </section>
       <section class="tab" data-tab="blank" role="tabpanel" hidden>
-        <p class="hint">A fluid shot: paint flat colour keyframes, and AInVFX's ainvfx-fluid IC-LoRA turns them into smoke, steam or fire, as a new plate. Sides in multiples of 64, 8k + 1 frames, 24, 25 or 50 fps.</p>
+        <p class="hint">A fluid shot: paint your fluid (smoke, fire, water and more) on keyframes, and AInVFX's ainvfx-fluid IC-LoRA turns it into a new plate. Width and height in multiples of 64; 8k + 1 frames, such as 121; 24, 25 or 50 fps.</p>
         <div class="blank-row">
           <label>Width <input id="b-width" type="number" min="256" max="1920" step="64" value="960"></label>
           <label>Height <input id="b-height" type="number" min="256" max="1920" step="64" value="512"></label>

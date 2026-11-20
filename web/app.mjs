@@ -96,7 +96,7 @@ const HINT = {
 };
 const HDR_MISSING = "16-bit needs Lightricks' SDR-to-HDR IC-LoRA: ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors in models/loras and its scene embeddings in models/embeddings. Accept its licence on Hugging Face, then python get_models.py downloads both.";
 const FLUID_MISSING = "Fluid shots need ainvfx-fluid.safetensors in models/loras: download it from huggingface.co/AInVFX/ainvfx-fluid (folder ltx-2.5).";
-const FLUID_HINT = "Describe the fluid: smoke plume, wild fire, thick white steam (ainvfxfluid is added)";
+const FLUID_HINT = "Describe the fluid: smoke plume, wildfire, splashing water (the page adds ainvfxfluid)";
 
 const S = {
   plate: null, original: null, hero: null,
@@ -131,9 +131,9 @@ const fx = document.createElement("canvas"); // scratch layer for masked overlay
 const HISTORY_HELP = $("#history-empty").textContent;
 const FINISH_TIP = $("#finish-btn").title; // the Finish button's tooltip, written once in the page
 $("#help-preview").textContent = $(".preview-note").textContent; // the Help's Preview entry is the Render panel's note
-const FLUID_HELP = "A fluid shot: paint flat colour blobs (light grey smoke, white steam, orange and yellow fire) on the first frame and on the " +
-  "last frame, and on the 8-frame grid between if you want. Ctrl+C and Ctrl+V copy a keyframe; drag its diamond to move it. Describe " +
-  "the fluid, then Enter.";
+const FLUID_HELP = "A fluid shot: paint your fluid (smoke, fire, water and more) in flat colours on the first and last frames, " +
+  "and every 8 frames between if you want. Ctrl+C and Ctrl+V copy a keyframe; drag its diamond to move it. Describe the fluid in " +
+  "the text prompt, then press Enter.";
 
 const quiet = (e) => { // work stopped: the status line says so, and the log too unless explained() wrote its fact
   if (e?.message === "cancelled") return;
@@ -1746,7 +1746,7 @@ function enterFluid() { // a blank plate opens as a fluid shot: the paint tool i
   $("#prompt").value = f.prompt ?? "";
   if (f.result) { f.view = "result"; setShot(f.result.preview, "fluid"); }
   fluidUI(); timelineUI(); render();
-  status("Blank plate: paint a fluid keyframe, describe it at the top, then Generate.", "hint");
+  status("Blank plate: paint your fluid on a keyframe, describe it in the text prompt, then Generate.", "hint");
 }
 
 function paintKey(e, rub) { // strokes go to the keyframe on the playhead's slot of the 8-frame grid

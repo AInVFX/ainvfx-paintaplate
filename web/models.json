@@ -191,7 +191,7 @@
    "file": "ainvfx-fluid.safetensors",
    "repo": "AInVFX/ainvfx-fluid",
    "source": "https://huggingface.co/AInVFX/ainvfx-fluid",
-   "use": "Turns painted keyframes on a blank plate into smoke, steam or fire",
+   "use": "Turns painted keyframes into a fluid: smoke, fire, water and more",
    "licence": "LTX-2.x Community License",
    "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
    "optional": true,
