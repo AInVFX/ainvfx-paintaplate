@@ -579,7 +579,7 @@ export function crumbs(path) { // the Open dialog's trail: Input or Output and t
   const full = FULL.exec(path);
   if (full) {
     const root = full[0], sep = root.length > 1 && root.endsWith("\\") ? "\\" : "/", parts = path.slice(root.length).split(/[\\/]/).filter(Boolean);
-    return [{ label: root.length > 1 ? root.slice(0, 2) : root, path: root }, ...parts.map((p, i) => ({ label: p, path: root + parts.slice(0, i + 1).join(sep) }))];
+    return [{ label: root.length > 1 ? root.slice(0, 2) : "This machine", path: root }, ...parts.map((p, i) => ({ label: p, path: root + parts.slice(0, i + 1).join(sep) }))];
   }
   const out = path.startsWith("output:"), base = out ? "output:" : "", parts = path.slice(base.length).split("/").filter(Boolean);
   return [{ label: out ? "Output" : "Input", path: base }, ...parts.map((p, i) => ({ label: p, path: base + parts.slice(0, i + 1).join("/") }))];

@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { crumbs, fullPath } from "../../web/logic.mjs";
 
 test("a full path's trail names the machine's folders, each by its full path", () => {
-  assert.deepEqual(crumbs("/data/plates"), [{ label: "/", path: "/" }, { label: "data", path: "/data" }, { label: "plates", path: "/data/plates" }]);
+  assert.deepEqual(crumbs("/data/plates"), [{ label: "This machine", path: "/" }, { label: "data", path: "/data" }, { label: "plates", path: "/data/plates" }]);
   assert.deepEqual(crumbs("C:\\shots\\sh010"), [{ label: "C:", path: "C:\\" }, { label: "shots", path: "C:\\shots" }, { label: "sh010", path: "C:\\shots\\sh010" }]);
   assert.deepEqual(crumbs("D:/shots"), [{ label: "D:", path: "D:/" }, { label: "shots", path: "D:/shots" }]);
 });

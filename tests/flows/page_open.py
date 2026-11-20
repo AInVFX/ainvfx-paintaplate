@@ -53,7 +53,7 @@ def run(browser, port, U):
     listed = U.poll(page, lambda: page.query_selector(f"#browse .item[data-path='{movie}']") is not None, 10)
     trail = page.eval_on_selector_all("#crumbs button", "els => els.map((e) => e.textContent)")
     lit = page.eval_on_selector_all("#open [data-root].on", "els => els.map((e) => e.textContent)")
-    U.check(listed and page.evaluate(SHOWN) and trail[0] == "/" and trail[-1] == "plates" and not lit and page.input_value("#path") == "",
+    U.check(listed and page.evaluate(SHOWN) and trail[0] == "This machine" and trail[-1] == "plates" and not lit and page.input_value("#path") == "",
             f"the full path of a folder of plates lists it, with the machine's folders as its trail and no root lit: {trail}, lit {lit}")
     before = opened()
     page.dblclick(f"#browse .item[data-path='{movie}']")

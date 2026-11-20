@@ -19,7 +19,7 @@ def run(browser, port, U):
     page.click("#open-btn"); page.click("#open [data-tab=files]")
     on_input = U.until(page, "document.querySelector('#open [data-root=\"\"]').classList.contains('on')", 5000)
     trail = page.eval_on_selector_all("#crumbs button", "els => els.map((e) => e.textContent)")
-    U.check(on_input and trail[:1] != ["/"], f"the dialog opens again on Input, not on the folder typed before: {trail}")
+    U.check(on_input and trail == ["Input"], f"the dialog opens again on Input, not on the folder typed before: {trail}")
     U.check(page.is_visible('#open [data-root="output:"]') and page.is_visible("#browse-find"), "its Input and Output buttons and its filter are there")
     U.no_errors([e for e in errors if "/paintaplate/stat" not in e and "Failed to load resource" not in e],  # a folder of plates: its stat answers 404, then the dialog lists it
                 "after the dialog opens again")
