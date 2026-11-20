@@ -7,7 +7,7 @@ import re
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NOT_OURS = {"MODELS.md": "a file of an export", "ocio_source_setup.py": "a file of OpenRV"}
+NOT_OURS = {"MODELS.md": "a file of an export", "scene.comfyui.json": "a file of an export", "ocio_source_setup.py": "a file of OpenRV"}
 
 
 def read(*path):

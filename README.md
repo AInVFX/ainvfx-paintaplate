@@ -20,7 +20,7 @@ Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com
 | **Light** | Relights the shot. Paint where the light comes from, in its colour. Paint in black to darken an area |
 | **A fluid shot** | Starts from a blank plate. Paint your fluid (smoke, fire, water and more) in flat colours on a few keyframes, and ainvfx-fluid generates the shot. The shot becomes the plate for every edit |
 | **Review** | The viewer follows OpenRV: colour through OpenColorIO, the same keys, a wipe against the plate, the Colour Inspector. |
-| **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers) with its matte, as one zip. For Paint and Clean the zip also holds `layer/`, the new pixels as the composite blends them: with the plate and the matte they rebuild the result. With Upscale, `upscaled/` holds the same set at the size you choose: at 3840 x 2160, for 121 frames, about 46 min for Paint or Clean on a 16 GB GPU, 23 min for the result alone, and about 14 min on a 96 GB GPU. Every pixel of an upscaled frame is new. **ComfyUI graph** saves the whole scene as one ComfyUI workflow in the editor's own format: one group per step, each with a note, to drop on ComfyUI's canvas |
+| **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers) with its matte, as one zip. For Paint and Clean the zip also holds `layer/`, the new pixels as the composite blends them: with the plate and the matte they rebuild the result. With Upscale, `upscaled/` holds the same set at the size you choose: at 3840 x 2160, for 121 frames, about 46 min for Paint or Clean on a 16 GB GPU, 23 min for the result alone, and about 14 min on a 96 GB GPU. Every pixel of an upscaled frame is new. Tick **ComfyUI graph** to add the whole scene to the zip as one ComfyUI workflow in the editor's own format (`scene.comfyui.json`): one group per step, each with a note, to drop on ComfyUI's canvas |
 | **Finish** | The passes on the whole plate, in a menu between Save scene and Export. SDR to HDR turns an SDR result, or a plate with no edit, into half-float EXR frames in ACES2065-1, the colour space OCIO's file rules give EXR. Set it where you open them, in a viewer or in compositing software: read with a plain gamma, they look darker and less saturated than the plate. Upscale makes Export also write the result at the size you choose, up to 3840 x 2160, restored by SeedVR2 7B: the plate's own size, 2560 or 3840 px on the long side, or a size you type. For Paint and Clean, the plate, the new layer and the matte come at that size too; with SDR to HDR, the result and its matte |
 
 The limits that matter today: edits are painted on the first frame only; shots are tested up to 121 frames; edits are made at up to 1920 px on the long side; a plate can be up to 3840 x 2160.
@@ -121,7 +121,7 @@ Good to know:
 
 - Clean a thin object by its full name: "floodlight pole" finds more than "floodlight".
 - Clean with **Whole object** on also takes the object's cast shadow when Klein's prompt writer points at one. If a shadow stays, clean it with a second stroke, **Whole object** off.
-- To replace a head, paint the new head over the old one. A head removed with Clean comes back as a head.
+- To replace a head, paint the new head over the old one. A body part removed with Clean, such as a head, can reappear in the result.
 - Paint additions on open ground. An addition painted across a foreground object breaks up during the shot.
 - With Preview on Half size or Quarter size, judge an effect on the full-size shot, not on the preview pass.
 - Paint a plate reads each plate's colour space from its file, and the export writes every pixel back in that space. Change it only for a camera's log footage, which no file tag describes: right-click > OCIO > Plate, then the camera's log space.
@@ -130,12 +130,16 @@ Good to know:
 Known limits:
 
 - On a plate whose camera travels, a paint's matte can lose the painted object on some frames, when SAM 3.1 stops tracking it. The page then warns and names the frames to check. Another seed, another text prompt or another stroke can help.
-- On such a plate, a paint added over a Clean edit can bring a faint shape of the removed object back on some frames. Check the result frame by frame.
+- On such a plate, a paint added over a Clean edit can show a faint shape of the removed object again on some frames. Check the result frame by frame.
 - A painted object that a foreground object hides can raise « object left its place » although the composite is right: check the picture.
 - A shadow painted with Light comes out soft: a text prompt can ask for a deeper one. A relight can leave a thin light or dark edge along bright outlines.
 - The check after Clean compares colours. An object of another colour that takes the removed object's place passes it, so look at the first frame.
 - On a paint's first frames, the matte can take in a change that the shot made to an object right beside the painted one, most on a Half size preview: check the first frames.
 - Under 16 GB of VRAM, LTX works in 256 px tiles, and a soft band can show where two tiles overlap, most in SDR to HDR's frames. From 16 GB every frame is encoded and decoded in one piece.
+- A Light edit with SDR to HDR can show a faint patch of light that floats over the plate. It comes from the Light edit, before SDR to HDR: another seed or another stroke changes it.
+- A paint whose strokes cover a whole object that walks can lose its matte part-way. The page then warns « object left its place ». Paint closer to the object, or try another seed.
+- A paint's matte can keep a few small spots near the edit, where the regenerated frame differs slightly from the plate.
+- At Half size or Quarter size, the preview's matte can cover parts of the object far from the edit. Export uses the full-size matte.
 
 **Where the rest is.** Press `?` for the keys; the backquote key shows the viewer full screen, where S opens the colours and T the edit's text prompt. The right-click menu lists every action with its keyboard shortcut, and the viewer's colour tools under **OCIO**. [`ARCHITECTURE.md`](ARCHITECTURE.md) explains how the pack works and how to change it. [`TESTING.md`](TESTING.md) describes every test.
 
