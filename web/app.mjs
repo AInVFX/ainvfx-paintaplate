@@ -1204,7 +1204,7 @@ function setShot(src, key, space = "@model", frames = null, { framesSpace = null
 // Once the shot of the current edits exists, it shows on every frame, playing or paused; the plate shows only in the wipe and
 // while O is held. Frame 0 shows the edited first frame with the strokes while edits are made.
 const held = { canvas: canvas([1, 1]), url: "" }; // the last shot frame drawn while paused: shown while the shot video seeks
-const editingFirst = () => !!(S.draft || stroke || S.running || S.queued || S.hover || S.peek);
+const editingFirst = () => !!(S.draft || stroke || S.running || S.queued || S.hover || S.hoverFluid || S.peek);
 
 // Edits are layers (logic.hiddenAbove). While an edit of History is changed, the first frame shows the edits under it and
 // its strokes. Its own old result is hidden, so a rubbed stroke leaves no generated paint behind, and so is every edit above
@@ -1363,7 +1363,11 @@ function overlays(W, H) { // on the first frame: the strokes, then the edit taki
   }
   if (S.draft) strokes(S.draft, 1);
   const shown = S.hover ?? S.selected; // History: which edit is which, and the one selected
-  if (shown && shown !== e && shown.tool !== "light" && shown.strokes.length) strokes(shown, S.hover ? 0.55 : 0.8);
+  // A selected Light edit shows its result alone: its strokes add light, so drawn over its result they would count it twice.
+  // Hovered, its strokes show while the pointer stays, as every edit's do.
+  if (shown && shown !== e && (S.hover || shown.tool !== "light") && shown.strokes.length) strokes(shown, S.hover ? 0.55 : 0.8);
+  const key = S.hoverFluid && S.fluid?.keys.find((k) => k.frame === 0); // the fluid row hovered: its keyframe on the first frame
+  if (key) { ctx.globalAlpha = 0.55; ctx.drawImage(key.canvas, 0, 0, W, H); ctx.globalAlpha = 1; }
   if (e && e.launched && !e.preview) { // the strokes stay until the first preview replaces them, then fade into it
     const t = e.shown ? (performance.now() - e.shown) / 350 : 0;
     if (t < 1) { strokes(e, 1 - t); if (e.shown) requestAnimationFrame(render); }
@@ -1995,6 +1999,7 @@ async function toggleFluid() { // bypass: the blank plate under the edits; on ag
 async function removeFluid() { // the fluid shot goes: the blank plate under the edits, and empty keyframes to paint again
   const f = S.fluid;
   cancel("fluid");
+  S.hoverFluid = false; // its row changes before the pointer leaves it
   Object.assign(f, { keys: [], result: null, on: true, prompt: "", busy: null });
   f.made?.clear();
   await rebase();
@@ -2028,6 +2033,8 @@ function fluidRow() { // the first edit of a blank plate: its fluid shot, which 
   li.querySelector(".again").disabled = !n || !S.fluidReady; // as an edit's arrow, it also works while the shot is being made
   li.querySelector(".del").onclick = () => removeFluid().catch(quiet);
   li.onclick = (ev) => { if (!ev.target.closest("button")) editFluid(); };
+  li.onmouseenter = () => { S.hoverFluid = true; render(); };
+  li.onmouseleave = () => { S.hoverFluid = false; render(); };
   return li;
 }
 
