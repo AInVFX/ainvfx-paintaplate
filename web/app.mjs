@@ -368,7 +368,7 @@ function stopEverything() {
   pause();
   clearTimeout(S.prefetchTimer); clearTimeout(idleTimer);
   for (const e of S.edits) e.token = (e.token ?? 0) + 1;
-  cancel("edit", "snap", "warm", "fluid", ...BACKGROUND);
+  cancel("edit", "snap", "warm", "fluid", "prefetch", ...BACKGROUND); // a plate that opens or closes stops the prefetch too
   S.running = null; // every pass stops: none runs until its next turn
 }
 
