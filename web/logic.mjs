@@ -1145,8 +1145,8 @@ export const editList = (nums) => (nums.length === 1 ? `edit ${nums[0]}` : `edit
 export function stopHint({ edit = null, waits = [] } = {}) {
   const list = waits.length ? editList(waits) : "";
   const wait = list ? ` ${list[0].toUpperCase()}${list.slice(1)} ${waits.length > 1 ? "wait" : "waits"}.` : "";
-  return edit === null ? `Stopped.${wait} Enter goes on from where it stopped.`
-    : `Stopped. Edit ${edit} keeps its strokes, text prompt and seed.${wait} Enter generates again, Ctrl+Enter tries another seed, Esc drops the strokes.`;
+  return edit === null ? `Stopped.${wait} Enter continues from there.`
+    : `Stopped. Edit ${edit} keeps its strokes, text prompt and seed.${wait} Enter generates again, Ctrl+Enter tries another seed, Esc removes the strokes.`;
 }
 
 // Edits are layers, after Generate. An edit above an edit that is made again stays hidden until its own

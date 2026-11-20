@@ -648,9 +648,9 @@ test("editList and stopHint: the status line names the edits stopped and waiting
   assert.equal(editList([3]), "edit 3");
   assert.equal(editList([3, 4]), "edits 3 and 4");
   assert.equal(editList([3, 4, 5]), "edits 3, 4 and 5");
-  assert.equal(stopHint({ edit: 2, waits: [3] }), "Stopped. Edit 2 keeps its strokes, text prompt and seed. Edit 3 waits. Enter generates again, Ctrl+Enter tries another seed, Esc drops the strokes.");
-  assert.equal(stopHint({ waits: [3, 4] }), "Stopped. Edits 3 and 4 wait. Enter goes on from where it stopped.");
-  assert.equal(stopHint(), "Stopped. Enter goes on from where it stopped.");
+  assert.equal(stopHint({ edit: 2, waits: [3] }), "Stopped. Edit 2 keeps its strokes, text prompt and seed. Edit 3 waits. Enter generates again, Ctrl+Enter tries another seed, Esc removes the strokes.");
+  assert.equal(stopHint({ waits: [3, 4] }), "Stopped. Edits 3 and 4 wait. Enter continues from there.");
+  assert.equal(stopHint(), "Stopped. Enter continues from there.");
 });
 
 // ---------- Viewer, round 1, second pass, turn 2: after Generate, an edit above waits for its own pass ----------

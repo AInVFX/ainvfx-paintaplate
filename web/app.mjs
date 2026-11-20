@@ -355,7 +355,7 @@ async function openPlate(list, typed, opts = {}) {
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
   const big = bigPlateWarning(spec, S.vram); // above 2K on a GPU under BIG_PLATE.vram: renders may not finish (README, GPU)
   if (big) { log(big); setTimeout(() => status(big), 80); }
-  const next = "Describe the edit at the top, paint on the frame, then Generate.", plate = S.plate;
+  const next = "Describe the edit in the text prompt, paint on the frame, then Generate.", plate = S.plate;
   const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", from file"} (right-click > OCIO > Plate changes it). ${next}`;
   status(opened, "hint");
   if (keying()) enterFluid(); else fluidUI();
@@ -632,7 +632,7 @@ function endStats() { // one line in the log for the stretch just played along o
 }
 function toggleStats() {
   S.stats = !S.stats;
-  hud(S.stats ? "Playback statistics on: play, then pause. The log keeps the line." : "Playback statistics off.", 3500);
+  hud(S.stats ? "Playback statistics on: play, then pause. The log then writes one line of figures." : "Playback statistics off.", 3500);
 }
 
 function play() {
@@ -1121,7 +1121,7 @@ function endCompare(draw = true) { // the wipe goes back to the plate on its lef
   cmpVid.removeAttribute("src"); cmpVid.load();
   if (!wiped) { S.wipe = null; $("#wipe-btn").setAttribute("aria-pressed", "false"); }
   placeWipe(); stagesUI();
-  if (draw) { render(); hud(`${label}: out of the wipe.`, 1500); }
+  if (draw) { render(); hud(`${label}: removed from the wipe.`, 1500); }
 }
 
 // A live preview belongs to the render that sent it (S.stage.key, "fluid" for a fluid shot). While those edits are on
@@ -1181,7 +1181,7 @@ function stopGenerating() { // Esc on the edit being generated, or Stop: everyth
   dropLive();
   const waits = S.edits.filter((e) => e.state === "queued").map(num);
   log(`Stopped: ${edit ? `edit ${num(edit)} keeps its strokes, text prompt and seed` : "what finished is kept"}${waits.length ? `, ${editList(waits)} ${waits.length > 1 ? "wait" : "waits"}` : ""}. Everything waits for Enter.`);
-  hud(edit ? `Stopped. Enter generates edit ${num(edit)} again.` : "Stopped. Enter goes on from where it stopped.", 4000);
+  hud(edit ? `Stopped. Enter generates edit ${num(edit)} again.` : stopHint(), 4000);
   historyUI(); // before the status line: a waiting row says so, and the stop's sentence comes last
   stoppedUI(edit);
   stagesUI(); generateUI();
@@ -1548,7 +1548,7 @@ function rubOut(e) { // the eraser works on the strokes in progress, or on the c
   let d = S.draft;
   const target = S.selected;
   if (!d && target?.strokes.length) d = busy(target) ? reopen(target) : reopenDone(target);
-  if (!d) return hud("Nothing to rub out: select an edit in History, or paint first.");
+  if (!d) return hud("Nothing to erase: select an edit in History, or paint first.");
   cancel("prefetch");
   clearTimeout(S.prefetchTimer);
   mark();
@@ -1755,7 +1755,7 @@ function paintKey(e, rub) { // strokes go to the keyframe on the playhead's slot
   const f = S.fluid, slot = snapKey(S.frame, S.plate.frames);
   if (slot !== S.frame) { seek(slot); hud(keyframeSlotLine(S.plate.first + slot), 2500); }
   let key = f.keys.find((k) => k.frame === slot);
-  if (!key && rub) return hud("No keyframe on this frame to rub out.");
+  if (!key && rub) return hud("No keyframe on this frame to erase.");
   mark();
   if (!key) f.keys.push((key = newKey(slot)));
   f.view = "keys";
@@ -1829,7 +1829,7 @@ function deleteKey(k = keyHere()) {
   mark();
   S.fluid.keys.splice(S.fluid.keys.indexOf(k), 1);
   staleFluid(); render();
-  hud(`Keyframe ${S.plate.first + k.frame} deleted: Ctrl+Z brings it back.`);
+  hud(`Keyframe ${S.plate.first + k.frame} deleted: Ctrl+Z undoes it.`);
 }
 
 function jumpKey(dir) {
@@ -1943,7 +1943,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     log(`Fluid shot v${v}: done in ${((performance.now() - t0) / 1000).toFixed(1)} s.\n  ${(outputText("fluid", out, "plate") ?? "").split("\n")[0]}`);
     f.editing = false; // the shot is made: it becomes the plate under the next edits, and the viewer plays it
     await rebase();
-    status(`Fluid shot v${v}: done, now the plate under the next edits. Space plays it; Paint, Clean and Light work on it.`, "hint");
+    status(`Fluid shot v${v}: done. It is now the plate for the next edits: Space plays it, and Paint, Clean and Light edit it.`, "hint");
   } catch (err) {
     if (err?.message !== "cancelled") quiet(err);
   } finally {
@@ -2089,7 +2089,7 @@ function launch(edit, another = false) { // Generate: the edit on the first fram
   S.peek = null;
   if (reuse(edit)) {
     log(`Edit ${num(edit)}: unchanged, result reused.`);
-    hud(`Edit ${num(edit)}: unchanged, result reused. Ctrl+Enter for another seed.`, 3000);
+    hud(`Edit ${num(edit)}: unchanged, result reused. Ctrl+Enter tries another seed.`, 3000);
     recompose(); historyUI(); render(); timelineUI();
     queueWaiting(() => queue(regenerateDependents));
     return;
@@ -2155,7 +2155,7 @@ function select(edit) { // a History row becomes the current edit: its words in 
   S.peek = edit; // frame 0 shows its strokes until playback starts or an edit is launched
   if (edit) { setTool(edit.tool); $("#prompt").value = edit.prompt; if (edit.tool === "erase") $("#whole").checked = !!edit.whole; }
   else if (!S.draft) $("#prompt").value = "";
-  if (edit) hud(`Edit ${num(edit)} selected: retype its text prompt, paint more or rub strokes out, then Generate. N starts a new edit.`, 3500);
+  if (edit) hud(`Edit ${num(edit)} selected: change its text prompt, paint more or erase strokes, then Generate. N starts a new edit.`, 3500);
   historyUI(); render();
 }
 
@@ -2190,7 +2190,7 @@ function nextEdit() { // New edit (N): the strokes in progress start now, and th
   S.selected = null;
   $("#prompt").value = "";
   historyUI(); render();
-  hud(`New edit: describe it, then paint. The tool stays ${NAME[S.tool]}.`, 2500);
+  hud(`New edit: describe it in the text prompt, then paint. The tool stays ${NAME[S.tool]}.`, 2500);
 }
 
 function pickTool(t) { // the person picks a tool: another tool than the edit being worked on starts a new edit
@@ -2424,14 +2424,14 @@ async function findWhole(edit, before, kind) { // SAM 3.1 finds the whole object
   edit.editCore = core && boxOf(core, size[0], size[1]);
   const found = Math.max(0, outputFiles("snap", out, "named").length - 1), many = (k, one) => `${k} ${one}${k === 1 ? "" : "s"}`; // the blank frame comes first
   log(`Edit ${num(edit)}: SAM masks, ${objects.length} kept.\n  ${edit.prompt ? `${many(found, "object")} named "${edit.prompt}", ` : ""}${many(picks.length, "stroke point")}.`);
-  if (!objects.length) return status(`Edit ${num(edit)}: no single object under the stroke. Clean takes the painted pixels only.`);
+  if (!objects.length) return status(`Edit ${num(edit)}: no single object under the stroke. Clean removes the painted pixels only.`);
   const bits = new Uint8Array(area);
   for (let i = 0; i < area; i++) if (objects.some((m) => m[i])) bits[i] = 1;
   edit.found = { key: snapKeyOf(edit), bits, size }; // the object alone: its shadow joins it once the caption cites one (joinShadow)
   edit.sam = samMask(bits, size, edit);
   redrawStrokes(edit);
   render();
-  status(`Edit ${num(edit)}: ${edit.prompt && found ? edit.prompt : "object"} found under the stroke. Clean takes the whole object.`, "hint"); // its name only when SAM 3.1 found it by that name
+  status(`Edit ${num(edit)}: ${edit.prompt && found ? edit.prompt : "object"} found under the stroke. Clean removes the whole object.`, "hint"); // its name only when SAM 3.1 found it by that name
 }
 
 function samMask(bits, size, edit) { // a SAM mask (0 or 1 per pixel at `size`) as a canvas at the edit's mask size
@@ -2779,7 +2779,7 @@ function preempt() { // Generate: a full-size or export step in its first half s
   if (!st || !r) return;
   const def = STAGES.find((x) => x.id === st.id), cls = !def.final ? "preview" : st.id === "export" ? "export" : "full", pct = Math.round(st.progress * 100);
   if (!stopsForEdit({ cls, progress: st.progress })) return void log(`Render v${r.v}: ${labelOf(def, r)}: at ${pct}%, finishing before the new edit.`);
-  log(`Render v${r.v}: ${labelOf(def, r)}: stopped at ${pct}% for the new edit. It goes on when its edits show again.`);
+  log(`Render v${r.v}: ${labelOf(def, r)}: stopped at ${pct}% for the new edit. It continues when its edits are turned on again.`);
   cancel(...BACKGROUND);
 }
 
@@ -3820,7 +3820,7 @@ function setDisplay(change) {
   const d = S.display, on = colour.displayActive(d);
   $("#display-state").hidden = !on;
   $("#display-state").textContent = colour.displayLabel(d);
-  hud(S.mode ? `${colour.PARAMS[S.mode].label} ${colour.formatParam(S.mode, d[S.mode])}` : on ? colour.displayLabel(d) : "Colour as shot.", 1400);
+  hud(S.mode ? `${colour.PARAMS[S.mode].label} ${colour.formatParam(S.mode, d[S.mode])}` : on ? colour.displayLabel(d) : "Colour adjustments off.", 1400);
   render();
 }
 
@@ -3828,7 +3828,7 @@ function colorMode(name) { // RV's interactive edit: drag on the frame, or the w
   if (S.mode === name) return leaveMode();
   S.mode = name;
   view.classList.add("scrub");
-  hud(`${colour.PARAMS[name].label} ${colour.formatParam(name, S.display[name])}: drag on the frame, or the wheel, - and =. Backspace resets, Esc leaves.`, 4000);
+  hud(`${colour.PARAMS[name].label} ${colour.formatParam(name, S.display[name])}: drag on the frame, or the wheel, - and =. Backspace resets, Esc closes.`, 4000);
   render();
 }
 
@@ -3837,7 +3837,7 @@ function leaveMode() {
   const name = S.mode;
   S.mode = S.scrub = null;
   view.classList.remove("scrub");
-  hud(colour.displayActive(S.display) ? colour.displayLabel(S.display) : `${colour.PARAMS[name].label} as shot.`);
+  hud(colour.displayActive(S.display) ? colour.displayLabel(S.display) : `${colour.PARAMS[name].label} reset.`);
 }
 
 const stepColor = (name, dir) => setDisplay({ [name]: colour.clampParam(name, S.display[name] + dir * colour.PARAMS[name].step) });
@@ -4384,7 +4384,7 @@ function takeColor(hex, how = "") {
 function setRub(on) {
   S.rub = on;
   $("#rub-btn").setAttribute("aria-pressed", String(on));
-  hud(on ? "Eraser: rub out the strokes you just painted." : NAME[S.tool]);
+  hud(on ? "Eraser: erases strokes of the edit in progress." : NAME[S.tool]);
   render();
 }
 let eraserKey = null; // E held down: when it went down, the eraser before it, and whether a stroke was dragged since
