@@ -797,6 +797,16 @@ export const FINISH = [
   { id: "upscale", name: "Upscale",
     line: "Export also writes an upscaled set at the size chosen, with SeedVR2 7B, including layers and mattes." },
 ];
+// The Export dialog's words for every kind of result, from one source: the line above its parts, the result's format, and
+// the note under them. kind: "edits", "plate" (SDR to HDR on the plate, with no edit), "relit" (a Light edit in HDR) or
+// "fluid". ready: what Export takes its files from is made; left: the time until it is, such as "about 10 min", or "".
+export function exportWords({ kind, ready = true, left = "", exr = false, hdr = false, movie = "" }) {
+  const first = (step) => `${step} first${left ? `: ${left}` : ""}.`, inHdr = (what) => (ready ? `${what} in HDR, from SDR to HDR.` : `${what} in HDR. ${first("SDR to HDR runs")}`);
+  const note = kind === "fluid" ? (hdr ? "The fluid shot in HDR, with the SDR shot in ProRes 4444 and its preview movie." : "The fluid shot in ProRes 4444, with its preview movie.")
+    : kind === "plate" ? inHdr("The plate") : kind === "relit" ? inHdr("The relit result") : ready ? "" : first("The full-size composite renders");
+  return { hint: "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.",
+    format: (kind === "fluid" ? hdr : exr) ? "half-float EXR frames, ACES2065-1" : kind === "fluid" ? "ProRes 4444 movie" : movie, note };
+}
 export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on
 
 // What to do when a line names a missing file of models/vae_approx, which holds the live preview's decoder that

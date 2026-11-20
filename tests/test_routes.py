@@ -107,7 +107,7 @@ class Routes(unittest.TestCase):
             asyncio.run(routes.download(types.SimpleNamespace(query={"run": "../../etc"})))
         app = types.SimpleNamespace(routes=web.RouteTableDef())
         routes.setup(app)
-        self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/browse", "/paintaplate/thumb",
+        self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/graph", "/paintaplate/browse", "/paintaplate/thumb",
                          "/paintaplate/blank", "/paintaplate/jobs/{key}", "/paintaplate/jobs/{key}", "/paintaplate/live/{prompt}", "/paintaplate/cache", "/paintaplate/stat",
                          "/paintaplate/frames", "/paintaplate/pixel", "/paintaplate/scenes", "/paintaplate/scenes/{name}", "/paintaplate/scenes/{name}",
                          "/paintaplate/ocio", "/paintaplate/ocio/shader", "/paintaplate/version"])
