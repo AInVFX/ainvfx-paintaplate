@@ -119,15 +119,13 @@ def deliver_upscale(page, size: str = ""):
     """--upscale: Finish > Upscale on for this run, before any edit, at `size`: the long side in px, as Custom… takes
     it. The row's list gives the size when one of its entries has that long side, else Custom… does;
     with no size, the page's own. Export then writes the upscaled set too, and the zip
-    holds it under upscaled/. The switch asks first."""
+    holds it under upscaled/."""
     page.click("#finish-btn")
     if page.is_disabled("#finish-upscale"):
         why = page.text_content("#finish-upscale-why")
         page.keyboard.press("Escape")
         raise RuntimeError(f"--upscale: the Finish menu offers no Upscale on this page: {why}")
     page.click("#finish-upscale")
-    if page.is_visible("#finish-upscale-ask"):
-        page.click("#finish-upscale-yes")
     page.wait_for_function("document.querySelector('#finish-upscale').checked", timeout=10000)
     if size:  # the list sits in the Finish menu: chosen while the menu is open
         listed = page.evaluate("""(size) => [...document.querySelectorAll('#finish-upscale-size option')]
@@ -242,6 +240,16 @@ def stage(note):
 PREVIEW = {"off": "off", "latent": "latent", "half": "2", "quarter": "4"}  # the Preview menu's choices, as the page stores them (logic.readPreview)
 
 
+def tick_offered(page, graph=False):
+    """In the Export dialog: ticks the review movie, as the flow does (a real ComfyUI writes it as an MP4), and with
+    `graph` the ComfyUI graph, which then comes in the same zip. Each box only when the dialog offers it: a relit result
+    in HDR has no review movie, and a fluid shot alone or a plate alone has neither. Returns the boxes it ticked."""
+    ticked = [box for box in ["#x-review"] + (["#x-graph"] if graph else []) if page.is_visible(box)]
+    for box in ticked:
+        page.check(box)
+    return ticked
+
+
 def preview_script(choice: str) -> str:
     """The script that stores the Preview menu's choice before the page loads, where the page keeps it for the session."""
     return f"sessionStorage.setItem('paintaplate.preview-menu', '{PREVIEW[choice]}');"
@@ -279,9 +287,9 @@ def main():
     ap.add_argument("--timeout", type=int, default=150)
     ap.add_argument("--out", default=SHOTS, help="folder for screenshots and timings")
     ap.add_argument("--think", type=float, default=0, help="seconds between opening the plate and the first stroke")
-    ap.add_argument("--graph", action="store_true", help="after the export, also save the scene's ComfyUI graph")
+    ap.add_argument("--graph", action="store_true", help="tick ComfyUI graph in the Export dialog, and save the scene's graph from the zip beside it")
     ap.add_argument("--option", action="append", default=[], help="with --url: one more option of the page's address, such as hdr=0 (SDR to HDR off)")
-    ap.add_argument("--memory", default="", help="with --url: the page's memory profile, small, medium or large (by default the card decides)")
+    ap.add_argument("--memory", default="", help="with --url: the page's memory profile, small, medium or large (by default the GPU decides)")
     ap.add_argument("--preview", default="", choices=("", *PREVIEW), help="with --url: the Preview menu's choice, stored before the page loads (by default the page's own)")
     ap.add_argument("--upscale", nargs="?", const="on", default="", help="with --url, at the size given (the long side in px, as Custom… takes it; alone, the page's own): turn Finish > Upscale on before painting, so Export "
                     "writes the upscaled set too; the zip waits up to 3 hours")
@@ -399,7 +407,7 @@ def fluid_shot(page, spec, shots, mark, wait_s=900):
     mark("fluid: generating")
     page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
       return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden && document.querySelector('#opening').hidden; })()""",
-                           timeout=wait_s * 1000)  # made: the first edit, and the plate under the next ones; a small card needs longer
+                           timeout=wait_s * 1000)  # made: the first edit, and the plate under the next ones; a small GPU needs longer
     mark("fluid: shot ready | " + page.inner_text("#status"))
 
 
@@ -504,9 +512,7 @@ def remote(a):
                 if page.inner_text("#render-left") == "full size ready":  # Export writes the result, then the zip downloads
                     with page.expect_download(timeout=3 * 3600000 if a.upscale else 600000) as dl:  # the upscaled set: about 45 min on a 16 GB GPU
                         page.click("#export-btn")
-                        page.check("#x-review")  # the review movie too, as the flow asks: a real ComfyUI writes it as an MP4
-                        if a.graph:  # the scene as one ComfyUI workflow, in the same zip
-                            page.check("#x-graph")
+                        tick_offered(page, a.graph)
                         page.click("#x-go")
                     dl.value.save_as(f"{shots}/export.zip")
                     names = zipfile.ZipFile(f"{shots}/export.zip").namelist()
