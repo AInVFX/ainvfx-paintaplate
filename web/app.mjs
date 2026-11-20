@@ -3505,7 +3505,7 @@ function setPreview(mode) { // the Preview menu (logic.readPreview): Off, Latent
 function previewUI() { // the Preview menu: Off, Latent preview, then half and a quarter of this plate's working size
   const sel = $("#preview-size"), p = S.plate;
   if (!p) return;
-  const fluid = keying() || (!!S.fluid && p.path !== S.fluid.result?.path); // a fluid shot's keyframes, or the blank plate: no preview pass
+  const fluid = keying() || (!!S.fluid && !S.fluid.result); // a fluid shot's keyframes, or a blank plate with no fluid shot yet: no preview pass runs there
   const sizes = fluid ? [] : previewSizes([p.spec.width, p.spec.height], p.work);
   sel.replaceChildren(new Option("Off", "off"), new Option("Latent preview", "latent"), ...sizes.map((o) => new Option(`${o.label} (${o.size[0]} x ${o.size[1]})`, String(o.div))));
   sel.value = String(fluid && typeof previewMode === "number" ? "latent" : previewMode); // a size chosen comes back with the fluid shot as the plate
