@@ -99,7 +99,7 @@ const FLUID_MISSING = "Fluid shots need ainvfx-fluid.safetensors in models/loras
 const FLUID_HINT = "Describe the fluid: smoke plume, wild fire, thick white steam (ainvfxfluid is added)";
 
 const S = {
-  plate: null, original: null, hero: null,
+  plate: null, original: null, hero: null, swap: null, // swap: the plate under the edits while it reopens (rebase)
   edits: [], draft: null, running: null, ids: 0, vers: 0, past: [], future: [], chain: Promise.resolve(), queued: 0,
   tool: "paint", size: 48, colors: { paint: "#000000", light: "#ffd890" }, rub: false,
   get color() { return this.colors[this.tool] ?? "#000000"; },
@@ -367,6 +367,7 @@ function stopEverything() {
   clearTimeout(S.prefetchTimer); clearTimeout(idleTimer);
   for (const e of S.edits) e.token = (e.token ?? 0) + 1;
   cancel("edit", "snap", "warm", "fluid", ...BACKGROUND);
+  S.running = null; // every pass stops: none runs until its next turn
 }
 
 let openCtl = null; // the plate opening now: its AbortController, until its first frame shows
@@ -913,6 +914,7 @@ addEventListener("pointerdown", (e) => { if (!$("#finish").hidden && !e.target.c
 addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#finish").hidden) { closeFinish(); e.preventDefault(); e.stopImmediatePropagation(); } }, true);
 
 function recompose() {
+  if (!S.plate) return; // a plate that opens, or the plate under the edits while it is swapped (rebase): nothing to compose yet
   S.hero = layered();
   const edits = S.edits.filter((e) => e.on && e.patch && e.state !== "generating").map((e) => `${e.id}.${e.version}`).join(",");
   const on = hdrWanted() && (!!edits || !(fluidOnly() || keying())); // with no edit, the plate alone; a fluid shot exports itself
@@ -1972,14 +1974,18 @@ async function rebase() { // the plate under the edits: the fluid shot when it i
   if (!path || S.plate?.path === path) { historyUI(); return render(); }
   // an HDR fluid shot: the space the hdr workflow writes its EXR frames in (HDR_SPACE there). Read from the file, they
   // would open as Linear Rec.709, their AP0 values taken for Rec.709 ones
-  await openPlate([], path, { under: true, cs: made && f.result.hdr ? knownSpace(HDR_FRAMES) ?? undefined : modelSpace(), chosen: false });
+  const swap = (S.swap = openPlate([], path, { under: true, cs: made && f.result.hdr ? knownSpace(HDR_FRAMES) ?? undefined : modelSpace(), chosen: false }));
+  try { await swap; } finally { if (S.swap === swap) S.swap = null; }
   log(`Plate under the edits: ${made ? `the fluid shot v${f.result.v}` : "the blank plate"}.`); // once it is open
-  if (S.edits.some((e) => e.on && e.state === "done")) queue(regenerateDependents); // made again on it, or taken back
+  queue(remakeAll); // each edit taken back from memory, or made again on it (turn)
 }
+
+async function plateReady() { while (S.swap) await S.swap.catch(() => {}); } // the plate under the edits, open again: a swap (rebase) leaves S.plate null until then
 
 async function toggleFluid() { // bypass: the blank plate under the edits; on again: the fluid shot
   const f = S.fluid;
   f.on = f.on === false;
+  if (f.result) status(switched(`Fluid shot v${f.result.v}`, f.on));
   if (keying() && f.result) leaveKeys();
   historyUI();
   await rebase();
@@ -2103,26 +2109,26 @@ function launch(edit, another = false) { // Generate: the edit on the first fram
   if (S.halted) stoppedUI(); // under a stop it waits for Enter
 }
 
-function reuse(edit) { // a result made from the same strokes, words, seed and switch comes back without a pass
-  const rec = recordOf(edit), same = edit.made === rec && !!edit.patch, hit = same ? null : edit.results?.get(rec);
+function reuse(edit) { // a result made on this plate from the same strokes, words, seed and switch, over the same edits, comes back without a pass
+  const rec = recordOf(edit), under = activeBefore(edit).map(record), holds = (r) => !dependsOnChange(edit, under, r.basis ?? []);
+  const same = edit.made === rec && !!edit.patch && holds(edit), hit = same ? null : [...(edit.results?.values() ?? [])].reverse().find((r) => r.made === rec && holds(r));
   if (!same && !hit) return false;
-  if (hit) Object.assign(edit, hit, { made: rec });
+  if (hit) Object.assign(edit, hit);
   Object.assign(edit, { state: "done", force: false, kept: undefined, preview: null, latent: null });
   return true;
 }
 
-function keep(edit) { // the result just made, kept by what made it
-  const m = (edit.results ??= new Map());
-  m.delete(edit.made);
-  m.set(edit.made, { patch: edit.patch, version: edit.version, foot: edit.foot, basis: edit.basis, base: edit.base, thumb: edit.thumb });
+function keep(edit) { // the result just made, kept by what made it: the plate, strokes, words, seed and switch, and the edits under it
+  const m = (edit.results ??= new Map()), key = `${edit.made}|${edit.basis.map((e) => `${e.id}.${e.version}`).join(",")}`;
+  m.delete(key);
+  m.set(key, { made: edit.made, patch: edit.patch, version: edit.version, foot: edit.foot, basis: edit.basis, base: edit.base, thumb: edit.thumb });
   while (m.size > RESULTS_KEPT) m.delete(m.keys().next().value);
 }
 
 async function regenerateDependents() { // after an edit ran: the edits above it that depend on it run again (needsRegen, as rebuild does)
   for (const e of [...S.edits]) {
-    if (!e.on || e.state !== "done" || !needsRegen(e)) continue;
-    if (e.base !== S.plate?.path && reuse(e) && !needsRegen(e)) continue; // made on another plate: a result made on this one comes back
-    await generate(e);
+    await plateReady();
+    if (e.on && e.state === "done" && needsRegen(e)) await turn(e);
   }
   recompose(); historyUI(); render(); timelineUI();
 }
@@ -2138,7 +2144,7 @@ function queueWaiting(first = null) {
   queue(async () => {
     for (const e of [...S.edits]) {
       if (!e.on || e.state === "drawing" || e === S.running) continue;
-      if (e.state === "queued" || !e.patch || e.force || needsRegen(e)) await generate(e); // what Enter started is made by now: nothing runs twice
+      if (e.state === "queued") await generate(e); else await turn(e); // what Enter started is made by now: nothing runs twice
     }
     recompose(); historyUI(); render(); timelineUI();
   });
@@ -2227,19 +2233,20 @@ async function baseUpload(below, before, size) { // the frame under an edit, upl
 }
 
 async function generate(edit) {
+  await plateReady(); // the plate under the edits, swapped (rebase): the pass starts on the new one
   if (!S.edits.includes(edit) || !edit.on || edit.state === "drawing") return; // changed since it was queued: it waits for Generate
   if (S.halted) return; // a stop: no job is posted until Enter, which runs what waits, by its state (queueWaiting)
   if (edit.refused?.record === recordOf(edit)) return; // « No » at the check's question: nothing of it runs until it changes (heldBack)
   const token = (edit.token = (edit.token ?? 0) + 1);
   const alive = () => edit.token === token && S.edits.includes(edit) && edit.on;
   const p = S.plate, light = edit.tool === "light", tag = `e${edit.id}_${token}`;
-  cancel("warm"); // an edit never waits for the warm-up: what it needs loads now
-  S.running = edit;
-  edit.saw = activeBefore(edit).map(record); // the edits under it as it starts: a change to them restarts it (rebuild)
-  Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false, leftWhy: null, editAsked: false, refused: null });
-  recompose(); historyUI(); render();
-  log(`Edit ${num(edit)}: ${NAME[edit.tool]} ${edit.prompt ? `"${edit.prompt}"` : "with no text prompt"}, seed ${edit.seed}${edit.tool === "erase" ? `, whole object ${edit.whole ? "on" : "off"}` : ""}, ${painted(edit)} stroke${painted(edit) === 1 ? "" : "s"}, over ${edit.saw.length} edit${edit.saw.length === 1 ? "" : "s"}.`);
   try {
+    cancel("warm"); // an edit never waits for the warm-up: what it needs loads now
+    S.running = edit;
+    edit.saw = activeBefore(edit).map(record); // the edits under it as it starts: a change to them restarts it (rebuild)
+    Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false, leftWhy: null, editAsked: false, refused: null });
+    recompose(); historyUI(); render();
+    log(`Edit ${num(edit)}: ${NAME[edit.tool]} ${edit.prompt ? `"${edit.prompt}"` : "with no text prompt"}, seed ${edit.seed}${edit.tool === "erase" ? `, whole object ${edit.whole ? "on" : "off"}` : ""}, ${painted(edit)} stroke${painted(edit) === 1 ? "" : "s"}, over ${edit.saw.length} edit${edit.saw.length === 1 ? "" : "s"}.`);
     await edit.preparing; // the snap and the caption started when the strokes stopped: reused when nothing changed since
     if (!alive()) return;
     redrawStrokes(edit); // in one pass from its strokes, as a scene opened again draws them: the same images, the same job
@@ -2469,24 +2476,37 @@ function footprint(edit) { // where the edit changed the frame, on a coarse grid
 const record = (e) => ({ id: e.id, version: e.version, tool: e.tool, foot: e.foot });
 const needsRegen = (edit) => edit.base !== S.plate?.path || dependsOnChange(edit, activeBefore(edit).map(record), edit.basis);
 
+// An edit's turn in a pass over History, once the plate under the edits is open. A result that holds for this plate and the
+// edits under it comes back with no pass: its own, or one made before (reuse), with « reused » in the log when it was not on
+// show. Otherwise the edit runs again. A failed edit keeps its own rule: an erase that the check held back waits for its answer.
+async function turn(e) {
+  await plateReady();
+  if (e.state === "failed") { if (!e.patch || e.force || needsRegen(e)) await generate(e); return; }
+  if (e.state === "done" && e.patch && !e.force && !needsRegen(e)) return; // nothing it depends on changed
+  const shown = e.state === "done" ? e.patch : null;
+  if (!e.force && reuse(e)) { if (e.patch !== shown) log(`Edit ${num(e)}: reused, already made on the same plate with the same edits under it.`); return; }
+  await generate(e);
+}
+
+async function remakeAll() { // after a bypass, a removal, another try or another plate under the edits: each active edit in turn
+  for (const e of [...S.edits]) if (e.on && e.state !== "drawing" && e.state !== "queued") await turn(e);
+  recompose(); historyUI(); render(); timelineUI();
+}
+
 function rebuild() { // after a bypass, a removal or another try: make again only what depends on the change; renders go on
   const r = S.running; // an edit being generated whose base changed, or which is to run again, stops now: its pass would be thrown away
   if (r && (r.force || !S.edits.includes(r) || !r.on || dependsOnChange(r, activeBefore(r).map(record), r.saw ?? []))) { log(`Edit ${num(r)}: pass stopped, queued again.`); stopEdit(r); }
   recompose(); historyUI(); render();
-  queue(async () => {
-    for (const e of [...S.edits]) {
-      if (!e.on || e.state === "drawing" || e.state === "queued") continue;
-      if (!e.patch || e.force || needsRegen(e)) await generate(e);
-    }
-    recompose(); historyUI(); render(); timelineUI();
-  });
+  queue(remakeAll);
 }
+
+const switched = (what, on) => `${what} ${on ? "is back on" : "is bypassed"}.`; // an eye in History: an edit, or the fluid shot
 
 function toggle(edit) {
   mark();
   edit.on = !edit.on;
   if (!edit.on && S.running === edit) stopEdit(edit);
-  status(edit.on ? `Edit ${num(edit)} is back on.` : `Edit ${num(edit)} is bypassed.`);
+  status(switched(`Edit ${num(edit)}`, edit.on));
   rebuild();
 }
 
