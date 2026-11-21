@@ -726,7 +726,7 @@ def matte_flicker(mattes, run: int = 3) -> np.ndarray:
 
 def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=None, zone: float = 1 / 16,
                  threshold: float = 0.1, workers: int = 8, element=None, tick=None, erased=None,
-                 erased_edge: float = 0.0, first_frame: int = 1):
+                 erased_edge: float = 0.0, first_frame: int = 1, _moves_from: int | None = None):
     """One matte per frame from a tracker's masks, made safe for the composite. Returns (mattes (n, H, W), summary).
     The summary names each frame by the plate's own number: `first_frame` is the number of the plate's first frame.
 
@@ -765,7 +765,11 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
       they kept their place for 8 frames). When less than a quarter of its place holds it while a quarter or more of
       the place is in view, and what was found beyond the place lies in view, joined to the matte of the frame
       before, it moves from that frame, unless it was lost (below) since it was last at its place: it is then
-      followed as an object that moves over its first frames, and the plate is not asked again. One that leaves while its place goes behind what stands in front (LTX can walk a cow
+      followed as an object that moves over its first frames, and the plate is not asked again. On the frames just
+      before, where it already reached beyond its place, in view, joined to its matte, it was moving with what it is
+      attached to, and the plate read that as standing in front of it (a head that turns under the beams drawn over
+      it): the matte then runs a second time, from the same inputs, with the object followed as moving from the first
+      of those frames. One that leaves while its place goes behind what stands in front (LTX can walk a cow
       away beside the horse that hides its place) is lost: from the first frame where all that was found has left
       the place, with the object never seen there again, the matte holds nothing, and the summary warns. Changes
       that LTX leaves at the empty place are no part of it;
@@ -837,7 +841,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     object's area (the tracker's mask on that frame with the part of its place that the plate covers, or where it was
     last seen), then one line per rule that acted.
     """
-    if os.environ.get("PAINTAPLATE_RECORD"):
+    if os.environ.get("PAINTAPLATE_RECORD") and _moves_from is None:  # the second run below reads the same inputs
         record(os.environ["PAINTAPLATE_RECORD"], masks, n, first, shot, base, zone, threshold, element, erased, erased_edge, first_frame)
     half = lambda a, image=False: a if a is None or not np.size(a) else (np.asarray(a)[..., :3] if image else np.asarray(a)).astype(np.float16).astype(np.float32)  # noqa: E731
     masks, first, element, erased = half(masks), half(first), half(element), half(erased)  # in half floats, as a recording keeps them: a
@@ -938,6 +942,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     peak = int(line.sum())  # the object's largest size: its region on frame 0, then SAM's masks that are not the paint zone
     size, last = np.ones(n, np.int64), max(int(line.sum()), 1)  # the object's area on each frame
     at_place, all_left = np.zeros(n, bool), np.zeros(n, bool)  # frames where the object was seen at its place; frames where all that was found had left it
+    beyond = np.zeros(n, bool)  # frames where a painted object held as standing still reached beyond its place, in view, joined to its matte
     seen = strays = held = added = alone = lost = guarded = smoothed = fronts = zones = placed = cleaned = 0
     holding = np.zeros(n, bool)  # the frames where the last matte holds with no SAM mask, counted on the matte as it ends
     most, chunk = 1.0, 2 * max(1, workers)
@@ -961,6 +966,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
             for t in range(start, min(n, start + chunk)):
                 if tick:
                     tick()
+                if t == _moves_from:  # the second run: the object moves from this frame, and the plate is not asked
+                    still, moved, late = False, t, True
                 s = tracked(t)
                 hide, blocked = None, False  # where the plate stands in front of the object's place; whether the tracker's mask was left out for it
                 if plates is not None and still is not False:
@@ -1051,6 +1058,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                 left = False  # whether all that was found has left the object's place
                 if hide is not None and not real and found.any():  # a painted object that stands still: a piece that has left its place, with what stands in front or alone, is not the object
                     whole = found
+                    out_there = bulk(found & ~here) & ~hide  # its thick part beyond the place's margin, where the plate shows it
+                    beyond[t] = bool(out_there.any()) and prev.any() and bool(touching(out_there, grow(prev, thin)).any())
                     if 4 * int((found & here).sum()) >= int(open0.sum()):  # the object is seen at its place: what is joined to it there counts
                         found, at_place[t] = touching(found, here), True
                     else:  # it is not: a found area that reaches beyond the place's margin is leaving it
@@ -1117,6 +1126,13 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                     for j, own in waiting:
                         out[j] *= own
                     zones, prev, waiting = zones + len(waiting), out[t] > 0.5, []
+    if late and _moves_from is None:  # it moved from frame `moved`: on the frames just before, where it already reached beyond its place,
+        start = moved                 # joined to its matte, it was moving with what it is attached to, and the plate read that as standing
+        while start > 0 and beyond[start - 1]:  # in front of it: the matte runs again with the object moving from there
+            start -= 1
+        if start < moved:
+            return follow_matte(masks, n, first, shot=shot, base=base, zone=zone, threshold=threshold, workers=workers, element=element,
+                                tick=tick, erased=erased, erased_edge=erased_edge, first_frame=first_frame, _moves_from=start)
     left = None  # (the frame after the object was last seen at its place, the first frame after it where all that was found had left)
     after = np.flatnonzero(all_left & (np.arange(n) > (np.flatnonzero(at_place)[-1] if at_place.any() else -1)))
     if len(after):  # it never came back: from there the matte holds nothing

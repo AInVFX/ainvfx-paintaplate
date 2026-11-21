@@ -51,6 +51,36 @@ def scene(kind="beams", still=STILL, turn=1.2, step=3.0, seen=15, stop=None):
     return dict(masks=masks, n=N, first=zone, shot=shot, base=base, element=shown[0].astype(np.float32)), shown
 
 
+def head_scene(turn_at=STILL, step=1.0, turn=2.5, seen=15):
+    """A plate where a head (a brown ellipse with a white blaze) stands still for `turn_at` frames, then moves right by
+    `step` px a frame; and two beams that leave its eye, on the blaze, towards the right edge and the bottom, drawn over
+    the head and the field and turning with the head by `turn` degrees a frame. The head changes the plate around the
+    beams' first place, so the plate's test of what stands in front reads it as standing in front of them. Returns
+    follow_matte's arguments, where the shot draws the beams, and where the plate shows the head, on each frame."""
+    rng = np.random.default_rng(5)
+    field = (ndimage.gaussian_filter(rng.random((H, W, 3)), (1.2, 1.2, 0)) * 0.5 + 0.2).astype(np.float32)
+    yy, xx = np.mgrid[:H, :W]
+    base, shot = np.repeat(field[None], N, 0), np.repeat(field[None], N, 0)
+    beams, head = np.zeros((N, H, W), bool), np.zeros((N, H, W), bool)
+    for t in range(N):
+        moved = max(0, t - turn_at)
+        hx = 130 + step * moved
+        head[t] = ((xx - hx) / 26.0) ** 2 + ((yy - 60) / 34.0) ** 2 <= 1
+        base[t][head[t]] = (0.45, 0.25, 0.12)
+        base[t][head[t] & (np.abs(xx - hx - 8) < 5)] = (0.9, 0.9, 0.85)
+        ex, ey = hx + 8, 52
+        for angle in (14.0, 38.0):
+            a = np.deg2rad(angle + turn * moved)
+            along, across = (xx - ex) * np.cos(a) + (yy - ey) * np.sin(a), -(xx - ex) * np.sin(a) + (yy - ey) * np.cos(a)
+            beams[t] |= (np.abs(across) < 3.5) & (along >= 0)
+        shot[t] = base[t]
+        shot[t][beams[t]] = (0.95, 0.15, 0.15)
+    masks = beams.astype(np.float32)
+    masks[seen:] = 0
+    zone = ndimage.binary_dilation(beams[0], iterations=6).astype(np.float32)
+    return dict(masks=masks, n=N, first=zone, shot=shot, base=base, element=beams[0].astype(np.float32)), beams, head
+
+
 class MovesAfterStandingStill(unittest.TestCase):
     def follows(self, args, shown, label):
         """The matte holds the object on every frame where the shot shows it, and little beside it."""
@@ -89,6 +119,16 @@ class MovesAfterStandingStill(unittest.TestCase):
                 summary = self.follows(*scene(kind, still=0), f"{kind} that moves from the first frame")
                 self.assertNotIn("Warning", summary)
                 self.assertIn("\n  Object moves from frame ", summary)
+
+    def test_beams_drawn_over_a_head_that_turns_keep_their_matte_over_it(self):
+        args, beams, head = head_scene()
+        mattes, summary = mathops.follow_matte(**args, workers=1)
+        got = mattes > 0.5
+        for t in range(N):
+            over = beams[t] & head[t]  # the beams where the shot draws them over the head
+            if over.any():
+                self.assertGreaterEqual(int((got[t] & over).sum()), 0.9 * int(over.sum()), f"frame {t}: the beams over the head are in the matte\n{summary}")
+        self.assertNotIn("Warning", summary)
 
     def test_the_matte_of_an_object_that_the_shot_stops_showing_ends_with_it(self):
         for label, kw in (("the shot stops drawing it at frame 30", {"stop": 30}), ("it leaves the frame", {"step": 8.0})):
