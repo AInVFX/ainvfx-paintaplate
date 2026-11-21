@@ -372,6 +372,23 @@ def seam_field(plate: np.ndarray, gen: np.ndarray, mask: np.ndarray, band: float
     return np.clip(field, -0.4, 0.4).astype(np.float32)
 
 
+def kept_edges(plate: np.ndarray, gen: np.ndarray, level: float = 0.06) -> np.ndarray:
+    """Where the plate and the generated frame both have an edge (H, W): the outline of what stays, a person beside a
+    cleaned object, a window frame. An edge only the plate has (the object a Clean removed) is not one."""
+    def edges(img):
+        y = img[..., :3] @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+        return np.hypot(ndimage.sobel(y, 0), ndimage.sobel(y, 1)) / 8.0 > level
+    return ndimage.binary_dilation(edges(plate) & edges(gen))  # one pixel wider: a diagonal step cannot slip through
+
+
+def edge_grow(mask: np.ndarray, stop: np.ndarray, steps: float) -> np.ndarray:
+    """`mask` grown by `steps` pixels, one at a time, never into `stop`: a Clean's margin stops at what stays."""
+    m = mask > 0.5
+    for _ in range(int(round(steps))):
+        m = m | (ndimage.binary_dilation(m) & ~stop)
+    return np.maximum(m.astype(np.float32), mask)
+
+
 def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0, match_color=True, grain=1.0,
                  grow=8, feather=12, steady=2, workers=8, progress=None, keep=None):
     """Fit `n` generated frames to the plate they are composited onto. Returns (images, masks), full size.
@@ -395,18 +412,28 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
     if len(masks) < n:  # a shorter matte holds its last frame
         masks = np.concatenate([masks, np.repeat(masks[-1:], n - len(masks), 0)])
     small = np.stack([resize_to(m, hl, wl) for m in masks])
-    small = steady_masks(small, steady, grow / lo, feather / lo)
-    kept = None
+    def low(g, factor, hh, ww):  # a frame at low resolution: shrunk if it has the plate's size, else resized from its own
+        return shrink(g, factor) if g.shape[:2] == (h, w) else resize_lanczos(g, hh, ww)
+
+    kept = painted = None
     if keep is not None:  # a painted object: the colour field leaves it as the shot made it, steady from frame to frame
         keep = np.asarray(keep, np.float32)[:n]
         if len(keep) < n:
             keep = np.concatenate([keep, np.repeat(keep[-1:], n - len(keep), 0)])
-        kept = steady_masks(np.stack([resize_to(m, hl, wl) for m in keep]), steady, 0.0, max(1.0, feather / lo / 2))
+        painted = np.stack([resize_to(m, hl, wl) for m in keep])
+        kept = steady_masks(painted, steady, 0.0, max(1.0, feather / lo / 2))
+    cleaned = small if painted is None else np.clip(small - painted, 0.0, 1.0)  # the part of the matte that a Clean regenerates
+    if cleaned.max() > 0.02 and grow > 0:  # its margin stops at the edges the plate and the clean plate both keep: the outline of what stays
+        grown, limits = [], []
+        for i in range(n):  # its soft edge too: the feather fades it on the far side, and stops at what stays
+            stop = kept_edges(low(plate_at(i), lo, hl, wl), low(gen_at(i), lo, hl, wl))
+            grown.append(edge_grow(cleaned[i], stop, grow / lo)); limits.append(edge_grow(cleaned[i], stop, (grow + 2 * feather) / lo))
+        small = np.maximum(steady_masks(np.stack(grown), steady, 0.0, feather / lo) * np.stack(limits),
+                           steady_masks(painted, steady, grow / lo, feather / lo) if painted is not None else 0.0)
+    else:
+        small = steady_masks(small, steady, grow / lo, feather / lo)
     band = max(4.0, (grow + feather) / lo)
     ha, wa = max(1, h // al), max(1, w // al)
-
-    def low(g, factor, hh, ww):  # a frame at low resolution: shrunk if it has the plate's size, else resized from its own
-        return shrink(g, factor) if g.shape[:2] == (h, w) else resize_lanczos(g, hh, ww)
 
     def measure(i):  # pass 1: the shift and the colour field of one frame, at low resolution
         p, g = plate_at(i), gen_at(i)
