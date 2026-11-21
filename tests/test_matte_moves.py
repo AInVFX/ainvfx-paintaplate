@@ -130,6 +130,16 @@ class MovesAfterStandingStill(unittest.TestCase):
                 self.assertGreaterEqual(int((got[t] & over).sum()), 0.9 * int(over.sum()), f"frame {t}: the beams over the head are in the matte\n{summary}")
         self.assertNotIn("Warning", summary)
 
+    def test_no_warning_when_the_tracker_sees_a_fragment_of_beams_the_matte_holds_whole(self):
+        args, beams, head = head_scene()
+        near = np.zeros((H, W), bool); near[:, :175] = True  # the tracker returns the beams' first stretch only
+        for t in range(10, 16):
+            args["masks"][t] = (beams[t] & near).astype(np.float32)
+        mattes, summary = mathops.follow_matte(**args, workers=1)
+        self.assertNotIn("Warning", summary)
+        for t in range(N):
+            self.assertGreaterEqual(int(((mattes[t] > 0.5) & beams[t]).sum()), 0.9 * int(beams[t].sum()), f"frame {t}: the beams are in the matte\n{summary}")
+
     def test_the_matte_of_an_object_that_the_shot_stops_showing_ends_with_it(self):
         for label, kw in (("the shot stops drawing it at frame 30", {"stop": 30}), ("it leaves the frame", {"step": 8.0})):
             with self.subTest(label):

@@ -1118,7 +1118,7 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                 seen += bool(core.any())
                 hidden = int((line & hide).sum()) if hide is not None else 0  # the part of the object's place that the plate covers
                 last = int(core.sum()) + hidden if core.any() else last
-                size[t], cores[t] = last, core
+                size[t], cores[t] = max(last, first_size), core  # the object's area: SAM's last sighting, never less than its first area (SAM can see a fragment)
                 fronts += blocked or (hide is not None and 2 * hidden >= max(int(line.sum()), 1))
                 if found.any():
                     keep = found
