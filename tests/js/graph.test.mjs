@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { parseWorkflow } from "../../web/logic.mjs";
-import { sceneGraph } from "../../web/graph.mjs";
+import { fluidGraph, sceneGraph } from "../../web/graph.mjs";
 
-const WF = Object.fromEntries(["edit", "matte", "clean", "cleanup", "shot", "export"].map((n) =>
+const WF = Object.fromEntries(["edit", "matte", "clean", "cleanup", "shot", "export", "fluid", "hdr"].map((n) =>
   [n, parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${n}.json`, import.meta.url))))]));
 const plate = { path: "plates/shot.mp4", config: "ocio://studio-config-latest", cs: "sRGB Encoded Rec.709 (sRGB)", frames: 121, work: [1280, 704], prev: [768, 416], track: [960, 528], trackErase: [640, 352] };
 const pass = { steps: 8, denoise: 1, grow: 16, feather: 6, sigma: 3 };
@@ -184,4 +184,20 @@ test("a node's widgets: a seed keeps its control, an image upload its button, a 
   const linked = file.nodes.find((n) => n.type === "ImageScale" && n.inputs.some((i) => i.widget)); // its width comes by link
   assert.ok(linked && linked.widgets_values.length === 4 && linked.inputs.filter((i) => i.widget).every((i) => i.link !== null), "a linked widget keeps a value in its place, and its link");
   assert.throws(() => editorGraph(api, { ...INFO, KSamplerSelect: undefined }), /ComfyUI does not know the node KSamplerSelect/);
+});
+
+test("a fluid shot alone is one prompt: its keyframes by name, its text prompt and seed, and SDR to HDR only when 16-bit", () => {
+  const blank = { path: "output:paintaplate/b/blank_960x512.mov", config: plate.config, frames: 121, fps: 25, size: [960, 512] };
+  const fluid = { keys: [{ frame: 0, image: "k1.png" }, { frame: 60, image: "k2.png" }], prompt: "Thick white smoke.", seed: 7, hdr: false, prefix: "paintaplate/x/graph" };
+  const g = fluidGraph(WF, { plate: blank, fluid });
+  linked(g);
+  const key = Object.values(g).find((n) => n.class_type === "PaintAPlate_KeyframeVideo");
+  assert.deepEqual(JSON.parse(key.inputs.keys), fluid.keys, "the keyframes, by their names in the input folder");
+  const values = Object.values(g).flatMap((n) => Object.values(n.inputs));
+  assert.ok(values.includes(7) && values.includes("Thick white smoke."), "the seed and the text prompt the shot was made with");
+  assert.equal(count(g, "PaintAPlate_LoadPlate"), 1);
+  const hdr = fluidGraph(WF, { plate: blank, fluid: { ...fluid, hdr: true } });
+  linked(hdr);
+  assert.equal(count(hdr, "PaintAPlate_LoadPlate"), 1, "SDR to HDR takes the fluid shot by link");
+  assert.ok(Object.keys(hdr).length > Object.keys(g).length, "SDR to HDR adds its pass");
 });

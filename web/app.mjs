@@ -10,7 +10,7 @@ import { XRAY_SIDE, XRAY_TEXT, alphaFromHalfs, tintPixels, xrayPlan } from "./xr
 import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
-import { editorGraph, sceneGraph } from "./graph.mjs";
+import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
 import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleComposes, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, fluidPasses, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
@@ -3559,7 +3559,7 @@ const exportsExr = (r) => exrResult(S.plate.spec, r?.skip ? !r.skip.has("hdr") :
 function exportDialog() { // its words come from one source for every kind of result (logic.exportWords)
   const fluid = fluidOnly(), alone = plateAlone(S.heroKey), r = S.renders.get(S.heroKey), relitHdr = !!r?.hdrAfter, spec = S.plate.spec;
   for (const k of ["matte", "review", "shot"]) $(`#x-${k}`).closest("label").hidden = fluid || alone || relitHdr; // a fluid shot alone, the plate alone, a relit result in HDR: their own files
-  $("#x-graph").closest("label").hidden = fluid || alone || !S.edits.some((e) => e.on && e.patch && e.state === "done"); // the edits on show, as one ComfyUI workflow
+  $("#x-graph").closest("label").hidden = alone || !(fluid ? graphsFluid() : S.edits.some((e) => e.on && e.patch && e.state === "done")); // the edits on show, or a fluid shot alone, as one ComfyUI workflow
   const kind = fluid ? "fluid" : alone ? "plate" : relitHdr ? "relit" : "edits";
   const ready = fluid || (alone ? !!r?.review : relitHdr ? !!r.hdrFrames : !!(r?.exported || r?.review));
   const words = exportWords({ kind, ready, left: ready ? "" : secs(renderLeft(true), ""), hdr: fluid && !!S.fluid.result.hdr, exr: !fluid && exportsExr(r),
@@ -3767,6 +3767,7 @@ async function sceneTarget(name) { // a scene of this name saved here: the page 
 }
 
 async function graphFile() { // the whole scene as one ComfyUI workflow, for Export's zip, or null
+  if (fluidOnly()) return fluidGraphFile();
   const p = S.plate, active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
   if (!p || !active.length) return null;
   const edits = [];
@@ -3781,6 +3782,21 @@ async function graphFile() { // the whole scene as one ComfyUI workflow, for Exp
       erasePrompt: erasePrompt(active.filter((e) => e.tool === "erase").map((e) => e.caption?.text)),
       grow: grow(p.spec.width, erase), feather: feather(p.spec.width), prefix: `paintaplate/${p.id}/graph`,
       hdr, exr: exrResult(p.spec, hdr, p.headroom) } }); // exr: the result as half-float EXR frames, as Export writes it
+  return editorFile(graph);
+}
+
+const keysOf = (sig) => JSON.stringify(JSON.parse(sig)[0]); // a fluid shot's keyframes, from its signature (fluidSig)
+const graphsFluid = () => keysOf(fluidSig()) === keysOf(S.fluid.result.sig); // the keyframes on show made the fluid shot: its graph makes it again
+async function fluidGraphFile() { // a fluid shot alone: its keyframes, and the text prompt and seed it was made with
+  const p = S.plate, f = S.fluid, r = f.result, size = [p.spec.width, p.spec.height], keys = [];
+  if (!graphsFluid()) return null;
+  for (const [i, k] of [...f.keys].sort((a, b) => a.frame - b.frame).entries()) // as the fluid shot was asked for: the paint on black, at the shot's size
+    redrawKey(k), keys.push({ frame: k.frame, image: await uploadGraphImage(snap(k.canvas, size, "#000"), i + 1, "keyframe") });
+  return editorFile(fluidGraph(WF, { about: { version: S.version, name: p.name }, plate: { path: f.blankPath ?? p.path, config: S.ocio.config, frames: p.frames, fps: p.fps, size },
+    fluid: { keys, prompt: r.prompt, seed: r.seed, hdr: !!r.hdr, prefix: `paintaplate/${p.id}/graph` } }));
+}
+
+async function editorFile(graph) { // what this ComfyUI says of each node class, then the editor's own format: { file }, or nothing when a class is missing
   const classes = [...new Set(Object.values(graph).map((n) => n.class_type))], specs = await Promise.all(classes.map(objectInfo)); // what this ComfyUI says of each node class: its widgets, in the editor's order
   const unknown = classes.filter((c, i) => !specs[i]?.input);
   if (unknown.length) return void stopped(`The ComfyUI graph was not written: this ComfyUI does not describe ${unknown.join(", ")}`, "Install the missing nodes, restart ComfyUI, then export again.");

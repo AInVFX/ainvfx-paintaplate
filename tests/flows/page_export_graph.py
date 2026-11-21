@@ -1,4 +1,5 @@
-"""Export: « ComfyUI graph » is a tick box among Export's parts, and the scene's graph comes in the zip, beside the result.
+"""Export: « ComfyUI graph » is a tick box among Export's parts, and the scene's graph comes in the zip, beside the result;
+a fluid shot alone offers it too, its graph beside the shot.
 The dialog's words come from one source, none says « The zip downloads at once », and the Help's Export entry opens with
 the dialog's own line."""
 import json
@@ -27,5 +28,24 @@ def run(browser, port, U):
             f"the zip holds the graph beside the result: {sorted({n.split('/')[0] for n in z.namelist()})}")
     graph = json.loads(z.read("scene.comfyui.json"))
     U.check(bool(graph["nodes"]) and bool(graph["groups"]), f"the graph is a ComfyUI workflow: {len(graph['nodes'])} nodes in {len(graph['groups'])} groups")
-    U.no_errors(errors, "after the export with its graph")
+    page.click("#open-btn"); page.click("#open [data-tab=blank]")  # a fluid shot alone
+    page.fill("#b-frames", "17"); page.dispatch_event("#b-frames", "input")
+    page.evaluate(U.WATCH)
+    page.click("#open-go")
+    page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
+    U.paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)]); page.keyboard.press("Enter")
+    U.wait_log(page, U.added_line("under the edits: the fluid shot v"), 240000, "the fluid shot under the edits")
+    page.click("#export-btn")
+    U.check(page.is_visible("#x-graph"), "a fluid shot alone offers the ComfyUI graph among Export's parts (the box keeps its last choice)")
+    page.check("#x-graph")
+    with page.expect_download(timeout=180000) as dl:
+        page.click("#x-go")
+    z = zipfile.ZipFile(dl.value.path())
+    U.check("scene.comfyui.json" in z.namelist() and any(n.startswith("plate/") for n in z.namelist()),
+            f"the zip holds the fluid shot's graph beside the shot: {sorted({n.split('/')[0] for n in z.namelist()})}")
+    graph = json.loads(z.read("scene.comfyui.json"))
+    titles = [g["title"] for g in graph["groups"]]
+    keys = [n for n in graph["nodes"] if n.get("properties", {}).get("Node name for S&R") == "PaintAPlate_KeyframeVideo"]
+    U.check(titles[:4] == ["README", "INPUT", "MODELS", "FLUID SHOT"] and len(keys) == 1, f"the graph makes the fluid shot: groups {titles}, {len(keys)} Keyframe Video")
+    U.no_errors(errors, "after the exports with their graphs")
     page.close()

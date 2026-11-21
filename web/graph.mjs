@@ -168,7 +168,7 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
   sec = "output";
   add(instantiate(WF.export, "export", { ...common, relight, keep_untouched: !relight, grow: render.grow, feather: render.feather,
     hdr_grow: render.grow + render.feather, prefix: render.exr ? "" : out("export"), exr_prefix: render.exr ? out("export/f") : "",
-    matte_prefix: out("matte/matte") }, // render.exr: SDR to HDR's values in half-float EXR, as Export writes them (logic.exrResult)
+    matte_prefix: out("matte/matte"), paint_matte: paintMatte ? "paint" : "" }, // paint_matte: a painted object keeps its colours; render.exr: SDR to HDR's values in half-float EXR, as Export writes them (logic.exrResult)
     { shot: made, ...(hdr ? { hdr } : {}), ...(a ? { matte_a: a, matte_b: paintMatte ?? erasedMatte } : {}) }));
   const files = `output/${render.prefix}`, n = edits.length, painting = edits.filter((e) => e.tool === "paint").length;
   const images = edits.flatMap((e) => [e.mask, e.layer].filter(Boolean)); // what the graph reads from the input folder
@@ -198,6 +198,40 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
       where[kept].label = `${sa.startsWith("stage") ? "both stages" : "both passes"} · ${ra.join(" · ")}`;
   };
   return organise(merge(parts, shared), where, sections);
+}
+
+// A fluid shot alone as one ComfyUI workflow, as Paint a plate's Generate makes it: its keyframes painted on black become
+// the control video, LTX 2.5 with ainvfx-fluid makes the shot in the blank plate's format, and SDR to HDR, for a 16-bit
+// shot, turns it into half-float EXR frames.
+export function fluidGraph(WF, { plate, fluid, about = {} }) {
+  const parts = [], where = {}, out = (s) => `${fluid.prefix}/${s}`, fps = plate.fps ?? 24;
+  const add = (inst, sec) => {
+    for (const [id, n] of Object.entries(inst.nodes)) {
+      const label = n._meta.title.slice(n._meta.title.indexOf(": ") + 2);
+      where[id] = { sec: /^Plate( in the model space)?$/.test(label) ? "input" : sec, label }; // the blank plate opens INPUT
+    }
+    parts.push(inst.nodes);
+    return inst.saved;
+  };
+  const made = instantiate(WF.fluid, "fluid shot", { path: plate.path, config: plate.config, color_space: "@model", max_frames: plate.frames,
+    keys: JSON.stringify(fluid.keys), prompt: fluid.prompt, seed: fluid.seed, prefix: out("plate"), video_prefix: out("preview"), control_prefix: out("control/c") });
+  const shot = add(made, "fluid"), loader = Object.keys(made.nodes).find((id) => made.nodes[id].class_type === "PaintAPlate_LoadPlate"); // the blank plate's loader
+  if (fluid.hdr) add(instantiate(WF.hdr, "SDR to HDR", { config: plate.config, max_frames: plate.frames, fps: Math.round(fps), cond_fps: Math.min(30, fps),
+    prefix: out("hdr/f") }, { path: shot.plate }, { plate: loader }), "hdr"); // the shot by link, its rate and length from the blank plate
+  const n = fluid.keys.length, images = fluid.keys.map((k) => k.image), files = `output/${fluid.prefix}`;
+  const sections = [
+    ["readme", "How this graph works", [`AInVFX Paint a plate${about.version ? ` ${about.version}` : ""}: the fluid shot of ${about.name ?? plate.path}, as one ComfyUI workflow.`,
+      `It paints ${n} keyframe${n === 1 ? "" : "s"} on black, at frame${n === 1 ? "" : "s"} ${fluid.keys.map((k) => k.frame).join(", ")}, into a control video. LTX 2.5 with ainvfx-fluid then makes the fluid shot, ${by(plate.size)}, ${plate.frames} frames at ${fps} fps, seed ${fluid.seed}${fluid.hdr ? ", and SDR to HDR turns it into half-float EXR frames" : ""}, as Paint a plate's Generate does.`,
+      `To run it, press Run. These files must be where Paint a plate put them when it saved this graph: the blank plate, ${plate.path}, and, in ComfyUI's input folder, ${images.join(", ")}.`,
+      "To change the fluid: in FLUID SHOT, change the node marked [prompt] or [seed], then Run."].join("\n\n")],
+    ["input", "INPUT", `The blank plate. Load Plate reads ${plate.path}, ${plate.frames} frames at ${fps} fps: black frames of ${by(plate.size)}, which set the shot's size, length and rate.`],
+    ["models", "MODELS", `The models, each loaded once and shared by every step that uses it: LTX 2.5, Gemma and its VAEs, with AInVFX's ainvfx-fluid IC-LoRA${fluid.hdr ? " and Lightricks' SDR-to-HDR IC-LoRA" : ""}.`],
+    ["fluid", "FLUID SHOT", [`Keyframe Video paints the keyframes on black at their frames: the control video. LTX 2.5 with AInVFX's ainvfx-fluid IC-LoRA turns it into the fluid, seed ${fluid.seed}. Its prompt is the node marked [prompt].`,
+      `In: the blank plate, and the keyframes (${images.join(", ")}) from ComfyUI's input folder.`,
+      `Out: the fluid shot in the blank plate's format, its preview movie and the control video, in ${files}${fluid.hdr ? "; the shot also goes on to SDR TO HDR" : ""}.`].join("\n\n")],
+    ...(fluid.hdr ? [["hdr", "SDR TO HDR", `Lightricks' SDR-to-HDR IC-LoRA turns the fluid shot into scene-linear values, written as half-float EXR frames in ACES2065-1, in ${files}/hdr.`]] : []),
+  ];
+  return organise(merge(parts), where, sections);
 }
 
 // ---------- The scene in the editor's own format ----------
