@@ -1118,7 +1118,6 @@ export const bigPlateWarning = (spec, vram) => (spec && vram > 0 && Math.max(spe
   : null);
 export const hdrFps = (fps) => Math.min(30, +fps || 24); // the conditioning frame rate: at most 30, as in Lightricks' workflow
 export const blankDepth = (v) => (+v === HDR_DEPTH ? HDR_DEPTH : 8);
-export const defaultDepth = (hdrReady) => (hdrReady ? HDR_DEPTH : 8); // a blank plate: 16-bit whenever SDR to HDR can run
 // The 8-bit movies of an image sequence (its playback proxy, its review, its SDR-to-HDR pass) hold log values, ACEScct when
 // the config has it, so they show what its full-precision frames show; a config without it keeps the model space.
 export const viewerSpace = (names, model) => (names.includes("ACEScct") ? "ACEScct" : model);

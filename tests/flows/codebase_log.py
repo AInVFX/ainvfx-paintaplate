@@ -47,6 +47,6 @@ def run(browser, port, U):
     page.wait_for_function("window.__playable > 0", timeout=60000)
     status, lines = page.text_content("#status"), U.log_lines(page)
     blank = [OPENED.match(t) for t in lines if t.startswith("Plate ")][-1]
-    U.check(status == FLUID and blank is not None and blank.group(1, 2, 3, 4) == ("960", "512", "121", "16-bit") and not any("Plate ready" in t for t in lines),
+    U.check(status == FLUID and blank is not None and blank.group(1, 2, 3, 4) == ("960", "512", "121", "8-bit") and not any("Plate ready" in t for t in lines),
             f"a blank plate keeps its fluid hint once its playback video is loaded, and its line gives the bit depth asked for its fluid shot: {status!r}, {[t for t in lines if t.startswith('Plate ')][-1:]}")
     page.close()

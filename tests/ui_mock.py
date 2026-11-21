@@ -250,14 +250,14 @@ def drag(page, selector, dx, dy):
 # ---------- The flows: each opens its own page and closes it ----------
 
 def start_flow(browser, port):
-    """With no plate open, the page opens a blank plate at start, at the Blank tab's settings, in 16-bit when SDR to HDR can
-    run, its keyframes ready to paint (?blank=0 starts empty, as every other flow does)."""
+    """With no plate open, the page opens a blank plate at start, at the Blank tab's settings, in 8-bit (16-bit, with SDR to
+    HDR, is the tab's other choice), its keyframes ready to paint (?blank=0 starts empty, as every other flow does)."""
     page = browser.new_page(viewport=VIEWPORT)
     page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     spec = page.text_content("#spec")
-    check("960 x 512, 25 fps, 121 frames" in spec and page.input_value("#b-depth") == "16" and not page.is_hidden("#fluid"),
-          f"a blank plate opens at start, 16-bit, its keyframes ready to paint: {spec}")
+    check("960 x 512, 25 fps, 121 frames" in spec and page.input_value("#b-depth") == "8" and not page.is_hidden("#fluid"),
+          f"a blank plate opens at start, 8-bit, its keyframes ready to paint: {spec}")
     page.close()
 
 
@@ -606,7 +606,7 @@ def fluid_flow(browser, port):
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
     page.click("#open-btn"); page.click("#open [data-tab=blank]")
-    page.select_option("#b-depth", "8")  # an 8-bit fluid shot: fluid16_flow covers 16-bit, the default once SDR to HDR is installed
+    page.select_option("#b-depth", "8")  # an 8-bit fluid shot, the default: fluid16_flow covers 16-bit
     page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.select_option("#b-fps", "24"); page.fill("#b-frames", "33")
     page.dispatch_event("#b-frames", "input")
     note = page.text_content("#b-note")
@@ -825,7 +825,7 @@ def oom_flow(browser, port):
     urllib.request.urlopen(urllib.request.Request(f"{base}/mock/oom", json.dumps({"workflow": "fluid", "times": 1}).encode(),
                                                   {"Content-Type": "application/json"}))
     page.click("#open-btn"); page.click("#open [data-tab=blank]")
-    page.select_option("#b-depth", "8")  # an 8-bit fluid shot: fluid16_flow covers 16-bit, the default once SDR to HDR is installed
+    page.select_option("#b-depth", "8")  # an 8-bit fluid shot, the default: fluid16_flow covers 16-bit
     page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.select_option("#b-fps", "24"); page.fill("#b-frames", "33")
     page.dispatch_event("#b-frames", "input"); page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)

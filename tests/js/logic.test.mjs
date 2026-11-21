@@ -412,7 +412,7 @@ test("a light's relight is an optional part of its edit, with the frame as Klein
   assert.equal(find(lit, (n) => n.class_type === "ReferenceMultiLatent").inputs["images.image1"], undefined); // Klein's one reference: the frame
 });
 
-import { viewerSpace, drawsDeep, fluidRun, passMovie, defaultDepth } from "../../web/logic.mjs";
+import { viewerSpace, drawsDeep, fluidRun, passMovie } from "../../web/logic.mjs";
 
 test("an image sequence's 8-bit movies hold log values; playing, one kind of frame", () => {
   assert.equal(viewerSpace(["ACEScg", "ACEScct", "ACES2065-1"], "sRGB Encoded Rec.709 (sRGB)"), "ACEScct");
@@ -422,11 +422,9 @@ test("an image sequence's 8-bit movies hold log values; playing, one kind of fra
   assert.equal(drawsDeep(true, true), true, "playing with every precise frame in: those only");
 });
 
-test("a fluid shot exports from its own folder; a blank plate is 16-bit when SDR to HDR can run", () => {
+test("a fluid shot exports from its own folder", () => {
   assert.equal(fluidRun("output:paintaplate/p1/fluid_v2/hdr"), "paintaplate/p1/fluid_v2");
   assert.equal(fluidRun("paintaplate/p1/fluid_v2/plate/blank_960x512.mov"), "paintaplate/p1/fluid_v2");
-  assert.equal(defaultDepth(true), 16);
-  assert.equal(defaultDepth(false), 8);
 });
 
 test("the Render panel shows each finished pass that made a movie", () => {
