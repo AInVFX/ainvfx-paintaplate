@@ -601,6 +601,14 @@ def carry(mask: np.ndarray, dy: int, dx: int) -> np.ndarray:
     return out
 
 
+def shot_change(shot: np.ndarray, plate: np.ndarray) -> np.ndarray:
+    """How far a regenerated frame is from the plate's frame under it, per pixel: (H, W) from two (H, W, 3) frames in
+    0 to 1. Each pixel counts from the plate's own range of values FOLLOW_SHIFT of the width around it, so a road that
+    the shot only shifted is no change, then the result is softened by one pixel. Follow Matte's test of change."""
+    size = (2 * max(1, round(FOLLOW_SHIFT * plate.shape[1])) + 1,) * 2 + (1,)
+    return ndimage.gaussian_filter(np.maximum(ndimage.minimum_filter(plate, size) - shot, shot - ndimage.maximum_filter(plate, size)).max(axis=-1).clip(0), 1.0)
+
+
 def record(folder: str, masks, n: int, first, shot, base, zone: float, threshold: float, element, erased=None, erased_edge=0.0, first_frame=1) -> str:
     """With PAINTAPLATE_RECORD=<folder> in ComfyUI's environment, what Follow Matte was given, as one .npz file: the
     tracker's masks, the first-frame mask, the element, the shot, the plate and the Clean matte under a paint, at their own
@@ -841,12 +849,9 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
     compare = shot is not None and base is not None
     real = shot is None and base is not None  # an erase: the frames the tracker read are the plate, and the object is the plate's own
 
-    def differ(t):  # how far the shot is from the plate under it, per pixel: from the plate's own range of values a few pixels
-        b = base[min(t, len(base) - 1)]  # around, so a road the shot only shifted is no change
-        b = (b if b.shape[:2] == (h, w) else resize_to(b, h, w))[..., :3]
-        s, size = shot[min(t, len(shot) - 1)][..., :3], (span, span, 1)
-        return ndimage.gaussian_filter(np.maximum(ndimage.minimum_filter(b, size) - s, s - ndimage.maximum_filter(b, size)).max(axis=-1).clip(0), 1.0)
-    span = 2 * max(1, round(FOLLOW_SHIFT * w)) + 1
+    def differ(t):  # how far the shot is from the plate under it, per pixel (shot_change)
+        b = base[min(t, len(base) - 1)]
+        return shot_change(shot[min(t, len(shot) - 1)][..., :3], (b if b.shape[:2] == (h, w) else resize_to(b, h, w))[..., :3])
     reach, thin = max(2.0, zone * w), max(1.0, w / 240)
 
     def bulk(m):  # a mask without its thin lines (an opening by `thin`), worked out in the mask's own box
