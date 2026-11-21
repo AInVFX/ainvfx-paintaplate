@@ -3462,6 +3462,9 @@ function stagesUI() {
     if (movie) {
       pick(li, st.id, labelOf(st).toLowerCase());
       if (S.pass ? S.pass === st.id : movie.url === S.shot?.url) li.classList.add("shown"); // the row on show
+    } else if (now && S.pass) { // the step at work, while another is on show: a click ends the pin, and its live preview shows again
+      li.classList.add("pick");
+      li.onclick = () => choosePass(S.pass);
     }
     return li;
   })];

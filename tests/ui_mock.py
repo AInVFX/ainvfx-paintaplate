@@ -420,6 +420,10 @@ def generate_flow(browser, port):
     page.wait_for_timeout(300)
     check("Viewer: Shot, full size." in log_lines(page) and shown() == ["Shot, full size"],
           f"a click on a finished step displays it while the next step runs: {shown()}")
+    page.click("#stages li.now.pick", delay=300)  # the step at work: back to the latest result, its live preview when it has one
+    check(page.text_content("#hud") == "The latest result." and not page.query_selector("#stages li.now.pick"),
+          f"a click on the step at work ends the pin: {page.text_content('#hud')!r}")
+    page.click("#stages li.pick[data-pass='full']", delay=700)  # pinned again: the full-size composite must take the viewer from it
     page.wait_for_function("document.querySelector('#render-left').textContent === 'full size ready'", timeout=120000)
     check(shown() == ["Composite, full size"], f"the full-size composite, once made, takes the viewer from the pinned step: {shown()}")
     lines = log_lines(page)
