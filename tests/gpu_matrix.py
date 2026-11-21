@@ -262,7 +262,7 @@ def command(a, case, folder):
     cmd = [sys.executable, os.path.join(HERE, "ui_live.py"), "--url", a.url, "--comfy", a.comfy, "--out", folder,
            "--channel", a.channel, "--timeout", str(a.timeout), "--think", "2", *(["--memory", a.memory] if a.memory else []), *(["--preview", a.preview] if getattr(a, "preview", "") else []), *[f"--option={o}" for o in case.get("address", [])], *(["--graph"] if a.graph else []),
            *(["--hdr"] if getattr(a, "hdr", False) or case.get("hdr") else []), *(["--upscale" if case.get("upscale") is True else f"--upscale={case['upscale']}"] if case.get("upscale") else [])]
-    cmd += ["--fluid", json.dumps(case["fluid"])] if "fluid" in case else ["--path", case["path"]]
+    cmd += ["--fluid", json.dumps(case["fluid"])] if "fluid" in case else ["--scene", case["scene"]] if "scene" in case else ["--path", case["path"]]
     if case.get("strokes"):
         cmd += ["--strokes", json.dumps(case["strokes"])]
     if case.get("seed") is not None:
@@ -803,6 +803,9 @@ def run_case(a, name, case, folder):
     memory, t0 = Memory(a.url), time.time()
     memory.start()
     print(f"--- {name}", flush=True)
+    if "scene" in case:  # a scene case: its scene, from tests/scenes, in that ComfyUI's scenes folder
+        scenes = os.path.join(a.comfy, "output", "paintaplate", "scenes"); os.makedirs(scenes, exist_ok=True)
+        shutil.copy(os.path.join(HERE, "scenes", case["scene"] + ".paintaplate.json"), scenes)
     subprocess.run(command(a, case, folder))
     memory.on = False
     memory.join(3)
@@ -843,7 +846,7 @@ def run_case(a, name, case, folder):
         job["run"] = span[1] - span[0] if span else None
         job["vram"], job["ram"], job["own"] = memory.peak(*span) if span else [0, 0, 0]
     failed = [m for m in result["marks"] if m.startswith("FAILED")] or ([] if marks else ["ui_live.py wrote no marks"])
-    done = any(m.startswith("downloaded") for m in result["marks"]) or not case.get("strokes")  # a fluid shot alone has no export
+    done = any(m.startswith("downloaded") for m in result["marks"]) or not (case.get("strokes") or case.get("scene"))  # a fluid shot alone has no export
     result["passed"], result["why"] = not failed and done, (failed[0] if failed else "" if done else "the full-size composite was not reached: " + (result["marks"] or ["?"])[-1])
     result["passed"], result["why"] = matte_verdict(result["passed"], result["why"], result["mattes"])
     if any(s[0] == "paint" for s in case.get("strokes", [])) and case.get("path"):

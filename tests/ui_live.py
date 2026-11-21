@@ -195,6 +195,13 @@ def viewer_check(page, now, row, label):
             f"its progress changed the time {ticks} times and replaced {gone} rows")
 
 
+def open_scene(page, name, timeout=60000):
+    """Open plate > Scenes: the scene saved on that ComfyUI under `name` opens with its plate, and its edits and their
+    render run again, each with its own seed and words."""
+    page.click("#open-btn"); page.click("#open [data-tab=scenes]")
+    page.dblclick(f"#scenes .scene:has(.name:text-is({json.dumps(name)}))", timeout=timeout)
+
+
 ENDED = ("Export: done", "Download: ")  # the status line once the export is written, then once its zip downloads
 NAME_ASKED = "took the stroke for another object"  # the page's line when an erase with no text prompt asks for its object's name (logic.asksName)
 
@@ -304,6 +311,7 @@ def main():
     ap.add_argument("--port", type=int, default=8190)
     ap.add_argument("--url", default="", help="a running ComfyUI with the real workflows and models (no stand-ins)")
     ap.add_argument("--path", default="", help="plate path in that ComfyUI's input folder, typed into the open dialog")
+    ap.add_argument("--scene", default="", help="instead of --path and --strokes: a scene saved on that ComfyUI, by its name; it opens with its plate and every edit, and its render runs")
 
     ap.add_argument("--strokes", default="", help='JSON list of [tool, words, [[x, y], ...], brush size, {"whole": false, "color": "#d32f2f"}]; a list of such [[x, y], ...] draws several strokes for one edit')
     ap.add_argument("--fluid", default="", help='with --url: a fluid shot from a blank plate first, as fluid_shot() describes; '
@@ -460,7 +468,7 @@ def remote(a):
     shutil.rmtree(shots, ignore_errors=True); os.makedirs(shots)
     fluid = json.loads(a.fluid) if a.fluid else None
     default = [] if fluid else [["paint", "a small campfire", [[0.45, 0.8], [0.5, 0.75], [0.55, 0.8]]]]
-    strokes = json.loads(a.strokes) if a.strokes else default
+    strokes = [] if a.scene else json.loads(a.strokes) if a.strokes else default  # a scene brings its own edits
     marks, errors, t0 = [], [], time.time()
     mark = lambda what: (marks.append((round(time.time() - t0, 1), what)), print(f"{marks[-1][0]:7.1f} s  {what}"))  # noqa: E731
     from playwright.sync_api import sync_playwright
@@ -480,9 +488,9 @@ def remote(a):
             if fluid:  # a fluid shot first: once made, it is the plate the strokes are painted on
                 fluid_shot(page, fluid, shots, mark, wait_s=max(900, 4 * a.timeout))
             else:
-                open_listed(page, a.path)
+                open_scene(page, a.scene) if a.scene else open_listed(page, a.path)
                 page.wait_for_function("document.querySelector('#spec').textContent && document.querySelector('#opening').hidden", timeout=300000)
-            if strokes:
+            if strokes or a.scene:
                 mark("plate open: " + page.inner_text("#spec")); page.screenshot(path=f"{shots}/1_open.png")
                 if a.hdr:
                     mark(deliver_hdr(page))
