@@ -1088,6 +1088,8 @@ def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=N
                         near = prev if prev.any() else line
                         joined = touching(made & found, grow(near, reach)) if near.any() and (made & found).any() else None
                         keep = grow(joined, thin) & found if joined is not None and joined.any() else prev & found  # none: the matte before holds
+                        if 3 * int(keep.sum()) >= 2 * int(found.sum()):  # the tracker's mask is the painted object, not a larger one it lies on (a horse):
+                            keep |= ~grow(~grow(keep, reach / 4), reach / 4) & found  # what was found, in a gap of the change under half a zone across: thin smoke over a trunk
                     f, region = ndimage.binary_fill_holes(keep), (found if follows else core)
                     thick = bulk(region)  # the object without its thin lines: the region never creeps along them
                     kept = line & hide if hide is not None else None
