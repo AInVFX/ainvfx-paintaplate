@@ -3257,7 +3257,7 @@ async function track(active, shotPath, base, suffix, progress, previous, tools, 
 
 function mattesOf(found) { // a missing matte is the other one again: the workflows take both
   const a = found.matte_a ?? found.matte_b, b = found.matte_b ?? found.matte_a;
-  return { found, any: !!a, values: { matte_a: a ?? "", matte_b: b ?? "" } };
+  return { found, any: !!a, values: { matte_a: a ?? "", matte_b: b ?? "", paint_matte: found.matte_b ?? "" } }; // paint_matte: a painted object keeps its colours
 }
 
 const PARTS = { export: "the result in the plate's format", layer: "its layer", matte: "its matte", "upscaled": "the upscaled set", review: "a review movie", shot: "the regenerated shot",

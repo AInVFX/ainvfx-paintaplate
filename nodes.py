@@ -300,13 +300,16 @@ class FitToPlate(io.ComfyNode):
                 io.Int.Input("steady", default=2, min=0, max=12, optional=True,
                              tooltip="Frames on each side over which the mask edge, the shift and the colour "
                                      "match are smoothed. 0 treats every frame on its own."),
+                io.Mask.Input("keep", optional=True,
+                              tooltip="Where the shot keeps its own colours: a painted object. The colour match then "
+                                      "fixes only the edge the composite adds around it."),
             ],
             outputs=[io.Image.Output(display_name="image"), io.Mask.Output(display_name="mask")],
         )
 
     @classmethod
     def execute(cls, plate, image, align, max_shift, match_color, grain, grow, feather, mask=None,
-                steady=2) -> io.NodeOutput:
+                steady=2, keep=None) -> io.NodeOutput:
         n, h, w = min(plate.shape[0], image.shape[0]), plate.shape[1], plate.shape[2]
         if mask is None or not bool(mask.any()):  # nothing to composite (a relight alone): the plate stands, nothing is fitted
             return io.NodeOutput(plate[:n], torch.zeros((n, h, w), dtype=torch.float32))
@@ -316,7 +319,8 @@ class FitToPlate(io.ComfyNode):
         images, out = mathops.fit_to_plate(
             n, h, w, stoppable(lambda i: plate[i].float().cpu().numpy()), lambda i: image[i].float().cpu().numpy(), masks,
             align=align, max_shift=max_shift, match_color=match_color, grain=grain, grow=grow, feather=feather,
-            steady=steady, workers=WORKERS, progress=lambda: bar.update(1))
+            steady=steady, workers=WORKERS, progress=lambda: bar.update(1),
+            keep=None if keep is None or not bool(keep.any()) else keep[:n].float().cpu().numpy())
         return io.NodeOutput(to_image(images), to_image(out))
 
 

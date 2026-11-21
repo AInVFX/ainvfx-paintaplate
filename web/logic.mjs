@@ -6,7 +6,8 @@
 // Optional links: when every source slot is left empty, the link goes, with every node that fed it. The same rule as
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
-export const OPTIONAL = { fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_erased: ["erased"], follow_element: ["seed"],
+// fit_keep comes first: with no matte at all, it goes before fit_mask, with which it shares the paint matte's node.
+export const OPTIONAL = { fit_keep: ["paint_matte"], fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_erased: ["erased"], follow_element: ["seed"],
   review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], plate_level: ["plate_width", "plate_height"],
   matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"],
   export_plate: ["prefix"], export_exr: ["exr_prefix"], export_layer: ["layer_prefix"], export_layer_exr: ["layer_exr_prefix"],

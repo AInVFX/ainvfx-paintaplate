@@ -130,7 +130,7 @@ def load(name, folder=None):
 # no plate size (a shot): its HDR frames go on as they are; no movie
 # asked of a matte, an export's matte or a fluid shot's control video (the Render panel's rows show them; the ComfyUI
 # graph of the Export dialog leaves them out).
-OPTIONAL = {"fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",), "follow_erased": ("erased",),
+OPTIONAL = {"fit_keep": ("paint_matte",), "fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",), "follow_erased": ("erased",),
             "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "plate_level": ("plate_width", "plate_height"),
             "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",),
             "export_plate": ("prefix",), "export_exr": ("exr_prefix",), "export_layer": ("layer_prefix",),
@@ -521,16 +521,19 @@ def mattes(g):
     size = g("GetImageSize", image=add)
     erase = g("ImageScale", _title="Clean matte at the paint matte's size", image=erase, upscale_method="bilinear",
               width=size[0], height=size[1], crop="disabled")
-    return g("MaskComposite", destination=g("ImageToMask", image=erase, channel="red"),
-             source=g("ImageToMask", image=add, channel="red"), x=0, y=0, operation="add")
+    paint = g("ImageToMask", image=add, channel="red")  # the paint matte alone too: a painted object keeps its colours
+    return g("MaskComposite", destination=g("ImageToMask", image=erase, channel="red"), source=paint, x=0, y=0, operation="add"), paint
 
 
-def fitted(g, base, gen, union):
-    """Fit to Plate, then the composite: the edit over `base`, everything else untouched."""
+def fitted(g, base, gen, union, paint=None):
+    """Fit to Plate, then the composite: the edit over `base`, everything else untouched. `paint`, the paint matte: the
+    colour match leaves a painted object as the shot made it, and fixes the edge the composite adds around it."""
     fit = g("PaintAPlate_FitToPlate", _progress=True, plate=base, image=gen, mask=union, align=True, max_shift=8.0,
             match_color=True, grain=Slot("grain", 1.0), grow=Slot("grow", 8), feather=Slot("feather", 12),
-            steady=Slot("steady", 2))
+            steady=Slot("steady", 2), **({"keep": paint} if paint is not None else {}))
     g.link_slot(fit, "mask", "fit_mask")  # the page drops this link when there is no matte
+    if paint is not None:
+        g.link_slot(fit, "keep", "fit_keep")  # and this one when there is no paint matte (a Clean alone)
     # One frame at a time: core's Image Composite Masked holds four copies of the shot and two of its mask on a whole
     # batch. Fit to Plate always gives a mask (zeros without a matte), and Load Plate gives the plate's alpha apart: RGB here
     size = g("GetImageSize", image=base)
@@ -558,11 +561,11 @@ def comp():
     small = g("ImageScale", image=model, upscale_method="area", width=Slot("width", 960), height=Slot("height", 544),
               crop="disabled")
     gen = g("PaintAPlate_LoadPlate", _title="Generated shot", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
-    union = mattes(g)
+    union, paint = mattes(g)
     relit = g("PaintAPlate_RelightTransfer", plate=small, source=half(g, small), relit=half(g, gen),
               plate_space="sRGB", shot_space="sRGB", radius=Slot("radius", 1), strength=Slot("strength", 1.0), align=True)
     base = g("ComfySwitchNode", switch=Slot("relight", False), on_false=small, on_true=relit)
-    fit, final = fitted(g, base, gen, union)
+    fit, final = fitted(g, base, gen, union, paint)
     xray_matte(g, fit, load)
     # the writer takes the composite as it is and saves the plate's own frames (`frames`): no second batch of the shot
     g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Composite preview", _output="video", filename_prefix=Slot("video_prefix", "paintaplate/plate/comp"), images=final, frames=load[4], fps=load[3])
@@ -574,7 +577,7 @@ def composite(g):
     plate, relit when the light changed, and everywhere else the plate's own pixels."""
     load, model = plate(g, pad=True)
     gen = g("PaintAPlate_LoadPlate", _title="Generated shot", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
-    union = mattes(g)
+    union, paint = mattes(g)
     # The shot comes back at the plate's levels: the tone mapping of the plate's peak, which the models saw, is undone.
     # The peak is the number the plate's conversion into the model space read (its second output): the plate is read once.
     gen_plate = colour(g, gen, "@model", Slot("color_space", "@model"), "Shot in the plate's colour space", peak=model[1])
@@ -598,7 +601,7 @@ def composite(g):
     g.link_slot(shot, "hdr", "hdr_shot")
     g.link_slot(shot, "mask", "fit_mask")  # no matte: the link goes, as Fit to Plate's does
     # the new pixels are matched to the plate they are composited onto: relit when the light changed
-    fit, final = fitted(g, base, shot, union)
+    fit, final = fitted(g, base, shot, union, paint)
     return load, fit, final
 
 

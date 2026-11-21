@@ -129,7 +129,7 @@
   "class_type": "ImageToMask",
   "inputs": {
    "image": [
-    "8",
+    "6",
     0
    ],
    "channel": "red"
@@ -139,7 +139,7 @@
   "class_type": "ImageToMask",
   "inputs": {
    "image": [
-    "6",
+    "8",
     0
    ],
    "channel": "red"
@@ -149,11 +149,11 @@
   "class_type": "MaskComposite",
   "inputs": {
    "destination": [
-    "9",
+    "10",
     0
    ],
    "source": [
-    "10",
+    "9",
     0
    ],
    "x": 0,
@@ -251,7 +251,11 @@
    "grain": 1.0,
    "grow": 8,
    "feather": 12,
-   "steady": 2
+   "steady": 2,
+   "keep": [
+    "9",
+    0
+   ]
   },
   "_meta": {
    "slots": {
@@ -259,7 +263,8 @@
     "grow": "grow",
     "feather": "feather",
     "steady": "steady",
-    "mask": "fit_mask"
+    "mask": "fit_mask",
+    "keep": "fit_keep"
    },
    "progress": true
   }

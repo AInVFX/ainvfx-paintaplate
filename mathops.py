@@ -373,14 +373,16 @@ def seam_field(plate: np.ndarray, gen: np.ndarray, mask: np.ndarray, band: float
 
 
 def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0, match_color=True, grain=1.0,
-                 grow=8, feather=12, steady=2, workers=8, progress=None):
+                 grow=8, feather=12, steady=2, workers=8, progress=None, keep=None):
     """Fit `n` generated frames to the plate they are composited onto. Returns (images, masks), full size.
 
     `plate_at(i)` gives frame i as an (h, w, C) float array; `gen_at(i)` gives it at the plate's size or smaller (a shot
     made at the working size of a 4K plate): then only the window around the matte is enlarged, with a Lanczos-3
     (`resize_lanczos`), frame by frame. `masks` is (N or 1, any height, any width). The mask edge, the shift and the colour match are smoothed over
     `steady` frames on each side, so nothing in the composite changes from one frame to the next unless
-    the shot does. Masks and colour fields are computed at about 480 px, alignment at about 512 px.
+    the shot does. Masks and colour fields are computed at about 480 px, alignment at about 512 px. `keep` (N or 1, any
+    size), optional: where the shot keeps its own colours, a painted object. The colour match then fixes only the edge the
+    composite adds around it, and any other area of the matte (a cleaned one), so a painted object keeps its colours.
     """
     tick = progress or (lambda: None)
 
@@ -394,6 +396,12 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
         masks = np.concatenate([masks, np.repeat(masks[-1:], n - len(masks), 0)])
     small = np.stack([resize_to(m, hl, wl) for m in masks])
     small = steady_masks(small, steady, grow / lo, feather / lo)
+    kept = None
+    if keep is not None:  # a painted object: the colour field leaves it as the shot made it, steady from frame to frame
+        keep = np.asarray(keep, np.float32)[:n]
+        if len(keep) < n:
+            keep = np.concatenate([keep, np.repeat(keep[-1:], n - len(keep), 0)])
+        kept = steady_masks(np.stack([resize_to(m, hl, wl) for m in keep]), steady, 0.0, max(1.0, feather / lo / 2))
     band = max(4.0, (grow + feather) / lo)
     ha, wa = max(1, h // al), max(1, w // al)
 
@@ -448,8 +456,11 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
         g = np.array(g, np.float32, copy=True)
         if len(ys):
             y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
-            if fields is not None:  # the colour field, enlarged like the mask
-                g[y0:y1, x0:x1, :3] *= np.exp(resize_to(fields[i], h, w)[y0:y1, x0:x1])
+            if fields is not None:  # the colour field, enlarged like the mask; none on a painted object (keep)
+                f = resize_to(fields[i], h, w)[y0:y1, x0:x1]
+                if kept is not None:
+                    f = f * (1.0 - np.clip(resize_to(kept[i], h, w)[y0:y1, x0:x1], 0.0, 1.0))[..., None]
+                g[y0:y1, x0:x1, :3] *= np.exp(f)
             if np.any(level > 0):
                 g[y0:y1, x0:x1] = add_grain_level(g[y0:y1, x0:x1], level, np.random.default_rng(i))
         tick()
