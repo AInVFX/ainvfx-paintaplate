@@ -1,5 +1,5 @@
 {
- "about": "What ComfyUI's /object_info says about the node classes of a scene's graph (with and without SDR to HDR), in the fields graph.editorGraph reads: each input in order with its type and six of its options (default, forceInput, control_after_generate, image_upload, multiline, dynamicPrompts), and the outputs. A combo's choices are left out. Read from a running ComfyUI 0.44.2 by tests/object_info_fixture.py.",
+ "about": "What ComfyUI's /object_info says about the node classes of a scene's graph (with and without SDR to HDR), in the fields graph.editorGraph reads: each input in order with its type and six of its options (default, forceInput, control_after_generate, image_upload, multiline, dynamicPrompts), and the outputs. A combo's choices are left out. Read from a running ComfyUI 0.45.3 by tests/object_info_fixture.py.",
  "nodes": {
   "BasicScheduler": {
    "input": {
@@ -188,6 +188,58 @@
    ],
    "output_name": [
     "CONDITIONING"
+   ]
+  },
+  "CreateVideo": {
+   "input": {
+    "required": {
+     "images": [
+      "IMAGE",
+      {}
+     ],
+     "fps": [
+      "FLOAT",
+      {
+       "default": 30.0
+      }
+     ]
+    },
+    "optional": {
+     "audio": [
+      "AUDIO",
+      {}
+     ],
+     "bit_depth": [
+      "COMBO",
+      {
+       "default": "auto"
+      }
+     ],
+     "color_space": [
+      "COMBO",
+      {
+       "default": "sRGB"
+      }
+     ],
+     "chroma_subsampling": [
+      "COMBO",
+      {
+       "default": "auto"
+      }
+     ],
+     "codec": [
+      "COMBO",
+      {
+       "default": "none"
+      }
+     ]
+    }
+   },
+   "output": [
+    "VIDEO"
+   ],
+   "output_name": [
+    "VIDEO"
    ]
   },
   "EmptyLTXVLatentVideo": {
@@ -1267,6 +1319,10 @@
       {
        "default": 2
       }
+     ],
+     "keep": [
+      "MASK",
+      {}
      ]
     }
    },
@@ -1423,6 +1479,43 @@
    ],
    "output_name": [
     "image"
+   ]
+  },
+  "PaintAPlate_KeyframeVideo": {
+   "input": {
+    "required": {
+     "width": [
+      "INT",
+      {
+       "default": 960
+      }
+     ],
+     "height": [
+      "INT",
+      {
+       "default": 512
+      }
+     ],
+     "frames": [
+      "INT",
+      {
+       "default": 121
+      }
+     ],
+     "keys": [
+      "STRING",
+      {
+       "default": "[]",
+       "multiline": true
+      }
+     ]
+    }
+   },
+   "output": [
+    "IMAGE"
+   ],
+   "output_name": [
+    "images"
    ]
   },
   "PaintAPlate_LevelFill": {
@@ -1994,6 +2087,39 @@
    ],
    "output_name": [
     "images"
+   ]
+  },
+  "SaveVideo": {
+   "input": {
+    "required": {
+     "video": [
+      "VIDEO",
+      {}
+     ],
+     "filename_prefix": [
+      "STRING",
+      {
+       "default": "video/ComfyUI",
+       "multiline": false
+      }
+     ],
+     "format": [
+      "COMFY_DYNAMICCOMBO_V3",
+      {}
+     ]
+    },
+    "optional": {
+     "codec": [
+      "COMFY_DYNAMICCOMBO_V3",
+      {}
+     ]
+    }
+   },
+   "output": [
+    "VIDEO"
+   ],
+   "output_name": [
+    "video"
    ]
   },
   "SetLatentNoiseMask": {
