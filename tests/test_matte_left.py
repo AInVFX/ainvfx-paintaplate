@@ -1,6 +1,7 @@
-"""Follow Matte for a painted object that LTX walks out of its place. Once all that was found has left the place, with
-the object never seen there again, the matte holds nothing, changes left at the empty place included, and the summary
-warns. The tracker's mask counts as the paint zone only when it lies mostly inside it."""
+"""Follow Matte for a painted object that LTX walks out of its place, in view, on a plate that stands still. Joined frame
+after frame to the matte of the frame before, it keeps its matte, and a change that LTX leaves at the empty place stays
+out; when it walks back, the matte comes back with it. The tracker's mask counts as the paint zone only when it lies
+mostly inside it."""
 import os
 import re
 import sys
@@ -29,19 +30,17 @@ def shot_of(path, residue=None):
 
 
 class LeftItsPlace(unittest.TestCase):
-    def test_lost_for_good_holds_nothing_and_warns(self):
+    def test_an_object_that_walks_out_of_its_place_in_view_keeps_its_matte(self):
         path = [40 if t < 14 else min(40 + 6 * (t - 13), W - 12) for t in range(N)]
         matte, summary = mathops.follow_matte(**shot_of(path, residue=24))
-        start = int(re.search(r"Warning: object left its place at frame (\d+)\. Try another seed, another text prompt or another stroke\.", summary)[1])
-        empty = int(re.search(r"\n  Removed: whole matte from frame (\d+) \(object out of its place\)\.", summary)[1])
-        start, empty = start - 1, empty - 1  # indices: the summary names a movie's frames from 1
-        self.assertTrue(14 <= start <= empty <= 24, summary)
-        self.assertEqual(int((matte[empty:] > 0.5).sum()), 0)  # the change at the empty place too
-        self.assertTrue((matte[:14, 26:38, 40:52] > 0.5).all())
-        self.assertLess(summary.index("left its place"), summary.index("Removed: whole matte"))
+        self.assertNotIn("left its place", summary)
+        self.assertIn("\n  Object moves from frame ", summary)
+        for t, x in enumerate(path):
+            self.assertTrue((matte[t, 26:38, x:x + 12] > 0.5).all(), f"frame {t}: the object is in the matte\n{summary}")
+        self.assertEqual(int((matte[24:, 30:34, 44:48] > 0.5).sum()), 0)  # the change left at the empty place stays out
 
     def test_comeback_keeps_the_matte(self):
-        path = [40 if t < 14 or t >= 26 else (min(40 + 6 * (t - 13), 120) if t < 20 else 120) for t in range(N)]
+        path = [40 if t < 14 else 40 + 6 * min(t - 13, 6) if t < 26 else max(76 - 6 * (t - 25), 40) for t in range(N)]
         matte, summary = mathops.follow_matte(**shot_of(path))
         self.assertNotIn("left its place", summary)
         self.assertTrue((matte[-1, 26:38, 40:52] > 0.5).all())
