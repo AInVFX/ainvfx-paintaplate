@@ -403,10 +403,25 @@ def generate_flow(browser, port):
     check(not page.is_disabled("#undo-btn"), "undo is live after a stroke")
     page.wait_for_timeout(QUIET_MS)
     check(row_titles(page) == [] and not page.is_disabled("#generate"), f"the strokes wait for Generate: nothing starts by itself {row_titles(page)}")
+    mock_route(port, "/mock/hold", {"output": "follow", "seconds": 6, "times": 1})  # the full-size matte lasts 6 s, its progress coming in
     page.keyboard.press("Enter")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
     check(row_titles(page) == ["1. Paint"] and row_words(page) == ["a red fire"], f"Enter generates edit 1 with its words: {row_titles(page)} {row_words(page)}")
+    shown = lambda: page.eval_on_selector_all("#stages li.shown .name", "els => els.map(e => e.textContent)")  # noqa: E731
+    page.wait_for_function("[...document.querySelectorAll('#stages li.now .name')].some((e) => e.textContent.startsWith('Track the paint'))"
+                           " && !!document.querySelector('#stages li.pick[data-pass=\"full\"]')", timeout=120000)
+    page.evaluate("""() => { window.__gone = 0; window.__ticks = 0; new MutationObserver((ms) => { for (const m of ms) {
+      window.__gone += [...m.removedNodes].filter((n) => n.nodeName === 'LI').length; if (m.target.classList?.contains('time')) window.__ticks++; } })
+      .observe(document.querySelector('#stages'), { childList: true, subtree: true }); }""")
+    page.wait_for_function("window.__ticks + window.__gone > 0", timeout=60000)
+    check(page.evaluate("window.__gone") == 0 and page.evaluate("window.__ticks") > 0,
+          f"while a step runs, a progress message changes its row's time and replaces no row, so a click lands: {page.evaluate('[window.__ticks, window.__gone]')}")
+    page.click("#stages li.pick[data-pass='full']", delay=700)  # pressed as long as a person presses, while the matte's progress comes in
+    page.wait_for_timeout(300)
+    check("Viewer: Shot, full size." in log_lines(page) and shown() == ["Shot, full size"],
+          f"a click on a finished step displays it while the next step runs: {shown()}")
     page.wait_for_function("document.querySelector('#render-left').textContent === 'full size ready'", timeout=120000)
+    check(shown() == ["Composite, full size"], f"the full-size composite, once made, takes the viewer from the pinned step: {shown()}")
     lines = log_lines(page)
     full = [i for i, line in enumerate(lines) if "plays the full-size shot" in line or line.startswith("Viewer: full-size shot")]
     done = [i for i, line in enumerate(lines) if any(r in line for r in REVIEWED)]

@@ -1,6 +1,7 @@
 """The Preview menu. A new browser starts on Latent preview: no preview pass, and each pass's live preview shows in the
 player. Off makes the full size alone and asks the workflows for no live preview: the render starts no preview step, the
-Render panel lists no preview row, the player shows no live preview, and every LTX pass posts live 0."""
+Render panel lists no preview row, the player shows no live preview but shows the
+full-size shot as soon as it is made, and every LTX pass posts live 0."""
 import json
 import re
 import urllib.request
@@ -38,7 +39,7 @@ def run(browser, port, U):
     U.check(any(t.startswith("Render v1: Composite, full size: about") for t in started) and not any(", preview: about" in t for t in started),
             f"the render starts no preview step, and makes the full-size composite: {started}")
     U.check(any(t.startswith("Render v1: 1 edit (") and "shot preview off" in t for t in lines), "the render's line says that the shot preview is off")
-    U.check(not any(t.startswith("Viewer: full-size shot") for t in lines), "the viewer keeps the plate until the full-size composite")
+    U.check(any(t.startswith("Viewer: full-size shot") for t in lines), "the viewer shows the full-size shot as soon as it is made, until the full-size composite")
     ltx = [p["live"] for p in posts(port)[before:] if p["live"] is not None]
     U.check(len(ltx) >= 1 and all(every == 0 for every in ltx), f"every LTX pass asks for no live preview: {ltx}")
     U.check(False not in page.evaluate("window.__live"), "the player shows no live preview")

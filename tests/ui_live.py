@@ -171,6 +171,30 @@ DONE = "document.querySelectorAll('#history li').length === {n} && !document.que
 
 LEFT = "#history li:is([data-left], [data-asked])"  # History's marks: an erase that the page's check holds back (logic.eraseCheck, data-left), or an edit that asks for its object's name (data-asked)
 ASKED = "document.querySelector('#ask').open"  # the page's question dialog: while it is open, the page behind it takes no click
+# While a render runs, a finished Render row pressed as long as a person presses displays its step: (the step that runs,
+# the finished row's data-pass, its name). The step's progress must change its row's time and replace no row.
+VIEWER_CHECKS = (("Track the paint, full size", "full", "Shot, full size"), ("Composite, full size", "trackfull", "Track the paint, full size"))
+WATCH_ROWS = """() => { window.__gone = 0; window.__ticks = 0; new MutationObserver((ms) => { for (const m of ms) {
+  window.__gone += [...m.removedNodes].filter((n) => n.nodeName === 'LI').length; if (m.target.classList?.contains('time')) window.__ticks++; } })
+  .observe(document.querySelector('#stages'), { childList: true, subtree: true }); }"""
+RUNS_WITH = """([now, row]) => [...document.querySelectorAll('#stages li.now .name')].some((e) => e.textContent === now)
+  && !!document.querySelector(`#stages li.pick[data-pass="${row}"]`)"""
+
+
+def viewer_check(page, now, row, label):
+    """The mark of one viewer check: while `now` runs, press the finished row `row` for 700 ms, as a person presses."""
+    page.evaluate(WATCH_ROWS)
+    until = time.time() + 15
+    while time.time() < until and page.evaluate("window.__ticks + window.__gone") == 0:
+        time.sleep(0.2)
+    ticks, gone = page.evaluate("[window.__ticks, window.__gone]")
+    page.click(f"#stages li.pick[data-pass='{row}']", delay=700)
+    time.sleep(0.5)
+    shown = any(f"Viewer: {label}." in t for t in page.eval_on_selector_all("#log li", "els => els.slice(-8).map(e => e.textContent)"))
+    return (f"viewer: {label} {'displayed' if shown else 'NOT displayed'} on a click while « {now} » runs; "
+            f"its progress changed the time {ticks} times and replaced {gone} rows")
+
+
 ENDED = ("Export: done", "Download: ")  # the status line once the export is written, then once its zip downloads
 NAME_ASKED = "took the stroke for another object"  # the page's line when an erase with no text prompt asks for its object's name (logic.asksName)
 
@@ -490,9 +514,12 @@ def remote(a):
                             raise NameAsked(next(line for line in said if NAME_ASKED in line))
                         raise RuntimeError("the erase left its object")
                     mark(f"{tool} edit on the first frame | {status()}"); page.screenshot(path=f"{shots}/2_{tool}_done.png")
-                seen, silent, asked = set(), 0, time.time()
+                seen, silent, asked, viewed = set(), 0, time.time(), set()
                 deadline = time.time() + a.timeout * 8
                 while time.time() < deadline:
+                    for check in VIEWER_CHECKS:
+                        if check not in viewed and a.url and page.evaluate(RUNS_WITH, list(check[:2])):
+                            viewed.add(check); mark(viewer_check(page, *check))
                     note = page.inner_text("#render-left")
                     tag = stage(note) if note else status()[:40]
                     if tag not in seen:
@@ -506,6 +533,11 @@ def remote(a):
                             break
                     time.sleep(1)
                 mark("final: " + status())
+                if a.url:  # the viewer, by itself: the full-size shot once made, then the full-size composite over any pinned step
+                    texts = page.eval_on_selector_all("#log li", "els => els.map(e => e.textContent)")
+                    by_itself = any("Viewer: full-size shot until the full-size composite is ready." in t for t in texts)
+                    mark(f"viewer: the full-size shot {'displayed' if by_itself else 'NOT displayed'} by itself before the composite; "
+                         f"on show at the end: {', '.join(page.eval_on_selector_all('#stages li.shown .name', 'els => els.map(e => e.textContent)')) or 'no row'}")
                 page.keyboard.press("F6"); page.keyboard.press("End"); time.sleep(1); page.screenshot(path=f"{shots}/3_wipe.png")
                 page.keyboard.press("F6"); page.keyboard.press("Home"); page.keyboard.press("Space"); time.sleep(2)
                 page.keyboard.press("Space"); page.screenshot(path=f"{shots}/4_played.png")

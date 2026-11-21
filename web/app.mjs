@@ -2945,7 +2945,7 @@ async function plateHdr(r) {
     Object.assign(r, { review: r.hdrMovie, reviewSpace: logSpace(), reviewFrames: r.hdrFrames, reviewFramesSpace: HDR_FRAMES }); // the result on show
   });
   if (key !== S.heroKey) return log(`Render v${r.v}: SDR to HDR: ready, in the background.`);
-  if (!S.pass) setShot(r.review, key, r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace });
+  showMade(r.review, key, r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace });
   hud("SDR to HDR: the viewer plays it.", 2500);
   stagesUI(); exportUI();
   if (S.wantDownload) return exportAlone(r);
@@ -3052,10 +3052,10 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     }, store);
     return carry ? store.shot : store.clean;
   };
-  const off = !S.previewCap; // no preview pass: the four preview steps are in r.skip (plan), and the viewer keeps the plate until the full-size composite
+  const off = !S.previewCap; // no preview pass: the four preview steps are in r.skip (plan)
   const made = off ? null : await passes(pv, p.shot, sized, false);
-  if (!off && here() && !S.pass && !pv.taken && !pv.comp && !r.review && S.shot?.url !== pv.raw) { // a rough look at once: the whole frame as the model made it, until the composite
-    setShot(pv.raw, key, "@model");
+  if (!off && here() && !pv.taken && !pv.comp && !r.review && S.shot?.url !== pv.raw) { // a rough look at once: the whole frame as the model made it, until the composite
+    showMade(pv.raw, key, "@model");
     hud("Shot, preview: Space plays it. The composite follows.", 2500);
   }
   if (!off) await step(r, "track", async (progress) => { pv.painted = await track(active, made, base, `_${sized}`, progress, null, ["paint"],
@@ -3069,15 +3069,15 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     const matte = outputFile("comp", comp, "matte_movie"); // the matte the composite used: the X-ray shows it
     pv.compMatte = matte ? viewUrl(matte) : null;
   }, pv);
-  if (!off && here() && !S.pass && !r.review && S.shot?.url !== pv.comp) {
-    setShot(pv.comp, key, "@model");
+  if (!off && here() && !r.review && S.shot?.url !== pv.comp) {
+    showMade(pv.comp, key, "@model");
     hud("Composite, preview: Space plays it. The full-size composite follows.", 2500);
     status("Composite, preview: ready. The full-size passes follow; Export can write the result now.", "hint");
   }
   const onePass = !off && sw === p.work[0] && sh === p.work[1];
   const final = onePass ? made : await passes(r, p.work, "full", true);
-  if (!off && here() && !S.pass && !onePass && !r.taken && !r.review && r.raw && S.shot?.url !== r.raw) { // the full-size shot as LTX made it, until the full-size composite:
-    setShot(r.raw, key, "@model"); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640 px)
+  if (here() && !onePass && !r.taken && !r.review && r.raw && S.shot?.url !== r.raw) { // the full-size shot as LTX made it, until the full-size composite, in every Preview mode:
+    showMade(r.raw, key, "@model"); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640 px)
     hud("Shot, full size: Space plays it as LTX made it. The full-size composite follows.", 2500);
     log("Viewer: full-size shot until the full-size composite is ready.");
   }
@@ -3122,7 +3122,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     Object.assign(r, { review: r.hdrMovie, reviewSpace: logSpace(), reviewFrames: r.hdrFrames, reviewFramesSpace: HDR_FRAMES, play: null, playSpace: null });
   });
   if (!here()) return log(`Render v${r.v}: Composite, full size: ready, in the background.`);
-  if (!S.pass) setShot(r.play ?? r.review, key, r.playSpace ?? r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace });
+  showMade(r.play ?? r.review, key, r.playSpace ?? r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace });
   hud(r.hdrAfter ? "SDR to HDR: the viewer plays it." : "Composite, full size: the viewer plays it.", 2500);
   stagesUI(); exportUI();
   if (!S.wantDownload) return status(r.hdrAfter ? "SDR to HDR: ready, in the viewer, its EXR frames at full precision as they load. Export writes them for compositing software."
@@ -3397,6 +3397,23 @@ function stepsInOrder(r, skip) {
     now: S.stage?.key === S.heroKey ? S.stage.id : null }).map((id) => of[id]);
 }
 
+// The Render panel's rows stay in place while a step runs: a progress message changes their times only, so the row a
+// person presses is the row they release, and the click lands. The rows are built again when one comes, goes or changes.
+function keepRows(list, rows) {
+  const same = (a, b) => a.className === b.className && a.title === b.title && a.dataset.pass === b.dataset.pass && a.children[1]?.textContent === b.children[1]?.textContent;
+  const old = [...list.children];
+  if (old.length === rows.length && old.every((li, i) => same(li, rows[i]))) old.forEach((li, i) => { li.children[2].textContent = rows[i].children[2].textContent; });
+  else list.replaceChildren(...rows);
+}
+
+// A result that has just been made takes the viewer: the shot and its composite at the preview size, the full-size shot,
+// the full-size composite. A pinned step gives way to it, so the newest result is on show; the live preview does not.
+function showMade(url, key, space, frames = null, opts = {}) {
+  if (S.pass) { S.pass = null; fluidInput(); }
+  setShot(url, key, space, frames, opts);
+  stagesUI();
+}
+
 function stagesUI() {
   $("#stop").hidden = !generating();
   if ($("#help").open && !$("#models").hidden) modelsUI().catch(quiet); // Models and licences follows the job's plan while it is open
@@ -3420,7 +3437,7 @@ function stagesUI() {
     li.dataset.pass = x.id;
     return li;
   });
-  if (!p || !edits) { list.replaceChildren(...fluidRows); $("#render-left").textContent = ""; return timelineBar(); }
+  if (!p || !edits) { keepRows(list, fluidRows); $("#render-left").textContent = ""; return timelineBar(); }
   const skip = r?.skip ?? plan({ key: S.heroKey }, active).skip, later = (st) => st.onDemand && !S.wantDownload; // the export waits for Export
   const pick = (li, id, label) => { // a finished pass with a picture: a click shows it on every frame, a second click the latest
     li.classList.add("pick");
@@ -3433,7 +3450,7 @@ function stagesUI() {
   first.className = "done" + (S.pass === "first" ? " shown" : "");
   first.innerHTML = '<span class="dot"></span><span class="name">First frame</span><span class="time">edit</span>';
   pick(first, "first", "the first frame");
-  list.replaceChildren(...fluidRows, ...(active.length ? [first] : []), ...stepsInOrder(r, skip).map((st) => {
+  const rows = [...fluidRows, ...(active.length ? [first] : []), ...stepsInOrder(r, skip).map((st) => {
     const li = document.createElement("li"), took = doneOf(r, st), from = (st.preview ? previewOf(r) : r)?.taken?.[st.id];
     const now = S.stage?.id === st.id && S.stage.key === S.heroKey;
     li.className = took !== undefined ? "done" : now ? "now" : later(st) ? "later" : "";
@@ -3447,7 +3464,8 @@ function stagesUI() {
       if (S.pass ? S.pass === st.id : movie.url === S.shot?.url) li.classList.add("shown"); // the row on show
     }
     return li;
-  }));
+  })];
+  keepRows(list, rows);
   const pre = renderLeft(), all = renderLeft(true);
   const busy = S.stage?.key === S.heroKey, what = S.wantDownload ? "export" : "full size", next = S.previewCap && !alone ? "preview" : "full size";
   $("#render-left").textContent = stale() || !(previewOf(r)?.comp || r?.review) ? (pre ? `${next} ${secs(pre)}` : busy ? `${next} almost ready` : "")
