@@ -383,10 +383,10 @@ def kept_edges(plate: np.ndarray, gen: np.ndarray, level: float = 0.06) -> np.nd
 
 def edge_grow(mask: np.ndarray, stop: np.ndarray, steps: float) -> np.ndarray:
     """`mask` grown by `steps` pixels, one at a time, never into `stop`: a Clean's margin stops at what stays."""
-    m = mask > 0.5
-    for _ in range(int(round(steps))):
-        m = m | (ndimage.binary_dilation(m) & ~stop)
-    return np.maximum(m.astype(np.float32), mask)
+    steps = int(round(steps))
+    if steps < 1:
+        return mask
+    return np.maximum(ndimage.binary_dilation(mask > 0.5, iterations=steps, mask=~stop).astype(np.float32), mask)
 
 
 def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0, match_color=True, grain=1.0,
@@ -423,13 +423,18 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
         painted = np.stack([resize_to(m, hl, wl) for m in keep])
         kept = steady_masks(painted, steady, 0.0, max(1.0, feather / lo / 2))
     cleaned = small if painted is None else np.clip(small - painted, 0.0, 1.0)  # the part of the matte that a Clean regenerates
-    if cleaned.max() > 0.02 and grow > 0:  # its margin stops at the edges the plate and the clean plate both keep: the outline of what stays
-        grown, limits = [], []
-        for i in range(n):  # its soft edge too: the feather fades it on the far side, and stops at what stays
+    if cleaned.max() > 0.02 and grow > feather:  # a Clean's wide margin: all of the object, its soft edges and what it blurs
+        near = dilate(cleaned, feather / lo)  # its first stretch, as wide as the feather, always grows: the object's rim and outline go whole
+
+        def margin(i):  # the rest stops at the edges the plate and the clean plate both keep, the outline of what stays; its soft edge too
             stop = kept_edges(low(plate_at(i), lo, hl, wl), low(gen_at(i), lo, hl, wl))
-            grown.append(edge_grow(cleaned[i], stop, grow / lo)); limits.append(edge_grow(cleaned[i], stop, (grow + 2 * feather) / lo))
-        small = np.maximum(steady_masks(np.stack(grown), steady, 0.0, feather / lo) * np.stack(limits),
-                           steady_masks(painted, steady, grow / lo, feather / lo) if painted is not None else 0.0)
+            grown = edge_grow(near[i], stop, (grow - feather) / lo)
+            return grown, edge_grow(grown, stop, 2 * feather / lo)
+        with ThreadPoolExecutor(workers) as pool:
+            grown, limits = (np.stack(part) for part in zip(*pool.map(margin, range(n))))
+        small = np.maximum(steady_masks(near, steady, 0.0, feather / lo), steady_masks(grown, steady, 0.0, feather / lo) * limits)
+        if painted is not None:
+            small = np.maximum(small, steady_masks(painted, steady, grow / lo, feather / lo))
     else:
         small = steady_masks(small, steady, grow / lo, feather / lo)
     band = max(4.0, (grow + feather) / lo)
@@ -439,8 +444,8 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
         p, g = plate_at(i), gen_at(i)
         dy = dx = 0.0
         if align:
-            keep = 1.0 - resize_to(small[i], ha, wa)
-            dy, dx = phase_shift(structure(shrink(p, al)) * keep, structure(low(g, al, ha, wa)) * keep, max_shift / al, fine=True)
+            plain = 1.0 - resize_to(small[i], ha, wa)  # where the composite shows the plate: the two frames are compared there
+            dy, dx = phase_shift(structure(shrink(p, al)) * plain, structure(low(g, al, ha, wa)) * plain, max_shift / al, fine=True)
             dy, dx = dy * al, dx * al
         field = None
         if match_color and small[i].max() > 0.02:
