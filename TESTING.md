@@ -210,8 +210,9 @@ The mock's own routes, for the checks that need a window held open or a look at 
 | `page_ocio_reset` | `tests/flows/page_ocio_reset.py`. Shift+End and right-click > OCIO > Reset OCIO bring back the config's display and view, with no look, in the same words in the status line and the log; the playhead stays where it is. |
 | `page_log_strokes` | `tests/flows/page_log_strokes.py`. Strokes in quick succession leave one request line of the prompt writer in the log, and no stopped line. |
 | `page_prefetch_stop` | `tests/flows/page_prefetch_stop.py`. The prompt writer's prefetch stops when a plate opens. |
+| `page_stop_upload` | `tests/flows/page_stop_upload.py`. A pass that a stop reaches while a picture of it is on its way to ComfyUI posts no further job. The uploads are slowed: the edit's eye, turned off while the frame under the edit travels, ends the pass with no request to the prompt writer; turned off while the mask travels, for an edit whose caption is ready, it ends the pass with no job for Klein. Turned on again, each edit is made. |
 
-Every module of `tests/flows` is a flow, named after its file (`tests/flows/README.md`). The suite has 93 flows. The runner starts each flow's page on Half size (`HalfSize` in `tests/ui_mock.py`), the preview pass most flows check; a flow that tests the default opens its page with `new_page(default_preview=True)`. On one CPU, `pipeline` takes about five minutes at `--speed 16`.
+Every module of `tests/flows` is a flow, named after its file (`tests/flows/README.md`). The suite has 94 flows. The runner starts each flow's page on Half size (`HalfSize` in `tests/ui_mock.py`), the preview pass most flows check; a flow that tests the default opens its page with `new_page(default_preview=True)`. On one CPU, `pipeline` takes about five minutes at `--speed 16`.
 
 ## CI
 

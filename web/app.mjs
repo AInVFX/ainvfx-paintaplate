@@ -2289,6 +2289,7 @@ async function generate(edit) {
     status(`Edit ${num(edit)}: ${NAME[edit.tool]}, edit preview.`);
     const size = p.prev, values = { base, reference, start: light ? base : reference, caption: cap, seed: edit.seed,
       mask: await uploadCanvas(maskAt(edit, size), `${tag}_mask.png`), ...editSettings(edit, size, QUICK), prefix: `paintaplate/${p.id}/edits/e${edit.id}` };
+    if (!alive()) return; // stopped while the mask was on its way to ComfyUI: no job is posted
     log(`Edit ${num(edit)}: Klein edit preview, ${size.join(" x ")}, ${QUICK.steps} steps.`);
     const quick = await run("edit", values, { kind: "edit", front: true, preview: show, progress: (f) => editProgress(edit, f / 2) }).done;
     if (!alive()) return;
@@ -2301,14 +2302,16 @@ async function generate(edit) {
     const work = p.work, start = snap(before, work);
     start.getContext("2d").drawImage(edit.preview, 0, 0, work[0], work[1]);
     const startName = await uploadCanvas(start, `${tag}_start.png`);
-    const full = await run("edit", { ...values, base: await baseUpload(below, before, work), start: startName,
+    const sized = { ...values, base: await baseUpload(below, before, work), start: startName,
       // an erase refines the edit preview, which has no object left: shown the original, Klein draws part of it back
       // a relight refines its edit preview at full size
       reference: edit.tool === "erase" || light ? startName : await uploadCanvas(editImage(edit, before, work), `${tag}_ref_full.png`),
       mask: await uploadCanvas(maskAt(edit, work), `${tag}_mask_full.png`), ...editSettings(edit, work, FULL),
       relight: light ? 1 : 0,
       // a shade stroke reaches Klein in words only (logic.lightIntent): darkened where painted, it reads as a streak
-      level: edit.tool === "erase" }, { kind: "edit", front: true, progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
+      level: edit.tool === "erase" };
+    if (!alive()) return; // stopped while these were on their way: no job is posted
+    const full = await run("edit", sized, { kind: "edit", front: true, progress: (f) => editProgress(edit, 0.5 + f / 2) }).done;
     if (!alive()) return;
     // a relight shows the frame as the export will make it: Klein's light on the plate's own detail
     edit.patch = await loadImage(viewUrl(outputFile("edit", full, light ? "relit" : "patch")));
@@ -2379,7 +2382,12 @@ function editSettings(edit, size, pass) { // steps, denoise, and the growth and 
 
 // What Klein's first pass needs: the whole object for an erase, the frame under the edit, and the caption. It runs when the
 // strokes stop ("prefetch", cancelled by the next stroke) and again when the edit starts, which reuses what is still current.
+// A pass's uploads and reads can outlast a stop (stopEdit, stopEverything) or a newer pass of the same edit: each moves the
+// edit's token on. The check this gives then throws « cancelled », so what was waiting posts no further job.
+const standing = (edit, token = edit.token) => () => { if (edit.token !== token) throw new Error("cancelled"); };
+
 async function prepare(edit, index, kind) {
+  const current = standing(edit);
   const below = (index < 0 ? S.edits : S.edits.slice(0, index)).filter((e) => e.on && e.patch), size = S.plate.prev;
   const before = layered(index < 0 ? S.edits.length : index);
   if (edit.tool === "erase" && !edit.whole && edit.sam) { edit.sam = null; edit.editCore = null; edit.snapped = ""; redrawStrokes(edit); } // Whole object turned off: the strokes alone
@@ -2390,13 +2398,18 @@ async function prepare(edit, index, kind) {
   }
   const base = await baseUpload(below, before, size);
   const reference = await uploadCanvas(editImage(edit, before, size), `e${edit.id}_${painted(edit)}_ref.png`);
+  current(); // the frame and the drawing are up: the prompt writer is asked only for a pass that still stands
   const key = () => [edit.tool, edit.prompt, bounds(edit.mask), painted(edit), edit.sam ? 1 : 0, edit.editCore ?? "", paintHues(edit).join(" "), below.map((e) => `${e.id}.${e.version}`)].join("|"); // a paint's colours too: a caption written before a stroke of another colour is not reused
   // no words, and an answer about another object: the writer looks once more, at the frame with all but the object dimmed
   // (dimFrame); a second answer about another object asks for the object's name (generate). Each look keeps its own key.
   const plain = key(), dimmed = `${plain}|dimmed`;
   let cap = edit.caption?.key === dimmed ? edit.caption.text : await captionFor(edit, reference, plain, kind);
-  if (!cap && asksName(edit.tool, edit.prompt) && edit.caption?.key === plain)
-    cap = await captionFor(edit, await uploadCanvas(dimFrame(edit, before, size), `e${edit.id}_${painted(edit)}_dim.png`), dimmed, kind, true);
+  if (!cap && asksName(edit.tool, edit.prompt) && edit.caption?.key === plain) {
+    const dim = await uploadCanvas(dimFrame(edit, before, size), `e${edit.id}_${painted(edit)}_dim.png`);
+    current();
+    cap = await captionFor(edit, dim, dimmed, kind, true);
+  }
+  current();
   if (cap && edit.tool === "erase" && edit.whole && edit.sam && await joinShadow(edit, before, kind)) // its cast shadow, when the caption cites one
     edit.caption.key = edit.caption.key === dimmed ? `${key()}|dimmed` : key(); // the caption that cites the shadow stays, under the key of the mask that now holds it
   return { before, below, base, reference, cap };
@@ -2435,7 +2448,8 @@ async function findWhole(edit, before, kind) { // SAM 3.1 finds the whole object
   const picks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * (pts.length - 1))))]; // up to five points, one prompt each
   const points = Object.fromEntries(picks.map((i, j) => [`point_${j}`, JSON.stringify([{ x: Math.round(pts[i][0] * k), y: Math.round(pts[i][1] * k) }])]));
   status(`Edit ${num(edit)}: SAM 3.1 looking for the ${edit.prompt || "object"} under the stroke.`);
-  const frame = await uploadCanvas(snap(before, size), `e${edit.id}_snap.png`);
+  const current = standing(edit), frame = await uploadCanvas(snap(before, size), `e${edit.id}_snap.png`);
+  current();
   const out = await run("snap", { image: frame, words: edit.prompt, ...points }, { kind, front: true }).done;
   const painted = canvasBits(maskAt(edit, size), size), fileBits = (f) => maskBits(f, size);
   const objects = pickObjects({ painted, area,
@@ -2468,7 +2482,8 @@ async function joinShadow(edit, before, kind) { // the object's cast shadow join
   if (!box || !found || found.key !== snapKeyOf(edit) || found.shadow === JSON.stringify(box)) return;
   const [w, h] = found.size, name = edit.prompt || "object";
   status(`Edit ${num(edit)}: SAM 3.1 looking for the shadow of the ${name}.`);
-  const frame = await uploadCanvas(snap(before, found.size), `e${edit.id}_shadow.png`);
+  const current = standing(edit), frame = await uploadCanvas(snap(before, found.size), `e${edit.id}_shadow.png`);
+  current();
   const out = await run("snap", { image: frame, words: "shadow" }, { kind: kind === "edit" ? "snap" : kind, front: true }).done;
   const shadow = shadowOf({ object: found.bits, box, w, h, shadows: await Promise.all(outputFiles("snap", out, "named").slice(1).map((f) => maskBits(f, found.size))) });
   found.shadow = JSON.stringify(box); // looked for: Generate after a prefetch does not ask again
