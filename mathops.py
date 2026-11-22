@@ -959,6 +959,32 @@ def follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base,
                               (int((flicker > 0).sum()), float(flicker.max()) if len(flicker) else 0.0, worst), first_frame)
 
 
+def clean_votes(zone_masks, named, kept, zone, first_frame: int = 1):
+    """A Clean's matte from SAM 3.1's answers on the plate. Returns (mattes, summary). `zone_masks` (N, H, W) is SAM's
+    track of the zone; `named` (N, K, H, W) its objects of the removed thing's name, or None; `kept` what the plate
+    keeps (kept_things with the zone as the region, so the removed thing is not among them); `zone` (H, W) the painted
+    area. On the first frame SAM's track answers with the zone: the named objects that lie mostly in it stand in for
+    it. The matte is the track minus what the plate keeps (a person in front of the palm behind her)."""
+    m = np.asarray(zone_masks, np.float32) > 0.5
+    n = len(m)
+    zone = np.asarray(zone, np.float32).reshape(-1, *m.shape[1:])[0] > 0.5
+    if named is not None and np.size(named):
+        named = np.asarray(named, np.float32) > 0.5
+        first = np.zeros(m.shape[1:], bool)
+        for k in range(named.shape[1]):
+            a = named[0, k]
+            if a.any() and (a & zone).sum() >= VOTES_KEPT * a.sum():
+                first |= a
+        if first.any():
+            m[0] = first
+    kept = np.asarray(kept, np.float32)[:n] > 0.5 if kept is not None and np.size(kept) else np.zeros_like(m)
+    out = m & ~kept
+    seen = int(m.reshape(n, -1).any(axis=1).sum())
+    left = int((m & kept).reshape(n, -1).any(axis=1).sum())
+    lines = [f"tracked on {seen} of {n} frames."] + [f"Left out: what the plate keeps, on {left} frame" + ("" if left == 1 else "s") + "."] * bool(left)
+    return out.astype(np.float32), "\n  ".join(lines)
+
+
 def votes_summary(n: int, seen: int, counts: dict, hidden=(), gone_at=None, flicker=None, first_frame: int = 1) -> str:
     """Follow Matte's summary for a person: the headline, then one line per rule that acted, the plate's numbers for
     frames. The page writes « Paint matte (…): » or « Clean matte (…): » before it."""
