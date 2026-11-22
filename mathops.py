@@ -966,13 +966,15 @@ SAM_WORDS_CUT = (" with ", " in ", " on ", " at ", " from ", " behind ", " outsi
 def sam_words(answer: str, kind: str = "thing") -> str:
     """The words SAM 3.1 searches for, from the prompt upsampler's answer. `kind` "thing": the edit's object, a short
     noun phrase: a longer answer keeps its first one (« bald eagle landing on the fence post » gives « bald eagle »).
-    "kept": what the plate keeps, a list: entries of more than four words, denials (« no other people ») and « none »
-    go. Lowercase, without a final full stop."""
+    "kept": what the plate keeps, the first entry of the list the upsampler gives, its main person, animal or vehicle
+    (« person », « horse », « white van »): the entries after it name parts and accessories (« blue-sleeved arm »), which
+    the edit may change. Entries of more than four words, denials (« no other people ») and « none » never count.
+    Lowercase, without a final full stop."""
     text = " ".join(str(answer or "").strip().strip(".").lower().split())
     if kind == "kept":
         items = [x.strip().strip(".") for x in text.split(",")]
         items = [x for x in items if x and x != "none" and len(x.split()) <= 4 and not x.startswith("no ") and "visible" not in x]
-        return ", ".join(items)
+        return items[0] if items else ""
     for word in SAM_WORDS_CUT:
         if word in f" {text} ":
             text = f" {text} ".split(word)[0].strip()

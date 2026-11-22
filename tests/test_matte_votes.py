@@ -124,7 +124,9 @@ class Votes(unittest.TestCase):
         self.assertEqual(mathops.sam_words("palm branches and fronds outside the open window, including the large fronds"), "palm branches and fronds")
         self.assertEqual(mathops.sam_words("two red laser beams"), "two red laser beams")
         kept = "person, prosthetic arm apparatus, blue-sleeved arm, no other people, animals, or vehicles visible"
-        self.assertEqual(mathops.sam_words(kept, "kept"), "person, prosthetic arm apparatus, blue-sleeved arm, animals")
+        self.assertEqual(mathops.sam_words(kept, "kept"), "person")
+        self.assertEqual(mathops.sam_words("White van, driver.", "kept"), "white van")
+        self.assertEqual(mathops.sam_words("no animals, horse", "kept"), "horse")
         self.assertEqual(mathops.sam_words("None.", "kept"), "")
 
 
