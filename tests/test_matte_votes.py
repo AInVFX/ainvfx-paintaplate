@@ -119,7 +119,7 @@ class Votes(unittest.TestCase):
         self.assertFalse((m > 0.5)[lady > 0].any())
         self.assertTrue((m[3] > 0.5)[(palm[3] > 0) & (lady[3] == 0)].all())
         self.assertFalse((m[0] > 0.5)[(zone > 0) & (palm[0] == 0)].any())  # the first frame is the palm, not the zone
-        self.assertEqual(summary, "tracked on 10 of 10 frames.\n  Left out: what the plate keeps, on 10 frames.")
+        self.assertEqual(summary, "tracked on 10 of 10 frames.\n  Left out: what the plate keeps (person, animal, vehicle), on 10 frames.")
 
 
     def test_sam_s_words_from_the_upsampler_s_answers(self):
@@ -148,6 +148,15 @@ class Votes(unittest.TestCase):
         np.testing.assert_array_equal(np.asarray(again) > 0.5, np.asarray(m) > 0.5)
         self.assertEqual(summary2, summary)
 
+
+    def test_each_line_of_a_paint_s_summary_reads_as_approved(self):
+        s = mathops.votes_summary(10, 9, {"old": 2, "cut": 3, "kept": 4, "away": 1, "added": 5}, hidden=[(3, 4)], gone_at=8)
+        self.assertEqual(s.split("\n  "), ["tracked on 9 of 10 frames.", "Old object added where the shot changed, on 2 frames.",
+                                           "Cut to the change: SAM masks over what the plate keeps, on 3 frames.",
+                                           "Left out: what the plate keeps (person, animal, vehicle) where the shot did not change, on 4 frames.",
+                                           "Left out: SAM masks away from the object, on 1 frame.",
+                                           "Added: what the shot changed beside the object, on 5 frames.",
+                                           "Object hidden from frame 4 to 5.", "Object out of the frame from frame 9."])
 
 if __name__ == "__main__":
     unittest.main()

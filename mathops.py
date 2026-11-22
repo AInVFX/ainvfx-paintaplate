@@ -934,7 +934,7 @@ def _clean_votes(zone_masks, named, kept, zone, first_frame):
     out = m & ~kept
     seen = int(m.reshape(n, -1).any(axis=1).sum())
     left = int((m & kept).reshape(n, -1).any(axis=1).sum())
-    lines = [f"tracked on {seen} of {n} frames."] + [f"Left out: what the plate keeps, on {left} frame" + ("" if left == 1 else "s") + "."] * bool(left)
+    lines = [f"tracked on {seen} of {n} frames."] + [f"Left out: what the plate keeps (person, animal, vehicle), on {left} frame" + ("" if left == 1 else "s") + "."] * bool(left)
     return out.astype(np.float32), "\n  ".join(lines)
 
 
@@ -977,7 +977,7 @@ def votes_summary(n: int, seen: int, counts: dict, hidden=(), gone_at=None, flic
     if counts.get("cut"):
         lines.append(f"Cut to the change: SAM masks over what the plate keeps, on {on(counts['cut'])}.")
     if counts.get("kept"):
-        lines.append(f"Left out: what the plate keeps where the shot did not change, on {on(counts['kept'])}.")
+        lines.append(f"Left out: what the plate keeps (person, animal, vehicle) where the shot did not change, on {on(counts['kept'])}.")
     if counts.get("away"):
         lines.append(f"Left out: SAM masks away from the object, on {on(counts['away'])}.")
     if counts.get("added"):
