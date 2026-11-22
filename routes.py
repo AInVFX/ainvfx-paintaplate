@@ -96,8 +96,9 @@ def zip_name(name: str, folder: str) -> str:
     return re.sub(r"[^\w.-]", "_", name or os.path.basename(folder))[:120]
 
 
-def collect(folder: str, parts: list[str]) -> list[tuple[str, str]]:
-    """(path on disk, name in the zip) for each part asked for, in a fixed order."""
+def collect(folder: str, parts: list[str], upscaled: str = "") -> list[tuple[str, str]]:
+    """(path on disk, name in the zip) for each part asked for, in a fixed order. `upscaled`: the folder under the run's
+    that holds the upscaled set of the size asked for (Upscale's steps keep one per size); the zip names it upscaled/."""
     real = os.path.realpath(folder)  # compared as real paths: the output folder itself may be a symbolic link
 
     def inside(path):
@@ -107,9 +108,10 @@ def collect(folder: str, parts: list[str]) -> list[tuple[str, str]]:
     for part in [p for p in PARTS if p in parts]:
         patterns, single = PARTS[part]
         if single is None:  # a folder, kept as a folder: its files and subfolders in the order of their names
-            for d, dirs, names in os.walk(os.path.join(folder, patterns[0])):
+            base = os.path.join(folder, upscaled if part == "upscaled" and upscaled else patterns[0])
+            for d, dirs, names in os.walk(base):
                 dirs.sort()
-                files += [(path, os.path.relpath(path, folder)) for path in (os.path.join(d, f) for f in sorted(names)) if inside(path)]
+                files += [(path, os.path.join(patterns[0], os.path.relpath(path, base))) for path in (os.path.join(d, f) for f in sorted(names)) if inside(path)]
             continue
         found = next((m for pat in patterns for m in sorted(glob.glob(os.path.join(folder, pat))) if inside(m)), None)
         if found:
@@ -262,15 +264,16 @@ logging.info("[Paint a plate] %s: build %s.\n  Build parts: ComfyUI %s; ComfyUI-
              sum(len(m) == 3 for m in _built["models"]), len(_built["models"]))
 
 
-def build_zip(folder: str, name: str, parts: list[str], models: list[str] | None = None) -> str:
+def build_zip(folder: str, name: str, parts: list[str], models: list[str] | None = None, upscaled: str = "") -> str:
     """The zip of `parts`, stored (EXR, PNG and video are already compressed) and reused while it is current, with
     MODELS.md when the page names the models behind the result."""
-    files = collect(folder, parts)
+    files = collect(folder, parts, upscaled)
     if "export" in parts and not any(arc.startswith("export/") for _, arc in files):
         raise FileNotFoundError("Export not found for this run. Run Export first.")
     if not files:  # a fluid shot's zip holds no export: its HDR frames, its plate and its preview
         raise FileNotFoundError("Download: no files in this run.")
     mark = f"__m{hashlib.sha1(','.join(models).encode()).hexdigest()[:8]}" if models else ""  # another list of models, another zip
+    mark += f"__u{hashlib.sha1(upscaled.encode()).hexdigest()[:8]}" if upscaled and "upscaled" in parts else ""  # another size, another zip
     target = os.path.join(folder, f"{name}__{'-'.join(p for p in PARTS if p in parts)}{mark}.zip")
     newest = max(os.path.getmtime(p) for p, _ in files)
     if os.path.exists(target) and os.path.getmtime(target) >= newest:
@@ -295,7 +298,7 @@ async def download(request: web.Request) -> web.StreamResponse:
         folder = folders.run_folder(request.query.get("run", ""))
         name = zip_name(request.query.get("name", ""), folder)
         models = [m for m in request.query.get("models", "").split(",") if m]
-        path = await asyncio.to_thread(build_zip, folder, name, asked, models)
+        path = await asyncio.to_thread(build_zip, folder, name, asked, models, request.query.get("upscaled", ""))
     except FileNotFoundError as exc:
         raise web.HTTPNotFound(text=str(exc)) from exc
     return web.FileResponse(path, headers={"Content-Disposition": f'attachment; filename="{name}.zip"'})

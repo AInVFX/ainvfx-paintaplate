@@ -874,6 +874,8 @@ function setFinish(opt, on) { // SDR to HDR keeps its own renders (the render ke
 }
 // Upscale turned on or off, or another size: the player shows the latest result, unless a step of the plate's size is pinned
 function latestUpscale() { if (S.pass && !UP_IDS.has(S.pass)) return; S.pass = null; showLatest(); stagesUI(); }
+// Export waits for a pass: its line
+const runsFirst = (label) => `Export: ${label} runs first. The zip downloads when it is done.`;
 // A result made, as the status line says it
 const ready = (label, more = "", next = "Export writes it for compositing software.") => `${label}: ready, in the viewer${more}. ${next}`;
 // The confirmation's detail line when Upscale turns on
@@ -3014,7 +3016,7 @@ function exportPlate(r = S.renders.get(S.heroKey) ?? want(S.heroKey, true)) { //
   // composite (exportAlone): the render runs first when SDR to HDR has not, then the zip downloads
   if (r.done?.hdr !== undefined) return exportAlone(r);
   S.wantDownload = ["hdr"];
-  status("Export: SDR to HDR runs first. The zip downloads when it is done.");
+  status(runsFirst("SDR to HDR"));
   exportUI(); stagesUI(); touch();
 }
 
@@ -3184,6 +3186,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       matte: matte ? viewUrl(matte) : null, layer: x.layer, // the Export row shows its matte
       ...x.parts, upscaled: upscaled(r) }; // the zip takes upscaled/ when Upscale's steps made it
   });
+  r.exported.upscaled = upscaled(r); // another size since the export: its own steps
   S.exported = r.exported;
   stagesUI(); exportUI();
   confirmed(exportDone(S.exported.text));
@@ -3258,9 +3261,10 @@ async function upscalePart(part, set, keeps, progress, movie = true) {
   const values = (shot, space, [first, count], more) => ({ shot, max_frames: p.frames, source_width: sw, source_height: sh, first, count,
     width: target[0], height: target[1], color_space: space, color_fix: "lab", format, seed: 42, config: S.ocio.config, under: "", under_space: space,
     matte: "", comp_prefix: "", matte_prefix: "", ...more });
-  const matte = () => ({ matte: set.matte ?? "", matte_prefix: set.matte ? `${set.dir}/upscaled/matte/matte` : "" });
+  const out = `${set.dir}/upscale/${sized}/out`; // the upscaled set of this size, which the zip names upscaled/ (download)
+  const matte = () => ({ matte: set.matte ?? "", matte_prefix: set.matte ? `${out}/matte/matte` : "" });
   const [mw, mh] = colour.nativeSize(target[0], target[1], NATIVE_SIDE), view = float ? logSpace() : p.cs; // its viewer movie: the look of its frames
-  const save = (shot, frames, name, space) => ["upscale_export", { shot, frames: `output:${frames}`, max_frames: p.frames, count: size, prefix: `${set.dir}/upscaled/${name}`,
+  const save = (shot, frames, name, space) => ["upscale_export", { shot, frames: `output:${frames}`, max_frames: p.frames, count: size, prefix: `${out}/${name}`,
     ...(movie ? { ...movieDims(mw, mh), config: S.ocio.config, color_space: space, movie_space: view, video_prefix: `${set.dir}/upscale/${sized}/movie/${name}` } : {}) }, size / 5];
   const jobs = part === "plate" ? [...windows.map((win, i) => ["upscale", values(p.path, p.cs, win, { prefix: `${plateDir}/${n(i)}/f` }), win[1]]), save(p.path, plateDir, "plate", p.cs)]
     : part === "layer" ? [...windows.map((win, i) => ["upscale", values(set.layer, set.space, win, { prefix: `${set.dir}/upscale/${sized}/layer/${n(i)}/f`, ...matte(),
@@ -3268,13 +3272,13 @@ async function upscalePart(part, set, keeps, progress, movie = true) {
     : [...(keeps ? [] : windows.map((win, i) => ["upscale", values(set.result, set.space, win, { prefix: `${set.dir}/upscale/${sized}/result/${n(i)}/f`, ...matte() }), win[1]])),
       save(set.result, `${set.dir}/upscale/${sized}/${keeps ? "comp" : "result"}`, "export", set.space)]; // [workflow, values, weight]: a window weighs its frames, a part written a fifth of a window
   const total = jobs.reduce((a, [, , wt]) => a + wt, 0);
-  let before = 0, out = null;
+  let before = 0, done = null;
   for (const [name, v, wt] of jobs) {
-    out = await run(name, v, { kind: "export", progress: (f) => progress((before + f * wt) / total) }).done;
+    done = await run(name, v, { kind: "export", progress: (f) => progress((before + f * wt) / total) }).done;
     before += wt;
     progress(before / total);
   }
-  const file = movie ? outputFile("upscale_export", out, "video") : null;
+  const file = movie ? outputFile("upscale_export", done, "video") : null;
   return file ? { url: viewUrl(file), space: view, size: [mw, mh] } : null; // what its row shows
 }
 async function upscaleAlone(dir, result, float) { // Upscale on a result with no plate and no layer (a fluid shot, the plate alone): restored under upscaled/ of dir; false when it stopped or failed
@@ -3363,7 +3367,8 @@ async function download(parts = ["export", "matte"]) {
   if (written) parts = [...parts, "graph"];
   const models = (await modelsBehindResult().catch(() => [])).map((m) => m.id).join(",");
   const a = Object.assign(document.createElement("a"), {
-    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, parts: parts.join(","), models })}`,
+    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, parts: parts.join(","), models,
+      ...(parts.includes("upscaled") ? { upscaled: `upscale/${upSize()}/out` } : {}) })}`, // the upscaled set of the size asked for (upscalePart)
     download: `${S.exported.name}.zip` });
   document.body.append(a); a.click(); a.remove();
   const what = parts.map((k) => (k === "export" && S.exported.space === HDR_FRAMES ? "the result as half-float EXR frames" : PARTS[k])); // SDR to HDR's result of a plate whose format holds nothing above 1.0
@@ -4601,9 +4606,10 @@ $("#x-go").onclick = () => {
   const r = S.renders.get(S.heroKey);
   if (plateAlone(S.heroKey) || r?.hdrAfter) return void setTimeout(() => exportPlate(r), 0); // SDR to HDR's frames: the plate alone, or a relit result in HDR
   const parts = ["export", ...["matte", "review", "shot"].filter((k) => $(`#x-${k}`).checked)];
-  if (r?.exported) return download(parts);
+  if (r?.exported && r.skip?.has("upcomp")) return download(parts); // with Upscale on, the render makes the steps still due, then the zip
   S.wantDownload = parts;
-  status(`Export: writing ${exportsExr(r) ? "half-float EXR frames in ACES2065-1" : "in the plate's own format"}. The zip downloads when it is done.`);
+  status(r && UPS.some((st) => !r.skip.has(st.id) && doneOf(r, st) === undefined) ? runsFirst("Upscale")
+    : `Export: writing ${exportsExr(r) ? "half-float EXR frames in ACES2065-1" : "in the plate's own format"}. The zip downloads when it is done.`);
   exportUI(); stagesUI(); touch();
 };
 $("#log-btn").onclick = () => {

@@ -88,5 +88,7 @@ def run(browser, port, U):
     with page.expect_download(timeout=280000) as dl:
         page.click("#x-go")
     parts = {n.split("/")[1] for n in zipfile.ZipFile(dl.value.path()).namelist() if n.startswith("upscaled/")}
-    U.check(parts == {"export", "plate", "layer", "matte"} and not jobs(start), f"Export writes the steps' upscaled set with no Upscale job: {sorted(parts)}, {jobs(start)}")
+    taken = [t for t in U.log_lines(page)[start:] if t.startswith("export: taken from the job index")]
+    U.check(parts == {"export", "plate", "layer", "matte"} and not jobs(start) and len(taken) == 1,
+            f"Export takes its job from the job index and writes the steps' upscaled set, with no Upscale job: {sorted(parts)}, {jobs(start)}, {taken}")
     page.close()
