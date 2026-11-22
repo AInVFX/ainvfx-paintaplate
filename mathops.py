@@ -959,6 +959,26 @@ def follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base,
                               (int((flicker > 0).sum()), float(flicker.max()) if len(flicker) else 0.0, worst), first_frame)
 
 
+SAM_WORDS_CUT = (" with ", " in ", " on ", " at ", " from ", " behind ", " outside ", " including ", " that ", " which ", ",",
+                 " standing", " landing", " rising", " hanging", " overlapping")
+
+
+def sam_words(answer: str, kind: str = "thing") -> str:
+    """The words SAM 3.1 searches for, from the prompt upsampler's answer. `kind` "thing": the edit's object, a short
+    noun phrase: a longer answer keeps its first one (« bald eagle landing on the fence post » gives « bald eagle »).
+    "kept": what the plate keeps, a list: entries of more than four words, denials (« no other people ») and « none »
+    go. Lowercase, without a final full stop."""
+    text = " ".join(str(answer or "").strip().strip(".").lower().split())
+    if kind == "kept":
+        items = [x.strip().strip(".") for x in text.split(",")]
+        items = [x for x in items if x and x != "none" and len(x.split()) <= 4 and not x.startswith("no ") and "visible" not in x]
+        return ", ".join(items)
+    for word in SAM_WORDS_CUT:
+        if word in f" {text} ":
+            text = f" {text} ".split(word)[0].strip()
+    return text
+
+
 def clean_votes(zone_masks, named, kept, zone, first_frame: int = 1):
     """A Clean's matte from SAM 3.1's answers on the plate. Returns (mattes, summary). `zone_masks` (N, H, W) is SAM's
     track of the zone; `named` (N, K, H, W) its objects of the removed thing's name, or None; `kept` what the plate

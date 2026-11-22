@@ -119,5 +119,14 @@ class Votes(unittest.TestCase):
         self.assertEqual(summary, "tracked on 10 of 10 frames.\n  Left out: what the plate keeps, on 10 frames.")
 
 
+    def test_sam_s_words_from_the_upsampler_s_answers(self):
+        self.assertEqual(mathops.sam_words("Bald eagle landing on the fence post with wings spread wide."), "bald eagle")
+        self.assertEqual(mathops.sam_words("palm branches and fronds outside the open window, including the large fronds"), "palm branches and fronds")
+        self.assertEqual(mathops.sam_words("two red laser beams"), "two red laser beams")
+        kept = "person, prosthetic arm apparatus, blue-sleeved arm, no other people, animals, or vehicles visible"
+        self.assertEqual(mathops.sam_words(kept, "kept"), "person, prosthetic arm apparatus, blue-sleeved arm, animals")
+        self.assertEqual(mathops.sam_words("None.", "kept"), "")
+
+
 if __name__ == "__main__":
     unittest.main()
