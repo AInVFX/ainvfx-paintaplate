@@ -26,6 +26,10 @@ Each recording gets one table, where every approach is measured alike:
   pass, in the Fit to Plate recording of the same frames beside it; without one, the column is empty. On a frame whose
   reference holds nothing (the object hidden or gone), « where none » gives the matte's area there, as a share of the
   frame;
+- with --floor f, a reference smaller than the share f of the frame is measured against that share, so one row of
+  pixels at the edge of a sliver (an object leaving the frame) does not weigh as several points;
+- with --empty a-b, the frames a to b (the plate's numbers) must hold no matte, as while an object is hidden: « Empty
+  frames » gives how many of them hold one, and the largest share of the frame it covers there;
 - the measures of tests/matte_replay.py: the frames that hold a matte, the large changes kept, the mean area and, with
   --head, the share of the head of a horse that faces right;
 - the flicker (mathops.matte_flicker): the share of the matte that comes and goes within 3 frames, the mean over the
@@ -38,7 +42,7 @@ then each approach's matte over the shot, with the plate lost in red, the edit l
 yellow. A Clean's recording holds no shot: its pictures show the plate.
 
     python tests/matte_study.py <recording.npz>... [--refs <folder>] [--approach file.py:function]...
-        [--code <copy of mathops.py>]... [--first baseline] [--band 2] [--worse 0.5] [--head]
+        [--code <copy of mathops.py>]... [--first baseline] [--band 2] [--worse 0.5] [--floor 0] [--empty a-b] [--head]
         [--out <folder>] [--sheet] [--scale 0.5]
 """
 import argparse
@@ -152,15 +156,17 @@ def counted(ref, band):
     return (ndimage.distance_transform_edt(edge) > band) | (ndimage.distance_transform_edt(~edge) > band)
 
 
-def score(matte, ref, band, seen=None):
+def score(matte, ref, band, seen=None, floor=0.0):
     """(edit lost, plate lost, where none, plate lost seen) on one frame. Edit lost and plate lost are shares of the
     reference's area, or None when the reference holds nothing; where none is then the matte's area as a share of the
-    frame, else None. Plate lost seen weights the plate lost by `seen` (0 to 1 per pixel), or is None without it."""
+    frame, else None. Plate lost seen weights the plate lost by `seen` (0 to 1 per pixel), or is None without it. A
+    reference smaller than `floor` px is measured against `floor` px."""
     matte = np.asarray(matte, np.float32)
     count = counted(ref, band)
     total = float(ref[count].sum())
     if total < 1.0:  # nothing to take on this frame: an object hidden or gone
         return None, None, float((matte > 0.5).mean()), None
+    total = max(total, floor)
     lost = np.maximum(matte - ref, 0)[count]
     return (float(np.maximum(ref - matte, 0)[count].sum()) / total, float(lost.sum()) / total, None,
             None if seen is None else float((lost * seen[count]).sum()) / total)
@@ -186,15 +192,21 @@ def mean_worst(pairs, first_frame, worst=max):
     return float(np.mean([p for p, _ in pairs])), float(v), int(t) + first_frame
 
 
-def measure(args, rec, runs, refs, band, head):
+def measure(args, rec, runs, refs, band, head, floor=0.0, empty=None):
     """{name: figures} for every approach on one recording."""
     first_frame = args["first_frame"]
     mattes = {name: m for name, (m, _) in runs.items()}
     replayed = matte_replay.measure(args, mattes, head=head)
     weights = {t: seen_weight(args, t, rec.get("clean")) for t in refs}
     out = {}
+    n, h, w = size(args)
     for name, (m, seconds) in runs.items():
-        scores = {t: score(m[t], r, band, weights[t]) for t, r in refs.items()}
+        scores = {t: score(m[t], r, band, weights[t], floor * h * w) for t, r in refs.items()}
+        held = None
+        if empty:
+            a, b = (max(0, f - first_frame) for f in empty)
+            shares = [float((np.asarray(m[t], np.float32) > 0.5).mean()) for t in range(a, min(b + 1, n))]
+            held = (sum(1 for x in shares if x > 0), len(shares), max(shares) if shares else 0.0)
         flicker = mathops.matte_flicker(m)
         out[name] = {
             "edit_lost": mean_worst([(s[0], t) for t, s in scores.items()], first_frame),
@@ -207,6 +219,7 @@ def measure(args, rec, runs, refs, band, head):
             "area": replayed[name]["area"],
             "flicker": mean_worst([(float(v), t) for t, v in enumerate(flicker)], first_frame),
             "seconds": seconds,
+            "empty": held,
             "per_frame": {str(t + first_frame): {"edit_lost": s[0], "plate_lost": s[1], "where_none": s[2], "plate_seen": s[3]} for t, s in scores.items()},
         }
     return out
@@ -225,19 +238,21 @@ def worse(fig, base, by):
     return fig is not None and base is not None and 100 * (fig[0] - base[0]) > by
 
 
-def table(case, path, args, figures, refs, first, by, head):
+def table(case, path, args, figures, refs, first, by, head, empty=None):
     """The recording's table, in Markdown."""
     n, h, w = size(args)
     frames = ", ".join(str(t + args["first_frame"]) for t in sorted(refs)) or "none"
     lines = [f"### {case} · {os.path.basename(path)} · {w} x {h}, {n} frames, references on frames {frames}", "",
              "| Approach | Edit lost | Plate lost | Plate lost, seen | Where none | Frames with a matte | Large changes kept | Mean area | Flicker |"
-             + (" Head |" if head else "") + " Seconds | |",
-             "| --- " * (10 + head) + "| --- |"]
+             + (" Head |" if head else "") + (" Empty frames |" if empty else "") + " Seconds | |",
+             "| --- " * (10 + head + bool(empty)) + "| --- |"]
     base = figures.get(first, {})
     for name, f in figures.items():
         mark = "worse" if name != first and (worse(f["edit_lost"], base.get("edit_lost"), by) or worse(f["plate_lost"], base.get("plate_lost"), by)) else ""
         lines.append(f"| {name} | {cell(f['edit_lost'])} | {cell(f['plate_lost'])} | {cell(f['plate_seen'])} | {cell(f['where_none'])} | {f['frames']} | {cell(f['kept'])} "
-                     f"| {100 * f['area']:.2f}% | {cell(f['flicker'])} |" + (f" {cell(f['head'])} |" if head else "") + f" {f['seconds']:.1f} | {mark} |")
+                     f"| {100 * f['area']:.2f}% | {cell(f['flicker'])} |" + (f" {cell(f['head'])} |" if head else "")
+                     + (f" {f['empty'][0]} of {f['empty'][1]}, at most {100 * f['empty'][2]:.2f}% |" if empty and f['empty'] else "")
+                     + f" {f['seconds']:.1f} | {mark} |")
     return "\n".join(lines) + "\n"
 
 
@@ -304,10 +319,13 @@ def main(argv=None):
     ap.add_argument("--band", type=float, default=BAND, help="px on each side of a reference's edge that count for neither measure")
     ap.add_argument("--worse", type=float, default=WORSE, help="points above the first approach's mean that read « worse »")
     ap.add_argument("--head", action="store_true", help="also the share of the head of a horse that faces right")
+    ap.add_argument("--floor", type=float, default=0.0, help="a reference smaller than this share of the frame is measured against it")
+    ap.add_argument("--empty", default="", help="a-b: the frames (the plate's numbers) that must hold no matte")
     ap.add_argument("--out", default=".", help="the folder for study.md, study.json and the sheets")
     ap.add_argument("--sheet", action="store_true", help="one picture per recording")
     ap.add_argument("--scale", type=float, default=0.5, help="the sheet's size against the recording's")
     a = ap.parse_args(argv)
+    empty = tuple(int(v) for v in a.empty.split("-")) if a.empty else None
     os.makedirs(a.out, exist_ok=True)
     found, text = {}, ["# Matte study", ""]
     for path in a.recordings:
@@ -320,10 +338,10 @@ def main(argv=None):
             start = time.perf_counter()
             m = fitted(run(args, rec), n, h, w)
             runs[name] = (m, time.perf_counter() - start)
-        figures = measure(args, rec, runs, refs, a.band, a.head)
+        figures = measure(args, rec, runs, refs, a.band, a.head, a.floor, empty)
         key = f"{case}/{os.path.basename(path)}"
         found[key] = figures
-        text.append(table(case, path, args, figures, refs, a.first, a.worse, a.head))
+        text.append(table(case, path, args, figures, refs, a.first, a.worse, a.head, empty))
         if a.sheet:
             sheet(os.path.join(a.out, f"sheet_{case}_{os.path.splitext(os.path.basename(path))[0]}.jpg"), args, runs, refs, a.band, a.scale)
     with open(os.path.join(a.out, "study.md"), "w", encoding="utf-8") as f:

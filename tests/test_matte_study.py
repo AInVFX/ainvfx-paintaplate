@@ -154,6 +154,22 @@ class Study(unittest.TestCase):
         self.assertIsNotNone(f["plate_seen"])
         self.assertLessEqual(f["plate_seen"][0], f["plate_lost"][0])
 
+    def test_a_floor_bounds_a_tiny_reference_and_empty_frames_are_counted(self):
+        tiny = np.zeros((H, W), np.float32)
+        tiny[20:22, 30:32] = 1  # 4 px
+        wide = np.zeros((H, W), np.float32)
+        wide[19:23, 29:33] = 1  # a matte one pixel wider on each side
+        _, plate, _, _ = matte_study.score(wide, tiny, 0)
+        _, floored, _, _ = matte_study.score(wide, tiny, 0, floor=0.01 * H * W)
+        self.assertAlmostEqual(plate, 3.0)  # 12 px of plate against a reference of 4 px
+        self.assertAlmostEqual(floored, 12 / (0.01 * H * W))
+        out = os.path.join(self.dir.name, "empty_out")
+        found = matte_study.main([self.rec, "--out", out, "--empty", "3-5", "--approach", f"{os.path.join(self.dir.name, 'approaches.py')}:perfect"])
+        f = found["toy/" + os.path.basename(self.rec)]["perfect"]
+        self.assertEqual(f["empty"][:2], (3, 3))  # the square is on frames 3, 4 and 5
+        with open(os.path.join(out, "study.md"), encoding="utf-8") as fh:
+            self.assertIn("3 of 3, at most 4.69%", fh.read())
+
     def test_plate_lost_where_the_shot_is_the_plate_is_not_seen(self):
         f = self.found["halo"]
         self.assertGreater(f["plate_lost"][0], 0.5)  # a ring of matte 6 to 9 px around the square
