@@ -1,6 +1,6 @@
 """Measure any function that makes a matte, on recordings of Follow Matte, against references drawn by hand.
 
-A recording is a file that PAINTAPLATE_RECORD wrote (mathops.record). Beside it, a study can keep two files:
+A recording is a file that PAINTAPLATE_RECORD wrote (mathops.record_votes). Beside it, a study can keep two files:
 - <recording>.tracks.npz: more tracks of SAM 3.1 on the same frames, one array (N, H, W) per name, in 0 to 1 or in
   8 bits, such as the element tracked on the shot or the paint zone tracked on the plate;
 - <recording>.json: what the recording does not hold, such as the case's name ("case") and the edit's caption.
@@ -9,10 +9,12 @@ size (it is read at the recording's size): 255 where the edit acts, 0 where the 
 what is partly transparent, such as thin smoke. <frame> is the plate's own number. <case> is the recording's "case",
 else the name of its folder.
 
-An approach is a function approach(rec) -> mattes (N, H, W) in 0 to 1, named as file.py:function. `rec` holds
-mathops.replay(recording), with `tracks`, `facts` (the .json) and `path` added. A matte of another size is resampled to
-the recording's size, and a shorter one holds its last frame. `baseline` is this checkout's follow_matte; each --code
-adds follow_matte from another copy of mathops.py, named after its folder.
+An approach is a function approach(rec) -> mattes (N, H, W) in 0 to 1, named as file.py:function. `rec` holds what
+matte_replay.inputs reads from the recording (the shot, the plate, SAM's answers, the zone, the threshold), the
+arguments of Follow Matte's rules (`call`, `kind`), with `tracks`, `facts` (the .json) and `path` added. A matte of
+another size is resampled to the recording's size, and a shorter one holds its last frame. `baseline` is this
+checkout's Follow Matte (follow_votes, a Clean: clean_votes); each --code adds it from another copy of mathops.py,
+named after its folder.
 
 Each recording gets one table, where every approach is measured alike:
 - the edit lost: on each reference frame, the share of the reference that the matte misses, sum(max(ref - matte, 0))
@@ -73,8 +75,8 @@ def beside(path, suffix):
 
 
 def load(path):
-    """(follow_matte's arguments, rec) for one recording: rec is what an approach reads."""
-    args = mathops.replay(path)
+    """(args, rec) for one recording: args as matte_replay.inputs reads it, rec what an approach reads."""
+    kind, call, args = matte_replay.inputs(path)
     tracks = {}
     if os.path.exists(beside(path, ".tracks.npz")):
         with np.load(beside(path, ".tracks.npz")) as d:
@@ -84,13 +86,15 @@ def load(path):
         fits = [f for f in glob.glob(os.path.join(os.path.dirname(path), "fit_to_plate_*.npz")) if f"_{args['n']}f_" in os.path.basename(f)]
         if fits:
             fit = mathops.replay_fit(max(fits, key=os.path.getsize))
-            h, w = args["base"].shape[1:3]
+            h, w = args["first"].shape[-2:]
             clean = np.stack([f if f.shape[:2] == (h, w) else mathops.resize_to(f, h, w) for f in fit["image"]])
     facts = {}
     if os.path.exists(beside(path, ".json")):
         with open(beside(path, ".json"), encoding="utf-8") as f:
             facts = json.load(f)
-    return args, dict(args, tracks=tracks, facts=facts, path=path, clean=clean)
+    if clean is not None and args["base"] is None and fits:  # a Clean's plate, for the plate lost seen
+        args["base"] = np.stack([f if f.shape[:2] == clean.shape[1:3] else mathops.resize_to(f, *clean.shape[1:3]) for f in fit["plate"]])
+    return args, dict(args, call=call, tracks=tracks, facts=facts, path=path, clean=clean)
 
 
 def size(args):
@@ -102,11 +106,11 @@ def size(args):
 
 
 def approaches(specs, codes):
-    """[(name, run(args, rec) -> mattes)]: baseline, each --code's follow_matte, then each --approach."""
-    out = [("baseline", lambda args, rec: mathops.follow_matte(**args)[0])]
+    """[(name, run(args, rec) -> mattes)]: baseline, each --code's Follow Matte, then each --approach."""
+    out = [("baseline", lambda args, rec: matte_replay.follow(mathops, rec["kind"], rec["call"])[0])]
     for c in codes:
         name, module = matte_replay.code(c)
-        out.append((name, lambda args, rec, m=module: m.follow_matte(**args)[0]))
+        out.append((name, lambda args, rec, m=module: matte_replay.follow(m, rec["kind"], rec["call"])[0]))
     for spec in specs:
         file, _, fn = spec.rpartition(":")
         if not file or not fn:
@@ -311,10 +315,10 @@ def sheet(path, args, runs, refs, band, scale):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("recordings", nargs="+", help="files that PAINTAPLATE_RECORD wrote (follow_matte_*.npz)")
+    ap.add_argument("recordings", nargs="+", help="files that PAINTAPLATE_RECORD wrote (follow_votes_*.npz)")
     ap.add_argument("--refs", default="", help="the references' folder: <refs>/<case>/ref_<frame>.png")
     ap.add_argument("--approach", action="append", default=[], help="file.py:function, called as function(rec)")
-    ap.add_argument("--code", action="append", default=[], help="a copy of mathops.py whose follow_matte is measured too")
+    ap.add_argument("--code", action="append", default=[], help="a copy of mathops.py whose Follow Matte is measured too")
     ap.add_argument("--first", default="baseline", help="the approach the others are compared with")
     ap.add_argument("--band", type=float, default=BAND, help="px on each side of a reference's edge that count for neither measure")
     ap.add_argument("--worse", type=float, default=WORSE, help="points above the first approach's mean that read « worse »")

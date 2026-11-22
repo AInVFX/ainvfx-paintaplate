@@ -486,7 +486,7 @@ def erase_verdict(after, before, mask, size, first=1):
 
 def matte_verdict(passed, why, mattes):
     """(passed, why) once the page's matte summaries are read: a case that passed fails on the first warning of its mattes
-    (mathops.follow_summary writes « Warning: … » among its detail lines), and says where to look. Every step can run and
+    (a detail line that starts « Warning: »), and says where to look. Every step can run and
     the export download while the matte lost the object."""
     warned = [line.strip() for m in mattes for line in m.split("\n") if line.strip().startswith("Warning:")]
     return (False, f"{warned[0]} The case fails on this matte warning: check its picture on the sheet.") if passed and warned else (passed, why)

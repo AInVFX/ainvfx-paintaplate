@@ -1,4 +1,4 @@
-"""tests/matte_study.py: approaches measured alike against references, on a recording that mathops.record wrote."""
+"""tests/matte_study.py: approaches measured alike against references, on a recording that mathops.record_votes wrote."""
 import json
 import os
 import sys
@@ -30,7 +30,7 @@ def perfect(rec):
 
 
 def zone(rec):
-    return np.repeat(np.asarray(rec["first"], np.float32).reshape(1, 48, 64), rec["n"], 0)
+    return rec["tracks"]["zone"]
 
 
 def half(rec):
@@ -78,8 +78,10 @@ class Study(unittest.TestCase):
         shot = np.where(squares[..., None] > 0, 0.95, base).astype(np.float32)
         zone = np.zeros((1, H, W), np.float32)
         zone[0, 8:32, 4:34] = 1
-        cls.rec = mathops.record(os.path.join(d, "toy"), squares, N, zone, shot, base, 1 / 16, 0.1, squares[:1], first_frame=1)
-        np.savez_compressed(matte_study.beside(cls.rec, ".tracks.npz"), element_shot=(squares * 255).astype(np.uint8))
+        cls.rec = mathops.record_votes(os.path.join(d, "toy"), "paint", shot_masks=squares, word_masks=None, plate_masks=None, kept=None,
+                                       element=squares[:1], shot=shot, base=base, threshold=0.1, zone=1 / 16, first_frame=1)
+        np.savez_compressed(matte_study.beside(cls.rec, ".tracks.npz"), element_shot=(squares * 255).astype(np.uint8),
+                            zone=(np.repeat(zone, N, 0) * 255).astype(np.uint8))
         os.makedirs(os.path.join(d, "refs", "toy"))
         for frame, t in ((1, 0), (5, 4)):
             Image.fromarray((square(t) * 255).astype(np.uint8)).save(os.path.join(d, "refs", "toy", f"ref_{frame}.png"))
@@ -142,7 +144,7 @@ class Study(unittest.TestCase):
         rng = np.random.default_rng(9)
         base = (0.3 + 0.2 * rng.random((N, H, W, 3))).astype(np.float32)
         squares = np.stack([square(t) for t in range(N)])
-        rec = mathops.record(d, squares, N, squares[:1], None, base, 1 / 16, 0.1, None)
+        rec = mathops.record_votes(d, "clean", zone_masks=squares, named=None, kept=None, zone=squares[:1], first_frame=1)
         filled = base.copy()
         filled[:, 14:26] = 0.6  # the clean plate pass changes the rows of the squares
         mathops.record_fit(d, N, lambda i: base[i], lambda i: filled[i], squares, None, {"grow": 2})
