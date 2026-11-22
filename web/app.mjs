@@ -3278,11 +3278,10 @@ function exportedParts(p, done, exr) {
 }
 
 function upscaleGuess(id) { // seconds for one of Upscale's steps on the render on show (logic.upscaleSeconds); no id: all of them
-  const r = S.renders.get(S.heroKey), f = upscaleFigures(), keeps = r?.skip ? !r.skip.has("upplate") : upscaleKeeps((r?.active ?? []).map((e) => e.tool)) && !S.deliver.hdr; // as planned (plan)
+  const r = S.renders.get(S.heroKey), f = upscaleFigures(), keeps = r?.skip ? !r.skip.has("uplayer") : upscaleKeeps((r?.active ?? []).map((e) => e.tool)) && !S.deliver.hdr; // as planned (plan)
   const pass = (passes, parts) => upscaleSeconds(f.target, f.frames, { passes, parts, profile: S.memoryProfile.name });
   if (!id) return keeps ? f.edit : f.alone;
-  if (id === "uphdr" || (id === "upplate" && plateAlone(S.heroKey))) return pass(1, 1); // one result: its pass and its part
-  return id !== "upcomp" ? pass(1, 0) : keeps ? pass(0, 3) : pass(1, 1); // the plate's pass, the layer's, then the parts written; or the result's pass and its part
+  return id === "upcomp" && keeps ? pass(0, 1) : pass(1, 1); // each step writes its own part: the plate's pass and part, the layer's, the composite's part; or one result's pass and part
 }
 
 // Finish > Upscale: SeedVR2 7B upscales the result to the size asked for, in windows this machine's memory holds
