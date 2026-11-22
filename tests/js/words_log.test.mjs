@@ -26,7 +26,7 @@ test("every workflow the page posts has a name for the log", () => {
   assert.match(all, /Memory freed before \$\{JOB_NAME\[name\] \?\? name\}: /);
 });
 
-test("an erase that worked says the object is gone, and SeedVR2 upscales the result", () => {
+test("an erase that worked says the object is gone, and SeedVR2 7B upscales the result", () => {
   assert.ok(app.includes("the object is gone from the first frame ("));
-  assert.ok(app.includes('"SeedVR2 upscales the result."') && !app.includes("SeedVR2 restores"));
+  assert.ok(app.includes('"SeedVR2 7B upscales the result."') && !app.includes("SeedVR2 restores"));
 });

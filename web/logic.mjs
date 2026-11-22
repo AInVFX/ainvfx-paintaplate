@@ -125,6 +125,9 @@ export const previewCap = (work, div) => (div ? Math.round(Math.max(...work) / d
 
 export const gb = (n) => (n > 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
 
+// A time as a person reads it in the Render panel's rows and the render's log lines: seconds under 100 s, then minutes
+export const span = (s) => (s < 100 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`);
+export const doneIn = (dt, guess) => `done in ${dt < 100 ? `${dt.toFixed(1)} s` : `${(dt / 60).toFixed(1)} min`} (estimate ${span(guess)})`;
 export function secs(t, tail = " left") { // "about 40 s left", "about 1 min 40 s left": rounded to 10 s past a minute; with tail "", the time alone
   if (t == null || !isFinite(t)) return "";
   if (t < 60) return `about ${Math.max(1, Math.round(t))} s${tail}`;
@@ -775,8 +778,8 @@ export function upscaleFolder(plateId, parts) {
 // The upscaled result is composed from the upscaled plate, layer and matte when it is in the plate's own colour space, so
 // that its untouched pixels are the plate's (Paint and Clean). SDR to HDR's EXR frames regenerate every pixel: their result
 // is restored itself, with its matte, and keeps its values above 1.0 everywhere.
-export const upscaleComposes = ({ layer, matte, space }, plateSpace) => !!layer && !!matte && space === plateSpace;
-export const upscaleKeeps = (tools) => tools.length > 0 && !tools.includes("light"); // Paint and Clean keep the plate's untouched pixels: the upscaled plate, layer and matte come too
+export const upscaleKeeps = (tools, exr = false) => tools.length > 0 && !tools.includes("light") && !exr; // Paint and Clean keep the plate's untouched pixels, and their export
+// writes the layer and the matte in the plate's own colour space: the upscaled plate, layer and matte come too. An EXR result of SDR to HDR is upscaled alone
 // What the row says when the size asked for is no larger than the plate: the plate's own size, or a smaller one.
 export function upscaleWhy(width, height, ask = UPSCALE_ASK) {
   const [tw, th] = upscaleTarget(width, height, ask), part = { 2: "half", 3: "a third of" }[UPSCALE.factor] ?? `1/${UPSCALE.factor} of`;
@@ -796,7 +799,7 @@ export const FINISH = [
     line: "The result is regenerated in scene-linear values, fitted to the plate. It becomes half-float EXR frames in ACES2065-1, in the viewer and in Export.",
     ask: "This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1." },
   { id: "upscale", name: "Upscale",
-    line: "Export also writes an upscaled set at the size chosen, with SeedVR2 7B, including layers and mattes." },
+    line: "The render's last step: SeedVR2 7B upscales the result to the size chosen, including layers and mattes. The player shows it, and Export writes it." },
 ];
 // The Render panel's rows in the order things happen: the steps done, in the order they finished (a step reused from an
 // earlier render is done at once, so it comes first), then the step running, then the steps to come in their planned
@@ -1351,7 +1354,7 @@ export const fluidPasses = (result, spaces = {}) => (result ? [
 // names the models that made its result.
 export const STEP_FLOWS = { erase: ["matte"], clean: ["clean"], shot: ["shot"], track: ["matte"], comp: ["comp"],
   cleanfull: ["clean", "cleanup"], full: ["shot"], trackfull: ["matte"], hdr: ["hdr"], review: ["review"], export: ["export"],
-  upscale: ["upscale", "upscale_export"] };
+  upscale: ["upscale", "upscale_export"], upplate: ["upscale"], uplayer: ["export", "upscale"], upcomp: ["export", "upscale", "upscale_export"] };
 // The workflows behind a result: its edits' own (the prompt writer and Klein, SAM's object search for an erase), the
 // render's record, and a fluid shot's (with its SDR to HDR)
 export function resultFlows({ tools = [], render = [], fluid = false, fluidHdr = false } = {}) {

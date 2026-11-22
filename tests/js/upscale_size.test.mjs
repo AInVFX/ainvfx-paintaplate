@@ -53,10 +53,11 @@ test("the row says what a size no larger than the plate does, and nothing for a 
   assert.match(upscaleWhy(1920, 1080, { side: "width", px: 1280 }), /^This size is smaller than the plate, so the frames come out smaller/);
 });
 
-test("the upscaled result is composed from the plate only when it is in the plate's colour space; SDR to HDR's is restored itself", async () => {
-  const { upscaleComposes } = await import("../../web/logic.mjs");
-  assert.equal(upscaleComposes({ layer: "l", matte: "m", space: "sRGB Encoded Rec.709 (sRGB)" }, "sRGB Encoded Rec.709 (sRGB)"), true); // Paint
-  assert.equal(upscaleComposes({ layer: "l", matte: "m", space: "ACES2065-1" }, "sRGB Encoded Rec.709 (sRGB)"), false); // Paint with SDR to HDR
-  assert.equal(upscaleComposes({ layer: "l", matte: "m", space: "Linear Rec.709 (sRGB)" }, "Linear Rec.709 (sRGB)"), true); // an HDR plate's Paint
-  assert.equal(upscaleComposes({ layer: null, matte: "m", space: "ACES2065-1" }, "ACES2065-1"), false); // Light, a fluid shot, the plate alone
+test("the plate and the layer are upscaled, then composited, for Paint and Clean; Light, the plate alone and an EXR result of SDR to HDR are upscaled alone", async () => {
+  const { upscaleKeeps } = await import("../../web/logic.mjs");
+  assert.equal(upscaleKeeps(["paint"]), true); // Paint
+  assert.equal(upscaleKeeps(["erase", "paint"]), true); // Clean and Paint
+  assert.equal(upscaleKeeps(["paint"], true), false); // Paint with SDR to HDR on an SDR plate: an EXR result
+  assert.equal(upscaleKeeps(["light"]), false); // Light: its export writes no matte
+  assert.equal(upscaleKeeps([]), false); // the plate alone
 });

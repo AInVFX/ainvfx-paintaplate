@@ -38,7 +38,7 @@ const MEASURED = [ // [case, step, seconds, plate, SDR to HDR on]
 const OUTSIDE = { "horse_light export": "a relight's export writes no matte: 19 nodes against 27, 6.1 s against 9.3 to 10.0 s" };
 
 test("before a step ever ran on a 16 GB GPU, its announcement holds within 25% of what it took", () => {
-  assert.equal(Object.keys(REF).filter((id) => id !== "upscale").length, 11, "a reference for every step of STAGES but Upscale, whose estimate is logic.upscaleSeconds");
+  assert.equal(Object.keys(REF).filter((id) => !["upplate", "uplayer", "upcomp"].includes(id)).length, 11, "a reference for every step of STAGES but Upscale's, whose estimates are logic.upscaleSeconds");
   const guess = (id, plate, hdr) => (id === "cleanup" ? stageTwoGuess(REF, plate, "small") : stepGuess(id, REF[id], plate, "small", hdr));
   const off = MEASURED.filter(([, id, took, plate = HORSE, hdr = false]) => Math.abs(guess(id, plate, hdr) - took) > 0.25 * took);
   assert.deepEqual(off.map(([where, id]) => `${where} ${id}`), Object.keys(OUTSIDE));
