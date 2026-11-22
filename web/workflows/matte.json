@@ -168,7 +168,7 @@
   }
  },
  "12": {
-  "class_type": "PrimitiveStringMultiline",
+  "class_type": "PrimitiveString",
   "inputs": {
    "value": "You name things in images for a segmentation model. Answer with the words only, in lowercase."
   },

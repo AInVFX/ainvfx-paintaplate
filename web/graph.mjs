@@ -145,8 +145,8 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
     sec = "eraseTrack";
     const zone = union("area to clean", erased, plate.trackErase); // SAM 3.1 follows the zone on the plate, and finds on it what it keeps
     erasedMatte = add(instantiate(WF.matte, "object tracking", { ...common, width: plate.trackErase[0], height: plate.trackErase[1],
-      prefix: out("matte_a/m"), base: plate.path, base_color_space: plate.cs, removed_request: nameRequest("erase", erased.map((e) => e.prompt)) },
-      { mask: zone, prompt: zone }, { drop })).frames;
+      prefix: out("matte_a/m"), base_color_space: plate.cs, removed_request: nameRequest("erase", erased.map((e) => e.prompt)) },
+      { mask: zone, prompt: zone, base: ["plate", 0] }, { drop })).frames;
     // the erase pass in Lightricks' two stages, as the page renders it: half the working size, then 2 steps at full size
     const values = { ...common, seed: render.seed, prompt: render.erasePrompt ?? "" };
     sec = "erasePass";
@@ -162,10 +162,11 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
     { hero: frame, ...(made ? { path: made } : {}) }, { drop })).frames;
   sec = "paintTrack";
   if (painted.length) { // the painted area stands in for the element, which the page reads from the edit's pixels
-    const area = union("painted area", painted, plate.track), under = clean ? { base: cleaned } : {};
+    const area = union("painted area", painted, plate.track);
     paintMatte = add(instantiate(WF.matte, "paint tracking", { ...common, color_space: "@model", width: plate.track[0],
-      height: plate.track[1], prefix: out("matte_b/m"), ...(clean ? {} : { base: plate.path, base_color_space: plate.cs }),
-      name_request: nameRequest("paint", painted.map((e) => e.prompt)) }, { path: made, mask: area, prompt: area, seed: area, ...under }, { drop })).frames;
+      height: plate.track[1], prefix: out("matte_b/m"), base_color_space: clean ? "@model" : plate.cs,
+      name_request: nameRequest("paint", painted.map((e) => e.prompt)) }, { path: made, mask: area, prompt: area, seed: area, base: clean ? cleaned : ["plate", 0] },
+      { drop })).frames;
   }
   const relight = edits.some((e) => e.tool === "light"), a = erasedMatte ?? paintMatte, fps = plate.fps ?? 24;
   sec = "hdr";

@@ -1372,15 +1372,21 @@
       "MASK",
       {}
      ],
-     "erased": [
+     "word_masks": [
       "MASK",
       {}
      ],
-     "erased_edge": [
-      "FLOAT",
-      {
-       "default": 0.0
-      }
+     "named": [
+      "SAM3_TRACK_DATA",
+      {}
+     ],
+     "plate_masks": [
+      "MASK",
+      {}
+     ],
+     "kept": [
+      "SAM3_TRACK_DATA",
+      {}
      ],
      "first_frame": [
       "INT",
@@ -1709,6 +1715,31 @@
     "image"
    ]
   },
+  "PaintAPlate_SamWords": {
+   "input": {
+    "required": {
+     "text": [
+      "STRING",
+      {
+       "forceInput": true,
+       "multiline": false
+      }
+     ],
+     "kind": [
+      "COMBO",
+      {
+       "default": "thing"
+      }
+     ]
+    }
+   },
+   "output": [
+    "STRING"
+   ],
+   "output_name": [
+    "words"
+   ]
+  },
   "PaintAPlate_SaveFrames": {
    "input": {
     "required": {
@@ -1877,6 +1908,24 @@
      "source": [
       "*",
       {}
+     ]
+    }
+   },
+   "output": [
+    "STRING"
+   ],
+   "output_name": [
+    "STRING"
+   ]
+  },
+  "PrimitiveString": {
+   "input": {
+    "required": {
+     "value": [
+      "STRING",
+      {
+       "multiline": false
+      }
      ]
     }
    },
@@ -2188,6 +2237,81 @@
    "output_name": [
     "IMAGE",
     "MASK"
+   ]
+  },
+  "TextGenerate": {
+   "input": {
+    "required": {
+     "clip": [
+      "CLIP",
+      {}
+     ],
+     "prompt": [
+      "STRING",
+      {
+       "default": "",
+       "multiline": true,
+       "dynamicPrompts": true
+      }
+     ],
+     "max_length": [
+      "INT",
+      {
+       "default": 512
+      }
+     ],
+     "sampling_mode": [
+      "COMFY_DYNAMICCOMBO_V3",
+      {}
+     ]
+    },
+    "optional": {
+     "image": [
+      "IMAGE",
+      {}
+     ],
+     "video": [
+      "IMAGE",
+      {}
+     ],
+     "audio": [
+      "AUDIO",
+      {}
+     ],
+     "thinking": [
+      "BOOLEAN",
+      {
+       "default": false
+      }
+     ],
+     "use_default_template": [
+      "BOOLEAN",
+      {
+       "default": true
+      }
+     ],
+     "mtp": [
+      "COMBO",
+      {
+       "default": "auto"
+      }
+     ],
+     "system_prompt": [
+      "STRING",
+      {
+       "forceInput": true,
+       "multiline": false
+      }
+     ]
+    }
+   },
+   "output": [
+    "STRING",
+    "STRING"
+   ],
+   "output_name": [
+    "generated_text",
+    "thinking"
    ]
   },
   "ThresholdMask": {

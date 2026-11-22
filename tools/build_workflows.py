@@ -500,7 +500,7 @@ def matte():
     under = g("ImageScale", image=colour(g, under, Slot("base_color_space", "@model"), "@model"),
               upscale_method="area", width=Slot("width", 960), height=Slot("height", 544), crop="disabled")
     upsampler = g("CLIPLoader", clip_name=Slot("upsampler", UPSAMPLER), type="flux3", device="default")
-    system = g("PrimitiveStringMultiline", _title="Naming", value=NAMING_SYSTEM)
+    system = g("PrimitiveString", _title="Naming", value=NAMING_SYSTEM)  # one line: a multiline text reads as a note in the scene's graph
 
     def named(image, request, kind, title):  # the upsampler's answer about one frame, as the words SAM searches for
         text = g("TextGenerate", _title=title, clip=upsampler, prompt=request, image=g("ImageFromBatch", image=image, batch_index=0, length=1),
