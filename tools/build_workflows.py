@@ -19,6 +19,9 @@ KLEIN = "flux3-image-klein-int8-convrot.safetensors"
 LTX = "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
 GEMMA = "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors"
 UPSAMPLER = "qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors"
+NAMING_SYSTEM = "You name things in images for a segmentation model. Answer with the words only, in lowercase."
+KEPT_REQUEST = ("List the people, animals and vehicles in this image, each in one or two words, separated by commas. If there are "
+                "none, answer: none.")
 INOUTPAINT = "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors"
 SAM = "sam3.1_multiplex_fp16.safetensors"
 # The memory profile's slots (logic.memoryProfile on the page): `tile`, the tile size of every LTX decode, WHOLE for the
@@ -130,8 +133,8 @@ def load(name, folder=None):
 # no plate size (a shot): its HDR frames go on as they are; no movie
 # asked of a matte, an export's matte or a fluid shot's control video (the Render panel's rows show them; the ComfyUI
 # graph of the Export dialog leaves them out).
-OPTIONAL = {"fit_keep": ("paint_matte",), "fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), "follow_base": ("base",), "follow_erased": ("erased",),
-            "follow_element": ("seed",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "plate_level": ("plate_width", "plate_height"),
+OPTIONAL = {"fit_keep": ("paint_matte",), "fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",), 
+            "follow_element": ("seed",), "follow_base": ("base",), "follow_named": ("name_request",), "follow_removed": ("removed_request",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "plate_level": ("plate_width", "plate_height"),
             "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",),
             "export_plate": ("prefix",), "export_exr": ("exr_prefix",), "export_layer": ("layer_prefix",),
             "export_layer_exr": ("layer_exr_prefix",), "upscale_comp": ("comp_prefix",), "upscale_matte": ("matte_prefix",)}
@@ -476,32 +479,57 @@ def shot():
 
 
 def matte():
-    """SAM 3.1 follows a painted or erased area through the frames from the first frame, then Follow Matte makes the
-    track safe: one matte per frame even when SAM returns none, the last matte where SAM loses the object, and for
-    paint every pixel the shot changed near the matte, compared with the plate the shot was made over (`base`). Under a Clean edit it also takes the Clean matte (`erased`)
-    and how far the composite moves its edge (`erased_edge`): there only the SAM mask anchors a change. With the plate's first frame number (`first_frame`), the summary names the
-    plate's own frames."""
+    """SAM 3.1 follows the edit through the frames, asked several questions, then Follow Matte judges its answers by how
+    much the shot changed (mathops.follow_votes; a Clean: mathops.clean_votes). FLUX 3 Image Klein's prompt upsampler,
+    as in prompt(), names the edit's object from the first frame (`name_request`; a Clean: `removed_request`, the thing it
+    removes) and the plate's main person, animal or vehicle, and SAM Words keeps the words SAM searches for. SAM follows
+    the shot from the edit's prompt mask with the object's name (`prompt`: the element; a Clean: the plate from the zone),
+    the shot from the name alone, the plate from the element (the object the edit replaces) and the plate from the kept
+    thing's name. The page drops the name's tracks when the edit has no text prompt, and the plate's element track for
+    a Clean. With the plate's first frame number (`first_frame`), the summary names the plate's own frames."""
     g = Graph()
     load, model = plate(g, pad=True)
     frames = g("ImageScale", image=model, upscale_method="area", width=Slot("width", 960),
                height=Slot("height", 544), crop="disabled")
     sam = g("CheckpointLoaderSimple", ckpt_name=Slot("sam", SAM))
     first = g("LoadImageMask", _title="Area on the first frame", image=Slot("mask", ""), channel="red")
-    track = g("SAM3_VideoTrack", _progress=True, images=frames, model=sam, initial_mask=first,
-              detection_threshold=0.5, max_objects=4, detect_interval=1)
-    masks = g("SAM3_TrackToMask", track_data=track, object_indices="")
+    prompt_mask = g("LoadImageMask", _title="SAM's prompt on the first frame", image=Slot("prompt", ""), channel="red")
+    element = g("LoadImageMask", _title="Where the edit changed the first frame", image=Slot("seed", ""), channel="red")
     under = g("PaintAPlate_LoadPlate", _title="Plate under the shot", path=Slot("base", ""), max_frames=Slot("max_frames", 121),
               pad_8n1=True)
     under = g("ImageScale", image=colour(g, under, Slot("base_color_space", "@model"), "@model"),
               upscale_method="area", width=Slot("width", 960), height=Slot("height", 544), crop="disabled")
-    element = g("LoadImageMask", _title="Where the edit changed the first frame", image=Slot("seed", ""), channel="red")
-    clean = g("PaintAPlate_LoadPlate", _title="Clean matte under the paint", path=Slot("erased", ""), max_frames=1024, pad_8n1=False)
-    follow = g("PaintAPlate_FollowMatte", masks=masks, first=first, frames=frames, base=under, element=element,
-               zone=Slot("zone", 0.0625), threshold=Slot("threshold", 0.1),
-               erased=g("ImageToMask", image=clean, channel="red"), erased_edge=Slot("erased_edge", 0.0), first_frame=Slot("first_frame", 1))
-    g.link_slot(follow, "base", "follow_base")  # dropped for an erase matte: no shot to compare
-    g.link_slot(follow, "element", "follow_element")  # dropped for an erase matte: the object is the first-frame mask
-    g.link_slot(follow, "erased", "follow_erased")  # dropped when no Clean edit lies under the paint
+    upsampler = g("CLIPLoader", clip_name=Slot("upsampler", UPSAMPLER), type="flux3", device="default")
+    system = g("PrimitiveStringMultiline", _title="Naming", value=NAMING_SYSTEM)
+
+    def named(image, request, kind, title):  # the upsampler's answer about one frame, as the words SAM searches for
+        text = g("TextGenerate", _title=title, clip=upsampler, prompt=request, image=g("ImageFromBatch", image=image, batch_index=0, length=1),
+                 max_length=64, sampling_mode="off", thinking=False, use_default_template=True, mtp="auto", system_prompt=system)
+        return g("CLIPTextEncode", text=g("PaintAPlate_SamWords", text=text, kind=kind), clip=sam[1])
+
+    def track(images, title, progress=False, **prompts):  # the first track carries the step's progress
+        return g("SAM3_VideoTrack", _title=title, _progress=progress, images=images, model=sam, detection_threshold=0.5, max_objects=4,
+                 detect_interval=1, **prompts)
+
+    name = named(frames, Slot("name_request", ""), "thing", "The edit's object, named")
+    removed = named(frames, Slot("removed_request", ""), "thing", "The removed thing, named")
+    kept = named(under, KEPT_REQUEST, "kept", "What the plate keeps, named")
+    asked = track(frames, "SAM 3.1: the prompt mask and the name", progress=True, initial_mask=prompt_mask, conditioning=name)
+    g.link_slot(asked, "conditioning", "follow_named")
+    by_name = track(frames, "SAM 3.1: the name", conditioning=name)
+    by_removed = track(frames, "SAM 3.1: the removed thing's name", conditioning=removed)
+    by_plate = track(under, "SAM 3.1: the plate from the element", initial_mask=element)
+    by_kept = track(under, "SAM 3.1: what the plate keeps", conditioning=kept)
+    follow = g("PaintAPlate_FollowMatte", masks=g("SAM3_TrackToMask", track_data=asked, object_indices=""), first=first, frames=frames,
+               base=under, element=element, word_masks=g("SAM3_TrackToMask", track_data=by_name, object_indices=""), named=by_removed,
+               plate_masks=g("SAM3_TrackToMask", track_data=by_plate, object_indices=""), kept=by_kept,
+               zone=Slot("zone", 0.0625), threshold=Slot("threshold", 0.1), first_frame=Slot("first_frame", 1))
+    g.link_slot(follow, "word_masks", "follow_named")
+    g.link_slot(follow, "named", "follow_removed")
+    g.link_slot(follow, "element", "follow_element")  # a Clean has no element: its matte follows the zone
+    g.link_slot(follow, "plate_masks", "follow_element")
+    g.link_slot(follow, "base", "follow_base")  # the plate under the matte: a paint's, or a Clean's own plate
+    g.link_slot(follow, "kept", "follow_base")  # what the plate keeps is found on it
     grey = g("MaskToImage", mask=follow[0])
     g("PaintAPlate_SaveFrames", _title="Matte frames", _output="frames", images=grey, filename_prefix=Slot("prefix", "paintaplate/plate/matte/m"))
     movie = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Matte movie (grey): its row in the Render panel shows it", _output="movie", images=grey,

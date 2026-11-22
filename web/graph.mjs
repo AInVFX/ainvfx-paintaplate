@@ -2,7 +2,7 @@
 // opens in ComfyUI and keeps working there. Laid out for a person who takes it over: numbered sections in the order they
 // run, each opening with a README note. Pure functions over workflows parsed by logic.mjs, tested in Node.
 
-import { fillWorkflow, stageOne } from "./logic.mjs";
+import { fillWorkflow, nameRequest, stageOne } from "./logic.mjs";
 
 const LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]); // the input loaders: a link can stand in for one, and none is a model
 const EDIT_OUT = ["result", "patch", "relit"]; // an edit's saved images: inside one scene, links carry them
@@ -143,8 +143,10 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
   const low = stageOne(plate.work);
   if (erased.length) {
     sec = "eraseTrack";
+    const zone = union("area to clean", erased, plate.trackErase); // SAM 3.1 follows the zone on the plate, and finds on it what it keeps
     erasedMatte = add(instantiate(WF.matte, "object tracking", { ...common, width: plate.trackErase[0], height: plate.trackErase[1],
-      prefix: out("matte_a/m") }, { mask: union("area to clean", erased, plate.trackErase) }, { drop })).frames;
+      prefix: out("matte_a/m"), base: plate.path, base_color_space: plate.cs, removed_request: nameRequest("erase", erased.map((e) => e.prompt)) },
+      { mask: zone, prompt: zone }, { drop })).frames;
     // the erase pass in Lightricks' two stages, as the page renders it: half the working size, then 2 steps at full size
     const values = { ...common, seed: render.seed, prompt: render.erasePrompt ?? "" };
     sec = "erasePass";
@@ -153,14 +155,18 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
     made = add(instantiate(WF.cleanup, "clean plate pass", { ...values, width: plate.work[0], height: plate.work[1], prefix: out("clean/f"),
       video_prefix: out("clean") }, { hole: erasedMatte, hero: erasedFrame, low: half }, { drop }), `stage 2 at ${by(plate.work)} · `).frames;
   }
-  const clean = !!made;
+  const clean = !!made, cleaned = made; // a paint's matte compares the shot with the plate it was made over
   sec = "shot";
   if (edits.some((e) => e.tool !== "erase")) made = add(instantiate(WF.shot, "shot", { ...common, ...(made ? { color_space: "@model" } : {}),
     width: plate.work[0], height: plate.work[1], seed: render.seed, prompt: render.prompt, prefix: out("shot/f"), video_prefix: out("raw") },
     { hero: frame, ...(made ? { path: made } : {}) }, { drop })).frames;
   sec = "paintTrack";
-  if (painted.length) paintMatte = add(instantiate(WF.matte, "paint tracking", { ...common, color_space: "@model", width: plate.track[0],
-    height: plate.track[1], prefix: out("matte_b/m") }, { path: made, mask: union("painted area", painted, plate.track) }, { drop })).frames;
+  if (painted.length) { // the painted area stands in for the element, which the page reads from the edit's pixels
+    const area = union("painted area", painted, plate.track), under = clean ? { base: cleaned } : {};
+    paintMatte = add(instantiate(WF.matte, "paint tracking", { ...common, color_space: "@model", width: plate.track[0],
+      height: plate.track[1], prefix: out("matte_b/m"), ...(clean ? {} : { base: plate.path, base_color_space: plate.cs }),
+      name_request: nameRequest("paint", painted.map((e) => e.prompt)) }, { path: made, mask: area, prompt: area, seed: area, ...under }, { drop })).frames;
+  }
   const relight = edits.some((e) => e.tool === "light"), a = erasedMatte ?? paintMatte, fps = plate.fps ?? 24;
   sec = "hdr";
   const hdr = render.hdr && made ? add(instantiate(WF.hdr, "SDR to HDR", { config: plate.config, max_frames: plate.frames, fps: Math.round(fps),

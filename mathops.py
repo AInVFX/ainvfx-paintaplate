@@ -841,6 +841,8 @@ def kept_things(objects, region) -> np.ndarray:
     that a Clean removes, a horse that a paint turns into a robot), not a thing to keep. A horse with a paint on its
     belly lies about half in it, and stays a thing to keep: the matte then cuts SAM's whole horse to the change."""
     objects = np.asarray(objects) > 0.5
+    if objects.ndim == 3:  # one thing, (N, H, W)
+        objects = objects[:, None]
     out = np.zeros((objects.shape[0],) + objects.shape[2:], bool)
     for k in range(objects.shape[1]):
         m = objects[:, k]
@@ -852,11 +854,19 @@ def kept_things(objects, region) -> np.ndarray:
 
 def follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, threshold: float = 0.1,
                  zone: float = 1 / 16, first_frame: int = 1, tick=None):
+    if os.environ.get("PAINTAPLATE_RECORD"):
+        record_votes(os.environ["PAINTAPLATE_RECORD"], "paint", shot_masks=shot_masks, word_masks=word_masks, plate_masks=plate_masks,
+                     kept=kept, element=element, shot=shot, base=base, threshold=threshold, zone=zone, first_frame=first_frame)
+    return _follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, threshold, zone, first_frame, tick)
+
+
+def _follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, threshold, zone, first_frame, tick):
     """A paint's matte from SAM 3.1's answers, judged by how much the shot changed (votes). Returns (mattes, summary).
 
     `shot_masks` and `word_masks` are SAM's masks on the shot (N, H, W), given the element with the object's name and
     the name alone; `plate_masks` its masks on the plate given the element (the object the edit replaces); `kept` what
-    the plate keeps (N, H, W, from kept_things); `element` where the edit changed the first frame; `shot` and `base` the
+    the plate keeps (SAM's objects (N, K, H, W), or one (N, H, W), filtered by kept_things against the element closed by
+    1/60 of the width); `element` where the edit changed the first frame; `shot` and `base` the
     shot and the plate (N, H, W, 3) in 0 to 1. On the first frame a mask given the element answers with it: the second
     frame's stands in for it. Each piece of the masks is then judged on its frame:
     - a piece that lies mostly on what the plate keeps is cut to the change, closed by 1/320 of the width: a whole horse
@@ -876,12 +886,13 @@ def follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base,
     h, w = shot.shape[1:3]
     tick = tick or (lambda: None)
     frames = lambda a: np.asarray(a, np.float32)[:n] > 0.5 if a is not None and np.size(a) else np.zeros((n, h, w), bool)  # noqa: E731
-    shot_m, word_m, plate_m, kept = frames(shot_masks), frames(word_masks), frames(plate_masks), frames(kept)
+    shot_m, word_m, plate_m = frames(shot_masks), frames(word_masks), frames(plate_masks)
     if n > 1:
         shot_m[0] = shot_m[1]
     union = shot_m | word_m
     seed = np.asarray(element, np.float32).reshape(-1, h, w)[0] > 0.5 if element is not None and np.size(element) else np.zeros((h, w), bool)
     seed = _close(seed, max(2, round(w / 60)))
+    kept = kept_things(np.asarray(kept, np.float32)[:n], seed) if kept is not None and np.size(kept) else np.zeros((n, h, w), bool)
     reach, near, close = max(2.0, zone * w), max(1.0, w * VOTES_GLOW), max(1, round(w / 320))
     grow = lambda m, px: dilate(m.astype(np.uint8), px) > 0 if m.any() else m  # noqa: E731
     out = np.zeros((n, h, w), np.float32)
@@ -984,9 +995,16 @@ def sam_words(answer: str, kind: str = "thing") -> str:
 
 
 def clean_votes(zone_masks, named, kept, zone, first_frame: int = 1):
+    if os.environ.get("PAINTAPLATE_RECORD"):
+        record_votes(os.environ["PAINTAPLATE_RECORD"], "clean", zone_masks=zone_masks, named=named, kept=kept, zone=zone, first_frame=first_frame)
+    return _clean_votes(zone_masks, named, kept, zone, first_frame)
+
+
+def _clean_votes(zone_masks, named, kept, zone, first_frame):
     """A Clean's matte from SAM 3.1's answers on the plate. Returns (mattes, summary). `zone_masks` (N, H, W) is SAM's
-    track of the zone; `named` (N, K, H, W) its objects of the removed thing's name, or None; `kept` what the plate
-    keeps (kept_things with the zone as the region, so the removed thing is not among them); `zone` (H, W) the painted
+    track of the zone; `named` (N, K, H, W) its objects of the removed thing's name, or None; `kept` SAM's objects of what
+    the plate keeps (N, K, H, W), filtered by kept_things against the zone, so the removed thing is not among them;
+    `zone` (H, W) the painted
     area. On the first frame SAM's track answers with the zone: the named objects that lie mostly in it stand in for
     it. The matte is the track minus what the plate keeps (a person in front of the palm behind her)."""
     m = np.asarray(zone_masks, np.float32) > 0.5
@@ -1001,12 +1019,41 @@ def clean_votes(zone_masks, named, kept, zone, first_frame: int = 1):
                 first |= a
         if first.any():
             m[0] = first
-    kept = np.asarray(kept, np.float32)[:n] > 0.5 if kept is not None and np.size(kept) else np.zeros_like(m)
+    kept = kept_things(np.asarray(kept, np.float32)[:n], zone) if kept is not None and np.size(kept) else np.zeros_like(m)
     out = m & ~kept
     seen = int(m.reshape(n, -1).any(axis=1).sum())
     left = int((m & kept).reshape(n, -1).any(axis=1).sum())
     lines = [f"tracked on {seen} of {n} frames."] + [f"Left out: what the plate keeps, on {left} frame" + ("" if left == 1 else "s") + "."] * bool(left)
     return out.astype(np.float32), "\n  ".join(lines)
+
+
+def record_votes(folder: str, kind: str, **arrays) -> str:
+    """With PAINTAPLATE_RECORD=<folder>, what Follow Matte was given, as one .npz file: SAM 3.1's answers, the element or
+    the zone, the shot and the plate, in half floats, with the values. replay_votes reads it back, so the matte runs
+    again on a CPU (tests/matte_study.py). Returns the file's path."""
+    os.makedirs(folder, exist_ok=True)
+    out = {"kind": np.array(kind)}
+    for k, v in arrays.items():
+        out[k] = np.zeros((0,), np.float16) if v is None or not np.size(v) else np.asarray(v, np.float32).astype(np.float16)
+    first = next((a for a in arrays.values() if a is not None and np.ndim(a) >= 3), None)
+    n, h, w = (np.shape(first)[0], np.shape(first)[1], np.shape(first)[2]) if first is not None else (0, 0, 0)
+    path = os.path.join(folder, f"follow_votes_{kind}_{w}x{h}_{n}f_{time.strftime('%Y%m%d_%H%M%S')}.npz")
+    np.savez_compressed(path, **out)
+    return path
+
+
+def replay_votes(path: str) -> dict:
+    """What record_votes wrote: {"kind": "paint" or "clean", "args": the arguments of follow_votes or clean_votes}."""
+    d = np.load(path)
+    back = lambda k: d[k].astype(np.float32) if d[k].size else None  # noqa: E731
+    kind = str(d["kind"])
+    scalars = {k: (int(d[k]) if k == "first_frame" else float(d[k])) for k in ("threshold", "zone", "first_frame") if k in d.files and d[k].ndim == 0}
+    names = ("shot_masks", "word_masks", "plate_masks", "kept", "element", "shot", "base") if kind == "paint" else ("zone_masks", "named", "kept", "zone")
+    args = {k: back(k) for k in names if k in d.files}
+    if kind == "clean":
+        scalars.pop("threshold", None)
+        args["zone"] = back("zone")
+    return {"kind": kind, "args": {**args, **scalars}}
 
 
 def votes_summary(n: int, seen: int, counts: dict, hidden=(), gone_at=None, flicker=None, first_frame: int = 1) -> str:

@@ -133,5 +133,21 @@ class Votes(unittest.TestCase):
         self.assertEqual(mathops.sam_words("None.", "kept"), "")
 
 
+    def test_a_recording_replays_the_same_matte(self):
+        import tempfile
+        from unittest import mock
+        base = scene(7)
+        obj = box(0, N, 16, 28, 20, 34)
+        shot = paint(base, obj)
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"PAINTAPLATE_RECORD": d}):
+            m, summary = mathops.follow_votes(obj, obj, None, None, obj[:1], shot, base)
+            files = os.listdir(d)
+            r = mathops.replay_votes(os.path.join(d, files[0]))
+        self.assertEqual((len(files), r["kind"]), (1, "paint"))
+        again, summary2 = mathops.follow_votes(**r["args"])
+        np.testing.assert_array_equal(np.asarray(again) > 0.5, np.asarray(m) > 0.5)
+        self.assertEqual(summary2, summary)
+
+
 if __name__ == "__main__":
     unittest.main()

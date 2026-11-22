@@ -436,6 +436,18 @@ class RelightTransfer(io.ComfyNode):
 
 
 
+SAM3_TRACK = io.Custom("SAM3_TRACK_DATA")  # SAM 3.1's track: every object's masks, packed (core's nodes_sam3)
+
+
+def track_objects(track, n, h, w):
+    """SAM 3.1's track as its objects' masks, (n, K, h, w) in 0 to 1, as SAM3_TrackToMask enlarges them; None without one."""
+    if track is None or track.get("packed_masks") is None:
+        return None
+    from comfy.ldm.sam3.tracker import unpack_masks
+    m = F.interpolate(unpack_masks(track["packed_masks"]).float(), size=(h, w), mode="bilinear", align_corners=False)
+    return m[:n].cpu().numpy()
+
+
 class FollowMatte(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -443,29 +455,25 @@ class FollowMatte(io.ComfyNode):
             node_id="PaintAPlate_FollowMatte",
             display_name="Follow Matte",
             category=CATEGORY,
-            description="One matte per frame from SAM 3.1's track, safe for the composite. It follows the object's own region "
-                        "from the first-frame mask: objects SAM 3.1 finds by itself elsewhere are left out; where the object is not "
-                        "seen, the last matte holds (with no mask, the first-frame mask); with the plate the shot was made over, "
-                        "the matte also takes the generated pixels connected to the object, so a generated element is never "
-                        "dropped. A frame that differs from the plate everywhere adds nothing. An object that stands still in "
-                        "the scene and passes behind something the plate holds leaves the matte while it is hidden, and comes "
-                        "back into it where it comes out: what stands in front is left out. The summary gives a "
-                        "headline, its warnings, then one line per rule that acted, and names each frame by the plate's own number.",
+            description="One matte per frame from SAM 3.1's answers, judged by how much the shot changed. A paint: the pieces of "
+                        "SAM's masks that the shot changed, whole; over what the plate keeps, cut to the change; the object the edit "
+                        "replaces, where the shot changed; the matte follows the object while it is hidden and stops when it leaves "
+                        "the frame. A Clean: SAM's track of the zone, without what the plate keeps. The summary gives a headline, then "
+                        "one line per rule that acted, and names each frame by the plate's own number.",
             inputs=[
-                io.Mask.Input("masks", tooltip="SAM masks, one per tracked frame. SAM 3.1 may return fewer, or none."),
-                io.Mask.Input("first", tooltip="The area on the first frame that SAM 3.1 follows."),
-                io.Image.Input("frames", tooltip="The frames SAM 3.1 tracked: their count sets the matte's length. For Paint, the shot. For Clean, the plate: Follow Matte asks it what passes in front of the object."),
-                io.Image.Input("base", optional=True, tooltip="The plate the shot was made over, at the same size."),
-                io.Mask.Input("element", optional=True,
-                              tooltip="Where the edit changed the first frame: the object's region starts here, not at the first-frame area."),
+                io.Mask.Input("masks", tooltip="SAM masks of the shot, from the element and the text prompt, one per frame. SAM 3.1 may return fewer, or none."),
+                io.Mask.Input("first", tooltip="The area on the first frame that the edit painted: a Clean's matte follows it."),
+                io.Image.Input("frames", tooltip="The frames SAM 3.1 tracked: their count sets the matte's length. For Paint, the shot. For Clean, the plate."),
+                io.Image.Input("base", optional=True, tooltip="The plate under the matte, at the same size: the one the shot was made over, or a Clean's own plate."),
+                io.Mask.Input("element", optional=True, tooltip="Where the edit changed the first frame. A Clean has none."),
+                io.Mask.Input("word_masks", optional=True, tooltip="SAM masks of the shot, from the text prompt alone, one per frame."),
+                SAM3_TRACK.Input("named", optional=True, tooltip="SAM's objects of the thing a Clean removes, found by its name: the first frame takes those in the area."),
+                io.Mask.Input("plate_masks", optional=True, tooltip="SAM masks of the plate, from the element: what the edit replaces."),
+                SAM3_TRACK.Input("kept", optional=True, tooltip="SAM's objects of the plate's main person, animal or vehicle: the matte leaves them out where the shot did not change."),
                 io.Float.Input("zone", default=0.0625, min=0.0, max=0.5, step=0.005,
-                               tooltip="How far the SAM mask may move from the object's region, with a change still joining, as a fraction of the width."),
+                               tooltip="How far the object may move from one frame to the next, as a fraction of the width."),
                 io.Float.Input("threshold", default=0.1, min=0.01, max=1.0, step=0.01,
-                               tooltip="How much more a pixel must change than its frame changes around the object, from 0 to 1, to join the matte."),
-                io.Mask.Input("erased", optional=True,
-                              tooltip="The Clean matte under this paint. Inside it, a change joins only where it touches the SAM mask."),
-                io.Float.Input("erased_edge", default=0.0, min=0.0, max=0.5, step=0.001, optional=True,
-                               tooltip="How far the composite moves the Clean matte's edge: its grow plus its feather, as a fraction of the width."),
+                               tooltip="How much more a pixel must change than its frame changes around the object, from 0 to 1, to count as changed."),
                 io.Int.Input("first_frame", default=1, min=0, max=99999999, optional=True,
                              tooltip="The plate's number for its first frame: 1 for a movie, the first file's number for a sequence. The summary names frames by these numbers."),
             ],
@@ -473,17 +481,39 @@ class FollowMatte(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, masks, first, frames, zone, threshold, base=None, element=None, erased=None,
-                erased_edge=0.0, first_frame=1) -> io.NodeOutput:
+    def execute(cls, masks, first, frames, zone, threshold, base=None, element=None, word_masks=None, named=None, plate_masks=None,
+                kept=None, first_frame=1) -> io.NodeOutput:
         shot = frames[..., :3].float().cpu().numpy()
-        plate = base[..., :3].float().cpu().numpy() if base is not None else None
-        out, summary = mathops.follow_matte(masks.float().cpu().numpy(), len(shot), first.float().cpu().numpy(),
-                                            shot if plate is not None else None, plate if plate is not None else shot,  # an erase: the tracked frames are the plate
-                                            zone=zone, threshold=threshold, tick=Stop(),
-                                            element=element.float().cpu().numpy() if element is not None else None,
-                                            erased=erased.float().cpu().numpy() if erased is not None else None, erased_edge=erased_edge,
-                                            first_frame=first_frame)
-        return io.NodeOutput(torch.from_numpy(out).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()), summary)
+        n, h, w = shot.shape[:3]
+        arr = lambda m: m.float().cpu().numpy() if m is not None else None  # noqa: E731
+        kept_objects = track_objects(kept, n, h, w)
+        if element is not None:  # a paint: the frames are the shot, `base` the plate it was made over
+            out, summary = mathops.follow_votes(arr(masks), arr(word_masks), arr(plate_masks), kept_objects, arr(element), shot,
+                                                base[..., :3].float().cpu().numpy(), threshold=threshold, zone=zone,
+                                                first_frame=first_frame, tick=Stop())
+        else:  # a Clean: the frames are the plate
+            out, summary = mathops.clean_votes(arr(masks), track_objects(named, n, h, w), kept_objects, arr(first), first_frame=first_frame)
+        return io.NodeOutput(torch.from_numpy(np.ascontiguousarray(out)).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()), summary)
+
+
+class SamWords(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PaintAPlate_SamWords",
+            display_name="SAM Words",
+            category=CATEGORY,
+            description="The words SAM 3.1 searches for, from the prompt upsampler's answer: the edit's object as a short noun "
+                        "phrase, or the plate's main person, animal or vehicle.",
+            inputs=[io.String.Input("text", force_input=True, tooltip="The prompt upsampler's answer."),
+                    io.Combo.Input("kind", options=["thing", "kept"], default="thing",
+                                   tooltip="thing: the edit's object. kept: the first person, animal or vehicle of the list.")],
+            outputs=[io.String.Output(display_name="words")],
+        )
+
+    @classmethod
+    def execute(cls, text, kind="thing") -> io.NodeOutput:
+        return io.NodeOutput(mathops.sam_words(text, kind))
 
 
 class KeyframeVideo(io.ComfyNode):
@@ -899,5 +929,5 @@ class JoinWindows(io.ComfyNode):
         return io.NodeOutput(torch.from_numpy(rgb).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()))
 
 
-NODES = [LoadPlate, SavePlate, ColorSpace, SaveFrames, SaveMovie, FitToPlate, CompositeFrames, RelightTransfer, FollowMatte, LevelFill, LivePreview,
+NODES = [LoadPlate, SavePlate, ColorSpace, SaveFrames, SaveMovie, FitToPlate, CompositeFrames, RelightTransfer, FollowMatte, SamWords, LevelFill, LivePreview,
          KeyframeVideo, HDRMatch, KeepBlack, JoinWindows]
