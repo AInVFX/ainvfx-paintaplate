@@ -818,6 +818,7 @@ VOTES_ALONE = 0.3  # of a SAM mask's piece: changed by a quarter of the threshol
 VOTES_KEPT = 0.5  # of a piece, or of a kept thing: this share on what the plate keeps, or in the element, decides
 VOTES_GLOW = 1 / 160  # of the width: what the shot changed this close to the matte joins it, on that frame only
 VOTES_PATIENCE = 2  # empty frames in a row before the object counts as hidden or gone
+VOTES_SUBJECT = 0.75  # of a kept thing on its first frame: this share in the area the edit works on makes it the edit's subject
 
 
 def _first_present(m) -> int:
@@ -836,14 +837,15 @@ def _close(m, r):
 
 def kept_things(objects, region) -> np.ndarray:
     """What the plate keeps, (N, H, W) booleans from SAM's objects (N, K, H, W): each object, unless on its first frame
-    half of it or more lies in `region`, the area the edit works on: there it is the edit's own subject (a barn that a
-    Clean removes, an arm brace that a paint replaces), not a thing to keep."""
+    VOTES_SUBJECT of it or more lies in `region`, the area the edit works on: there it is the edit's own subject (a barn
+    that a Clean removes, a horse that a paint turns into a robot), not a thing to keep. A horse with a paint on its
+    belly lies about half in it, and stays a thing to keep: the matte then cuts SAM's whole horse to the change."""
     objects = np.asarray(objects) > 0.5
     out = np.zeros((objects.shape[0],) + objects.shape[2:], bool)
     for k in range(objects.shape[1]):
         m = objects[:, k]
         f0 = _first_present(m)
-        if f0 >= 0 and (m[f0] & region).sum() < VOTES_KEPT * m[f0].sum():
+        if f0 >= 0 and (m[f0] & region).sum() < VOTES_SUBJECT * m[f0].sum():
             out |= m
     return out
 

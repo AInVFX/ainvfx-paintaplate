@@ -93,6 +93,9 @@ class Votes(unittest.TestCase):
         kept = mathops.kept_things(objects, region)
         self.assertFalse(kept[0, 20, 20])
         self.assertTrue(kept[0, 20, 60])
+        half = np.zeros((N, 1, H, W), np.float32)
+        half[:, 0, 10:30, 20:50] = 1  # half of it in the area: a horse with a paint on its belly stays a thing to keep
+        self.assertTrue(mathops.kept_things(half, region)[0, 20, 25])
 
     def test_the_first_frame_takes_the_second_frame_s_answer(self):
         base = scene(6)
