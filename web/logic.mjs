@@ -1250,11 +1250,12 @@ export function dabFlow(peak, spacingOverRadius) {
 // values, with no view's tone mapping.
 export const PASSES = { erase: ["r", "erased.found.movie_a"], clean: ["pv", "cleanRaw"], shot: ["pv", "raw"], track: ["pv", "painted.found.movie_b"],
   comp: ["pv", "comp"], cleanfull: ["r", "cleanRaw"], full: ["r", "raw"], trackfull: ["r", "full.found.movie_b"], hdr: ["r", "hdrMovie"],
-  review: ["r", "play"], export: ["r", "exported.matte"] };
+  review: ["r", "play"], export: ["r", "exported.matte"], upplate: ["up", "plate"], uplayer: ["up", "layer"], upcomp: ["up", "comp"] };
 export const MATTE_PASSES = new Set(["erase", "track", "trackfull", "export"]);
 const keyPath = (o, path) => path.split(".").reduce((x, k) => x?.[k], o);
-export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of a finished step, or null
+export function passMovie(id, r, pv, spaces = {}, up = null) { // { url, space, frames } of a finished step, or null; `up`: what Upscale's steps made at the size asked for
   const at = PASSES[id], store = at && (at[0] === "pv" ? pv : r);
+  if (at?.[0] === "up") return up?.[at[1]]?.url ? { url: up[at[1]].url, space: up[at[1]].space, frames: null } : null; // its movie at its own size (app.fitCanvas)
   const url = (at && keyPath(store, at[1])) ?? (id === "review" ? store?.review : null);
   if (!url) return null;
   if (id === "review") return { url, space: store.playSpace ?? store.reviewSpace ?? "@model", frames: store.reviewFrames ?? null };

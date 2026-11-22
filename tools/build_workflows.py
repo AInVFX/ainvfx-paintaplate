@@ -899,13 +899,17 @@ def upscale_export():
     (Slot frames), in order, each window its last frames (Slot count) and the last window what is left of the shot's
     frames (Slot max_frames), so a window job that runs again counts once; a shot made in one job is one window. Save Plate writes the joined frames at their own size, in the format of the export at the plate's size (Slot
     shot), which Load Plate reads for its spec: the same file type, codec, bit depth, frame numbers, colour tags, timecode
-    and audio. The frames are in the plate's colour space already, so nothing converts them."""
+    and audio. The frames are in the plate's colour space already, so nothing converts them. Save Movie writes the part's viewer
+    movie at its own size when the page names it (Slot video_prefix): its row in the Render panel plays it."""
     g = Graph()
     shot = g("PaintAPlate_LoadPlate", _title="Result: its format", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
     frames = g("PaintAPlate_JoinWindows", _title="Upscaled windows, joined", folder=Slot("frames", ""),
                count=Slot("count", 0), max_frames=Slot("max_frames", 121))
     g("PaintAPlate_SavePlate", _title="Upscaled export", _output="export", images=frames, plate=shot[2],
       filename_prefix=Slot("prefix", "paintaplate/plate/upscaled"), keep_untouched=False)
+    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Viewer movie of the upscaled part, at its own size", _output="video",
+      images=frames, frames=shot[4], config=Slot("config", OCIO_CONFIG), source=Slot("color_space", "@model"), destination=Slot("movie_space", "@model"),
+      fps=shot[3], crf=12, filename_prefix=Slot("video_prefix", ""))
     g.save("upscale_export")
 
 

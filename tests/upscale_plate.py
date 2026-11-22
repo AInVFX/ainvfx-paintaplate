@@ -27,7 +27,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 
-from build_workflows import UPSCALE_CHUNK, UPSCALE_OVERLAP  # noqa: E402
+from build_workflows import OCIO_CONFIG, UPSCALE_CHUNK, UPSCALE_OVERLAP  # noqa: E402
 
 LONG_SIDE = 3840
 MOST = (3840, 2160)  # the largest target: its long side and its short side
@@ -94,8 +94,9 @@ def machine(url: str) -> tuple:
 
 def export_values(shot: str, frames: int, label: str = "upscale", count: int = WINDOW) -> dict:
     """The slots of the upscale_export workflow: the windows' frames, read under ComfyUI's output folder, `count` frames
-    in each window."""
-    return {"shot": shot, "frames": f"{OUTPUT}{label}/upscale", "max_frames": frames, "count": count, "prefix": f"{label}/export"}
+    in each window. No viewer movie: its prefix stays empty, so Save Movie writes nothing."""
+    return {"shot": shot, "frames": f"{OUTPUT}{label}/upscale", "max_frames": frames, "count": count, "prefix": f"{label}/export",
+            "video_prefix": "", "movie_width": 0, "movie_height": 0, "config": OCIO_CONFIG, "color_space": "@model", "movie_space": "@model"}
 
 
 def shot_path(comfy: str, shot: str) -> str:

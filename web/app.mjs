@@ -869,8 +869,13 @@ function setFinish(opt, on) { // SDR to HDR keeps its own renders (the render ke
   confirmed(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Result: regenerated in scene-linear values, fitted to the plate.\n  Format: half-float EXR frames in ACES2065-1, in the viewer and in Export."
     : opt.id === "upscale" ? `\n  ${upscaleWhen()}` : ""}` : `Finish: ${opt.name} off.`, 1500);
   finishUI(); recompose(); stagesUI(); exportUI(); touch();
+  if (opt.id === "upscale") latestUpscale();
   if (on && opt.id === "hdr" && plateAlone(S.heroKey) && !S.renders.get(S.heroKey)) status(`Finish: ${opt.name} on. Generate runs it on the plate: about ${Math.round(estimate("hdr", plan({ key: S.heroKey }, []).skip))} s.`, "hint");
 }
+// Upscale turned on or off, or another size: the player shows the latest result, unless a step of the plate's size is pinned
+function latestUpscale() { if (S.pass && !UP_IDS.has(S.pass)) return; S.pass = null; showLatest(); stagesUI(); }
+// A result made, as the status line says it
+const ready = (label, more = "", next = "Export writes it for compositing software.") => `${label}: ready, in the viewer${more}. ${next}`;
 // The confirmation's detail line when Upscale turns on
 const upscaleWhen = () => `Each render ends with Upscale at ${upscaleFigures().target.join(" x ")}: about ${span(upscaleGuess())} on this GPU.`;
 function upscaleSizeUI(opt, show) { // Finish > Upscale's size: the plate's sizes, then Custom…, with the size asked for chosen; shown while the row is on
@@ -910,6 +915,7 @@ function setUpscaleAsk(asked) { // the size asked for: kept for this plate, and 
   if (S.deliver.upscale) S.deliver.upscale = asked;
   confirmed(`Finish: Upscale at ${upscaleFigures().target.join(" x ")}.`, 1500);
   finishUI(); stagesUI(); exportUI(); touch(); // another size: its own steps (upOf)
+  latestUpscale();
 }
 function openFinish(open = $("#finish").hidden) { // the menu opens under its button; Esc, a click outside or the button closes it
   if (!open) return closeFinish();
@@ -945,6 +951,8 @@ function recompose() {
 
 function showLatest() { // the latest result of the edits on show: the full-size composite, else the full-size shot, else the preview
   const key = S.heroKey, r = S.renders.get(key), pv = previewOf(r), review = r?.play ?? r?.review;
+  const up = r && upscaled(r) ? upOf(r).comp : null; // Finish > Upscale's last step, once made, at the size asked for
+  if (up?.url) return void setShot(up.url, key, up.space);
   const best = review ?? r?.raw ?? pv?.comp ?? pv?.raw;
   if (best) setShot(best, key, best === review ? (r.playSpace ?? r.reviewSpace) : "@model", best === review ? r.reviewFrames : null, { framesSpace: best === review ? r.reviewFramesSpace : null });
   else if (!key) setShot(null, key);
@@ -968,7 +976,7 @@ function choosePass(id) {
   if (!S.pass) { fluidInput(); if (keying() && S.fluid.result) showFluid(); else showLatest(); hud("The latest result.", 1500); return stagesUI(); }
   if (id === "first") { pause(); seek(0); render(); }
   else {
-    const m = fluid ?? passMovie(id, r, previewOf(r), passSpaces());
+    const m = fluid ?? passMovie(id, r, previewOf(r), passSpaces(), upOf(r));
     if (!m) { S.pass = null; return stagesUI(); }
     if (fluid && keying()) S.fluid.view = "result"; // the keyframes stay as painted; the viewer shows the pass
     setShot(m.url, fluid && keying() ? "fluid" : S.heroKey, m.space, m.frames ?? null, { framesSpace: m.framesSpace }); // a pass's EXR frames and their space (passMovie, fluidPasses)
@@ -1001,7 +1009,7 @@ function passLabel(id) {
 function shownLabel() { // the pass on show, by its row's name: the one clicked, else the latest result
   if (S.pass) return passLabel(S.pass);
   const r = S.renders.get(S.heroKey), pv = previewOf(r);
-  return labelOf(STAGES.find((x) => S.shot?.url && passMovie(x.id, r, pv, passSpaces())?.url === S.shot.url), r) ?? (S.shot ? "Result" : S.edits.length ? "First frame" : "Plate");
+  return labelOf(STAGES.find((x) => S.shot?.url && passMovie(x.id, r, pv, passSpaces(), upOf(r))?.url === S.shot.url), r) ?? (S.shot ? "Result" : S.edits.length ? "First frame" : "Plate");
 }
 // A fluid row on show with the wipe: its step's input on the wipe's left side (logic.fluidWipeLeft), as a comparison that
 // ends with the row or the wipe. A comparison picked by Ctrl+click stays as it is.
@@ -1020,7 +1028,7 @@ function comparePass(id) {
   if (S.cmp?.id === id) return endCompare();
   if (passLabel(id) === shownLabel()) return plateWipe(); // the pass on show against itself shows nothing: the plate takes the left side
   const r = S.renders.get(S.heroKey);
-  const m = id === "first" ? { url: null, space: modelSpace(), frames: null } : passMovie(id, r, previewOf(r), passSpaces());
+  const m = id === "first" ? { url: null, space: modelSpace(), frames: null } : passMovie(id, r, previewOf(r), passSpaces(), upOf(r));
   if (!m) return;
   S.cmp = { ...m, id, key: S.heroKey, label: passLabel(id), wiped: S.cmp ? S.cmp.wiped : S.wipe !== null };
   sharp.cmp = null;
@@ -1213,7 +1221,16 @@ function setShot(src, key, space = "@model", frames = null, { framesSpace = null
   S.shot = src ? { url: src, key, space, frames, framesSpace } : null;
   if (src) { if (shotVid.getAttribute("src") !== src) shotVid.src = src; }
   else { shotVid.removeAttribute("src"); shotVid.load(); }
+  fitCanvas(src, key);
   render(); timelineUI();
+}
+// The canvas holds the picture on show at its own size: the plate's, up to NATIVE_SIDE, or an upscaled step's, so that zoom
+// reaches its pixels. Zoom counts the plate's pixels either way, and the wipe draws both sides in the same frame.
+function fitCanvas(src, key) {
+  if (!S.plate) return;
+  const up = src ? Object.values(upOf(S.renders.get(key)) ?? {}).find((m) => m?.url === src) : null;
+  const [w, h] = up?.size ?? colour.nativeSize(S.plate.spec.width, S.plate.spec.height, NATIVE_SIDE);
+  if (view.width !== w || view.height !== h) { [view.width, view.height] = [w, h]; applyView(); }
 }
 
 // Once the shot of the current edits exists, it shows on every frame, playing or paused; the plate shows only in the wipe and
@@ -3156,7 +3173,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   stagesUI(); exportUI();
   const upNext = UPS.some((st) => !r.skip.has(st.id) && doneOf(r, st) === undefined); // Upscale's steps follow the composite
   if (!S.wantDownload || upNext) status(r.hdrAfter ? "SDR to HDR: ready, in the viewer, its EXR frames at full precision as they load. Export writes them for compositing software."
-    : `Composite, full size: ready, in the viewer${deep ? ", its EXR frames at full precision as they load" : ""}. ${upNext ? `Upscale is next: about ${span(UPS.reduce((a, st) => a + (r.skip.has(st.id) ? 0 : estimate(st.id, r.skip)), 0))}.` : "Export writes it for compositing software."}`, "hint");
+    : ready("Composite, full size", deep ? ", its EXR frames at full precision as they load" : "", upNext ? `Upscale is next: about ${span(UPS.reduce((a, st) => a + (r.skip.has(st.id) ? 0 : estimate(st.id, r.skip)), 0))}.` : undefined), "hint");
   if (r.hdrAfter) return S.wantDownload ? exportAlone(r) : undefined; // the relit result in HDR: Export zips the frames SDR to HDR wrote
   await upscaleSteps();
   if (!S.wantDownload) return;
@@ -3189,9 +3206,15 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       const x = (r.upParts ??= await exportJob(progress));
       return { dir: x.run, result: x.parts.path, space: x.parts.space, float: x.parts.float, layer: x.layer ? x.parts.layerPath : null, matte: x.parts.mattePath };
     };
-    await step(r, "upplate", (progress) => upscalePart("plate", null, true, progress), store);
-    await step(r, "uplayer", async (progress) => upscalePart("layer", await parts((f) => progress(f / 10)), true, (f) => progress(0.1 + f * 0.9)), store);
-    await step(r, "upcomp", async (progress) => upscalePart("comp", await parts((f) => progress(f / 10)), keeps, (f) => progress(0.1 + f * 0.9)), store);
+    const made = (part, keep) => async (progress) => { store[part] = await upscalePart(part, await parts((f) => progress(f / 10)), keep, (f) => progress(0.1 + f * 0.9)); };
+    await step(r, "upplate", made("plate", true), store);
+    await step(r, "uplayer", made("layer", true), store);
+    await step(r, "upcomp", made("comp", keeps), store);
+    if (!here() || !store.comp?.url || S.wantDownload) return; // Export goes on to the zip
+    showMade(store.comp.url, key, store.comp.space);
+    hud("Composite, upscaled: the viewer plays it.", 2500);
+    stagesUI();
+    status(ready("Composite, upscaled"), "hint");
   }
 }
 
@@ -3214,19 +3237,20 @@ function upscaleGuess(id) { // seconds for one of Upscale's steps on the render 
 // Finish > Upscale: SeedVR2 7B upscales the result to the size asked for, in windows this machine's memory holds
 // (logic.upscaleWindow), in the steps that follow the full-size composite (upscaleSteps). With a layer and a matte (Paint and
 // Clean keep the plate's untouched pixels), « Plate, upscaled » makes the plate's windows, kept under the plate's folder for the
-// next render (the job index); « Layer, upscaled » makes the layer's, whose jobs compose the upscaled result from them and the
-// matte, and write the upscaled matte; « Composite, upscaled » has Save Plate write each part in the format of its plate-size
-// twin, under upscaled/ in the export's folder: the zip's part « upscaled ». Otherwise « Composite, upscaled » makes the result's
-// windows, with the upscaled matte when there is one, then its part. `part`: "plate", "layer" or "comp"; `set`: { dir, result,
-// space, float, layer, matte } as Load Plate takes the paths (null for the plate's windows); `keeps`: the plate and the layer come too.
-// Its jobs are of the export's kind: what stops a render's steps stops them.
-async function upscalePart(part, set, keeps, progress) {
+// next render (the job index), then the upscaled plate; « Layer, upscaled » makes the layer's windows, whose jobs compose the
+// upscaled result from them and the matte and write the upscaled matte, then the upscaled layer; « Composite, upscaled » writes
+// the upscaled result. Otherwise « Composite, upscaled » makes the result's windows, with the upscaled matte when there is one,
+// then the upscaled result. Save Plate writes each part in the format of its plate-size twin, under upscaled/ in the export's
+// folder (the zip's part « upscaled »), and Save Movie its viewer movie, at its own size, for its row. `set`: { dir, result,
+// space, float, layer, matte }, the export's parts as Load Plate takes the paths; `keeps`: the plate and the layer come too;
+// `movie`: false for a part that only Export writes. Its jobs are of the export's kind: what stops a render's steps stops them.
+async function upscalePart(part, set, keeps, progress, movie = true) {
   const p = S.plate, [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]];
   const stats = await fetch("/system_stats").then((res) => res.json()).catch(() => null), gib = 2 ** 30;
   const target = upscaleTarget(w, h, S.deliver.upscale || S.upscaleAsk), [sw, sh] = upscaleSource(w, h, target), sized = target.join("x"); // each size keeps its own windows
   const size = upscaleWindow((stats?.system?.ram_total ?? 0) / gib, (stats?.devices?.[0]?.vram_total ?? 0) / gib, target, [w, h], p.frames,
     keeps ? UPSCALE.composeCopies : UPSCALE.copies); // the plate's windows and the layer's are the same: sized for the layer's, which composes
-  const float = set ? set.float : /^\.exr$/i.test(p.spec.ext ?? ""); // the plate's windows come before the export's parts: an EXR plate keeps EXR
+  const float = set.float; // EXR frames: an EXR plate, or SDR to HDR's result
   const windows = upscaleWindows(p.frames, size), format = float ? "exr" : "png16", n = (i) => `w${String(i).padStart(3, "0")}`;
   const plateDir = upscaleFolder(S.plate.id, [p.path, p.cs, S.ocio.config, target, size, format, S.build]);
   if (part === (keeps ? "plate" : "comp")) log(`Upscale: ${target.join(" x ")}${sw ? `, upscaled from ${sw} x ${sh}` : ""}, ${windows.length === 1 ? "1 job" : `${windows.length} windows of ${size} frames`}.\n  `
@@ -3235,26 +3259,29 @@ async function upscalePart(part, set, keeps, progress) {
     width: target[0], height: target[1], color_space: space, color_fix: "lab", format, seed: 42, config: S.ocio.config, under: "", under_space: space,
     matte: "", comp_prefix: "", matte_prefix: "", ...more });
   const matte = () => ({ matte: set.matte ?? "", matte_prefix: set.matte ? `${set.dir}/upscaled/matte/matte` : "" });
-  const save = (shot, frames, name) => ["upscale_export", { shot, frames: `output:${frames}`, max_frames: p.frames, count: size, prefix: `${set.dir}/upscaled/${name}` }, size / 5];
-  const jobs = part === "plate" ? windows.map((win, i) => ["upscale", values(p.path, p.cs, win, { prefix: `${plateDir}/${n(i)}/f` }), win[1]]) // [workflow, values, weight]: a window weighs its frames
-    : part === "layer" ? windows.map((win, i) => ["upscale", values(set.layer, set.space, win, { prefix: `${set.dir}/upscale/${sized}/layer/${n(i)}/f`, ...matte(),
-      under: `output:${plateDir}/${n(i)}`, under_space: p.cs, comp_prefix: `${set.dir}/upscale/${sized}/comp/${n(i)}/f` }), win[1]])
+  const [mw, mh] = colour.nativeSize(target[0], target[1], NATIVE_SIDE), view = float ? logSpace() : p.cs; // its viewer movie: the look of its frames
+  const save = (shot, frames, name, space) => ["upscale_export", { shot, frames: `output:${frames}`, max_frames: p.frames, count: size, prefix: `${set.dir}/upscaled/${name}`,
+    ...(movie ? { ...movieDims(mw, mh), config: S.ocio.config, color_space: space, movie_space: view, video_prefix: `${set.dir}/upscale/${sized}/movie/${name}` } : {}) }, size / 5];
+  const jobs = part === "plate" ? [...windows.map((win, i) => ["upscale", values(p.path, p.cs, win, { prefix: `${plateDir}/${n(i)}/f` }), win[1]]), save(p.path, plateDir, "plate", p.cs)]
+    : part === "layer" ? [...windows.map((win, i) => ["upscale", values(set.layer, set.space, win, { prefix: `${set.dir}/upscale/${sized}/layer/${n(i)}/f`, ...matte(),
+      under: `output:${plateDir}/${n(i)}`, under_space: p.cs, comp_prefix: `${set.dir}/upscale/${sized}/comp/${n(i)}/f` }), win[1]]), save(set.layer, `${set.dir}/upscale/${sized}/layer`, "layer", set.space)]
     : [...(keeps ? [] : windows.map((win, i) => ["upscale", values(set.result, set.space, win, { prefix: `${set.dir}/upscale/${sized}/result/${n(i)}/f`, ...matte() }), win[1]])),
-      save(set.result, `${set.dir}/upscale/${sized}/${keeps ? "comp" : "result"}`, "export"), // a part written weighs a fifth of a window
-      ...(keeps ? [save(set.layer, `${set.dir}/upscale/${sized}/layer`, "layer"), save(p.path, plateDir, "plate")] : [])];
+      save(set.result, `${set.dir}/upscale/${sized}/${keeps ? "comp" : "result"}`, "export", set.space)]; // [workflow, values, weight]: a window weighs its frames, a part written a fifth of a window
   const total = jobs.reduce((a, [, , wt]) => a + wt, 0);
-  let before = 0;
+  let before = 0, out = null;
   for (const [name, v, wt] of jobs) {
-    await run(name, v, { kind: "export", progress: (f) => progress((before + f * wt) / total) }).done;
+    out = await run(name, v, { kind: "export", progress: (f) => progress((before + f * wt) / total) }).done;
     before += wt;
     progress(before / total);
   }
+  const file = movie ? outputFile("upscale_export", out, "video") : null;
+  return file ? { url: viewUrl(file), space: view, size: [mw, mh] } : null; // what its row shows
 }
 async function upscaleAlone(dir, result, float) { // Upscale on a result with no plate and no layer (a fluid shot, the plate alone): restored under upscaled/ of dir; false when it stopped or failed
   const t0 = performance.now(), guess = Math.round(upscaleFigures().alone);
   status(`Upscale: about ${guess} s.`);
   try {
-    await upscalePart("comp", { dir, result, space: float ? HDR_FRAMES : S.plate.cs, float, layer: null, matte: null }, false, (x) => showStatus(`Upscale: ${Math.round(x * 100)}%.`));
+    await upscalePart("comp", { dir, result, space: float ? HDR_FRAMES : S.plate.cs, float, layer: null, matte: null }, false, (x) => showStatus(`Upscale: ${Math.round(x * 100)}%.`), false);
   } catch (err) { // a stop says nothing more; a failure writes its fact in the log and what to do on the status line
     const e = explained(err, "Upscale");
     if (e === err) status("Upscale: stopped. The zip was not written."); else showStatus(e.message);
@@ -3501,7 +3528,7 @@ function stagesUI() {
     li.children[1].textContent = labelOf(st);
     li.children[2].textContent = from ? `from v${from}` : took !== undefined ? span(took) : now ? `${Math.round(S.stage.progress * 100)}%`
       : later(st) ? "on Export" : `~${span(estimate(st.id, skip))}`;
-    const movie = took !== undefined ? passMovie(st.id, r, previewOf(r), { log: logSpace(), data: matteSpace() }) : null;
+    const movie = took !== undefined ? passMovie(st.id, r, previewOf(r), { log: logSpace(), data: matteSpace() }, upOf(r)) : null;
     if (movie) {
       pick(li, st.id, labelOf(st).toLowerCase());
       if (S.pass ? S.pass === st.id : movie.url === S.shot?.url) li.classList.add("shown"); // the row on show

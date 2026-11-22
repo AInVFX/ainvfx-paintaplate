@@ -51,5 +51,41 @@
    },
    "output": "export"
   }
+ },
+ "4": {
+  "class_type": "PaintAPlate_SaveMovie",
+  "inputs": {
+   "width": 0,
+   "height": 0,
+   "images": [
+    "2",
+    0
+   ],
+   "frames": [
+    "1",
+    4
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "@model",
+   "fps": [
+    "1",
+    3
+   ],
+   "crf": 12,
+   "filename_prefix": ""
+  },
+  "_meta": {
+   "title": "Viewer movie of the upscaled part, at its own size",
+   "slots": {
+    "width": "movie_width",
+    "height": "movie_height",
+    "config": "config",
+    "source": "color_space",
+    "destination": "movie_space",
+    "filename_prefix": "video_prefix"
+   },
+   "output": "video"
+  }
  }
 }
