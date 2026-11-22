@@ -808,8 +808,10 @@ def _follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base
     state, prev, hidden_for, empty = "present", np.zeros((h, w), bool), 0, 0
     counts = dict(old=0, cut=0, away=0, added=0, kept=0)
     hidden, gone_at = [], None
+    with ThreadPoolExecutor(min(16, os.cpu_count() or 4)) as pool:  # each frame's change on its own: scipy's filters release the GIL
+        diffs = list(pool.map(lambda t: shot_change(shot[t], base[t]), range(n)))
     for t in range(n):
-        d = shot_change(shot[t], base[t])
+        d = diffs[t]
         away_from = ~grow(union[t] | plate_m[t], reach)
         level = float(np.median(d[away_from])) if away_from.sum() > 256 else float(np.median(d))
         changed, moved = d > level + threshold, d > level + 0.25 * threshold
