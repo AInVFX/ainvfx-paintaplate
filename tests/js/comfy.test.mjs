@@ -137,3 +137,12 @@ test("the job index key holds the pack's version: a result made by another versi
   assert.equal(indexParts("1.11.9", undefined, "plate-id", values), null); // a workflow without a hash
   assert.equal(indexParts("1.11.9", "wf-hash", null, values), null); // a plate that could not be checked
 });
+
+test("the workflows load with no-cache, so the browser never runs a copy kept from an earlier version of the pack", async () => {
+  const { loadWorkflows, WF } = await import("../../web/comfy.mjs");
+  const asked = [];
+  globalThis.fetch = async (url, options) => { asked.push([String(url), options?.cache]); return { text: async () => "{}" }; };
+  await loadWorkflows(["matte"]);
+  assert.deepEqual(asked, [["workflows/matte.json", "no-cache"]]);
+  assert.ok(WF.matte);
+});
