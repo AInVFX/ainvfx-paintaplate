@@ -118,8 +118,8 @@ def deliver_hdr(page):
 def deliver_upscale(page, size: str = ""):
     """--upscale: Finish > Upscale on for this run, before any edit, at `size`: the long side in px, as Custom… takes
     it. The row's list gives the size when one of its entries has that long side, else Custom… does;
-    with no size, the page's own. Export then writes the upscaled set too, and the zip
-    holds it under upscaled/."""
+    with no size, the page's own. Upscale's steps then follow the full-size composite, and the zip holds their
+    upscaled set under upscaled/."""
     page.click("#finish-btn")
     if page.is_disabled("#finish-upscale"):
         why = page.text_content("#finish-upscale-why")
@@ -323,8 +323,8 @@ def main():
     ap.add_argument("--option", action="append", default=[], help="with --url: one more option of the page's address, such as hdr=0 (SDR to HDR off)")
     ap.add_argument("--memory", default="", help="with --url: the page's memory profile, small, medium or large (by default the GPU decides)")
     ap.add_argument("--preview", default="", choices=("", *PREVIEW), help="with --url: the Preview menu's choice, stored before the page loads (by default the page's own)")
-    ap.add_argument("--upscale", nargs="?", const="on", default="", help="with --url, at the size given (the long side in px, as Custom… takes it; alone, the page's own): turn Finish > Upscale on before painting, so Export "
-                    "writes the upscaled set too; the zip waits up to 3 hours")
+    ap.add_argument("--upscale", nargs="?", const="on", default="", help="with --url, at the size given (the long side in px, as Custom… takes it; alone, the page's own): turn Finish > Upscale on before painting, so the render's steps "
+                    "make the upscaled set, which the zip holds; the zip waits up to 3 hours")
     ap.add_argument("--hdr", action="store_true", help="with --url: turn SDR to HDR on in the Finish menu before painting, so the render makes "
                     "its full-size shot again in scene-linear values and HDR Match fits it to the plate")
     ap.add_argument("--seed", type=int, default=None, help="with --url: the page's ?seed=: the first new edit and each fluid shot start from it, each next edit from the next number (by default the page draws each seed)")
