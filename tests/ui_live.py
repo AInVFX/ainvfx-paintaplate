@@ -565,6 +565,16 @@ def remote(a):
                             mark(f"ComfyUI graph saved: {len(json.load(open(f'{shots}/scene.comfyui.json'))['nodes'])} nodes and notes")
                         except Exception as exc:
                             mark(f"ComfyUI graph not saved: {type(exc).__name__}: {str(exc).splitlines()[0][:120]} | status: {status()}")
+            elif fluid and a.upscale:  # a fluid shot alone: Upscale's step follows the shot with no Generate, then Export zips both
+                mark(deliver_upscale(page, "" if a.upscale == "on" else a.upscale))
+                page.wait_for_function("['full size ready'].includes(document.querySelector('#render-left').textContent) || document.querySelector('#status').textContent.startsWith('Error')",
+                                       timeout=a.timeout * 8 * 1000)
+                mark("final: " + status()); page.screenshot(path=f"{shots}/4_played.png")
+                with page.expect_download(timeout=3 * 3600000) as dl:
+                    page.click("#export-btn"); page.click("#x-go")
+                dl.value.save_as(f"{shots}/export.zip")
+                names = zipfile.ZipFile(f"{shots}/export.zip").namelist()
+                mark(f"downloaded {len(names)} files; upscaled: {', '.join(sorted({n.split('/')[1] for n in names if n.startswith('upscaled/')})) or 'none'}")
         except NameAsked as exc:
             mark(f"name asked: {exc}")
         except Exception as exc:
