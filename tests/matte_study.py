@@ -20,8 +20,12 @@ Each recording gets one table, where every approach is measured alike:
   shares of the reference's area: a matte twice the object's size loses 100% of plate. A band of --band px on each
   side of the reference's edge (where it crosses 0.5) counts for neither, as a careful person and a matte can place
   one edge a pixel or two apart, and the composite feathers it. Each column gives the mean over the reference frames,
-  then the worst frame. On a frame whose reference holds nothing (the object hidden or gone), « where none » gives
-  the matte's area there, as a share of the frame;
+  then the worst frame. « Plate lost, seen » weights the plate lost by how far the shot differs from the plate there
+  (mathops.shot_change against the recording's threshold, full weight from the threshold up): taking the shot where it
+  reproduces the plate costs nothing visible. A Clean's recording holds no shot: its weight comes from the clean plate
+  pass, in the Fit to Plate recording of the same frames beside it; without one, the column is empty. On a frame whose
+  reference holds nothing (the object hidden or gone), « where none » gives the matte's area there, as a share of the
+  frame;
 - the measures of tests/matte_replay.py: the frames that hold a matte, the large changes kept, the mean area and, with
   --head, the share of the head of a horse that faces right;
 - the flicker (mathops.matte_flicker): the share of the matte that comes and goes within 3 frames, the mean over the
@@ -38,6 +42,7 @@ yellow. A Clean's recording holds no shot: its pictures show the plate.
         [--out <folder>] [--sheet] [--scale 0.5]
 """
 import argparse
+import glob
 import importlib.util
 import json
 import os
@@ -70,11 +75,18 @@ def load(path):
     if os.path.exists(beside(path, ".tracks.npz")):
         with np.load(beside(path, ".tracks.npz")) as d:
             tracks = {k: d[k].astype(np.float32) / (255.0 if d[k].dtype == np.uint8 else 1.0) for k in d.files}
+    clean = None
+    if args["shot"] is None:  # a Clean: the clean plate pass, from the Fit to Plate recording of the same frames
+        fits = [f for f in glob.glob(os.path.join(os.path.dirname(path), "fit_to_plate_*.npz")) if f"_{args['n']}f_" in os.path.basename(f)]
+        if fits:
+            fit = mathops.replay_fit(max(fits, key=os.path.getsize))
+            h, w = args["base"].shape[1:3]
+            clean = np.stack([f if f.shape[:2] == (h, w) else mathops.resize_to(f, h, w) for f in fit["image"]])
     facts = {}
     if os.path.exists(beside(path, ".json")):
         with open(beside(path, ".json"), encoding="utf-8") as f:
             facts = json.load(f)
-    return args, dict(args, tracks=tracks, facts=facts, path=path)
+    return args, dict(args, tracks=tracks, facts=facts, path=path, clean=clean)
 
 
 def size(args):
@@ -140,15 +152,29 @@ def counted(ref, band):
     return (ndimage.distance_transform_edt(edge) > band) | (ndimage.distance_transform_edt(~edge) > band)
 
 
-def score(matte, ref, band):
-    """(edit lost, plate lost, where none) on one frame. The first two are shares of the reference's area, or None when
-    the reference holds nothing; then the third is the matte's area as a share of the frame, else None."""
+def score(matte, ref, band, seen=None):
+    """(edit lost, plate lost, where none, plate lost seen) on one frame. Edit lost and plate lost are shares of the
+    reference's area, or None when the reference holds nothing; where none is then the matte's area as a share of the
+    frame, else None. Plate lost seen weights the plate lost by `seen` (0 to 1 per pixel), or is None without it."""
     matte = np.asarray(matte, np.float32)
     count = counted(ref, band)
     total = float(ref[count].sum())
     if total < 1.0:  # nothing to take on this frame: an object hidden or gone
-        return None, None, float((matte > 0.5).mean())
-    return (float(np.maximum(ref - matte, 0)[count].sum()) / total, float(np.maximum(matte - ref, 0)[count].sum()) / total, None)
+        return None, None, float((matte > 0.5).mean()), None
+    lost = np.maximum(matte - ref, 0)[count]
+    return (float(np.maximum(ref - matte, 0)[count].sum()) / total, float(lost.sum()) / total, None,
+            None if seen is None else float((lost * seen[count]).sum()) / total)
+
+
+def seen_weight(args, t, clean=None):
+    """How visible taking the shot is on frame t, per pixel: how far the shot (a Clean: its clean plate pass, `clean`)
+    differs from the plate, against the threshold, from 0 to 1. None without a shot or a clean plate pass."""
+    view = args["shot"] if args["shot"] is not None else clean
+    if view is None:
+        return None
+    n, h, w = size(args)
+    d = mathops.shot_change(np.asarray(matte_replay.frame(view, t, h, w), np.float32), np.asarray(matte_replay.frame(args["base"], t, h, w), np.float32))
+    return np.clip(d / args["threshold"], 0, 1)
 
 
 def mean_worst(pairs, first_frame, worst=max):
@@ -165,21 +191,23 @@ def measure(args, rec, runs, refs, band, head):
     first_frame = args["first_frame"]
     mattes = {name: m for name, (m, _) in runs.items()}
     replayed = matte_replay.measure(args, mattes, head=head)
+    weights = {t: seen_weight(args, t, rec.get("clean")) for t in refs}
     out = {}
     for name, (m, seconds) in runs.items():
-        scores = {t: score(m[t], r, band) for t, r in refs.items()}
+        scores = {t: score(m[t], r, band, weights[t]) for t, r in refs.items()}
         flicker = mathops.matte_flicker(m)
         out[name] = {
             "edit_lost": mean_worst([(s[0], t) for t, s in scores.items()], first_frame),
             "plate_lost": mean_worst([(s[1], t) for t, s in scores.items()], first_frame),
             "where_none": mean_worst([(s[2], t) for t, s in scores.items()], first_frame),
+            "plate_seen": mean_worst([(s[3], t) for t, s in scores.items()], first_frame),
             "frames": int(len(replayed[name]["frames"])),
             "kept": mean_worst(replayed[name]["kept"], first_frame, worst=min),
             "head": mean_worst(replayed[name]["head"], first_frame),
             "area": replayed[name]["area"],
             "flicker": mean_worst([(float(v), t) for t, v in enumerate(flicker)], first_frame),
             "seconds": seconds,
-            "per_frame": {str(t + first_frame): {"edit_lost": s[0], "plate_lost": s[1], "where_none": s[2]} for t, s in scores.items()},
+            "per_frame": {str(t + first_frame): {"edit_lost": s[0], "plate_lost": s[1], "where_none": s[2], "plate_seen": s[3]} for t, s in scores.items()},
         }
     return out
 
@@ -202,13 +230,13 @@ def table(case, path, args, figures, refs, first, by, head):
     n, h, w = size(args)
     frames = ", ".join(str(t + args["first_frame"]) for t in sorted(refs)) or "none"
     lines = [f"### {case} · {os.path.basename(path)} · {w} x {h}, {n} frames, references on frames {frames}", "",
-             "| Approach | Edit lost | Plate lost | Where none | Frames with a matte | Large changes kept | Mean area | Flicker |"
+             "| Approach | Edit lost | Plate lost | Plate lost, seen | Where none | Frames with a matte | Large changes kept | Mean area | Flicker |"
              + (" Head |" if head else "") + " Seconds | |",
-             "| --- " * (9 + head) + "| --- |"]
+             "| --- " * (10 + head) + "| --- |"]
     base = figures.get(first, {})
     for name, f in figures.items():
         mark = "worse" if name != first and (worse(f["edit_lost"], base.get("edit_lost"), by) or worse(f["plate_lost"], base.get("plate_lost"), by)) else ""
-        lines.append(f"| {name} | {cell(f['edit_lost'])} | {cell(f['plate_lost'])} | {cell(f['where_none'])} | {f['frames']} | {cell(f['kept'])} "
+        lines.append(f"| {name} | {cell(f['edit_lost'])} | {cell(f['plate_lost'])} | {cell(f['plate_seen'])} | {cell(f['where_none'])} | {f['frames']} | {cell(f['kept'])} "
                      f"| {100 * f['area']:.2f}% | {cell(f['flicker'])} |" + (f" {cell(f['head'])} |" if head else "") + f" {f['seconds']:.1f} | {mark} |")
     return "\n".join(lines) + "\n"
 

@@ -50,6 +50,14 @@ def tracked(rec):
 
 def short(rec):
     return perfect(rec)[:5, ::2, ::2]
+
+
+def halo(rec):  # the square, and a ring 6 to 9 px around it where the shot is the plate
+    m = perfect(rec)
+    for t in range(rec["n"]):
+        m[t, 5:35, 1 + 2 * t:31 + 2 * t] = np.maximum(m[t, 5:35, 1 + 2 * t:31 + 2 * t], 1)
+        m[t, 8:32, 4 + 2 * t:28 + 2 * t] = square(t)[8:32, 4 + 2 * t:28 + 2 * t]
+    return m
 '''
 
 
@@ -78,7 +86,7 @@ class Study(unittest.TestCase):
         Image.fromarray(np.zeros((H, W), np.uint8)).save(os.path.join(d, "refs", "toy", "ref_8.png"))  # the object gone
         with open(os.path.join(d, "approaches.py"), "w", encoding="utf-8") as f:
             f.write(APPROACHES)
-        specs = [f"{os.path.join(d, 'approaches.py')}:{fn}" for fn in ("perfect", "zone", "half", "shifted", "tracked", "short")]
+        specs = [f"{os.path.join(d, 'approaches.py')}:{fn}" for fn in ("perfect", "zone", "half", "shifted", "tracked", "short", "halo")]
         cls.out = os.path.join(d, "out")
         argv = [cls.rec, "--refs", os.path.join(d, "refs"), "--out", cls.out, "--first", "perfect", "--sheet", "--scale", "1"]
         for s in specs:
@@ -127,7 +135,31 @@ class Study(unittest.TestCase):
     def test_the_sheet_has_a_row_per_reference_and_a_column_per_approach(self):
         name = f"sheet_toy_{os.path.splitext(os.path.basename(self.rec))[0]}.jpg"
         with Image.open(os.path.join(self.out, name)) as im:
-            self.assertEqual(im.size, (90 + W * (3 + 7), 28 + H * 3))
+            self.assertEqual(im.size, (90 + W * (3 + 8), 28 + H * 3))
+
+    def test_a_clean_beside_its_composite_s_recording_is_measured_with_its_clean_plate_pass(self):
+        d = os.path.join(self.dir.name, "clean_case")
+        rng = np.random.default_rng(9)
+        base = (0.3 + 0.2 * rng.random((N, H, W, 3))).astype(np.float32)
+        squares = np.stack([square(t) for t in range(N)])
+        rec = mathops.record(d, squares, N, squares[:1], None, base, 1 / 16, 0.1, None)
+        filled = base.copy()
+        filled[:, 14:26] = 0.6  # the clean plate pass changes the rows of the squares
+        mathops.record_fit(d, N, lambda i: base[i], lambda i: filled[i], squares, None, {"grow": 2})
+        refs = os.path.join(self.dir.name, "clean_refs", "clean_case")
+        os.makedirs(refs)
+        Image.fromarray((square(4) * 255).astype(np.uint8)).save(os.path.join(refs, "ref_5.png"))
+        found = matte_study.main([rec, "--refs", os.path.dirname(refs), "--out", os.path.join(self.dir.name, "clean_out")])
+        f = found["clean_case/" + os.path.basename(rec)]["baseline"]
+        self.assertIsNotNone(f["plate_seen"])
+        self.assertLessEqual(f["plate_seen"][0], f["plate_lost"][0])
+
+    def test_plate_lost_where_the_shot_is_the_plate_is_not_seen(self):
+        f = self.found["halo"]
+        self.assertGreater(f["plate_lost"][0], 0.5)  # a ring of matte 6 to 9 px around the square
+        self.assertLess(f["plate_seen"][0], 0.02)  # there the shot is the plate: nothing visible is lost
+        self.assertLess(self.found["zone"]["plate_seen"][0], 0.01 * self.found["zone"]["plate_lost"][0])  # the zone's plate is the shot's
+        self.assertEqual(self.found["perfect"]["plate_seen"][0], 0.0)
 
 
 if __name__ == "__main__":
