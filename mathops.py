@@ -401,6 +401,9 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
     size), optional: where the shot keeps its own colours, a painted object. The colour match then fixes only the edge the
     composite adds around it, and any other area of the matte (a cleaned one), so a painted object keeps its colours.
     """
+    if os.environ.get("PAINTAPLATE_RECORD"):  # what the composite was given (record_fit): tests/matte_study.py reads it
+        record_fit(os.environ["PAINTAPLATE_RECORD"], n, plate_at, gen_at, masks, keep, {"align": align, "max_shift": max_shift,
+                   "match_color": match_color, "grain": grain, "grow": grow, "feather": feather, "steady": steady})
     tick = progress or (lambda: None)
 
     def full(g):  # a frame at the plate's size
@@ -680,6 +683,50 @@ def replay(path: str) -> dict:
             "erased": back("erased") if "erased" in d.files else None,
             "erased_edge": float(d["erased_edge"]) if "erased_edge" in d.files else 0.0,
             "first_frame": int(d["first_frame"]) if "first_frame" in d.files else 1}
+
+
+def reference_frames(n: int) -> list:
+    """The frames that a matte's references are drawn on: the first, the last and three between (0, 30, 60, 90 and 120
+    of 121 frames). record_fit keeps them at full size."""
+    return sorted({0, n // 4, n // 2, (3 * n) // 4, n - 1}) if n > 0 else []
+
+
+def record_fit(folder: str, n: int, plate_at, gen_at, masks, keep, values: dict) -> str:
+    """With PAINTAPLATE_RECORD=<folder> in ComfyUI's environment, what Fit to Plate was given, as one .npz file beside
+    Follow Matte's: every frame of the plate and of the generated frames (the shot, or a Clean's clean plate pass) at
+    the matte's size, the frames of reference_frames at their own sizes, the mattes and `keep` as given, in half floats,
+    and the node's values. A Clean's clean plate pass is recorded nowhere else. replay_fit reads it back. Returns the
+    file's path."""
+    m = np.asarray(masks, np.float32)
+    mh, mw = m.shape[-2:]
+    h, w = np.shape(plate_at(0))[:2]
+
+    def small(f):  # a frame at the matte's size: whole blocks averaged, then resampled
+        f = np.asarray(f, np.float32)[..., :3]
+        return resize_to(shrink(f, max(1, min(f.shape[0] // mh, f.shape[1] // mw))), mh, mw).astype(np.float16)
+
+    whole = lambda f: np.asarray(f, np.float32)[..., :3].astype(np.float16)  # noqa: E731
+    pick = reference_frames(n)
+    names = sorted(values)
+    os.makedirs(folder, exist_ok=True)
+    stamp = f"{time.strftime('%Y%m%d_%H%M%S')}_{int(time.time() * 1000) % 1000:03d}"
+    path = os.path.join(folder, f"fit_to_plate_{w}x{h}_{n}f_{stamp}.npz")
+    np.savez_compressed(path, plate=np.stack([small(plate_at(t)) for t in range(n)]), image=np.stack([small(gen_at(t)) for t in range(n)]),
+                        spread_plate=np.stack([whole(plate_at(t)) for t in pick]), spread_image=np.stack([whole(gen_at(t)) for t in pick]),
+                        masks=m.astype(np.float16), keep=np.zeros((0,), np.float16) if keep is None else np.asarray(keep, np.float16),
+                        pick=np.array(pick), names=np.array(names), values=np.array([float(values[k]) for k in names]), n=n)
+    return path
+
+
+def replay_fit(path: str) -> dict:
+    """What record_fit wrote, in floats: `plate` and `image` (N, h, w, 3) at the matte's size, `spread_plate` and
+    `spread_image` on the frames of `pick`, `masks`, `keep` (or None) and the node's `values` by name. An array kept in
+    8 bits, as in a smaller copy of the file, reads from 0 to 1, as in replay."""
+    d = np.load(path)
+    f = lambda k: d[k].astype(np.float32) / (255.0 if d[k].dtype == np.uint8 else 1.0)  # noqa: E731
+    return {"n": int(d["n"]), "plate": f("plate"), "image": f("image"), "spread_plate": f("spread_plate"), "spread_image": f("spread_image"),
+            "masks": f("masks"), "keep": f("keep") if d["keep"].size else None, "pick": [int(t) for t in d["pick"]],
+            "values": {str(k): float(v) for k, v in zip(d["names"], d["values"])}}
 
 
 def follow_summary(n: int, seen=None, zones=0, placed=0, strays=0, held=0, added=0, most=0.0, alone=0, guarded=0,
