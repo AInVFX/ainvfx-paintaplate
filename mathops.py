@@ -814,6 +814,176 @@ def matte_flicker(mattes, run: int = 3) -> np.ndarray:
     return out
 
 
+VOTES_ALONE = 0.3  # of a SAM mask's piece: changed by a quarter of the threshold over this share, it is the edit, whole
+VOTES_KEPT = 0.5  # of a piece, or of a kept thing: this share on what the plate keeps, or in the element, decides
+VOTES_GLOW = 1 / 160  # of the width: what the shot changed this close to the matte joins it, on that frame only
+VOTES_PATIENCE = 2  # empty frames in a row before the object counts as hidden or gone
+
+
+def _first_present(m) -> int:
+    seen = np.flatnonzero(np.asarray(m).reshape(len(m), -1).any(axis=1))
+    return int(seen[0]) if len(seen) else -1
+
+
+def _edge(m) -> bool:
+    return bool(m[:2].any() or m[-2:].any() or m[:, :2].any() or m[:, -2:].any())
+
+
+def _close(m, r):
+    r = int(r)
+    return ndimage.binary_closing(np.pad(m, r), iterations=r)[r:-r, r:-r] if r > 0 and m.any() else m
+
+
+def kept_things(objects, region) -> np.ndarray:
+    """What the plate keeps, (N, H, W) booleans from SAM's objects (N, K, H, W): each object, unless on its first frame
+    half of it or more lies in `region`, the area the edit works on: there it is the edit's own subject (a barn that a
+    Clean removes, an arm brace that a paint replaces), not a thing to keep."""
+    objects = np.asarray(objects) > 0.5
+    out = np.zeros((objects.shape[0],) + objects.shape[2:], bool)
+    for k in range(objects.shape[1]):
+        m = objects[:, k]
+        f0 = _first_present(m)
+        if f0 >= 0 and (m[f0] & region).sum() < VOTES_KEPT * m[f0].sum():
+            out |= m
+    return out
+
+
+def follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, threshold: float = 0.1,
+                 zone: float = 1 / 16, first_frame: int = 1, tick=None):
+    """A paint's matte from SAM 3.1's answers, judged by how much the shot changed (votes). Returns (mattes, summary).
+
+    `shot_masks` and `word_masks` are SAM's masks on the shot (N, H, W), given the element with the object's name and
+    the name alone; `plate_masks` its masks on the plate given the element (the object the edit replaces); `kept` what
+    the plate keeps (N, H, W, from kept_things); `element` where the edit changed the first frame; `shot` and `base` the
+    shot and the plate (N, H, W, 3) in 0 to 1. On the first frame a mask given the element answers with it: the second
+    frame's stands in for it. Each piece of the masks is then judged on its frame:
+    - a piece that lies mostly on what the plate keeps is cut to the change, closed by 1/320 of the width: a whole horse
+      for a paint on its belly keeps the painted part, a patch on a large kept thing stays whole; a cut under 2% of the
+      piece is that thing regenerated, and is left out;
+    - any other piece is the edit, whole, when the shot changed it by a quarter of the threshold over VOTES_ALONE of it
+      (thin smoke changes the plate by a few percent), else it is cut to the change;
+    - the plate's masks join where the shot changed, near the shot's masks: the old object, which the new one covers.
+    The matte then follows a state. Present, it takes the pieces that lie at least half within the last matte grown by
+    `zone` of the width (a mask can jump onto a far thing in the frame its object leaves: a boat's wake). Hidden (it
+    vanished inside the frame for VOTES_PATIENCE frames), it takes pieces within the last matte grown by one more zone per
+    frame, never one that lies mostly on what the plate keeps. Gone (it vanished after touching the frame's edge), it
+    takes nothing. On each frame alone, what the shot changed above the threshold within VOTES_GLOW of the width of the
+    matte joins it (a beam's glow, a wing's blur), so it cannot creep. What the plate keeps wins wherever the shot did
+    not change. Frames are named by the plate's numbers: `first_frame` is the first one's."""
+    n = len(shot)
+    h, w = shot.shape[1:3]
+    tick = tick or (lambda: None)
+    frames = lambda a: np.asarray(a, np.float32)[:n] > 0.5 if a is not None and np.size(a) else np.zeros((n, h, w), bool)  # noqa: E731
+    shot_m, word_m, plate_m, kept = frames(shot_masks), frames(word_masks), frames(plate_masks), frames(kept)
+    if n > 1:
+        shot_m[0] = shot_m[1]
+    union = shot_m | word_m
+    seed = np.asarray(element, np.float32).reshape(-1, h, w)[0] > 0.5 if element is not None and np.size(element) else np.zeros((h, w), bool)
+    seed = _close(seed, max(2, round(w / 60)))
+    reach, near, close = max(2.0, zone * w), max(1.0, w * VOTES_GLOW), max(1, round(w / 320))
+    grow = lambda m, px: dilate(m.astype(np.uint8), px) > 0 if m.any() else m  # noqa: E731
+    out = np.zeros((n, h, w), np.float32)
+    state, prev, hidden_for, empty = "present", np.zeros((h, w), bool), 0, 0
+    counts = dict(old=0, cut=0, away=0, added=0, kept=0)
+    hidden, gone_at = [], None
+    for t in range(n):
+        d = shot_change(shot[t], base[t])
+        away_from = ~grow(union[t] | plate_m[t], reach)
+        level = float(np.median(d[away_from])) if away_from.sum() > 256 else float(np.median(d))
+        changed, moved = d > level + threshold, d > level + 0.25 * threshold
+        labels, count = ndimage.label(union[t])
+        cand, cut = np.zeros((h, w), bool), np.zeros((h, w), bool)
+        for k in range(1, count + 1):
+            piece = labels == k
+            if (piece & kept[t]).sum() >= VOTES_KEPT * piece.sum():
+                c = piece & grow(changed, 2)
+                if c.sum() >= 0.02 * piece.sum():  # less is the kept thing regenerated: specks
+                    cut |= c
+            elif moved[piece].mean() >= VOTES_ALONE:
+                cand |= piece
+            else:
+                cut |= piece & grow(changed, 2)
+        counts["cut"] += bool(cut.any())
+        cand |= _close(cut, close)
+        old = plate_m[t] & grow(changed, 2)
+        if old.any():
+            ol, _ = ndimage.label(old)
+            hit = np.unique(ol[old & grow(union[t], reach)])
+            old = np.isin(ol, hit[hit > 0])
+            counts["old"] += bool(old.any())
+        cand = ndimage.binary_fill_holes(cand | old)
+        if t == 0:
+            allowed = grow(seed, reach) if seed.any() else np.ones((h, w), bool)
+        elif state == "present":
+            allowed = grow(prev, reach)
+        elif state == "hidden":
+            allowed = grow(prev, reach * (1 + hidden_for))
+        else:
+            allowed = np.zeros((h, w), bool)
+        labels, count = ndimage.label(cand)
+        m = np.zeros((h, w), bool)
+        left_out = False
+        for k in range(1, count + 1):
+            piece = labels == k
+            if (piece & allowed).sum() < 0.5 * piece.sum() or (state == "hidden" and (piece & kept[t]).sum() >= VOTES_KEPT * piece.sum()):
+                left_out = True
+                continue
+            m |= piece
+        counts["away"] += left_out
+        if m.any():
+            glow = changed & grow(m, near) & ~m
+            counts["added"] += bool(glow.any())
+            m |= glow
+            if state == "hidden" and hidden and hidden[-1][1] is None:
+                hidden[-1][1] = t - 1
+            state, prev, hidden_for, empty = "present", m, 0, 0
+        else:
+            empty += 1
+            if state == "present" and t > 0 and empty >= VOTES_PATIENCE:
+                if _edge(prev):
+                    state, gone_at = "gone", t - empty + 1
+                else:
+                    state, hidden_for = "hidden", 1
+                    hidden.append([t - empty + 1, None])
+            elif state == "hidden":
+                hidden_for += 1
+        dropped = m & kept[t] & ~moved
+        counts["kept"] += bool(dropped.any())
+        out[t] = m & ~dropped
+        tick()
+    if hidden and hidden[-1][1] is None:
+        hidden[-1][1] = n - 1
+    flicker = matte_flicker(out)
+    worst = int(np.argmax(flicker)) if len(flicker) else 0
+    return out, votes_summary(n, int(union.reshape(n, -1).any(axis=1).sum()), counts, hidden, gone_at,
+                              (int((flicker > 0).sum()), float(flicker.max()) if len(flicker) else 0.0, worst), first_frame)
+
+
+def votes_summary(n: int, seen: int, counts: dict, hidden=(), gone_at=None, flicker=None, first_frame: int = 1) -> str:
+    """Follow Matte's summary for a person: the headline, then one line per rule that acted, the plate's numbers for
+    frames. The page writes « Paint matte (…): » or « Clean matte (…): » before it."""
+    on = lambda k: f"{k} frame" + ("" if k == 1 else "s")  # noqa: E731
+    lines = [f"tracked on {seen} of {n} frames."]
+    if counts.get("old"):
+        lines.append(f"Old object added where the shot changed, on {on(counts['old'])}.")
+    if counts.get("cut"):
+        lines.append(f"Cut to the change: SAM masks over what the plate keeps, on {on(counts['cut'])}.")
+    if counts.get("kept"):
+        lines.append(f"Left out: what the plate keeps where the shot did not change, on {on(counts['kept'])}.")
+    if counts.get("away"):
+        lines.append(f"Left out: SAM masks away from the object, on {on(counts['away'])}.")
+    if counts.get("added"):
+        lines.append(f"Added: what the shot changed beside the object, on {on(counts['added'])}.")
+    for a, b in hidden:
+        lines.append(f"Object hidden from frame {a + first_frame} to {b + first_frame}.")
+    if gone_at is not None:
+        lines.append(f"Object out of the frame from frame {gone_at + first_frame}.")
+    if flicker is not None and flicker[0]:
+        share = f"{100 * flicker[1]:.0f}%" if flicker[1] >= 0.1 else f"{100 * flicker[1]:.1f}%"
+        lines.append(f"Flicker: pieces of the matte for {FOLLOW_FLICKER} frames or fewer, on {on(flicker[0])} (up to {share} of the matte at frame {flicker[2] + first_frame}).")
+    return "\n  ".join(lines)
+
+
 def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=None, zone: float = 1 / 16,
                  threshold: float = 0.1, workers: int = 8, element=None, tick=None, erased=None,
                  erased_edge: float = 0.0, first_frame: int = 1, _moves_from: int | None = None):
