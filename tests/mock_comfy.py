@@ -404,6 +404,9 @@ async def execute(pid, prompt):
     elif "plate" in outs:  # fluid: each keyframe softened into a cloud, crossfaded to the next, written in the blank plate's format
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         h, w = frames[0].shape[:2]
+        if int(v.get("width") or 0) and int(v.get("height") or 0):  # the shot preview's size, as ImageScale makes it
+            w, h = int(v["width"]), int(v["height"])
+            spec = {**spec, "width": w, "height": h}
         keys = sorted(json.loads(v.get("keys") or "[]"), key=lambda k: k["frame"])
         clouds = [(k["frame"], np.asarray(Image.open(resolve(k["image"])).convert("RGB").resize((w, h)).filter(ImageFilter.GaussianBlur(4)),
                                           np.float32) / 255) for k in keys]
@@ -426,6 +429,8 @@ async def execute(pid, prompt):
             o[outs["control"]] = {"images": [save_mp4([at.get(i, np.zeros((h, w, 3), np.float32)) for i in range(len(frames))],
                                                        v["control_prefix"], spec["fps"])], "animated": [True]}
         o[outs["video"]] = {"images": [save_mp4(shot, v["video_prefix"], spec["fps"])], "animated": [True]}
+        if "first" in outs:  # frame 0 of the shot, as Save Image writes it
+            o[outs["first"]] = {"images": [save_png(shot[0], "output", v["first_prefix"], 0)]}
     elif "video" in outs or "export" in outs or "exr" in outs:  # comp and export: blend the shot over the plate through the matte
         half = lambda fs: [f.astype(np.float16) for f in fs]  # noqa: E731  the plate, the shot, the matte and the result are held at once, in half floats
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)

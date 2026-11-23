@@ -726,12 +726,14 @@ def fluid():
     As its model card and example workflow: the IC-LoRA loader reads the reference downscale factor (2) from the file
     and hands it to the guide; the control video is black with the keyframes at their frames, at the size and length
     of the shot; euler_ancestral, the 8 distilled sigmas, CFG 1, no first-frame image (the LoRA reads frame 0 from the
-    control video). The blank plate gives the size, frame rate and length, and Save Plate writes the shot in its format
-    (ProRes 4444), so it opens as the next plate.
+    control video). The blank plate gives the frame rate and the length, and the size unless `width` and `height` ask for
+    the shot preview's. Save Plate writes the shot in the blank plate's format (ProRes 4444), and Save Image writes its
+    first frame, as `ingest` writes a plate's first frame.
     """
     g = Graph()
     load, model = plate(g, pad=True)
-    size = g("GetImageSize", image=model)
+    scaled = g("ImageScale", image=model, upscale_method="lanczos", width=Slot("width", 0), height=Slot("height", 0), crop="disabled")
+    size = g("GetImageSize", image=scaled)
     control = g("PaintAPlate_KeyframeVideo", _title="Control video: the keyframes on black", width=size[0], height=size[1],
                 frames=size[2], keys=Slot("keys", "[]"))
     shown = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Control video as a movie: the Fluid: keyframes row shows it", _output="control",
@@ -763,6 +765,8 @@ def fluid():
     g("SaveVideo", _title="Fluid shot preview", _output="video", format="auto", format__codec="auto",
       video=g("CreateVideo", images=decoded, fps=load[3], bit_depth=8, color_space="sRGB", codec="none"),
       filename_prefix=Slot("video_prefix", "paintaplate/fluid/preview"))
+    g("SaveImage", _title="First frame", _output="first", images=g("ImageFromBatch", image=decoded, batch_index=0, length=1),
+      filename_prefix=Slot("first_prefix", "paintaplate/fluid/first"))
     g.save("fluid")
 
 

@@ -2003,7 +2003,7 @@ async function generateFluid(another = false) { // one LTX 2.5 pass with ainvfx-
     log(`Fluid shot v${v}: started.\n  ${keys.length === 1 ? "1 keyframe, at frame" : `${keys.length} keyframes, at frames`} ${keys.map((k) => p.first + k.frame).join(", ")}.\n  ${size.join(" x ")}, ${p.frames} frames at ${p.fps} fps.\n  Seed ${f.seed}, prompt "${prompt}".`);
     status(`Fluid shot v${v}: running, one LTX 2.5 pass with ainvfx-fluid.`);
     const out = await run("fluid", { ...S.memoryProfile.slots, path: f.blankPath ?? p.path, config: S.ocio.config, color_space: "@model", max_frames: p.frames, keys: JSON.stringify(keys), prompt, seed: f.seed,
-      prefix: `${dir}/plate`, video_prefix: `${dir}/preview`, control_prefix: `${dir}/control/c`, ...plateMovie(p), live: liveEvery(previewMode) },
+      prefix: `${dir}/plate`, video_prefix: `${dir}/preview`, control_prefix: `${dir}/control/c`, first_prefix: `${dir}/first`, ...plateMovie(p), live: liveEvery(previewMode) },
       { kind: "fluid", progress: (x) => { if (f.busy) { f.busy.progress = x; fluidUI(); fluidProgress(); } }, live: showLive }).done;
     let path = `${folderOf("fluid", out, "video")}/plate/${(f.blankPath ?? p.spec.source).split(/[\\/]/).pop()}`;
     let movie = null, hdrFrames = null; // an HDR fluid shot as an 8-bit movie in log values: the look of its EXR frames
