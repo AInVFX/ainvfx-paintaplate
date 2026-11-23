@@ -448,18 +448,34 @@ async def thumb(request: web.Request) -> web.StreamResponse:
 
 
 # ---------- The blank plate of a fluid shot ----------
+# The sizes, lengths and frame rates that ainvfx-fluid takes, as the page's Blank plate tab holds them (FLUID in
+# web/logic.mjs): sides in multiples of 64, the three trained rates, 8k + 1 frames up to LTX 2.5's 20 s at the rate.
+# tests/test_routes.py keeps the two equal.
+BLANK_SIDES = (256, 1920, 64)  # the smallest side, the largest, and the step between sides
+BLANK_RATES = (24, 25, 50)
+BLANK_FEWEST = 9  # frames; the most are blank_frames(fps)
+LTX_SECONDS = 20  # LTX 2.5's positions span 20 s, as LENGTH.seconds in web/logic.mjs
+
+
+def blank_frames(fps: float) -> int:
+    """The most frames of a blank plate at `fps`: the longest 8k + 1 count within LTX 2.5's 20 s (logic.plateLength)."""
+    most = int(LTX_SECONDS * fps + 1 + 1e-9)
+    return most - (most - 1) % 8
+
 
 def blank_plate(width: int, height: int, fps: float, frames: int) -> str:
     """The input-folder path of a black plate of this size, frame rate and length, written once (ProRes 4444).
 
-    LTX and ainvfx-fluid need sides in multiples of 64 and 8k + 1 frames; the page keeps to the trained limits.
+    It takes the plates the Blank plate tab offers (BLANK_SIDES, BLANK_RATES, BLANK_FEWEST to blank_frames) and refuses any other.
     """
-    if not (64 <= width <= 4096 and 64 <= height <= 4096 and width % 64 == 0 and height % 64 == 0):
-        raise ValueError("Blank plate: width and height must be multiples of 64, from 64 to 4096 px.")
-    if not (9 <= frames <= 1025 and (frames - 1) % 8 == 0):
-        raise ValueError("Blank plate: length must be 8k + 1 frames, from 9 to 1,025.")
-    if not 1 <= fps <= 120:
-        raise ValueError("Blank plate: frame rate must be from 1 to 120 fps.")
+    least, most, step = BLANK_SIDES
+    if not (least <= width <= most and least <= height <= most and width % step == 0 and height % step == 0):
+        raise ValueError(f"Blank plate: width and height must be multiples of {step}, from {least} to {most} px.")
+    if fps not in BLANK_RATES:
+        raise ValueError(f"Blank plate: frame rate must be {', '.join(map(str, BLANK_RATES[:-1]))} or {BLANK_RATES[-1]} fps.")
+    most = blank_frames(fps)
+    if not (BLANK_FEWEST <= frames <= most and (frames - 1) % 8 == 0):
+        raise ValueError(f"Blank plate: length must be 8k + 1 frames, from {BLANK_FEWEST} to {most} at {fps:g} fps.")
     rel = f"{BLANK}/fluid_{width}x{height}_{fps:g}fps_{frames}f.mov"
     full = os.path.join(os.path.abspath(folder_paths.get_input_directory()), rel)
     if not os.path.exists(full):

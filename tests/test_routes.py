@@ -1,7 +1,9 @@
 """The download route: which folders it reads, what each zip holds, and that it stays inside output/paintaplate."""
 import asyncio
+import json
 import logging
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -20,6 +22,7 @@ sys.modules["folder_paths"] = types.SimpleNamespace(get_output_directory=lambda:
 sys.path.insert(0, ROOT)
 import routes  # noqa: E402
 import test_plateio  # noqa: E402
+from test_web import node  # noqa: E402
 from aiohttp import web  # noqa: E402
 
 
@@ -354,18 +357,22 @@ class Build(unittest.TestCase):
 
 class BlankPlate(unittest.TestCase):
     def test_blank_plate_route(self):
-        """A black canvas in input/paintaplate/blank: written once, refused outside 64-multiples, 8k + 1 frames and 1 to 120 fps."""
+        """A black canvas in input/paintaplate/blank, written once. Refused outside the Blank plate tab's sides (256 to
+        1920 px, in multiples of 64), its frame rates (24, 25 or 50 fps) and its lengths (8k + 1 frames, from 9 up to LTX
+        2.5's 20 s at the rate: 481, 497 and 1001 frames)."""
+        self.assertEqual([routes.blank_frames(r) for r in routes.BLANK_RATES], [481, 497, 1001])
         require("av", "numpy")
-        rel = routes.blank_plate(128, 64, 25, 17)
-        self.assertEqual(rel, "paintaplate/blank/fluid_128x64_25fps_17f.mov")
+        rel = routes.blank_plate(256, 320, 25, 17)
+        self.assertEqual(rel, "paintaplate/blank/fluid_256x320_25fps_17f.mov")
         full = os.path.join(INPUT, rel)
         spec = routes.plateio.probe_plate(full)
-        self.assertEqual((spec["codec"], spec["width"], spec["height"], spec["frames"], spec["fps"]), ("prores", 128, 64, 17, 25.0))
+        self.assertEqual((spec["codec"], spec["width"], spec["height"], spec["frames"], spec["fps"]), ("prores", 256, 320, 17, 25.0))
         first = os.path.getmtime(full)
         time.sleep(0.02)
-        self.assertEqual(routes.blank_plate(128, 64, 25, 17), rel)
+        self.assertEqual(routes.blank_plate(256, 320, 25, 17), rel)
         self.assertEqual(os.path.getmtime(full), first)  # reused, not rewritten
-        for bad in ((100, 64, 25, 17), (128, 64, 25, 16), (128, 64, 0, 17)):
+        for bad in ((192, 320, 25, 17), (1984, 320, 25, 17), (300, 320, 25, 17), (256, 320, 25, 16), (256, 320, 25, 505), (256, 320, 50, 1009),
+                    (256, 320, 30, 17), (256, 320, 0, 17), (256, 320, float("nan"), 17)):
             with self.assertRaises(ValueError, msg=str(bad)):
                 routes.blank_plate(*bad)
 
@@ -376,11 +383,26 @@ class BlankPlate(unittest.TestCase):
             app.add_routes(table)
             from aiohttp.test_utils import TestClient, TestServer
             async with TestClient(TestServer(app)) as client:
-                r = await client.post("/paintaplate/blank", json={"width": 128, "height": 64, "fps": 25, "frames": 17})
+                r = await client.post("/paintaplate/blank", json={"width": 256, "height": 320, "fps": 25, "frames": 17})
                 self.assertEqual((r.status, (await r.json())["path"]), (200, rel))
-                r = await client.post("/paintaplate/blank", json={"width": 130, "height": 64, "fps": 25, "frames": 17})
+                r = await client.post("/paintaplate/blank", json={"width": 130, "height": 320, "fps": 25, "frames": 17})
                 self.assertEqual(r.status, 400)
+                r = await client.post("/paintaplate/blank", json={"width": 256, "height": 320, "fps": 30, "frames": 17})
+                self.assertEqual((r.status, await r.text()), (400, "Blank plate: frame rate must be 24, 25 or 50 fps."))
         asyncio.run(run())
+
+    def test_page_and_server_take_the_same_blank_plates(self):
+        """The Blank plate tab and /paintaplate/blank take the same sides, frame rates and lengths: logic.FLUID and
+        logic.plateLength on the page, routes.BLANK_SIDES, BLANK_RATES, BLANK_FEWEST and blank_frames on the server."""
+        code = ("import('./web/logic.mjs').then((m) => console.log(JSON.stringify({ f: m.FLUID, s: m.LENGTH.seconds, "
+                "most: m.FLUID.rates.map((r) => m.plateLength(r).frames) })))")
+        r = subprocess.run([node(), "--input-type=module", "-e", code], capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        p = json.loads(r.stdout)
+        f = p["f"]
+        self.assertEqual(((f["minSide"], f["maxSide"], f["step"]), tuple(f["rates"]), f["minFrames"], p["s"], p["most"]),
+                         (routes.BLANK_SIDES, routes.BLANK_RATES, routes.BLANK_FEWEST, routes.LTX_SECONDS,
+                          [routes.blank_frames(r) for r in routes.BLANK_RATES]))
 
 
 class DeepFramesTest(unittest.TestCase):

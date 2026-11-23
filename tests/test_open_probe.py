@@ -290,14 +290,14 @@ class AgainstTheMock(unittest.TestCase):
         self.assertIn("Not compared with paintaplate/probe_0: ", text)
 
     def test_another_workflow_on_a_blank_shot(self):
-        code, text = self.run_probe("blank:192x128", "--workflow", "hdr", "--set", "tile=256", "--set", "guide_tiled=true")
+        code, text = self.run_probe("blank:256x256", "--workflow", "hdr", "--set", "tile=256", "--set", "guide_tiled=true")
         self.assertEqual(code, 0, text)
-        self.assertIn("192 x 128, 121 frames", text)
+        self.assertIn("256 x 256, 121 frames", text)
         self.assertRegex(text, r"the whole job +\d+\.\d +\d+\.\d +\d+\.\d +\d+\.\d\n")
         self.assertRegex(text, r"Output: files in output/paintaplate/probe_\d+\.\n")
         with urllib.request.urlopen(f"{self.url}/mock/posts") as r:
             self.assertEqual(json.load(r)[-1]["outputs"], ["hdr", "movie"], "the hdr job, with the probe's values")
-        code, text = self.run_probe("blank:192x128", "--workflow", "hdr", "--set", "tiles=256")
+        code, text = self.run_probe("blank:256x256", "--workflow", "hdr", "--set", "tiles=256")
         self.assertEqual(code, 1, text)
         self.assertIn("Slot not in the hdr workflow: tiles.", text)
 

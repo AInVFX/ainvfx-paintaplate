@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, LENGTH, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateLength, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, fluidPasses, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft, span, doneIn, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, JOB_NAME, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -260,6 +260,8 @@ async function writeCaption(e, reference, key, kind, dimmed = false) {
 
 // ---------- Plate ----------
 
+const keepOf = (st) => plateLength(st?.fps).frames; // the frames a plate opens with: LTX 2.5's 20 s at its frame rate (logic.plateLength)
+
 // opts.cs: the plate's colour space (else read from the file); opts.fluid: a blank plate, opened as a fluid shot; opts.under:
 // the same edits on another plate, or on the same plate in another colour space
 async function openPlate(list, typed, opts = {}) {
@@ -273,7 +275,7 @@ async function openPlate(list, typed, opts = {}) {
   const ctl = (openCtl = new AbortController()); // Cancel on the opening screen, or Esc, aborts it (cancelOpen)
   Object.assign(S, { plate: null, hero: null, original: null }); // nothing to draw while the new plate loads
   const id = Date.now().toString(36), sub = `paintaplate/${id}`;
-  let path = typed, out, cs, headroom = 1;
+  let path = typed, out, cs, headroom = 1, total = null; // total: the frames the file holds, when it holds more than open
   const name = list.length ? plateStem(list[0].name, list.length > 1) : typed.split("/").pop(); // several files: a sequence
   opening(name, list.length > 0);
   try {
@@ -299,9 +301,11 @@ async function openPlate(list, typed, opts = {}) {
     cs = knownSpace(opts.cs) ?? st?.color_space ?? modelSpace(); // one colour space per plate: the viewer, the models and the export use it
     // a video plate's proxy keeps its own values at the working size, so the viewer converts it with OCIO as it does the plate
     const video = st?.kind === "video", work = st?.width ? fitSize(st.width, st.height, WORK_SIDE, 32) : null;
+    const keep = keepOf(st); // Load Plate reads no more: the frames after them are left out, and the log says so below
+    if ((st?.frames ?? 0) > keep) total = st.frames;
     const t0 = performance.now();
     const native = st?.width ? colour.nativeSize(st.width, st.height, NATIVE_SIDE) : null; // the playback proxy at the viewer's canvas size
-    out = await run("ingest", { path, config: S.ocio.config, color_space: cs, proxy_space: video ? cs : logSpace(),
+    out = await run("ingest", { path, config: S.ocio.config, color_space: cs, max_frames: keep, proxy_space: video ? cs : logSpace(),
       proxy_size: native ? Math.max(...native) : video && work ? Math.max(...work) : DEEP_SIDE, ...(native ? movieDims(...native) : {}), prefix: `${sub}/hero`, video_prefix: `${sub}/proxy` }, {
       progress: (f) => openStep(OPENING.at, f, null, f > 0.02 ? ((performance.now() - t0) / 1000) * (1 - f) / f : null),
       step: (cls) => { const k = INGEST[cls]; if (k && OPENING.order.indexOf(k) >= OPENING.order.indexOf(OPENING.at)) openStep(k, 0); } }).done;
@@ -320,7 +324,7 @@ async function openPlate(list, typed, opts = {}) {
   const spec = JSON.parse(outputText("ingest", out, "spec"));
   const [w, h] = [spec.width, spec.height];
   const stem = plateStem(spec.kind === "video" ? spec.source : spec.first_file ?? spec.source, spec.kind === "sequence");
-  S.plate = { id, path, cs, pageSpaceChosen: opts.chosen ?? (!!fileSpace && cs !== fileSpace), headroom, spec, frames: spec.frames, fps: spec.fps || 24, name: stem, deep: spec.kind !== "video", // an image sequence: read at full precision
+  S.plate = { id, path, cs, pageSpaceChosen: opts.chosen ?? (!!fileSpace && cs !== fileSpace), headroom, spec, frames: spec.frames, total: total ?? spec.frames, fps: spec.fps || 24, name: stem, deep: spec.kind !== "video", // an image sequence: read at full precision
     proxySpace: spec.kind === "video" ? cs : logSpace(), // an image sequence's proxy holds log values
     first: spec.kind === "video" ? 1 : spec.first_frame ?? 1,
     work: fitSize(w, h, WORK_SIDE, 32), prev: fitSize(w, h, EDIT_SIDE, 16),
@@ -343,7 +347,7 @@ async function openPlate(list, typed, opts = {}) {
   shotVid.removeAttribute("src"); shotVid.load();
   for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = false;
   const kind = spec.kind === "video" ? spec.codec : `${spec.ext.slice(1).toUpperCase()} ${spec.kind}`;
-  $("#spec").textContent = `${S.plate.name}: ${kind}, ${w} x ${h}, ${Math.round(S.plate.fps * 1000) / 1000} fps, ${spec.frames} frames, ${cs}`;
+  $("#spec").textContent = `${S.plate.name}: ${kind}, ${w} x ${h}, ${Math.round(S.plate.fps * 1000) / 1000} fps, ${S.plate.total > spec.frames ? `${spec.frames} of ${S.plate.total}` : spec.frames} frames, ${cs}`;
   document.activeElement?.blur();
   S.took = {};
   $("#close-btn").hidden = false;
@@ -353,6 +357,8 @@ async function openPlate(list, typed, opts = {}) {
   const depth = opts.fluid?.depth ? { bits: opts.fluid.depth, float: false } : plateDepth(spec); // a blank plate: the depth asked for its fluid shot
   log(`Plate ${S.plate.name}: opened in ${((performance.now() - began) / 1000).toFixed(1)} s.\n  ${w} x ${h}, ${spec.frames} frame${spec.frames === 1 ? "" : "s"}, ${depth.float ? "float" : `${depth.bits}-bit`}, ${cs}${opts.cs ? "" : ", from file"}.`);
   log(`Working sizes: edits at ${S.plate.work.join(" x ")}, edit preview at ${S.plate.prev.join(" x ")}, ${S.previewCap ? `shot preview at ${S.plate.shot.join(" x ")}` : "shot preview off"}, tracking at ${S.plate.track.join(" x ")}.`);
+  const long = opts.under || opts.fluid ? null : lengthWarning({ name: S.plate.name, total: S.plate.total, kept: spec.frames, first: S.plate.first, fps: S.plate.fps });
+  if (long) log(long.fact); // frames left out: the status line shows it below, with what to do
 
   const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the viewer repeats the frame before.` : "";
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
@@ -361,6 +367,7 @@ async function openPlate(list, typed, opts = {}) {
   const next = "Describe the edit in the text prompt, paint on the frame, then Generate.", plate = S.plate;
   const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", from file"} (right-click > OCIO > Plate changes it). ${next}`;
   status(opened, "hint");
+  if (long) setTimeout(() => status(`${long.fact.split("\n")[0]} ${long.next}`, "hint"), 90); // after the open's own sentence, as the lines above
   if (keying()) enterFluid(); else fluidUI();
   plateVid.addEventListener("canplaythrough", () => { // the playback video is loaded. It says so only while the open's own sentence is on show: a blank plate keeps its fluid hint
     if (S.plate !== plate || OPENING.at !== "load") return; // another plate has opened since
@@ -2121,18 +2128,30 @@ function depthUI() { // a blank plate opens in 8-bit; 16-bit needs SDR to HDR, o
   $("#b-depth").closest("label").style.display = S.hdrReady ? "" : "none";
   $("#b-depth").value = "8";
 }
-const blankForm = () => blankSpec({ width: $("#b-width").value, height: $("#b-height").value, fps: $("#b-fps").value, frames: $("#b-frames").value });
+const blankTyped = () => ({ width: $("#b-width").value, height: $("#b-height").value, fps: $("#b-fps").value, frames: $("#b-frames").value });
+const blankForm = () => blankSpec(blankTyped());
 
-function blankNote() { // what the blank plate will be, snapped to what LTX and ainvfx-fluid take
+// What the blank plate will be, snapped to what LTX and ainvfx-fluid take, with a sentence for each value it does not take
+// as typed (logic.blankChanges): while the person types, and after blankFit has put the values used in the fields
+function blankNote(changed = blankChanges(blankTyped(), blankForm())) {
   const s = blankForm();
-  $("#b-note").textContent = `${s.width} x ${s.height}, ${s.frames} frames at ${s.fps} fps: ${(s.frames / s.fps).toFixed(2)} s.` +
+  $("#b-frames").max = String(plateLength(s.fps).frames); // the most frames at the rate chosen: LTX 2.5's 20 s
+  $("#b-note").textContent = `${s.width} x ${s.height}, ${s.frames} frames at ${s.fps} fps: ${(s.frames / s.fps).toFixed(2)} s.` + changed.map((c) => ` ${c}`).join("") +
     (s.frames === FLUID.tested ? "" : ` ${FLUID.tested} frames is the tested length.`) + (S.fluidReady ? "" : ` ${FLUID_MISSING}`) +
     (blankDepth($("#b-depth").value) === HDR_DEPTH ? (S.hdrReady ? " 16-bit: SDR to HDR turns the fluid shot and every edit on it into half-float EXR." : ` ${HDR_MISSING}`) : "");
   openGoUI();
 }
 
+function blankFit() { // a field left, or Open: every field shows the value the blank plate uses, and the note says which changed
+  const typed = blankTyped(), s = blankSpec(typed), changed = blankChanges(typed, s);
+  for (const k of ["width", "height", "frames"]) $(`#b-${k}`).value = String(s[k]);
+  $("#b-fps").value = String(s.fps);
+  blankNote(changed);
+}
+
 async function openBlank() { // a black canvas LTX and ainvfx-fluid take, then a fluid shot on it
   if (!S.fluidReady) return status(FLUID_MISSING);
+  blankFit(); // the fields show what is posted
   const spec = blankForm(), depth = blankDepth($("#b-depth").value);
   if (depth === HDR_DEPTH && !S.hdrReady) return status(HDR_MISSING);
   const r = await post("/paintaplate/blank", spec);
@@ -3831,7 +3850,7 @@ async function chooseItem(it, b) { // one click: the item's details, read from t
   const r = await fetch(`/paintaplate/stat?${new URLSearchParams({ path: it.path, config: S.ocio.config })}`), st = await r.json();
   if (OPEN.chosen !== it) return;
   const fmt = st.kind === "video" ? `${st.codec} ${st.pix_fmt ?? ""}`.trim() : `${(st.ext ?? "").slice(1).toUpperCase()} frames`;
-  info.textContent = r.ok ? `${it.name}: ${st.width} x ${st.height}, ${st.frames} frames${st.kind === "video" ? ` at ${Math.round(st.fps * 1000) / 1000} fps` : ""}, ${fmt}, ${gb(st.size)}. Colour space: ${st.color_space}.`
+  info.textContent = r.ok ? `${it.name}: ${st.width} x ${st.height}, ${st.frames} frames${st.kind === "video" ? ` at ${Math.round(st.fps * 1000) / 1000} fps` : ""}, ${fmt}, ${gb(st.size)}. Colour space: ${st.color_space}.${st.frames > keepOf(st) ? ` Opens its first ${keepOf(st)} frames: LTX 2.5 makes shots of up to ${LENGTH.seconds} s.` : ""}`
     : `${it.name} cannot be opened: ${st.error ?? r.status}`;
 }
 
@@ -4648,7 +4667,7 @@ $("#prompt").oninput = () => { // the words belong to the edit being drawn, or t
 $("#editing").onclick = () => select(null);
 $("#new-edit").onclick = () => nextEdit();
 
-for (const id of ["#b-width", "#b-height", "#b-fps", "#b-frames"]) $(id).oninput = blankNote;
+for (const id of ["#b-width", "#b-height", "#b-fps", "#b-frames"]) Object.assign($(id), { oninput: () => blankNote(), onchange: blankFit }); // the note while typing; the value used once the field is left
 $("#generate").onclick = () => enter(false);
 $("#display-state").onclick = () => resetDisplay();
 $("#undo-btn").onclick = () => undo();

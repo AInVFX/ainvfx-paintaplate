@@ -525,17 +525,34 @@ export function pickedColor(data) {
 }
 
 // ---------- A fluid shot on a blank plate: AInVFX's ainvfx-fluid IC-LoRA (its model card) ----------
-// Sides in multiples of 64 (the LoRA's reference downscale factor is 2), up to the app's 1920; 8k + 1 frames, 121 tested,
-// 33 and 321 seen in training; 24, 25 and 50 fps trained. Keyframes sit on frame 0, on the last frame, and between on
+// Sides in multiples of 64 (the LoRA's reference downscale factor is 2), up to the app's 1920; 8k + 1 frames from 9 up to
+// LTX 2.5's 20 s at the frame rate (plateLength), 121 tested, 33 and 321 seen in training; 24, 25 and 50 fps trained. Keyframes sit on frame 0, on the last frame, and between on
 // the first frame of each 8-frame group of the LTX VAE (8k + 1).
-export const FLUID = { trigger: "ainvfxfluid", step: 64, minSide: 256, maxSide: 1920, minFrames: 9, maxFrames: 321, tested: 121,
+export const FLUID = { trigger: "ainvfxfluid", step: 64, minSide: 256, maxSide: 1920, minFrames: 9, tested: 121,
   rates: [24, 25, 50], prompt: "smoke plume" };
 const nearest = (list, v) => list.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
 
 export function blankSpec({ width, height, fps, frames }) { // the blank plate LTX and ainvfx-fluid take, nearest to what was typed
   const side = (v) => Math.min(FLUID.maxSide, Math.max(FLUID.minSide, Math.round((+v || 0) / FLUID.step) * FLUID.step));
-  const n = Math.min(FLUID.maxFrames, Math.max(FLUID.minFrames, Math.round(((+frames || 0) - 1) / 8) * 8 + 1));
-  return { width: side(width), height: side(height), fps: nearest(FLUID.rates, +fps || FLUID.rates[1]), frames: n };
+  const rate = nearest(FLUID.rates, +fps || FLUID.rates[1]); // its frames go up to LTX 2.5's 20 s at that rate
+  const n = Math.min(plateLength(rate).frames, Math.max(FLUID.minFrames, Math.round(((+frames || 0) - 1) / 8) * 8 + 1));
+  return { width: side(width), height: side(height), fps: rate, frames: n };
+}
+
+// A sentence for each value of the Blank plate tab that the blank plate does not take as typed. Once the person leaves a
+// field, it shows the value used (blankFit in app.mjs), and the tab's note keeps the sentence.
+export function blankChanges(typed, used) {
+  const said = [], given = (v) => String(v ?? "").trim() !== "" && Number.isFinite(+v);
+  for (const [label, key] of [["Width", "width"], ["Height", "height"]]) {
+    const v = +typed[key], u = used[key];
+    if (!given(typed[key])) said.push(`${label} set to ${u} px.`);
+    else if (v !== u) said.push(`${label} set to ${u} px, ${v > FLUID.maxSide ? "the largest" : v < FLUID.minSide ? "the smallest" : `the nearest multiple of ${FLUID.step}`}.`);
+  }
+  const f = +typed.frames;
+  if (!given(typed.frames)) said.push(`Frames set to ${used.frames}.`);
+  else if (f !== used.frames) said.push(`Frames set to ${used.frames}, ${f > plateLength(used.fps).frames ? `the most at ${used.fps} fps` : f < FLUID.minFrames ? "the fewest" : "the nearest 8k + 1"}.`);
+  if (+typed.fps !== used.fps) said.push(`Frame rate set to ${used.fps} fps.`);
+  return said;
 }
 
 export function keySlots(frames) { // where a keyframe may sit: frame 0, each 8k + 1 that starts a whole group of 8, the last frame
@@ -1133,6 +1150,29 @@ export const BIG_PLATE = { side: 2048, vram: 46 * 2 ** 30 };
 export const bigPlateWarning = (spec, vram) => (spec && vram > 0 && Math.max(spec.width, spec.height) > BIG_PLATE.side && vram < BIG_PLATE.vram
   ? `This plate is ${spec.width} x ${spec.height}, above 2K, and this GPU has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB GPU: its renders may run out of memory here.`
   : null);
+// ---------- How much of a plate opens: LTX 2.5's 20 seconds ----------
+// LTX 2.5 places each frame at its time in seconds, its number divided by the frame rate, and its positions span 20 s in
+// time and 2048 px in space (positional_embedding_max_pos, [20, 2048, 2048], in ComfyUI's comfy/ldm/lightricks/av_model.py).
+// Every LTX pass runs at the working size, 1920 px at most, so only the time limits a shot: 20 s from its first frame to
+// its last, at any frame rate. A plate opens with the longest 8k + 1 count within the 20 s, so the padding LTX needs adds
+// no frame past them: 481 frames at 24 fps, 497 at 25, 601 at 30, 1001 at 50. `most` is the largest 8k + 1 count that
+// every node of the pack takes (4,096 frames, nodes.py).
+export const LENGTH = { seconds: 20, most: 4089 };
+
+export function plateLength(fps) { // the frames a plate at `fps` opens with, and whether LTX 2.5's 20 s sets them
+  const rate = +fps > 0 ? +fps : 24, timed = Math.max(1, Math.floor(LENGTH.seconds * rate + 1 + 1e-9)), most = Math.min(LENGTH.most, timed);
+  return { frames: most - ((most - 1) % 8), byTime: timed <= LENGTH.most };
+}
+
+// The warning of a plate that opens with frames left out, as { fact, next }: the fact for the log, what to do for the
+// status line. Frame numbers are the plate's own: `first` is its first frame's. Null when nothing is left out.
+export function lengthWarning({ name, total, kept, first = 1, fps }) {
+  if (!(total > kept)) return null;
+  const [a, b] = [first + kept, first + total - 1], { frames, byTime } = plateLength(fps), rate = Math.round(fps * 1000) / 1000;
+  return { fact: `Warning: plate ${name}: frames ${first} to ${a - 1} kept, of ${total}.\n  Frames ${a} to ${b} are left out: ` +
+    (byTime ? `LTX 2.5 makes shots of up to ${LENGTH.seconds} s, ${frames} frames at ${rate} fps.` : `a step of Paint a plate takes up to ${LENGTH.most} frames.`),
+    next: `To work on frames ${a} to ${b}, open them as a plate of their own.` };
+}
 export const hdrFps = (fps) => Math.min(30, +fps || 24); // the conditioning frame rate: at most 30, as in Lightricks' workflow
 export const blankDepth = (v) => (+v === HDR_DEPTH ? HDR_DEPTH : 8);
 // The 8-bit movies of an image sequence (its playback proxy, its review, its SDR-to-HDR pass) hold log values, ACEScct when

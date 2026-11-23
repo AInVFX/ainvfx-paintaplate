@@ -39,7 +39,7 @@ test("preview sizes come from the plate's size: exact divisions of the working s
 
 test("a blank plate: sides in 64s up to 1920, 8k + 1 frames, a trained frame rate; keyframes on the LTX grid", () => {
   assert.deepEqual(blankSpec({ width: 1000, height: 500, fps: 30, frames: 100 }), { width: 1024, height: 512, fps: 25, frames: 97 });
-  assert.deepEqual(blankSpec({ width: 4000, height: 10, fps: 60, frames: 999 }), { width: 1920, height: 256, fps: 50, frames: 321 });
+  assert.deepEqual(blankSpec({ width: 4000, height: 10, fps: 60, frames: 999 }), { width: 1920, height: 256, fps: 50, frames: 1001 });
   assert.deepEqual(keySlots(121).slice(0, 3), [0, 1, 9]);
   assert.deepEqual(keySlots(121).slice(-2), [113, 120]); // as the model card: 1, 9, 17, ... 113, then the last frame
   assert.deepEqual(keySlots(9), [0, 1, 8]);

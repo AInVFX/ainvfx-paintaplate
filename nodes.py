@@ -100,8 +100,8 @@ class LoadPlate(io.ComfyNode):
             inputs=[
                 io.String.Input("path", tooltip="A file, a folder of frames or a frame pattern (shot.####.exr) in ComfyUI's "
                                                 "input folder. Start with 'output:' to read from the output folder."),
-                io.Int.Input("max_frames", default=121, min=1, max=1024,
-                             tooltip="Frames to load from the start. 121 frames are 5 s at 24 fps."),
+                io.Int.Input("max_frames", default=121, min=1, max=4096,
+                             tooltip="Frames to load from the start, at most."),
                 io.Boolean.Input("pad_8n1", default=False,
                                  tooltip="Repeat the last frame up to 8k+1 frames, the length LTX needs. "
                                          "'frames' keeps the real count."),
