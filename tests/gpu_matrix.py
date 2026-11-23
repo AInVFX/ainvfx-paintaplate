@@ -18,7 +18,8 @@ start and its end in ComfyUI's /history.
 quick: on plates/horse.mp4 (python get_plates.py) a cow painted behind the fence, one erase, one light, then a fluid shot
 at 1280 x 704 x 121. all adds a 3840 x 2160 plate at 50 fps, made here from horse.mp4 (paint, erase, light), a fluid
 shot at 1920 x 1088 at 50 fps with one edit on it, then the same 3840 x 2160 plate at 25 fps. --cases also takes case
-names, with commas. The strokes and the seed of each case are in gpu_matrix.json beside this file: a case paints the
+names, with commas: the long cases, outside quick and all, run on plates made here up to LTX 2.5's 20 s (MADE).
+The strokes and the seed of each case are in gpu_matrix.json beside this file: a case paints the
 same strokes from the same seed at every run, so a wrong picture comes back at the next run. --seeds 7,8,9 runs each
 case once per seed, in place of its own. ui_live.py opens the page with ?index=0: the page leaves its job index alone,
 so every job runs and every time is a measured one. --memory small,
@@ -52,8 +53,11 @@ except ImportError:
 
 QUICK = ("horse_cow", "horse_erase", "horse_light", "fluid_720")
 ALL = QUICK + ("uhd_cow", "uhd_erase", "uhd_light", "fluid_1080_edit", "uhd25_cow", "uhd25_erase", "uhd25_light")
-UHD = {"horse_3840x2160_50fps.mp4": 50, "horse_3840x2160_25fps.mp4": 25}  # « 4K at 50 fps », and at 25: every tool runs on a 3840 x 2160 plate
-UHD_SIZE, UHD_FRAMES = (3840, 2160), 121
+# The plates this script makes from horse.mp4 (1920 x 1080, 121 frames) in ComfyUI's input/plates, by name: their size,
+# frame rate and frames. « 4K at 50 fps », and at 25: every tool runs on a 3840 x 2160 plate. The long plates hold LTX 2.5's
+# longest shots (logic.plateLength): 20 s at 25 fps at 1920 x 1080, and 20 s at 50 fps at 960 x 544.
+MADE = {"horse_3840x2160_50fps.mp4": ((3840, 2160), 50, 121), "horse_3840x2160_25fps.mp4": ((3840, 2160), 25, 121),
+        "horse_1920x1080_25fps_497f.mp4": ((1920, 1080), 25, 497), "horse_960x544_50fps_1001f.mp4": ((960, 544), 50, 1001)}
 STEP = re.compile(r"Render v(\d+): (.+?)(?: took |: done in )([\d.]+) (s|min)\b")  # the page's log: one line per render step, in minutes from 100 s
 # and one line per finished job: its id, its seconds, its nodes, those ComfyUI took from its cache (a model loader among
 # them is a model not loaded again) and the previews the page received. A line starts with its time, with no space after it
@@ -221,8 +225,19 @@ def browser_ready(channel):
              "so the page's player never runs in it.")
 
 
-def make_uhd(source, target, fps):
-    """A 3840 x 2160 plate at `fps`: horse.mp4's first 121 frames, enlarged with Lanczos by the pack's own movie writer."""
+def back_and_forth(i, n):
+    """The frame of a source of `n` frames that a made plate shows at its frame `i`: the source forward, then backward, and
+    so on (0, 1, …, n - 1, n - 2, …, 1, 0, 1, …), so a plate longer than its source holds no cut."""
+    period = 2 * n - 2
+    if period <= 0:
+        return 0
+    k = i % period
+    return k if k < n else period - k
+
+
+def make_plate(source, target, size, fps, frames):
+    """A plate of `frames` frames at `fps` and `size` (width, height): the source's frames, back and forth where it holds
+    fewer (back_and_forth), resized with Lanczos by the pack's own movie writer."""
     try:
         import av
     except ImportError:
@@ -230,8 +245,8 @@ def make_uhd(source, target, fps):
     sys.path.insert(0, REPO)
     import plateio
     with av.open(source) as src:
-        frames = [f.to_ndarray(format="rgb24") for _, f in zip(range(UHD_FRAMES), src.decode(video=0))]
-    plateio.write_movie(lambda i: frames[i], len(frames), target, fps, crf=14, preset="medium", size=UHD_SIZE)
+        clip = [f.to_ndarray(format="rgb24") for _, f in zip(range(frames), src.decode(video=0))]
+    plateio.write_movie(lambda i: clip[back_and_forth(i, len(clip))], frames, target, fps, crf=14, preset="medium", size=size)
 
 
 def load_cases():
@@ -1004,10 +1019,10 @@ def main():
     plates = os.path.join(a.comfy, "input", "plates")
     if any("path" in cases[n] for n in names) and not os.path.exists(os.path.join(plates, "horse.mp4")):
         stop("The test plate is missing: run `python get_plates.py` in the pack's folder, which puts horse.mp4 in ComfyUI's input/plates.")
-    for file, fps in UHD.items():
+    for file, (size, fps, frames) in MADE.items():
         if any(cases[n].get("path", "").endswith(file) for n in names) and not os.path.exists(os.path.join(plates, file)):
             print(f"making {file} from horse.mp4", flush=True)
-            make_uhd(os.path.join(plates, "horse.mp4"), os.path.join(plates, file), fps)
+            make_plate(os.path.join(plates, "horse.mp4"), os.path.join(plates, file), size, fps, frames)
     hdr = os.path.join(plates, "horse_hdr")  # the HDR test plate: horse.mp4's frames as half-float EXR, lifted to a peak near 7
     if any(cases[n].get("path") == "plates/horse_hdr" for n in names) and not glob.glob(os.path.join(hdr, "horse_hdr.*.exr")):
         print("making the HDR test plate from horse.mp4 (tests/hdr_plate.py)", flush=True)
