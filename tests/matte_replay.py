@@ -1,9 +1,10 @@
-"""Replay a recording of Follow Matte's inputs through mathops.follow_matte, on a CPU, and measure the matte.
+"""Replay a recording of Follow Matte's inputs through mathops.follow_votes (a Clean: clean_votes), on a CPU, and
+measure the matte.
 
-ComfyUI started with PAINTAPLATE_RECORD=<folder> writes one .npz file per Follow Matte run (mathops.record): the
-tracker's masks, the first-frame mask, the element, the shot, the plate and a Clean edit's matte, at the size Follow
-Matte works at. This tool runs follow_matte again on such a file, with this checkout's mathops.py first, then with each
-copy of mathops.py given by --code, and prints for each code the frames that hold a matte and the summary. Then one
+ComfyUI started with PAINTAPLATE_RECORD=<folder> writes one .npz file per Follow Matte run (mathops.record_votes):
+SAM 3.1's answers, the element (a Clean: the zone), the shot and the plate, at the size Follow Matte works at. This tool
+runs Follow Matte's rules again on such a file, with this checkout's mathops.py first, then with each copy of
+mathops.py given by --code, and prints for each code the frames that hold a matte and the summary. Then one
 table measures every code alike:
 - the frames that hold a matte, by the plate's own numbers;
 - the large changes kept: what the shot changed by Follow Matte's own test (mathops.shot_change above the threshold
@@ -13,10 +14,12 @@ table measures every code alike:
   tracker's mask, is not counted: this column reads with the frames that hold a matte;
 - the matte's mean area, as a share of the frame;
 - with --head, the share of the head inside the matte: the head is the top 45% and the right 30% of the box around
-  the tracker's mask (a horse that faces right, whose whole body the tracker returns).
+  the tracker's mask (a horse that faces right, whose whole body the tracker returns). The tracker's mask is SAM's
+  answer from the element (a Clean: from the zone).
 A line per code then says whether it gives this checkout's matte, pixel for pixel. With --sheet, a picture of four
 frames (--frames, by the plate's own numbers): the plate, the shot, their difference 4 times brighter, and each code's
-matte over the shot, its edge in yellow. A Clean's recording holds no shot: its sheet shows the plate. The tool needs
+matte over the shot, its edge in yellow. A Clean's recording holds neither the shot nor the plate: its sheet shows the
+mattes alone. The tool needs
 only the pack's own packages, so a recording replays on the machine that made it.
 
     python tests/matte_replay.py <recording.npz> [--code <copy of mathops.py>]... [--head]
@@ -36,6 +39,29 @@ import mathops  # noqa: E402
 LARGE = 64  # px: a changed piece this large is a change that the matte should keep; smaller ones are specks
 GAIN = 4  # the sheet shows the difference between the shot and the plate this many times brighter
 EIGHT = np.ones((3, 3), bool)
+
+
+def inputs(path):
+    """(kind, call, args) for one recording: « paint » or « clean »; the arguments of follow_votes or clean_votes; and
+    what the measures and the sheet read: the frame count, the shot and the plate (None in a Clean's recording), the
+    tracker's mask, the first-frame mask, the zone, the threshold and the plate's first frame number."""
+    r = mathops.replay_votes(path)
+    kind, call = r["kind"], r["args"]
+    paint = kind == "paint"
+    masks = call["shot_masks"] if paint else call["zone_masks"]
+    first = call["element"] if paint else call["zone"]
+    n = len(call["shot"]) if paint else len(masks)
+    first = np.asarray(first, np.float32).reshape((-1,) + np.shape(first)[-2:])[0]
+    args = {"kind": kind, "n": n, "shot": call["shot"] if paint else None, "base": call["base"] if paint else None,
+            "masks": masks if masks is not None else np.zeros((n,) + first.shape, np.float32), "first": first,
+            "zone": float(call.get("zone", 1 / 16)) if paint else 1 / 16, "threshold": float(call.get("threshold", 0.1)),
+            "first_frame": int(call.get("first_frame", 1))}
+    return kind, call, args
+
+
+def follow(module, kind, call):
+    """(mattes, summary): one copy of mathops.py's Follow Matte rules on a recording's arguments."""
+    return (module.follow_votes if kind == "paint" else module.clean_votes)(**call)
 
 
 def code(path):
@@ -111,6 +137,9 @@ def sheet(path, args, mattes, numbers, scale):
     """The sheet: per frame, the plate, the shot, their difference GAIN times brighter, and each code's matte."""
     from PIL import Image, ImageDraw
     n, first, base = args["n"], args["first_frame"], args["base"]
+    if base is None:  # a Clean's recording: the mattes over black
+        h, w = mattes[next(iter(mattes))].shape[1:3]
+        base = np.zeros((1, h, w, 3), np.float32)
     view = args["shot"] if args["shot"] is not None else base
     h, w = mattes[next(iter(mattes))].shape[1:3]
     cw, ch, top = max(1, round(w * scale)), max(1, round(h * scale)), 18
@@ -142,14 +171,13 @@ def main(argv=None):
     ap.add_argument("--sheet", default="", help="write the sheet to this file (.jpg or .png)")
     ap.add_argument("--frames", default="", help="the sheet's frames, by the plate's own numbers, with commas (by default the first, a third, two thirds, the last)")
     ap.add_argument("--scale", type=float, default=0.5, help="the sheet's cells against the recording's size")
-    ap.add_argument("--workers", type=int, default=8, help="follow_matte's threads")
     a = ap.parse_args(argv)
     os.environ.pop("PAINTAPLATE_RECORD", None)  # a replay records nothing
-    args = mathops.replay(a.recording)
+    kind, call, args = inputs(a.recording)
     n, first = args["n"], args["first_frame"]
     mattes = {}
     for name, module in [("this checkout", mathops)] + [code(p) for p in a.code]:
-        out, summary = module.follow_matte(**args, workers=a.workers)
+        out, summary = follow(module, kind, call)
         mattes[name] = np.asarray(out)
         frames = np.flatnonzero(mattes[name].reshape(n, -1).any(1))
         print(f"--- {name}: a matte on {len(frames)} of {n} frames ({runs(frames, first)})\n{summary}")

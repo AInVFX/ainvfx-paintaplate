@@ -28,7 +28,7 @@ test("a scene is one prompt: files only for the plate and the strokes, frames be
   assert.equal(count(g, "SaveImage"), 0);
   assert.equal(count(g, "PaintAPlate_SaveFrames"), 1); // the export's matte; the frames handed between steps are links
   assert.equal(count(g, "PaintAPlate_SavePlate"), 1);
-  assert.equal(count(g, "SAM3_VideoTrack"), 2); // the erase on the plate, the paint on the shot
+  assert.equal(count(g, "SAM3_VideoTrack"), 5); // the erase: the zone and what the plate keeps; the paint: the element, the plate's element and what the plate keeps (a text prompt adds the name's track to each)
   const captions = Object.values(g).filter((n) => n.class_type === "CLIPTextEncode").map((n) => n.inputs.text);
   for (const c of ["erase caption", "paint caption", "light caption"]) assert.ok(captions.includes(c), c);
 });

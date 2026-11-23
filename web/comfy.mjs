@@ -126,7 +126,9 @@ export const post = (path, body) =>
 
 export async function loadWorkflows(names) { // all at once: the small files load in parallel
   const loaded = await Promise.all(names.map(async (name) => {
-    const text = await (await fetch(`workflows/${name}.json`)).text();
+    // "no-cache": the browser asks the server each time, so a workflow always matches the pack that runs (a copy kept
+    // from an earlier version would post inputs the page no longer fills)
+    const text = await (await fetch(`workflows/${name}.json`, { cache: "no-cache" })).text();
     return [name, parseWorkflow(JSON.parse(text)), await hashHex(text)];
   }));
   for (const [name, wf, hash] of loaded) [WF[name], hashes[name]] = [wf, hash];

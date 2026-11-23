@@ -401,6 +401,9 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
     size), optional: where the shot keeps its own colours, a painted object. The colour match then fixes only the edge the
     composite adds around it, and any other area of the matte (a cleaned one), so a painted object keeps its colours.
     """
+    if os.environ.get("PAINTAPLATE_RECORD"):  # what the composite was given (record_fit): tests/matte_study.py reads it
+        record_fit(os.environ["PAINTAPLATE_RECORD"], n, plate_at, gen_at, masks, keep, {"align": align, "max_shift": max_shift,
+                   "match_color": match_color, "grain": grain, "grow": grow, "feather": feather, "steady": steady})
     tick = progress or (lambda: None)
 
     def full(g):  # a frame at the plate's size
@@ -604,12 +607,8 @@ def relight_frame(plate: np.ndarray, source: np.ndarray, relit: np.ndarray, radi
     return out
 
 
-FOLLOW_SPIKE = 2.0  # a matte more than this many times the median of the 7 frames around it is a spike, unless the tracker's mask grew as much
-FOLLOW_WARN = 3.0  # the largest matte against the object's area: above it, the summary warns
-FOLLOW_SIDE = 320  # the plate's own move, and what it puts in front of the object, are read at about this width
 FOLLOW_FLICKER = 3  # frames: a piece of the matte that comes and goes within this many frames is a flicker (matte_flicker)
 FOLLOW_SHIFT = 1 / 320  # of the width (2 px at 640): a pixel of the shot within the plate's own range this far around it is no change
-FOLLOW_STILL = 8  # frames: an object that keeps its place in the scene this long stands still in it, so the plate can cover it
 
 
 def plate_move(before: np.ndarray, after: np.ndarray) -> tuple[float, float]:
@@ -652,91 +651,48 @@ def shot_change(shot: np.ndarray, plate: np.ndarray) -> np.ndarray:
     return ndimage.gaussian_filter(np.maximum(ndimage.minimum_filter(plate, size) - shot, shot - ndimage.maximum_filter(plate, size)).max(axis=-1).clip(0), 1.0)
 
 
-def record(folder: str, masks, n: int, first, shot, base, zone: float, threshold: float, element, erased=None, erased_edge=0.0, first_frame=1) -> str:
-    """With PAINTAPLATE_RECORD=<folder> in ComfyUI's environment, what Follow Matte was given, as one .npz file: the
-    tracker's masks, the first-frame mask, the element, the shot, the plate and the Clean matte under a paint, at their own
-    size, in half floats (float16), with the plate's first frame number. SAM and LTX need a GPU; this file does not:
-    follow_matte(**replay(file)) runs the matte again anywhere, at the live run's size, so it counts as the live run did
-    and a rule is tried on the real shot that showed its fault. Returns the file's path."""
-    def kept(a, after=0):  # `after`: 1 for an image, whose first 3 channels are kept
-        if a is None or not np.size(a):
-            return np.zeros((0,), np.float16)
-        return (np.asarray(a)[..., :3] if after else np.asarray(a)).astype(np.float16)
+def reference_frames(n: int) -> list:
+    """The frames that a matte's references are drawn on: the first, the last and three between (0, 30, 60, 90 and 120
+    of 121 frames). record_fit keeps them at full size."""
+    return sorted({0, n // 4, n // 2, (3 * n) // 4, n - 1}) if n > 0 else []
 
+
+def record_fit(folder: str, n: int, plate_at, gen_at, masks, keep, values: dict) -> str:
+    """With PAINTAPLATE_RECORD=<folder> in ComfyUI's environment, what Fit to Plate was given, as one .npz file beside
+    Follow Matte's: every frame of the plate and of the generated frames (the shot, or a Clean's clean plate pass) at
+    the matte's size, the frames of reference_frames at their own sizes, the mattes and `keep` as given, in half floats,
+    and the node's values. A Clean's clean plate pass is recorded nowhere else. replay_fit reads it back. Returns the
+    file's path."""
+    m = np.asarray(masks, np.float32)
+    mh, mw = m.shape[-2:]
+    h, w = np.shape(plate_at(0))[:2]
+
+    def small(f):  # a frame at the matte's size: whole blocks averaged, then resampled
+        f = np.asarray(f, np.float32)[..., :3]
+        return resize_to(shrink(f, max(1, min(f.shape[0] // mh, f.shape[1] // mw))), mh, mw).astype(np.float16)
+
+    whole = lambda f: np.asarray(f, np.float32)[..., :3].astype(np.float16)  # noqa: E731
+    pick = reference_frames(n)
+    names = sorted(values)
     os.makedirs(folder, exist_ok=True)
-    h, w = np.shape(shot)[1:3] if shot is not None else np.shape(masks)[-2:]
-    path = os.path.join(folder, f"follow_matte_{w}x{h}_{n}f_{time.strftime('%Y%m%d_%H%M%S')}.npz")
-    np.savez_compressed(path, masks=kept(masks), first=kept(first), element=kept(element), shot=kept(shot, 1), base=kept(base, 1),
-                        erased=kept(erased), erased_edge=erased_edge, n=n, zone=zone, threshold=threshold, first_frame=first_frame)
+    stamp = f"{time.strftime('%Y%m%d_%H%M%S')}_{int(time.time() * 1000) % 1000:03d}"
+    path = os.path.join(folder, f"fit_to_plate_{w}x{h}_{n}f_{stamp}.npz")
+    np.savez_compressed(path, plate=np.stack([small(plate_at(t)) for t in range(n)]), image=np.stack([small(gen_at(t)) for t in range(n)]),
+                        spread_plate=np.stack([whole(plate_at(t)) for t in pick]), spread_image=np.stack([whole(gen_at(t)) for t in pick]),
+                        masks=m.astype(np.float16), keep=np.zeros((0,), np.float16) if keep is None else np.asarray(keep, np.float16),
+                        pick=np.array(pick), names=np.array(names), values=np.array([float(values[k]) for k in names]), n=n)
     return path
 
 
-def replay(path: str) -> dict:
-    """follow_matte's arguments from a file that PAINTAPLATE_RECORD wrote: follow_matte(**replay(path))."""
+def replay_fit(path: str) -> dict:
+    """What record_fit wrote, in floats: `plate` and `image` (N, h, w, 3) at the matte's size, `spread_plate` and
+    `spread_image` on the frames of `pick`, `masks`, `keep` (or None) and the node's `values` by name. An array kept in
+    8 bits, as in a smaller copy of the file, reads from 0 to 1, as in replay."""
     d = np.load(path)
-    back = lambda k: (d[k].astype(np.float32) / (255 if d[k].dtype == np.uint8 else 1)) if d[k].size else None  # noqa: E731
-    return {"masks": back("masks") if d["masks"].size else np.zeros((0, 1, 1), np.float32), "n": int(d["n"]), "first": back("first"),
-            "shot": back("shot"), "base": back("base"), "zone": float(d["zone"]), "threshold": float(d["threshold"]), "element": back("element"),
-            "erased": back("erased") if "erased" in d.files else None,
-            "erased_edge": float(d["erased_edge"]) if "erased_edge" in d.files else 0.0,
-            "first_frame": int(d["first_frame"]) if "first_frame" in d.files else 1}
-
-
-def follow_summary(n: int, seen=None, zones=0, placed=0, strays=0, held=0, added=0, most=0.0, alone=0, guarded=0,
-                   smoothed=0, moved=0, fronts=0, gone=0, largest=None, cleaned=0, left=None, above=None,
-                   flicker=None, first_frame=1) -> str:
-    """Follow Matte's summary for a person: a headline, the warning next when there is one, then one
-    line per rule that acted, and only those. The page writes « Paint matte (WxH): » or « Clean matte (WxH): » before it,
-    and the GPU report reads that start. `seen` counts the frames where SAM 3.1 found the object, None when it returned
-    no mask; `largest` is (the largest matte against the object's area on its frame, that frame); the other counts are
-    follow_matte's, in frames. Frames come as indices from 0, and the summary names each by the plate's own number:
-    `first_frame` is the number of the plate's first frame, 1 for a movie and the first file's number for a sequence."""
-    def on(k):
-        return f"{k} frame" + ("" if k == 1 else "s")
-
-    def at(t):  # the plate's number for the frame at index t
-        return t + first_frame
-    lines = []
-    if seen is None:
-        lines.append("Held: first-frame mask, on every frame.")
-    else:
-        if zones:
-            lines.append(f"Removed: paint zone outside the object's place, on {on(zones)} (SAM mask held the paint zone).")
-        if placed:
-            lines.append(f"Object stands still: its place of frame {at(0)} added where the plate shows it, on {on(placed)}.")
-        if strays:
-            lines.append(f"Removed: SAM detections too far from the object, on {on(strays)}.")
-        if held:
-            lines.append(f"Held: last matte, on {on(held)} with no SAM mask.")
-        if added:
-            why = [f"up to {most:.1f}x the SAM mask"] * bool(most) + [f"{on(alone)} with no SAM mask"] * bool(alone)
-            lines.append(f"Added: areas the shot changed next to the object, on {on(added)}" + (f" ({'; '.join(why)})." if why else "."))
-    if cleaned:
-        lines.append(f"Removed: areas the shot changed inside the Clean matte, on {on(cleaned)} (not touching the SAM mask).")
-    if guarded:
-        lines.append(f"Removed: areas the shot changed away from the SAM mask, on {on(guarded)} (changes over 3x the object).")
-    if smoothed:
-        lines.append(f"Reduced: matte over {FOLLOW_SPIKE:g}x the frames around it, on {on(smoothed)}.")
-    if moved:
-        lines.append(f"Object moves from frame {at(moved)}: occlusion by the plate not tested.")
-    if fronts:
-        lines.append(f"Removed: areas where the plate stands in front of the object, on {on(fronts)}.")
-    if gone:
-        lines.append(f"Removed: pieces that left the object's place, on {on(gone)}.")
-    if left is not None:
-        lines.append(f"Removed: whole matte from frame {at(left[1])} (object out of its place).")
-    if flicker is not None and flicker[0]:
-        share = f"{100 * flicker[1]:.0f}%" if flicker[1] >= 0.1 else f"{100 * flicker[1]:.1f}%"
-        lines.append(f"Flicker: pieces of the matte for {FOLLOW_FLICKER} frames or fewer, on {on(flicker[0])} (up to {share} of the matte at frame {at(flicker[2])}).")
-    if largest is not None and largest[0] > FOLLOW_WARN:
-        if above is not None and above[0] != above[1]:  # the frames above FOLLOW_WARN, first to last
-            lines.insert(0, f"Warning: matte above {FOLLOW_WARN:g}x the object from frame {at(above[0])} to {at(above[1])} "
-                            f"(up to {largest[0]:.1f}x at frame {at(largest[1])}). Check the composite there.")
-        else:
-            lines.insert(0, f"Warning: matte {largest[0]:.1f}x the object at frame {at(largest[1])}. Check the composite there.")
-    if left is not None:
-        lines.insert(0, f"Warning: object left its place at frame {at(left[0])}. Try another seed, another text prompt or another stroke.")
-    return "\n  ".join([f"tracked on {seen or 0} of {n} frames."] + lines)
+    f = lambda k: d[k].astype(np.float32) / (255.0 if d[k].dtype == np.uint8 else 1.0)  # noqa: E731
+    return {"n": int(d["n"]), "plate": f("plate"), "image": f("image"), "spread_plate": f("spread_plate"), "spread_image": f("spread_image"),
+            "masks": f("masks"), "keep": f("keep") if d["keep"].size else None, "pick": [int(t) for t in d["pick"]],
+            "values": {str(k): float(v) for k, v in zip(d["names"], d["values"])}}
 
 
 def matte_flicker(mattes, run: int = 3) -> np.ndarray:
@@ -767,445 +723,273 @@ def matte_flicker(mattes, run: int = 3) -> np.ndarray:
     return out
 
 
-def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=None, zone: float = 1 / 16,
-                 threshold: float = 0.1, workers: int = 8, element=None, tick=None, erased=None,
-                 erased_edge: float = 0.0, first_frame: int = 1, _moves_from: int | None = None):
-    """One matte per frame from a tracker's masks, made safe for the composite. Returns (mattes (n, H, W), summary).
-    The summary names each frame by the plate's own number: `first_frame` is the number of the plate's first frame.
+VOTES_ALONE = 0.3  # of a SAM mask's piece: changed by a quarter of the threshold over this share, it is the edit, whole
+VOTES_KEPT = 0.5  # of a piece, or of a kept thing: this share on what the plate keeps, or in the element, decides
+VOTES_GLOW = 1 / 160  # of the width: what the shot changed this close to the matte joins it, on that frame only
+VOTES_PATIENCE = 2  # empty frames in a row before the object counts as hidden or gone
+VOTES_SUBJECT = 0.75  # of a kept thing on its first frame: this share in the area the edit works on makes it the edit's subject
 
-    A tracker can return no masks, fewer than the frames, lose part of an object, or find other objects by itself
-    (SAM 3.1's video tracker found some on 102 of 121 frames from an empty first-frame mask). A broken matte
-    drops a good result from the composite, or leaves the erase pass with no frames to read. So the matte follows the
-    object's own region, which starts as `element` (for paint, the pixels the edit changed on the first frame) or else
-    as the first-frame mask, and moves by at most `zone` of the width per frame:
-    - the tracker's mask within `zone` of the width of that region is the object; the rest is left out, even where a
-      thin line joins it to the object (SAM's paint matte traced a smoke plume's edges, joined to a painted car). After
-      frames where the object was not seen, the search grows by `zone` per frame, up to four times, so an object that
-      comes back nearby is found again. The region keeps only the object's thick parts (an opening of 1/240 of the
-      width), so it never creeps along a thin line; the matte itself keeps the thin parts near the object. An empty
-      region searches nothing;
-    - a paint's tracker is given its paint zone (`first`), which can be several times the object (`element`), and it
-      returns that zone on its first frames before it finds the object (10 to 13 frames on each of five
-      cow recordings, where the matte held the zone, 3.4 to 5.4 times the cow, then fell to a quarter in one frame).
-      So with an element at most half the first-frame mask, a tracker's mask of two fifths of that mask or more is the
-      zone; so is a mask of twice the element or more while the tracker's masks still shrink from the zone to the object,
-      until the first one under that (a bald eagle in a zone 6.3 times its size: on the two frames before the eagle,
-      2.3 and 2.5 times it, under two fifths of the zone). With `base`, on those frames the matte of an object that stands still (see below) is its place of frame 0,
-      moved with the background, with what the shot changed joined to it (a part that moves out of the place, such as a
-      wing that opens, stays in), and the search keeps the zone; frames before the object is known to stand still are
-      set when it is. An object found to move in the scene is followed as before. One that moves inside its paint
-      zone is not found to move (its first matte is the zone), so the matte keeps to its place there;
-    - an erased object (no `shot`, with `base`) is the plate's own: once it is known to stand still, its place of
-      frame 0, moved with the background, is the object wherever the plate shows that place thick (an opening by 1/240
-      of the width), seen by SAM or not (a barn that comes out from behind a horse: SAM finds it again on
-      frame 101, and the matte holds it from frame 98);
-    - a frame where the object is not seen keeps the previous matte (with no mask at all, the first-frame mask holds).
-      A painted object that moved away from its place after it kept it (below) keeps only the pieces of its last
-      matte where the shot still differs from the plate, so its matte ends where the shot stops showing it (an object
-      that LTX stops drawing, or that leaves the frame) instead of holding a place it left; one that moves from its
-      first frames holds its last matte as before (thin smoke, whose change can stay under the threshold);
-    - a painted object held as standing still can start to move on any frame (beams from a head that turns, after
-      they kept their place for 8 frames). When less than a quarter of its place holds it while a quarter or more of
-      the place is in view, and what was found beyond the place lies in view, joined to the matte of the frame
-      before, it moves from that frame, unless it was lost (below) since it was last at its place: it is then
-      followed as an object that moves over its first frames, and the plate is not asked again. On the frames just
-      before, where it already reached beyond its place, in view, joined to its matte, it was moving with what it is
-      attached to, and the plate read that as standing in front of it (a head that turns under the beams drawn over
-      it): the matte then runs a second time, from the same inputs, with the object followed as moving from the first
-      of those frames. One that leaves while its place goes behind what stands in front (LTX can walk a cow
-      away beside the horse that hides its place) is lost: from the first frame where all that was found has left
-      the place, with the object never seen there again, the matte holds nothing, and the summary warns. Changes
-      that LTX leaves at the empty place are no part of it;
-    - with `shot` and `base` (the regenerated frames and the plate they were made over, (N, H, W, 3) in 0 to 1), the
-      matte also takes the generated pixels connected to the object: the areas that touch the object or its region,
-      within `zone` of it, where the shot differs from the plate by `threshold` more than the frame differs around the
-      object (the median difference between one and three zones away: the frame's own level). LTX regenerates every
-      pixel, so a frame that comes out brighter, softer or shifted differs from the plate everywhere: that raises its
-      own level and adds nothing (without it, three frames brighter by 0.14 give a matte of 5 times the object). A
-      generated element stays in where the tracker dropped it, and the region moves with it;
-    - with `shot` and `base`, the matte keeps, of what was found, what the shot changed within a zone of the matte of the
-      frame before (of the first-frame mask on frame 0), each changed piece whole. A tracker can return a whole object for
-      a paint on a small part of it (SAM 3.1 returns a whole horse for a paint on its body), and the region, which follows
-      what was found, then holds the whole object within a few frames; a part of that object that the shot leaves as the
-      plate goes back to the plate, and specks where the regenerated frame differs a little more than the threshold, away
-      from the change, stay out. A thin piece beside the change, such as a leg seen between the rails of a fence, joins
-      it. When no changed piece joins it, the matte of the frame before holds where the object is found: the matte never
-      flashes the tracker's whole mask for a frame. The region, and where the object
-      stands and whether it moves, still follow what was found: a region cut to the changed areas finds a bird that
-      lands and stands, then holds it as standing still and loses it when it flies;
-    - with `shot` and `base`, the plate also says when something it holds stands in front of the object (as with
-      a cow painted behind a fence, a camera that pans, a horse that walks in front of the cow; SAM then returned
-      nothing in one run and the horse in another, and LTX made the horse again where the cow went behind it). The
-      plate's background moves from frame to frame by the median shift of its tiles (plate_move). A place is covered
-      where the plate's colours, at two blurs (a quarter of `zone` for what is large, 1/160 of the width for where it
-      ends), differ from the colours it first showed at the same place of the scene by `threshold` more than the places in view
-      do, and at the object's own place also from that first look read inside the place, so what stood beside the
-      object on frame 0 is no part of it (a front object that touches the object on frame 0 keeps it out
-      for 3 frames after it comes out, 6 without that first look); or where they differ as much from the frame before, moved with the background (what moves in the plate: a
-      dark leg over a dark rail reads as the rail), unless frame 0 said covered there on the frame before (what stood
-      there has just left). At the object's own place, slits and holes under a quarter of a
-      zone are closed. The plate holds no painted object, so none of this depends on what was generated. It applies
-      from frame FOLLOW_STILL, to an object that kept its place in the scene until then (its matte stayed within half
-      a zone of the first one, moved with the background). Its region then holds its place of frame 0 and its covered
-      part, and moves with the background, as a held matte does. A changed area counts when it lies mostly in view
-      and touches, in view, the tracker's mask or, with a thick part, the region (a thin line of changes runs along
-      the outline of what stands in front); at the places where the object stood on frame 0, which frame 0 showed in
-      view, what is covered never counts. A tracker's mask that lies mostly on covered places is what stands in
-      front, and is left out; so is each piece of it that does, as for an erase (pieces of SAM's mask on
-      the horse's head, over the cow's place). What is found counts only at the object's place of
-      frame 0, with a margin of half a zone, and where it is joined to it there while a quarter of the place holds
-      the object: a piece that leaves the place, with what stands in front or alone, is not the object (LTX
-      can draw the cow walking away with the horse, then give the horse its head); when less than a quarter
-      does, a found area that reaches beyond the margin is left out whole, not cut at it (such a strip
-      can stay on the horse's chest). Of a changed area, what is
-      covered counts only in that margin, and only when a quarter of the area at most is covered. So the matte is empty while the object is hidden, takes it again where it
-      comes out, and leaves out what stands in front. An object that moves in the scene over its first frames is
-      followed as before;
-    - with `base` and no `shot`, the matte is an erase's: the frames the tracker read are the plate, and the object is
-      the plate's own (an erased barn behind a horse: without this, the matte holds its last 30 px at one place
-      of the frame for 65 frames, and leaves the barn out as too far when the tracker finds it again). The plate is
-      asked as above for an object that stands still: the region and a held matte move with the background, a held
-      matte drops what the plate covers, and a tracker's mask that lies mostly on covered places is left out. So is each
-      piece of it that does: it lies on what stands in front (43 to 55 px on the horse's head, beside the
-      barn that the horse hides; the composite grows them to 1.2% of the frame). Otherwise the
-      tracker's mask is taken wherever it goes: when it is the matte of the frame before, whole, on places that
-      changed, the object moves by itself, and the plate is not asked again;
-    - with `erased`, the matte of a Clean edit made under this paint ((N, H, W) in 0 to 1, at any size), grown by
-      `erased_edge` of the width, as far as the composite moves its edge (its grow plus its feather): there the
-      shot shows the cleaned place while the plate still shows the object, so the two differ on every frame. Inside
-      it the region is no anchor: a changed area joins only where it touches the tracker's mask, within `zone` of
-      it. Painted smoke that drifts over the cleaned place away from its source is cut there;
-    - changes larger than 3 times the object's largest area keep only what lies at the tracker's own mask, and the
-      region does not follow them. A matte more than FOLLOW_SPIKE times the median of the 7 frames around it, when the
-      tracker's own mask did not grow as much, keeps only what those frames hold too. So the matte's area changes
-      smoothly, and a difference over the whole frame cannot move the search.
-    `tick`, called once per frame, lets the caller stop the loop by raising (ComfyUI's interrupt check, in nodes.py).
-    The summary is follow_summary's: a headline, a warning when the largest matte is more than FOLLOW_WARN times the
-    object's area (the tracker's mask on that frame with the part of its place that the plate covers, or where it was
-    last seen), then one line per rule that acted.
-    """
-    if os.environ.get("PAINTAPLATE_RECORD") and _moves_from is None:  # the second run below reads the same inputs
-        record(os.environ["PAINTAPLATE_RECORD"], masks, n, first, shot, base, zone, threshold, element, erased, erased_edge, first_frame)
-    half = lambda a, image=False: a if a is None or not np.size(a) else (np.asarray(a)[..., :3] if image else np.asarray(a)).astype(np.float16).astype(np.float32)  # noqa: E731
-    masks, first, element, erased = half(masks), half(first), half(element), half(erased)  # in half floats, as a recording keeps them: a
-    shot, base = half(shot, True), half(base, True)  # recording replays this run exactly
-    masks = np.asarray(masks, np.float32).reshape((-1,) + np.shape(masks)[-2:]) if np.size(masks) else np.zeros((0, 1, 1), np.float32)
-    first = np.asarray(first, np.float32)
-    first = first[0] if first.ndim == 3 else first
-    h, w = (shot.shape[1:3] if shot is not None else masks.shape[1:3] if len(masks) else first.shape[-2:])
-    fit = lambda m: (m if m.shape == (h, w) else resize_to(m.astype(np.float32), h, w)) > 0.5  # noqa: E731
-    seed = fit(first)
-    el = None if element is None or not np.size(element) else fit(np.asarray(element, np.float32).reshape(np.shape(element)[-2:]))
-    tracked = lambda t: fit(masks[t]) if t < len(masks) else np.zeros((h, w), bool)  # noqa: E731
-    erased = np.asarray(erased, np.float32).reshape((-1,) + np.shape(erased)[-2:]) if erased is not None and np.size(erased) else None
-    cleaned_at = (lambda t: grow(fit(erased[min(t, len(erased) - 1)]), erased_edge * w)) if erased is not None else None  # noqa: E731
-    grow = lambda m, r: dilate(m.astype(np.uint8), min(r, max(h, w))) > 0  # noqa: E731
-    eight = np.ones((3, 3), bool)
 
-    compare = shot is not None and base is not None
-    real = shot is None and base is not None  # an erase: the frames the tracker read are the plate, and the object is the plate's own
+def _first_present(m) -> int:
+    seen = np.flatnonzero(np.asarray(m).reshape(len(m), -1).any(axis=1))
+    return int(seen[0]) if len(seen) else -1
 
-    def differ(t):  # how far the shot is from the plate under it, per pixel (shot_change)
-        b = base[min(t, len(base) - 1)]
-        return shot_change(shot[min(t, len(shot) - 1)][..., :3], (b if b.shape[:2] == (h, w) else resize_to(b, h, w))[..., :3])
-    reach, thin = max(2.0, zone * w), max(1.0, w / 240)
 
-    def bulk(m):  # a mask without its thin lines (an opening by `thin`), worked out in the mask's own box
-        if not m.any():
-            return m
-        ys, xs, r = np.flatnonzero(m.any(1)), np.flatnonzero(m.any(0)), int(np.ceil(thin)) + 1
-        box = (slice(max(ys[0] - r, 0), ys[-1] + r + 1), slice(max(xs[0] - r, 0), xs[-1] + r + 1))
-        out = np.zeros_like(m)
-        out[box] = grow(~grow(~m[box], thin), thin)
-        return out
+def _edge(m) -> bool:
+    return bool(m[:2].any() or m[-2:].any() or m[:, :2].any() or m[:, -2:].any())
 
-    def touching(m, to):  # the connected parts of a mask that touch another one, worked out in the mask's own box
-        ys, xs = np.flatnonzero(m.any(1)), np.flatnonzero(m.any(0))
-        box = (slice(ys[0], ys[-1] + 1), slice(xs[0], xs[-1] + 1))
-        parts, _ = ndimage.label(m[box], structure=eight)
-        keep = np.unique(parts[m[box] & to[box]])
-        out = np.zeros_like(m)
-        out[box] = np.isin(parts, keep[keep > 0])
-        return out
 
-    def in_view(m, hide):  # a mask without its pieces that lie mostly on covered places
-        parts, count = ndimage.label(m, structure=eight)
-        areas, covered = np.bincount(parts.ravel(), minlength=count + 1), np.bincount(parts[hide], minlength=count + 1)
-        return m & (2 * covered <= areas)[parts]
-    k = max(1, -(-w // FOLLOW_SIDE))  # the plate is read small: every k-th pixel
-    soft = (max(1.0, zone * (w // k) / 4), max(1.0, (w // k) / 160))  # two blurs: a quarter of a zone says that something large stands there, 1/160 of the width says where it ends
+def _close(m, r):
+    r = int(r)
+    return ndimage.binary_closing(np.pad(m, r), iterations=r)[r:-r, r:-r] if r > 0 and m.any() else m
 
-    def plate(t):  # the plate, small: its luma, to measure its move, and its colours at the two blurs, to compare places and not their texture
-        b = base[min(t, len(base) - 1)]
-        b = (b if b.shape[:2] == (h, w) else resize_to(b, h, w))[::k, ::k, :3]  # every k-th pixel
-        return luma(b), [ndimage.gaussian_filter(b, (r, r, 0), truncate=2.5) for r in soft]
 
-    def read_in(b, m):  # the plate's colours at the two blurs, read inside a mask only: what stands beside it does not mix in
-        mf = m.astype(np.float32)
-        return [ndimage.gaussian_filter(b * mf[..., None], (r, r, 0), truncate=2.5)
-                / np.maximum(ndimage.gaussian_filter(mf, r, truncate=2.5), 1e-6)[..., None] for r in soft]
+def kept_things(objects, region) -> np.ndarray:
+    """What the plate keeps, (N, H, W) booleans from SAM's objects (N, K, H, W): each object, unless on its first frame
+    VOTES_SUBJECT of it or more lies in `region`, the area the edit works on: there it is the edit's own subject (a barn
+    that a Clean removes, a horse that a paint turns into a robot), not a thing to keep. A horse with a paint on its
+    belly lies about half in it, and stays a thing to keep: the matte then cuts SAM's whole horse to the change."""
+    objects = np.asarray(objects) > 0.5
+    if objects.ndim == 3:  # one thing, (N, H, W)
+        objects = objects[:, None]
+    out = np.zeros((objects.shape[0],) + objects.shape[2:], bool)
+    for k in range(objects.shape[1]):
+        m = objects[:, k]
+        f0 = _first_present(m)
+        if f0 >= 0 and (m[f0] & region).sum() < VOTES_SUBJECT * m[f0].sum():
+            out |= m
+    return out
 
-    def front(colours, at, was, levels, stood, past, by, far):  # where the plate covers what it first showed at this place of the scene (small), the levels of the places in view, and what that first look alone says
-        hs, ws = colours[0].shape[:2]
-        oy, ox = int(at[0]), int(at[1])
-        if abs(oy) > hs or abs(ox) > ws:  # the scene's map holds one frame on each side of frame 0: further away, no place is known to be covered
-            return np.zeros((hs, ws), bool), levels, np.zeros((hs, ws), bool)
-        there = (slice(hs - oy, 2 * hs - oy), slice(ws - ox, 2 * ws - ox))  # this frame, in the scene's map
-        known, levels = learnt[there] > 0, list(levels)
-        calm = (learnt[there] == 1) & ~was  # the level comes from the places of frame 0 while 64 of them are in view, then from every known place
-        calm = calm if int(calm.sum()) >= 64 else known & ~was
-        covered = known.copy()
-        for i in (0, 1):
-            apart = np.abs(colours[i] - ground[i][there]).max(axis=-1)
-            levels[i] = float(np.median(apart[calm])) if int(calm.sum()) >= 64 else levels[i]
-            covered &= (apart > threshold + levels[i]) & (np.abs(colours[i] - ground_in[i][there]).max(axis=-1) > threshold + levels[i])
-        new = ~known  # the map learns a place the first time the plate shows it, away from the frame's edge where a blur reads the frame's own border
-        new[:rim], new[hs - rim:], new[:, :rim], new[:, ws - rim:] = False, False, False, False
-        for i in (0, 1):
-            ground[i][there][new], ground_in[i][there][new] = colours[i][new], colours[i][new]
-        learnt[there][new] = 2
-        against = covered.copy()  # covered, by that first look alone
-        oy, ox = int(by[0]), int(by[1])  # what moves in the plate stands in front too: a dark leg over a dark rail reads as the rail, and differs from the frame before
-        here = (slice(max(oy, 0), hs + min(oy, 0)), slice(max(ox, 0), ws + min(ox, 0)))
-        there = (slice(max(-oy, 0), hs - max(oy, 0)), slice(max(-ox, 0), ws - max(ox, 0)))
-        apart = np.abs(colours[1][here] - past[there]).max(axis=-1)
-        covered[here] |= (apart > threshold + float(np.median(apart))) & ~far[there]  # but not where frame 0 said covered on the frame before: what stood there has just left
-        gap = max(1.0, zone * ws / 4)  # at the object's own place, what stands in front has no slit or hole under a quarter of a zone: a dark coat over a dark rail reads as the rail
-        inside = dilate((covered & stood).astype(np.uint8), gap) > 0
-        return covered | (stood & ~(dilate((~inside).astype(np.uint8), gap) > 0)), levels, against
 
-    line = el if el is not None and el.any() else seed  # the object's own region
-    given = int(seed.sum())  # the first-frame mask the tracker was given
-    zoned = line is el and 2 * int(el.sum()) <= given  # a paint zone at least twice the object: the tracker returns the zone first
-    first_size, shrinking = int(line.sum()), zoned  # the object's first area; whether the tracker's masks still shrink from the zone to it
+def follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, threshold: float = 0.1,
+                 zone: float = 1 / 16, first_frame: int = 1, tick=None):
+    if os.environ.get("PAINTAPLATE_RECORD"):
+        record_votes(os.environ["PAINTAPLATE_RECORD"], "paint", shot_masks=shot_masks, word_masks=word_masks, plate_masks=plate_masks,
+                     kept=kept, element=element, shot=shot, base=base, threshold=threshold, zone=zone, first_frame=first_frame)
+    return _follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, threshold, zone, first_frame, tick)
 
-    def zone_sized(area):  # a tracker's mask this large is the zone: two fifths of it or more, or twice the object or more while the masks still shrink
-        return zoned and (5 * area >= 2 * given or (shrinking and area >= 2 * first_size))
-    out, cores, prev = np.zeros((n, h, w), np.float32), np.zeros((n, h, w), bool), seed
-    peak = int(line.sum())  # the object's largest size: its region on frame 0, then SAM's masks that are not the paint zone
-    size, last = np.ones(n, np.int64), max(int(line.sum()), 1)  # the object's area on each frame
-    at_place, all_left = np.zeros(n, bool), np.zeros(n, bool)  # frames where the object was seen at its place; frames where all that was found had left it
-    beyond = np.zeros(n, bool)  # frames where a painted object held as standing still reached beyond its place, in view, joined to its matte
-    seen = strays = held = added = alone = lost = guarded = smoothed = fronts = zones = placed = cleaned = 0
-    holding = np.zeros(n, bool)  # the frames where the last matte holds with no SAM mask, counted on the matte as it ends
-    most, chunk = 1.0, 2 * max(1, workers)
-    still = None  # does the object keep its place in the scene? Not known before frame FOLLOW_STILL
-    waiting = []  # the zone's frames before it is known whether the object stands still, each with the object's place
-    ground = ground_in = learnt = before = past = home = None  # the scene's map (the softened colours each place first showed, and which places it holds), the frame before's luma and colours, the first matte moved with the background
-    rim = int(np.ceil(2.5 * soft[0]))  # as far as the large blur reads
-    gone = moved = 0  # frames where a piece that left the object's place was left out; the frame where the object was seen to move in the scene
-    late = False  # whether a painted object held as standing still moved away from its place
-    inside = np.ones((h, w), bool)  # the places that frame 0 showed, moved with the background: an object cut by the frame's edge shows more of itself as the plate moves, and that is not a move
-    seat = np.zeros(2)  # the background's move at the frame before, in whole small pixels
-    zone_at = seed  # the paint zone, moved with the background: the tracker's mask is the zone only when it lies mostly inside it
-    open0 = line  # where the object stood on frame 0, moved with the background: frame 0 showed these places in view, so the plate knows what covers them
-    place, rest = np.zeros(2), np.zeros(2)  # the background's move since frame 0 (small pixels), and what is left of it under a whole pixel
-    was, floor = np.zeros((-(-h // k), -(-w // k)), bool), (0.0, 0.0)  # the covered places of the frame before (small), and the levels of the places in view
-    far = was  # the places that frame 0 alone said covered, on the frame before
-    with ThreadPoolExecutor(max(1, workers)) as pool:  # numpy and scipy release the GIL; a chunk at a time, so the differences of a long shot never sit in memory together
-        for start in range(0, n, chunk):
-            block = list(pool.map(differ, range(start, min(n, start + chunk)))) if compare else None
-            plates = list(pool.map(plate, range(start, min(n, start + chunk)))) if base is not None and still is not False else None
-            for t in range(start, min(n, start + chunk)):
-                if tick:
-                    tick()
-                if t == _moves_from:  # the second run: the object moves from this frame, and the plate is not asked
-                    still, moved, late = False, t, True
-                s = tracked(t)
-                hide, blocked = None, False  # where the plate stands in front of the object's place; whether the tracker's mask was left out for it
-                if plates is not None and still is not False:
-                    lum, colours = plates[t - start]
-                    if t == 0:  # frame 0 in the middle of the scene's map, with room for one frame on each side
-                        hs, ws = lum.shape
-                        ground, learnt = [np.zeros((3 * hs, 3 * ws, 3), np.float32) for _ in colours], np.zeros((3 * hs, 3 * ws), np.uint8)
-                        for i in (0, 1):
-                            ground[i][hs:2 * hs, ws:2 * ws] = colours[i]
-                        learnt[hs:2 * hs, ws:2 * ws] = 1
-                        stood, b0 = open0[::k, ::k], (base[0] if base[0].shape[:2] == (h, w) else resize_to(base[0], h, w))[::k, ::k, :3]
-                        ground_in = [g.copy() for g in ground]  # the object's place also read inside itself: what stood beside it on frame 0 is not its first look
-                        for i, inner in enumerate(read_in(b0, stood)):
-                            ground_in[i][hs:2 * hs, ws:2 * ws][stood] = inner[stood]
-                    else:
-                        dy, dx = plate_move(before, lum)
-                        place += (dy, dx)
-                        rest += (dy * k, dx * k)
-                        step = np.rint(rest).astype(int)
-                        rest -= step
-                        open0, inside = carry(open0, int(step[0]), int(step[1])), carry(inside, int(step[0]), int(step[1]))
-                        zone_at = carry(zone_at, int(step[0]), int(step[1]))
-                        if still is None:
-                            home = carry(home, int(step[0]), int(step[1]))
-                        else:  # the region and a held matte move with the background
-                            line, prev = carry(line, int(step[0]), int(step[1])) | open0, carry(prev, int(step[0]), int(step[1]))  # it stands still: its region holds its place of frame 0
-                            was, floor, far = front(colours, np.rint(place), was, floor, open0[::k, ::k], past, np.rint(place) - seat, far)
-                            hide = np.repeat(np.repeat(was, k, 0), k, 1)[:h, :w]
-                    before, past, seat = lum, colours[1], np.rint(place)
-                near = grow(line, reach * min(1 + lost, 4)) if line.any() else np.zeros((h, w), bool)
-                core = s & near  # SAM's mask near the region: what lies further away is left out, even joined to it
-                strays += bool((s & ~near).any())
-                here = grow(open0, reach / 2) if hide is not None else None  # the object's place of frame 0, with a margin of half a zone
-                if hide is not None and 2 * int((core & hide).sum()) > int(core.sum()):  # most of the tracker's mask lies on covered places
-                    if real and 4 * int((core & prev).sum()) >= 3 * max(int(core.sum()), int(prev.sum())) and 4 * int(core.sum()) >= last:
-                        still, hide, moved = False, None, t  # an erased object is the plate's own: the matte of the frame before, whole, on places that changed, and a quarter of the object's last area or more, is the object moving by itself (its region can be a stroke's zone many times the object)
-                    else:
-                        core, blocked = np.zeros((h, w), bool), True  # it is what stands in front
-                elif hide is not None and not real:
-                    core = in_view(core, hide) & ~(hide & ~here)  # a piece on what stands in front is left out; beyond the place, only what is in view counts
-                elif hide is not None:
-                    core = in_view(core, hide)  # of an erased object's mask, a piece that lies mostly on covered places is on what stands in front
-                if core.any() and 20 * int(core.sum()) < last:  # a sliver of the object, as SAM 3.1 returns some: not a sighting
-                    core = np.zeros((h, w), bool)
-                if not zone_sized(int(core.sum())):  # a mask as large as the paint zone is the zone, not the object
-                    peak = max(peak, int(core.sum()))
-                found, follows = core, True
-                if real and hide is not None:  # an erased object stands still: its place of frame 0, where the plate shows it thick, is the object, seen by SAM or not
-                    shows = bulk(open0 & ~hide) & ~found
-                    if shows.any():
-                        found, placed = found | shows, placed + 1
-                gain = made = None  # the areas the shot changed next to the object, and of what was found what the shot changed, on this frame
-                if block is not None and (core.any() or line.any()):
-                    d, anchor = block[t - start], core | line
-                    within = grow(anchor, reach)
-                    around = grow(anchor, 3 * reach) & ~within  # between one and three zones from the object
-                    level = float(np.median(d[around])) if int(around.sum()) >= 64 else 0.0  # what this frame differs by, object or not
-                    changed = ndimage.binary_opening(d > threshold + level, structure=eight) & within
-                    labels, _ = ndimage.label(changed, structure=eight)
-                    if hide is None:
-                        joined = np.unique(labels[changed & grow(anchor, thin)])
-                        gain = np.isin(labels, joined[joined > 0])  # the changed areas that touch the object or its region
-                    else:  # the changed areas in view that touch the object, or with a thick part its region in view, and that lie mostly in view; never what covers the object's own place
-                        shown = changed & ~hide
-                        joined = np.unique(labels[(shown & grow(core, thin)) | (bulk(shown) & grow(line & ~hide, thin))])
-                        joined = joined[joined > 0]
-                        areas, covered = np.bincount(labels[changed]), np.bincount(labels[changed & hide], minlength=int(labels.max()) + 1)
-                        gain = np.isin(labels, joined[2 * covered[joined] <= areas[joined]]) & ~hide  # of an area that lies mostly in view, what is in view
-                        gain |= bulk(np.isin(labels, joined[4 * covered[joined] <= areas[joined]]) & hide & here & ~open0)  # and, when a quarter of it at most is covered, its covered part in the margin around the place: there the plate may have first shown something that has left
-                        # (its thick part only: a thin covered line at the place's edge is the edge of what stands in front, or a fence's slat)
-                    if cleaned_at is not None:  # under a Clean edit the shot differs from the plate on every frame: there only the tracker's mask anchors a change
-                        under = gain & cleaned_at(t)
-                        near = under & grow(core, reach) if core.any() else np.zeros_like(under)
-                        cut = under & ~(touching(near, grow(core, thin)) if near.any() else near)
-                        if cut.any():
-                            gain, cleaned = gain & ~cut, cleaned + 1
-                    if int(gain.sum()) > 3 * max(peak, 1):  # never a runaway: changes far beyond the object's size stay out
-                        gain, follows = (gain & grow(core, reach) if core.any() else np.zeros_like(core)), False
-                        guarded += 1
-                    if int((gain & ~core).sum()) > 0.25 * int(core.sum()) + 16:
-                        added += 1
-                        if core.any():
-                            most = max(most, float((core | gain).sum()) / int(core.sum()))
-                        else:
-                            alone += 1  # SAM returned nothing here: no ratio to SAM's mask
-                    found = core | gain
-                    made = ndimage.binary_opening(d > threshold + level, structure=eight)  # what the shot changed on this frame
-                left = False  # whether all that was found has left the object's place
-                if hide is not None and not real and found.any():  # a painted object that stands still: a piece that has left its place, with what stands in front or alone, is not the object
-                    whole = found
-                    out_there = bulk(found & ~here) & ~hide  # its thick part beyond the place's margin, where the plate shows it
-                    beyond[t] = bool(out_there.any()) and prev.any() and bool(touching(out_there, grow(prev, thin)).any())
-                    if 4 * int((found & here).sum()) >= int(open0.sum()):  # the object is seen at its place: what is joined to it there counts
-                        found, at_place[t] = touching(found, here), True
-                    else:  # it is not: a found area that reaches beyond the place's margin is leaving it
-                        parts, _ = ndimage.label(found, structure=eight)
-                        leaving = np.unique(parts[found & ~here])
-                        away = np.isin(parts, leaving[leaving > 0])
-                        shown = in_view(away, hide) & ~hide  # what left the place, where the plate shows it
-                        since = np.flatnonzero(at_place[:t])  # frames where it was seen at its place
-                        if (not all_left[since[-1] + 1 if len(since) else 0:t].any() and 4 * int((open0 & ~hide).sum()) >= int(open0.sum())
-                                and prev.any() and shown.any() and touching(shown, grow(prev, thin)).any()):
-                            still, hide, moved, late = False, None, t, True  # not lost since it was last at its place, a quarter of the place is in view and holds it no more, and what left, in view, is joined to the matte of the frame before: it moves from here
-                        else:
-                            found = found & ~away  # what left with what stands in front, or alone, is left out whole
-                    if hide is not None:
-                        core = core & found
-                        gone += bool(bulk(whole & ~found).any())
-                        left = all_left[t] = not found.any()
-                seen += bool(core.any())
-                hidden = int((line & hide).sum()) if hide is not None else 0  # the part of the object's place that the plate covers
-                last = int(core.sum()) + hidden if core.any() else last
-                size[t], cores[t] = max(last, first_size), core  # the object's area: SAM's last sighting, never less than its first area (SAM can see a fragment)
-                fronts += blocked or (hide is not None and 2 * hidden >= max(int(line.sum()), 1))
-                if found.any():
-                    keep = found
-                    if made is not None:  # a paint's matte keeps, of what was found, the pieces the shot changed beside the matte before
-                        near = prev if prev.any() else line
-                        joined = touching(made & found, grow(near, reach)) if near.any() and (made & found).any() else None
-                        keep = grow(joined, thin) & found if joined is not None and joined.any() else prev & found  # none: the matte before holds
-                        if 3 * int(keep.sum()) >= 2 * int(found.sum()):  # the tracker's mask is the painted object, not a larger one it lies on (a horse):
-                            keep |= ~grow(~grow(keep, reach / 4), reach / 4) & found  # what was found, in a gap of the change under half a zone across: thin smoke over a trunk
-                    f, region = ndimage.binary_fill_holes(keep), (found if follows else core)
-                    thick = bulk(region)  # the object without its thin lines: the region never creeps along them
-                    kept = line & hide if hide is not None else None
-                    line, lost = (ndimage.binary_fill_holes(thick) if thick.any() else ndimage.binary_fill_holes(region)), 0
-                    if kept is not None:
-                        line |= kept  # the region keeps its covered part
-                elif left:  # all that was found has left the object's place: nothing of it is there, and no last matte holds
-                    f = np.zeros((h, w), bool)
-                elif hide is not None:  # not seen: the last matte holds where its place is in view, and the search grows only around a place in view
-                    f, lost = (bulk(prev & ~hide) if hidden else prev), lost + (2 * hidden < int(line.sum()))  # no crumbs of a matte that the plate covers
-                    holding[t] = f.any()
-                else:  # the object is not seen: the last matte holds, and the search grows
-                    f, lost = prev, lost + 1
-                    if late and made is not None and prev.any():  # it moved away from its place: its matte ends where the shot stops changing the plate
-                        f = touching(prev, grow(made, thin)) if made.any() else np.zeros_like(prev)
-                    holding[t] = f.any()
-                if zone_sized(int(s.sum())) and plates is not None and still is not False and 2 * int((s & zone_at).sum()) > int(s.sum()):  # the tracker's mask is the zone: as large, and mostly inside it
-                    own = ndimage.binary_fill_holes(open0)  # the matte shows the object's place of frame 0; the search keeps the zone
-                    if gain is not None and gain.any():  # and what the shot changed, joined to that place: a part that moves out of it (a wing that opens) stays in
-                        own = own | touching(gain, grow(own, thin))
-                    if still:
-                        f, zones = f & own, zones + 1
-                    else:
-                        waiting.append((t, own))
-                shrinking = shrinking and int(s.sum()) >= 2 * first_size  # the first mask within twice the object ends the shrink
-                out[t], prev = f, f
-                if plates is not None and t == 0:
-                    home = ndimage.binary_fill_holes(found) if found.any() else f  # where the object was found: it stands still or moves from there
-                elif plates is not None and still is None:
-                    body = bulk(found)  # without thin lines: a changed area that a thin line joins to the object is not the object moving
-                    if body.any() and bulk(touching(body, grow(home, thin)) & ~grow(home, reach / 2) & inside).any():
-                        still, moved = False, t  # it moves in the scene: followed as before
-                    elif t >= min(FOLLOW_STILL, n - 1):
-                        still = True
-                if still and waiting:  # it stands still: the zone's frames before this one show its place too
-                    for j, own in waiting:
-                        out[j] *= own
-                    zones, prev, waiting = zones + len(waiting), out[t] > 0.5, []
-    if late and _moves_from is None:  # it moved from frame `moved`: on the frames just before, where it already reached beyond its place,
-        start = moved                 # joined to its matte, it was moving with what it is attached to, and the plate read that as standing
-        while start > 0 and beyond[start - 1]:  # in front of it: the matte runs again with the object moving from there
-            start -= 1
-        if start < moved:
-            return follow_matte(masks, n, first, shot=shot, base=base, zone=zone, threshold=threshold, workers=workers, element=element,
-                                tick=tick, erased=erased, erased_edge=erased_edge, first_frame=first_frame, _moves_from=start)
-    left = None  # (the frame after the object was last seen at its place, the first frame after it where all that was found had left)
-    after = np.flatnonzero(all_left & (np.arange(n) > (np.flatnonzero(at_place)[-1] if at_place.any() else -1)))
-    if len(after):  # it never came back: from there the matte holds nothing
-        left = (int(np.flatnonzero(at_place)[-1]) + 1 if at_place.any() else 0, int(after[0]))
-        out[left[1]:], cores[left[1]:] = 0, False
-    areas, solid = out.reshape(n, -1).sum(1), cores.reshape(n, -1).sum(1)
-    for t in range(n):  # no frame several times its neighbours, unless the tracker's own mask is
-        lo, hi = max(0, t - 3), min(n, t + 4)
-        usual = FOLLOW_SPIKE * float(np.median(areas[lo:hi])) + 16
-        if areas[t] > usual and solid[t] <= FOLLOW_SPIKE * float(np.median(solid[lo:hi])) + 16:
-            calm = np.zeros((h, w), bool)
-            for j in range(lo, hi):
-                if j != t and areas[j] <= usual:
-                    calm |= out[j] > 0.5
-            out[t] = cores[t] | ((out[t] > 0.5) & grow(calm, thin))
-            smoothed += 1
-    held = int((holding & out.reshape(n, -1).any(1)).sum()) if n else 0  # a frame emptied after it held, as when the object never came back, holds nothing
-    largest = above = flicker = None
-    if n:
-        ratio = out.reshape(n, -1).sum(1) / size
-        worst, over = int(ratio.argmax()), np.flatnonzero(ratio > FOLLOW_WARN)
-        largest, above = (float(ratio[worst]), worst), ((int(over[0]), int(over[-1])) if len(over) else None)
-        shares = matte_flicker(out[:, ::k, ::k], FOLLOW_FLICKER)  # read small, as the plate is
-        flicker = (int((shares > 0).sum()), float(shares.max()), int(shares.argmax())) if shares.any() else None
-    tracked_any = bool(len(masks)) and bool(masks.any())
-    counts = dict(seen=seen, zones=zones, placed=placed, strays=strays, held=held, added=added, most=most, alone=alone) if tracked_any else {}
-    return out, follow_summary(n, first_frame=first_frame, guarded=guarded, smoothed=smoothed, moved=moved, fronts=fronts, gone=gone, largest=largest, cleaned=cleaned, left=left, above=above,
-                                flicker=flicker, **counts)
+
+def _follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, threshold, zone, first_frame, tick):
+    """A paint's matte from SAM 3.1's answers, judged by how much the shot changed (votes). Returns (mattes, summary).
+
+    `shot_masks` and `word_masks` are SAM's masks on the shot (N, H, W), given the element with the object's name and
+    the name alone; `plate_masks` its masks on the plate given the element (the object the edit replaces); `kept` what
+    the plate keeps (SAM's objects (N, K, H, W), or one (N, H, W), filtered by kept_things against the element closed by
+    1/60 of the width); `element` where the edit changed the first frame; `shot` and `base` the
+    shot and the plate (N, H, W, 3) in 0 to 1. On the first frame a mask given the element answers with it: the second
+    frame's stands in for it. Each piece of the masks is then judged on its frame:
+    - a piece that lies mostly on what the plate keeps is cut to the change, closed by 1/320 of the width: a whole horse
+      for a paint on its belly keeps the painted part, a patch on a large kept thing stays whole; a cut under 2% of the
+      piece is that thing regenerated, and is left out;
+    - any other piece is the edit, whole, when the shot changed it by a quarter of the threshold over VOTES_ALONE of it
+      (thin smoke changes the plate by a few percent), else it is cut to the change;
+    - the plate's masks join where the shot changed, near the shot's masks: the old object, which the new one covers.
+    The matte then follows a state. Present, it takes the pieces that lie at least half within the last matte grown by
+    `zone` of the width (a mask can jump onto a far thing in the frame its object leaves: a boat's wake). Hidden (it
+    vanished inside the frame for VOTES_PATIENCE frames), it takes pieces within the last matte grown by one more zone per
+    frame, never one that lies mostly on what the plate keeps. Gone (it vanished after touching the frame's edge), it
+    takes nothing. On each frame alone, what the shot changed above the threshold within VOTES_GLOW of the width of the
+    matte joins it (a beam's glow, a wing's blur), so it cannot creep. What the plate keeps wins wherever the shot did
+    not change. Frames are named by the plate's numbers: `first_frame` is the first one's."""
+    n = len(shot)
+    h, w = shot.shape[1:3]
+    tick = tick or (lambda: None)
+    frames = lambda a: np.asarray(a, np.float32)[:n] > 0.5 if a is not None and np.size(a) else np.zeros((n, h, w), bool)  # noqa: E731
+    shot_m, word_m, plate_m = frames(shot_masks), frames(word_masks), frames(plate_masks)
+    if n > 1:
+        shot_m[0] = shot_m[1]
+    union = shot_m | word_m
+    seed = np.asarray(element, np.float32).reshape(-1, h, w)[0] > 0.5 if element is not None and np.size(element) else np.zeros((h, w), bool)
+    seed = _close(seed, max(2, round(w / 60)))
+    kept = kept_things(np.asarray(kept, np.float32)[:n], seed) if kept is not None and np.size(kept) else np.zeros((n, h, w), bool)
+    reach, near, close = max(2.0, zone * w), max(1.0, w * VOTES_GLOW), max(1, round(w / 320))
+    grow = lambda m, px: dilate(m.astype(np.uint8), px) > 0 if m.any() else m  # noqa: E731
+    out = np.zeros((n, h, w), np.float32)
+    state, prev, hidden_for, empty = "present", np.zeros((h, w), bool), 0, 0
+    counts = dict(old=0, cut=0, away=0, added=0, kept=0)
+    hidden, gone_at = [], None
+    with ThreadPoolExecutor(min(16, os.cpu_count() or 4)) as pool:  # each frame's change on its own: scipy's filters release the GIL
+        diffs = list(pool.map(lambda t: shot_change(shot[t], base[t]), range(n)))
+    for t in range(n):
+        d = diffs[t]
+        away_from = ~grow(union[t] | plate_m[t], reach)
+        level = float(np.median(d[away_from])) if away_from.sum() > 256 else float(np.median(d))
+        changed, moved = d > level + threshold, d > level + 0.25 * threshold
+        labels, count = ndimage.label(union[t])
+        cand, cut = np.zeros((h, w), bool), np.zeros((h, w), bool)
+        for k in range(1, count + 1):
+            piece = labels == k
+            if (piece & kept[t]).sum() >= VOTES_KEPT * piece.sum():
+                c = piece & grow(changed, 2)
+                if c.sum() >= 0.02 * piece.sum():  # less is the kept thing regenerated: specks
+                    cut |= c
+            elif moved[piece].mean() >= VOTES_ALONE:
+                cand |= piece
+            else:
+                cut |= piece & grow(changed, 2)
+        counts["cut"] += bool(cut.any())
+        cand |= _close(cut, close)
+        old = plate_m[t] & grow(changed, 2)
+        if old.any():
+            ol, _ = ndimage.label(old)
+            hit = np.unique(ol[old & grow(union[t], reach)])
+            old = np.isin(ol, hit[hit > 0])
+            counts["old"] += bool(old.any())
+        cand = ndimage.binary_fill_holes(cand | old)
+        if t == 0:
+            allowed = grow(seed, reach) if seed.any() else np.ones((h, w), bool)
+        elif state == "present":
+            allowed = grow(prev, reach)
+        elif state == "hidden":
+            allowed = grow(prev, reach * (1 + hidden_for))
+        else:
+            allowed = np.zeros((h, w), bool)
+        labels, count = ndimage.label(cand)
+        m = np.zeros((h, w), bool)
+        left_out = False
+        for k in range(1, count + 1):
+            piece = labels == k
+            if (piece & allowed).sum() < 0.5 * piece.sum() or (state == "hidden" and (piece & kept[t]).sum() >= VOTES_KEPT * piece.sum()):
+                left_out = True
+                continue
+            m |= piece
+        counts["away"] += left_out
+        if m.any():
+            glow = changed & grow(m, near) & ~m
+            counts["added"] += bool(glow.any())
+            m |= glow
+            if state == "hidden" and hidden and hidden[-1][1] is None:
+                hidden[-1][1] = t - 1
+            state, prev, hidden_for, empty = "present", m, 0, 0
+        else:
+            empty += 1
+            if state == "present" and t > 0 and empty >= VOTES_PATIENCE:
+                if _edge(prev):
+                    state, gone_at = "gone", t - empty + 1
+                else:
+                    state, hidden_for = "hidden", 1
+                    hidden.append([t - empty + 1, None])
+            elif state == "hidden":
+                hidden_for += 1
+        dropped = m & kept[t] & ~moved
+        counts["kept"] += bool(dropped.any())
+        out[t] = m & ~dropped
+        tick()
+    if hidden and hidden[-1][1] is None:
+        hidden[-1][1] = n - 1
+    flicker = matte_flicker(out)
+    worst = int(np.argmax(flicker)) if len(flicker) else 0
+    return out, votes_summary(n, int(union.reshape(n, -1).any(axis=1).sum()), counts, hidden, gone_at,
+                              (int((flicker > 0).sum()), float(flicker.max()) if len(flicker) else 0.0, worst), first_frame)
+
+
+SAM_WORDS_CUT = (" with ", " in ", " on ", " at ", " from ", " behind ", " outside ", " including ", " that ", " which ", ",",
+                 " standing", " landing", " rising", " hanging", " overlapping")
+
+
+def sam_words(answer: str, kind: str = "thing") -> str:
+    """The words SAM 3.1 searches for, from the prompt upsampler's answer. `kind` "thing": the edit's object, a short
+    noun phrase: a longer answer keeps its first one (« bald eagle landing on the fence post » gives « bald eagle »).
+    "kept": what the plate keeps, the first entry of the list the upsampler gives, its main person, animal or vehicle
+    (« person », « horse », « white van »): the entries after it name parts and accessories (« blue-sleeved arm »), which
+    the edit may change. Entries of more than four words, denials (« no other people ») and « none » never count.
+    Lowercase, without a final full stop."""
+    text = " ".join(str(answer or "").strip().strip(".").lower().split())
+    if kind == "kept":
+        items = [x.strip().strip(".") for x in text.split(",")]
+        items = [x for x in items if x and x != "none" and len(x.split()) <= 4 and not x.startswith("no ") and "visible" not in x]
+        return items[0] if items else ""
+    for word in SAM_WORDS_CUT:
+        if word in f" {text} ":
+            text = f" {text} ".split(word)[0].strip()
+    return text
+
+
+def clean_votes(zone_masks, named, kept, zone, first_frame: int = 1):
+    if os.environ.get("PAINTAPLATE_RECORD"):
+        record_votes(os.environ["PAINTAPLATE_RECORD"], "clean", zone_masks=zone_masks, named=named, kept=kept, zone=zone, first_frame=first_frame)
+    return _clean_votes(zone_masks, named, kept, zone, first_frame)
+
+
+def _clean_votes(zone_masks, named, kept, zone, first_frame):
+    """A Clean's matte from SAM 3.1's answers on the plate. Returns (mattes, summary). `zone_masks` (N, H, W) is SAM's
+    track of the zone; `named` (N, K, H, W) its objects of the removed thing's name, or None; `kept` SAM's objects of what
+    the plate keeps (N, K, H, W), filtered by kept_things against the zone, so the removed thing is not among them;
+    `zone` (H, W) the painted
+    area. On the first frame SAM's track answers with the zone: the named objects that lie mostly in it stand in for
+    it. The matte is the track minus what the plate keeps (a person in front of the palm behind her)."""
+    m = np.asarray(zone_masks, np.float32) > 0.5
+    n = len(m)
+    zone = np.asarray(zone, np.float32).reshape(-1, *m.shape[1:])[0] > 0.5
+    if named is not None and np.size(named):
+        named = np.asarray(named, np.float32) > 0.5
+        first = np.zeros(m.shape[1:], bool)
+        for k in range(named.shape[1]):
+            a = named[0, k]
+            if a.any() and (a & zone).sum() >= VOTES_KEPT * a.sum():
+                first |= a
+        if first.any():
+            m[0] = first
+    kept = kept_things(np.asarray(kept, np.float32)[:n], zone) if kept is not None and np.size(kept) else np.zeros_like(m)
+    out = m & ~kept
+    seen = int(m.reshape(n, -1).any(axis=1).sum())
+    left = int((m & kept).reshape(n, -1).any(axis=1).sum())
+    lines = [f"tracked on {seen} of {n} frames."] + [f"Left out: what the plate keeps (person, animal, vehicle), on {left} frame" + ("" if left == 1 else "s") + "."] * bool(left)
+    return out.astype(np.float32), "\n  ".join(lines)
+
+
+def record_votes(folder: str, kind: str, **arrays) -> str:
+    """With PAINTAPLATE_RECORD=<folder>, what Follow Matte was given, as one .npz file: SAM 3.1's answers, the element or
+    the zone, the shot and the plate, in half floats, with the values. replay_votes reads it back, so the matte runs
+    again on a CPU (tests/matte_study.py). Returns the file's path."""
+    os.makedirs(folder, exist_ok=True)
+    out = {"kind": np.array(kind)}
+    for k, v in arrays.items():
+        out[k] = np.zeros((0,), np.float16) if v is None or not np.size(v) else np.asarray(v, np.float32).astype(np.float16)
+    first = next((a for a in arrays.values() if a is not None and np.ndim(a) >= 3), None)
+    n, h, w = (np.shape(first)[0], np.shape(first)[1], np.shape(first)[2]) if first is not None else (0, 0, 0)
+    path = os.path.join(folder, f"follow_votes_{kind}_{w}x{h}_{n}f_{time.strftime('%Y%m%d_%H%M%S')}.npz")
+    np.savez_compressed(path, **out)
+    return path
+
+
+def replay_votes(path: str) -> dict:
+    """What record_votes wrote: {"kind": "paint" or "clean", "args": the arguments of follow_votes or clean_votes}."""
+    d = np.load(path)
+    back = lambda k: d[k].astype(np.float32) if d[k].size else None  # noqa: E731
+    kind = str(d["kind"])
+    scalars = {k: (int(d[k]) if k == "first_frame" else float(d[k])) for k in ("threshold", "zone", "first_frame") if k in d.files and d[k].ndim == 0}
+    names = ("shot_masks", "word_masks", "plate_masks", "kept", "element", "shot", "base") if kind == "paint" else ("zone_masks", "named", "kept", "zone")
+    args = {k: back(k) for k in names if k in d.files}
+    if kind == "clean":
+        scalars.pop("threshold", None)
+        args["zone"] = back("zone")
+    return {"kind": kind, "args": {**args, **scalars}}
+
+
+def votes_summary(n: int, seen: int, counts: dict, hidden=(), gone_at=None, flicker=None, first_frame: int = 1) -> str:
+    """Follow Matte's summary for a person: the headline, then one line per rule that acted, the plate's numbers for
+    frames. The page writes « Paint matte (…): » or « Clean matte (…): » before it."""
+    on = lambda k: f"{k} frame" + ("" if k == 1 else "s")  # noqa: E731
+    lines = [f"tracked on {seen} of {n} frames."]
+    if counts.get("old"):
+        lines.append(f"Old object added where the shot changed, on {on(counts['old'])}.")
+    if counts.get("cut"):
+        lines.append(f"Cut to the change: SAM masks over what the plate keeps, on {on(counts['cut'])}.")
+    if counts.get("kept"):
+        lines.append(f"Left out: what the plate keeps (person, animal, vehicle) where the shot did not change, on {on(counts['kept'])}.")
+    if counts.get("away"):
+        lines.append(f"Left out: SAM masks away from the object, on {on(counts['away'])}.")
+    if counts.get("added"):
+        lines.append(f"Added: what the shot changed beside the object, on {on(counts['added'])}.")
+    for a, b in hidden:
+        lines.append(f"Object hidden from frame {a + first_frame} to {b + first_frame}.")
+    if gone_at is not None:
+        lines.append(f"Object out of the frame from frame {gone_at + first_frame}.")
+    if flicker is not None and flicker[0]:
+        share = f"{100 * flicker[1]:.0f}%" if flicker[1] >= 0.1 else f"{100 * flicker[1]:.1f}%"
+        lines.append(f"Flicker: pieces of the matte for {FOLLOW_FLICKER} frames or fewer, on {on(flicker[0])} (up to {share} of the matte at frame {flicker[2] + first_frame}).")
+    return "\n  ".join(lines)
 
 
 GRAIN_UNIT = _grain_unit()

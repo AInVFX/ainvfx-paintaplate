@@ -7,11 +7,21 @@
 // tools/build_workflows.py (OPTIONAL there; a test checks they match): a relight alone has
 // no matte to composite with, nor to save (the export's "matte" output goes with it).
 // fit_keep comes first: with no matte at all, it goes before fit_mask, with which it shares the paint matte's node.
-export const OPTIONAL = { fit_keep: ["paint_matte"], fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_base: ["base"], follow_erased: ["erased"], follow_element: ["seed"],
+// follow_element comes before follow_base: the plate's element track hangs on both, and goes with the first.
+export const OPTIONAL = { fit_keep: ["paint_matte"], fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_element: ["seed"], follow_base: ["base"], follow_named: ["name_request"], follow_removed: ["removed_request"],
   review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], plate_level: ["plate_width", "plate_height"],
   matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"],
   export_plate: ["prefix"], export_exr: ["exr_prefix"], export_layer: ["layer_prefix"], export_layer_exr: ["layer_exr_prefix"],
   upscale_comp: ["comp_prefix"], upscale_matte: ["matte_prefix"] };
+
+// The matte's requests to the prompt upsampler: the words SAM 3.1 searches for, from an edit's text prompt.
+export const NAME_REQUEST = { paint: "The edit painted this into the image: \"{text}\". Name the thing it painted with a short noun phrase of at most three words, like \"red car\" or \"smoke\". Answer with that phrase only.",
+  erase: "The edit removes this from the image: \"{text}\". Name the thing it removes with a short noun phrase of at most three words, like \"red car\" or \"tree\". Answer with that phrase only." };
+
+export function nameRequest(tool, texts) { // the request for the edits' text prompts, joined; none without a text prompt
+  const text = texts.map((t) => String(t ?? "").trim()).filter(Boolean).join("; ");
+  return text ? NAME_REQUEST[tool].replace("{text}", text.replaceAll("\"", "'")) : "";
+}
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
   const slots = {}, outputs = {}, progress = new Set();

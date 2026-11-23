@@ -25,7 +25,7 @@ import mathops  # noqa: E402
 import matte_replay  # noqa: E402
 
 N, H, W = 12, 72, 128
-EMPTY = "import numpy as np\n\n\ndef follow_matte(masks, n, first, shot=None, **kw):\n    return np.zeros((n,) + shot.shape[1:3], np.float32), f\"tracked on 0 of {n} frames.\"\n"
+EMPTY = "import numpy as np\n\n\ndef follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, **kw):\n    return np.zeros(shot.shape[:3], np.float32), f\"tracked on 0 of {len(shot)} frames.\"\n"
 
 
 def record(folder):
@@ -38,7 +38,7 @@ def record(folder):
         masks[t, 28:44, 30 + 2 * t:50 + 2 * t] = 1
         shot[t, 28:44, 30 + 2 * t:50 + 2 * t] = (0.9, 0.2, 0.1)
     with mock.patch.dict(os.environ, {"PAINTAPLATE_RECORD": folder}):
-        _, summary = mathops.follow_matte(masks, N, masks[0], shot=shot, base=base, element=masks[0], workers=1)
+        _, summary = mathops.follow_votes(masks, masks, None, None, masks[:1], shot, base)
     return glob.glob(os.path.join(folder, "*.npz"))[0], summary
 
 
@@ -53,7 +53,7 @@ class MatteReplayMeasure(unittest.TestCase):
             text = io.StringIO()
             with contextlib.redirect_stdout(text), mock.patch.dict(os.environ, {"PAINTAPLATE_RECORD": tmp}):
                 matte_replay.main([path, "--code", os.path.join(tmp, "copy", "mathops.py"), "--code", os.path.join(tmp, "empty.py"),
-                                   "--sheet", os.path.join(tmp, "sheet.jpg"), "--frames", "1,6,12", "--workers", "1"])
+                                   "--sheet", os.path.join(tmp, "sheet.jpg"), "--frames", "1,6,12"])
             out = text.getvalue()
             self.assertIn(f"--- this checkout: a matte on {N} of {N} frames (1-{N})\n{summary}\n", out)  # the live run's summary
             self.assertIn(f"--- empty: a matte on 0 of {N} frames (none)", out)
