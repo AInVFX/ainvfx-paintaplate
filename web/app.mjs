@@ -4606,11 +4606,12 @@ function pickFrame(on) {
 // On the first frame a pick reads the frame's own values under the pointer, the ones Klein reads, with the paint in progress
 // over them. The brush paints with these values and a paint stroke shows through OCIO and the colour tools as the picture
 // does (strokes), so a stroke of a picked colour cannot be told from the picture where it was picked, in any view. On another
-// frame the pick reads the pixels on show, through OCIO and the colour tools, and says so.
+// frame, and on every frame while a fluid shot's keyframes are open, the pick reads the pixels on show, through OCIO and the
+// colour tools, and says so: there the picture is the keyframe on show, which the plate's own first frame does not hold.
 function pickAt(e) {
   const [x, y] = frameAt(e), n = PICK_SIDE, half = n >> 1;
   render();
-  const own = !S.playing && S.frame === 0 && !!S.original;
+  const own = !S.playing && S.frame === 0 && !!S.original && !keying();
   let color;
   if (own) {
     const sx = Math.round(x) - half, sy = Math.round(y) - half;
