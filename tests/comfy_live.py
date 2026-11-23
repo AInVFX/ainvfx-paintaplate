@@ -257,6 +257,9 @@ def main():
         check(b"Paint a plate" in page, "app page served")
         _, ctype = http(f"{url}/extensions/ainvfx-paintaplate/app.mjs")
         check("javascript" in ctype, f"app.mjs served as JavaScript ({ctype})")
+        with urllib.request.urlopen(f"{url}/extensions/ainvfx-paintaplate/app.mjs", timeout=30) as r:
+            rule = r.headers.get("Cache-Control", "")
+        check(rule == "no-cache", f"the page's files are checked with the server at each load (Cache-Control: {rule!r})")
         exts, _ = http(f"{url}/extensions")
         check(any(e.endswith("ainvfx-paintaplate/open.js") for e in exts) and not any(e.endswith("app.mjs") for e in exts),
               "only open.js loads into the graph editor")

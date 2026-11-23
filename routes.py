@@ -23,7 +23,8 @@ output:, or, on a ComfyUI that answers this machine alone, an absolute path.
 `parts` chooses what the zip holds (default: export,matte): export is the result in the plate's own format, layer the
 shot as the composite blends it (result = plate x (1 - matte) + layer x matte), matte where the plate changed, review the full-size review movie (else the preview composite), shot the whole frame as the model made
 it (the full-size pass first), upscaled the set that Upscale made (upscaled/export, upscaled/plate, upscaled/layer, upscaled/matte). Only render folders under output/paintaplate are zipped, and only plain files inside them.
-Everything here is plain functions (tests/test_routes.py); setup() adds the routes to ComfyUI's server.
+Everything here is plain functions (tests/test_routes.py); setup() adds the routes to ComfyUI's server, and gives the
+page's own files, which ComfyUI serves from ./web, the rule « Cache-Control: no-cache » (fresh_page).
 """
 from __future__ import annotations
 
@@ -958,9 +959,24 @@ def this_machine(handler):
     return guarded
 
 
+PAGE = f"/extensions/{os.path.basename(os.path.dirname(os.path.abspath(__file__)))}/"  # where ComfyUI serves ./web: under the pack's folder name
+
+
+async def fresh_page(request: web.Request, response: web.StreamResponse) -> None:
+    """The page's own files are checked with the server at each load (« Cache-Control: no-cache »). ComfyUI gives its rule
+    to .js and .css files and none to .mjs, .html or .json, so a browser could run a module that it kept from an earlier
+    version of the pack with this version's workflows. With « no-cache » the browser still keeps a file, and asks first
+    whether it changed: an unchanged file costs one short answer. A rule already set on an answer stays."""
+    if request.path.startswith(PAGE):
+        response.headers.setdefault("Cache-Control", "no-cache")
+
+
 def setup(server) -> None:
-    """Add the routes to ComfyUI's server (or to anything with an aiohttp RouteTableDef as `routes`)."""
+    """Add the routes to ComfyUI's server (or to anything with an aiohttp RouteTableDef as `routes`), and the page's
+    cache rule (fresh_page) to its application."""
     app = getattr(server, "app", None)
+    if app is not None:
+        app.on_response_prepare.append(fresh_page)
     if TRACE and app is not None:
         app.middlewares.append(trace)
         app.on_startup.append(_pulse)
