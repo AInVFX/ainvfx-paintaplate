@@ -1,10 +1,12 @@
 """The zip's part « upscaled » takes the upscaled set of the size asked for: Upscale's steps keep one per size under the run's
-folder, and the zip names it upscaled/, as before. A folder outside the run gives no file."""
+folder, and the zip names it upscaled/, as before. A folder outside the run gives no file, and a value that is not an
+upscaled set's folder makes the route read no folder at all."""
 import os
 import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 from _env import ROOT, require
 require("aiohttp")
@@ -49,6 +51,13 @@ class UpscaledPart(unittest.TestCase):
     def test_a_folder_outside_the_run_gives_no_file(self):
         self.assertEqual(routes.collect(self.run, ["upscaled"], "../" + os.path.basename(self.run) + "_x"), [])
         self.assertEqual(routes.collect(self.run, ["upscaled"], "/etc"), [])
+
+    def test_a_value_in_another_form_reads_no_folder(self):
+        read = []
+        with mock.patch.object(routes.os, "walk", side_effect=lambda top, *a, **k: read.append(top) or iter(())):
+            for value in ("/", "/etc", ".", "..", "export", "upscale/1600x880", "upscale/1600x880/out/..", "upscale/1600x880/out/../../.."):
+                self.assertEqual(routes.collect(self.run, ["upscaled"], value), [], value)
+        self.assertEqual(read, [])
 
     def test_each_size_has_its_own_zip(self):
         a = routes.build_zip(self.run, "r", ["upscaled"], None, "upscale/1600x880/out")

@@ -89,6 +89,7 @@ PARTS = {"export": (["export"], None), "layer": (["layer"], None), "matte": (["m
          # Export's ComfyUI graph: the scene as one workflow, which the page writes into the run's folder (graph_post)
          "graph": ([GRAPH], GRAPH)}
 DEFAULT_PARTS = ["export", "matte"]
+UPSCALED_SET = re.compile(r"upscale/\d+x\d+/out")  # an upscaled set's folder under its run, as the page names it: one per size
 
 
 def zip_name(name: str, folder: str) -> str:
@@ -98,7 +99,8 @@ def zip_name(name: str, folder: str) -> str:
 
 def collect(folder: str, parts: list[str], upscaled: str = "") -> list[tuple[str, str]]:
     """(path on disk, name in the zip) for each part asked for, in a fixed order. `upscaled`: the folder under the run's
-    that holds the upscaled set of the size asked for (Upscale's steps keep one per size); the zip names it upscaled/."""
+    that holds the upscaled set of the size asked for (Upscale's steps keep one per size), as UPSCALED_SET; the zip names
+    it upscaled/. A value in another form gives no file, and no folder is read for it."""
     real = os.path.realpath(folder)  # compared as real paths: the output folder itself may be a symbolic link
 
     def inside(path):
@@ -108,7 +110,10 @@ def collect(folder: str, parts: list[str], upscaled: str = "") -> list[tuple[str
     for part in [p for p in PARTS if p in parts]:
         patterns, single = PARTS[part]
         if single is None:  # a folder, kept as a folder: its files and subfolders in the order of their names
-            base = os.path.join(folder, upscaled if part == "upscaled" and upscaled else patterns[0])
+            sized = part == "upscaled" and bool(upscaled)
+            if sized and not UPSCALED_SET.fullmatch(upscaled):
+                continue
+            base = os.path.join(folder, upscaled if sized else patterns[0])
             for d, dirs, names in os.walk(base):
                 dirs.sort()
                 files += [(path, os.path.join(patterns[0], os.path.relpath(path, base))) for path in (os.path.join(d, f) for f in sorted(names)) if inside(path)]
