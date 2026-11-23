@@ -1,7 +1,7 @@
 """Finish > Upscale on a plate with no edit, with SDR to HDR on: the plate alone's render makes « SDR to HDR », then « SDR to HDR,
 upscaled », SDR to HDR's frames upscaled with no Export, which the player shows at their own size. Export posts no Upscale job, and
 the zip holds them under upscaled/ beside the frames at the plate's size, with no upscaled plate. It asks for 1600 x 880, a size
-above the plate's 1280 x 704 that the mock holds in the sandbox's memory."""
+above the plate's 1280 x 704 that the mock holds in a small machine's memory."""
 import zipfile
 
 ROWS = "els => els.map((e) => [e.querySelector('.name').textContent, e.querySelector('.time').textContent, e.className])"

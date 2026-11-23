@@ -3,7 +3,7 @@ Paint, « Plate, upscaled », « Layer, upscaled » and « Composite, upscaled �
 with no Export, and « full size ready » waits for them; off, their rows go; on again, they come back made, with no new job.
 Export then posts no Upscale job, and the zip holds the upscaled set. The player shows each made step as any step: the upscaled
 composite as the latest result, the canvas at its own size, 1600 x 880, a size above the plate's 1280 x 704 that the mock holds
-in the sandbox's memory (upscale_size checks the sizes)."""
+in a small machine's memory (upscale_size checks the sizes)."""
 import zipfile
 
 ROWS = "els => els.map((e) => [e.querySelector('.name').textContent, e.querySelector('.time').textContent, e.className])"

@@ -1,7 +1,7 @@
 """Finish > Upscale on a plate with no edit and no SDR to HDR: the plate alone's render has one step, « Plate, upscaled », the plate
 itself upscaled with no Export, which the player shows at its own size. Off, the plate shows again; on again, the step comes back
 made, with no new job. Export posts no Upscale job, and the zip holds the upscaled plate under upscaled/. It asks for 1600 x 880, a
-size above the plate's 1280 x 704 that the mock holds in the sandbox's memory."""
+size above the plate's 1280 x 704 that the mock holds in a small machine's memory."""
 import zipfile
 
 ROWS = "els => els.map((e) => [e.querySelector('.name').textContent, e.querySelector('.time').textContent, e.className])"
