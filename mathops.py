@@ -611,38 +611,6 @@ FOLLOW_FLICKER = 3  # frames: a piece of the matte that comes and goes within th
 FOLLOW_SHIFT = 1 / 320  # of the width (2 px at 640): a pixel of the shot within the plate's own range this far around it is no change
 
 
-def plate_move(before: np.ndarray, after: np.ndarray) -> tuple[float, float]:
-    """How far the plate's background moved between two frames: (dy, dx) in pixels of these luma frames (H, W).
-
-    The median, over tiles of a fifth of the width, of the shift that puts one frame on the
-    other. An object in front that fills less than half of the tiles leaves the median alone (a horse that
-    fills a third of the frame). A flat plate, or a move of more than a quarter of a tile per frame, gives (0, 0)."""
-    h, w = before.shape
-    side = max(16, w // 5)
-    moves = []
-    for y in range(0, max(1, h - side + 1), side):
-        for x in range(0, max(1, w - side + 1), side):
-            a, b = before[y:y + side, x:x + side], after[y:y + side, x:x + side]
-            if a.std() > 1e-3 and b.std() > 1e-3:
-                dy, dx = phase_shift(a, b, side / 4)  # what moves `after` back onto `before`
-                moves.append((-dy, -dx))
-    if len(moves) < 3:
-        return 0.0, 0.0
-    dy, dx = np.median(np.asarray(moves), axis=0)
-    return float(dy), float(dx)
-
-
-def carry(mask: np.ndarray, dy: int, dx: int) -> np.ndarray:
-    """A mask moved by whole pixels. What leaves the frame is lost, and what enters it is empty."""
-    if not (dy or dx):
-        return mask
-    h, w = mask.shape
-    out = np.zeros_like(mask)
-    if abs(dy) < h and abs(dx) < w:
-        out[max(dy, 0):h + min(dy, 0), max(dx, 0):w + min(dx, 0)] = mask[max(-dy, 0):h - max(dy, 0), max(-dx, 0):w - max(dx, 0)]
-    return out
-
-
 def shot_change(shot: np.ndarray, plate: np.ndarray) -> np.ndarray:
     """How far a regenerated frame is from the plate's frame under it, per pixel: (H, W) from two (H, W, 3) frames in
     0 to 1. Each pixel counts from the plate's own range of values FOLLOW_SHIFT of the width around it, so a road that
