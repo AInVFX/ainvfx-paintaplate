@@ -125,6 +125,9 @@ export const previewCap = (work, div) => (div ? Math.round(Math.max(...work) / d
 
 export const gb = (n) => (n > 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
 
+// A time as a person reads it in the Render panel's rows and the render's log lines: seconds under 100 s, then minutes
+export const span = (s) => (s < 100 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`);
+export const doneIn = (dt, guess) => `done in ${dt < 100 ? `${dt.toFixed(1)} s` : `${(dt / 60).toFixed(1)} min`} (estimate ${span(guess)})`;
 export function secs(t, tail = " left") { // "about 40 s left", "about 1 min 40 s left": rounded to 10 s past a minute; with tail "", the time alone
   if (t == null || !isFinite(t)) return "";
   if (t < 60) return `about ${Math.max(1, Math.round(t))} s${tail}`;
@@ -775,8 +778,8 @@ export function upscaleFolder(plateId, parts) {
 // The upscaled result is composed from the upscaled plate, layer and matte when it is in the plate's own colour space, so
 // that its untouched pixels are the plate's (Paint and Clean). SDR to HDR's EXR frames regenerate every pixel: their result
 // is restored itself, with its matte, and keeps its values above 1.0 everywhere.
-export const upscaleComposes = ({ layer, matte, space }, plateSpace) => !!layer && !!matte && space === plateSpace;
-export const upscaleKeeps = (tools) => tools.length > 0 && !tools.includes("light"); // Paint and Clean keep the plate's untouched pixels: the upscaled plate, layer and matte come too
+export const upscaleKeeps = (tools, exr = false) => tools.length > 0 && !tools.includes("light") && !exr; // Paint and Clean keep the plate's untouched pixels, and their export
+// writes the layer and the matte in the plate's own colour space: the upscaled plate, layer and matte come too. An EXR result of SDR to HDR is upscaled alone
 // What the row says when the size asked for is no larger than the plate: the plate's own size, or a smaller one.
 export function upscaleWhy(width, height, ask = UPSCALE_ASK) {
   const [tw, th] = upscaleTarget(width, height, ask), part = { 2: "half", 3: "a third of" }[UPSCALE.factor] ?? `1/${UPSCALE.factor} of`;
@@ -796,7 +799,7 @@ export const FINISH = [
     line: "The result is regenerated in scene-linear values, fitted to the plate. It becomes half-float EXR frames in ACES2065-1, in the viewer and in Export.",
     ask: "This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1." },
   { id: "upscale", name: "Upscale",
-    line: "Export also writes an upscaled set at the size chosen, with SeedVR2 7B, including layers and mattes." },
+    line: "The render's last step: SeedVR2 7B upscales the result to the size chosen, including layers and mattes. The player shows it, and Export writes it." },
 ];
 // The Render panel's rows in the order things happen: the steps done, in the order they finished (a step reused from an
 // earlier render is done at once, so it comes first), then the step running, then the steps to come in their planned
@@ -813,7 +816,8 @@ export function stepOrder(steps, { done, at = () => undefined, now = null }) {
 export function exportWords({ kind, ready = true, left = "", exr = false, hdr = false, movie = "" }) {
   const first = (step) => `${step} first${left ? `: ${left}` : ""}.`, inHdr = (what) => (ready ? `${what} in HDR, from SDR to HDR.` : `${what} in HDR. ${first("SDR to HDR runs")}`);
   const note = kind === "fluid" ? (hdr ? "The fluid shot in HDR, with the SDR shot in ProRes 4444 and its preview movie." : "The fluid shot in ProRes 4444, with its preview movie.")
-    : kind === "plate" ? inHdr("The plate") : kind === "relit" ? inHdr("The relit result") : ready ? "" : first("The full-size composite renders");
+    : kind === "plate" ? inHdr("The plate") : kind === "relit" ? inHdr("The relit result") : kind === "upscaled" ? (ready ? "" : first("Upscale runs"))
+    : ready ? "" : first("The full-size composite renders");
   return { hint: "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.",
     format: (kind === "fluid" ? hdr : exr) ? "half-float EXR frames, ACES2065-1" : kind === "fluid" ? "ProRes 4444 movie" : movie, note };
 }
@@ -1103,8 +1107,10 @@ export const hdrOfKey = (key, dflt) => (key?.endsWith("|hdr") ? true : key?.ends
 // The render key of what is on show: the edits' key (hdrKey). A plate with no edit has a render only when the Finish menu asks
 // SDR to HDR of a plate whose format holds nothing above 1.0: the key PLATE_ALONE, whose one step is SDR to HDR on the plate.
 export const PLATE_ALONE = "|hdr";
-export const renderKey = (edits, dflt, on) => (edits ? hdrKey(edits, dflt, on) : on && !dflt ? PLATE_ALONE : "");
-export const plateAlone = (key) => key === PLATE_ALONE;
+// Finish > Upscale on a plate with no edit and no SDR to HDR: the key PLATE_UP, whose one step upscales the plate itself.
+export const PLATE_UP = "|up";
+export const renderKey = (edits, dflt, on, up = false) => (edits ? hdrKey(edits, dflt, on) : on && !dflt ? PLATE_ALONE : up ? PLATE_UP : "");
+export const plateAlone = (key) => key === PLATE_ALONE || key === PLATE_UP;
 // SDR to HDR on a plate whose format cannot hold values above 1.0: asked before it turns on, then the result is
 // an EXR sequence, which the player shows at full precision and the export writes.
 export const exrResult = (spec, hdrRan, headroom = 1) => !!hdrRan && !holdsHdr(spec, headroom);
@@ -1247,11 +1253,12 @@ export function dabFlow(peak, spacingOverRadius) {
 // values, with no view's tone mapping.
 export const PASSES = { erase: ["r", "erased.found.movie_a"], clean: ["pv", "cleanRaw"], shot: ["pv", "raw"], track: ["pv", "painted.found.movie_b"],
   comp: ["pv", "comp"], cleanfull: ["r", "cleanRaw"], full: ["r", "raw"], trackfull: ["r", "full.found.movie_b"], hdr: ["r", "hdrMovie"],
-  review: ["r", "play"], export: ["r", "exported.matte"] };
+  review: ["r", "play"], export: ["r", "exported.matte"], upplate: ["up", "upplate"], uplayer: ["up", "uplayer"], upcomp: ["up", "upcomp"], uphdr: ["up", "uphdr"] };
 export const MATTE_PASSES = new Set(["erase", "track", "trackfull", "export"]);
 const keyPath = (o, path) => path.split(".").reduce((x, k) => x?.[k], o);
-export function passMovie(id, r, pv, spaces = {}) { // { url, space, frames } of a finished step, or null
+export function passMovie(id, r, pv, spaces = {}, up = null) { // { url, space, frames } of a finished step, or null; `up`: what Upscale's steps made at the size asked for
   const at = PASSES[id], store = at && (at[0] === "pv" ? pv : r);
+  if (at?.[0] === "up") return up?.[at[1]]?.url ? { url: up[at[1]].url, space: up[at[1]].space, frames: null } : null; // its movie at its own size (app.fitCanvas)
   const url = (at && keyPath(store, at[1])) ?? (id === "review" ? store?.review : null);
   if (!url) return null;
   if (id === "review") return { url, space: store.playSpace ?? store.reviewSpace ?? "@model", frames: store.reviewFrames ?? null };
@@ -1351,7 +1358,7 @@ export const fluidPasses = (result, spaces = {}) => (result ? [
 // names the models that made its result.
 export const STEP_FLOWS = { erase: ["matte"], clean: ["clean"], shot: ["shot"], track: ["matte"], comp: ["comp"],
   cleanfull: ["clean", "cleanup"], full: ["shot"], trackfull: ["matte"], hdr: ["hdr"], review: ["review"], export: ["export"],
-  upscale: ["upscale", "upscale_export"] };
+  upscale: ["upscale", "upscale_export"], upplate: ["upscale"], uplayer: ["export", "upscale"], upcomp: ["export", "upscale", "upscale_export"], uphdr: ["upscale", "upscale_export"] };
 // The workflows behind a result: its edits' own (the prompt writer and Klein, SAM's object search for an erase), the
 // render's record, and a fluid shot's (with its SDR to HDR)
 export function resultFlows({ tools = [], render = [], fluid = false, fluidHdr = false } = {}) {

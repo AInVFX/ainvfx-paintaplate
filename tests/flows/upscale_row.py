@@ -1,7 +1,6 @@
 """Finish > Upscale on the mock: the row is off and asks in figures before it turns on; at Export, one step in the
 Render panel restores the plate and the layer window by window (a 16 GB GPU with 52 GB of RAM: windows of 21 frames),
-composes the upscaled result, and the zip holds the upscaled set beside the plate-size result and its layer. A second render's export
-takes the plate's windows from the job index."""
+composes the upscaled result, and the zip holds the upscaled set beside the plate-size result and its layer. A second render takes the plate's windows from the job index."""
 import zipfile
 
 
@@ -35,13 +34,13 @@ def run(browser, port, U):
             f"the zip holds the layer and the upscaled set, its matte numbered on across the windows: {sorted(parts)}, {len(mattes)} matte frames")
     status = page.text_content("#status") or ""
     U.check(status.startswith("Download: ") and "its layer" in status and "the upscaled set" in status, f"the download line names them: {status!r}")
+    start = len(U.log_lines(page))
     page.keyboard.press("c"); U.paint_once(page, "the cup", [(0.6, 0.4), (0.62, 0.45)]); page.wait_for_timeout(1500); page.keyboard.press("Enter")
     U.wait_log(page, f"window.__lines.filter((t) => {U.HAS_REVIEWED}).length >= 2", 240000, "the full-size composite of both edits")
-    start = len(U.log_lines(page))
     page.click("#export-btn")
     with page.expect_download(timeout=280000) as dl:
         page.click("#x-go")
     taken = [t for t in U.log_lines(page)[start:] if t.startswith("upscale: taken from the job index")]
     names = zipfile.ZipFile(dl.value.path()).namelist()
-    U.check(len(taken) == 3 and any(n.startswith("upscaled/plate/") for n in names), f"the next export takes the plate's 3 windows from the job index: {len(taken)}")
+    U.check(len(taken) == 3 and any(n.startswith("upscaled/plate/") for n in names), f"the next render takes the plate's 3 windows from the job index: {len(taken)}")
     page.close()

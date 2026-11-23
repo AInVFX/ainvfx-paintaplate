@@ -331,6 +331,9 @@ async def execute(pid, prompt):
         save_mp4((np.asarray(Image.open(f).convert("RGB"), np.float32) / 255 for f in files), f"{v['prefix']}/plate", fps)
         o[outs["export"]] = {"text": [f"Save Plate: 1 file written to {v['prefix']}."],
                              "files": [{"filename": "plate_00001_.webm", "subfolder": v["prefix"], "type": "output"}]}
+        if "video" in outs and v.get("video_prefix"):  # the part's viewer movie, at the size the page asks for
+            side = max(int(v.get("movie_width") or 0), int(v.get("movie_height") or 0))
+            o[outs["video"]] = {"images": [save_mp4((np.asarray(Image.open(f).convert("RGB"), np.float32) / 255 for f in files), v["video_prefix"], fps, side)], "animated": [True]}
     elif "hdr" in outs:  # SDR to HDR: the shot decoded from sRGB, its brightest values lifted above 1.0, as half-float EXR frames
         frames, spec = read_plate(v["path"], v.get("max_frames", 1024), pad=True)
         await steps(pid, 8, 2.0, live=(v.get("live") or 0, frames[0]))

@@ -11,9 +11,9 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleComposes, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
 import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
-import { dataSpace, fluidPasses, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft } from "./logic.mjs";
+import { dataSpace, fluidPasses, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft, span, doneIn, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, JOB_NAME, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { askedSeed, editSeed, gridGrow } from "./logic.mjs"; // the tests: a seed asked for in the address, and each edit's seed from it
@@ -861,14 +861,56 @@ function askFinish(opt, on) { // a pass that changes what Export writes asks fir
   $(`#finish-${opt.id}`).checked = false;
   ask.hidden = false;
 }
-function setFinish(opt, on) { // each setting keeps its own renders: the render key gains "|hdr"
+function setFinish(opt, on) { // SDR to HDR keeps its own renders (the render key gains "|hdr"); Upscale's steps keep theirs per size, and the render on show is planned again
   if (opt.id === "hdr") S.deliver.hdr = on;
-  if (opt.id === "upscale") S.deliver.upscale = on ? S.upscaleAsk : false; // the renders stay: Upscale runs at Export, after them
+  if (opt.id === "upscale") S.deliver.upscale = on ? S.upscaleAsk : false;
+  const shown = S.renders.get(S.heroKey);
+  if (opt.id === "upscale" && shown) plan(shown, shown.active); // its steps join the Render panel, or leave it, at once
   confirmed(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Result: regenerated in scene-linear values, fitted to the plate.\n  Format: half-float EXR frames in ACES2065-1, in the viewer and in Export."
-    : opt.id === "upscale" ? `\n  Export: an upscaled set too, at ${upscaleFigures().target.join(" x ")}.` : ""}` : `Finish: ${opt.name} off.`, 1500);
-  finishUI(); recompose(); touch();
-  if (on && plateAlone(S.heroKey) && !S.renders.get(S.heroKey)) status(`Finish: ${opt.name} on. Generate runs it on the plate: about ${Math.round(estimate("hdr", plan({ key: S.heroKey }, []).skip))} s.`, "hint");
+    : opt.id === "upscale" ? `\n  ${upscaleWhen()}` : ""}` : `Finish: ${opt.name} off.`, 1500);
+  finishUI(); recompose(); stagesUI(); exportUI(); touch();
+  if (opt.id === "upscale") latestUpscale();
+  if (on && plateAlone(S.heroKey) && !fluidOnly() && !S.renders.get(S.heroKey)) { // the plate alone before Generate: what Generate runs, and about how long
+    const skip = plan({ key: S.heroKey }, []).skip, steps = STAGES.filter((st) => !skip.has(st.id)), passes = steps.map((st) => (st.up ? "Upscale" : "SDR to HDR"));
+    status(`Finish: ${opt.name} on. Generate runs ${passes.length > 1 ? passes.join(" and ") : "it"} on the plate: about ${span(steps.reduce((a, st) => a + estimate(st.id, skip), 0))}.`, "hint");
+  }
 }
+// Upscale turned on or off, or another size: the player shows the latest result, unless a step of the plate's size is pinned
+function latestUpscale() {
+  const r = S.renders.get(S.heroKey);
+  if (r) plan(r, r.active ?? []); // the render now on show, as the switch stands: the plate alone's comes back with its step
+  if (S.pass && !UP_IDS.has(S.pass)) return stagesUI();
+  S.pass = null; showLatest(); stagesUI();
+}
+// Export waits for a pass: its line
+const runsFirst = (label) => `Export: ${label} runs first. The zip downloads when it is done.`;
+// The last of Upscale's steps, once made: the player shows it, and the status line says so
+function upscaledShown(r, key) {
+  const st = upLast(r), m = upOf(r)?.[st?.id];
+  if (key !== S.heroKey || !m?.url || S.wantDownload) return; // Export goes on to the zip
+  showMade(m.url, key, m.space);
+  hud(`${labelOf(st, r)}: the viewer plays it.`, 2500);
+  stagesUI();
+  status(ready(labelOf(st, r)), "hint");
+}
+// Finish > Upscale on one result: the plate itself on the plate alone (« Plate, upscaled »), a fluid shot alone (« Fluid: shot,
+// upscaled »), or SDR to HDR's frames on the plate
+// alone or a relit composite (« SDR to HDR, upscaled »). Each size keeps its own result, as the edits' steps do (upscaleSteps).
+async function upscaleResult(r) {
+  const st = UPS.find((x) => (x.id === "uphdr" || x.id === "upplate") && !r.skip.has(x.id));
+  if (!st || (r.active?.length && !r.hdrAfter)) return; // an edit's « Plate, upscaled » is its plate's windows (upscaleSteps)
+  const p = S.plate, hdr = st.id === "uphdr", store = ((r.ups ??= {})[upSize()] ??= {}), f = fluidOnly() ? S.fluid.result : null;
+  r.run ??= f ? f.run ?? fluidRun(f.path) : r.base; // a fluid shot's set sits beside its own files, which its zip takes (downloadFluid)
+  await step(r, st.id, async (progress) => {
+    store[st.id] = await upscalePart("comp", { dir: r.run, result: hdr ? r.hdrFrames : f ? f.path : p.path, space: hdr || f?.hdr ? HDR_FRAMES : p.cs,
+      float: hdr || (f ? !!f.hdr : /^\.exr$/i.test(p.spec.ext ?? "")), layer: null, matte: null }, false, progress);
+    if (!hdr) Object.assign(r, { review: store[st.id]?.url ?? null, reviewSpace: store[st.id]?.space ?? p.cs }); // the plate alone's result
+  }, store);
+}
+// A result made, as the status line says it
+const ready = (label, more = "", next = "Export writes it for compositing software.") => `${label}: ready, in the viewer${more}. ${next}`;
+// The confirmation's detail line when Upscale turns on
+const upscaleWhen = () => `Each render ends with Upscale at ${upscaleFigures().target.join(" x ")}: about ${span(upscaleGuess())} on this GPU.`;
 function upscaleSizeUI(opt, show) { // Finish > Upscale's size: the plate's sizes, then Custom…, with the size asked for chosen; shown while the row is on
   const sel = $(`#finish-${opt.id}-size`), p = S.plate;
   if (!sel) return;
@@ -905,7 +947,8 @@ function setUpscaleAsk(asked) { // the size asked for: kept for this plate, and 
   S.upscaleAsk = asked;
   if (S.deliver.upscale) S.deliver.upscale = asked;
   confirmed(`Finish: Upscale at ${upscaleFigures().target.join(" x ")}.`, 1500);
-  finishUI(); touch();
+  finishUI(); stagesUI(); exportUI(); touch(); // another size: its own steps (upOf)
+  latestUpscale();
 }
 function openFinish(open = $("#finish").hidden) { // the menu opens under its button; Esc, a click outside or the button closes it
   if (!open) return closeFinish();
@@ -929,7 +972,8 @@ function recompose() {
   S.hero = layered();
   const edits = S.edits.filter((e) => e.on && e.patch && e.state !== "generating").map((e) => `${e.id}.${e.version}`).join(",");
   const on = hdrWanted() && (!!edits || !(fluidOnly() || keying())); // with no edit, the plate alone; a fluid shot exports itself
-  const key = renderKey(edits, holdsHdr(S.plate?.spec, S.plate?.headroom), on); // Finish's SDR to HDR on an SDR plate: another render
+  const up = !!S.deliver.upscale && S.upscaleReady && !edits && !keying(); // Finish > Upscale on a plate with no edit, or on a fluid shot alone: the plate alone's render
+  const key = renderKey(edits, holdsHdr(S.plate?.spec, S.plate?.headroom), on, up); // Finish's SDR to HDR on an SDR plate: another render
   if (key === S.heroKey) return;
   S.heroKey = key;
   const r = S.renders.get(key); // a set of edits seen before plays at once (a bypass turned back on, for example)
@@ -941,6 +985,8 @@ function recompose() {
 
 function showLatest() { // the latest result of the edits on show: the full-size composite, else the full-size shot, else the preview
   const key = S.heroKey, r = S.renders.get(key), pv = previewOf(r), review = r?.play ?? r?.review;
+  const up = r && upscaled(r) ? upOf(r)?.[upLast(r).id] : null; // Finish > Upscale's last step, once made, at the size asked for
+  if (up?.url) return void setShot(up.url, key, up.space);
   const best = review ?? r?.raw ?? pv?.comp ?? pv?.raw;
   if (best) setShot(best, key, best === review ? (r.playSpace ?? r.reviewSpace) : "@model", best === review ? r.reviewFrames : null, { framesSpace: best === review ? r.reviewFramesSpace : null });
   else if (!key) setShot(null, key);
@@ -964,7 +1010,7 @@ function choosePass(id) {
   if (!S.pass) { fluidInput(); if (keying() && S.fluid.result) showFluid(); else showLatest(); hud("The latest result.", 1500); return stagesUI(); }
   if (id === "first") { pause(); seek(0); render(); }
   else {
-    const m = fluid ?? passMovie(id, r, previewOf(r), passSpaces());
+    const m = fluid ?? passMovie(id, r, previewOf(r), passSpaces(), upOf(r));
     if (!m) { S.pass = null; return stagesUI(); }
     if (fluid && keying()) S.fluid.view = "result"; // the keyframes stay as painted; the viewer shows the pass
     setShot(m.url, fluid && keying() ? "fluid" : S.heroKey, m.space, m.frames ?? null, { framesSpace: m.framesSpace }); // a pass's EXR frames and their space (passMovie, fluidPasses)
@@ -997,7 +1043,7 @@ function passLabel(id) {
 function shownLabel() { // the pass on show, by its row's name: the one clicked, else the latest result
   if (S.pass) return passLabel(S.pass);
   const r = S.renders.get(S.heroKey), pv = previewOf(r);
-  return labelOf(STAGES.find((x) => S.shot?.url && passMovie(x.id, r, pv, passSpaces())?.url === S.shot.url), r) ?? (S.shot ? "Result" : S.edits.length ? "First frame" : "Plate");
+  return labelOf(STAGES.find((x) => S.shot?.url && passMovie(x.id, r, pv, passSpaces(), upOf(r))?.url === S.shot.url), r) ?? (S.shot ? "Result" : S.edits.length ? "First frame" : "Plate");
 }
 // A fluid row on show with the wipe: its step's input on the wipe's left side (logic.fluidWipeLeft), as a comparison that
 // ends with the row or the wipe. A comparison picked by Ctrl+click stays as it is.
@@ -1016,7 +1062,7 @@ function comparePass(id) {
   if (S.cmp?.id === id) return endCompare();
   if (passLabel(id) === shownLabel()) return plateWipe(); // the pass on show against itself shows nothing: the plate takes the left side
   const r = S.renders.get(S.heroKey);
-  const m = id === "first" ? { url: null, space: modelSpace(), frames: null } : passMovie(id, r, previewOf(r), passSpaces());
+  const m = id === "first" ? { url: null, space: modelSpace(), frames: null } : passMovie(id, r, previewOf(r), passSpaces(), upOf(r));
   if (!m) return;
   S.cmp = { ...m, id, key: S.heroKey, label: passLabel(id), wiped: S.cmp ? S.cmp.wiped : S.wipe !== null };
   sharp.cmp = null;
@@ -1061,7 +1107,8 @@ function plateWipe() { // the plain wipe: the plate on the left, the pass on sho
 // Until every matte has the frame, the last tint stays; data-frame names the frame it shows.
 function xrayNow() { // the mattes of the edits on show, at the size on show
   const r = S.renders.get(S.heroKey), st = STAGES.find((x) => x.id === S.pass);
-  const full = st ? !!st.final : !!S.shot?.url && [r?.play, r?.review, r?.raw, r?.cleanRaw, r?.hdrMovie].includes(S.shot.url);
+  const full = st ? !!st.final : !!S.shot?.url && ([r?.play, r?.review, r?.raw, r?.cleanRaw, r?.hdrMovie].includes(S.shot.url)
+    || Object.values(upOf(r) ?? {}).some((m) => m?.url === S.shot.url)); // an upscaled step on show, the latest result, is full size too
   return xrayPlan({ tools: S.edits.filter((e) => e.on && e.patch && e.state === "done").map((e) => e.tool), r, pv: previewOf(r), full });
 }
 function setXray(on) {
@@ -1139,7 +1186,8 @@ function endCompare(draw = true) { // the wipe goes back to the plate on its lef
 // each step, so it shows as an image over the frame: a canvas would draw its first frame alone, the edited first frame.
 S.liveKey = null;
 const onShow = () => (keying() ? "fluid" : S.heroKey); // what the viewer shows: a fluid shot's keyframes, or a set of edits
-const labelOf = (st, r = S.renders.get(S.heroKey)) => st && stepLabel(st, !!r?.lightOnly); // a step's name in the Render panel and the log
+const labelOf = (st, r = S.renders.get(S.heroKey)) => st && (st.id === "upplate" && r?.key === PLATE_UP && fluidOnly() ? "Fluid: shot, upscaled" // the plate alone is a fluid shot
+  : stepLabel(st, !!r?.lightOnly)); // a step's name in the Render panel and the log
 function liveShown() { return !!S.live && S.liveKey === onShow() && !S.halted && !S.pass && S.wipe === null && !S.compare && !S.draft && !stroke; }
 function placeLive() { // the live preview covers the frame, where zoom and pan place it
   const el = $("#live");
@@ -1209,7 +1257,16 @@ function setShot(src, key, space = "@model", frames = null, { framesSpace = null
   S.shot = src ? { url: src, key, space, frames, framesSpace } : null;
   if (src) { if (shotVid.getAttribute("src") !== src) shotVid.src = src; }
   else { shotVid.removeAttribute("src"); shotVid.load(); }
+  fitCanvas(src, key);
   render(); timelineUI();
+}
+// The canvas holds the picture on show at its own size: the plate's, up to NATIVE_SIDE, or an upscaled step's, so that zoom
+// reaches its pixels. Zoom counts the plate's pixels either way, and the wipe draws both sides in the same frame.
+function fitCanvas(src, key) {
+  if (!S.plate) return;
+  const up = src ? Object.values(upOf(S.renders.get(key)) ?? {}).find((m) => m?.url === src) : null;
+  const [w, h] = up?.size ?? colour.nativeSize(S.plate.spec.width, S.plate.spec.height, NATIVE_SIDE);
+  if (view.width !== w || view.height !== h) { [view.width, view.height] = [w, h]; applyView(); }
 }
 
 // Once the shot of the current edits exists, it shows on every frame, playing or paused; the plate shows only in the wipe and
@@ -2775,7 +2832,8 @@ function want(key, asked = false) { // the set of edits on show becomes the most
   let r = S.renders.get(key);
   if (!r) {
     const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
-    if (!active.length && !(asked && plateAlone(key))) return null; // asked: Generate or Export makes the plate alone's render, minutes of work
+    if (!active.length && !(plateAlone(key) && (asked || (key === PLATE_UP && fluidOnly())))) return null; // asked: Generate or Export makes the plate alone's render, minutes of work;
+    // a fluid shot's Upscale follows the shot, as an edit's follows its composite
     r = { key, v: ++S.run, previews: {}, active: active.map(freeze), heroFrame: S.hero,
       cleanFrame: active.some((e) => e.tool === "erase") ? layered(S.edits.length, (e) => e.tool === "erase") : null };
     r.base = `paintaplate/${S.plate.id}/v${r.v}`;
@@ -2813,7 +2871,7 @@ function nextClass(r) { // the class of a render's next step: "preview", "full" 
   plan(r, r.active);
   const pv = r.previews[S.plate.shot.join("x")] ?? {}, exporting = !!S.wantDownload && r.key === S.heroKey;
   for (const st of STAGES) {
-    if (r.skip.has(st.id) || (st.preview ? pv : r).done?.[st.id] !== undefined) continue;
+    if (r.skip.has(st.id) || (st.preview ? pv : storeOf(r, st))?.done?.[st.id] !== undefined) continue;
     return !st.final ? "preview" : !st.onDemand ? "full" : exporting ? "export" : null;
   }
   return null;
@@ -2828,7 +2886,8 @@ function preempt() { // Generate: a full-size or export step in its first half s
   const st = S.stage, r = S.piping;
   if (!st || !r) return;
   const def = STAGES.find((x) => x.id === st.id), cls = !def.final ? "preview" : st.id === "export" ? "export" : "full", pct = Math.round(st.progress * 100);
-  if (!stopsForEdit({ cls, progress: st.progress })) return void log(`Render v${r.v}: ${labelOf(def, r)}: at ${pct}%, finishing before the new edit.`);
+  if (!def.up && !stopsForEdit({ cls, progress: st.progress })) return void log( // Upscale's steps stop at once: their finished windows stay in the job index
+    `Render v${r.v}: ${labelOf(def, r)}: at ${pct}%, finishing before the new edit.`);
   log(`Render v${r.v}: ${labelOf(def, r)}: stopped at ${pct}% for the new edit. It continues when its edits are turned on again.`);
   cancel(...BACKGROUND);
 }
@@ -2856,6 +2915,7 @@ const gridAt = (w) => gridGrow(w, S.plate.spec.width, grow(S.plate.spec.width, t
 
 // Every step of a render, in order. `preview` steps run at the preview size, once per size, so going back to a size plays what
 // it made at once. `final` steps run at full size right after them: the passes, then the full-size composite (the review) the viewer plays.
+// Finish > Upscale's steps (`up`) follow, each result kept per upscaled size, as a preview step keeps one per preview size.
 // The export (`onDemand`) writes the result for compositing software, only when Export asks for it.
 const STAGES = [
   { id: "erase", label: "Track the object", ref: 6 }, { id: "clean", label: "Clean plate pass, preview", ref: 10, preview: true },
@@ -2864,13 +2924,21 @@ const STAGES = [
   { id: "cleanfull", label: "Clean plate pass, full size", ref: 32, final: true }, { id: "full", label: "Shot, full size", ref: 45, final: true },
   { id: "trackfull", label: "Track the paint, full size", ref: 16, final: true }, { id: "hdr", label: "SDR to HDR", ref: 45, final: true },
   { id: "review", label: "Composite, full size", ref: 12, final: true },
+  { id: "upplate", label: "Plate, upscaled", ref: 0, final: true, up: true }, { id: "uplayer", label: "Layer, upscaled", ref: 0, final: true, up: true },
+  { id: "upcomp", label: "Composite, upscaled", ref: 0, final: true, up: true }, // Finish > Upscale (upscaleSteps)
+  { id: "uphdr", label: "SDR to HDR, upscaled", ref: 0, final: true, up: true }, // SDR to HDR's frames, on the plate alone or a relit composite (upscaleResult)
   { id: "export", label: "Export", ref: 10, final: true, onDemand: true },
-  { id: "upscale", label: "Upscale", ref: 0, final: true, onDemand: true }, // Finish > Upscale: after the export, before the zip
 ];
 const REF = Object.fromEntries(STAGES.map((x) => [x.id, x.ref])); // each step's reference in seconds, by id (logic.stepGuess)
 const previewOf = (r) => r?.previews?.[S.plate.shot.join("x")]; // what this preview size made for a set of edits
-const doneOf = (r, st) => (st.preview ? previewOf(r) : r)?.done?.[st.id]; // seconds a step took, if it ran
-const fullSizeMade = (r) => !!r?.review && !(r.hdrAfter && r.done?.hdr === undefined); // the full-size result is made: the composite, and SDR to HDR on it when a Light edit takes it (logic.hdrAfterComposite)
+const upSize = () => upscaleTarget(S.plate.spec.width ?? S.plate.work[0], S.plate.spec.height ?? S.plate.work[1], S.deliver.upscale || S.upscaleAsk).join("x");
+const upOf = (r) => r?.ups?.[upSize()]; // what Upscale's steps made at the size asked for
+const UPS = STAGES.filter((st) => st.up), UP_IDS = new Set(UPS.map((st) => st.id));
+const storeOf = (r, st) => (st.preview ? previewOf(r) : st.up ? upOf(r) : r); // where a step keeps its result: per preview size, per upscaled size, or once
+const doneOf = (r, st) => storeOf(r, st)?.done?.[st.id]; // seconds a step took, if it ran
+const upLast = (r) => (r?.skip ? UPS.filter((st) => !r.skip.has(st.id)).at(-1) : undefined); // the last of Upscale's steps this render makes: its result is the latest
+const upscaled = (r) => !!upLast(r) && doneOf(r, upLast(r)) !== undefined; // the zip takes upscaled/: Upscale's steps made it at the size asked for
+const fullSizeMade = (r) => !!r?.review && !(r.hdrAfter && r.done?.hdr === undefined) && UPS.every((st) => r.skip?.has(st.id) || doneOf(r, st) !== undefined); // the full-size result is made: the composite, SDR to HDR on it when a Light edit takes it (logic.hdrAfterComposite), and Upscale's steps while it is on
 S.took = {}; // measured seconds per step, for this plate: the next estimates use them
 let stepSeq = 0; // the order in which steps finish, kept per render (store.at): the Render panel lists them so (stepsInOrder)
 
@@ -2879,11 +2947,13 @@ function plan(r, active) { // the steps this set of edits needs: the erase pass 
   const erase = active.some((e) => e.tool === "erase"), paint = active.some((e) => e.tool === "paint"), carry = active.some((e) => e.tool !== "erase");
   const tools = active.map((e) => e.tool), hdrOn = hdrOfKey(r.key, holdsHdr(p.spec, p.headroom)); // the switch is in the key
   r.hdrAfter = S.hdrReady && hdrAfterComposite(p.spec, tools, hdrOn, p.headroom); // a Light edit's new light in HDR: SDR to HDR on the relit composite
+  const up = !!S.deliver.upscale && S.upscaleReady, alone = !active.length, upAlone = r.key === PLATE_UP; // Finish > Upscale, as the switch stands: setFinish plans the render on show again
+  const keeps = up && !alone && !r.hdrAfter && upscaleKeeps(tools, exrResult(p.spec, S.hdrReady && wantsHdr(p.spec, tools, hdrOn), p.headroom)); // the plate and the layer are upscaled, then composited
   r.skip = new Set([!erase && "erase", !erase && "clean", !carry && "shot", !paint && "track", (onePass || !erase) && "cleanfull",
     (onePass || !carry) && "full", (onePass || !paint) && "trackfull",
-    !(S.hdrReady && wantsHdr(p.spec, tools, hdrOn)) && !r.hdrAfter && "hdr", r.hdrAfter && "export", r.hdrAfter && "upscale", // after the composite, Export zips its frames (exportAlone)
-    ...(active.length ? [] : ["comp", "review", "export", "upscale"]), // the plate alone: SDR to HDR makes the result; Export zips its frames, and restores them itself (exportAlone)
-    !(S.deliver.upscale && S.upscaleReady) && "upscale",
+    !(S.hdrReady && wantsHdr(p.spec, tools, hdrOn)) && !r.hdrAfter && "hdr", r.hdrAfter && "export", upAlone && "hdr", // after the composite, Export zips its frames (exportAlone); the plate alone with Upscale only keeps its own values
+    ...(active.length ? [] : ["comp", "review", "export"]), // the plate alone: SDR to HDR makes the result; Export zips its frames, and upscales them itself (exportAlone)
+    !(keeps || (up && upAlone)) && "upplate", !keeps && "uplayer", !(up && !alone && !r.hdrAfter) && "upcomp", !(up && ((alone && !upAlone) || r.hdrAfter)) && "uphdr",
     ...(S.previewCap ? [] : STAGES.filter((st) => st.preview).map((st) => st.id))].filter(Boolean)); // no preview pass
   r.lightOnly = active.length > 0 && active.every((e) => e.tool === "light"); // its composite is Relight Transfer (logic.stepLabel)
   return r;
@@ -2900,7 +2970,7 @@ const makesHdr = (skip) => !!skip && !skip.has("hdr"); // a render makes SDR to 
 const timeStep = (id) => (id === "cleanfull" && startsFromPreview(S.plate, S.previewCap) ? "cleanup" : id); // the name a step's seconds go under: stage 2 alone apart from both stages
 
 function estimate(id, skip) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess. skip: the render's steps left out
-  if (id === "upscale") return upscaleGuess();
+  if (UP_IDS.has(id)) return upscaleGuess(id);
   const hdr = makesHdr(skip), t = timeStep(id);
   if (S.took[timeId(t, hdr)]) return S.took[timeId(t, hdr)];
   const known = TIMES[stepKey(t, hdr)];
@@ -2914,7 +2984,7 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   const t0 = performance.now(), guess = Math.round(estimate(id, r.skip)), notRun = jobsNotRun();
   S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step
   stagesUI();
-  log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: about ${guess} s.`);
+  log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: about ${span(guess)}.`);
   const stage = S.stage;
   await work((f) => {
     if (S.stage !== stage) return;
@@ -2924,7 +2994,7 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   });
   dropLive();
   const dt = (performance.now() - t0) / 1000, t = timeStep(id);
-  if (jobsNotRun() === notRun && id !== "upscale") { // a step whose jobs were answered without running (the job index, ComfyUI's cache) keeps no time; Upscale's depends on the plate's windows the index holds (upscaleGuess)
+  if (jobsNotRun() === notRun && !UP_IDS.has(id)) { // a step whose jobs were answered without running (the job index, ComfyUI's cache) keeps no time; Upscale's depends on the plate's windows the index holds (upscaleGuess)
     TIMES = remember(TIMES, stepKey(t, makesHdr(r.skip)), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
     try { localStorage.setItem(TIMES_KEY, JSON.stringify(TIMES)); } catch { /* a private window: the session's own times still serve */ }
     S.took[timeId(t, makesHdr(r.skip))] = dt;
@@ -2932,7 +3002,7 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   (store.done ??= {})[id] = dt; (store.at ??= {})[id] = ++stepSeq;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
   S.stage = null;
-  log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: done in ${dt.toFixed(1)} s (estimate ${guess} s).`);
+  log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: ${doneIn(dt, guess)}.`);
   stagesUI();
 }
 
@@ -2946,9 +3016,13 @@ function reused(r, store, id, take) { // a step that a render with the same eras
 
 // SDR to HDR on a plate with no edit (logic.plateAlone): one step on the plate itself, at the working size, its frames brought
 // back to the plate's size and level by HDR Match in the workflow. The viewer plays them, and Export zips them as they are.
-async function plateHdr(r) {
+async function plateHdr(r) { // the plate alone: SDR to HDR on the plate, Upscale on its result, or both
   const p = S.plate, key = r.key, base = r.base;
-  if (!r.told) { r.told = true; log(`Render v${r.v}: no edit, the plate through SDR to HDR.\n  Steps: SDR to HDR.`); }
+  if (!r.told) {
+    r.told = true;
+    const passes = [!r.skip.has("hdr") && "SDR to HDR", upLast(r) && "Upscale"].filter(Boolean);
+    log(`Render v${r.v}: no edit, the ${fluidOnly() ? "fluid shot" : "plate"} through ${passes.join(" and ")}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
+  }
   await step(r, "hdr", async (progress) => {
     const out = await run("hdr", { ...S.memoryProfile.slots, path: p.path, color_space: p.cs, config: S.ocio.config, max_frames: p.frames,
       width: p.work[0], height: p.work[1], plate_width: p.spec.width, plate_height: p.spec.height, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps),
@@ -2959,31 +3033,37 @@ async function plateHdr(r) {
       hdrMovie: m ? viewUrl(m) : null, run: hf ? hf.subfolder.replace(/\/hdr$/, "") : base });
     Object.assign(r, { review: r.hdrMovie, reviewSpace: logSpace(), reviewFrames: r.hdrFrames, reviewFramesSpace: HDR_FRAMES }); // the result on show
   });
-  if (key !== S.heroKey) return log(`Render v${r.v}: SDR to HDR: ready, in the background.`);
-  showMade(r.review, key, r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace });
-  hud("SDR to HDR: the viewer plays it.", 2500);
+  if (r.done?.hdr !== undefined && key === S.heroKey && !upscaled(r)) { // SDR to HDR's result on show; Upscale's step follows while it is on
+    showMade(r.review, key, r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace });
+    hud("SDR to HDR: the viewer plays it.", 2500);
+    stagesUI(); exportUI();
+    const st = upLast(r);
+    if (!S.wantDownload) status(st ? ready("SDR to HDR", ", its EXR frames at full precision as they load", `Upscale is next: about ${span(estimate(st.id, r.skip))}.`)
+      : "SDR to HDR: ready, in the viewer, its EXR frames at full precision as they load. Export writes them for compositing software.", "hint");
+  }
+  await upscaleResult(r);
+  if (key !== S.heroKey) return log(`Render v${r.v}: ${labelOf(upLast(r) ?? STAGES.find((st) => st.id === "hdr"), r)}: ready, in the background.`);
+  upscaledShown(r, key);
   stagesUI(); exportUI();
-  if (S.wantDownload) return exportAlone(r);
-  status("SDR to HDR: ready, in the viewer, its EXR frames at full precision as they load. Export writes them for compositing software.", "hint");
+  if (S.wantDownload) return fluidOnly() ? downloadFluid() : exportAlone(r);
 }
-async function exportAlone(r) { // Export on the plate alone, or on a relit composite after SDR to HDR (logic.hdrAfterComposite): the frames SDR to HDR wrote, at the plate's size and level, in ACES2065-1
-  r.exported ??= { run: r.run, name: `${S.plate.name}_paintaplate_v${r.v}`, text: `${S.plate.frames} half-float EXR frames in ACES2065-1, in ${r.run}/hdr.`, matte: null };
+async function exportAlone(r) { // Export on the plate alone, or on a relit composite after SDR to HDR (logic.hdrAfterComposite): the frames SDR to HDR wrote,
+  // at the plate's size and level, in ACES2065-1, and the upscaled set Upscale's step made, at the size asked for
+  const hdr = r.done?.hdr !== undefined;
+  r.exported ??= { run: r.run, name: `${S.plate.name}_paintaplate_v${r.v}`, text: hdr ? `${S.plate.frames} half-float EXR frames in ACES2065-1, in ${r.run}/hdr.` : "", matte: null };
   S.exported = r.exported;
   S.wantDownload = null;
   stagesUI(); exportUI();
   confirmed(exportDone(S.exported.text));
-  const parts = ["hdr"];
-  if (S.deliver.upscale && S.upscaleReady) { // Finish > Upscale: there is no composite, so the end output alone is restored
-    if (!(await upscaleAlone(r.run, r.hdrFrames, true))) return;
-    parts.push("upscaled");
-  }
-  download(parts);
+  download([...(hdr ? ["hdr"] : []), ...(upscaled(r) ? ["upscaled"] : [])]);
 }
-function exportPlate(r = S.renders.get(S.heroKey) ?? want(S.heroKey, true)) { // Export of SDR to HDR's frames, on the plate alone or on a relit
-  // composite (exportAlone): the render runs first when SDR to HDR has not, then the zip downloads
-  if (r.done?.hdr !== undefined) return exportAlone(r);
+function exportPlate(r = S.renders.get(S.heroKey) ?? want(S.heroKey, true)) { // Export of the plate alone or of a relit composite in HDR (exportAlone):
+  // the render makes its steps still due first, then the zip downloads
+  plan(r, r.active ?? []);
+  const due = STAGES.find((st) => (st.id === "hdr" || st.up) && !r.skip.has(st.id) && doneOf(r, st) === undefined);
+  if (!due) return exportAlone(r);
   S.wantDownload = ["hdr"];
-  status("Export: SDR to HDR runs first. The zip downloads when it is done.");
+  status(runsFirst(due.up ? "Upscale" : "SDR to HDR"));
   exportUI(); stagesUI(); touch();
 }
 
@@ -3140,28 +3220,53 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   showMade(r.play ?? r.review, key, r.playSpace ?? r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace });
   hud(r.hdrAfter ? "SDR to HDR: the viewer plays it." : "Composite, full size: the viewer plays it.", 2500);
   stagesUI(); exportUI();
-  if (!S.wantDownload) return status(r.hdrAfter ? "SDR to HDR: ready, in the viewer, its EXR frames at full precision as they load. Export writes them for compositing software."
-    : `Composite, full size: ready, in the viewer${deep ? ", its EXR frames at full precision as they load" : ""}. Export writes it for compositing software.`, "hint");
-  if (r.hdrAfter) return exportAlone(r); // the relit result in HDR: Export zips the frames SDR to HDR wrote
+  const upNext = UPS.some((st) => !r.skip.has(st.id) && doneOf(r, st) === undefined); // Upscale's steps follow the composite
+  const upLeft = upNext ? `Upscale is next: about ${span(UPS.reduce((a, st) => a + (r.skip.has(st.id) || doneOf(r, st) !== undefined ? 0 : estimate(st.id, r.skip)), 0))}.` : undefined;
+  if (!S.wantDownload || upNext) status(r.hdrAfter ? (upLeft ? ready("SDR to HDR", ", its EXR frames at full precision as they load", upLeft) : "SDR to HDR: ready, in the viewer, its EXR frames at full precision as they load. Export writes them for compositing software.")
+    : ready("Composite, full size", deep ? ", its EXR frames at full precision as they load" : "", upLeft), "hint");
+  if (r.hdrAfter) { // the relit result in HDR: Upscale's step on SDR to HDR's frames, then Export zips them
+    await upscaleResult(r);
+    upscaledShown(r, key);
+    return S.wantDownload ? exportAlone(r) : undefined;
+  }
+  await upscaleSteps();
+  if (!S.wantDownload) return;
   await step(r, "export", async (progress) => { // only when Export asks: the plate's own format, and the matte, beside the review
+    const x = await exportJob(progress), matte = outputFile("export", x.done, "matte_movie");
+    r.exported = { run: x.run, name: `${p.name}_paintaplate_v${r.v}`,
+      text: x.exr ? `${p.frames} half-float EXR frames in ACES2065-1, in ${x.file?.subfolder ?? `${x.run}/export`}.` : outputText("export", x.done, "export") ?? "",
+      matte: matte ? viewUrl(matte) : null, layer: x.layer, // the Export row shows its matte
+      ...x.parts, upscaled: upscaled(r) }; // the zip takes upscaled/ when Upscale's steps made it
+  });
+  r.exported.upscaled = upscaled(r); // another size since the export: its own steps
+  S.exported = r.exported;
+  stagesUI(); exportUI();
+  confirmed(exportDone(S.exported.text));
+  const parts = S.wantDownload;
+  S.wantDownload = null;
+  download([parts[0], ...(S.exported.layer ? ["layer"] : []), ...parts.slice(1), ...(S.exported.upscaled ? ["upscaled"] : [])]); // the layer goes with the result it rebuilds
+  async function exportJob(progress) { // the export's job: Export posts it, and Upscale's steps post it first for the parts they read, so Export takes it from the job index
     const exr = exrResult(p.spec, r.hdr, p.headroom); // the result as half-float EXR frames instead of the plate's format
     const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr,
       ...r.full.values, relight, keep_untouched: !relight, prefix: exr ? "" : `${dir}/export`, exr_prefix: exr ? `${dir}/export/f` : "", matte_prefix: `${dir}/matte/matte`,
       layer_prefix: exr || relight ? "" : `${dir}/layer`, layer_exr_prefix: exr && !relight ? `${dir}/layer/f` : "",
       matte_video_prefix: `${dir}/matte_movie/m`, ...plateMovie(p), grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
-    const file = outputFile("export", done, exr ? "exr" : "export"), matte = outputFile("export", done, "matte_movie"); // a job taken from the index keeps its own folder
-    r.exported = { run: file ? file.subfolder.replace(/\/export$/, "") : dir, name: `${p.name}_paintaplate_v${r.v}`,
-      text: exr ? `${p.frames} half-float EXR frames in ACES2065-1, in ${file?.subfolder ?? `${dir}/export`}.` : outputText("export", done, "export") ?? "",
-      matte: matte ? viewUrl(matte) : null, layer: !!outputFile("export", done, exr ? "layer_exr" : "layer"), // the Export row shows its matte
-      ...exportedParts(p, done, exr) }; // what Upscale reads
-  });
-  S.exported = r.exported;
-  stagesUI(); exportUI();
-  confirmed(exportDone(S.exported.text));
-  await step(r, "upscale", (progress) => upscaleExport(r, progress)); // Finish > Upscale: the upscaled set, before the zip
-  const parts = S.wantDownload;
-  S.wantDownload = null;
-  download([parts[0], ...(S.exported.layer ? ["layer"] : []), ...parts.slice(1), ...(S.exported.upscaled ? ["upscaled"] : [])]); // the layer goes with the result it rebuilds
+    const file = outputFile("export", done, exr ? "exr" : "export"); // a job taken from the index keeps its own folder
+    return { done, exr, file, run: file ? file.subfolder.replace(/\/export$/, "") : dir, layer: !!outputFile("export", done, exr ? "layer_exr" : "layer"), parts: exportedParts(p, done, exr) };
+  }
+  async function upscaleSteps() { // Finish > Upscale's steps, kept with the size asked for (upOf): another size makes its own, a size made before comes back at once
+    if (r.skip.has("upcomp")) return;
+    const store = ((r.ups ??= {})[upSize()] ??= {}), keeps = !r.skip.has("upplate");
+    const parts = async (progress) => { // the export's parts, which the layer's and the result's windows read
+      const x = (r.upParts ??= await exportJob(progress));
+      return { dir: x.run, result: x.parts.path, space: x.parts.space, float: x.parts.float, layer: x.layer ? x.parts.layerPath : null, matte: x.parts.mattePath };
+    };
+    const made = (part, keep, id) => async (progress) => { store[id] = await upscalePart(part, await parts((f) => progress(f / 10)), keep, (f) => progress(0.1 + f * 0.9)); };
+    await step(r, "upplate", made("plate", true, "upplate"), store);
+    await step(r, "uplayer", made("layer", true, "uplayer"), store);
+    await step(r, "upcomp", made("comp", keeps, "upcomp"), store);
+    upscaledShown(r, key);
+  }
 }
 
 // What the export wrote, as Load Plate reads it: a movie by its file, a sequence by its folder. space: the result's colour
@@ -3173,68 +3278,57 @@ function exportedParts(p, done, exr) {
     mattePath: matte ? `output:${matte.subfolder}` : null, space: exr ? HDR_FRAMES : p.cs, float: exr || /^\.exr$/i.test(p.spec.ext ?? "") };
 }
 
-function upscaleGuess() { // seconds for Upscale on the render on show: Paint and Clean restore the plate and the layer, and write three parts, but not with SDR to HDR
-  const r = S.renders.get(S.heroKey), f = upscaleFigures();
-  return upscaleKeeps((r?.active ?? []).map((e) => e.tool)) && !S.deliver.hdr ? f.edit : f.alone; // SDR to HDR's result is restored itself
+function upscaleGuess(id) { // seconds for one of Upscale's steps on the render on show (logic.upscaleSeconds); no id: all of them
+  const r = S.renders.get(S.heroKey), f = upscaleFigures(), keeps = r?.skip ? !r.skip.has("uplayer") : upscaleKeeps((r?.active ?? []).map((e) => e.tool)) && !S.deliver.hdr; // as planned (plan)
+  const pass = (passes, parts) => upscaleSeconds(f.target, f.frames, { passes, parts, profile: S.memoryProfile.name });
+  if (!id) return keeps ? f.edit : f.alone;
+  return id === "upcomp" && keeps ? pass(0, 1) : pass(1, 1); // each step writes its own part: the plate's pass and part, the layer's, the composite's part; or one result's pass and part
 }
 
-// Finish > Upscale: SeedVR2 7B restores an export at 3840 px on the long side, in windows this machine's memory holds
-// (logic.upscaleWindow). With a layer and a matte (Paint and Clean kept the plate's untouched pixels): the plate's windows
-// first, kept under the plate's folder for its next export (the job index); then the layer's, whose jobs compose the upscaled
-// result from them and the matte, and write the upscaled matte. Otherwise the result alone, with the upscaled matte when there is one.
-// Save Plate then writes each part in the format of its plate-size twin, under upscaled/ in `dir`: the zip's part « upscaled ». Its
-// jobs are the export's (kind « export »): what stops the export stops them. `set`: { dir, result, space, float, layer,
-// matte } as Load Plate takes the paths, with the plate (S.plate) giving the size, the frames and the plate itself.
-async function upscaleSet(set, progress) {
-  const p = S.plate, dir = set.dir, [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]];
+// Finish > Upscale: SeedVR2 7B upscales the result to the size asked for, in windows this machine's memory holds
+// (logic.upscaleWindow), in the steps that follow the full-size composite (upscaleSteps). With a layer and a matte (Paint and
+// Clean keep the plate's untouched pixels), « Plate, upscaled » makes the plate's windows, kept under the plate's folder for the
+// next render (the job index), then the upscaled plate; « Layer, upscaled » makes the layer's windows, whose jobs compose the
+// upscaled result from them and the matte and write the upscaled matte, then the upscaled layer; « Composite, upscaled » writes
+// the upscaled result. Otherwise « Composite, upscaled » makes the result's windows, with the upscaled matte when there is one,
+// then the upscaled result. Save Plate writes each part in the format of its plate-size twin, under upscaled/ in the export's
+// folder (the zip's part « upscaled »), and Save Movie its viewer movie, at its own size, for its row. `set`: { dir, result,
+// space, float, layer, matte }, the export's parts as Load Plate takes the paths; `keeps`: the plate and the layer come too.
+// Its jobs are of the export's kind: what stops a render's steps stops them.
+async function upscalePart(part, set, keeps, progress) {
+  const p = S.plate, [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]];
   const stats = await fetch("/system_stats").then((res) => res.json()).catch(() => null), gib = 2 ** 30;
-  const target = upscaleTarget(w, h, S.deliver.upscale || S.upscaleAsk), [sw, sh] = upscaleSource(w, h, target), keeps = upscaleComposes(set, p.cs);
-  const sized = target.join("x"); // each size keeps its own windows
+  const target = upscaleTarget(w, h, S.deliver.upscale || S.upscaleAsk), [sw, sh] = upscaleSource(w, h, target), sized = target.join("x"); // each size keeps its own windows
   const size = upscaleWindow((stats?.system?.ram_total ?? 0) / gib, (stats?.devices?.[0]?.vram_total ?? 0) / gib, target, [w, h], p.frames,
     keeps ? UPSCALE.composeCopies : UPSCALE.copies); // the plate's windows and the layer's are the same: sized for the layer's, which composes
-  const windows = upscaleWindows(p.frames, size), format = set.float ? "exr" : "png16", n = (i) => `w${String(i).padStart(3, "0")}`;
+  const float = set.float; // EXR frames: an EXR plate, or SDR to HDR's result
+  const windows = upscaleWindows(p.frames, size), format = float ? "exr" : "png16", n = (i) => `w${String(i).padStart(3, "0")}`;
   const plateDir = upscaleFolder(S.plate.id, [p.path, p.cs, S.ocio.config, target, size, format, S.build]);
-  log(`Upscale: ${target.join(" x ")}${sw ? `, upscaled from ${sw} x ${sh}` : ""}, ${windows.length === 1 ? "1 job" : `${windows.length} windows of ${size} frames`}.\n  `
-    + (keeps ? "SeedVR2 upscales the plate and the layer; the upscaled result is composited from them and the matte." : "SeedVR2 upscales the result."));
+  if (part === (keeps ? "plate" : "comp")) log(`Upscale: ${target.join(" x ")}${sw ? `, upscaled from ${sw} x ${sh}` : ""}, ${windows.length === 1 ? "1 job" : `${windows.length} windows of ${size} frames`}.\n  `
+    + (keeps ? "SeedVR2 7B upscales the plate and the layer, then composites the result from them and the matte." : "SeedVR2 7B upscales the result."));
   const values = (shot, space, [first, count], more) => ({ shot, max_frames: p.frames, source_width: sw, source_height: sh, first, count,
     width: target[0], height: target[1], color_space: space, color_fix: "lab", format, seed: 42, config: S.ocio.config, under: "", under_space: space,
     matte: "", comp_prefix: "", matte_prefix: "", ...more });
-  const jobs = [ // [workflow, values, weight]: a window weighs its frames, a part written upscaled a fifth of a window
-    ...(keeps ? windows.map((win, i) => ["upscale", values(p.path, p.cs, win, { prefix: `${plateDir}/${n(i)}/f` }), win[1]]) : []),
-    ...windows.map((win, i) => ["upscale", values(keeps ? set.layer : set.result, set.space, win, {
-      prefix: `${dir}/upscale/${sized}/${keeps ? "layer" : "result"}/${n(i)}/f`, matte: set.matte ?? "", matte_prefix: set.matte ? `${dir}/upscaled/matte/matte` : "",
-      ...(keeps ? { under: `output:${plateDir}/${n(i)}`, under_space: p.cs, comp_prefix: `${dir}/upscale/${sized}/comp/${n(i)}/f` } : {}) }), win[1]]),
-    ["upscale_export", { shot: set.result, frames: `output:${dir}/upscale/${sized}/${keeps ? "comp" : "result"}`, max_frames: p.frames, count: size, prefix: `${dir}/upscaled/export` }, size / 5],
-    ...(keeps ? [["upscale_export", { shot: set.layer, frames: `output:${dir}/upscale/${sized}/layer`, max_frames: p.frames, count: size, prefix: `${dir}/upscaled/layer` }, size / 5],
-      ["upscale_export", { shot: p.path, frames: `output:${plateDir}`, max_frames: p.frames, count: size, prefix: `${dir}/upscaled/plate` }, size / 5]] : []),
-  ];
+  const out = `${set.dir}/upscale/${sized}/out`; // the upscaled set of this size, which the zip names upscaled/ (download)
+  const matte = () => ({ matte: set.matte ?? "", matte_prefix: set.matte ? `${out}/matte/matte` : "" });
+  const [mw, mh] = colour.nativeSize(target[0], target[1], NATIVE_SIDE), view = float ? logSpace() : p.cs; // its viewer movie: the look of its frames
+  const save = (shot, frames, name, space) => ["upscale_export", { shot, frames: `output:${frames}`, max_frames: p.frames, count: size, prefix: `${out}/${name}`,
+    ...movieDims(mw, mh), config: S.ocio.config, color_space: space, movie_space: view, video_prefix: `${set.dir}/upscale/${sized}/movie/${name}` }, size / 5];
+  const jobs = part === "plate" ? [...windows.map((win, i) => ["upscale", values(p.path, p.cs, win, { prefix: `${plateDir}/${n(i)}/f` }), win[1]]), save(p.path, plateDir, "plate", p.cs)]
+    : part === "layer" ? [...windows.map((win, i) => ["upscale", values(set.layer, set.space, win, { prefix: `${set.dir}/upscale/${sized}/layer/${n(i)}/f`, ...matte(),
+      under: `output:${plateDir}/${n(i)}`, under_space: p.cs, comp_prefix: `${set.dir}/upscale/${sized}/comp/${n(i)}/f` }), win[1]]), save(set.layer, `${set.dir}/upscale/${sized}/layer`, "layer", set.space)]
+    : [...(keeps ? [] : windows.map((win, i) => ["upscale", values(set.result, set.space, win, { prefix: `${set.dir}/upscale/${sized}/result/${n(i)}/f`, ...matte() }), win[1]])),
+      save(set.result, `${set.dir}/upscale/${sized}/${keeps ? "comp" : "result"}`, "export", set.space)]; // [workflow, values, weight]: a window weighs its frames, a part written a fifth of a window
   const total = jobs.reduce((a, [, , wt]) => a + wt, 0);
-  let before = 0;
+  let before = 0, done = null;
   for (const [name, v, wt] of jobs) {
-    await run(name, v, { kind: "export", progress: (f) => progress((before + f * wt) / total) }).done;
+    done = await run(name, v, { kind: "export", progress: (f) => progress((before + f * wt) / total) }).done;
     before += wt;
     progress(before / total);
   }
+  const file = outputFile("upscale_export", done, "video");
+  return file ? { url: viewUrl(file), space: view, size: [mw, mh] } : null; // what its row shows
 }
-async function upscaleAlone(dir, result, float) { // Upscale on a result with no plate and no layer (a fluid shot, the plate alone): restored under upscaled/ of dir; false when it stopped or failed
-  const t0 = performance.now(), guess = Math.round(upscaleFigures().alone);
-  status(`Upscale: about ${guess} s.`);
-  try {
-    await upscaleSet({ dir, result, space: float ? HDR_FRAMES : S.plate.cs, float, layer: null, matte: null }, (x) => showStatus(`Upscale: ${Math.round(x * 100)}%.`));
-  } catch (err) { // a stop says nothing more; a failure writes its fact in the log and what to do on the status line
-    const e = explained(err, "Upscale");
-    if (e === err) status("Upscale: stopped. The zip was not written."); else showStatus(e.message);
-    return false;
-  }
-  status(`Upscale: done in ${((performance.now() - t0) / 1000).toFixed(1)} s (estimate ${guess} s).`);
-  return true;
-}
-async function upscaleExport(r, progress) { // the render's step: the export's parts, as the export step kept them
-  const x = r.exported;
-  await upscaleSet({ dir: x.run, result: x.path, space: x.space, float: x.float, layer: x.layer ? x.layerPath : null, matte: x.mattePath }, progress);
-  x.upscaled = true; // the zip takes the upscaled set
-}
-
 function elementOf(zones, size, hero = S.hero) { // where the edits changed the first frame, inside the paint zones: the paint matte starts here
   const [w, h] = size, data = (c) => c.getContext("2d").getImageData(0, 0, w, h).data;
   const bits = changedMask(data(snap(hero, size)), data(snap(S.original, size)), data(zones), FOLLOW.seed);
@@ -3308,7 +3402,8 @@ async function download(parts = ["export", "matte"]) {
   if (written) parts = [...parts, "graph"];
   const models = (await modelsBehindResult().catch(() => [])).map((m) => m.id).join(",");
   const a = Object.assign(document.createElement("a"), {
-    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, parts: parts.join(","), models })}`,
+    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, parts: parts.join(","), models,
+      ...(parts.includes("upscaled") ? { upscaled: `upscale/${upSize()}/out` } : {}) })}`, // the upscaled set of the size asked for (upscalePart)
     download: `${S.exported.name}.zip` });
   document.body.append(a); a.click(); a.remove();
   const what = parts.map((k) => (k === "export" && S.exported.space === HDR_FRAMES ? "the result as half-float EXR frames" : PARTS[k])); // SDR to HDR's result of a plate whose format holds nothing above 1.0
@@ -3408,7 +3503,7 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
 // earlier render is done first), then the step running, then the steps to come in their planned order
 function stepsInOrder(r, skip) {
   const steps = STAGES.filter((st) => !skip.has(st.id)), of = Object.fromEntries(steps.map((st) => [st.id, st]));
-  return stepOrder(steps.map((st) => st.id), { done: (id) => doneOf(r, of[id]) !== undefined, at: (id) => (of[id].preview ? previewOf(r) : r)?.at?.[id],
+  return stepOrder(steps.map((st) => st.id), { done: (id) => doneOf(r, of[id]) !== undefined, at: (id) => storeOf(r, of[id])?.at?.[id],
     now: S.stage?.key === S.heroKey ? S.stage.id : null }).map((id) => of[id]);
 }
 
@@ -3466,14 +3561,14 @@ function stagesUI() {
   first.innerHTML = '<span class="dot"></span><span class="name">First frame</span><span class="time">edit</span>';
   pick(first, "first", "the first frame");
   const rows = [...fluidRows, ...(active.length ? [first] : []), ...stepsInOrder(r, skip).map((st) => {
-    const li = document.createElement("li"), took = doneOf(r, st), from = (st.preview ? previewOf(r) : r)?.taken?.[st.id];
+    const li = document.createElement("li"), took = doneOf(r, st), from = storeOf(r, st)?.taken?.[st.id];
     const now = S.stage?.id === st.id && S.stage.key === S.heroKey;
     li.className = took !== undefined ? "done" : now ? "now" : later(st) ? "later" : "";
     li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time"></span>';
     li.children[1].textContent = labelOf(st);
-    li.children[2].textContent = from ? `from v${from}` : took !== undefined ? `${Math.round(took)} s` : now ? `${Math.round(S.stage.progress * 100)}%`
-      : later(st) ? "on Export" : `~${Math.round(estimate(st.id, skip))} s`;
-    const movie = took !== undefined ? passMovie(st.id, r, previewOf(r), { log: logSpace(), data: matteSpace() }) : null;
+    li.children[2].textContent = from ? `from v${from}` : took !== undefined ? span(took) : now ? `${Math.round(S.stage.progress * 100)}%`
+      : later(st) ? "on Export" : `~${span(estimate(st.id, skip))}`;
+    const movie = took !== undefined ? passMovie(st.id, r, previewOf(r), { log: logSpace(), data: matteSpace() }, upOf(r)) : null;
     if (movie) {
       pick(li, st.id, labelOf(st).toLowerCase());
       if (S.pass ? S.pass === st.id : movie.url === S.shot?.url) li.classList.add("shown"); // the row on show
@@ -3559,15 +3654,18 @@ function exportUI() {
 // A fluid shot with no edit on it exports itself: its HDR frames when it went through SDR to HDR (half-float EXR in
 // ACES2065-1), the shot in the blank plate's format (ProRes 4444) and its preview movie, from the fluid shot's folder.
 const fluidOnly = () => !!S.fluid?.result && S.fluid.on !== false && !S.edits.some((e) => e.on && e.patch);
-async function downloadFluid() {
-  const f = S.fluid.result, parts = f.hdr ? ["hdr", "plate", "preview"] : ["plate", "preview"];
+async function downloadFluid() { // Export of a fluid shot alone: its own files, and the upscaled set its step made (upscaleResult)
+  const f = S.fluid.result, parts = f.hdr ? ["hdr", "plate", "preview"] : ["plate", "preview"], r = S.renders.get(S.heroKey);
+  if (r) plan(r, r.active ?? []);
+  if (r && UPS.some((st) => !r.skip.has(st.id) && doneOf(r, st) === undefined)) { // Upscale's step first: the render makes it, then the zip
+    S.wantDownload = ["fluid"];
+    status(runsFirst("Upscale"));
+    exportUI(); stagesUI(); return void touch();
+  }
+  S.wantDownload = null;
   S.exported = { run: f.run ?? fluidRun(f.path), name: `fluid_v${f.v}`, text: "" };
   log(`Export: fluid shot v${f.v}${f.hdr ? " in HDR" : ""}, from ${S.exported.run}.`);
-  if (S.deliver.upscale && S.upscaleReady) { // Finish > Upscale: the fluid shot alone
-    if (!(await upscaleAlone(S.exported.run, f.path, f.hdr))) return;
-    parts.push("upscaled");
-  }
-  download(parts);
+  download([...parts, ...(r && upscaled(r) ? ["upscaled"] : [])]);
 }
 
 const exportsExr = (r) => exrResult(S.plate.spec, r?.skip ? !r.skip.has("hdr") : hdrWanted(), S.plate.headroom); // the render's own plan (plan) decides: an HDR result of a plate whose format holds nothing above 1.0
@@ -3575,7 +3673,7 @@ function exportDialog() { // its words come from one source for every kind of re
   const fluid = fluidOnly(), alone = plateAlone(S.heroKey), r = S.renders.get(S.heroKey), relitHdr = !!r?.hdrAfter, spec = S.plate.spec;
   for (const k of ["matte", "review", "shot"]) $(`#x-${k}`).closest("label").hidden = fluid || alone || relitHdr; // a fluid shot alone, the plate alone, a relit result in HDR: their own files
   $("#x-graph").closest("label").hidden = alone || !(fluid ? graphsFluid() : S.edits.some((e) => e.on && e.patch && e.state === "done")); // the edits on show, or a fluid shot alone, as one ComfyUI workflow
-  const kind = fluid ? "fluid" : alone ? "plate" : relitHdr ? "relit" : "edits";
+  const kind = fluid ? "fluid" : alone ? (S.heroKey === PLATE_UP ? "upscaled" : "plate") : relitHdr ? "relit" : "edits";
   const ready = fluid || (alone ? !!r?.review : relitHdr ? !!r.hdrFrames : !!(r?.exported || r?.review));
   const words = exportWords({ kind, ready, left: ready ? "" : secs(renderLeft(true), ""), hdr: fluid && !!S.fluid.result.hdr, exr: !fluid && exportsExr(r),
     movie: fluid ? "" : spec.kind === "video" ? `${spec.codec} movie` : `${spec.ext.slice(1).toUpperCase()} ${spec.kind}` }); // a fluid shot names its own formats
@@ -4546,9 +4644,10 @@ $("#x-go").onclick = () => {
   const r = S.renders.get(S.heroKey);
   if (plateAlone(S.heroKey) || r?.hdrAfter) return void setTimeout(() => exportPlate(r), 0); // SDR to HDR's frames: the plate alone, or a relit result in HDR
   const parts = ["export", ...["matte", "review", "shot"].filter((k) => $(`#x-${k}`).checked)];
-  if (r?.exported) return download(parts);
+  if (r?.exported && r.skip?.has("upcomp")) return download(parts); // with Upscale on, the render makes the steps still due, then the zip
   S.wantDownload = parts;
-  status(`Export: writing ${exportsExr(r) ? "half-float EXR frames in ACES2065-1" : "in the plate's own format"}. The zip downloads when it is done.`);
+  status(r && UPS.some((st) => !r.skip.has(st.id) && doneOf(r, st) === undefined) ? runsFirst("Upscale")
+    : `Export: writing ${exportsExr(r) ? "half-float EXR frames in ACES2065-1" : "in the plate's own format"}. The zip downloads when it is done.`);
   exportUI(); stagesUI(); touch();
 };
 $("#log-btn").onclick = () => {
@@ -4755,7 +4854,7 @@ function enter(another) { // Generate (Enter): the edit in progress, then its sh
   if (another) { const target = S.selected ?? S.edits.at(-1); if (target) again(target); return; }
   if (resumed || renderPending()) { // a stopped or failed render goes on
     const r = S.renders.get(S.heroKey) ?? (plateAlone(S.heroKey) ? want(S.heroKey, true) : null); if (r) r.failed = null; touch(0);
-    return hud(resumed ? "Generating again from where it stopped." : plateAlone(S.heroKey) ? "SDR to HDR starts now." : "The shot renders now.", 2000);
+    return hud(resumed ? "Generating again from where it stopped." : plateAlone(S.heroKey) ? `${S.heroKey === PLATE_UP ? "Upscale" : "SDR to HDR"} starts now.` : "The shot renders now.", 2000);
   }
   hud(S.edits.length ? "The result is up to date. Ctrl+Enter tries another seed." : "Paint on the frame first, then Generate.", 3000);
 }

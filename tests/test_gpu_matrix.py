@@ -226,6 +226,13 @@ class Run(unittest.TestCase):
             self.assertEqual(r["profile"], "small (16 GB of VRAM, 52 GB of RAM. Models load one at a time)")
             self.assertEqual(len(r["live_off"]), 1)
 
+    def test_the_report_reads_a_step_in_minutes_as_the_page_writes_it_from_100_s(self):
+        log = ("04:54:50 PM  Render v1: Plate, upscaled: about 22 min.\n05:17:42 PM  Render v1: Plate, upscaled: done in 22.9 min (estimate 22 min).\n"
+               "05:41:02 PM  Render v1: Composite, upscaled: about 86 s.\n05:41:41 PM  Render v1: Composite, upscaled: done in 39.5 s (estimate 86 s).\n")
+        r = gpu_matrix.read_log(log)
+        self.assertEqual([(label, round(s, 1)) for label, s in r["steps"]], [("v1 Plate, upscaled", 1374.0), ("v1 Composite, upscaled", 39.5)])
+        self.assertEqual(r["announced"], {"v1 Plate, upscaled": 1320, "v1 Composite, upscaled": 86})
+
     def test_fresh_frees_comfyui_before_each_case(self):
         """Without --fresh, a case's first job can read the memory that the case before it left (138 GB on a pod)."""
         calls, _, report = self.matrix("horse_cow,horse_erase", [True], "--fresh")

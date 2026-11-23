@@ -54,7 +54,7 @@ QUICK = ("horse_cow", "horse_erase", "horse_light", "fluid_720")
 ALL = QUICK + ("uhd_cow", "uhd_erase", "uhd_light", "fluid_1080_edit", "uhd25_cow", "uhd25_erase", "uhd25_light")
 UHD = {"horse_3840x2160_50fps.mp4": 50, "horse_3840x2160_25fps.mp4": 25}  # « 4K at 50 fps », and at 25: every tool runs on a 3840 x 2160 plate
 UHD_SIZE, UHD_FRAMES = (3840, 2160), 121
-STEP = re.compile(r"Render v(\d+): (.+?)(?: took |: done in )([\d.]+) s")  # the page's log: one line per render step
+STEP = re.compile(r"Render v(\d+): (.+?)(?: took |: done in )([\d.]+) (s|min)\b")  # the page's log: one line per render step, in minutes from 100 s
 # and one line per finished job: its id, its seconds, its nodes, those ComfyUI took from its cache (a model loader among
 # them is a model not loaded again) and the previews the page received. A line starts with its time, with no space after it
 JOB = re.compile(r"([a-z]+) ([0-9a-f?]{1,8}): done in ([\d.]+) s \((\d+) nodes?(?:, (\d+) from ComfyUI's cache)?(?:, (\d+) previews?)?")
@@ -301,7 +301,7 @@ def log_steps(text):
     steps, fluid = [], "?"
     for line in text.splitlines():
         if m := STEP.search(line):
-            steps.append((f"v{m.group(1)} {m.group(2)}", float(m.group(3))))
+            steps.append((f"v{m.group(1)} {m.group(2)}", float(m.group(3)) * (60 if m.group(4) == "min" else 1)))
         elif m := re.search(r"Fluid (?:shot )?v(\d+): (.+?):? (?:took|done in) ([\d.]+) s", line):
             steps.append((f"fluid v{m.group(1)} {m.group(2)}", float(m.group(3))))
         elif m := re.search(r"Fluid (?:shot )?v(\d+): done in ([\d.]+) s", line):
@@ -344,7 +344,7 @@ def read_log(text):
         "profile": f"{profile.group(1)} ({'. '.join(x for x in profile.group(2, 3) if x)})" if profile else "not in the log's last 400 lines",
         "mattes": re.findall(r"([A-Z][a-z]+ matte(?: \([^)\n]*\))?: tracked on [^\n]*(?:\n  [^\n]*)*)", text),  # any word before « matte »; the headline and its detail lines (mathops.follow_summary)
         "seeds": sorted(set(re.findall(r"\b[Ss]eed (\d+)\b(?! asked for)", text)), key=int),  # « seed 105, » in a sentence, « Seed 104, » on a detail line
-        "announced": {f"v{v} {label}": int(s) for v, label, s in re.findall(r"Render v(\d+): (.+?)(?: \(about |: about )(\d+) s", text)},
+        "announced": {f"v{v} {label}": int(n) * (60 if unit == "min" else 1) for v, label, n, unit in re.findall(r"Render v(\d+): (.+?)(?: \(about |: about )(\d+) (s|min)\b", text)},
         "figures": re.findall(r"((?:Edit \d+:|Warning: edit \d+,) [^\n]*?\(\d+% of it changed[^)\n]*\))", text),  # an erase: how much of the object changed, gone or held back (logic.leftLines)
     }
 
