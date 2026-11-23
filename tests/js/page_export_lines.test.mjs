@@ -6,14 +6,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { exportWords, secs } from "../../web/logic.mjs";
 
+const STEPS = { comp: "Composite, full size", shot: "Shot, full size", hdr: "SDR to HDR", up: "Composite, upscaled" }; // the Render panel's names, as the page gives them
 const read = (f) => readFileSync(new URL(`../../web/${f}`, import.meta.url), "utf8");
 
 test("the Export dialog: one line above its parts for every kind of result, and a note only for what Export waits for or brings", () => {
   const HINT = "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.";
   const said = (o) => { const w = exportWords(o); assert.equal(w.hint, HINT); return w.note; };
-  assert.equal(said({ kind: "edits", ready: true, movie: "h264 movie" }), ""); // written, or ready to write: nothing to add
-  assert.equal(said({ kind: "edits", ready: false, left: secs(64, ""), movie: "h264 movie" }), "The full-size composite renders first: about 1 min.");
-  assert.equal(said({ kind: "edits", ready: false }), "The full-size composite renders first."); // no estimate yet
+  assert.equal(said({ kind: "edits", ready: true, steps: STEPS }), ""); // written, or ready to write: nothing to add
+  assert.equal(said({ kind: "edits", ready: false, left: secs(64, ""), steps: STEPS }), "Composite, full size renders first: about 1 min.");
+  assert.equal(said({ kind: "edits", ready: false, steps: STEPS }), "Composite, full size renders first."); // no estimate yet
   assert.equal(said({ kind: "plate", ready: true, exr: true }), "The plate in HDR, from SDR to HDR.");
   assert.equal(said({ kind: "plate", ready: false, left: secs(610, ""), exr: true }), "The plate in HDR. SDR to HDR runs first: about 10 min.");
   assert.equal(said({ kind: "relit", ready: true, exr: true }), "The relit result in HDR, from SDR to HDR.");
@@ -24,15 +25,16 @@ test("the Export dialog: one line above its parts for every kind of result, and 
 
 test("the Help's Export entry opens with the Export dialog's own line, which is written once", () => {
   const html = read("paintaplate.html"), app = read("app.mjs");
-  assert.match(html, /<dt>Export<\/dt><dd><span id="help-export"><\/span> The result keeps the plate's format;/);
+  assert.match(html, /<dt>Export<\/dt><dd><span id="help-export"><\/span><\/dd>/); // the whole entry comes from exportWords' help
   assert.ok(html.includes('<p id="x-hint" class="hint"></p>')); // the dialog's line comes from the code, never from the page's file
-  assert.ok(app.includes('$("#help-export").textContent = exportWords({ kind: "edits" }).hint;'));
+  assert.ok(app.includes('$("#help-export").textContent = exportWords({ kind: "edits", steps: { comp: labelOf(STAGES.find((st) => st.id === "review"), null) } }).help;'));
+  assert.ok(exportWords({ kind: "edits", steps: STEPS }).help.startsWith(`${exportWords({ kind: "edits" }).hint} Composite, full size keeps the plate's format.`));
   for (const src of [html, app, read("logic.mjs")]) assert.equal(src.split("then downloads").length - 1, src === read("logic.mjs") ? 1 : 0);
 });
 
 test("the dialog names the result's format once: the plate's own, EXR frames with SDR to HDR, a fluid shot's own", () => {
-  assert.equal(exportWords({ kind: "edits", movie: "h264 movie" }).format, "h264 movie");
-  assert.equal(exportWords({ kind: "edits", exr: true, movie: "h264 movie" }).format, "half-float EXR frames, ACES2065-1");
+  assert.equal(exportWords({ kind: "edits", spec: { kind: "video", codec: "h264" } }).format, "H.264 movie");
+  assert.equal(exportWords({ kind: "edits", exr: true, spec: { kind: "video", codec: "h264" } }).format, "half-float EXR frames, ACES2065-1");
   assert.equal(exportWords({ kind: "fluid" }).format, "ProRes 4444 movie");
   assert.equal(exportWords({ kind: "fluid", hdr: true }).format, "half-float EXR frames, ACES2065-1");
 });

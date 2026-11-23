@@ -67,9 +67,10 @@ def run(browser, port, U):
     U.check(len(exrs) == 49 and size == (704, 1280) and "LTX" in listed,
             f"the zip holds the 49 EXR frames at the plate's size, 1280 x 704, and the models behind them: {len(exrs)} frames, {size}, {names[:2]}")
     status = page.text_content("#status") or ""
-    U.check(status.startswith("Download: ") and status.endswith("with the HDR frames.") and any(
-        t.startswith("Export: done, in ComfyUI's output folder.") and "49 half-float EXR frames in ACES2065-1" in t for t in U.log_lines(page)),
-        f"the status line and the log say what Export wrote: {status!r}")
+    said = U.log_lines(page)
+    U.check(status.startswith("Download: ") and status.endswith(".zip.") and any(t.startswith("Download: ") and "SDR to HDR." in t for t in said) and any(
+        t.startswith("Export: done, in ComfyUI's output folder.") and "49 half-float EXR frames in ACES2065-1" in t for t in said),
+        f"the status line names the zip, and the log what Export wrote and the row the zip holds: {status!r}")
     page.click("#finish-btn")
     page.click("#finish-hdr")
     U.check(not rows() and page.is_disabled("#export-btn") and page.is_disabled("#generate"), "turned off, the plate has no step and nothing to export")

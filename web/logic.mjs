@@ -837,16 +837,49 @@ export function stepOrder(steps, { done, at = () => undefined, now = null }) {
   return steps.map((id, i) => ({ id, i, k: rank(id) })).sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.i - b.i).map((x) => x.id);
 }
 
-// The Export dialog's words for every kind of result, from one source: the line above its parts, the result's format, and
-// the note under them. kind: "edits", "plate" (SDR to HDR on the plate, with no edit), "relit" (a Light edit in HDR) or
-// "fluid". ready: what Export takes its files from is made; left: the time until it is, such as "about 10 min", or "".
-export function exportWords({ kind, ready = true, left = "", exr = false, hdr = false, movie = "" }) {
+// The Export dialog's words for every kind of result, from one source: the line above its rows, each row's label and detail
+// and whether it shows, the note under them, and the Help's Export entry. kind: "edits", "plate" (SDR to HDR on the plate,
+// with no edit), "relit" (a Light edit in HDR), "upscaled" (the plate alone, upscaled) or "fluid". The rows take the Render
+// panel's step names, which `steps` gives as the page names them (app.labelOf): comp, the composite at full size; shot, the
+// shot at full size; hdr, SDR to HDR; up, the Upscale step whose set the zip takes. ready: what Export takes its files from
+// is made; left: the time until it is, such as "about 10 min", or "". spec: the plate's spec, which names its format; exr:
+// the result is half-float EXR frames, an HDR result of a plate whose format holds nothing above 1.0; hdr: the fluid shot
+// went through SDR to HDR. The composite as a movie (the review movie) shows only where the composite is frames.
+export const EXR_FRAMES = "half-float EXR frames, ACES2065-1";
+export function exportWords({ kind, ready = true, left = "", exr = false, hdr = false, spec = null, steps = {} }) {
   const first = (step) => `${step} first${left ? `: ${left}` : ""}.`, inHdr = (what) => (ready ? `${what} in HDR, from SDR to HDR.` : `${what} in HDR. ${first("SDR to HDR runs")}`);
   const note = kind === "fluid" ? (hdr ? "The fluid shot in HDR, with the SDR shot in ProRes 4444 and its preview movie." : "The fluid shot in ProRes 4444, with its preview movie.")
     : kind === "plate" ? inHdr("The plate") : kind === "relit" ? inHdr("The relit result") : kind === "upscaled" ? (ready ? "" : first("Upscale runs"))
-    : ready ? "" : first("The full-size composite renders");
-  return { hint: "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.",
-    format: (kind === "fluid" ? hdr : exr) ? "half-float EXR frames, ACES2065-1" : kind === "fluid" ? "ProRes 4444 movie" : movie, note };
+    : ready ? "" : first(`${steps.comp} renders`);
+  const format = (kind === "fluid" ? hdr : exr) ? EXR_FRAMES : kind === "fluid" ? "ProRes 4444 movie" : plateFormat(spec);
+  const edits = kind === "edits", frames = format === EXR_FRAMES || (!!spec && spec.kind !== "video");
+  const hint = "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.";
+  return { hint, format, note, help: `${hint} ${steps.comp} keeps the plate's format. With SDR to HDR, a movie or another SDR format gives half-float EXR frames.`,
+    rows: {
+      export: { label: kind === "fluid" ? "Fluid shot" : kind === "plate" || kind === "relit" ? steps.hdr : kind === "upscaled" ? steps.up : steps.comp, detail: format, shown: true },
+      review: { label: `${steps.comp}, as a movie`, detail: "H.264 MP4", shown: edits && frames },
+      matte: { label: "Matte", detail: "where the plate changed, PNG frames", shown: edits },
+      shot: { label: steps.shot, detail: "the whole frame as the model made it, H.264 MP4", shown: edits },
+      graph: { label: "ComfyUI graph", detail: "the whole scene as one ComfyUI workflow, JSON", shown: true }, // the page decides: the edits on show, or a fluid shot alone
+      upscaled: { label: steps.up, shown: true }, // no row: Finish > Upscale adds its set to the zip
+    } };
+}
+// A plate's format as the Export dialog names it: « H.264 movie », « ProRes 4444 movie », « EXR frames ». spec: the plate's
+// spec, with the codec and the profile its movie names (plateio).
+const CODECS = { h264: "H.264", hevc: "H.265", prores: "ProRes", av1: "AV1", vp9: "VP9", mpeg4: "MPEG-4", dnxhd: "DNxHD", ffv1: "FFV1", mjpeg: "Motion JPEG" };
+export function plateFormat(spec) {
+  if (!spec) return "";
+  if (spec.kind !== "video") return `${String(spec.ext ?? "").replace(/^\./, "").toUpperCase()} frames`;
+  const name = CODECS[spec.codec] ?? String(spec.codec ?? "").toUpperCase();
+  return `${name}${spec.codec === "prores" && spec.profile ? ` ${spec.profile}` : ""} movie`;
+}
+// What the log says once the zip downloads: its name, then one detail line per row of the dialog that the zip holds, in the
+// dialog's words (exportWords' rows). parts: the zip's parts, as the page asks the route for them. A part with no row of its
+// own (the layer) adds no line, and a fluid shot's files share the row « Fluid shot ».
+const ROW_OF = { export: "export", hdr: "export", plate: "export", preview: "export", matte: "matte", review: "review", shot: "shot", graph: "graph", upscaled: "upscaled" };
+export function downloadLines(zip, parts, rows) {
+  const labels = [...new Set(parts.map((p) => rows[ROW_OF[p]]?.label).filter(Boolean))];
+  return [`Download: ${zip}.`, ...labels.map((label) => `  ${label}.`)].join("\n");
 }
 export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on
 

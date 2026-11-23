@@ -18,7 +18,7 @@ def run(browser, port, U):
             "ComfyUI graph is a tick box among Export's parts, off")
     U.check("downloads at once" not in (page.text_content("#export") or "") and page.text_content("#x-hint").startswith("Export writes the selected files"),
             f"the dialog says what Export does: {page.text_content('#x-hint')!r}, {page.text_content('#x-note')!r}")
-    U.check(page.text_content("#help-export") == page.text_content("#x-hint") == "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.",
+    U.check(page.text_content("#help-export").startswith(page.text_content("#x-hint")) and page.text_content("#x-hint") == "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.",
             f"the Help's Export entry opens with the same line: {page.text_content('#help-export')!r}")
     page.check("#x-graph")
     with page.expect_download(timeout=180000) as dl:
