@@ -20,7 +20,7 @@ export const NAME_REQUEST = { paint: "The edit painted this into the image: \"{t
 
 export function nameRequest(tool, texts) { // the request for the edits' text prompts, joined; none without a text prompt
   const text = texts.map((t) => String(t ?? "").trim()).filter(Boolean).join("; ");
-  return text ? NAME_REQUEST[tool].replace("{text}", text.replaceAll("\"", "'")) : "";
+  return text ? NAME_REQUEST[tool].replace("{text}", () => text.replaceAll("\"", "'")) : ""; // a function: « $& » in a text prompt stays as typed
 }
 
 export function parseWorkflow(prompt) { // slots, outputs and the progress node, from each node's _meta
