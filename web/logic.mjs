@@ -1368,7 +1368,8 @@ export const fluidPasses = (result, spaces = {}) => (result ? [
 // names the models that made its result.
 export const STEP_FLOWS = { erase: ["matte"], clean: ["clean"], shot: ["shot"], track: ["matte"], comp: ["comp"],
   cleanfull: ["clean", "cleanup"], full: ["shot"], trackfull: ["matte"], hdr: ["hdr"], review: ["review"], export: ["export"],
-  upscale: ["upscale", "upscale_export"], upplate: ["upscale"], uplayer: ["export", "upscale"], upcomp: ["export", "upscale", "upscale_export"], uphdr: ["upscale", "upscale_export"] };
+  upplate: ["export", "upscale", "upscale_export"], uplayer: ["export", "upscale", "upscale_export"], upcomp: ["export", "upscale", "upscale_export"], // an edit's upscaled steps read the export's parts
+  uphdr: ["upscale", "upscale_export"] };
 // The workflows behind a result: its edits' own (the prompt writer and Klein, SAM's object search for an erase), the
 // render's record, and a fluid shot's (with its SDR to HDR)
 export function resultFlows({ tools = [], render = [], fluid = false, fluidHdr = false } = {}) {

@@ -110,14 +110,14 @@ class Votes(unittest.TestCase):
     def test_a_clean_leaves_out_what_the_plate_keeps(self):
         zone = box(0, 1, 4, 30, 50, 96)[0]
         palm = box(0, N, 6, 28, 56, 94)  # the removed thing
-        lady = box(0, N, 10, 46, 40, 66)  # in front of the palm's left side
+        person = box(0, N, 10, 46, 40, 66)  # in front of the palm's left side
         track = palm.copy()
         track[0] = zone  # on its first frame SAM answers with the zone
         named = np.stack([palm, box(0, N, 40, 46, 2, 10)], axis=1)  # the palm, and a plant elsewhere with the same name
-        kept = mathops.kept_things(np.stack([lady, palm], axis=1), zone > 0)  # the palm lies in the zone: not kept
+        kept = mathops.kept_things(np.stack([person, palm], axis=1), zone > 0)  # the palm lies in the zone: not kept
         m, summary = mathops.clean_votes(track, named, kept, zone)
-        self.assertFalse((m > 0.5)[lady > 0].any())
-        self.assertTrue((m[3] > 0.5)[(palm[3] > 0) & (lady[3] == 0)].all())
+        self.assertFalse((m > 0.5)[person > 0].any())
+        self.assertTrue((m[3] > 0.5)[(palm[3] > 0) & (person[3] == 0)].all())
         self.assertFalse((m[0] > 0.5)[(zone > 0) & (palm[0] == 0)].any())  # the first frame is the palm, not the zone
         self.assertEqual(summary, "tracked on 10 of 10 frames.\n  Left out: what the plate keeps (person, animal, vehicle), on 10 frames.")
 

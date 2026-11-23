@@ -3154,7 +3154,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     hud("Shot, preview: Space plays it. The composite follows.", 2500);
   }
   if (!off) await step(r, "track", async (progress) => { pv.painted = await track(active, made, base, `_${sized}`, progress, null, ["paint"],
-    underOf(pv), r.heroFrame, r.erased?.found.matte_a); }, pv);
+    underOf(pv), r.heroFrame); }, pv);
   pv.mattes = mattesOf({ ...r.erased?.found, ...pv.painted?.found });
   if (!off) await step(r, "comp", async (progress) => {
     const comp = await run("comp", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, width: sw, height: sh, shot: made, ...plateMovie(p),
@@ -3177,7 +3177,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     log("Viewer: full-size shot until the full-size composite is ready.");
   }
   await step(r, "trackfull", async (progress) => { r.full = await track(active, final, base, "_full", progress, pv.mattes, ["paint"],
-    underOf(onePass ? pv : r), r.heroFrame, r.erased?.found.matte_a); });
+    underOf(onePass ? pv : r), r.heroFrame); });
   r.full ??= pv.mattes;
   if (!r.hdrAfter) await step(r, "hdr", async (progress) => { // SDR to HDR: the full-size shot made again in scene-linear values; review fits it to the plate
     const out = await run("hdr", { ...S.memoryProfile.slots, path: final, config: S.ocio.config, max_frames: p.frames, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps), ...plateMovie(p),
@@ -3338,7 +3338,7 @@ function elementOf(zones, size, hero = S.hero) { // where the edits changed the 
   return c;
 }
 
-async function track(active, shotPath, base, suffix, progress, previous, tools, under = null, hero = S.hero, erased = null) { // SAM 3.1 follows a kind of edit through the shot; `under`: the plate the shot was made over; `erased`: the Clean matte's frames under a paint
+async function track(active, shotPath, base, suffix, progress, previous, tools, under = null, hero = S.hero) { // SAM 3.1 follows a kind of edit through the shot; `under`: the plate the shot was made over
   const p = S.plate, found = { ...(previous?.found ?? {}) };
   for (const [key, tool, path, cs] of [["matte_a", "erase", p.path, p.cs], ["matte_b", "paint", shotPath, "@model"]]) {
     const edits = active.filter((e) => e.tool === tool);
@@ -3388,7 +3388,7 @@ function jobFlows() {
   const f = S.fluid, fluid = !!f && (f.result ? f.on !== false : keying() && f.keys.length > 0);
   const alone = !edits.length && plateAlone(S.heroKey), skip = edits.length || alone ? plan({ key: S.heroKey }, edits).skip : null;
   const steps = skip ? STAGES.filter((st) => !skip.has(st.id)).flatMap((st) => STEP_FLOWS[st.id] ?? []) : [];
-  if (S.deliver.upscale && S.upscaleReady && !edits.length && (alone || fluid)) steps.push(...STEP_FLOWS.upscale); // their export restores itself
+  if (S.deliver.upscale && S.upscaleReady && !edits.length && fluid) steps.push("upscale", "upscale_export"); // a fluid shot planned before it is made: Upscale's step follows it
   return resultFlows({ tools: edits.map((e) => e.tool), render: steps, fluid, fluidHdr: fluid && (f.result ? !!f.result.hdr : f.depth === HDR_DEPTH && S.hdrReady) });
 }
 async function modelsBehindResult() { // the models behind the result on show: the workflows its render ran, for the export's MODELS.md
