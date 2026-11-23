@@ -1107,7 +1107,8 @@ function plateWipe() { // the plain wipe: the plate on the left, the pass on sho
 // Until every matte has the frame, the last tint stays; data-frame names the frame it shows.
 function xrayNow() { // the mattes of the edits on show, at the size on show
   const r = S.renders.get(S.heroKey), st = STAGES.find((x) => x.id === S.pass);
-  const full = st ? !!st.final : !!S.shot?.url && [r?.play, r?.review, r?.raw, r?.cleanRaw, r?.hdrMovie].includes(S.shot.url);
+  const full = st ? !!st.final : !!S.shot?.url && ([r?.play, r?.review, r?.raw, r?.cleanRaw, r?.hdrMovie].includes(S.shot.url)
+    || Object.values(upOf(r) ?? {}).some((m) => m?.url === S.shot.url)); // an upscaled step on show, the latest result, is full size too
   return xrayPlan({ tools: S.edits.filter((e) => e.on && e.patch && e.state === "done").map((e) => e.tool), r, pv: previewOf(r), full });
 }
 function setXray(on) {

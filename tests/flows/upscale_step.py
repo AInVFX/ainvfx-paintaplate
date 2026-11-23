@@ -65,6 +65,25 @@ def run(browser, port, U):
     U.poll(page, lambda: shown() == ["Composite, upscaled"] and canvas() == [1600, 880], 3)
     U.check(shown() == ["Composite, upscaled"] and canvas() == [1600, 880] and page.text_content("#status").startswith("Composite, upscaled: ready, in the viewer."),
             f"the player shows the upscaled composite at its own size: {shown()}, canvas {canvas()}, {page.text_content('#status')!r}")
+    view = lambda: page.eval_on_selector("canvas[data-picture]", "e => { const r = e.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }")  # noqa: E731
+    page.keyboard.press("x")  # the X-ray on the upscaled composite, the latest result
+    U.poll(page, lambda: page.is_visible("#xray"), 3)
+    latest, over = page.text_content("#hud") or "", page.eval_on_selector("#xray", "e => { const r = e.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }")
+    page.click("#stages li.pick[data-pass=upcomp]"); page.wait_for_timeout(300)  # pinned, the same step
+    page.keyboard.press("x"); page.keyboard.press("x")  # off, then on: its hud names the mattes it reads
+    pinned = page.text_content("#hud") or ""
+    U.check(page.is_visible("#xray") and over == view() and latest == pinned and latest.startswith("X-ray"),
+            f"the X-ray lies over the upscaled composite and reads its full-size mattes, shown as the latest result or pinned: {latest!r} / {pinned!r}, {over} / {view()}")
+    page.keyboard.press("x"); page.click("#stages li.pick[data-pass=upcomp]")  # X-ray off; the latest result again
+    U.poll(page, lambda: shown() == ["Composite, upscaled"], 3)
+    page.keyboard.press("F5")  # the Colour Inspector, Shift+click on the frame's centre
+    v = view(); page.keyboard.down("Shift"); page.mouse.click(v[0] + v[2] / 2, v[1] + v[3] / 2); page.keyboard.up("Shift")
+    U.poll(page, lambda: bool(page.get_attribute("#inspector", "data-value")), 5)
+    src, value, px = (page.get_attribute("#inspector", k) for k in ("data-source", "data-value", "data-pixel"))
+    x, y = (int(n) for n in (px or "-9,-9").split(","))
+    U.check(src == "Composite, upscaled" and bool(value) and abs(x - 640) <= 1 and abs(y - 352) <= 1,
+            f"the Colour Inspector reads the upscaled composite, at the plate's pixel under the pointer: {src!r}, {value!r}, {px!r}")
+    page.keyboard.press("F5")
     page.click("#stages li.pick[data-pass=review]")
     U.poll(page, lambda: shown() == ["Composite, full size"] and canvas() == [1280, 704], 3)
     U.check(shown() == ["Composite, full size"] and canvas() == [1280, 704], f"a click on the full-size composite displays it at the plate's size: {shown()}, canvas {canvas()}")
