@@ -3271,7 +3271,8 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       const x = (r.upParts ??= await exportJob(progress));
       return { dir: x.run, result: x.parts.path, space: x.parts.space, float: x.parts.float, layer: x.layer ? x.parts.layerPath : null, matte: x.parts.mattePath };
     };
-    const made = (part, keep, id) => async (progress) => { store[id] = await upscalePart(part, await parts((f) => progress(f / 10)), keep, (f) => progress(0.1 + f * 0.9), sized); };
+    const made = (part, keep, id) => async (progress) => { store[id] = await upscalePart(part, await parts((f) => progress(f / 10)), keep, (f) => progress(0.1 + f * 0.9), sized,
+      { plate: store.upplate?.home, comp: store.uplayer?.comp }); };
     for (const [id, part, keep] of [["upplate", "plate", true], ["uplayer", "layer", true], ["upcomp", "comp", keeps]]) {
       if (upSize() !== sized) throw YIELD; // another size is asked for between two steps: its own steps, from the first
       await step(r, id, made(part, keep, id), store);
@@ -3308,7 +3309,11 @@ function upscaleGuess(id) { // seconds for one of Upscale's steps on the render 
 // space, float, layer, matte }, the export's parts as Load Plate takes the paths; `keeps`: the plate and the layer come too;
 // `sized`: the size it works at, as upSize names it, which its caller keeps for all its steps. Its jobs are of the export's
 // kind: what stops a render's steps stops them, and it posts no further job once it no longer stands (upStands).
-async function upscalePart(part, set, keeps, progress, sized) {
+// A window's job taken from the job index keeps its own folder, as every job does, and each opening of a plate has its own
+// folders: the first window says where the part's windows are, the others are written beside it, and what reads them reads
+// them there (the layer's windows under the plate's, the join). `made`: where the plate's windows and the composed frames
+// are, as their parts returned them. A join is not kept in the job index: it writes its part into this render's folder.
+async function upscalePart(part, set, keeps, progress, sized, made = {}) {
   const p = S.plate, [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]];
   const stats = await fetch("/system_stats").then((res) => res.json()).catch(() => null), gib = 2 ** 30;
   const target = sized.split("x").map(Number), [sw, sh] = upscaleSource(w, h, target); // each size keeps its own windows
@@ -3327,21 +3332,31 @@ async function upscalePart(part, set, keeps, progress, sized) {
   const [mw, mh] = colour.nativeSize(target[0], target[1], NATIVE_SIDE), view = float ? logSpace() : p.cs; // its viewer movie: the look of its frames
   const save = (shot, frames, name, space) => ["upscale_export", { shot, frames: `output:${frames}`, max_frames: p.frames, count: size, prefix: `${out}/${name}`,
     ...movieDims(mw, mh), config: S.ocio.config, color_space: space, movie_space: view, video_prefix: `${set.dir}/upscale/${sized}/movie/${name}` }, size / 5];
-  const jobs = part === "plate" ? [...windows.map((win, i) => ["upscale", values(p.path, p.cs, win, { prefix: `${plateDir}/${n(i)}/f` }), win[1]]), save(p.path, plateDir, "plate", p.cs)]
-    : part === "layer" ? [...windows.map((win, i) => ["upscale", values(set.layer, set.space, win, { prefix: `${set.dir}/upscale/${sized}/layer/${n(i)}/f`, ...matte(),
-      under: `output:${plateDir}/${n(i)}`, under_space: p.cs, comp_prefix: `${set.dir}/upscale/${sized}/comp/${n(i)}/f` }), win[1]]), save(set.layer, `${set.dir}/upscale/${sized}/layer`, "layer", set.space)]
-    : [...(keeps ? [] : windows.map((win, i) => ["upscale", values(set.result, set.space, win, { prefix: `${set.dir}/upscale/${sized}/result/${n(i)}/f`, ...matte() }), win[1]])),
-      save(set.result, `${set.dir}/upscale/${sized}/${keeps ? "comp" : "result"}`, "export", set.space)]; // [workflow, values, weight]: a window weighs its frames, a part written a fifth of a window
-  const total = jobs.reduce((a, [, , wt]) => a + wt, 0);
-  let before = 0, done = null;
-  for (const [name, v, wt] of jobs) {
+  const parent = (done, key) => outputFile("upscale", done, key)?.subfolder.replace(/\/[^/]+$/, ""); // where a window's job wrote its frames
+  let home = part === "plate" ? plateDir : `${set.dir}/upscale/${sized}/${part === "layer" ? "layer" : "result"}`; // this part's windows, as planned
+  let comp = (part === "comp" ? made.comp : null) ?? `${set.dir}/upscale/${sized}/comp`; // the frames the layer's windows compose
+  const under = made.plate ?? plateDir;
+  const window = (win, i) => (part === "plate" ? values(p.path, p.cs, win, { prefix: `${home}/${n(i)}/f` })
+    : part === "layer" ? values(set.layer, set.space, win, { prefix: `${home}/${n(i)}/f`, ...matte(), under: `output:${under}/${n(i)}`, under_space: p.cs, comp_prefix: `${comp}/${n(i)}/f` })
+    : values(set.result, set.space, win, { prefix: `${home}/${n(i)}/f`, ...matte() }));
+  const mine = part === "comp" && keeps ? [] : windows; // after the plate and the layer, « Composite, upscaled » has no window: the layer's jobs composed its frames
+  const total = mine.reduce((a, win) => a + win[1], 0) + size / 5; // a window weighs its frames, a part written a fifth of a window
+  let before = 0;
+  const job = async (name, v, wt) => {
     if (!upStands(sized)) throw YIELD; // turned off, another size, or other edits on show, between two jobs
-    done = await run(name, v, { kind: "export", progress: (f) => progress((before + f * wt) / total) }).done;
+    const done = await run(name, v, { kind: "export", progress: (f) => progress((before + f * wt) / total) }).done;
     before += wt;
     progress(before / total);
+    return done;
+  };
+  for (const [i, win] of mine.entries()) {
+    const done = await job("upscale", window(win, i), win[1]);
+    if (i === 0) [home, comp] = [parent(done, "frames") ?? home, part === "layer" ? parent(done, "comp") ?? comp : comp];
   }
+  const done = await job(...(part === "plate" ? save(p.path, home, "plate", p.cs) : part === "layer" ? save(set.layer, home, "layer", set.space)
+    : save(set.result, keeps ? comp : home, "export", set.space)));
   const file = outputFile("upscale_export", done, "video");
-  return file ? { url: viewUrl(file), space: view, size: [mw, mh] } : null; // what its row shows
+  return { url: file ? viewUrl(file) : null, space: view, size: [mw, mh], home, comp }; // what its row shows, and where its windows are
 }
 function elementOf(zones, size, hero = S.hero) { // where the edits changed the first frame, inside the paint zones: the paint matte starts here
   const [w, h] = size, data = (c) => c.getContext("2d").getImageData(0, 0, w, h).data;
