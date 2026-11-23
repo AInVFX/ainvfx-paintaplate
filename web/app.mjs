@@ -876,9 +876,18 @@ function setFinish(opt, on) { // SDR to HDR keeps its own renders (the render ke
   }
 }
 // Upscale turned on or off, or another size: the player shows the latest result, unless a step of the plate's size is pinned
+// One of Upscale's steps stands while its render is on show, with Upscale on, at the size the step works at
+const upStands = (sized) => !!S.deliver.upscale && S.piping?.key === S.heroKey && upSize() === sized;
+// Upscale turned off, another size, or other edits on show, while one of its steps runs: the step stops at once, as for a new
+// edit (preempt). Its finished jobs stay in the job index, so it continues from them when it is asked for again.
+function upscaleStale() {
+  const st = S.stage;
+  if (st && UP_IDS.has(st.id) && !upStands(st.sized)) cancel("export"); // Upscale's jobs are of the export's kind (upscalePart)
+}
 function latestUpscale() {
   const r = S.renders.get(S.heroKey);
   if (r) plan(r, r.active ?? []); // the render now on show, as the switch stands: the plate alone's comes back with its step
+  upscaleStale();
   if (S.pass && !UP_IDS.has(S.pass)) return stagesUI();
   S.pass = null; showLatest(); stagesUI();
 }
@@ -899,11 +908,11 @@ function upscaledShown(r, key) {
 async function upscaleResult(r) {
   const st = UPS.find((x) => (x.id === "uphdr" || x.id === "upplate") && !r.skip.has(x.id));
   if (!st || (r.active?.length && !r.hdrAfter)) return; // an edit's « Plate, upscaled » is its plate's windows (upscaleSteps)
-  const p = S.plate, hdr = st.id === "uphdr", store = ((r.ups ??= {})[upSize()] ??= {}), f = fluidOnly() ? S.fluid.result : null;
+  const p = S.plate, hdr = st.id === "uphdr", sized = upSize(), store = ((r.ups ??= {})[sized] ??= {}), f = fluidOnly() ? S.fluid.result : null;
   r.run ??= f ? f.run ?? fluidRun(f.path) : r.base; // a fluid shot's set sits beside its own files, which its zip takes (downloadFluid)
   await step(r, st.id, async (progress) => {
     store[st.id] = await upscalePart("comp", { dir: r.run, result: hdr ? r.hdrFrames : f ? f.path : p.path, space: hdr || f?.hdr ? HDR_FRAMES : p.cs,
-      float: hdr || (f ? !!f.hdr : /^\.exr$/i.test(p.spec.ext ?? "")), layer: null, matte: null }, false, progress);
+      float: hdr || (f ? !!f.hdr : /^\.exr$/i.test(p.spec.ext ?? "")), layer: null, matte: null }, false, progress, sized);
     if (!hdr) Object.assign(r, { review: store[st.id]?.url ?? null, reviewSpace: store[st.id]?.space ?? p.cs }); // the plate alone's result
   }, store);
 }
@@ -976,6 +985,7 @@ function recompose() {
   const key = renderKey(edits, holdsHdr(S.plate?.spec, S.plate?.headroom), on, up); // Finish's SDR to HDR on an SDR plate: another render
   if (key === S.heroKey) return;
   S.heroKey = key;
+  upscaleStale(); // one of Upscale's steps that runs for the edits no longer on show stops
   const r = S.renders.get(key); // a set of edits seen before plays at once (a bypass turned back on, for example)
   S.exported = r?.exported ?? null;
   S.pass = null; // other edits: the viewer follows their latest result
@@ -2982,7 +2992,7 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   if (store.done?.[id] !== undefined || r.skip?.has(id)) return;
   if (S.running || S.queued || pickRender() !== r) throw YIELD; // an edit, or a step of a more urgent render, goes first
   const t0 = performance.now(), guess = Math.round(estimate(id, r.skip)), notRun = jobsNotRun();
-  S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step
+  S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null, sized: UP_IDS.has(id) ? upSize() : null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step; sized: the size one of Upscale's steps works at
   stagesUI();
   log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: about ${span(guess)}.`);
   const stage = S.stage;
@@ -3256,15 +3266,17 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   }
   async function upscaleSteps() { // Finish > Upscale's steps, kept with the size asked for (upOf): another size makes its own, a size made before comes back at once
     if (r.skip.has("upcomp")) return;
-    const store = ((r.ups ??= {})[upSize()] ??= {}), keeps = !r.skip.has("upplate");
+    const sized = upSize(), store = ((r.ups ??= {})[sized] ??= {}), keeps = !r.skip.has("upplate");
     const parts = async (progress) => { // the export's parts, which the layer's and the result's windows read
       const x = (r.upParts ??= await exportJob(progress));
       return { dir: x.run, result: x.parts.path, space: x.parts.space, float: x.parts.float, layer: x.layer ? x.parts.layerPath : null, matte: x.parts.mattePath };
     };
-    const made = (part, keep, id) => async (progress) => { store[id] = await upscalePart(part, await parts((f) => progress(f / 10)), keep, (f) => progress(0.1 + f * 0.9)); };
-    await step(r, "upplate", made("plate", true, "upplate"), store);
-    await step(r, "uplayer", made("layer", true, "uplayer"), store);
-    await step(r, "upcomp", made("comp", keeps, "upcomp"), store);
+    const made = (part, keep, id) => async (progress) => { store[id] = await upscalePart(part, await parts((f) => progress(f / 10)), keep, (f) => progress(0.1 + f * 0.9), sized); };
+    for (const [id, part, keep] of [["upplate", "plate", true], ["uplayer", "layer", true], ["upcomp", "comp", keeps]]) {
+      if (upSize() !== sized) throw YIELD; // another size is asked for between two steps: its own steps, from the first
+      await step(r, id, made(part, keep, id), store);
+    }
+    if (upSize() !== sized) throw YIELD;
     upscaledShown(r, key);
   }
 }
@@ -3293,12 +3305,13 @@ function upscaleGuess(id) { // seconds for one of Upscale's steps on the render 
 // the upscaled result. Otherwise « Composite, upscaled » makes the result's windows, with the upscaled matte when there is one,
 // then the upscaled result. Save Plate writes each part in the format of its plate-size twin, under upscaled/ in the export's
 // folder (the zip's part « upscaled »), and Save Movie its viewer movie, at its own size, for its row. `set`: { dir, result,
-// space, float, layer, matte }, the export's parts as Load Plate takes the paths; `keeps`: the plate and the layer come too.
-// Its jobs are of the export's kind: what stops a render's steps stops them.
-async function upscalePart(part, set, keeps, progress) {
+// space, float, layer, matte }, the export's parts as Load Plate takes the paths; `keeps`: the plate and the layer come too;
+// `sized`: the size it works at, as upSize names it, which its caller keeps for all its steps. Its jobs are of the export's
+// kind: what stops a render's steps stops them, and it posts no further job once it no longer stands (upStands).
+async function upscalePart(part, set, keeps, progress, sized) {
   const p = S.plate, [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]];
   const stats = await fetch("/system_stats").then((res) => res.json()).catch(() => null), gib = 2 ** 30;
-  const target = upscaleTarget(w, h, S.deliver.upscale || S.upscaleAsk), [sw, sh] = upscaleSource(w, h, target), sized = target.join("x"); // each size keeps its own windows
+  const target = sized.split("x").map(Number), [sw, sh] = upscaleSource(w, h, target); // each size keeps its own windows
   const size = upscaleWindow((stats?.system?.ram_total ?? 0) / gib, (stats?.devices?.[0]?.vram_total ?? 0) / gib, target, [w, h], p.frames,
     keeps ? UPSCALE.composeCopies : UPSCALE.copies); // the plate's windows and the layer's are the same: sized for the layer's, which composes
   const float = set.float; // EXR frames: an EXR plate, or SDR to HDR's result
@@ -3322,6 +3335,7 @@ async function upscalePart(part, set, keeps, progress) {
   const total = jobs.reduce((a, [, , wt]) => a + wt, 0);
   let before = 0, done = null;
   for (const [name, v, wt] of jobs) {
+    if (!upStands(sized)) throw YIELD; // turned off, another size, or other edits on show, between two jobs
     done = await run(name, v, { kind: "export", progress: (f) => progress((before + f * wt) / total) }).done;
     before += wt;
     progress(before / total);
