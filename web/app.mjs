@@ -2830,14 +2830,16 @@ function historyUI() {
     li.onclick = (ev) => { if (!ev.target.closest("button")) { if (keying()) leaveKeys(); pause(); seek(0); show(S.peek === e && !S.selected ? null : e); } };
     return li;
   }), ...fluid);
+  if (S.hover && !$("#history").matches(":hover")) { S.hover = null; render(); } // a row rebuilt after the pointer left it: its strokes go
   undoUI();
   exportUI(); timelineUI();
 }
 
-function matteMenu(e) { // under a paint's row: how much of the regenerated shot the composite keeps (logic.matteChoices)
-  const menu = document.createElement("select"), chose = matteChosen();
-  menu.className = "matte";
-  menu.title = "How much of the regenerated shot to keep in the composite.";
+function matteMenu(e) { // under a paint's row, with its label: how much of the regenerated shot the composite keeps (logic.matteChoices)
+  const label = document.createElement("label"), menu = document.createElement("select"), chose = matteChosen();
+  label.className = "matte";
+  label.title = "How much of the regenerated shot to keep in the composite.";
+  label.append(Object.assign(document.createElement("span"), { textContent: "Matte strategy" }), menu);
   menu.replaceChildren(...matteChoices(e.tool).map((c) => {
     const o = document.createElement("option");
     o.value = c; o.title = MATTE_TIPS[c];
@@ -2845,9 +2847,9 @@ function matteMenu(e) { // under a paint's row: how much of the regenerated shot
     return o;
   }));
   menu.value = matteOf(e);
-  menu.onclick = (ev) => ev.stopPropagation(); // a click on the menu is not a click on the row
+  label.onclick = (ev) => ev.stopPropagation(); // a click on the menu or its label is not a click on the row
   menu.onchange = () => setMatte(e, menu.value);
-  return menu;
+  return label;
 }
 
 // What « Auto » chose for the paint matte of the render on show: its full size, else its preview
@@ -2860,8 +2862,10 @@ function setMatte(e, strategy) { // the menu changed: the matte and the composit
   if (matteOf(e) === strategy) return;
   mark();
   e.matte = strategy;
-  log(`Edit ${num(e)}: matte ${strategy}. The matte and the composite run again.`);
+  Object.assign(S, { hover: null, peek: null }); // the row rebuilds under the menu's popup: frame 0 shows the result, not the strokes
   historyUI(); recompose(); stagesUI(); exportUI(); touch(); // as a Finish switch: another render, whose shot the job index answers
+  const made = fullSizeMade(S.renders.get(S.heroKey)); // back to a strategy already rendered: it shows at once, nothing runs
+  log(`Edit ${num(e)}: matte ${strategy}.${made ? "" : " The matte and the composite run again."}`);
 }
 
 function editProgress(edit, f) { // the state line of one History row, without rebuilding the list

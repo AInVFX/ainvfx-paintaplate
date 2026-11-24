@@ -5,7 +5,9 @@ import io
 import json
 import zipfile
 
-MENU = "#history li select.matte"
+MENU = "#history li label.matte select"
+SIGNATURE = """(() => { const c = document.querySelector('#view'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  let s = 0; for (let i = 0; i < d.length; i += 4 * 97) s += d[i] + 2 * d[i + 1] + 3 * d[i + 2]; return s; })()"""  # the viewer's picture, in one number
 
 
 def run(browser, port, U):
@@ -25,11 +27,16 @@ def run(browser, port, U):
     texts = lambda: page.eval_on_selector_all(f"{MENU} option", "os => os.map((o) => o.textContent)")  # noqa: E731
     U.check(texts() == ["Auto: Object and effects", "Object", "Object and effects", "Whole shot"] and page.input_value(MENU) == "Auto",
             f"a paint's row has the menu; « Auto » shows Follow Matte's choice: {texts()} {page.input_value(MENU)!r}")
+    label = page.text_content("#history li label.matte span")
+    widths = page.evaluate(f"""() => {{ const m = document.querySelector('{MENU}'), was = m.value;
+      const w = [...m.options].map((o) => {{ m.value = o.value; return m.offsetWidth; }}); m.value = was; return w; }}""")
+    U.check(label == "Matte strategy" and len(set(widths)) == 1, f"the menu has its label and one width for every choice: {label!r} {widths}")
     matte = [json.loads(b)["prompt"] for b in posted if b and '"PaintAPlate_FollowMatte"' in b]
     U.check(matte and all(n["inputs"].get("strategy") == "Auto" for p in matte for n in p.values() if n["class_type"] == "PaintAPlate_FollowMatte"),
             f"Generate posts the paint matte with « Auto »: {len(matte)} matte jobs")
     page.evaluate(U.WATCH)
     del posted[:]
+    page.hover("#history li .title")  # the pointer on the row: frame 0 shows the edit's strokes until the menu changes
     page.select_option(MENU, "Whole shot")
     U.wait_log(page, U.added_line("Edit 1: matte Whole shot. The matte and the composite run again."), 10000, "the menu's log line")
     U.wait_log(page, "document.querySelector('#render-left').textContent === 'full size ready'", 180000, "full-size composite again")
@@ -41,6 +48,24 @@ def run(browser, port, U):
             and grew["review: posted"] >= 1 and strategies == {"Whole shot"},
             f"another strategy runs the matte and the composite, and takes the shot from the job index: {grew} {strategies}")
     U.check(page.input_value(MENU) == "Whole shot", f"the menu shows the strategy chosen: {page.input_value(MENU)!r}")
+    page.hover("#frame-now")  # from the menu to the viewer, as after a choice in the menu's popup
+    page.wait_for_timeout(U.QUIET_MS)
+    shown = page.evaluate(SIGNATURE)
+    page.hover("#history li .title"); page.hover("#frame-now")  # a hover that starts and ends: frame 0 without strokes
+    page.wait_for_timeout(U.QUIET_MS)
+    clean = page.evaluate(SIGNATURE)
+    U.check(shown == clean, f"after a change of strategy, frame 0 shows the new composite, not the edit's strokes: {shown} {clean}")
+    page.evaluate(U.WATCH)
+    page.select_option(MENU, "Auto")  # back to the strategy of the first render: it shows at once
+    U.wait_log(page, U.added_line("Edit 1: matte Auto."), 10000, "the menu's line for a strategy made before")
+    U.settled(page)
+    grew = U.added(page, ("shot", "matte", "comp", "review"))
+    lines = page.evaluate("window.__lines")
+    U.check(sum(grew[f"{s}: posted"] for s in ("shot", "matte", "comp", "review")) == 0 and "Edit 1: matte Auto." in lines
+            and not any("run again" in line for line in lines if line.startswith("Edit 1: matte")),
+            f"back to a strategy made before: it shows at once, nothing runs, and the log says no more: {grew}")
+    page.select_option(MENU, "Whole shot")
+    U.settled(page)
     page.click("#undo-btn")
     U.until(page, f"document.querySelector('{MENU}').value === 'Auto'")
     U.check(page.input_value(MENU) == "Auto", "undo brings « Auto » back")
