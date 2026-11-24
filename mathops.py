@@ -352,17 +352,24 @@ def smooth_track(track: np.ndarray, radius: int) -> np.ndarray:
     return ndimage.uniform_filter1d(t, 2 * radius + 1, axis=0, mode="nearest")
 
 
+SEAM_DARK = 0.03  # seam_field leaves out the ring's pixels darker than this in the plate or the shot (sRGB-encoded luma)
+
+
 def seam_field(plate: np.ndarray, gen: np.ndarray, mask: np.ndarray, band: float) -> np.ndarray:
     """Log ratio (H, W, 3) that brings `gen` to the colour and exposure of `plate` at the edge of `mask`.
 
     It is measured on a ring just outside the mask, where the composite shows the plate, and
     spread smoothly inside it, as a Poisson blend would: colour and exposure drift are fixed,
-    texture is left alone. Work at low resolution: the field is smooth by design.
+    texture is left alone. Work at low resolution: the field is smooth by design. The ring leaves out
+    the near black (SEAM_DARK): there a ratio of two tiny values tints the edge (magenta on a fluid
+    shot's black, where the shot's black is a little green).
     """
     outside = mask < 0.02
     if outside.all() or not outside.any():
         return np.zeros(plate.shape[:2] + (3,), np.float32)
-    ring = outside & (ndimage.distance_transform_edt(outside) <= band)
+    luma = np.array([0.2126, 0.7152, 0.0722], np.float32)
+    lit = np.minimum(plate[..., :3] @ luma, gen[..., :3] @ luma) > SEAM_DARK  # in the near black, the ratio is noise: a fluid on black
+    ring = outside & (ndimage.distance_transform_edt(outside) <= band) & lit
     if ring.sum() < 16:
         return np.zeros(plate.shape[:2] + (3,), np.float32)
     d = np.log(np.maximum(plate[..., :3], 1e-4)) - np.log(np.maximum(gen[..., :3], 1e-4))
