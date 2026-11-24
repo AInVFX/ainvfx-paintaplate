@@ -358,7 +358,7 @@ async function openPlate(list, typed, opts = {}) {
   // The plate's two lines in the log (design rule 12): what it is, then the sizes the page works at. What to do next is a hint, below
   const depth = opts.fluid?.depth ? { bits: opts.fluid.depth, float: false } : plateDepth(spec); // a blank plate: the depth asked for its fluid shot
   log(`Plate ${S.plate.name}: opened in ${((performance.now() - began) / 1000).toFixed(1)} s.\n  ${w} x ${h}, ${spec.frames} frame${spec.frames === 1 ? "" : "s"}, ${depth.float ? "float" : `${depth.bits}-bit`}, ${cs}${opts.cs ? "" : ", from file"}.`);
-  log(`Working sizes: edits at ${S.plate.work.join(" x ")}, edit preview at ${S.plate.prev.join(" x ")}, ${S.previewCap ? `shot preview at ${S.plate.shot.join(" x ")}` : "shot preview off"}, tracking at ${S.plate.track.join(" x ")}.`);
+  log(`Working sizes: edits and shots at ${S.plate.work.join(" x ")}${S.previewCap ? `, shot preview at ${S.plate.shot.join(" x ")}` : ""}, tracking at ${S.plate.track.join(" x ")}.`); // an edit's quick first look gives its size in the edit's own line
   const long = opts.under || opts.fluid || !keep ? null : lengthWarning({ name: S.plate.name, total: S.plate.total, keep: { ...keep, frames: spec.frames },
     first: S.plate.first, fps: S.plate.fps, width: w, height: h, ram: S.ram });
   if (long) log(long); // frames left out: the status line shows its first line below, with the open's next step
@@ -504,10 +504,10 @@ function planCaches() { // each cache's share and frame size, when the budget, t
   const budget = cacheBudget(), frames = S.outPt - S.inPt + 1, shot = !!S.shot?.url, plateOn = !shot || S.wipe !== null;
   const exact = colour.nativeSize(p.spec.width, p.spec.height, DEEP_SIDE), size = (v) => [v.videoWidth, v.videoHeight];
   const sources = [
-    plateVid.videoWidth && { id: "plate", name: "the plate", cache: caches.get(plateVid), movie: size(plateVid), show: plateOn && !p.deep },
-    shot && shotVid.videoWidth && { id: "shot", name: "the shot", cache: caches.get(shotVid), movie: size(shotVid), show: !S.shot.frames },
-    p.deep && !DEEP_MB && { id: "deep", name: "the plate's EXR frames", cache: deep, movie: exact, show: plateOn, bytes: 6 },
-    S.shot?.frames && !DEEP_MB && { id: "deepShot", name: "the shot's EXR frames", cache: deepShot, movie: exact, show: true, bytes: 6 },
+    plateVid.videoWidth && { id: "plate", name: "the plate's", cache: caches.get(plateVid), movie: size(plateVid), show: plateOn && !p.deep },
+    shot && shotVid.videoWidth && { id: "shot", name: "the shot's", cache: caches.get(shotVid), movie: size(shotVid), show: !S.shot.frames },
+    p.deep && !DEEP_MB && { id: "deep", name: "the plate's", kind: "EXR", cache: deep, movie: exact, show: plateOn, bytes: 6 },
+    S.shot?.frames && !DEEP_MB && { id: "deepShot", name: "the shot's", kind: "EXR", cache: deepShot, movie: exact, show: true, bytes: 6 },
   ].filter(Boolean);
   if (!sources.length) return; // no movie has loaded yet
   const rest = JSON.stringify([frames, sources.map((s) => [s.id, s.movie, s.show])]), key = JSON.stringify([budget, rest]);
@@ -525,9 +525,10 @@ function planCaches() { // each cache's share and frame size, when the budget, t
   Object.assign(planned, { key, rest, budget, shares, fit: keep ? planned.fit : fit });
   for (const s of sources) if (!s.show) s.cache.stopReader(); // the sources on show read first
   for (const s of sources.sort((a, b) => Number(!!b.show) - Number(!!a.show))) s.cache.plan(shares[s.id].budget, s.bytes ? null : [shares[s.id].width, shares[s.id].height]);
-  const why = CACHE_MB ? "set in the address" : S.cache ? "set in View > Cache memory" : "Auto"; // the memory profile's line names the GPU
-  const said = cacheLine(memoryText(budget), why, sources.map((s) => ({ name: s.name, frames, ...shares[s.id] })));
-  if (fresh && said !== planned.said) log((planned.said = said));
+  const why = CACHE_MB ? "set in the address" : S.cache ? "View > Cache memory" : "Auto"; // the memory profile's line names the GPU
+  const said = cacheLine(memoryText(budget), why, sources.map((s) => ({ name: s.name, kind: s.kind, frames, show: s.show, movie: s.movie, ...shares[s.id] })));
+  if (planned.plate !== S.plate) Object.assign(planned, { plate: S.plate, saidAll: new Set() }); // each plan is said once per plate: a switch between sources on show says nothing new
+  if (fresh && !planned.saidAll.has(said)) { planned.saidAll.add(said); log(said); }
   cacheUI();
 }
 function planSoon() { if (!planned.timer) planned.timer = setTimeout(() => { planned.timer = 0; planCaches(); }, 300); }

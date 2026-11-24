@@ -467,9 +467,10 @@ def page_mask(comfy, jobs, graphs):
 
 
 def edit_preview_size(log):
-    """The edit preview's size from the page's working sizes line (« edit preview at 768 x 432 »): the size the page judges
-    an erase at (app.mjs, `p.prev`), and not the shot preview's. None without that line."""
-    found = re.findall(r"edit preview at (\d+) x (\d+)", log)
+    """The edit preview's size from the edit's own line (« Edit 1: Klein edit preview, 768 x 432, 4 steps. »), or from the
+    older working sizes line (« edit preview at 768 x 432 »): the size the page judges an erase at (app.mjs, `p.prev`),
+    and not the shot preview's. None without such a line."""
+    found = re.findall(r"edit preview(?: at|,) (\d+) x (\d+)", log)
     return (int(found[-1][0]), int(found[-1][1])) if found else None
 
 def erase_verdict(after, before, mask, size, first=1):

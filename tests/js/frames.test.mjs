@@ -104,19 +104,26 @@ test("the Auto budget: 512 MB beside ComfyUI on the small memory profile, 1 GB o
 
 test("the frame cache's line of the log: the budget and where it comes from, then what fits, with no GPU size", () => {
   const line = viewerFrames.cacheLine;
-  assert.equal(line("512 MB", "Auto", [{ name: "the plate", fits: 121, frames: 121, width: 960, height: 512 }]), "Frame cache: 512 MB (Auto), 121 of 121 frames at 960 x 512.");
-  assert.equal(line("8 MB", "set in the address", [{ name: "the plate", fits: 3, frames: 49, width: 960, height: 528 }, { name: "the shot", fits: 3, frames: 49, width: 960, height: 528 }]),
-    "Frame cache: 8 MB (set in the address), 3 of 49 frames of the plate at 960 x 528; 3 of 49 frames of the shot at 960 x 528.");
+  assert.equal(line("512 MB", "Auto", [{ name: "the plate's", fits: 121, frames: 121, width: 960, height: 512, show: true, movie: [960, 512] }]),
+    "Frame cache, 512 MB (Auto): all of the plate's 121 frames at 960 x 512, their own size.");
+  assert.equal(line("512 MB", "View > Cache memory", [{ name: "the shot's", fits: 121, frames: 121, width: 1366, height: 774, show: true, shrunk: true, movie: [1920, 1088] },
+    { name: "the plate's", fits: 0, frames: 121, width: 960, height: 544, movie: [1920, 1088] }]),
+    "Frame cache, 512 MB (View > Cache memory): all of the shot's 121 frames at 1366 x 774, to fit in 512 MB.", "only the sources that hold frames");
+  assert.equal(line("1 GB", "Auto", [{ name: "the plate's", fits: 121, frames: 121, width: 1472, height: 828, show: true, movie: [1920, 1080] }]),
+    "Frame cache, 1 GB (Auto): all of the plate's 121 frames at 1472 x 828, their size on screen.");
+  assert.equal(line("8 MB", "set in the address", [{ name: "the plate's", fits: 3, frames: 49, width: 960, height: 528, show: true }, { name: "the shot's", kind: "EXR", fits: 1, frames: 1250, width: 960, height: 528 }]),
+    "Frame cache, 8 MB (set in the address): 3 of the plate's 49 frames at 960 x 528; 1 of the shot's 1,250 EXR frames at 960 x 528.");
 });
 
 test("frames are kept at the size on show, smaller when the range does not fit, never under 960 px", () => {
   const size = viewerFrames.cacheSize, uhd = [3840, 2160];
   const a = size({ budget: 512e6, frames: 121, movie: uhd, fit: [1700, 956] }); // a 3840 x 2160 shot of 121 frames in 512 MB
   assert.equal(a.fits, 121);
+  assert.equal(a.shrunk, true, "smaller than on show, so that all 121 frames fit");
   assert.ok(a.width >= 960 && a.width <= 1728 && 121 * a.width * a.height * 4 <= 512e6, JSON.stringify(a));
-  assert.deepEqual(size({ budget: 4e9, frames: 121, movie: [1920, 1080], fit: [2400, 1350] }), { width: 1920, height: 1080, fits: 121 }); // never larger than the movie
-  assert.deepEqual(size({ budget: 64e6, frames: 121, movie: uhd, fit: [1700, 956] }), { width: 960, height: 540, fits: 30 }); // at the floor: a window round the playhead
-  assert.deepEqual(size({ budget: 512e6, frames: 121, movie: [640, 360], fit: [1700, 956] }), { width: 640, height: 360, fits: 121 });
+  assert.deepEqual(size({ budget: 4e9, frames: 121, movie: [1920, 1080], fit: [2400, 1350] }), { width: 1920, height: 1080, fits: 121, shrunk: false }); // never larger than the movie
+  assert.deepEqual(size({ budget: 64e6, frames: 121, movie: uhd, fit: [1700, 956] }), { width: 960, height: 540, fits: 30, shrunk: true }); // at the floor: a window round the playhead
+  assert.deepEqual(size({ budget: 512e6, frames: 121, movie: [640, 360], fit: [1700, 956] }), { width: 640, height: 360, fits: 121, shrunk: false });
 });
 
 test("one budget: the source on show first, both sides of the wipe in equal shares, EXR frames at their own size", () => {

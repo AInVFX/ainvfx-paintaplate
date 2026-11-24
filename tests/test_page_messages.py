@@ -8,6 +8,7 @@ class Messages(unittest.TestCase):
     def test_the_working_sizes_line_gives_the_edit_preview_size_in_its_words_and_in_the_older_ones(self):
         new = "Working sizes: edits at 1920 x 1088, edit preview at 768 x 432, shot preview at 640 x 352, tracking at 960 x 544."
         self.assertEqual(gpu_matrix.edit_preview_size(new), (768, 432))
+        self.assertEqual(gpu_matrix.edit_preview_size("Edit 1: Klein edit preview, 752 x 400, 4 steps."), (752, 400), "the edit's own line")
         self.assertIsNone(gpu_matrix.edit_preview_size("Plate desk.mp4: opened in 1.2 s."))
 
     def test_the_timed_steps_read_the_same_in_the_log_s_new_words_and_in_the_older_ones(self):
