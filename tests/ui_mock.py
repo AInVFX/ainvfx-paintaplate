@@ -837,8 +837,7 @@ def oom_flow(browser, port):
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     stroke(page, [(0.45, 0.7), (0.55, 0.6)])
     page.evaluate("document.activeElement.blur()"); page.keyboard.press("Enter")
-    page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
-      return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden; })()""", timeout=120000)
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => /^Render v\\d+: Fluid shot, full size: done in /.test(e.textContent))", timeout=120000)
     ev = json.loads(urllib.request.urlopen(f"{base}/mock/events").read())
     oom, free, posted = [e for e in ev if e[0] == "oom"], [e for e in ev if e[0] == "free"], [e for e in ev if e[0] == "prompt"]
     waited = len(posted) >= 2 and len(free) == 1 and posted[-1][1] >= free[0][1] + 1.0

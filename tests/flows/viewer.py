@@ -175,6 +175,7 @@ def fluid_wipe_and_models(page, U):
     page.keyboard.press("Enter")
     page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
       return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden; })()""", timeout=120000)
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => /^Render v\\d+: Fluid shot, full size: done in /.test(e.textContent))", timeout=120000)
     page.click('#history li[data-id="fluid"] .edit')  # the keyframes again: the fluid shot is the result
     page.keyboard.press("Home"); page.keyboard.press("F6"); page.wait_for_timeout(800)
     xy = page.evaluate(TO_CANVAS, list(spot))
