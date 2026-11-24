@@ -1467,7 +1467,7 @@ export function freesBefore(profile, last, name, room = null) { // room: { free,
 // 20 s later. So the sampling is timed by its own pace, between its first and its latest step, and the rest comes from
 // what the step took the last time on this machine (the page keeps
 // each step's total, lead and tail per size, frame count and memory profile, in paintaplate.step-times).
-const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
+const STEP_FAMILY = { fluid: "ltx", fluidfull: "ltx", erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
 // A step's time before it ever ran on this machine (stepGuess): the 96 GB GPU's reference (STAGES' ref, in seconds at
 // REF_SIZE), scaled to the plate, then to the GPU. A 16 GB GPU, the small profile, holds one family of models at a time,
 // so each job loads its models again: a lead in seconds per family, then a factor per step on the reference's scaled
@@ -1482,8 +1482,8 @@ const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sam", com
 // half-float EXR frames: `withHdr` multiplies their seconds (37.7 s and 14.6 s on the HDR test plate made from horse.mp4,
 // 1920 x 1080 and 121 frames). tests/js/render_estimates.test.mjs holds every measured step within 25%.
 export const SLOWER = {
-  small: { lead: { ltx: 38, sam: 11, frames: 0 }, erase: 2.1, track: 1, trackfull: 1, clean: 3.35, shot: 1.64, cleanfull: 1.18,
-    full: 1.1, hdr: 1.166, comp: 0.42, review: 0.42, export: 0.235, grow: { hdr: 1.72, full: 1.72 }, withHdr: { review: 1.9, export: 1.6 },
+  small: { lead: { ltx: 38, sam: 11, frames: 0 }, fluid: 1.1, fluidfull: 1.1, erase: 2.1, track: 1, trackfull: 1, clean: 3.35, shot: 1.64, cleanfull: 1.18,
+    full: 1.1, hdr: 1.166, comp: 0.42, review: 0.42, export: 0.235, grow: { hdr: 1.72, full: 1.72, fluidfull: 1.72 }, withHdr: { review: 1.9, export: 1.6 },
     fixed: { comp: 6.4, review: 3 } },
 };
 export const slower = (profile, id) => SLOWER[profile]?.[id] ?? 1;
