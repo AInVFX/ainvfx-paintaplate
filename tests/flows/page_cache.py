@@ -1,6 +1,6 @@
 """The check of View > Cache memory > Custom… (tests/flows/README.md). It asks for a size in MB or GB in a field, sets
 the frame cache's budget, and the next session keeps it. A size it cannot read changes nothing, and the status line
-says what to type."""
+says what to type. Whatever the cache holds, a paused frame shows at the plate's own size."""
 
 import re
 
@@ -45,12 +45,26 @@ def run(browser, port, U):
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function(OPEN, timeout=60000)
-    U.check(U.poll(page, lambda: any(t.startswith("Frame cache: 1.5 GB (set in View > Cache memory)") for t in U.log_lines(page)), 10),
+    U.check(U.poll(page, lambda: any(t.startswith("Frame cache, 1.5 GB (View > Cache memory): ") for t in U.log_lines(page)), 10),
             f"the next session plans its frame cache on 1.5 GB: {[t for t in U.log_lines(page) if t.startswith('Frame cache')]}")
-    lines = lambda: [t for t in U.log_lines(page) if t.startswith("Frame cache:")]  # noqa: E731
+    lines = lambda: [t for t in U.log_lines(page) if t.startswith("Frame cache, ")]  # noqa: E731
     before, size = lines(), page.viewport_size
     for w in (size["width"] - 120, size["width"] - 240, size["width"] - 60):  # as the log panel opens and the window shrinks
         page.set_viewport_size({"width": w, "height": size["height"]}); page.wait_for_timeout(700)
     page.set_viewport_size(size); page.wait_for_timeout(700)
     U.check(lines() == before, f"a resize keeps the frame cache and writes no line: {lines()[len(before):]}")
+    page.close()
+    # Paused, the viewer reads the frame on show at the plate's own size, whatever the cache holds: 40 MB keeps desk.mp4's
+    # frames at 960 x 528 for playback, and the frame on show still comes at 1280 x 704 from the frames route.
+    page = U.load(browser, port, "?blank=0&cache=40")
+    asked = []
+    page.on("request", lambda r: asked.append(r.url) if "/paintaplate/frames?" in r.url else None)
+    U.open_path(page, "plates/desk.mp4")
+    page.wait_for_function(OPEN, timeout=60000)
+    U.check(U.poll(page, lambda: any(" at 960 x 528" in t for t in U.log_lines(page) if t.startswith("Frame cache, ")), 10),
+            f"40 MB keeps the frames smaller than the plate: {[t for t in U.log_lines(page) if t.startswith('Frame cache')]}")
+    for _ in range(5):
+        page.keyboard.press("ArrowRight")
+    U.check(U.poll(page, lambda: any("first=5&count=1&side=4096" in u for u in asked), 10), f"paused on frame 6, the viewer reads it at its own size: {asked[-2:]}")
+    U.check(page.evaluate("document.querySelector('#view').width") == 1280, "the viewer's canvas holds the plate's own 1280 px: from 1:1, its pixels show as squares")
     page.close()
