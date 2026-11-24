@@ -13,7 +13,7 @@ const shown = (w) => Object.entries(w.rows).filter(([k, r]) => r.shown && k !== 
 test("a movie plate: the composite in its own format, the matte, the shot, and no second movie of the composite", () => {
   assert.deepEqual(shown(exportWords({ kind: "edits", spec: MOVIE, steps: STEPS })), [
     ["export", "Composite, full size", "H.264 movie"], ["matte", "Matte", "where the plate changed, PNG frames"],
-    ["shot", "Shot, full size", "the whole frame as the model made it, H.264 MP4"], ["graph", "ComfyUI graph", "the whole scene as one ComfyUI workflow, JSON"]]);
+    ["shot", "Shot, full size", "the whole frame as the model made it, H.264 MP4"], ["graph", "ComfyUI graph", "the scene as one ComfyUI workflow, with the images it loads"]]);
 });
 
 test("a plate of frames, or SDR to HDR's EXR frames: the same composite as a movie too", () => {

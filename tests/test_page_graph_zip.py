@@ -92,5 +92,33 @@ class GraphInZip(unittest.TestCase):
             self.assertEqual(json.load(f), {"nodes": []})
 
 
+
+class GraphImagesInZip(unittest.TestCase):
+    """The zip holds every image the graph's nodes load, from the top of ComfyUI's input folder, in input/ under the names
+    the graph uses; a name with a folder in it, or a file that is not there, adds nothing."""
+
+    def test_the_images_the_graph_loads_come_in_input(self):
+        routes = load_routes()
+        run = os.path.join(routes.folders.folder_paths.get_output_directory(), f"paintaplate/graphimages{os.getpid()}/v1")
+        os.makedirs(run, exist_ok=True)
+        self.addCleanup(shutil.rmtree, os.path.dirname(run), True)
+        inputs = routes.folders.folder_paths.get_input_directory()
+        for name in ("desk_e1_mask_0676e451.png", "desk_e1_strokes_7bcde075.png", "desk_e1_keyframe_12345678.png"):
+            with open(os.path.join(inputs, name), "wb") as f:
+                f.write(b"png")
+            self.addCleanup(os.remove, os.path.join(inputs, name))
+        nodes = [{"type": "LoadImageMask", "widgets_values": ["desk_e1_mask_0676e451.png", "red", "image"]},
+                 {"type": "LoadImage", "widgets_values": ["desk_e1_strokes_7bcde075.png", "image"]},
+                 {"type": "LoadImage", "widgets_values": ["../secret.png", "image"]}, {"type": "LoadImage", "widgets_values": ["gone.png", "image"]},
+                 {"type": "MarkdownNote", "widgets_values": ["text"]},
+                 {"type": "PaintAPlate_KeyframeVideo", "widgets_values": [960, 512, 17, json.dumps([{"frame": 0, "image": "desk_e1_keyframe_12345678.png"}])]}]
+        with open(os.path.join(run, routes.GRAPH), "w") as f:
+            json.dump({"nodes": nodes}, f)
+        got = [arc for _, arc in routes.collect(run, ["graph"], stem="desk", names={"graph": "comfyui_graph"})]
+        self.assertEqual(got, ["desk_comfyui_graph.json", "input/desk_e1_mask_0676e451.png", "input/desk_e1_strokes_7bcde075.png",
+                               "input/desk_e1_keyframe_12345678.png"])
+        print("The zip holds the graph and the images it loads, in input/")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -94,6 +94,7 @@ UPSCALED_PARTS = ("export", "matte")  # the upscaled set's folders that the zip 
 MOVIES = (".mp4", ".mov", ".webm")  # a part that is one such file sits at the top of the zip
 ROW_NAME = re.compile(r"[a-z0-9_]{1,60}")  # a part's name in the zip, as the page sends it
 FRAME_TAIL = re.compile(r"[._-]?\d+_?\.[A-Za-z0-9]+$")  # a frame's number, the mark before it, and its extension
+GRAPH_IMAGE = re.compile(r"[\w.-]+\.png")  # an image a graph loads: a file at the top of ComfyUI's input folder
 
 
 def zip_name(name: str, folder: str) -> str:
@@ -123,6 +124,30 @@ def frame_tail(name: str) -> str:
     return m.group(0) if m else f"_{name}"
 
 
+def graph_images(path: str) -> list[str]:
+    """The images that the ComfyUI graph at `path` loads, by the names its nodes give: LoadImage's and LoadImageMask's image,
+    and the keyframes that Keyframe Video takes as a JSON list. They are files at the top of ComfyUI's input folder, where the
+    page puts them (logic.graphImageName). A name with a folder in it is left out."""
+    try:
+        with open(path) as f:
+            nodes = json.load(f).get("nodes", [])
+    except (OSError, ValueError, AttributeError):
+        return []
+    images = []
+    for node in nodes if isinstance(nodes, list) else []:
+        values = (node.get("widgets_values") or []) if isinstance(node, dict) else []
+        found = values[:1] if isinstance(node, dict) and node.get("type") in ("LoadImage", "LoadImageMask") else []
+        if isinstance(node, dict) and node.get("type") == "PaintAPlate_KeyframeVideo":  # its keyframes: the JSON list of its keys
+            for value in values:
+                try:
+                    keys = json.loads(value) if isinstance(value, str) and value.startswith("[") else []
+                except ValueError:
+                    keys = []
+                found += [k.get("image") for k in keys if isinstance(k, dict)]
+        images += [v for v in dict.fromkeys(found) if isinstance(v, str) and GRAPH_IMAGE.fullmatch(v) and v not in images]
+    return images
+
+
 def collect(folder: str, parts: list[str], upscaled: str = "", stem: str = "", names: dict | None = None) -> list[tuple[str, str]]:
     """(path on disk, name in the zip) for each part asked for, in a fixed order (zipped)."""
     return [(path, arc) for path, arc, _ in zipped(folder, parts, upscaled, stem, names)]
@@ -133,6 +158,7 @@ def zipped(folder: str, parts: list[str], upscaled: str = "", stem: str = "", na
     plate's or the scene's name (the run folder's own name when it is empty), then the part's name: names[part], which the
     page takes from the Export dialog's rows, else the part's id. A part that is one movie sits at the top, as
     <stem>_<name>.<ext>. A part's frames sit in a folder of its name, each as <stem>_<name><frame>.<ext> (frame_tail).
+    The graph comes with the images its nodes load, in input/ (graph_images).
     `upscaled`: the folder under the run's that holds the upscaled set of the size asked for, as UPSCALED_SET; its result and
     its matte come, named by names["up"], else <folder>_upscaled. A value in another form gives no file, and no folder is read
     for it. A name already taken keeps its first file: the composite's movie never replaces a composite that is a movie."""
@@ -179,6 +205,12 @@ def zipped(folder: str, parts: list[str], upscaled: str = "", stem: str = "", na
                           if inside(m) and (part == "graph" or m.lower().endswith(MOVIES))), None)
             if found:
                 add(found, f"{stem}_{names.get(part) or part}{os.path.splitext(found)[1].lower()}", part)
+                if part == "graph":  # the images its nodes load, from the top of ComfyUI's input folder, under the names it uses
+                    inputs = os.path.realpath(folder_paths.get_input_directory())
+                    for image in graph_images(found):
+                        path = os.path.join(inputs, image)
+                        if os.path.isfile(path) and not os.path.islink(path) and os.path.dirname(os.path.realpath(path)) == inputs:
+                            add(path, f"input/{image}", part)
     return files
 
 

@@ -859,7 +859,7 @@ export function exportWords({ kind, ready = true, left = "", exr = false, hdr = 
     review: { label: `${steps.comp}, as a movie`, detail: "H.264 MP4", shown: edits && frames },
     matte: { label: "Matte", detail: "where the plate changed, PNG frames", shown: edits },
     shot: { label: steps.shot, detail: "the whole frame as the model made it, H.264 MP4", shown: edits },
-    graph: { label: "ComfyUI graph", detail: "the whole scene as one ComfyUI workflow, JSON", shown: true }, // the page decides: the edits on show, or a fluid shot alone
+    graph: { label: "ComfyUI graph", detail: "the scene as one ComfyUI workflow, with the images it loads", shown: true }, // the page decides: the edits on show, or a fluid shot alone
     upscaled: { label: steps.up, shown: true }, // no row: Finish > Upscale adds its set to the zip
   };
   return { hint, format, note, rows, zip: zipNames(rows, steps.hdr), help: `${hint} ${steps.comp} keeps the plate's format. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.`,
@@ -937,11 +937,12 @@ export const keyframeSlotLine = (frame) => `Keyframes snap to the first frame, t
 const FAMILIES = { Display: "Display-referred", ITU: "ITU (International Telecommunication Union)" };
 export function plateFamily(name) { return FAMILIES[name] ?? name; }
 // An image that the scene's ComfyUI graph reads. It sits at the top of ComfyUI's input folder: LoadImage lists only the files
-// there, and the editor marks an image input whose file is not in that list as missing. Named after the plate, the edit,
-// what it holds and its hash, so two scenes never share a name.
-export function graphImageName(plate, edit, kind, hash) {
-  const stem = String(plate || "").replace(/[^A-Za-z0-9-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "plate";
-  return `paintaplate_${stem}_e${edit}_${kind}_${String(hash).slice(0, 8)}.png`;
+// there, and the editor marks an image input whose file is not in that list as missing. Named after the export's stem (the
+// plate's or the scene's name), the edit, what it holds and its hash, so two scenes never share a name; the export's zip
+// holds it under the same name, in input/ (routes.graph_images).
+export function graphImageName(name, edit, kind, hash) {
+  const stem = String(name || "").replace(/[^A-Za-z0-9-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "plate";
+  return `${stem}_e${edit}_${kind}_${String(hash).slice(0, 8)}.png`;
 }
 
 export function fluidPrompt(words) { // the trigger first, as the model card asks; no words: its own example

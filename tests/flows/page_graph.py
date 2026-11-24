@@ -35,7 +35,7 @@ def run(browser, port, U):
             return False
 
     names = sorted(loaders.values())
-    U.check(len(names) == 2 and all("/" not in v and v.startswith("paintaplate_desk_e1_") for v in names),
+    U.check(len(names) == 2 and all("/" not in v and v.startswith("desk_e1_") for v in names),
             f"each image loader of the graph reads a file at the top of the input folder: {loaders}")
     U.check(all(there(v) for v in names), f"each of those files is in the input folder: {[(v, there(v)) for v in names]}")
     U.check("must be in ComfyUI's input folder" in readme and all(v in readme for v in names), f"the README note names the files that must be on disk: {readme[:500]!r}")

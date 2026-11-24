@@ -1,6 +1,6 @@
 """Export's zip names every file after the plate, or after the scene once it is saved, and after its row in the dialog. A
 movie plate with every row ticked gives its composite and its shot at the top, its matte's frames in matte/, its graph and
-its models' list, all named desk_..., and no layer, in desk_v1.zip. A blank plate's scene saved as « smoke » names its fluid
+the images the graph loads (in input/) and its models' list, all named desk_..., and no layer, in desk_v1.zip. A blank plate's scene saved as « smoke » names its fluid
 shot's files smoke_..., in smoke_fluid_v1.zip."""
 import zipfile
 
@@ -23,7 +23,7 @@ def run(browser, port, U):
     rows = {zip_rows.row_of(n) for n in names}
     U.check(dl.value.suggested_filename == "desk_v1.zip" and all(n.rsplit("/", 1)[-1].startswith("desk_") for n in names),
             f"the zip and every file in it start with the plate's name: {dl.value.suggested_filename}, {names[:3]}")
-    U.check(rows == {"composite_full_size", "matte", "shot_full_size", "comfyui_graph", "models"} and "matte/desk_matte_00001_.png" in names
+    U.check(rows == {"composite_full_size", "matte", "shot_full_size", "comfyui_graph", "input", "models"} and "matte/desk_matte_00001_.png" in names
             and not any("layer" in n for n in names), f"each file takes its row's name, frames sit in their row's folder, and no layer: {sorted(rows)}")
     page.click("#open-btn"); page.click("#open [data-tab=blank]")  # a blank plate, saved as a scene
     page.fill("#b-frames", "17"); page.dispatch_event("#b-frames", "input")

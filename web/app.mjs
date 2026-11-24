@@ -149,7 +149,7 @@ const snapKeyOf = (e) => `${painted(e)}|${e.whole ? e.prompt : ""}`; // what SAM
 // that reads it keeps its job index key when a scene opens again. Without WebCrypto (plain http) each upload has its own name.
 const uploadGraphImage = async (c, edit, kind) => { // an image of the scene's ComfyUI graph: at the top of the input folder (logic.graphImageName)
   const b = await blob(c), h = (await hashHex(b)) || Date.now().toString(16);
-  return upload(b, graphImageName(S.plate.name, edit, kind, h), "");
+  return upload(b, graphImageName(exportStem(), edit, kind, h), "");
 };
 const uploadCanvas = async (c, name) => {
   const b = await blob(c), h = await hashHex(b);
