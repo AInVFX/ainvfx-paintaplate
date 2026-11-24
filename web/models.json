@@ -1,6 +1,6 @@
 {
- "about": "Every model Paint a plate's workflows load: its licence (the one its Hugging Face repository states, read on 2 Nov 2026 at the revision pinned in get_models.py), its source and what it does here. upstream: the original model's licence when a repackaged file comes from another repository. tests/test_models.py checks it against get_models.py and the workflows.",
- "checked": "2026-11-02",
+ "about": "Every model Paint a plate's workflows load: its licence (the one its Hugging Face repository states, read on 23 Nov 2026 at the revision pinned in get_models.py, named by the licence's own title and linked to its text), its source and what it does here. upstream: the original model's licence when a repackaged file comes from another repository. tests/test_models.py checks it against get_models.py and the workflows.",
+ "checked": "2026-11-23",
  "models": [
   {
    "id": "klein",
@@ -65,7 +65,7 @@
    "repo": "Lightricks/LTX-2.5",
    "source": "https://huggingface.co/Lightricks/LTX-2.5",
    "use": "Extends every edit to the whole shot; makes fluid shots and SDR to HDR",
-   "licence": "LTX-2.x Community License",
+   "licence": "LTX-2.x Community License Agreement",
    "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
    "gated": true,
    "revision": "49b093a39c19169a8a81721dcc541e07e945232f"
@@ -77,7 +77,7 @@
    "repo": "Lightricks/LTX-2.5",
    "source": "https://huggingface.co/Lightricks/LTX-2.5",
    "use": "Reads LTX 2.5's prompts",
-   "licence": "LTX-2.x Community License",
+   "licence": "LTX-2.x Community License Agreement",
    "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
    "upstream": {
     "licence": "Apache-2.0 (Gemma 4)",
@@ -93,7 +93,7 @@
    "repo": "Lightricks/LTX-2.5",
    "source": "https://huggingface.co/Lightricks/LTX-2.5",
    "use": "Encodes and decodes LTX 2.5's video",
-   "licence": "LTX-2.x Community License",
+   "licence": "LTX-2.x Community License Agreement",
    "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
    "gated": true,
    "revision": "49b093a39c19169a8a81721dcc541e07e945232f"
@@ -105,7 +105,7 @@
    "repo": "Lightricks/LTX-2.5",
    "source": "https://huggingface.co/Lightricks/LTX-2.5",
    "use": "Makes the audio latent that LTX 2.5 needs to sample video",
-   "licence": "LTX-2.x Community License",
+   "licence": "LTX-2.x Community License Agreement",
    "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
    "gated": true,
    "revision": "49b093a39c19169a8a81721dcc541e07e945232f"
@@ -117,7 +117,7 @@
    "repo": "WepeNerd/LTX-Ripple",
    "source": "https://huggingface.co/WepeNerd/LTX-Ripple",
    "use": "Extends Paint and Light edits to the whole shot",
-   "licence": "LTX-2 Community License Agreement",
+   "licence": "LTX-2.x Community License Agreement",
    "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
    "revision": "76abac5ede8a3415b9d1cd803843a38ecb351600"
   },
@@ -128,7 +128,7 @@
    "repo": "Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting",
    "source": "https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting",
    "use": "Makes the clean plate pass",
-   "licence": "LTX-2 Community License",
+   "licence": "LTX-2 Community License Agreement",
    "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2",
    "gated": true,
    "revision": "8becd61405133263d9e580be41a92e8f827b01ed"
@@ -152,7 +152,7 @@
    "source": "https://huggingface.co/Kijai/LTX2.3_comfy",
    "use": "Decodes the live preview while a pass runs",
    "licence": "LTX-2 Community License Agreement",
-   "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE",
+   "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2",
    "upstream": {
     "licence": "MIT",
     "source": "https://github.com/madebyollin/taehv"
@@ -166,7 +166,7 @@
    "repo": "Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR",
    "source": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR",
    "use": "Turns the SDR shot into scene-linear HDR",
-   "licence": "LTX-2.x Community License",
+   "licence": "LTX-2.x Community License Agreement",
    "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
    "optional": true,
    "gated": true,
@@ -179,7 +179,7 @@
    "repo": "Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR",
    "source": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR",
    "use": "The prompt that SDR to HDR uses",
-   "licence": "LTX-2.x Community License",
+   "licence": "LTX-2.x Community License Agreement",
    "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
    "optional": true,
    "gated": true,
@@ -192,7 +192,7 @@
    "repo": "AInVFX/ainvfx-fluid",
    "source": "https://huggingface.co/AInVFX/ainvfx-fluid",
    "use": "Turns painted keyframes into a fluid: smoke, fire, water and more",
-   "licence": "LTX-2.x Community License",
+   "licence": "LTX-2.x Community License Agreement",
    "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
    "optional": true,
    "revision": "6102c50e9629ab4bf32a36d184e705b7a829e4f3"
