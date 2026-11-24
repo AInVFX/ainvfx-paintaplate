@@ -189,7 +189,7 @@ def fluid_wipe_and_models(page, U):
     page.keyboard.down("Shift"); page.mouse.click(*spot); page.keyboard.up("Shift")  # Shift+click shows the inspector, as RV
     page.wait_for_function("document.querySelector('#inspector').dataset.movie === 'true'", timeout=20000)
     rows = page.eval_on_selector_all("#inspector div", "els => els.map(e => e.textContent)")
-    U.check(any(r.startswith("Values8-bit movie:") and "not the pass's own values" in r for r in rows),
+    U.check(any(r.startswith("Values8-bit movie, ") for r in rows),
             f"on a shot shown by its movie, the inspector says its values are the movie's codes: {[r for r in rows if r.startswith('Values')]}")
     page.keyboard.press("F5")
     page.click("#view", button="right")

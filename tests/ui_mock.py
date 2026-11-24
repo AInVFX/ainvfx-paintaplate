@@ -503,7 +503,7 @@ def history_flow(browser, port):
     page.wait_for_function("[...document.querySelectorAll('#log li span')].slice(%d).some((e) => /used again|reused from an earlier render/.test(e.textContent))" % seen,
                            timeout=60000)
     lines = log_lines(page)[seen:]
-    check(not any(re.search(r"(Track the object|Clean plate pass, preview)(?: \(|: )about", line) for line in lines),
+    check(not any(re.search(r"(Track the object to clean|Clean plate pass, preview)(?: \(|: )about", line) for line in lines),
           "the paint removed, the next render uses the erase's matte and clean plate again: nothing tracks or cleans twice")
     page.wait_for_function("document.querySelector('#render-left').textContent === 'full size ready'", timeout=120000)
     lines = log_lines(page)[seen:]
@@ -954,15 +954,15 @@ def hdr_flow(browser, port):
     rows = lambda: page.eval_on_selector_all("#stages li.pick .name", "els => els.map(e => e.textContent)")  # noqa: E731
     shown = lambda: page.eval_on_selector_all("#stages li.shown .name", "els => els.map(e => e.textContent)")  # noqa: E731
     picture = lambda: page.evaluate("document.querySelector('canvas[data-picture]').dataset.picture")  # noqa: E731
-    check({"First frame", "Shot, preview", "SDR to HDR", "Composite, full size"} <= set(rows()) and shown() == ["Composite, full size"],
+    check({"Edited first frame", "Shot, preview", "SDR to HDR", "Composite, full size"} <= set(rows()) and shown() == ["Composite, full size"],
           f"every finished pass with a picture is a row to click, the latest on show: {rows()}, {shown()}")
     page.click("#stages li.pick:has-text('SDR to HDR')")
     poll(page, lambda: shown() == ["SDR to HDR"])
     check(shown() == ["SDR to HDR"] and ": displayed." in (page.text_content("#hud") or ""), f"a click displays that pass in the viewer: {shown()}")
-    page.click("#stages li.pick:has-text('First frame')")
-    poll(page, lambda: shown() == ["First frame"] and picture() == "hero")
-    check(shown() == ["First frame"] and picture() == "hero", f"the First frame row shows the edit as Klein made it: {shown()}, {picture()}")
-    page.click("#stages li.pick:has-text('First frame')")
+    page.click("#stages li.pick:has-text('Edited first frame')")
+    poll(page, lambda: shown() == ["Edited first frame"] and picture() == "hero")
+    check(shown() == ["Edited first frame"] and picture() == "hero", f"the Edited first frame row shows the edit as Klein made it: {shown()}, {picture()}")
+    page.click("#stages li.pick:has-text('Edited first frame')")
     poll(page, lambda: shown() == ["Composite, full size"])
     check(shown() == ["Composite, full size"], f"a second click goes back to the latest: {shown()}")
     page.evaluate(WATCH)

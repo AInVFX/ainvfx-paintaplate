@@ -32,10 +32,10 @@ test("the box sits beside the point and stays inside the viewport", () => {
   assert.deepEqual(boxPlace(900, 550, 220, 120, 1000, 600), [666, 416]);
 });
 
-test("the inspector says when its values are a movie's codes", () => {
+test("the inspector says when its values come from a movie, and in which space", () => {
   assert.equal(sourceLine({ space: "ACES2065-1", movie: false }, null), "ACES2065-1, as stored");
-  assert.equal(sourceLine({ space: "ACEScct", movie: true }, { bits: 8 }), "8-bit movie: ACEScct codes, not the pass's own values");
-  assert.equal(sourceLine({ space: "sRGB Encoded Rec.709 (sRGB)", movie: false }, { bits: 10 }), "10-bit movie: sRGB Encoded Rec.709 (sRGB) codes");
+  assert.equal(sourceLine({ space: "ACEScct", movie: true }, { bits: 8 }), "8-bit movie, ACEScct");
+  assert.equal(sourceLine({ space: "sRGB Encoded Rec.709 (sRGB)", movie: false }, { bits: 10 }), "10-bit movie, sRGB Encoded Rec.709 (sRGB)");
   assert.equal(sourceLine(null, null), null);
 });
 

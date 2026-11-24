@@ -1023,7 +1023,7 @@ const matteSpace = () => dataSpace(S.ocio.info?.spaces) ?? modelSpace();
 // to the latest result, which the viewer follows again as steps finish.
 function choosePass(id) {
   const r = S.renders.get(S.heroKey);
-  const label = id === "first" ? "First frame" : labelOf(STAGES.find((x) => x.id === id));
+  const label = id === "first" ? "Edited first frame" : labelOf(STAGES.find((x) => x.id === id));
   S.pass = S.pass === id ? null : id;
   if (!S.pass) { showLatest(); hud("The latest result.", 1500); return stagesUI(); }
   if (id === "first") { pause(); seek(0); render(); }
@@ -1053,7 +1053,7 @@ function compareRow(li, id) { // in the Render panel's pick helper: Ctrl+click c
 }
 const passSpaces = () => ({ log: logSpace(), data: matteSpace(), hdr: HDR_FRAMES });
 function passLabel(id) {
-  if (id === "first") return "First frame";
+  if (id === "first") return "Edited first frame";
   return labelOf(STAGES.find((x) => x.id === id)) ?? id;
 }
 function shownLabel() { // the pass on show, by its row's name: the one clicked, else the latest result
@@ -2822,7 +2822,7 @@ const gridAt = (w) => gridGrow(w, S.plate.spec.width, grow(S.plate.spec.width, t
 // The export (`onDemand`) writes the result for compositing software, only when Export asks for it.
 const STAGES = [
   { id: "fluid", label: "Fluid shot, preview", ref: 25, preview: true }, { id: "fluidfull", label: "Fluid shot, full size", ref: 22, final: true }, // measured on a 96 GB GPU
-  { id: "erase", label: "Track the object", ref: 6 }, { id: "clean", label: "Clean plate pass, preview", ref: 10, preview: true },
+  { id: "erase", label: "Track the object to clean", ref: 6 }, { id: "clean", label: "Clean plate pass, preview", ref: 10, preview: true },
   { id: "shot", label: "Shot, preview", ref: 20, preview: true }, { id: "track", label: "Track the paint, preview", ref: 16, preview: true },
   { id: "comp", label: "Composite, preview", ref: 14, preview: true },
   { id: "cleanfull", label: "Clean plate pass, full size", ref: 32, final: true }, { id: "full", label: "Shot, full size", ref: 45, final: true },
@@ -3530,7 +3530,7 @@ function stagesUI() {
   };
   const first = document.createElement("li"); // the edit on the first frame, as Klein made it
   first.className = "done" + (S.pass === "first" ? " shown" : "");
-  first.innerHTML = '<span class="dot"></span><span class="name">First frame</span><span class="time">edit</span>';
+  first.innerHTML = '<span class="dot"></span><span class="name">Edited first frame</span><span class="time">edit</span>';
   pick(first, "first", "the first frame");
   const rows = [...(active.some((e) => e.tool !== "fluid") ? [first] : []), ...stepsInOrder(r, skip).map((st) => { // the first frame an edit's pass made: a fluid shot alone has none
     const li = document.createElement("li"), took = doneOf(r, st), from = storeOf(r, st)?.taken?.[st.id];
@@ -4134,7 +4134,7 @@ function inspectSource() { // the file on show at the point, on its side of the 
   if (S.compare || (left && !S.cmp)) return { path: p.path, movie: false, space: p.cs, label: "Plate" }; // O held, or the wipe's plate side
   const sh = left ? S.cmp : S.shot, label = left ? S.cmp.label : sh ? shownLabel() : "Plate";
   if (left && S.cmp.black) return { path: null, drawn: "Blank plate", label }; // a fluid shot's black blank plate: no file to read
-  if ((left ? S.cmp.id : S.pass) === "first") return { path: null, drawn: "First frame", label }; // Klein's edit: a picture, not a file
+  if ((left ? S.cmp.id : S.pass) === "first") return { path: null, drawn: "Edited first frame", label }; // Klein's edit: a picture, not a file
   const frames = !!sh?.frames, space = sh ? (frames ? sh.framesSpace ?? p.cs : sh.space) : p.cs;
   return { path: sourcePath(sh, p.path), movie: !!sh && !frames, space: space === "@model" ? modelSpace() : space, label };
 }

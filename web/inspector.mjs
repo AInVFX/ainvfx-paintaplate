@@ -48,7 +48,7 @@ export function sourceLine(source, movie) {
   if (!source) return null;
   if (source.drawn) return `${source.drawn}, as drawn: the final colour only`;
   if (!movie && !source.movie) return `${source.space}, as stored`;
-  return `${movie?.bits ?? 8}-bit movie: ${source.space} codes${source.movie ? ", not the pass's own values" : ""}`;
+  return `${movie?.bits ?? 8}-bit movie, ${source.space}`;
 }
 
 // The rows the inspector shows, top to bottom.

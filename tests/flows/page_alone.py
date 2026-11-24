@@ -1,6 +1,6 @@
 """SDR to HDR on a plate with no edit (logic.plateAlone). On desk.mp4,
 whose format holds nothing above 1.0, Finish > SDR to HDR turns it on and starts nothing: Generate starts it. The Render
-panel shows one step, SDR to HDR, with no First frame row, and the job takes the plate itself, with the plate's size for
+panel shows one step, SDR to HDR, with no Edited first frame row, and the job takes the plate itself, with the plate's size for
 HDR Match. Once it is done, the player shows its EXR frames at full precision, and Export downloads them as they are:
 half-float EXR frames at the plate's size, with the models behind them in MODELS.md. Turned off, the plate has nothing to
 export; turned on again, the result shows at once."""

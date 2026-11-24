@@ -26,7 +26,7 @@ def run(browser, port, U):
     page.evaluate(U.WATCH); page.keyboard.press("Enter")
     page.wait_for_function(DONE.format(r" Fluid shot, full size: done in "), timeout=120000)
     rows = page.evaluate(ROWS)
-    U.check("First frame" not in rows and rows[:2] == ["Fluid shot, preview", "Fluid shot, full size"] and "SDR to HDR" not in rows,
+    U.check("Edited first frame" not in rows and rows[:2] == ["Fluid shot, preview", "Fluid shot, full size"] and "SDR to HDR" not in rows,
             f"the fluid shot alone: no first frame of an edit, its two steps, no SDR to HDR: {rows}")
     page.evaluate(U.WATCH)
     page.click("#finish-btn"); page.click("#finish-hdr")
@@ -50,7 +50,7 @@ def run(browser, port, U):
     new, rows = page.evaluate("window.__lines"), page.evaluate(ROWS)
     comp = next((i for i, t in enumerate(new) if re.search(r" Composite, full size: done in ", t)), None)
     hdr = next((i for i, t in enumerate(new) if re.search(r" SDR to HDR: done in ", t)), None)
-    U.check("First frame" in rows and rows.index("First frame") == rows.index("Fluid shot, full size") + 1 and comp is not None and hdr is not None and comp < hdr and rows.index("Composite, full size") < rows.index("SDR to HDR"),
+    U.check("Edited first frame" in rows and rows.index("Edited first frame") == rows.index("Fluid shot, full size") + 1 and comp is not None and hdr is not None and comp < hdr and rows.index("Composite, full size") < rows.index("SDR to HDR"),
             f"a Paint over the fluid shot: its first frame after the fluid shot's steps, then SDR to HDR on its composite, whole: {rows}")
     page.click("#export-btn")
     boxes = {k: page.is_visible(f"#x-{k}") for k in ("matte", "review", "shot")}

@@ -63,7 +63,7 @@ def run(browser, port, U):
     one = page.evaluate(SIDES)
     page.keyboard.press(",")
     two = page.evaluate(SIDES)
-    U.check(first[0] == "Plate" and one[0] == "First frame" and two[0] not in ("Plate", "First frame") and two[1] == first[1],
+    U.check(first[0] == "Plate" and one[0] == "Edited first frame" and two[0] not in ("Plate", "Edited first frame") and two[1] == first[1],
             f"comma steps the wipe's left side: {first[0]}, {one[0]}, {two[0]}, against {first[1]}")
     page.keyboard.press(".")
     three = page.evaluate(SIDES)
