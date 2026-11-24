@@ -165,7 +165,8 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
     const area = union("painted area", painted, plate.track);
     paintMatte = add(instantiate(WF.matte, "paint tracking", { ...common, color_space: "@model", width: plate.track[0],
       height: plate.track[1], prefix: out("matte_b/m"), base_color_space: clean ? "@model" : plate.cs,
-      name_request: nameRequest("paint", painted.map((e) => e.prompt)), strategy: sharedMatte(painted) },
+      name_request: nameRequest("paint", edits.filter((e) => e.tool === "paint").map((e) => e.words)), // as the page asks it (app.track)
+      strategy: sharedMatte(edits.filter((e) => e.tool === "paint")) },
       { path: made, mask: area, prompt: area, seed: area, base: clean ? cleaned : ["plate", 0] },
       { drop })).frames;
   }
