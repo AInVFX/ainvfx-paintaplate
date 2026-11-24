@@ -751,7 +751,7 @@ def deep_frames(rel: str, first: int, count: int, side: int) -> tuple[bytes, int
     the end holds the last, as Load Plate pads a shot.
     """
     full = folders.plate_path(rel)  # a plate, or a render's review frames
-    first, count, side = max(0, first), min(max(1, count), DEEP_FRAMES_MAX), min(max(64, side), 4096)
+    first, count, side = max(0, first), min(max(1, count), DEEP_FRAMES_MAX), min(max(64, side), plateio.NATIVE_SIDE)
     if plateio.is_sequence(full) or full.lower().endswith(STILLS):
         frames = [frame_rgb(full, i) for i in range(first, first + count)]
     else:
