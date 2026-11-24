@@ -917,7 +917,7 @@ async function upscaleResult(r) {
   const st = UPS.find((x) => (x.id === "uphdr" || x.id === "upplate") && !r.skip.has(x.id));
   if (!st || (r.active?.some((e) => e.tool !== "fluid") && !r.hdrAfter)) return; // an edit's « Plate, upscaled » is its plate's windows (upscaleSteps)
   const p = plateUnder(r), hdr = st.id === "uphdr", sized = upSize(), store = ((r.ups ??= {})[sized] ??= {});
-  r.run ??= r.base; // a fluid shot's files sit in its render's folder, beside the upscaled set, which its zip takes (downloadFluid)
+  r.run ??= r.base; // a fluid shot's files sit in its render's folder, beside the upscaled set, which its zip takes (exportAlone)
   await step(r, st.id, async (progress) => {
     store[st.id] = await upscalePart("comp", { dir: r.run, result: hdr ? r.hdrFrames : p.path, space: hdr ? HDR_FRAMES : p.cs,
       float: hdr || (r.fluid ? false : /^\.exr$/i.test(p.spec.ext ?? "")), layer: null, matte: null }, false, progress, sized);
@@ -2916,11 +2916,11 @@ function reused(r, store, id, take) { // a step that a render with the same eras
 // back to the plate's size and level by HDR Match in the workflow. The viewer plays them, and Export zips them as they are.
 async function plateHdr(r) { // the plate alone: SDR to HDR on the plate, Upscale on its result, or both
   const p = plateUnder(r), key = r.key, base = r.base;
-  if (r.fluid && r.skip.has("hdr") && !upLast(r)) return S.wantDownload && key === S.heroKey ? downloadFluid() : undefined; // the fluid shot alone, with no Finish step
+  if (r.fluid && r.skip.has("hdr") && !upLast(r)) return S.wantDownload && key === S.heroKey ? exportAlone(r) : undefined; // the fluid shot alone, with no Finish step
   if (!r.told) {
     r.told = true;
     const passes = [!r.skip.has("hdr") && "SDR to HDR", upLast(r) && "Upscale"].filter(Boolean);
-    log(`Render v${r.v}: no edit, the ${fluidOnly() ? "fluid shot" : "plate"} through ${passes.join(" and ")}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
+    log(`Render v${r.v}: no edit, the plate through ${passes.join(" and ")}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
   }
   await step(r, "hdr", async (progress) => {
     const out = await run("hdr", { ...S.memoryProfile.slots, path: p.path, color_space: p.cs, config: S.ocio.config, max_frames: p.frames,
@@ -2944,7 +2944,7 @@ async function plateHdr(r) { // the plate alone: SDR to HDR on the plate, Upscal
   if (key !== S.heroKey) return log(`Render v${r.v}: ${labelOf(upLast(r) ?? STAGES.find((st) => st.id === "hdr"), r)}: ready, in the background.`);
   upscaledShown(r, key);
   stagesUI(); exportUI();
-  if (S.wantDownload) return fluidOnly() ? downloadFluid() : exportAlone(r);
+  if (S.wantDownload) return exportAlone(r);
 }
 // A blank plate's fluid shot, the first steps of its render: at the shot preview's size when the Preview menu asks for it,
 // then at full size, in the render's folder. A render of the same version takes the full size from the one that made it.
@@ -2976,7 +2976,7 @@ async function fluidSteps(r, fl) {
     log(`Render v${r.v}: Fluid shot, full size: reused from render v${donor.v}.`);
   }
   await step(r, "fluidfull", async (progress) => { r.fluid = await make(r.base, null)(progress); });
-  if (alone) Object.assign(r, { review: r.fluid.movie, reviewSpace: "@model" }); // the fluid shot alone: its result
+  if (alone) Object.assign(r, { review: r.fluid.movie, reviewSpace: "@model", run: r.run ?? r.base }); // the fluid shot alone: its result, and its files' folder
   await fluidFirst(r, fl);
   if (!donor) shown(r.fluid, "Fluid shot, full size: Space plays it. Use Paint, Clean or Light to edit it further.");
 }
@@ -2992,19 +2992,20 @@ async function fluidFirst(r, fl) { // the full-size shot of a fluid version: its
   historyUI(); exportUI();
 }
 async function exportAlone(r) { // Export on the plate alone, or on a relit composite after SDR to HDR (logic.hdrAfterComposite): the frames SDR to HDR wrote,
-  // at the plate's size and level, in ACES2065-1, and the upscaled set Upscale's step made, at the size asked for
-  const hdr = r.done?.hdr !== undefined;
-  r.exported ??= { run: r.run, name: `${S.plate.name}_paintaplate_v${r.v}`, text: hdr ? `${S.plate.frames} half-float EXR frames in ACES2065-1, in ${r.run}/hdr.` : "", matte: null };
+  // at the plate's size and level, in ACES2065-1, and the upscaled set Upscale's step made, at the size asked for. A fluid
+  // shot alone adds its own files: the shot in the blank plate's format and its preview movie
+  const hdr = r.done?.hdr !== undefined, fluid = !!r.fluid && !r.active.some((e) => e.tool !== "fluid");
+  r.exported ??= { run: r.run ?? r.base, name: fluid ? `fluid_v${fluidEdit()?.version}` : `${S.plate.name}_paintaplate_v${r.v}`, text: hdr ? `${S.plate.frames} half-float EXR frames in ACES2065-1, in ${r.run}/hdr.` : "", matte: null };
   S.exported = r.exported;
   S.wantDownload = null;
   stagesUI(); exportUI();
   confirmed(exportDone(S.exported.text));
-  download([...(hdr ? ["hdr"] : []), ...(upscaled(r) ? ["upscaled"] : [])]);
+  download([...(hdr ? ["hdr"] : []), ...(fluid ? ["plate", "preview"] : []), ...(upscaled(r) ? ["upscaled"] : [])]);
 }
 function exportPlate(r = S.renders.get(S.heroKey) ?? want(S.heroKey, true)) { // Export of the plate alone or of a relit composite in HDR (exportAlone):
   // the render makes its steps still due first, then the zip downloads
   plan(r, r.active ?? []);
-  const due = STAGES.find((st) => (st.id === "hdr" || st.up) && !r.skip.has(st.id) && doneOf(r, st) === undefined);
+  const due = STAGES.find((st) => (st.id === "fluidfull" || st.id === "hdr" || st.up) && !r.skip.has(st.id) && doneOf(r, st) === undefined);
   if (!due) return exportAlone(r);
   S.wantDownload = ["hdr"];
   status(runsFirst(due.up ? "Upscale" : "SDR to HDR"));
@@ -3609,20 +3610,6 @@ function exportUI() {
 // A fluid shot with no edit on it exports itself: its HDR frames when it went through SDR to HDR (half-float EXR in
 // ACES2065-1), the shot in the blank plate's format (ProRes 4444) and its preview movie, from the fluid shot's folder.
 const fluidOnly = () => { const f = fluidEdit(); return !!f && f.on && f.state === "done" && !S.edits.some((e) => e !== f && e.on && e.patch); }; // a fluid shot with no edit on it
-async function downloadFluid() { // Export of a fluid shot alone: its own files, and the upscaled set its step made (upscaleResult)
-  const f = fluidEdit(), r = S.renders.get(S.heroKey), hdr = r?.done?.hdr !== undefined, parts = hdr ? ["hdr", "plate", "preview"] : ["plate", "preview"];
-  if (r) plan(r, r.active ?? []);
-  if (r && UPS.some((st) => !r.skip.has(st.id) && doneOf(r, st) === undefined)) { // Upscale's step first: the render makes it, then the zip
-    S.wantDownload = ["fluid"];
-    status(runsFirst("Upscale"));
-    exportUI(); stagesUI(); return void touch();
-  }
-  S.wantDownload = null;
-  S.exported = { run: r?.run ?? r?.base, name: `fluid_v${f.version}`, text: "" };
-  log(`Export: fluid shot v${f.version}${hdr ? " in HDR" : ""}, from ${S.exported.run}.`);
-  download([...parts, ...(r && upscaled(r) ? ["upscaled"] : [])]);
-}
-
 const exportsExr = (r) => exrResult(S.plate.spec, r?.skip ? !r.skip.has("hdr") : hdrWanted(), S.plate.headroom); // the render's own plan (plan) decides: an HDR result of a plate whose format holds nothing above 1.0
 function exportDialog() { // its words come from one source for every kind of result (logic.exportWords)
   const fluid = fluidOnly(), alone = plateAlone(S.heroKey), r = S.renders.get(S.heroKey), relitHdr = !!r?.hdrAfter, spec = S.plate.spec;
@@ -4595,7 +4582,7 @@ $("#preview-size").onchange = (e) => setPreview(readPreview(e.target.value));
 
 $("#x-go").onclick = () => {
   S.graph = !$("#x-graph").closest("label").hidden && $("#x-graph").checked ? graphFile().catch((err) => void quiet(err)) : null; // from the edits on show; the zip takes it
-  if (fluidOnly()) return void setTimeout(downloadFluid, 0); // once the dialog has closed
+  if (fluidOnly()) return void setTimeout(exportPlate, 0); // once the dialog has closed: as the plate alone exports
   const r = S.renders.get(S.heroKey);
   if (plateAlone(S.heroKey) || r?.hdrAfter) return void setTimeout(() => exportPlate(r), 0); // SDR to HDR's frames: the plate alone, or a relit result in HDR
   const parts = ["export", ...["matte", "review", "shot"].filter((k) => $(`#x-${k}`).checked)];
