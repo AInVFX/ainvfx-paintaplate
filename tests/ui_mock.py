@@ -1008,8 +1008,8 @@ def fluid16_flow(browser, port):
     with page.expect_download() as dl:
         page.click("#x-go")
     names = zipfile.ZipFile(dl.value.path()).namelist()
-    check(zip_rows.files(names, "sdr_to_hdr", (".exr",)) and zip_rows.files(names, "fluid_shot"),
-          f"the zip holds the HDR frames and the shot in the blank plate's format: {names[:3]}")
+    check(zip_rows.files(names, "sdr_to_hdr", (".exr",)) and zip_rows.files(names, "fluid_shot") and all(n.rsplit("/", 1)[-1].startswith("fluid_") for n in names),
+          f"the zip holds the HDR frames and the shot in the blank plate's format, named after the blank plate: {names[:3]}")
     page.evaluate("""() => { const v = document.querySelector('canvas[data-precision]'); window.__prec = [];
       new MutationObserver(() => window.__prec.push(v.dataset.precision)).observe(v, { attributes: true, attributeFilter: ['data-precision'] }); }""")
     page.click("#play-btn"); page.wait_for_function("window.__prec.length >= 34", timeout=30000); page.click("#play-btn")  # two rounds of its 17 frames

@@ -3444,8 +3444,12 @@ async function modelsBehindResult() { // the models behind the result on show: t
   const flows = resultFlows({ tools: edits.map((e) => e.tool), render: [...(r?.flows ?? [])], fluid, fluidHdr: fluid && !!S.fluid.result.hdr });
   return modelsBehind(registry, flows, (n) => WF[n]?.prompt);
 }
-// The name every exported file starts with: the scene's name once it is saved or opened, for its plate, else the plate's name
-const exportStem = () => (S.exportStem && S.exportStem.plate === S.plate?.path ? S.exportStem.name : S.plate?.name) || "";
+// The name every exported file starts with: the scene's name once it is saved or opened, for its plate, else the plate's name. A
+// fluid shot's plate is its blank plate, whose name holds when SDR to HDR makes the shot an EXR plate of its own frames.
+const exportStem = () => {
+  const blank = S.fluid?.blankPath, own = blank ? blank.split(/[\\/]/).pop().replace(/\.[^.]+$/, "") : S.plate?.name;
+  return (S.exportStem && [S.plate?.path, blank].includes(S.exportStem.plate) ? S.exportStem.name : own) || "";
+};
 async function download(parts = ["export", "matte"]) {
   const words = exportWordsNow(); // the dialog's rows: the zip's names and the log's download line
   const source = $("#x-source");
@@ -3934,7 +3938,7 @@ async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it ag
   if (!r.ok) throw new Error(`The scene was not saved: ${await r.text()}`);
   const { path } = await r.json().catch(() => ({})); // the scene's file, on the machine that runs ComfyUI
   if (f) f.sceneName = name; // its next save keeps the name
-  S.exportStem = { plate: S.plate?.path, name }; // the export's files start with the scene's name from now on (exportStem)
+  S.exportStem = { plate: S.fluid?.blankPath || S.plate?.path, name }; // the export's files start with the scene's name from now on (exportStem)
   const fact = `Scene ${name} saved${path ? `: ${path}` : ""}.`;
   hud(fact, 3000);
   told(fact, "Open plate > Scenes opens it again, or downloads it.");
