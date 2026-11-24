@@ -2817,7 +2817,7 @@ const gridAt = (w) => gridGrow(w, S.plate.spec.width, grow(S.plate.spec.width, t
 // Finish > Upscale's steps (`up`) follow, each result kept per upscaled size, as a preview step keeps one per preview size.
 // The export (`onDemand`) writes the result for compositing software, only when Export asks for it.
 const STAGES = [
-  { id: "fluid", label: "Fluid shot, preview", ref: 10, preview: true }, { id: "fluidfull", label: "Fluid shot, full size", ref: 22, final: true }, // one LTX pass: half of the shot's
+  { id: "fluid", label: "Fluid shot, preview", ref: 25, preview: true }, { id: "fluidfull", label: "Fluid shot, full size", ref: 22, final: true }, // measured on a 96 GB GPU
   { id: "erase", label: "Track the object", ref: 6 }, { id: "clean", label: "Clean plate pass, preview", ref: 10, preview: true },
   { id: "shot", label: "Shot, preview", ref: 20, preview: true }, { id: "track", label: "Track the paint, preview", ref: 16, preview: true },
   { id: "comp", label: "Composite, preview", ref: 14, preview: true },
