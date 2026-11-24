@@ -557,6 +557,10 @@ export function blankChanges(typed, used, machine = {}) {
   return said;
 }
 
+// The Blank plate tab's limits under its hint, from FLUID and the frames this machine holds at the size and rate chosen.
+export const blankLimits = (s, machine = {}) => `Width and height: ${FLUID.minSide} to ${FLUID.maxSide} px, in steps of ${FLUID.step}. ` +
+  `Frames: ${FLUID.minFrames} to ${countText(Math.max(FLUID.minFrames, plateKeep(s, machine).frames))} at ${s.fps} fps, in steps of 8.`;
+
 export function keySlots(frames) { // where a keyframe may sit: frame 0, each 8k + 1 that starts a whole group of 8, the last frame
   const slots = [0];
   for (let f = 1; f <= frames - 8; f += 8) slots.push(f);

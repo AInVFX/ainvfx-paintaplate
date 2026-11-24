@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { blankChanges, blankSpec, FLUID, LENGTH, lengthWarning, plateLength } from "../../web/logic.mjs";
+import { blankChanges, blankLimits, blankSpec, FLUID, LENGTH, lengthWarning, plateLength } from "../../web/logic.mjs";
 
 test("a plate opens with the longest 8k + 1 count within LTX 2.5's 20 s, at any frame rate", () => {
   const frames = (fps) => plateLength(fps).frames;
@@ -47,6 +47,8 @@ test("the Blank plate tab's fields and note give the limits that FLUID and LENGT
   assert.deepEqual(field("b-frames"), { min: FLUID.minFrames, step: 8 }, "the page sets the most frames for the rate chosen");
   const rates = [...html.match(/<select id="b-fps">([\s\S]*?)<\/select>/)[1].matchAll(/<option[^>]*>(\d+)<\/option>/g)].map((m) => +m[1]);
   assert.deepEqual(rates, FLUID.rates);
-  const note = html.match(/data-tab="blank"[^>]*>\s*<p class="hint">([^<]*)<\/p>/)[1];
-  assert.ok(note.includes(`from ${FLUID.minSide} to ${FLUID.maxSide} px, in multiples of ${FLUID.step}; 8k + 1 frames, from ${FLUID.minFrames} up to ${LENGTH.seconds} s`), note);
+  const hint = html.match(/data-tab="blank"[^>]*>\s*<p class="hint">([^<]*)<\/p>\s*<p class="hint" id="b-limits"><\/p>/)[1];
+  assert.ok(!/\d/.test(hint), `the hint holds no limit of its own: the page writes them from FLUID: ${hint}`);
+  assert.equal(blankLimits({ width: 960, height: 512, fps: 25 }), "Width and height: 256 to 1920 px, in steps of 64. Frames: 9 to 497 at 25 fps, in steps of 8.");
+  assert.equal(blankLimits({ width: 1920, height: 1088, fps: 50 }, { ram: 52 * 2 ** 30, profile: "small" }), "Width and height: 256 to 1920 px, in steps of 64. Frames: 9 to 113 at 50 fps, in steps of 8.");
 });
