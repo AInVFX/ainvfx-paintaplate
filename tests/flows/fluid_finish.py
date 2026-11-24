@@ -33,9 +33,8 @@ def run(browser, port, U):
     page.wait_for_function("!document.querySelector('#finish-hdr-ask').hidden", timeout=10000); page.click("#finish-hdr-yes"); page.keyboard.press("Escape")
     page.wait_for_function(DONE.format(r" SDR to HDR: done in "), timeout=120000)
     new, rows = page.evaluate("window.__lines"), page.evaluate(ROWS)
-    U.check(rows[:3] == ["Fluid shot, preview", "Fluid shot, full size", "SDR to HDR"]
-            and all(any(re.search(rf" Fluid shot, {s}: reused from render v\d+\.$", t) for t in new) for s in ("preview", "full size")),
-            f"SDR to HDR on afterwards: the render takes both fluid steps from the first one and lists them: {rows}")
+    U.check(rows[:3] == ["Fluid shot, preview", "Fluid shot, full size", "SDR to HDR"] and not any(re.match(r"Render v[2-9]", t) for t in new),
+            f"SDR to HDR on afterwards: the same render runs it, as its last step, after its fluid steps: {rows}")
     page.click("#stages li.pick:has-text('SDR to HDR')")
     U.check(U.until(page, "document.querySelector('#stages li.shown')?.textContent.includes('SDR to HDR') === true", 5000), "SDR to HDR's step on display")
     page.click("#finish-btn"); page.click("#finish-hdr"); page.keyboard.press("Escape")
