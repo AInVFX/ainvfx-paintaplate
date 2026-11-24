@@ -199,6 +199,7 @@ body.plate-alone .hud.corner { left: auto; top: auto; right: 14px; bottom: 10px;
 #stages .time { font-variant-numeric: tabular-nums; font-size: 12px; }
 #stages li.now .time { color: var(--gold); }
 dialog .check { display: flex; align-items: baseline; gap: 8px; color: var(--text); margin: 9px 0; }
+#export .check > span { white-space: nowrap; flex-shrink: 0; } /* a row's label stays on one line; its detail wraps */
 dialog .check input { width: auto; display: inline; margin: 0; accent-color: var(--gold); }
 dialog .check small { color: var(--muted); }
 .hint { color: var(--muted); margin: 6px 0; }
