@@ -455,11 +455,12 @@ class FollowMatte(io.ComfyNode):
             node_id="PaintAPlate_FollowMatte",
             display_name="Follow Matte",
             category=CATEGORY,
-            description="One matte per frame from SAM 3.1's answers, judged by how much the shot changed. A paint: the pieces of "
-                        "SAM's masks that the shot changed, whole; over what the plate keeps, cut to the change; the object the edit "
-                        "replaces, where the shot changed; the matte follows the object while it is hidden and stops when it leaves "
-                        "the frame. A Clean: SAM's track of the zone, without what the plate keeps. The summary gives a headline, then "
-                        "one line per rule that acted, and names each frame by the plate's own number.",
+            description="One matte per frame, from SAM 3.1's answers and from what the shot changed. Paint: the parts of SAM's "
+                        "masks that the shot changed; over a person, animal or vehicle the plate keeps, only what changed; and the "
+                        "object the edit replaces, where the shot changed. The matte follows the object while it is hidden, and stops "
+                        "when it leaves the frame. Clean: SAM's track of the painted area, without what the plate keeps. Then the "
+                        "strategy sets how much of the regenerated shot to keep. The summary has one line per rule that acted, then "
+                        "one for the strategy, with the plate's own frame numbers.",
             inputs=[
                 io.Mask.Input("masks", tooltip="SAM masks of the shot, from the element and the text prompt, one per frame. SAM 3.1 may return fewer, or none."),
                 io.Mask.Input("first", tooltip="The area on the first frame that the edit painted: a Clean's matte follows it."),
@@ -476,13 +477,18 @@ class FollowMatte(io.ComfyNode):
                                tooltip="How much more a pixel must change than its frame changes around the object, from 0 to 1, to count as changed."),
                 io.Int.Input("first_frame", default=1, min=0, max=99999999, optional=True,
                              tooltip="The plate's number for its first frame: 1 for a movie, the first file's number for a sequence. The summary names frames by these numbers."),
+                io.Combo.Input("strategy", options=list(mathops.MATTE_STRATEGIES), default="Auto", optional=True,
+                               tooltip="How much of the regenerated shot to keep in the composite. Object: the edit's object only, which keeps "
+                                       "the most plate. Object and effects: the object with what the shot changed around it, smoke and light "
+                                       "included. Whole shot: every pixel comes from the regenerated shot. Auto: Object, or Object and effects "
+                                       "when the edit spreads past the object."),
             ],
             outputs=[io.Mask.Output(display_name="mask"), io.String.Output(display_name="summary")],
         )
 
     @classmethod
     def execute(cls, masks, first, frames, zone, threshold, base=None, element=None, word_masks=None, named=None, plate_masks=None,
-                kept=None, first_frame=1) -> io.NodeOutput:
+                kept=None, first_frame=1, strategy="Auto") -> io.NodeOutput:
         shot = frames[..., :3].float().cpu().numpy()
         n, h, w = shot.shape[:3]
         arr = lambda m: m.float().cpu().numpy() if m is not None else None  # noqa: E731
@@ -490,9 +496,10 @@ class FollowMatte(io.ComfyNode):
         if element is not None:  # a paint: the frames are the shot, `base` the plate it was made over
             out, summary = mathops.follow_votes(arr(masks), arr(word_masks), arr(plate_masks), kept_objects, arr(element), shot,
                                                 base[..., :3].float().cpu().numpy(), threshold=threshold, zone=zone,
-                                                first_frame=first_frame, tick=Stop())
+                                                first_frame=first_frame, tick=Stop(), strategy=strategy)
         else:  # a Clean: the frames are the plate
-            out, summary = mathops.clean_votes(arr(masks), track_objects(named, n, h, w), kept_objects, arr(first), first_frame=first_frame)
+            out, summary = mathops.clean_votes(arr(masks), track_objects(named, n, h, w), kept_objects, arr(first), first_frame=first_frame,
+                                               strategy=strategy)
         return io.NodeOutput(torch.from_numpy(np.ascontiguousarray(out)).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()), summary)
 
 

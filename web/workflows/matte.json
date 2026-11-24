@@ -556,13 +556,15 @@
    ],
    "zone": 0.0625,
    "threshold": 0.1,
-   "first_frame": 1
+   "first_frame": 1,
+   "strategy": "Auto"
   },
   "_meta": {
    "slots": {
     "zone": "zone",
     "threshold": "threshold",
     "first_frame": "first_frame",
+    "strategy": "strategy",
     "word_masks": "follow_named",
     "named": "follow_removed",
     "element": "follow_element",

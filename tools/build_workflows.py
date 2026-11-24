@@ -486,7 +486,8 @@ def matte():
     the shot from the edit's prompt mask with the object's name (`prompt`: the element; a Clean: the plate from the zone),
     the shot from the name alone, the plate from the element (the object the edit replaces) and the plate from the kept
     thing's name. The page drops the name's tracks when the edit has no text prompt, and the plate's element track for
-    a Clean. With the plate's first frame number (`first_frame`), the summary names the plate's own frames."""
+    a Clean. With the plate's first frame number (`first_frame`), the summary names the plate's own frames; the
+    strategy (`strategy`, mathops.MATTE_STRATEGIES) sets how much of the shot the composite takes."""
     g = Graph()
     load, model = plate(g, pad=True)
     frames = g("ImageScale", image=model, upscale_method="area", width=Slot("width", 960),
@@ -523,7 +524,8 @@ def matte():
     follow = g("PaintAPlate_FollowMatte", masks=g("SAM3_TrackToMask", track_data=asked, object_indices=""), first=first, frames=frames,
                base=under, element=element, word_masks=g("SAM3_TrackToMask", track_data=by_name, object_indices=""), named=by_removed,
                plate_masks=g("SAM3_TrackToMask", track_data=by_plate, object_indices=""), kept=by_kept,
-               zone=Slot("zone", 0.0625), threshold=Slot("threshold", 0.1), first_frame=Slot("first_frame", 1))
+               zone=Slot("zone", 0.0625), threshold=Slot("threshold", 0.1), first_frame=Slot("first_frame", 1),
+               strategy=Slot("strategy", "Auto"))
     g.link_slot(follow, "word_masks", "follow_named")
     g.link_slot(follow, "named", "follow_removed")
     g.link_slot(follow, "element", "follow_element")  # a Clean has no element: its matte follows the zone
