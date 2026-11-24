@@ -1818,6 +1818,9 @@ const sameKeys = (a, b) => JSON.stringify(JSON.parse(a || "{}").keys) === JSON.s
 // The fluid shot a render's full-size step made for this version of the fluid row, or null
 const fluidMade = (e) => [...S.renders.values()].find((r) => r.fluid && r.active.some((a) => a.src === e && a.version === e.version))?.fluid ?? null;
 // The plate under a render's edits: the plate itself, or on a blank plate the fluid shot its full-size step made, in the model space
+// ainvfx-fluid's IC-LoRA guide halves the latent, a 32nd of the frame: a fluid pass's sides are multiples of 64. The shot
+// preview's size, held to that, as close to its shape as it goes (fluidSteps)
+const fluidSize = ([w, h]) => { const h64 = Math.max(64, Math.round(h / 64) * 64); return [Math.max(64, Math.round((h64 * w) / h / 64) * 64), h64]; };
 const plateUnder = (r) => (r?.fluid ? { ...S.plate, path: r.fluid.path, cs: modelSpace() } : S.plate);
 // The edits are painted on the picture under them: over a fluid shot whose first frame is not made yet, an edit waits for it (fluidFirst)
 const pictureReady = (e) => { const i = S.edits.indexOf(e); return !(i < 0 ? S.edits : S.edits.slice(0, i)).some((b) => b.tool === "fluid" && b.on && b.state === "done" && !b.patch); };
@@ -2953,7 +2956,7 @@ async function fluidSteps(r, fl) {
   const p = S.plate, blank = p.path.split(/[\\/]/).pop(), alone = !r.active.some((e) => e.tool !== "fluid");
   if (!r.told && alone) {
     r.told = true;
-    log(`Render v${r.v}: 1 edit (Fluid 1), seed ${fl.seed}, ${S.previewCap ? `shot preview at ${p.shot.join(" x ")}` : "shot preview off"}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
+    log(`Render v${r.v}: 1 edit (Fluid 1), seed ${fl.seed}, ${S.previewCap ? `shot preview at ${fluidSize(p.shot).join(" x ")}` : "shot preview off"}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
   }
   const make = (dir, size) => async (progress) => {
     const keys = [];
@@ -2966,8 +2969,8 @@ async function fluidSteps(r, fl) {
   };
   const shown = (made, line) => { if (alone && r.key === S.heroKey && made?.movie) { showMade(made.movie, r.key, "@model"); hud(line, 2500); status(line, "hint"); } }; // as an edit's step says it
   if (!r.skip.has("fluid")) {
-    const sized = p.shot.join("x"), pv = (r.previews[sized] ??= {});
-    await step(r, "fluid", async (progress) => { pv.fluid = await make(`${r.base}/fluid_${sized}`, p.shot)(progress); }, pv);
+    const size = fluidSize(p.shot), pv = (r.previews[p.shot.join("x")] ??= {});
+    await step(r, "fluid", async (progress) => { pv.fluid = await make(`${r.base}/fluid_${size.join("x")}`, size)(progress); }, pv);
     if (r.done?.fluidfull === undefined) shown(pv.fluid, "Fluid shot, preview: Space plays it. The full-size fluid shot follows.");
   }
   const donor = r.fluid ? null : [...S.renders.values()].find((d) => d !== r && d.fluid && d.active?.some((e) => e.tool === "fluid" && e.version === fl.version));

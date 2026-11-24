@@ -407,6 +407,8 @@ async def execute(pid, prompt):
         if int(v.get("width") or 0) and int(v.get("height") or 0):  # the shot preview's size, as ImageScale makes it
             w, h = int(v["width"]), int(v["height"])
             spec = {**spec, "width": w, "height": h}
+        if w % 64 or h % 64:  # ainvfx-fluid's IC-LoRA guide halves the latent, as ComfyUI-LTXVideo says it on a GPU
+            raise RuntimeError(f"Latent spatial size {w // 32}x{h // 32} must be divisible by latent_downscale_factor 2.0")
         keys = sorted(json.loads(v.get("keys") or "[]"), key=lambda k: k["frame"])
         clouds = [(k["frame"], np.asarray(Image.open(resolve(k["image"])).convert("RGB").resize((w, h)).filter(ImageFilter.GaussianBlur(4)),
                                           np.float32) / 255) for k in keys]
