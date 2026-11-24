@@ -11,10 +11,10 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { autoChose, keepsAnswers, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, LENGTH, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateLength, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
-import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
+import { autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, LENGTH, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateLength, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, fluidPasses, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft, span, doneIn, PLATE_UP } from "./logic.mjs";
-import { awaitingPass, editList, eraserAfterKey, hiddenAbove, JOB_NAME, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
+import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { askedSeed, editSeed, gridGrow } from "./logic.mjs"; // the tests: a seed asked for in the address, and each edit's seed from it
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
@@ -428,17 +428,8 @@ const ramRoom = async (name) => { // ComfyUI's free RAM and what this job's fram
   const p = S.plate, sys = p && (await fetch("/system_stats").then((r) => r.json()).catch(() => null))?.system;
   return sys?.ram_free ? { free: sys.ram_free, need: framesNeed(p.spec.width ?? p.work[0], p.spec.height ?? p.work[1], p.frames, name) } : null;
 };
-onFree(async (last, name) => { // why ComfyUI's memory is freed before this job, or null: speed first where there is room
-  if (freesBefore(S.memoryProfile, last, name)) {
-    const why = `${JOB_NAME[last] ?? last}'s models unloaded.\n  This GPU holds one model family at a time.`;
-    if (!keepsAnswers(last, name)) return why;
-    const room = await ramRoom(name);
-    return { why, keep: !room || room.free >= room.need }; // the cache keeps SAM's answers for a change of strategy, unless RAM is short
-  }
-  if (!S.plate || !last || FAMILY[name] === FAMILY[last]) return null;
-  const room = await ramRoom(name), gib = (n) => Math.round(n / 2 ** 30); // a larger GPU: only when RAM is short for this job's frames
-  return freesBefore(S.memoryProfile, last, name, room) ? `${gib(room.free)} GB of RAM free, ${gib(room.need)} GB needed for its frames.` : null;
-});
+onFree(async (last, name) => // why ComfyUI's memory is freed before this job, or null, or { why, keep } (logic.freeAsk): speed first where there is room
+  freeAsk(S.memoryProfile, last, name, S.plate && freeNeedsRoom(S.memoryProfile, last, name) ? await ramRoom(name) : null, !!S.plate));
 onStop((kind) => S.halted && STOPPED.includes(kind)); // a stop stops everything: a render step that was uploading its images when the stop came posts no job after it
 
 async function warmAll() { // every model loads while the person looks at the page: the first edit and the first shot start at once
@@ -2920,7 +2911,7 @@ function donorOf(r, final) {
   const goal = final ? (carry ? "full" : "cleanfull") : carry ? "shot" : "clean";
   const ready = (d) => { const st = final ? d : d.previews[sized]; return !!st?.[carry ? "shot" : "clean"] && st.done?.[goal] !== undefined; };
   const key = donorFor(r.active, [...S.renders.values()].filter((d) => d !== r && !d.failed && !d.donor && ready(d))
-    .map((d) => ({ key: d.key, active: d.active, wanted: d.wanted })));
+    .map((d) => ({ key: d.key, active: d.active, wanted: d.wanted })), r.key); // the same edits under another matte strategy too
   return key ? S.renders.get(key) : null;
 }
 
@@ -3174,15 +3165,16 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     return Object.assign(kept, { clean: folderOf("clean", out, "frames"), raw: viewUrl(outputFile("clean", out, "video")) });
   };
   const take = (store, d, final) => { // frames an earlier render of more edits made: the composite takes them inside these edits' mattes only
-    const from = final ? d : d.previews[sized];
+    const from = final ? d : d.previews[sized], ids = (x) => x.active.map((e) => `${e.id}.${e.version}`).sort().join();
+    const same = ids(d) === ids(r); // the same edits, another matte strategy
     for (const id of final ? ["cleanfull", "full"] : ["clean", "shot"]) {
       if (r.skip.has(id) || store.done?.[id] !== undefined) continue;
       (store.done ??= {})[id] = 0; (store.at ??= {})[id] = ++stepSeq;
       (store.taken ??= {})[id] = d.v;
-      log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: reused from render v${d.v}, whose other edits are far from these.`);
+      log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: reused from render v${d.v}${same ? "" : ", whose other edits are far from these"}.`);
     }
     Object.assign(store, { clean: from.clean, shot: from.shot, raw: from.raw, cleanRaw: from.cleanRaw });
-    r.donor = d.v;
+    if (!same) r.donor = d.v; // the same edits under another matte strategy made this very shot: no Render in full to offer
     return carry ? from.shot : from.clean;
   };
   const underOf = (st) => (st.clean ? { path: st.clean, cs: "@model" } : { path: p.path, cs: p.cs }); // the plate a shot was made over
@@ -3455,7 +3447,7 @@ async function track(active, shotPath, base, suffix, progress, previous, tools, 
     const note = outputText("matte", out, "follow");
     if (note) log(`${tool === "erase" ? "Clean" : "Paint"} matte${suffix ? ` (${suffix.slice(1)})` : ""}: ${note}`);
     found[key] = folderOf("matte", out, "frames");
-    if (tool === "paint") { found.chose = autoChose(note); historyUI(); } // the menu's « Auto » shows its choice
+    if (tool === "paint") { found.chose = autoChose(note); setTimeout(historyUI); } // the menu's « Auto » shows its choice, once the render holds this matte
   }
   return mattesOf(found);
 }

@@ -1,17 +1,27 @@
-"""The matte menu under a paint's row (tests/flows/README.md): « Auto » shows Follow Matte's choice; another strategy runs the
-matte and the composite again and takes the shot from the job index; undo and redo carry it; a saved scene keeps it and
-opens with it; the scene's ComfyUI graph has it as Follow Matte's input."""
+"""The matte menu under a paint's row (tests/flows/README.md), on a 16 GB GPU with the shot preview off, as Adrien's laptop:
+« Auto » shows Follow Matte's choice; another strategy runs the matte and the composite again, takes the shot from the
+render of the same edits (never the shot again, job index or not), and every free keeps ComfyUI's cache, so SAM 3.1's
+answers serve again; undo and redo carry it; a saved scene keeps it and opens with it; the scene's ComfyUI graph has it as
+Follow Matte's input; the Help says what the tooltips say."""
 import io
 import json
 import zipfile
 
 MENU = "#history li label.matte select"
+CARD = {"vram": 17.2e9, "ram": 65.5e9}  # a 16 GB GPU with 61 GB of RAM: the small profile, which frees between families
 SIGNATURE = """(() => { const c = document.querySelector('#view'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
   let s = 0; for (let i = 0; i < d.length; i += 4 * 97) s += d[i] + 2 * d[i + 1] + 3 * d[i + 2]; return s; })()"""  # the viewer's picture, in one number
 
 
+def frees(page, port, U, seen_lines, seen_events):  # each « Memory freed before … » line with the free_memory the page posted
+    lines = [t for t in U.log_lines(page)[seen_lines:] if t.startswith("Memory freed before")]
+    events = [e for e in U.mock_route(port, "/mock/events") if e[0] == "free"][seen_events:]
+    return [(line.split(":")[0].removeprefix("Memory freed before "), e[2]) for line, e in zip(lines, events)], len(lines) == len(events)
+
+
 def run(browser, port, U):
     U.mock_route(port, "/mock/follow", {"auto": "Object and effects"})
+    U.mock_route(port, "/mock/card", CARD)
     page = U.load(browser, port)
     errors = []
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
@@ -20,6 +30,8 @@ def run(browser, port, U):
     U.open_plate(page)
     page.fill("#prompt", "a red fire"); page.evaluate("document.activeElement.blur()")
     U.stroke(page, [(0.3, 0.5), (0.4, 0.52), (0.5, 0.5)])
+    page.select_option("#preview-size", label="Off")
+    seen = (len(U.log_lines(page)), sum(e[0] == "free" for e in U.mock_route(port, "/mock/events")))
     page.click("#generate")
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
     U.wait_log(page, "document.querySelector('#render-left').textContent === 'full size ready'", 180000, "full-size composite")
@@ -27,6 +39,9 @@ def run(browser, port, U):
     texts = lambda: page.eval_on_selector_all(f"{MENU} option", "os => os.map((o) => o.textContent)")  # noqa: E731
     U.check(texts() == ["Auto: Object and effects", "Object", "Object and effects", "Whole shot"] and page.input_value(MENU) == "Auto",
             f"a paint's row has the menu; « Auto » shows Follow Matte's choice: {texts()} {page.input_value(MENU)!r}")
+    made, paired = frees(page, port, U, *seen)
+    U.check(paired and dict(made).get("the matte") is True and dict(made).get("the review movie") is False,
+            f"Generate on a 16 GB GPU: the free before the matte clears ComfyUI's cache, the one before the review movie keeps it: {made}")
     label = page.text_content("#history li label.matte span")
     widths = page.evaluate(f"""() => {{ const m = document.querySelector('{MENU}'), was = m.value;
       const w = [...m.options].map((o) => {{ m.value = o.value; return m.offsetWidth; }}); m.value = was; return w; }}""")
@@ -40,6 +55,7 @@ def run(browser, port, U):
             f"Generate posts the paint matte with « Auto »: {len(matte)} matte jobs")
     page.evaluate(U.WATCH)
     del posted[:]
+    seen = (len(U.log_lines(page)), sum(e[0] == "free" for e in U.mock_route(port, "/mock/events")))
     page.hover("#history li .title")  # the pointer on the row: frame 0 shows the edit's strokes until the menu changes
     page.select_option(MENU, "Whole shot")
     U.wait_log(page, U.added_line("Edit 1: matte Whole shot. The matte and the composite run again."), 10000, "the menu's log line")
@@ -48,9 +64,13 @@ def run(browser, port, U):
     grew = U.added(page, ("edit", "shot", "matte", "comp", "review"))
     matte = [json.loads(b)["prompt"] for b in posted if b and '"PaintAPlate_FollowMatte"' in b]
     strategies = {n["inputs"].get("strategy") for p in matte for n in p.values() if n["class_type"] == "PaintAPlate_FollowMatte"}
-    U.check(grew["shot: posted"] == 0 and grew["edit: posted"] == 0 and grew["shot: made before"] >= 1 and grew["matte: posted"] >= 1
+    reused = page.evaluate("window.__lines.some((t) => t.includes('Shot, full size: reused from render v1.'))")
+    U.check(grew["shot: posted"] == 0 and grew["edit: posted"] == 0 and grew["shot: made before"] == 0 and reused and grew["matte: posted"] >= 1
             and grew["review: posted"] >= 1 and strategies == {"Whole shot"},
-            f"another strategy runs the matte and the composite, and takes the shot from the job index: {grew} {strategies}")
+            f"another strategy runs the matte and the composite, and takes the shot from render v1, not from the job index: {grew} {strategies}")
+    changed, paired = frees(page, port, U, *seen)
+    U.check(paired and changed and all(flag is False for _, flag in changed),
+            f"a change of strategy: every free keeps ComfyUI's cache, so SAM's answers serve again: {changed}")
     U.check(page.input_value(MENU) == "Whole shot", f"the menu shows the strategy chosen: {page.input_value(MENU)!r}")
     page.hover("#frame-now")  # from the menu to the viewer, as after a choice in the menu's popup
     page.wait_for_timeout(U.QUIET_MS)

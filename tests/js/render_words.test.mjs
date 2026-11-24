@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 
 test("the memory rule's line says that the GPU holds one model family at a time", () => {
-  const app = read("web/app.mjs");
+  const app = read("web/app.mjs") + read("web/logic.mjs"); // the line is built by logic.freeAsk
   assert.match(app, /This GPU holds one model family at a time\./);
   assert.doesNotMatch(app, /This card holds/);
 });

@@ -519,14 +519,16 @@ export function dependsOnChange(edit, before, basis) {
 // and no light is involved, since a light changes every pixel. `want`: the new render's edits, as frozen; `renders`:
 // [{ key, active, wanted }], those whose frames exist. Returns the key of the one with the fewest edits left out, then the
 // most recently shown, or null.
-export function donorFor(want, renders) {
-  const key = (e) => `${e.id}.${e.version}`, mine = new Set(want.map(key));
+// `self`, the key of the render that asks: a render of the same edits whose key differs only by matte strategies
+// (logic.matteKey) made this very shot, so its frames serve too.
+export function donorFor(want, renders, self = "") {
+  const key = (e) => `${e.id}.${e.version}`, mine = new Set(want.map(key)), unmatted = (k) => k.replace(/~\d+/g, "");
   const apart = (a, b) => !!a.foot && !!b.foot && !overlap(a.foot, b.foot);
   if (!want.length || want.some((e) => e.tool === "light")) return null;
   let best = null;
   for (const r of renders) {
-    const have = new Set(r.active.map(key));
-    if (have.size <= mine.size || [...mine].some((k) => !have.has(k)) || r.active.some((e) => e.tool === "light")) continue;
+    const have = new Set(r.active.map(key)), same = !!self && r.key !== self && unmatted(r.key) === unmatted(self);
+    if ((have.size <= mine.size && !(same && have.size === mine.size)) || [...mine].some((k) => !have.has(k)) || r.active.some((e) => e.tool === "light")) continue;
     const out = r.active.filter((e) => !mine.has(key(e)));
     if (!out.every((o) => want.every((e) => apart(o, e)))) continue;
     const wanted = r.wanted ?? 0;
@@ -1505,6 +1507,20 @@ export const JOB_NAME = { ingest: "opening the plate", prompt: "the prompt write
 // Follow Matte again and not SAM. Any other free also clears the cache, as before.
 const KEEPS = new Set(["sam", "frames"]);
 export const keepsAnswers = (last, name) => KEEPS.has(FAMILY[last]) && KEEPS.has(FAMILY[name]);
+
+// Why ComfyUI's memory is freed before job `name` after job `last`, or null: on a small GPU, between families of models,
+// with { why, keep } between the matte and the frames steps, which keeps ComfyUI's cache unless RAM is short for the
+// frames (`room`); on a larger GPU, only when RAM is short. `room`: { free, need } in bytes, or null where unknown.
+export function freeAsk(profile, last, name, room = null, plate = true) {
+  if (freesBefore(profile, last, name)) {
+    const why = `${JOB_NAME[last] ?? last}'s models unloaded.\n  This GPU holds one model family at a time.`;
+    return keepsAnswers(last, name) ? { why, keep: !room || room.free >= room.need } : why;
+  }
+  if (!plate || !last || FAMILY[name] === FAMILY[last] || !freesBefore(profile, last, name, room)) return null;
+  return `${Math.round(room.free / 2 ** 30)} GB of RAM free, ${Math.round(room.need / 2 ** 30)} GB needed for its frames.`;
+}
+// Whether freeAsk needs the RAM figures for this pair: a free that may keep the cache, or a larger GPU's change of family
+export const freeNeedsRoom = (profile, last, name) => !!last && FAMILY[name] !== FAMILY[last] && (!profile?.frees || keepsAnswers(last, name));
 
 export function freesBefore(profile, last, name, room = null) { // room: { free, need } in bytes of RAM, where ComfyUI gives it
   if (!last || FAMILY[name] === FAMILY[last]) return false;
