@@ -68,7 +68,7 @@ class ReadmeLinks(unittest.TestCase):
         size = sum(get_models.SIZES[os.path.basename(path)] for _, path, _ in get_models.MODELS)
         stated = {name: re.search(pattern, README) for name, pattern in (
             ("nodes", r"a pack of (\d+) nodes"), ("workflows", r"one of (\d+) ComfyUI workflows"),
-            ("files", r"Each of the (\d+) files"), ("GB of disk", r"\*\*(\d+) GB of disk\*\*"))}
+            ("files", r"(\d+) files, \d+ GB in all"), ("GB of disk", r"\*\*(\d+) GB of disk\*\*"))}
         self.assertEqual({k: int(v.group(1)) if v else None for k, v in stated.items()},
                          {"nodes": len(nodes), "workflows": len(workflows), "files": len(get_models.MODELS), "GB of disk": round(size / 1e9)})
 

@@ -12,22 +12,22 @@ Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com
 
 ## What it does
 
-| | |
+| Feature | What it does |
 | --- | --- |
-| **Clean** | Removes the object under your stroke and regenerates the background behind it. With **Whole object**, SAM 3.1 (Meta's Segment Anything Model) finds all of it: name it in the text prompt ("red umbrella") |
+| **Clean** | Removes the object under your stroke and regenerates the background behind it. Enable **Whole object** to remove all of it: name it in the text prompt ("red umbrella"), and SAM 3.1 (Meta's Segment Anything Model) finds it |
 | **Paint** | Adds what the text prompt describes where you paint, in the style of the image. It follows the outline, pose and colours of your strokes |
 | **Light** | Relights the shot. Paint where the light comes from, in its colour. Paint in black to darken an area |
 | **A fluid shot** | Starts from a blank plate. Paint your fluid (smoke, fire, water and more) in flat colours on a few keyframes, and ainvfx-fluid, our fluid model, generates the shot. Then edit it with Paint, Clean or Light, as any plate |
 | **Review** | The viewer follows [OpenRV](https://github.com/AcademySoftwareFoundation/OpenRV), the Academy Software Foundation's review player: colour through OpenColorIO (OCIO), the same keys, a wipe against the plate, the Colour Inspector |
-| **Finish** | Passes on the whole plate. **SDR to HDR** turns a standard dynamic range result, or a plate with no edit, into high dynamic range: half-float EXR frames in ACES2065-1. **Upscale** adds steps to the render: SeedVR2 7B, ByteDance's video restoration model, upscales the result to the size you choose, up to 3840 x 2160 |
-| **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers), with its matte, as one zip. The matte is the mask of what the edit changed. Tick **ComfyUI graph** to add the whole scene as one ComfyUI workflow, with a note on each step |
+| **Finish** | Enable **SDR to HDR** to turn a standard dynamic range plate, edited or not, into high dynamic range: half-float EXR frames in ACES2065-1. Enable **Upscale** to upscale the result with ByteDance's SeedVR2 7B, up to 3840 x 2160 |
+| **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers), with its matte, as one zip. The matte is the mask of what the edit changed. Enable **ComfyUI graph** to export every step as one ComfyUI workflow, to open and change in ComfyUI |
 
 ## What you need
 
 - **ComfyUI v0.45.3 or newer**, with [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo).
-- **An NVIDIA GPU with 16 GB of VRAM**, the GPU's own memory. 16 GB is the tested minimum: every tool runs there, more slowly, because the models load one at a time. More VRAM is faster: from 24 GB, the edit models load when the page opens, and from 60 GB, every model does and stays loaded. A plate above 2K, more than 2048 px on its long side, needs a 96 GB GPU.
-- **64 GB of RAM** for 121 frames at 1920 x 1080, as tested. RAM grows with a plate's length and size: see [Limits](#limits).
+- **An NVIDIA GPU with 16 GB of VRAM** at least. 16 GB is the tested minimum: every tool runs there, more slowly, because the models load one at a time. More VRAM is faster: from 24 GB, the edit models load when the page opens, and from 60 GB, every model does and stays loaded. For a plate above 2K, more than 2048 px on its long side, a 96 GB GPU is recommended: see [Limits](#limits).
 - **79 GB of disk** for the models.
+- **64 GB of RAM**, recommended: the smallest amount we tested. RAM grows with a plate's length and size: see [Limits](#limits).
 
 On a Mac, or without such a GPU, run Paint a plate [on Runpod](#on-runpod).
 
@@ -57,17 +57,18 @@ The steps are the same on Windows and Linux. Run each command with the Python th
      cd custom_nodes
      git clone https://github.com/AInVFX/ainvfx-paintaplate
      git clone https://github.com/Lightricks/ComfyUI-LTXVideo
-     python -m pip install -r ainvfx-paintaplate/requirements.txt -r ComfyUI-LTXVideo/requirements.txt
+     python -m pip install -r ainvfx-paintaplate/requirements.txt
+     python -m pip install -r ComfyUI-LTXVideo/requirements.txt
      ```
 4. **Restart ComfyUI.**
-5. **Download the models**, in the pack's folder, `custom_nodes/ainvfx-paintaplate`. Set your token first: `export HF_TOKEN=hf_...` on Linux, `$env:HF_TOKEN = "hf_..."` in PowerShell on Windows. Then run [`get_models.py`](get_models.py):
+5. **Download the models** into ComfyUI's `models` folders: 17 files, 79 GB in all. Get the ones you lack by hand, from the pages of the [models table](#credits-and-licences), or with [`get_models.py`](get_models.py). For the script, go to the pack's folder, `custom_nodes/ainvfx-paintaplate`, and set your token: `export HF_TOKEN=hf_...` on Linux, `$env:HF_TOKEN = "hf_..."` in PowerShell on Windows. Then run:
 
    ```sh
-   python get_models.py --list    # each file, its size, and whether it is in place
+   python get_models.py --list    # each file, its folder and size, and whether it is in place
    python get_models.py           # downloads what is missing: 79 GB in all
    ```
 
-   Each of the 17 files goes to its folder under `models/`, at the revision that was tested. A file already in place is skipped, so you can run the command again. If Hugging Face refuses a file, its line says why and names the page to open. The last line counts the files downloaded, already there and missing. For models in another folder, name it: `python get_models.py path/to/models`. `--no-fluid` skips ainvfx-fluid, `--no-hdr` skips SDR to HDR and `--no-upscale` skips SeedVR2 7B (Upscale): that feature is then off, and the rest works.
+   The script puts each file in its folder, at the revision that was tested, and skips a file already in place: you can run it again. If Hugging Face refuses a file, its line says why and names the page to open. For a download by hand, `--list` names each file's folder, Hugging Face repository and tested revision. For models in another folder, name it: `python get_models.py path/to/models`. `--no-fluid` skips ainvfx-fluid, `--no-hdr` skips SDR to HDR and `--no-upscale` skips SeedVR2 7B (Upscale): that feature is then off, and the rest works.
 6. **Download the example plates** with [`get_plates.py`](get_plates.py). This step is optional and needs no token.
 
    ```sh
@@ -81,11 +82,9 @@ The steps are the same on Windows and Linux. Run each command with the Python th
    http://127.0.0.1:8188/extensions/ainvfx-paintaplate/paintaplate.html
    ```
 
-**After an update**, reload the page once and skip the browser's cache: press Ctrl+Shift+R in Chrome, Edge or Firefox (Cmd+Shift+R on a Mac). From then on, the browser checks the page's files at each load. A scene opened again makes each of its jobs again, once: results made by another version are not reused.
-
 ### On Runpod
 
-Runpod rents GPUs by the hour, in the cloud.
+Runpod rents GPUs by the hour, in the cloud. Its 96 GB GPUs run every tool of Paint a plate at full speed, plates above 2K included, with no powerful GPU of your own.
 
 1. Accept the four models' terms and create a Hugging Face read token, as in [step 2 of Install](#install).
 2. Start a pod: an RTX PRO 6000, the image `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`, a host with CUDA 13.0 or newer, a 150 GB container disk, ports 8188 and 8888, and your token in an `HF_TOKEN` environment variable.
@@ -115,9 +114,8 @@ Each edit stays in History: click its pencil to change it, and add as many as yo
 ## Tips
 
 - Clean a thin object by its full name: "floodlight pole" finds more than "floodlight".
-- With **Whole object** on, Clean also takes the object's cast shadow when the prompt writer points at one. The prompt writer is the model that writes each edit's caption. If a shadow stays, clean it with a second stroke, **Whole object** off.
+- With **Whole object** on, Clean also removes the object's cast shadow when the prompt writer, the model that writes each edit's caption, mentions it. If a shadow stays, clean it with a second stroke, **Whole object** off.
 - To replace a head, paint the new head over the old one.
-- Paint additions on open ground. An addition painted across a foreground object breaks up during the shot.
 - With a shot preview at half or a quarter size, judge an effect on the full-size shot.
 - Paint a plate reads each plate's colour space from its file, and the export writes every pixel back in that space. Change it only for a camera's log footage, which no file tag describes: right-click > OCIO > Plate, then the camera's log space.
 - Open the EXR frames of SDR to HDR in ACES2065-1, in a viewer or in compositing software. Read with a plain gamma, they look darker and less saturated than the plate.
@@ -152,12 +150,13 @@ Paint a plate is a web page that ComfyUI serves, with a pack of 16 nodes. Each s
 **Length and frame rate**
 
 - A plate opens with up to 20 s at its frame rate, LTX 2.5's longest shot: 481 frames at 24 fps, 497 at 25 fps and 1001 at 50 fps. The log names any frames left out.
-- Every tool is tested up to 121 frames. A longer shot needs more VRAM and more RAM.
+- Every tool is tested at 121 frames. Longer shots also run, with less testing on our side, and need more VRAM and more RAM.
 
 **Size**
 
 - Edits are painted on the first frame only, and made at up to 1920 px on the long side.
 - A plate can be up to 3840 x 2160. Upscale goes up to the same size.
+- A plate above 2K runs best on a 96 GB GPU. On an RTX PRO 6000 (96 GB), the erase of a 3840 x 2160 plate of 121 frames took 341 s. On an RTX 5090 (32 GB), the same erase was still running after 30 minutes.
 
 **Memory and time**
 
