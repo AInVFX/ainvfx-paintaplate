@@ -1821,6 +1821,8 @@ const fluidMade = (e) => [...S.renders.values()].find((r) => r.fluid && r.active
 // ainvfx-fluid's IC-LoRA guide halves the latent, a 32nd of the frame: a fluid pass's sides are multiples of 64. The shot
 // preview's size, held to that, as close to its shape as it goes (fluidSteps)
 const fluidSize = ([w, h]) => { const h64 = Math.max(64, Math.round(h / 64) * 64); return [Math.max(64, Math.round((h64 * w) / h / 64) * 64), h64]; };
+// The render that made this fluid version's full size, other than r: its shot is taken back, and no preview pass runs for it
+const fluidDonor = (r, version) => [...S.renders.values()].find((d) => d !== r && d.fluid && d.active?.some((e) => e.tool === "fluid" && e.version === version)) ?? null;
 const plateUnder = (r) => (r?.fluid ? { ...S.plate, path: r.fluid.path, cs: modelSpace() } : S.plate);
 // The edits are painted on the picture under them: over a fluid shot whose first frame is not made yet, an edit waits for it (fluidFirst)
 const pictureReady = (e) => { const i = S.edits.indexOf(e); return !(i < 0 ? S.edits : S.edits.slice(0, i)).some((b) => b.tool === "fluid" && b.on && b.state === "done" && !b.patch); };
@@ -2850,7 +2852,8 @@ function plan(r, all) { // the steps this set of edits needs: the erase pass for
   r.hdrAfter = S.hdrReady && hdrAfterComposite(p.spec, tools, hdrOn, p.headroom); // a Light edit's new light in HDR: SDR to HDR on the relit composite
   const up = !!S.deliver.upscale && S.upscaleReady, alone = !active.length, upAlone = r.key === PLATE_UP || (fl && alone && !(S.hdrReady && wantsHdr(p.spec, [], hdrOn))); // Finish > Upscale, as the switch stands: setFinish plans the render on show again
   const keeps = up && !alone && !r.hdrAfter && upscaleKeeps(tools, exrResult(p.spec, S.hdrReady && wantsHdr(p.spec, tools, hdrOn), p.headroom)); // the plate and the layer are upscaled, then composited
-  r.skip = new Set([(!fl || !alone) && "fluid", !fl && "fluidfull", !erase && "erase", !erase && "clean", !carry && "shot", !paint && "track", (onePass || !erase) && "cleanfull",
+  const madeAlready = fl && !!fluidDonor(r, all.find((e) => e.tool === "fluid").version); // its full size made by another render
+  r.skip = new Set([(!fl || !alone || madeAlready) && "fluid", !fl && "fluidfull", !erase && "erase", !erase && "clean", !carry && "shot", !paint && "track", (onePass || !erase) && "cleanfull",
     (onePass || !carry) && "full", (onePass || !paint) && "trackfull",
     !(S.hdrReady && wantsHdr(p.spec, tools, hdrOn)) && !r.hdrAfter && "hdr", r.hdrAfter && "export", upAlone && "hdr", // after the composite, Export zips its frames (exportAlone); the plate alone with Upscale only keeps its own values
     ...(active.length ? [] : ["comp", "review", "export"]), // the plate alone: SDR to HDR makes the result; Export zips its frames, and upscales them itself (exportAlone)
@@ -2973,7 +2976,7 @@ async function fluidSteps(r, fl) {
     await step(r, "fluid", async (progress) => { pv.fluid = await make(`${r.base}/fluid_${size.join("x")}`, size)(progress); }, pv);
     if (r.done?.fluidfull === undefined) shown(pv.fluid, "Fluid shot, preview: Space plays it. The full-size fluid shot follows.");
   }
-  const donor = r.fluid ? null : [...S.renders.values()].find((d) => d !== r && d.fluid && d.active?.some((e) => e.tool === "fluid" && e.version === fl.version));
+  const donor = r.fluid ? null : fluidDonor(r, fl.version);
   if (donor && r.done?.fluidfull === undefined) { // the same version, made by another render
     Object.assign(r, { fluid: donor.fluid }); (r.done ??= {}).fluidfull = 0; (r.at ??= {}).fluidfull = ++stepSeq;
     log(`Render v${r.v}: Fluid shot, full size: reused from render v${donor.v}.`);

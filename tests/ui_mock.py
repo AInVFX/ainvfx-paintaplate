@@ -1014,8 +1014,13 @@ def fluid16_flow(browser, port):
     fmt = page.text_content("#x-format") or ""
     check("half-float EXR" in fmt and page.is_hidden("#x-matte"), f"with SDR to HDR on, its export is its HDR frames: {fmt}")
     page.keyboard.press("Escape")
-    page.click("#finish-btn"); page.click("#finish-hdr")  # off: the SDR render, made already
+    page.evaluate(WATCH)
+    page.click("#finish-btn"); page.click("#finish-hdr")  # off: a render without SDR to HDR, which takes the fluid shot made already
     page.keyboard.press("Escape")
+    page.wait_for_function("window.__lines.some((t) => / Fluid shot, full size: reused from render v\\d+\\./.test(t))", timeout=30000)
+    new = page.evaluate("window.__lines")
+    check(not any(" Fluid shot, preview" in t for t in new),
+          f"turned off afterwards, the render takes the full size made already and runs no preview pass: {[t[:60] for t in new if 'Fluid shot' in t]}")
     page.click("#export-btn")
     fmt = page.text_content("#x-format") or ""
     check(not page.evaluate("document.querySelector('#finish-hdr').checked") and "ProRes 4444" in fmt, f"turned off afterwards, the fluid shot exports in ProRes 4444: {fmt}")
