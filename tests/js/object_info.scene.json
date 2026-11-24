@@ -1393,6 +1393,12 @@
       {
        "default": 1
       }
+     ],
+     "strategy": [
+      "COMBO",
+      {
+       "default": "Auto"
+      }
      ]
     }
    },
