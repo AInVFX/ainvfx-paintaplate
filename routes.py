@@ -475,7 +475,7 @@ def blank_plate(width: int, height: int, fps: float, frames: int) -> str:
         raise ValueError(f"Blank plate: frame rate must be {', '.join(map(str, BLANK_RATES[:-1]))} or {BLANK_RATES[-1]} fps.")
     most = blank_frames(fps)
     if not (BLANK_FEWEST <= frames <= most and (frames - 1) % 8 == 0):
-        raise ValueError(f"Blank plate: length must be 8k + 1 frames, from {BLANK_FEWEST} to {most} at {fps:g} fps.")
+        raise ValueError(f"Blank plate: length must be 8k + 1 frames, from {BLANK_FEWEST} to {most:,} at {fps:g} fps.")
     rel = f"{BLANK}/fluid_{width}x{height}_{fps:g}fps_{frames}f.mov"
     full = os.path.join(os.path.abspath(folder_paths.get_input_directory()), rel)
     if not os.path.exists(full):

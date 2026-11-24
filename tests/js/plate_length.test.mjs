@@ -1,5 +1,5 @@
-// A plate opens with up to LTX 2.5's 20 s at its frame rate, and says which frames it leaves out; the Blank plate tab
-// shows the values its plate uses, and says why.
+// A plate opens with up to LTX 2.5's 20 s at its frame rate, and says which frames it leaves out and why; the Blank plate
+// tab shows the values its plate uses, and says why.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -18,23 +18,23 @@ test("a plate opens with the longest 8k + 1 count within LTX 2.5's 20 s, at any 
   assert.deepEqual(plateLength(240), { frames: LENGTH.most, byTime: false }, "past 4,089 frames, the nodes' bound sets the count");
 });
 
-test("a plate with frames left out says which, why and what to do; a plate within 20 s opens with no warning", () => {
-  assert.deepEqual(lengthWarning({ name: "long", total: 1250, kept: 1001, first: 1, fps: 50 }), {
-    fact: "Warning: plate long: frames 1 to 1001 kept, of 1250.\n  Frames 1002 to 1250 are left out: LTX 2.5 makes shots of up to 20 s, 1001 frames at 50 fps.",
-    next: "To work on frames 1002 to 1250, open them as a plate of their own." });
-  assert.equal(lengthWarning({ name: "shot", total: 600, kept: 97, first: 1001, fps: 5 }).fact,
-    "Warning: plate shot: frames 1001 to 1097 kept, of 600.\n  Frames 1098 to 1600 are left out: LTX 2.5 makes shots of up to 20 s, 97 frames at 5 fps.", "the plate's own frame numbers");
-  assert.match(lengthWarning({ name: "fast", total: 5000, kept: 4089, fps: 240 }).fact, /Frames 4090 to 5000 are left out: a step of Paint a plate takes up to 4089 frames\.$/);
-  assert.equal(lengthWarning({ name: "whole", total: 600, kept: 600, fps: 30 }), null);
+test("a plate with frames left out says which and why; a plate within 20 s opens with no warning", () => {
+  const time = (fps) => ({ frames: plateLength(fps).frames, by: "time" });
+  assert.equal(lengthWarning({ name: "long", total: 1250, keep: time(50), fps: 50 }),
+    "Warning: plate long: 1,001 of its 1,250 frames opened.\n  Frames 1002 to 1250 are left out: LTX 2.5 makes shots of up to 20 s, 1,001 frames at 50 fps.");
+  assert.equal(lengthWarning({ name: "shot", total: 600, keep: time(5), first: 1001, fps: 5 }),
+    "Warning: plate shot: 97 of its 600 frames opened.\n  Frames 1098 to 1600 are left out: LTX 2.5 makes shots of up to 20 s, 97 frames at 5 fps.", "the plate's own frame numbers");
+  assert.match(lengthWarning({ name: "fast", total: 5000, keep: { frames: 4089, by: "most" }, fps: 240 }), /Frames 4090 to 5000 are left out: Paint a plate's steps take up to 4,089 frames\.$/);
+  assert.equal(lengthWarning({ name: "whole", total: 600, keep: time(30), fps: 30 }), null);
 });
 
 test("the Blank plate tab names each value its plate does not take as typed; its frames go up to 20 s at the rate chosen", () => {
   const changes = (typed) => blankChanges(typed, blankSpec(typed));
   assert.deepEqual(changes({ width: "5000", height: "100", fps: "25", frames: "2000" }),
-    ["Width set to 1920 px, the largest.", "Height set to 256 px, the smallest.", "Frames set to 497, the most at 25 fps."]);
+    ["Width set to 1920 px, the largest.", "Height set to 256 px, the smallest.", "Frames set to 497, the most at 25 fps (20 s)."]);
   assert.equal(blankSpec({ width: "960", height: "512", fps: "50", frames: "2000" }).frames, 1001);
   assert.deepEqual(changes({ width: "1000", height: "512", fps: "24", frames: "100" }),
-    ["Width set to 1024 px, the nearest multiple of 64.", "Frames set to 97, the nearest 8k + 1."]);
+    ["Width set to 1024 px, the nearest multiple of 64.", "Frames set to 97, the nearest count LTX takes."]);
   assert.deepEqual(changes({ width: "", height: "512", fps: "50", frames: "4" }), ["Width set to 256 px.", "Frames set to 9, the fewest."]);
   assert.deepEqual(changes({ width: "960", height: "512", fps: "25", frames: "121" }), []);
 });

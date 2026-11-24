@@ -532,16 +532,17 @@ export const FLUID = { trigger: "ainvfxfluid", step: 64, minSide: 256, maxSide: 
   rates: [24, 25, 50], prompt: "smoke plume" };
 const nearest = (list, v) => list.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
 
-export function blankSpec({ width, height, fps, frames }) { // the blank plate LTX and ainvfx-fluid take, nearest to what was typed
+export function blankSpec({ width, height, fps, frames }, machine = {}) { // the blank plate LTX and ainvfx-fluid take, nearest to what was typed
   const side = (v) => Math.min(FLUID.maxSide, Math.max(FLUID.minSide, Math.round((+v || 0) / FLUID.step) * FLUID.step));
-  const rate = nearest(FLUID.rates, +fps || FLUID.rates[1]); // its frames go up to LTX 2.5's 20 s at that rate
-  const n = Math.min(plateLength(rate).frames, Math.max(FLUID.minFrames, Math.round(((+frames || 0) - 1) / 8) * 8 + 1));
-  return { width: side(width), height: side(height), fps: rate, frames: n };
+  const rate = nearest(FLUID.rates, +fps || FLUID.rates[1]), [w, h] = [side(width), side(height)];
+  const most = Math.max(FLUID.minFrames, plateKeep({ width: w, height: h, fps: rate }, machine).frames); // up to 20 s at that rate, as the machine holds
+  const n = Math.min(most, Math.max(FLUID.minFrames, Math.round(((+frames || 0) - 1) / 8) * 8 + 1));
+  return { width: w, height: h, fps: rate, frames: n };
 }
 
 // A sentence for each value of the Blank plate tab that the blank plate does not take as typed. Once the person leaves a
 // field, it shows the value used (blankFit in app.mjs), and the tab's note keeps the sentence.
-export function blankChanges(typed, used) {
+export function blankChanges(typed, used, machine = {}) {
   const said = [], given = (v) => String(v ?? "").trim() !== "" && Number.isFinite(+v);
   for (const [label, key] of [["Width", "width"], ["Height", "height"]]) {
     const v = +typed[key], u = used[key];
@@ -549,8 +550,9 @@ export function blankChanges(typed, used) {
     else if (v !== u) said.push(`${label} set to ${u} px, ${v > FLUID.maxSide ? "the largest" : v < FLUID.minSide ? "the smallest" : `the nearest multiple of ${FLUID.step}`}.`);
   }
   const f = +typed.frames;
-  if (!given(typed.frames)) said.push(`Frames set to ${used.frames}.`);
-  else if (f !== used.frames) said.push(`Frames set to ${used.frames}, ${f > plateLength(used.fps).frames ? `the most at ${used.fps} fps` : f < FLUID.minFrames ? "the fewest" : "the nearest 8k + 1"}.`);
+  const most = plateKeep(used, machine), why = most.by === "ram" ? `the most this machine holds at ${used.width} x ${used.height}` : `the most at ${used.fps} fps (${LENGTH.seconds} s)`;
+  if (!given(typed.frames)) said.push(`Frames set to ${countText(used.frames)}.`);
+  else if (f !== used.frames) said.push(`Frames set to ${countText(used.frames)}, ${f > most.frames ? why : f < FLUID.minFrames ? "the fewest" : "the nearest count LTX takes"}.`);
   if (+typed.fps !== used.fps) said.push(`Frame rate set to ${used.fps} fps.`);
   return said;
 }
@@ -1148,7 +1150,7 @@ export const wantsHdrFor = (spec, headroom, deliverHdr) => holdsHdr(spec, headro
 // reports about 47.5 GiB, a 40 GB one about 39.6.
 export const BIG_PLATE = { side: 2048, vram: 46 * 2 ** 30 };
 export const bigPlateWarning = (spec, vram) => (spec && vram > 0 && Math.max(spec.width, spec.height) > BIG_PLATE.side && vram < BIG_PLATE.vram
-  ? `This plate is ${spec.width} x ${spec.height}, above 2K, and this GPU has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB GPU: its renders may run out of memory here.`
+  ? `Warning: this plate is ${spec.width} x ${spec.height}, above 2K, and this GPU has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB GPU: its renders may run out of memory here.`
   : null);
 // ---------- How much of a plate opens: LTX 2.5's 20 seconds ----------
 // LTX 2.5 places each frame at its time in seconds, its number divided by the frame rate, and its positions span 20 s in
@@ -1164,14 +1166,42 @@ export function plateLength(fps) { // the frames a plate at `fps` opens with, an
   return { frames: most - ((most - 1) % 8), byTime: timed <= LENGTH.most };
 }
 
-// The warning of a plate that opens with frames left out, as { fact, next }: the fact for the log, what to do for the
-// status line. Frame numbers are the plate's own: `first` is its first frame's. Null when nothing is left out.
-export function lengthWarning({ name, total, kept, first = 1, fps }) {
-  if (!(total > kept)) return null;
-  const [a, b] = [first + kept, first + total - 1], { frames, byTime } = plateLength(fps), rate = Math.round(fps * 1000) / 1000;
-  return { fact: `Warning: plate ${name}: frames ${first} to ${a - 1} kept, of ${total}.\n  Frames ${a} to ${b} are left out: ` +
-    (byTime ? `LTX 2.5 makes shots of up to ${LENGTH.seconds} s, ${frames} frames at ${rate} fps.` : `a step of Paint a plate takes up to ${LENGTH.most} frames.`),
-    next: `To work on frames ${a} to ${b}, open them as a plate of their own.` };
+// A count as a person reads it: thousands take a comma (« 1,001 frames »). A frame number is the plate's own and takes none.
+export const countText = (n) => Number(n).toLocaleString("en-CA");
+
+// ---------- How much of a plate this machine holds ----------
+// Every step holds the plate's frames in float32, several times over. On an RTX PRO 6000 pod (96 GB of VRAM, a container of
+// 175 GB of RAM), the export of a 1920 x 1080 plate of 497 frames with SDR to HDR on held 14 copies of it (165.3 GB), and
+// the clean plate pass of a 3840 x 2160 plate of 121 frames 14.2 (164 GB): FIT.copies at the plate's own size covers each
+// step. ComfyUI also holds FIT.held GB besides the frames: 5 where every model stays in VRAM (large); 12 on a 16 GB GPU
+// under a 52 GB cap, where 121 frames at 1920 x 1080 peaked at 51 GB (small; medium counts as small until it is measured).
+// A plate opens with no more frames than FIT.share of the RAM that ComfyUI reports holds through every step.
+export const FIT = { copies: 14, share: 0.99, held: { small: 12, medium: 12, large: 5 } };
+export function framesFit(width, height, ram, profile = "small") { // the most frames, as 8k + 1; LENGTH.most when ComfyUI reports no RAM
+  if (!(ram > 0 && width > 0 && height > 0)) return LENGTH.most;
+  const room = FIT.share * ram - (FIT.held[profile] ?? FIT.held.small) * 2 ** 30;
+  const n = Math.min(LENGTH.most, Math.floor(room / (FIT.copies * width * height * 12)));
+  return n < 1 ? 1 : n - ((n - 1) % 8);
+}
+// The frames a plate opens with, and what sets them: "time", LTX 2.5's 20 s at its frame rate; "ram", what this machine
+// holds at its size (framesFit); "most", the nodes' ceiling. `st`: width, height and fps, as the stat route gives them;
+// `machine`: { ram, profile }, as ComfyUI reports its RAM and as memoryProfile names its GPU.
+export function plateKeep(st, machine = {}) {
+  const { frames, byTime } = plateLength(st?.fps), fit = framesFit(st?.width, st?.height, machine.ram, machine.profile);
+  return fit < frames ? { frames: fit, by: "ram" } : { frames, by: byTime ? "time" : "most" };
+}
+// Why a plate opens with no more than `keep.frames`: one sentence for the Open dialog and the log.
+export function keepReason(keep, { fps, width, height, ram }) {
+  if (keep.by === "ram") return `this machine's ${Math.round(ram / 2 ** 30)} GB of RAM holds ${countText(keep.frames)} frames at ${width} x ${height} through every step`;
+  if (keep.by === "most") return `Paint a plate's steps take up to ${countText(LENGTH.most)} frames`;
+  return `LTX 2.5 makes shots of up to ${LENGTH.seconds} s, ${countText(keep.frames)} frames at ${Math.round(fps * 1000) / 1000} fps`;
+}
+// The log's warning for a plate that opens with frames left out: the status line shows its first line. Frame numbers are
+// the plate's own: `first` is its first frame's. `plate`: fps, width, height and ram, for keepReason. Null when nothing is.
+export function lengthWarning({ name, total, keep, first = 1, ...plate }) {
+  if (!(total > keep.frames)) return null;
+  const [a, b] = [first + keep.frames, first + total - 1];
+  return `Warning: plate ${name}: ${countText(keep.frames)} of its ${countText(total)} frames opened.\n  Frames ${a} to ${b} are left out: ${keepReason(keep, plate)}.`;
 }
 export const hdrFps = (fps) => Math.min(30, +fps || 24); // the conditioning frame rate: at most 30, as in Lightricks' workflow
 export const blankDepth = (v) => (+v === HDR_DEPTH ? HDR_DEPTH : 8);

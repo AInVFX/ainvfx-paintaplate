@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, LENGTH, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateLength, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, fluidRun, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText } from "./logic.mjs";
 import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, fluidPasses, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, fluidWipeLeft, span, doneIn, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, JOB_NAME, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -260,7 +260,8 @@ async function writeCaption(e, reference, key, kind, dimmed = false) {
 
 // ---------- Plate ----------
 
-const keepOf = (st) => plateLength(st?.fps).frames; // the frames a plate opens with: LTX 2.5's 20 s at its frame rate (logic.plateLength)
+const machine = () => ({ ram: S.ram, profile: S.memoryProfile?.name }); // what the limit per machine reads (logic.framesFit)
+const keepOf = (st) => plateKeep(st, machine()); // the frames a plate opens with: LTX 2.5's 20 s at its rate, or what this machine holds
 
 // opts.cs: the plate's colour space (else read from the file); opts.fluid: a blank plate, opened as a fluid shot; opts.under:
 // the same edits on another plate, or on the same plate in another colour space
@@ -275,7 +276,7 @@ async function openPlate(list, typed, opts = {}) {
   const ctl = (openCtl = new AbortController()); // Cancel on the opening screen, or Esc, aborts it (cancelOpen)
   Object.assign(S, { plate: null, hero: null, original: null }); // nothing to draw while the new plate loads
   const id = Date.now().toString(36), sub = `paintaplate/${id}`;
-  let path = typed, out, cs, headroom = 1, total = null; // total: the frames the file holds, when it holds more than open
+  let path = typed, out, cs, headroom = 1, total = null, keep = null; // total: the frames the file holds, when it holds more than open
   const name = list.length ? plateStem(list[0].name, list.length > 1) : typed.split("/").pop(); // several files: a sequence
   opening(name, list.length > 0);
   try {
@@ -294,18 +295,19 @@ async function openPlate(list, typed, opts = {}) {
     }
     if (ctl.signal.aborted) throw new Error("cancelled");
     openStep("read", 0, "Decoding the frames");
-    const st = opts.st ?? await fetch(`/paintaplate/stat?${new URLSearchParams({ path, config: S.ocio.config, cs: knownSpace(opts.cs) ?? "" })}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const st = opts.st ?? await plateStat(path, knownSpace(opts.cs) ?? "");
+    if (st.error) throw new Error(st.error); // no open without the plate's size, rate and frames: the server's own line says why
     headroom = st?.headroom ?? 1; // above 1.0 for a log encoding: an integer plate then holds SDR to HDR's values (logic.holdsHdr)
     setSalt(plateIdentity(path, st, INDEX_ON)); // the plate's identity: job index keys change when it does
     fileSpace = st?.color_space ?? null;
     cs = knownSpace(opts.cs) ?? st?.color_space ?? modelSpace(); // one colour space per plate: the viewer, the models and the export use it
     // a video plate's proxy keeps its own values at the working size, so the viewer converts it with OCIO as it does the plate
     const video = st?.kind === "video", work = st?.width ? fitSize(st.width, st.height, WORK_SIDE, 32) : null;
-    const keep = keepOf(st); // Load Plate reads no more: the frames after them are left out, and the log says so below
-    if ((st?.frames ?? 0) > keep) total = st.frames;
+    keep = keepOf(st); // Load Plate reads no more: the frames after them are left out, and the log says so below
+    if ((st?.frames ?? 0) > keep.frames) total = st.frames;
     const t0 = performance.now();
     const native = st?.width ? colour.nativeSize(st.width, st.height, NATIVE_SIDE) : null; // the playback proxy at the viewer's canvas size
-    out = await run("ingest", { path, config: S.ocio.config, color_space: cs, max_frames: keep, proxy_space: video ? cs : logSpace(),
+    out = await run("ingest", { path, config: S.ocio.config, color_space: cs, max_frames: keep.frames, proxy_space: video ? cs : logSpace(),
       proxy_size: native ? Math.max(...native) : video && work ? Math.max(...work) : DEEP_SIDE, ...(native ? movieDims(...native) : {}), prefix: `${sub}/hero`, video_prefix: `${sub}/proxy` }, {
       progress: (f) => openStep(OPENING.at, f, null, f > 0.02 ? ((performance.now() - t0) / 1000) * (1 - f) / f : null),
       step: (cls) => { const k = INGEST[cls]; if (k && OPENING.order.indexOf(k) >= OPENING.order.indexOf(OPENING.at)) openStep(k, 0); } }).done;
@@ -347,7 +349,7 @@ async function openPlate(list, typed, opts = {}) {
   shotVid.removeAttribute("src"); shotVid.load();
   for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = false;
   const kind = spec.kind === "video" ? spec.codec : `${spec.ext.slice(1).toUpperCase()} ${spec.kind}`;
-  $("#spec").textContent = `${S.plate.name}: ${kind}, ${w} x ${h}, ${Math.round(S.plate.fps * 1000) / 1000} fps, ${S.plate.total > spec.frames ? `${spec.frames} of ${S.plate.total}` : spec.frames} frames, ${cs}`;
+  $("#spec").textContent = `${S.plate.name}: ${kind}, ${w} x ${h}, ${Math.round(S.plate.fps * 1000) / 1000} fps, ${S.plate.total > spec.frames ? `${countText(spec.frames)} of ${countText(S.plate.total)}` : countText(spec.frames)} frames, ${cs}`;
   document.activeElement?.blur();
   S.took = {};
   $("#close-btn").hidden = false;
@@ -357,17 +359,18 @@ async function openPlate(list, typed, opts = {}) {
   const depth = opts.fluid?.depth ? { bits: opts.fluid.depth, float: false } : plateDepth(spec); // a blank plate: the depth asked for its fluid shot
   log(`Plate ${S.plate.name}: opened in ${((performance.now() - began) / 1000).toFixed(1)} s.\n  ${w} x ${h}, ${spec.frames} frame${spec.frames === 1 ? "" : "s"}, ${depth.float ? "float" : `${depth.bits}-bit`}, ${cs}${opts.cs ? "" : ", from file"}.`);
   log(`Working sizes: edits at ${S.plate.work.join(" x ")}, edit preview at ${S.plate.prev.join(" x ")}, ${S.previewCap ? `shot preview at ${S.plate.shot.join(" x ")}` : "shot preview off"}, tracking at ${S.plate.track.join(" x ")}.`);
-  const long = opts.under || opts.fluid ? null : lengthWarning({ name: S.plate.name, total: S.plate.total, kept: spec.frames, first: S.plate.first, fps: S.plate.fps });
-  if (long) log(long.fact); // frames left out: the status line shows it below, with what to do
+  const long = opts.under || opts.fluid || !keep ? null : lengthWarning({ name: S.plate.name, total: S.plate.total, keep: { ...keep, frames: spec.frames },
+    first: S.plate.first, fps: S.plate.fps, width: w, height: h, ram: S.ram });
+  if (long) log(long); // frames left out: the status line shows its first line below, with the open's next step
 
   const gaps = spec.missing?.length ? ` ${spec.missing.length} frame${spec.missing.length > 1 ? "s are" : " is"} missing (${spec.missing.slice(0, 4).join(", ")}${spec.missing.length > 4 ? "…" : ""}): the viewer repeats the frame before.` : "";
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
-  const big = bigPlateWarning(spec, S.vram); // above 2K on a GPU under BIG_PLATE.vram: renders may not finish (README, GPU)
-  if (big) { log(big); setTimeout(() => status(big), 80); }
+  const big = bigPlateWarning(spec, S.vram); // above 2K on a GPU under BIG_PLATE.vram: renders may not finish (README, GPU). status() logs it once
+  if (big) setTimeout(() => status(big), 80);
   const next = "Describe the edit in the text prompt, paint on the frame, then Generate.", plate = S.plate;
   const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", from file"} (right-click > OCIO > Plate changes it). ${next}`;
   status(opened, "hint");
-  if (long) setTimeout(() => status(`${long.fact.split("\n")[0]} ${long.next}`, "hint"), 90); // after the open's own sentence, as the lines above
+  if (long) setTimeout(() => status(`${long.split("\n")[0]} ${next}`, "hint"), 90); // after the open's own sentence, as the lines above
   if (keying()) enterFluid(); else fluidUI();
   plateVid.addEventListener("canplaythrough", () => { // the playback video is loaded. It says so only while the open's own sentence is on show: a blank plate keeps its fluid hint
     if (S.plate !== plate || OPENING.at !== "load") return; // another plate has opened since
@@ -438,8 +441,8 @@ onStop((kind) => S.halted && STOPPED.includes(kind)); // a stop stops everything
 async function warmAll() { // every model loads while the person looks at the page: the first edit and the first shot start at once
   const t0 = performance.now(), start = $("#status").textContent; // what the page said at start: the warm-up's line replaces only that
   const stats = await (await fetch("/system_stats")).json();
-  S.vram = stats.devices?.[0]?.vram_total ?? 0;
-  S.memoryProfile = memoryProfile({ vram: S.vram, ram: stats.system?.ram_total ?? 0, force: MEMORY_ASKED });
+  S.vram = stats.devices?.[0]?.vram_total ?? 0; S.ram = stats.system?.ram_total ?? 0; // the RAM that ComfyUI may use: a cap where one is set
+  S.memoryProfile = memoryProfile({ vram: S.vram, ram: S.ram, force: MEMORY_ASKED });
   log(`Memory profile: ${S.memoryProfile.name} (${S.memoryProfile.why}).\n  ${S.memoryProfile.does}.`); // the profile and the GPU, then what the page does on it
   if (!S.memoryProfile.warm.length) return; // a small GPU: no model loads before an action needs it
   // ComfyUI keeps its history in memory until it restarts: a model that a prompt in it used is still loaded
@@ -2129,21 +2132,21 @@ function depthUI() { // a blank plate opens in 8-bit; 16-bit needs SDR to HDR, o
   $("#b-depth").value = "8";
 }
 const blankTyped = () => ({ width: $("#b-width").value, height: $("#b-height").value, fps: $("#b-fps").value, frames: $("#b-frames").value });
-const blankForm = () => blankSpec(blankTyped());
+const blankForm = () => blankSpec(blankTyped(), machine());
 
 // What the blank plate will be, snapped to what LTX and ainvfx-fluid take, with a sentence for each value it does not take
 // as typed (logic.blankChanges): while the person types, and after blankFit has put the values used in the fields
-function blankNote(changed = blankChanges(blankTyped(), blankForm())) {
+function blankNote(changed = blankChanges(blankTyped(), blankForm(), machine())) {
   const s = blankForm();
-  $("#b-frames").max = String(plateLength(s.fps).frames); // the most frames at the rate chosen: LTX 2.5's 20 s
-  $("#b-note").textContent = `${s.width} x ${s.height}, ${s.frames} frames at ${s.fps} fps: ${(s.frames / s.fps).toFixed(2)} s.` + changed.map((c) => ` ${c}`).join("") +
-    (s.frames === FLUID.tested ? "" : ` ${FLUID.tested} frames is the tested length.`) + (S.fluidReady ? "" : ` ${FLUID_MISSING}`) +
+  $("#b-frames").max = String(Math.max(FLUID.minFrames, plateKeep(s, machine()).frames)); // the most frames: 20 s at the rate chosen, as this machine holds
+  $("#b-note").textContent = `${s.width} x ${s.height}, ${countText(s.frames)} frames at ${s.fps} fps: ${(s.frames / s.fps).toFixed(2)} s.` + changed.map((c) => ` ${c}`).join("") +
+    (s.frames === FLUID.tested ? "" : ` ainvfx-fluid is tested at ${FLUID.tested} frames.`) + (S.fluidReady ? "" : ` ${FLUID_MISSING}`) +
     (blankDepth($("#b-depth").value) === HDR_DEPTH ? (S.hdrReady ? " 16-bit: SDR to HDR turns the fluid shot and every edit on it into half-float EXR." : ` ${HDR_MISSING}`) : "");
   openGoUI();
 }
 
 function blankFit() { // a field left, or Open: every field shows the value the blank plate uses, and the note says which changed
-  const typed = blankTyped(), s = blankSpec(typed), changed = blankChanges(typed, s);
+  const typed = blankTyped(), s = blankSpec(typed, machine()), changed = blankChanges(typed, s, machine());
   for (const k of ["width", "height", "frames"]) $(`#b-${k}`).value = String(s[k]);
   $("#b-fps").value = String(s.fps);
   blankNote(changed);
@@ -3850,7 +3853,9 @@ async function chooseItem(it, b) { // one click: the item's details, read from t
   const r = await fetch(`/paintaplate/stat?${new URLSearchParams({ path: it.path, config: S.ocio.config })}`), st = await r.json();
   if (OPEN.chosen !== it) return;
   const fmt = st.kind === "video" ? `${st.codec} ${st.pix_fmt ?? ""}`.trim() : `${(st.ext ?? "").slice(1).toUpperCase()} frames`;
-  info.textContent = r.ok ? `${it.name}: ${st.width} x ${st.height}, ${st.frames} frames${st.kind === "video" ? ` at ${Math.round(st.fps * 1000) / 1000} fps` : ""}, ${fmt}, ${gb(st.size)}. Colour space: ${st.color_space}.${st.frames > keepOf(st) ? ` Opens its first ${keepOf(st)} frames: LTX 2.5 makes shots of up to ${LENGTH.seconds} s.` : ""}`
+  const keep = r.ok ? keepOf(st) : null, first = st.first_frame ?? 1;
+  info.textContent = r.ok ? `${it.name}: ${st.width} x ${st.height}, ${countText(st.frames)} frames${st.fps ? ` at ${Math.round(st.fps * 1000) / 1000} fps` : ""}, ${fmt}, ${gb(st.size)}. Colour space: ${st.color_space}.` +
+    (st.frames > keep.frames ? ` Opens frames ${first} to ${first + keep.frames - 1}: ${keepReason(keep, { ...st, ram: S.ram })}.` : "")
     : `${it.name} cannot be opened: ${st.error ?? r.status}`;
 }
 
@@ -4779,8 +4784,8 @@ $("#drop").ondrop = (e) => { e.preventDefault(); e.stopPropagation(); e.currentT
 // ?remote shows that case, for the tests.
 const PATHS_HERE = sameMachine(location.hostname) && !Q.has("remote");
 $("#path-row").hidden = !PATHS_HERE; $("#path-remote").hidden = PATHS_HERE;
-async function plateStat(path) { // the server's stat of a plate, or { error } with the one line that says why it cannot read it
-  const r = await fetch(`/paintaplate/stat?${new URLSearchParams({ path, config: S.ocio.config })}`).catch(() => null);
+async function plateStat(path, cs = "") { // the server's stat of a plate, or { error } with the one line that says why it cannot read it
+  const r = await fetch(`/paintaplate/stat?${new URLSearchParams({ path, config: S.ocio.config, cs })}`).catch(() => null);
   if (!r) return { error: "ComfyUI did not answer. Check that it runs." };
   const body = await r.json().catch(() => ({}));
   return r.ok ? body : { error: body.error ?? `ComfyUI cannot read this path (HTTP ${r.status}).` };
