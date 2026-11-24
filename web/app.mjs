@@ -2857,7 +2857,7 @@ function plan(r, all) { // the steps this set of edits needs: the erase pass for
   const donor = fl ? fluidDonor(r, all.find((e) => e.tool === "fluid").version) : null, pvMade = !!donor?.previews?.[p.shot.join("x")]?.fluid; // made by another render
   r.skip = new Set([(!fl || (!pvMade && (!alone || !!donor))) && "fluid", !fl && "fluidfull", !erase && "erase", !erase && "clean", !carry && "shot", !paint && "track", (onePass || !erase) && "cleanfull",
     (onePass || !carry) && "full", (onePass || !paint) && "trackfull",
-    !(S.hdrReady && wantsHdr(p.spec, tools, hdrOn)) && !r.hdrAfter && "hdr", r.hdrAfter && "export", upAlone && "hdr", // after the composite, Export zips its frames (exportAlone); the plate alone with Upscale only keeps its own values
+    !(S.hdrReady && wantsHdr(p.spec, tools, hdrOn)) && !r.hdrAfter && "hdr", r.hdrAfter && !fl && "export", upAlone && "hdr", // after the composite, Export zips its frames (exportAlone); the plate alone with Upscale only keeps its own values
     ...(active.length ? [] : ["comp", "review", "export"]), // the plate alone: SDR to HDR makes the result; Export zips its frames, and upscales them itself (exportAlone)
     !(keeps || (up && upAlone)) && "upplate", !keeps && "uplayer", !(up && !alone && !r.hdrAfter) && "upcomp", !(up && ((alone && !upAlone) || r.hdrAfter)) && "uphdr",
     ...(S.previewCap ? [] : STAGES.filter((st) => st.preview).map((st) => st.id))].filter(Boolean)); // no preview pass
@@ -2980,7 +2980,7 @@ async function fluidSteps(r, fl) {
       log(`Render v${r.v}: Fluid shot, preview: reused from render v${made.v}.`);
     }
     await step(r, "fluid", async (progress) => { pv.fluid = await make(`${r.base}/fluid_${size.join("x")}`, size)(progress); }, pv);
-    if (r.done?.fluidfull === undefined) shown(pv.fluid, "Fluid shot, preview: Space plays it. The full-size fluid shot follows.");
+    if (r.done?.fluidfull === undefined && !fluidDonor(r, fl.version)) shown(pv.fluid, "Fluid shot, preview: Space plays it. The full-size fluid shot follows.");
   }
   const donor = r.fluid ? null : fluidDonor(r, fl.version);
   if (donor && r.done?.fluidfull === undefined) { // the same version, made by another render
@@ -2991,6 +2991,7 @@ async function fluidSteps(r, fl) {
   if (alone) Object.assign(r, { review: r.fluid.movie, reviewSpace: "@model", run: r.run ?? r.base }); // the fluid shot alone: its result, and its files' folder
   await fluidFirst(r, fl);
   if (!donor) shown(r.fluid, "Fluid shot, full size: Space plays it. Use Paint, Clean or Light to edit it further.");
+  else if (alone && r.key === S.heroKey && !S.pass) showLatest(); // taken from another render: its full size is the latest, not the preview
 }
 async function fluidFirst(r, fl) { // the full-size shot of a fluid version: its first frame is the picture the edits above are painted on
   const e = fl.src;
@@ -3184,17 +3185,18 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const upLeft = upNext ? `Upscale is next: about ${span(UPS.reduce((a, st) => a + (r.skip.has(st.id) || doneOf(r, st) !== undefined ? 0 : estimate(st.id, r.skip)), 0))}.` : undefined;
   if (!S.wantDownload || upNext) status(r.hdrAfter ? (upLeft ? ready("SDR to HDR", ", its EXR frames at full precision as they load", upLeft) : "SDR to HDR: ready, in the viewer, its EXR frames at full precision as they load. Export writes them for compositing software.")
     : ready("Composite, full size", deep ? ", its EXR frames at full precision as they load" : "", upLeft), "hint");
-  if (r.hdrAfter) { // the relit result in HDR: Upscale's step on SDR to HDR's frames, then Export zips them
+  if (r.hdrAfter) { // SDR to HDR's frames: Upscale's step on them; a relit result zips them, and over a fluid shot the export step adds the edits' parts
     await upscaleResult(r);
     upscaledShown(r, key);
-    return S.wantDownload ? exportAlone(r) : undefined;
+    if (!r.fluid) return S.wantDownload ? exportAlone(r) : undefined;
   }
   await upscaleSteps();
   if (!S.wantDownload) return;
   await step(r, "export", async (progress) => { // only when Export asks: the plate's own format, and the matte, beside the review
     const x = await exportJob(progress), matte = outputFile("export", x.done, "matte_movie");
     r.exported = { run: x.run, name: `${p.name}_paintaplate_v${r.v}`,
-      text: x.exr ? `${p.frames} half-float EXR frames in ACES2065-1, in ${x.file?.subfolder ?? `${x.run}/export`}.` : outputText("export", x.done, "export") ?? "",
+      text: r.hdrAfter && r.hdrFrames ? `${p.frames} half-float EXR frames in ACES2065-1, in ${x.run}/hdr.` // over a fluid shot: SDR to HDR's frames are the result
+        : x.exr ? `${p.frames} half-float EXR frames in ACES2065-1, in ${x.file?.subfolder ?? `${x.run}/export`}.` : outputText("export", x.done, "export") ?? "",
       matte: matte ? viewUrl(matte) : null, layer: x.layer, // the Export row shows its matte
       ...x.parts, upscaled: upscaled(r) }; // the zip takes upscaled/ when Upscale's steps made it
   });
@@ -3548,6 +3550,8 @@ function stagesUI() {
     }
     return li;
   })];
+  const fluidRows = stepsInOrder(r, skip).filter((st) => st.id === "fluid" || st.id === "fluidfull").length;
+  if (rows[0] === first && fluidRows) rows.splice(fluidRows, 0, rows.shift()); // an edit's first frame is made on the fluid shot's: it follows its steps
   keepRows(list, rows);
   const pre = renderLeft(), all = renderLeft(true);
   const busy = S.stage?.key === S.heroKey, what = S.wantDownload ? "export" : "full size", next = S.previewCap && !alone ? "preview" : "full size";
@@ -3624,7 +3628,7 @@ function exportUI() {
 const fluidOnly = () => { const f = fluidEdit(); return !!f && f.on && f.state === "done" && !S.edits.some((e) => e !== f && e.on && e.patch); }; // a fluid shot with no edit on it
 const exportsExr = (r) => exrResult(S.plate.spec, r?.skip ? !r.skip.has("hdr") : hdrWanted(), S.plate.headroom); // the render's own plan (plan) decides: an HDR result of a plate whose format holds nothing above 1.0
 function exportDialog() { // its words come from one source for every kind of result (logic.exportWords)
-  const fluid = fluidOnly(), alone = plateAlone(S.heroKey), r = S.renders.get(S.heroKey), relitHdr = !!r?.hdrAfter, spec = S.plate.spec;
+  const fluid = fluidOnly(), alone = plateAlone(S.heroKey), r = S.renders.get(S.heroKey), relitHdr = !!r?.hdrAfter && !r.fluid, spec = S.plate.spec; // over a fluid shot, the edits' own parts, the result in HDR
   for (const k of ["matte", "review", "shot"]) $(`#x-${k}`).closest("label").hidden = fluid || alone || relitHdr; // a fluid shot alone, the plate alone, a relit result in HDR: their own files
   $("#x-graph").closest("label").hidden = alone || !(fluid ? graphsFluid() : S.edits.some((e) => e.on && e.patch && e.state === "done")); // the edits on show, or a fluid shot alone, as one ComfyUI workflow
   const kind = fluid ? "fluid" : alone ? (S.heroKey === PLATE_UP ? "upscaled" : "plate") : relitHdr ? "relit" : "edits";
@@ -4596,8 +4600,8 @@ $("#x-go").onclick = () => {
   S.graph = !$("#x-graph").closest("label").hidden && $("#x-graph").checked ? graphFile().catch((err) => void quiet(err)) : null; // from the edits on show; the zip takes it
   if (fluidOnly()) return void setTimeout(exportPlate, 0); // once the dialog has closed: as the plate alone exports
   const r = S.renders.get(S.heroKey);
-  if (plateAlone(S.heroKey) || r?.hdrAfter) return void setTimeout(() => exportPlate(r), 0); // SDR to HDR's frames: the plate alone, or a relit result in HDR
-  const parts = ["export", ...["matte", "review", "shot"].filter((k) => $(`#x-${k}`).checked)];
+  if (plateAlone(S.heroKey) || (r?.hdrAfter && !r.fluid)) return void setTimeout(() => exportPlate(r), 0); // SDR to HDR's frames: the plate alone, or a relit result in HDR
+  const parts = [r?.hdrAfter ? "hdr" : "export", ...["matte", "review", "shot"].filter((k) => $(`#x-${k}`).checked)]; // over a fluid shot, the result is SDR to HDR's frames
   if (r?.exported && r.skip?.has("upcomp")) return download(parts); // with Upscale on, the render makes the steps still due, then the zip
   S.wantDownload = parts;
   status(r && UPS.some((st) => !r.skip.has(st.id) && doneOf(r, st) === undefined) ? runsFirst("Upscale")
