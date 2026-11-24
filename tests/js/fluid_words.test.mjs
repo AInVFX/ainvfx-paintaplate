@@ -16,3 +16,8 @@ test("the lines that say how to change something say « use … to change it »"
   for (const line of ["Use the pencil to change it.", "Use the pencil to change edit ${num(edit)}.", "Use the pencil to change the fluid shot.",
     "(use right-click > OCIO > Plate to change it)"]) assert.ok(app.includes(line), line);
 });
+
+test("the Blank plate tab says what its fluid shot becomes: History's first row, not a new plate", () => {
+  assert.ok(html.includes("AInVFX's ainvfx-fluid IC-LoRA turns it into a shot: the first row of History."));
+  assert.ok(!html.includes("turns it into a new plate"));
+});
