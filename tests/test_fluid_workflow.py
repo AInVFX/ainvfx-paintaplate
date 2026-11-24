@@ -54,5 +54,14 @@ class FluidFirstFrame(unittest.TestCase):
         self.assertEqual(prompt[outs["plate"]]["inputs"]["images"][0], decoded)
 
 
+
+class FluidControlMovie(unittest.TestCase):
+    def test_the_control_movie_says_what_it_shows(self):
+        """`control`: the keyframes on black as LTX reads them, a movie that the GPU cases compare with the shot."""
+        prompt, _, outs = build_workflows.load("fluid", WORKFLOWS)
+        movie = prompt[outs["control"]]
+        self.assertEqual((movie["class_type"], movie["_meta"]["title"]), ("PaintAPlate_SaveMovie", "Control video as a movie: the keyframes on black"))
+        self.assertEqual(prompt[movie["inputs"]["images"][0]]["class_type"], "PaintAPlate_KeyframeVideo")
+
 if __name__ == "__main__":
     unittest.main()

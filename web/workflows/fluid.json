@@ -102,7 +102,7 @@
    "filename_prefix": ""
   },
   "_meta": {
-   "title": "Control video as a movie: the Fluid: keyframes row shows it",
+   "title": "Control video as a movie: the keyframes on black",
    "slots": {
     "width": "movie_width",
     "height": "movie_height",

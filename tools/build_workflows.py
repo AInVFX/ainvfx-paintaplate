@@ -736,7 +736,7 @@ def fluid():
     size = g("GetImageSize", image=scaled)
     control = g("PaintAPlate_KeyframeVideo", _title="Control video: the keyframes on black", width=size[0], height=size[1],
                 frames=size[2], keys=Slot("keys", "[]"))
-    shown = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Control video as a movie: the Fluid: keyframes row shows it", _output="control",
+    shown = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Control video as a movie: the keyframes on black", _output="control",
               images=control, fps=load[3], crf=18, filename_prefix=Slot("control_prefix", ""))
     g.link_slot(shown, "images", "fluid_control")
     lora = g("LTXICLoRALoaderModelOnly", _title="ainvfx-fluid IC-LoRA (reads its downscale factor)",
