@@ -847,14 +847,14 @@ export function stepOrder(steps, { done, at = () => undefined, now = null }) {
 // went through SDR to HDR. The composite as a movie (the review movie) shows only where the composite is frames.
 export const EXR_FRAMES = "half-float EXR frames, ACES2065-1";
 export function exportWords({ kind, ready = true, left = "", exr = false, hdr = false, spec = null, steps = {} }) {
-  const first = (step) => `${step} first${left ? `: ${left}` : ""}.`, inHdr = (what) => (ready ? `${what} in HDR, from SDR to HDR.` : `${what} in HDR. ${first("SDR to HDR runs")}`);
+  const first = (step) => `${step} first${left ? `: ${left}` : ""}.`, inHdr = (what) => (ready ? `${what} in HDR.` : `${what} in HDR. ${first("SDR to HDR runs")}`);
   const note = kind === "fluid" ? (hdr ? "The fluid shot in HDR, with the SDR shot in ProRes 4444 and its preview movie." : "The fluid shot in ProRes 4444, with its preview movie.")
     : kind === "plate" ? inHdr("The plate") : kind === "relit" ? inHdr("The relit result") : kind === "upscaled" ? (ready ? "" : first("Upscale runs"))
     : ready ? "" : first(`${steps.comp} renders`);
   const format = (kind === "fluid" ? hdr : exr) ? EXR_FRAMES : kind === "fluid" ? "ProRes 4444 movie" : plateFormat(spec);
   const edits = kind === "edits", frames = format === EXR_FRAMES || (!!spec && spec.kind !== "video");
   const hint = "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.";
-  return { hint, format, note, help: `${hint} ${steps.comp} keeps the plate's format. With SDR to HDR, a movie or another SDR format gives half-float EXR frames.`,
+  return { hint, format, note, help: `${hint} ${steps.comp} keeps the plate's format. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.`,
     rows: {
       export: { label: kind === "fluid" ? "Fluid shot" : kind === "plate" || kind === "relit" ? steps.hdr : kind === "upscaled" ? steps.up : steps.comp, detail: format, shown: true },
       review: { label: `${steps.comp}, as a movie`, detail: "H.264 MP4", shown: edits && frames },

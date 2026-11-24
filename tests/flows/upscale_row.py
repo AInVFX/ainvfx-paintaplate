@@ -33,7 +33,9 @@ def run(browser, port, U):
     U.check(parts == {"export", "plate", "layer", "matte"} and len(mattes) == 49 and any(n.startswith("layer/") for n in names),
             f"the zip holds the layer and the upscaled set, its matte numbered on across the windows: {sorted(parts)}, {len(mattes)} matte frames")
     status = page.text_content("#status") or ""
-    U.check(status.startswith("Download: ") and "its layer" in status and "the upscaled set" in status, f"the download line names them: {status!r}")
+    said = [t for t in U.log_lines(page) if t.startswith("Download: ")][-1:]
+    U.check(status.startswith("Download: ") and status.endswith(".zip.") and said and "Composite, upscaled." in said[0],
+            f"the status line names the zip, and the log names the rows it holds, the upscaled set among them: {status!r}, {said!r}")
     start = len(U.log_lines(page))
     page.keyboard.press("c"); U.paint_once(page, "the cup", [(0.6, 0.4), (0.62, 0.45)]); page.wait_for_timeout(1500); page.keyboard.press("Enter")
     U.wait_log(page, f"window.__lines.filter((t) => {U.HAS_REVIEWED}).length >= 2", 240000, "the full-size composite of both edits")

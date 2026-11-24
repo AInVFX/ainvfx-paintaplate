@@ -10,17 +10,20 @@ STAGES = "() => [...document.querySelectorAll('#stages li')].map((li) => li.text
 SAID = "() => [...document.querySelectorAll('#log li')].map((li) => li.textContent).filter((t) => t.includes('Download: ')).at(-1) ?? ''"
 
 
-def painted(page, U):
+def painted(page, U, full=False):
     page.click('.tools [data-tool="paint"]')
-    U.paint_once(page, "a lantern", [(0.3, 0.5), (0.36, 0.5)]); page.keyboard.press("Enter")
+    U.paint_once(page, "a lantern", [(0.3, 0.5), (0.36, 0.5)])
+    page.evaluate(U.WATCH); page.keyboard.press("Enter")
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
+    if full:  # the render's full-size steps end before another plate opens, which stops them
+        U.wait_log(page, U.added_line(U.REVIEWED), 180000, "the full-size composite")
 
 
 def run(browser, port, U):
     errors = []
     page = U.load(browser, port, errors=errors)
     U.open_plate(page, "paintaplate/hdr_room")  # a plate of EXR frames
-    painted(page, U)
+    painted(page, U, full=True)
     stages = page.evaluate(STAGES)
     page.click("#export-btn")
     rows = page.evaluate(ROWS)
@@ -57,7 +60,7 @@ def run(browser, port, U):
             f"a fluid shot alone: one row of its own: {rows}")
     page.keyboard.press("Escape")
     U.check(page.text_content("#help-export") == "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip. "
-            "Composite, full size keeps the plate's format. With SDR to HDR, a movie or another SDR format gives half-float EXR frames.",
+            "Composite, full size keeps the plate's format. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.",
             f"the Help's Export entry: the dialog's line, then the composite's step: {page.text_content('#help-export')!r}")
     U.no_errors(errors, "after the three dialogs")
     page.close()

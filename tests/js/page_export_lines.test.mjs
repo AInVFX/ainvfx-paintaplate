@@ -15,9 +15,9 @@ test("the Export dialog: one line above its parts for every kind of result, and 
   assert.equal(said({ kind: "edits", ready: true, steps: STEPS }), ""); // written, or ready to write: nothing to add
   assert.equal(said({ kind: "edits", ready: false, left: secs(64, ""), steps: STEPS }), "Composite, full size renders first: about 1 min.");
   assert.equal(said({ kind: "edits", ready: false, steps: STEPS }), "Composite, full size renders first."); // no estimate yet
-  assert.equal(said({ kind: "plate", ready: true, exr: true }), "The plate in HDR, from SDR to HDR.");
+  assert.equal(said({ kind: "plate", ready: true, exr: true }), "The plate in HDR.");
   assert.equal(said({ kind: "plate", ready: false, left: secs(610, ""), exr: true }), "The plate in HDR. SDR to HDR runs first: about 10 min.");
-  assert.equal(said({ kind: "relit", ready: true, exr: true }), "The relit result in HDR, from SDR to HDR.");
+  assert.equal(said({ kind: "relit", ready: true, exr: true }), "The relit result in HDR.");
   assert.equal(said({ kind: "relit", ready: false, left: secs(610, ""), exr: true }), "The relit result in HDR. SDR to HDR runs first: about 10 min.");
   assert.equal(said({ kind: "fluid" }), "The fluid shot in ProRes 4444, with its preview movie.");
   assert.equal(said({ kind: "fluid", hdr: true }), "The fluid shot in HDR, with the SDR shot in ProRes 4444 and its preview movie.");
