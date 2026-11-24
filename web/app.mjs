@@ -2964,7 +2964,7 @@ async function fluidSteps(r, fl) {
     const movie = outputFile("fluid", out, "video"), first = outputFile("fluid", out, "first");
     return { path: `${folderOf("fluid", out, "video")}/plate/${blank}`, movie: movie ? viewUrl(movie) : null, first: first ? viewUrl(first) : null };
   };
-  const shown = (made, line) => { if (alone && r.key === S.heroKey && made?.movie) { showMade(made.movie, r.key, "@model"); hud(line, 2500); } };
+  const shown = (made, line) => { if (alone && r.key === S.heroKey && made?.movie) { showMade(made.movie, r.key, "@model"); hud(line, 2500); status(line, "hint"); } }; // as an edit's step says it
   if (!r.skip.has("fluid")) {
     const sized = p.shot.join("x"), pv = (r.previews[sized] ??= {});
     await step(r, "fluid", async (progress) => { pv.fluid = await make(`${r.base}/fluid_${sized}`, p.shot)(progress); }, pv);

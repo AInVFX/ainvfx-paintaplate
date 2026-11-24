@@ -653,6 +653,8 @@ def fluid_flow(browser, port):
           f"Enter generates with the trigger, the words and the three keyframes: {sent}")
     page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => /^Render v\\d+: Fluid shot, full size: done in /.test(e.textContent))", timeout=120000)
     log, rows = log_lines(page), row_titles(page)
+    check(page.text_content("#status") == "Fluid shot, full size: Space plays it. Use Paint, Clean or Light to edit it further.",
+          f"the status line says what to do with the fluid shot, as an edit's step does: {page.text_content('#status')}")
     check(rows == ["1. Fluid"] and not any("under the edits" in line for line in log) and not page.is_disabled("[data-tool=erase]"),
           f"the render queue makes the fluid shot, the first edit, and nothing reopens it: Clean and Light work on it: {rows}")
     page.click('#history li[data-id="fluid"] .edit')
