@@ -2869,7 +2869,7 @@ function setMatte(e, strategy) { // the menu changed: the matte and the composit
   mark();
   e.matte = strategy;
   Object.assign(S, { hover: null, peek: null }); // the row rebuilds under the menu's popup: frame 0 shows the result, not the strokes
-  historyUI(); recompose(); stagesUI(); exportUI(); touch(); // as a Finish switch: another render, whose shot the job index answers
+  recompose(); historyUI(); stagesUI(); exportUI(); touch(); // as a Finish switch: another render, whose shot the job index answers; « Auto » shows its choice in it
   const made = fullSizeMade(S.renders.get(S.heroKey)); // back to a strategy already rendered: it shows at once, nothing runs
   log(`Edit ${num(e)}: matte ${strategy}.${made ? "" : " The matte and the composite run again."}`);
 }

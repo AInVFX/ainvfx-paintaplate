@@ -30,7 +30,11 @@ def run(browser, port, U):
     label = page.text_content("#history li label.matte span")
     widths = page.evaluate(f"""() => {{ const m = document.querySelector('{MENU}'), was = m.value;
       const w = [...m.options].map((o) => {{ m.value = o.value; return m.offsetWidth; }}); m.value = was; return w; }}""")
-    U.check(label == "Matte strategy" and len(set(widths)) == 1, f"the menu has its label and one width for every choice: {label!r} {widths}")
+    lines, left, thumb = page.evaluate("""() => { const li = document.querySelector('#history li'), l = li.querySelector('label.matte');
+      return [l.querySelector('span').getClientRects().length, l.getBoundingClientRect().left, li.querySelector('.thumb').getBoundingClientRect().left]; }""")
+    U.check(label == "Matte strategy" and len(set(widths)) == 1 and lines == 1 and abs(left - thumb) < 1,
+            f"the menu has its label on one line under the thumbnail, and one width for every choice: {label!r} {lines} line(s), "
+            f"left {left:.0f} against the thumbnail's {thumb:.0f}, widths {widths}")
     matte = [json.loads(b)["prompt"] for b in posted if b and '"PaintAPlate_FollowMatte"' in b]
     U.check(matte and all(n["inputs"].get("strategy") == "Auto" for p in matte for n in p.values() if n["class_type"] == "PaintAPlate_FollowMatte"),
             f"Generate posts the paint matte with « Auto »: {len(matte)} matte jobs")
@@ -64,6 +68,7 @@ def run(browser, port, U):
     U.check(sum(grew[f"{s}: posted"] for s in ("shot", "matte", "comp", "review")) == 0 and "Edit 1: matte Auto." in lines
             and not any("run again" in line for line in lines if line.startswith("Edit 1: matte")),
             f"back to a strategy made before: it shows at once, nothing runs, and the log says no more: {grew}")
+    U.check(texts()[0] == "Auto: Object and effects", f"back on « Auto », the menu shows its choice again: {texts()}")
     page.select_option(MENU, "Whole shot")
     U.settled(page)
     page.click("#undo-btn")
