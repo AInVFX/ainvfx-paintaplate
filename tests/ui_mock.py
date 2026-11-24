@@ -1019,8 +1019,8 @@ def fluid16_flow(browser, port):
     page.keyboard.press("Escape")
     page.wait_for_function("window.__lines.some((t) => / Fluid shot, full size: reused from render v\\d+\\./.test(t))", timeout=30000)
     new = page.evaluate("window.__lines")
-    check(not any(" Fluid shot, preview" in t for t in new),
-          f"turned off afterwards, the render takes the full size made already and runs no preview pass: {[t[:60] for t in new if 'Fluid shot' in t]}")
+    check(not any(re.search(r" Fluid shot, preview: (about|done in) ", t) for t in new) and any(re.search(r" Fluid shot, preview: reused from render v\d+\.$", t) for t in new),
+          f"turned off afterwards, the render takes the fluid shot's preview and full size made already, and runs no fluid pass: {[t[:60] for t in new if 'Fluid shot' in t]}")
     page.click("#export-btn")
     fmt = page.text_content("#x-format") or ""
     check(not page.evaluate("document.querySelector('#finish-hdr').checked") and "ProRes 4444" in fmt, f"turned off afterwards, the fluid shot exports in ProRes 4444: {fmt}")

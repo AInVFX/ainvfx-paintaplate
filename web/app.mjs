@@ -849,7 +849,7 @@ function finishRow(opt) { // one row of the Finish menu: its switch and name, it
 function finishUI() { // the Finish button and its menu: each row as this plate allows it, and the button's count
   const list = $("#finish-list"), btn = $("#finish-btn");
   if (!list.children.length) list.replaceChildren(...FINISH.map(finishRow));
-  btn.disabled = !S.plate || keying();
+  btn.disabled = !S.plate; // with a fluid shot's keyframes open too: Finish applies to its render
   if (btn.disabled) closeFinish();
   const on = [];
   for (const opt of FINISH) {
@@ -877,6 +877,8 @@ function setFinish(opt, on) { // SDR to HDR keeps its own renders (the render ke
   confirmed(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Result: regenerated in scene-linear values, fitted to the plate.\n  Format: half-float EXR frames in ACES2065-1, in the viewer and in Export."
     : opt.id === "upscale" ? `\n  ${upscaleWhen()}` : ""}` : `Finish: ${opt.name} off.`, 1500);
   finishUI(); recompose(); stagesUI(); exportUI(); touch();
+  const now = S.renders.get(S.heroKey); // a step on display that the render on show does not have: the latest result instead
+  if (S.pass && S.pass !== "first" && !(now && passMovie(S.pass, now, previewOf(now), passSpaces(), upOf(now)))) { S.pass = null; showLatest(); stagesUI(); }
   if (opt.id === "upscale") latestUpscale();
   if (on && plateAlone(S.heroKey) && !fluidOnly() && !S.renders.get(S.heroKey)) { // the plate alone before Generate: what Generate runs, and about how long
     const skip = plan({ key: S.heroKey }, []).skip, steps = STAGES.filter((st) => !skip.has(st.id)), passes = steps.map((st) => (st.up ? "Upscale" : "SDR to HDR"));
@@ -2852,8 +2854,8 @@ function plan(r, all) { // the steps this set of edits needs: the erase pass for
   r.hdrAfter = S.hdrReady && hdrAfterComposite(p.spec, fl ? [...tools, "fluid"] : tools, hdrOn, p.headroom); // a Light edit's new light in HDR: SDR to HDR on the relit composite
   const up = !!S.deliver.upscale && S.upscaleReady, alone = !active.length, upAlone = r.key === PLATE_UP || (fl && alone && !(S.hdrReady && wantsHdr(p.spec, [], hdrOn))); // Finish > Upscale, as the switch stands: setFinish plans the render on show again
   const keeps = up && !alone && !r.hdrAfter && upscaleKeeps(tools, exrResult(p.spec, S.hdrReady && wantsHdr(p.spec, tools, hdrOn), p.headroom)); // the plate and the layer are upscaled, then composited
-  const madeAlready = fl && !!fluidDonor(r, all.find((e) => e.tool === "fluid").version); // its full size made by another render
-  r.skip = new Set([(!fl || !alone || madeAlready) && "fluid", !fl && "fluidfull", !erase && "erase", !erase && "clean", !carry && "shot", !paint && "track", (onePass || !erase) && "cleanfull",
+  const donor = fl ? fluidDonor(r, all.find((e) => e.tool === "fluid").version) : null, pvMade = !!donor?.previews?.[p.shot.join("x")]?.fluid; // made by another render
+  r.skip = new Set([(!fl || (!pvMade && (!alone || !!donor))) && "fluid", !fl && "fluidfull", !erase && "erase", !erase && "clean", !carry && "shot", !paint && "track", (onePass || !erase) && "cleanfull",
     (onePass || !carry) && "full", (onePass || !paint) && "trackfull",
     !(S.hdrReady && wantsHdr(p.spec, tools, hdrOn)) && !r.hdrAfter && "hdr", r.hdrAfter && "export", upAlone && "hdr", // after the composite, Export zips its frames (exportAlone); the plate alone with Upscale only keeps its own values
     ...(active.length ? [] : ["comp", "review", "export"]), // the plate alone: SDR to HDR makes the result; Export zips its frames, and upscales them itself (exportAlone)
@@ -2972,7 +2974,11 @@ async function fluidSteps(r, fl) {
   };
   const shown = (made, line) => { if (alone && r.key === S.heroKey && made?.movie) { showMade(made.movie, r.key, "@model"); hud(line, 2500); status(line, "hint"); } }; // as an edit's step says it
   if (!r.skip.has("fluid")) {
-    const size = fluidSize(p.shot), pv = (r.previews[p.shot.join("x")] ??= {});
+    const size = fluidSize(p.shot), pv = (r.previews[p.shot.join("x")] ??= {}), made = fluidDonor(r, fl.version), kept = made?.previews?.[p.shot.join("x")]?.fluid;
+    if (kept && pv.done?.fluid === undefined) { // the same version's preview, made by another render
+      Object.assign(pv, { fluid: kept }); (pv.done ??= {}).fluid = 0; (pv.at ??= {}).fluid = ++stepSeq;
+      log(`Render v${r.v}: Fluid shot, preview: reused from render v${made.v}.`);
+    }
     await step(r, "fluid", async (progress) => { pv.fluid = await make(`${r.base}/fluid_${size.join("x")}`, size)(progress); }, pv);
     if (r.done?.fluidfull === undefined) shown(pv.fluid, "Fluid shot, preview: Space plays it. The full-size fluid shot follows.");
   }
@@ -3524,7 +3530,7 @@ function stagesUI() {
   first.className = "done" + (S.pass === "first" ? " shown" : "");
   first.innerHTML = '<span class="dot"></span><span class="name">First frame</span><span class="time">edit</span>';
   pick(first, "first", "the first frame");
-  const rows = [...(active.length ? [first] : []), ...stepsInOrder(r, skip).map((st) => {
+  const rows = [...(active.some((e) => e.tool !== "fluid") ? [first] : []), ...stepsInOrder(r, skip).map((st) => { // the first frame an edit's pass made: a fluid shot alone has none
     const li = document.createElement("li"), took = doneOf(r, st), from = storeOf(r, st)?.taken?.[st.id];
     const now = S.stage?.id === st.id && S.stage.key === S.heroKey;
     li.className = took !== undefined ? "done" : now ? "now" : later(st) ? "later" : "";
