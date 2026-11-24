@@ -607,8 +607,9 @@ async def quit_route(request):  # the mock stops at once, as a ComfyUI that the 
     return web.json_response({})
 
 
-async def free_route(request):  # ComfyUI releases memory between prompts: here, one second after /free
-    EVENTS.append(("free", time.time()))
+async def free_route(request):  # ComfyUI releases memory between prompts: here, one second after /free; the event keeps whether its cache goes too
+    body = await request.json() if request.can_read_body else {}
+    EVENTS.append(("free", time.time(), body.get("free_memory")))
     STATE["release_at"] = time.time() + 1.0
     return web.json_response({})
 

@@ -1500,6 +1500,12 @@ export const JOB_NAME = { ingest: "opening the plate", prompt: "the prompt write
   comp: "the composite", review: "the review movie", export: "Export", warm: "the warm-up", fluid: "the fluid shot", hdr: "SDR to HDR",
   upscale: "Upscale", upscale_export: "the upscaled export" };
 
+// A free between the matte and the steps that only read frames (the composite, the review movie, Export) unloads the models
+// but keeps ComfyUI's cache: SAM 3.1's answers and the prompt upsampler's stay in it, so a change of matte strategy runs
+// Follow Matte again and not SAM. Any other free also clears the cache, as before.
+const KEEPS = new Set(["sam", "frames"]);
+export const keepsAnswers = (last, name) => KEEPS.has(FAMILY[last]) && KEEPS.has(FAMILY[name]);
+
 export function freesBefore(profile, last, name, room = null) { // room: { free, need } in bytes of RAM, where ComfyUI gives it
   if (!last || FAMILY[name] === FAMILY[last]) return false;
   return !!profile?.frees || (!!room && room.free < room.need);
