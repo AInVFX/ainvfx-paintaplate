@@ -1306,7 +1306,7 @@ export const PASSES = { fluid: ["pv", "fluid.movie"], fluidfull: ["r", "fluid.mo
 export const MATTE_PASSES = new Set(["erase", "track", "trackfull", "export"]);
 const keyPath = (o, path) => path.split(".").reduce((x, k) => x?.[k], o);
 export function passMovie(id, r, pv, spaces = {}, up = null) { // { url, space, frames } of a finished step, or null; `up`: what Upscale's steps made at the size asked for
-  const at = PASSES[id], store = at && (at[0] === "pv" ? pv : r);
+  const at = PASSES[id], store = at && (at[0] === "pv" ? pv : id === "review" ? r?.compResult ?? r : r); // the composite's own result, whichever is on show (app.plan)
   if (at?.[0] === "up") return up?.[at[1]]?.url ? { url: up[at[1]].url, space: up[at[1]].space, frames: null } : null; // its movie at its own size (app.fitCanvas)
   const url = (at && keyPath(store, at[1])) ?? (id === "review" ? store?.review : null);
   if (!url) return null;
