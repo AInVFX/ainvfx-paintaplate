@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { downloadLines, EXR_FRAMES, exportWords, plateFormat } from "../../web/logic.mjs";
+import { downloadLines, EXR_FRAMES, exportWords, plateFormat, zipNames } from "../../web/logic.mjs";
 
 const read = (f) => readFileSync(new URL(`../../web/${f}`, import.meta.url), "utf8");
 const STEPS = { comp: "Composite, full size", shot: "Shot, full size", hdr: "SDR to HDR", up: "Composite, upscaled" }; // as the page gives them
@@ -56,10 +56,21 @@ test("the log's download line: the zip, then one line per row it holds; the laye
 
 test("one source: the page's file holds no row words, and logic.mjs never writes a step's name", () => {
   const html = read("paintaplate.html"), at = html.indexOf('<dialog id="export">'), dialog = html.slice(at, html.indexOf("</dialog>", at));
-  assert.equal((dialog.match(/<label class="check"/g) ?? []).length, 5);
-  assert.equal((dialog.match(/<span><\/span> <small( id="x-format")?><\/small><\/label>/g) ?? []).length, 5); // every label and detail comes from exportWords
+  assert.equal((dialog.match(/<label class="check"/g) ?? []).length, 6);
+  assert.equal((dialog.match(/<span><\/span> <small( id="x-format")?><\/small><\/label>/g) ?? []).length, 6); // every label and detail comes from exportWords
   for (const old of ["The result", "Its matte", "The review movie", "The regenerated shot"]) assert.ok(!dialog.includes(old), old);
   const logic = read("logic.mjs");
   for (const step of ["Composite, full size", "Shot, full size"]) assert.ok(!logic.includes(step), `${step}: written once, in the Render panel's steps`);
   assert.ok(read("app.mjs").includes('steps: { comp: name("review"), shot: name("full"), hdr: name("hdr"), up: name(up) }'));
+});
+
+test("the source plate: a row of its own with its size, never on a blank plate; its files and its upscaled twin take its name", () => {
+  const w = exportWords({ kind: "edits", spec: MOVIE, steps: STEPS, source: true, bytes: 3.1e9 });
+  assert.deepEqual(w.rows.source, { label: "Source plate", detail: "the plate's own files, 3.10 GB", shown: true });
+  assert.equal(exportWords({ kind: "edits", spec: MOVIE, steps: STEPS, source: true }).rows.source.detail, "the plate's own files"); // before its size comes
+  assert.equal(exportWords({ kind: "edits", spec: MOVIE, steps: STEPS }).rows.source.shown, false); // a blank plate's page passes source: false
+  assert.equal(exportWords({ kind: "fluid", steps: STEPS, source: true }).rows.source.shown, false);
+  assert.deepEqual([w.zip.source, w.zip.up.plate], ["source_plate", "source_plate_upscaled"]);
+  assert.deepEqual(zipNames(w.rows, "SDR to HDR").source, "source_plate");
+  assert.equal(downloadLines("desk_v1.zip", ["export", "source"], w.rows), "Download: desk_v1.zip.\n  Composite, full size.\n  Source plate.");
 });

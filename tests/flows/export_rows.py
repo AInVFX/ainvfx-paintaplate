@@ -28,7 +28,7 @@ def run(browser, port, U):
     page.click("#export-btn")
     rows = page.evaluate(ROWS)
     U.check([r[:2] for r in rows] == [["x-export", "Composite, full size"], ["x-review", "Composite, full size, as a movie"], ["x-matte", "Matte"],
-                                      ["x-shot", "Shot, full size"], ["x-graph", "ComfyUI graph"]] and rows[0][2] == "EXR frames" and rows[1][2] == "H.264 MP4",
+                                      ["x-shot", "Shot, full size"], ["x-source", "Source plate"], ["x-graph", "ComfyUI graph"]] and rows[0][2] == "EXR frames" and rows[1][2] == "H.264 MP4",
             f"a plate of EXR frames: the composite as its own frames, and the same composite as a movie: {rows}")
     U.check("Composite, full size" in stages and "Shot, full size" in stages, f"the rows take the Render panel's step names: {stages}")
     page.check("#x-review")
@@ -37,7 +37,8 @@ def run(browser, port, U):
     painted(page, U)
     page.click("#export-btn")
     rows = page.evaluate(ROWS)
-    U.check([r[:2] for r in rows] == [["x-export", "Composite, full size"], ["x-matte", "Matte"], ["x-shot", "Shot, full size"], ["x-graph", "ComfyUI graph"]]
+    U.check([r[:2] for r in rows] == [["x-export", "Composite, full size"], ["x-matte", "Matte"], ["x-shot", "Shot, full size"], ["x-source", "Source plate"],
+                                      ["x-graph", "ComfyUI graph"]]
             and rows[0][2] == "H.264 movie", f"a movie plate: its composite is a movie, with no second one: {rows}")
     U.check(page.is_checked("#x-review"), "the composite's movie keeps its tick from the plate of frames, hidden")
     page.evaluate(U.WATCH)
@@ -56,7 +57,7 @@ def run(browser, port, U):
     U.wait_log(page, U.added_line("under the edits: the fluid shot v"), 240000, "the fluid shot")
     page.click("#export-btn")
     rows = page.evaluate(ROWS)
-    U.check(rows[0] == ["x-export", "Fluid shot", "ProRes 4444 movie"] and not any(r[0] in ("x-review", "x-matte", "x-shot") for r in rows),
+    U.check(rows[0] == ["x-export", "Fluid shot", "ProRes 4444 movie"] and not any(r[0] in ("x-review", "x-matte", "x-shot", "x-source") for r in rows),
             f"a fluid shot alone: one row of its own: {rows}")
     page.keyboard.press("Escape")
     U.check(page.text_content("#help-export") == "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip. "

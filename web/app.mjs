@@ -3448,13 +3448,15 @@ async function modelsBehindResult() { // the models behind the result on show: t
 const exportStem = () => (S.exportStem && S.exportStem.plate === S.plate?.path ? S.exportStem.name : S.plate?.name) || "";
 async function download(parts = ["export", "matte"]) {
   const words = exportWordsNow(); // the dialog's rows: the zip's names and the log's download line
+  const source = $("#x-source");
+  if (source.checked && !source.closest("label").hidden && !parts.includes("source")) parts = [...parts, "source"]; // the source plate, where its row offers it ticked
   const graph = await S.graph; S.graph = null; // Export's ComfyUI graph, written beside the result so the zip takes it
   const written = graph ? await fetch(`/paintaplate/graph?${new URLSearchParams({ run: S.exported.run })}`, { method: "POST", body: JSON.stringify(graph.file, null, 1) })
     .then((r) => r.ok, () => false) : null; // null: no graph asked for, or none to write, which graphFile said
   if (written) parts = [...parts, "graph"];
   const models = (await modelsBehindResult().catch(() => [])).map((m) => m.id).join(",");
   const a = Object.assign(document.createElement("a"), {
-    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, stem: exportStem(), names: JSON.stringify(words.zip), parts: parts.join(","), models,
+    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, stem: exportStem(), names: JSON.stringify(words.zip), parts: parts.join(","), models, ...(parts.includes("source") ? { plate: S.plate.path } : {}),
       ...(parts.includes("upscaled") ? { upscaled: `upscale/${upSize()}/out` } : {}) })}`, // the upscaled set of the size asked for (upscalePart)
     download: `${S.exported.name}.zip` });
   document.body.append(a); a.click(); a.remove();
@@ -3729,7 +3731,8 @@ function exportWordsNow() {
   const name = (id) => labelOf(STAGES.find((st) => st.id === id), r);
   const up = kind === "edits" ? "upcomp" : UPS.find((st) => (st.id === "uphdr" || st.id === "upplate") && !r?.skip?.has(st.id))?.id ?? "upplate"; // the step whose set the zip takes (upscaleResult)
   return exportWords({ kind, ready, left: ready ? "" : secs(renderLeft(true), ""), hdr: fluid && !!S.fluid.result.hdr, exr: !fluid && exportsExr(r),
-    spec: fluid ? null : S.plate.spec, steps: { comp: name("review"), shot: name("full"), hdr: name("hdr"), up: name(up) } });
+    spec: fluid ? null : S.plate.spec, steps: { comp: name("review"), shot: name("full"), hdr: name("hdr"), up: name(up) },
+    source: !fluid && !S.fluid?.blankPath, bytes: S.exportSource?.plate === S.plate?.path ? S.exportSource.bytes : 0 }); // a blank plate has no files of its own to offer
 }
 function exportDialog() { // each row's label and detail, and whether it shows, come from one source for every kind of result (exportWordsNow)
   const words = exportWordsNow(), fluid = fluidOnly();
@@ -3742,6 +3745,12 @@ function exportDialog() { // each row's label and detail, and whether it shows, 
   $("#x-graph").closest("label").hidden = plateAlone(S.heroKey) || !(fluid ? graphsFluid() : S.edits.some((e) => e.on && e.patch && e.state === "done")); // the edits on show, or a fluid shot alone, as one ComfyUI workflow
   $("#x-hint").textContent = words.hint; $("#x-note").textContent = words.note;
   $("#export").showModal();
+  const path = S.plate?.path;
+  if (words.rows.source.shown) fetch(`/paintaplate/download/size?path=${encodeURIComponent(path)}`).then((r) => (r.ok ? r.json() : null)).then((got) => {
+    if (!(got?.bytes >= 0) || S.plate?.path !== path) return;
+    S.exportSource = { plate: path, bytes: got.bytes }; // the source plate's row shows its size
+    $("#x-source").closest("label").querySelector("small").textContent = exportWordsNow().rows.source.detail;
+  }).catch(() => {});
 }
 
 function setTool(t) {

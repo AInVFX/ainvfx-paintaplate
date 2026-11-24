@@ -846,7 +846,8 @@ export function stepOrder(steps, { done, at = () => undefined, now = null }) {
 // the result is half-float EXR frames, an HDR result of a plate whose format holds nothing above 1.0; hdr: the fluid shot
 // went through SDR to HDR. The composite as a movie (the review movie) shows only where the composite is frames.
 export const EXR_FRAMES = "half-float EXR frames, ACES2065-1";
-export function exportWords({ kind, ready = true, left = "", exr = false, hdr = false, spec = null, steps = {} }) {
+// source: the plate has files of its own to offer (no blank plate); bytes: their size, once known.
+export function exportWords({ kind, ready = true, left = "", exr = false, hdr = false, spec = null, steps = {}, source = false, bytes = 0 }) {
   const first = (step) => `${step} first${left ? `: ${left}` : ""}.`, inHdr = (what) => (ready ? `${what} in HDR.` : `${what} in HDR. ${first("SDR to HDR runs")}`);
   const note = kind === "fluid" ? (hdr ? "The fluid shot in HDR, with the SDR shot in ProRes 4444 and its preview movie." : "The fluid shot in ProRes 4444, with its preview movie.")
     : kind === "plate" ? inHdr("The plate") : kind === "relit" ? inHdr("The relit result") : kind === "upscaled" ? (ready ? "" : first("Upscale runs"))
@@ -859,6 +860,7 @@ export function exportWords({ kind, ready = true, left = "", exr = false, hdr = 
     review: { label: `${steps.comp}, as a movie`, detail: "H.264 MP4", shown: edits && frames },
     matte: { label: "Matte", detail: "where the plate changed, PNG frames", shown: edits },
     shot: { label: steps.shot, detail: "the whole frame as the model made it, H.264 MP4", shown: edits },
+    source: { label: "Source plate", detail: bytes > 0 ? `the plate's own files, ${gb(bytes)}` : "the plate's own files", shown: source && kind !== "fluid" },
     graph: { label: "ComfyUI graph", detail: "the scene as one ComfyUI workflow, with the images it loads", shown: true }, // the page decides: the edits on show, or a fluid shot alone
     upscaled: { label: steps.up, shown: true }, // no row: Finish > Upscale adds its set to the zip
   };
@@ -872,8 +874,9 @@ export const zipName = (label) => String(label ?? "").toLowerCase().replace(/[^a
 // take their step's name (hdr); Upscale's result takes its step's name, and its matte the matte's name with « _upscaled ».
 export function zipNames(rows, hdr) {
   const first = zipName(rows.export.label), matte = zipName(rows.matte.label);
-  return { export: first, review: first, matte, shot: zipName(rows.shot.label), hdr: zipName(hdr), plate: first, preview: `${first}_preview`,
-    graph: zipName(rows.graph.label), up: { export: zipName(rows.upscaled.label), matte: `${matte}_upscaled` } };
+  const source = zipName(rows.source.label);
+  return { export: first, review: first, matte, shot: zipName(rows.shot.label), source, hdr: zipName(hdr), plate: first, preview: `${first}_preview`,
+    graph: zipName(rows.graph.label), up: { export: zipName(rows.upscaled.label), matte: `${matte}_upscaled`, plate: `${source}_upscaled` } };
 }
 // A plate's format as the Export dialog names it: « H.264 movie », « ProRes 4444 movie », « EXR frames ». spec: the plate's
 // spec, with the codec and the profile its movie names (plateio).
@@ -887,7 +890,7 @@ export function plateFormat(spec) {
 // What the log says once the zip downloads: its name, then one detail line per row of the dialog that the zip holds, in the
 // dialog's words (exportWords' rows). parts: the zip's parts, as the page asks the route for them. A part with no row of its
 // own (the layer) adds no line, and a fluid shot's files share the row « Fluid shot ».
-const ROW_OF = { export: "export", hdr: "export", plate: "export", preview: "export", matte: "matte", review: "review", shot: "shot", graph: "graph", upscaled: "upscaled" };
+const ROW_OF = { export: "export", hdr: "export", plate: "export", preview: "export", matte: "matte", review: "review", shot: "shot", source: "source", graph: "graph", upscaled: "upscaled" };
 export function downloadLines(zip, parts, rows) {
   const labels = [...new Set(parts.map((p) => rows[ROW_OF[p]]?.label).filter(Boolean))];
   return [`Download: ${zip}.`, ...labels.map((label) => `  ${label}.`)].join("\n");
