@@ -849,7 +849,7 @@ export const EXR_FRAMES = "half-float EXR frames, ACES2065-1";
 // source: the plate has files of its own to offer (no blank plate); bytes: their size, once known.
 export function exportWords({ kind, ready = true, left = "", exr = false, hdr = false, spec = null, steps = {}, source = false, bytes = 0 }) {
   const first = (step) => `${step} first${left ? `: ${left}` : ""}.`, inHdr = (what) => (ready ? `${what} in HDR.` : `${what} in HDR. ${first("SDR to HDR runs")}`);
-  const note = kind === "fluid" ? (hdr ? "The fluid shot in HDR, with the SDR shot in ProRes 4444 and its preview movie." : "The fluid shot in ProRes 4444, with its preview movie.")
+  const note = kind === "fluid" ? (hdr ? "The fluid shot in HDR, with the SDR shot in ProRes 4444." : "The fluid shot in ProRes 4444.")
     : kind === "plate" ? inHdr("The plate") : kind === "relit" ? inHdr("The relit result") : kind === "upscaled" ? (ready ? "" : first("Upscale runs"))
     : ready ? "" : first(`${steps.comp} renders`);
   const format = (kind === "fluid" ? hdr : exr) ? EXR_FRAMES : kind === "fluid" ? "ProRes 4444 movie" : plateFormat(spec);

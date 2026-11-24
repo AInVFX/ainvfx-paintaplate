@@ -3709,7 +3709,7 @@ function exportUI() {
 // ACES2065-1), the shot in the blank plate's format (ProRes 4444) and its preview movie, from the fluid shot's folder.
 const fluidOnly = () => !!S.fluid?.result && S.fluid.on !== false && !S.edits.some((e) => e.on && e.patch);
 async function downloadFluid() { // Export of a fluid shot alone: its own files, and the upscaled set its step made (upscaleResult)
-  const f = S.fluid.result, parts = f.hdr ? ["hdr", "plate", "preview"] : ["plate", "preview"], r = S.renders.get(S.heroKey);
+  const f = S.fluid.result, parts = f.hdr ? ["hdr", "plate"] : ["plate"], r = S.renders.get(S.heroKey); // its preview movie stays on disk, for the viewer: the shot already is a movie
   if (r) plan(r, r.active ?? []);
   if (r && UPS.some((st) => !r.skip.has(st.id) && doneOf(r, st) === undefined)) { // Upscale's step first: the render makes it, then the zip
     S.wantDownload = ["fluid"];
