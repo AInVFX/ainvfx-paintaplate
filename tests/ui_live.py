@@ -435,11 +435,10 @@ def fluid_shot(page, spec, shots, mark, wait_s=900):
     mark(f"fluid: {len(frames)} keyframes, {len(spec['keys'])} strokes")
     page.evaluate("document.activeElement.blur()")
     page.keyboard.press("Enter")
-    page.wait_for_function("/generating/.test(document.querySelector('#fluid-state').textContent)", timeout=60000)
-    mark("fluid: generating")
-    page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
-      return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden && document.querySelector('#opening').hidden; })()""",
-                           timeout=wait_s * 1000)  # made: the first edit, and the plate under the next ones; a small GPU needs longer
+    page.wait_for_function("document.querySelector('#stages li.now')?.textContent.includes('Fluid shot') === true", timeout=wait_s * 1000)
+    mark("fluid: its first step runs")
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => / Fluid shot, full size: done in /.test(e.textContent))",
+                           timeout=wait_s * 1000)  # made: History's first row, the picture under the next edits; a small GPU needs longer
     mark("fluid: shot ready | " + page.inner_text("#status"))
 
 
