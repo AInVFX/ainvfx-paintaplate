@@ -684,6 +684,8 @@ def fluid_flow(browser, port):
       return t.join() === '2. Paint,1. Fluid' && !document.querySelector('#history li.busy') && !!f && f.textContent.includes('thick white smoke'); })()"""
     page.wait_for_function(rows_done, timeout=120000)
     page.wait_for_function(f"window.__lines.some((t) => {HAS_REVIEWED})", timeout=120000)  # its render made, through the full-size composite
+    check(any(re.match(r"Render v\d+: Fluid shot, full size: reused from render v\d+\.$", t) for t in page.evaluate("window.__lines")),
+          "the edit's render takes the fluid shot its first render made, and says so")
     name, scene = save_scene(page)
     fluid_row = next((e for e in scene["edits"] if e["tool"] == "fluid"), {})
     check(scene["version"] == 7 and fluid_row.get("prompt") == "thick white smoke" and fluid_row.get("made") and [e["prompt"] for e in scene["edits"] if e["tool"] != "fluid"] == ["a lantern"],

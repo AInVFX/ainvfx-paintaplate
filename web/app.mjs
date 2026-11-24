@@ -2971,7 +2971,10 @@ async function fluidSteps(r, fl) {
     if (r.done?.fluidfull === undefined) shown(pv.fluid, "Fluid shot, preview: Space plays it. The full-size fluid shot follows.");
   }
   const donor = r.fluid ? null : [...S.renders.values()].find((d) => d !== r && d.fluid && d.active?.some((e) => e.tool === "fluid" && e.version === fl.version));
-  if (donor) { r.fluid = donor.fluid; (r.done ??= {}).fluidfull ??= 0; (r.at ??= {}).fluidfull ??= ++stepSeq; } // the same version, made by another render
+  if (donor && r.done?.fluidfull === undefined) { // the same version, made by another render
+    Object.assign(r, { fluid: donor.fluid }); (r.done ??= {}).fluidfull = 0; (r.at ??= {}).fluidfull = ++stepSeq;
+    log(`Render v${r.v}: Fluid shot, full size: reused from render v${donor.v}.`);
+  }
   await step(r, "fluidfull", async (progress) => { r.fluid = await make(r.base, null)(progress); });
   if (alone) Object.assign(r, { review: r.fluid.movie, reviewSpace: "@model" }); // the fluid shot alone: its result
   await fluidFirst(r, fl);
