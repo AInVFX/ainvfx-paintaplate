@@ -92,5 +92,11 @@ def run(browser, port, U):
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
     U.until(page, f"!!document.querySelector('{MENU}')")
     U.check(page.input_value(MENU) == "Whole shot", f"the scene opens with the strategy: {page.input_value(MENU)!r}")
+    helped = page.evaluate("""() => { const dt = [...document.querySelectorAll('#help [data-help=tools] dt')].find((d) => d.textContent === 'Matte strategy');
+      return dt ? dt.nextElementSibling.textContent : ''; }""")
+    U.check(helped.startswith("Under a paint's row.") and all(
+            page.evaluate("(t) => [...document.querySelectorAll('#history li label.matte option')].find((o) => o.value === t)?.title", t).lower()
+            in helped.lower() for t in ("Auto", "Object", "Object and effects", "Whole shot")),
+            f"the Help's Tools tab explains the menu with its tooltips' words: {helped[:90]!r}")
     U.check(not errors, f"no page errors: {errors}")
     page.close()
