@@ -54,6 +54,15 @@ def run(browser, port, U):
     U.check(matte and all(n["inputs"].get("strategy") == "Auto" for p in matte for n in p.values() if n["class_type"] == "PaintAPlate_FollowMatte"),
             f"Generate posts the paint matte with « Auto »: {len(matte)} matte jobs")
     page.evaluate(U.WATCH)
+    page.select_option(MENU, "Object and effects")  # the strategy « Auto » chose: its render stands for it
+    U.wait_log(page, U.added_line("Edit 1: matte Object and effects."), 10000, "the menu's line for the strategy Auto chose")
+    U.settled(page)
+    grew = U.added(page, ("shot", "matte", "comp", "review"))
+    said = page.evaluate("window.__lines")
+    U.check(sum(grew[f"{s}: posted"] for s in ("shot", "matte", "comp", "review")) == 0 and page.input_value(MENU) == "Object and effects"
+            and not any("run again" in t for t in said if t.startswith("Edit 1: matte")),
+            f"« Object and effects », which « Auto » chose: Auto's render stands for it, and nothing runs: {grew}")
+    page.evaluate(U.WATCH)
     del posted[:]
     seen = (len(U.log_lines(page)), sum(e[0] == "free" for e in U.mock_route(port, "/mock/events")))
     page.hover("#history li .title")  # the pointer on the row: frame 0 shows the edit's strokes until the menu changes
@@ -114,9 +123,9 @@ def run(browser, port, U):
     U.check(page.input_value(MENU) == "Whole shot", f"the scene opens with the strategy: {page.input_value(MENU)!r}")
     helped = page.evaluate("""() => { const dt = [...document.querySelectorAll('#help [data-help=tools] dt')].find((d) => d.textContent === 'Matte strategy');
       return dt ? dt.nextElementSibling.textContent : ''; }""")
-    U.check(helped.startswith("Under a paint's row.") and all(
+    U.check(helped.startswith("Sets how a paint edit is composited back into the plate.") and helped.endswith("Auto picks Object or Object and effects, from what the edit changed.") and all(
             page.evaluate("(t) => [...document.querySelectorAll('#history li label.matte option')].find((o) => o.value === t)?.title", t).lower()
-            in helped.lower() for t in ("Auto", "Object", "Object and effects", "Whole shot")),
+            in helped.lower() for t in ("Object", "Object and effects", "Whole shot")),
             f"the Help's Tools tab explains the menu with its tooltips' words: {helped[:90]!r}")
     U.check(not errors, f"no page errors: {errors}")
     page.close()

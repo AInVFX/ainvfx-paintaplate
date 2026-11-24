@@ -983,10 +983,16 @@ addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#finish").hid
 function recompose() {
   if (!S.plate) return; // a plate that opens, or the plate under the edits while it is swapped (rebase): nothing to compose yet
   S.hero = layered();
-  const edits = S.edits.filter((e) => e.on && e.patch && e.state !== "generating").map((e) => `${e.id}.${e.version}${matteKey(e)}`).join(","); // a strategy: another render, its shot from the job index
-  const on = hdrWanted() && (!!edits || !(fluidOnly() || keying())); // with no edit, the plate alone; a fluid shot exports itself
-  const up = !!S.deliver.upscale && S.upscaleReady && !edits && !keying(); // Finish > Upscale on a plate with no edit, or on a fluid shot alone: the plate alone's render
-  const key = renderKey(edits, holdsHdr(S.plate?.spec, S.plate?.headroom), on, up); // Finish's SDR to HDR on an SDR plate: another render
+  const shown = S.edits.filter((e) => e.on && e.patch && e.state !== "generating");
+  const keyOf = (auto) => { // a strategy: another render, its shot taken from the render of the same edits
+    const edits = shown.map((e) => `${e.id}.${e.version}${auto === e ? "" : matteKey(e)}`).join(",");
+    const on = hdrWanted() && (!!edits || !(fluidOnly() || keying())); // with no edit, the plate alone; a fluid shot exports itself
+    const up = !!S.deliver.upscale && S.upscaleReady && !edits && !keying(); // Finish > Upscale on a plate with no edit, or on a fluid shot alone: the plate alone's render
+    return renderKey(edits, holdsHdr(S.plate?.spec, S.plate?.headroom), on, up); // Finish's SDR to HDR on an SDR plate: another render
+  };
+  const paints = shown.filter((e) => matteChoices(e.tool).length), one = paints.length === 1 ? paints[0] : null;
+  const asAuto = one && matteOf(one) !== "Auto" && matteChoseIn(S.renders.get(keyOf(one))) === matteOf(one); // « Auto » chose this very strategy: its render stands for it
+  const key = keyOf(asAuto ? one : null);
   if (key === S.heroKey) return;
   S.heroKey = key;
   upscaleStale(); // one of Upscale's steps that runs for the edits no longer on show stops
@@ -2849,11 +2855,9 @@ function matteMenu(e) { // under a paint's row, with its label: how much of the 
   return label;
 }
 
-// What « Auto » chose for the paint matte of the render on show: its full size, else its preview
-const matteChosen = () => {
-  const r = S.renders.get(S.heroKey);
-  return r?.full?.found?.chose ?? Object.values(r?.previews ?? {}).map((pv) => pv.painted?.found?.chose).find(Boolean) ?? null;
-};
+// What « Auto » chose for the paint matte of a render: its full size, else its preview; the render on show by default
+const matteChoseIn = (r) => r?.full?.found?.chose ?? Object.values(r?.previews ?? {}).map((pv) => pv.painted?.found?.chose).find(Boolean) ?? null;
+const matteChosen = () => matteChoseIn(S.renders.get(S.heroKey));
 
 function setMatte(e, strategy) { // the menu changed: the matte and the composite run again, then what depends on them, never the shot
   if (matteOf(e) === strategy) return;
