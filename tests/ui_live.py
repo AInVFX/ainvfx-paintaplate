@@ -247,7 +247,7 @@ def flow(page, url, open_plate, shots, wait_s=120):
     page.screenshot(path=f"{shots}/3_full_size_wipe.png")
     with page.expect_download(timeout=wait_s * 3000) as dl:  # Export: only now is the result written in the plate's format
         page.click("#export-btn")
-        page.check("#x-review")
+        tick_offered(page)  # the composite's movie, where the dialog offers it: a composite of frames
         page.click("#x-go")
     final = status()
     print("final:", final, "| frame while playing:", playing_frame, "| steps:", page.inner_text("#stages").replace("\n", " "))
