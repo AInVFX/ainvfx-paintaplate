@@ -295,22 +295,9 @@ def matte_areas(comfy, since):
 
 
 def log_steps(text):
-    """The steps the page times, in its log's order: each render step (« Render vN: … took … s »); for a fluid shot its LTX
-    pass (the fluid job after « Fluid shot vN: started »), each step timed (« Fluid shot vN: SDR to HDR: done in … s ») and the
-    whole shot (« Fluid shot vN: done in … s »)."""
-    steps, fluid = [], "?"
-    for line in text.splitlines():
-        if m := STEP.search(line):
-            steps.append((f"v{m.group(1)} {m.group(2)}", float(m.group(3)) * (60 if m.group(4) == "min" else 1)))
-        elif m := re.search(r"Fluid (?:shot )?v(\d+): (.+?):? (?:took|done in) ([\d.]+) s", line):
-            steps.append((f"fluid v{m.group(1)} {m.group(2)}", float(m.group(3))))
-        elif m := re.search(r"Fluid (?:shot )?v(\d+): done in ([\d.]+) s", line):
-            steps.append((f"fluid v{m.group(1)} in all", float(m.group(2))))
-        elif m := re.search(r"Fluid (?:shot )?v(\d+):", line):
-            fluid = m.group(1)
-        elif m := re.search(r"(?<![a-z])fluid [0-9a-f?]{1,8}: done in ([\d.]+) s", line):
-            steps.append((f"fluid v{fluid} LTX pass", float(m.group(1))))
-    return steps
+    """The steps the page times, in its log's order: one line per render step (« Render vN: … done in … s »), a fluid
+    shot's two passes and its SDR to HDR among them."""
+    return [(f"v{m.group(1)} {m.group(2)}", float(m.group(3)) * (60 if m.group(4) == "min" else 1)) for m in map(STEP.search, text.splitlines()) if m]
 
 
 def carried(r, fresh, gb):
