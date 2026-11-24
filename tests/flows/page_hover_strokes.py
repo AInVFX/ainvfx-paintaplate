@@ -69,7 +69,7 @@ def run(browser, port, U):
     page.keyboard.press("Enter")
     page.wait_for_function(U.DONE.format(n=1) + " && document.querySelector('#fluid').hidden", timeout=120000)
     page.click(f"{FLUID} .eye")  # bypassed: the blank plate under the edits, as when every edit is bypassed
-    U.wait_log(page, "[...document.querySelectorAll('#log li span')].some((e) => e.textContent.includes('under the edits: the blank plate'))", 60000, "blank plate")
+    U.wait_log(page, "[...document.querySelectorAll('#log li span')].some((e) => e.textContent === 'Fluid shot v1 is bypassed.')", 60000, "the fluid shot bypassed")
     U.settled(page)
     page.keyboard.press("Home"); away()
     blank = pixel(key_at)

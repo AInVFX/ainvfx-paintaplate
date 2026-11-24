@@ -478,7 +478,7 @@ export function dependsOnChange(edit, before, basis) {
   const now = new Set(before.map(key)), was = new Set(basis.map(key));
   const changed = [...before.filter((e) => !was.has(key(e))), ...basis.filter((e) => !now.has(key(e)))];
   if (!changed.length) return false;
-  return edit.tool === "light" || changed.some((c) => c.tool === "light" || overlap(c.foot, edit.foot));
+  return edit.tool === "light" || changed.some((c) => c.tool === "light" || c.tool === "fluid" || overlap(c.foot, edit.foot)); // a light or a fluid shot changes the whole frame
 }
 
 // A render of fewer edits (after a bypass or a removal) can take the frames of an earlier render of more edits: its composite
@@ -1181,8 +1181,6 @@ export const viewerSpace = (names, model) => (names.includes("ACEScct") ? "ACESc
 // While a shot plays, one source shows one kind of frame: its full-precision frames once all of them are in, else its 8-bit
 // movie. Mixed, the two would alternate as the frames arrive, with two different tone mappings, and the shot would flicker.
 export const drawsDeep = (playing, holdsAll) => !playing || holdsAll;
-// A fluid shot's folder, from its HDR frames or its shot in the blank plate's format: what its export zips.
-export const fluidRun = (path) => String(path ?? "").replace(/^output[:/]/, "").replace(/\/(hdr|plate)(\/[^/]*)?$/, "");
 
 // Esc, by what the page is doing. A plate that opens stops opening. The strokes in progress are dropped. The edit being
 // generated stops and stays the current edit, with its strokes, words and seed ("reopen"): everything else that generates
@@ -1301,7 +1299,7 @@ export function dabFlow(peak, spacingOverRadius) {
 // where its movie sits, in the render (`r`) or in its preview size (`pv`), as a path of keys. The tracking steps and the
 // export show their matte as a grey movie, drawn through the config's data colour space (`spaces.data`): it shows its own
 // values, with no view's tone mapping.
-export const PASSES = { erase: ["r", "erased.found.movie_a"], clean: ["pv", "cleanRaw"], shot: ["pv", "raw"], track: ["pv", "painted.found.movie_b"],
+export const PASSES = { fluid: ["pv", "fluid.movie"], fluidfull: ["r", "fluid.movie"], erase: ["r", "erased.found.movie_a"], clean: ["pv", "cleanRaw"], shot: ["pv", "raw"], track: ["pv", "painted.found.movie_b"],
   comp: ["pv", "comp"], cleanfull: ["r", "cleanRaw"], full: ["r", "raw"], trackfull: ["r", "full.found.movie_b"], hdr: ["r", "hdrMovie"],
   review: ["r", "play"], export: ["r", "exported.matte"], upplate: ["up", "upplate"], uplayer: ["up", "uplayer"], upcomp: ["up", "upcomp"], uphdr: ["up", "uphdr"] };
 export const MATTE_PASSES = new Set(["erase", "track", "trackfull", "export"]);
@@ -1392,31 +1390,20 @@ export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
   return rows.length ? `${said.join(" ")} ${pyJSON(rows)}` : said.join(" ");
 }
 
-// The wipe on a fluid row: the step's input on the left, its output on the right, so each step reads against what it was
-// given: the blank plate (black) before the keyframes, the keyframes before the shot, the SDR shot before SDR to HDR.
-export const fluidWipeLeft = (id) => ({ fluid_keys: "black", fluid_shot: "fluid_keys", fluid_hdr: "fluid_shot" })[id] ?? null;
-// A fluid shot's own passes, shown from the Render panel with its keyframes open or closed: the control video LTX was
-// guided by, the shot as LTX made it, and for a 16-bit plate its SDR-to-HDR frames as a movie in log values.
-export const fluidPasses = (result, spaces = {}) => (result ? [
-  result.control && { id: "fluid_keys", label: "Fluid: keyframes", url: result.control, space: "@model" },
-  result.preview && { id: "fluid_shot", label: "Fluid: shot", url: result.preview, space: "@model" },
-  result.hdr && result.movie && { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: result.movie, space: spaces.log ?? "@model",
-    frames: result.hdrFrames ?? null, framesSpace: result.hdrFrames ? spaces.hdr ?? null : null },
-].filter(Boolean) : []);
 // The workflows each render step runs (a full-size erase pass runs two). The Models and licences dialog plans with them
 // from the start of a job; a render also keeps the record of the steps it ran or took again (r.flows), so an export's MODELS.md
 // names the models that made its result.
-export const STEP_FLOWS = { erase: ["matte"], clean: ["clean"], shot: ["shot"], track: ["matte"], comp: ["comp"],
+export const STEP_FLOWS = { fluid: ["fluid"], fluidfull: ["fluid"], erase: ["matte"], clean: ["clean"], shot: ["shot"], track: ["matte"], comp: ["comp"],
   cleanfull: ["clean", "cleanup"], full: ["shot"], trackfull: ["matte"], hdr: ["hdr"], review: ["review"], export: ["export"],
   upplate: ["export", "upscale", "upscale_export"], uplayer: ["export", "upscale", "upscale_export"], upcomp: ["export", "upscale", "upscale_export"], // an edit's upscaled steps read the export's parts
   uphdr: ["upscale", "upscale_export"] };
 // The workflows behind a result: its edits' own (the prompt writer and Klein, SAM's object search for an erase), the
 // render's record, and a fluid shot's (with its SDR to HDR)
-export function resultFlows({ tools = [], render = [], fluid = false, fluidHdr = false } = {}) {
+export function resultFlows({ tools = [], render = [], fluid = false } = {}) {
   const w = new Set(render);
   if (tools.length) ["prompt", "edit"].forEach((n) => w.add(n));
   if (tools.includes("erase")) w.add("snap");
-  if (fluid) { w.add("fluid"); if (fluidHdr) w.add("hdr"); }
+  if (fluid) w.add("fluid"); // a fluid shot planned before its render: its steps name the rest
   return [...w];
 }
 // The config's data colour space (OCIO's isdata, such as the studio config's Raw), from the spaces /paintaplate/ocio lists
@@ -1500,7 +1487,7 @@ export const SLOWER = {
     fixed: { comp: 6.4, review: 3 } },
 };
 export const slower = (profile, id) => SLOWER[profile]?.[id] ?? 1;
-const BIG_STEPS = ["full", "cleanfull", "cleanup", "hdr", "review", "export"]; // the steps made at the working size (cleanup: stageTwoGuess)
+const BIG_STEPS = ["fluidfull", "full", "cleanfull", "cleanup", "hdr", "review", "export"]; // the steps made at the working size (cleanup: stageTwoGuess)
 export const stepSizeOf = (id, plate) => (BIG_STEPS.includes(id) ? plate.work : ["erase", "track", "trackfull"].includes(id) ? plate.track : plate.shot);
 const REF_SIZE = 928 * 512 * 97; // pixels times frames, where the references were measured
 export function stepGuess(id, ref, plate, profile, hdr = false) { // seconds: the reference scaled to this plate (BIG_STEPS at 0.73 of it), then to this GPU; hdr: the render makes SDR to HDR
@@ -1588,4 +1575,14 @@ export function foldersIn(values) {
   };
   walk(values, 0);
   return [...found].sort();
+}
+
+// A scene of version 6 or earlier, as version 7 holds it: its fluid shot, kept apart then, is History's first row, and a
+// 16-bit fluid shot turns Finish > SDR to HDR on. Version 5 named the switch « hdr ». A scene of version 7 is returned as it is.
+export function sceneV7(scene) {
+  if (!(scene.version < 7)) return scene;
+  const { fluid, hdr, ...rest } = scene, edits = [...(scene.edits ?? [])];
+  if (fluid) edits.unshift({ tool: "fluid", prompt: fluid.prompt ?? "", seed: fluid.seed, on: fluid.on !== false, made: !!fluid.made, keys: fluid.keys ?? [] });
+  const on = (scene.version >= 6 ? !!scene.deliver?.hdr : scene.version === 5 && hdr === true) || +(fluid?.depth ?? 8) >= 16;
+  return { ...rest, version: 7, edits, deliver: { ...(scene.deliver ?? {}), hdr: on }, fluid: undefined };
 }

@@ -10,9 +10,8 @@ def settled(page, limit=240):  # Generate reads Generate for three seconds runni
 
 
 def fluid16_scene(page, U):
-    """A 16-bit fluid shot with a paint edit on it, saved as a scene and opened again: every job comes back from the job
-    index, the fluid shot's SDR to HDR included, and none is posted twice. Run again on reopen, SDR to HDR would rewrite
-    the EXR frames under the edits: the plate's time would change, and every job on it would miss the index."""
+    """A 16-bit fluid shot with a paint edit on it, saved as a scene and opened again: Finish > SDR to HDR comes back on,
+    and every job comes back from the job index, SDR to HDR included, with none posted twice."""
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.click("#open-btn"); page.click("#open [data-tab=blank]")
@@ -23,18 +22,18 @@ def fluid16_scene(page, U):
     page.evaluate(U.WATCH)
     U.paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)])
     page.keyboard.press("Enter")
-    U.wait_log(page, U.added_line("under the edits: the fluid shot v"), 240000, "the HDR fluid shot under the edits")
+    U.wait_log(page, U.added_line(("SDR to HDR: done in", "SDR to HDR took")), 240000, "the fluid shot through SDR to HDR")
     page.keyboard.press("p")
     U.paint_once(page, "a lantern", [(0.3, 0.5), (0.34, 0.56)])
     page.keyboard.press("Enter")
     rows = """(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
       return t.join() === '2. Paint,1. Fluid' && !document.querySelector('#history li.busy'); })()"""
     page.wait_for_function(rows, timeout=240000)
-    U.wait_log(page, U.added_line(U.REVIEWED), 300000, "the full-size composite of the edit on the HDR fluid shot")
+    U.wait_log(page, U.added_line(U.REVIEWED), 300000, "the full-size composite of the edit on the fluid shot")
     settled(page)
     name, scene = U.save_scene(page)
-    U.check(scene["fluid"]["depth"] == 16 and scene["plate"]["color_space"] != "ACES2065-1",
-            f"the scene saves the blank plate in its own colour space, not the HDR frames' ACES2065-1: {scene['plate']['color_space']}")
+    U.check(scene["deliver"]["hdr"] and scene["edits"][0]["tool"] == "fluid" and scene["plate"]["color_space"] != "ACES2065-1",
+            f"the scene saves Finish > SDR to HDR on, the fluid shot as History's first row, the blank plate in the model space: {scene['plate']['color_space']}")
     page.evaluate(U.WATCH)
     U.open_scene(page, name)
     page.wait_for_function("window.__lines.some((t) => t.startsWith('Scene opened'))", timeout=240000)
@@ -120,31 +119,14 @@ def pass_rows(page, U):
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     page.evaluate(U.WATCH)
     U.paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)]); page.keyboard.press("Enter")
-    U.wait_log(page, U.added_line("under the edits: the fluid shot v"), 240000, "the HDR fluid shot under the edits")
-    fluid = ["Fluid: keyframes", "Fluid: shot", "Fluid: SDR to HDR"]
-    for state in ("closed", "open"):
-        if state == "open":
-            page.click('#history li[data-id="fluid"] .edit')
-            page.wait_for_function("!document.querySelector('#fluid').hidden", timeout=10000)
-        U.check(rows(page) == fluid, f"keyframes {state}: the fluid shot's rows: {rows(page)}")
-        for label in fluid:
-            page.click(f"#stages li.pick:has-text('{label}')"); page.wait_for_timeout(800)
-            second = frames_seen(page, ("Home", "ArrowRight"))[1]  # frame 1 holds no keyframe: the control video is black there
-            black = second["lit"] == 0
-            U.check(shown(page) == [label] and black == (label == "Fluid: keyframes"),
-                    f"keyframes {state}, {label}: on show on every frame (frame 1 {'black' if black else 'lit'}): {shown(page)}, {second}")
-            page.click(f"#stages li.pick:has-text('{label}')"); page.wait_for_timeout(500)
-            U.check(shown(page) == [], f"keyframes {state}, {label}: a second click gives the fluid shot back: {shown(page)}")
-        page.keyboard.press("F6"); page.wait_for_timeout(300)  # the wipe on a fluid row: the step's input on the left, its output on the right
-        for label, left in (("Fluid: keyframes", "Blank plate"), ("Fluid: shot", "Fluid: keyframes"), ("Fluid: SDR to HDR", "Fluid: shot")):
-            page.click(f"#stages li.pick:has-text('{label}')"); page.wait_for_timeout(600)
-            sides = (page.text_content("#wipe .label.left"), page.text_content("#wipe .label.right"))
-            U.check(sides == (left, label), f"keyframes {state}, the wipe on {label}: {left} on the left, the pass on the right: {sides}")
-            page.click(f"#stages li.pick:has-text('{label}')"); page.wait_for_timeout(400)
-        page.keyboard.press("F6"); page.wait_for_timeout(300)
-        page.click("#stages li.pick:has-text('Fluid: shot')"); page.wait_for_timeout(500)
-        page.keyboard.press("Escape"); page.wait_for_timeout(500)
-        U.check(shown(page) == [], f"keyframes {state}: Esc gives the fluid shot back: {shown(page)}")
+    U.wait_log(page, U.added_line(("SDR to HDR: done in", "SDR to HDR took")), 240000, "the fluid shot through SDR to HDR")
+    steps = ["Fluid shot, full size", "SDR to HDR"]
+    U.check(rows(page)[-2:] == steps, f"the fluid shot's render lists its steps as every render does: {rows(page)}")
+    for label in steps:  # each finished step shows its pass, and a second click gives the latest result back
+        page.click(f"#stages li.pick:has-text('{label}')"); page.wait_for_timeout(800)
+        U.check(shown(page) == [label], f"{label}: a click shows its pass: {shown(page)}")
+        page.click(f"#stages li.pick:has-text('{label}')"); page.wait_for_timeout(500)
+        U.check(shown(page) == [steps[-1]], f"{label}: a second click gives the latest result back, SDR to HDR's: {shown(page)}")
     U.check(not errors, f"no console errors in the pass rows: {errors}")
 
 
