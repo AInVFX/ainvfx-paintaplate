@@ -366,7 +366,7 @@ async function openPlate(list, typed, opts = {}) {
   const big = bigPlateWarning(spec, S.vram); // above 2K on a GPU under BIG_PLATE.vram: renders may not finish (README, GPU)
   if (big) { log(big); setTimeout(() => status(big), 80); }
   const next = "Describe the edit in the text prompt, paint on the frame, then Generate.", plate = S.plate;
-  const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", from file"} (right-click > OCIO > Plate changes it). ${next}`;
+  const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", from file"} (use right-click > OCIO > Plate to change it). ${next}`;
   status(opened, "hint");
   if (long) setTimeout(() => status(`${long.fact.split("\n")[0]} ${long.next}`, "hint"), 90); // after the open's own sentence, as the lines above
   if (keying()) enterFluid(); else fluidUI();
