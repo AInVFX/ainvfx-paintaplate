@@ -1,5 +1,6 @@
 """The page checks (tests/flows/README.md): renders, passes, bit depth, scenes."""
 import time
+import zip_rows  # noqa: E402
 
 
 def settled(page, limit=240):  # Generate reads Generate for three seconds running: no edit, no render step left
@@ -181,11 +182,11 @@ def hdr_video(page, U):
         page.click("#x-go")
     import zipfile
     names = zipfile.ZipFile(dl.value.path()).namelist()
-    U.check("half-float EXR" in fmt and any(n.startswith("export/") and n.endswith(".exr") for n in names) and not any(n.endswith((".mp4", ".webm")) and n.startswith("export/") for n in names),
+    U.check("half-float EXR" in fmt and zip_rows.composite(names, (".exr",)) and not any(n.endswith((".mp4", ".webm")) and n.startswith("composite_full_size/") for n in names),
             f"Export writes the EXR sequence, not a video file: {fmt}, {[n for n in names if n.startswith('export/')][:3]}")
-    listed = zipfile.ZipFile(dl.value.path()).read("MODELS.md").decode() if "MODELS.md" in names else ""
+    listed = "".join(zipfile.ZipFile(dl.value.path()).read(n).decode() for n in zip_rows.files(names, "models"))
     U.check("FLUX 3 Image Klein" in listed and listed.count("\n| ") >= 4,
-            f"the zip lists the models behind the result, with their licences (MODELS.md): {listed.splitlines()[6:9]}")
+            f"the zip lists the models behind the result, with their licences (its models' list): {listed.splitlines()[6:9]}")
     U.check(not errors, f"no console errors with SDR to HDR on a video plate: {errors}")
 
 

@@ -397,10 +397,10 @@ def main():
                     check(len(mattes) == N, f"export {run}: matte saved, {len(mattes)} frames")
                     blob, ctype = http(f"{url}/paintaplate/download?run={shot}&name=test_{run}&parts=export,matte,review")
                     names = zipfile.ZipFile(io.BytesIO(blob)).namelist() if "zip" in ctype else []
-                    review = "review.mp4" in names or relight  # the composite preview runs for the non-relight cases
+                    review = any(n.endswith("_review.mp4") for n in names) or relight  # the composite preview runs for the non-relight cases
                     check(any(n.startswith("export/") for n in names) and sum(n.startswith("matte/") for n in names) == N and review,
                           f"download {run}: zip with {sum(n.startswith('export/') for n in names)} export and "
-                          f"{sum(n.startswith('matte/') for n in names)} matte files{', a review movie' if 'review.mp4' in names else ''}")
+                          f"{sum(n.startswith('matte/') for n in names)} matte files{', a review movie' if any(n.endswith('_review.mp4') for n in names) else ''}")
     finally:
         if proc:
             proc.terminate(); proc.wait(20)

@@ -3079,7 +3079,7 @@ async function plateHdr(r) { // the plate alone: SDR to HDR on the plate, Upscal
 async function exportAlone(r) { // Export on the plate alone, or on a relit composite after SDR to HDR (logic.hdrAfterComposite): the frames SDR to HDR wrote,
   // at the plate's size and level, in ACES2065-1, and the upscaled set Upscale's step made, at the size asked for
   const hdr = r.done?.hdr !== undefined;
-  r.exported ??= { run: r.run, name: `${S.plate.name}_paintaplate_v${r.v}`, text: hdr ? `${S.plate.frames} half-float EXR frames in ACES2065-1, in ${r.run}/hdr.` : "", matte: null };
+  r.exported ??= { run: r.run, name: `${exportStem()}_v${r.v}`, text: hdr ? `${S.plate.frames} half-float EXR frames in ACES2065-1, in ${r.run}/hdr.` : "", matte: null };
   S.exported = r.exported;
   S.wantDownload = null;
   stagesUI(); exportUI();
@@ -3262,7 +3262,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   if (!S.wantDownload) return;
   await step(r, "export", async (progress) => { // only when Export asks: the plate's own format, and the matte, beside the review
     const x = await exportJob(progress), matte = outputFile("export", x.done, "matte_movie");
-    r.exported = { run: x.run, name: `${p.name}_paintaplate_v${r.v}`,
+    r.exported = { run: x.run, name: `${exportStem()}_v${r.v}`,
       text: x.exr ? `${p.frames} half-float EXR frames in ACES2065-1, in ${x.file?.subfolder ?? `${x.run}/export`}.` : outputText("export", x.done, "export") ?? "",
       matte: matte ? viewUrl(matte) : null, layer: x.layer, // the Export row shows its matte
       ...x.parts, upscaled: upscaled(r) }; // the zip takes upscaled/ when Upscale's steps made it
@@ -3273,7 +3273,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   confirmed(exportDone(S.exported.text));
   const parts = S.wantDownload;
   S.wantDownload = null;
-  download([parts[0], ...(S.exported.layer ? ["layer"] : []), ...parts.slice(1), ...(S.exported.upscaled ? ["upscaled"] : [])]); // the layer goes with the result it rebuilds
+  download([...parts, ...(S.exported.upscaled ? ["upscaled"] : [])]); // the layer stays on disk, where Upscale reads it
   async function exportJob(progress) { // the export's job: Export posts it, and Upscale's steps post it first for the parts they read, so Export takes it from the job index
     const exr = exrResult(p.spec, r.hdr, p.headroom); // the result as half-float EXR frames instead of the plate's format
     const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr,
@@ -3444,18 +3444,21 @@ async function modelsBehindResult() { // the models behind the result on show: t
   const flows = resultFlows({ tools: edits.map((e) => e.tool), render: [...(r?.flows ?? [])], fluid, fluidHdr: fluid && !!S.fluid.result.hdr });
   return modelsBehind(registry, flows, (n) => WF[n]?.prompt);
 }
+// The name every exported file starts with: the scene's name once it is saved or opened, for its plate, else the plate's name
+const exportStem = () => (S.exportStem && S.exportStem.plate === S.plate?.path ? S.exportStem.name : S.plate?.name) || "";
 async function download(parts = ["export", "matte"]) {
+  const words = exportWordsNow(); // the dialog's rows: the zip's names and the log's download line
   const graph = await S.graph; S.graph = null; // Export's ComfyUI graph, written beside the result so the zip takes it
   const written = graph ? await fetch(`/paintaplate/graph?${new URLSearchParams({ run: S.exported.run })}`, { method: "POST", body: JSON.stringify(graph.file, null, 1) })
     .then((r) => r.ok, () => false) : null; // null: no graph asked for, or none to write, which graphFile said
   if (written) parts = [...parts, "graph"];
   const models = (await modelsBehindResult().catch(() => [])).map((m) => m.id).join(",");
   const a = Object.assign(document.createElement("a"), {
-    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, parts: parts.join(","), models,
+    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, stem: exportStem(), names: JSON.stringify(words.zip), parts: parts.join(","), models,
       ...(parts.includes("upscaled") ? { upscaled: `upscale/${upSize()}/out` } : {}) })}`, // the upscaled set of the size asked for (upscalePart)
     download: `${S.exported.name}.zip` });
   document.body.append(a); a.click(); a.remove();
-  const said = downloadLines(`${S.exported.name}.zip`, parts, exportWordsNow().rows); // one detail line per row the zip holds, in the dialog's words
+  const said = downloadLines(`${S.exported.name}.zip`, parts, words.rows); // one detail line per row the zip holds, in the dialog's words
   log(said); showStatus(said.split("\n")[0]);
   if (written === false) told(...GRAPH_UNWRITTEN); // after the download's line, so the status line keeps the warning and what to do
 }
@@ -3523,7 +3526,7 @@ async function exportLog() { // the log's export (logic.logReport): the log with
     lines: [...$("#log").children].map((li) => [li.firstChild.textContent, li.lastChild.textContent]), now });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
-  a.download = logFileName(name, now);
+  a.download = logFileName(exportStem() || name, now);
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
   hud(`Log exported: ${a.download}.`, 2500);
@@ -3712,7 +3715,7 @@ async function downloadFluid() { // Export of a fluid shot alone: its own files,
     exportUI(); stagesUI(); return void touch();
   }
   S.wantDownload = null;
-  S.exported = { run: f.run ?? fluidRun(f.path), name: `fluid_v${f.v}`, text: "" };
+  S.exported = { run: f.run ?? fluidRun(f.path), name: `${exportStem()}_fluid_v${f.v}`, text: "" };
   log(`Export: fluid shot v${f.v}${f.hdr ? " in HDR" : ""}, from ${S.exported.run}.`);
   download([...parts, ...(r && upscaled(r) ? ["upscaled"] : [])]);
 }
@@ -3922,6 +3925,7 @@ async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it ag
   if (!r.ok) throw new Error(`The scene was not saved: ${await r.text()}`);
   const { path } = await r.json().catch(() => ({})); // the scene's file, on the machine that runs ComfyUI
   if (f) f.sceneName = name; // its next save keeps the name
+  S.exportStem = { plate: S.plate?.path, name }; // the export's files start with the scene's name from now on (exportStem)
   const fact = `Scene ${name} saved${path ? `: ${path}` : ""}.`;
   hud(fact, 3000);
   told(fact, "Open plate > Scenes opens it again, or downloads it.");
@@ -3979,6 +3983,7 @@ async function editorFile(graph) { // what this ComfyUI says of each node class,
 async function openScene(text, name = null) { // the plate opens in its colour space, then every edit runs again with its own seed and words
   const scene = JSON.parse(text), o = scene.ocio;
   if (scene.format !== SCENE.format || !(scene.version <= SCENE.version)) throw new Error("This file is not a Paint a plate scene.");
+  S.exportStem = name ? { plate: scene.plate?.path, name } : null; // its export's files start with the scene's name (exportStem)
   if (o) { // its OCIO config and view, where this ComfyUI has them
     if (o.config && o.config !== S.ocio.config) await loadOcio(o.config).catch((err) => log(`Warning: the scene's OCIO config did not load (${err.message}). Check its colours in the config in use.`));
     const info = S.ocio.info;

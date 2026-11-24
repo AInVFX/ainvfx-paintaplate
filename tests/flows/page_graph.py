@@ -6,6 +6,7 @@ import json
 import zipfile
 import urllib.parse
 import urllib.request
+import zip_rows  # noqa: E402
 
 OPEN = "document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden"
 
@@ -21,7 +22,7 @@ def run(browser, port, U):
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
     with page.expect_download(timeout=180000) as dl:  # the graph comes in Export's zip
         page.click("#export-btn"); page.check("#x-graph"); page.click("#x-go")
-    graph = json.loads(zipfile.ZipFile(dl.value.path()).read("scene.comfyui.json"))
+    graph = json.loads((z := zipfile.ZipFile(dl.value.path())).read(zip_rows.files(z.namelist(), "comfyui_graph")[0]))
     loaders = {n["title"]: n["widgets_values"][0] for n in graph["nodes"] if n["type"] in ("LoadImage", "LoadImageMask")}
     readme = next(n for n in graph["nodes"] if n["type"] == "MarkdownNote")["widgets_values"][0]
 

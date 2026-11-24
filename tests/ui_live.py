@@ -9,6 +9,7 @@ an edit, let the idle time render the shot, the composite and the export, wipe, 
 `ingest`, `comp` and `export` are the real workflows. Screenshots go to /tmp/paintaplate_ui.
 """
 import argparse, glob, json, os, re, shutil, subprocess, sys, time, urllib.request, zipfile
+import zip_rows  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -389,12 +390,12 @@ def main():
         os.remove(link)
         if real:
             os.symlink(real, link)
-    exports = [n for n in names if n.startswith("export/") and n.endswith(".exr")]
-    mattes = [n for n in names if n.startswith("matte/")]
+    exports = zip_rows.composite(names, (".exr",))
+    mattes = zip_rows.files(names, "matte")
     print(f"zip: {len(exports)} EXR frames, {len(mattes)} matte frames; console errors: {len(errors)}")
     for e in errors[:10]:
         print("  console:", e[:300])
-    passed = ok and exports and mattes and "review.mp4" in names and not errors
+    passed = ok and exports and mattes and any(n.endswith("_composite_full_size.mp4") for n in names) and not errors
     print("UI FLOW PASSED" if passed else "UI FLOW FAILED")
     return 0 if passed else 1
 
@@ -561,7 +562,7 @@ def remote(a):
                     if a.graph:  # the scene as one ComfyUI workflow, from the export's zip. A case does not depend on it
                         try:
                             with open(f"{shots}/scene.comfyui.json", "wb") as f:
-                                f.write(zipfile.ZipFile(f"{shots}/export.zip").read("scene.comfyui.json"))
+                                f.write(zipfile.ZipFile(f"{shots}/export.zip").read(zip_rows.files(names, "comfyui_graph")[0]))
                             mark(f"ComfyUI graph saved: {len(json.load(open(f'{shots}/scene.comfyui.json'))['nodes'])} nodes and notes")
                         except Exception as exc:
                             mark(f"ComfyUI graph not saved: {type(exc).__name__}: {str(exc).splitlines()[0][:120]} | status: {status()}")

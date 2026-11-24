@@ -33,6 +33,10 @@ def touch(root, rel):
     open(path, "wb").close()
 
 
+NAMES = {"export": "composite_full_size", "review": "composite_full_size", "matte": "matte", "shot": "shot_full_size", "graph": "comfyui_graph",
+         "hdr": "sdr_to_hdr", "plate": "fluid_shot", "preview": "fluid_shot_preview",
+         "up": {"export": "composite_upscaled", "matte": "matte_upscaled"}}  # the zip's names, as the page sends them (logic.zipNames)
+
 class UpscaledPart(unittest.TestCase):
     def setUp(self):
         self.run = tempfile.mkdtemp()
@@ -41,12 +45,12 @@ class UpscaledPart(unittest.TestCase):
             touch(self.run, rel)
 
     def test_the_size_asked_for_is_named_upscaled(self):
-        names = [arc for _, arc in routes.collect(self.run, ["upscaled"], "upscale/1600x880/out")]
-        self.assertEqual(names, [os.path.join("upscaled", "export", "f_00001_.png"), os.path.join("upscaled", "matte", "matte_00001_.png")])
+        names = [arc for _, arc in routes.collect(self.run, ["upscaled"], "upscale/1600x880/out", stem="desk", names=NAMES)]
+        self.assertEqual(names, [os.path.join("composite_upscaled", "desk_composite_upscaled_00001_.png"), os.path.join("matte_upscaled", "desk_matte_upscaled_00001_.png")])
 
     def test_with_no_size_the_runs_own_upscaled_folder(self):
-        names = [arc for _, arc in routes.collect(self.run, ["upscaled"])]
-        self.assertEqual(names, [os.path.join("upscaled", "export", "old_00001_.png")])
+        names = [arc for _, arc in routes.collect(self.run, ["upscaled"], stem="desk", names=NAMES)]
+        self.assertEqual(names, [os.path.join("composite_upscaled", "desk_composite_upscaled_00001_.png")])
 
     def test_a_folder_outside_the_run_gives_no_file(self):
         self.assertEqual(routes.collect(self.run, ["upscaled"], "../" + os.path.basename(self.run) + "_x"), [])

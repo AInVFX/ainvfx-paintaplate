@@ -3,6 +3,7 @@ upscaled », SDR to HDR's frames upscaled with no Export, which the player shows
 the zip holds them under upscaled/ beside the frames at the plate's size, with no upscaled plate. It asks for 1600 x 880, a size
 above the plate's 1280 x 704 that the mock holds in a small machine's memory."""
 import zipfile
+import zip_rows  # noqa: E402
 
 ROWS = "els => els.map((e) => [e.querySelector('.name').textContent, e.querySelector('.time').textContent, e.className])"
 SIZE = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
@@ -41,7 +42,7 @@ def run(browser, port, U):
     with page.expect_download(timeout=240000) as dl:
         page.click("#x-go")
     zipped = zipfile.ZipFile(dl.value.path()).namelist()
-    U.check(not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]) and any(n.startswith("upscaled/export/") for n in zipped)
-            and any(n.startswith("hdr/") for n in zipped) and not any(n.startswith("upscaled/plate/") for n in zipped),
+    U.check(not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]) and zip_rows.files(zipped, "sdr_to_hdr_upscaled")
+            and zip_rows.files(zipped, "sdr_to_hdr") and not zip_rows.files(zipped, "plate_upscaled"),
             f"Export posts no Upscale job, and zips the upscaled frames beside the frames at the plate's size: {sorted({n.split('/')[0] + '/' + n.split('/')[1] for n in zipped if '/' in n})}")
     page.close()

@@ -695,7 +695,7 @@ export function plainPaths(text, folder = "") {
 export const deepStopped = (what, why) =>
   `Error: full-precision frames of ${what}: stopped (${String(why ?? "").replace(/\s+/g, " ").trim() || "no reason given"}). Viewer: 8-bit movie.`;
 
-// The log's export: the text of paintaplate_log_<plate>_<YYYYMMDD_HHMM>.txt, to share for troubleshooting. It holds the
+// The log's export: the text of <plate or scene>_log_<YYYYMMDD_HHMM>.txt, to share for troubleshooting. It holds the
 // log and what ComfyUI reports of its versions and its machine (/system_stats): no command line, and its plate and log
 // lines through plainPaths.
 export function logReport({ version, build, stats, browser, address, memory, plate, lines, now, folder = "" }) {
@@ -717,7 +717,7 @@ export function logReport({ version, build, stats, browser, address, memory, pla
 // The log's file name, in the browser's local time.
 export function logFileName(plate, d) {
   const two = (n) => String(n).padStart(2, "0"), name = String(plate || "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "no_plate";
-  return `paintaplate_log_${name}_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}.txt`;
+  return `${name}_log_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}.txt`;
 }
 
 // ---------- Upscale ----------
@@ -854,15 +854,26 @@ export function exportWords({ kind, ready = true, left = "", exr = false, hdr = 
   const format = (kind === "fluid" ? hdr : exr) ? EXR_FRAMES : kind === "fluid" ? "ProRes 4444 movie" : plateFormat(spec);
   const edits = kind === "edits", frames = format === EXR_FRAMES || (!!spec && spec.kind !== "video");
   const hint = "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.";
-  return { hint, format, note, help: `${hint} ${steps.comp} keeps the plate's format. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.`,
-    rows: {
-      export: { label: kind === "fluid" ? "Fluid shot" : kind === "plate" || kind === "relit" ? steps.hdr : kind === "upscaled" ? steps.up : steps.comp, detail: format, shown: true },
-      review: { label: `${steps.comp}, as a movie`, detail: "H.264 MP4", shown: edits && frames },
-      matte: { label: "Matte", detail: "where the plate changed, PNG frames", shown: edits },
-      shot: { label: steps.shot, detail: "the whole frame as the model made it, H.264 MP4", shown: edits },
-      graph: { label: "ComfyUI graph", detail: "the whole scene as one ComfyUI workflow, JSON", shown: true }, // the page decides: the edits on show, or a fluid shot alone
-      upscaled: { label: steps.up, shown: true }, // no row: Finish > Upscale adds its set to the zip
-    } };
+  const rows = {
+    export: { label: kind === "fluid" ? "Fluid shot" : kind === "plate" || kind === "relit" ? steps.hdr : kind === "upscaled" ? steps.up : steps.comp, detail: format, shown: true },
+    review: { label: `${steps.comp}, as a movie`, detail: "H.264 MP4", shown: edits && frames },
+    matte: { label: "Matte", detail: "where the plate changed, PNG frames", shown: edits },
+    shot: { label: steps.shot, detail: "the whole frame as the model made it, H.264 MP4", shown: edits },
+    graph: { label: "ComfyUI graph", detail: "the whole scene as one ComfyUI workflow, JSON", shown: true }, // the page decides: the edits on show, or a fluid shot alone
+    upscaled: { label: steps.up, shown: true }, // no row: Finish > Upscale adds its set to the zip
+  };
+  return { hint, format, note, rows, zip: zipNames(rows, steps.hdr), help: `${hint} ${steps.comp} keeps the plate's format. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.`,
+  };
+}
+// A row's name in the zip: its label in lower case, its words joined by « _ », so the zip's names follow the dialog's words.
+export const zipName = (label) => String(label ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+// What the zip route calls each part (routes.zip_rows), from the row it belongs to (exportWords' rows). The composite as a
+// movie takes the composite's name; a fluid shot's preview movie takes its shot's name with « _preview »; SDR to HDR's frames
+// take their step's name (hdr); Upscale's result takes its step's name, and its matte the matte's name with « _upscaled ».
+export function zipNames(rows, hdr) {
+  const first = zipName(rows.export.label), matte = zipName(rows.matte.label);
+  return { export: first, review: first, matte, shot: zipName(rows.shot.label), hdr: zipName(hdr), plate: first, preview: `${first}_preview`,
+    graph: zipName(rows.graph.label), up: { export: zipName(rows.upscaled.label), matte: `${matte}_upscaled` } };
 }
 // A plate's format as the Export dialog names it: « H.264 movie », « ProRes 4444 movie », « EXR frames ». spec: the plate's
 // spec, with the codec and the profile its movie names (plateio).

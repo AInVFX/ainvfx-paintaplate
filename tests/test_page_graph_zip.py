@@ -26,6 +26,10 @@ def load_routes():  # routes as another test module loaded it, with its folder_p
     return routes
 
 
+NAMES = {"export": "composite_full_size", "review": "composite_full_size", "matte": "matte", "shot": "shot_full_size", "graph": "comfyui_graph",
+         "hdr": "sdr_to_hdr", "plate": "fluid_shot", "preview": "fluid_shot_preview",
+         "up": {"export": "composite_upscaled", "matte": "matte_upscaled"}}  # the zip's names, as the page sends them (logic.zipNames)
+
 class Request:  # what graph_post reads of a request: its query and its body
     def __init__(self, query, body):
         self.query, self.body = query, body
@@ -51,9 +55,9 @@ class GraphInZip(unittest.TestCase):
         self.assertEqual(json.loads(answer.body), {"file": "scene.comfyui.json"})
         with open(os.path.join(self.folder, "scene.comfyui.json")) as f:
             self.assertEqual(json.load(f), graph)
-        self.assertIn("scene.comfyui.json", [name for _, name in routes.collect(self.folder, ["export", "graph"])])
-        with zipfile.ZipFile(routes.build_zip(self.folder, "shot", ["export", "graph"])) as z:
-            self.assertEqual(json.loads(z.read("scene.comfyui.json")), graph)
+        self.assertIn("desk_comfyui_graph.json", [name for _, name in routes.collect(self.folder, ["export", "graph"], stem="desk", names=NAMES)])
+        with zipfile.ZipFile(routes.build_zip(self.folder, "shot", ["export", "graph"], stem="desk", names=NAMES)) as z:
+            self.assertEqual(json.loads(z.read("desk_comfyui_graph.json")), graph)
 
     def test_a_body_that_is_not_json_and_a_folder_outside_are_refused(self):
         with self.assertRaises(web.HTTPBadRequest):

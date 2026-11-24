@@ -20,9 +20,10 @@ output:, or, on a ComfyUI that answers this machine alone, an absolute path.
     GET  /paintaplate/ocio/shader?config=&space=&display=&view=&look=   the viewer's GLSL and lookup tables for a source
     GET  /paintaplate/download?run=paintaplate/<plate>/v3&name=shot010_paintaplate_v3&parts=export,matte
     POST /paintaplate/graph?run=paintaplate/<plate>/v3     Export's ComfyUI graph, into the run's folder for its zip
-`parts` chooses what the zip holds (default: export,matte): export is the result in the plate's own format, layer the
-shot as the composite blends it (result = plate x (1 - matte) + layer x matte), matte where the plate changed, review the full-size review movie (else the preview composite), shot the whole frame as the model made
-it (the full-size pass first), upscaled the set that Upscale made (upscaled/export, upscaled/plate, upscaled/layer, upscaled/matte). Only render folders under output/paintaplate are zipped, and only plain files inside them.
+`parts` chooses what the zip holds (default: export,matte): export is the composite in the plate's own format, matte its PNG
+frames, review the composite as a movie, shot the regenerated shot, hdr, plate and preview a fluid shot's own files, graph the
+scene as one ComfyUI workflow, upscaled Upscale's result and matte at the size asked for. `stem` and `names` name the files:
+every name starts with the plate's or the scene's name, then the part's name, from the Export dialog's rows (zipped). Only render folders under output/paintaplate are zipped, and only plain files inside them.
 Everything here is plain functions (tests/test_routes.py); setup() adds the routes to ComfyUI's server, and gives the
 page's own files, which ComfyUI serves from ./web, the rule « Cache-Control: no-cache » (fresh_page).
 """
@@ -73,24 +74,26 @@ SCENES = "paintaplate/scenes"  # scenes saved on this ComfyUI, under the output 
 THUMB_WIDTH = 240
 THUMBS_AT_ONCE = asyncio.Semaphore(4)  # a folder of thousands of outputs asks for its thumbnails as they scroll into view
 
-# part: (paths in the run folder, the first match wins for a file; its name in the zip, None for a folder).
-# The page keeps each preview size's composite and passes in a folder named after the size (640x352/), the
-# full-size passes in full/, and the export's review movie at the top; the last patterns read older runs.
-GRAPH = "scene.comfyui.json"  # Export's ComfyUI graph, in its run's folder and in its zip
+# part: (paths in the run folder, the first match wins for a file; True for a folder of frames, or of one movie). The page
+# keeps each preview size's composite and passes in a folder named after the size (640x352/), the full-size passes in full/,
+# and the export's review movie at the top; the last patterns read older runs.
+GRAPH = "scene.comfyui.json"  # Export's ComfyUI graph, in its run's folder
 GRAPH_MAX = 16 << 20  # bytes: a scene's graph is far smaller
-PARTS = {"export": (["export"], None), "layer": (["layer"], None), "matte": (["matte"], None),
-         "review": (["review_*.mp4", "*/comp_*.mp4", "comp_*.mp4"], "review.mp4"),
-         "shot": (["full/raw_*.mp4", "full/clean_*.mp4", "*/raw_*.mp4", "*/clean_*.mp4", "full_*.mp4", "raw_*.mp4"],
-                  "regenerated_shot.mp4"),
+PARTS = {"export": (["export"], True), "matte": (["matte"], True),
+         "review": (["review_*", "*/comp_*", "comp_*"], False),
+         "shot": (["full/raw_*", "full/clean_*", "*/raw_*", "*/clean_*", "full_*", "raw_*"], False),
          # a fluid shot exported by itself: its HDR frames, the shot in the blank plate's format, its preview movie
-         "hdr": (["hdr"], None), "plate": (["plate"], None), "preview": (["preview_*.mp4"], "preview.mp4"),
-         # Upscale: the result, the plate, the layer and the matte upscaled, each in its folder under upscaled/ (its windows
-         # are saved elsewhere, so they stay out)
-         "upscaled": (["upscaled"], None),
+         "hdr": (["hdr"], True), "plate": (["plate"], True), "preview": (["preview_*"], False),
+         # Upscale: its set's result and matte (UPSCALED_PARTS); the upscaled plate and layer stay on disk
+         "upscaled": (["upscaled"], True),
          # Export's ComfyUI graph: the scene as one workflow, which the page writes into the run's folder (graph_post)
-         "graph": ([GRAPH], GRAPH)}
+         "graph": ([GRAPH], False)}
 DEFAULT_PARTS = ["export", "matte"]
 UPSCALED_SET = re.compile(r"upscale/\d+x\d+/out")  # an upscaled set's folder under its run, as the page names it: one per size
+UPSCALED_PARTS = ("export", "matte")  # the upscaled set's folders that the zip takes: the result and its matte
+MOVIES = (".mp4", ".mov", ".webm")  # a part that is one such file sits at the top of the zip
+ROW_NAME = re.compile(r"[a-z0-9_]{1,60}")  # a part's name in the zip, as the page sends it
+FRAME_TAIL = re.compile(r"[._-]?\d+_?\.[A-Za-z0-9]+$")  # a frame's number, the mark before it, and its extension
 
 
 def zip_name(name: str, folder: str) -> str:
@@ -98,30 +101,84 @@ def zip_name(name: str, folder: str) -> str:
     return re.sub(r"[^\w.-]", "_", name or os.path.basename(folder))[:120]
 
 
-def collect(folder: str, parts: list[str], upscaled: str = "") -> list[tuple[str, str]]:
-    """(path on disk, name in the zip) for each part asked for, in a fixed order. `upscaled`: the folder under the run's
-    that holds the upscaled set of the size asked for (Upscale's steps keep one per size), as UPSCALED_SET; the zip names
-    it upscaled/. A value in another form gives no file, and no folder is read for it."""
+def zip_rows(text: str) -> dict:
+    """The page's names for the parts in the zip (logic.zipNames), sent as JSON: {part: name, "up": {folder: name}}. A name
+    that is not made of lower-case letters, digits and « _ » is left out, and its part keeps its id."""
+    try:
+        raw = json.loads(text) if text else {}
+    except ValueError:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    rows = {k: v for k, v in raw.items() if k in PARTS and isinstance(v, str) and ROW_NAME.fullmatch(v)}
+    if isinstance(raw.get("up"), dict):
+        rows["up"] = {k: v for k, v in raw["up"].items() if k in UPSCALED_PARTS and isinstance(v, str) and ROW_NAME.fullmatch(v)}
+    return rows
+
+
+def frame_tail(name: str) -> str:
+    """What tells a frame apart in its file's name: its number, the mark before it, and its extension. matte_00001_.png gives
+    _00001_.png, and room.1001.exr gives .1001.exr. A name with no number keeps itself, after an « _ »."""
+    m = FRAME_TAIL.search(name)
+    return m.group(0) if m else f"_{name}"
+
+
+def collect(folder: str, parts: list[str], upscaled: str = "", stem: str = "", names: dict | None = None) -> list[tuple[str, str]]:
+    """(path on disk, name in the zip) for each part asked for, in a fixed order (zipped)."""
+    return [(path, arc) for path, arc, _ in zipped(folder, parts, upscaled, stem, names)]
+
+
+def zipped(folder: str, parts: list[str], upscaled: str = "", stem: str = "", names: dict | None = None) -> list[tuple[str, str, str]]:
+    """(path on disk, name in the zip, part) for each part asked for, in a fixed order. Every name starts with `stem`, the
+    plate's or the scene's name (the run folder's own name when it is empty), then the part's name: names[part], which the
+    page takes from the Export dialog's rows, else the part's id. A part that is one movie sits at the top, as
+    <stem>_<name>.<ext>. A part's frames sit in a folder of its name, each as <stem>_<name><frame>.<ext> (frame_tail).
+    `upscaled`: the folder under the run's that holds the upscaled set of the size asked for, as UPSCALED_SET; its result and
+    its matte come, named by names["up"], else <folder>_upscaled. A value in another form gives no file, and no folder is read
+    for it. A name already taken keeps its first file: the composite's movie never replaces a composite that is a movie."""
     real = os.path.realpath(folder)  # compared as real paths: the output folder itself may be a symbolic link
+    stem, names = zip_name(stem, folder)[:80], names or {}
 
     def inside(path):
         return not os.path.islink(path) and os.path.commonpath([os.path.realpath(path), real]) == real
 
-    files = []
+    def walk(base):  # the files under base, in the order of their names, with their path from base
+        found = []
+        for d, dirs, fnames in os.walk(base):
+            dirs.sort()
+            found += [(p, os.path.relpath(p, base)) for p in (os.path.join(d, f) for f in sorted(fnames)) if inside(p)]
+        return found
+
+    files, taken = [], set()
+
+    def add(path, arc, part):
+        if arc not in taken:
+            taken.add(arc)
+            files.append((path, arc, part))
+
+    def place(found, row, part):  # one movie at the top, frames in the folder of their name
+        if len(found) == 1 and found[0][1].lower().endswith(MOVIES):
+            add(found[0][0], f"{stem}_{row}{os.path.splitext(found[0][1])[1].lower()}", part)
+            return
+        for path, rel in found:
+            sub, fname = os.path.split(rel)
+            add(path, "/".join(x for x in (row, sub, f"{stem}_{row}{frame_tail(fname)}") if x), part)
+
     for part in [p for p in PARTS if p in parts]:
-        patterns, single = PARTS[part]
-        if single is None:  # a folder, kept as a folder: its files and subfolders in the order of their names
-            sized = part == "upscaled" and bool(upscaled)
-            if sized and not UPSCALED_SET.fullmatch(upscaled):
+        patterns, is_folder = PARTS[part]
+        if part == "upscaled":
+            if upscaled and not UPSCALED_SET.fullmatch(upscaled):
                 continue
-            base = os.path.join(folder, upscaled if sized else patterns[0])
-            for d, dirs, names in os.walk(base):
-                dirs.sort()
-                files += [(path, os.path.join(patterns[0], os.path.relpath(path, base))) for path in (os.path.join(d, f) for f in sorted(names)) if inside(path)]
-            continue
-        found = next((m for pat in patterns for m in sorted(glob.glob(os.path.join(folder, pat))) if inside(m)), None)
-        if found:
-            files.append((found, single))
+            base = os.path.join(folder, upscaled or patterns[0])
+            for sub in UPSCALED_PARTS:
+                place(walk(os.path.join(base, sub)), names.get("up", {}).get(sub) or f"{sub}_upscaled", part)
+        elif is_folder:
+            place(walk(os.path.join(folder, patterns[0])), names.get(part) or part, part)
+        else:
+            found = next((m for pat in patterns for m in sorted(glob.glob(os.path.join(folder, pat)))
+                          if inside(m) and (part == "graph" or m.lower().endswith(MOVIES))), None)
+            if found:
+                add(found, f"{stem}_{names.get(part) or part}{os.path.splitext(found)[1].lower()}", part)
     return files
 
 
@@ -270,27 +327,30 @@ logging.info("[Paint a plate] %s: build %s.\n  Build parts: ComfyUI %s; ComfyUI-
              sum(len(m) == 3 for m in _built["models"]), len(_built["models"]))
 
 
-def build_zip(folder: str, name: str, parts: list[str], models: list[str] | None = None, upscaled: str = "") -> str:
-    """The zip of `parts`, stored (EXR, PNG and video are already compressed) and reused while it is current, with
-    MODELS.md when the page names the models behind the result."""
-    files = collect(folder, parts, upscaled)
-    if "export" in parts and not any(arc.startswith("export/") for _, arc in files):
+def build_zip(folder: str, name: str, parts: list[str], models: list[str] | None = None, upscaled: str = "", stem: str = "",
+              names: dict | None = None) -> str:
+    """The zip of `parts`, named as zipped names them, stored (EXR, PNG and video are already compressed) and reused while it
+    is current, with the models' list (<stem>_models.md) when the page names the models behind the result."""
+    files = zipped(folder, parts, upscaled, stem, names)
+    if "export" in parts and not any(part == "export" for _, _, part in files):
         raise FileNotFoundError("Export not found for this run. Run Export first.")
     if not files:  # a fluid shot's zip holds no export: its HDR frames, its plate and its preview
         raise FileNotFoundError("Download: no files in this run.")
+    stem = zip_name(stem, folder)[:80]
     mark = f"__m{hashlib.sha1(','.join(models).encode()).hexdigest()[:8]}" if models else ""  # another list of models, another zip
     mark += f"__u{hashlib.sha1(upscaled.encode()).hexdigest()[:8]}" if upscaled and "upscaled" in parts else ""  # another size, another zip
+    mark += f"__n{hashlib.sha1(json.dumps([stem, names or {}], sort_keys=True).encode()).hexdigest()[:8]}"  # other names, another zip
     target = os.path.join(folder, f"{name}__{'-'.join(p for p in PARTS if p in parts)}{mark}.zip")
-    newest = max(os.path.getmtime(p) for p, _ in files)
+    newest = max(os.path.getmtime(p) for p, _, _ in files)
     if os.path.exists(target) and os.path.getmtime(target) >= newest:
         return target
     part = f"{target}.{uuid.uuid4().hex}.part"  # two downloads at once never write the same file
     try:
         with zipfile.ZipFile(part, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
-            for path, arc in sorted(files, key=lambda f: f[1]):
+            for path, arc, _ in sorted(files, key=lambda f: f[1]):
                 z.write(path, arc)
             if models:
-                z.writestr("MODELS.md", models_md(models))
+                z.writestr(f"{stem}_models.md", models_md(models))
         os.replace(part, target)
     finally:
         if os.path.exists(part):
@@ -304,7 +364,9 @@ async def download(request: web.Request) -> web.StreamResponse:
         folder = folders.run_folder(request.query.get("run", ""))
         name = zip_name(request.query.get("name", ""), folder)
         models = [m for m in request.query.get("models", "").split(",") if m]
-        path = await asyncio.to_thread(build_zip, folder, name, asked, models, request.query.get("upscaled", ""))
+        stem = request.query.get("stem", "") or re.sub(r"_v\d+$", "", name)  # the page sends it; else the zip's name, less its version
+        path = await asyncio.to_thread(build_zip, folder, name, asked, models, request.query.get("upscaled", ""), stem,
+                                       zip_rows(request.query.get("names", "")))
     except FileNotFoundError as exc:
         raise web.HTTPNotFound(text=str(exc)) from exc
     return web.FileResponse(path, headers={"Content-Disposition": f'attachment; filename="{name}.zip"'})

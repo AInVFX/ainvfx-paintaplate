@@ -5,9 +5,9 @@ import { test } from "node:test";
 import { logFileName, logReport } from "../../web/logic.mjs";
 
 test("logFileName: the plate's name and the local date and time", () => {
-  assert.equal(logFileName("desk", new Date(2026, 10, 14, 17, 5)), "paintaplate_log_desk_20261114_1705.txt");
-  assert.equal(logFileName("", new Date(2026, 0, 2, 3, 4)), "paintaplate_log_no_plate_20260102_0304.txt");
-  assert.equal(logFileName("my plate (v2)", new Date(2026, 0, 2, 3, 4)), "paintaplate_log_my_plate_v2_20260102_0304.txt");
+  assert.equal(logFileName("desk", new Date(2026, 10, 14, 17, 5)), "desk_log_20261114_1705.txt");
+  assert.equal(logFileName("", new Date(2026, 0, 2, 3, 4)), "no_plate_log_20260102_0304.txt");
+  assert.equal(logFileName("my plate (v2)", new Date(2026, 0, 2, 3, 4)), "my_plate_v2_log_20260102_0304.txt");
 });
 
 test("logReport: versions, machine, page, plate, then the log with its times", () => {

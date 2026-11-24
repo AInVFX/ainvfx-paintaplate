@@ -4,6 +4,7 @@ The dialog's words come from one source, none says « The zip downloads at once 
 the dialog's own line."""
 import json
 import zipfile
+import zip_rows  # noqa: E402
 
 
 def run(browser, port, U):
@@ -24,9 +25,9 @@ def run(browser, port, U):
     with page.expect_download(timeout=180000) as dl:
         page.click("#x-go")
     z = zipfile.ZipFile(dl.value.path())
-    U.check("scene.comfyui.json" in z.namelist() and any(n.startswith("export/") for n in z.namelist()),
+    U.check(zip_rows.files(z.namelist(), "comfyui_graph") and zip_rows.composite(z.namelist()),
             f"the zip holds the graph beside the result: {sorted({n.split('/')[0] for n in z.namelist()})}")
-    graph = json.loads(z.read("scene.comfyui.json"))
+    graph = json.loads(z.read(zip_rows.files(z.namelist(), "comfyui_graph")[0]))
     U.check(bool(graph["nodes"]) and bool(graph["groups"]), f"the graph is a ComfyUI workflow: {len(graph['nodes'])} nodes in {len(graph['groups'])} groups")
     page.click("#open-btn"); page.click("#open [data-tab=blank]")  # a fluid shot alone
     page.fill("#b-frames", "17"); page.dispatch_event("#b-frames", "input")
@@ -41,9 +42,9 @@ def run(browser, port, U):
     with page.expect_download(timeout=180000) as dl:
         page.click("#x-go")
     z = zipfile.ZipFile(dl.value.path())
-    U.check("scene.comfyui.json" in z.namelist() and any(n.startswith("plate/") for n in z.namelist()),
+    U.check(zip_rows.files(z.namelist(), "comfyui_graph") and zip_rows.files(z.namelist(), "fluid_shot"),
             f"the zip holds the fluid shot's graph beside the shot: {sorted({n.split('/')[0] for n in z.namelist()})}")
-    graph = json.loads(z.read("scene.comfyui.json"))
+    graph = json.loads(z.read(zip_rows.files(z.namelist(), "comfyui_graph")[0]))
     titles = [g["title"] for g in graph["groups"]]
     keys = [n for n in graph["nodes"] if n.get("properties", {}).get("Node name for S&R") == "PaintAPlate_KeyframeVideo"]
     U.check(titles[:4] == ["README", "INPUT", "MODELS", "FLUID SHOT"] and len(keys) == 1, f"the graph makes the fluid shot: groups {titles}, {len(keys)} Keyframe Video")

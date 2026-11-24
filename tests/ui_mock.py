@@ -17,6 +17,7 @@ The flows of this file are in FLOWS. Each module of tests/flows adds one, named 
 """
 import argparse, json, os, queue, re, shutil, signal, subprocess, sys, threading, time, traceback, urllib.request, zipfile
 from concurrent.futures import ThreadPoolExecutor
+import zip_rows  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -435,12 +436,12 @@ def generate_flow(browser, port):
         page.click("#export-btn"); page.click("#x-go")
     zipped = zipfile.ZipFile(dl.value.path()).namelist()
     lines = log_lines(page)
-    check(any(n.startswith("export/") for n in zipped) and any(n.startswith("matte/") for n in zipped) and any(line.startswith("Export: done") for line in lines),
+    check(zip_rows.composite(zipped) and zip_rows.files(zipped, "matte") and any(line.startswith("Export: done") for line in lines),
           f"Export writes the result and its matte when pressed, then the zip downloads: {sorted({n.split('/')[0] for n in zipped})}")
     # The ComfyUI graph: the scene in the editor's own format, one group per section in the order they run, each opening with its note
     with page.expect_download(timeout=60000) as dl:  # the graph comes in Export's zip
         page.click("#export-btn"); page.check("#x-graph"); page.click("#x-go")
-    graph = json.loads(zipfile.ZipFile(dl.value.path()).read("scene.comfyui.json"))
+    graph = json.loads((z := zipfile.ZipFile(dl.value.path())).read(zip_rows.files(z.namelist(), "comfyui_graph")[0]))
     groups, notes = [g["title"] for g in graph["groups"]], [n for n in graph["nodes"] if n["type"] == "MarkdownNote"]
     overview = notes[0]["widgets_values"][0]
     rects = [(n["pos"][0], n["pos"][1] - 30, n["pos"][0] + n["size"][0], n["pos"][1] + n["size"][1]) for n in graph["nodes"]]  # each with its title bar
@@ -1007,7 +1008,7 @@ def fluid16_flow(browser, port):
     with page.expect_download() as dl:
         page.click("#x-go")
     names = zipfile.ZipFile(dl.value.path()).namelist()
-    check(any(n.startswith("hdr/") and n.endswith(".exr") for n in names) and any(n.startswith("plate/") for n in names),
+    check(zip_rows.files(names, "sdr_to_hdr", (".exr",)) and zip_rows.files(names, "fluid_shot"),
           f"the zip holds the HDR frames and the shot in the blank plate's format: {names[:3]}")
     page.evaluate("""() => { const v = document.querySelector('canvas[data-precision]'); window.__prec = [];
       new MutationObserver(() => window.__prec.push(v.dataset.precision)).observe(v, { attributes: true, attributeFilter: ['data-precision'] }); }""")

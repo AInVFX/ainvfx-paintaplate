@@ -41,6 +41,7 @@ import threading
 import time
 import urllib.request
 import zipfile
+import zip_rows  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -513,11 +514,12 @@ def sheet(case, folder, plate, others=(), mask=None, judge_at=None):
         for title, path in (("export", export), *others):
             into = os.path.join(work, title.replace(" ", "_"))
             with zipfile.ZipFile(path) as z:
-                names = [n for n in z.namelist() if n.startswith(("export/", "matte/")) and not n.endswith("/")]
+                composite = zip_rows.composite(z.namelist())  # its frames in a folder, else its one movie
+                names = composite + zip_rows.files(z.namelist(), "matte")
                 z.extractall(into, names)
-            movies = [n for n in names if n.startswith("export/") and n.lower().endswith(MOVIES)]
+            movies = [n for n in composite if n.lower().endswith(MOVIES)]
             columns.append((title, os.path.join(into, movies[0]) if movies else
-                            [os.path.join(into, n) for n in sorted(names) if n.startswith("export/") and n.lower().endswith(IMAGES)]))
+                            [os.path.join(into, n) for n in sorted(composite) if n.lower().endswith(IMAGES)]))
             mattes = mattes or sorted(glob.glob(os.path.join(into, "matte", "*.png")))
         count, numbers = media_count(columns[1][1]), frame_numbers(columns[0][1])  # the plate's own frame numbers
         number = lambda i: numbers[i] if i < len(numbers) else i + 1  # noqa: E731
@@ -624,7 +626,7 @@ def export_media(path, into):
     """The export inside a case's export.zip (its export/ folder), unzipped into `into`: the movie's path, or the image
     files in order."""
     with zipfile.ZipFile(path) as z:
-        names = [n for n in z.namelist() if n.startswith("export/") and not n.endswith("/")]
+        names = zip_rows.composite(z.namelist())  # its frames in a folder, else its one movie
         z.extractall(into, names)
     movies = [n for n in names if n.lower().endswith(MOVIES)]
     return os.path.join(into, movies[0]) if movies else [os.path.join(into, n) for n in sorted(names) if n.lower().endswith(IMAGES)]
