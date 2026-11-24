@@ -1003,8 +1003,8 @@ def fluid16_flow(browser, port):
     check(True, "the fluid shot plays as soon as its full size is made, while SDR to HDR runs on it")
     wait_log(page, added_line(("SDR to HDR: done in", "SDR to HDR took")), 120000, "SDR to HDR on the fluid shot")
     new = page.evaluate("window.__lines")
-    check(any(line.startswith("Plate ") and "16-bit" in line for line in new) and not any("under the edits" in line for line in new),
-          "the plate's line says 16-bit, and nothing reopens the fluid shot")
+    check(any(line.startswith("Plate ") and "16-bit" in line and line.endswith("\n  Finish: SDR to HDR on.") for line in new) and not any("under the edits" in line for line in new),
+          "the plate's line says 16-bit and that Finish > SDR to HDR is on, and nothing reopens the fluid shot")
     check(not page.is_disabled("#export-btn"), "a fluid shot with no edit on it can be exported")
     page.click("#export-btn")
     fmt = page.text_content("#x-format") or ""

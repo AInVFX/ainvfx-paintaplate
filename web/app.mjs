@@ -356,7 +356,7 @@ async function openPlate(list, typed, opts = {}) {
   previewUI(); fitView(); historyUI(); timelineUI(); stagesUI(); exportUI(); render();
   // The plate's two lines in the log (design rule 12): what it is, then the sizes the page works at. What to do next is a hint, below
   const depth = opts.fluid?.depth ? { bits: opts.fluid.depth, float: false } : plateDepth(spec); // a blank plate: the depth asked for its fluid shot
-  log(`Plate ${S.plate.name}: opened in ${((performance.now() - began) / 1000).toFixed(1)} s.\n  ${w} x ${h}, ${spec.frames} frame${spec.frames === 1 ? "" : "s"}, ${depth.float ? "float" : `${depth.bits}-bit`}, ${cs}${opts.cs ? "" : ", from file"}.`);
+  log(`Plate ${S.plate.name}: opened in ${((performance.now() - began) / 1000).toFixed(1)} s.\n  ${w} x ${h}, ${spec.frames} frame${spec.frames === 1 ? "" : "s"}, ${depth.float ? "float" : `${depth.bits}-bit`}, ${cs}${opts.cs ? "" : ", from file"}.${opts.fluid?.depth === HDR_DEPTH && S.hdrReady ? "\n  Finish: SDR to HDR on." : ""}`);
   log(`Working sizes: edits at ${S.plate.work.join(" x ")}, edit preview at ${S.plate.prev.join(" x ")}, ${S.previewCap ? `shot preview at ${S.plate.shot.join(" x ")}` : "shot preview off"}, tracking at ${S.plate.track.join(" x ")}.`);
   const long = opts.under || opts.fluid ? null : lengthWarning({ name: S.plate.name, total: S.plate.total, kept: spec.frames, first: S.plate.first, fps: S.plate.fps });
   if (long) log(long.fact); // frames left out: the status line shows it below, with what to do
