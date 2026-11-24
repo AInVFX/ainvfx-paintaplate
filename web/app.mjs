@@ -2849,7 +2849,7 @@ function plan(r, all) { // the steps this set of edits needs: the erase pass for
   const fl = all.some((e) => e.tool === "fluid"), active = all.filter((e) => e.tool !== "fluid"); // a blank plate's fluid shot: its steps first, the edits' read it as their plate
   const erase = active.some((e) => e.tool === "erase"), paint = active.some((e) => e.tool === "paint"), carry = active.some((e) => e.tool !== "erase");
   const tools = active.map((e) => e.tool), hdrOn = hdrOfKey(r.key, holdsHdr(p.spec, p.headroom)); // the switch is in the key
-  r.hdrAfter = S.hdrReady && hdrAfterComposite(p.spec, tools, hdrOn, p.headroom); // a Light edit's new light in HDR: SDR to HDR on the relit composite
+  r.hdrAfter = S.hdrReady && hdrAfterComposite(p.spec, fl ? [...tools, "fluid"] : tools, hdrOn, p.headroom); // a Light edit's new light in HDR: SDR to HDR on the relit composite
   const up = !!S.deliver.upscale && S.upscaleReady, alone = !active.length, upAlone = r.key === PLATE_UP || (fl && alone && !(S.hdrReady && wantsHdr(p.spec, [], hdrOn))); // Finish > Upscale, as the switch stands: setFinish plans the render on show again
   const keeps = up && !alone && !r.hdrAfter && upscaleKeeps(tools, exrResult(p.spec, S.hdrReady && wantsHdr(p.spec, tools, hdrOn), p.headroom)); // the plate and the layer are upscaled, then composited
   const madeAlready = fl && !!fluidDonor(r, all.find((e) => e.tool === "fluid").version); // its full size made by another render

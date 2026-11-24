@@ -1126,8 +1126,9 @@ export const wantsHdr = (spec, tools, on) => !!spec && !!on && !tools.includes("
 // SDR to HDR on the composite, once it is made: a set with a Light edit, on a plate whose format holds nothing above 1.0, when
 // SDR to HDR is on. Relight Transfer relights the plate's own pixels, and the shot's HDR frames reach the result only inside
 // the mattes, so the new light would stay SDR: the relit composite goes through SDR to HDR whole, as a plate with no edit
-// does (app.plateHdr), and its frames are the result. A plate that holds values above 1.0 keeps them under the relight.
-export const hdrAfterComposite = (spec, tools, on, headroom = 1) => !!spec && !!on && tools.includes("light") && !holdsHdr(spec, headroom);
+// does (app.plateHdr), and its frames are the result. So does a set over a fluid shot, whose plate is generated: the fluid
+// shot goes through SDR to HDR with the edits on it. A plate that holds values above 1.0 keeps them under the relight.
+export const hdrAfterComposite = (spec, tools, on, headroom = 1) => !!spec && !!on && (tools.includes("light") || tools.includes("fluid")) && !holdsHdr(spec, headroom);
 // The switch away from the plate's default makes another render, so each setting keeps its own: "|hdr" or "|sdr".
 export const hdrKey = (edits, dflt, on) => (on === dflt ? edits : `${edits}|${on ? "hdr" : "sdr"}`);
 export const hdrOfKey = (key, dflt) => (key?.endsWith("|hdr") ? true : key?.endsWith("|sdr") ? false : dflt);
