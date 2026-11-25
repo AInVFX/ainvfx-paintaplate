@@ -855,7 +855,7 @@ export function upscaleWhy(width, height, ask = UPSCALE_ASK) {
   return tw === width && th === height ? `At the plate's own size, ${restore}` : `This size is smaller than the plate, so the frames come out smaller: ${restore}`;
 }
 // Finish > Upscale's note under its size list: about how long the upscaled set takes on this GPU, for the size chosen and
-// the edits on show (upscaleFigures).
+// the edits displayed (upscaleFigures).
 export const upscaleNote = (seconds) => `About ${Math.max(1, Math.round(seconds / 60))} min on this GPU.`;
 
 // The Finish menu: the passes on the whole plate after the full-size composite, in the order the render runs them. Each
@@ -903,7 +903,7 @@ export function exportWords({ kind, ready = true, left = "", exr = false, hdr = 
     matte: { label: "Matte", detail: "where the plate changed, PNG frames", shown: edits },
     shot: { label: steps.shot, detail: "the whole frame as the model made it, H.264 MP4", shown: edits },
     source: { label: "Source plate", detail: bytes > 0 ? `the plate's own files, ${gb(bytes)}` : "the plate's own files", shown: source && kind !== "fluid" },
-    graph: { label: "ComfyUI graph", detail: "the scene as one ComfyUI workflow, with the images it loads", shown: true }, // the page decides: the edits on show, or a fluid shot alone
+    graph: { label: "ComfyUI graph", detail: "the scene as one ComfyUI workflow, with the images it loads", shown: true }, // the page decides: the edits displayed, or a fluid shot alone
     upscaled: { label: upHdr ? `${hdrRow}, upscaled` : steps.up, shown: true }, // no row: Finish > Upscale adds its set to the zip
   };
   return { hint, format, note, rows, zip: zipNames(rows, hdrRow, steps.comp), help: `${hint} ${steps.comp} keeps the plate's format. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.`,
@@ -1222,7 +1222,7 @@ export const hdrAfterComposite = (spec, tools, on, headroom = 1) => !!spec && !!
 // The switch away from the plate's default makes another render, so each setting keeps its own: "|hdr" or "|sdr".
 export const hdrKey = (edits, dflt, on) => (on === dflt ? edits : `${edits}|${on ? "hdr" : "sdr"}`);
 export const hdrOfKey = (key, dflt) => (key?.endsWith("|hdr") ? true : key?.endsWith("|sdr") ? false : dflt);
-// The render key of what is on show: the edits' key (hdrKey). A plate with no edit has a render only when the Finish menu asks
+// The render key of what is displayed: the edits' key (hdrKey). A plate with no edit has a render only when the Finish menu asks
 // SDR to HDR of a plate whose format holds nothing above 1.0: the key PLATE_ALONE, whose one step is SDR to HDR on the plate.
 export const PLATE_ALONE = "|hdr";
 // Finish > Upscale on a plate with no edit and no SDR to HDR: the key PLATE_UP, whose one step upscales the plate itself.
@@ -1303,7 +1303,7 @@ export const drawsDeep = (playing, holdsAll) => !playing || holdsAll;
 
 // Esc, by what the page is doing. A plate that opens stops opening. The strokes in progress are dropped. The edit being
 // generated stops and stays the current edit, with its strokes, words and seed ("reopen"): everything else that generates
-// stops with it, and nothing starts until Enter. Then the selection goes, then a pass on show gives way to the latest
+// stops with it, and nothing starts until Enter. Then the selection goes, then a pass displayed gives way to the latest
 // result, and last everything that generates stops ("stop").
 export const escapeAction = ({ opening = false, editing, running = false, selected, pinned = false, generating }) =>
   (opening ? "cancelOpen" : editing ? "discard" : running ? "reopen" : selected ? "deselect" : pinned ? "latest" : generating ? "stop" : null);
@@ -1413,7 +1413,7 @@ export function dabFlow(peak, spacingOverRadius) {
   return peak / sum;
 }
 
-// ---------- Passes on show ----------
+// ---------- The passes displayed ----------
 // Each finished step that made a picture shows on every frame from the Render panel, one render of the shot at a time:
 // where its movie sits, in the render (`r`) or in its preview size (`pv`), as a path of keys. The tracking steps and the
 // export show their matte as a grey movie, drawn through the config's data colour space (`spaces.data`): it shows its own
@@ -1424,7 +1424,7 @@ export const PASSES = { fluid: ["pv", "fluid.movie"], fluidfull: ["r", "fluid.mo
 export const MATTE_PASSES = new Set(["erase", "track", "trackfull", "export"]);
 const keyPath = (o, path) => path.split(".").reduce((x, k) => x?.[k], o);
 export function passMovie(id, r, pv, spaces = {}, up = null) { // { url, space, frames } of a finished step, or null; `up`: what Upscale's steps made at the size asked for
-  const at = PASSES[id], store = at && (at[0] === "pv" ? pv : id === "review" ? r?.compResult ?? r : r); // the composite's own result, whichever is on show (app.plan)
+  const at = PASSES[id], store = at && (at[0] === "pv" ? pv : id === "review" ? r?.compResult ?? r : r); // the composite's own result, whichever is displayed (app.plan)
   if (at?.[0] === "up") return up?.[at[1]]?.url ? { url: up[at[1]].url, space: up[at[1]].space, frames: null } : null; // its movie at its own size (app.fitCanvas)
   const url = (at && keyPath(store, at[1])) ?? (id === "review" ? store?.review : null);
   if (!url) return null;

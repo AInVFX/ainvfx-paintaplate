@@ -470,7 +470,7 @@ def generate_flow(browser, port):
 
 def history_flow(browser, port):
     """Edits in History. A whole-object erase as the second edit: SAM runs while the strokes rest. The first edit removed:
-    the numbers start again, the erase's matte and clean plate are used again, no render step stops, only the set on show
+    the numbers start again, the erase's matte and clean plate are used again, no render step stops, only the set displayed
     renders, its preview before its full size. Undo and redo of the removal. An edit
     selected: its words retyped, another seed. Three undos take the kept results back. The preview size menu."""
     errors = []
@@ -511,12 +511,12 @@ def history_flow(browser, port):
     stopped = [line for line in lines if re.match(r"^(clean|cleanup|shot|matte|comp|review|export) \S+: cancelled", line)]
     check(not stopped, f"a removal stops no render step: the render it leaves keeps what it made {stopped}")
     shown = {re.match(r"^Render v(\d+):", line)[1] for line in lines if re.match(r"^Render v\d+: .*: about \d+ s", line)}
-    check(len(shown) == 1, f"only the set on show renders: the render of the edits before the removal waits (renders {sorted(shown)})")
+    check(len(shown) == 1, f"only the set displayed renders: the render of the edits before the removal waits (renders {sorted(shown)})")
     steps = [(i, line) for i, line in enumerate(lines) if re.match(r"^Render v\d+: .*(?: \(about |: about )\d+ s", line)]
     comp = next((i for i, line in steps if re.search(r"Composite, preview(?: \(|: )about", line)), None)
     full = next((i for i, line in steps if re.search(r"(, full size|Export)(?: \(|: )about", line)), None)
     check(comp is not None and (full is None or comp < full),
-          f"the render queue: the preview of the edits on show runs before any full-size step (composite at {comp}, first full size at {full})")
+          f"the render queue: the preview of the edits displayed runs before any full-size step (composite at {comp}, first full size at {full})")
     check(not page.is_disabled("#undo-btn") and page.is_disabled("#redo-btn"), "undo is live, redo is not")
     page.keyboard.press("Control+z")
     page.wait_for_function(DONE.format(n=2), timeout=120000)
@@ -714,7 +714,7 @@ def scene_flow(browser, port):
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
     open_plate(page)
 
-    def reviews(n):  # the full-size composite of the edits on show, the last step Generate starts
+    def reviews(n):  # the full-size composite of the edits displayed, the last step Generate starts
         page.wait_for_function(f"window.__lines.filter((t) => {HAS_REVIEWED}).length >= {n}", timeout=180000)
 
     page.evaluate(WATCH)
@@ -956,7 +956,7 @@ def hdr_flow(browser, port):
     shown = lambda: page.eval_on_selector_all("#stages li.shown .name", "els => els.map(e => e.textContent)")  # noqa: E731
     picture = lambda: page.evaluate("document.querySelector('canvas[data-picture]').dataset.picture")  # noqa: E731
     check({"Edited first frame", "Shot, preview", "SDR to HDR", "Composite, full size"} <= set(rows()) and shown() == ["Composite, full size"],
-          f"every finished pass with a picture is a row to click, the latest on show: {rows()}, {shown()}")
+          f"every finished pass with a picture is a row to click, the latest displayed: {rows()}, {shown()}")
     page.click("#stages li.pick:has-text('SDR to HDR')")
     poll(page, lambda: shown() == ["SDR to HDR"])
     check(shown() == ["SDR to HDR"] and ": displayed." in (page.text_content("#hud") or ""), f"a click displays that pass in the viewer: {shown()}")

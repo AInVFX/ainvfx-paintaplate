@@ -21,7 +21,7 @@ test("over a real SDR plate a paint keeps the plate's own pixels, and a plate th
 test("once SDR to HDR has run after the composite, the composite's step still shows the composite, SDR to HDR's step its own frames", () => {
   const comp = { review: "/view?review.mp4", reviewSpace: "@model", reviewFrames: "output:v2/review/frames/f_%05d.exr", play: "/view?review.mp4", playSpace: "@model" };
   const r = { ...comp, compResult: comp, hdrMovie: "/view?hdr_movie.mp4", hdrFrames: "output:v2/hdr/f_%05d.exr" };
-  Object.assign(r, { review: r.hdrMovie, reviewSpace: "ACEScct", reviewFrames: r.hdrFrames, reviewFramesSpace: "ACES2065-1", play: null, playSpace: null }); // the result on show
+  Object.assign(r, { review: r.hdrMovie, reviewSpace: "ACEScct", reviewFrames: r.hdrFrames, reviewFramesSpace: "ACES2065-1", play: null, playSpace: null }); // the result displayed
   const spaces = { log: "ACEScct", hdr: "ACES2065-1" };
   assert.deepEqual(passMovie("review", r, {}, spaces), { url: comp.play, space: "@model", frames: comp.reviewFrames });
   assert.deepEqual(passMovie("hdr", r, {}, spaces), { url: r.hdrMovie, space: "ACEScct", frames: r.hdrFrames, framesSpace: "ACES2065-1" });

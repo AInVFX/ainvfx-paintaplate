@@ -5,7 +5,7 @@ import { XRAY_ALPHA, alphaFromHalfs, halfToFloat, tintPixels, xrayPlan } from ".
 const r = { erased: { found: { movie_a: "a" } }, full: { found: { movie_a: "a", movie_b: "bf" } }, exported: null };
 const pv = { mattes: { found: { movie_a: "a", movie_b: "bp" } } };
 
-test("the X-ray's mattes: a light edit tints the whole frame, the export's matte once made, else the tracking mattes of the size on show until its composite", () => {
+test("the X-ray's mattes: a light edit tints the whole frame, the export's matte once made, else the tracking mattes of the size displayed until its composite", () => {
   assert.deepEqual(xrayPlan({ tools: [] }), { from: "none", urls: [] });
   assert.deepEqual(xrayPlan({ tools: ["paint", "light"], r, pv, full: true }), { from: "light", urls: [] });
   assert.deepEqual(xrayPlan({ tools: ["paint", "erase"], r, pv, full: true }), { from: "tracking", urls: ["a", "bf"] });

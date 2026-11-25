@@ -54,8 +54,8 @@ def run(browser, port, U):
     page.set_viewport_size(size); page.wait_for_timeout(700)
     U.check(lines() == before, f"a resize keeps the frame cache and writes no line: {lines()[len(before):]}")
     page.close()
-    # Paused, the viewer reads the frame on show at the plate's own size, whatever the cache holds: 40 MB keeps desk.mp4's
-    # frames at 960 x 528 for playback, and the frame on show still comes at 1280 x 704 from the frames route.
+    # Paused, the viewer reads the frame displayed at the plate's own size, whatever the cache holds: 40 MB keeps desk.mp4's
+    # frames at 960 x 528 for playback, and the frame displayed still comes at 1280 x 704 from the frames route.
     page = U.load(browser, port, "?blank=0&cache=40")
     asked = []
     page.on("request", lambda r: asked.append(r.url) if "/paintaplate/frames?" in r.url else None)

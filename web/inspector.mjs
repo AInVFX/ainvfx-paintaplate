@@ -1,7 +1,7 @@
 // The colour inspector, as OpenRV's (src/lib/app/mu_rvui/inspector.mu at 0bd9675): F5 shows it, as
 // toggleColorInspector in rvui.mu; Shift+click samples, Shift+drag averages, the box drags the point with it. RV lists the pixel in the image's own pixels (Native Pixel), its values as "%f", and
 // the average of the pixels sampled with Shift held. RV shows either the source colour or the final colour; this
-// inspector shows both: the source values at full precision and native size, read on the server from the file on show
+// inspector shows both: the source values at full precision and native size, read on the server from the file displayed
 // (/paintaplate/pixel), and the values drawn on screen, as 0 to 1 like RV's framebuffer read. Pure functions, tested in
 // tests/js/inspector.test.mjs.
 
@@ -15,7 +15,7 @@ export function sourcePixel(fx, fy, width, height) {
   return { x: clamp(fx, width), y: clamp(fy, height), inside };
 }
 
-// The file on show: a shot's EXR frames when it has them, else its movie (an output file named by ComfyUI's view URL),
+// The file displayed: a shot's EXR frames when it has them, else its movie (an output file named by ComfyUI's view URL),
 // else the plate.
 export function sourcePath(shot, plate) {
   if (shot?.frames) return shot.frames;

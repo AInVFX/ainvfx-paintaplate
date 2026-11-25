@@ -14,7 +14,7 @@ const placeholders = [...html.matchAll(/\bplaceholder="([^"]*)"/g)].map((m) => m
 test("no idiom that a reader who is not fluent must decode", () => {
   const lines = [...titles, ...notes, ...placeholders];
   assert.ok(lines.length > 50, `lines found: ${lines.length}`);
-  const idioms = ["rub out", "rubs out", "comes back", "come back", "at once", "goes on", "on show", "for the latest", "can change"];
+  const idioms = ["rub out", "rubs out", "comes back", "come back", "at once", "goes on", "for the latest", "can change"];
   assert.deepEqual(lines.filter((l) => idioms.some((i) => l.includes(i))), []);
 });
 

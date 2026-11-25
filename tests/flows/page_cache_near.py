@@ -1,5 +1,5 @@
-"""A switch of the sources on show keeps a cache's frames when its new size is near its own. With a budget that holds the
-shot alone at the size on show, the wipe shares it with the plate and plans the shot a few pixels smaller: the shot keeps
+"""A switch of the sources displayed keeps a cache's frames when its new size is near its own. With a budget that holds the
+shot alone at the size displayed, the wipe shares it with the plate and plans the shot a few pixels smaller: the shot keeps
 its size and the frames that still fit. With the wipe off, its own size comes back with its frames: the green stripe never
 falls below where it was."""
 import re

@@ -36,7 +36,7 @@ def run(browser, port, U):
     page.click("#stop")
     U.wait_log(page, U.added_line("Stopped: what finished is kept"), 10000, "line of the stop")
     before = posts()
-    U.check(not page.is_hidden("#stop"), "under the stop the step still waits for its upload, and Stop stays on show")
+    U.check(not page.is_hidden("#stop"), "under the stop the step still waits for its upload, and Stop stays displayed")
     U.mock_route(port, "/mock/release", {})
     U.poll(page, lambda: page.is_hidden("#stop") or posts() != before, 30)  # the step has ended, or a job came
     U.check(page.is_hidden("#stop") and posts() == before,
