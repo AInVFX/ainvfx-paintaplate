@@ -15,12 +15,12 @@ Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com
 | Feature | What it does |
 | --- | --- |
 | **Clean** | Removes the object under your stroke and regenerates the background behind it. Enable **Whole object** to remove all of it: name it in the text prompt ("red umbrella"), and SAM 3.1 (Meta's Segment Anything Model) finds it |
-| **Paint** | Adds what the text prompt describes where you paint, in the style of the image. It follows the outline, pose and colours of your strokes |
+| **Paint** | Adds what the text prompt describes where you paint, in the style of the image. It follows the outline, pose and colours of your strokes. SAM 3.1 tracks it, and the **Matte strategy** menu chooses how much of the new shot to keep, from the object alone to the whole shot, so the plate stays untouched everywhere else |
 | **Light** | Relights the shot. Paint where the light comes from, in its colour. Paint in black to darken an area |
-| **A fluid shot** | Starts from a blank plate. Paint your fluid (smoke, fire, water and more) in flat colours on a few keyframes, and ainvfx-fluid, our fluid model, generates the shot. Then edit it with Paint, Clean or Light, as any plate |
+| **A fluid shot** | Starts from a blank plate. Paint your fluid (smoke, fire, water and more) in flat colours on a few keyframes, and ainvfx-fluid, our fluid model, generates the shot as the first row of History. Then edit it with Paint, Clean or Light, as any plate |
 | **Review** | The viewer follows [OpenRV](https://github.com/AcademySoftwareFoundation/OpenRV), the Academy Software Foundation's review player: colour through OpenColorIO (OCIO), the same keys, a wipe against the plate, the Colour Inspector |
 | **Finish** | Enable **SDR to HDR** to turn a standard dynamic range plate, edited or not, into high dynamic range: half-float EXR frames in ACES2065-1. Enable **Upscale** to upscale the result with ByteDance's SeedVR2 7B, up to 3840 x 2160 |
-| **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers), with its matte, as one zip. The matte is the mask of what the edit changed. Enable **ComfyUI graph** to export every step as one ComfyUI workflow, to open and change in ComfyUI |
+| **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers), with its matte, as one zip. The matte is the mask of what the edit changed. Each file is named after the plate, or the scene once saved, then its row in the Export dialog. Enable **ComfyUI graph** to export every step as one ComfyUI workflow, with the images it loads, to open and change in ComfyUI |
 
 ## What you need
 
@@ -103,13 +103,13 @@ No Runpod account yet? Create it through [our referral link](https://www.runpod.
 
 ## A first edit
 
-1. Press **Open plate**, then double-click a plate, for example `plates/horse.mp4`. Sequence files and folders of frames are supported. In the same dialog, **Blank plate** starts a fluid shot.
+1. Press **Open plate**, then double-click a plate, for example `plates/horse.mp4`. Sequence files and folders of frames are supported. A plate opens with up to 20 s of frames, or as many as this machine holds. In the same dialog, **Blank plate** starts a fluid shot.
 2. Pick a tool: **Paint**, **Clean** or **Light** (keys P, C and L). Describe the edit in the text prompt, for example "a campfire". Then paint on the first frame.
 3. Press **Generate** (or Enter): the edit on the first frame followed by the shot. The Render panel shows each step as it runs, and each pass displays live. **Render > Preview** can first make a shot preview: a quick pass of the whole shot at half or a quarter of the size.
 4. Play the shot with Space, and compare it with the plate in the wipe.
 5. Press **Export** to write the result in the plate's own format.
 
-Each edit stays in History: click its pencil to change it, and add as many as you need. **Save scene** keeps the plate and its edits on this ComfyUI.
+Each edit stays in History, and you can add as many as you need. Click a row to see its strokes, or its pencil to change the edit. **Save scene** keeps the plate and its edits on this ComfyUI.
 
 ## Tips
 
@@ -120,13 +120,16 @@ Each edit stays in History: click its pencil to change it, and add as many as yo
 - Paint a plate reads each plate's colour space from its file, and the export writes every pixel back in that space. Change it only for a camera's log footage, which no file tag describes: right-click > OCIO > Plate, then the camera's log space.
 - Open the EXR frames of SDR to HDR in ACES2065-1, in a viewer or in compositing software. Read with a plain gamma, they look darker and less saturated than the plate.
 - Open a plate behind a symbolic link inside ComfyUI's input or output folder by its full path, when ComfyUI runs on your own machine: the Open dialog does not follow such a link. The input or output folder itself can be a link, or set with ComfyUI's `--input-directory` and `--output-directory`.
+- Export's zip names each file after the plate, or the scene once saved, then its row: for a plate named `desk`, `desk_v1.zip` holds `desk_composite_full_size.mp4`, the matte's frames in `matte/`, `desk_shot_full_size.mp4`, `desk_comfyui_graph.json` and `desk_models.md`. With SDR to HDR, its frames are the row **HDR**, in `hdr/`.
+- **Source plate**, off by default, adds the plate's own files to the zip, in `source_plate/`. A plate of 4K EXR frames can take many gigabytes: the dialog shows their size first, and the zip downloads as it is written.
+- To run the exported ComfyUI graph on another machine, copy the zip's `input/` folder into ComfyUI's input folder, and the plate to the path the graph names.
 - Press `?` for the keys. The backquote key shows the viewer full screen, where S opens the colours and T the edit's text prompt. The right-click menu lists every action with its keyboard shortcut, and the viewer's colour tools under **OCIO**.
 
 ## When something goes wrong
 
 - **The log.** The **Log** button opens it. It records what happened, one line per fact, and the button is highlighted when an error arrives. The download icon beside it saves the log as a text file, with the versions and the machine as ComfyUI reports them. Its paths start at ComfyUI's folder, as `output/paintaplate/…`, so it shows nothing of your own folders.
 - **The memory profile.** Its line in the log says how the page uses your GPU, from its VRAM: see [What you need](#what-you-need).
-- **Stop.** Esc, or **Stop** beside Generate, stops what generates. Finished steps are kept, and Enter continues from there.
+- **Stop.** Esc, or **Stop** beside Generate, stops what generates. Finished steps are kept; Enter continues from there.
 - **ComfyUI's memory grows, or the page waits and nothing runs.** Start ComfyUI with `PAINTAPLATE_TRACE=1` in its environment. Every request then writes a line in ComfyUI's terminal when it starts and when it ends, with the memory the process holds. Add these lines to your report: [TESTING.md](TESTING.md#the-trace-when-comfyuis-memory-grows-and-no-job-runs) explains them.
 - **A model or a node is missing.** The page names it at start. `python get_models.py --list` shows what is in place.
 - **Report a fault** in the [issues](https://github.com/AInVFX/ainvfx-paintaplate/issues), with the saved log attached.
@@ -149,8 +152,8 @@ Paint a plate is a web page that ComfyUI serves, with a pack of 16 nodes. Each s
 
 **Length and frame rate**
 
-- A plate opens with up to 20 s at its frame rate, LTX 2.5's longest shot: 481 frames at 24 fps, 497 at 25 fps and 1001 at 50 fps. The log names any frames left out.
-- Every tool is tested at 121 frames. Longer shots also run, with less testing on our side, and need more VRAM and more RAM.
+- A plate opens with up to 20 s at its frame rate, LTX 2.5's longest shot: 481 frames at 24 fps, 497 at 25 fps and 1,001 at 50 fps. It also opens with no more frames than this machine's RAM holds through every step. The Open dialog says so before the plate opens, and the log names any frames left out.
+- Every tool is tested at 121 frames. Longer shots also run, tested at 497 frames (1920 x 1080, 25 fps) and 1,001 frames (960 x 544, 50 fps) on a 96 GB GPU with 175 GB of RAM. They need more VRAM and more RAM, and take about twice the time that the Render panel announces.
 
 **Size**
 
@@ -160,17 +163,19 @@ Paint a plate is a web page that ComfyUI serves, with a pack of 16 nodes. Each s
 
 **Memory and time**
 
-- RAM grows with a plate's length and size. 64 GB is tested for 121 frames at 1920 x 1080. A 3840 x 2160 plate of 121 frames ran on a 96 GB GPU with 188 GB of RAM, where ComfyUI held up to 164 GB.
+- RAM grows with a plate's length and size. On a 64 GB machine, with 52 GB of it for ComfyUI and a 16 GB GPU, a 1920 x 1080 plate opens with 121 frames. With 175 GB of RAM and a 96 GB GPU, it opens with 513 frames, and a 3840 x 2160 plate with 129. A 3840 x 2160 plate of 121 frames ran on a 96 GB GPU with 188 GB of RAM, where ComfyUI held up to 164 GB.
 - Under 16 GB of VRAM, LTX works in 256 px tiles, and a soft band can show where two tiles overlap, most in SDR to HDR's frames.
 - Upscale runs again with each new render. At 3840 x 2160, for 121 frames, it takes about 46 min for Paint or Clean on a 16 GB GPU, 23 min for the result alone, and about 14 min on a 96 GB GPU.
+- Upscale works in chunks of 21 frames, and two chunks meet with no blend: a jump can show there.
 
 **The matte, for Paint and Clean**
 
 - A paint's matte can lose the painted object on some frames, when SAM 3.1 stops finding it: the composite then shows the plate there. The log's matte line names the frames where the object is hidden or out of the frame. Try another seed, another text prompt or another stroke.
+- A painted object that leaves the frame and comes back loses its matte: the composite shows the plate there from then on. On 497 frames of `horse.mp4` at 1920 x 1080, the cow reached the frame's edge at frame 125, and the composite lost it once it was back in view. **Whole shot** in the **Matte strategy** menu keeps it.
 - A painted object that comes back from behind something can get its matte back a few frames late: check those frames.
 - A paint's matte can take in a change that the shot made right beside the painted object: check around the object.
 - A paint's matte can keep a few small spots near the edit, where the regenerated frame differs slightly from the plate.
-- A faint paint, such as thin smoke or a soft glow, can keep only its densest part: where the shot changes the plate too little, the composite shows the plate. Paint it denser or brighter, or try another seed.
+- A faint paint, such as thin smoke or a soft glow, can keep only its densest part: where the shot changes the plate too little, the composite shows the plate. Paint it denser or brighter, try another seed, or choose **Object and effects** in its **Matte strategy** menu.
 - The shot preview's matte can cover parts of the object far from the edit. Export uses the full-size matte.
 
 **Clean**
@@ -184,6 +189,7 @@ Paint a plate is a web page that ComfyUI serves, with a pack of 16 nodes. Each s
 **Paint**
 
 - A paint that replaces an object, such as a new arm over an arm, can leave thin pieces of the old object in view on later frames, where the old object reaches beyond the new one.
+- On a long shot, a Paint can drift from the plate: on 1,001 frames of `horse.mp4` at 960 x 544 and 50 fps, the painted cow left the shot by frame 201, and a larger cow appeared later.
 
 **Light**
 
