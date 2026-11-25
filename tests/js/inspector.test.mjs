@@ -21,7 +21,7 @@ test("values as RV prints them, above 1.0 and below 0, and the running average",
   const rows = inspectorRows({ x: 4, y: 5, frame: 1001, value: [4, 0.5, -0.1], final: [1, 0.5, 0], average: avg });
   assert.deepEqual(rows[0], ["Native Pixel", "4, 5"]);
   assert.deepEqual(rows.find((r) => r[0] === "Red"), ["Red", "4.000000"]);
-  assert.ok(rows.some((r) => r[0] === "Average of 2"));
+  assert.ok(rows.some((r) => r[0] === "Average source colour of 2"));
   assert.equal(rows.at(-3)[1], "2.000000");
 });
 
@@ -48,5 +48,5 @@ test("the side of the wipe a plate pixel falls on: left of the line, the plate o
 test("the rows name the pass read; a picture the page drew is read as drawn", () => {
   const rows = inspectorRows({ x: 1, y: 2, frame: 1001, source: { label: "Shot, preview", space: "ACEScg", movie: true }, value: [0.5, 0.5, 0.5] });
   assert.deepEqual(rows.slice(0, 3), [["Native Pixel", "1, 2"], ["Frame", "1001"], ["Source", "Shot, preview"]]);
-  assert.equal(sourceLine({ drawn: "First frame", label: "First frame" }), "First frame, as drawn: the final colour only");
+  assert.equal(sourceLine({ drawn: "First frame", label: "First frame" }), "First frame, as drawn: the display colour only");
 });

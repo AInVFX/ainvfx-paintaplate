@@ -4200,7 +4200,7 @@ function inspectSample(e, start) { // Shift+click, Shift+drag: RV's beginSamplin
   refreshInspector(true);
 }
 
-function refreshInspector(force = false) { // on every redraw: place the box, read the final colour, read the source again
+function refreshInspector(force = false) { // on every redraw: place the box, read the display colour, read the source again
   const i = S.inspect;
   if (!i.on || !S.plate) return;
   const box = $("#inspector"), mark = $("#inspector-mark");
@@ -4211,7 +4211,7 @@ function refreshInspector(force = false) { // on every redraw: place the box, re
   Object.assign(box.style, { left: `${bx}px`, top: `${by}px` });
   mark.hidden = false; Object.assign(mark.style, { left: `${sx}px`, top: `${sy}px` });
   const cx = Math.floor(((i.pt.x + 0.5) / width) * view.width), cy = Math.floor(((i.pt.y + 0.5) / height) * view.height);
-  i.final = [...readBack(view, cx, cy).slice(0, 3)].map((v) => v / 255); // the final colour, as drawn
+  i.final = [...readBack(view, cx, cy).slice(0, 3)].map((v) => v / 255); // the display colour, as drawn
   const key = inspectKey();
   if (force || key !== i.key) { i.key = key; readPixel(); }
   // The last values with the point and frame they were read at: while a read is on its way, a redraw would show the new
@@ -4254,7 +4254,7 @@ async function readPixel() {
   }
 }
 
-function showInspector(pt, frame, got, live = true) { // live: the point and frame on show now, so the final colour is theirs
+function showInspector(pt, frame, got, live = true) { // live: the point and frame on show now, so the display colour is theirs
   const box = $("#inspector"), i = S.inspect;
   const rows = pt ? inspectorRows({ ...pt, ...(got ?? {}), final: live ? i.final : null, frame: S.plate.first + frame, average: i.avg })
     : [["Shift+click", "the frame to sample a pixel"]];

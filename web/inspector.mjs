@@ -46,7 +46,7 @@ export function boxPlace(x, y, w, h, vw, vh, gap = 14) {
 // not the pass's values: the line says so.
 export function sourceLine(source, movie) {
   if (!source) return null;
-  if (source.drawn) return `${source.drawn}, as drawn: the final colour only`;
+  if (source.drawn) return `${source.drawn}, as drawn: the display colour only`;
   if (!movie && !source.movie) return `${source.space}, as stored`;
   return `${movie?.bits ?? 8}-bit movie, ${source.space}`;
 }
@@ -61,7 +61,7 @@ export function inspectorRows({ x, y, inside = true, frame, value, final, averag
   if (error) return [...rows, ["Error", error]];
   const rgb = (label, v) => [[label, ""], ...["Red", "Green", "Blue", "Alpha"].slice(0, v.length).map((n, i) => [n, formatValue(v[i])])];
   if (value) rows.push(...rgb("Source colour", value));
-  if (final) rows.push(...rgb("Final colour", final));
-  if (average?.n > 1) rows.push(...rgb(`Average of ${average.n}`, average.sum.map((s) => s / average.n)));
+  if (final) rows.push(...rgb("Display colour", final));
+  if (average?.n > 1) rows.push(...rgb(`Average source colour of ${average.n}`, average.sum.map((s) => s / average.n)));
   return rows;
 }
