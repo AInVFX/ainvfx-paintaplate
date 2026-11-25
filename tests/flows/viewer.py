@@ -180,7 +180,7 @@ def fluid_wipe_and_models(page, U):
     page.keyboard.press("Home"); page.keyboard.press("F6"); page.wait_for_timeout(800)
     xy = page.evaluate(TO_CANVAS, list(spot))
     key0 = page.evaluate(PIXEL, xy)
-    U.check(min(key0) > 200 and page.text_content("#wipe .label.left") == "Keyframe",
+    U.check(min(key0) > 200 and page.text_content("#wipe .label.left") == "Fluid 1, keyframes",
             f"the wipe on a fluid shot shows the painted keyframe on its frame: {key0}, label {page.text_content('#wipe .label.left')!r}")
     for _ in range(5): page.keyboard.press("ArrowRight")
     page.wait_for_timeout(800)

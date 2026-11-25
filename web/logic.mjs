@@ -626,6 +626,9 @@ export function nearestKey(frames, frame) {
   }
   return best;
 }
+// The wipe's name for a History row's strokes: « Paint 2, strokes », « Fluid 1, keyframes ». `name`: the tool's name, `n`:
+// the edit's number in History.
+export const strokesLabel = (name, n, fluid) => `${name} ${n}, ${fluid ? "keyframes" : "strokes"}`;
 
 // ---------- OCIO, as RV's menu shows it ----------
 

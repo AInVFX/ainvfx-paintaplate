@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, nearestKey, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7, autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, downloadLines } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearestKey, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokesLabel, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7, autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, downloadLines } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -1050,23 +1050,28 @@ function choosePass(id) {
   stagesUI();
 }
 
-// ---------- Two passes in the wipe (Ctrl+click on a finished Render step) ----------
+// ---------- Two passes in the wipe (Ctrl+click on a finished Render step or a History row) ----------
 // The wipe's left side shows a second pass of the edits on show, against the pass on show on its right, both named, so a
 // fault can be traced to the step it comes from: the shot against its composite, a matte against the picture, a preview
 // against the full size. Ctrl+click (Cmd+click on a Mac) puts a row there; the same again, Esc or F6 ends it. The left
-// side draws as the right does: paused, the frame at native size from the frames route; playing, its movie.
-S.cmp = null; // { id, label, url, space, frames, framesSpace, key, wiped }: the pass on the left, the edits it belongs to, and whether the wipe was on before
+// side draws as the right does: paused, the frame at native size from the frames route; playing, its movie. A History
+// row puts its strokes there instead, over the plate, on the frame that holds them (rowStrokes).
+S.cmp = null; // { id, label, url, space, frames, framesSpace, key, wiped, edit }: the pass on the left, the edits it belongs to, whether the wipe was on before, and a History row's edit for its strokes
 function compareRow(li, id) { // in the Render panel's pick helper: Ctrl+click compares, a plain click shows the pass
   const show = li.onclick;
   li.onclick = (e) => (e.ctrlKey || e.metaKey ? comparePass(id) : show(e));
   li.dataset.compare = id;
-  li.title += " Ctrl+click (Cmd+click on a Mac) puts it on the wipe's left side, against the displayed result.";
+  li.title += " Ctrl+click to add it to the wipe.";
   li.classList.toggle("compared", S.cmp?.id === id);
   if (S.xray) xrayLater(); // the rows changed: a matte the X-ray reads may have come
 }
 const passSpaces = () => ({ log: logSpace(), data: matteSpace(), hdr: HDR_FRAMES });
+const rowOf = (id) => S.edits.find((e) => `strokes:${e.id}` === id) ?? null; // a History row's strokes in the wipe: « strokes:<edit id> »
+const markCompared = () => { for (const li of $$("#history li[data-strokes]")) li.classList.toggle("compared", String(S.cmp?.edit?.id) === li.dataset.strokes); };
 function passLabel(id) {
   if (id === "first") return "Edited first frame";
+  const row = rowOf(id);
+  if (row) return strokesLabel(NAME[row.tool], num(row), row.tool === "fluid");
   return labelOf(STAGES.find((x) => x.id === id)) ?? id;
 }
 function shownLabel() { // the pass on show, by its row's name: the one clicked, else the latest result
@@ -1078,8 +1083,8 @@ function shownLabel() { // the pass on show, by its row's name: the one clicked,
 function comparePass(id) {
   if (S.cmp?.id === id) return endCompare();
   if (passLabel(id) === shownLabel()) return plateWipe(); // the pass on show against itself shows nothing: the plate takes the left side
-  const r = S.renders.get(S.heroKey);
-  const m = id === "first" ? { url: null, space: modelSpace(), frames: null } : passMovie(id, r, previewOf(r), passSpaces(), upOf(r));
+  const r = S.renders.get(S.heroKey), row = rowOf(id);
+  const m = row ? { url: null, space: modelSpace(), frames: null, edit: row } : id === "first" ? { url: null, space: modelSpace(), frames: null } : passMovie(id, r, previewOf(r), passSpaces(), upOf(r));
   if (!m) return;
   S.cmp = { ...m, id, key: S.heroKey, label: passLabel(id), wiped: S.cmp ? S.cmp.wiped : S.wipe !== null };
   sharp.cmp = null;
@@ -1087,16 +1092,17 @@ function comparePass(id) {
   else if (cmpVid.getAttribute("src") !== m.url) cmpVid.src = m.url;
   S.wipe ??= 0.5;
   $("#wipe-btn").setAttribute("aria-pressed", "true");
-  placeWipe(); render(); stagesUI();
-  hud(`Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right. Ctrl+click it again, Esc or F6 ends it.`, 3500);
+  placeWipe(); render(); stagesUI(); markCompared();
+  hud(`Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right. Press Esc or F6 to end it.`, 3500);
   log(`Viewer: wipe, ${S.cmp.label} against ${shownLabel()}.`);
 }
 // With the wipe on, comma steps its left side and period its right side through the passes on offer: on the left the
-// plate, the first frame and the Render panel's finished steps; on the right the latest result and the same steps. A pass
-// already on the other side is passed over: a pass against itself shows nothing.
+// plate, the first frame, the Render panel's finished steps and each History row's strokes; on the right the latest
+// result and the same steps. A pass already on the other side is passed over: a pass against itself shows nothing.
 function stepWipe(side) {
   if (S.wipe === null || !S.plate) return;
   const left = side === "left", rows = [...$$(left ? "#stages li[data-compare]" : "#stages li[data-pass]")].map((li) => (left ? li.dataset.compare : li.dataset.pass));
+  if (left) rows.push(...[...$$("#history li[data-strokes]")].reverse().map((li) => `strokes:${li.dataset.strokes}`)); // History's order: edit 1 first
   const offers = [left ? "plate" : null, ...rows], at = Math.max(0, offers.indexOf(left ? S.cmp?.id ?? "plate" : S.pass));
   for (let i = 1; i < offers.length; i++) {
     const id = offers[(at + i) % offers.length];
@@ -1191,6 +1197,7 @@ function endCompare(draw = true) { // the wipe goes back to the plate on its lef
   if (!S.cmp) return;
   const { wiped, label } = S.cmp;
   S.cmp = null; sharp.cmp = null;
+  markCompared();
   cmpVid.removeAttribute("src"); cmpVid.load();
   if (!wiped) { S.wipe = null; $("#wipe-btn").setAttribute("aria-pressed", "false"); }
   placeWipe(); stagesUI();
@@ -1331,7 +1338,7 @@ function shotFrame() { // the shot at the playhead: a cached frame, the video wh
 function render() {
   if (!S.plate || !S.hero) { xray.el.hidden = true; return; }
   if (keying()) return renderFluid();
-  if (S.cmp && S.cmp.key !== S.heroKey) endCompare(false); // other edits on show: the pass compared was the old edits'
+  if (S.cmp && (S.cmp.edit ? !S.edits.includes(S.cmp.edit) : S.cmp.key !== S.heroKey)) endCompare(false); // other edits on show: the pass compared was the old edits'; a row's strokes stay while the row does
   $("#wipe .label.left").textContent = S.cmp?.label ?? "Plate";
   $("#wipe .label.right").textContent = shownLabel();
   wantDeep(); // an image sequence's own values load around the playhead, as OpenRV's cache does
@@ -1382,9 +1389,9 @@ function render() {
     return side;
   };
   let compared = "waiting";
-  const drawCompared = () => { // the wipe's left side: the pass Ctrl+clicked in the Render panel, at this frame; the plate until it has one
+  const drawCompared = () => { // the wipe's left side: the pass Ctrl+clicked in the Render panel, at this frame, the plate until it has one; or a History row's strokes over the plate
     const c = S.cmp, at = Math.abs(cmpVid.currentTime - time(S.frame)) < 0.5 / p.fps;
-    if (c.black) { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, view.width, view.height); compared = "drawn"; return; } // a fluid shot's blank plate
+    if (c.edit) { drawPlate(); inWork((w, h) => rowStrokes(c.edit, 1, w, h)); compared = "drawn"; return; }
     const ok = c.id === "first" ? draw(S.hero, model) // the First frame row: the edit as Klein made it
       : (still && draw(sharpFrame("cmp", sourcePath(c, p.path)), c.frames ? c.framesSpace ?? p.cs : c.space)) // paused: native size
         || (cmpVid.readyState >= 2 && !cmpVid.seeking && (S.playing || at) && draw(cmpVid, c.space));
@@ -1419,12 +1426,13 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
   const shot = () => ctx.drawImage(look.image(cached || shotVid, S.display, S.shot?.space ?? modelSpace()), 0, 0, W, H); // a decoded frame first: no seek shows
   if (f.version && S.wipe !== null && !S.compare && (cached || shotReady())) { // the wipe: this frame's painted keyframe, or black, against the shot
     const key = keyHere();
-    if (S.cmp) { if (!S.cmp.black && cmpVid.readyState >= 2) ctx.drawImage(look.image(cmpVid, S.display, S.cmp.space), 0, 0, W, H); } // a fluid row's input
+    if (S.cmp?.edit) inWork((w, h) => rowStrokes(S.cmp.edit, 1, w, h)); // a History row's strokes, over the blank plate
+    else if (S.cmp) { if (cmpVid.readyState >= 2) ctx.drawImage(look.image(cmpVid, S.display, S.cmp.space), 0, 0, W, H); } // a Render step
     else if (key) ctx.drawImage(key.canvas, 0, 0, W, H); // no onion skins: the left side shows what this frame was given
     ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip(); shot(); ctx.restore();
   } else if (f.version && (S.playing ? made : f.view === "result") && !S.compare && (cached || shotReady())) shot(); // playing a made shot: never the keyframes
   else keysLayer(W, H);
-  $("#wipe .label.left").textContent = S.cmp?.label ?? "Keyframe"; $("#wipe .label.right").textContent = S.cmp ? shownLabel() : "Result";
+  $("#wipe .label.left").textContent = S.cmp?.label ?? strokesLabel(NAME.fluid, num(f), true); $("#wipe .label.right").textContent = shownLabel();
   inWork(drawCursor);
   if (S.inspect.on) refreshInspector();
   if (!xray.el.hidden) drawXray(); // it hides: a fluid shot's keyframes have no matte
@@ -1441,9 +1449,11 @@ function keysLayer(W, H) { // the keyframe on this frame; between keyframes, the
   ctx.globalAlpha = 1;
 }
 
-// A fluid shot's keyframe on the frame displayed, when the shot holds one there: the row hovered or clicked shows it over
-// the picture, on any frame.
+// A History row's strokes on the frame displayed: a fluid shot's keyframe on its own frame, an edit's strokes on the first
+// frame, where edits are painted. A hovered or clicked fluid row shows its keyframe over the picture; the wipe's left side
+// shows a row's strokes over the plate. A frame that holds none shows nothing more.
 function rowStrokes(e, alpha, W, H) {
+  if (e.tool !== "fluid") { if (S.frame === 0) strokes(e, alpha); return; }
   const key = e.keys.find((k) => k.frame === S.frame);
   if (!key) return;
   ctx.globalAlpha = alpha; ctx.drawImage(key.canvas, 0, 0, W, H); ctx.globalAlpha = 1;
@@ -2705,8 +2715,8 @@ function historyUI() {
     const img = li.querySelector(".thumb");
     const thumb = e.tool === "fluid" && e.keys.length ? snap([...e.keys].sort((x, y) => x.frame - y.frame)[0].canvas, [120, 80], "#000").toDataURL("image/jpeg", 0.8) : e.thumb;
     if (thumb) img.src = thumb; else img.removeAttribute("src");
-    li.title = "Show this edit's strokes on the first frame. Use the pencil to change it.";
-    if (e.tool === "fluid") li.title = "Show the fluid shot's first keyframe. Use the pencil to change it.";
+    li.title = `Click to show the painted ${e.tool === "fluid" ? "keyframes" : "strokes"}. Ctrl+click to add them to the wipe. Use the pencil to edit.`;
+    if (e.strokes.length || e.keys?.length) li.dataset.strokes = e.id; // the wipe's left side can show them (stepWipe)
     li.querySelector(".title").textContent = `${num(e)}. ${NAME[e.tool]}`;
     const what = e.tool === "fluid" ? e.prompt || `${e.keys.length} keyframe${e.keys.length === 1 ? "" : "s"}` : e.tool === "erase" ? (e.whole ? "Whole object" : "Painted area") : e.prompt || (e.tool === "light" ? "From the strokes" : "No text prompt");
     const small = li.querySelector("small");
@@ -2728,6 +2738,7 @@ function historyUI() {
     li.onmouseleave = () => { S.hover = null; render(); };
     li.onclick = (ev) => {
       if (ev.target.closest("button")) return;
+      if (ev.ctrlKey || ev.metaKey) return comparePass(`strokes:${e.id}`); // its strokes on the wipe's left side, over the plate
       const at = e.tool === "fluid" ? nearestKey(e.keys.map((k) => k.frame), S.frame) ?? 0 : 0; // a fluid shot's keyframe nearest the frame displayed; an edit's first frame
       if (keying()) leaveKeys();
       pause(); seek(at); show(S.peek === e && !S.selected ? null : e);
@@ -2735,6 +2746,7 @@ function historyUI() {
     return li;
   }));
   if (S.hover && !$("#history").matches(":hover")) { S.hover = null; render(); } // a row rebuilt after the pointer left it: its strokes go
+  markCompared();
   undoUI();
   exportUI(); timelineUI();
 }
@@ -4241,7 +4253,7 @@ function inspectSource() { // the file on show at the point, on its side of the 
   const p = S.plate, pt = S.inspect.pt, left = !keying() && pt && wipeSide(pt.x, p.spec.width, S.wipe) === "left";
   if (S.compare || (left && !S.cmp)) return { path: p.path, movie: false, space: p.cs, label: "Plate" }; // O held, or the wipe's plate side
   const sh = left ? S.cmp : S.shot, label = left ? S.cmp.label : sh ? shownLabel() : "Plate";
-  if (left && S.cmp.black) return { path: null, drawn: "Blank plate", label }; // a fluid shot's black blank plate: no file to read
+  if (left && S.cmp.edit) return { path: null, drawn: label, label }; // a History row's strokes over the plate: a drawing, not a file
   if ((left ? S.cmp.id : S.pass) === "first") return { path: null, drawn: "Edited first frame", label }; // Klein's edit: a picture, not a file
   const frames = !!sh?.frames, space = sh ? (frames ? sh.framesSpace ?? p.cs : sh.space) : p.cs;
   return { path: sourcePath(sh, p.path), movie: !!sh && !frames, space: space === "@model" ? modelSpace() : space, label };

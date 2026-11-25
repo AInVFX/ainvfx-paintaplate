@@ -13,7 +13,7 @@ test("no line says that a tool, a menu or a pencil « changes it », or that str
 });
 
 test("the lines that say how to change something start with the action: « use … to edit it »", () => {
-  for (const line of ["Use the pencil to change it.", "Use the pencil to edit it.", "(use right-click > OCIO > Plate to change it)"]) assert.ok(app.includes(line), line);
+  for (const line of ["Use the pencil to edit.", "Use the pencil to edit it.", "(use right-click > OCIO > Plate to change it)"]) assert.ok(app.includes(line), line);
 });
 
 test("the Blank plate tab says what its fluid shot becomes: History's first row, not a new plate", () => {
