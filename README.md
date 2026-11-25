@@ -133,7 +133,7 @@ Each edit stays in History: click its pencil to change it, and add as many as yo
 
 ## How it works
 
-Paint a plate is a web page that ComfyUI serves, with a pack of 16 nodes. Each step is one of 16 ComfyUI workflows, in [`web/workflows`](web/workflows): the page fills in its values and sends it to ComfyUI. A job made once is kept in a job index on disk, so the same edit on the same plate never runs twice. For Paint and Clean, the prompt writer names the edit's object and what the plate keeps, and the matte comes from SAM 3.1's answers to several questions about them. The composite then blends the regenerated shot into the plate through the matte. The [models table](#credits-and-licences) says what each model does.
+Paint a plate is a web page that ComfyUI serves, with a pack of 16 nodes. Each step is one of 17 ComfyUI workflows, in [`web/workflows`](web/workflows): the page fills in its values and sends it to ComfyUI. A job made once is kept in a job index on disk, so the same edit on the same plate never runs twice. For Paint and Clean, the prompt writer names the edit's object and what the plate keeps, and the matte comes from SAM 3.1's answers to several questions about them. The composite then blends the regenerated shot into the plate through the matte. The [models table](#credits-and-licences) says what each model does.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) explains how the pack works and how to change it. [TESTING.md](TESTING.md) describes every test.
 

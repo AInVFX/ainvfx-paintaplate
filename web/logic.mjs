@@ -1557,7 +1557,7 @@ const TILED = { slots: { tile: 256, encode_tile: 256, guide_tiled: true }, does:
 // the system then stops ComfyUI. A profile that `frees` holds one family of models at a time: the page asks
 // ComfyUI to free its memory before a job whose family is not that of the job posted before it.
 export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", clean: "ltx", cleanup: "ltx", fluid: "ltx", hdr: "ltx", warm: "ltx",
-  matte: "sam", snap: "sam", ingest: "frames", comp: "frames", review: "frames", export: "frames", upscale: "seedvr2", upscale_export: "frames" }; // by workflow: the models it loads, or frames only
+  matte: "sam", snap: "sam", ingest: "frames", comp: "frames", review: "frames", export: "frames", upscale: "seedvr2", upscale_export: "frames", hdr_comp: "frames" }; // by workflow: the models it loads, or frames only
 // Speed first where there is room. Under 24 GB of VRAM the GPU cannot hold two families of models, so a
 // change of family frees ComfyUI's memory. On a larger GPU the models stay loaded, and the memory is freed only when
 // RAM is short for the next job's frames: a job that reads the plate can hold RAM_COPIES float32 copies of it. The open
@@ -1572,7 +1572,7 @@ export const framesNeed = (width, height, frames, name = "") => // bytes of RAM 
 export const JOB_NAME = { ingest: "opening the plate", prompt: "the prompt writer", prefetch: "the prompt writer", edit: "the edit",
   snap: "the SAM mask", clean: "the clean plate pass", cleanup: "the clean plate pass", shot: "the shot", matte: "the matte",
   comp: "the composite", review: "the review movie", export: "Export", warm: "the warm-up", fluid: "the fluid shot", hdr: "SDR to HDR",
-  upscale: "Upscale", upscale_export: "the upscaled export" };
+  hdr_comp: "the HDR composite", upscale: "Upscale", upscale_export: "the upscaled export" };
 
 // A free between the matte and the steps that only read frames (the composite, the review movie, Export) unloads the models
 // but keeps ComfyUI's cache: SAM 3.1's answers and the prompt upsampler's stay in it, so a change of matte strategy runs
