@@ -1,5 +1,5 @@
-// The lines that tell a person how to change something name the action: « Use the pencil to change it. », not « Its pencil
-// changes it. », and say what changes, not what « comes back ».
+// The lines that tell a person how to change something start with the action: « Use the pencil to edit it. », not « Its
+// pencil changes it. », and say what changes, not what « comes back ».
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -12,9 +12,8 @@ test("no line says that a tool, a menu or a pencil « changes it », or that str
   assert.deepEqual(said.filter((t) => !t.trimStart().startsWith("//")), []);
 });
 
-test("the lines that say how to change something say « use … to change it »", () => {
-  for (const line of ["Use the pencil to change it.", "Use the pencil to change edit ${num(edit)}.", "Use the pencil to change the fluid shot.",
-    "(use right-click > OCIO > Plate to change it)"]) assert.ok(app.includes(line), line);
+test("the lines that say how to change something start with the action: « use … to edit it »", () => {
+  for (const line of ["Use the pencil to change it.", "Use the pencil to edit it.", "(use right-click > OCIO > Plate to change it)"]) assert.ok(app.includes(line), line);
 });
 
 test("the Blank plate tab says what its fluid shot becomes: History's first row, not a new plate", () => {

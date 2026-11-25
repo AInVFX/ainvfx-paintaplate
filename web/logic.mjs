@@ -617,6 +617,15 @@ export function nearKeys(keys, frame) { // the keyframes before and after a fram
   }
   return { prev, next };
 }
+// The keyframe a click on the fluid shot's row goes to: the one nearest `frame`, the earlier one when two are as near.
+export function nearestKey(frames, frame) {
+  let best = null;
+  for (const f of frames) {
+    const d = Math.abs(f - frame), b = best === null ? Infinity : Math.abs(best - frame);
+    if (d < b || (d === b && f < best)) best = f;
+  }
+  return best;
+}
 
 // ---------- OCIO, as RV's menu shows it ----------
 

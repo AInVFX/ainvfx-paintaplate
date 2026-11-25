@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7, autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, downloadLines } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, nearestKey, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7, autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, downloadLines } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -1376,6 +1376,11 @@ function render() {
     drawPlate();
     return "plate";
   };
+  const edited = () => { // the edited side, then the keyframe of the fluid row hovered or clicked, on this frame
+    const side = drawEdited(), fl = still && [S.hover, S.peek].find((x) => x?.tool === "fluid");
+    if (fl) inWork((w, h) => rowStrokes(fl, 0.55, w, h));
+    return side;
+  };
   let compared = "waiting";
   const drawCompared = () => { // the wipe's left side: the pass Ctrl+clicked in the Render panel, at this frame; the plate until it has one
     const c = S.cmp, at = Math.abs(cmpVid.currentTime - time(S.frame)) < 0.5 / p.fps;
@@ -1391,9 +1396,9 @@ function render() {
   else if (S.wipe !== null) {
     if (S.cmp) drawCompared(); else drawPlate();
     ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip();
-    shown = drawEdited();
+    shown = edited();
     ctx.restore();
-  } else shown = drawEdited();
+  } else shown = edited();
   view.dataset.picture = shown; // what the edited side shows: hero, shot, held or plate (tests/ui_mock.py reads it)
   placeLive();
   view.dataset.precision = exact.length ? "float" : "8-bit"; // an image sequence's own values, or 8-bit frames
@@ -1436,6 +1441,14 @@ function keysLayer(W, H) { // the keyframe on this frame; between keyframes, the
   ctx.globalAlpha = 1;
 }
 
+// A fluid shot's keyframe on the frame displayed, when the shot holds one there: the row hovered or clicked shows it over
+// the picture, on any frame.
+function rowStrokes(e, alpha, W, H) {
+  const key = e.keys.find((k) => k.frame === S.frame);
+  if (!key) return;
+  ctx.globalAlpha = alpha; ctx.drawImage(key.canvas, 0, 0, W, H); ctx.globalAlpha = 1;
+}
+
 function overlays(W, H) { // on the first frame: the strokes, then the edit taking shape inside them
   const e = S.running;
   if (e?.preview) ctx.drawImage(e.preview, 0, 0, W, H);
@@ -1451,8 +1464,6 @@ function overlays(W, H) { // on the first frame: the strokes, then the edit taki
   // A selected Light edit shows its result alone: its strokes add light, so drawn over its result they would count it twice.
   // Hovered, its strokes show while the pointer stays, as every edit's do.
   if (shown && shown !== e && (S.hover || shown.tool !== "light") && shown.strokes.length) strokes(shown, S.hover ? 0.55 : 0.8);
-  const fl = [S.hover, S.peek].find((x) => x?.tool === "fluid"), key = fl?.keys.find((k) => k.frame === 0); // the fluid row hovered or shown: its first keyframe
-  if (key) { ctx.globalAlpha = 0.55; ctx.drawImage(key.canvas, 0, 0, W, H); ctx.globalAlpha = 1; }
   if (e && e.launched && !e.preview) { // the strokes stay until the first preview replaces them, then fade into it
     const t = e.shown ? (performance.now() - e.shown) / 350 : 0;
     if (t < 1) { strokes(e, 1 - t); if (e.shown) requestAnimationFrame(render); }
@@ -2158,12 +2169,11 @@ function select(edit) { // a History row becomes the current edit: its words in 
   historyUI(); render();
 }
 
-function show(edit) { // a click on a History row: frame 0 shows that edit's strokes and nothing is selected, so the next strokes start a new edit on top. Its pencil selects it
+function show(edit) { // a click on a History row: its strokes show on their frame and nothing is selected, so the next strokes start a new edit on top. Its pencil selects it
   if (S.selected && !S.draft) $("#prompt").value = "";
   S.selected = null;
-  S.peek = edit; // frame 0 shows its strokes until playback starts or an edit is launched
-  if (edit) hud(edit.tool === "fluid" ? "Fluid shot: first keyframe displayed. A new stroke starts a new edit on top. Use the pencil to change the fluid shot."
-    : `Edit ${num(edit)}: strokes displayed. A new stroke starts a new edit on top. Use the pencil to change edit ${num(edit)}.`, 3500);
+  S.peek = edit; // its strokes show until playback starts or an edit is launched
+  if (edit) hud(`${edit.tool === "fluid" ? `Fluid shot: keyframe ${S.plate.first + S.frame}` : `Edit ${num(edit)}: strokes`} displayed. Paint to start a new edit on top. Use the pencil to edit it.`, 3500);
   historyUI(); render();
 }
 
@@ -2716,7 +2726,12 @@ function historyUI() {
     if (matteChoices(e.tool).length) li.append(matteMenu(e));
     li.onmouseenter = () => { S.hover = e; render(); };
     li.onmouseleave = () => { S.hover = null; render(); };
-    li.onclick = (ev) => { if (!ev.target.closest("button")) { if (keying()) leaveKeys(); pause(); seek(0); show(S.peek === e && !S.selected ? null : e); } };
+    li.onclick = (ev) => {
+      if (ev.target.closest("button")) return;
+      const at = e.tool === "fluid" ? nearestKey(e.keys.map((k) => k.frame), S.frame) ?? 0 : 0; // a fluid shot's keyframe nearest the frame displayed; an edit's first frame
+      if (keying()) leaveKeys();
+      pause(); seek(at); show(S.peek === e && !S.selected ? null : e);
+    };
     return li;
   }));
   if (S.hover && !$("#history").matches(":hover")) { S.hover = null; render(); } // a row rebuilt after the pointer left it: its strokes go
