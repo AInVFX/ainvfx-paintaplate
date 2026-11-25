@@ -466,6 +466,38 @@ export function pickObjects({ painted, points, named, area }) {
   return objects.filter((m, i) => objects.some((o, j) => j !== i && iou(m, o) > 0.5));
 }
 
+// ---------- The matte strategy: how much of the regenerated shot the composite keeps ----------
+// Follow Matte's input `strategy` (mathops.MATTE_STRATEGIES), one per paint, from the menu under its row in History. A
+// Clean's matte is also the hole its clean plate pass fills, so a strategy there would make that pass again: a Clean, a
+// Light edit (no matte) and the fluid shot take no menu. An edit with no strategy, as in an older scene, has « Auto ».
+export const MATTE_STRATEGIES = ["Auto", "Object", "Object and effects", "Whole shot"];
+export const MATTE_TIPS = {
+  Auto: "Object, or Object and effects when the edit spreads past the object.",
+  Object: "The edit's object only, which keeps the most plate.",
+  "Object and effects": "The object, what it replaces, and what the shot changed around it: smoke, light, thin haze.",
+  "Whole shot": "Every pixel comes from the regenerated shot.",
+};
+export const matteChoices = (tool) => (tool === "paint" ? MATTE_STRATEGIES : []);
+export const matteOf = (e) => (matteChoices(e?.tool).includes(e?.matte) ? e.matte : "Auto");
+// A part of an edit's render key: a strategy other than « Auto » makes another render, whose shot comes from the job index
+export const matteKey = (e) => (matteOf(e) === "Auto" ? "" : `~${MATTE_STRATEGIES.indexOf(matteOf(e))}`);
+// The paints share one matte step: it runs the widest of their strategies, so none is cropped below its own choice
+const WIDTH = ["Object", "Auto", "Object and effects", "Whole shot"];
+export function sharedMatte(edits) {
+  return edits.length ? edits.map(matteOf).reduce((a, b) => (WIDTH.indexOf(b) > WIDTH.indexOf(a) ? b : a)) : "Auto";
+}
+// The log's line when paints that share the matte chose differently; `num` gives an edit's number in History
+export function sharedMatteLine(edits, num) {
+  if (edits.length < 2 || new Set(edits.map(matteOf)).size < 2) return "";
+  const nums = edits.map(num), runs = sharedMatte(edits), by = edits.find((e) => matteOf(e) === runs);
+  return `Edits ${nums.slice(0, -1).join(", ")} and ${nums.at(-1)} share the paint matte: it runs ${runs}, edit ${num(by)}'s choice.`;
+}
+// What « Auto » chose, from the strategy line of Follow Matte's summary; null when the summary has none
+export function autoChose(summary) {
+  const m = /Strategy: Auto chose (Object and effects|Object)\b/.exec(summary ?? "");
+  return m ? m[1] : null;
+}
+
 // ---------- Edits that depend on each other ----------
 
 export const overlap = (a, b) => !!a && !!b && a.bits.some((v, i) => v && b.bits[i]);
@@ -487,14 +519,16 @@ export function dependsOnChange(edit, before, basis) {
 // and no light is involved, since a light changes every pixel. `want`: the new render's edits, as frozen; `renders`:
 // [{ key, active, wanted }], those whose frames exist. Returns the key of the one with the fewest edits left out, then the
 // most recently shown, or null.
-export function donorFor(want, renders) {
-  const key = (e) => `${e.id}.${e.version}`, mine = new Set(want.map(key));
+// `self`, the key of the render that asks: a render of the same edits whose key differs only by matte strategies
+// (logic.matteKey) made this very shot, so its frames serve too.
+export function donorFor(want, renders, self = "") {
+  const key = (e) => `${e.id}.${e.version}`, mine = new Set(want.map(key)), unmatted = (k) => k.replace(/~\d+/g, "");
   const apart = (a, b) => !!a.foot && !!b.foot && !overlap(a.foot, b.foot);
   if (!want.length || want.some((e) => e.tool === "light")) return null;
   let best = null;
   for (const r of renders) {
-    const have = new Set(r.active.map(key));
-    if (have.size <= mine.size || [...mine].some((k) => !have.has(k)) || r.active.some((e) => e.tool === "light")) continue;
+    const have = new Set(r.active.map(key)), same = !!self && r.key !== self && unmatted(r.key) === unmatted(self);
+    if ((have.size <= mine.size && !(same && have.size === mine.size)) || [...mine].some((k) => !have.has(k)) || r.active.some((e) => e.tool === "light")) continue;
     const out = r.active.filter((e) => !mine.has(key(e)));
     if (!out.every((o) => want.every((e) => apart(o, e)))) continue;
     const wanted = r.wanted ?? 0;
@@ -1489,6 +1523,26 @@ export const JOB_NAME = { ingest: "opening the plate", prompt: "the prompt write
   snap: "the SAM mask", clean: "the clean plate pass", cleanup: "the clean plate pass", shot: "the shot", matte: "the matte",
   comp: "the composite", review: "the review movie", export: "Export", warm: "the warm-up", fluid: "the fluid shot", hdr: "SDR to HDR",
   upscale: "Upscale", upscale_export: "the upscaled export" };
+
+// A free between the matte and the steps that only read frames (the composite, the review movie, Export) unloads the models
+// but keeps ComfyUI's cache: SAM 3.1's answers and the prompt upsampler's stay in it, so a change of matte strategy runs
+// Follow Matte again and not SAM. Any other free also clears the cache, as before.
+const KEEPS = new Set(["sam", "frames"]);
+export const keepsAnswers = (last, name) => KEEPS.has(FAMILY[last]) && KEEPS.has(FAMILY[name]);
+
+// Why ComfyUI's memory is freed before job `name` after job `last`, or null: on a small GPU, between families of models,
+// with { why, keep } between the matte and the frames steps, which keeps ComfyUI's cache unless RAM is short for the
+// frames (`room`); on a larger GPU, only when RAM is short. `room`: { free, need } in bytes, or null where unknown.
+export function freeAsk(profile, last, name, room = null, plate = true) {
+  if (freesBefore(profile, last, name)) {
+    const why = `${JOB_NAME[last] ?? last}'s models unloaded.\n  This GPU holds one model family at a time.`;
+    return keepsAnswers(last, name) ? { why, keep: !room || room.free >= room.need } : why;
+  }
+  if (!plate || !last || FAMILY[name] === FAMILY[last] || !freesBefore(profile, last, name, room)) return null;
+  return `${Math.round(room.free / 2 ** 30)} GB of RAM free, ${Math.round(room.need / 2 ** 30)} GB needed for its frames.`;
+}
+// Whether freeAsk needs the RAM figures for this pair: a free that may keep the cache, or a larger GPU's change of family
+export const freeNeedsRoom = (profile, last, name) => !!last && FAMILY[name] !== FAMILY[last] && (!profile?.frees || keepsAnswers(last, name));
 
 export function freesBefore(profile, last, name, room = null) { // room: { free, need } in bytes of RAM, where ComfyUI gives it
   if (!last || FAMILY[name] === FAMILY[last]) return false;

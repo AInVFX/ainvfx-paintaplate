@@ -2,7 +2,7 @@
 // opens in ComfyUI and keeps working there. Laid out for a person who takes it over: numbered sections in the order they
 // run, each opening with a README note. Pure functions over workflows parsed by logic.mjs, tested in Node.
 
-import { fillWorkflow, nameRequest, stageOne } from "./logic.mjs";
+import { fillWorkflow, nameRequest, sharedMatte, stageOne } from "./logic.mjs";
 
 const LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]); // the input loaders: a link can stand in for one, and none is a model
 const EDIT_OUT = ["result", "patch", "relit"]; // an edit's saved images: inside one scene, links carry them
@@ -165,7 +165,9 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
     const area = union("painted area", painted, plate.track);
     paintMatte = add(instantiate(WF.matte, "paint tracking", { ...common, color_space: "@model", width: plate.track[0],
       height: plate.track[1], prefix: out("matte_b/m"), base_color_space: clean ? "@model" : plate.cs,
-      name_request: nameRequest("paint", painted.map((e) => e.prompt)) }, { path: made, mask: area, prompt: area, seed: area, base: clean ? cleaned : ["plate", 0] },
+      name_request: nameRequest("paint", edits.filter((e) => e.tool === "paint").map((e) => e.words)), // as the page asks it (app.track)
+      strategy: sharedMatte(edits.filter((e) => e.tool === "paint")) },
+      { path: made, mask: area, prompt: area, seed: area, base: clean ? cleaned : ["plate", 0] },
       { drop })).frames;
   }
   const relight = edits.some((e) => e.tool === "light"), a = erasedMatte ?? paintMatte, fps = plate.fps ?? 24;

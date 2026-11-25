@@ -119,7 +119,8 @@ class Votes(unittest.TestCase):
         self.assertFalse((m > 0.5)[person > 0].any())
         self.assertTrue((m[3] > 0.5)[(palm[3] > 0) & (person[3] == 0)].all())
         self.assertFalse((m[0] > 0.5)[(zone > 0) & (palm[0] == 0)].any())  # the first frame is the palm, not the zone
-        self.assertEqual(summary, "tracked on 10 of 10 frames.\n  Left out: what the plate keeps (person, animal, vehicle), on 10 frames.")
+        self.assertEqual(summary, "tracked on 10 of 10 frames.\n  Left out: what the plate keeps (person, animal, vehicle), on 10 frames."
+                                  "\n  Strategy: Object.")
 
 
     def test_sam_s_words_from_the_upsampler_s_answers(self):

@@ -401,6 +401,10 @@ async def execute(pid, prompt):
         if "movie" in outs:  # its grey movie, for its row in the Render panel
             greys = [np.dstack([np.asarray(x, np.float32).reshape(x.shape[:2])] * 3) for x in ms]
             o[outs["movie"]] = {"images": [save_mp4(greys, v["video_prefix"], v.get("fps", 24.0))], "animated": [True]}
+        if "follow" in outs and STATE.get("follow"):  # Follow Matte's summary with its strategy line, once /mock/follow armed it
+            strategy = v.get("strategy", "Auto")
+            line = f"Auto chose {STATE['follow']['auto']}: the edit spreads past the object (23% of the frame)." if strategy == "Auto" else f"{strategy}."
+            o[outs["follow"]] = {"text": [f"tracked on {len(frames)} of {len(frames)} frames.\n  Strategy: {line}"]}
     elif "plate" in outs:  # fluid: each keyframe softened into a cloud, crossfaded to the next, written in the blank plate's format
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         h, w = frames[0].shape[:2]
@@ -610,8 +614,9 @@ async def quit_route(request):  # the mock stops at once, as a ComfyUI that the 
     return web.json_response({})
 
 
-async def free_route(request):  # ComfyUI releases memory between prompts: here, one second after /free
-    EVENTS.append(("free", time.time()))
+async def free_route(request):  # ComfyUI releases memory between prompts: here, one second after /free; the event keeps whether its cache goes too
+    body = await request.json() if request.can_read_body else {}
+    EVENTS.append(("free", time.time(), body.get("free_memory")))
     STATE["release_at"] = time.time() + 1.0
     return web.json_response({})
 
@@ -660,6 +665,12 @@ async def spill_route(request):  # mock only: the next `times` erase jobs reach 
 async def writer_route(request):  # mock only: the next `times` prompt-writer jobs answer `text`, as a writer that takes the stroke for another object
     body = await request.json()
     STATE["writer"] = {"times": int(body.get("times", 1)), "text": str(body.get("text", "")), "wide": body.get("wide")}
+    return web.json_response({})
+
+
+async def follow_route(request):  # mock only: the matte answers with Follow Matte's summary, its strategy line naming `auto` as Auto's choice
+    body = await request.json()
+    STATE["follow"] = {"auto": str(body.get("auto", "Object"))}
     return web.json_response({})
 
 
@@ -754,6 +765,7 @@ async def start():
     app.router.add_post("/mock/spill", spill_route)
     app.router.add_post("/mock/writer", writer_route)
     app.router.add_post("/mock/snap", snap_route)
+    app.router.add_post("/mock/follow", follow_route)
     app.router.add_post("/mock/named", named_route)
     app.router.add_get("/mock/events", lambda r: web.json_response(EVENTS))
     app.router.add_get("/mock/posts", lambda r: web.json_response(POSTS))

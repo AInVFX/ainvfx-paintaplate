@@ -352,17 +352,24 @@ def smooth_track(track: np.ndarray, radius: int) -> np.ndarray:
     return ndimage.uniform_filter1d(t, 2 * radius + 1, axis=0, mode="nearest")
 
 
+SEAM_DARK = 0.03  # seam_field leaves out the ring's pixels darker than this in the plate or the shot (sRGB-encoded luma)
+
+
 def seam_field(plate: np.ndarray, gen: np.ndarray, mask: np.ndarray, band: float) -> np.ndarray:
     """Log ratio (H, W, 3) that brings `gen` to the colour and exposure of `plate` at the edge of `mask`.
 
     It is measured on a ring just outside the mask, where the composite shows the plate, and
     spread smoothly inside it, as a Poisson blend would: colour and exposure drift are fixed,
-    texture is left alone. Work at low resolution: the field is smooth by design.
+    texture is left alone. Work at low resolution: the field is smooth by design. The ring leaves out
+    the near black (SEAM_DARK): there a ratio of two tiny values tints the edge (magenta on a fluid
+    shot's black, where the shot's black is a little green).
     """
     outside = mask < 0.02
     if outside.all() or not outside.any():
         return np.zeros(plate.shape[:2] + (3,), np.float32)
-    ring = outside & (ndimage.distance_transform_edt(outside) <= band)
+    luma = np.array([0.2126, 0.7152, 0.0722], np.float32)
+    lit = np.minimum(plate[..., :3] @ luma, gen[..., :3] @ luma) > SEAM_DARK  # in the near black, the ratio is noise: a fluid on black
+    ring = outside & (ndimage.distance_transform_edt(outside) <= band) & lit
     if ring.sum() < 16:
         return np.zeros(plate.shape[:2] + (3,), np.float32)
     d = np.log(np.maximum(plate[..., :3], 1e-4)) - np.log(np.maximum(gen[..., :3], 1e-4))
@@ -730,11 +737,13 @@ def kept_things(objects, region) -> np.ndarray:
 
 
 def follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, threshold: float = 0.1,
-                 zone: float = 1 / 16, first_frame: int = 1, tick=None):
+                 zone: float = 1 / 16, first_frame: int = 1, tick=None, strategy: str = "Object"):
     if os.environ.get("PAINTAPLATE_RECORD"):
-        record_votes(os.environ["PAINTAPLATE_RECORD"], "paint", shot_masks=shot_masks, word_masks=word_masks, plate_masks=plate_masks,
-                     kept=kept, element=element, shot=shot, base=base, threshold=threshold, zone=zone, first_frame=first_frame)
-    return _follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, threshold, zone, first_frame, tick)
+        record_votes(os.environ["PAINTAPLATE_RECORD"], "paint", strategy=strategy, shot_masks=shot_masks, word_masks=word_masks,
+                     plate_masks=plate_masks, kept=kept, element=element, shot=shot, base=base, threshold=threshold, zone=zone,
+                     first_frame=first_frame)
+    out, summary = _follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, threshold, zone, first_frame, tick)
+    return with_strategy(strategy, out, summary, shot=shot, base=base, old=plate_masks, threshold=threshold, zone=zone, tick=tick)
 
 
 def _follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, threshold, zone, first_frame, tick):
@@ -873,10 +882,12 @@ def sam_words(answer: str, kind: str = "thing") -> str:
     return text
 
 
-def clean_votes(zone_masks, named, kept, zone, first_frame: int = 1):
+def clean_votes(zone_masks, named, kept, zone, first_frame: int = 1, strategy: str = "Object"):
     if os.environ.get("PAINTAPLATE_RECORD"):
-        record_votes(os.environ["PAINTAPLATE_RECORD"], "clean", zone_masks=zone_masks, named=named, kept=kept, zone=zone, first_frame=first_frame)
-    return _clean_votes(zone_masks, named, kept, zone, first_frame)
+        record_votes(os.environ["PAINTAPLATE_RECORD"], "clean", strategy=strategy, zone_masks=zone_masks, named=named, kept=kept, zone=zone,
+                     first_frame=first_frame)
+    out, summary = _clean_votes(zone_masks, named, kept, zone, first_frame)
+    return with_strategy(strategy, out, summary)
 
 
 def _clean_votes(zone_masks, named, kept, zone, first_frame):
@@ -906,12 +917,115 @@ def _clean_votes(zone_masks, named, kept, zone, first_frame):
     return out.astype(np.float32), "\n  ".join(lines)
 
 
-def record_votes(folder: str, kind: str, **arrays) -> str:
+# The matte strategies: how much of the shot the composite takes. One function applies each to Follow Matte's matte.
+MATTE_STRATEGIES = ("Auto", "Object", "Object and effects", "Whole shot")
+EFFECTS_WEAK = 0.2  # a change this share of the threshold joins « Object and effects » where it continues the object's
+EFFECTS_LIGHT = 0.03  # or a change of light and colour this large, the shot and the plate blurred
+EFFECTS_HOLD = 2  # frames on each side over which « Object and effects » holds what it found (thin smoke comes and goes)
+AUTO_SPREAD = 0.05  # « Auto »: the edit spreads when the shot changed this share of the frame away from the object
+AUTO_QUIET = 0.05  # « Auto »: or when what « Object and effects » adds differs from the plate over less than this share
+
+
+def effects_matte(today, shot, base, old=None, threshold: float = 0.1, zone: float = 1 / 16, tick=None, workers: int = 8):
+    """« Object and effects »: the matte `today` (N, H, W), what the edit replaces whole (`old`, SAM's masks of the plate
+    from the element), and what the shot changed around them. Returns (mattes, spread, quiet).
+
+    On each frame the seed is the matte, the old object and the shot's strong change (shot_change above the frame's level
+    away from the object plus `threshold`) closed over 1/40 of the width, holes filled. The weak change that continues the
+    seed within 1/5 of the width joins it: a change EFFECTS_WEAK times the threshold, or a change of light and colour above
+    EFFECTS_LIGHT (both frames blurred over 1/120 of the width, so thin smoke over busy ground counts). The whole is closed
+    over 1/80 of the width, holes filled, pieces under 1/2000 of the frame left out, held over EFFECTS_HOLD frames on each
+    side and grown by 1/64 of the width. Solid: thin smoke shows at full strength, and Fit to Plate softens the edge.
+    The frames run on `workers` threads.
+
+    `spread`: the mean share of each frame, beyond 1/5 of the width from the matte, where shot_change passes the threshold.
+    `quiet`: the mean share of each frame inside the result but outside the matte, weighted by shot_change over the
+    threshold (up to 1): how much of the plate it gives up visibly."""
+    today = np.asarray(today) > 0.5
+    n, h, w = today.shape
+    oldm = np.zeros((n, h, w), bool)
+    if old is not None and np.size(old):
+        o = np.asarray(old, np.float32)
+        o = o.max(1) if o.ndim == 4 else o
+        for t in range(n):
+            f = o[min(t, len(o) - 1)]
+            oldm[t] = (f if f.shape == (h, w) else resize_to(f[..., None], h, w)[..., 0]) > 0.5
+    sigma, reach, speck = max(1.0, w / 120), w / 5, h * w / 2000
+
+    def frame(t):  # one frame's (what it adds, spread, shot_change); the frames run on `workers` threads
+        if tick:
+            tick()
+        g, b = (np.asarray(a[t], np.float32)[..., :3] for a in (shot, base))
+        if g.shape[:2] != (h, w):
+            g = resize_to(g, h, w)
+        if b.shape[:2] != (h, w):
+            b = resize_to(b, h, w)
+        d = shot_change(g, b)
+        far = ~(dilate(today[t].astype(np.uint8), reach) > 0) if today[t].any() else np.ones((h, w), bool)
+        spread = float((d[far] > threshold).mean()) if far.any() else 0.0
+        obj = today[t] | oldm[t]
+        away = ~(dilate(obj.astype(np.uint8), max(2.0, zone * w)) > 0) if obj.any() else np.ones((h, w), bool)
+        if away.sum() < 256:
+            away = np.ones((h, w), bool)
+        light = np.abs(ndimage.gaussian_filter(g, (sigma, sigma, 0)) - ndimage.gaussian_filter(b, (sigma, sigma, 0))).max(-1)
+        level, level_light = float(np.median(d[away])), float(np.median(light[away]))
+        seed = obj | ndimage.binary_fill_holes(_close(d > level + threshold, max(2, round(w / 40))))
+        if not seed.any():
+            return seed, spread, d
+        weak = ((d > level + EFFECTS_WEAK * threshold) | (light > level_light + EFFECTS_LIGHT)) & (dilate(seed.astype(np.uint8), reach) > 0)
+        lab, _ = ndimage.label(weak | seed)
+        ids = np.unique(lab[seed])
+        m = ndimage.binary_fill_holes(_close(np.isin(lab, ids[ids > 0]), max(2, round(w / 80))))
+        lab, k = ndimage.label(m)
+        if k:
+            m = np.isin(lab, np.flatnonzero(ndimage.sum(m, lab, np.arange(1, k + 1)) >= speck) + 1)
+        return m, spread, d
+
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, n or 1))) as pool:
+        found = list(pool.map(frame, range(n)))
+    out = today | oldm
+    for t, (m, _, _) in enumerate(found):
+        out[t] |= m
+    spread, changes = [f[1] for f in found], [f[2] for f in found]
+    held = np.stack([out[max(0, t - EFFECTS_HOLD):t + EFFECTS_HOLD + 1].any(0) for t in range(n)]) if n else out
+    grown = np.stack([dilate(m.astype(np.uint8), max(1.0, w / 64)) > 0 if m.any() else m for m in held]) if n else held
+    quiet = [float((np.minimum(1.0, changes[t] / threshold) * (grown[t] & ~today[t])).sum() / (h * w)) for t in range(len(changes))]
+    return grown, float(np.mean(spread)) if spread else 0.0, float(np.mean(quiet)) if quiet else 0.0
+
+
+def with_strategy(strategy: str, mattes, summary: str, shot=None, base=None, old=None, threshold: float = 0.1,
+                  zone: float = 1 / 16, tick=None):
+    """Follow Matte's matte through a strategy (MATTE_STRATEGIES). Returns (mattes, summary) with one line that names the
+    strategy that ran and, for « Auto », why. « Object »: the matte as Follow Matte made it, which keeps the most plate.
+    « Object and effects »: effects_matte. « Whole shot »: every pixel from the shot. « Auto » takes « Object and
+    effects » when the edit spreads (spread over AUTO_SPREAD) or when what it adds differs little from the plate (quiet
+    under AUTO_QUIET), else « Object ». A Clean (no shot here) runs « Object » for « Auto » and « Object and effects »."""
+    mattes = np.asarray(mattes, np.float32)
+    if strategy not in MATTE_STRATEGIES:
+        raise ValueError(f"matte strategy {strategy!r}: one of {', '.join(MATTE_STRATEGIES)}")
+    if strategy == "Whole shot":
+        return np.ones_like(mattes), f"{summary}\n  Strategy: Whole shot, every pixel comes from the regenerated shot."
+    if shot is None or base is None:
+        why = "Strategy: Auto chose Object: a Clean keeps to its object." if strategy == "Auto" else "Strategy: Object."
+        return mattes, f"{summary}\n  {why}"
+    if strategy == "Object":
+        return mattes, f"{summary}\n  Strategy: Object."
+    effects, spread, quiet = effects_matte(mattes, shot, base, old, threshold, zone, tick)
+    if strategy == "Object and effects":
+        return effects.astype(np.float32), f"{summary}\n  Strategy: Object and effects."
+    if spread > AUTO_SPREAD:
+        return effects.astype(np.float32), f"{summary}\n  Strategy: Auto chose Object and effects: the edit spreads past the object ({100 * spread:.0f}% of the frame)."
+    if quiet < AUTO_QUIET:
+        return effects.astype(np.float32), f"{summary}\n  Strategy: Auto chose Object and effects: it barely changes the plate around the object ({100 * quiet:.0f}% of the frame)."
+    return mattes, f"{summary}\n  Strategy: Auto chose Object: Object and effects would change {100 * quiet:.0f}% of the frame around the object."
+
+
+def record_votes(folder: str, kind: str, strategy: str = "Object", **arrays) -> str:
     """With PAINTAPLATE_RECORD=<folder>, what Follow Matte was given, as one .npz file: SAM 3.1's answers, the element or
-    the zone, the shot and the plate, in half floats, with the values. replay_votes reads it back, so the matte runs
+    the zone, the shot and the plate, in half floats, with the values and the strategy. replay_votes reads it back, so the matte runs
     again on a CPU (tests/matte_study.py). Returns the file's path."""
     os.makedirs(folder, exist_ok=True)
-    out = {"kind": np.array(kind)}
+    out = {"kind": np.array(kind), "strategy": np.array(str(strategy))}
     for k, v in arrays.items():
         out[k] = np.zeros((0,), np.float16) if v is None or not np.size(v) else np.asarray(v, np.float32).astype(np.float16)
     first = next((a for a in arrays.values() if a is not None and np.ndim(a) >= 3), None)
@@ -922,7 +1036,8 @@ def record_votes(folder: str, kind: str, **arrays) -> str:
 
 
 def replay_votes(path: str) -> dict:
-    """What record_votes wrote: {"kind": "paint" or "clean", "args": the arguments of follow_votes or clean_votes}."""
+    """What record_votes wrote: {"kind": "paint" or "clean", "args": the arguments of follow_votes or clean_votes}. A
+    recording without a strategy replays as « Object »."""
     d = np.load(path)
     back = lambda k: d[k].astype(np.float32) if d[k].size else None  # noqa: E731
     kind = str(d["kind"])
@@ -932,6 +1047,7 @@ def replay_votes(path: str) -> dict:
     if kind == "clean":
         scalars.pop("threshold", None)
         args["zone"] = back("zone")
+    scalars["strategy"] = str(d["strategy"]) if "strategy" in d.files else "Object"  # an older recording made today's matte
     return {"kind": kind, "args": {**args, **scalars}}
 
 

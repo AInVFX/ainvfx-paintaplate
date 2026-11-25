@@ -11,10 +11,10 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7 } from "./logic.mjs";
-import { FAMILY, foldersIn, framesNeed, freesBefore, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
+import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7, autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine } from "./logic.mjs";
+import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_UP } from "./logic.mjs";
-import { awaitingPass, editList, eraserAfterKey, hiddenAbove, JOB_NAME, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
+import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { askedSeed, editSeed, gridGrow } from "./logic.mjs"; // the tests: a seed asked for in the address, and each edit's seed from it
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
@@ -428,15 +428,12 @@ function closePlate(message = "Plate closed: its frames left the browser's memor
 }
 
 S.memoryProfile = memoryProfile({ force: MEMORY_ASKED }); // until /system_stats answers: nothing loads early, and LTX works in small tiles
-onFree(async (last, name) => { // why ComfyUI's memory is freed before this job, or null: speed first where there is room
-  if (freesBefore(S.memoryProfile, last, name)) return `${JOB_NAME[last] ?? last}'s models unloaded.\n  This GPU holds one model family at a time.`;
-  const p = S.plate;
-  if (!p || !last || FAMILY[name] === FAMILY[last]) return null;
-  const sys = (await fetch("/system_stats").then((r) => r.json()).catch(() => null))?.system; // a larger GPU: only when RAM is short for this job's frames
-  const room = sys?.ram_free ? { free: sys.ram_free, need: framesNeed(p.spec.width ?? p.work[0], p.spec.height ?? p.work[1], p.frames, name) } : null;
-  const gib = (n) => Math.round(n / 2 ** 30);
-  return freesBefore(S.memoryProfile, last, name, room) ? `${gib(room.free)} GB of RAM free, ${gib(room.need)} GB needed for its frames.` : null;
-});
+const ramRoom = async (name) => { // ComfyUI's free RAM and what this job's frames need, in bytes, where ComfyUI gives them; else null
+  const p = S.plate, sys = p && (await fetch("/system_stats").then((r) => r.json()).catch(() => null))?.system;
+  return sys?.ram_free ? { free: sys.ram_free, need: framesNeed(p.spec.width ?? p.work[0], p.spec.height ?? p.work[1], p.frames, name) } : null;
+};
+onFree(async (last, name) => // why ComfyUI's memory is freed before this job, or null, or { why, keep } (logic.freeAsk): speed first where there is room
+  freeAsk(S.memoryProfile, last, name, S.plate && freeNeedsRoom(S.memoryProfile, last, name) ? await ramRoom(name) : null, !!S.plate));
 onStop((kind) => S.halted && STOPPED.includes(kind)); // a stop stops everything: a render step that was uploading its images when the stop came posts no job after it
 
 async function warmAll() { // every model loads while the person looks at the page: the first edit and the first shot start at once
@@ -998,11 +995,17 @@ addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#finish").hid
 function recompose() {
   if (!S.plate) return; // a plate that opens: nothing to compose yet
   S.hero = layered();
-  const inKey = S.edits.filter((e) => e.on && (e.patch || (e.tool === "fluid" && e.state === "done")) && e.state !== "generating"); // a fluid shot from its Generate on, as its steps make it
-  const edits = inKey.map((e) => `${e.id}.${e.version}`).join(","), last = hdrLast(inKey.map((e) => e.tool));
-  const on = hdrWanted() && (!!edits || !(fluidEdit() || keying())); // with no edit, the plate alone; a blank plate alone makes nothing
-  const up = !!S.deliver.upscale && S.upscaleReady && !edits && !keying() && !fluidEdit(); // Finish > Upscale on a plate with no edit, or on a fluid shot alone: the plate alone's render
-  const dflt = holdsHdr(S.plate?.spec, S.plate?.headroom), key = renderKey(edits, dflt, last ? dflt : on, up); // Finish's SDR to HDR on an SDR plate: another render, unless it runs last
+  const shown = S.edits.filter((e) => e.on && (e.patch || (e.tool === "fluid" && e.state === "done")) && e.state !== "generating"); // a fluid shot from its Generate on, as its steps make it
+  const last = hdrLast(shown.map((e) => e.tool)), dflt = holdsHdr(S.plate?.spec, S.plate?.headroom);
+  const keyOf = (auto) => { // a strategy: another render, its shot taken from the render of the same edits
+    const edits = shown.map((e) => `${e.id}.${e.version}${auto === e ? "" : matteKey(e)}`).join(",");
+    const on = hdrWanted() && (!!edits || !(fluidEdit() || keying())); // with no edit, the plate alone; a blank plate alone makes nothing
+    const up = !!S.deliver.upscale && S.upscaleReady && !edits && !keying() && !fluidEdit(); // Finish > Upscale on a plate with no edit, or on a fluid shot alone: the plate alone's render
+    return renderKey(edits, dflt, last ? dflt : on, up); // Finish's SDR to HDR on an SDR plate: another render, unless it runs last
+  };
+  const paints = shown.filter((e) => matteChoices(e.tool).length), one = paints.length === 1 ? paints[0] : null;
+  const asAuto = one && matteOf(one) !== "Auto" && matteChoseIn(S.renders.get(keyOf(one))) === matteOf(one); // « Auto » chose this very strategy: its render stands for it
+  const key = keyOf(asAuto ? one : null);
   if (key === S.heroKey) return;
   S.heroKey = key;
   upscaleStale(); // one of Upscale's steps that runs for the edits no longer on show stops
@@ -2555,7 +2558,7 @@ function stopEdit(edit) {
 // progress. Undo restores the snapshot; an edit whose result no longer matches its strokes, words or seed is made again.
 
 function snapshot() {
-  const rec = (e) => ({ e, strokes: e.strokes.slice(), prompt: e.prompt, seed: e.seed, on: e.on, whole: !!e.whole,
+  const rec = (e) => ({ e, strokes: e.strokes.slice(), prompt: e.prompt, seed: e.seed, on: e.on, whole: !!e.whole, matte: e.matte,
     keys: e.keys?.map((k) => ({ k, frame: k.frame, strokes: k.strokes.slice() })) }); // a fluid shot's keyframes, as an edit's strokes
   return { edits: S.edits.map(rec), draft: S.draft ? rec(S.draft) : null };
 }
@@ -2572,9 +2575,9 @@ function restore(snap) {
   cancel("edit", "snap", "prefetch", "warm"); // the edits change; renders go on, and what they make stays
   for (const e of [...S.edits, S.draft].filter(Boolean)) if (e.state === "generating" || e.state === "queued") e.token = (e.token ?? 0) + 1;
   Object.assign(S, { running: null, draft: null, hover: null, selected: null, peek: null }); // an undo or a redo ends the selection: the next strokes start a new edit
-  const apply = ({ e, strokes, prompt, seed, on, whole, keys }) => {
+  const apply = ({ e, strokes, prompt, seed, on, whole, keys, matte }) => {
     const same = strokes.length === e.strokes.length && strokes.every((st, i) => st === e.strokes[i]);
-    Object.assign(e, { prompt, seed, on, whole });
+    Object.assign(e, { prompt, seed, on, whole, matte });
     if (!same) { e.strokes = strokes.slice(); e.sam = null; e.snapped = ""; e.caption = null; redrawStrokes(e); }
     if (e.tool === "erase" && e.whole && !e.sam) e.snapped = "";
     if (keys) e.keys = keys.map(({ k, frame, strokes: st }) => { const same = st.length === k.strokes.length && st.every((x, j) => x === k.strokes[j]); k.frame = frame; if (!same) { k.strokes = st.slice(); redrawKey(k); } return k; });
@@ -2709,13 +2712,46 @@ function historyUI() {
     li.querySelector(".again").onclick = () => again(e);
     li.querySelector(".del").onclick = () => removeEdit(e);
     li.querySelector(".again").disabled = e.state === "drawing" || !(e.strokes.length || e.keys?.length) || (e.tool === "fluid" && !S.fluidReady);
+    if (matteChoices(e.tool).length) li.append(matteMenu(e));
     li.onmouseenter = () => { S.hover = e; render(); };
     li.onmouseleave = () => { S.hover = null; render(); };
     li.onclick = (ev) => { if (!ev.target.closest("button")) { if (keying()) leaveKeys(); pause(); seek(0); show(S.peek === e && !S.selected ? null : e); } };
     return li;
   }));
+  if (S.hover && !$("#history").matches(":hover")) { S.hover = null; render(); } // a row rebuilt after the pointer left it: its strokes go
   undoUI();
   exportUI(); timelineUI();
+}
+
+function matteMenu(e) { // under a paint's row, with its label: how much of the regenerated shot the composite keeps (logic.matteChoices)
+  const label = document.createElement("label"), menu = document.createElement("select"), chose = matteChosen();
+  label.className = "matte";
+  label.title = "How much of the regenerated shot to keep in the composite.";
+  label.append(Object.assign(document.createElement("span"), { textContent: "Matte strategy" }), menu);
+  menu.replaceChildren(...matteChoices(e.tool).map((c) => {
+    const o = document.createElement("option");
+    o.value = c; o.title = MATTE_TIPS[c];
+    o.textContent = c === "Auto" && chose ? `Auto: ${chose}` : c;
+    return o;
+  }));
+  menu.value = matteOf(e);
+  label.onclick = (ev) => ev.stopPropagation(); // a click on the menu or its label is not a click on the row
+  menu.onchange = () => setMatte(e, menu.value);
+  return label;
+}
+
+// What « Auto » chose for the paint matte of a render: its full size, else its preview; the render on show by default
+const matteChoseIn = (r) => r?.full?.found?.chose ?? Object.values(r?.previews ?? {}).map((pv) => pv.painted?.found?.chose).find(Boolean) ?? null;
+const matteChosen = () => matteChoseIn(S.renders.get(S.heroKey));
+
+function setMatte(e, strategy) { // the menu changed: the matte and the composite run again, then what depends on them, never the shot
+  if (matteOf(e) === strategy) return;
+  mark();
+  e.matte = strategy;
+  Object.assign(S, { hover: null, peek: null }); // the row rebuilds under the menu's popup: frame 0 shows the result, not the strokes
+  recompose(); historyUI(); stagesUI(); exportUI(); touch(); // as a Finish switch: another render, whose shot the job index answers; « Auto » shows its choice in it
+  const made = fullSizeMade(S.renders.get(S.heroKey)); // back to a strategy already rendered: it shows at once, nothing runs
+  log(`Edit ${num(e)}: matte ${strategy}.${made ? "" : " The matte and the composite run again."}`);
 }
 
 function editProgress(edit, f) { // the state line of one History row, without rebuilding the list
@@ -2739,7 +2775,7 @@ const YIELD = new Error("yield"); // a render step gives way to an edit, or to t
 
 function freeze(e) { // what a render needs of an edit, as it is now: a later change to the edit never reaches the render
   if (e.tool === "fluid") return { src: e, id: e.id, version: e.version, tool: "fluid", prompt: e.prompt, seed: e.seed, keys: e.keysMade ?? [], foot: e.foot }; // its keyframes as Generate took them
-  return { src: e, id: e.id, version: e.version, tool: e.tool, prompt: e.prompt, seed: e.seed, caption: e.caption?.text ?? "",
+  return { src: e, id: e.id, version: e.version, tool: e.tool, prompt: e.prompt, seed: e.seed, caption: e.caption?.text ?? "", matte: matteOf(e),
     hue: hueOf(e), patch: e.patch, mask: e.mask && snap(e.mask, S.plate.track), foot: e.foot };
 }
 
@@ -2764,7 +2800,7 @@ function donorOf(r, final) {
   const goal = final ? (carry ? "full" : "cleanfull") : carry ? "shot" : "clean";
   const ready = (d) => { const st = final ? d : d.previews[sized]; return !!st?.[carry ? "shot" : "clean"] && st.done?.[goal] !== undefined; };
   const key = donorFor(r.active.filter((e) => e.tool !== "fluid"), [...S.renders.values()].filter((d) => d !== r && !d.failed && !d.donor && ready(d) && fv(d) === fv(r))
-    .map((d) => ({ key: d.key, active: d.active.filter((e) => e.tool !== "fluid"), wanted: d.wanted })));
+    .map((d) => ({ key: d.key, active: d.active.filter((e) => e.tool !== "fluid"), wanted: d.wanted })), r.key); // the same edits under another matte strategy too
   return key ? S.renders.get(key) : null;
 }
 
@@ -3080,15 +3116,16 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     return Object.assign(kept, { clean: folderOf("clean", out, "frames"), raw: viewUrl(outputFile("clean", out, "video")) });
   };
   const take = (store, d, final) => { // frames an earlier render of more edits made: the composite takes them inside these edits' mattes only
-    const from = final ? d : d.previews[sized];
+    const from = final ? d : d.previews[sized], ids = (x) => x.active.map((e) => `${e.id}.${e.version}`).sort().join();
+    const same = ids(d) === ids(r); // the same edits, another matte strategy
     for (const id of final ? ["cleanfull", "full"] : ["clean", "shot"]) {
       if (r.skip.has(id) || store.done?.[id] !== undefined) continue;
       (store.done ??= {})[id] = 0; (store.at ??= {})[id] = ++stepSeq;
       (store.taken ??= {})[id] = d.v;
-      log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: reused from render v${d.v}, whose other edits are far from these.`);
+      log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: reused from render v${d.v}${same ? "" : ", whose other edits are far from these"}.`);
     }
     Object.assign(store, { clean: from.clean, shot: from.shot, raw: from.raw, cleanRaw: from.cleanRaw });
-    r.donor = d.v;
+    if (!same) r.donor = d.v; // the same edits under another matte strategy made this very shot: no Render in full to offer
     return carry ? from.shot : from.clean;
   };
   const underOf = (st) => (st.clean ? { path: st.clean, cs: "@model" } : { path: p.path, cs: p.cs }); // the plate a shot was made over
@@ -3353,10 +3390,13 @@ async function track(active, shotPath, base, suffix, progress, previous, tools, 
       : tool === "erase" ? { base: plate.path, base_color_space: plate.cs } : {}; // a Clean finds what the plate keeps on the plate itself
     if (tool === "paint") compare.seed = await uploadCanvas(elementOf(union, size, hero), `seed${suffix}.png`); // from what the edits changed
     const mask = await uploadCanvas(union, `${key}${suffix}.png`), texts = edits.map((e) => e.prompt);
+    const strategy = tool === "paint" ? { strategy: sharedMatte(edits) } : {}; // a Clean's matte is its pass's hole: Follow Matte's own (logic.matteChoices)
+    const shared = tool === "paint" ? sharedMatteLine(edits, (e) => num(e.src)) : "";
+    if (shared) log(shared);
     const naming = tool === "paint" ? { name_request: nameRequest("paint", texts), prompt: compare.seed } // SAM 3.1 starts from the element
       : { removed_request: nameRequest("erase", texts), prompt: mask }; // and for a Clean from the zone
     const out = await run("matte", { path, config: S.ocio.config, color_space: cs, max_frames: p.frames, width: sw, height: sh, prefix: `${base}/${key}${suffix}/m`,
-      mask, zone: FOLLOW.zone, threshold: FOLLOW.threshold, first_frame: p.first, ...compare, ...naming,
+      mask, zone: FOLLOW.zone, threshold: FOLLOW.threshold, first_frame: p.first, ...compare, ...naming, ...strategy,
       fps: p.fps, video_prefix: `${base}/${key}${suffix}_movie/m`, ...plateMovie(p) }, // its grey movie, for its row in the Render panel
       { kind: "matte", progress }).done;
     const movie = outputFile("matte", out, "movie");
@@ -3364,6 +3404,7 @@ async function track(active, shotPath, base, suffix, progress, previous, tools, 
     const note = outputText("matte", out, "follow");
     if (note) log(`${tool === "erase" ? "Clean" : "Paint"} matte${suffix ? ` (${suffix.slice(1)})` : ""}: ${note}`);
     found[key] = folderOf("matte", out, "frames");
+    if (tool === "paint") { found.chose = autoChose(note); setTimeout(historyUI); } // the menu's « Auto » shows its choice, once the render holds this matte
   }
   return mattesOf(found);
 }
@@ -3830,7 +3871,8 @@ async function saveScene() { // on this ComfyUI: Open plate > Scenes opens it ag
     deliver: { ...S.deliver }, in: S.inPt, out: S.outPt,
     edits: S.edits.filter((e) => e.tool !== "fluid" || e.keys.length).map((e) => (e.tool === "fluid"
       ? { tool: "fluid", prompt: keying() ? $("#prompt").value.trim() : e.prompt ?? "", seed: e.seed, on: e.on, made: !!e.version, keys: e.keys.map((k) => ({ frame: k.frame, strokes: packStrokes(k.strokes) })) }
-      : { tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on, caption: e.caption?.text ?? "", strokes: packStrokes(e.strokes) })) };
+      : { tool: e.tool, color: e.color, prompt: e.prompt, seed: e.seed, whole: !!e.whole, on: e.on,
+        ...(matteOf(e) === "Auto" ? {} : { matte: matteOf(e) }), caption: e.caption?.text ?? "", strokes: packStrokes(e.strokes) })) };
   const named = blank && !blank.sceneName // a scene of a blank plate is named once, at its first save
     ? await ask("Name this scene.", "Save as fluid_shot", { field: { value: "fluid_shot", label: (v) => `Save as ${sceneName(v) || "fluid_shot"}` } }) : null;
   if (named === false) return; // « No, cancel »: nothing saved
@@ -3862,7 +3904,7 @@ async function graphFile() { // the whole scene as one ComfyUI workflow, for Exp
   const p = S.plate && plateUnder(S.renders.get(S.heroKey)), active = S.edits.filter((e) => e.tool !== "fluid" && e.on && e.patch && e.state === "done");
   if (!p || !active.length) return null;
   const edits = [];
-  for (const [i, e] of active.entries()) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, caption: e.caption?.text || templateCaption(e),
+  for (const [i, e] of active.entries()) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, matte: matteOf(e), caption: e.caption?.text || templateCaption(e),
     mask: await uploadGraphImage(maskAt(e, p.work), i + 1, "mask"),
     layer: e.tool === "paint" ? await uploadGraphImage(snap(e.paint, p.work), i + 1, "strokes") : null,
     quick: editSettings(e, p.prev, QUICK), full: editSettings(e, p.work, FULL) });
@@ -3920,7 +3962,7 @@ async function openScene(text, name = null) { // the plate opens in its colour s
   }
   for (const saved of scene.edits.filter((e) => e.tool !== "fluid")) {
     const e = Object.assign(newEdit(), { tool: saved.tool, color: saved.color, prompt: saved.prompt ?? "", seed: saved.seed,
-      whole: !!saved.whole, on: saved.on !== false, state: "queued", launched: performance.now(), caption: saved.caption ? { key: "scene", text: saved.caption } : null,
+      whole: !!saved.whole, matte: saved.matte, on: saved.on !== false, state: "queued", launched: performance.now(), caption: saved.caption ? { key: "scene", text: saved.caption } : null,
       strokes: unpackStrokes(saved.strokes, S.plate.work, from) });
     redrawStrokes(e);
     e.thumb = strokesThumb(e);
