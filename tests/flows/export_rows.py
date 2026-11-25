@@ -39,7 +39,7 @@ def run(browser, port, U):
     rows = page.evaluate(ROWS)
     U.check([r[:2] for r in rows] == [["x-export", "Composite, full size"], ["x-matte", "Matte"], ["x-shot", "Shot, full size"], ["x-source", "Source plate"],
                                       ["x-graph", "ComfyUI graph"]]
-            and rows[0][2] == "H.264 movie", f"a movie plate: its composite is a movie, with no second one: {rows}")
+            and rows[0][2] == "ProRes 4444 XQ", f"a movie plate: its composite is a ProRes 4444 XQ movie, with no second one: {rows}")
     U.check(page.is_checked("#x-review"), "the composite's movie keeps its tick from the plate of frames, hidden")
     page.evaluate(U.WATCH)
     with page.expect_download(timeout=180000):
@@ -58,11 +58,11 @@ def run(browser, port, U):
                            timeout=240000)  # the fluid shot, made by its render's steps
     page.click("#export-btn")
     rows = page.evaluate(ROWS)
-    U.check(rows[0] == ["x-export", "Fluid shot", "ProRes 4444 movie"] and not any(r[0] in ("x-review", "x-matte", "x-shot", "x-source") for r in rows),
+    U.check(rows[0] == ["x-export", "Fluid shot", "ProRes 4444 XQ"] and not any(r[0] in ("x-review", "x-matte", "x-shot", "x-source") for r in rows),
             f"a fluid shot alone: one row of its own: {rows}")
     page.keyboard.press("Escape")
     U.check(page.text_content("#help-export") == "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip. "
-            "Composite, full size keeps the plate's format. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.",
+            "Frames keep their format, and a movie gives ProRes 4444 XQ. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.",
             f"the Help's Export entry: the dialog's line, then the composite's step: {page.text_content('#help-export')!r}")
     U.no_errors(errors, "after the three dialogs")
     page.close()

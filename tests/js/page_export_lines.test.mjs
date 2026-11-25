@@ -19,8 +19,8 @@ test("the Export dialog: one line above its parts for every kind of result, and 
   assert.equal(said({ kind: "plate", ready: false, left: secs(610, ""), exr: true }), "The plate in HDR. SDR to HDR runs first: about 10 min.");
   assert.equal(said({ kind: "relit", ready: true, exr: true }), "The relit result in HDR.");
   assert.equal(said({ kind: "relit", ready: false, left: secs(610, ""), exr: true }), "The relit result in HDR. SDR to HDR runs first: about 10 min.");
-  assert.equal(said({ kind: "fluid" }), "The fluid shot in ProRes 4444.");
-  assert.equal(said({ kind: "fluid", hdr: true }), "The fluid shot in HDR, with the SDR shot in ProRes 4444.");
+  assert.equal(said({ kind: "fluid" }), "The fluid shot in ProRes 4444 XQ.");
+  assert.equal(said({ kind: "fluid", hdr: true }), "The fluid shot in HDR, with the SDR shot in ProRes 4444 XQ.");
 });
 
 test("the Help's Export entry opens with the Export dialog's own line, which is written once", () => {
@@ -28,14 +28,14 @@ test("the Help's Export entry opens with the Export dialog's own line, which is 
   assert.match(html, /<dt>Export<\/dt><dd><span id="help-export"><\/span><\/dd>/); // the whole entry comes from exportWords' help
   assert.ok(html.includes('<p id="x-hint" class="hint"></p>')); // the dialog's line comes from the code, never from the page's file
   assert.ok(app.includes('$("#help-export").textContent = exportWords({ kind: "edits", steps: { comp: labelOf(STAGES.find((st) => st.id === "review"), null) } }).help;'));
-  assert.ok(exportWords({ kind: "edits", steps: STEPS }).help.startsWith(`${exportWords({ kind: "edits" }).hint} Composite, full size keeps the plate's format.`));
+  assert.ok(exportWords({ kind: "edits", steps: STEPS }).help.startsWith(`${exportWords({ kind: "edits" }).hint} Frames keep their format, and a movie gives ProRes 4444 XQ.`));
   for (const src of [html, app, read("logic.mjs")]) assert.equal(src.split("then downloads").length - 1, src === read("logic.mjs") ? 1 : 0);
 });
 
-test("the dialog names the result's format once: the plate's own, EXR frames with SDR to HDR, a fluid shot's own", () => {
-  assert.equal(exportWords({ kind: "edits", spec: { kind: "video", codec: "h264" } }).format, "H.264 movie");
+test("the dialog names the result's format once: a sequence's own, ProRes 4444 XQ for a movie, EXR frames with SDR to HDR", () => {
+  assert.equal(exportWords({ kind: "edits", spec: { kind: "video", codec: "h264" } }).format, "ProRes 4444 XQ");
   assert.equal(exportWords({ kind: "edits", exr: true, spec: { kind: "video", codec: "h264" } }).format, "half-float EXR frames, ACES2065-1");
-  assert.equal(exportWords({ kind: "fluid" }).format, "ProRes 4444 movie");
+  assert.equal(exportWords({ kind: "fluid" }).format, "ProRes 4444 XQ");
   assert.equal(exportWords({ kind: "fluid", hdr: true }).format, "half-float EXR frames, ACES2065-1");
 });
 

@@ -1,4 +1,4 @@
-"""Frames of another size than the plate, written in the plate's own format: a movie in its codec, a 16-bit PNG sequence
+"""Frames of another size than the plate, written as Save Plate writes the export: a movie as ProRes 4444 XQ, a 16-bit PNG sequence
 under the plate's frame names, and an EXR frame with its pixel type and its header attributes, its other channels left
 out. Save Plate writes the export of Upscale this way."""
 import os

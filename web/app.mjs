@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7, autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, downloadLines } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7, autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, downloadLines } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -3059,7 +3059,7 @@ async function fluidFirst(r, fl) { // the full-size shot of a fluid version: its
 }
 async function exportAlone(r) { // Export on the plate alone, or on a relit composite after SDR to HDR (logic.hdrAfterComposite): the frames SDR to HDR wrote,
   // at the plate's size and level, in ACES2065-1, and the upscaled set Upscale's step made, at the size asked for. A fluid
-  // shot alone adds its own file: the shot in the blank plate's format. Its preview movie stays on disk, for the viewer
+  // shot alone adds its own file: the shot as ProRes 4444 XQ. Its preview movie stays on disk, for the viewer
   const hdr = r.done?.hdr !== undefined && !r.skip?.has("hdr"), fluid = !!r.fluid && !r.active.some((e) => e.tool !== "fluid"); // made, and on as the switch stands
   r.exported ??= { run: r.run ?? r.base, name: fluid ? `${exportStem()}_fluid_v${fluidEdit()?.version}` : `${exportStem()}_v${r.v}`, text: hdr ? `${S.plate.frames} half-float EXR frames in ACES2065-1, in ${r.run}/hdr.` : "", matte: null };
   S.exported = r.exported;
@@ -3250,7 +3250,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   }
   await upscaleSteps();
   if (!S.wantDownload) return;
-  await step(r, "export", async (progress) => { // only when Export asks: the plate's own format, and the matte, beside the review
+  await step(r, "export", async (progress) => { // only when Export asks: the composite in its export format (logic.exportFormat), its layer and its matte, beside the review
     const x = await exportJob(progress), matte = outputFile("export", x.done, "matte_movie");
     r.exported = { run: x.run, name: `${exportStem()}_v${r.v}`,
       text: r.hdrAfter && r.hdrFrames ? `${p.frames} half-float EXR frames in ACES2065-1, in ${x.run}/hdr.` // over a fluid shot: SDR to HDR's frames are the result
@@ -3694,7 +3694,7 @@ function exportUI() {
 }
 
 // A fluid shot with no edit on it exports as the plate alone does (exportAlone): SDR to HDR's frames when the switch is on
-// (half-float EXR in ACES2065-1), and the shot in the blank plate's format (ProRes 4444).
+// (half-float EXR in ACES2065-1), and the shot as ProRes 4444 XQ, as every movie the export writes.
 const fluidOnly = () => { const f = fluidEdit(); return !!f && f.on && f.state === "done" && !S.edits.some((e) => e !== f && e.on && e.patch); }; // a fluid shot with no edit on it
 const exportsExr = (r) => exrResult(S.plate.spec, r?.skip ? !r.skip.has("hdr") : hdrWanted(), S.plate.headroom); // the render's own plan (plan) decides: an HDR result of a plate whose format holds nothing above 1.0
 // The Export dialog's words for the result on show (logic.exportWords), with the Render panel's step names (labelOf)
@@ -3942,7 +3942,7 @@ async function graphFile() { // the whole scene as one ComfyUI workflow, for Exp
     render: { upscale: !!S.deliver.upscale, prompt: shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt, hue: e.hue ?? hueOf(e.src ?? e) }))), seed: active[0].seed,
       erasePrompt: erasePrompt(active.filter((e) => e.tool === "erase").map((e) => e.caption?.text)),
       grow: grow(p.spec.width, erase), feather: feather(p.spec.width), prefix: `paintaplate/${p.id}/graph`,
-      hdr, exr: exrResult(p.spec, hdr, p.headroom) } }); // exr: the result as half-float EXR frames, as Export writes it
+      hdr, exr: exrResult(p.spec, hdr, p.headroom), format: exportFormat(p.spec) } }); // exr: the result as half-float EXR frames, as Export writes it; format: else
   return editorFile(graph);
 }
 
@@ -4699,7 +4699,7 @@ $("#x-go").onclick = () => {
   if (r?.exported && r.skip?.has("upcomp")) return download(parts); // with Upscale on, the render makes the steps still due, then the zip
   S.wantDownload = parts;
   status(r && UPS.some((st) => !r.skip.has(st.id) && doneOf(r, st) === undefined) ? runsFirst("Upscale")
-    : `Export: writing ${exportsExr(r) ? "half-float EXR frames in ACES2065-1" : "in the plate's own format"}. The zip downloads when it is done.`);
+    : `Export: writing ${exportsExr(r) ? "half-float EXR frames in ACES2065-1" : exportFormat(S.plate.spec)}. The zip downloads when it is done.`);
   exportUI(); stagesUI(); touch();
 };
 $("#log-btn").onclick = () => {

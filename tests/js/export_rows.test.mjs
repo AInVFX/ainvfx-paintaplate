@@ -3,16 +3,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { downloadLines, EXR_FRAMES, exportWords, plateFormat, zipNames } from "../../web/logic.mjs";
+import { downloadLines, EXR_FRAMES, exportFormat, exportWords, zipNames } from "../../web/logic.mjs";
 
 const read = (f) => readFileSync(new URL(`../../web/${f}`, import.meta.url), "utf8");
 const STEPS = { comp: "Composite, full size", shot: "Shot, full size", hdr: "SDR to HDR", up: "Composite, upscaled" }; // as the page gives them
 const MOVIE = { kind: "video", codec: "h264", ext: ".mp4" }, FRAMES = { kind: "sequence", ext: ".exr" }, PRORES = { kind: "video", codec: "prores", profile: "4444", ext: ".mov" };
 const shown = (w) => Object.entries(w.rows).filter(([k, r]) => r.shown && k !== "upscaled").map(([k, r]) => [k, r.label, r.detail]);
 
-test("a movie plate: the composite in its own format, the matte, the shot, and no second movie of the composite", () => {
+test("a movie plate: the composite as ProRes 4444 XQ, the matte, the shot, and no second movie of the composite", () => {
   assert.deepEqual(shown(exportWords({ kind: "edits", spec: MOVIE, steps: STEPS })), [
-    ["export", "Composite, full size", "H.264 movie"], ["matte", "Matte", "where the plate changed, PNG frames"],
+    ["export", "Composite, full size", "ProRes 4444 XQ"], ["matte", "Matte", "where the plate changed, 16-bit PNG frames"],
     ["shot", "Shot, full size", "the whole frame as the model made it, H.264 MP4"], ["graph", "ComfyUI graph", "the scene as one ComfyUI workflow, with the images it loads"]]);
 });
 
@@ -24,11 +24,11 @@ test("a plate of frames, or SDR to HDR's EXR frames: the same composite as a mov
   assert.equal(exportWords({ kind: "edits", spec: MOVIE, exr: true, steps: STEPS }).rows.export.detail, EXR_FRAMES);
 });
 
-test("a format reads by its name: H.264, ProRes with its profile, a sequence's file type", () => {
-  assert.equal(plateFormat(MOVIE), "H.264 movie");
-  assert.equal(plateFormat(PRORES), "ProRes 4444 movie");
-  assert.equal(plateFormat({ kind: "video", codec: "hevc" }), "H.265 movie");
-  assert.equal(plateFormat({ kind: "sequence", ext: ".png" }), "PNG frames");
+test("the export's format: a sequence keeps its file type, and every movie is ProRes 4444 XQ, whatever its codec", () => {
+  assert.equal(exportFormat(MOVIE), "ProRes 4444 XQ");
+  assert.equal(exportFormat(PRORES), "ProRes 4444 XQ");
+  assert.equal(exportFormat({ kind: "video", codec: "hevc" }), "ProRes 4444 XQ");
+  assert.equal(exportFormat({ kind: "sequence", ext: ".png" }), "PNG frames");
   assert.equal(exportWords({ kind: "edits", spec: PRORES, steps: STEPS }).rows.review.shown, false); // a blank plate's composite is a movie
 });
 
@@ -44,7 +44,7 @@ test("SDR to HDR on the plate alone or a relit result, Upscale on the plate alon
     assert.equal(w.rows.export.label, label, kind);
     assert.deepEqual(["review", "matte", "shot"].filter((k) => w.rows[k].shown), [], kind);
   }
-  assert.equal(exportWords({ kind: "fluid", steps: STEPS }).rows.export.detail, "ProRes 4444 movie");
+  assert.equal(exportWords({ kind: "fluid", steps: STEPS }).rows.export.detail, "ProRes 4444 XQ");
 });
 
 test("the log's download line: the zip, then one line per row it holds; the layer has no row", () => {

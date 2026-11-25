@@ -44,7 +44,7 @@ export function stale(api) {
 const pass = { steps: 8, denoise: 1, grow: 16, feather: 6, sigma: 3 };
 const plate = { path: "plates/horse.mp4", config: "ocio://studio-config-latest", cs: "sRGB Encoded Rec.709 (sRGB)", frames: 121, fps: 24,
   work: [1280, 704], prev: [768, 416], track: [960, 528], trackErase: [640, 352] };
-const render = { prompt: "Ripple", seed: 1, grow: 53, feather: 13, prefix: "paintaplate/x/graph" };
+const render = { format: "ProRes 4444 XQ", prompt: "Ripple", seed: 1, grow: 53, feather: 13, prefix: "paintaplate/x/graph" };
 const image = (k, kind) => graphImageName("horse", k, kind, `${k}${kind}`.padEnd(32, "0"));
 const edit = (tool, k) => ({ tool, seed: k, caption: `${tool} caption`, words: `${tool} words`, quick: pass, full: pass, mask: image(k, "mask"),
   layer: tool === "paint" ? image(k, "strokes") : null });

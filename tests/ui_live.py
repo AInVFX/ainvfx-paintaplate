@@ -246,7 +246,7 @@ def flow(page, url, open_plate, shots, wait_s=120):
     page.keyboard.press("F6")  # wipe on, at frame 10
     page.keyboard.press("End")
     page.screenshot(path=f"{shots}/3_full_size_wipe.png")
-    with page.expect_download(timeout=wait_s * 3000) as dl:  # Export: only now is the result written in the plate's format
+    with page.expect_download(timeout=wait_s * 3000) as dl:  # Export: only now is the result written in its export format
         page.click("#export-btn")
         tick_offered(page)  # the composite's movie, where the dialog offers it: a composite of frames
         page.click("#x-go")
@@ -398,7 +398,7 @@ def main():
     print(f"zip: {len(exports)} EXR frames, {len(mattes)} matte frames; console errors: {len(errors)}")
     for e in errors[:10]:
         print("  console:", e[:300])
-    passed = ok and exports and mattes and any(n.endswith("_composite_full_size.mp4") for n in names) and not errors
+    passed = ok and exports and mattes and any(n.endswith("_composite_full_size.mov") for n in names) and not errors
     print("UI FLOW PASSED" if passed else "UI FLOW FAILED")
     return 0 if passed else 1
 

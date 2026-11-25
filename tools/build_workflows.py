@@ -661,10 +661,11 @@ def review():
 
 
 def export():
-    """For compositing software, when Export is pressed: the composite the review shows, written by Save Plate in the
-    plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers, the untouched
-    pixels exactly the source's), with the matte of where the plate changed and, for an edit that keeps the plate's
-    untouched pixels, the layer the composite blends in: result = plate x (1 - matte) + layer x matte."""
+    """For compositing software, when Export is pressed: the composite the review shows, written by Save Plate (a
+    sequence in the plate's own format, its EXR layers and untouched pixels exactly the source's; a movie as ProRes 4444
+    XQ, its untouched pixels the source's own samples), with the matte of where the plate changed as 16-bit PNG frames
+    and, for an edit that keeps the plate's untouched pixels, the layer the composite blends in:
+    result = plate x (1 - matte) + layer x matte."""
     g = Graph()
     load, fit, final = composite(g)
     plate_out = g("PaintAPlate_SavePlate", _title="Export", _output="export", images=final, plate=load[2],
@@ -680,7 +681,7 @@ def export():
             filename_prefix=Slot("exr_prefix", ""))
     g.link_slot(exr, "images", "export_exr")
     # The layer: the shot as the composite blends it. Composite Frames sizes its source to the plate with the bilinear
-    # filter of Image Scale, so this is the picture it blends. Written as the result is: in the plate's own format with no
+    # filter of Image Scale, so this is the picture it blends. Written as the result is: by Save Plate with no
     # source pixel kept, or as half-float EXR frames in ACES2065-1 beside an EXR result. A relight leaves it out (Slots
     # layer_prefix and layer_exr_prefix empty): every pixel of its result may change, so the result is the only layer.
     size = g("GetImageSize", image=load[0])
@@ -729,7 +730,7 @@ def fluid():
     and hands it to the guide; the control video is black with the keyframes at their frames, at the size and length
     of the shot; euler_ancestral, the 8 distilled sigmas, CFG 1, no first-frame image (the LoRA reads frame 0 from the
     control video). The blank plate gives the frame rate and the length, and the size unless `width` and `height` ask for
-    the shot preview's. Save Plate writes the shot in the blank plate's format (ProRes 4444), and Save Image writes its
+    the shot preview's. Save Plate writes the shot as ProRes 4444 XQ, as every movie of the export, and Save Image writes its
     first frame, as `ingest` writes a plate's first frame.
     """
     g = Graph()
@@ -762,7 +763,7 @@ def fluid():
     # the whole frame in one piece by default, in 128-frame temporal tiles, as the hdr workflow decodes (hdr())
     decoded = g("VAEDecodeTiled", tile_size=Slot("tile", WHOLE), overlap=64, temporal_size=128, temporal_overlap=32, vae=vae, samples=g("LTXVCropGuides", positive=guide[0], negative=guide[1],
                                                  latent=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])[2])
-    g("PaintAPlate_SavePlate", _title="The fluid plate, in the blank plate's format", _output="plate", images=decoded,
+    g("PaintAPlate_SavePlate", _title="The fluid shot, as ProRes 4444 XQ", _output="plate", images=decoded,
       plate=load[2], filename_prefix=Slot("prefix", "paintaplate/fluid/plate"), keep_untouched=False)
     g("SaveVideo", _title="Fluid shot preview", _output="video", format="auto", format__codec="auto",
       video=g("CreateVideo", images=decoded, fps=load[3], bit_depth=8, color_space="sRGB", codec="none"),
@@ -931,9 +932,9 @@ def upscale():
 def upscale_export():
     """Upscale's export, after the last window. Join Windows reads the windows' folders under one parent folder
     (Slot frames), in order, each window its last frames (Slot count) and the last window what is left of the shot's
-    frames (Slot max_frames), so a window job that runs again counts once; a shot made in one job is one window. Save Plate writes the joined frames at their own size, in the format of the export at the plate's size (Slot
-    shot), which Load Plate reads for its spec: the same file type, codec, bit depth, frame numbers, colour tags, timecode
-    and audio. The frames are in the plate's colour space already, so nothing converts them. Save Movie writes the part's viewer
+    frames (Slot max_frames), so a window job that runs again counts once; a shot made in one job is one window. Save Plate writes the joined frames at their own size, as it writes the export at the plate's size (Slot
+    shot), which Load Plate reads for its spec: a sequence in its own file type and bit depth, a movie as ProRes 4444 XQ,
+    with the frame numbers, colour tags, timecode and audio. The frames are in the plate's colour space already, so nothing converts them. Save Movie writes the part's viewer
     movie at its own size when the page names it (Slot video_prefix): its row in the Render panel plays it."""
     g = Graph()
     shot = g("PaintAPlate_LoadPlate", _title="Result: its format", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
