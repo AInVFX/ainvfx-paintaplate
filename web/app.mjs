@@ -996,7 +996,7 @@ addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#finish").hid
 function recompose() {
   if (!S.plate) return; // a plate that opens: nothing to compose yet
   S.hero = layered();
-  const shown = S.edits.filter((e) => e.on && (e.patch || (e.tool === "fluid" && e.state === "done")) && e.state !== "generating"); // a fluid shot from its Generate on, as its steps make it
+  const shown = S.edits.filter((e) => e.on && (e.patch || (e.tool === "fluid" && e.state === "done")) && e.state !== "generating" && upToDate(e)); // a fluid shot from its Generate on, as its steps make it
   const last = hdrLast(shown.map((e) => e.tool)), dflt = holdsHdr(S.plate?.spec, S.plate?.headroom);
   const keyOf = (auto) => { // a strategy: another render, its shot taken from the render of the same edits
     const edits = shown.map((e) => `${e.id}.${e.version}${auto === e ? "" : matteKey(e)}`).join(",");
@@ -2520,6 +2520,10 @@ function footprint(edit) { // where the edit changed the frame, on a coarse grid
 
 const record = (e) => ({ id: e.id, version: e.version, tool: e.tool, foot: e.foot });
 const needsRegen = (edit) => edit.base !== S.plate?.path || dependsOnChange(edit, activeBefore(edit).map(record), edit.basis);
+// An edit's result holds while the picture under it is the one it was made on. One that waits for a fluid shot's first
+// frame, or depends on an edit made again under it, stays out of every render until it is made again, as the first frame
+// hides it: a fluid shot made again renders alone first. The render's key, its edits and the Render panel all read this.
+const upToDate = (e) => !e.waits && !needsRegen(e);
 
 // An edit's turn in a pass over History, once the plate under the edits is open. A result that holds for this plate and the
 // edits under it comes back with no pass: its own, or one made before (reuse), with « reused » in the log when it was not on
@@ -2679,6 +2683,7 @@ const ICON = {
   del: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
 };
 const STATE = { drawing: "Drawing", queued: "Waiting", generating: "Generating", failed: "Failed: try again" };
+const WAITS_FLUID = "Waits for the fluid shot"; // an edit above a fluid shot whose first frame is not made yet (pictureReady)
 
 function thumbOf(edit) { // the frame after this edit, cropped to where it changed
   const c = layered(S.edits.indexOf(edit) + 1), f = edit.foot;
@@ -2735,8 +2740,9 @@ function historyUI() {
     if (hidden.has(e)) small.textContent = `Hidden until edit ${num(S.draft)} is generated`;
     else if (forEnter || (STATE[e.state] && e.on)) {
       small.innerHTML = '<span class="state"></span>';
-      small.firstChild.textContent = forEnter ? "Waits for Enter" : asked ? askedText(asked) : left ? (e.leftWhy === "beyond" ? "The area around the object changed" : "The object may still be there") : STATE[e.state];
-    } else if (awaits.has(e)) small.textContent = "Waits to be generated again";
+      small.firstChild.textContent = forEnter ? "Waits for Enter" : asked ? askedText(asked) : left ? (e.leftWhy === "beyond" ? "The area around the object changed" : "The object may still be there") : pictureReady(e) || e.state === "drawing" ? STATE[e.state] : WAITS_FLUID;
+    } else if (e.on && !pictureReady(e)) small.textContent = WAITS_FLUID; // made on the fluid shot before it was made again: its turn comes with the new first frame
+    else if (awaits.has(e)) small.textContent = "Waits to be generated again";
     else small.textContent = e.on ? what : `Bypassed: ${what}`;
     small.title = e.caption?.text ? `What Klein received: ${e.caption.text}` : what;
     li.querySelector(".edit").onclick = () => { if (e.tool === "fluid") return editFluid(); if (keying()) leaveKeys(); pause(); seek(0); select(e); };
@@ -2821,7 +2827,7 @@ function freeze(e) { // what a render needs of an edit, as it is now: a later ch
 function want(key, asked = false) { // the set of edits on show becomes the most recently shown render, made from what it is now
   let r = S.renders.get(key);
   if (!r) {
-    const active = S.edits.filter((e) => e.on && e.state === "done" && (e.patch || e.tool === "fluid"));
+    const active = S.edits.filter((e) => e.on && e.state === "done" && (e.patch || e.tool === "fluid") && upToDate(e));
     if (!active.length && !(plateAlone(key) && asked)) return null; // asked: Generate or Export makes the plate alone's render, minutes of work;
     r = { key, v: ++S.run, previews: {}, active: active.map(freeze), heroFrame: S.hero,
       cleanFrame: active.some((e) => e.tool === "erase") ? layered(S.edits.length, (e) => e.tool === "erase") : null };
@@ -3091,8 +3097,9 @@ async function fluidFirst(r, fl) { // the full-size shot of a fluid version: its
   if (e.version !== fl.version || e.patch) return;
   e.patch = first;
   keep(e);
-  rebuild(); // the edits above are made again on it, or taken back when one was made on it before
-  for (const w of S.edits) if (w.waits) { w.waits = false; queue(() => generate(w)); } // the edits that waited for it
+  for (const w of S.edits) w.waits = false;
+  rebuild(); // the edits above are made again on it, or taken back when one was made on it before: once each (remakeAll)
+  for (const w of S.edits) if (w.on && w.state === "queued") queue(() => generate(w)); // a new edit that waited for it, which remakeAll leaves to its own turn
   historyUI(); exportUI();
 }
 async function exportAlone(r) { // Export on the plate alone, or on a relit composite after SDR to HDR (logic.hdrAfterComposite): the frames SDR to HDR wrote,
@@ -3580,7 +3587,7 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
   finalToo ||= !S.previewCap || plateAlone(S.heroKey); // with no preview pass, the next result is the full-size composite; the plate alone has no preview
   const p = S.plate, r = S.renders.get(S.heroKey), exporting = !!S.wantDownload;
   if (!p || !S.heroKey || (finalToo ? (exporting ? r?.exported : fullSizeMade(r)) : previewOf(r)?.comp || r?.review)) return 0;
-  const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
+  const active = S.edits.filter((e) => e.on && e.patch && e.state === "done" && upToDate(e));
   const skip = r?.skip ?? plan({ key: S.heroKey }, active).skip;
   let t = 0;
   for (const st of STAGES) {
@@ -3621,7 +3628,7 @@ function stagesUI() {
   if ($("#help").open && !$("#models").hidden) modelsUI().catch(quiet); // Models and licences follows the job's plan while it is open
   finishUI(); // the Render panel: every step, done, running or waiting, and the time left
   const list = $("#stages"), p = S.plate, r = S.renders.get(S.heroKey);
-  const active = S.edits.filter((e) => e.on && e.state === "done" && (e.patch || e.tool === "fluid"));
+  const active = S.edits.filter((e) => e.on && e.state === "done" && (e.patch || e.tool === "fluid") && upToDate(e));
   const alone = plateAlone(S.heroKey); // the plate alone: its one step, SDR to HDR
   const edits = (active.length || alone) && !keying();
   $("#render-full").hidden = !r?.donor || !edits; // a set that took another render's frames can still be made with its own shot
