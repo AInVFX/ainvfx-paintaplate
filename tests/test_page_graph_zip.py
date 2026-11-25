@@ -26,6 +26,10 @@ def load_routes():  # routes as another test module loaded it, with its folder_p
     return routes
 
 
+NAMES = {"export": "composite_full_size", "review": "composite_full_size", "matte": "matte", "shot": "shot_full_size", "graph": "comfyui_graph",
+         "hdr": "sdr_to_hdr", "plate": "fluid_shot", "preview": "fluid_shot_preview",
+         "up": {"export": "composite_upscaled", "matte": "matte_upscaled"}}  # the zip's names, as the page sends them (logic.zipNames)
+
 class Request:  # what graph_post reads of a request: its query and its body
     def __init__(self, query, body):
         self.query, self.body = query, body
@@ -51,9 +55,9 @@ class GraphInZip(unittest.TestCase):
         self.assertEqual(json.loads(answer.body), {"file": "scene.comfyui.json"})
         with open(os.path.join(self.folder, "scene.comfyui.json")) as f:
             self.assertEqual(json.load(f), graph)
-        self.assertIn("scene.comfyui.json", [name for _, name in routes.collect(self.folder, ["export", "graph"])])
-        with zipfile.ZipFile(routes.build_zip(self.folder, "shot", ["export", "graph"])) as z:
-            self.assertEqual(json.loads(z.read("scene.comfyui.json")), graph)
+        self.assertIn("desk_comfyui_graph.json", [name for _, name in routes.collect(self.folder, ["export", "graph"], stem="desk", names=NAMES)])
+        with zipfile.ZipFile(routes.build_zip(self.folder, "shot", ["export", "graph"], stem="desk", names=NAMES)) as z:
+            self.assertEqual(json.loads(z.read("desk_comfyui_graph.json")), graph)
 
     def test_a_body_that_is_not_json_and_a_folder_outside_are_refused(self):
         with self.assertRaises(web.HTTPBadRequest):
@@ -86,6 +90,34 @@ class GraphInZip(unittest.TestCase):
         self.assertFalse(os.path.islink(os.path.join(self.folder, "scene.comfyui.json")))
         with open(os.path.join(self.folder, "scene.comfyui.json")) as f:
             self.assertEqual(json.load(f), {"nodes": []})
+
+
+
+class GraphImagesInZip(unittest.TestCase):
+    """The zip holds every image the graph's nodes load, from the top of ComfyUI's input folder, in input/ under the names
+    the graph uses; a name with a folder in it, or a file that is not there, adds nothing."""
+
+    def test_the_images_the_graph_loads_come_in_input(self):
+        routes = load_routes()
+        run = os.path.join(routes.folders.folder_paths.get_output_directory(), f"paintaplate/graphimages{os.getpid()}/v1")
+        os.makedirs(run, exist_ok=True)
+        self.addCleanup(shutil.rmtree, os.path.dirname(run), True)
+        inputs = routes.folders.folder_paths.get_input_directory()
+        for name in ("desk_e1_mask_0676e451.png", "desk_e1_strokes_7bcde075.png", "desk_e1_keyframe_12345678.png"):
+            with open(os.path.join(inputs, name), "wb") as f:
+                f.write(b"png")
+            self.addCleanup(os.remove, os.path.join(inputs, name))
+        nodes = [{"type": "LoadImageMask", "widgets_values": ["desk_e1_mask_0676e451.png", "red", "image"]},
+                 {"type": "LoadImage", "widgets_values": ["desk_e1_strokes_7bcde075.png", "image"]},
+                 {"type": "LoadImage", "widgets_values": ["../secret.png", "image"]}, {"type": "LoadImage", "widgets_values": ["gone.png", "image"]},
+                 {"type": "MarkdownNote", "widgets_values": ["text"]},
+                 {"type": "PaintAPlate_KeyframeVideo", "widgets_values": [960, 512, 17, json.dumps([{"frame": 0, "image": "desk_e1_keyframe_12345678.png"}])]}]
+        with open(os.path.join(run, routes.GRAPH), "w") as f:
+            json.dump({"nodes": nodes}, f)
+        got = [arc for _, arc in routes.collect(run, ["graph"], stem="desk", names={"graph": "comfyui_graph"})]
+        self.assertEqual(got, ["desk_comfyui_graph.json", "input/desk_e1_mask_0676e451.png", "input/desk_e1_strokes_7bcde075.png",
+                               "input/desk_e1_keyframe_12345678.png"])
+        print("The zip holds the graph and the images it loads, in input/")
 
 
 if __name__ == "__main__":

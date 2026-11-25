@@ -28,9 +28,9 @@ test("the saved graph writes what Export writes, and its notes name the format",
     "a plate that cannot hold them: half-float EXR frames, and the matte");
   assert.equal(note(sdr, "SDR TO HDR"), "", "no SDR to HDR, no section");
   assert.doesNotMatch(note(hdr, "SDR TO HDR"), /EXR/);
-  assert.match(note(exr, "SDR TO HDR"), /holds nothing above 1\.0, so OUTPUT writes them as half-float EXR frames in ACES2065-1\./);
+  assert.match(note(exr, "SDR TO HDR"), /holds values up to 1\.0 only, so OUTPUT writes them as half-float EXR frames, ACES2065-1\./);
   assert.match(note(hdr, "OUTPUT"), /Save Plate writes the result to output\/paintaplate\/x\/graph\/export in the plate's own format/);
-  assert.match(note(exr, "OUTPUT"), /Save Frames writes the result to output\/paintaplate\/x\/graph\/export as half-float EXR frames in ACES2065-1, and the matte/);
-  assert.match(note(exr, "How this graph works"), /It writes the result as half-float EXR frames in ACES2065-1 to output\/paintaplate\/x\/graph\/export/);
+  assert.match(note(exr, "OUTPUT"), /Save Frames writes the result to output\/paintaplate\/x\/graph\/export as half-float EXR frames, ACES2065-1, and the matte/);
+  assert.match(note(exr, "How this graph works"), /It writes the result as half-float EXR frames, ACES2065-1, to output\/paintaplate\/x\/graph\/export/);
   assert.ok(editorGraph(exr, INFO).nodes.length > 0, "the editor's format takes it: ComfyUI describes every node");
 });

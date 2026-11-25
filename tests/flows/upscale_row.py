@@ -2,6 +2,7 @@
 Render panel restores the plate and the layer window by window (a 16 GB GPU with 52 GB of RAM: windows of 21 frames),
 composes the upscaled result, and the zip holds the upscaled set beside the plate-size result and its layer. A second render takes the plate's windows from the job index."""
 import zipfile
+import zip_rows  # noqa: E402
 
 
 def run(browser, port, U):
@@ -28,12 +29,14 @@ def run(browser, port, U):
     lines = U.log_lines(page)
     U.check(any(t.startswith("Upscale: 3840 x 2112, 3 windows of 21 frames.") for t in lines), f"the windows follow the machine's memory: {[t for t in lines if 'Upscale:' in t]}")
     names = zipfile.ZipFile(dl.value.path()).namelist()
-    parts = {n.split("/")[1] for n in names if n.startswith("upscaled/")}
-    mattes = [n for n in names if n.startswith("upscaled/matte/")]
-    U.check(parts == {"export", "plate", "layer", "matte"} and len(mattes) == 49 and any(n.startswith("layer/") for n in names),
-            f"the zip holds the layer and the upscaled set, its matte numbered on across the windows: {sorted(parts)}, {len(mattes)} matte frames")
+    parts = {zip_rows.row_of(n) for n in names if zip_rows.row_of(n).endswith("_upscaled")}
+    mattes = zip_rows.files(names, "matte_upscaled")
+    U.check(parts == {"composite_upscaled", "matte_upscaled"} and len(mattes) == 49 and not any(n.startswith("layer") for n in names),
+            f"the zip holds the upscaled result and its matte, numbered on across the windows, and no layer: {sorted(parts)}, {len(mattes)} matte frames")
     status = page.text_content("#status") or ""
-    U.check(status.startswith("Download: ") and "its layer" in status and "the upscaled set" in status, f"the download line names them: {status!r}")
+    said = [t for t in U.log_lines(page) if t.startswith("Download: ")][-1:]
+    U.check(status.startswith("Download: ") and status.endswith(".zip.") and said and "Composite, upscaled." in said[0],
+            f"the status line names the zip, and the log names the rows it holds, the upscaled set among them: {status!r}, {said!r}")
     start = len(U.log_lines(page))
     page.keyboard.press("c"); U.paint_once(page, "the cup", [(0.6, 0.4), (0.62, 0.45)]); page.wait_for_timeout(1500); page.keyboard.press("Enter")
     U.wait_log(page, f"window.__lines.filter((t) => {U.HAS_REVIEWED}).length >= 2", 240000, "the full-size composite of both edits")
@@ -42,5 +45,5 @@ def run(browser, port, U):
         page.click("#x-go")
     taken = [t for t in U.log_lines(page)[start:] if t.startswith("upscale: taken from the job index")]
     names = zipfile.ZipFile(dl.value.path()).namelist()
-    U.check(len(taken) == 3 and any(n.startswith("upscaled/plate/") for n in names), f"the next render takes the plate's 3 windows from the job index: {len(taken)}")
+    U.check(len(taken) == 3 and zip_rows.files(names, "composite_upscaled"), f"the next render takes the plate's 3 windows from the job index: {len(taken)}")
     page.close()

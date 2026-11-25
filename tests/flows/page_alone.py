@@ -2,13 +2,14 @@
 whose format holds nothing above 1.0, Finish > SDR to HDR turns it on and starts nothing: Generate starts it. The Render
 panel shows one step, SDR to HDR, with no Edited first frame row, and the job takes the plate itself, with the plate's size for
 HDR Match. Once it is done, the player shows its EXR frames at full precision, and Export downloads them as they are:
-half-float EXR frames at the plate's size, with the models behind them in MODELS.md. Turned off, the plate has nothing to
+half-float EXR frames at the plate's size, with the models behind them in the models' list. Turned off, the plate has nothing to
 export; turned on again, the result shows at once."""
 import json
 import os
 import sys
 import tempfile
 import zipfile
+import zip_rows  # noqa: E402
 
 
 def frame_size(path):  # (height, width) of an EXR frame, read by the pack's own reader
@@ -60,16 +61,17 @@ def run(browser, port, U):
         page.click("#x-go")
     z = zipfile.ZipFile(dl.value.path())
     names = z.namelist()
-    exrs = sorted(n for n in names if n.startswith("hdr/") and n.endswith(".exr"))
-    listed = z.read("MODELS.md").decode() if "MODELS.md" in names else ""
+    exrs = sorted(zip_rows.files(names, "sdr_to_hdr", (".exr",)))
+    listed = "".join(z.read(n).decode() for n in zip_rows.files(names, "models"))
     with tempfile.TemporaryDirectory() as tmp:
         size = frame_size(z.extract(exrs[0], tmp)) if exrs else None
     U.check(len(exrs) == 49 and size == (704, 1280) and "LTX" in listed,
             f"the zip holds the 49 EXR frames at the plate's size, 1280 x 704, and the models behind them: {len(exrs)} frames, {size}, {names[:2]}")
     status = page.text_content("#status") or ""
-    U.check(status.startswith("Download: ") and status.endswith("with the HDR frames.") and any(
-        t.startswith("Export: done, in ComfyUI's output folder.") and "49 half-float EXR frames in ACES2065-1" in t for t in U.log_lines(page)),
-        f"the status line and the log say what Export wrote: {status!r}")
+    said = U.log_lines(page)
+    U.check(status.startswith("Download: ") and status.endswith(".zip.") and any(t.startswith("Download: ") and "SDR to HDR." in t for t in said) and any(
+        t.startswith("Export: done, in ComfyUI's output folder.") and "49 half-float EXR frames in ACES2065-1" in t for t in said),
+        f"the status line names the zip, and the log what Export wrote and the row the zip holds: {status!r}")
     page.click("#finish-btn")
     page.click("#finish-hdr")
     U.check(not rows() and page.is_disabled("#export-btn") and page.is_disabled("#generate"), "turned off, the plate has no step and nothing to export")

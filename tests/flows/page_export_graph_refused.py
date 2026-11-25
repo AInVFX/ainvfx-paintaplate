@@ -2,6 +2,7 @@
 restart of ComfyUI: the zip downloads with the other files, the log says so once as a warning, and the status line adds
 what to do."""
 import zipfile
+import zip_rows  # noqa: E402
 
 FACT = "Warning: the ComfyUI graph was not written. The zip holds the other files."
 TODO = "Restart ComfyUI after an update of Paint a plate, then export again."
@@ -18,7 +19,7 @@ def run(browser, port, U):
     with page.expect_download(timeout=180000) as dl:
         page.click("#x-go")
     names = zipfile.ZipFile(dl.value.path()).namelist()
-    U.check("scene.comfyui.json" not in names and any(n.startswith("export/") for n in names) and any(n.startswith("matte/") for n in names),
+    U.check(not zip_rows.files(names, "comfyui_graph") and zip_rows.composite(names) and zip_rows.files(names, "matte"),
             f"the zip downloads with the other files: {sorted({n.split('/')[0] for n in names})}")
     U.check(U.poll(page, lambda: FACT in U.log_lines(page)) and U.log_lines(page).count(FACT) == 1,
             f"the log says once that the graph was not written: {[t for t in U.log_lines(page) if 'graph' in t]}")

@@ -5,6 +5,7 @@ Export then posts no Upscale job, and the zip holds the upscaled set. The player
 composite as the latest result, the canvas at its own size, 1600 x 880, a size above the plate's 1280 x 704 that the mock holds
 in a small machine's memory (upscale_size checks the sizes)."""
 import zipfile
+import zip_rows  # noqa: E402
 
 ROWS = "els => els.map((e) => [e.querySelector('.name').textContent, e.querySelector('.time').textContent, e.className])"
 UP = ["Plate, upscaled", "Layer, upscaled", "Composite, upscaled"]
@@ -106,8 +107,8 @@ def run(browser, port, U):
     page.click("#export-btn")
     with page.expect_download(timeout=280000) as dl:
         page.click("#x-go")
-    parts = {n.split("/")[1] for n in zipfile.ZipFile(dl.value.path()).namelist() if n.startswith("upscaled/")}
+    parts = {zip_rows.row_of(n) for n in zipfile.ZipFile(dl.value.path()).namelist() if zip_rows.row_of(n).endswith("_upscaled")}
     taken = [t for t in U.log_lines(page)[start:] if t.startswith("export: taken from the job index")]
-    U.check(parts == {"export", "plate", "layer", "matte"} and not jobs(start) and len(taken) == 1,
+    U.check(parts == {"composite_upscaled", "matte_upscaled"} and not jobs(start) and len(taken) == 1,
             f"Export takes its job from the job index and writes the steps' upscaled set, with no Upscale job: {sorted(parts)}, {jobs(start)}, {taken}")
     page.close()

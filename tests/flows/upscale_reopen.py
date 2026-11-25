@@ -5,6 +5,7 @@ zips the upscaled set from this opening's folder. The plate alone then takes the
 for 1600 x 880, a size above the plate's 1280 x 704 that the mock holds in a small machine's memory, in three windows of 21
 frames: the first window says where a part's windows are, and the others are written beside it."""
 import zipfile
+import zip_rows  # noqa: E402
 
 ROWS = "els => els.map((e) => [e.querySelector('.name').textContent, e.querySelector('.time').textContent, e.className])"
 UP = ["Plate, upscaled", "Layer, upscaled", "Composite, upscaled"]
@@ -58,8 +59,8 @@ def run(browser, port, U):
     page.click("#export-btn")
     with page.expect_download(timeout=240000) as dl:
         page.click("#x-go")
-    parts = {n.split("/")[1] for n in zipfile.ZipFile(dl.value.path()).namelist() if n.startswith("upscaled/")}
-    U.check(parts == {"export", "plate", "layer", "matte"} and not bad(), f"Export zips the upscaled set of the scene opened again: {sorted(parts)}, {bad()}")
+    parts = {zip_rows.row_of(n) for n in zipfile.ZipFile(dl.value.path()).namelist() if zip_rows.row_of(n).endswith("_upscaled")}
+    U.check(parts == {"composite_upscaled", "matte_upscaled"} and not bad(), f"Export zips the upscaled set of the scene opened again: {sorted(parts)}, {bad()}")
     U.open_plate(page)  # the same plate, opened again with no edit: another folder once more
     page.evaluate(U.WATCH)
     upscale_at("1600")

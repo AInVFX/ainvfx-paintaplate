@@ -3,6 +3,7 @@ itself upscaled with no Export, which the player shows at its own size. Off, the
 made, with no new job. Export posts no Upscale job, and the zip holds the upscaled plate under upscaled/. It asks for 1600 x 880, a
 size above the plate's 1280 x 704 that the mock holds in a small machine's memory."""
 import zipfile
+import zip_rows  # noqa: E402
 
 ROWS = "els => els.map((e) => [e.querySelector('.name').textContent, e.querySelector('.time').textContent, e.className])"
 SIZE = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
@@ -58,5 +59,5 @@ def run(browser, port, U):
     with page.expect_download(timeout=240000) as dl:
         page.click("#x-go")
     zipped = zipfile.ZipFile(dl.value.path()).namelist()
-    U.check(any(n.startswith("upscaled/export/") for n in zipped) and not jobs(start), f"Export posts no Upscale job, and zips the upscaled plate: {sorted({n.rsplit('/', 1)[0] for n in zipped})}")
+    U.check(zip_rows.files(zipped, "plate_upscaled") and not jobs(start), f"Export posts no Upscale job, and zips the upscaled plate: {sorted({n.rsplit('/', 1)[0] for n in zipped})}")
     page.close()

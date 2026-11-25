@@ -3,6 +3,7 @@
 Upscale job, and the zip's upscaled set holds no plate and no layer. The mock writes a joined set as a movie, whatever format the
 page asks for; the GPU runs read it as EXR frames."""
 import zipfile
+import zip_rows  # noqa: E402
 
 NAMES = "els => els.map((e) => e.querySelector('.name').textContent)"
 
@@ -24,7 +25,7 @@ def run(browser, port, U):
     page.click("#export-btn")
     with page.expect_download(timeout=240000) as dl:
         page.click("#x-go")
-    parts = {n.split("/")[1] for n in zipfile.ZipFile(dl.value.path()).namelist() if n.startswith("upscaled/")}
-    U.check(parts == {"export", "matte"} and not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]),
+    parts = {zip_rows.row_of(n) for n in zipfile.ZipFile(dl.value.path()).namelist() if zip_rows.row_of(n).endswith("_upscaled")}
+    U.check(parts == {"composite_upscaled", "matte_upscaled"} and not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]),
             f"Export writes the upscaled result and its matte, no plate and no layer, with no Upscale job: {sorted(parts)}")
     page.close()

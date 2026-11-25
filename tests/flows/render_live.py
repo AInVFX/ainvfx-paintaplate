@@ -5,6 +5,7 @@ anyway »: the flow must answer that question, or the live job waits until its t
 import contextlib
 import io
 import tempfile
+import zip_rows  # noqa: E402
 
 import ui_live
 
@@ -34,6 +35,6 @@ def run(browser, port, U):
     U.check("edit erase: asked |" in said.getvalue(), "the check holds the erase back and asks « Render anyway »: the flow "
             "answers it, and the erase's shot renders")
     U.check(final.startswith(ui_live.ENDED), f"the flow ends on the status line that CI's live job reads, the export's or the download's: {final[:80]!r}")
-    folders = sorted({n.split("/")[0] for n in names})
-    U.check({"export", "matte"} <= set(folders), f"the flow reaches the export: {len(names)} files in the zip ({', '.join(folders)})")
+    folders = sorted({zip_rows.row_of(n) for n in names})
+    U.check({"composite_full_size", "matte"} <= set(folders), f"the flow reaches the export: {len(names)} files in the zip ({', '.join(folders)})")
     page.close()

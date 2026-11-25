@@ -3,6 +3,7 @@ which runs with no Generate and no Export, and which the player shows at its own
 short side at most 2160. Export posts no Upscale job, and the zip holds the upscaled shot under upscaled/, beside the shot in the
 blank plate's format."""
 import zipfile
+import zip_rows  # noqa: E402
 
 ROWS = "els => els.map((e) => [e.querySelector('.name').textContent, e.querySelector('.time').textContent, e.className])"
 SIZE = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
@@ -36,7 +37,7 @@ def run(browser, port, U):
     with page.expect_download(timeout=240000) as dl:
         page.click("#x-go")
     zipped = zipfile.ZipFile(dl.value.path()).namelist()
-    U.check(not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]) and any(n.startswith("upscaled/export/") for n in zipped)
-            and any(n.startswith("plate/") for n in zipped) and not any(n.startswith("upscaled/plate/") for n in zipped),
+    U.check(not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]) and zip_rows.files(zipped, "fluid_shot_upscaled")
+            and zip_rows.files(zipped, "fluid_shot") and not zip_rows.files(zipped, "plate_upscaled"),
             f"Export posts no Upscale job, and zips the upscaled shot beside the shot: {sorted({n.rsplit('/', 1)[0] for n in zipped})}")
     page.close()

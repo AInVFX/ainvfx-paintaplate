@@ -233,7 +233,7 @@
         <dt>Stop</dt><dd>Esc, or Stop beside Generate. Finished steps are kept; Enter continues from there.</dd>
         <dt>Status line</dt><dd>The latest event: an error in red, a warning in amber. The log has the details.</dd>
         <dt>Finish</dt><dd>SDR to HDR (standard to high dynamic range) regenerates the result as scene-linear, half-float EXR frames in ACES2065-1. Upscale adds steps to the render that make the result larger, up to 3840 x 2160, with SeedVR2 7B. Click a row to display it.</dd>
-        <dt>Export</dt><dd><span id="help-export"></span> The result keeps the plate's format; with SDR to HDR, a movie or another SDR format gives half-float EXR frames.</dd>
+        <dt>Export</dt><dd><span id="help-export"></span></dd>
         <dt>Save scene</dt><dd>Saves the plate and every edit on this ComfyUI. Open > Scenes opens it again.</dd>
       </dl>
     </section>
@@ -320,11 +320,12 @@
     <form method="dialog">
       <h2>Export</h2>
       <p id="x-hint" class="hint"></p>
-      <label class="check"><input type="checkbox" checked disabled> The result <small id="x-format"></small></label>
-      <label class="check"><input id="x-matte" type="checkbox" checked> Its matte <small>where the plate changed, PNG frames</small></label>
-      <label class="check"><input id="x-review" type="checkbox"> The review movie <small>H.264 MP4 of the full-size composite</small></label>
-      <label class="check"><input id="x-shot" type="checkbox"> The regenerated shot <small>the whole frame as the model made it, MP4</small></label>
-      <label class="check" title="Open it in ComfyUI to keep editing the scene there."><input id="x-graph" type="checkbox"> ComfyUI graph <small>the whole scene as one ComfyUI workflow, JSON</small></label>
+      <label class="check"><input id="x-export" type="checkbox" checked disabled> <span></span> <small id="x-format"></small></label>
+      <label class="check"><input id="x-review" type="checkbox"> <span></span> <small></small></label>
+      <label class="check"><input id="x-matte" type="checkbox" checked> <span></span> <small></small></label>
+      <label class="check"><input id="x-shot" type="checkbox"> <span></span> <small></small></label>
+      <label class="check"><input id="x-source" type="checkbox"> <span></span> <small></small></label>
+      <label class="check" title="Open it in ComfyUI to keep editing the scene there."><input id="x-graph" type="checkbox"> <span></span> <small></small></label>
 
       <p id="x-note" class="hint"></p>
       <menu><button value="cancel">Cancel</button><button id="x-go" value="ok" class="primary">Export</button></menu>

@@ -735,7 +735,7 @@ export function plainPaths(text, folder = "") {
 export const deepStopped = (what, why) =>
   `Error: full-precision frames of ${what}: stopped (${String(why ?? "").replace(/\s+/g, " ").trim() || "no reason given"}). Viewer: 8-bit movie.`;
 
-// The log's export: the text of paintaplate_log_<plate>_<YYYYMMDD_HHMM>.txt, to share for troubleshooting. It holds the
+// The log's export: the text of <plate or scene>_log_<YYYYMMDD_HHMM>.txt, to share for troubleshooting. It holds the
 // log and what ComfyUI reports of its versions and its machine (/system_stats): no command line, and its plate and log
 // lines through plainPaths.
 export function logReport({ version, build, stats, browser, address, memory, plate, lines, now, folder = "" }) {
@@ -757,7 +757,7 @@ export function logReport({ version, build, stats, browser, address, memory, pla
 // The log's file name, in the browser's local time.
 export function logFileName(plate, d) {
   const two = (n) => String(n).padStart(2, "0"), name = String(plate || "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "no_plate";
-  return `paintaplate_log_${name}_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}.txt`;
+  return `${name}_log_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}.txt`;
 }
 
 // ---------- Upscale ----------
@@ -877,16 +877,63 @@ export function stepOrder(steps, { done, at = () => undefined, now = null }) {
   return steps.map((id, i) => ({ id, i, k: rank(id) })).sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.i - b.i).map((x) => x.id);
 }
 
-// The Export dialog's words for every kind of result, from one source: the line above its parts, the result's format, and
-// the note under them. kind: "edits", "plate" (SDR to HDR on the plate, with no edit), "relit" (a Light edit in HDR) or
-// "fluid". ready: what Export takes its files from is made; left: the time until it is, such as "about 10 min", or "".
-export function exportWords({ kind, ready = true, left = "", exr = false, hdr = false, movie = "" }) {
-  const first = (step) => `${step} first${left ? `: ${left}` : ""}.`, inHdr = (what) => (ready ? `${what} in HDR, from SDR to HDR.` : `${what} in HDR. ${first("SDR to HDR runs")}`);
-  const note = kind === "fluid" ? (hdr ? "The fluid shot in HDR, with the SDR shot in ProRes 4444 and its preview movie." : "The fluid shot in ProRes 4444, with its preview movie.")
+// The Export dialog's words for every kind of result, from one source: the line above its rows, each row's label and detail
+// and whether it shows, the note under them, and the Help's Export entry. kind: "edits", "plate" (SDR to HDR on the plate,
+// with no edit), "relit" (a Light edit in HDR), "upscaled" (the plate alone, upscaled) or "fluid". The rows take the Render
+// panel's step names, which `steps` gives as the page names them (app.labelOf): comp, the composite at full size; shot, the
+// shot at full size; hdr, SDR to HDR; up, the Upscale step whose set the zip takes. ready: what Export takes its files from
+// is made; left: the time until it is, such as "about 10 min", or "". spec: the plate's spec, which names its format; exr:
+// the result is half-float EXR frames, an HDR result of a plate whose format holds nothing above 1.0; hdr: the fluid shot
+// went through SDR to HDR. The composite as a movie (the review movie) shows only where the composite is frames.
+export const EXR_FRAMES = "half-float EXR frames, ACES2065-1";
+// source: the plate has files of its own to offer (no blank plate); bytes: their size, once known.
+export function exportWords({ kind, ready = true, left = "", exr = false, hdr = false, last = false, spec = null, steps = {}, source = false, bytes = 0 }) {
+  const first = (step) => `${step} first${left ? `: ${left}` : ""}.`, inHdr = (what) => (ready ? `${what} in HDR.` : `${what} in HDR. ${first("SDR to HDR runs")}`);
+  const note = kind === "fluid" ? (hdr ? "The fluid shot in HDR, with the SDR shot in ProRes 4444." : "The fluid shot in ProRes 4444.")
     : kind === "plate" ? inHdr("The plate") : kind === "relit" ? inHdr("The relit result") : kind === "upscaled" ? (ready ? "" : first("Upscale runs"))
-    : ready ? "" : first("The full-size composite renders");
-  return { hint: "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.",
-    format: (kind === "fluid" ? hdr : exr) ? "half-float EXR frames, ACES2065-1" : kind === "fluid" ? "ProRes 4444 movie" : movie, note };
+    : ready ? "" : first(`${steps.comp} renders`);
+  const format = (kind === "fluid" ? hdr : exr) ? EXR_FRAMES : kind === "fluid" ? "ProRes 4444 movie" : plateFormat(spec);
+  const edits = kind === "edits", frames = format === EXR_FRAMES || (!!spec && spec.kind !== "video");
+  const hint = "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.";
+  const rows = {
+    export: { label: kind === "fluid" ? "Fluid shot" : kind === "plate" || kind === "relit" || last ? steps.hdr : kind === "upscaled" ? steps.up : steps.comp, detail: format, shown: true },
+    review: { label: `${steps.comp}, as a movie`, detail: "H.264 MP4", shown: edits && frames },
+    matte: { label: "Matte", detail: "where the plate changed, PNG frames", shown: edits },
+    shot: { label: steps.shot, detail: "the whole frame as the model made it, H.264 MP4", shown: edits },
+    source: { label: "Source plate", detail: bytes > 0 ? `the plate's own files, ${gb(bytes)}` : "the plate's own files", shown: source && kind !== "fluid" },
+    graph: { label: "ComfyUI graph", detail: "the scene as one ComfyUI workflow, with the images it loads", shown: true }, // the page decides: the edits on show, or a fluid shot alone
+    upscaled: { label: steps.up, shown: true }, // no row: Finish > Upscale adds its set to the zip
+  };
+  return { hint, format, note, rows, zip: zipNames(rows, steps.hdr, steps.comp), help: `${hint} ${steps.comp} keeps the plate's format. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.`,
+  };
+}
+// A row's name in the zip: its label in lower case, its words joined by « _ », so the zip's names follow the dialog's words.
+export const zipName = (label) => String(label ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+// What the zip route calls each part (routes.zip_rows), from the row it belongs to (exportWords' rows). The composite as a
+// movie takes the composite's name; a fluid shot's preview movie takes its shot's name with « _preview »; SDR to HDR's frames
+// take their step's name (hdr); Upscale's result takes its step's name, and its matte the matte's name with « _upscaled ».
+export function zipNames(rows, hdr, comp = rows.export.label) {
+  const first = zipName(rows.export.label), matte = zipName(rows.matte.label);
+  const source = zipName(rows.source.label);
+  return { export: first, review: zipName(comp), matte, shot: zipName(rows.shot.label), source, hdr: zipName(hdr), plate: first, preview: `${first}_preview`,
+    graph: zipName(rows.graph.label), up: { export: zipName(rows.upscaled.label), matte: `${matte}_upscaled`, plate: `${source}_upscaled` } };
+}
+// A plate's format as the Export dialog names it: « H.264 movie », « ProRes 4444 movie », « EXR frames ». spec: the plate's
+// spec, with the codec and the profile its movie names (plateio).
+const CODECS = { h264: "H.264", hevc: "H.265", prores: "ProRes", av1: "AV1", vp9: "VP9", mpeg4: "MPEG-4", dnxhd: "DNxHD", ffv1: "FFV1", mjpeg: "Motion JPEG" };
+export function plateFormat(spec) {
+  if (!spec) return "";
+  if (spec.kind !== "video") return `${String(spec.ext ?? "").replace(/^\./, "").toUpperCase()} frames`;
+  const name = CODECS[spec.codec] ?? String(spec.codec ?? "").toUpperCase();
+  return `${name}${spec.codec === "prores" && spec.profile ? ` ${spec.profile}` : ""} movie`;
+}
+// What the log says once the zip downloads: its name, then one detail line per row of the dialog that the zip holds, in the
+// dialog's words (exportWords' rows). parts: the zip's parts, as the page asks the route for them. A part with no row of its
+// own (the layer) adds no line, and a fluid shot's files share the row « Fluid shot ».
+const ROW_OF = { export: "export", hdr: "export", plate: "export", preview: "export", matte: "matte", review: "review", shot: "shot", source: "source", graph: "graph", upscaled: "upscaled" };
+export function downloadLines(zip, parts, rows) {
+  const labels = [...new Set(parts.map((p) => rows[ROW_OF[p]]?.label).filter(Boolean))];
+  return [`Download: ${zip}.`, ...labels.map((label) => `  ${label}.`)].join("\n");
 }
 export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on
 
@@ -933,11 +980,12 @@ export const keyframeSlotLine = (frame) => `Keyframes snap to the first frame, t
 const FAMILIES = { Display: "Display-referred", ITU: "ITU (International Telecommunication Union)" };
 export function plateFamily(name) { return FAMILIES[name] ?? name; }
 // An image that the scene's ComfyUI graph reads. It sits at the top of ComfyUI's input folder: LoadImage lists only the files
-// there, and the editor marks an image input whose file is not in that list as missing. Named after the plate, the edit,
-// what it holds and its hash, so two scenes never share a name.
-export function graphImageName(plate, edit, kind, hash) {
-  const stem = String(plate || "").replace(/[^A-Za-z0-9-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "plate";
-  return `paintaplate_${stem}_e${edit}_${kind}_${String(hash).slice(0, 8)}.png`;
+// there, and the editor marks an image input whose file is not in that list as missing. Named after the export's stem (the
+// plate's or the scene's name), the edit, what it holds and its hash, so two scenes never share a name; the export's zip
+// holds it under the same name, in input/ (routes.graph_images).
+export function graphImageName(name, edit, kind, hash) {
+  const stem = String(name || "").replace(/[^A-Za-z0-9-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "plate";
+  return `${stem}_e${edit}_${kind}_${String(hash).slice(0, 8)}.png`;
 }
 
 export function fluidPrompt(words) { // the trigger first, as the model card asks; no words: its own example
