@@ -2948,7 +2948,7 @@ function plan(r, all) { // the steps this set of edits needs: the erase pass for
     !(S.hdrReady && wantsHdr(p.spec, tools, hdrOn)) && !r.hdrAfter && "hdr", r.hdrAfter && !fl && "export", upAlone && "hdr", // after the composite, Export zips its frames (exportAlone); the plate alone with Upscale only keeps its own values
     ...(active.length ? [] : ["comp", "review", "export"]), // the plate alone: SDR to HDR makes the result; Export zips its frames, and upscales them itself (exportAlone)
     !(keeps || (up && upAlone)) && "upplate", !keeps && "uplayer", !(up && !alone && !r.hdrAfter) && "upcomp", !(up && ((alone && !upAlone) || r.hdrAfter)) && "uphdr",
-    ...(S.previewCap ? [] : STAGES.filter((st) => st.preview).map((st) => st.id))].filter(Boolean)); // no preview pass
+    ...STAGES.filter((st) => st.preview && (!S.previewCap || (r.review && previewOf(r)?.done?.[st.id] === undefined))).map((st) => st.id)].filter(Boolean)); // no preview pass with the Preview menu at Off or Latent, and none at a new size once the render's full size is made
   r.lightOnly = active.length > 0 && active.every((e) => e.tool === "light");
   if (last) { const res = !hdrOn ? r.compResult : r.done?.hdr !== undefined ? r.hdrResult : null; if (res) Object.assign(r, res); } // the result as the switch stands // its composite is Relight Transfer (logic.stepLabel)
   return r;

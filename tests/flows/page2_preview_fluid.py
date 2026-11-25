@@ -1,7 +1,7 @@
 """A new preview size while the fluid shot's steps run: the step at work stops, at any progress, the preview at the new
 size runs, then the full size runs again from its start. The mock holds each window open, so the change always meets it:
 the step's upload of its keyframes, its job at work, the preview at the old size. Latent preview, which makes no preview
-pass, stops nothing."""
+pass, stops nothing. A render whose full size is made makes no preview at a new size."""
 
 FLUID = '#history li[data-id="fluid"]'
 LOG = "[...document.querySelectorAll('#log li')].map((e) => e.textContent)"
@@ -72,10 +72,15 @@ def run(browser, port, U):
     U.check(len(said("stopped at")) == 2 and len(said("Fluid shot, full size: done in")) == 3,
             f"latent preview while the full size runs: nothing stops, the full size ends ({said('stopped at')})")
 
-    # 4. Half size, then quarter size while a new version's half-size preview runs, held open: the preview stops
-    #    immediately, the quarter-size preview runs, then the full size
+    # 4. A render whose full size is made makes no preview at a new size: half size runs nothing for it
+    previews = len(said("Fluid shot, preview: about"))
     page.select_option("#preview-size", "2")
     U.settled(page)
+    U.check(len(said("Fluid shot, preview: about")) == previews,
+            f"half size once the full size is made: no preview runs for that render ({said('Fluid shot, preview: about')[previews:]})")
+
+    # 5. Quarter size while a new version's half-size preview runs, held open: the preview stops immediately, the
+    #    quarter-size preview runs, then the full size
     page.click(f"{FLUID} .edit")
     U.stroke(page, [(0.2, 0.3), (0.25, 0.35), (0.3, 0.3)])
     U.mock_route(port, "/mock/hold", {"slot": "width", "seconds": 8, "times": 1})  # the preview: the one fluid job with a width
