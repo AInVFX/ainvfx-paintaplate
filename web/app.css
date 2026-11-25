@@ -203,6 +203,8 @@ body.plate-alone .hud.corner { left: auto; top: auto; right: 14px; bottom: 10px;
 #stages li.now .time { color: var(--gold); }
 dialog .check { display: flex; align-items: baseline; gap: 8px; color: var(--text); margin: 9px 0; }
 #export .check > span { white-space: nowrap; flex-shrink: 0; } /* a row's label stays on one line; its detail wraps */
+#export fieldset { border: 0; margin: 0 0 10px; padding: 0; } /* What, then Stage: the zip takes each element ticked at each stage ticked */
+#export legend { font-weight: 600; padding: 0; margin-bottom: 4px; }
 dialog .check input { width: auto; display: inline; margin: 0; accent-color: var(--gold); }
 dialog .check small { color: var(--muted); }
 .hint { color: var(--muted); margin: 6px 0; }

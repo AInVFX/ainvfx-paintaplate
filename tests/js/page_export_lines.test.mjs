@@ -32,12 +32,6 @@ test("the Help's Export entry opens with the Export dialog's own line, which is 
   for (const src of [html, app, read("logic.mjs")]) assert.equal(src.split("then downloads").length - 1, src === read("logic.mjs") ? 1 : 0);
 });
 
-test("the dialog names the result's format once: a sequence's own, ProRes 4444 XQ for a movie, EXR frames with SDR to HDR", () => {
-  assert.equal(exportWords({ kind: "edits", spec: { kind: "video", codec: "h264" } }).format, "ProRes 4444 XQ");
-  assert.equal(exportWords({ kind: "edits", exr: true, spec: { kind: "video", codec: "h264" } }).format, "half-float EXR frames, ACES2065-1");
-  assert.equal(exportWords({ kind: "fluid" }).format, "ProRes 4444 XQ");
-  assert.equal(exportWords({ kind: "fluid", hdr: true }).format, "half-float EXR frames, ACES2065-1");
-});
 
 test("a time reads « about 1 min 40 s left » in the Render panel, and « about 1 min 40 s » in a sentence that says what comes first", () => {
   assert.equal(secs(96), "about 1 min 40 s left");

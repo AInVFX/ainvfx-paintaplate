@@ -32,11 +32,11 @@ def run(browser, port, U):
     U.check(names[-2:] == ["Fluid shot, full size", "Fluid: shot, upscaled"] and shown() == ["Fluid: shot, upscaled"] and page.evaluate(CANVAS) == [3456, 2160],
             f"the upscaled step follows the fluid shot, and the player shows it at its own size: {names}, {shown()}, {page.evaluate(CANVAS)}")
     start = len(U.log_lines(page))
-    page.click("#export-btn")
+    page.click("#export-btn"); page.check("#x-full")  # beside the upscaled shot, which the dialog opens on
     with page.expect_download(timeout=240000) as dl:
         page.click("#x-go")
     zipped = zipfile.ZipFile(dl.value.path()).namelist()
     U.check(not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]) and zip_rows.files(zipped, "fluid_shot_upscaled")
-            and zip_rows.files(zipped, "fluid_shot") and not zip_rows.files(zipped, "plate_upscaled"),
+            and zip_rows.files(zipped, "fluid_shot_full_size") and not zip_rows.files(zipped, "plate_upscaled"),
             f"Export posts no Upscale job, and zips the upscaled shot beside the shot: {sorted({n.rsplit('/', 1)[0] for n in zipped})}")
     page.close()

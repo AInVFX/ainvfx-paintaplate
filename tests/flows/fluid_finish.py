@@ -6,6 +6,8 @@ composite goes through SDR to HDR whole, after « Composite, full size »."""
 import re
 import zipfile
 
+import zip_rows
+
 ROWS = "[...document.querySelectorAll('#stages li .name')].map((e) => e.textContent)"
 DONE = "window.__lines.some((t) => /{}/.test(t))"
 
@@ -52,16 +54,16 @@ def run(browser, port, U):
     U.check("Edited first frame" in rows and rows.index("Edited first frame") == rows.index("Fluid shot, full size") + 1 and comp is not None and hdr is not None and comp < hdr and rows.index("Composite, full size") < rows.index("SDR to HDR"),
             f"a Paint over the fluid shot: its first frame after the fluid shot's steps, then SDR to HDR on its composite, whole: {rows}")
     page.click("#export-btn")
-    boxes = {k: page.is_visible(f"#x-{k}") for k in ("matte", "review", "shot")}
+    boxes = {k: page.is_visible(f"#x-{k}") for k in ("shot", "layer", "matte", "composite")}
     U.check(all(boxes.values()) and "relit" not in (page.text_content("#x-note") or ""),
-            f"over a fluid shot, Export offers the edits' composite, matte and shot, as for any edit: {boxes}")
-    first = page.evaluate("document.querySelector('#x-export').closest('label').querySelector('span').textContent")
-    U.check(first == "HDR", f"its first row names what the files hold, SDR to HDR's frames: {first!r}")
+            f"over a fluid shot, Export offers the edits' shot, layer, matte and composite, as for any edit: {boxes}")
+    first = [k for k in ("composite", "hdr") if page.is_checked(f"#x-{k}")]
+    U.check(first == ["composite", "hdr"], f"its ticks open on the result, SDR to HDR's frames of the composite: {first}")
     page.check("#x-matte")
     with page.expect_download(timeout=120000) as dl:
         page.click("#x-go")
     names = zipfile.ZipFile(dl.value.path()).namelist()
-    U.check(any(n.startswith("hdr/") and n.endswith(".exr") for n in names) and any(n.startswith("matte/") for n in names),
+    U.check(zip_rows.files(names, "composite_hdr", (".exr",)) and zip_rows.files(names, "matte"),
             f"its zip: the result as SDR to HDR's EXR frames, and the matte: {sorted({n.split('/')[0] for n in names})}")
     U.no_errors(errors, "with the Finish menu on a blank plate")
     page.close()

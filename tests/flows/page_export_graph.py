@@ -54,7 +54,7 @@ def run(browser, port, U):
     with page.expect_download(timeout=180000) as dl:
         page.click("#x-go")
     z = zipfile.ZipFile(dl.value.path())
-    U.check(zip_rows.files(z.namelist(), "comfyui_graph") and zip_rows.files(z.namelist(), "fluid_shot"),
+    U.check(zip_rows.files(z.namelist(), "comfyui_graph") and zip_rows.files(z.namelist(), "fluid_shot_full_size"),
             f"the zip holds the fluid shot's graph beside the shot: {sorted({n.split('/')[0] for n in z.namelist()})}")
     graph = json.loads(z.read(zip_rows.files(z.namelist(), "comfyui_graph")[0]))
     loads = loaded(graph)

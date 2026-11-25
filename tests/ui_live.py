@@ -276,10 +276,11 @@ PREVIEW = {"off": "off", "latent": "latent", "half": "2", "quarter": "4"}  # the
 
 
 def tick_offered(page, graph=False):
-    """In the Export dialog: ticks the review movie, as the flow does (a real ComfyUI writes it as an MP4), and with
-    `graph` the ComfyUI graph, which then comes in the same zip. Each box only when the dialog offers it: a relit result
-    in HDR has no review movie, and a fluid shot alone or a plate alone has neither. Returns the boxes it ticked."""
-    ticked = [box for box in ["#x-review"] + (["#x-graph"] if graph else []) if page.is_visible(box)]
+    """In the Export dialog, beside the result it opens on: ticks the Preview stage, so the zip holds the movies the viewer
+    plays (a real ComfyUI writes them as MP4), and with `graph` the ComfyUI graph, which then comes in the same zip. Each
+    tick only when the dialog offers it: a render with no preview has no Preview tick, and a plate alone has no graph.
+    Returns the ticks it set."""
+    ticked = [box for box in ["#x-preview"] + (["#x-graph"] if graph else []) if page.is_visible(box)]
     for box in ticked:
         page.check(box)
     return ticked

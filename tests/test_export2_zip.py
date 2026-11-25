@@ -52,6 +52,8 @@ class ZipRows(unittest.TestCase):
         self.assertEqual([os.path.basename(p) for p in f(f"output:{self.v3}/export/desk.mov")], ["desk.mov"])
         self.assertEqual([os.path.basename(p) for p in f(f"output:{self.v3}/matte")], [f"matte_{i:05}_.png" for i in (1, 2, 3)])
         self.assertEqual([os.path.basename(p) for p in f(f"output:{self.v3}/hdr/f_#####_.exr")], ["f_00001_.exr", "f_00002_.exr"])
+        write(os.path.join(self.out, self.v3, "hdr", "upscale", "3840x2160", "out", "comp", "f_00001_.exr"), b"u")  # Upscale's set of SDR to HDR's set
+        self.assertEqual([os.path.basename(p) for p in f(f"output:{self.v3}/hdr/upscale/3840x2160/out/comp")], ["f_00001_.exr"])
 
     def test_paths_outside_output_paintaplate_links_and_other_types_are_refused(self):
         f = self.routes.row_files

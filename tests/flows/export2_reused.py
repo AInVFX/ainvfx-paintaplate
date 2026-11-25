@@ -7,7 +7,7 @@ import zipfile
 import zip_rows
 
 MENU = "#history li label.matte select"
-TICKS = ("#x-matte", "#x-shot", "#x-source", "#x-graph")  # every row a paint on a movie plate shows, beside the composite's
+TICKS = ("#x-plate", "#x-shot", "#x-layer", "#x-matte", "#x-graph")  # every element a paint on a movie plate shows, beside the composite
 
 
 def run(browser, port, U):
@@ -32,14 +32,14 @@ def run(browser, port, U):
     U.check(reused, "render v2 takes « Shot, full size » from render v1, whose folder holds its file")
     page.click("#export-btn")
     shown = [t for t in TICKS if page.is_visible(t)]
-    U.check(shown == list(TICKS), f"a paint on a movie plate shows these rows beside the composite's: {shown}")
+    U.check(shown == list(TICKS) and page.is_checked("#x-composite") and page.is_checked("#x-full"), f"a paint on a movie plate shows these ticks, and opens on the composite at full size: {shown}")
     for tick in TICKS:
         page.check(tick)
     page.evaluate(U.WATCH)
     with page.expect_download(timeout=180000) as dl:
         page.click("#x-go")
     names = zipfile.ZipFile(io.BytesIO(open(dl.value.path(), "rb").read())).namelist()
-    have = {row: zip_rows.files(names, row) for row in ("composite_full_size", "matte", "shot_full_size", "source_plate", "comfyui_graph")}
+    have = {row: zip_rows.files(names, row) for row in ("composite_full_size", "layer_full_size", "matte", "shot_full_size", "source_plate", "comfyui_graph")}
     U.check(all(have.values()), f"every row ticked is in the zip, the shot that render v1 made among them: {have} {names}")
     U.wait_log(page, "window.__lines.some((t) => t.startsWith('Download: '))", 30000, "the download's line")
     said = "\n".join(page.evaluate("window.__lines"))

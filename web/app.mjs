@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, missingLine, outputPath, zipRows, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7, autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, downloadLines } from "./logic.mjs";
+import { askedText, asksName, autoChose, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_STAGES, xDefaults, xRows, xShown, zipName } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -2890,7 +2890,7 @@ $("#help-export").textContent = exportWords({ kind: "edits", steps: { comp: labe
 const storeOf = (r, st) => (st.preview ? previewOf(r) : st.up ? upOf(r) : r); // where a step keeps its result: per preview size, per upscaled size, or once
 const doneOf = (r, st) => storeOf(r, st)?.done?.[st.id]; // seconds a step took, if it ran
 const upLast = (r) => (r?.skip ? UPS.filter((st) => !r.skip.has(st.id)).at(-1) : undefined); // the last of Upscale's steps this render makes: its result is the latest
-const upscaled = (r) => !!upLast(r) && doneOf(r, upLast(r)) !== undefined; // the zip takes upscaled/: Upscale's steps made it at the size asked for
+const upscaled = (r) => !!upLast(r) && doneOf(r, upLast(r)) !== undefined; // Upscale's steps made their set, at the size asked for
 const fullSizeMade = (r) => !!r?.review && !(r.hdrAfter && r.done?.hdr === undefined) && UPS.every((st) => r.skip?.has(st.id) || doneOf(r, st) !== undefined); // the full-size result is made: the composite, SDR to HDR on it when a Light edit takes it (logic.hdrAfterComposite), and Upscale's steps while it is on
 S.took = {}; // measured seconds per step, for this plate: the next estimates use them
 let stepSeq = 0; // the order in which steps finish, kept per render (store.at): the Render panel lists them so (stepsInOrder)
@@ -3063,17 +3063,18 @@ async function exportAlone(r) { // Export on the plate alone, or on a relit comp
   const hdr = r.done?.hdr !== undefined && !r.skip?.has("hdr"), fluid = !!r.fluid && !r.active.some((e) => e.tool !== "fluid"); // made, and on as the switch stands
   r.exported ??= { run: r.run ?? r.base, name: fluid ? `${exportStem()}_fluid_v${fluidEdit()?.version}` : `${exportStem()}_v${r.v}`, text: hdr ? `${S.plate.frames} half-float EXR frames in ACES2065-1, in ${r.run}/hdr.` : "", matte: null };
   S.exported = r.exported;
+  const ticks = S.wantDownload;
   S.wantDownload = null;
   stagesUI(); exportUI();
   confirmed(exportDone(S.exported.text));
-  download([...(hdr ? ["hdr"] : []), ...(fluid ? ["plate"] : []), ...(upscaled(r) ? ["upscaled"] : [])]);
+  download(ticks);
 }
-function exportPlate(r = S.renders.get(S.heroKey) ?? want(S.heroKey, true)) { // Export of the plate alone or of a relit composite in HDR (exportAlone):
+function exportPlate(r = S.renders.get(S.heroKey) ?? want(S.heroKey, true), ticks = S.wantDownload) { // Export of the plate alone or of a relit composite in HDR (exportAlone):
   // the render makes its steps still due first, then the zip downloads
   plan(r, r.active ?? []);
   const due = STAGES.find((st) => (st.id === "fluidfull" || st.id === "hdr" || st.up) && !r.skip.has(st.id) && doneOf(r, st) === undefined);
+  S.wantDownload = ticks; // what Export takes once the steps still due are made
   if (!due) return exportAlone(r);
-  S.wantDownload = ["hdr"];
   status(runsFirst(due.up ? "Upscale" : "SDR to HDR"));
   exportUI(); stagesUI(); touch();
 }
@@ -3257,15 +3258,14 @@ async function pipeline(r) { // a render's steps in order; a step made already i
         : x.exr ? `${p.frames} half-float EXR frames in ACES2065-1, in ${x.file?.subfolder ?? `${x.run}/export`}.` : outputText("export", x.done, "export") ?? "",
       plateText: x.exr ? `${p.frames} half-float EXR frames in ACES2065-1, in ${x.file?.subfolder ?? `${x.run}/export`}.` : outputText("export", x.done, "export") ?? "", // the switch may turn after
       matte: matte ? viewUrl(matte) : null, layer: x.layer, // the Export row shows its matte
-      ...x.parts, upscaled: upscaled(r) }; // the zip takes upscaled/ when Upscale's steps made it
+      ...x.parts };
   });
-  r.exported.upscaled = upscaled(r); // another size since the export: its own steps
   S.exported = r.exported;
   stagesUI(); exportUI();
   confirmed(exportDone(S.exported.text));
-  const parts = S.wantDownload;
+  const ticks = S.wantDownload;
   S.wantDownload = null;
-  download([...parts, ...(S.exported.upscaled ? ["upscaled"] : [])]); // the layer stays on disk, where Upscale reads it
+  download(ticks);
   async function exportJob(progress) { // the export's job: Export posts it, and Upscale's steps post it first for the parts they read, so Export takes it from the job index
     const exr = exrResult(p.spec, r.hdr, p.headroom); // the result as half-float EXR frames instead of the plate's format
     const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr,
@@ -3443,30 +3443,72 @@ async function modelsBehindResult() { // the models behind the result on show: t
 // The name every exported file starts with: the scene's name once it is saved or opened, for its plate, else the plate's name. A
 // fluid shot's plate is its blank plate, whose name its export takes.
 const exportStem = () => (S.exportStem && S.exportStem.plate === S.plate?.path ? S.exportStem.name : S.plate?.name) || "";
-async function download(parts = ["export", "matte"]) { // the zip of the parts asked, each file named as the page knows it
-  const words = exportWordsNow(), r = S.renders.get(S.heroKey), ex = S.exported, source = $("#x-source");
-  const plate = source.checked && !source.closest("label").hidden ? S.plate.path : ""; // the source plate, where its row offers it ticked
+// Every file the zip may take for the render on show, cell by cell: an element (logic.X_ELEMENTS) at a stage (X_STAGES),
+// with its label, which names it in the zip (logic.zipName) and in the download's lines, and its file once made (file).
+// The export step writes the full-size composite, layer and matte, and Export runs it; SDR to HDR's and Upscale's steps
+// write theirs first; a preview counts once the render made it. SDR to HDR's and Upscale's sets are 1.11.31's here: the
+// HDR result is SDR to HDR's frames, or the export itself as EXR frames, and Upscale's result is out/export. Before the
+// render exists, its plan (exportPlan) says what it will make; the files come from the render itself, at download time.
+function exportCells(r) {
+  if (!r) return [];
+  const p = S.plate, pv = () => previewOf(r) ?? {}, full = () => (p.shot.join("x") === p.work.join("x") ? pv() : r), skip = r.skip ?? new Set(); // full: the full-size passes (plan's onePass)
+  const name = (id) => labelOf(STAGES.find((st) => st.id === id), r), out = (part) => () => r.exported && `output:${setFolder(r.exported.run, { size: upSize() })}/${part}`; // Upscale's set: here every one under upscale/, as 1.11.31 writes it
+  const fluid = fluidOnly(), alone = plateAlone(S.heroKey) && !fluid, relit = !!r.hdrAfter && !r.fluid, edits = !fluid && !alone && !relit;
+  const relight = (r.active ?? []).some((e) => e.tool === "light"), exr = edits && !r.hdrAfter && exportsExr(r), up = !!upLast(r);
+  const upHdr = up && (upLast(r).id === "uphdr" || exr), keeps = up && !skip.has("uplayer");
+  const cells = [], add = (element, stage, label, file, source = false) => cells.push({ element, stage, label, file: typeof file === "function" ? file : () => file, source });
+  const overFluid = !!r.fluid || !!fluidEdit()?.on; // a blank plate: the plate under the edits is the fluid shot
+  if (overFluid && !skip.has("fluid")) add("plate", "preview", name("fluid"), () => outputPath(pv().fluid?.movie));
+  if (!skip.has("shot")) add("shot", "preview", name("shot"), () => outputPath(pv().raw));
+  if (!skip.has("clean")) add("shot", "preview", name("clean"), () => outputPath(pv().cleanRaw));
+  if (!skip.has("comp")) { add("matte", "preview", "Matte, preview", () => outputPath(pv().compMatte)); add("composite", "preview", name("comp"), () => outputPath(pv().comp)); }
+  if (overFluid) add("plate", "full", name("fluidfull"), () => r.fluid?.path);
+  else add("plate", "full", "Source plate", p.path, true); // the plate's own files, where they are
+  if (edits || relit) {
+    if (!skip.has("full")) add("shot", "full", name("full"), () => full().shot);
+    if (!skip.has("cleanfull")) add("shot", "full", name("cleanfull"), () => full().clean);
+  }
+  if (edits) {
+    add("composite", exr ? "hdr" : "full", exr ? "Composite, HDR" : name("review"), () => r.exported?.path);
+    if (!relight) add("layer", exr ? "hdr" : "full", exr ? "Layer, HDR" : "Layer, full size", () => r.exported?.layerPath);
+    for (const stage of skip.has("hdr") ? ["full"] : ["full", "hdr"]) add("matte", stage, "Matte", () => r.exported?.mattePath); // one picture at full size and in HDR, which the zip takes once
+  }
+  if (!skip.has("hdr")) {
+    if (r.hdrAfter) add("composite", "hdr", "Composite, HDR", () => r.hdrFrames); // a relit result, or the edits over a fluid shot
+    else if (alone || fluid) add("plate", "hdr", "Plate, HDR", () => r.hdrFrames ?? (r.exported && `output:${setFolder(r.exported.run, { hdr: true })}`));
+    else if (edits) add("shot", "hdr", "Shot, HDR", () => r.hdrFrames); // the shot made again in scene-linear values, before the composite
+  }
+  if (up && (alone || fluid)) add("plate", "up", upHdr ? "Plate, HDR, upscaled" : name("upplate"), out("export"));
+  else if (up) {
+    add("composite", "up", upHdr ? "Composite, HDR, upscaled" : name("upcomp"), out("export"));
+    if (keeps) { add("plate", "up", name("upplate"), out("plate")); add("layer", "up", name("uplayer"), out("layer")); }
+    if (edits) add("matte", "up", "Matte, upscaled", out("matte"));
+  }
+  return cells;
+}
+const ticked = (sel) => $(sel).checked && !$(sel).closest("label").hidden; // a hidden tick asks for nothing, even ticked
+const exportTicks = () => ({ elements: new Set(X_ELEMENTS.filter((k) => ticked(`#x-${k}`))), stages: new Set(X_STAGES.filter((k) => ticked(`#x-${k}`))), graph: ticked("#x-graph") });
+async function download(ticks) { // the zip of the ticked cells (exportCells), each file named as the page knows it from the job that made it
+  const words = exportWordsNow(), r = S.renders.get(S.heroKey), ex = S.exported;
   const graph = await S.graph; S.graph = null; // Export's ComfyUI graph, written into the run's folder so that the zip takes it
   const posted = graph ? await fetch(`/paintaplate/graph?${new URLSearchParams({ run: ex.run })}`, { method: "POST", body: JSON.stringify(graph.file, null, 1) })
     .then((res) => (res.ok ? res.json() : false), () => false) : null; // null: no graph asked for, or none to write, which graphFile said
-  const full = S.plate.shot.join("x") === S.plate.work.join("x") ? previewOf(r) : r, up = `output:${ex.run}/upscale/${upSize()}/out`; // full: where the full-size passes keep their files (plan's onePass)
-  const asked = [...parts, ...(posted ? ["graph"] : []), ...(parts.includes("upscaled") ? [...(ex.mattePath ? ["upmatte"] : []), ...(plate ? ["upplate"] : [])] : [])];
-  const rows = zipRows(asked, words, { export: ex.path, hdr: r?.hdrFrames ?? `output:${ex.run}/hdr`, plate: r?.fluid?.path, matte: ex.mattePath, review: outputPath(r?.review),
-    shot: outputPath(full?.raw), graph: posted && `output:${ex.run}/${posted.file}`, upscaled: `${up}/export`, upmatte: `${up}/matte`, upplate: `${up}/plate` });
-  const files = JSON.stringify(rows.filter((row) => row[3]).map(([, name, , path]) => [name, path]));
+  const rows = xRows(exportCells(r).map((c) => ({ ...c, file: c.file() })), ticks), plate = rows.find((row) => row[3]); // plate: the source plate's own files
+  const graphRow = posted ? [[zipName(words.elements.graph.label), words.elements.graph.label, `output:${ex.run}/${posted.file}`]] : [];
+  const listed = [...rows.filter((row) => !row[3]), ...graphRow], files = JSON.stringify(listed.filter((row) => row[2]).map(([name, , path]) => [name, path]));
   try {
     const gone = await fetch(`/paintaplate/download/check?${new URLSearchParams({ files })}`).then((res) => (res.ok ? res.json() : res.text().then((text) => { throw new Error(text); })));
-    const missing = [...new Set(rows.filter(([, name, , path]) => !path || gone.missing.includes(name)).map(([, , label]) => label))];
-    if (missing.length) return void status(missingLine(missing)); // a part asked for has no file: no zip, and the line names it
+    const missing = [...new Set([...listed, ...(plate ? [plate] : [])].filter(([name, , path]) => !path || gone.missing.includes(name)).map(([, label]) => label))];
+    if (missing.length) return void status(missingLine(missing)); // a file the ticks ask for is not on disk: no zip, and the line names it
   } catch (err) {
     return void status(explained(err, "Export").message);
   }
   const models = (await modelsBehindResult().catch(() => [])).map((m) => m.id).join(",");
   const a = Object.assign(document.createElement("a"), {
-    href: `/paintaplate/download?${new URLSearchParams({ run: ex.run, name: ex.name, stem: exportStem(), files, models, ...(plate ? { plate, source: words.zip.source } : {}) })}`,
+    href: `/paintaplate/download?${new URLSearchParams({ run: ex.run, name: ex.name, stem: exportStem(), files, models, ...(plate ? { plate: plate[2], source: plate[0] } : {}) })}`,
     download: `${ex.name}.zip` });
   document.body.append(a); a.click(); a.remove();
-  const said = downloadLines(`${ex.name}.zip`, [...asked, ...(plate ? ["source"] : [])], words.rows); // one detail line per row the zip holds, in the dialog's words
+  const said = downloadLines(`${ex.name}.zip`, [...rows, ...graphRow].map((row) => row[1])); // one detail line per row the zip holds, in the dialog's words
   log(said); showStatus(said.split("\n")[0]);
   if (posted === false) told(...GRAPH_UNWRITTEN); // after the download's line, so the status line keeps the warning and what to do
 }
@@ -3708,31 +3750,38 @@ const fluidOnly = () => { const f = fluidEdit(); return !!f && f.on && f.state =
 const exportsExr = (r) => exrResult(S.plate.spec, r?.skip ? !r.skip.has("hdr") : hdrWanted(), S.plate.headroom); // the render's own plan (plan) decides: an HDR result of a plate whose format holds nothing above 1.0
 // The Export dialog's words for the result on show (logic.exportWords), with the Render panel's step names (labelOf)
 function exportWordsNow() {
-  const fluid = fluidOnly(), alone = plateAlone(S.heroKey), r = S.renders.get(S.heroKey), relitHdr = !!r?.hdrAfter && !r.fluid, last = !!r?.hdrAfter && !r.skip?.has("hdr"); // over a fluid shot, the edits' own parts; last: SDR to HDR's frames are the result
+  const fluid = fluidOnly(), alone = plateAlone(S.heroKey), r = S.renders.get(S.heroKey), relitHdr = !!r?.hdrAfter && !r.fluid;
   const kind = fluid ? "fluid" : alone ? (S.heroKey === PLATE_UP ? "upscaled" : "plate") : relitHdr ? "relit" : "edits";
   const ready = fluid || (alone ? !!r?.review : relitHdr ? !!r.hdrFrames : !!(r?.exported || r?.review));
-  const name = (id) => labelOf(STAGES.find((st) => st.id === id), r);
-  const up = kind === "edits" && !last ? "upcomp" : UPS.find((st) => (st.id === "uphdr" || st.id === "upplate") && !r?.skip?.has(st.id))?.id ?? "upplate"; // the step whose set the zip takes (upscaleResult)
-  return exportWords({ kind, ready, left: ready ? "" : secs(renderLeft(true), ""), hdr: fluid && r?.done?.hdr !== undefined && !r.skip?.has("hdr"), exr: !fluid && exportsExr(r), last, // hdr: SDR to HDR made and on
-    spec: fluid ? null : S.plate.spec, steps: { comp: name("review"), shot: name("full"), up: name(up) }, upHdr: up === "uphdr",
-    source: !fluidEdit(), bytes: S.exportSource?.plate === S.plate?.path ? S.exportSource.bytes : 0 }); // a blank plate has no files of its own to offer
+  return exportWords({ kind, ready, left: ready ? "" : secs(renderLeft(true), ""), hdr: fluid && r?.done?.hdr !== undefined && !r.skip?.has("hdr"), // hdr: SDR to HDR made and on
+    steps: { comp: labelOf(STAGES.find((st) => st.id === "review"), r) }, bytes: S.exportSource?.plate === S.plate?.path ? S.exportSource.bytes : 0 });
 }
-function exportDialog() { // each row's label and detail, and whether it shows, come from one source for every kind of result (exportWordsNow)
-  const words = exportWordsNow(), fluid = fluidOnly();
-  for (const [k, w] of Object.entries(words.rows)) {
-    const row = $(`#x-${k}`)?.closest("label");
-    if (!row) continue; // the upscaled set has no row: Finish > Upscale adds it
-    row.querySelector("span").textContent = w.label; row.querySelector("small").textContent = w.detail;
-    row.hidden = !w.shown;
-  }
-  $("#x-graph").closest("label").hidden = plateAlone(S.heroKey) || !(fluid ? graphsFluid() : S.edits.some((e) => e.on && e.patch && e.state === "done")); // the edits on show, or a fluid shot alone, as one ComfyUI workflow
+// The render on show, or, before Export makes it, its plan: the steps it will make (plan), which store nothing
+function exportPlan() {
+  const active = S.edits.filter((e) => e.on && e.state === "done" && (e.patch || e.tool === "fluid")); // as want() takes them
+  return S.renders.get(S.heroKey) ?? Object.assign(plan({ key: S.heroKey }, active), { active });
+}
+function exportDialog() { // the ticks the render on show can give (exportCells), in one source's words (exportWordsNow), set to its result at its last stage
+  const words = exportWordsNow(), fluid = fluidOnly(), r = exportPlan(), cells = exportCells(r), shown = xShown(cells);
+  const on = xDefaults(cells, fluid || plateAlone(S.heroKey) ? "plate" : "composite");
+  const tick = (id, w, show, checked) => {
+    const input = $(`#x-${id}`), row = input.closest("label"), small = row.querySelector("small");
+    row.querySelector("span").textContent = w.label;
+    if (small) small.textContent = w.detail ?? "";
+    row.hidden = !show; input.checked = checked;
+  };
+  for (const k of X_ELEMENTS) tick(k, words.elements[k], shown.elements.has(k), on.elements.has(k));
+  for (const k of X_STAGES) tick(k, words.stages[k], shown.stages.has(k), on.stages.has(k));
+  tick("graph", words.elements.graph, !plateAlone(S.heroKey) && (fluid ? graphsFluid() : S.edits.some((e) => e.on && e.patch && e.state === "done")), false); // the edits on show, or a fluid shot alone, as one ComfyUI workflow
   $("#x-hint").textContent = words.hint; $("#x-note").textContent = words.note;
+  const go = () => { const ticks = exportTicks(); $("#x-go").disabled = !xRows(cells, ticks).length && !ticks.graph; }; // ticks that give no file give no zip
+  $("#export").onchange = go; go();
   $("#export").showModal();
   const path = S.plate?.path;
-  if (words.rows.source.shown) fetch(`/paintaplate/download/size?path=${encodeURIComponent(path)}`).then((r) => (r.ok ? r.json() : null)).then((got) => {
+  if (cells.some((c) => c.source)) fetch(`/paintaplate/download/size?path=${encodeURIComponent(path)}`).then((res) => (res.ok ? res.json() : null)).then((got) => {
     if (!(got?.bytes >= 0) || S.plate?.path !== path) return;
-    S.exportSource = { plate: path, bytes: got.bytes }; // the source plate's row shows its size
-    $("#x-source").closest("label").querySelector("small").textContent = exportWordsNow().rows.source.detail;
+    S.exportSource = { plate: path, bytes: got.bytes }; // the plate's tick shows its own files' size
+    $("#x-plate").closest("label").querySelector("small").textContent = exportWordsNow().elements.plate.detail;
   }).catch(() => {});
 }
 
@@ -4699,14 +4748,13 @@ $("#export-btn").onclick = exportDialog;
 $("#preview-size").onchange = (e) => setPreview(readPreview(e.target.value));
 
 $("#x-go").onclick = () => {
-  S.graph = !$("#x-graph").closest("label").hidden && $("#x-graph").checked ? graphFile().catch((err) => void quiet(err)) : null; // from the edits on show; the zip takes it
-  if (fluidOnly()) return void setTimeout(exportPlate, 0); // once the dialog has closed: as the plate alone exports
-  const r = S.renders.get(S.heroKey);
-  if (plateAlone(S.heroKey) || (r?.hdrAfter && !r.fluid)) return void setTimeout(() => exportPlate(r), 0); // SDR to HDR's frames: the plate alone, or a relit result in HDR
-  const parts = [r?.hdrAfter ? "hdr" : "export", ...["matte", "review", "shot"].filter((k) => $(`#x-${k}`).checked && !$(`#x-${k}`).closest("label").hidden)]; // over a fluid shot, the result is SDR to HDR's frames; a hidden row adds nothing, even ticked on another plate
+  const ticks = exportTicks(), r = S.renders.get(S.heroKey);
+  S.graph = ticks.graph ? graphFile().catch((err) => void quiet(err)) : null; // from the edits on show; the zip takes it
+  if (fluidOnly()) return void setTimeout(() => exportPlate(undefined, ticks), 0); // once the dialog has closed: as the plate alone exports
+  if (plateAlone(S.heroKey) || (r?.hdrAfter && !r.fluid)) return void setTimeout(() => exportPlate(r, ticks), 0); // SDR to HDR's frames: the plate alone, or a relit result in HDR
   if (r?.exported && !r.hdrAfter && r.exported.plateText !== undefined) r.exported.text = r.exported.plateText; // SDR to HDR turned off after the export step
-  if (r?.exported && r.skip?.has("upcomp")) return download(parts); // with Upscale on, the render makes the steps still due, then the zip
-  S.wantDownload = parts;
+  if (r?.exported && r.skip?.has("upcomp")) return download(ticks); // with Upscale on, the render makes the steps still due, then the zip
+  S.wantDownload = ticks;
   status(r && UPS.some((st) => !r.skip.has(st.id) && doneOf(r, st) === undefined) ? runsFirst("Upscale")
     : `Export: writing ${exportsExr(r) ? "half-float EXR frames in ACES2065-1" : exportFormat(S.plate.spec)}. The zip downloads when it is done.`);
   exportUI(); stagesUI(); touch();

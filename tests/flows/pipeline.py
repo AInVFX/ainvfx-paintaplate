@@ -159,13 +159,13 @@ def hdr_video(page, U):
     page.wait_for_function("document.querySelector('canvas[data-precision]').dataset.precision === 'float'", timeout=60000)
     U.check(True, "paused, the player shows the result's EXR frames at full precision")
     page.click("#export-btn")
-    fmt = page.text_content("#x-format") or ""
+    ticks = [k for k in ("composite", "full", "hdr") if page.is_checked(f"#x-{k}")]  # the dialog opens on the result at its last stage
     with page.expect_download(timeout=240000) as dl:
         page.click("#x-go")
     import zipfile
     names = zipfile.ZipFile(dl.value.path()).namelist()
-    U.check("half-float EXR" in fmt and zip_rows.composite(names, (".exr",)) and not any(n.endswith((".mp4", ".webm")) and n.startswith("composite_full_size/") for n in names),
-            f"Export writes the EXR sequence, not a video file: {fmt}, {zip_rows.composite(names)[:3]}")
+    U.check(ticks[:1] == ["composite"] and zip_rows.composite(names, (".exr",)) and not any(n.endswith((".mp4", ".webm")) and n.startswith("composite_full_size/") for n in names),
+            f"Export writes the EXR sequence, not a video file: {ticks}, {zip_rows.composite(names)[:3]}")
     listed = "".join(zipfile.ZipFile(dl.value.path()).read(n).decode() for n in zip_rows.files(names, "models"))
     U.check("FLUX 3 Image Klein" in listed and listed.count("\n| ") >= 4,
             f"the zip lists the models behind the result, with their licences (its models' list): {listed.splitlines()[6:9]}")

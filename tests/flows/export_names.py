@@ -16,10 +16,10 @@ def run(browser, port, U):
     U.paint_once(page, "a lantern", [(0.3, 0.5), (0.36, 0.5)]); page.keyboard.press("Enter")
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
     page.click("#export-btn")
-    for box in ("#x-matte", "#x-shot", "#x-source", "#x-graph"):
+    for box in ("#x-plate", "#x-shot", "#x-matte", "#x-graph"):  # beside the composite at full size, which the dialog opens on
         page.check(box)
-    page.wait_for_function("/the plate's own files, [0-9.]+ [KMG]B$/.test(document.querySelector('#x-source').closest('label').querySelector('small').textContent)",
-                           timeout=10000)  # the source plate's row shows its size
+    page.wait_for_function("/the plate under the edits, [0-9.]+ [KMG]B$/.test(document.querySelector('#x-plate').closest('label').querySelector('small').textContent)",
+                           timeout=10000)  # the plate's tick shows its own files' size
     with page.expect_download(timeout=180000) as dl:
         page.click("#x-go")
     names = zipfile.ZipFile(dl.value.path()).namelist()
@@ -46,6 +46,6 @@ def run(browser, port, U):
         page.click("#x-go")
     names = zipfile.ZipFile(dl.value.path()).namelist()
     U.check(dl.value.suggested_filename == "smoke_fluid_v1.zip" and names and all(n.rsplit("/", 1)[-1].startswith("smoke_") for n in names)
-            and zip_rows.files(names, "fluid_shot"), f"a saved scene names its export after itself: {dl.value.suggested_filename}, {names}")
+            and zip_rows.files(names, "fluid_shot_full_size"), f"a saved scene names its export after itself: {dl.value.suggested_filename}, {names}")
     U.no_errors(errors, "after the two exports")
     page.close()

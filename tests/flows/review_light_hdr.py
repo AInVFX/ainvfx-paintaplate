@@ -26,9 +26,9 @@ def run(browser, port, U):
     U.check(hdr and comp and hdr[-1] > comp[-1], f"SDR to HDR runs after the full-size composite: {[log[i] for i in comp[-1:] + hdr[-1:]]}")
     U.check(page.evaluate("[...document.querySelectorAll('#stages li.done')].some((li) => li.textContent.includes('SDR to HDR'))"), "the Render panel shows SDR to HDR done")
     page.click("#export-btn")
-    fmt, note = page.text_content("#x-format"), page.text_content("#x-note")
-    U.check(fmt == "half-float EXR frames, ACES2065-1" and note.startswith("The relit result in HDR"), f"the Export dialog says what Export writes: {fmt!r} | {note!r}")
-    U.check(page.is_hidden("#x-matte"), "a relit result in HDR exports its frames alone")
+    ticks, note = [k for k in ("composite", "full", "hdr") if page.is_checked(f"#x-{k}")], page.text_content("#x-note")
+    U.check(ticks == ["composite", "hdr"] and note.startswith("The relit result in HDR"), f"the Export dialog opens on the relit result in HDR: {ticks} | {note!r}")
+    U.check(page.is_hidden("#x-layer") and not page.is_checked("#x-matte"), "a relit result has no layer, and Export opens on its HDR frames alone")
     page.click("#x-go")
     U.wait_log(page, "[...document.querySelectorAll('#log li span')].some((e) => e.textContent.startsWith('Export: done'))", 120000, "the export")
     done = [t for t in page.evaluate(LOG) if t.startswith("Export: done")][-1]
