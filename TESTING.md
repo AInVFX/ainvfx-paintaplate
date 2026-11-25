@@ -221,11 +221,13 @@ Every module of `tests/flows` is a flow, named after its file (`tests/flows/READ
 | Job | What it runs |
 | --- | --- |
 | Unit tests | The whole suite with no browser and no ComfyUI: the Python modules, the Node tests and the linters. |
-| Page tests | `test_ui_mock`: the page against the mock ComfyUI, in six shards on six machines (`PAGE_SHARD`). Each shard runs its part of the flows, one per CPU. A failed shard leaves the others running. |
+| Page tests | `test_ui_mock`: the page against the mock ComfyUI, in six shards on six machines (`PAGE_SHARD`), cut by time (below). Each shard runs its flows side by side, one per CPU, the longest first, and its log ends the run with one line of its flows' seconds (`PAGE_SECONDS`). A failed shard leaves the others running. |
 | Live tests | `tools/ci_comfyui.sh` builds ComfyUI and ComfyUI-LTXVideo at the pins on CPU, with empty model files from `tools/placeholders.py`; then `test_live` and the source check of `test_workflows`. No model runs: model workflows are cancelled once ComfyUI has validated them, and the browser test swaps those it posts for stand-ins made of core nodes (`edit`, `snap`, `prompt`, `matte`, `shot`, `clean` and its second stage `cleanup`). |
 | Release | On `main` only, once every job passes, each page shard included: a new `version` in `pyproject.toml` gets its Comfy Registry publish, its tag `v<version>` and its GitHub release (a pre-release before 1.0.0). Each step skips what is done already. |
 
 pip downloads are cached, and the browser jobs drive the runner's own Google Chrome when it has one, so no browser is downloaded.
+
+**The shards, cut by time.** `tests/page_seconds.json` holds each flow's seconds on CI. `ui_mock.flow_names` gives each flow, the longest first, to the shard with the least time so far, so the shards end close together: on GitHub's runners, with four flows side by side, each holds about 800 s of flows and its job takes 3 min 45 to 4 min 15. A new flow needs no edit of the cut: until its time is read in, it takes the median. To read in a run's times, save its log, `gh run view <run> --log > ci.log`, then `python tests/ui_mock.py --seconds-from ci.log` rewrites the file from the six `PAGE_SECONDS` lines; a log that lacks a flow is refused. With `DOCS_COMPLETE=1`, `tests/test_docs2_shards.py` names every flow the file lacks and every name it holds that no flow has. A job cannot end before its longest flow, `pipeline` (about 230 s there), plus about 25 s for the job's setup and the plates.
 
 ## On a GPU machine
 

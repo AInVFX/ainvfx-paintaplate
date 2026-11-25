@@ -5,7 +5,9 @@
     python tests/ui_mock.py --only keys,scene   the flows named
     python tests/ui_mock.py --jobs 4            four flows side by side (default: one per CPU)
     python tests/ui_mock.py --speed 1           the mock's jobs at their full simulated time (default: 8 times shorter)
-    python tests/ui_mock.py --shard 2/4         the second of four parts of the flows, for machines side by side (the CI)
+    python tests/ui_mock.py --shard 2/4         the second of four parts of the flows, cut by their time on CI, for machines
+                                                side by side (the CI)
+    python tests/ui_mock.py --seconds-from LOG  tests/page_seconds.json rewritten from a CI run's log (TESTING.md, CI)
 
 A flow is one subject of the page: the Open dialog, a first edit and its render, a fluid shot, the keys. Each flow runs in
 its own process, against its own mock ComfyUI (its own port and folders) and its own browser. So a flow starts from its own
@@ -15,11 +17,12 @@ failed. Screenshots and each mock's log go to /tmp/paintaplate_ui_mock. tests/te
 
 The flows of this file are in FLOWS. Each module of tests/flows adds one, named after its file (tests/flows/README.md).
 """
-import argparse, json, os, queue, re, shutil, signal, subprocess, sys, threading, time, traceback, urllib.request, zipfile
+import argparse, json, os, queue, re, shutil, signal, statistics, subprocess, sys, threading, time, traceback, urllib.request, zipfile
 from concurrent.futures import ThreadPoolExecutor
 import zip_rows  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+SECONDS = os.path.join(HERE, "page_seconds.json")  # each flow's seconds on CI, which cut the flows into shards (flow_names)
 REPO = os.path.dirname(HERE)
 SHOTS = "/tmp/paintaplate_ui_mock"
 PAGE = "http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html{query}"
@@ -1178,20 +1181,36 @@ def module_flow(name):
     return lambda browser, port: module.run(browser, port, sys.modules[__name__])
 
 
+def flow_seconds(names):
+    """Each flow's seconds on CI (SECONDS), as the page jobs' lines gave them (seconds_line, read_seconds). A flow with no
+    time yet, such as a new one, takes the median of the others until CI's next lines are read in."""
+    with open(SECONDS, encoding="utf-8") as fh:
+        known = json.load(fh)
+    median = statistics.median(known.values()) if known else 1.0
+    return {name: known.get(name, median) for name in names}
+
+
 def flow_names(shard=""):
-    """Every flow, in the order of a run: the flows of this file, then one per module of tests/flows, by name. A shard,
-    "2/4", is every fourth flow from the second: the parts hold different flows and, together, all of them."""
+    """Every flow, the longest first by its seconds on CI (flow_seconds), so the flows that run side by side end close
+    together. A shard, "2/6", is the second of six parts cut by time: each flow, the longest first, joins the part with the
+    least time so far, so the parts end close together and hold, together, every flow once."""
     folder = os.path.join(HERE, "flows")
     extra = sorted(n[:-3] for n in os.listdir(folder) if n.endswith(".py") and not n.startswith("_")) if os.path.isdir(folder) else []
     twice = sorted(set(extra) & set(FLOWS))
     if twice:
         raise SystemExit(f"tests/flows: {', '.join(twice)} is also the name of a flow of ui_mock.py; rename the file")
-    names = [*FLOWS, *extra]
+    seconds = flow_seconds([*FLOWS, *extra])
+    names = sorted(seconds, key=lambda name: (-seconds[name], name))
     if shard:
         part, parts = (int(n) if n.isdigit() else 0 for n in (shard.split("/") + ["", ""])[:2])
         if not 1 <= part <= parts:
             raise SystemExit(f'a shard reads "2/4", the second of four parts: {shard}')
-        names = names[part - 1::parts]
+        cut = [[0.0, []] for _ in range(parts)]
+        for name in names:
+            least = min(cut, key=lambda p: p[0])  # the first of the parts with the least time so far
+            least[0] += seconds[name]
+            least[1].append(name)
+        names = cut[part - 1][1]
     return names
 
 
@@ -1200,6 +1219,14 @@ def seconds_line(results, shard, wall):
     in seconds and each flow's seconds. The flows are cut into shards by these times."""
     return "PAGE_SECONDS " + json.dumps({"shard": shard, "cpus": os.cpu_count() or 1, "wall": round(wall, 1),
                                           "flows": {r["flow"]: r["seconds"] for r in results}}, sort_keys=True)
+
+
+def read_seconds(text):
+    """Each flow's seconds from the page jobs' lines in a CI log (seconds_line): every shard's flows together."""
+    found = {}
+    for match in re.finditer(r"PAGE_SECONDS (\{.*\})", text):
+        found.update(json.loads(match.group(1))["flows"])
+    return found
 
 
 # ---------- The plates, made once for a run and copied into each flow's folders ----------
@@ -1316,6 +1343,8 @@ def main():
     ap.add_argument("--speed", type=float, default=8, help="divide the simulated time of the mock's jobs by this (1: as mock_comfy.py runs alone)")
     ap.add_argument("--port", type=int, default=8199, help="the first mock's port; flows side by side take the next ones")
     ap.add_argument("--root", default="/tmp/paintaplate_mock_ui", help="where the mocks keep their folders, one per flow")
+    ap.add_argument("--seconds-from", metavar="LOG", help="rewrite tests/page_seconds.json from a CI run's log, which holds one "
+                    "PAGE_SECONDS line per page job (gh run view <run> --log), and stop")
     ap.add_argument("--flow", help=argparse.SUPPRESS)  # the runner's own: one flow in this process
     ap.add_argument("--plates", help=argparse.SUPPRESS)  # the runner's own: where it made the plates
     a = ap.parse_args()
@@ -1328,6 +1357,15 @@ def main():
                 print(f"  FAIL {type(exc).__name__}: {(str(exc).strip() or 'no message').splitlines()[0]}", flush=True)
             sys.exit(1)
         return
+    if a.seconds_from:
+        with open(a.seconds_from, encoding="utf-8") as fh:
+            found = read_seconds(fh.read())
+        lacking = [n for n in flow_names() if n not in found]
+        if lacking:
+            ap.error(f"{a.seconds_from} has no time for {', '.join(lacking)}: give the log of a whole run, every page job's line")
+        with open(SECONDS, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(found, indent=1, sort_keys=True) + "\n")
+        return print(f"{os.path.relpath(SECONDS)}: {len(found)} flows")
     names = flow_names(a.shard)
     if a.list:
         return print("\n".join(names))
