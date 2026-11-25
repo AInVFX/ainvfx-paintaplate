@@ -695,8 +695,8 @@ def export():
                   filename_prefix=Slot("layer_exr_prefix", ""))
     g.link_slot(layer_exr, "images", "export_layer_exr")
     matte_frames = g("MaskToImage", mask=fit[1])
-    g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed", _output="matte", images=matte_frames, frames=load[4],
-      filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))
+    g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed (16-bit PNG)", _output="matte", images=matte_frames, frames=load[4],
+      format="png16", filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))
     movie = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Matte movie (grey): the Export row shows it", _output="matte_movie", images=matte_frames,
               frames=load[4], fps=load[3], crf=18, filename_prefix=Slot("matte_video_prefix", ""))
     g.link_slot(movie, "images", "export_matte_movie")

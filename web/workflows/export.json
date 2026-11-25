@@ -637,10 +637,11 @@
     "1",
     4
    ],
+   "format": "png16",
    "filename_prefix": "paintaplate/plate/matte/matte"
   },
   "_meta": {
-   "title": "Matte: where the plate changed",
+   "title": "Matte: where the plate changed (16-bit PNG)",
    "slots": {
     "filename_prefix": "matte_prefix"
    },

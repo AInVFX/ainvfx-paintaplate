@@ -643,26 +643,26 @@ class NativeMovieTest(unittest.TestCase):
 
 class UntouchedTest(unittest.TestCase):
     def test_a_pixel_the_matte_shows_as_zero_is_the_source_pixel(self):
-        """Untouched pixels identical to the source (item 5): Save Plate keeps every pixel its 8-bit matte shows as 0, the
-        matte's faint edge included, so the export and its matte agree pixel for pixel."""
-        changed = np.array([0.0, 0.0005, 0.002, 0.0039, 1.0 / 255, 0.5, 1.0], np.float32)
+        """Untouched pixels identical to the source: Save Plate keeps every pixel its 16-bit matte shows as 0, the matte's
+        faint edge included, so the export and its matte agree pixel for pixel."""
+        changed = np.array([0.0, 5e-6, 7.6e-6, 7.7e-6, 1.0 / 65535, 0.002, 0.5, 1.0], np.float32)
         keep = plateio.untouched(changed)
-        shown = np.clip(255.0 * changed, 0, 255).astype(np.uint8)  # the matte as Save Frames writes it
+        shown = np.round(np.clip(changed, 0, 1) * 65535.0).astype(np.uint16)  # the matte as Save Frames writes it (png16)
         self.assertEqual(keep.tolist(), (shown == 0).tolist())
-        self.assertEqual(keep.tolist(), [True, True, True, True, False, False, False])
+        self.assertEqual(keep.tolist(), [True, True, True, False, False, False, False, False])
         d = tempfile.mkdtemp(); src = os.path.join(d, "src"); os.makedirs(src)
         rng = np.random.default_rng(5)
         plate = rng.random((8, 16, 3)).astype(np.float16)
         OpenEXR.File({"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}, {"RGB": plate}).write(os.path.join(src, "p.1001.exr"))
         spec = plateio.probe_plate(src)
-        tail = np.zeros((8, 16), np.float32); tail[:, 8:] = 0.002; tail[:, 12:] = 0.5  # a faint edge, then the edit
+        tail = np.zeros((8, 16), np.float32); tail[:, 8:] = 5e-6; tail[:, 12:] = 0.5  # a faint edge, then the edit
         out = os.path.join(d, "out"); os.makedirs(out)
         written = plateio.write_still(spec, 0, np.full((8, 16, 3), 3.0, np.float32), None, plateio.untouched(tail), out)
         with OpenEXR.File(written) as f:
             ch = f.channels(); got = ch["RGB"].pixels if "RGB" in ch else np.stack([ch[c].pixels for c in "RGB"], -1)
-        self.assertTrue(np.array_equal(got[:, :12], plate[:, :12]), "the faint edge, below one 8-bit step: the source's own half floats")
+        self.assertTrue(np.array_equal(got[:, :12], plate[:, :12]), "the faint edge, below half a 16-bit step: the source's own half floats")
         self.assertTrue(np.all(got[:, 12:] == 3.0), "the edit where the matte shows it")
-        print("untouched: every pixel the 8-bit matte shows as 0 is the source's own, its faint edge included")
+        print("untouched: every pixel the 16-bit matte shows as 0 is the source's own, its faint edge included")
 
 
 class StoppedWriters(unittest.TestCase):

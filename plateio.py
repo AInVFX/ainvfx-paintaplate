@@ -645,13 +645,13 @@ def decode_frames(files: list, pad_8n1: bool = False, workers: int = 8, each=Non
     return _padded(rgb, alpha, len(files), pad_8n1)
 
 
-MATTE_STEP = 1.0 / 255  # the export's matte is 8-bit PNG, scaled by 255 and truncated: below one step it reads 0
+MATTE_STEP = 0.5 / 65535  # the export's matte is 16-bit PNG, scaled by 65535 and rounded: below half a step it reads 0
 
 
 def untouched(changed: np.ndarray) -> np.ndarray:
-    """The pixels the export copies from the source, exactly: those its delivered matte shows as 0. The matte is 8-bit
-    PNG, 255 times the weight truncated (core_uint8), so a weight under 1/255 shows 0. Read back with read_float, a
-    level k reads k / 255, so this rule reads the delivered matte too."""
+    """The pixels the export copies from the source: those its delivered matte shows as 0. The matte is 16-bit PNG,
+    65535 times the weight rounded (Save Frames' png16), so a weight under half of 1/65535 shows 0. Read back with
+    read_float, a level k reads k / 65535, so this rule reads the delivered matte too."""
     return np.asarray(changed) < MATTE_STEP
 
 
