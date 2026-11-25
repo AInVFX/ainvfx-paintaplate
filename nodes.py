@@ -200,7 +200,7 @@ class SavePlate(io.ComfyNode):
             node_id="PaintAPlate_SavePlate",
             display_name="Save Plate",
             category=CATEGORY,
-            description="Writes frames for compositing software. A sequence keeps the plate's own format: file type, bit "
+            description="Writes frames for compositing. A sequence keeps the plate's own format: file type, bit "
                         "depth, frame numbers and colour tags; for EXR, every other layer and header attribute is kept, and "
                         "the data window grows only to hold an edit outside it. A movie is written as ProRes 4444 XQ in a "
                         ".mov, with the plate's size, frame rate, colour tags, timecode and audio. The plate's own alpha is "
