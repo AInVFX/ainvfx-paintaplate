@@ -1072,7 +1072,8 @@ function passLabel(id) {
 function shownLabel() { // the pass on show, by its row's name: the one clicked, else the latest result
   if (S.pass) return passLabel(S.pass);
   const r = S.renders.get(S.heroKey), pv = previewOf(r);
-  return labelOf(STAGES.find((x) => S.shot?.url && passMovie(x.id, r, pv, passSpaces(), upOf(r))?.url === S.shot.url), r) ?? (S.shot ? "Result" : S.edits.length ? "First frame" : "Plate");
+  return labelOf(STAGES.find((x) => !r?.skip?.has(x.id) && S.shot?.url && passMovie(x.id, r, pv, passSpaces(), upOf(r))?.url === S.shot.url), r) // among the render's own steps
+    ?? (S.shot ? "Result" : S.edits.length ? "First frame" : "Plate");
 }
 function comparePass(id) {
   if (S.cmp?.id === id) return endCompare();
