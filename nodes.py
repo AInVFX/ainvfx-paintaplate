@@ -173,7 +173,7 @@ class ColorSpace(io.ComfyNode):
                                tooltip="The batch these frames are a part of. Into @model, the tone mapping takes that batch's "
                                        "peak: a frame converted alone has the values it has in the whole batch converted. "
                                        "Out of @model, the plate the frames were made from, in 'destination': the tone "
-                                       "mapping of its peak is undone, so new content comes back at the plate's levels."),
+                                       "mapping of its peak is undone, so new content matches the plate's levels."),
                 io.Float.Input("peak", optional=True, force_input=True,
                                tooltip="That peak as a number: the second output of the plate's own Colour Space (OCIO). "
                                        "Used in place of 'peak_of', so the plate is read once."),

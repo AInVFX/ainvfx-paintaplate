@@ -187,7 +187,7 @@ def fill(name, values, folder=None):
 def colour(g, image, source, destination, title=None, peak_of=None, peak=None):
     """Colour Space (OCIO) in the config the page names (Slot config). Into @model, `peak_of` is the batch `image` is a
     part of: the tone mapping takes that batch's peak. Out of @model, it is the plate in `destination`: the tone mapping of
-    its peak is undone, so new content comes back at the plate's levels. `peak` is that peak as a number: the second
+    its peak is undone, so new content matches the plate's levels. `peak` is that peak as a number: the second
     output of the plate's own conversion, which read it."""
     part = {k: v for k, v in (("peak_of", peak_of), ("peak", peak)) if v is not None}
     return g("PaintAPlate_ColorSpace", _title=title, image=image, config=Slot("config", OCIO_CONFIG), source=source,
@@ -608,7 +608,7 @@ def composite(g):
     load, model = plate(g, pad=True)
     gen = g("PaintAPlate_LoadPlate", _title="Generated shot", path=Slot("shot", ""), max_frames=1024, pad_8n1=False)
     union, paint = mattes(g)
-    # The shot comes back at the plate's levels: the tone mapping of the plate's peak, which the models saw, is undone.
+    # The shot matches the plate's levels: the tone mapping of the plate's peak, which the models saw, is undone.
     # The peak is the number the plate's conversion into the model space read (its second output): the plate is read once.
     gen_plate = colour(g, gen, "@model", Slot("color_space", "@model"), "Shot in the plate's colour space", peak=model[1])
     # Relight: the light from the regenerated shot, the detail from the plate, in linear light. The plate as the model saw
