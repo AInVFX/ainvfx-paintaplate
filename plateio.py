@@ -47,26 +47,9 @@ _FRAME_RE = re.compile(r"^(?P<prefix>.*?)(?P<num>\d+)(?P<suffix>[^\d]*?)(?P<ext>
 # One sequence of a folder, as RV and Nuke name it: shot.####.exr, ComfyUI_#####_.png or shot.%04d.exr
 _PATTERN_RE = re.compile(r"^(?P<prefix>.*?)(?:#+|%0?\d*d)(?P<suffix>[^#%\d]*?)(?P<ext>\.[A-Za-z0-9]+)$")
 
-# Encoder to use for each decoder name found in a source file.
-_ENCODERS = {
-    "prores": "prores_ks",
-    "h264": "libx264",
-    "hevc": "libx265",
-    "dnxhd": "dnxhd",
-    "mjpeg": "mjpeg",
-    "ffv1": "ffv1",
-    "av1": "libaom-av1",
-    "vp9": "libvpx-vp9",
-}
-# Fallback pixel format per encoder when the source one is not accepted.
-_DEFAULT_PIX = {
-    "prores_ks": "yuv422p10le",
-    "libx264": "yuv420p",
-    "libx265": "yuv420p10le",
-    "dnxhd": "yuv422p10le",
-    "ffv1": "yuv444p16le",
-}
-_PRORES_PROFILES = {"proxy": 0, "lt": 1, "standard": 2, "hq": 3, "4444": 4, "4444xq": 5}
+# Every movie the export writes is ProRes 4444 XQ in a .mov, whatever the plate's codec (VideoWriter): in 4:4:4 an edited
+# pixel and an untouched one share no colour sample, and XQ is the ProRes profile that keeps untouched pixels closest.
+MOVIE_ENCODER, MOVIE_PROFILE, MOVIE_EXT = "prores_ks", "5", ".mov"  # FFmpeg's ProRes encoder; its profile 5 is 4444 XQ
 
 
 # --------------------------------------------------------------------------
@@ -1039,61 +1022,25 @@ def write_blank(path: str, width: int, height: int, fps: float, frames: int) -> 
     return path
 
 
-def encoder_pix_fmt(encoder: str, want: str) -> str:
-    """The pixel format nearest `want` that `encoder` writes: the same chroma layout at the highest depth it offers.
-
-    FFmpeg's ProRes decoder reports a 4444 plate as yuv444p12le, and prores_ks writes yuv444p10le: it refuses to open
-    with the decoder's format.
-    """
-    try:
-        offered = [f.name for f in (av.codec.Codec(encoder, "w").video_formats or [])]
-    except (AVError, ValueError, TypeError):
-        offered = []
-    if not offered or want in offered:
-        return want
-    family = lambda f: (re.match(r"^([a-z]+\d*)p", f) or re.match(r"^(.*)$", f)).group(1)  # yuv444, yuva444, yuv420, gbr
-    depth = lambda f: int((re.findall(r"p(\d+)", f) or ["8"])[0])
-    same = [f for f in offered if family(f) == family(want)]
-    if same:
-        return max(same, key=depth)
-    return _DEFAULT_PIX.get(encoder) if _DEFAULT_PIX.get(encoder) in offered else offered[0]
-
-
 class VideoWriter:
-    """Encode frames in the source codec, pixel format, colour tags and timecode.
-
-    Falls back to ProRes 4444 in a .mov when the source encoder is missing.
-    Audio from the source file is copied packet for packet on close().
-    """
+    """Writes a plate's frames as a movie for compositing software: ProRes 4444 XQ, 10 bits in 4:4:4, with an alpha channel
+    where the plate has one, at the plate's size and frame rate, with its colour tags and timecode, in a .mov named as
+    `out_path`. Audio from the source file is copied packet for packet on close()."""
 
     def __init__(self, spec: dict, out_path: str, audio_source: str | None = None):
         if av is None:
             raise RuntimeError("PyAV missing: movies cannot be written. Install the pack's requirements.")
         self.spec = spec
         self.notes: list[str] = []
-        codec = spec.get("codec", "prores")
-        encoder = _ENCODERS.get(codec, codec)
-        if encoder not in av.codecs_available:
-            self.notes.append(f"Encoder {encoder} not available: writing ProRes 4444 instead.")
-            encoder, out_path = "prores_ks", os.path.splitext(out_path)[0] + ".mov"
-        self.path = out_path
-        self.out = av.open(out_path, "w")
+        self.path = os.path.splitext(out_path)[0] + MOVIE_EXT
+        self.out = av.open(self.path, "w")
         rate = Fraction(spec.get("fps_num") or 24, spec.get("fps_den") or 1)
-        self.stream = self.out.add_stream(encoder, rate=rate)
+        self.stream = self.out.add_stream(MOVIE_ENCODER, rate=rate)
         self.stream.width = spec["width"]
         self.stream.height = spec["height"]
-        pix = spec.get("pix_fmt") or _DEFAULT_PIX.get(encoder, "yuv420p")
-        if (written := encoder_pix_fmt(encoder, pix)) != pix:
-            self.notes.append(f"{encoder} does not write {pix}: using {written}.")
-            pix = written
-        try:
-            self.stream.pix_fmt = pix
-        except (ValueError, AVError):
-            pix = _DEFAULT_PIX.get(encoder, "yuv420p")
-            self.stream.pix_fmt = pix
-            self.notes.append(f"Pixel format {spec.get('pix_fmt')} refused by {encoder}: using {pix}.")
-        self.pix_fmt = pix
-        self.eight = eight_bit_rgb(pix)  # written from 8-bit values (write)
+        alpha = re.match(r"(yuva|gbrap|rgba|bgra|argb|abgr|ya\d)", spec.get("pix_fmt") or "") is not None
+        self.pix_fmt = self.stream.pix_fmt = "yuva444p10le" if alpha else "yuv444p10le"
+        self.keeps = (spec.get("pix_fmt") or "").startswith("yuv")  # the source has YUV samples of its own to keep (write)
         cc = self.stream.codec_context
         for attr in ("color_primaries", "color_trc", "colorspace", "color_range"):
             value = spec.get(attr)
@@ -1102,16 +1049,7 @@ class VideoWriter:
                     setattr(cc, attr, value)
                 except (ValueError, TypeError, AVError):
                     self.notes.append(f"Could not copy {attr}.")
-        opts = {}
-        if encoder == "prores_ks":
-            prof = str(spec.get("profile", "")).lower().replace(" ", "")
-            opts["profile"] = str(next((v for k, v in sorted(_PRORES_PROFILES.items(), key=lambda kv: -len(kv[0])) if k in prof), 4 if "444" in pix else 3))
-        elif encoder in ("libx264", "libx265"):
-            # crf 8 is visually lossless: the codec is the only loss on untouched pixels. The preset trades encode
-            # time for file size at the same quality; medium encodes about twice as fast as slow (checked on x264).
-            opts["crf"] = "8"
-            opts["preset"] = "medium"
-        cc.options = opts
+        cc.options = {"profile": MOVIE_PROFILE}
         if spec.get("timecode"):
             self.stream.metadata["timecode"] = spec["timecode"]
         # Streams must all exist before the first packet is written.
@@ -1130,22 +1068,20 @@ class VideoWriter:
 
     def write(self, rgb: np.ndarray, keep: np.ndarray | None = None, source=None) -> None:
         """`rgb` is display-referred float (H, W, 3) in 0..1, as decoded by core. Where `keep` (H, W) holds, the source
-        frame's own YUV samples are written instead (`keep_samples`)."""
-        if self.eight:  # 8-bit RGB: rounded here, since swscale's step to 8 bits moves 123 of the 256 levels up by one (read_native)
-            frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(to_uint8(rgb)), format="rgb24")
-        else:
-            frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(to_uint16(rgb)), format="rgb48le")
+        frame's own YUV samples are written instead (`keep_samples`), when it has them (`keeps`): a movie coded in RGB goes
+        through RGB."""
+        frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(to_uint16(rgb)), format="rgb48le")
         kwargs = {"format": self.pix_fmt}
         if self.dst_colorspace not in (None, 2):  # 2 = unspecified
             kwargs["dst_colorspace"] = self.dst_colorspace
-        if self.pix_fmt.startswith("yuv") and self.dst_range in (None, 0, 1):  # limited range video
+        if self.dst_range in (None, 0, 1):  # limited range video
             kwargs["src_color_range"] = 2  # full range RGB in
             kwargs["dst_color_range"] = 1
         try:
             frame = frame.reformat(**kwargs)
         except (ValueError, TypeError, AVError):  # an older PyAV without colour-range arguments
             frame = frame.reformat(format=self.pix_fmt)
-        if keep is not None and source is not None and self.pix_fmt.startswith("yuv"):
+        if keep is not None and source is not None and self.keeps:
             frame = keep_samples(frame, source, keep)
             self.samples_kept = True
         frame.pts = self.index

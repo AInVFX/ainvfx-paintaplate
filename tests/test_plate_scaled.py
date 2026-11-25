@@ -23,7 +23,7 @@ def ramp(h, w):
 
 @unittest.skipUnless(av is not None, "PyAV missing")
 class ScaledMovie(unittest.TestCase):
-    def test_a_movie_keeps_its_codec_pixel_format_and_frame_count_at_twice_its_size(self):
+    def test_a_movie_at_twice_its_size_is_prores_4444_xq_with_its_frame_count(self):
         with tempfile.TemporaryDirectory() as tmp:
             src, out = os.path.join(tmp, "plate.mov"), os.path.join(tmp, "out", "plate.mov")
             with av.open(src, "w") as c:
@@ -46,7 +46,7 @@ class ScaledMovie(unittest.TestCase):
             w.close()
             with av.open(w.path) as c:
                 v = c.streams.video[0]
-                self.assertEqual((v.codec_context.name, v.codec_context.pix_fmt, v.width, v.height), ("prores", "yuv422p10le", 64, 36))
+                self.assertEqual((v.codec_context.name, v.codec_context.profile, v.codec_context.pix_fmt, v.width, v.height), ("prores", "XQ", "yuv444p12le", 64, 36))
                 self.assertEqual(sum(1 for _ in c.decode(video=0)), 3)
 
 
