@@ -10,7 +10,7 @@ CACHE = "(() => { const c = document.querySelector('#tl-cache').dataset; return 
 FULL = "(() => { const c = document.querySelector('#tl-cache').dataset; return +c.frames > 1 && c.cached === c.frames && !!c.size; })()"
 VIEW = "document.querySelector('#view').dataset"
 PAUSED = "[...document.querySelectorAll('video')].every((v) => v.paused)"
-PLAN = "([...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('Frame cache: ')).pop()?.textContent ?? '')"  # the log's last line about the cache's plan
+PLAN = "([...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('Frame cache, ')).pop()?.textContent ?? '')"  # the log's last line about the cache's plan
 MOVES = """() => { const el = document.querySelector('#frame-now'); let last = el.textContent; window.__moves = 0;
   new MutationObserver(() => { if (el.textContent !== last) { last = el.textContent; window.__moves += 1; } })
     .observe(el, { childList: true, characterData: true, subtree: true }); }"""  # counts each new frame number of the playhead, from now on
@@ -30,7 +30,7 @@ def lines(page):
 
 
 def plan_line(page):  # the last line of the log about the cache's plan
-    return next((line for line in reversed(lines(page)) if "Frame cache: " in line), "")
+    return next((line for line in reversed(lines(page)) if "Frame cache, " in line), "")
 
 
 def space(page):  # play or pause, whatever had the focus
@@ -46,7 +46,7 @@ def run(browser, port, U):
     cached, frames, size = page.evaluate(CACHE)
     w, h = (int(v) for v in size.split("x"))
     said = plan_line(page)
-    U.check(cached == frames and 960 <= w <= 1280 and "1 GB (Auto), " in said and f"{frames} of {frames} frames at {w} x {h}" in said,
+    U.check(cached == frames and 960 <= w <= 1280 and "1 GB (Auto): " in said and f"all of the plate's {frames} frames at {w} x {h}" in said,
             f"the stripe fills: {cached} of {frames} frames in memory at {w} x {h}, the size the frame is shown, inside the Auto budget ({said[:60]})")
 
     # 2. With every frame in memory the plate plays from memory: the videos stay paused, a clock moves the playhead
@@ -68,7 +68,7 @@ def run(browser, port, U):
     # 4. View > Cache memory sets the budget and keeps it; View > Playback statistics turns the line off
     U.menu(page, "View", "Cache memory", "512 MB")
     page.wait_for_function("localStorage.getItem('paintaplate.cache') === '512000000'", timeout=5000)
-    planned = U.until(page, f"{PLAN}.includes('512 MB (set in View > Cache memory)')", 10000)
+    planned = U.until(page, f"{PLAN}.includes('512 MB (View > Cache memory)')", 10000)
     U.check(planned, f"View > Cache memory sets the budget and keeps it for the next session: {plan_line(page)[:70]}")
     page.click("#view", button="right")  # a ticked entry: U.menu finds an entry by its exact name, without a tick
     page.locator("#ctx li.group > span:first-child", has_text=re.compile("^View$")).first.hover()
@@ -83,7 +83,7 @@ def run(browser, port, U):
         small.wait_for_timeout(500); seen.append(small.evaluate(CACHE)[0])  # the one read on the clock in this flow: the budget is sampled for 4 s, to show that it holds
     cached, frames, size = small.evaluate(CACHE)
     said = plan_line(small)
-    U.check(0 < max(seen) <= 3 and size == "960x528" and "8 MB (set in the address)" in said and f"3 of {frames} frames at 960 x 528" in said,
+    U.check(0 < max(seen) <= 3 and size == "960x528" and "8 MB (set in the address)" in said and f"3 of the plate's {frames} frames at 960 x 528" in said,
             f"a budget of 8 MB holds: at most {max(seen)} frames in memory at {size} ({said[:60]})")
     small.evaluate(MOVES)
     space(small)
@@ -93,9 +93,9 @@ def run(browser, port, U):
     space(small)
     small.wait_for_function(f"({VIEW}.stats || '').includes('from the video')", timeout=10000)
     U.check(True, f"and the statistics name the path: {small.evaluate(f'{VIEW}.stats')[:110]}")
-    before = sum("Frame cache: " in line for line in lines(small))
+    before = sum("Frame cache, " in line for line in lines(small))
     U.open_path(small, "plates/desk.mp4")
-    U.wait_log(small, f"[...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('Frame cache: ')).length > {before}", 60000, "cache plan of the plate opened again")
+    U.wait_log(small, f"[...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('Frame cache, ')).length > {before}", 60000, "cache plan of the plate opened again")
     U.check(plan_line(small).count(" frames at ") == 1, f"a plate that opens logs its cache's plan, the same plate again too: {plan_line(small)[:70]}")
     small.close()
 
@@ -104,10 +104,10 @@ def run(browser, port, U):
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
     space(page)
     U.wait_log(page, f"{VIEW}.play === 'memory' && {VIEW}.picture === 'shot'", 150000, "shot playing from memory")
-    U.wait_log(page, f"{PLAN}.includes('frames of the shot at')",
-               30000, "cache plan that names the shot")  # the plan is logged again each time the shot's movie changes: read it once it names the shot
-    said = plan_line(page)
-    U.check("frames of the shot at" in said and page.evaluate(PAUSED), f"the shot of the edits plays from memory once its frames are in ({said[-62:]})")
+    SHOT_PLAN = """[...document.querySelectorAll('#log li span')].some((e) => e.textContent.startsWith('Frame cache, ') && e.textContent.includes(" of the shot's "))"""
+    U.wait_log(page, SHOT_PLAN, 30000, "cache plan that names the shot")  # each plan is logged once per plate: read the one that names the shot
+    said = next((t for t in reversed(lines(page)) if t.startswith("Frame cache, ") and " of the shot's " in t), "")
+    U.check(" of the shot's " in said and page.evaluate(PAUSED), f"the shot of the edits plays from memory once its frames are in ({said[-62:]})")
     space(page)
     page.close()
 
@@ -116,5 +116,5 @@ def run(browser, port, U):
     small = opened(browser, port, U)
     U.wait_log(small, FULL, 150000, "frame cache with every frame of the plate, on the small memory profile")
     said = plan_line(small)
-    U.check(re.fullmatch(r"Frame cache: 512 MB \(Auto\), (\d+) of \1 frames at \d+ x \d+\.", said) is not None, f"on a 16 GB GPU beside ComfyUI the Auto budget is 512 MB, and the line names no GPU: {said}")
+    U.check(re.fullmatch(r"Frame cache, 512 MB \(Auto\): all of the plate's \d+ frames at \d+ x \d+(, [^.;]+)?\.", said) is not None, f"on a 16 GB GPU beside ComfyUI the Auto budget is 512 MB, and the line names no GPU: {said}")
     small.close()

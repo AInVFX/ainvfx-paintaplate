@@ -28,6 +28,7 @@ from PIL import Image
 from server import PromptServer
 
 from . import folders, mathops, ocio, plateio
+from .plateio import MOST_FRAMES, MOST_SIDE
 
 
 Plate = io.Custom("PAINTAPLATE_PLATE")
@@ -100,7 +101,7 @@ class LoadPlate(io.ComfyNode):
             inputs=[
                 io.String.Input("path", tooltip="A file, a folder of frames or a frame pattern (shot.####.exr) in ComfyUI's "
                                                 "input folder. Start with 'output:' to read from the output folder."),
-                io.Int.Input("max_frames", default=121, min=1, max=4096,
+                io.Int.Input("max_frames", default=121, min=1, max=MOST_FRAMES,
                              tooltip="Frames to load from the start, at most."),
                 io.Boolean.Input("pad_8n1", default=False,
                                  tooltip="Repeat the last frame up to 8k+1 frames, the length LTX needs. "
@@ -339,8 +340,8 @@ class CompositeFrames(io.ComfyNode):
                 io.Image.Input("destination", tooltip="The frames around the mask, any size."),
                 io.Image.Input("source", tooltip="The frames inside the mask, any size."),
                 io.Mask.Input("mask", tooltip="Where the source goes, any size: 1 is the source, 0 the destination."),
-                io.Int.Input("width", default=1920, min=16, max=16384, tooltip="Width of the result."),
-                io.Int.Input("height", default=1088, min=16, max=16384, tooltip="Height of the result."),
+                io.Int.Input("width", default=1920, min=16, max=MOST_SIDE, tooltip="Width of the result."),
+                io.Int.Input("height", default=1088, min=16, max=MOST_SIDE, tooltip="Height of the result."),
             ],
             outputs=[io.Image.Output(display_name="image")],
         )
@@ -527,9 +528,9 @@ class KeyframeVideo(io.ComfyNode):
                         "black frames, with each keyframe image at its frame.",
             search_aliases=["keyframes", "control video", "ainvfx-fluid"],
             inputs=[
-                io.Int.Input("width", default=960, min=64, max=8192),
-                io.Int.Input("height", default=512, min=64, max=8192),
-                io.Int.Input("frames", default=121, min=1, max=4096),
+                io.Int.Input("width", default=960, min=64, max=MOST_SIDE),
+                io.Int.Input("height", default=512, min=64, max=MOST_SIDE),
+                io.Int.Input("frames", default=121, min=1, max=MOST_FRAMES),
                 io.String.Input("keys", default="[]", multiline=True,
                                 tooltip='A JSON list of {"frame": n, "image": "folder/key.png"}, images in ComfyUI\'s input folder.'),
             ],
@@ -577,7 +578,7 @@ class LivePreview(io.ComfyNode):
                 io.String.Input("decoder", default="taeltx2_3.safetensors",
                                 tooltip="A tiny video decoder in models/vae_approx. Without it there is no preview, and the shot "
                                         "still renders."),
-                io.Int.Input("frames", default=121, min=1, max=4096,
+                io.Int.Input("frames", default=121, min=1, max=MOST_FRAMES,
                              tooltip="Frames of the shot. Latent frames after them are guide frames, never shown."),
                 io.Float.Input("fps", default=24.0, min=1.0, max=120.0),
                 io.Int.Input("every", default=0, min=0, max=100, tooltip="Steps between two previews. 0 turns the preview off."),
@@ -730,7 +731,7 @@ class SaveFrames(io.ComfyNode):
                 io.Float.Input("fps", default=0.0, min=0.0, max=240.0, optional=True,
                                tooltip="exr only: the shot's frame rate, written in each frame's header (framesPerSecond), "
                                        "so the frames keep their rate when they open as a plate. 0 writes none."),
-                io.Int.Input("frames", default=0, min=0, max=4096, optional=True,
+                io.Int.Input("frames", default=0, min=0, max=MOST_FRAMES, optional=True,
                              tooltip="The frames to save, from the first: 0 saves them all. Load Plate's 'frames' leaves its "
                                      "8k+1 padding out."),
                 io.Combo.Input("chromaticities", options=["none", *plateio.CHROMATICITIES], default="none", optional=True,
@@ -778,10 +779,10 @@ class SaveMovie(io.ComfyNode):
                 io.Int.Input("crf", default=18, min=0, max=51, optional=True,
                              tooltip="x264's quality: 18 as core Save Video, lower is closer to the frames. The playback "
                                      "proxy and the review use 12."),
-                io.Int.Input("width", default=0, min=0, max=8192, optional=True,
+                io.Int.Input("width", default=0, min=0, max=MOST_SIDE, optional=True,
                              tooltip="The movie's width: 0 keeps the frames' size. Scaled with Lanczos while it converts."),
-                io.Int.Input("height", default=0, min=0, max=8192, optional=True, tooltip="The movie's height: 0 keeps the frames' size."),
-                io.Int.Input("frames", default=0, min=0, max=4096, optional=True,
+                io.Int.Input("height", default=0, min=0, max=MOST_SIDE, optional=True, tooltip="The movie's height: 0 keeps the frames' size."),
+                io.Int.Input("frames", default=0, min=0, max=MOST_FRAMES, optional=True,
                              tooltip="The frames to save, from the first: 0 saves them all. Load Plate's 'frames' leaves its "
                                      "8k+1 padding out."),
                 io.String.Input("config", default=ocio.BUILTIN, optional=True,
@@ -790,7 +791,7 @@ class SaveMovie(io.ComfyNode):
                 io.String.Input("destination", default="@model", optional=True,
                                 tooltip="The movie's colour space. Each frame is converted as it is saved, to the values "
                                         "Colour Space (OCIO) gives the whole batch."),
-                io.Int.Input("largest_size", default=0, min=0, max=8192, optional=True,
+                io.Int.Input("largest_size", default=0, min=0, max=MOST_SIDE, optional=True,
                              tooltip="The frames' longer side before the movie is made, by area averaging as core's Scale "
                                      "Image to Max Dimension: 0 keeps their size. Each frame is sized as it is saved."),
             ],
@@ -911,9 +912,9 @@ class JoinWindows(io.ComfyNode):
                         "of their names, into one batch.",
             inputs=[
                 io.String.Input("folder", tooltip="The windows' parent folder, a path as Load Plate takes it."),
-                io.Int.Input("count", default=0, min=0, max=4096, optional=True,
+                io.Int.Input("count", default=0, min=0, max=MOST_FRAMES, optional=True,
                              tooltip="Frames in each window. Each window reads its last 'count' frames, so a window saved twice counts once. 0 reads every frame."),
-                io.Int.Input("max_frames", default=0, min=0, max=4096, optional=True,
+                io.Int.Input("max_frames", default=0, min=0, max=MOST_FRAMES, optional=True,
                              tooltip="Frames in the shot. The last window reads what is left after the others. 0 reads every frame."),
             ],
             outputs=[io.Image.Output(display_name="images")],

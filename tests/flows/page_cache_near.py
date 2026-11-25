@@ -5,7 +5,7 @@ falls below where it was."""
 import re
 
 OPEN = "document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden"
-SHOT = re.compile(r"(\d+) of (\d+) frames of the shot at (\d+) x (\d+)")
+SHOT = re.compile(r"(all|\d+) of the shot's (\d+) frames at (\d+) x (\d+)")
 STRIPE = """(() => { const c = document.querySelector('#tl-cache'), d = c.getContext('2d').getImageData(0, 0, c.width, 1).data;
   let lit = 0; for (let i = 0; i < c.width; i++) if (d[i * 4 + 1] > 120) lit++; return lit / c.width; })()"""
 WATCH = """(() => { window.__least = 1; const c = document.querySelector('#tl-cache');
@@ -15,7 +15,7 @@ WATCH = """(() => { window.__least = 1; const c = document.querySelector('#tl-ca
 
 
 def shot_lines(page, U):  # the shot's part of every « Frame cache » line: (frames in, frames in all, width, height)
-    return [tuple(int(x) for x in m.groups()) for t in U.log_lines(page) if t.startswith("Frame cache:") and (m := SHOT.search(t))]
+    return [tuple(int(m[2] if x == "all" else x) for x in m.groups()) for t in U.log_lines(page) if t.startswith("Frame cache, ") and (m := SHOT.search(t))]
 
 
 def run(browser, port, U):
@@ -42,7 +42,8 @@ def run(browser, port, U):
     before = page.evaluate(STRIPE)
     page.keyboard.press("F6")
     page.evaluate(WATCH)
-    U.check(U.poll(page, lambda: shot_lines(page, U)[-1] == alone, 10), f"the wipe off: the shot alone again, at its size: {shot_lines(page, U)[-1]}")
+    page.wait_for_timeout(1000)
+    U.check(shot_lines(page, U)[-1] == wiped, f"the wipe off brings back a plan the log said already: no new line: {shot_lines(page, U)[-2:]}")
     page.wait_for_timeout(1000)
     U.check(page.evaluate("window.__least") >= before - 0.05, f"its frames stayed: the stripe never fell below {page.evaluate('window.__least'):.2f}, from {before:.2f}")
     page.close()

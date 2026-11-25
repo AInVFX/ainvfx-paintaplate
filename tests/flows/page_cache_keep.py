@@ -4,7 +4,7 @@ longer fit, and a larger one drops no decoded frame: the green stripe of the fra
 import re
 
 OPEN = "document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden"
-LINE = re.compile(r"^Frame cache: (.+?) \(set in View > Cache memory\), (\d+) of (\d+) frames at (\d+) x (\d+)\.$")
+LINE = re.compile(r"^Frame cache, (.+?) \(View > Cache memory\): (all|\d+) of the plate's (\d+) frames at (\d+) x (\d+)\b")
 STRIPE = """(() => { const c = document.querySelector('#tl-cache'), d = c.getContext('2d').getImageData(0, 0, c.width, 1).data;
   let lit = 0; for (let i = 0; i < c.width; i++) if (d[i * 4 + 1] > 120) lit++; return lit / c.width; })()"""
 WATCH = """(() => { window.__least = 1; const c = document.querySelector('#tl-cache');
@@ -26,7 +26,7 @@ def budget(page, U, size):  # View > Cache memory > Custom…, the row found by 
 def line(page, U, size):  # the newest « Frame cache » line for this budget: (frames in, frames in all, width, height)
     def newest():
         found = [m for t in U.log_lines(page) if (m := LINE.match(t)) and m[1] == size]
-        return tuple(int(x) for x in found[-1].groups()[1:]) if found else None
+        return tuple(int(m[3] if x == "all" else x) for x in found[-1].groups()[1:]) if (m := found[-1] if found else None) else None
     U.poll(page, lambda: newest() is not None, 10)
     return newest()
 

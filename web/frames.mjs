@@ -4,7 +4,7 @@
 // is shown; frames it skipped are fetched by seeking. Stepping and scrubbing then draw from memory, with no seek, and
 // once every frame between the in and out points is in, the page plays from memory as RV does (app.mjs, tick).
 
-import { frameUse } from "./logic.mjs";
+import { countText, frameUse } from "./logic.mjs";
 
 const bytes = (frame) => frame.bytes ?? frame.width * frame.height * 4; // an ImageBitmap holds 4 bytes a pixel
 
@@ -225,10 +225,16 @@ export function autoBudget({ host = "", profile = "small", deviceMemory = 0 }) {
   return deviceMemory ? Math.min(2e9, Math.max(512e6, (deviceMemory * 1e9) / 4)) : 1e9;
 }
 
-// The frame cache's line of the log: the budget and where it comes from, then what fits. A size appears once, and one
-// source needs no name. `sources`: [{ name, fits, frames, width, height }].
-export const cacheLine = (budget, why, sources) =>
-  `Frame cache: ${budget} (${why}), ${sources.map((s) => `${s.fits} of ${s.frames} frames${sources.length > 1 ? ` of ${s.name}` : ""} at ${s.width} x ${s.height}`).join("; ")}.`;
+// The frame cache's line of the log: the budget and where it comes from, then what each source holds, for the sources
+// that hold frames. A source on show says why its frames have that size: the movie's own, their size on screen, or
+// smaller so that all of them fit the budget. `sources`: [{ name (« the plate's »), kind (« EXR » or none), fits,
+// frames, width, height, show, shrunk, movie: [w, h] }]. Paused, the viewer reads each frame at its own size anyway.
+export const cacheLine = (budget, why, sources) => {
+  const why2 = (s) => (!s.show || s.kind || s.fits < s.frames ? "" : s.shrunk ? `, to fit in ${budget}` : s.movie?.[0] === s.width ? ", their own size" : ", their size on screen");
+  const part = (s) => `${s.fits === s.frames ? "all" : countText(s.fits)} of ${s.name} ${countText(s.frames)}${s.kind ? ` ${s.kind}` : ""} frames at ${s.width} x ${s.height}${why2(s)}`;
+  const held = sources.filter((s) => s.fits > 0);
+  return `Frame cache, ${budget} (${why}): ${held.length ? held.map(part).join("; ") : "no frame yet"}.`;
+};
 
 // The size a source's frames are kept at, and how many fit. `movie`: the movie's own size; `fit`: the size the frame is
 // shown at, in device pixels; `bytes`: per pixel (4 for an ImageBitmap). Frames are kept at the size on show (its width
@@ -242,7 +248,7 @@ export function cacheSize({ budget, frames, movie: [mw, mh], fit: [fw, fh], byte
   if (cost(Math.round(mw * k), Math.round(mh * k)) > budget) k = Math.max(least, Math.sqrt(budget / cost(mw, mh)));
   let width = Math.max(2, Math.round(mw * k)), height = Math.max(2, Math.round(mh * k));
   while (k > least && width > mw * least && cost(width, height) > budget) { width -= 1; height = Math.max(2, Math.round((width * mh) / mw)); } // the rounding went over
-  return { width, height, fits: Math.min(frames, Math.floor(budget / (width * height * per))) };
+  return { width, height, fits: Math.min(frames, Math.floor(budget / (width * height * per))), shrunk: k < shown };
 }
 
 // One budget shared by the caches. The sources on show come first, in equal shares, each at the size it is shown. The

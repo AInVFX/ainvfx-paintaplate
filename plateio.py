@@ -33,6 +33,12 @@ try:
 except ImportError:
     OpenEXR = None
 
+# The pack's ceilings of size and length, one home each. NATIVE_SIDE: the long side a plate is read at for the viewer,
+# at most (the frames route; web/app.mjs keeps the same NATIVE_SIDE, and tests/test_time_sizes.py keeps them equal).
+# MOST_SIDE: the largest width or height a node takes. MOST_FRAMES: the most frames a node takes; the page's LENGTH.most
+# (web/logic.mjs) is the largest 8k + 1 count within it.
+NATIVE_SIDE, MOST_SIDE, MOST_FRAMES = 4096, 8192, 4096
+
 IMAGE_EXTS = {".exr", ".png", ".tif", ".tiff", ".dpx", ".jpg", ".jpeg", ".webp", ".avif"}
 VIDEO_EXTS = {".mov", ".mp4", ".mkv", ".mxf", ".avi", ".webm", ".m4v"}
 ANIMATIONS = {".gif", ".webp"}  # animated images, as core's Save Animated WEBP writes them: videos, never frames of a sequence
