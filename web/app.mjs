@@ -22,7 +22,7 @@ import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, nearSize, s
 import { readBack } from "./canvas.mjs"; // the viewer: a few pixels of the view, read without moving it off the GPU
 import { deepStopped } from "./logic.mjs"; // the viewer: the full-precision frames' failure, in red
 import { hdrAfterComposite } from "./logic.mjs"; // the render: a Light edit's new light in HDR
-import { renderStatus, stepClasses } from "./logic.mjs"; // the Render panel's status line
+import { renderStatus, runOrder, stepClasses } from "./logic.mjs"; // the Render panel's status line and its planned steps
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -2978,7 +2978,7 @@ async function plateHdr(r) { // the plate alone: SDR to HDR on the plate, Upscal
   if (!r.told) {
     r.told = true;
     const passes = [!r.skip.has("hdr") && "SDR to HDR", upLast(r) && "Upscale"].filter(Boolean);
-    log(`Render v${r.v}: no edit, the plate through ${passes.join(" and ")}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
+    log(`Render v${r.v}: no edit, the plate through ${passes.join(" and ")}.\n  Steps: ${runOrder(STAGES.filter((st) => !r.skip.has(st.id)), r.hdrAfter).map((st) => labelOf(st, r)).join("; ")}.`);
   }
   await step(r, "hdr", async (progress) => {
     const out = await run("hdr", { ...S.memoryProfile.slots, path: p.path, color_space: p.cs, config: S.ocio.config, max_frames: p.frames,
@@ -3013,7 +3013,7 @@ async function fluidSteps(r, fl) {
   const p = S.plate, blank = p.path.split(/[\\/]/).pop(), alone = !r.active.some((e) => e.tool !== "fluid");
   if (!r.told && alone) {
     r.told = true;
-    log(`Render v${r.v}: 1 edit (Fluid 1), seed ${fl.seed}, ${S.previewCap ? `shot preview at ${fluidSize(p.shot).join(" x ")}` : "shot preview off"}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
+    log(`Render v${r.v}: 1 edit (Fluid 1), seed ${fl.seed}, ${S.previewCap ? `shot preview at ${fluidSize(p.shot).join(" x ")}` : "shot preview off"}.\n  Steps: ${runOrder(STAGES.filter((st) => !r.skip.has(st.id)), r.hdrAfter).map((st) => labelOf(st, r)).join("; ")}.`);
   }
   const make = (dir, size) => async (progress) => {
     const keys = [];
@@ -3101,7 +3101,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const scene = erase ? erasePrompt(erases.map((e) => e.caption)) : ""; // the scene as it stays, never the erased object
   if (!r.told) {
     r.told = true;
-    log(`Render v${r.v}: ${r.active.length} edit${r.active.length === 1 ? "" : "s"} (${r.active.map((e) => (e.tool === "fluid" ? "Fluid 1" : `${NAME[e.tool]} ${num(e.src)}`)).join(", ")}), seed ${common.seed}, ${S.previewCap ? `shot preview at ${sw} x ${sh}` : "shot preview off"}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
+    log(`Render v${r.v}: ${r.active.length} edit${r.active.length === 1 ? "" : "s"} (${r.active.map((e) => (e.tool === "fluid" ? "Fluid 1" : `${NAME[e.tool]} ${num(e.src)}`)).join(", ")}), seed ${common.seed}, ${S.previewCap ? `shot preview at ${sw} x ${sh}` : "shot preview off"}.\n  Steps: ${runOrder(STAGES.filter((st) => !r.skip.has(st.id)), r.hdrAfter).map((st) => labelOf(st, r)).join("; ")}.`);
     if (carry) log(`Render v${r.v}: LTX prompt: ${prompt}`);
     if (erase) log(`Render v${r.v}: Clean plate pass prompt: ${scene || "none."}`);
   }
@@ -3554,8 +3554,8 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
 
 // The Render panel's rows in the order things happen: the steps done, in the order they finished (a step reused from an
 // earlier render is done first), then the step running, then the steps to come in their planned order
-function stepsInOrder(r, skip) {
-  const steps = STAGES.filter((st) => !skip.has(st.id)), of = Object.fromEntries(steps.map((st) => [st.id, st]));
+function stepsInOrder(r, skip, hdrAfter = !!r?.hdrAfter) {
+  const steps = runOrder(STAGES.filter((st) => !skip.has(st.id)), hdrAfter), of = Object.fromEntries(steps.map((st) => [st.id, st]));
   return stepOrder(steps.map((st) => st.id), { done: (id) => doneOf(r, of[id]) !== undefined, at: (id) => storeOf(r, of[id])?.at?.[id],
     now: S.stage?.key === S.heroKey ? S.stage.id : null }).map((id) => of[id]);
 }
@@ -3601,7 +3601,7 @@ function stagesUI() {
   first.className = "done" + (S.pass === "first" ? " shown" : "");
   first.innerHTML = '<span class="dot"></span><span class="name">Edited first frame</span><span class="time">edit</span>';
   pick(first, "first", "the first frame");
-  const rows = [...(active.some((e) => e.tool !== "fluid") ? [first] : []), ...stepsInOrder(r, skip).map((st) => { // the first frame an edit's pass made: a fluid shot alone has none
+  const rows = [...(active.some((e) => e.tool !== "fluid") ? [first] : []), ...stepsInOrder(r, skip, !!planned.hdrAfter).map((st) => { // the first frame an edit's pass made: a fluid shot alone has none
     const li = document.createElement("li"), took = doneOf(r, st), from = storeOf(r, st)?.taken?.[st.id];
     const now = S.stage?.id === st.id && S.stage.key === S.heroKey;
     li.className = took !== undefined ? "done" : now ? "now" : later(st) ? "later" : "";
@@ -3619,7 +3619,7 @@ function stagesUI() {
     }
     return li;
   })];
-  const fluidRows = stepsInOrder(r, skip).filter((st) => st.id === "fluid" || st.id === "fluidfull").length;
+  const fluidRows = stepsInOrder(r, skip, !!planned.hdrAfter).filter((st) => st.id === "fluid" || st.id === "fluidfull").length;
   if (rows[0] === first && fluidRows) rows.splice(fluidRows, 0, rows.shift()); // an edit's first frame is made on the fluid shot's: it follows its steps
   keepRows(list, rows);
   // the status line: the class of steps at work, the preview, the full size or Finish, and the time until it is done (logic.renderStatus)

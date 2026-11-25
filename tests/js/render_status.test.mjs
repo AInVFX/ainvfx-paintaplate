@@ -47,3 +47,10 @@ test("a class whose time is spent says « almost ready » while a step runs; the
   assert.equal(line(steps, false, ids(PAINT), { exporting: true }), `export ${secs(10)}`);
   assert.equal(line(steps, false, ids(steps), { exported: true }), "exported");
 });
+
+test("a planned SDR to HDR that runs on the composite is listed after it, where it will run", async () => {
+  const { runOrder } = await import("../../web/logic.mjs");
+  assert.deepEqual(ids(runOrder(PAINT, true)), ["shot", "track", "comp", "full", "trackfull", "review", "hdr"]);
+  assert.deepEqual(ids(runOrder(PAINT, false)), ids(PAINT), "before the composite, the shot is made again in HDR first");
+  assert.deepEqual(ids(runOrder([st("fluid", { preview: true }), st("fluidfull", { final: true }), st("hdr", { final: true })], true)), ["fluid", "fluidfull", "hdr"], "a fluid shot alone has no composite");
+});

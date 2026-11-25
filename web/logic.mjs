@@ -1746,3 +1746,12 @@ export function renderStatus(steps, { exporting = false, exported = false, busy 
   for (const [cls, name] of [["preview", "preview"], ["full", "full size"], ["finish", "finish"]]) if (due(cls).length) return say(name, due(cls));
   return has("finish") ? "finish ready" : has("full") ? "full size ready" : "";
 }
+// The render's planned steps in the order they run: as the page lists them, with SDR to HDR after the full-size composite
+// when it runs on it (hdrLast), so a step still to come sits where it will run.
+export function runOrder(steps, hdrLast = false) {
+  const hdr = steps.find((st) => st.id === "hdr"), comp = steps.findIndex((st) => st.id === "review");
+  if (!hdrLast || !hdr || comp < steps.indexOf(hdr)) return steps;
+  const rest = steps.filter((st) => st !== hdr);
+  rest.splice(rest.findIndex((st) => st.id === "review") + 1, 0, hdr);
+  return rest;
+}
