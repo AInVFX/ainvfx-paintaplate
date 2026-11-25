@@ -11,7 +11,7 @@
    The open's first frame and playback proxy hold the pixels of the whole plate converted as one batch: both ways
    write the proxy without loss for this, because x264 does not always make the same movie from the same frames.
 """
-import argparse, io, json, os, shutil, subprocess, sys, time, urllib.request, uuid, zipfile
+import argparse, io, json, os, shutil, subprocess, sys, time, urllib.parse, urllib.request, uuid, zipfile
 import numpy as np
 import zip_rows  # noqa: E402
 
@@ -396,7 +396,9 @@ def main():
                     verify_export(kind, os.path.join(input_dir, path), os.path.join(output_dir, exp_dir), relight)
                     mattes = sorted(os.listdir(os.path.join(output_dir, shot, "matte")))
                     check(len(mattes) == N, f"export {run}: matte saved, {len(mattes)} frames")
-                    blob, ctype = http(f"{url}/paintaplate/download?run={shot}&name=test_{run}&parts=export,matte,review")
+                    review = next((f for f in sorted(os.listdir(os.path.join(output_dir, shot))) if f.startswith("review_") and f.endswith(".mp4")), None)
+                    rows = [["composite_full_size", f"output:{exp_dir}"], ["matte", f"output:{shot}/matte"]] + ([["review", f"output:{shot}/{review}"]] if review else [])
+                    blob, ctype = http(f"{url}/paintaplate/download?" + urllib.parse.urlencode({"run": shot, "name": f"test_{run}", "files": json.dumps(rows)}))
                     names = zipfile.ZipFile(io.BytesIO(blob)).namelist() if "zip" in ctype else []
                     review = any(n.endswith("_review.mp4") for n in names) or relight  # the composite preview runs for the non-relight cases
                     exports = zip_rows.composite(names)  # its frames in export/, or its one movie at the top

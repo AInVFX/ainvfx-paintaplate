@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7, autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, downloadLines } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, missingLine, outputPath, zipRows, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7, autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, downloadLines } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -3443,23 +3443,32 @@ async function modelsBehindResult() { // the models behind the result on show: t
 // The name every exported file starts with: the scene's name once it is saved or opened, for its plate, else the plate's name. A
 // fluid shot's plate is its blank plate, whose name its export takes.
 const exportStem = () => (S.exportStem && S.exportStem.plate === S.plate?.path ? S.exportStem.name : S.plate?.name) || "";
-async function download(parts = ["export", "matte"]) {
-  const words = exportWordsNow(); // the dialog's rows: the zip's names and the log's download line
-  const source = $("#x-source");
-  if (source.checked && !source.closest("label").hidden && !parts.includes("source")) parts = [...parts, "source"]; // the source plate, where its row offers it ticked
-  const graph = await S.graph; S.graph = null; // Export's ComfyUI graph, written beside the result so the zip takes it
-  const written = graph ? await fetch(`/paintaplate/graph?${new URLSearchParams({ run: S.exported.run })}`, { method: "POST", body: JSON.stringify(graph.file, null, 1) })
-    .then((r) => r.ok, () => false) : null; // null: no graph asked for, or none to write, which graphFile said
-  if (written) parts = [...parts, "graph"];
+async function download(parts = ["export", "matte"]) { // the zip of the parts asked, each file named as the page knows it
+  const words = exportWordsNow(), r = S.renders.get(S.heroKey), ex = S.exported, source = $("#x-source");
+  const plate = source.checked && !source.closest("label").hidden ? S.plate.path : ""; // the source plate, where its row offers it ticked
+  const graph = await S.graph; S.graph = null; // Export's ComfyUI graph, written into the run's folder so that the zip takes it
+  const posted = graph ? await fetch(`/paintaplate/graph?${new URLSearchParams({ run: ex.run })}`, { method: "POST", body: JSON.stringify(graph.file, null, 1) })
+    .then((res) => (res.ok ? res.json() : false), () => false) : null; // null: no graph asked for, or none to write, which graphFile said
+  const full = S.plate.shot.join("x") === S.plate.work.join("x") ? previewOf(r) : r, up = `output:${ex.run}/upscale/${upSize()}/out`; // full: where the full-size passes keep their files (plan's onePass)
+  const asked = [...parts, ...(posted ? ["graph"] : []), ...(parts.includes("upscaled") ? [...(ex.mattePath ? ["upmatte"] : []), ...(plate ? ["upplate"] : [])] : [])];
+  const rows = zipRows(asked, words, { export: ex.path, hdr: r?.hdrFrames ?? `output:${ex.run}/hdr`, plate: r?.fluid?.path, matte: ex.mattePath, review: outputPath(r?.review),
+    shot: outputPath(full?.raw), graph: posted && `output:${ex.run}/${posted.file}`, upscaled: `${up}/export`, upmatte: `${up}/matte`, upplate: `${up}/plate` });
+  const files = JSON.stringify(rows.filter((row) => row[3]).map(([, name, , path]) => [name, path]));
+  try {
+    const gone = await fetch(`/paintaplate/download/check?${new URLSearchParams({ files })}`).then((res) => (res.ok ? res.json() : res.text().then((text) => { throw new Error(text); })));
+    const missing = [...new Set(rows.filter(([, name, , path]) => !path || gone.missing.includes(name)).map(([, , label]) => label))];
+    if (missing.length) return void status(missingLine(missing)); // a part asked for has no file: no zip, and the line names it
+  } catch (err) {
+    return void status(explained(err, "Export").message);
+  }
   const models = (await modelsBehindResult().catch(() => [])).map((m) => m.id).join(",");
   const a = Object.assign(document.createElement("a"), {
-    href: `/paintaplate/download?${new URLSearchParams({ run: S.exported.run, name: S.exported.name, stem: exportStem(), names: JSON.stringify(words.zip), parts: parts.join(","), models, ...(parts.includes("source") ? { plate: S.plate.path } : {}),
-      ...(parts.includes("upscaled") ? { upscaled: `upscale/${upSize()}/out` } : {}) })}`, // the upscaled set of the size asked for (upscalePart)
-    download: `${S.exported.name}.zip` });
+    href: `/paintaplate/download?${new URLSearchParams({ run: ex.run, name: ex.name, stem: exportStem(), files, models, ...(plate ? { plate, source: words.zip.source } : {}) })}`,
+    download: `${ex.name}.zip` });
   document.body.append(a); a.click(); a.remove();
-  const said = downloadLines(`${S.exported.name}.zip`, parts, words.rows); // one detail line per row the zip holds, in the dialog's words
+  const said = downloadLines(`${ex.name}.zip`, [...asked, ...(plate ? ["source"] : [])], words.rows); // one detail line per row the zip holds, in the dialog's words
   log(said); showStatus(said.split("\n")[0]);
-  if (written === false) told(...GRAPH_UNWRITTEN); // after the download's line, so the status line keeps the warning and what to do
+  if (posted === false) told(...GRAPH_UNWRITTEN); // after the download's line, so the status line keeps the warning and what to do
 }
 
 // ---------- Interface ----------

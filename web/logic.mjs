@@ -932,6 +932,22 @@ export function downloadLines(zip, parts, rows) {
   const labels = [...new Set(parts.map((p) => rows[ROW_OF[p]]?.label).filter(Boolean))];
   return [`Download: ${zip}.`, ...labels.map((label) => `  ${label}.`)].join("\n");
 }
+// The zip's rows for the parts asked (app.download): [part, its name in the zip, its row's label, its file], each file as
+// the page knows it from the job that made it (`file`, by part), or null. Upscale's set adds its matte and the source
+// plate's (upmatte, upplate) to its result (upscaled).
+export function zipRows(parts, { zip, rows }, file) {
+  const of = { export: [zip.export, rows.export.label], hdr: [zip.hdr, rows.export.label], plate: [zip.plate, rows.export.label],
+    matte: [zip.matte, rows.matte.label], review: [zip.review, rows.review.label], shot: [zip.shot, rows.shot.label], graph: [zip.graph, rows.graph.label],
+    upscaled: [zip.up.export, rows.upscaled.label], upmatte: [zip.up.matte, `${rows.matte.label}, upscaled`], upplate: [zip.up.plate, `${rows.source.label}, upscaled`] };
+  return parts.map((part) => [part, ...of[part], file[part] || null]);
+}
+// The line when a part asked for has no file on disk: Export stops before its download (app.download).
+export const missingLine = (labels) => `Error: Export stopped: ${labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`} ${labels.length === 1 ? "has" : "have"} no file on disk.`;
+// The page path of a file that ComfyUI's /view serves from its output folder (comfy.viewUrl), or null.
+export function outputPath(url) {
+  const q = new URLSearchParams(String(url ?? "").split("?")[1] ?? "");
+  return q.get("type") === "output" && q.get("filename") ? `output:${[q.get("subfolder"), q.get("filename")].filter(Boolean).join("/")}` : null;
+}
 export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on
 
 // What to do when a line names a missing file of models/vae_approx, which holds the live preview's decoder that
