@@ -439,7 +439,8 @@ class _Chunks(io.RawIOBase):
 
 
 async def stream_zip(request: web.Request, name: str, files: list[tuple[str, str, str]], models: list[str], stem: str) -> web.StreamResponse:
-    """The zip of `files`, written as it downloads, with no copy of it on disk: a source plate's files can be large."""
+    """The zip of `files`, written as it downloads, with no copy of it on disk: a source plate's files can be large. A file
+    that cannot be read ends the response before its last chunk, so the browser reports the download as failed."""
     response = web.StreamResponse(headers={"Content-Type": "application/zip", "Content-Disposition": f'attachment; filename="{name}.zip"'})
     await response.prepare(request)
     loop, queue, stop = asyncio.get_running_loop(), asyncio.Queue(maxsize=8), threading.Event()
@@ -462,6 +463,7 @@ async def stream_zip(request: web.Request, name: str, files: list[tuple[str, str
         raise
     finally:
         await asyncio.gather(task, return_exceptions=True)
+    await task  # the writer's error, such as a file that cannot be read: the response ends here, without its last chunk
     await response.write_eof()
     return response
 
