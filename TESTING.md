@@ -221,7 +221,7 @@ Every module of `tests/flows` is a flow, named after its file (`tests/flows/READ
 | Job | What it runs |
 | --- | --- |
 | Unit tests | The whole suite with no browser and no ComfyUI: the Python modules, the Node tests and the linters. |
-| Page tests | `test_ui_mock`: the page against the mock ComfyUI, in four shards on four machines (`PAGE_SHARD`). Each shard runs its part of the flows, one per CPU. A failed shard leaves the others running. |
+| Page tests | `test_ui_mock`: the page against the mock ComfyUI, in six shards on six machines (`PAGE_SHARD`). Each shard runs its part of the flows, one per CPU. A failed shard leaves the others running. |
 | Live tests | `tools/ci_comfyui.sh` builds ComfyUI and ComfyUI-LTXVideo at the pins on CPU, with empty model files from `tools/placeholders.py`; then `test_live` and the source check of `test_workflows`. No model runs: model workflows are cancelled once ComfyUI has validated them, and the browser test swaps those it posts for stand-ins made of core nodes (`edit`, `snap`, `prompt`, `matte`, `shot`, `clean` and its second stage `cleanup`). |
 | Release | On `main` only, once every job passes, each page shard included: a new `version` in `pyproject.toml` gets its Comfy Registry publish, its tag `v<version>` and its GitHub release (a pre-release before 1.0.0). Each step skips what is done already. |
 

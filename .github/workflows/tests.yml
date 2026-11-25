@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 # Three kinds of job side by side, none repeating another's tests: the Python and Node level, the page against the mock
-# ComfyUI in four shards, and a real ComfyUI on CPU. The page jobs drive the runner's own Google Chrome when it has one (no browser download, no
+# ComfyUI in six shards, and a real ComfyUI on CPU. The page jobs drive the runner's own Google Chrome when it has one (no browser download, no
 # system packages, and it plays H.264); else Playwright's Chromium is installed. Then, on main, the release job.
 jobs:
   unit:
@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false  # a failed shard leaves the others running, so every flow reports
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     env:
       PAGE_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}  # tests/test_ui_mock.py runs this part of the flows, one flow per CPU
     steps:

@@ -235,7 +235,7 @@ When ComfyUI runs on this machine (`frames.sameMachine`), the ComfyUI files tab 
 | `get_models.py` | Every model file the workflows load, with its repository, its tested revision, its folder and its size. `python get_models.py` downloads what is missing, with ComfyUI's own Python on Windows, macOS or Linux; `--list` says what is in place. The pod setup runs it. It also holds what `get_plates.py` shares: `download`, `listing`, `hub`. |
 | `get_plates.py` | The example plates: the MP4 files of the dataset `AInVFX/ainvfx-paintaplate`, into `input/plates`, with the same options and closing line as `get_models.py`. |
 
-Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), `.gitignore` (the example plates included: they live on Hugging Face) and `.comfyignore` (what the Registry package leaves out). `.github/workflows/tests.yml` runs three kinds of job side by side on every push: the unit tests, the page against the mock ComfyUI in four shards, and a CPU ComfyUI with a headless browser. Its `release` job publishes a new version from `main` (section 13).
+Also at the root: `README.md`, `TESTING.md`, this file, `LICENSE` (Apache 2.0), `.gitignore` (the example plates included: they live on Hugging Face) and `.comfyignore` (what the Registry package leaves out). `.github/workflows/tests.yml` runs three kinds of job side by side on every push: the unit tests, the page against the mock ComfyUI in six shards, and a CPU ComfyUI with a headless browser. Its `release` job publishes a new version from `main` (section 13).
 
 ### The page, in `web/`
 

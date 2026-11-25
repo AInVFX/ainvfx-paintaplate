@@ -2,7 +2,7 @@
 
 The first test runs every flow once, side by side (one per CPU), each with its own time limit. Every test then reports its
 own flow: a failure names its flow and shows its last lines, and the other flows still run. It needs playwright with a
-browser. In CI the page job runs it, one part of the flows per machine (PAGE_SHARD, as "2/4"); the unit job leaves it
+browser. In CI the page job runs it, one part of the flows per machine (PAGE_SHARD, as "2/6"); the unit job leaves it
 to the page job.
 
 One flow alone, its lines as they come: python tests/ui_mock.py --only keys
