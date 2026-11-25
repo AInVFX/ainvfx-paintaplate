@@ -73,3 +73,15 @@ test("the line names every file the ticks ask for that is not on disk", () => {
   assert.equal(missingLine(["Shot, full size"]), "Error: Export stopped: Shot, full size has no file on disk.");
   assert.equal(missingLine(["Shot, full size", "Matte", "Composite, upscaled"]), "Error: Export stopped: Shot, full size, Matte and Composite, upscaled have no file on disk.");
 });
+
+test("one rule names the zip, its files and the log: ASCII letters, digits, « . », « - » and « _ »", async () => {
+  const { fileStem, zipFileName, logFileName } = await import("../../web/logic.mjs");
+  assert.equal(fileStem("Désk shot.01"), "D_sk_shot.01");
+  assert.equal(fileStem("  über / plate  "), "ber_plate");
+  assert.equal(zipFileName("Désk shot.01", "v3", {}), "D_sk_shot.01_v3");
+  assert.equal(zipFileName("desk", "v3", { hdr: true }), "desk_v3_hdr");
+  assert.equal(zipFileName("desk", "v3", { hdr: true, up: true }), "desk_v3_hdr_upscaled");
+  assert.equal(zipFileName("smoke", "fluid_v1", { preview: true }), "smoke_fluid_v1_preview");
+  assert.equal(zipFileName("", "v1", {}), "no_plate_v1");
+  assert.ok(logFileName("Désk shot.01", new Date(2026, 10, 25, 9, 5)).startsWith("D_sk_shot.01_log_20261125_0905"));
+});

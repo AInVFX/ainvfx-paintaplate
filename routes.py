@@ -89,8 +89,10 @@ ZIP_TYPES = plateio.IMAGE_EXTS | plateio.VIDEO_EXTS  # what a row holds: frames,
 
 
 def zip_name(name: str, folder: str) -> str:
-    """A file name made only of letters, digits, '.', '-' and '_'."""
-    return re.sub(r"[^\w.-]", "_", name or os.path.basename(folder))[:120]
+    """A name in a file's name: letters A to Z, digits, '.', '-' and '_', every other run of characters one '_', none at
+    either end (logic.fileStem, the same rule on the page). With no name, the run's folder's."""
+    clean = lambda text: re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_")  # noqa: E731
+    return (clean(name or "") or clean(os.path.basename(folder)))[:120]
 
 
 def zip_list(text: str) -> list[tuple[str, str]]:

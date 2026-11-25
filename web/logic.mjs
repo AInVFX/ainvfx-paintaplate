@@ -755,8 +755,14 @@ export function logReport({ version, build, stats, browser, address, memory, pla
 }
 
 // The log's file name, in the browser's local time.
+// A name in a file's name: letters A to Z, digits, « . », « - » and « _ », every other run of characters one « _ », none at
+// either end. It names the zip, every file in it (routes.zip_name, the same rule) and the log's file.
+export const fileStem = (name) => String(name ?? "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+// The zip's name, without its extension: the stem, the render's version (v3, or fluid_v2 for a fluid shot alone), then what
+// it holds beyond full size, so that two zips of one render never share a name: desk_v3, desk_v3_hdr, desk_v3_hdr_upscaled.
+export const zipFileName = (stem, version, held = {}) => [fileStem(stem) || "no_plate", version, held.preview && "preview", held.hdr && "hdr", held.up && "upscaled"].filter(Boolean).join("_");
 export function logFileName(plate, d) {
-  const two = (n) => String(n).padStart(2, "0"), name = String(plate || "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "no_plate";
+  const two = (n) => String(n).padStart(2, "0"), name = fileStem(plate) || "no_plate";
   return `${name}_log_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}.txt`;
 }
 
