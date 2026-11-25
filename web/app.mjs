@@ -1017,12 +1017,17 @@ function recompose() {
   stagesUI(); exportUI();
 }
 
-function showLatest() { // the latest result of the edits on show: the full-size composite, else the full-size shot, else the preview
-  const key = S.heroKey, r = S.renders.get(key), pv = previewOf(r), review = r?.play ?? r?.review;
-  const up = r && upscaled(r) ? upOf(r)?.[upLast(r).id] : null; // Finish > Upscale's last step, once made, at the size asked for
-  if (up?.url) return void setShot(up.url, key, up.space);
-  const best = review ?? r?.raw ?? pv?.comp ?? pv?.raw;
-  if (best) setShot(best, key, best === review ? (r.playSpace ?? r.reviewSpace) : "@model", best === review ? r.reviewFrames : null, { framesSpace: best === review ? r.reviewFramesSpace : null });
+function latestOf(r) { // a render's latest result: Upscale's last step at the size asked for, else the full-size composite, else the full-size shot, else the preview
+  const up = r && upscaled(r) ? upOf(r)?.[upLast(r).id] : null;
+  if (up?.url) return { url: up.url, space: up.space, frames: null, framesSpace: null };
+  const pv = previewOf(r), review = r?.play ?? r?.review, best = review ?? r?.raw ?? pv?.comp ?? pv?.raw;
+  if (!best) return null;
+  return best === review ? { url: best, space: r.playSpace ?? r.reviewSpace, frames: r.reviewFrames ?? null, framesSpace: r.reviewFramesSpace ?? null }
+    : { url: best, space: "@model", frames: null, framesSpace: null };
+}
+function showLatest() { // the latest result of the edits on show
+  const key = S.heroKey, l = latestOf(S.renders.get(key));
+  if (l) setShot(l.url, key, l.space, l.frames, { framesSpace: l.framesSpace });
   else if (!key) setShot(null, key);
 }
 
@@ -1108,7 +1113,12 @@ function stepWipe(side) {
   for (let i = 1; i < offers.length; i++) {
     const id = offers[(at + i) % offers.length];
     if (left && id === "plate") { endCompare(); break; }
-    if (!left && id === null) { if (S.pass) choosePass(S.pass); break; } // the pinned row clicked again: the latest result
+    if (!left && id === null) { // the latest result, unless it is the picture of the step displayed now: then the next step
+      const r = S.renders.get(S.heroKey);
+      if (S.pass && passMovie(S.pass, r, previewOf(r), passSpaces(), upOf(r))?.url === latestOf(r)?.url) continue;
+      if (S.pass) choosePass(S.pass);
+      break;
+    }
     if (left ? passLabel(id) === shownLabel() : id === S.cmp?.id) continue;
     if (left) comparePass(id); else choosePass(id);
     break;
