@@ -1,6 +1,6 @@
 {
- "about": "Every model Paint a plate's workflows load: its licence (the one its Hugging Face repository states, read on 2 Nov 2026 at the revision pinned in get_models.py), its source and what it does here. upstream: the original model's licence when a repackaged file comes from another repository. tests/test_models.py checks it against get_models.py and the workflows.",
- "checked": "2026-11-02",
+ "about": "Every model Paint a plate's workflows load: its licence (the one its Hugging Face repository states, read on 23 Nov 2026 at the revision pinned in get_models.py), its source and what it does here. upstream: the original model's licence when a repackaged file comes from another repository. tests/test_models.py checks it against get_models.py and the workflows.",
+ "checked": "2026-11-23",
  "models": [
   {
    "id": "klein",
@@ -117,7 +117,7 @@
    "repo": "WepeNerd/LTX-Ripple",
    "source": "https://huggingface.co/WepeNerd/LTX-Ripple",
    "use": "Extends Paint and Light edits to the whole shot",
-   "licence": "LTX-2 Community License Agreement",
+   "licence": "LTX-2.x Community License",
    "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
    "revision": "76abac5ede8a3415b9d1cd803843a38ecb351600"
   },
@@ -151,8 +151,8 @@
    "repo": "Kijai/LTX2.3_comfy",
    "source": "https://huggingface.co/Kijai/LTX2.3_comfy",
    "use": "Decodes the live preview while a pass runs",
-   "licence": "LTX-2 Community License Agreement",
-   "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE",
+   "licence": "LTX-2 Community License",
+   "licence_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2",
    "upstream": {
     "licence": "MIT",
     "source": "https://github.com/madebyollin/taehv"
