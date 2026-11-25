@@ -851,7 +851,8 @@ def keep_samples(frame, source, keep: np.ndarray):
 
     Untouched pixels then reach the encoder as the source's YUV samples, with no RGB round trip: a 4:2:0 plate loses up
     to 12/255 to that round trip, even with a lossless encode (42.25 dB). A chroma sample shared by four pixels
-    is kept only when all four are untouched.
+    is kept only when all four are untouched. The new frame takes `frame`'s colour matrix and range, which a reader
+    decodes it by.
     """
     itemsize = 2 if re.search(r"p1[0246]", frame.format.name) else 1
     out = av.VideoFrame(frame.width, frame.height, frame.format.name)
@@ -866,6 +867,7 @@ def keep_samples(frame, source, keep: np.ndarray):
         buf[:, : a.shape[1]] = a
         p_out.update(buf.tobytes())
     out.pts = frame.pts
+    out.colorspace, out.color_range = frame.colorspace, frame.color_range  # ProRes writes them into each frame's header
     return out
 
 
