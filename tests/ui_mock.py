@@ -104,6 +104,16 @@ def view_box(page):
     return page.eval_on_selector("#view", "e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }")
 
 
+def tap(page, key, seconds=0.05):
+    """A tap of a letter key that lasts `seconds` by the key's own clock: Chrome's DevTools protocol sends its down and up
+    with their timestamps, which the page reads (event.timeStamp), so a page busy between the two still reads a tap."""
+    cdp, at = page.context.new_cdp_session(page), time.time()
+    key_of = {"key": key, "code": f"Key{key.upper()}", "windowsVirtualKeyCode": ord(key.upper())}
+    cdp.send("Input.dispatchKeyEvent", {"type": "keyDown", "text": key, "timestamp": at, **key_of})
+    cdp.send("Input.dispatchKeyEvent", {"type": "keyUp", "timestamp": at + seconds, **key_of})
+    cdp.detach()
+
+
 def stroke(page, pts):
     """A brush stroke through points given from 0 to 1 across the frame."""
     box = view_box(page)
@@ -880,8 +890,8 @@ def keys_flow(browser, port):
     frame = lambda: int(text("#frame-now"))  # noqa: E731
     results = {}
 
-    def key(k, test):  # a key's effect, within 1.5 s: a busy page answers later than at once
-        page.keyboard.press(k)
+    def key(k, test, press=None):  # a key's effect, within 1.5 s: a busy page answers later than at once
+        (press or page.keyboard.press)(k)
         results[k] = poll(page, test, 1.5)
     page.keyboard.press("Home"); start = frame()
     key("ArrowRight", lambda: frame() == start + 1); key("ArrowLeft", lambda: frame() == start)
@@ -894,7 +904,7 @@ def keys_flow(browser, port):
     key("c", lambda: "on" in attr("[data-tool=erase]", "class")); key("l", lambda: "on" in attr("[data-tool=light]", "class"))
     key("p", lambda: "on" in attr("[data-tool=paint]", "class"))
     size = int(text("#size-out")); key("=", lambda: int(text("#size-out")) > size); key("-", lambda: int(text("#size-out")) == size)
-    key("e", lambda: attr("#rub-btn", "aria-pressed") == "true"); page.keyboard.press("e")
+    key("e", lambda: attr("#rub-btn", "aria-pressed") == "true", lambda k: tap(page, k)); tap(page, "e")  # a tap, by the key's own clock
     key("i", lambda: page.evaluate("document.querySelector('#view').classList.contains('picking')")); page.keyboard.press("Escape")  # the in-frame picker
     for k, name in (("Shift+E", "Exposure"), ("k", "Contrast"), ("y", "Gamma"), ("Shift+S", "Saturation"), ("h", "Hue")):
         key(k, lambda name=name: text("#hud").startswith(name)); page.keyboard.press("Escape")

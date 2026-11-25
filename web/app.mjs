@@ -4638,16 +4638,16 @@ function setRub(on) {
   render();
 }
 let eraserKey = null; // E held down: when it went down, the eraser before it, and whether a stroke was dragged since
-function holdEraser() { // E goes down: the eraser is on while it is held
+function holdEraser(at = performance.now()) { // E goes down, at the key's own time (event.timeStamp): the eraser is on while it is held
   if (eraserKey) return;
-  eraserKey = { at: performance.now(), was: S.rub, dragged: false };
+  eraserKey = { at, was: S.rub, dragged: false };
   if (!S.rub) setRub(true);
 }
-function releaseEraser() { // E comes up: a tap switches the eraser, a hold or a stroke puts it back as it was (logic.eraserAfterKey)
+function releaseEraser(at = performance.now()) { // E comes up: a tap switches the eraser, a hold or a stroke puts it back as it was (logic.eraserAfterKey)
   const k = eraserKey;
   if (!k) return;
   eraserKey = null;
-  const on = eraserAfterKey(k.was, (performance.now() - k.at) / 1000, k.dragged);
+  const on = eraserAfterKey(k.was, (at - k.at) / 1000, k.dragged); // the key's own times: a busy page between them still reads a tap
   if (on !== S.rub) setRub(on);
 }
 $("#rub-btn").onclick = () => setRub(!S.rub);
@@ -4880,7 +4880,7 @@ addEventListener("keydown", (e) => {
   else if (k === "?") showHelp("keys");
   else if (TOOLS[combo] && !mod) pickTool(TOOLS[combo]); // P, C and L; Shift+P is free
   else if (low === "n" && !mod) nextEdit();
-  else if (combo === "e" && !mod && !e.altKey) { if (!e.repeat) holdEraser(); } // the eraser while E is down; a tap switches it (releaseEraser). RV's e is exposure: here Shift+E
+  else if (combo === "e" && !mod && !e.altKey) { if (!e.repeat) holdEraser(e.timeStamp); } // the eraser while E is down; a tap switches it (releaseEraser). RV's e is exposure: here Shift+E
   else if (k === "-" || k === "_") setSize(S.size / 1.2);
   else if (k === "=" || k === "+") setSize(S.size * 1.2);
   else if (k === "Enter") enter(mod);
@@ -4894,7 +4894,7 @@ addEventListener("keydown", (e) => {
 });
 addEventListener("keyup", (e) => {
   if (e.key.toLowerCase() === "o" && S.compare) { S.compare = false; render(); }
-  if (e.key.toLowerCase() === "e") releaseEraser();
+  if (e.key.toLowerCase() === "e") releaseEraser(e.timeStamp);
 });
 addEventListener("blur", () => { if (eraserKey) { eraserKey.dragged = true; releaseEraser(); } }); // E came up in another window: the hold ends
 function enter(another) { // Generate (Enter): the edit in progress, then its shot; nothing already made runs again. Ctrl+Enter: another seed
