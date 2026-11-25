@@ -927,7 +927,7 @@ async function upscaleResult(r) {
   const p = plateUnder(r), hdr = st.id === "uphdr", sized = upSize(), store = ((r.ups ??= {})[sized] ??= {});
   r.run ??= r.base; // a fluid shot's files sit in its render's folder, beside the upscaled set, which its zip takes (exportAlone)
   await step(r, st.id, async (progress) => {
-    store[st.id] = await upscalePart("comp", { dir: r.run, result: hdr ? r.hdrFrames : p.path, space: hdr ? HDR_FRAMES : p.cs,
+    store[st.id] = await upscalePart("comp", { dir: r.run, plate: p, result: hdr ? r.hdrFrames : p.path, space: hdr ? HDR_FRAMES : p.cs,
       float: hdr || (r.fluid ? false : /^\.exr$/i.test(p.spec.ext ?? "")), layer: null, matte: null }, false, progress, sized);
     if (!hdr) Object.assign(r, { review: store[st.id]?.url ?? null, reviewSpace: store[st.id]?.space ?? p.cs }); // the plate alone's result
   }, store);
@@ -3280,7 +3280,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     const sized = upSize(), store = ((r.ups ??= {})[sized] ??= {}), keeps = !r.skip.has("upplate");
     const parts = async (progress) => { // the export's parts, which the layer's and the result's windows read
       const x = (r.upParts ??= await exportJob(progress));
-      return { dir: x.run, result: x.parts.path, space: x.parts.space, float: x.parts.float, layer: x.layer ? x.parts.layerPath : null, matte: x.parts.mattePath };
+      return { dir: x.run, plate: plateUnder(r), result: x.parts.path, space: x.parts.space, float: x.parts.float, layer: x.layer ? x.parts.layerPath : null, matte: x.parts.mattePath };
     };
     const made = (part, keep, id) => async (progress) => { store[id] = await upscalePart(part, await parts((f) => progress(f / 10)), keep, (f) => progress(0.1 + f * 0.9), sized,
       { plate: store.upplate?.home, comp: store.uplayer?.comp }); };
@@ -3316,8 +3316,9 @@ function upscaleGuess(id) { // seconds for one of Upscale's steps on the render 
 // upscaled result from them and the matte and write the upscaled matte, then the upscaled layer; « Composite, upscaled » writes
 // the upscaled result. Otherwise « Composite, upscaled » makes the result's windows, with the upscaled matte when there is one,
 // then the upscaled result. Save Plate writes each part in the format of its plate-size twin, under upscaled/ in the export's
-// folder (the zip's part « upscaled »), and Save Movie its viewer movie, at its own size, for its row. `set`: { dir, result,
-// space, float, layer, matte }, the export's parts as Load Plate takes the paths; `keeps`: the plate and the layer come too;
+// folder (the zip's part « upscaled »), and Save Movie its viewer movie, at its own size, for its row. `set`: { dir, plate,
+// result, space, float, layer, matte }: the plate under the edits as the other steps read it (plateUnder: on a blank plate,
+// the fluid shot), then the export's parts as Load Plate takes the paths; `keeps`: the plate and the layer come too;
 // `sized`: the size it works at, as upSize names it, which its caller keeps for all its steps. Its jobs are of the export's
 // kind: what stops a render's steps stops them, and it posts no further job once it no longer stands (upStands).
 // A window's job taken from the job index keeps its own folder, as every job does, and each opening of a plate has its own
@@ -3325,7 +3326,7 @@ function upscaleGuess(id) { // seconds for one of Upscale's steps on the render 
 // them there (the layer's windows under the plate's, the join). `made`: where the plate's windows and the composed frames
 // are, as their parts returned them. A join is not kept in the job index: it writes its part into this render's folder.
 async function upscalePart(part, set, keeps, progress, sized, made = {}) {
-  const p = S.plate, [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]];
+  const p = set.plate, [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]];
   const stats = await fetch("/system_stats").then((res) => res.json()).catch(() => null), gib = 2 ** 30;
   const target = sized.split("x").map(Number), [sw, sh] = upscaleSource(w, h, target); // each size keeps its own windows
   const size = upscaleWindow((stats?.system?.ram_total ?? 0) / gib, (stats?.devices?.[0]?.vram_total ?? 0) / gib, target, [w, h], p.frames,
