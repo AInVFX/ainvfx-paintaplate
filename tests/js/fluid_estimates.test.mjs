@@ -19,7 +19,7 @@ test("on a 96 GB GPU, the fluid shot's preview and full size announce themselves
   assert.deepEqual(off, []);
 });
 
-// Adrien's laptop, an RTX 4090 Laptop GPU (16 GB of VRAM, 52 GB of RAM), on 24 Nov: a 16-bit fluid shot at 1280 x 704, 121
+// Measures on an RTX 4090 Laptop GPU (16 GB of VRAM, 52 GB of RAM): a 16-bit fluid shot at 1280 x 704, 121
 // frames, the preview at Half size, the models loading for the first pass
 const LAPTOP = [["fluid_1280x704_25fps_121f", "fluid", 45.1, P704], ["fluid_1280x704_25fps_121f", "fluidfull", 83.7, P704]];
 

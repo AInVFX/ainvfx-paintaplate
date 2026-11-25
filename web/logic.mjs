@@ -696,7 +696,7 @@ export function logLevel(text) { // a log message's colour, from its words: red 
 // warning shows by its first line that starts with its word, in its colour (logLevel). A line that succeeds replaces a
 // fault that is over (`shown`: the status line's level), in the normal colour, unless it is bookkeeping. Every other event
 // reaches the status line from the code that makes it, with what to do next.
-const BOOKKEEPING = /^(Frame cache|Viewer|Played|Memory profile|Working sizes|Native frames|Plate under the edits|Job index off)\b/;
+const BOOKKEEPING = /^(Frame cache|Viewer|Played|Memory profile|Working sizes|Native frames|Job index off)\b/;
 export function statusOf(text, shown = "") {
   const lines = String(text).split("\n"), level = logLevel(text), word = level === "error" ? "Error: " : "Warning: ";
   if (level) return { text: lines.map((l) => l.trim()).find((l) => l.startsWith(word)), level };
@@ -863,8 +863,8 @@ export const upscaleNote = (seconds) => `About ${Math.max(1, Math.round(seconds 
 // it asks before it turns on, when it changes what Export writes.
 export const FINISH = [
   { id: "hdr", name: "SDR to HDR",
-    line: "The result is regenerated in scene-linear values, fitted to the plate. It becomes half-float EXR frames in ACES2065-1, in the viewer and in Export.",
-    ask: "This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1." },
+    line: "The result is made again with values above 1.0, matched to the plate. A plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames in ACES2065-1.",
+    ask: "This plate holds values up to 1.0 only. With SDR to HDR, the result becomes half-float EXR frames in ACES2065-1, in the viewer and in Export." },
   { id: "upscale", name: "Upscale",
     line: "The render's last step: SeedVR2 7B upscales the result to the size chosen, including layers and mattes. The player shows it, and Export writes it." },
 ];
@@ -886,8 +886,10 @@ export function stepOrder(steps, { done, at = () => undefined, now = null }) {
 // the result is half-float EXR frames, an HDR result of a plate whose format holds nothing above 1.0; hdr: the fluid shot
 // went through SDR to HDR. The composite as a movie (the review movie) shows only where the composite is frames.
 export const EXR_FRAMES = "half-float EXR frames, ACES2065-1";
-// source: the plate has files of its own to offer (no blank plate); bytes: their size, once known.
-export function exportWords({ kind, ready = true, left = "", exr = false, hdr = false, last = false, spec = null, steps = {}, source = false, bytes = 0 }) {
+// source: the plate has files of its own to offer (no blank plate); bytes: their size, once known. last: SDR to HDR ran
+// after the composite, over the edits on a fluid shot, so its frames are the result; upHdr: Upscale's set is made from them.
+export function exportWords({ kind, ready = true, left = "", exr = false, hdr = false, last = false, upHdr = false, spec = null, steps = {}, source = false, bytes = 0 }) {
+  const hdrRow = "HDR"; // SDR to HDR's frames, named for what they hold: the step is SDR to HDR, its output is HDR
   const first = (step) => `${step} first${left ? `: ${left}` : ""}.`, inHdr = (what) => (ready ? `${what} in HDR.` : `${what} in HDR. ${first("SDR to HDR runs")}`);
   const note = kind === "fluid" ? (hdr ? "The fluid shot in HDR, with the SDR shot in ProRes 4444." : "The fluid shot in ProRes 4444.")
     : kind === "plate" ? inHdr("The plate") : kind === "relit" ? inHdr("The relit result") : kind === "upscaled" ? (ready ? "" : first("Upscale runs"))
@@ -896,22 +898,22 @@ export function exportWords({ kind, ready = true, left = "", exr = false, hdr = 
   const edits = kind === "edits", frames = format === EXR_FRAMES || (!!spec && spec.kind !== "video");
   const hint = "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.";
   const rows = {
-    export: { label: kind === "fluid" ? "Fluid shot" : kind === "plate" || kind === "relit" || last ? steps.hdr : kind === "upscaled" ? steps.up : steps.comp, detail: format, shown: true },
+    export: { label: kind === "fluid" ? "Fluid shot" : kind === "plate" || kind === "relit" || last ? hdrRow : kind === "upscaled" ? steps.up : steps.comp, detail: format, shown: true },
     review: { label: `${steps.comp}, as a movie`, detail: "H.264 MP4", shown: edits && frames },
     matte: { label: "Matte", detail: "where the plate changed, PNG frames", shown: edits },
     shot: { label: steps.shot, detail: "the whole frame as the model made it, H.264 MP4", shown: edits },
     source: { label: "Source plate", detail: bytes > 0 ? `the plate's own files, ${gb(bytes)}` : "the plate's own files", shown: source && kind !== "fluid" },
     graph: { label: "ComfyUI graph", detail: "the scene as one ComfyUI workflow, with the images it loads", shown: true }, // the page decides: the edits on show, or a fluid shot alone
-    upscaled: { label: steps.up, shown: true }, // no row: Finish > Upscale adds its set to the zip
+    upscaled: { label: upHdr ? `${hdrRow}, upscaled` : steps.up, shown: true }, // no row: Finish > Upscale adds its set to the zip
   };
-  return { hint, format, note, rows, zip: zipNames(rows, steps.hdr, steps.comp), help: `${hint} ${steps.comp} keeps the plate's format. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.`,
+  return { hint, format, note, rows, zip: zipNames(rows, hdrRow, steps.comp), help: `${hint} ${steps.comp} keeps the plate's format. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.`,
   };
 }
 // A row's name in the zip: its label in lower case, its words joined by « _ », so the zip's names follow the dialog's words.
 export const zipName = (label) => String(label ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 // What the zip route calls each part (routes.zip_rows), from the row it belongs to (exportWords' rows). The composite as a
-// movie takes the composite's name; a fluid shot's preview movie takes its shot's name with « _preview »; SDR to HDR's frames
-// take their step's name (hdr); Upscale's result takes its step's name, and its matte the matte's name with « _upscaled ».
+// movie takes the composite's name (comp); a fluid shot's preview movie takes its shot's name with « _preview »; SDR to HDR's
+// frames take the name given (hdr); Upscale's result takes its step's name, and its matte the matte's name with « _upscaled ».
 export function zipNames(rows, hdr, comp = rows.export.label) {
   const first = zipName(rows.export.label), matte = zipName(rows.matte.label);
   const source = zipName(rows.source.label);

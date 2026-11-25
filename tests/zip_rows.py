@@ -4,8 +4,8 @@ the row's name; one movie, the graph and the models' list sit at the top, as <st
 import os
 
 # The rows the page names, then the route's own names for a request that names none (its parts' ids)
-ROWS = ("composite_full_size", "light_transfer_full_size", "shot_full_size", "matte", "comfyui_graph", "models", "sdr_to_hdr",
-        "fluid_shot", "fluid_shot_preview", "composite_upscaled", "matte_upscaled", "plate_upscaled", "sdr_to_hdr_upscaled",
+ROWS = ("composite_full_size", "light_transfer_full_size", "shot_full_size", "matte", "comfyui_graph", "models", "hdr",
+        "fluid_shot", "fluid_shot_preview", "composite_upscaled", "matte_upscaled", "plate_upscaled", "hdr_upscaled",
         "fluid_shot_upscaled", "export", "review", "shot", "graph", "preview")
 # The composite's row: a Light-only render names it after its step, and the route names it export when a request names no
 # row (tests/comfy_live.py), as in the zips of older runs

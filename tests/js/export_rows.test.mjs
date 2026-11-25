@@ -39,7 +39,7 @@ test("the rows and the note take the step names they are given: a Light edit's c
 });
 
 test("SDR to HDR on the plate alone or a relit result, Upscale on the plate alone, a fluid shot alone: one row of their own", () => {
-  for (const [kind, label] of [["plate", "SDR to HDR"], ["relit", "SDR to HDR"], ["upscaled", "Composite, upscaled"], ["fluid", "Fluid shot"]]) {
+  for (const [kind, label] of [["plate", "HDR"], ["relit", "HDR"], ["upscaled", "Composite, upscaled"], ["fluid", "Fluid shot"]]) {
     const w = exportWords({ kind, spec: MOVIE, exr: kind !== "upscaled", steps: STEPS });
     assert.equal(w.rows.export.label, label, kind);
     assert.deepEqual(["review", "matte", "shot"].filter((k) => w.rows[k].shown), [], kind);
@@ -61,7 +61,7 @@ test("one source: the page's file holds no row words, and logic.mjs never writes
   for (const old of ["The result", "Its matte", "The review movie", "The regenerated shot"]) assert.ok(!dialog.includes(old), old);
   const logic = read("logic.mjs");
   for (const step of ["Composite, full size", "Shot, full size"]) assert.ok(!logic.includes(step), `${step}: written once, in the Render panel's steps`);
-  assert.ok(read("app.mjs").includes('steps: { comp: name("review"), shot: name("full"), hdr: name("hdr"), up: name(up) }'));
+  assert.ok(read("app.mjs").includes('steps: { comp: name("review"), shot: name("full"), up: name(up) }'));
 });
 
 test("the source plate: a row of its own with its size, never on a blank plate; its files and its upscaled twin take its name", () => {

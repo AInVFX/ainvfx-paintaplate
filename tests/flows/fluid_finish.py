@@ -55,6 +55,8 @@ def run(browser, port, U):
     boxes = {k: page.is_visible(f"#x-{k}") for k in ("matte", "review", "shot")}
     U.check(all(boxes.values()) and "relit" not in (page.text_content("#x-note") or ""),
             f"over a fluid shot, Export offers the edits' composite, matte and shot, as for any edit: {boxes}")
+    first = page.evaluate("document.querySelector('#x-export').closest('label').querySelector('span').textContent")
+    U.check(first == "HDR", f"its first row names what the files hold, SDR to HDR's frames: {first!r}")
     page.check("#x-matte")
     with page.expect_download(timeout=120000) as dl:
         page.click("#x-go")

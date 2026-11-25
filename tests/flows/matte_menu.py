@@ -1,4 +1,4 @@
-"""The matte menu under a paint's row (tests/flows/README.md), on a 16 GB GPU with the shot preview off, as Adrien's laptop:
+"""The matte menu under a paint's row (tests/flows/README.md), on a 16 GB GPU with the shot preview off:
 « Auto » shows Follow Matte's choice; another strategy runs the matte and the composite again, takes the shot from the
 render of the same edits (never the shot again, job index or not), and every free keeps ComfyUI's cache, so SAM 3.1's
 answers serve again; undo and redo carry it; a saved scene keeps it and opens with it; the scene's ComfyUI graph has it as
@@ -6,6 +6,8 @@ Follow Matte's input; the Help says what the tooltips say."""
 import io
 import json
 import zipfile
+
+import zip_rows
 
 MENU = "#history li label.matte select"
 CARD = {"vram": 17.2e9, "ram": 65.5e9}  # a 16 GB GPU with 61 GB of RAM: the small profile, which frees between families
@@ -111,7 +113,8 @@ def run(browser, port, U):
     U.check([e.get("matte") for e in scene["edits"]] == ["Whole shot"], f"the saved scene keeps the strategy: {[e.get('matte') for e in scene['edits']]}")
     with page.expect_download(timeout=180000) as dl:
         page.click("#export-btn"); page.check("#x-graph"); page.click("#x-go")
-    graph = json.loads(zipfile.ZipFile(io.BytesIO(open(dl.value.path(), "rb").read())).read("scene.comfyui.json"))
+    with zipfile.ZipFile(io.BytesIO(open(dl.value.path(), "rb").read())) as z:
+        graph = json.loads(z.read(zip_rows.files(z.namelist(), "comfyui_graph")[0]))  # the zip names the graph after the plate
     follow = [n for n in graph["nodes"] if n.get("type") == "PaintAPlate_FollowMatte"]
     U.check(follow and all("Whole shot" in n.get("widgets_values", []) for n in follow),
             f"the scene's ComfyUI graph has the strategy as Follow Matte's input: {[n.get('widgets_values') for n in follow]}")

@@ -28,7 +28,7 @@ def output(prompt, name):
 
 
 NAMES = {"export": "composite_full_size", "review": "composite_full_size", "matte": "matte", "shot": "shot_full_size", "graph": "comfyui_graph",
-         "hdr": "sdr_to_hdr", "plate": "fluid_shot", "preview": "fluid_shot_preview",
+         "hdr": "hdr", "plate": "fluid_shot", "preview": "fluid_shot_preview",
          "up": {"export": "composite_upscaled", "matte": "matte_upscaled"}}  # the zip's names, as the page sends them (logic.zipNames)
 
 class ExportLayer(unittest.TestCase):

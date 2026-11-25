@@ -42,7 +42,7 @@ def run(browser, port, U):
     with page.expect_download(timeout=240000) as dl:
         page.click("#x-go")
     zipped = zipfile.ZipFile(dl.value.path()).namelist()
-    U.check(not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]) and zip_rows.files(zipped, "sdr_to_hdr_upscaled")
-            and zip_rows.files(zipped, "sdr_to_hdr") and not zip_rows.files(zipped, "plate_upscaled"),
+    U.check(not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]) and zip_rows.files(zipped, "hdr_upscaled")
+            and zip_rows.files(zipped, "hdr") and not zip_rows.files(zipped, "plate_upscaled"),
             f"Export posts no Upscale job, and zips the upscaled frames beside the frames at the plate's size: {sorted({n.split('/')[0] + '/' + n.split('/')[1] for n in zipped if '/' in n})}")
     page.close()

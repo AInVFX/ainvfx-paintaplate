@@ -33,7 +33,7 @@ def touch(path, data=b"x"):
 
 
 NAMES = {"export": "composite_full_size", "review": "composite_full_size", "matte": "matte", "shot": "shot_full_size", "graph": "comfyui_graph",
-         "hdr": "sdr_to_hdr", "plate": "fluid_shot", "preview": "fluid_shot_preview",
+         "hdr": "hdr", "plate": "fluid_shot", "preview": "fluid_shot_preview",
          "up": {"export": "composite_upscaled", "matte": "matte_upscaled"}}  # the zip's names, as the page sends them (logic.zipNames)
 
 class Routes(unittest.TestCase):
@@ -508,7 +508,7 @@ class FluidExport(unittest.TestCase):
                 with open(os.path.join(d, rel), "wb") as f:
                     f.write(b"x")
             names = [name for _, name in routes.collect(d, ["hdr", "plate", "preview"], stem="smoke", names=NAMES)]
-            self.assertEqual(names, ["sdr_to_hdr/smoke_sdr_to_hdr_00001_.exr", "sdr_to_hdr/smoke_sdr_to_hdr_00002_.exr", "smoke_fluid_shot.mov", "smoke_fluid_shot_preview.mp4"])
+            self.assertEqual(names, ["hdr/smoke_hdr_00001_.exr", "hdr/smoke_hdr_00002_.exr", "smoke_fluid_shot.mov", "smoke_fluid_shot_preview.mp4"])
             import zipfile  # its zip needs no export folder (without it, the request answers 404 and the browser cancels the download)
             with zipfile.ZipFile(routes.build_zip(d, "fluid_v1", ["hdr", "plate", "preview"], stem="smoke", names=NAMES)) as z:
                 self.assertEqual(sorted(z.namelist()), sorted(names))

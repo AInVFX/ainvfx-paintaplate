@@ -3698,9 +3698,9 @@ function exportWordsNow() {
   const kind = fluid ? "fluid" : alone ? (S.heroKey === PLATE_UP ? "upscaled" : "plate") : relitHdr ? "relit" : "edits";
   const ready = fluid || (alone ? !!r?.review : relitHdr ? !!r.hdrFrames : !!(r?.exported || r?.review));
   const name = (id) => labelOf(STAGES.find((st) => st.id === id), r);
-  const up = kind === "edits" ? "upcomp" : UPS.find((st) => (st.id === "uphdr" || st.id === "upplate") && !r?.skip?.has(st.id))?.id ?? "upplate"; // the step whose set the zip takes (upscaleResult)
+  const up = kind === "edits" && !last ? "upcomp" : UPS.find((st) => (st.id === "uphdr" || st.id === "upplate") && !r?.skip?.has(st.id))?.id ?? "upplate"; // the step whose set the zip takes (upscaleResult)
   return exportWords({ kind, ready, left: ready ? "" : secs(renderLeft(true), ""), hdr: fluid && r?.done?.hdr !== undefined && !r.skip?.has("hdr"), exr: !fluid && exportsExr(r), last, // hdr: SDR to HDR made and on
-    spec: fluid ? null : S.plate.spec, steps: { comp: name("review"), shot: name("full"), hdr: name("hdr"), up: name(up) },
+    spec: fluid ? null : S.plate.spec, steps: { comp: name("review"), shot: name("full"), up: name(up) }, upHdr: up === "uphdr",
     source: !fluidEdit(), bytes: S.exportSource?.plate === S.plate?.path ? S.exportSource.bytes : 0 }); // a blank plate has no files of its own to offer
 }
 function exportDialog() { // each row's label and detail, and whether it shows, come from one source for every kind of result (exportWordsNow)

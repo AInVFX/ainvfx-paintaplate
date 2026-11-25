@@ -61,7 +61,7 @@ def run(browser, port, U):
         page.click("#x-go")
     z = zipfile.ZipFile(dl.value.path())
     names = z.namelist()
-    exrs = sorted(zip_rows.files(names, "sdr_to_hdr", (".exr",)))
+    exrs = sorted(zip_rows.files(names, "hdr", (".exr",)))
     listed = "".join(z.read(n).decode() for n in zip_rows.files(names, "models"))
     with tempfile.TemporaryDirectory() as tmp:
         size = frame_size(z.extract(exrs[0], tmp)) if exrs else None
@@ -69,7 +69,7 @@ def run(browser, port, U):
             f"the zip holds the 49 EXR frames at the plate's size, 1280 x 704, and the models behind them: {len(exrs)} frames, {size}, {names[:2]}")
     status = page.text_content("#status") or ""
     said = U.log_lines(page)
-    U.check(status.startswith("Download: ") and status.endswith(".zip.") and any(t.startswith("Download: ") and "SDR to HDR." in t for t in said) and any(
+    U.check(status.startswith("Download: ") and status.endswith(".zip.") and any(t.startswith("Download: ") and "  HDR." in t for t in said) and any(
         t.startswith("Export: done, in ComfyUI's output folder.") and "49 half-float EXR frames in ACES2065-1" in t for t in said),
         f"the status line names the zip, and the log what Export wrote and the row the zip holds: {status!r}")
     page.click("#finish-btn")

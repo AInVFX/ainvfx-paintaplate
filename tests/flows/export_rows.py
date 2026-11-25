@@ -54,7 +54,8 @@ def run(browser, port, U):
     page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     U.paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)]); page.keyboard.press("Enter")
-    U.wait_log(page, U.added_line("under the edits: the fluid shot v"), 240000, "the fluid shot")
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => /^Render v\\d+: Fluid shot, full size: done in /.test(e.textContent))",
+                           timeout=240000)  # the fluid shot, made by its render's steps
     page.click("#export-btn")
     rows = page.evaluate(ROWS)
     U.check(rows[0] == ["x-export", "Fluid shot", "ProRes 4444 movie"] and not any(r[0] in ("x-review", "x-matte", "x-shot", "x-source") for r in rows),
