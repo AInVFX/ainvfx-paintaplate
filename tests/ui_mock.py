@@ -1195,6 +1195,13 @@ def flow_names(shard=""):
     return names
 
 
+def seconds_line(results, shard, wall):
+    """The page job's line of flow times, for its log: the shard, the CPUs that ran its flows side by side, its wall time
+    in seconds and each flow's seconds. The flows are cut into shards by these times."""
+    return "PAGE_SECONDS " + json.dumps({"shard": shard, "cpus": os.cpu_count() or 1, "wall": round(wall, 1),
+                                          "flows": {r["flow"]: r["seconds"] for r in results}}, sort_keys=True)
+
+
 # ---------- The plates, made once for a run and copied into each flow's folders ----------
 
 def make_hdr_plate(root):
