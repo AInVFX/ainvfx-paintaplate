@@ -1,13 +1,13 @@
 """Finish > Upscale turned off, or set to another size, while one of its steps runs. The step stops at once, as for a new edit, and
 its finished jobs stay in the job index. Off: nothing more runs, and no upscaled step is made. On again: the steps run. Another
-size inside a step: that size's own steps run from the first, to « full size ready », with no error. Back at the first size, the
+size inside a step: that size's own steps run from the first, to « finish ready », with no error. Back at the first size, the
 step it had made is still made, and the others run. The sizes, 1600 x 880 and 1400 x 770, are above the plate's 1280 x 704 and
 fit the mock in a small machine's memory."""
 
 ROWS = "els => els.map((e) => [e.querySelector('.name').textContent, e.querySelector('.time').textContent, e.className])"
 UP = ["Plate, upscaled", "Layer, upscaled", "Composite, upscaled"]
 CANVAS = "() => { const c = document.querySelector('canvas[data-picture]'); return [c.width, c.height]; }"
-RESTS = "document.querySelector('#render-left').textContent === 'full size ready' || document.querySelector('#status').textContent.startsWith('Error')"
+RESTS = "['full size ready', 'finish ready'].includes(document.querySelector('#render-left').textContent) || document.querySelector('#status').textContent.startsWith('Error')"
 
 
 def run(browser, port, U):

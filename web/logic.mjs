@@ -1725,3 +1725,24 @@ export function sceneV7(scene) {
   const on = (scene.version >= 6 ? !!scene.deliver?.hdr : scene.version === 5 && hdr === true) || +(fluid?.depth ?? 8) >= 16;
   return { ...rest, version: 7, edits, deliver: { ...(scene.deliver ?? {}), hdr: on }, fluid: undefined };
 }
+
+// ---------- The Render panel's status line ----------
+// The render's steps fall in classes, in the order they run: the preview, the full size, then Finish, for the Finish menu's
+// passes that run on the full-size result (SDR to HDR after the composite or on the plate alone, and Upscale's steps); the
+// export is its own. A step that is neither a preview nor a full-size step (a Clean's tracking) belongs to the first class
+// the render has. `steps`: the render's planned steps, as the page lists them; hdrLast: SDR to HDR runs on the full-size result.
+export function stepClasses(steps, hdrLast = false) {
+  const first = steps.some((st) => st.preview) ? "preview" : "full";
+  return Object.fromEntries(steps.map((st) => [st.id, st.onDemand ? "export" : st.up || (st.id === "hdr" && hdrLast) ? "finish" : st.final ? "full" : st.preview ? "preview" : first]));
+}
+// The line names the class at work and the time until that class is done: « preview », « full size », then « finish ». At
+// the end it says what is ready, so a full size that is made is never announced again while Finish runs.
+// `steps`: each planned step's class, whether it is done, and its seconds left; busy: one of them runs now.
+export function renderStatus(steps, { exporting = false, exported = false, busy = false } = {}) {
+  const due = (...cls) => steps.filter((s) => cls.includes(s.cls) && !s.done), has = (cls) => steps.some((s) => s.cls === cls);
+  const say = (name, list) => { const t = list.reduce((a, s) => a + s.left, 0); return t ? `${name} ${secs(t)}` : busy ? `${name} almost ready` : ""; };
+  if (exported) return "exported";
+  if (exporting) return say("export", due("preview", "full", "finish", "export"));
+  for (const [cls, name] of [["preview", "preview"], ["full", "full size"], ["finish", "finish"]]) if (due(cls).length) return say(name, due(cls));
+  return has("finish") ? "finish ready" : has("full") ? "full size ready" : "";
+}

@@ -1,6 +1,6 @@
 """Finish > Upscale's steps are steps of the render, as SDR to HDR's is. Its switch changes the Render panel at once: on, with a
 Paint, « Plate, upscaled », « Layer, upscaled » and « Composite, upscaled » follow the full-size composite and run with the render,
-with no Export, and « full size ready » waits for them; off, their rows go; on again, they come back made, with no new job.
+with no Export, and « finish ready » waits for them; off, their rows go; on again, they come back made, with no new job.
 Export then posts no Upscale job, and the zip holds the upscaled set. The player shows each made step as any step: the upscaled
 composite as the latest result, the canvas at its own size, 1600 x 880, a size above the plate's 1280 x 704 that the mock holds
 in a small machine's memory (upscale_size checks the sizes)."""
@@ -59,10 +59,10 @@ def run(browser, port, U):
     U.check(not ups() and page.text_content("#render-left") == "full size ready", f"with Upscale off, the render ends at the composite: {rows()}")
     switch(True)
     U.poll(page, planned, 1.5)
-    U.check(planned() and page.text_content("#render-left") != "full size ready", f"once the render is made, Upscale on adds its steps at once, and the render is no longer ready: {rows()}")
+    U.check(planned() and page.text_content("#render-left") not in ("full size ready", "finish ready"), f"once the render is made, Upscale on adds its steps at once, and the render is no longer ready: {rows()}")
     U.wait_log(page, U.added_line("Composite, upscaled: done in"), 240000, "Upscale's steps, with no Export")
-    U.poll(page, lambda: made() and page.text_content("#render-left") == "full size ready", 3)
-    U.check(made() and page.text_content("#render-left") == "full size ready", f"the three steps are made, then « full size ready »: {rows()}")
+    U.poll(page, lambda: made() and page.text_content("#render-left") == "finish ready", 3)
+    U.check(made() and page.text_content("#render-left") == "finish ready", f"the three steps are made, then « finish ready »: {rows()}")
     U.poll(page, lambda: shown() == ["Composite, upscaled"] and canvas() == [1600, 880], 3)
     U.check(shown() == ["Composite, upscaled"] and canvas() == [1600, 880] and page.text_content("#status").startswith("Composite, upscaled: ready, in the viewer."),
             f"the player shows the upscaled composite at its own size: {shown()}, canvas {canvas()}, {page.text_content('#status')!r}")

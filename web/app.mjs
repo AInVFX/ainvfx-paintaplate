@@ -22,6 +22,7 @@ import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, nearSize, s
 import { readBack } from "./canvas.mjs"; // the viewer: a few pixels of the view, read without moving it off the GPU
 import { deepStopped } from "./logic.mjs"; // the viewer: the full-precision frames' failure, in red
 import { hdrAfterComposite } from "./logic.mjs"; // the render: a Light edit's new light in HDR
+import { renderStatus, stepClasses } from "./logic.mjs"; // the Render panel's status line
 
 const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
@@ -3530,6 +3531,12 @@ async function exportLog() { // the log's export (logic.logReport): the log with
 }
 $("#log-export").addEventListener("click", exportLog);
 
+function stepSecs(st, skip) { // seconds a step has left: its estimate, less what the step at work has run
+  const est = estimate(st.id, skip);
+  return S.stage?.id === st.id && S.stage.key === S.heroKey
+    ? stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(timeStep(st.id), makesHdr(skip))]?.tail ?? null }) : est;
+}
+
 function renderLeft(finalToo = false) { // seconds until the preview, or the full-size composite (and the export once asked for), is ready
   finalToo ||= !S.previewCap || plateAlone(S.heroKey); // with no preview pass, the next result is the full-size composite; the plate alone has no preview
   const p = S.plate, r = S.renders.get(S.heroKey), exporting = !!S.wantDownload;
@@ -3540,10 +3547,7 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
   for (const st of STAGES) {
     if (st.final && !finalToo) break;
     if (skip.has(st.id) || doneOf(r, st) !== undefined || (st.onDemand && !exporting)) continue;
-    const est = estimate(st.id, skip);
-    if (S.stage?.id === st.id && S.stage.key === S.heroKey) {
-      t += stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(timeStep(st.id), makesHdr(skip))]?.tail ?? null });
-    } else t += est;
+    t += stepSecs(st, skip);
   }
   return t;
 }
@@ -3585,7 +3589,7 @@ function stagesUI() {
   $("#render").hidden = !p; // its Preview menu shows from a blank plate on
   list.hidden = !edits;
   if (!p || !edits) { keepRows(list, []); $("#render-left").textContent = ""; return timelineBar(); }
-  const skip = r?.skip ?? plan({ key: S.heroKey }, active).skip, later = (st) => st.onDemand && !S.wantDownload; // the export waits for Export
+  const planned = r?.skip ? r : plan({ key: S.heroKey }, active), skip = planned.skip, later = (st) => st.onDemand && !S.wantDownload; // the export waits for Export
   const pick = (li, id, label) => { // a finished pass with a picture: a click shows it on every frame, a second click the latest
     li.classList.add("pick");
     li.title = `${label}: click to display it. ${BACK_TO_LATEST}.`;
@@ -3618,10 +3622,10 @@ function stagesUI() {
   const fluidRows = stepsInOrder(r, skip).filter((st) => st.id === "fluid" || st.id === "fluidfull").length;
   if (rows[0] === first && fluidRows) rows.splice(fluidRows, 0, rows.shift()); // an edit's first frame is made on the fluid shot's: it follows its steps
   keepRows(list, rows);
-  const pre = renderLeft(), all = renderLeft(true);
-  const busy = S.stage?.key === S.heroKey, what = S.wantDownload ? "export" : "full size", next = S.previewCap && !alone ? "preview" : "full size";
-  $("#render-left").textContent = stale() || !(previewOf(r)?.comp || r?.review) ? (pre ? `${next} ${secs(pre)}` : busy ? `${next} almost ready` : "")
-    : r?.exported ? "exported" : fullSizeMade(r) && !S.wantDownload ? "full size ready" : all ? `${what} ${secs(all)}` : busy ? `${what} almost ready` : "";
+  // the status line: the class of steps at work, the preview, the full size or Finish, and the time until it is done (logic.renderStatus)
+  const due = STAGES.filter((st) => !skip.has(st.id) && (!st.onDemand || S.wantDownload)), cls = stepClasses(due, !!planned.hdrAfter || alone);
+  $("#render-left").textContent = renderStatus(due.map((st) => ({ cls: cls[st.id], done: doneOf(r, st) !== undefined, left: stepSecs(st, skip) })),
+    { exporting: !!S.wantDownload, exported: !!r?.exported, busy: S.stage?.key === S.heroKey });
   timelineBar();
 }
 

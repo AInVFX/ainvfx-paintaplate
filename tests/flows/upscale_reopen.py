@@ -10,7 +10,7 @@ import zip_rows  # noqa: E402
 ROWS = "els => els.map((e) => [e.querySelector('.name').textContent, e.querySelector('.time').textContent, e.className])"
 UP = ["Plate, upscaled", "Layer, upscaled", "Composite, upscaled"]
 CANVAS = "() => { const c = document.querySelector('canvas[data-picture]'); return [c.width, c.height]; }"
-RESTS = "document.querySelector('#render-left').textContent === 'full size ready' || document.querySelector('#status').textContent.startsWith('Error')"
+RESTS = "['full size ready', 'finish ready'].includes(document.querySelector('#render-left').textContent) || document.querySelector('#status').textContent.startsWith('Error')"
 
 
 def run(browser, port, U):

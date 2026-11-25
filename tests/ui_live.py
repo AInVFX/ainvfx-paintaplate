@@ -264,6 +264,9 @@ def rows(i, fluid):
     return i + 1 + bool(fluid)
 
 
+READY = ("full size ready", "finish ready")  # the render's status once every step is made: « finish ready » when a Finish pass follows the full size
+
+
 def stage(note):
     """The stage that a note of the render names: « preview about 14 s left » and « preview almost ready » are « preview »."""
     return note.split(" about ")[0].split(" almost ")[0]
@@ -532,7 +535,7 @@ def remote(a):
                     tag = stage(note) if note else status()[:40]
                     if tag not in seen:
                         seen.add(tag); mark("stage: " + (note or status()))
-                    if note == "full size ready" or "Error" in status() or status().startswith("Missing"):
+                    if note in READY or "Error" in status() or status().startswith("Missing"):
                         break
                     if time.time() - asked >= 10:  # a ComfyUI stopped for its memory leaves the page waiting: the case ends here, with what it has
                         asked, silent = time.time(), 0 if answers(a.url) else silent + 1
@@ -549,7 +552,7 @@ def remote(a):
                 page.keyboard.press("F6"); page.keyboard.press("End"); time.sleep(1); page.screenshot(path=f"{shots}/3_wipe.png")
                 page.keyboard.press("F6"); page.keyboard.press("Home"); page.keyboard.press("Space"); time.sleep(2)
                 page.keyboard.press("Space"); page.screenshot(path=f"{shots}/4_played.png")
-                if page.inner_text("#render-left") == "full size ready":  # Export writes the result, then the zip downloads
+                if page.inner_text("#render-left") in READY:  # Export writes the result, then the zip downloads
                     with page.expect_download(timeout=3 * 3600000 if a.upscale else 600000) as dl:  # the upscaled set: about 45 min on a 16 GB GPU
                         page.click("#export-btn")
                         tick_offered(page, a.graph)
@@ -567,7 +570,7 @@ def remote(a):
                             mark(f"ComfyUI graph not saved: {type(exc).__name__}: {str(exc).splitlines()[0][:120]} | status: {status()}")
             elif fluid and a.upscale:  # a fluid shot alone: Upscale's step follows the shot with no Generate, then Export zips both
                 mark(deliver_upscale(page, "" if a.upscale == "on" else a.upscale))
-                page.wait_for_function("['full size ready'].includes(document.querySelector('#render-left').textContent) || document.querySelector('#status').textContent.startsWith('Error')",
+                page.wait_for_function("['full size ready', 'finish ready'].includes(document.querySelector('#render-left').textContent) || document.querySelector('#status').textContent.startsWith('Error')",
                                        timeout=a.timeout * 8 * 1000)
                 mark("final: " + status()); page.screenshot(path=f"{shots}/4_played.png")
                 with page.expect_download(timeout=3 * 3600000) as dl:
