@@ -427,6 +427,10 @@ export const stageOne = ([w, h], step = 32) => [Math.max(step, Math.round(w / 2 
 // Generate stops a running render step only where that wastes least: a full-size or an export step in its first half. A step
 // past halfway costs less to finish than to run again, and a preview step is short and often reused by the new edit's render.
 export const stopsForEdit = ({ cls, progress }) => cls !== "preview" && progress < 0.5;
+// A new preview size while a render makes a step: the step stops, at any progress, when the preview at the new size must
+// come first: a preview at the old size, or a full-size step. A step that serves every size (the object tracked for
+// Clean), a Finish step and the export go on. `cls`: the step's class, as stepClasses gives it.
+export const stopsForPreview = (step, cls) => !!step.preview || (!!step.final && cls === "full");
 
 // ---------- The job index ----------
 // A job's key hashes its workflow and the values that change what it makes. Output folders (the prefixes) and the live

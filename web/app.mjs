@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearestKey, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokesLabel, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7, autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, downloadLines } from "./logic.mjs";
+import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearestKey, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, stopsForPreview, strokesLabel, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7, autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, downloadLines } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -79,6 +79,7 @@ const LIGHT = { flow: 0.3, shade: 0.35, spread: 1.6, spacing: 0.25 };
 const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid", "hdr", "upscale", "upscale_export"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "hdr", "review", "export"]; // the render's job kinds: Generate and a new plate stop them
 const STOPPED = ["edit", "fluid", "snap", "prefetch", ...BACKGROUND]; // the job kinds a stop ends: none of them is posted until Enter (design rule 13)
+const RENDER_KINDS = [...BACKGROUND, "fluid"]; // a render step's job kinds, the fluid shot's included: a step stopped for the preview at a new size posts none
 const UPSAMPLER = {}; // Black Forest Labs' system prompts for the prompt writer (upsampler.json)
 const SCENE = { format: "paintaplate-scene", version: 7 }; // 3: the OCIO config, the plate's colour space by its OCIO name, the display and view; 4: the SDR-to-HDR switch, the blank plate's bit depth; 5: the switch as set, null for the plate's default; 6: the Finish menu's passes (key « deliver »), the switch gone
 const OCIO_PREF = "paintaplate.ocio"; // the config, display, view and look, kept for the next session as RV keeps them
@@ -434,7 +435,7 @@ const ramRoom = async (name) => { // ComfyUI's free RAM and what this job's fram
 };
 onFree(async (last, name) => // why ComfyUI's memory is freed before this job, or null, or { why, keep } (logic.freeAsk): speed first where there is room
   freeAsk(S.memoryProfile, last, name, S.plate && freeNeedsRoom(S.memoryProfile, last, name) ? await ramRoom(name) : null, !!S.plate));
-onStop((kind) => S.halted && STOPPED.includes(kind)); // a stop stops everything: a render step that was uploading its images when the stop came posts no job after it
+onStop((kind) => (S.halted && STOPPED.includes(kind)) || (!!S.stage?.stopped && RENDER_KINDS.includes(kind))); // a stop stops everything, and a step stopped for the preview stops: a render step that was uploading its images when the stop came posts no job after it
 
 async function warmAll() { // every model loads while the person looks at the page: the first edit and the first shot start at once
   const t0 = performance.now(), start = $("#status").textContent; // what the page said at start: the warm-up's line replaces only that
@@ -3696,13 +3697,30 @@ function setPreview(mode) { // the Preview menu (logic.readPreview): Off, Latent
   previewMode = mode;
   try { sessionStorage.setItem(PREVIEW_PREF, String(mode)); } catch { /* this page only */ }
   if (!S.plate) return;
+  const was = S.previewCap;
   S.previewCap = previewCap(S.plate.work, previewDivOf(mode));
   S.plate.shot = previewSize([S.plate.spec.width, S.plate.spec.height], S.plate.work, S.previewCap || previewCap(S.plate.work, PREVIEW_DIV));
   previewUI();
+  if (S.previewCap && S.previewCap !== was) previewFirst(mode === 2 ? "half" : "quarter");
   S.heroKey = ""; recompose(); // what this size made already plays at once; the full size and its export never depend on it
   status(S.previewCap ? `Preview: ${mode === 2 ? "half" : "quarter"} size (${S.plate.shot[0]} x ${S.plate.shot[1]}). The export stays at full size.`
     : mode === "off" ? "Preview: off. No live preview, no preview pass." : "Preview: latent preview. Each pass shows live in the player.");
   stagesUI(); exportUI(); touch();
+}
+
+// A new preview size while the render on display makes a step: the step stops, at any progress, when the preview at the
+// new size must come first (logic.stopsForPreview). The preview then runs and is displayed, then the full size runs again
+// from its start. The same for every render; a render with no preview to make at the new size goes on.
+function previewFirst(size) {
+  const st = S.stage, r = S.piping;
+  if (!st || !r || r.key !== S.heroKey) return;
+  plan(r, r.active);
+  const def = STAGES.find((x) => x.id === st.id), due = STAGES.filter((x) => !r.skip.has(x.id) && !x.onDemand);
+  const ahead = STAGES.some((x) => x.preview && !r.skip.has(x.id) && previewOf(r)?.done?.[x.id] === undefined); // a preview to make at the new size
+  if (!ahead || !stopsForPreview(def, stepClasses(due, !!r.hdrAfter || plateAlone(r.key))[def.id])) return;
+  log(`Render v${r.v}: ${labelOf(def, r)}: stopped at ${Math.round(st.progress * 100)}% for the ${size}-size preview.${def.preview ? "" : " It runs again after the preview."}`);
+  st.stopped = true; // a job the step asks for after this, its upload done, is not posted (onStop)
+  cancel(...RENDER_KINDS);
 }
 
 function previewUI() { // the Preview menu: Off, Latent preview, then half and a quarter of this plate's working size
