@@ -53,11 +53,10 @@ test("the row says what a size no larger than the plate does, and nothing for a 
   assert.match(upscaleWhy(1920, 1080, { side: "width", px: 1280 }), /^This size is smaller than the plate, so the frames come out smaller/);
 });
 
-test("the plate and the layer are upscaled, then composited, for Paint and Clean; Light, the plate alone and an EXR result of SDR to HDR are upscaled alone", async () => {
+test("the plate and the layer are upscaled, then composited, for Paint and Clean, on SDR to HDR's set as on the plate-size one; Light and the plate alone are upscaled alone", async () => {
   const { upscaleKeeps } = await import("../../web/logic.mjs");
   assert.equal(upscaleKeeps(["paint"]), true); // Paint
   assert.equal(upscaleKeeps(["erase", "paint"]), true); // Clean and Paint
-  assert.equal(upscaleKeeps(["paint"], true), false); // Paint with SDR to HDR on an SDR plate: an EXR result
   assert.equal(upscaleKeeps(["light"]), false); // Light: its export writes no matte
   assert.equal(upscaleKeeps([]), false); // the plate alone
 });

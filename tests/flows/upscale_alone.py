@@ -1,4 +1,4 @@
-"""Finish > Upscale on a plate with no edit, with SDR to HDR on: the plate alone's render makes « SDR to HDR », then « SDR to HDR,
+"""Finish > Upscale on a plate with no edit, with SDR to HDR on: the plate alone's render makes « Plate, HDR », then « SDR to HDR,
 upscaled », SDR to HDR's frames upscaled with no Export, which the player shows at their own size. Export posts no Upscale job, and
 the zip holds them under upscaled/ beside the frames at the plate's size, with no upscaled plate. It asks for 1600 x 880, a size
 above the plate's 1280 x 704 that the mock holds in a small machine's memory."""
@@ -28,14 +28,14 @@ def run(browser, port, U):
     page.click("#finish-upscale")
     status = page.text_content("#status") or ""
     U.check("3840 x 2112" in page.evaluate(SIZE), "the size list chooses the plate's upscaled size")
-    U.check(names() == ["SDR to HDR", "SDR to HDR, upscaled"] and status.startswith("Finish: Upscale on. Generate runs SDR to HDR and Upscale on the plate: about "),
+    U.check(names() == ["Plate, HDR", "Plate, HDR, upscaled"] and status.startswith("Finish: Upscale on. Generate runs SDR to HDR and Upscale on the plate: about "),
             f"before Generate, the Render panel shows both steps, and the status line what Generate runs: {names()}, {status!r}")
     custom(page, U, "1600")
     page.keyboard.press("Escape")
     page.click("#generate")
-    U.wait_log(page, U.added_line("SDR to HDR, upscaled: done in"), 240000, "SDR to HDR, then its upscaled step, on the plate")
-    U.poll(page, lambda: shown() == ["SDR to HDR, upscaled"] and page.evaluate(CANVAS) == [1600, 880], 3)
-    U.check(shown() == ["SDR to HDR, upscaled"] and page.evaluate(CANVAS) == [1600, 880] and (page.text_content("#status") or "").startswith("SDR to HDR, upscaled: ready, in the viewer."),
+    U.wait_log(page, U.added_line("Plate, HDR, upscaled: done in"), 240000, "SDR to HDR, then its upscaled step, on the plate")
+    U.poll(page, lambda: shown() == ["Plate, HDR, upscaled"] and page.evaluate(CANVAS) == [1600, 880], 3)
+    U.check(shown() == ["Plate, HDR, upscaled"] and page.evaluate(CANVAS) == [1600, 880] and (page.text_content("#status") or "").startswith("Plate, HDR, upscaled: ready, in the viewer."),
             f"the player shows SDR to HDR's frames upscaled, at their own size: {shown()}, {page.evaluate(CANVAS)}, {page.text_content('#status')!r}")
     start = len(U.log_lines(page))
     page.click("#export-btn")

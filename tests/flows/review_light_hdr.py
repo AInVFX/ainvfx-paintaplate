@@ -15,16 +15,16 @@ def run(browser, port, U):
     page.click("#finish-btn"); page.click("#finish-hdr"); page.click("#finish-hdr-yes"); page.keyboard.press("Escape")
     left = page.evaluate("""() => new Promise((done) => { const t0 = Date.now(), tick = () => {
       const now = document.querySelector('#stages li.now');
-      if (now && now.textContent.includes('SDR to HDR')) return done(document.querySelector('#render-left').textContent);
+      if (now && now.textContent.includes('Composite, HDR')) return done(document.querySelector('#render-left').textContent);
       if (Date.now() - t0 > 90000) return done(null);
       setTimeout(tick, 20); }; tick(); })""")  # the Render panel's note at the moment SDR to HDR runs on the composite
     U.check(left is not None and "ready" not in left, f"while SDR to HDR runs on the relit composite, the Render panel does not say the full size is ready: {left!r}")
-    settle("SDR to HDR")
+    settle("Composite, HDR")
     log = page.evaluate(LOG)
-    hdr = [i for i, t in enumerate(log) if ": SDR to HDR: done in " in t]
+    hdr = [i for i, t in enumerate(log) if ": Composite, HDR: done in " in t]
     comp = [i for i, t in enumerate(log) if ": Composite, full size: done in " in t or ": Light transfer, full size: done in " in t]  # Light edits alone: Relight Transfer
     U.check(hdr and comp and hdr[-1] > comp[-1], f"SDR to HDR runs after the full-size composite: {[log[i] for i in comp[-1:] + hdr[-1:]]}")
-    U.check(page.evaluate("[...document.querySelectorAll('#stages li.done')].some((li) => li.textContent.includes('SDR to HDR'))"), "the Render panel shows SDR to HDR done")
+    U.check(page.evaluate("[...document.querySelectorAll('#stages li.done')].some((li) => li.textContent.includes('Composite, HDR'))"), "the Render panel shows SDR to HDR done")
     page.click("#export-btn")
     fmt, note = page.text_content("#x-format"), page.text_content("#x-note")
     U.check(fmt == "half-float EXR frames, ACES2065-1" and note.startswith("The relit result in HDR"), f"the Export dialog says what Export writes: {fmt!r} | {note!r}")

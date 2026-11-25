@@ -94,7 +94,7 @@ PARTS = {"export": (["export"], True), "matte": (["matte"], True),
          # Export's ComfyUI graph: the scene as one workflow, which the page writes into the run's folder (graph_post)
          "graph": ([GRAPH], False)}
 DEFAULT_PARTS = ["export", "matte"]
-UPSCALED_SET = re.compile(r"upscale/\d+x\d+/out")  # an upscaled set's folder under its run, as the page names it: one per size
+UPSCALED_SET = re.compile(r"(hdr/)?upscale/\d+x\d+/out")  # an upscaled set's folder under its run, as the page names it (logic.setFolder): one per size, on SDR to HDR's set too
 UPSCALED_PARTS = ("export", "matte")  # the upscaled set's folders that the zip takes: the result and its matte; the plate, with the source plate
 MOVIES = (".mp4", ".mov", ".webm")  # a part that is one such file sits at the top of the zip
 ROW_NAME = re.compile(r"[a-z0-9_]{1,60}")  # a part's name in the zip, as the page sends it

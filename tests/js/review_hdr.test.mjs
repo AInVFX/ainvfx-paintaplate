@@ -10,7 +10,7 @@ test("SDR to HDR with a Light edit: on the relit composite for an SDR plate, nev
   assert.equal(hdrAfterComposite(mp4, ["light"], true), true, "a video plate: the relit composite goes through SDR to HDR");
   assert.equal(hdrAfterComposite(mp4, ["paint", "light"], true), true, "with a paint too: the whole composite");
   assert.equal(wantsHdr(mp4, ["paint", "light"], true), false, "and not on the shot");
-  assert.equal(hdrAfterComposite(mp4, ["paint"], true), false, "no Light edit: SDR to HDR stays on the shot");
+  assert.equal(hdrAfterComposite(mp4, ["paint"], true), true, "no Light edit: on the composite's elements, after it");
   assert.equal(wantsHdr(mp4, ["paint"], true), true);
   assert.equal(hdrAfterComposite(mp4, ["light"], false), false, "SDR to HDR off: neither");
   assert.equal(hdrAfterComposite(mp4, ["light"], true, 100), false, "a video that decodes above 1.0 (PQ) keeps its own values under the relight");

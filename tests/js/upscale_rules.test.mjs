@@ -1,7 +1,7 @@
 // Upscale's rules: the target and source sizes, the windows by the machine's memory, the estimate, the row.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FAMILY, FINISH, freesBefore, upscaleFolder, upscaleKeeps, upscaleSeconds, upscaleSource, upscaleTarget, upscaleWindow, upscaleWindows } from "../../web/logic.mjs";
+import { FAMILY, FINISH, freesBefore, finishFolder, setFolder, upscaleKeeps, upscaleSeconds, upscaleSource, upscaleTarget, upscaleWindow, upscaleWindows } from "../../web/logic.mjs";
 
 const UHD = [3840, 2160], HD = [1920, 1080];
 
@@ -58,10 +58,19 @@ test("on a 16 GB GPU, SeedVR2's model leaves the memory before the 4K export and
   assert.equal(freesBefore(large, "upscale", "upscale_export", { free: 150 * 2 ** 30, need: 20 * 2 ** 30 }), false);
 });
 
-test("a plate's 4K windows live in one folder per setting that changes their frames, the same on every export", () => {
+test("a plate's own Finish files live in one folder per pass and setting that changes their frames, the same on every render", () => {
   const parts = ["plates/desk.mp4", "sRGB", "ocio://studio-config-latest", [3840, 2112], 21, "png16", "b1"];
-  const folder = upscaleFolder("desk_1a2b", parts);
+  const folder = finishFolder("desk_1a2b", "upscale", parts);
   assert.match(folder, /^paintaplate\/desk_1a2b\/upscale\/[0-9a-f]{8}$/);
-  assert.equal(upscaleFolder("desk_1a2b", [...parts]), folder);
-  for (let i = 0; i < parts.length; i++) assert.notEqual(upscaleFolder("desk_1a2b", parts.map((x, j) => (j === i ? `${x}!` : x))), folder, `part ${i}`);
+  assert.equal(finishFolder("desk_1a2b", "upscale", [...parts]), folder);
+  for (let i = 0; i < parts.length; i++) assert.notEqual(finishFolder("desk_1a2b", "upscale", parts.map((x, j) => (j === i ? `${x}!` : x))), folder, `part ${i}`);
+  assert.match(finishFolder("desk_1a2b", "hdr", parts), /^paintaplate\/desk_1a2b\/hdr\/[0-9a-f]{8}$/, "SDR to HDR's frames of the plate, beside its windows");
+});
+
+test("a Finish pass writes its set inside the folder of the set it reads, as Export reads it", () => {
+  assert.equal(setFolder("paintaplate/p/v3"), "paintaplate/p/v3", "the plate-size set: the render's folder");
+  assert.equal(setFolder("paintaplate/p/v3", { hdr: true }), "paintaplate/p/v3/hdr");
+  assert.equal(setFolder("paintaplate/p/v3", { size: "3840x2160" }), "paintaplate/p/v3/upscale/3840x2160/out");
+  assert.equal(setFolder("paintaplate/p/v3", { hdr: true, size: "3840x2160" }), "paintaplate/p/v3/hdr/upscale/3840x2160/out");
+  assert.equal(setFolder(setFolder("r", { hdr: true }), { size: "1600x880" }), setFolder("r", { hdr: true, size: "1600x880" }), "Upscale on SDR to HDR's set");
 });

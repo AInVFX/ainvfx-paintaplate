@@ -463,7 +463,7 @@ test("the tracking steps and the export show their matte, grey, through the conf
   assert.equal(dataSpace([{ name: "sRGB", data: false }]), null);
 });
 
-import { plateDepth, hdrKey, hdrOfKey } from "../../web/logic.mjs";
+import { plateDepth, renderKey } from "../../web/logic.mjs";
 
 test("new content at the plate's bit depth: one rule per kind of plate", () => {
   const kinds = { "8-bit MP4": [{ kind: "video", ext: ".mp4", pix_fmt: "yuv420p" }, 8, "png", false],
@@ -482,13 +482,8 @@ test("new content at the plate's bit depth: one rule per kind of plate", () => {
   assert.deepEqual(plateDepth(null), { bits: 8, float: false, frames: "png", hdr: false }, "no plate: the 8-bit rule");
 });
 
-test("the SDR-to-HDR switch away from the plate's default makes another render key", () => {
-  assert.equal(hdrKey("1.1", true, true), "1.1");
-  assert.equal(hdrKey("1.1", true, false), "1.1|sdr", "an EXR plate switched off, as before");
-  assert.equal(hdrKey("1.1", false, true), "1.1|hdr", "a video plate switched on");
-  assert.equal(hdrKey("1.1", false, false), "1.1");
-  assert.deepEqual(["1.1", "1.1|sdr", "1.1|hdr"].map((k) => hdrOfKey(k, true)), [true, false, true]);
-  assert.deepEqual(["1.1", "1.1|sdr", "1.1|hdr"].map((k) => hdrOfKey(k, false)), [false, false, true]);
+test("the SDR-to-HDR switch keeps the edits' render: its steps run on that render's own result", () => {
+  for (const [dflt, on] of [[true, true], [true, false], [false, true], [false, false]]) assert.equal(renderKey("1.1", dflt, on), "1.1", `${dflt} ${on}`);
 });
 
 import { exrResult, holdsHdr } from "../../web/logic.mjs";
