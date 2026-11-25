@@ -107,7 +107,7 @@ test("every workflow names the outputs and the progress node the page reads", ()
   const wanted = { ingest: ["hero", "proxy", "spec"], prompt: ["text"], edit: ["patch", "relit", "result"],
     snap: ["named", "point_0", "point_1", "point_2", "point_3", "point_4"], clean: ["frames", "video"], shot: ["frames", "video"],
     matte: ["follow", "frames", "movie"], comp: ["matte_movie", "video"], review: ["frames", "matte_movie", "review", "view"], export: ["exr", "export", "layer", "layer_exr", "matte", "matte_movie"], warm: ["frame"],
-    fluid: ["control", "plate", "video"] };
+    fluid: ["control", "first", "plate", "video"] };
   for (const [name, outs] of Object.entries(wanted)) {
     const wf = workflow(name);
     assert.deepEqual(Object.keys(wf.outputs).sort(), outs.sort(), name);
@@ -297,16 +297,6 @@ test("a divider's drag stays inside the window and never squeezes a panel or the
   assert.equal(panelSize("log", 10, view, log), 60);
 });
 
-import { fluidWipeLeft } from "../../web/logic.mjs";
-
-test("the wipe on a fluid row shows the step's input on the left: black, the keyframes, the SDR shot", () => {
-  assert.equal(fluidWipeLeft("fluid_keys"), "black");
-  assert.equal(fluidWipeLeft("fluid_shot"), "fluid_keys");
-  assert.equal(fluidWipeLeft("fluid_hdr"), "fluid_shot");
-  assert.equal(fluidWipeLeft("full"), null);
-  assert.equal(fluidWipeLeft(null), null);
-});
-
 import { plateStem } from "../../web/logic.mjs";
 
 test("a plate's name keeps a movie's trailing digits and drops only an image sequence's frame number", () => {
@@ -412,7 +402,7 @@ test("a light's relight is an optional part of its edit, with the frame as Klein
   assert.equal(find(lit, (n) => n.class_type === "ReferenceMultiLatent").inputs["images.image1"], undefined); // Klein's one reference: the frame
 });
 
-import { viewerSpace, drawsDeep, fluidRun, passMovie } from "../../web/logic.mjs";
+import { viewerSpace, drawsDeep, passMovie } from "../../web/logic.mjs";
 
 test("an image sequence's 8-bit movies hold log values; playing, one kind of frame", () => {
   assert.equal(viewerSpace(["ACEScg", "ACEScct", "ACES2065-1"], "sRGB Encoded Rec.709 (sRGB)"), "ACEScct");
@@ -423,8 +413,6 @@ test("an image sequence's 8-bit movies hold log values; playing, one kind of fra
 });
 
 test("a fluid shot exports from its own folder", () => {
-  assert.equal(fluidRun("output:paintaplate/p1/fluid_v2/hdr"), "paintaplate/p1/fluid_v2");
-  assert.equal(fluidRun("paintaplate/p1/fluid_v2/plate/blank_960x512.mov"), "paintaplate/p1/fluid_v2");
 });
 
 test("the Render panel shows each finished pass that made a movie", () => {
@@ -454,7 +442,7 @@ test("a dropped link takes the nodes that only fed it: none is left feeding noth
 
 import { lightIntent } from "../../web/logic.mjs";
 
-import { fluidPasses, dataSpace, MATTE_PASSES } from "../../web/logic.mjs";
+import { dataSpace, MATTE_PASSES } from "../../web/logic.mjs";
 
 test("the tracking steps and the export show their matte, grey, through the config's data colour space", () => {
   const r = { erased: { found: { movie_a: "erase.mp4" } }, full: { found: { movie_a: "erase.mp4", movie_b: "paint_full.mp4" } },
@@ -473,17 +461,6 @@ test("the tracking steps and the export show their matte, grey, through the conf
   assert.equal(passMovie("hdr", { hdrMovie: "hdr.mp4" }, pv, { log: "ACEScct", hdr: "ACES2065-1" }).framesSpace, null, "no frames: no space");
   assert.equal(dataSpace([{ name: "ACEScg", data: false }, { name: "Raw", data: true }]), "Raw");
   assert.equal(dataSpace([{ name: "sRGB", data: false }]), null);
-});
-
-test("a fluid shot's rows: its keyframes, its shot, and SDR to HDR for a 16-bit plate", () => {
-  const sdr = { control: "c.mp4", preview: "p.mp4", hdr: false, movie: null }, hdr = { ...sdr, hdr: true, movie: "h.mp4" };
-  assert.deepEqual(fluidPasses(sdr).map((x) => [x.id, x.label, x.url, x.space]),
-    [["fluid_keys", "Fluid: keyframes", "c.mp4", "@model"], ["fluid_shot", "Fluid: shot", "p.mp4", "@model"]]);
-  assert.deepEqual(fluidPasses(hdr, { log: "ACEScct" }).at(-1), { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: "h.mp4", space: "ACEScct", frames: null, framesSpace: null });
-  assert.deepEqual(fluidPasses({ ...hdr, hdrFrames: "output:f/hdr/f_#####_.exr" }, { log: "ACEScct", hdr: "ACES2065-1" }).at(-1).framesSpace, "ACES2065-1",
-    "its EXR frames in their own space, for the viewer to draw and inspect");
-  assert.deepEqual(fluidPasses(null), [], "no fluid shot made: no rows");
-  assert.deepEqual(fluidPasses({ preview: "p.mp4" }).map((x) => x.id), ["fluid_shot"], "a shot made before its control movie existed");
 });
 
 import { plateDepth, hdrKey, hdrOfKey } from "../../web/logic.mjs";
@@ -553,7 +530,7 @@ test("a render's record of its workflows (r.flows) names the models behind the r
   assert.deepEqual(resultFlows({ tools: ["paint"], render: ran("shot", "track", "comp", "full", "trackfull", "review") }).sort(),
     ["comp", "edit", "matte", "prompt", "review", "shot"]);
   assert.ok(resultFlows({ tools: ["erase"], render: [] }).includes("snap"), "an erase: SAM's object search");
-  assert.deepEqual(resultFlows({ fluid: true, fluidHdr: true }).sort(), ["fluid", "hdr"], "a fluid shot alone, through SDR to HDR");
+  assert.deepEqual(resultFlows({ fluid: true, render: ["fluid", "hdr"] }).sort(), ["fluid", "hdr"], "a fluid shot alone, through SDR to HDR: its render steps name it");
   assert.ok(!resultFlows({ tools: ["paint"], render: ran("shot", "full", "review") }).includes("hdr"), "no SDR to HDR step ran: none listed");
   for (const id of Object.keys(STEP_FLOWS)) assert.ok(STEP_FLOWS[id].length > 0, id);
 });

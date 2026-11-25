@@ -17,7 +17,7 @@ test("no line a person reads says « on show »", () => {
 test("the way back to the latest result is one sentence, written once", () => {
   const all = files.map(([, src]) => src).join("\n") + read("paintaplate.html");
   assert.equal(all.split("to display the latest result").length - 1, 1);
-  assert.equal(all.split("${BACK_TO_LATEST}.").length - 1, 4);
+  assert.equal(all.split("${BACK_TO_LATEST}.").length - 1, 3);
 });
 
 test("a finished step's tooltip, with the wipe's Ctrl+click, ends with one full stop", () => {

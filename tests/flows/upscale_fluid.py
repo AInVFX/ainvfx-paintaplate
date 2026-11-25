@@ -20,7 +20,7 @@ def run(browser, port, U):
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     U.paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)])
     page.keyboard.press("Enter")
-    U.wait_log(page, U.added_line("under the edits: the fluid shot v"), 240000, "the fluid shot")
+    U.wait_log(page, U.added_line("Fluid shot, full size: done in"), 240000, "the fluid shot")
     rows = lambda: page.eval_on_selector_all("#stages li", ROWS)  # noqa: E731
     shown = lambda: [r[0] for r in rows() if "shown" in r[2].split()]  # noqa: E731
     page.click("#finish-btn"); page.click("#finish-upscale")
@@ -29,7 +29,7 @@ def run(browser, port, U):
     U.wait_log(page, U.added_line("Fluid: shot, upscaled: done in"), 240000, "the fluid shot's upscaled step, with no Generate and no Export")
     U.poll(page, lambda: shown() == ["Fluid: shot, upscaled"] and page.evaluate(CANVAS) == [3456, 2160], 3)
     names = [r[0] for r in rows()]
-    U.check(names[-3:] == ["Fluid: keyframes", "Fluid: shot", "Fluid: shot, upscaled"] and shown() == ["Fluid: shot, upscaled"] and page.evaluate(CANVAS) == [3456, 2160],
+    U.check(names[-2:] == ["Fluid shot, full size", "Fluid: shot, upscaled"] and shown() == ["Fluid: shot, upscaled"] and page.evaluate(CANVAS) == [3456, 2160],
             f"the upscaled step follows the fluid shot, and the player shows it at its own size: {names}, {shown()}, {page.evaluate(CANVAS)}")
     start = len(U.log_lines(page))
     page.click("#export-btn")

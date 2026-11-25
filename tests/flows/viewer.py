@@ -175,6 +175,7 @@ def fluid_wipe_and_models(page, U):
     page.keyboard.press("Enter")
     page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
       return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden; })()""", timeout=120000)
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => /^Render v\\d+: Fluid shot, full size: done in /.test(e.textContent))", timeout=120000)
     page.click('#history li[data-id="fluid"] .edit')  # the keyframes again: the fluid shot is the result
     page.keyboard.press("Home"); page.keyboard.press("F6"); page.wait_for_timeout(800)
     xy = page.evaluate(TO_CANVAS, list(spot))
@@ -188,7 +189,7 @@ def fluid_wipe_and_models(page, U):
     page.keyboard.down("Shift"); page.mouse.click(*spot); page.keyboard.up("Shift")  # Shift+click shows the inspector, as RV
     page.wait_for_function("document.querySelector('#inspector').dataset.movie === 'true'", timeout=20000)
     rows = page.eval_on_selector_all("#inspector div", "els => els.map(e => e.textContent)")
-    U.check(any(r.startswith("Values8-bit movie:") and "not the pass's own values" in r for r in rows),
+    U.check(any(r.startswith("Values8-bit movie, ") for r in rows),
             f"on a shot shown by its movie, the inspector says its values are the movie's codes: {[r for r in rows if r.startswith('Values')]}")
     page.keyboard.press("F5")
     page.click("#view", button="right")

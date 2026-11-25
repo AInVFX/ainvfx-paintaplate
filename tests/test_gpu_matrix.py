@@ -369,16 +369,18 @@ class ReportLines(unittest.TestCase):
              "  2 keyframes, at frames 1, 121.\n"
              "  1280 x 704, 121 frames at 24 fps.\n"
              "  Seed 104, prompt \"a wild fire, flames rising\".\n"
-             "11:40:38 PM fluid fd2d3d7a: done in 108.9 s (29 nodes, 4 previews).\n"
-             "11:43:33 PM hdr 647d4dd4: done in 175.3 s (29 nodes, 3 from ComfyUI's cache, 4 previews).\n"
-             "11:43:33 PM Fluid shot v1: SDR to HDR: done in 175.3 s.\n"
-             "  Half-float EXR frames in output:paintaplate/x/fluid_v1/hdr.\n"
-             "11:43:33 PM Fluid shot v1: done in 284.3 s.\n"
-             "  Save Plate: 1 file written to /data/ComfyUI/output/paintaplate/x/fluid_v1/plate.\n")
+             "11:38:49 PM Render v1: 1 edit (Fluid 1), seed 104, shot preview at 640 x 352.\n"
+             "  Steps: Fluid shot, preview; Fluid shot, full size; SDR to HDR.\n"
+             "11:39:20 PM fluid 1a2b3c4d: done in 30.6 s (32 nodes, 4 previews).\n"
+             "11:39:20 PM Render v1: Fluid shot, preview: done in 30.6 s (estimate 28 s).\n"
+             "11:41:09 PM fluid fd2d3d7a: done in 108.9 s (32 nodes, 4 previews).\n"
+             "11:41:09 PM Render v1: Fluid shot, full size: done in 108.9 s (estimate 110 s).\n"
+             "11:44:04 PM hdr 647d4dd4: done in 175.3 s (36 nodes, 3 from ComfyUI's cache, 4 previews).\n"
+             "11:44:04 PM Render v1: SDR to HDR: done in 175.3 s (estimate 170 s).\n")
 
     def test_a_fluid_shot_has_its_steps(self):
-        """The page's lines for a fluid shot give its steps: the LTX pass (the fluid job), SDR to HDR and the whole shot."""
-        self.assertEqual(gpu_matrix.read_log(self.FLUID)["steps"], [("fluid v1 LTX pass", 108.9), ("fluid v1 SDR to HDR", 175.3), ("fluid v1 in all", 284.3)])
+        """The page's lines for a fluid shot give its steps as a render's: its two passes, then SDR to HDR."""
+        self.assertEqual(gpu_matrix.read_log(self.FLUID)["steps"], [("v1 Fluid shot, preview", 30.6), ("v1 Fluid shot, full size", 108.9), ("v1 SDR to HDR", 175.3)])
 
     def test_render_steps_keep_their_names_and_order(self):
         log = "11:02:36 PM Render v1: Track the erase took 28.7 s\n11:03:35 PM Render v1: Erase pass, preview took 59.1 s\n"
@@ -588,7 +590,7 @@ class StoppedComfy(unittest.TestCase):
         self.assertEqual(gpu_matrix.FAILED_JOB.findall("hdr b6ade25f: failed after 628.5 s (29 nodes, 4 previews): ComfyUI stopped answering"), [("hdr", "b6ade25f")])
 
     def test_hdr_match_is_looked_for_after_a_render_s_sdr_to_hdr_only(self):
-        self.assertFalse(gpu_matrix.render_hdr([("fluid v1 SDR to HDR", 175.8), ("fluid v1 in all", 281.1)]))
+        self.assertTrue(gpu_matrix.render_hdr([("v1 Fluid shot, full size", 108.9), ("v1 SDR to HDR", 175.3)]), "a fluid shot's SDR to HDR is its render's step")
         self.assertTrue(gpu_matrix.render_hdr([("v1 Shot, full size", 580.0), ("v1 SDR to HDR", 640.0)]))
 
 

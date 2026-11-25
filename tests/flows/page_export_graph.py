@@ -34,7 +34,7 @@ def run(browser, port, U):
     page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     U.paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)]); page.keyboard.press("Enter")
-    U.wait_log(page, U.added_line("under the edits: the fluid shot v"), 240000, "the fluid shot under the edits")
+    U.wait_log(page, U.added_line("Fluid shot, full size: done in"), 240000, "the fluid shot")
     page.click("#export-btn")
     U.check(page.is_visible("#x-graph"), "a fluid shot alone offers the ComfyUI graph among Export's parts (the box keeps its last choice)")
     page.check("#x-graph")

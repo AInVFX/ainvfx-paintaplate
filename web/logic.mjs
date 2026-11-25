@@ -478,7 +478,7 @@ export function dependsOnChange(edit, before, basis) {
   const now = new Set(before.map(key)), was = new Set(basis.map(key));
   const changed = [...before.filter((e) => !was.has(key(e))), ...basis.filter((e) => !now.has(key(e)))];
   if (!changed.length) return false;
-  return edit.tool === "light" || changed.some((c) => c.tool === "light" || overlap(c.foot, edit.foot));
+  return edit.tool === "light" || changed.some((c) => c.tool === "light" || c.tool === "fluid" || overlap(c.foot, edit.foot)); // a light or a fluid shot changes the whole frame
 }
 
 // A render of fewer edits (after a bypass or a removal) can take the frames of an earlier render of more edits: its composite
@@ -1132,8 +1132,9 @@ export const wantsHdr = (spec, tools, on) => !!spec && !!on && !tools.includes("
 // SDR to HDR on the composite, once it is made: a set with a Light edit, on a plate whose format holds nothing above 1.0, when
 // SDR to HDR is on. Relight Transfer relights the plate's own pixels, and the shot's HDR frames reach the result only inside
 // the mattes, so the new light would stay SDR: the relit composite goes through SDR to HDR whole, as a plate with no edit
-// does (app.plateHdr), and its frames are the result. A plate that holds values above 1.0 keeps them under the relight.
-export const hdrAfterComposite = (spec, tools, on, headroom = 1) => !!spec && !!on && tools.includes("light") && !holdsHdr(spec, headroom);
+// does (app.plateHdr), and its frames are the result. So does a set over a fluid shot, whose plate is generated: the fluid
+// shot goes through SDR to HDR with the edits on it. A plate that holds values above 1.0 keeps them under the relight.
+export const hdrAfterComposite = (spec, tools, on, headroom = 1) => !!spec && !!on && (tools.includes("light") || tools.includes("fluid")) && !holdsHdr(spec, headroom);
 // The switch away from the plate's default makes another render, so each setting keeps its own: "|hdr" or "|sdr".
 export const hdrKey = (edits, dflt, on) => (on === dflt ? edits : `${edits}|${on ? "hdr" : "sdr"}`);
 export const hdrOfKey = (key, dflt) => (key?.endsWith("|hdr") ? true : key?.endsWith("|sdr") ? false : dflt);
@@ -1215,8 +1216,6 @@ export const viewerSpace = (names, model) => (names.includes("ACEScct") ? "ACESc
 // While a shot plays, one source shows one kind of frame: its full-precision frames once all of them are in, else its 8-bit
 // movie. Mixed, the two would alternate as the frames arrive, with two different tone mappings, and the shot would flicker.
 export const drawsDeep = (playing, holdsAll) => !playing || holdsAll;
-// A fluid shot's folder, from its HDR frames or its shot in the blank plate's format: what its export zips.
-export const fluidRun = (path) => String(path ?? "").replace(/^output[:/]/, "").replace(/\/(hdr|plate)(\/[^/]*)?$/, "");
 
 // Esc, by what the page is doing. A plate that opens stops opening. The strokes in progress are dropped. The edit being
 // generated stops and stays the current edit, with its strokes, words and seed ("reopen"): everything else that generates
@@ -1335,13 +1334,13 @@ export function dabFlow(peak, spacingOverRadius) {
 // where its movie sits, in the render (`r`) or in its preview size (`pv`), as a path of keys. The tracking steps and the
 // export show their matte as a grey movie, drawn through the config's data colour space (`spaces.data`): it shows its own
 // values, with no view's tone mapping.
-export const PASSES = { erase: ["r", "erased.found.movie_a"], clean: ["pv", "cleanRaw"], shot: ["pv", "raw"], track: ["pv", "painted.found.movie_b"],
+export const PASSES = { fluid: ["pv", "fluid.movie"], fluidfull: ["r", "fluid.movie"], erase: ["r", "erased.found.movie_a"], clean: ["pv", "cleanRaw"], shot: ["pv", "raw"], track: ["pv", "painted.found.movie_b"],
   comp: ["pv", "comp"], cleanfull: ["r", "cleanRaw"], full: ["r", "raw"], trackfull: ["r", "full.found.movie_b"], hdr: ["r", "hdrMovie"],
   review: ["r", "play"], export: ["r", "exported.matte"], upplate: ["up", "upplate"], uplayer: ["up", "uplayer"], upcomp: ["up", "upcomp"], uphdr: ["up", "uphdr"] };
 export const MATTE_PASSES = new Set(["erase", "track", "trackfull", "export"]);
 const keyPath = (o, path) => path.split(".").reduce((x, k) => x?.[k], o);
 export function passMovie(id, r, pv, spaces = {}, up = null) { // { url, space, frames } of a finished step, or null; `up`: what Upscale's steps made at the size asked for
-  const at = PASSES[id], store = at && (at[0] === "pv" ? pv : r);
+  const at = PASSES[id], store = at && (at[0] === "pv" ? pv : id === "review" ? r?.compResult ?? r : r); // the composite's own result, whichever is on show (app.plan)
   if (at?.[0] === "up") return up?.[at[1]]?.url ? { url: up[at[1]].url, space: up[at[1]].space, frames: null } : null; // its movie at its own size (app.fitCanvas)
   const url = (at && keyPath(store, at[1])) ?? (id === "review" ? store?.review : null);
   if (!url) return null;
@@ -1426,31 +1425,20 @@ export function lightIntent({ strokes, words = "", aspect = 16 / 9 }) {
   return rows.length ? `${said.join(" ")} ${pyJSON(rows)}` : said.join(" ");
 }
 
-// The wipe on a fluid row: the step's input on the left, its output on the right, so each step reads against what it was
-// given: the blank plate (black) before the keyframes, the keyframes before the shot, the SDR shot before SDR to HDR.
-export const fluidWipeLeft = (id) => ({ fluid_keys: "black", fluid_shot: "fluid_keys", fluid_hdr: "fluid_shot" })[id] ?? null;
-// A fluid shot's own passes, shown from the Render panel with its keyframes open or closed: the control video LTX was
-// guided by, the shot as LTX made it, and for a 16-bit plate its SDR-to-HDR frames as a movie in log values.
-export const fluidPasses = (result, spaces = {}) => (result ? [
-  result.control && { id: "fluid_keys", label: "Fluid: keyframes", url: result.control, space: "@model" },
-  result.preview && { id: "fluid_shot", label: "Fluid: shot", url: result.preview, space: "@model" },
-  result.hdr && result.movie && { id: "fluid_hdr", label: "Fluid: SDR to HDR", url: result.movie, space: spaces.log ?? "@model",
-    frames: result.hdrFrames ?? null, framesSpace: result.hdrFrames ? spaces.hdr ?? null : null },
-].filter(Boolean) : []);
 // The workflows each render step runs (a full-size erase pass runs two). The Models and licences dialog plans with them
 // from the start of a job; a render also keeps the record of the steps it ran or took again (r.flows), so an export's MODELS.md
 // names the models that made its result.
-export const STEP_FLOWS = { erase: ["matte"], clean: ["clean"], shot: ["shot"], track: ["matte"], comp: ["comp"],
+export const STEP_FLOWS = { fluid: ["fluid"], fluidfull: ["fluid"], erase: ["matte"], clean: ["clean"], shot: ["shot"], track: ["matte"], comp: ["comp"],
   cleanfull: ["clean", "cleanup"], full: ["shot"], trackfull: ["matte"], hdr: ["hdr"], review: ["review"], export: ["export"],
   upplate: ["export", "upscale", "upscale_export"], uplayer: ["export", "upscale", "upscale_export"], upcomp: ["export", "upscale", "upscale_export"], // an edit's upscaled steps read the export's parts
   uphdr: ["upscale", "upscale_export"] };
 // The workflows behind a result: its edits' own (the prompt writer and Klein, SAM's object search for an erase), the
 // render's record, and a fluid shot's (with its SDR to HDR)
-export function resultFlows({ tools = [], render = [], fluid = false, fluidHdr = false } = {}) {
+export function resultFlows({ tools = [], render = [], fluid = false } = {}) {
   const w = new Set(render);
   if (tools.length) ["prompt", "edit"].forEach((n) => w.add(n));
   if (tools.includes("erase")) w.add("snap");
-  if (fluid) { w.add("fluid"); if (fluidHdr) w.add("hdr"); }
+  if (fluid) w.add("fluid"); // a fluid shot planned before its render: its steps name the rest
   return [...w];
 }
 // The config's data colour space (OCIO's isdata, such as the studio config's Raw), from the spaces /paintaplate/ocio lists
@@ -1514,7 +1502,7 @@ export function freesBefore(profile, last, name, room = null) { // room: { free,
 // 20 s later. So the sampling is timed by its own pace, between its first and its latest step, and the rest comes from
 // what the step took the last time on this machine (the page keeps
 // each step's total, lead and tail per size, frame count and memory profile, in paintaplate.step-times).
-const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
+const STEP_FAMILY = { fluid: "ltx", fluidfull: "ltx", erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
 // A step's time before it ever ran on this machine (stepGuess): the 96 GB GPU's reference (STAGES' ref, in seconds at
 // REF_SIZE), scaled to the plate, then to the GPU. A 16 GB GPU, the small profile, holds one family of models at a time,
 // so each job loads its models again: a lead in seconds per family, then a factor per step on the reference's scaled
@@ -1529,12 +1517,12 @@ const STEP_FAMILY = { erase: "sam", clean: "ltx", shot: "ltx", track: "sam", com
 // half-float EXR frames: `withHdr` multiplies their seconds (37.7 s and 14.6 s on the HDR test plate made from horse.mp4,
 // 1920 x 1080 and 121 frames). tests/js/render_estimates.test.mjs holds every measured step within 25%.
 export const SLOWER = {
-  small: { lead: { ltx: 38, sam: 11, frames: 0 }, erase: 2.1, track: 1, trackfull: 1, clean: 3.35, shot: 1.64, cleanfull: 1.18,
-    full: 1.1, hdr: 1.166, comp: 0.42, review: 0.42, export: 0.235, grow: { hdr: 1.72, full: 1.72 }, withHdr: { review: 1.9, export: 1.6 },
+  small: { lead: { ltx: 38, sam: 11, frames: 0 }, fluid: 1.1, fluidfull: 1.1, erase: 2.1, track: 1, trackfull: 1, clean: 3.35, shot: 1.64, cleanfull: 1.18,
+    full: 1.1, hdr: 1.166, comp: 0.42, review: 0.42, export: 0.235, grow: { hdr: 1.72, full: 1.72, fluidfull: 1.72 }, withHdr: { review: 1.9, export: 1.6 },
     fixed: { comp: 6.4, review: 3 } },
 };
 export const slower = (profile, id) => SLOWER[profile]?.[id] ?? 1;
-const BIG_STEPS = ["full", "cleanfull", "cleanup", "hdr", "review", "export"]; // the steps made at the working size (cleanup: stageTwoGuess)
+const BIG_STEPS = ["fluidfull", "full", "cleanfull", "cleanup", "hdr", "review", "export"]; // the steps made at the working size (cleanup: stageTwoGuess)
 export const stepSizeOf = (id, plate) => (BIG_STEPS.includes(id) ? plate.work : ["erase", "track", "trackfull"].includes(id) ? plate.track : plate.shot);
 const REF_SIZE = 928 * 512 * 97; // pixels times frames, where the references were measured
 export function stepGuess(id, ref, plate, profile, hdr = false) { // seconds: the reference scaled to this plate (BIG_STEPS at 0.73 of it), then to this GPU; hdr: the render makes SDR to HDR
@@ -1622,4 +1610,14 @@ export function foldersIn(values) {
   };
   walk(values, 0);
   return [...found].sort();
+}
+
+// A scene of version 6 or earlier, as version 7 holds it: its fluid shot, kept apart then, is History's first row, and a
+// 16-bit fluid shot turns Finish > SDR to HDR on. Version 5 named the switch « hdr ». A scene of version 7 is returned as it is.
+export function sceneV7(scene) {
+  if (!(scene.version < 7)) return scene;
+  const { fluid, hdr, ...rest } = scene, edits = [...(scene.edits ?? [])];
+  if (fluid) edits.unshift({ tool: "fluid", prompt: fluid.prompt ?? "", seed: fluid.seed, on: fluid.on !== false, made: !!fluid.made, keys: fluid.keys ?? [] });
+  const on = (scene.version >= 6 ? !!scene.deliver?.hdr : scene.version === 5 && hdr === true) || +(fluid?.depth ?? 8) >= 16;
+  return { ...rest, version: 7, edits, deliver: { ...(scene.deliver ?? {}), hdr: on }, fluid: undefined };
 }

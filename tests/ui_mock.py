@@ -503,7 +503,7 @@ def history_flow(browser, port):
     page.wait_for_function("[...document.querySelectorAll('#log li span')].slice(%d).some((e) => /used again|reused from an earlier render/.test(e.textContent))" % seen,
                            timeout=60000)
     lines = log_lines(page)[seen:]
-    check(not any(re.search(r"(Track the object|Clean plate pass, preview)(?: \(|: )about", line) for line in lines),
+    check(not any(re.search(r"(Track the object to clean|Clean plate pass, preview)(?: \(|: )about", line) for line in lines),
           "the paint removed, the next render uses the erase's matte and clean plate again: nothing tracks or cleans twice")
     page.wait_for_function("document.querySelector('#render-left').textContent === 'full size ready'", timeout=120000)
     lines = log_lines(page)[seen:]
@@ -651,26 +651,29 @@ def fluid_flow(browser, port):
     sent = [line for line in log if line.startswith("Fluid shot v1: started.")]
     check(sent and 'prompt "ainvfxfluid, thick white smoke"' in sent[0] and "3 keyframes, at frames 1, 18, 33." in sent[0],
           f"Enter generates with the trigger, the words and the three keyframes: {sent}")
-    rows = row_titles(page)
-    check(rows == ["1. Fluid"] and any("under the edits: the fluid shot v1" in line for line in log) and not page.is_disabled("[data-tool=erase]"),
-          f"the fluid shot is the first edit and the plate under the next ones, with Clean and Light on: {rows}")
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => /^Render v\\d+: Fluid shot, full size: done in /.test(e.textContent))", timeout=120000)
+    log, rows = log_lines(page), row_titles(page)
+    check(page.text_content("#status") == "Fluid shot, full size: Space plays it. Use Paint, Clean or Light to edit it further.",
+          f"the status line says what to do with the fluid shot, as an edit's step does: {page.text_content('#status')}")
+    check(rows == ["1. Fluid"] and not any("under the edits" in line for line in log) and not page.is_disabled("[data-tool=erase]"),
+          f"the render queue makes the fluid shot, the first edit, and nothing reopens it: Clean and Light work on it: {rows}")
     page.click('#history li[data-id="fluid"] .edit')
     check(not page.is_hidden("#fluid"), "the pencil on the fluid row brings its keyframes back")
     page.keyboard.press("Enter")
-    until(page, "document.querySelector('#hud').textContent.includes('already made')")
+    until(page, "document.querySelector('#hud').textContent.includes('is up to date')")
     log = log_lines(page)
-    check(not any(line.startswith("Fluid shot v2") for line in log) and "already made" in page.text_content("#hud"),
+    check(not any(line.startswith("Fluid shot v2") for line in log) and "is up to date" in page.text_content("#hud"),
           "Enter again on the same keyframes and words makes nothing twice")
     page.screenshot(path=os.path.join(SHOTS, "4_fluid.png"))
     page.keyboard.press("c")
     check(page.is_hidden("#fluid") and row_titles(page) == ["1. Fluid"],
           "another tool closes the keyframes: the fluid shot stays the first edit")
     page.click('#history li[data-id="fluid"] .eye')
-    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => e.textContent.includes('under the edits: the blank plate'))", timeout=60000)
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => e.textContent === 'Fluid shot v1 is bypassed.')", timeout=60000)
     page.click('#history li[data-id="fluid"] .eye')
-    page.wait_for_function("[...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('under the edits: the fluid shot v1')).length >= 2", timeout=60000)
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => e.textContent === 'Fluid shot v1 is back on.')", timeout=60000)
     check(page.get_attribute('#history li[data-id="fluid"] .eye', "aria-pressed") == "true",
-          "the eye on the fluid row bypasses it (the blank plate under the edits) and turns it back on (its shot)")
+          "the eye on the fluid row bypasses it and turns it back on")
 
     # A paint edit on the fluid shot, then the scene saved and opened again: all of it comes back, from the job index
     page.keyboard.press("p")
@@ -683,9 +686,12 @@ def fluid_flow(browser, port):
       return t.join() === '2. Paint,1. Fluid' && !document.querySelector('#history li.busy') && !!f && f.textContent.includes('thick white smoke'); })()"""
     page.wait_for_function(rows_done, timeout=120000)
     page.wait_for_function(f"window.__lines.some((t) => {HAS_REVIEWED})", timeout=120000)  # its render made, through the full-size composite
+    check(any(re.match(r"Render v\d+: Fluid shot, full size: reused from render v\d+\.$", t) for t in page.evaluate("window.__lines")),
+          "the edit's render takes the fluid shot its first render made, and says so")
     name, scene = save_scene(page)
-    check(scene["fluid"]["prompt"] == "thick white smoke" and scene["fluid"]["made"] and [e["prompt"] for e in scene["edits"]] == ["a lantern"],
-          f"the scene keeps the fluid shot's own words, that it was made, and the edit on it: {scene['fluid']['prompt']!r}, {[e['prompt'] for e in scene['edits']]}")
+    fluid_row = next((e for e in scene["edits"] if e["tool"] == "fluid"), {})
+    check(scene["version"] == 7 and fluid_row.get("prompt") == "thick white smoke" and fluid_row.get("made") and [e["prompt"] for e in scene["edits"] if e["tool"] != "fluid"] == ["a lantern"],
+          f"the scene keeps the fluid shot as History's first row, its own words, that it was made, and the edit on it: {[(e['tool'], e.get('prompt')) for e in scene['edits']]}")
 
     page.evaluate(WATCH)
     open_scene(page, name)
@@ -835,8 +841,7 @@ def oom_flow(browser, port):
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     stroke(page, [(0.45, 0.7), (0.55, 0.6)])
     page.evaluate("document.activeElement.blur()"); page.keyboard.press("Enter")
-    page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
-      return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden; })()""", timeout=120000)
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => /^Render v\\d+: Fluid shot, full size: done in /.test(e.textContent))", timeout=120000)
     ev = json.loads(urllib.request.urlopen(f"{base}/mock/events").read())
     oom, free, posted = [e for e in ev if e[0] == "oom"], [e for e in ev if e[0] == "free"], [e for e in ev if e[0] == "prompt"]
     waited = len(posted) >= 2 and len(free) == 1 and posted[-1][1] >= free[0][1] + 1.0
@@ -949,15 +954,15 @@ def hdr_flow(browser, port):
     rows = lambda: page.eval_on_selector_all("#stages li.pick .name", "els => els.map(e => e.textContent)")  # noqa: E731
     shown = lambda: page.eval_on_selector_all("#stages li.shown .name", "els => els.map(e => e.textContent)")  # noqa: E731
     picture = lambda: page.evaluate("document.querySelector('canvas[data-picture]').dataset.picture")  # noqa: E731
-    check({"First frame", "Shot, preview", "SDR to HDR", "Composite, full size"} <= set(rows()) and shown() == ["Composite, full size"],
+    check({"Edited first frame", "Shot, preview", "SDR to HDR", "Composite, full size"} <= set(rows()) and shown() == ["Composite, full size"],
           f"every finished pass with a picture is a row to click, the latest on show: {rows()}, {shown()}")
     page.click("#stages li.pick:has-text('SDR to HDR')")
     poll(page, lambda: shown() == ["SDR to HDR"])
     check(shown() == ["SDR to HDR"] and ": displayed." in (page.text_content("#hud") or ""), f"a click displays that pass in the viewer: {shown()}")
-    page.click("#stages li.pick:has-text('First frame')")
-    poll(page, lambda: shown() == ["First frame"] and picture() == "hero")
-    check(shown() == ["First frame"] and picture() == "hero", f"the First frame row shows the edit as Klein made it: {shown()}, {picture()}")
-    page.click("#stages li.pick:has-text('First frame')")
+    page.click("#stages li.pick:has-text('Edited first frame')")
+    poll(page, lambda: shown() == ["Edited first frame"] and picture() == "hero")
+    check(shown() == ["Edited first frame"] and picture() == "hero", f"the Edited first frame row shows the edit as Klein made it: {shown()}, {picture()}")
+    page.click("#stages li.pick:has-text('Edited first frame')")
     poll(page, lambda: shown() == ["Composite, full size"])
     check(shown() == ["Composite, full size"], f"a second click goes back to the latest: {shown()}")
     page.evaluate(WATCH)
@@ -980,7 +985,8 @@ def hdr_flow(browser, port):
 
 
 def fluid16_flow(browser, port):
-    """A blank plate asked in 16-bit: its fluid shot goes through SDR to HDR and opens as an EXR plate, the switch on."""
+    """A blank plate asked in 16-bit: Finish > SDR to HDR is on, as on any SDR plate. The fluid shot plays while SDR to HDR
+    runs on it, the switch turns off and back on afterwards, and Export writes the HDR frames beside the shot."""
     page = load(browser, port)
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
@@ -988,33 +994,54 @@ def fluid16_flow(browser, port):
     page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.select_option("#b-fps", "24"); page.fill("#b-frames", "17")
     page.select_option("#b-depth", "16"); page.dispatch_event("#b-frames", "input")
     note = page.text_content("#b-note")
-    check("16-bit: SDR to HDR" in note, f"the blank plate form says what 16-bit does: {note}")
+    check("16-bit: Finish > SDR to HDR is on" in note, f"the blank plate form says what 16-bit does: {note}")
     page.evaluate(WATCH)
     page.click("#open-go")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
+    check(page.evaluate("document.querySelector('#finish-hdr').checked"), "16-bit turns Finish > SDR to HDR on at Open")
     paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)])
+    mock_route(port, "/mock/hold", {"output": "hdr", "seconds": 4, "times": 1})  # SDR to HDR lasts 4 s
     page.keyboard.press("Enter")
-    wait_log(page, added_line("under the edits: the fluid shot v"), 240000, "the HDR fluid shot under the edits")
-    page.wait_for_function("!document.querySelector('#finish-hdr-why').hidden && document.querySelector('#finish-hdr').checked", timeout=60000)
+    page.wait_for_function("""document.querySelector('#stages li.now')?.textContent.includes('SDR to HDR') === true
+      && document.querySelector('#hud').textContent.includes('Fluid shot, full size: Space plays it.')""", timeout=120000)
+    check(True, "the fluid shot plays as soon as its full size is made, while SDR to HDR runs on it")
+    wait_log(page, added_line(("SDR to HDR: done in", "SDR to HDR took")), 120000, "SDR to HDR on the fluid shot")
     new = page.evaluate("window.__lines")
-    check(any(line.startswith("Plate ") and "16-bit" in line for line in new) and any(re.search(r"SDR to HDR(?: took|:? done in) ", line) for line in new),
-          "16-bit: the plate's line says so, and the fluid shot goes through SDR to HDR")
-    check(page.evaluate("!document.querySelector('#finish-hdr-why').hidden && document.querySelector('#finish-hdr').checked"), "the HDR fluid shot is an EXR plate: SDR to HDR runs on its own for the edits on it")
+    check(any(line.startswith("Plate ") and "16-bit" in line and line.endswith("\n  Finish: SDR to HDR on.") for line in new) and not any("under the edits" in line for line in new),
+          "the plate's line says 16-bit and that Finish > SDR to HDR is on, and nothing reopens the fluid shot")
     check(not page.is_disabled("#export-btn"), "a fluid shot with no edit on it can be exported")
     page.click("#export-btn")
     fmt = page.text_content("#x-format") or ""
-    check("half-float EXR" in fmt and page.is_hidden("#x-matte"), f"its export is its HDR frames, without the render's options: {fmt}")
+    check("half-float EXR" in fmt and page.is_hidden("#x-matte"), f"with SDR to HDR on, its export is its HDR frames: {fmt}")
+    page.keyboard.press("Escape")
+    page.evaluate(WATCH)
+    page.click("#finish-btn"); page.click("#finish-hdr")  # off: a render without SDR to HDR, which takes the fluid shot made already
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(800)
+    new = page.evaluate("window.__lines")
+    check(not any(t.startswith("Render v") for t in new),
+          f"turned off afterwards, the same render shows its fluid shot again: no other render, no step: {[t[:60] for t in new if t.startswith('Render')]}")
+    page.click("#export-btn")
+    fmt = page.text_content("#x-format") or ""
+    check(not page.evaluate("document.querySelector('#finish-hdr').checked") and "ProRes 4444" in fmt, f"turned off afterwards, the fluid shot exports in ProRes 4444: {fmt}")
+    page.keyboard.press("Escape")
+    page.click("#finish-btn"); page.click("#finish-hdr")  # on again: it asks under its row, then the HDR render comes back
+    page.wait_for_function("!document.querySelector('#finish-hdr-ask').hidden", timeout=10000)
+    page.click("#finish-hdr-yes")
+    page.wait_for_function("document.querySelector('#finish-hdr').checked", timeout=10000)
+    page.keyboard.press("Escape")
+    page.click("#export-btn")
     with page.expect_download() as dl:
         page.click("#x-go")
     names = zipfile.ZipFile(dl.value.path()).namelist()
     check(any(n.startswith("hdr/") and n.endswith(".exr") for n in names) and any(n.startswith("plate/") for n in names),
-          f"the zip holds the HDR frames and the shot in the blank plate's format: {names[:3]}")
+          f"on again, the zip holds the HDR frames and the shot in the blank plate's format: {names[:3]}")
     page.evaluate("""() => { const v = document.querySelector('canvas[data-precision]'); window.__prec = [];
       new MutationObserver(() => window.__prec.push(v.dataset.precision)).observe(v, { attributes: true, attributeFilter: ['data-precision'] }); }""")
     page.click("#play-btn"); page.wait_for_function("window.__prec.length >= 34", timeout=30000); page.click("#play-btn")  # two rounds of its 17 frames
     seen = page.evaluate("window.__prec")
     flips = sum(1 for a, b in zip(seen, seen[1:]) if a != b)
-    check(flips <= 1, f"playing the HDR plate, its EXR frames and its 8-bit movie never alternate: {flips} changes in {len(seen)} draws")
+    check(flips <= 1, f"playing the HDR result, its EXR frames and its 8-bit movie never alternate: {flips} changes in {len(seen)} draws")
     page.wait_for_function("document.querySelector('canvas[data-precision]').dataset.precision === 'float'", timeout=30000)
     check(True, "paused, the frame shows at full precision")
     check(not errors, f"no console errors in a 16-bit fluid shot: {errors}")
