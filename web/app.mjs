@@ -4784,7 +4784,7 @@ $("#x-go").onclick = () => {
   if (fluidOnly()) return void setTimeout(() => exportPlate(undefined, ticks), 0); // once the dialog has closed: as the plate alone exports
   if (plateAlone(S.heroKey) || (r?.hdrAfter && !r.fluid && r.active?.some((e) => e.tool === "light"))) return void setTimeout(() => exportPlate(r, ticks), 0); // SDR to HDR's frames: the plate alone, or a Light edit's relit result in HDR
   if (r?.exported && !r.hdrAfter && r.exported.plateText !== undefined) r.exported.text = r.exported.plateText; // SDR to HDR turned off after the export step
-  if (r?.exported && r.skip?.has("upcomp")) return download(ticks); // with Upscale on, the render makes the steps still due, then the zip
+  if (r?.exported && fullSizeMade(r)) return download(ticks); // all made, the export too: the zip at once; else the render makes what is due, then the zip
   S.wantDownload = ticks;
   status(r && UPS.some((st) => !r.skip.has(st.id) && doneOf(r, st) === undefined) ? runsFirst("Upscale")
     : `Export: writing ${exportFormat(S.plate.spec)}. The zip downloads when it is done.`);
