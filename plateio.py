@@ -672,26 +672,39 @@ def untouched(changed: np.ndarray) -> np.ndarray:
     return np.asarray(changed) < MATTE_STEP
 
 
-def join_windows(folders: list, workers: int = 8, count: int = 0, max_frames: int = 0) -> np.ndarray:
+def join_windows(folders: list, workers: int = 8, count: int = 0, max_frames: int = 0, counts: list = None, share: int = 0) -> np.ndarray:
     """The frames of a shot's windows, saved one folder each, joined in order into one float32 batch, one window read at
     a time. With `count`, the frames in each window, and `max_frames`, the frames in the shot, window i reads its last
     min(count, max_frames - i * count) frames: a window job that runs again numbers its frames on in its folder (as
     Save Image does), so its newest frames are kept, and a folder beyond the shot reads none. With either at 0, every
-    frame of every window is read."""
+    frame of every window is read. With `counts`, each window's own frames, window i reads its last counts[i] frames. With
+    `share`, two neighbours share that many frames, which are crossfaded: across them the later window's weight rises from
+    1 / (share + 1) to share / (share + 1)."""
     files = [find_sequence(f) for f in folders]
-    if count and max_frames:
+    if counts:
+        if len(counts) > len(files):
+            raise ValueError(f"Join Windows: {len(files)} window folders for {len(counts)} windows.")
+        for folder, names, k in zip(folders, files, counts):
+            if len(names) < k:
+                raise ValueError(f"Join Windows: window {os.path.basename(os.path.normpath(folder))} holds {len(names)} of its {k} frames.")
+        files = [names[len(names) - k:] for names, k in zip(files, counts)]
+    elif count and max_frames:
         own = [max(0, min(count, max_frames - i * count)) for i in range(len(files))]
         for folder, names, k in zip(folders, files, own):
             if len(names) < k:
                 raise ValueError(f"Join Windows: window {os.path.basename(os.path.normpath(folder))} holds {len(names)} of its {k} frames.")
         files = [names[len(names) - k:] for names, k in zip(files, own) if k]
     out, pos = None, 0
-    for names in files:
+    for i, names in enumerate(files):
         rgb = decode_frames(names, False, workers)[0]
         if out is None:
-            out = np.empty((sum(len(f) for f in files),) + rgb.shape[1:], np.float32)
-        out[pos:pos + len(rgb)] = rgb
-        pos += len(rgb)
+            out = np.empty((sum(len(f) for f in files) - share * max(0, len(files) - 1),) + rgb.shape[1:], np.float32)
+        s = share if i else 0
+        for j in range(s):  # the frames this window shares with the one before
+            w = (j + 1) / (share + 1)
+            out[pos - s + j] = out[pos - s + j] * (1 - w) + rgb[j] * w
+        out[pos:pos + len(rgb) - s] = rgb[s:]
+        pos += len(rgb) - s
     return out
 
 

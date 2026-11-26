@@ -3363,9 +3363,9 @@ async function upscalePart(part, set, keeps, progress, sized, made = {}) {
   const float = set.float; // EXR frames: an EXR plate, or SDR to HDR's result
   const windows = upscaleWindows(p.frames, size), format = float ? "exr" : "png16", n = (i) => `w${String(i).padStart(3, "0")}`;
   const plateDir = finishFolder(S.plate.id, "upscale", [p.path, p.cs, S.ocio.config, target, size, most, format, S.build]);
-  const whole = Math.min(size, p.frames), chunk = upscaleChunk(whole, most), each = windows.length === 1 ? "in" : "each in"; // a full window's plan
+  const whole = Math.max(...windows.map(([, count]) => count)), chunk = upscaleChunk(whole, most), each = windows.length === 1 ? "in" : "each in"; // the longest window's plan
   const how = chunk >= whole ? `${each} one pass` : `${each} ${upscaleChunks(whole, chunk)} chunks of ${chunk} frames, each sharing ${4 * UPSCALE.overlap} frames with the next`;
-  if (part === (keeps ? "plate" : "comp")) log(`Upscale: ${target.join(" x ")}${sw ? `, upscaled from ${sw} x ${sh}` : ""}, ${windows.length === 1 ? "1 job" : `${windows.length} windows of ${size} frames`}, ${how}.\n  `
+  if (part === (keeps ? "plate" : "comp")) log(`Upscale: ${target.join(" x ")}${sw ? `, upscaled from ${sw} x ${sh}` : ""}, ${windows.length === 1 ? "1 job" : `${windows.length} windows of ${whole} frames`}, ${how}.\n  `
     + (keeps ? "SeedVR2 7B upscales the plate and the layer, then composites the result from them and the matte." : "SeedVR2 7B upscales the result."));
   const values = (shot, space, [first, count], more) => ({ shot, max_frames: p.frames, source_width: sw, source_height: sh, first, count,
     width: target[0], height: target[1], color_space: space, color_fix: "lab", format, seed: 42, config: S.ocio.config, under: "", under_space: space,
@@ -3373,7 +3373,8 @@ async function upscalePart(part, set, keeps, progress, sized, made = {}) {
   const out = setFolder(set.dir, { size: sized }); // the upscaled set of this size, which the zip names upscaled/ (download)
   const matte = () => ({ matte: set.matte ?? "", matte_prefix: set.matte ? `${out}/matte/matte` : "" });
   const [mw, mh] = colour.nativeSize(target[0], target[1], NATIVE_SIDE), view = float ? logSpace() : p.cs; // its viewer movie: the look of its frames
-  const save = (shot, frames, name, space) => ["upscale_export", { shot, frames: `output:${frames}`, max_frames: p.frames, count: size, prefix: `${out}/${name}`,
+  const save = (shot, frames, name, space) => ["upscale_export", { shot, frames: `output:${frames}`, max_frames: p.frames, prefix: `${out}/${name}`,
+    counts: windows.map(([, count]) => count).join(","), share: UPSCALE.share, // each window's frames, and the frames two neighbours share: the join crossfades them
     ...movieDims(mw, mh), config: S.ocio.config, color_space: space, movie_space: view, video_prefix: `${set.dir}/upscale/${sized}/movie/${name}` }, size / 5];
   const parent = (done, key) => outputFile("upscale", done, key)?.subfolder.replace(/\/[^/]+$/, ""); // where a window's job wrote its frames
   let home = part === "plate" ? plateDir : `${set.dir}/upscale/${sized}/${part === "layer" ? "layer" : "result"}`; // this part's windows, as planned

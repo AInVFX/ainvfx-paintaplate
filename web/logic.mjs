@@ -772,9 +772,10 @@ export function logFileName(plate, d) {
 // most: the largest target, its long and short sides; sizes: the long sides the menu lists beside the plate's own; least:
 // the smallest long side Custom… takes.
 export const UPSCALE = { long: 3840, most: [3840, 2160], sizes: [2560, 3840], least: 640, factor: 3, chunk: 21, step: 20, modelRam: 15.7,
-  bigVram: 32, copies: 8, composeCopies: 10, channels: 3072, passBase: 16.5, passPerMpx: 0.29, smallPass: 6, overlap: 3 };
+  bigVram: 32, copies: 8, composeCopies: 10, channels: 3072, passBase: 16.5, passPerMpx: 0.29, smallPass: 6, overlap: 3, share: 4 };
 // One pass of SeedVR2 7B (upscalePass): channels, the model's; passBase and passPerMpx, its VRAM in GB, then per latent frame per
-// megapixel; smallPass, the latent frames of a pass on a GPU under bigVram GB; overlap, the latent frames two chunks share.
+// megapixel; smallPass, the latent frames of a pass on a GPU under bigVram GB; overlap, the latent frames two chunks share;
+// share, the frames two windows share, which the join crossfades (upscaleWindows).
 // The size a person asks for: { side, px }, side "long", "width" or "height". The default is 3840 px on the long side, and a
 // scene saved before sizes, with the switch on (true), asks for it too.
 export const UPSCALE_ASK = { side: "long", px: UPSCALE.long };
@@ -826,8 +827,16 @@ export function upscaleWindow(ramGb, vramGb, [tw, th], [pw, ph], frames, copies 
   if (fit >= frames) return frames;
   return UPSCALE.chunk + UPSCALE.step * Math.max(0, Math.floor((fit - UPSCALE.chunk) / UPSCALE.step));
 }
-export const upscaleWindows = (frames, size) => // [first, count] of each job: windows that follow one another and share no frame
-  Array.from({ length: Math.ceil(frames / size) }, (_, i) => [i * size, Math.min(size, frames - i * size)]);
+// [first, count] of each job: windows of at most `size` frames, spread evenly so none is short, two neighbours sharing
+// `share` frames, which Join Windows crossfades, so the frames at a window's edge are sampled with context on both sides
+// and the change from one window to the next spreads over them. One window when the shot holds in one.
+export function upscaleWindows(frames, size, share = UPSCALE.share) {
+  if (frames <= size) return [[0, frames]];
+  const n = Math.ceil((frames - share) / (size - share)), total = frames + (n - 1) * share, base = Math.floor(total / n), extra = total - n * base;
+  const out = [];
+  for (let i = 0, first = 0; i < n; i++) { const count = base + (i < extra ? 1 : 0); out.push([first, count]); first += count - share; }
+  return out;
+}
 // Seconds, from 121 frames of horse.mp4 at 3840 x 2160: a SeedVR2 pass took 1,332 s on a 16 GB GPU (six windows of 21
 // frames) and 388 s on a 96 GB GPU (one job); each part Save Plate writes at 4K took 28.5 s and 27.4 s. Scaled by the
 // target's pixels and the frames. Paint and Clean make two passes, the plate's and the layer's, and write three parts.

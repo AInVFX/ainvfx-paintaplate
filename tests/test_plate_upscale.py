@@ -104,7 +104,7 @@ class ExportJob(unittest.TestCase):
         (sid, shot), = of(p, "PaintAPlate_LoadPlate")
         (jid, join), = of(p, "PaintAPlate_JoinWindows")
         (_, save), = of(p, "PaintAPlate_SavePlate")
-        self.assertEqual((shot["_meta"]["slots"]["path"], join["_meta"]["slots"]), ("shot", {"folder": "frames", "count": "count", "max_frames": "max_frames"}))
+        self.assertEqual((shot["_meta"]["slots"]["path"], join["_meta"]["slots"]), ("shot", {"folder": "frames", "count": "count", "max_frames": "max_frames", "counts": "counts", "share": "share"}))
         self.assertEqual((save["inputs"]["images"], save["inputs"]["plate"], save["inputs"]["keep_untouched"]), ([jid, 0], [sid, 2], False))
         self.assertEqual(save["_meta"]["output"], "export")
         self.assertEqual(set(upscale_plate.export_values("plates/horse.mp4", 121)), slots(p))

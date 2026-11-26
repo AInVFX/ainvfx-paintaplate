@@ -968,7 +968,7 @@ def upscale_export():
     g = Graph()
     shot = g("PaintAPlate_LoadPlate", _title="Result: its format", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
     frames = g("PaintAPlate_JoinWindows", _title="Upscaled windows, joined", folder=Slot("frames", ""),
-               count=Slot("count", 0), max_frames=Slot("max_frames", 121))
+               count=Slot("count", 0), max_frames=Slot("max_frames", 121), counts=Slot("counts", ""), share=Slot("share", 0))
     g("PaintAPlate_SavePlate", _title="Upscaled export", _output="export", images=frames, plate=shot[2],
       filename_prefix=Slot("prefix", "paintaplate/plate/upscaled"), keep_untouched=False)
     g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Viewer movie of the upscaled part, at its own size", _output="video",

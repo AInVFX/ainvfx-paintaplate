@@ -95,8 +95,9 @@ def machine(url: str) -> tuple:
 
 def export_values(shot: str, frames: int, label: str = "upscale", count: int = WINDOW) -> dict:
     """The slots of the upscale_export workflow: the windows' frames, read under ComfyUI's output folder, `count` frames
-    in each window. No viewer movie: its prefix stays empty, so Save Movie writes nothing."""
-    return {"shot": shot, "frames": f"{OUTPUT}{label}/upscale", "max_frames": frames, "count": count, "prefix": f"{label}/export",
+    in each window, windows that follow one another (no `counts`, no `share`). No viewer movie: its prefix stays empty, so
+    Save Movie writes nothing."""
+    return {"shot": shot, "frames": f"{OUTPUT}{label}/upscale", "max_frames": frames, "count": count, "counts": "", "share": 0, "prefix": f"{label}/export",
             "video_prefix": "", "movie_width": 0, "movie_height": 0, "config": OCIO_CONFIG, "color_space": "@model", "movie_space": "@model"}
 
 
