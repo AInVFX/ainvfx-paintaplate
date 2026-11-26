@@ -906,7 +906,7 @@ export function exportWords({ kind, ready = true, left = "", hdr = false, steps 
     matte: { label: "Matte", detail: "where the plate changed, 16-bit PNG frames" }, composite: { label: "Composite", detail: "the result" },
     graph: { label: "ComfyUI graph", detail: "the scene as one ComfyUI workflow, with the images it loads" } };
   const stages = { preview: { label: "Preview" }, full: { label: "Full size" }, hdr: { label: "HDR" }, up: { label: "Upscaled" } };
-  return { hint, note, elements, stages, help: `${hint} Frames keep their format, and a movie gives ${XQ}. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.` };
+  return { hint, note, elements, stages, help: `${hint} Frames keep their format, and a movie gives ${XQ}. With SDR to HDR, « HDR » gives half-float EXR frames in ACES2065-1.` };
 }
 // Export's ticks: the elements (What) and the stages (Stage), in the dialog's order. The zip takes every element ticked at
 // every stage ticked that the render has a file for: a cell (app.exportCells) is one element at one stage, with its label,
