@@ -427,6 +427,15 @@ export const stageOne = ([w, h], step = 32) => [Math.max(step, Math.round(w / 2 
 // Generate stops a running render step only where that wastes least: a full-size or an export step in its first half. A step
 // past halfway costs less to finish than to run again, and a preview step is short and often reused by the new edit's render.
 export const stopsForEdit = ({ cls, progress }) => cls !== "preview" && progress < 0.5;
+// A step's result displayed as it is made plays at once, and a player that already plays goes on with it. It waits, paused,
+// while the person paints, has an edit or the keyframes selected, looks at a pinned step, or paused the player by hand
+// during this render (Space, the play button); a stop holds everything.
+export const autoplays = ({ playing, painting, selected, keying, pinned, heldHere, halted }) =>
+  !halted && (playing || !(painting || selected || keying || pinned || heldHere));
+// Its line, written once: « Shot, preview: playing. The composite follows. », or « …: ready. Press Space to play it. … ».
+// `asMade`: what follows the state, as « , as LTX made it »; `follows`: the step that comes next, or what to do.
+export const resultLine = (label, plays, { asMade = "", follows = "" } = {}) =>
+  `${label}: ${plays ? "playing" : "ready"}${asMade}. ${plays ? "" : "Press Space to play it. "}${follows}`.trim();
 // A new preview size while a render makes a step: the step stops, at any progress, when the preview at the new size must
 // come first: a preview at the old size, or a full-size step. A step that serves every size (the object tracked for
 // Clean), a Finish step and the export go on. `cls`: the step's class, as stepClasses gives it.

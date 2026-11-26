@@ -667,7 +667,7 @@ def fluid_flow(browser, port):
           f"Enter generates with the trigger, the words and the three keyframes: {sent}")
     page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => /^Render v\\d+: Fluid shot, full size: done in /.test(e.textContent))", timeout=120000)
     log, rows = log_lines(page), row_titles(page)
-    check(page.text_content("#status") == "Fluid shot, full size: Space plays it. Use Paint, Clean or Light to edit it further.",
+    check(page.text_content("#status") == "Fluid shot, full size: playing. Use Paint, Clean or Light to edit it further.",
           f"the status line says what to do with the fluid shot, as an edit's step does: {page.text_content('#status')}")
     check(rows == ["1. Fluid"] and not any("under the edits" in line for line in log) and not page.is_disabled("[data-tool=erase]"),
           f"the render queue makes the fluid shot, the first edit, and nothing reopens it: Clean and Light work on it: {rows}")
@@ -1017,7 +1017,7 @@ def fluid16_flow(browser, port):
     mock_route(port, "/mock/hold", {"output": "hdr", "seconds": 4, "times": 1})  # SDR to HDR lasts 4 s
     page.keyboard.press("Enter")
     page.wait_for_function("""document.querySelector('#stages li.now')?.textContent.includes('SDR to HDR') === true
-      && document.querySelector('#hud').textContent.includes('Fluid shot, full size: Space plays it.')""", timeout=120000)
+      && document.querySelector('#hud').textContent.includes('Fluid shot, full size: playing.')""", timeout=120000)
     check(True, "the fluid shot plays as soon as its full size is made, while SDR to HDR runs on it")
     wait_log(page, added_line(("SDR to HDR: done in", "SDR to HDR took")), 120000, "SDR to HDR on the fluid shot")
     new = page.evaluate("window.__lines")

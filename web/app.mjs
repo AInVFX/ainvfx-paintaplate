@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearestKey, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, stopsForPreview, strokesLabel, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7, autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, downloadLines } from "./logic.mjs";
+import { askedText, asksName, autoplays, beyondDetail, blankChanges, blankDepth, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportWords, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeName, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, memoryBytes, missingFileHint, moveKey, nameRequest, nativeCause, nearestKey, nearKeys, ocioTree, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, resultLine, rubDabs, sceneName, secs, shadowBox, shadowOf, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, stopsForPreview, strokesLabel, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, plateKeep, keepReason, countText, blankLimits, sceneV7, autoChose, freeAsk, freeNeedsRoom, MATTE_TIPS, matteChoices, matteKey, matteOf, sharedMatte, sharedMatteLine, downloadLines } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -914,8 +914,7 @@ const runsFirst = (label) => `Export: ${label} runs first. The zip downloads whe
 function upscaledShown(r, key) {
   const st = upLast(r), m = upOf(r)?.[st?.id];
   if (key !== S.heroKey || !m?.url || S.wantDownload) return; // Export goes on to the zip
-  showMade(m.url, key, m.space);
-  hud(`${labelOf(st, r)}: the viewer plays it.`, 2500);
+  showStep(m.url, key, m.space, null, {}, labelOf(st, r));
   stagesUI();
   status(ready(labelOf(st, r)), "hint");
 }
@@ -1220,6 +1219,7 @@ function endCompare(draw = true) { // the wipe goes back to the plate on its lef
 // wipe, the plate held with O, a stroke, a stop or other edits hide it. It is a looping picture of the whole shot, new at
 // each step, so it shows as an image over the frame: a canvas would draw its first frame alone, the edited first frame.
 S.liveKey = null;
+S.held = null; // the render the person paused by hand (Space, the play button): its later steps wait, paused (logic.autoplays)
 const onShow = () => (keying() ? "fluid" : S.heroKey); // what the viewer shows: a fluid shot's keyframes, or a set of edits
 const labelOf = (st, r = S.renders.get(S.heroKey)) => st && (st.id === "upplate" && r?.fluid && !r.active.some((e) => e.tool !== "fluid") ? "Fluid: shot, upscaled" // the plate alone is a fluid shot
   : stepLabel(st, !!r?.lightOnly)); // a step's name in the Render panel and the log
@@ -1258,10 +1258,11 @@ function escape() { // Esc: logic.escapeAction. On the edit being generated it s
   if (what === "cancelOpen") return cancelOpen();
   if (what === "discard") return discard();
   if (what === "reopen") return stopGenerating();
-  if (what === "deselect") { select(null); if (busy) hud("Deselected. Esc again stops generating.", 2500); return; }
+  if (what === "deselect") { select(null); wake(); if (busy) hud("Deselected. Esc again stops generating.", 2500); return; }
   if (S.cmp) return endCompare(); // a comparison in the wipe ends before the pass displayed
-  if (what === "latest") return choosePass(S.pass); // a pass displayed: back to the latest
+  if (what === "latest") { choosePass(S.pass); return wake(); } // a pass displayed: back to the latest, which plays
   if (what === "stop") stopGenerating();
+  else if (!what) wake(); // nothing selected, pinned or running: the latest result plays
 }
 function stopGenerating() { // Esc on the edit being generated, or Stop: everything that generates stops where it is, and no job is posted until Enter. What finished is kept, the edit being generated keeps its strokes, and an edit that waited for its turn stays queued
   if (!generating()) return;
@@ -3042,8 +3043,7 @@ async function plateHdr(r) { // the plate alone: SDR to HDR on the plate, Upscal
     r.hdrResult = resultOf(r);
   });
   if (r.done?.hdr !== undefined && key === S.heroKey && !upscaled(r)) { // SDR to HDR's result displayed; Upscale's step follows while it is on
-    showMade(r.review, key, r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace });
-    hud("SDR to HDR: the viewer plays it.", 2500);
+    showStep(r.review, key, r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace }, "SDR to HDR");
     stagesUI(); exportUI();
     const st = upLast(r);
     if (!S.wantDownload) status(st ? ready("SDR to HDR", ", its EXR frames at full precision as they load", `Upscale is next: about ${span(estimate(st.id, r.skip))}.`)
@@ -3073,7 +3073,7 @@ async function fluidSteps(r, fl) {
     const movie = outputFile("fluid", out, "video"), first = outputFile("fluid", out, "first");
     return { path: `${folderOf("fluid", out, "video")}/plate/${blank}`, movie: movie ? viewUrl(movie) : null, first: first ? viewUrl(first) : null };
   };
-  const shown = (made, line) => { if (alone && r.key === S.heroKey && made?.movie) { showMade(made.movie, r.key, "@model"); hud(line, 2500); status(line, "hint"); } }; // as an edit's step says it
+  const shown = (made, label, follows) => { if (alone && r.key === S.heroKey && made?.movie) status(showStep(made.movie, r.key, "@model", null, {}, label, { follows }), "hint"); }; // as an edit's step says it
   if (!r.skip.has("fluid")) {
     const size = fluidSize(p.shot), pv = (r.previews[p.shot.join("x")] ??= {}), made = fluidDonor(r, fl.version), kept = made?.previews?.[p.shot.join("x")]?.fluid;
     if (kept && pv.done?.fluid === undefined) { // the same version's preview, made by another render
@@ -3081,7 +3081,7 @@ async function fluidSteps(r, fl) {
       log(`Render v${r.v}: Fluid shot, preview: reused from render v${made.v}.`);
     }
     await step(r, "fluid", async (progress) => { pv.fluid = await make(`${r.base}/fluid_${size.join("x")}`, size)(progress); }, pv);
-    if (r.done?.fluidfull === undefined && !fluidDonor(r, fl.version)) shown(pv.fluid, "Fluid shot, preview: Space plays it. The full-size fluid shot follows.");
+    if (r.done?.fluidfull === undefined && !fluidDonor(r, fl.version)) shown(pv.fluid, "Fluid shot, preview", "The full-size fluid shot follows.");
   }
   const donor = r.fluid ? null : fluidDonor(r, fl.version);
   if (donor && r.done?.fluidfull === undefined) { // the same version, made by another render
@@ -3091,7 +3091,7 @@ async function fluidSteps(r, fl) {
   await step(r, "fluidfull", async (progress) => { r.fluid = await make(r.base, null)(progress); });
   if (alone) Object.assign(r, { review: r.fluid.movie, reviewSpace: "@model", run: r.run ?? r.base }); // the fluid shot alone: its result, and its files' folder
   await fluidFirst(r, fl);
-  if (!donor) shown(r.fluid, "Fluid shot, full size: Space plays it. Use Paint, Clean or Light to edit it further.");
+  if (!donor) shown(r.fluid, "Fluid shot, full size", "Use Paint, Clean or Light to edit it further.");
   else if (alone && r.key === S.heroKey && !S.pass) showLatest(); // taken from another render: its full size is the latest, not the preview
 }
 async function fluidFirst(r, fl) { // the full-size shot of a fluid version: its first frame is the picture the edits above are painted on
@@ -3214,8 +3214,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const off = !S.previewCap; // no preview pass: the four preview steps are in r.skip (plan)
   const made = off ? null : await passes(pv, p.shot, sized, false);
   if (!off && here() && !pv.taken && !pv.comp && !r.review && S.shot?.url !== pv.raw) { // a rough look at once: the whole frame as the model made it, until the composite
-    showMade(pv.raw, key, "@model");
-    hud("Shot, preview: Space plays it. The composite follows.", 2500);
+    showStep(pv.raw, key, "@model", null, {}, "Shot, preview", { follows: "The composite follows." });
   }
   if (!off) await step(r, "track", async (progress) => { pv.painted = await track(active, made, base, `_${sized}`, progress, null, ["paint"],
     underOf(pv), r.heroFrame); }, pv);
@@ -3229,15 +3228,13 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     pv.compMatte = matte ? viewUrl(matte) : null;
   }, pv);
   if (!off && here() && !r.review && S.shot?.url !== pv.comp) {
-    showMade(pv.comp, key, "@model");
-    hud("Composite, preview: Space plays it. The full-size composite follows.", 2500);
+    showStep(pv.comp, key, "@model", null, {}, "Composite, preview", { follows: "The full-size composite follows." });
     status("Composite, preview: ready. The full-size passes follow; Export can write the result now.", "hint");
   }
   const onePass = !off && sw === p.work[0] && sh === p.work[1];
   const final = onePass ? made : await passes(r, p.work, "full", true);
   if (here() && !onePass && !r.taken && !r.review && r.raw && S.shot?.url !== r.raw) { // the full-size shot as LTX made it, until the full-size composite, in every Preview mode:
-    showMade(r.raw, key, "@model"); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640 px)
-    hud("Shot, full size: Space plays it as LTX made it. The full-size composite follows.", 2500);
+    showStep(r.raw, key, "@model", null, {}, "Shot, full size", { asMade: ", as LTX made it", follows: "The full-size composite follows." }); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640 px)
     log("Viewer: full-size shot until the full-size composite is ready.");
   }
   await step(r, "trackfull", async (progress) => { r.full = await track(active, final, base, "_full", progress, pv.mattes, ["paint"],
@@ -3285,8 +3282,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     r.hdrResult = resultOf(r);
   });
   if (!here()) return log(`Render v${r.v}: Composite, full size: ready, in the background.`);
-  showMade(r.play ?? r.review, key, r.playSpace ?? r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace });
-  hud(r.hdrAfter ? "SDR to HDR: the viewer plays it." : "Composite, full size: the viewer plays it.", 2500);
+  showStep(r.play ?? r.review, key, r.playSpace ?? r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace }, r.hdrAfter ? "SDR to HDR" : "Composite, full size");
   stagesUI(); exportUI();
   const upNext = UPS.some((st) => !r.skip.has(st.id) && doneOf(r, st) === undefined); // Upscale's steps follow the composite
   const upLeft = upNext ? `Upscale is next: about ${span(UPS.reduce((a, st) => a + (r.skip.has(st.id) || doneOf(r, st) !== undefined ? 0 : estimate(st.id, r.skip)), 0))}.` : undefined;
@@ -3621,6 +3617,26 @@ function keepRows(list, rows) {
 
 // A result that has just been made takes the viewer: the shot and its composite at the preview size, the full-size shot,
 // the full-size composite. A pinned step gives way to it, so the newest result is displayed; the live preview does not.
+// A step's result as it is made: displayed, then playing at once unless the person is busy with something else
+// (logic.autoplays); a player that already plays goes on with it. Its line says which (logic.resultLine). Returns the line,
+// for a status line that says the same.
+function showStep(url, key, space, frames, opts, label, words = {}) {
+  const pinned = !!S.pass, playing = S.playing; // showMade drops a pinned step for the newest result
+  showMade(url, key, space, frames, opts);
+  const plays = autoplays({ playing, painting: !!S.draft || !!stroke, selected: !!S.selected, keying: keying(), pinned, heldHere: S.held === key, halted: S.halted });
+  if (plays) play();
+  const line = resultLine(label, plays, words);
+  hud(line, 2500);
+  return line;
+}
+function handPlay() { // Space, the play button: a pause by hand holds this render's later steps still (logic.autoplays)
+  if (S.playing) { pause(); S.held = S.heroKey; } else { S.held = null; play(); }
+}
+function wake() { // Esc leaves nothing selected or pinned: the pause by hand no longer holds, and the latest result plays
+  S.held = null;
+  if (S.shot?.url && autoplays({ playing: S.playing, painting: !!S.draft || !!stroke, selected: !!S.selected, keying: keying(), pinned: !!S.pass, heldHere: false, halted: S.halted })) play();
+}
+
 function showMade(url, key, space, frames = null, opts = {}) {
   if (S.pass) { S.pass = null; }
   setShot(url, key, space, frames, opts);
@@ -4475,7 +4491,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Colours…", "S", openColours, !p, $("#colours").open], ["Text prompt…", "T", openWords, !p], "-",
       ["Whole object", "", () => $("#whole").click(), !p, $("#whole").checked], ["Smaller brush", "-", () => setSize(S.size / 1.2), !p],
       ["Larger brush", "=", () => setSize(S.size * 1.2), !p]]],
-    ["Control", [["Play or pause", "Space", () => (S.playing ? pause() : play()), !p, S.playing], ["Next frame", "Right", step(1), !p],
+    ["Control", [["Play or pause", "Space", handPlay, !p, S.playing], ["Next frame", "Right", step(1), !p],
       ["Previous frame", "Left", step(-1), !p], "-", ["Go to the in point", "Home", () => { pause(); seek(S.inPt); }, !p],
       ["Go to the out point", "End", () => { pause(); seek(S.outPt); }, !p], ["Set the in point", "[", () => setIn(S.frame), !p],
       ["Set the out point", "]", () => setOut(S.frame), !p], ["Clear in and out", "\\", clearRange, !p]]],
@@ -4750,7 +4766,7 @@ $("#menu-btn").onclick = (e) => { // the same menu as a right-click, for touch s
   const r = e.currentTarget.getBoundingClientRect();
   openMenu(r.left, r.bottom + 4);
 };
-$("#play-btn").onclick = () => (S.playing ? pause() : play());
+$("#play-btn").onclick = handPlay;
 $("#wipe-btn").onclick = () => setWipe(S.wipe === null);
 $("#export-btn").onclick = exportDialog;
 $("#preview-size").onchange = (e) => setPreview(readPreview(e.target.value));
@@ -4927,7 +4943,7 @@ addEventListener("keydown", (e) => {
   if (keying() && mod && !e.shiftKey && (low === "c" || low === "v") && !getSelection().toString()) { if (low === "c") copyKey(); else pasteKey(); return e.preventDefault(); }
   if (keying() && !mod && (k === "Delete" || k === "Backspace")) { deleteKey(); return e.preventDefault(); }
   if (keying() && e.altKey && (k === "ArrowLeft" || k === "ArrowRight")) { jumpKey(k === "ArrowLeft" ? -1 : 1); return e.preventDefault(); }
-  if (k === " " || k === "ArrowDown") S.playing ? pause() : play();
+  if (k === " " || k === "ArrowDown") handPlay(); // by hand: a pause holds this render's later steps still
   else if (k === "ArrowLeft" || k === "ArrowRight") { pause(); seek(S.frame + (k === "ArrowLeft" ? -1 : 1)); }
   else if (k === "Home") { pause(); seek(S.inPt); }
   else if (k === "End") { pause(); seek(S.outPt); }
