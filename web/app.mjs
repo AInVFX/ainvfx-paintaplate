@@ -995,7 +995,7 @@ addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#finish").hid
 
 function recompose() {
   if (!S.plate) return; // a plate that opens: nothing to compose yet
-  S.hero = layered(S.edits.length, upToDate); // the first frame of the edits on show: a result made on another picture under it is left out
+  S.hero = layered(S.edits.length, upToDate); // the first frame of the edits displayed: a result made on another picture under it is left out
   const shown = S.edits.filter((e) => e.on && (e.patch || (e.tool === "fluid" && e.state === "done")) && e.state !== "generating" && upToDate(e)); // a fluid shot from its Generate on, as its steps make it
   const last = hdrLast(shown.map((e) => e.tool)), dflt = holdsHdr(S.plate?.spec, S.plate?.headroom);
   const keyOf = (auto) => { // a strategy: another render, its shot taken from the render of the same edits
@@ -1025,7 +1025,7 @@ function latestOf(r) { // a render's latest result: Upscale's last step at the s
   return best === review ? { url: best, space: r.playSpace ?? r.reviewSpace, frames: r.reviewFrames ?? null, framesSpace: r.reviewFramesSpace ?? null }
     : { url: best, space: "@model", frames: null, framesSpace: null };
 }
-function showLatest() { // the latest result of the edits on show
+function showLatest() { // the latest result of the edits displayed
   const key = S.heroKey, l = latestOf(S.renders.get(key));
   if (l) setShot(l.url, key, l.space, l.frames, { framesSpace: l.framesSpace });
   else if (!key || stale()) setShot(null, key); // no result yet: no result of other edits stays on screen, the plate and the first frame show until one comes
@@ -1057,7 +1057,7 @@ function choosePass(id) {
 }
 
 // ---------- Two passes in the wipe (Ctrl+click on a finished Render step or a History row) ----------
-// The wipe's left side shows a second pass of the edits on show, against the pass on show on its right, both named, so a
+// The wipe's left side shows a second pass of the edits displayed, against the pass displayed on its right, both named, so a
 // fault can be traced to the step it comes from: the shot against its composite, a matte against the picture, a preview
 // against the full size. Ctrl+click (Cmd+click on a Mac) puts a row there; the same again, Esc or F6 ends it. The left
 // side draws as the right does: paused, the frame at native size from the frames route; playing, its movie. A History
@@ -1088,7 +1088,7 @@ function shownLabel() { // the pass displayed, by its row's name: the one clicke
 }
 function comparePass(id) {
   if (S.cmp?.id === id) return endCompare();
-  if (passLabel(id) === shownLabel()) return plateWipe(); // the pass on show against itself shows nothing: the plate takes the left side
+  if (passLabel(id) === shownLabel()) return plateWipe(); // the pass displayed against itself shows nothing: the plate takes the left side
   const r = S.renders.get(S.heroKey), row = rowOf(id);
   const m = row ? { url: null, space: modelSpace(), frames: null, edit: row } : id === "first" ? { url: null, space: modelSpace(), frames: null } : passMovie(id, r, previewOf(r), passSpaces(), upOf(r));
   if (!m) return;
@@ -1349,7 +1349,7 @@ function shotFrame() { // the shot at the playhead: a cached frame, the video wh
 function render() {
   if (!S.plate || !S.hero) { xray.el.hidden = true; return; }
   if (keying()) return renderFluid();
-  if (S.cmp && (S.cmp.edit ? !S.edits.includes(S.cmp.edit) : S.cmp.key !== S.heroKey)) endCompare(false); // other edits on show: the pass compared was the old edits'; a row's strokes stay while the row does
+  if (S.cmp && (S.cmp.edit ? !S.edits.includes(S.cmp.edit) : S.cmp.key !== S.heroKey)) endCompare(false); // other edits displayed: the pass compared was the old edits'; a row's strokes stay while the row does
   $("#wipe .label.left").textContent = S.cmp?.label ?? "Plate";
   $("#wipe .label.right").textContent = shownLabel();
   wantDeep(); // an image sequence's own values load around the playhead, as OpenRV's cache does
