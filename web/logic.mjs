@@ -906,7 +906,7 @@ export function exportWords({ kind, ready = true, left = "", hdr = false, steps 
     matte: { label: "Matte", detail: "where the plate changed, 16-bit PNG frames" }, composite: { label: "Composite", detail: "the result" },
     graph: { label: "ComfyUI graph", detail: "the scene as one ComfyUI workflow, with the images it loads" } };
   const stages = { preview: { label: "Preview" }, full: { label: "Full size" }, hdr: { label: "HDR" }, up: { label: "Upscaled" } };
-  return { hint, note, elements, stages, help: `${hint} Frames keep their format, and a movie gives ${XQ}. With SDR to HDR, « HDR » gives half-float EXR frames in ACES2065-1.` };
+  return { hint, note, elements, stages, help: `${hint} Frames keep their format, and a movie gives ${XQ}, or ${DEEP_FRAMES} when it holds more than 10 bits. With SDR to HDR, « HDR » gives half-float EXR frames in ACES2065-1.` };
 }
 // Export's ticks: the elements (What) and the stages (Stage), in the dialog's order. The zip takes every element ticked at
 // every stage ticked that the render has a file for: a cell (app.exportCells) is one element at one stage, with its label,
@@ -936,7 +936,12 @@ export const zipName = (label) => String(label ?? "").toLowerCase().replace(/[^a
 // The format of the files the export writes, as the dialog, the Help, the status line and the graph's notes name it: a
 // sequence keeps its own file type, and every movie is ProRes 4444 XQ (plateio.VideoWriter). spec: the plate's spec.
 export const XQ = "ProRes 4444 XQ";
-export const exportFormat = (spec) => (!spec ? "" : spec.kind === "video" ? XQ : `${String(spec.ext ?? "").replace(/^\./, "").toUpperCase()} frames`);
+export const exportFormat = (spec) => (!spec ? "" : spec.kind === "video" ? (deepMovie(spec) ? DEEP_FRAMES : XQ) : `${String(spec.ext ?? "").replace(/^\./, "").toUpperCase()} frames`);
+// A movie deeper than 10 bits, the most FFmpeg's ProRes encoder takes: Export writes it as 16-bit PNG frames, which keep its
+// samples (plateio.movie_writer), and says so when it starts (deepLine).
+export const deepMovie = (spec) => spec?.kind === "video" && (spec.bits ?? 8) > 10;
+export const DEEP_FRAMES = "16-bit PNG frames";
+export const deepLine = (spec) => (deepMovie(spec) ? `Export: the plate is a ${spec.bits}-bit movie, so Export writes ${DEEP_FRAMES}, which keep all ${spec.bits} bits.` : "");
 // What the log says once the zip downloads: its name, then one detail line per row the zip holds, in the dialog's words.
 export function downloadLines(zip, labels) {
   return [`Download: ${zip}.`, ...[...new Set(labels)].map((label) => `  ${label}.`)].join("\n");

@@ -28,7 +28,7 @@ test("the Help's Export entry opens with the Export dialog's own line, which is 
   assert.match(html, /<dt>Export<\/dt><dd><span id="help-export"><\/span><\/dd>/); // the whole entry comes from exportWords' help
   assert.ok(html.includes('<p id="x-hint" class="hint"></p>')); // the dialog's line comes from the code, never from the page's file
   assert.ok(app.includes('$("#help-export").textContent = exportWords({ kind: "edits", steps: { comp: labelOf(STAGES.find((st) => st.id === "review"), null) } }).help;'));
-  assert.ok(exportWords({ kind: "edits", steps: STEPS }).help.startsWith(`${exportWords({ kind: "edits" }).hint} Frames keep their format, and a movie gives ProRes 4444 XQ.`));
+  assert.ok(exportWords({ kind: "edits", steps: STEPS }).help.startsWith(`${exportWords({ kind: "edits" }).hint} Frames keep their format, and a movie gives ProRes 4444 XQ, or 16-bit PNG frames when it holds more than 10 bits.`));
   for (const src of [html, app, read("logic.mjs")]) assert.equal(src.split("then downloads").length - 1, src === read("logic.mjs") ? 1 : 0);
 });
 

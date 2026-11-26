@@ -99,3 +99,13 @@ test("the export writes the shot, and a Clean's pass under a paint, by Save Plat
   assert.deepEqual([save("shot").class_type, from(save("shot")), save("shot").inputs.keep_untouched], ["PaintAPlate_SavePlate", "Shot in the plate's colour space", false]);
   assert.deepEqual([save("clean").class_type, from(save("clean")), save("clean").inputs.keep_untouched], ["PaintAPlate_SavePlate", "Clean plate pass in the plate's colour space", false]);
 });
+
+test("a movie deeper than 10 bits exports as 16-bit PNG frames, and Export says so when it starts", async () => {
+  const { deepLine, deepMovie, exportFormat } = await import("../../web/logic.mjs");
+  const movie = (bits) => ({ kind: "video", ext: ".mov", bits });
+  assert.deepEqual([exportFormat(movie(12)), exportFormat(movie(10)), exportFormat(movie(8)), exportFormat({ kind: "sequence", ext: ".dpx", bits: 12 })],
+    ["16-bit PNG frames", "ProRes 4444 XQ", "ProRes 4444 XQ", "DPX frames"]);
+  assert.deepEqual([deepMovie(movie(12)), deepMovie(movie(10)), deepMovie({ kind: "video" })], [true, false, false]);
+  assert.equal(deepLine(movie(12)), "Export: the plate is a 12-bit movie, so Export writes 16-bit PNG frames, which keep all 12 bits.");
+  assert.equal(deepLine(movie(10)), "");
+});

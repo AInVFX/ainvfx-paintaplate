@@ -230,8 +230,8 @@ class SavePlate(io.ComfyNode):
         count = min(images.shape[0], spec["frames"])
         written, notes = [], []
         if spec["kind"] == "video":
-            writer = plateio.VideoWriter(spec, os.path.join(out_dir, os.path.basename(spec["source"])),
-                                         audio_source=spec["source"])
+            writer = plateio.movie_writer(spec, os.path.join(out_dir, os.path.basename(spec["source"])),
+                                          audio_source=spec["source"])
             bar = comfy.utils.ProgressBar(count)
             src = plateio.SourceFrames(spec["source"], writer.pix_fmt) if keep_untouched and changed is not None and writer.keeps else None
             try:
@@ -243,14 +243,15 @@ class SavePlate(io.ComfyNode):
                 try:
                     writer.close()
                 finally:
-                    if os.path.exists(writer.path):
-                        os.remove(writer.path)
+                    for path in getattr(writer, "paths", [writer.path]):
+                        if os.path.exists(path):
+                            os.remove(path)
                 raise
             finally:
                 if src is not None:
                     src.close()
             writer.close()
-            written, notes = [writer.path], writer.notes
+            written, notes = getattr(writer, "paths", [writer.path]), writer.notes
         else:
             bar = comfy.utils.ProgressBar(count)
             for i, rgb in enumerate(frames_np(images[:count])):
