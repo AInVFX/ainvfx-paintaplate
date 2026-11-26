@@ -33,9 +33,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import plateio  # noqa: E402
 
 
-def frames_of(comfy: str, label: str) -> np.ndarray:
-    """A run's frames, its windows joined as the export joins them."""
-    return plateio.join_windows(sorted(glob.glob(os.path.join(comfy, "output", label, "upscale", "w*"))))
+def frames_of(comfy: str, label: str, share: int = 0) -> np.ndarray:
+    """A run's frames, its windows joined as the export joins them: with `share`, two neighbours share that many frames,
+    crossfaded, each window's frames being those its folder holds."""
+    dirs = sorted(glob.glob(os.path.join(comfy, "output", label, "upscale", "w*")))
+    counts = [len(plateio.find_sequence(d)) for d in dirs] if share else None
+    return plateio.join_windows(dirs, counts=counts, share=share)
 
 
 def centre(a: np.ndarray, width: int, height: int) -> np.ndarray:
@@ -120,17 +123,21 @@ def chunk_bounds(count: int, chunk: int, overlap: int) -> list:
     return zones
 
 
-def bounds(comfy: str, runs: list, window: int, out: str, crop: int = 640) -> list:
-    """The table of `bounds` for runs given as label=chunk:overlap; `window`: the frames of each window, 0 for one window."""
+def bounds(comfy: str, runs: list, window: int, out: str, crop: int = 640, share=None) -> list:
+    """The table of `bounds` for runs given as label=chunk:overlap; `window`: the frames of each window, 0 for one window.
+    With `share`, the windows are the page's (upscale_plate.windows), two neighbours sharing that many frames, and a window's
+    edge is the steps into and across them; without, windows of `window` frames follow one another."""
     rows = []
     for spec in runs:
         label, plan = spec.split("=")
         chunk, overlap = (int(x) for x in plan.split(":"))
-        frames = frames_of(comfy, label)
+        frames = frames_of(comfy, label, share or 0)
         step = steps(centre(frames, 1920, 1080))
         n, size = len(frames), window or len(frames)
-        zones = [(a + z0, a + z1) for a in range(0, n, size) for z0, z1 in chunk_bounds(min(size, n - a), chunk, overlap)]
-        edges = [(a - 1, a - 1) for a in range(size, n, size)]  # a window's last frame to the next one's first
+        import upscale_plate  # noqa: E402  # the page's windows, as the tool cuts them
+        wins = upscale_plate.windows(n, count=size, every=True, share=share) if share is not None else [(a, min(size, n - a)) for a in range(0, n, size)]
+        zones = [(a + z0, a + z1) for a, c in wins for z0, z1 in chunk_bounds(c, chunk, overlap)]
+        edges = [(a - 1, a - 1 + (share or 0)) for a, _ in wins[1:]]  # a window's last frame of its own to the next one's first
         inside = [x for t, x in enumerate(step) if not any(z0 <= t <= z1 for z0, z1 in zones + edges)]
         peak = lambda zs: [max(step[z0:z1 + 1]) for z0, z1 in zs if z1 < len(step)]  # noqa: E731
         at_chunks, at_windows = peak(zones), peak(edges)
@@ -262,6 +269,7 @@ if __name__ == "__main__":
     b.add_argument("--comfy", required=True)
     b.add_argument("--runs", nargs="+", required=True, help="label=chunk:overlap, once for each run: the chunk in frames (0: one pass), the overlap in latent frames")
     b.add_argument("--window", type=int, default=0, help="the frames of each window, 0 for one window")
+    b.add_argument("--share", type=int, default=None, help="windows as the page cuts them, two neighbours sharing this many frames; unset: windows that follow one another")
     b.add_argument("--out", required=True)
     k = sub.add_parser("crops")
     k.add_argument("--result", action="append", required=True, help="label=folder: a result's frames or its movie's folder, once for each")
@@ -273,7 +281,7 @@ if __name__ == "__main__":
     if a.what == "seams":
         seams(a.comfy, a.runs, a.edge, a.out)
     elif a.what == "bounds":
-        bounds(a.comfy, a.runs, a.window, a.out)
+        bounds(a.comfy, a.runs, a.window, a.out, share=a.share)
     elif a.what == "crops":
         print(crops([r.split("=", 1) for r in a.result], a.frame, tuple(a.box), a.out))
     elif a.what == "parts":

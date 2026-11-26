@@ -68,11 +68,25 @@ def source_size(width: int, height: int, target: tuple, factor: int = FACTOR) ->
     return 2 * round(target[0] / factor / 2), 2 * round(target[1] / factor / 2)
 
 
-def windows(frames: int, first: int = 0, count: int = WINDOW, every: bool = False) -> list:
-    """The windows to run, as (first, count): the one asked for, or with `every` the whole shot in windows of `count`."""
+WINDOW_SHARE = 4  # frames two neighbouring windows share, which the join crossfades: the page's UPSCALE.share
+
+
+def windows(frames: int, first: int = 0, count: int = WINDOW, every: bool = False, share: int = WINDOW_SHARE) -> list:
+    """The windows to run, as (first, count): the one asked for, or with `every` the whole shot as the page cuts it
+    (logic.upscaleWindows): windows of at most `count` frames, spread evenly so none is short, two neighbours sharing
+    `share` frames."""
     if not every:
         return [(first, max(1, min(count, frames - first)))]
-    return [(f, min(count, frames - f)) for f in range(0, frames, count)]
+    if frames <= count:
+        return [(0, frames)]
+    n = -(-(frames - share) // (count - share))
+    base, extra = divmod(frames + (n - 1) * share, n)
+    out, f = [], 0
+    for i in range(n):
+        c = base + (1 if i < extra else 0)
+        out.append((f, c))
+        f += c - share
+    return out
 
 
 def window_frames(ram_gb: float, vram_gb: float, target: tuple, plate: tuple, frames: int) -> int:
@@ -95,9 +109,12 @@ def machine(url: str) -> tuple:
 
 def export_values(shot: str, frames: int, label: str = "upscale", count: int = WINDOW) -> dict:
     """The slots of the upscale_export workflow: the windows' frames, read under ComfyUI's output folder, `count` frames
-    in each window, windows that follow one another (no `counts`, no `share`). No viewer movie: its prefix stays empty, so
-    Save Movie writes nothing."""
-    return {"shot": shot, "frames": f"{OUTPUT}{label}/upscale", "max_frames": frames, "count": count, "counts": "", "share": 0, "prefix": f"{label}/export",
+    at most in each window, the windows as the page cuts them: each one's frames (`counts`) and the frames two neighbours
+    share, which the join crossfades. No viewer movie: its prefix stays empty, so Save Movie writes nothing."""
+    wins = windows(frames, count=count, every=True)
+    many = len(wins) > 1
+    return {"shot": shot, "frames": f"{OUTPUT}{label}/upscale", "max_frames": frames, "count": count, "counts": ",".join(str(c) for _, c in wins) if many else "",
+            "share": WINDOW_SHARE if many else 0, "prefix": f"{label}/export",
             "video_prefix": "", "movie_width": 0, "movie_height": 0, "config": OCIO_CONFIG, "color_space": "@model", "movie_space": "@model"}
 
 

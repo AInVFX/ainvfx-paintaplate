@@ -109,13 +109,14 @@ class ExportJob(unittest.TestCase):
         self.assertEqual(save["_meta"]["output"], "export")
         self.assertEqual(set(upscale_plate.export_values("plates/horse.mp4", 121)), slots(p))
 
-    def test_windows_follow_one_another_and_save_one_folder_each(self):
-        self.assertEqual(upscale_plate.windows(121, every=True), [(0, 21), (21, 21), (42, 21), (63, 21), (84, 21), (105, 16)])
+    def test_windows_are_the_pages_even_windows_sharing_4_frames_one_folder_each(self):
+        self.assertEqual(upscale_plate.windows(121, every=True), [(0, 21), (17, 21), (34, 21), (51, 21), (68, 21), (85, 20), (101, 20)])
         self.assertEqual(upscale_plate.windows(121, 0, 121, every=True), [(0, 121)])
         self.assertEqual(upscale_plate.windows(121, 84, 42), [(84, 37)])
         self.assertEqual((upscale_plate.WINDOW, upscale_plate.CHUNK_STEP), (build_workflows.UPSCALE_CHUNK, 20))
         self.assertEqual(upscale_plate.values("plates/horse.mp4", 1920, 1080, 121, window=3)["prefix"], "upscale/upscale/w003/f")
         self.assertEqual(upscale_plate.export_values("plates/horse.mp4", 121)["frames"], "output:upscale/upscale")
+        self.assertEqual({k: upscale_plate.export_values("plates/horse.mp4", 121)[k] for k in ("counts", "share")}, {"counts": "21,21,21,21,21,20,20", "share": 4})
         with open(os.path.join(ROOT, "folders.py")) as f:
             self.assertIn(f'\nOUTPUT = "{upscale_plate.OUTPUT}"', f.read())
 
