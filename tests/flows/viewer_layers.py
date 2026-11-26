@@ -28,11 +28,12 @@ def run(browser, port, U):
         U.paint_once(page, words, [(x, y), (x + 0.10, y)]); page.keyboard.press("n")
     page.wait_for_function(U.DONE.format(n=3), timeout=120000)
 
-    # 1. The second edit selected, nothing changed yet: every edit shows
+    # 1. The second edit selected with its pencil, nothing changed yet: the frame shows the picture it paints on, the edit
+    #    under it; the edit above it is left out, and History marks no row hidden, since nothing changed
     page.click("#history li:nth-child(2) .edit"); away()
     shown1, shown3 = pixel(p1), pixel(p3)
-    U.check(page.text_content("#editing").startswith("Editing 2") and np.abs(shown1 - plate1).sum() > 40 and np.abs(shown3 - plate3).sum() > 40 and not hidden(),
-            f"an edit selected and not changed hides nothing: edit 1 shows {shown1.tolist()} on a plate of {plate1.tolist()}, edit 3 {shown3.tolist()} on {plate3.tolist()}")
+    U.check(page.text_content("#editing").startswith("Editing 2") and np.abs(shown1 - plate1).sum() > 40 and np.abs(shown3 - plate3).max() <= 16 and not hidden(),
+            f"an edit selected shows the picture it paints on: edit 1 under it {shown1.tolist()} on a plate of {plate1.tolist()}, edit 3 above it left out {shown3.tolist()} on {plate3.tolist()}")
 
     # 2. The second edit changed, by a rub: the edit above it is hidden, the edit under it stays
     U.tap(page, "e"); U.stroke(page, [(0.52, 0.50), (0.58, 0.50)]); U.tap(page, "e"); away()
