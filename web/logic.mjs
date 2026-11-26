@@ -1693,30 +1693,38 @@ export function freesBefore(profile, last, name, room = null) { // room: { free,
 // each step's total, lead and tail per size, frame count and memory profile, in paintaplate.step-times).
 const STEP_FAMILY = { fluid: "ltx", fluidfull: "ltx", erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
 // A step's time before it ever ran on this machine (stepGuess): the 96 GB GPU's reference (STAGES' ref, in seconds at
-// REF_SIZE), scaled to the plate, then to the GPU. A 16 GB GPU, the small profile, holds one family of models at a time,
-// so each job loads its models again: a lead in seconds per family, then a factor per step on the reference's scaled
-// seconds. Measured on a 16 GB GPU with 52 GB of RAM, horse.mp4 at
-// 1920 x 1080 and 121 frames: the lead is what a job spent outside its sampler or its tracking loop in ComfyUI's trace,
-// and each factor makes the rest. SDR to HDR grows faster than its pixels (`grow`, the power of its scale): 172 s at
-// 1280 x 704 and 606 s at 1920 x 1088, 121 frames each, the same workflow for a fluid shot and a render. The full-size shot grows the same way: 79.8 s at
-// 960 x 512, 156.6 s at 1280 x 704 and 576.4 s at 1920 x 1088. A composite also spends `fixed` seconds whatever its size:
-// comp took 7.8 s at 480 x 256 and 13.7 to 15.3 s at 960 x 544, review 13.5 s at 1280 x 704 and 23.2 to 26.0 s at
-// 1920 x 1088, 121 frames each. Other
-// profiles announce the references as they are. With SDR to HDR on, the full-size composite (review) and the export write
-// half-float EXR frames: `withHdr` multiplies their seconds (37.7 s and 14.6 s on the HDR test plate made from horse.mp4,
-// 1920 x 1080 and 121 frames). tests/js/render_estimates.test.mjs holds every measured step within 25%.
+// REF_SIZE), scaled to the plate, then to the GPU. A 16 GB GPU, the small profile, holds one family of models at a time:
+// a step after a job of another family loads its models first, which costs its family's `lead` in seconds; a step after
+// one of its own family finds them loaded (startsLoaded). Each factor makes the rest. Measured on a 16 GB GPU with 52 GB of
+// RAM, horse.mp4 at 1920 x 1080 and 121 frames: the lead is what a job spent outside its sampler or its tracking loop in
+// ComfyUI's trace. SDR to HDR grows faster than its pixels (`grow`, the power of its scale): 172 s at 1280 x 704 and 606 s
+// at 1920 x 1088, 121 frames each, the same workflow for a fluid shot and a render. The full-size shot grows the same way:
+// 79.8 s at 960 x 512, 156.6 s at 1280 x 704 and 576.4 s at 1920 x 1088. The matte's steps (track, trackfull, erase): 95.7 s
+// for « Track the paint, full size » and 45.6 s for « Track the object to clean » at 1920 x 1080. A composite also spends
+// `fixed` seconds whatever its size: comp took 7.8 s at 480 x 256 and 13.7 to 15.3 s at 960 x 544, review 13.5 s at
+// 1280 x 704 and 23.2 to 26.0 s at 1920 x 1088, 121 frames each. With SDR to HDR on, the full-size composite (review)
+// and the export write half-float EXR frames: `withHdr` multiplies their seconds (37.7 s and 14.6 s on the HDR test plate
+// made from horse.mp4, 1920 x 1080 and 121 frames). On a 96 GB GPU, the large profile, the full-size shot also grows faster
+// than its pixels: 146 s at 1920 x 1088 and 121 frames, 457 s at 960 x 544 and 1001 frames, 1402 s at 1920 x 1088 and 497
+// frames; its full-size composite grows slower: 51, 63 and 78 s for the same plates. The medium profile announces the
+// references as they are. tests/js/render_estimates.test.mjs and page3_estimates.test.mjs hold every measure within 25%.
 export const SLOWER = {
-  small: { lead: { ltx: 38, sam: 11, frames: 0 }, fluid: 1.1, fluidfull: 1.1, erase: 2.1, track: 1, trackfull: 1, clean: 3.35, shot: 1.64, cleanfull: 1.18,
+  small: { lead: { ltx: 38, sam: 11, frames: 0 }, fluid: 1.1, fluidfull: 1.45, erase: 4.2, track: 3.9, trackfull: 3.9, clean: 3.35, shot: 1.45, cleanfull: 1.18,
     full: 1.1, hdr: 1.166, comp: 0.42, review: 0.42, export: 0.235, grow: { hdr: 1.72, full: 1.72, fluidfull: 1.72 }, withHdr: { review: 1.9, export: 1.6 },
     fixed: { comp: 6.4, review: 3 } },
+  large: { full: 0.21, review: 0.18, grow: { full: 1.78 }, fixed: { full: 36, review: 42 } },
 };
 export const slower = (profile, id) => SLOWER[profile]?.[id] ?? 1;
 const BIG_STEPS = ["fluidfull", "full", "cleanfull", "cleanup", "hdrshot", "hdrplate", "hdrlayer", "hdr", "review", "export"]; // the steps made at the working size (cleanup: stageTwoGuess)
 export const stepSizeOf = (id, plate) => (BIG_STEPS.includes(id) ? plate.work : ["erase", "track", "trackfull"].includes(id) ? plate.track : plate.shot);
 const REF_SIZE = 928 * 512 * 97; // pixels times frames, where the references were measured
-export function stepGuess(id, ref, plate, profile, hdr = false) { // seconds: the reference scaled to this plate (BIG_STEPS at 0.73 of it), then to this GPU; hdr: the render makes SDR to HDR
+// Whether a step starts with its models loaded: the job before it, or the step before it in a render's plan, loaded the
+// same family. `before`: that job's or step's family (FAMILY, STEP_FAMILY), null when nothing ran before it.
+export const startsLoaded = (id, before) => !!before && STEP_FAMILY[id] === before;
+export const stepFamily = (id) => STEP_FAMILY[id] ?? null; // the models a step loads, null for a step that STEP_FAMILY does not list
+export function stepGuess(id, ref, plate, profile, hdr = false, before = null) { // seconds: the reference scaled to this plate (BIG_STEPS at 0.73 of it), then to this GPU; hdr: the render makes SDR to HDR; before: as startsLoaded
   const [w, h] = stepSizeOf(id, plate), scale = (w * h * plate.frames) / REF_SIZE * (BIG_STEPS.includes(id) ? 0.73 : 1);
-  return (SLOWER[profile]?.lead?.[STEP_FAMILY[id]] ?? 0) + (SLOWER[profile]?.fixed?.[id] ?? 0) + ref * Math.max(0.25, scale) ** (SLOWER[profile]?.grow?.[id] ?? 1) * slower(profile, id)
+  return (startsLoaded(id, before) ? 0 : SLOWER[profile]?.lead?.[STEP_FAMILY[id]] ?? 0) + (SLOWER[profile]?.fixed?.[id] ?? 0) + ref * Math.max(0.25, scale) ** (SLOWER[profile]?.grow?.[id] ?? 1) * slower(profile, id)
     * (hdr ? SLOWER[profile]?.withHdr?.[id] ?? 1 : 1);
 }
 // Whether the full-size clean plate pass starts from the preview's own pass: the Preview pass is on (previewCap, 0 when Off)
@@ -1725,8 +1733,9 @@ export const startsFromPreview = (plate, previewCap) => { if (!plate?.work || !p
 // The full-size clean plate pass when its first stage is the preview's own pass, made already: the pass less that stage
 // (ref: each step's reference, by id). Its seconds are kept as « cleanup », apart from the pass that makes both stages.
 export const stageTwoGuess = (ref, plate, profile) => Math.max(1, stepGuess("cleanfull", ref.cleanfull, plate, profile) - stepGuess("clean", ref.clean, plate, profile));
-// The name a step's seconds are kept under: with SDR to HDR on, the steps it slows (SLOWER's withHdr) are kept apart.
-export const timeId = (id, hdr) => (hdr && Object.values(SLOWER).some((p) => p.withHdr?.[id]) ? `${id}+hdr` : id);
+// The name a step's seconds are kept under: with SDR to HDR on, the steps it slows (SLOWER's withHdr) are kept apart; on a
+// GPU that frees memory between families, a step that starts with its models loaded (`loaded`, startsLoaded) too.
+export const timeId = (id, hdr, loaded = false) => `${id}${hdr && Object.values(SLOWER).some((p) => p.withHdr?.[id]) ? "+hdr" : ""}${loaded ? "+loaded" : ""}`;
 export function stepLeft({ est, run, first = null, last = null, tail = null }) { // seconds left in the step that runs; first and last: [seconds since its start, progress]
   const after = tail ?? est * 0.15;
   if (first && last && last[1] - first[1] >= 0.2 && last[0] > first[0]) { // the sampler's own pace, over a fifth of its steps or more

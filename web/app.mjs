@@ -3,7 +3,7 @@
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
-import { cancel, cancelQuietly, connect, hashHex, jobsNotRun, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl, WF } from "./comfy.mjs";
+import { cancel, cancelQuietly, connect, hashHex, jobsNotRun, lastJob, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl, WF } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache, outgrows } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSampled, boxPlace, inspectorRows, pointsQuery, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, autoChose, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, deepLine, deepMovie, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, fileStem, FINISH, finishFolder, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName, zipName, autoplays, nearestKey, resultLine, stopsForPreview, strokesLabel, upscaleChunk, upscaleChunks, upscalePass } from "./logic.mjs";
+import { askedText, asksName, autoChose, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, deepLine, deepMovie, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, fileStem, FINISH, finishFolder, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName, zipName, autoplays, nearestKey, resultLine, stopsForPreview, strokesLabel, upscaleChunk, upscaleChunks, upscalePass, FAMILY, startsLoaded, stepFamily } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, exportDone, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_ALONE, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -3001,24 +3001,26 @@ const TIMES_KEY = "paintaplate.step-times"; // only the steps whose jobs ran (lo
 let TIMES = {};
 try { TIMES = JSON.parse(localStorage.getItem(TIMES_KEY) ?? "{}") ?? {}; } catch { TIMES = {}; }
 const stepSize = (id) => stepSizeOf(id, S.plate);
-const stepKey = (id, hdr = false) => timeKey(timeId(id, hdr), stepSize(id), S.plate.frames, S.memoryProfile.name);
+const stepKey = (id, hdr = false, loaded = false) => timeKey(timeId(id, hdr, loaded), stepSize(id), S.plate.frames, S.memoryProfile.name);
+const familyNow = () => FAMILY[lastJob()] ?? null; // the models on the GPU as the next job starts: the last job's
+const loadedFor = (id, before) => !!S.memoryProfile.frees && startsLoaded(id, before); // its times are kept apart (logic.timeId)
 const makesHdr = (skip) => !!skip && !skip.has("hdrshot"); // SDR to HDR before the composite (a plate that holds values above 1.0) slows the steps after it
 const timeStep = (id) => (id === "cleanfull" && startsFromPreview(S.plate, S.previewCap) ? "cleanup" : id); // the name a step's seconds go under: stage 2 alone apart from both stages
 
-function estimate(id, skip) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess. skip: the render's steps left out
+function estimate(id, skip, before = familyNow()) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess. skip: the render's steps left out; before: the family loaded as it starts (logic.startsLoaded)
   if (UP_IDS.has(id)) return upscaleGuess(id);
-  const hdr = makesHdr(skip), t = timeStep(id);
-  if (S.took[timeId(t, hdr)]) return S.took[timeId(t, hdr)];
-  const known = TIMES[stepKey(t, hdr)];
+  const hdr = makesHdr(skip), t = timeStep(id), loaded = loadedFor(t, before);
+  if (S.took[timeId(t, hdr, loaded)]) return S.took[timeId(t, hdr, loaded)];
+  const known = TIMES[stepKey(t, hdr, loaded)];
   if (known?.total) return known.total;
-  return t === "cleanup" ? stageTwoGuess(REF, S.plate, S.memoryProfile.name) : stepGuess(id, REF[id], S.plate, S.memoryProfile.name, hdr);
+  return t === "cleanup" ? stageTwoGuess(REF, S.plate, S.memoryProfile.name) : stepGuess(id, REF[id], S.plate, S.memoryProfile.name, hdr, before);
 }
 
 async function step(r, id, work, store = r) { // run one step of a render, timed and shown; preview steps keep their result per size
   if (store.done?.[id] !== undefined || r.skip?.has(id)) return;
   if (S.running || S.queued || pickRender() !== r) throw YIELD; // an edit, or a step of a more urgent render, goes first
-  const t0 = performance.now(), guess = Math.round(estimate(id, r.skip)), notRun = jobsNotRun();
-  S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null, sized: UP_IDS.has(id) ? upKey(r) : null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step; sized: the size one of Upscale's steps works at
+  const t0 = performance.now(), before = familyNow(), guess = Math.round(estimate(id, r.skip, before)), notRun = jobsNotRun();
+  S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null, sized: UP_IDS.has(id) ? upKey(r) : null, page3Before: before }; // page3Before: the family loaded as it started // first, last: [seconds since t0, progress] at the sampler's first and latest step; sized: the size one of Upscale's steps works at
   stagesUI();
   log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: about ${span(guess)}.`);
   const stage = S.stage;
@@ -3031,9 +3033,9 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   dropLive();
   const dt = (performance.now() - t0) / 1000, t = timeStep(id);
   if (jobsNotRun() === notRun && !UP_IDS.has(id)) { // a step whose jobs were answered without running (the job index, ComfyUI's cache) keeps no time; Upscale's depends on the plate's windows the index holds (upscaleGuess)
-    TIMES = remember(TIMES, stepKey(t, makesHdr(r.skip)), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
+    TIMES = remember(TIMES, stepKey(t, makesHdr(r.skip), loadedFor(t, before)), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
     try { localStorage.setItem(TIMES_KEY, JSON.stringify(TIMES)); } catch { /* a private window: the session's own times still serve */ }
-    S.took[timeId(t, makesHdr(r.skip))] = dt;
+    S.took[timeId(t, makesHdr(r.skip), loadedFor(t, before))] = dt;
   }
   (store.done ??= {})[id] = dt; (store.at ??= {})[id] = ++stepSeq;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
@@ -3680,10 +3682,23 @@ async function exportLog() { // the log's export (logic.logReport): the log with
 }
 $("#log-export").addEventListener("click", exportLog);
 
-function stepSecs(st, skip) { // seconds a step has left: its estimate, less what the step at work has run
-  const est = estimate(st.id, skip);
+function stepSecs(st, skip, before) { // seconds a step has left: its estimate, less what the step at work has run; before: as estimate
+  const est = estimate(st.id, skip, before);
   return S.stage?.id === st.id && S.stage.key === S.heroKey
-    ? stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(timeStep(st.id), makesHdr(skip))]?.tail ?? null }) : est;
+    ? stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(timeStep(st.id), makesHdr(skip), loadedFor(timeStep(st.id), before))]?.tail ?? null }) : est;
+}
+
+// The family loaded as each step of a render starts (logic.startsLoaded), in the order they run: the step at work keeps the
+// one it started with, each later step takes the family of the step before it, and the first takes the last job's.
+function familiesBefore(r, skip) {
+  const out = {};
+  let before = familyNow();
+  for (const st of STAGES) {
+    if (skip?.has(st.id) || doneOf(r, st) !== undefined) continue;
+    out[st.id] = S.stage?.id === st.id && S.stage.key === r?.key ? S.stage.page3Before : before;
+    before = stepFamily(st.id) ?? before;
+  }
+  return out;
 }
 
 function renderLeft(finalToo = false) { // seconds until the preview, or the full-size composite (and the export once asked for), is ready
@@ -3692,11 +3707,12 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
   if (!p || !S.heroKey || (finalToo ? (exporting ? r?.exported : fullSizeMade(r)) : previewOf(r)?.comp || r?.review)) return 0;
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done" && upToDate(e));
   const skip = r?.skip ?? plan({ key: S.heroKey }, active).skip;
+  const before = familiesBefore(r, skip);
   let t = 0;
   for (const st of STAGES) {
     if (st.final && !finalToo) break;
     if (skip.has(st.id) || doneOf(r, st) !== undefined || (st.onDemand && !exporting)) continue;
-    t += stepSecs(st, skip);
+    t += stepSecs(st, skip, before[st.id]);
   }
   return t;
 }
@@ -3759,6 +3775,7 @@ function stagesUI() {
   list.hidden = !edits;
   if (!p || !edits) { keepRows(list, []); $("#render-left").textContent = ""; return timelineBar(); }
   const planned = r?.skip ? r : plan({ key: S.heroKey }, active), skip = planned.skip;
+  const before = familiesBefore(r, skip); // the family loaded as each step starts (logic.startsLoaded)
   const pick = (li, id, label) => { // a finished pass with a picture: a click shows it on every frame, a second click the latest
     li.classList.add("pick");
     li.title = `${label}: click to display it. ${BACK_TO_LATEST}.`;
@@ -3777,7 +3794,7 @@ function stagesUI() {
     li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time"></span>';
     li.children[1].textContent = labelOf(st, planned); // as planned, before the render exists too
     li.children[2].textContent = from ? `from v${from}` : took !== undefined ? span(took) : now ? `${Math.round(S.stage.progress * 100)}%`
-      : `~${span(estimate(st.id, skip))}`;
+      : `~${span(estimate(st.id, skip, before[st.id]))}`;
     const movie = took !== undefined ? passMovie(st.id, r, previewOf(r), { log: logSpace(), data: matteSpace() }, upOf(r)) : null;
     if (movie) {
       pick(li, st.id, labelOf(st, planned).toLowerCase());
@@ -3793,7 +3810,7 @@ function stagesUI() {
   keepRows(list, rows);
   // the status line: the class of steps at work, the preview, the full size or Finish, and the time until it is done (logic.renderStatus)
   const due = STAGES.filter((st) => !skip.has(st.id) && (!st.onDemand || S.wantDownload)), cls = stepClasses(due);
-  $("#render-left").textContent = renderStatus(due.map((st) => ({ cls: cls[st.id], done: doneOf(r, st) !== undefined, left: stepSecs(st, skip) })),
+  $("#render-left").textContent = renderStatus(due.map((st) => ({ cls: cls[st.id], done: doneOf(r, st) !== undefined, left: stepSecs(st, skip, before[st.id]) })),
     { exporting: !!S.wantDownload, exported: !!r?.exported, busy: S.stage?.key === S.heroKey });
   timelineBar();
 }
@@ -3803,9 +3820,10 @@ function timelineBar() { // the line under the timeline: the preview in gold, th
   bar.className = "tl-render";
   if (!S.plate || !S.heroKey || !r) { bar.style.width = "0"; if (S.heroKey && stale()) bar.classList.add("stale"); return; }
   const steps = STAGES.filter((st) => !r.skip?.has(st.id) && (!st.onDemand || S.wantDownload || r.exported));
-  const total = steps.reduce((a, st) => a + estimate(st.id, r.skip), 0);
-  let done = steps.reduce((a, st) => a + (doneOf(r, st) !== undefined ? estimate(st.id, r.skip) : 0), 0);
-  if (S.stage?.key === S.heroKey) done += estimate(S.stage.id, r.skip) * S.stage.progress;
+  const before = familiesBefore(r, r.skip);
+  const total = steps.reduce((a, st) => a + estimate(st.id, r.skip, before[st.id]), 0);
+  let done = steps.reduce((a, st) => a + (doneOf(r, st) !== undefined ? estimate(st.id, r.skip, before[st.id]) : 0), 0);
+  if (S.stage?.key === S.heroKey) done += estimate(S.stage.id, r.skip, S.stage.page3Before) * S.stage.progress;
   bar.style.width = `${Math.round((done / Math.max(1, total)) * 100)}%`;
   if (r.review) bar.classList.add("ready");
   else if (previewOf(r)?.comp) bar.classList.add("final"); // the preview is made: the full-size passes run

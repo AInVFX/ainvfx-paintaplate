@@ -58,6 +58,7 @@ async function indexed(key) { // the outputs a finished job with this key made, 
 export const onNotice = (fn) => { notice = fn; }; // what the client has to tell the person (a retry, for example)
 let freeFirst = () => null, lastPosted = null; // the page's rule (logic.freesBefore): why ComfyUI's memory is freed before this job, or null, or { why, keep } to keep its cache; and the workflow of the last job posted
 export const onFree = (fn) => { freeFirst = fn; };
+export const lastJob = () => lastPosted; // the workflow of the last job posted: its models are those on the GPU (logic.FAMILY)
 let stopped = () => false; // the page's rule (design rule 13): whether a stop is in force for a job of this kind. Such a job is not posted
 export const onStop = (fn) => { stopped = fn; };
 const FREE_SETTLE_MS = 600; // ComfyUI's worker applies a free when it wakes: a job posted in the same instant would run first

@@ -691,7 +691,7 @@ test("the time left in a step follows the sampler's own pace, not the time the m
   assert.equal(stepLeft({ est: 42, run: 80, first: [37, 0.125], last: [51, 1], tail: 6 }), 1); // never less than a second
   assert.equal(stepLeft({ est: 42, run: 60 }), 4.2); // a step with no progress, past its estimate: a tenth of it
   assert.equal(slower("small", "full"), 1.1); // render_estimates.test.mjs holds the steps measured on a 16 GB GPU
-  assert.equal(slower("large", "full"), 1);
+  assert.equal(slower("medium", "full"), 1); // the large profile's factors: page3_estimates.test.mjs
   const key = timeKey("shot", [640, 352], 121, "small");
   assert.equal(key, "shot|640x352x121|small");
   let times = remember({}, key, { total: 57.6, lead: 37, tail: 6, at: 1 });
