@@ -1064,12 +1064,17 @@ def fluid16_flow(browser, port):
     names = zipfile.ZipFile(dl.value.path()).namelist()
     check(zip_rows.files(names, "plate_hdr", (".exr",)) and zip_rows.files(names, "fluid_shot_full_size") and all(n.rsplit("/", 1)[-1].startswith("fluid_") for n in names),
           f"on again, the zip holds the HDR frames and the shot as ProRes 4444 XQ, named after the blank plate: {names[:3]}")
+    # the page's own effect before the count: the HDR step displayed again and playing, so every draw counted is a playing one
+    page.wait_for_function("[...document.querySelectorAll('#stages li.shown')].some((li) => li.textContent.includes('Plate, HDR'))", timeout=30000)
+    playing = "document.querySelector('#play-btn').classList.contains('playing')"
+    if not poll(page, lambda: page.evaluate(playing), 3):  # a result plays as it is made; one made before waits for Space
+        page.click("#play-btn")
+    page.wait_for_function(playing, timeout=10000)
     page.evaluate("""() => { const v = document.querySelector('canvas[data-precision]'); window.__prec = [];
       new MutationObserver(() => window.__prec.push(v.dataset.precision)).observe(v, { attributes: true, attributeFilter: ['data-precision'] }); }""")
-    if not page.evaluate("document.querySelector('#play-btn').classList.contains('playing')"):  # a result plays as it is made
-        page.click("#play-btn")
-    page.wait_for_function("window.__prec.length >= 34", timeout=30000); page.click("#play-btn")  # two rounds of its 17 frames
-    seen = page.evaluate("window.__prec")
+    page.wait_for_function("window.__prec.length >= 34", timeout=30000)  # two rounds of its 17 frames
+    seen = page.evaluate("window.__prec")  # read before the pause, whose frame shows at full precision
+    page.click("#play-btn")
     flips = sum(1 for a, b in zip(seen, seen[1:]) if a != b)
     check(flips <= 1, f"playing the HDR result, its EXR frames and its 8-bit movie never alternate: {flips} changes in {len(seen)} draws")
     page.wait_for_function("document.querySelector('canvas[data-precision]').dataset.precision === 'float'", timeout=30000)
