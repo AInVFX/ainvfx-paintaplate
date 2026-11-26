@@ -1,4 +1,4 @@
-// Models and licences: which models made the result on show, and every model with its licence, from the registry
+// Models and licences: which models made the result displayed, and every model with its licence, from the registry
 // web/models.json. The models behind a result come from the workflows that made it: each workflow's own files, read from
 // its API JSON (the loaders' file names), matched to the registry. Pure functions, tested in tests/js/models.test.mjs.
 

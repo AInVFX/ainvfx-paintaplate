@@ -16,7 +16,7 @@ test("the next line that succeeds replaces a fault that is over, in the normal c
   assert.deepEqual(statusOf("Edit 1: done in 10.3 s.\n  Seed 259831255.", "warn"), { text: "Edit 1: done in 10.3 s.", level: "" });
 });
 
-test("with no fault on show, the log leaves the status line to the code that makes each event", () => {
+test("with no fault displayed, the log leaves the status line to the code that makes each event", () => {
   assert.equal(statusOf("Edit 1: done in 10.3 s.", ""), null);
   assert.equal(statusOf("Render v1: 1 edit (Light 1), seed 259831255, shot preview off."), null);
 });
