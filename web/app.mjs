@@ -1993,6 +1993,7 @@ function dragKey(e, key, el) { // a keyframe dragged along the timeline lands on
     el.removeEventListener("pointermove", move);
     S.draggingKey = false;
     if (moved) hud(`Keyframe moved to frame ${S.plate.first + key.frame}.`); else { pause(); seek(key.frame); }
+    if (moved && !keying()) editFluid(); // a moved keyframe changes the fluid shot: it is selected, as its pencil selects it, so Enter makes it again on its seed
     keysUI(true);
   }, { once: true });
 }
