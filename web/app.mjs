@@ -2876,7 +2876,8 @@ const gridAt = (w) => gridGrow(w, S.plate.spec.width, grow(S.plate.spec.width, t
 // it made at once. `final` steps run at full size right after them: the passes, then the full-size composite (the review) the viewer plays.
 // Finish's steps follow: SDR to HDR's (`hdr`), then Upscale's (`up`), each of Upscale's results kept per upscaled size, as a
 // preview step keeps one per preview size.
-// The export (`onDemand`) writes the result for compositing software, only when Export asks for it.
+// The export (`onDemand`) writes the result for compositing, only when Export asks for it. It has no row in the Render panel
+// (stagesUI): the status line says « export … », then « exported », and the log gives its lines.
 const STAGES = [
   { id: "fluid", label: "Fluid shot, preview", ref: 25, preview: true }, { id: "fluidfull", label: "Fluid shot, full size", ref: 22, final: true }, // measured on a 96 GB GPU
   { id: "erase", label: "Track the object to clean", ref: 6 }, { id: "clean", label: "Clean plate pass, preview", ref: 10, preview: true },
@@ -3256,7 +3257,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       text: r.hdrAfter && r.hdrFrames ? `${p.frames} half-float EXR frames in ACES2065-1, in ${r.hdrFrames.slice(7).replace(/\/[^/]*$/, "")}.` // SDR to HDR's frames are the result
         : outputText("export", x.done, "export") ?? "",
       plateText: outputText("export", x.done, "export") ?? "", // the switch may turn after
-      matte: matte ? viewUrl(matte) : null, layer: x.layer, // the Export row shows its matte
+      matte: matte ? viewUrl(matte) : null, layer: x.layer, // the X-ray shows its matte (xray.mjs)
       ...x.parts };
   });
   S.exported = r.exported;
@@ -3673,7 +3674,7 @@ function stagesUI() {
   $("#render").hidden = !p; // its Preview menu shows from a blank plate on
   list.hidden = !edits;
   if (!p || !edits) { keepRows(list, []); $("#render-left").textContent = ""; return timelineBar(); }
-  const planned = r?.skip ? r : plan({ key: S.heroKey }, active), skip = planned.skip, later = (st) => st.onDemand && !S.wantDownload; // the export waits for Export
+  const planned = r?.skip ? r : plan({ key: S.heroKey }, active), skip = planned.skip;
   const pick = (li, id, label) => { // a finished pass with a picture: a click shows it on every frame, a second click the latest
     li.classList.add("pick");
     li.title = `${label}: click to display it. ${BACK_TO_LATEST}.`;
@@ -3685,14 +3686,14 @@ function stagesUI() {
   first.className = "done" + (S.pass === "first" ? " shown" : "");
   first.innerHTML = '<span class="dot"></span><span class="name">Edited first frame</span><span class="time">edit</span>';
   pick(first, "first", "the first frame");
-  const rows = [...(active.some((e) => e.tool !== "fluid") ? [first] : []), ...stepsInOrder(r, skip).map((st) => { // the first frame an edit's pass made: a fluid shot alone has none
+  const rows = [...(active.some((e) => e.tool !== "fluid") ? [first] : []), ...stepsInOrder(r, skip).filter((st) => !st.onDemand).map((st) => { // the first frame an edit's pass made: a fluid shot alone has none
     const li = document.createElement("li"), took = doneOf(r, st), from = storeOf(r, st)?.taken?.[st.id];
     const now = S.stage?.id === st.id && S.stage.key === S.heroKey;
-    li.className = took !== undefined ? "done" : now ? "now" : later(st) ? "later" : "";
+    li.className = took !== undefined ? "done" : now ? "now" : "";
     li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time"></span>';
     li.children[1].textContent = labelOf(st, planned); // as planned, before the render exists too
     li.children[2].textContent = from ? `from v${from}` : took !== undefined ? span(took) : now ? `${Math.round(S.stage.progress * 100)}%`
-      : later(st) ? "on Export" : `~${span(estimate(st.id, skip))}`;
+      : `~${span(estimate(st.id, skip))}`;
     const movie = took !== undefined ? passMovie(st.id, r, previewOf(r), { log: logSpace(), data: matteSpace() }, upOf(r)) : null;
     if (movie) {
       pick(li, st.id, labelOf(st, planned).toLowerCase());

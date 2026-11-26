@@ -1427,16 +1427,16 @@ export function dabFlow(peak, spacingOverRadius) {
 
 // ---------- The passes displayed ----------
 // Each finished step that made a picture shows on every frame from the Render panel, one render of the shot at a time:
-// where its movie sits, in the render (`r`) or in its preview size (`pv`), as a path of keys. The tracking steps and the
-// export show their matte as a grey movie, drawn through the config's data colour space (`spaces.data`): it shows its own
+// where its movie sits, in the render (`r`) or in its preview size (`pv`), as a path of keys. The tracking steps
+// show their matte as a grey movie, drawn through the config's data colour space (`spaces.data`): it shows its own
 // values, with no view's tone mapping.
 export const PASSES = { fluid: ["pv", "fluid.movie"], fluidfull: ["r", "fluid.movie"], erase: ["r", "erased.found.movie_a"], clean: ["pv", "cleanRaw"], shot: ["pv", "raw"], track: ["pv", "painted.found.movie_b"],
   comp: ["pv", "comp"], cleanfull: ["r", "cleanRaw"], full: ["r", "raw"], trackfull: ["r", "full.found.movie_b"], hdrshot: ["r", "hdrMovie"],
   hdrplate: ["r", "hdrPlateMovie"], hdrlayer: ["r", "hdrLayerMovie"], hdr: ["r", "hdrMovie"],
-  review: ["r", "play"], export: ["r", "exported.matte"], upplate: ["up", "upplate"], uplayer: ["up", "uplayer"], upcomp: ["up", "upcomp"] };
+  review: ["r", "play"], upplate: ["up", "upplate"], uplayer: ["up", "uplayer"], upcomp: ["up", "upcomp"] };
 // SDR to HDR's steps: where each keeps its EXR frames
 const HDR_FRAMES_OF = { hdrshot: "hdrFrames", hdrplate: "hdrPlate", hdrlayer: "hdrLayer", hdr: "hdrFrames" };
-export const MATTE_PASSES = new Set(["erase", "track", "trackfull", "export"]);
+export const MATTE_PASSES = new Set(["erase", "track", "trackfull"]);
 const keyPath = (o, path) => path.split(".").reduce((x, k) => x?.[k], o);
 export function passMovie(id, r, pv, spaces = {}, up = null) { // { url, space, frames } of a finished step, or null; `up`: what Upscale's steps made at the size asked for
   const at = PASSES[id], store = at && (at[0] === "pv" ? pv : id === "review" ? r?.compResult ?? r : r); // the composite's own result, whichever is displayed (app.plan)

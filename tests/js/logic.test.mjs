@@ -444,17 +444,17 @@ import { lightIntent } from "../../web/logic.mjs";
 
 import { dataSpace, MATTE_PASSES } from "../../web/logic.mjs";
 
-test("the tracking steps and the export show their matte, grey, through the config's data colour space", () => {
+test("the tracking steps show their matte, grey, through the config's data colour space; the export has no row", () => {
   const r = { erased: { found: { movie_a: "erase.mp4" } }, full: { found: { movie_a: "erase.mp4", movie_b: "paint_full.mp4" } },
     exported: { matte: "export_matte.mp4" } }, pv = { painted: { found: { movie_b: "paint_640.mp4" } } };
   const spaces = { log: "ACEScct", data: "Raw" };
   assert.deepEqual(passMovie("erase", r, pv, spaces), { url: "erase.mp4", space: "Raw", frames: null });
   assert.deepEqual(passMovie("track", r, pv, spaces), { url: "paint_640.mp4", space: "Raw", frames: null });
   assert.deepEqual(passMovie("trackfull", r, pv, spaces), { url: "paint_full.mp4", space: "Raw", frames: null });
-  assert.deepEqual(passMovie("export", r, pv, spaces), { url: "export_matte.mp4", space: "Raw", frames: null });
+  assert.equal(passMovie("export", r, pv, spaces), null, "the export has no row to display: the X-ray shows its matte");
   assert.equal(passMovie("trackfull", {}, pv, spaces), null, "no full-size paint matte yet: no row to click");
   assert.equal(passMovie("erase", r, pv).space, "@model", "a config without a data space: the model space");
-  assert.deepEqual([...MATTE_PASSES].sort(), ["erase", "export", "track", "trackfull"]);
+  assert.deepEqual([...MATTE_PASSES].sort(), ["erase", "track", "trackfull"]);
   const h = { hdrMovie: "hdr.mp4", hdrFrames: "output:p/v1/full/hdr/f_#####_.exr" };
   assert.deepEqual(passMovie("hdr", h, pv, { log: "ACEScct", hdr: "ACES2065-1" }),
     { url: "hdr.mp4", space: "ACEScct", frames: "output:p/v1/full/hdr/f_#####_.exr", framesSpace: "ACES2065-1" }, "SDR to HDR's row: its EXR frames, as the review row has its own");

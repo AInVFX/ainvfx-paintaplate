@@ -131,7 +131,7 @@ def load(name, folder=None):
 # an erase matte: no plate under a shot to compare with, and no changed pixels to start from; a video plate's review:
 # no EXR frames, its movie is the plate's own quality; no SDR-to-HDR shot: the SDR shot goes on as it is; SDR to HDR with
 # no plate size (a shot): its HDR frames go on as they are; no movie
-# asked of a matte, an export's matte or a fluid shot's control video (the Render panel's rows show them; the ComfyUI
+# asked of a matte, an export's matte or a fluid shot's control video (the Render panel's rows and the X-ray show them; the ComfyUI
 # graph of the Export dialog leaves them out).
 OPTIONAL = {"fit_keep": ("paint_matte",), "fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",),
             "follow_element": ("seed",), "follow_base": ("base",), "follow_named": ("name_request",), "follow_removed": ("removed_request",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "plate_level": ("plate_width", "plate_height"),
@@ -697,7 +697,7 @@ def export():
     matte_frames = g("MaskToImage", mask=fit[1])
     g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed (16-bit PNG)", _output="matte", images=matte_frames, frames=load[4],
       format="png16", filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))
-    movie = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Matte movie (grey): the Export row shows it", _output="matte_movie", images=matte_frames,
+    movie = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Matte movie (grey): the X-ray shows it", _output="matte_movie", images=matte_frames,
               frames=load[4], fps=load[3], crf=18, filename_prefix=Slot("matte_video_prefix", ""))
     g.link_slot(movie, "images", "export_matte_movie")
     g.save("export")

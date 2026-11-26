@@ -4,7 +4,7 @@ job. Each stage keeps its own upscaled results, as its set has its own folder. I
 in a small machine's memory."""
 RESTS = "['full size ready', 'finish ready'].includes(document.querySelector('#render-left').textContent) || document.querySelector('#status').textContent.startsWith('Error')"
 NAMES = "els => els.map((e) => e.querySelector('.name').textContent)"
-finish = lambda rows: [x for x in rows[rows.index("Composite, full size") + 1:] if x != "Export"] if "Composite, full size" in rows else []  # noqa: E731  # the Finish steps' rows
+finish = lambda rows: rows[rows.index("Composite, full size") + 1:] if "Composite, full size" in rows else []  # noqa: E731  # the Finish steps' rows
 SIZE = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
 
 

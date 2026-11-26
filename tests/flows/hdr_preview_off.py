@@ -15,7 +15,7 @@ def run(browser, port, U):
     page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("Composite, HDR: done in"), 240000, "SDR to HDR's steps, with no preview")
     page.wait_for_function(RESTS, timeout=60000)
-    rows = [x for x in page.eval_on_selector_all("#stages li", NAMES) if x != "Export"]
+    rows = page.eval_on_selector_all("#stages li", NAMES)
     U.check(not any(", preview" in x for x in rows) and rows[-4:] == ["Composite, full size", "Plate, HDR", "Layer, HDR", "Composite, HDR"],
             f"Preview off: no preview step, and SDR to HDR's steps after the full-size composite: {rows}")
     page.click("#export-btn")

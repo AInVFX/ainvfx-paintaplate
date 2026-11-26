@@ -486,7 +486,7 @@ async def execute(pid, prompt):
                 save_mp4(shot, f"{v[part + '_prefix']}/plate", spec["fps"])
                 o[outs[part]] = {"files": [{"filename": "plate_00001_.webm", "subfolder": v[part + "_prefix"], "type": "output"}]}
         del frames, shot
-        if "matte_movie" in outs:  # the matte the composite used, as a grey movie: the X-ray reads a composite's small, the Export row shows the export's
+        if "matte_movie" in outs:  # the matte the composite used, as a grey movie: the X-ray reads a composite's small, and the export's
             o[outs["matte_movie"]] = {"images": [save_mp4((np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes), v["matte_video_prefix"], spec["fps"], side=320 if "video" in outs else 0)], "animated": [True]}
         if "video" in outs:
             o[outs["video"]] = {"images": [save_mp4(out, v["video_prefix"], spec["fps"])], "animated": [True]}

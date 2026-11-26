@@ -198,7 +198,6 @@ body.plate-alone .hud.corner { left: auto; top: auto; right: 14px; bottom: 10px;
 #stages li.done .dot { background: var(--ok); border-color: var(--ok); }
 #stages li.now { color: var(--text); }
 #stages li.now .dot { border-color: var(--gold); background: radial-gradient(var(--gold) 45%, transparent 50%); }
-#stages li.later .dot { border-style: dashed; }
 #stages .time { font-variant-numeric: tabular-nums; font-size: 12px; }
 #stages li.now .time { color: var(--gold); }
 dialog .check { display: flex; align-items: baseline; gap: 8px; color: var(--text); margin: 9px 0; }

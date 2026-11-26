@@ -72,8 +72,8 @@ def frames_seen(page, keys=("Home", "ArrowRight", "End")):  # the picture on the
 
 def pass_rows(page, U):
     """The Render panel's rows for mattes and fluid shots. On a video plate with a paint and an erase: the erase matte, the
-    paint matte at the preview and at full size, then after Export the export's matte, each a grey movie its row shows on
-    every frame. A fluid shot: its keyframes (the control video), its shot and its SDR to HDR, with the keyframes closed
+    paint matte at the preview and at full size, each a grey movie its row shows on
+    every frame. Export adds no row. A fluid shot: its keyframes (the control video), its shot and its SDR to HDR, with the keyframes closed
     and open. A second click, or Esc, gives the latest result back."""
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
@@ -101,12 +101,9 @@ def pass_rows(page, U):
     page.click("#export-btn")
     with page.expect_download(timeout=240000):
         page.click("#x-go")
-    page.wait_for_function("[...document.querySelectorAll('#stages li.pick .name')].some((e) => e.textContent === 'Export')", timeout=60000)
-    page.click("#stages li.pick:has-text('Export')"); page.wait_for_timeout(800)
-    seen = frames_seen(page)
-    U.check(shown(page) == ["Export"] and all(x["spread"] <= 12 and x["white"] > 0 for x in seen),
-            f"after Export, its row shows the export's matte, grey, on every frame: {shown(page)}, {seen}")
-    page.keyboard.press("Escape"); page.wait_for_timeout(500)
+    page.wait_for_function("document.querySelector('#render-left').textContent === 'exported'", timeout=60000)
+    names = page.eval_on_selector_all("#stages li .name", "els => els.map(e => e.textContent)")
+    U.check("Export" not in names, f"Export adds no row to the Render panel: {names}")
     page.keyboard.press("?"); page.click("#help [role=tab][data-help=models]")  # Help > Models and licences
     page.wait_for_function("!!document.querySelector('#models').dataset.shown", timeout=20000)
     named = page.evaluate("document.querySelector('#models').dataset.shown").split(",")

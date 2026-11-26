@@ -448,6 +448,8 @@ def generate_flow(browser, port):
     with page.expect_download(timeout=120000) as dl:
         page.click("#export-btn"); page.check("#x-matte"); page.click("#x-go")  # the matte, beside the composite the dialog opens on
     zipped = zipfile.ZipFile(dl.value.path()).namelist()
+    steps = page.eval_on_selector_all("#stages li .name", "els => els.map(e => e.textContent)")
+    check("Export" not in steps and page.text_content("#render-left") == "exported", f"the export has no row in the Render panel, and the status says it is done: {steps}, {page.text_content('#render-left')!r}")
     lines = log_lines(page)
     check(zip_rows.composite(zipped) and zip_rows.files(zipped, "matte") and any(line.startswith("Export: done") for line in lines),
           f"Export writes the result and its matte when pressed, then the zip downloads: {sorted({n.split('/')[0] for n in zipped})}")

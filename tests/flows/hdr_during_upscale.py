@@ -4,7 +4,7 @@ Upscale's jobs is held 8 s on the mock, so the switch meets it running. 1600 x 8
 RESTS = "['full size ready', 'finish ready'].includes(document.querySelector('#render-left').textContent) || document.querySelector('#status').textContent.startsWith('Error')"
 NAMES = "els => els.map((e) => e.querySelector('.name').textContent)"
 SIZE = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
-finish = lambda rows: [x for x in rows[rows.index("Composite, full size") + 1:] if x != "Export"] if "Composite, full size" in rows else []  # noqa: E731  # the Finish steps' rows
+finish = lambda rows: rows[rows.index("Composite, full size") + 1:] if "Composite, full size" in rows else []  # noqa: E731  # the Finish steps' rows
 
 
 def run(browser, port, U):

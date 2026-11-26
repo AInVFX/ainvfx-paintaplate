@@ -3,7 +3,7 @@ HDR runs, and the render rests at « full size ready ». On again: its steps run
 on the mock, so the switch meets it running."""
 RESTS = "['full size ready', 'finish ready'].includes(document.querySelector('#render-left').textContent) || document.querySelector('#status').textContent.startsWith('Error')"
 NAMES = "els => els.map((e) => e.querySelector('.name').textContent)"
-finish = lambda rows: [x for x in rows[rows.index("Composite, full size") + 1:] if x != "Export"] if "Composite, full size" in rows else []  # noqa: E731  # the Finish steps' rows
+finish = lambda rows: rows[rows.index("Composite, full size") + 1:] if "Composite, full size" in rows else []  # noqa: E731  # the Finish steps' rows
 
 
 def run(browser, port, U):
