@@ -1,6 +1,6 @@
 """Finish > Upscale on a plate with no edit, with SDR to HDR on: the plate alone's render makes « Plate, HDR », then « SDR to HDR,
 upscaled », SDR to HDR's frames upscaled with no Export, which the player shows at their own size. Export posts no Upscale job, and
-the zip holds them under upscaled/ beside the frames at the plate's size, with no upscaled plate. It asks for 1600 x 880, a size
+the zip holds them, named after their step, beside the frames at the plate's size, with no upscaled plate. It asks for 1600 x 880, a size
 above the plate's 1280 x 704 that the mock holds in a small machine's memory."""
 import zipfile
 import zip_rows  # noqa: E402

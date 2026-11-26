@@ -1,6 +1,6 @@
 """Finish > Upscale on a fluid shot alone: once the fluid shot is made, its render has one more step, « Plate, upscaled »,
 which runs with no Generate and no Export, and which the player shows at its own size: 3456 x 2160 for a 512 x 320 blank plate, the
-short side at most 2160. Export posts no Upscale job, and the zip holds the upscaled shot under upscaled/, beside the shot in the
+short side at most 2160. Export posts no Upscale job, and the zip holds the upscaled shot, named after its step, beside the shot in the
 blank plate's format."""
 import zipfile
 import zip_rows  # noqa: E402
