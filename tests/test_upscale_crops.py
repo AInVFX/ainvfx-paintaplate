@@ -1,5 +1,5 @@
 """tests/upscale_compare.py crops: the same frame of several results, the same box of each at full size, side by side, for
-the sheet of a half against a third; and tests/upscale_plate.py's source at a third."""
+a sheet; and the filter tests/upscale_plate.py sizes a window with, as the page's."""
 import os
 import sys
 import tempfile

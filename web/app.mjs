@@ -21,7 +21,7 @@ import { plateIdentity } from "./logic.mjs"; // the job index: the plate's ident
 import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, nearSize, sameMachine, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
 import { readBack } from "./canvas.mjs"; // the viewer: a few pixels of the view, read without moving it off the GPU
 import { deepStopped } from "./logic.mjs"; // the viewer: the full-precision frames' failure, in red
-import { hdrAfterComposite } from "./logic.mjs"; // the render: a Light edit's new light in HDR
+import { hdrAfterComposite } from "./logic.mjs"; // the render: SDR to HDR on the composite's elements, after it
 import { renderStatus, stepClasses } from "./logic.mjs"; // the Render panel's status line and its planned steps
 
 const $ = (q) => document.querySelector(q);
