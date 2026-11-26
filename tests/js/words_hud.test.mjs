@@ -27,7 +27,7 @@ test("once a plate is open, the status line says the edit is described in the te
 });
 
 test("Generate's HUD line names the shot as its tooltip does, and the preview composite's line says Export can write now", () => {
-  assert.ok(app.includes('"Generate (Enter) makes the edit, then the shot. Esc cancels."'));
+  assert.ok(app.includes('"Press Enter to make the edit, then the shot. Press Esc to cancel."'));
   assert.ok(app.includes("The full-size passes follow; Export can write the result now."));
   assert.ok(!app.includes("at any time"));
 });

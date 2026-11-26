@@ -27,8 +27,8 @@ class ReadmeWords(unittest.TestCase):
     def test_the_first_edit_says_what_the_help_says(self):
         self.assertIn("Sequence files and folders of frames are supported.", self.steps[0])
         self.assertIn("Sequence files and folders of frames are supported.", self.readme)
-        self.assertIn("the edit on the first frame followed by the shot. The Render panel shows each step as it runs", self.steps[2])
-        self.assertIn("the edit on the first frame followed by the shot. The Render panel shows each step as it runs", self.readme)
+        self.assertIn("make the edit on the first frame, then the shot. The Render panel shows each step as it runs", self.steps[2])
+        self.assertIn("make the edit on the first frame, then the shot. The Render panel shows each step as it runs", self.readme)
         self.assertIn('Describe the edit in the text prompt, for example "a campfire".', self.readme)
         self.assertIn(re.search(r"A plate opens with [^.]*\.", self.steps[0]).group(0), self.plain)  # the length a plate opens with
 

@@ -24,7 +24,7 @@ test("the Viewer tab says what the viewer displays: the latest result of the edi
 });
 
 test("a History row shows its strokes, and its pencil changes the edit", () => {
-  assert.match(tab("tools"), /Click a row to see its strokes, or its pencil to change the edit\./);
+  assert.match(tab("tools"), /Hover or click a row to show its strokes\. Ctrl\+click to add them to the wipe\. Use the pencil to edit\./);
 });
 
 test("the five tabs of prose hold 750 words at most", () => {

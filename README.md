@@ -105,11 +105,11 @@ No Runpod account yet? Create it through [our referral link](https://www.runpod.
 
 1. Press **Open plate**, then double-click a plate, for example `plates/horse.mp4`. Sequence files and folders of frames are supported. A plate opens with up to 20 s of frames, or as many as this machine holds. In the same dialog, **Blank plate** starts a fluid shot.
 2. Pick a tool: **Paint**, **Clean** or **Light** (keys P, C and L). Describe the edit in the text prompt, for example "a campfire". Then paint on the first frame.
-3. Press **Generate** (or Enter): the edit on the first frame followed by the shot. The Render panel shows each step as it runs, and each pass displays live. **Render > Preview** can first make a shot preview: a quick pass of the whole shot at half or a quarter of the size.
+3. Press Enter (or **Generate**) to make the edit on the first frame, then the shot. The Render panel shows each step as it runs, and each pass displays live. **Render > Preview** can first make a shot preview: a quick pass of the whole shot at half or a quarter of the size.
 4. Play the shot with Space, and compare it with the plate in the wipe.
 5. Press **Export** to write the result in the plate's own format.
 
-Each edit stays in History, and you can add as many as you need. Click a row to see its strokes, or its pencil to change the edit. **Save scene** keeps the plate and its edits on this ComfyUI.
+Each edit stays in History, and you can add as many as you need. Hover or click a row to show its strokes. Use the pencil to edit. **Save scene** keeps the plate and its edits on this ComfyUI.
 
 ## Tips
 

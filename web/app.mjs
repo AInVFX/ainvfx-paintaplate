@@ -1259,7 +1259,7 @@ function escape() { // Esc: logic.escapeAction. On the edit being generated it s
   if (what === "cancelOpen") return cancelOpen();
   if (what === "discard") return discard();
   if (what === "reopen") return stopGenerating();
-  if (what === "deselect") { select(null); wake(); if (busy) hud("Deselected. Esc again stops generating.", 2500); return; }
+  if (what === "deselect") { const was = S.selected; select(null); wake(); if (busy) hud(`Edit ${num(was)} deselected. Press Esc again to stop generating.`, 2500); return; }
   if (S.cmp) return endCompare(); // a comparison in the wipe ends before the pass displayed
   if (what === "latest") { choosePass(S.pass); return wake(); } // a pass displayed: back to the latest, which plays
   if (what === "stop") stopGenerating();
@@ -1702,7 +1702,7 @@ function prepareSoon(typing = false) { // the draft waits for Generate; SAM and 
   if (!S.draft) return generateUI();
   takeInputs(S.draft); // the prefetch sees them: SAM finds the whole object first, then the prompt writer writes for its box
   if (typing) S.prefetchTimer = setTimeout(() => prefetch(S.draft), PREFETCH_MS); // not on every keystroke
-  else { prefetch(S.draft); hud("Generate (Enter) makes the edit, then the shot. Esc cancels.", 2500); }
+  else { prefetch(S.draft); hud("Press Enter to make the edit, then the shot. Press Esc to cancel.", 2500); }
   generateUI();
 }
 
