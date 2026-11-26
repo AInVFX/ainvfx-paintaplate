@@ -83,6 +83,17 @@ def run(browser, port, U):
     U.check(paired and changed and all(flag is False for _, flag in changed),
             f"a change of strategy: every free keeps ComfyUI's cache, so SAM's answers serve again: {changed}")
     U.check(page.input_value(MENU) == "Whole shot", f"the menu shows the strategy chosen: {page.input_value(MENU)!r}")
+    page.evaluate("document.activeElement.blur()")
+    if page.evaluate("document.querySelector('#play-btn').classList.contains('playing')"):  # the new composite plays as it is made: held still on frame 0 to read it
+        page.keyboard.press("Space")
+    page.keyboard.press("Home")
+    last = page.evaluate(SIGNATURE)
+    for _ in range(30):  # paused on frame 0: its picture holds still, two reads 300 ms apart the same
+        page.wait_for_timeout(300)
+        now = page.evaluate(SIGNATURE)
+        if now == last:
+            break
+        last = now
     page.hover("#frame-now")  # from the menu to the viewer, as after a choice in the menu's popup
     page.wait_for_timeout(U.QUIET_MS)
     shown = page.evaluate(SIGNATURE)

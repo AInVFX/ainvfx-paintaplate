@@ -39,7 +39,9 @@ def run(browser, port, U):
     page.wait_for_function(U.DONE.format(n=3), timeout=120000)
     U.check(again and passes() == ["1", "2"], f"after edit 1 is made again, the edit above that depends on it is made again, and the edit far from it is not: passes of edits {passes()}")
 
-    # 2. Edit 1 changed again, its first Klein pass held: edit 2 stays hidden until its own pass ends, edit 3 stays on the frame
+    # 2. Edit 1, selected again with its pencil, changed again, its first Klein pass held: edit 2 stays hidden until its own
+    #    pass ends, edit 3 stays on the frame
+    page.click("#history li:nth-child(3) .edit"); away()
     U.stroke(page, [(0.10, 0.18), (0.14, 0.18)]); away()
     hold(port, output="patch", seconds=8)
     page.evaluate(U.WATCH)

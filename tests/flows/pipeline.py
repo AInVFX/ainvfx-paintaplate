@@ -156,6 +156,8 @@ def hdr_video(page, U):
     U.check(any("SDR to HDR took" in t or "SDR to HDR: done in" in t for t in lines), "the full-size shot went through SDR to HDR")
     settled(page)
     page.keyboard.press("n")
+    if page.evaluate("document.querySelector('#play-btn').classList.contains('playing')"):  # its result plays as it is made; paused, the player shows its EXR frames
+        page.click("#play-btn")
     page.wait_for_function("document.querySelector('canvas[data-precision]').dataset.precision === 'float'", timeout=60000)
     U.check(True, "paused, the player shows the result's EXR frames at full precision")
     page.click("#export-btn")
