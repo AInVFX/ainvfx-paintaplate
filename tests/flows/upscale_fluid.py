@@ -1,6 +1,7 @@
-"""Finish > Upscale on a fluid shot alone: once the fluid shot is made, its render has one more step, « Fluid: shot, upscaled »,
+"""Finish > Upscale on a fluid shot alone: once the fluid shot is made, its render has one more step, « Plate, upscaled »,
 which runs with no Generate and no Export, and which the player shows at its own size: 3456 x 2160 for a 512 x 320 blank plate, the
-short side at most 2160. Export posts no Upscale job, and the zip holds the upscaled shot under upscaled/, beside the shot as ProRes 4444 XQ."""
+short side at most 2160. Export posts no Upscale job, and the zip holds the upscaled shot, named after its step, beside the shot as
+ProRes 4444 XQ."""
 import zipfile
 import zip_rows  # noqa: E402
 
@@ -26,17 +27,17 @@ def run(browser, port, U):
     page.click("#finish-btn"); page.click("#finish-upscale")
     U.check("3456 x 2160" in page.evaluate(SIZE), "the size list chooses the fluid shot's upscaled size")
     page.keyboard.press("Escape")
-    U.wait_log(page, U.added_line("Fluid: shot, upscaled: done in"), 240000, "the fluid shot's upscaled step, with no Generate and no Export")
-    U.poll(page, lambda: shown() == ["Fluid: shot, upscaled"] and page.evaluate(CANVAS) == [3456, 2160], 3)
+    U.wait_log(page, U.added_line("Plate, upscaled: done in"), 240000, "the fluid shot's upscaled step, with no Generate and no Export")
+    U.poll(page, lambda: shown() == ["Plate, upscaled"] and page.evaluate(CANVAS) == [3456, 2160], 3)
     names = [r[0] for r in rows()]
-    U.check(names[-2:] == ["Fluid shot, full size", "Fluid: shot, upscaled"] and shown() == ["Fluid: shot, upscaled"] and page.evaluate(CANVAS) == [3456, 2160],
+    U.check(names[-2:] == ["Fluid shot, full size", "Plate, upscaled"] and shown() == ["Plate, upscaled"] and page.evaluate(CANVAS) == [3456, 2160],
             f"the upscaled step follows the fluid shot, and the player shows it at its own size: {names}, {shown()}, {page.evaluate(CANVAS)}")
     start = len(U.log_lines(page))
     page.click("#export-btn"); page.check("#x-full")  # beside the upscaled shot, which the dialog opens on
     with page.expect_download(timeout=240000) as dl:
         page.click("#x-go")
     zipped = zipfile.ZipFile(dl.value.path()).namelist()
-    U.check(not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]) and zip_rows.files(zipped, "fluid_shot_upscaled")
-            and zip_rows.files(zipped, "fluid_shot_full_size") and not zip_rows.files(zipped, "plate_upscaled"),
+    U.check(not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]) and zip_rows.files(zipped, "plate_upscaled")
+            and zip_rows.files(zipped, "fluid_shot_full_size") and not zip_rows.files(zipped, "fluid_shot_upscaled"),
             f"Export posts no Upscale job, and zips the upscaled shot beside the shot: {sorted({n.rsplit('/', 1)[0] for n in zipped})}")
     page.close()

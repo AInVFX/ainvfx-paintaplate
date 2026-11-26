@@ -334,6 +334,31 @@ async def execute(pid, prompt):
         if "video" in outs and v.get("video_prefix"):  # the part's viewer movie, at the size the page asks for
             side = max(int(v.get("movie_width") or 0), int(v.get("movie_height") or 0))
             o[outs["video"]] = {"images": [save_mp4((np.asarray(Image.open(f).convert("RGB"), np.float32) / 255 for f in files), v["video_prefix"], fps, side)], "animated": [True]}
+    elif "plate_prefix" in v and "layer" in v:  # hdr_comp: the HDR set's composite, the plate around the matte and the layer inside it, and the set's copies
+        top = int(v.get("max_frames") or 1024)
+        plate = [f[..., :3].astype(np.float16) for f in read_plate(v["plate"], top)[0]]  # half floats, as the EXR frames hold them: three inputs fit the mock's memory
+        h, w = plate[0].shape[:2]
+        sized = lambda f: f if f.shape[:2] == (h, w) else mathops.resize_to(f, h, w)  # noqa: E731
+        layer = [sized(f[..., :3]).astype(np.float16) for f in read_plate(v["layer"], top)[0]]
+        mattes = [sized(f)[..., :1].astype(np.float16) for f in read_plate(v["matte"], top)[0]]
+        await steps(pid, 1, 1.0)
+        comp = lambda i: (plate[i].astype(np.float32) * (1 - mattes[i]) + layer[i] * mattes[i]).astype(np.float32)  # noqa: E731  # each frame as it is written
+
+        def written(prefix, ext, frame):  # the frames under the job's prefix, as Save Frames numbers them
+            sub, _, stem = v[prefix].rpartition("/")
+            os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
+            names = [f"{stem}_{i + 1:05d}_.{ext}" for i in range(len(plate))]
+            paths = [os.path.join(folder("output"), sub, f) for f in names]
+            if ext == "exr":
+                plateio.write_exrs(frame, paths)
+            else:
+                for i, path in enumerate(paths):
+                    Image.fromarray(np.round(np.clip(frame(i).astype(np.float32), 0, 1) * 65535).astype(np.uint16)[..., 0]).save(path)  # 16-bit grey, as Save Frames writes the matte
+            return {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
+        o[outs["comp"]] = written("comp_prefix", "exr", comp)
+        o[outs["plate"]] = written("plate_prefix", "exr", lambda i: plate[i].astype(np.float32))
+        o[outs["matte"]] = written("matte_prefix", "png", lambda i: mattes[i])
+        o[outs["movie"]] = {"images": [save_mp4((acescct(comp(i)) for i in range(len(plate))), v["video_prefix"], v.get("movie_fps", 24.0))], "animated": [True]}
     elif "hdr" in outs:  # SDR to HDR: the shot decoded from sRGB, its brightest values lifted above 1.0, as half-float EXR frames
         frames, spec = read_plate(v["path"], v.get("max_frames", 1024), pad=True)
         await steps(pid, 8, 2.0, live=(v.get("live") or 0, frames[0]))

@@ -963,16 +963,16 @@ def hdr_flow(browser, port):
           f"a pass shows its live preview in the player, then its result replaces it: {caption}")
     new = lines()
     at = lambda texts: next((i for i, line in enumerate(new) if any(x in line for x in texts)), None)  # noqa: E731
-    check(at(("SDR to HDR took", "SDR to HDR: done in")) is not None and at(("SDR to HDR took", "SDR to HDR: done in")) < at(REVIEWED),
-          "the full-size shot goes through SDR to HDR before the full-size composite the viewer plays")
+    check(at(("Layer, HDR took", "Layer, HDR: done in")) is not None and at(("Layer, HDR took", "Layer, HDR: done in")) < at(REVIEWED),
+          "on an EXR plate, the full-size shot goes through SDR to HDR (« Layer, HDR ») before the full-size composite the viewer plays")
     rows = lambda: page.eval_on_selector_all("#stages li.pick .name", "els => els.map(e => e.textContent)")  # noqa: E731
     shown = lambda: page.eval_on_selector_all("#stages li.shown .name", "els => els.map(e => e.textContent)")  # noqa: E731
     picture = lambda: page.evaluate("document.querySelector('canvas[data-picture]').dataset.picture")  # noqa: E731
-    check({"Edited first frame", "Shot, preview", "SDR to HDR", "Composite, full size"} <= set(rows()) and shown() == ["Composite, full size"],
+    check({"Edited first frame", "Shot, preview", "Layer, HDR", "Composite, full size"} <= set(rows()) and shown() == ["Composite, full size"],
           f"every finished pass with a picture is a row to click, the latest displayed: {rows()}, {shown()}")
-    page.click("#stages li.pick:has-text('SDR to HDR')")
-    poll(page, lambda: shown() == ["SDR to HDR"])
-    check(shown() == ["SDR to HDR"] and ": displayed." in (page.text_content("#hud") or ""), f"a click displays that pass in the viewer: {shown()}")
+    page.click("#stages li.pick:has-text('Layer, HDR')")
+    poll(page, lambda: shown() == ["Layer, HDR"])
+    check(shown() == ["Layer, HDR"] and ": displayed." in (page.text_content("#hud") or ""), f"a click displays that pass in the viewer: {shown()}")
     page.click("#stages li.pick:has-text('Edited first frame')")
     poll(page, lambda: shown() == ["Edited first frame"] and picture() == "hero")
     check(shown() == ["Edited first frame"] and picture() == "hero", f"the Edited first frame row shows the edit as Klein made it: {shown()}, {picture()}")
@@ -1016,10 +1016,10 @@ def fluid16_flow(browser, port):
     paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)])
     mock_route(port, "/mock/hold", {"output": "hdr", "seconds": 4, "times": 1})  # SDR to HDR lasts 4 s
     page.keyboard.press("Enter")
-    page.wait_for_function("""document.querySelector('#stages li.now')?.textContent.includes('SDR to HDR') === true
+    page.wait_for_function("""document.querySelector('#stages li.now')?.textContent.includes('Plate, HDR') === true
       && document.querySelector('#hud').textContent.includes('Fluid shot, full size: Space plays it.')""", timeout=120000)
     check(True, "the fluid shot plays as soon as its full size is made, while SDR to HDR runs on it")
-    wait_log(page, added_line(("SDR to HDR: done in", "SDR to HDR took")), 120000, "SDR to HDR on the fluid shot")
+    wait_log(page, added_line(("Plate, HDR: done in", "Plate, HDR took")), 120000, "SDR to HDR on the fluid shot, « Plate, HDR »")
     new = page.evaluate("window.__lines")
     check(any(line.startswith("Plate ") and "16-bit" in line and line.endswith("\n  Finish: SDR to HDR on.") for line in new) and not any("under the edits" in line for line in new),
           "the plate's line says 16-bit and that Finish > SDR to HDR is on, and nothing reopens the fluid shot")

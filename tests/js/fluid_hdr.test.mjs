@@ -12,10 +12,11 @@ test("over a fluid shot on an SDR blank plate, SDR to HDR runs on the composite 
   assert.equal(hdrAfterComposite(SDR, ["paint", "fluid"], false), false, "with the switch off, no SDR to HDR");
 });
 
-test("over a real SDR plate a paint keeps the plate's own pixels, and a plate that holds HDR keeps its values", () => {
-  assert.equal(hdrAfterComposite(SDR, ["paint"], true), false);
+test("on a real SDR plate SDR to HDR runs after the composite for any edit, and a plate that holds HDR keeps its values", () => {
+  assert.equal(hdrAfterComposite(SDR, ["paint"], true), true, "a Paint: on its elements, after the composite");
   assert.equal(hdrAfterComposite(SDR, ["light"], true), true);
-  assert.equal(hdrAfterComposite(EXR, ["paint", "fluid"], true), false);
+  assert.equal(hdrAfterComposite(SDR, [], true), false, "the plate alone goes through SDR to HDR itself (app.plateHdr)");
+  assert.equal(hdrAfterComposite(EXR, ["paint"], true), false);
 });
 
 test("once SDR to HDR has run after the composite, the composite's step still shows the composite, SDR to HDR's step its own frames", () => {

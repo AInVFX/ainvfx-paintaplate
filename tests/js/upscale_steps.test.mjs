@@ -11,6 +11,6 @@ test("a time reads in seconds under 100 s, then in minutes, in the Render panel'
 });
 
 test("each of Upscale's steps names the workflows it posts, for the models behind a result, and no step is left of an Upscale at Export", () => {
-  for (const id of ["upplate", "uplayer", "upcomp", "uphdr"]) assert.ok(["upscale", "upscale_export"].every((n) => STEP_FLOWS[id].includes(n)), id);
+  for (const id of ["upplate", "uplayer", "upcomp"]) assert.ok(["upscale", "upscale_export"].every((n) => STEP_FLOWS[id].includes(n)), id);
   assert.equal(STEP_FLOWS.upscale, undefined);
 });

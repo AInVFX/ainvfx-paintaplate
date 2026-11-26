@@ -12,7 +12,7 @@ import json
 import os
 
 OUT = os.environ.get("PAINTAPLATE_WORKFLOWS_OUT") or os.path.join(os.path.dirname(__file__), "..", "web", "workflows")
-NAMES = ("ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid", "hdr", "upscale", "upscale_export")
+NAMES = ("ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid", "hdr", "hdr_comp", "upscale", "upscale_export")
 OCIO_CONFIG = "ocio://studio-config-latest"  # the page fills the config in use: $OCIO when it is set, as in RV
 
 KLEIN = "flux3-image-klein-int8-convrot.safetensors"
@@ -871,6 +871,36 @@ def hdr():
     g.save("hdr")
 
 
+def hdr_comp():
+    """« Composite, HDR »: the HDR set's composite, made again from its elements, as Upscale's is. The plate through SDR to
+    HDR (Slot plate) around the export's matte (Slot matte: 16-bit PNG frames, never generated), the layer through SDR to HDR
+    (Slot layer) inside it, through Composite Frames: comp = plate x (1 - matte) + layer x matte, in scene-linear values. The
+    plate and the layer are half-float EXR frames in ACES2065-1 at the plate's size, each made by the hdr workflow on its
+    element as on a plate with no edit, so each sits at its own SDR level, and the export's layer already matches the plate.
+
+    It writes the set beside the layer, which SDR to HDR wrote there: the composite (Slot comp_prefix), the plate (Slot
+    plate_prefix: SDR to HDR on the plate runs once per plate, and each render's set holds its copy) and the matte (Slot
+    matte_prefix), so the set's own plate, layer and matte rebuild its composite. The viewer movie is in log values (ACEScct,
+    Slot view_space): the look of the EXR frames, as SDR to HDR's own movie.
+    """
+    g = Graph()
+    plate = g("PaintAPlate_LoadPlate", _title="Plate, HDR", path=Slot("plate", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
+    layer = g("PaintAPlate_LoadPlate", _title="Layer, HDR", path=Slot("layer", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
+    matte = g("PaintAPlate_LoadPlate", _title="Matte", path=Slot("matte", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
+    size = g("GetImageSize", image=plate[0])
+    comp = g("PaintAPlate_CompositeFrames", _title="Composite, HDR: the plate around the matte, the layer inside it", destination=plate[0],
+             source=layer[0], mask=g("ImageToMask", image=matte[0], channel="red"), width=size[0], height=size[1])
+    for title, output, images, fmt, prefix in (("Composite, HDR (half-float EXR, ACES2065-1)", "comp", comp, "exr", "comp_prefix"),
+                                               ("Plate, HDR, in the set", "plate", plate[0], "exr", "plate_prefix"),
+                                               ("Matte, in the set (16-bit PNG)", "matte", matte[0], "png16", "matte_prefix")):
+        g("PaintAPlate_SaveFrames", _title=title, _output=output, images=images, frames=plate[4], format=fmt, fps=Slot("movie_fps", 24.0),
+          **({"chromaticities": "AP0"} if fmt == "exr" else {}), filename_prefix=Slot(prefix, ""))
+    g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Composite, HDR movie (log values: the look of the EXR frames)",
+      _output="movie", fps=Slot("movie_fps", 24.0), crf=12, frames=plate[4], images=colour(g, comp, HDR_SPACE, Slot("view_space", "ACEScct"), "Composite, HDR movie values"),
+      filename_prefix=Slot("video_prefix", ""))
+    g.save("hdr_comp")
+
+
 def upscale():
     """Upscale: one window of the result, frames `first` to `first + count - 1` (Slots first and count), made sharp
     at the size the page sends (Slots width and height) by SeedVR2 7B, with core's SeedVR2 nodes wired as core's blueprint
@@ -960,6 +990,6 @@ def upscale_export():
 
 
 if __name__ == "__main__":
-    for build in (ingest, prompt, edit, snap, clean, cleanup, shot, matte, comp, review, export, warm, fluid, hdr, upscale, upscale_export):
+    for build in (ingest, prompt, edit, snap, clean, cleanup, shot, matte, comp, review, export, warm, fluid, hdr, hdr_comp, upscale, upscale_export):
         build()
     print("wrote", sorted(os.listdir(OUT)))
