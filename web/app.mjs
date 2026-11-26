@@ -2115,6 +2115,11 @@ function queue(fn) { // one edit at a time, in order. A stop, and the Enter that
 }
 
 const UP_TO_DATE = "The result is up to date. Press Ctrl+Enter to try another seed."; // Enter on a selected edit that nothing changed
+function heldFor(edit) { // an edit that stops for the person's words (an object's name, other words) stays selected: they go to it, then Enter
+  if (S.draft) return; // strokes in progress keep the field and their words
+  S.selected = edit;
+  $("#prompt").value = edit.prompt ?? "";
+}
 const PAINT_FIRST = "Paint on the first frame, then press Enter."; // Enter with nothing painted and no edit selected
 
 function launch(edit, another = false) { // Generate: the edit on the first frame, then its shot. A result it already has is used again. `another`: an edit already in History starts again with another seed
@@ -2138,6 +2143,7 @@ function launch(edit, another = false) { // Generate: the edit on the first fram
   }
   if (edit.refused?.record === recordOf(edit)) { // refused at the check's question and unchanged since: it stays as « No » left it
     Object.assign(edit, { state: "failed", left: true });
+    heldFor(edit);
     recompose(); historyUI(); render(); timelineUI();
     return status(edit.refused.said, "hint");
   }
@@ -2294,6 +2300,7 @@ async function generate(edit) {
     if (!alive()) return;
     if (!cap) { // an erase with no words that the prompt writer took for another object (logic.asksName): no Klein pass, its name first
       Object.assign(edit, { patch: null, preview: null, latent: null, state: "failed", left: true, editAsked: writerSaw(edit.caption?.others), force: false }); // History marks its row (data-asked) with what the writer saw
+      heldFor(edit); // its name goes to it
       S.running = null;
       recompose(); historyUI(); render(); timelineUI();
       const fact = `Error: edit ${num(edit)}, the prompt writer took the stroke for another object. The edit stopped.`; // tests/ui_live.py reads « took the stroke for another object »
@@ -2386,6 +2393,7 @@ async function heldBack(edit, check, alive) {
   if (!anyway) {
     const said = `${lines.fact} ${leftHint(edit.prompt)}`;
     Object.assign(edit, { patch: null, refused: { record: recordOf(edit), said } });
+    heldFor(edit); // its new words go to it
     recompose(); historyUI(); render(); timelineUI();
     status(said, "hint");
     return false;
