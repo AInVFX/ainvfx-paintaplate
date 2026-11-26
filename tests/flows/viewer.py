@@ -29,6 +29,22 @@ DRAW = """async ({ cases, halfs, w }) => {
 }"""
 
 
+
+
+def steady(page, span):  # the sums of a span of the picture once the view holds still: the first read equal to the one before, 300 ms apart
+    last = page.evaluate(SUM, span)
+    for _ in range(30):
+        page.wait_for_timeout(300)
+        now = page.evaluate(SUM, span)
+        if now == last:
+            return now
+        last = now
+    return last
+
+def playing(page, on, key=None):  # the player plays (on) or holds still, by the play button or by `key`: a result already plays as it is made
+    if page.evaluate("document.querySelector('#play-btn').classList.contains('playing')") != on:
+        page.keyboard.press(key) if key else page.click("#play-btn")
+
 def parity_table(page):
     """Every case of the parity table: the page's 8-bit values and OpenRV's, and the largest difference."""
     cases = P.cases()
@@ -228,7 +244,7 @@ def exposure_while_playing(browser, port, U):
     seen = {}
     for name, keys in (("at rest", []), ("at +2 stops", ["Shift+E"] + ["="] * 20 + ["Escape"])):
         for k in keys: page.keyboard.press(k)
-        page.evaluate(PREC); page.keyboard.press("Space"); page.wait_for_timeout(2500); page.keyboard.press("Space")
+        page.evaluate(PREC); playing(page, True, "Space"); page.wait_for_timeout(2500); playing(page, False, "Space")
         seen[name] = sorted(set(page.evaluate("window.__prec")))
     U.check("8-bit" in seen["at rest"] and seen["at +2 stops"] == ["float"],
             f"playing, a source shows its 8-bit movie at rest and only its EXR frames once the exposure moves: {seen}")
@@ -267,16 +283,6 @@ def wipe_compare(page, U):
     Ctrl+click, Esc or F6 ends it."""
     row = "#stages li.pick:has-text('Track the paint, preview')"
 
-    def held(span):  # a half's sums once the view holds still: the first read equal to the one before, 300 ms apart
-        last = page.evaluate(SUM, span)
-        for _ in range(30):
-            page.wait_for_timeout(300)
-            now = page.evaluate(SUM, span)
-            if now == last:
-                return now
-            last = now
-        return last
-
     names = lambda: [page.text_content("#wipe .label.left"), page.text_content("#wipe .label.right")]  # noqa: E731
     compared = lambda: page.evaluate("document.querySelector('#view').dataset.compared")  # noqa: E731
     page.keyboard.press("F6"); page.wait_for_timeout(300)
@@ -288,12 +294,12 @@ def wipe_compare(page, U):
     U.check(names() == ["Plate", "Track the paint, preview"] and compared() == "" and "Viewer: wipe, Plate against Track the paint, preview." in said,
             f"Ctrl+click on the pass displayed compares it with the plate, never with itself: {names()}, {said[-1:]}")
     page.click(row); page.wait_for_timeout(500); page.keyboard.press("F6"); page.wait_for_timeout(300)  # the latest result, and the wipe off
-    before = held([0.5, 1.0])
+    before = steady(page, [0.5, 1.0])
     page.click(row, modifiers=["Control"])
     page.wait_for_function("document.querySelector('#view').dataset.compared === 'drawn'", timeout=30000)  # its own frame: the plate shows until then
     U.check(page.is_visible("#wipe") and names() == ["Track the paint, preview", "Composite, full size"] and "compared" in page.get_attribute(row, "class"),
             f"Ctrl+click on a finished step puts that pass on the wipe's left side, against the pass displayed, both named: {names()}")
-    left, right = held([0.0, 0.5]), held([0.5, 1.0])
+    left, right = steady(page, [0.0, 0.5]), steady(page, [0.5, 1.0])
     U.check(left["spread"] <= 12 and left["white"] > 0 and right["sum"] == before["sum"],
             f"the left side shows the paint matte, grey with white where the edit is ({left}); the right side is the composite as before ({right['sum']} against {before['sum']})")
     page.keyboard.press("F5")
@@ -330,11 +336,13 @@ XSTAT = """(() => { const x = document.querySelector('#xray'), d = x.getContext(
 def xray_view(page, U):
     """X tints, over the picture, where the edits displayed change the plate: the matte the composite of the size displayed
     used, then the export's matte once Export made one; a light edit tints the whole frame. The canvas itself stays the picture."""
-    page.keyboard.press("Home"); pic = page.evaluate(SUM, [0.0, 1.0])
+    page.keyboard.press("Home")  # paused at the first frame: the frame at its native size, once it has come
+    page.wait_for_function("(() => { const v = document.querySelector('#view'); return v.dataset.native === 'true' && v.dataset.picture !== 'held'; })()", timeout=30000)
+    pic = steady(page, [0.0, 1.0])
     page.keyboard.press("x")
     page.wait_for_function("(() => { const x = document.querySelector('#xray'); return !x.hidden && x.dataset.frame === '0'; })()", timeout=30000)
     got = page.evaluate(XSTAT)
-    U.check(got["from"] == "full" and 0 < got["share"] < 0.5 and got["at"][0] < 0.5 and page.evaluate(SUM, [0.0, 1.0])["sum"] == pic["sum"],
+    U.check(got["from"] == "full" and 0 < got["share"] < 0.5 and got["at"][0] < 0.5 and steady(page, [0.0, 1.0])["sum"] == pic["sum"],
             f"X tints where the paint changes the plate, from the full-size composite's matte, and leaves the canvas's picture as it was: {got}")
     page.keyboard.press("ArrowRight")
     page.wait_for_function("document.querySelector('#xray').dataset.frame === '1'", timeout=30000)
@@ -346,7 +354,7 @@ def xray_view(page, U):
     got = page.evaluate(XSTAT)
     U.check(0 < got["share"] < 0.5, f"once Export has made its matte, the X-ray reads it: {got}")
     tint = "(() => { const x = document.querySelector('#xray'), d = x.getContext('2d').getImageData(0, 0, x.width, x.height).data; let s = 0; for (let i = 3; i < d.length; i += 4) s += d[i]; return [Number(x.dataset.frame), s]; })()"
-    page.click("#play-btn")  # the button: after Export, a key could go to the button that has the focus
+    playing(page, True)  # the button: after Export, a key could go to the button that has the focus
     probe = "[document.querySelector('#frame-now').textContent, document.querySelector('#xray').dataset.frame, document.querySelector('#view').dataset.play]"
     trail = [page.evaluate(probe)]
     for _ in range(60):  # the shot starts to play: up to 15 s
@@ -356,7 +364,7 @@ def xray_view(page, U):
     seen = {}
     for _ in range(16):
         page.wait_for_timeout(120); f, s = page.evaluate(tint); seen.setdefault(f, s)
-    page.click("#play-btn")
+    playing(page, False)
     page.evaluate("document.activeElement.blur()")
     same = []
     for f in sorted(seen)[1:4]:
