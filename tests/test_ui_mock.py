@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 import ui_mock
@@ -35,13 +36,15 @@ class Page(unittest.TestCase):
     def result(cls, name):
         if cls.results is None:
             with tempfile.TemporaryDirectory() as folder:
-                out = os.path.join(folder, "results.json")
+                out, t0 = os.path.join(folder, "results.json"), time.time()
                 run = subprocess.run([sys.executable, os.path.join(ROOT, "tests", "ui_mock.py"), "--json", out, *(["--shard", SHARD] if SHARD else [])],
                                      capture_output=True, text=True)  # no limit here: ui_mock.py stops a flow past its own
                 if not os.path.exists(out):
                     raise RuntimeError("tests/ui_mock.py ended with no results:\n" + (run.stdout + run.stderr)[-3000:])
                 with open(out) as f:
-                    cls.results = {r["flow"]: r for r in json.load(f)}
+                    rows = json.load(f)
+                print(ui_mock.seconds_line(rows, SHARD, time.time() - t0), file=sys.stderr, flush=True)  # each flow's time, in the job's log
+                cls.results = {r["flow"]: r for r in rows}
         return cls.results[name]
 
 

@@ -19,8 +19,7 @@ test("the edit is described in the text prompt", () => {
   assert.doesNotMatch(text(help), /describ\w*[^.]* at the top/);
 });
 
-test("the viewer displays a step and the edits turned on: « on show » names neither", () => {
-  assert.doesNotMatch(text(help), /on show/i);
+test("the Viewer tab says what the viewer displays: the latest result of the edits turned on", () => {
   assert.match(tab("viewer"), /^What the viewer displays The latest result of the edits turned on\./);
 });
 

@@ -4,7 +4,7 @@
 // after its OCIO function (OCIOIPNode.cpp). OpenColorIO writes the two OCIO functions as GLSL ES 3.0 on the server
 // (ocio.py), with their lookup tables, from the same GPU processor OpenRV asks for (OPTIMIZATION_DEFAULT). A program is
 // made once per colour space and view: changing the plate's colour space, the display or the view swaps it, so it applies
-// while the shot plays. Frames of an image sequence (DeepFrames in frames.mjs, 960 px) and the paused frame on show at
+// while the shot plays. Frames of an image sequence (DeepFrames in frames.mjs, 960 px) and the paused frame displayed at
 // native size (sharpFrame in app.mjs) arrive as RGB half floats, so values above 1.0 reach the shader; video frames and
 // canvases are 8 bits.
 // OpenRV at 0bd9675 (main): src/lib/ip/IPBaseNodes/ColorIPNode.cpp, src/lib/ip/OCIONodes/OCIOIPNode.cpp,
@@ -40,7 +40,7 @@ export const pointIn = (rect, clientX, clientY, w, h) => [((clientX - rect.left)
 // At rest a playing source shows its 8-bit movie until all its EXR frames are in. That movie holds ACEScct codes in
 // H.264: pushed four stops up, a fluid shot's dark background moves by 4 display levels at the median and 24 at p99
 // against its EXR frames, with H.264's 8 px blocks visible. So once a colour tool moves, a source with
-// EXR frames shows only those, as RV plays only what it has decoded: the frame on show if it is in, else the nearest
+// EXR frames shows only those, as RV plays only what it has decoded: the frame displayed if it is in, else the nearest
 // one before it, else the nearest after (the cache keeps frames ahead of the playhead). Null when none is in.
 export function exactFrame(frames, f) {
   if (frames.has(f)) return f;

@@ -144,7 +144,7 @@ TO_CANVAS = """(([cx, cy]) => { const v = document.querySelector('#view'), r = v
 
 
 def zoom_and_paint(page, U):
-    """RV's zoom keys, and a stroke lands under the pointer at 4:1 and at 1:2 (the plate on show is 4K, the edits 1920)."""
+    """RV's zoom keys, and a stroke lands under the pointer at 4:1 and at 1:2 (the plate displayed is 4K, the edits 1920)."""
     page.keyboard.press("Home"); page.keyboard.press("p"); page.click(".sw[data-color='#d32f2f']")
     box = page.eval_on_selector("#viewport", "e => { const r = e.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }")
     for key, n, at in (("4", 4, (0.5, 0.5)), ("Shift+2", 0.5, (0.45, 0.5))):
@@ -263,25 +263,25 @@ def rendered(browser, port, U):
 
 def wipe_compare(page, U):
     """Two passes in the wipe: Ctrl+click on a finished Render step puts that pass on the wipe's left side, against the pass
-    on show, both named; the inspector reads the side its point is on, a preview pass at its own size; a second
+    displayed, both named; the inspector reads the side its point is on, a preview pass at its own size; a second
     Ctrl+click, Esc or F6 ends it."""
     row = "#stages li.pick:has-text('Track the paint, preview')"
     names = lambda: [page.text_content("#wipe .label.left"), page.text_content("#wipe .label.right")]  # noqa: E731
     compared = lambda: page.evaluate("document.querySelector('#view').dataset.compared")  # noqa: E731
     page.keyboard.press("F6"); page.wait_for_timeout(300)
-    U.check(names() == ["Plate", "Composite, full size"], f"F6: the plate on the left, the pass on show on the right, both named: {names()}")
+    U.check(names() == ["Plate", "Composite, full size"], f"F6: the plate on the left, the pass displayed on the right, both named: {names()}")
     page.click(row); page.wait_for_timeout(500)
     U.check(names() == ["Plate", "Track the paint, preview"], f"F6, then a click on a Render step: the right side takes the step's name: {names()}")
     page.click(row, modifiers=["Control"]); page.wait_for_timeout(300)
     said = page.evaluate("[...document.querySelectorAll('#log li span')].map((s) => s.textContent)")
     U.check(names() == ["Plate", "Track the paint, preview"] and compared() == "" and "Viewer: wipe, Plate against Track the paint, preview." in said,
-            f"Ctrl+click on the pass on show compares it with the plate, never with itself: {names()}, {said[-1:]}")
+            f"Ctrl+click on the pass displayed compares it with the plate, never with itself: {names()}, {said[-1:]}")
     page.click(row); page.wait_for_timeout(500); page.keyboard.press("F6"); page.wait_for_timeout(300)  # the latest result, and the wipe off
     before = page.evaluate(SUM, [0.5, 1.0])
     page.click(row, modifiers=["Control"])
     page.wait_for_function("document.querySelector('#view').dataset.compared === 'drawn'", timeout=30000)  # its own frame: the plate shows until then
     U.check(page.is_visible("#wipe") and names() == ["Track the paint, preview", "Composite, full size"] and "compared" in page.get_attribute(row, "class"),
-            f"Ctrl+click on a finished step puts that pass on the wipe's left side, against the pass on show, both named: {names()}")
+            f"Ctrl+click on a finished step puts that pass on the wipe's left side, against the pass displayed, both named: {names()}")
     left, right = page.evaluate(SUM, [0.0, 0.5]), page.evaluate(SUM, [0.5, 1.0])
     U.check(left["spread"] <= 12 and left["white"] > 0 and right["sum"] == before["sum"],
             f"the left side shows the paint matte, grey with white where the edit is ({left}); the right side is the composite as before ({right['sum']} against {before['sum']})")
@@ -317,7 +317,7 @@ XSTAT = """(() => { const x = document.querySelector('#xray'), d = x.getContext(
 
 
 def xray_view(page, U):
-    """X tints, over the picture, where the edits on show change the plate: the matte the composite of the size on show
+    """X tints, over the picture, where the edits displayed change the plate: the matte the composite of the size displayed
     used, then the export's matte once Export made one; a light edit tints the whole frame. The canvas itself stays the picture."""
     page.keyboard.press("Home"); pic = page.evaluate(SUM, [0.0, 1.0])
     page.keyboard.press("x")
@@ -358,7 +358,7 @@ def xray_view(page, U):
     page.keyboard.press("l"); U.paint_once(page, "warm sunset light", [(0.7, 0.3), (0.75, 0.35)]); page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('#xray').dataset.from === 'light'", timeout=120000)
     got = page.evaluate(XSTAT)
-    U.check(got["share"] == 1 and not got["hidden"], f"with a light edit on show, the X-ray tints the whole frame: {got}")
+    U.check(got["share"] == 1 and not got["hidden"], f"with a light edit displayed, the X-ray tints the whole frame: {got}")
     page.keyboard.press("x")
     U.check(page.is_hidden("#xray"), "X again hides the X-ray")
 

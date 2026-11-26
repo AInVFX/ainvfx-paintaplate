@@ -25,7 +25,7 @@ test("with no size, a smaller budget still makes the frames smaller so that all 
   assert.ok(fresh.width < first.width && fresh.fits === 121, JSON.stringify(fresh));
 });
 
-test("a source with a size and one without share the budget as before: the one on show first", () => {
+test("a source with a size and one without share the budget as before: the one displayed first", () => {
   const both = keep(1e9, [{ id: "plate", movie, show: false }]);
   assert.equal(both.shot.width, first.width);
   assert.ok(both.shot.budget + both.plate.budget <= 1e9);

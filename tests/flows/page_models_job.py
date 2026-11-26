@@ -1,11 +1,11 @@
-"""Models and licences tints the models of the job on show, as planned from its start. A Paint edit being painted, not
+"""Models and licences tints the models of the job displayed, as planned from its start. A Paint edit being painted, not
 generated yet, already shows Klein, LTX, the Ripple IC-LoRA and SAM 3.1, each card tinted over its whole surface; once
 the render is done, the same models stay tinted."""
 OPEN = "document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden"
 TINT = """(() => [...document.querySelectorAll('#models-all article.behind')].map((a) => getComputedStyle(a).backgroundColor))()"""
 
 
-def models(page):  # opens Help > Models and licences: the models of the job on show, and the line above them
+def models(page):  # opens Help > Models and licences: the models of the job displayed, and the line above them
     page.keyboard.press("?")
     page.click("#help [role=tab][data-help=models]")
     page.wait_for_function("document.querySelector('#help').open && !document.querySelector('#models').hidden", timeout=10000)

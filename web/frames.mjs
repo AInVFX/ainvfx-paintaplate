@@ -8,7 +8,7 @@ import { countText, frameUse } from "./logic.mjs";
 
 const bytes = (frame) => frame.bytes ?? frame.width * frame.height * 4; // an ImageBitmap holds 4 bytes a pixel
 
-let reading = null; // one hidden reader decodes at a time, so the source on show fills first
+let reading = null; // one hidden reader decodes at a time, so the source displayed fills first
 const waiting = new Set();
 function release(cache) { // its reader ended: the next cache that waits starts
   if (reading !== cache) return;
@@ -226,7 +226,7 @@ export function autoBudget({ host = "", profile = "small", deviceMemory = 0 }) {
 }
 
 // The frame cache's line of the log: the budget and where it comes from, then what each source holds, for the sources
-// that hold frames. A source on show says why its frames have that size: the movie's own, their size on screen, or
+// that hold frames. A source displayed says why its frames have that size: the movie's own, their size on screen, or
 // smaller so that all of them fit the budget. `sources`: [{ name (« the plate's »), kind (« EXR » or none), fits,
 // frames, width, height, show, shrunk, movie: [w, h] }]. Paused, the viewer reads each frame at its own size anyway.
 export const cacheLine = (budget, why, sources) => {
@@ -237,7 +237,7 @@ export const cacheLine = (budget, why, sources) => {
 };
 
 // The size a source's frames are kept at, and how many fit. `movie`: the movie's own size; `fit`: the size the frame is
-// shown at, in device pixels; `bytes`: per pixel (4 for an ImageBitmap). Frames are kept at the size on show (its width
+// shown at, in device pixels; `bytes`: per pixel (4 for an ImageBitmap). Frames are kept at the size displayed (its width
 // rounded up to 64 px, so a small change of layout keeps the cache), at most the movie's. When the frames between the in
 // and out points do not fit `budget` at that size, the size goes down, to CACHE_FLOOR on the long side at the least.
 // Under that the cache keeps the frames round the playhead: `fits` is then less than `frames`.
@@ -251,7 +251,7 @@ export function cacheSize({ budget, frames, movie: [mw, mh], fit: [fw, fh], byte
   return { width, height, fits: Math.min(frames, Math.floor(budget / (width * height * per))), shrunk: k < shown };
 }
 
-// One budget shared by the caches. The sources on show come first, in equal shares, each at the size it is shown. The
+// One budget shared by the caches. The sources displayed come first, in equal shares, each at the size it is shown. The
 // others share what is left, at the floor size. A source with a `size` keeps it: its share sets how many of its frames
 // fit, never their size. `sources`: [{ id, movie: [w, h], show, bytes, size }]. Returns, per id,
 // { width, height, fits, budget }: the size of its frames, how many fit, and its share in bytes.
@@ -273,9 +273,9 @@ export function cachePlan({ budget, frames, fit, sources }) {
 
 // A change of the view's size keeps the cached frames, drawn to the view's size: the caches plan again at the new size
 // only when the view is more than CACHE_GROW times wider or taller than the view they were planned for. A change of
-// the budget, of the sources on show or of the in and out points plans them again at once.
+// the budget, of the sources displayed or of the in and out points plans them again at once.
 export const CACHE_GROW = 1.25;
-// A plan made again for other sources on show (the wipe, the pass on show) can give a cache a size a few pixels from its
+// A plan made again for other sources displayed (the wipe, the pass displayed) can give a cache a size a few pixels from its
 // own (1917 x 1078 against 1920 x 1080), and a new size reads every frame again. Within CACHE_NEAR of its own size on
 // each side, a cache keeps its size: its share then sets how many of its frames fit.
 export const CACHE_NEAR = 0.1;
