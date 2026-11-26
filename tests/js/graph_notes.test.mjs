@@ -54,8 +54,8 @@ const fluid = (hdr) => fluidGraph(WF, { plate: { path: "output:paintaplate/blank
   about: { name: "smoke" } });
 const notes = (api) => Object.values(api).filter((n) => n.class_type === "PrimitiveStringMultiline").map((n) => Object.values(n.inputs).find((v) => typeof v === "string"));
 
-test("every note of a scene's graph names what the graph and the page have: each tool, SDR to HDR, EXR, Upscale", () => {
-  for (const api of [scene(["erase", "paint", "light"], { hdr: true, exr: true, upscale: true }), scene(["paint"]), scene(["erase"]), scene(["light"], { hdr: true })]) {
+test("every note of a scene's graph names what the graph and the page have: each tool, SDR to HDR, Upscale", () => {
+  for (const api of [scene(["erase", "paint", "light"], { hdr: true, upscale: true }), scene(["paint"]), scene(["erase"]), scene(["light"], { hdr: true })]) {
     assert.deepEqual(stale(api), []);
   }
 });
@@ -73,10 +73,9 @@ test("a note that names what its graph or the page lacks is caught", () => {
     ["file gone.png", "mark [keyframes]", "node Keyframe Video", "section EDIT 4", "section FLUID SHOT", "the page's « Nothing of the page »"]);
 });
 
-test("the notes take their words from the page: « Text prompt », the EXR result, SAM's answers, and Upscale outside the graph", () => {
-  const all = notes(scene(["erase", "paint", "light"], { hdr: true, exr: true, upscale: true })).join("\n");
+test("the notes take their words from the page: « Text prompt », SAM's answers, and Upscale outside the graph", () => {
+  const all = notes(scene(["erase", "paint", "light"], { hdr: true, upscale: true })).join("\n");
   assert.ok(all.includes("Its « Text prompt » is the node marked [caption].") && !/\bcaption is\b/.test(all));
-  assert.ok(all.includes(`OUTPUT writes them as ${EXR_FRAMES}.`) && !all.includes("half-float EXR frames in ACES2065-1"));
   assert.ok(all.includes("Follow Matte judges SAM's answers") && !all.includes("Follow Matte keeps the matte on the object"));
   assert.ok(all.includes("Finish > Upscale is not part of this graph") && !notes(scene(["paint"])).join("\n").includes("Upscale"));
   assert.ok(notes(fluid(true)).join("\n").includes(`SDR to HDR turns it into ${EXR_FRAMES}`));

@@ -136,8 +136,8 @@ def load(name, folder=None):
 OPTIONAL = {"fit_keep": ("paint_matte",), "fit_mask": ("matte_a", "matte_b"), "named": ("words",), "relit_frame": ("relight",),
             "follow_element": ("seed",), "follow_base": ("base",), "follow_named": ("name_request",), "follow_removed": ("removed_request",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "plate_level": ("plate_width", "plate_height"),
             "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",),
-            "export_plate": ("prefix",), "export_exr": ("exr_prefix",), "export_layer": ("layer_prefix",),
-            "export_layer_exr": ("layer_exr_prefix",), "export_shot": ("shot_prefix",), "export_clean": ("clean_prefix",), "upscale_comp": ("comp_prefix",), "upscale_matte": ("matte_prefix",)}
+            "export_layer": ("layer_prefix",),
+            "export_shot": ("shot_prefix",), "export_clean": ("clean_prefix",), "upscale_comp": ("comp_prefix",), "upscale_matte": ("matte_prefix",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -668,33 +668,21 @@ def export():
     result = plate x (1 - matte) + layer x matte."""
     g = Graph()
     load, fit, final, shot_plate, model = composite(g)
-    plate_out = g("PaintAPlate_SavePlate", _title="Export", _output="export", images=final, plate=load[2],
+    g("PaintAPlate_SavePlate", _title="Export", _output="export", images=final, plate=load[2],
                   filename_prefix=Slot("prefix", "paintaplate/plate/export"), keep_untouched=Slot("keep_untouched", True),
                   changed=fit[1])
-    g.link_slot(plate_out, "images", "export_plate")  # dropped for an EXR result: a video file cannot hold values above 1.0
-    # SDR to HDR on a plate whose format cannot hold values above 1.0 (a video, an integer sequence): the export
-    # is the result as half-float EXR frames, in ACES2065-1 as every HDR file here
     # Each writer takes its batch as it is and saves the plate's own frames (`frames`, without Load Plate's padding): no
     # second batch of the shot is held
-    exr = g("PaintAPlate_SaveFrames", _title="Export as half-float EXR frames (an HDR result of a video plate)", _output="exr", format="exr", fps=load[3], chromaticities="AP0",
-            images=colour(g, final, Slot("color_space", "@model"), HDR_SPACE, "The result in ACES2065-1"), frames=load[4],
-            filename_prefix=Slot("exr_prefix", ""))
-    g.link_slot(exr, "images", "export_exr")
     # The layer: the shot as the composite blends it. Composite Frames sizes its source to the plate with the bilinear
     # filter of Image Scale, so this is the picture it blends. Written as the result is: by Save Plate with no
-    # source pixel kept, or as half-float EXR frames in ACES2065-1 beside an EXR result. A relight leaves it out (Slots
-    # layer_prefix and layer_exr_prefix empty): every pixel of its result may change, so the result is the only layer.
+    # source pixel kept. A relight leaves it out (Slot layer_prefix empty): every pixel of its result may change, so the
+    # result is the only layer.
     size = g("GetImageSize", image=load[0])
     layer = g("ImageScale", _title="Layer: the shot as the composite blends it", image=fit[0], upscale_method="bilinear",
               width=size[0], height=size[1], crop="disabled")
     layer_plate = g("PaintAPlate_SavePlate", _title="Layer", _output="layer", images=layer, plate=load[2],
                     filename_prefix=Slot("layer_prefix", ""), keep_untouched=False)
     g.link_slot(layer_plate, "images", "export_layer")
-    layer_exr = g("PaintAPlate_SaveFrames", _title="Layer as half-float EXR frames (an HDR result of a video plate)", _output="layer_exr",
-                  format="exr", fps=load[3], chromaticities="AP0", frames=load[4],
-                  images=colour(g, layer, Slot("color_space", "@model"), HDR_SPACE, "The layer in ACES2065-1"),
-                  filename_prefix=Slot("layer_exr_prefix", ""))
-    g.link_slot(layer_exr, "images", "export_layer_exr")
     # The shot as the model made it, and a Clean's pass when a paint rides on it: in the plate's colour space, written as every
     # element is, by Save Plate in the export's format, at their own size, with none of the source's pixels. The page fills
     # shot_prefix, and clean_pass with clean_prefix, when Export takes them (logic's OPTIONAL: export_shot, export_clean).

@@ -11,7 +11,7 @@
 export const OPTIONAL = { fit_keep: ["paint_matte"], fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_element: ["seed"], follow_base: ["base"], follow_named: ["name_request"], follow_removed: ["removed_request"],
   review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], plate_level: ["plate_width", "plate_height"],
   matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"],
-  export_plate: ["prefix"], export_exr: ["exr_prefix"], export_layer: ["layer_prefix"], export_layer_exr: ["layer_exr_prefix"], export_shot: ["shot_prefix"], export_clean: ["clean_prefix"],
+  export_layer: ["layer_prefix"], export_shot: ["shot_prefix"], export_clean: ["clean_prefix"],
   upscale_comp: ["comp_prefix"], upscale_matte: ["matte_prefix"] };
 
 // The matte's requests to the prompt upsampler: the words SAM 3.1 searches for, from an edit's text prompt.
@@ -1239,9 +1239,6 @@ export const PLATE_ALONE = "|hdr";
 export const PLATE_UP = "|up";
 export const renderKey = (edits, dflt, on, up = false) => edits || (on && !dflt ? PLATE_ALONE : up ? PLATE_UP : "");
 export const plateAlone = (key) => key === PLATE_ALONE || key === PLATE_UP;
-// SDR to HDR on a plate whose format cannot hold values above 1.0: asked before it turns on, then the result is
-// an EXR sequence, which the player shows at full precision and the export writes.
-export const exrResult = (spec, hdrRan, headroom = 1) => !!hdrRan && !holdsHdr(spec, headroom);
 // SDR to HDR for a render: on its own when the plate holds values above 1.0, else when the Finish menu turns it on (deliverHdr)
 export const wantsHdrFor = (spec, headroom, deliverHdr) => holdsHdr(spec, headroom) || !!deliverHdr;
 // On a 32 GB GPU every step finishes at 1920 x 1088 x 121, slower than on 96 GB, but a 4K plate does not (its first erase

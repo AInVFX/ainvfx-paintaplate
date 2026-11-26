@@ -66,7 +66,7 @@ class Workflows(unittest.TestCase):
         wanted = {"ingest": {"hero", "proxy", "spec"}, "prompt": {"text"}, "edit": {"patch", "relit", "result"},
                   "snap": {"named"} | {f"point_{k}" for k in range(5)}, "clean": {"frames", "video"}, "cleanup": {"frames", "video"}, "shot": {"frames", "video"},
                   "matte": {"follow", "frames", "movie"}, "comp": {"video", "matte_movie"}, "review": {"review", "frames", "view", "matte_movie"},
-                  "export": {"clean", "export", "exr", "layer", "layer_exr", "matte", "matte_movie", "shot"}, "warm": {"frame"},
+                  "export": {"clean", "export", "layer", "matte", "matte_movie", "shot"}, "warm": {"frame"},
                   "fluid": {"plate", "video", "control", "first"}, "hdr": {"hdr", "movie"},
                   "hdr_comp": {"comp", "plate", "matte", "movie"}}
         for name, keys in wanted.items():
@@ -134,8 +134,7 @@ class ViewerMovies(unittest.TestCase):
 
     def test_exr_frames_take_the_shots_frame_rate(self):
         """Every Save Frames node that writes EXR frames of a shot is given the shot's frame rate, which it writes in each
-        frame's header: SDR to HDR takes the rate the page sends for its movie, and the review and the export take the
-        plate's own. A 16-bit fluid shot's frames open as a plate, and that plate took 24 fps for a shot made at 50."""
+        frame's header: SDR to HDR takes the rate the page sends for its movie, and the review takes the plate's own. A 16-bit fluid shot's frames open as a plate, and that plate took 24 fps for a shot made at 50."""
         def exr_frames(name):
             with open(os.path.join(WORKFLOWS, f"{name}.json")) as f:
                 wf = json.load(f)
@@ -144,7 +143,7 @@ class ViewerMovies(unittest.TestCase):
         [movie] = [n for n in wf.values() if n["class_type"] == "PaintAPlate_SaveMovie"]
         self.assertEqual((frames["_meta"]["slots"]["fps"], movie["_meta"]["slots"]["fps"]), ("movie_fps", "movie_fps"))
         self.assertEqual(frames["inputs"]["fps"], movie["inputs"]["fps"])
-        for name, fed, its, count in (("review", "PaintAPlate_SaveMovie", "fps", 1), ("export", "PaintAPlate_SavePlate", "plate", 2)):
+        for name, fed, its, count in (("review", "PaintAPlate_SaveMovie", "fps", 1),):
             wf, frames = exr_frames(name)  # the export writes its result and its layer
             self.assertEqual(len(frames), count, name)
             for each in frames:

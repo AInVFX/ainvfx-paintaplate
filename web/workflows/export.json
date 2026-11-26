@@ -463,60 +463,12 @@
    "title": "Export",
    "slots": {
     "filename_prefix": "prefix",
-    "keep_untouched": "keep_untouched",
-    "images": "export_plate"
+    "keep_untouched": "keep_untouched"
    },
    "output": "export"
   }
  },
  "27": {
-  "class_type": "PaintAPlate_ColorSpace",
-  "inputs": {
-   "image": [
-    "25",
-    0
-   ],
-   "config": "ocio://studio-config-latest",
-   "source": "@model",
-   "destination": "ACES2065-1"
-  },
-  "_meta": {
-   "title": "The result in ACES2065-1",
-   "slots": {
-    "config": "config",
-    "source": "color_space"
-   }
-  }
- },
- "28": {
-  "class_type": "PaintAPlate_SaveFrames",
-  "inputs": {
-   "format": "exr",
-   "fps": [
-    "1",
-    3
-   ],
-   "chromaticities": "AP0",
-   "images": [
-    "27",
-    0
-   ],
-   "frames": [
-    "1",
-    4
-   ],
-   "filename_prefix": ""
-  },
-  "_meta": {
-   "title": "Export as half-float EXR frames (an HDR result of a video plate)",
-   "slots": {
-    "filename_prefix": "exr_prefix",
-    "images": "export_exr"
-   },
-   "output": "exr"
-  }
- },
- "29": {
   "class_type": "GetImageSize",
   "inputs": {
    "image": [
@@ -525,7 +477,7 @@
    ]
   }
  },
- "30": {
+ "28": {
   "class_type": "ImageScale",
   "inputs": {
    "image": [
@@ -534,11 +486,11 @@
    ],
    "upscale_method": "bilinear",
    "width": [
-    "29",
+    "27",
     0
    ],
    "height": [
-    "29",
+    "27",
     1
    ],
    "crop": "disabled"
@@ -547,11 +499,11 @@
    "title": "Layer: the shot as the composite blends it"
   }
  },
- "31": {
+ "29": {
   "class_type": "PaintAPlate_SavePlate",
   "inputs": {
    "images": [
-    "30",
+    "28",
     0
    ],
    "plate": [
@@ -570,54 +522,7 @@
    "output": "layer"
   }
  },
- "32": {
-  "class_type": "PaintAPlate_ColorSpace",
-  "inputs": {
-   "image": [
-    "30",
-    0
-   ],
-   "config": "ocio://studio-config-latest",
-   "source": "@model",
-   "destination": "ACES2065-1"
-  },
-  "_meta": {
-   "title": "The layer in ACES2065-1",
-   "slots": {
-    "config": "config",
-    "source": "color_space"
-   }
-  }
- },
- "33": {
-  "class_type": "PaintAPlate_SaveFrames",
-  "inputs": {
-   "format": "exr",
-   "fps": [
-    "1",
-    3
-   ],
-   "chromaticities": "AP0",
-   "frames": [
-    "1",
-    4
-   ],
-   "images": [
-    "32",
-    0
-   ],
-   "filename_prefix": ""
-  },
-  "_meta": {
-   "title": "Layer as half-float EXR frames (an HDR result of a video plate)",
-   "slots": {
-    "filename_prefix": "layer_exr_prefix",
-    "images": "export_layer_exr"
-   },
-   "output": "layer_exr"
-  }
- },
- "34": {
+ "30": {
   "class_type": "PaintAPlate_SavePlate",
   "inputs": {
    "images": [
@@ -640,7 +545,7 @@
    "output": "shot"
   }
  },
- "35": {
+ "31": {
   "class_type": "PaintAPlate_LoadPlate",
   "inputs": {
    "path": "",
@@ -654,11 +559,11 @@
    }
   }
  },
- "36": {
+ "32": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
-    "35",
+    "31",
     0
    ],
    "config": "ocio://studio-config-latest",
@@ -677,11 +582,11 @@
    }
   }
  },
- "37": {
+ "33": {
   "class_type": "PaintAPlate_SavePlate",
   "inputs": {
    "images": [
-    "36",
+    "32",
     0
    ],
    "plate": [
@@ -700,7 +605,7 @@
    "output": "clean"
   }
  },
- "38": {
+ "34": {
   "class_type": "MaskToImage",
   "inputs": {
    "mask": [
@@ -709,11 +614,11 @@
    ]
   }
  },
- "39": {
+ "35": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
-    "38",
+    "34",
     0
    ],
    "frames": [
@@ -731,13 +636,13 @@
    "output": "matte"
   }
  },
- "40": {
+ "36": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
    "width": 0,
    "height": 0,
    "images": [
-    "38",
+    "34",
     0
    ],
    "frames": [

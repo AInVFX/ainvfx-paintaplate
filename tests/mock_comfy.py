@@ -462,7 +462,7 @@ async def execute(pid, prompt):
         o[outs["video"]] = {"images": [save_mp4(shot, v["video_prefix"], spec["fps"])], "animated": [True]}
         if "first" in outs:  # frame 0 of the shot, as Save Image writes it
             o[outs["first"]] = {"images": [save_png(shot[0], "output", v["first_prefix"], 0)]}
-    elif "video" in outs or "export" in outs or "exr" in outs:  # comp and export: blend the shot over the plate through the matte
+    elif "video" in outs or "export" in outs:  # comp and export: blend the shot over the plate through the matte
         half = lambda fs: [f.astype(np.float16) for f in fs]  # noqa: E731  the plate, the shot, the matte and the result are held at once, in half floats
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         frames, n = half(frames), spec["frames"]
@@ -480,7 +480,7 @@ async def execute(pid, prompt):
             out.append((g * m + p * (1 - m)).astype(np.float16))
             mattes.append(m.astype(np.float16) if has_matte else np.zeros((h, w, 1), np.float16))
             frames[i] = None
-        layer = [resize(shot[min(i, len(shot) - 1)], w, h) if not i else moved(resize(shot[min(i, len(shot) - 1)], w, h), back=True) for i in range(n)] if {"layer", "layer_exr"} & set(outs) else []
+        layer = [resize(shot[min(i, len(shot) - 1)], w, h) if not i else moved(resize(shot[min(i, len(shot) - 1)], w, h), back=True) for i in range(n)] if "layer" in outs else []
         for part in ("shot", "clean"):  # the shot as the model made it, and a Clean's pass under a paint, as Save Plate writes them
             if part in outs:
                 save_mp4(shot, f"{v[part + '_prefix']}/plate", spec["fps"])
@@ -491,29 +491,15 @@ async def execute(pid, prompt):
         if "video" in outs:
             o[outs["video"]] = {"images": [save_mp4(out, v["video_prefix"], spec["fps"])], "animated": [True]}
         else:
-            d = os.path.join(folder("output"), v.get("prefix") or v.get("exr_prefix", "").rpartition("/")[0])
+            d = os.path.join(folder("output"), v["prefix"])
             os.makedirs(d, exist_ok=True)
-            if "export" in outs:  # Save Plate: dropped for an HDR result of a video plate, which writes EXR frames instead
+            if "export" in outs:  # Save Plate
                 save_mp4(out, f"{v['prefix']}/plate", spec["fps"])
             if "matte" in outs:  # Save Frames' record, as ComfyUI answers it: the first frame
                 o[outs["matte"]] = {"images": [save_png(mattes[i][..., 0].astype(np.float32), "output", v["matte_prefix"], i) for i in range(n)][:1]}
-            if "exr" in outs:  # an HDR result of a video plate: half-float EXR frames instead of the plate's format
-                sub = v["exr_prefix"].rpartition("/")[0]
-                os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
-                names = [f"f_{i + 1:05d}_.exr" for i in range(n)]
-                plateio.write_exrs(lambda i: out[i], [os.path.join(folder("output"), sub, f) for f in names])
-                o[outs["exr"]] = {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
             if "layer" in outs:  # the shot as the composite blends it, as Save Plate writes it
                 save_mp4(layer, f"{v['layer_prefix']}/plate", spec["fps"])
                 o[outs["layer"]] = {"files": [{"filename": "plate_00001_.webm", "subfolder": v["layer_prefix"], "type": "output"}]}
-            if "layer_exr" in outs:  # beside an EXR result: half-float EXR frames
-                sub = v["layer_exr_prefix"].rpartition("/")[0]
-                os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
-                names = [f"f_{i + 1:05d}_.exr" for i in range(n)]
-                plateio.write_exrs(lambda i: layer[i], [os.path.join(folder("output"), sub, f) for f in names])
-                o[outs["layer_exr"]] = {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
-            if "export" not in outs:
-                return o
             o[outs["export"]] = {"text": [f"Save Plate: 1 file written to {d}.\n  First files: plate_00001_.webm."],
                                  "files": [{"filename": "plate_00001_.webm", "subfolder": v["prefix"], "type": "output"}]}
     else:
