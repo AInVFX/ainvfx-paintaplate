@@ -120,17 +120,36 @@ def frame_size(path: str) -> tuple:
         return struct.unpack(">II", f.read(24)[16:24])
 
 
+def even_chunk(count: int, chunk: int, overlap: int) -> int:
+    """The longest chunk of at most `chunk` frames with which core's split ends on a full chunk in a window of `count` frames,
+    chunks sharing `overlap` latent frames: chunks spread evenly, none short, the fewest frames sampled among them. The window
+    itself when it holds in one chunk."""
+    latent, most = (count - 1) // 4 + 1, (chunk - 1) // 4 + 1
+    if latent <= most:
+        return count
+    o = min(overlap, most - 1)
+
+    def last(size):  # the last chunk's latent frames, as core's SeedVR2TemporalChunk steps through the window
+        start = 0
+        while start + size < latent:
+            start += size - o
+        return latent - start
+    return 4 * (min(range(o + 1, most + 1), key=lambda size: (size - last(size), -size)) - 1) + 1
+
+
 def values(shot: str, width: int, height: int, frames: int, label: str = "upscale", first: int = 0, count: int = WINDOW,
            color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16", seed: int = 42, window: int = 0,
-           px: int = LONG_SIDE, side: str = "long", factor: int = FACTOR, chunk: int = UPSCALE_CHUNK, overlap: int = CHUNK_OVERLAP) -> dict:
+           px: int = LONG_SIDE, side: str = "long", factor: int = FACTOR, chunk: int = UPSCALE_CHUNK, overlap: int = CHUNK_OVERLAP, even: bool = False) -> dict:
     """The slots of the upscale workflow for window number `window` of a shot of `frames` frames: its own folder. `chunk`: the
-    frames SeedVR2 samples at once, 0 for one pass over the window; `overlap`: the latent frames two neighbouring chunks share."""
+    frames SeedVR2 samples at once, 0 for one pass over the window; `overlap`: the latent frames two neighbouring chunks share;
+    `even`: chunks of at most `chunk` frames, spread evenly over the window (even_chunk)."""
+    n = max(1, min(count, frames - first))
     w, h = target_size(width, height, px, side)
     sw, sh = source_size(width, height, (w, h), factor)
     return {"shot": shot, "max_frames": frames, "source_width": sw, "source_height": sh, "first": first, "count": max(1, min(count, frames - first)), "width": w,
             "height": h, "color_space": color_space, "color_fix": color_fix, "format": fmt, "seed": seed,
             "prefix": f"{label}/upscale/w{window:03}/f", "under": "", "under_space": color_space, "matte": "", "comp_prefix": "",
-            "matte_prefix": "", "chunk_frames": chunk or max(1, min(count, frames - first)), "chunk_overlap": overlap}
+            "matte_prefix": "", "chunk_frames": (even_chunk(n, chunk, overlap) if even else chunk) if chunk else n, "chunk_overlap": overlap}
 
 
 def decode_tiles(prompt: dict, tile: int, overlap: int) -> int:
@@ -144,14 +163,14 @@ def decode_tiles(prompt: dict, tile: int, overlap: int) -> int:
 def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first: int = 0, count: int = WINDOW,
         every: bool = False, color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16",
         px: int = LONG_SIDE, decode_tile: str = "", side: str = "long", factor: int = FACTOR, chunk: int = UPSCALE_CHUNK,
-        overlap: int = CHUNK_OVERLAP) -> dict:
+        overlap: int = CHUNK_OVERLAP, even: bool = False) -> dict:
     import build_workflows
     from hdr_plate import _comfy_pid, _plate_info, node_rows, run_prompt
     w, h, n = _plate_info(shot_path(comfy, shot))
     shutil.rmtree(os.path.join(comfy, "output", label), ignore_errors=True)
     target = target_size(w, h, px, side)
     count = count or window_frames(*machine(url), target, (w, h), n)
-    jobs = [("upscale", values(shot, w, h, n, label, f, c, color_space, color_fix, fmt, window=k, px=px, side=side, factor=factor, chunk=chunk, overlap=overlap))
+    jobs = [("upscale", values(shot, w, h, n, label, f, c, color_space, color_fix, fmt, window=k, px=px, side=side, factor=factor, chunk=chunk, overlap=overlap, even=even))
             for k, (f, c) in enumerate(windows(n, first, count, every))]
     if every:
         jobs.append(("upscale_export", export_values(shot, n, label, count)))
@@ -210,7 +229,8 @@ if __name__ == "__main__":
     ap.add_argument("--decode-tile", default="", help="T/O: the tile and the overlap of SeedVR2's decode in px; 4096/128 decodes whole")
     ap.add_argument("--chunk", type=int, default=UPSCALE_CHUNK, help="the frames SeedVR2 samples at once; 0: one pass over each window")
     ap.add_argument("--overlap", type=int, default=CHUNK_OVERLAP, help="the latent frames two neighbouring chunks share, which core's merge crossfades")
+    ap.add_argument("--even", action="store_true", help="chunks of at most --chunk frames, spread evenly over each window, none short")
     a = ap.parse_args()
     run(a.url, a.comfy, a.shot, os.path.expanduser(a.out), a.label, a.first, a.count, a.all, a.color_space, a.color_fix, a.format,
         a.width or a.height or a.long_side, a.decode_tile, "width" if a.width else "height" if a.height else "long", factor=a.factor,
-        chunk=a.chunk, overlap=a.overlap)
+        chunk=a.chunk, overlap=a.overlap, even=a.even)
