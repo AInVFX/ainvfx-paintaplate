@@ -1052,7 +1052,9 @@ def fluid16_flow(browser, port):
           f"on again, the zip holds the HDR frames and the shot in the blank plate's format, named after the blank plate: {names[:3]}")
     page.evaluate("""() => { const v = document.querySelector('canvas[data-precision]'); window.__prec = [];
       new MutationObserver(() => window.__prec.push(v.dataset.precision)).observe(v, { attributes: true, attributeFilter: ['data-precision'] }); }""")
-    page.click("#play-btn"); page.wait_for_function("window.__prec.length >= 34", timeout=30000); page.click("#play-btn")  # two rounds of its 17 frames
+    if not page.evaluate("document.querySelector('#play-btn').classList.contains('playing')"):  # a result plays as it is made
+        page.click("#play-btn")
+    page.wait_for_function("window.__prec.length >= 34", timeout=30000); page.click("#play-btn")  # two rounds of its 17 frames
     seen = page.evaluate("window.__prec")
     flips = sum(1 for a, b in zip(seen, seen[1:]) if a != b)
     check(flips <= 1, f"playing the HDR result, its EXR frames and its 8-bit movie never alternate: {flips} changes in {len(seen)} draws")
