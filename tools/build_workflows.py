@@ -137,7 +137,7 @@ OPTIONAL = {"fit_keep": ("paint_matte",), "fit_mask": ("matte_a", "matte_b"), "n
             "follow_element": ("seed",), "follow_base": ("base",), "follow_named": ("name_request",), "follow_removed": ("removed_request",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "plate_level": ("plate_width", "plate_height"),
             "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",),
             "export_plate": ("prefix",), "export_exr": ("exr_prefix",), "export_layer": ("layer_prefix",),
-            "export_layer_exr": ("layer_exr_prefix",), "upscale_comp": ("comp_prefix",), "upscale_matte": ("matte_prefix",)}
+            "export_layer_exr": ("layer_exr_prefix",), "export_shot": ("shot_prefix",), "export_clean": ("clean_prefix",), "upscale_comp": ("comp_prefix",), "upscale_matte": ("matte_prefix",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -632,7 +632,7 @@ def composite(g):
     g.link_slot(shot, "mask", "fit_mask")  # no matte: the link goes, as Fit to Plate's does
     # the new pixels are matched to the plate they are composited onto: relit when the light changed
     fit, final = fitted(g, base, shot, union, paint)
-    return load, fit, final
+    return load, fit, final, gen_plate, model  # with the shot in the plate's colour space, and the plate as the models see it
 
 
 def review():
@@ -641,7 +641,7 @@ def review():
     plate's own colour space, which the viewer reads at full precision. It runs right after the full-size passes;
     nothing here is written for compositing software (that is export, when Export is pressed)."""
     g = Graph()
-    load, fit, final = composite(g)
+    load, fit, final, _, _ = composite(g)
     xray_matte(g, fit, load)
     # Each writer takes the composite as it is: it saves the plate's own frames (`frames`, without Load Plate's padding) and
     # converts each frame as it saves it, so no second batch of the shot is held
@@ -661,12 +661,13 @@ def review():
 
 
 def export():
-    """For compositing software, when Export is pressed: the composite the review shows, written by Save Plate in the
-    plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers, the untouched
-    pixels exactly the source's), with the matte of where the plate changed and, for an edit that keeps the plate's
-    untouched pixels, the layer the composite blends in: result = plate x (1 - matte) + layer x matte."""
+    """For compositing software, when Export is pressed: the composite the review shows, written by Save Plate (a
+    sequence in the plate's own format, its EXR layers and untouched pixels exactly the source's; a movie as ProRes 4444
+    XQ, its untouched pixels the source's own samples), with the matte of where the plate changed as 16-bit PNG frames
+    and, for an edit that keeps the plate's untouched pixels, the layer the composite blends in:
+    result = plate x (1 - matte) + layer x matte."""
     g = Graph()
-    load, fit, final = composite(g)
+    load, fit, final, shot_plate, model = composite(g)
     plate_out = g("PaintAPlate_SavePlate", _title="Export", _output="export", images=final, plate=load[2],
                   filename_prefix=Slot("prefix", "paintaplate/plate/export"), keep_untouched=Slot("keep_untouched", True),
                   changed=fit[1])
@@ -680,7 +681,7 @@ def export():
             filename_prefix=Slot("exr_prefix", ""))
     g.link_slot(exr, "images", "export_exr")
     # The layer: the shot as the composite blends it. Composite Frames sizes its source to the plate with the bilinear
-    # filter of Image Scale, so this is the picture it blends. Written as the result is: in the plate's own format with no
+    # filter of Image Scale, so this is the picture it blends. Written as the result is: by Save Plate with no
     # source pixel kept, or as half-float EXR frames in ACES2065-1 beside an EXR result. A relight leaves it out (Slots
     # layer_prefix and layer_exr_prefix empty): every pixel of its result may change, so the result is the only layer.
     size = g("GetImageSize", image=load[0])
@@ -694,9 +695,20 @@ def export():
                   images=colour(g, layer, Slot("color_space", "@model"), HDR_SPACE, "The layer in ACES2065-1"),
                   filename_prefix=Slot("layer_exr_prefix", ""))
     g.link_slot(layer_exr, "images", "export_layer_exr")
+    # The shot as the model made it, and a Clean's pass when a paint rides on it: in the plate's colour space, written as every
+    # element is, by Save Plate in the export's format, at their own size, with none of the source's pixels. The page fills
+    # shot_prefix, and clean_pass with clean_prefix, when Export takes them (logic's OPTIONAL: export_shot, export_clean).
+    shot_out = g("PaintAPlate_SavePlate", _title="Shot: the frames the model made", _output="shot", images=shot_plate, plate=load[2],
+                 filename_prefix=Slot("shot_prefix", ""), keep_untouched=False)
+    g.link_slot(shot_out, "images", "export_shot")
+    clean = colour(g, g("PaintAPlate_LoadPlate", _title="Clean plate pass", path=Slot("clean_pass", ""), max_frames=1024, pad_8n1=False),
+                   "@model", Slot("color_space", "@model"), "Clean plate pass in the plate's colour space", peak=model[1])
+    clean_out = g("PaintAPlate_SavePlate", _title="Clean plate pass", _output="clean", images=clean, plate=load[2],
+                  filename_prefix=Slot("clean_prefix", ""), keep_untouched=False)
+    g.link_slot(clean_out, "images", "export_clean")
     matte_frames = g("MaskToImage", mask=fit[1])
-    g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed", _output="matte", images=matte_frames, frames=load[4],
-      filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))
+    g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed (16-bit PNG)", _output="matte", images=matte_frames, frames=load[4],
+      format="png16", filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))
     movie = g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Matte movie (grey): the Export row shows it", _output="matte_movie", images=matte_frames,
               frames=load[4], fps=load[3], crf=18, filename_prefix=Slot("matte_video_prefix", ""))
     g.link_slot(movie, "images", "export_matte_movie")
@@ -729,7 +741,7 @@ def fluid():
     and hands it to the guide; the control video is black with the keyframes at their frames, at the size and length
     of the shot; euler_ancestral, the 8 distilled sigmas, CFG 1, no first-frame image (the LoRA reads frame 0 from the
     control video). The blank plate gives the frame rate and the length, and the size unless `width` and `height` ask for
-    the shot preview's. Save Plate writes the shot in the blank plate's format (ProRes 4444), and Save Image writes its
+    the shot preview's. Save Plate writes the shot as ProRes 4444 XQ, as every movie of the export, and Save Image writes its
     first frame, as `ingest` writes a plate's first frame.
     """
     g = Graph()
@@ -762,7 +774,7 @@ def fluid():
     # the whole frame in one piece by default, in 128-frame temporal tiles, as the hdr workflow decodes (hdr())
     decoded = g("VAEDecodeTiled", tile_size=Slot("tile", WHOLE), overlap=64, temporal_size=128, temporal_overlap=32, vae=vae, samples=g("LTXVCropGuides", positive=guide[0], negative=guide[1],
                                                  latent=g("LTXVSeparateAVLatent", av_latent=sampled[0])[0])[2])
-    g("PaintAPlate_SavePlate", _title="The fluid plate, in the blank plate's format", _output="plate", images=decoded,
+    g("PaintAPlate_SavePlate", _title="The fluid shot, as ProRes 4444 XQ", _output="plate", images=decoded,
       plate=load[2], filename_prefix=Slot("prefix", "paintaplate/fluid/plate"), keep_untouched=False)
     g("SaveVideo", _title="Fluid shot preview", _output="video", format="auto", format__codec="auto",
       video=g("CreateVideo", images=decoded, fps=load[3], bit_depth=8, color_space="sRGB", codec="none"),
@@ -931,9 +943,9 @@ def upscale():
 def upscale_export():
     """Upscale's export, after the last window. Join Windows reads the windows' folders under one parent folder
     (Slot frames), in order, each window its last frames (Slot count) and the last window what is left of the shot's
-    frames (Slot max_frames), so a window job that runs again counts once; a shot made in one job is one window. Save Plate writes the joined frames at their own size, in the format of the export at the plate's size (Slot
-    shot), which Load Plate reads for its spec: the same file type, codec, bit depth, frame numbers, colour tags, timecode
-    and audio. The frames are in the plate's colour space already, so nothing converts them. Save Movie writes the part's viewer
+    frames (Slot max_frames), so a window job that runs again counts once; a shot made in one job is one window. Save Plate writes the joined frames at their own size, as it writes the export at the plate's size (Slot
+    shot), which Load Plate reads for its spec: a sequence in its own file type and bit depth, a movie as ProRes 4444 XQ,
+    with the frame numbers, colour tags, timecode and audio. The frames are in the plate's colour space already, so nothing converts them. Save Movie writes the part's viewer
     movie at its own size when the page names it (Slot video_prefix): its row in the Render panel plays it."""
     g = Graph()
     shot = g("PaintAPlate_LoadPlate", _title="Result: its format", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)

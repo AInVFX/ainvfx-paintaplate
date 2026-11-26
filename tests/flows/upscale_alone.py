@@ -38,11 +38,11 @@ def run(browser, port, U):
     U.check(shown() == ["SDR to HDR, upscaled"] and page.evaluate(CANVAS) == [1600, 880] and (page.text_content("#status") or "").startswith("SDR to HDR, upscaled: ready, in the viewer."),
             f"the player shows SDR to HDR's frames upscaled, at their own size: {shown()}, {page.evaluate(CANVAS)}, {page.text_content('#status')!r}")
     start = len(U.log_lines(page))
-    page.click("#export-btn")
+    page.click("#export-btn"); page.check("#x-hdr")  # beside the upscaled frames, which the dialog opens on
     with page.expect_download(timeout=240000) as dl:
         page.click("#x-go")
     zipped = zipfile.ZipFile(dl.value.path()).namelist()
-    U.check(not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]) and zip_rows.files(zipped, "hdr_upscaled")
-            and zip_rows.files(zipped, "hdr") and not zip_rows.files(zipped, "plate_upscaled"),
+    U.check(not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]) and zip_rows.files(zipped, "plate_hdr_upscaled")
+            and zip_rows.files(zipped, "plate_hdr") and not zip_rows.files(zipped, "plate_upscaled"),
             f"Export posts no Upscale job, and zips the upscaled frames beside the frames at the plate's size: {sorted({n.split('/')[0] + '/' + n.split('/')[1] for n in zipped if '/' in n})}")
     page.close()

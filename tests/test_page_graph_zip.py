@@ -26,9 +26,6 @@ def load_routes():  # routes as another test module loaded it, with its folder_p
     return routes
 
 
-NAMES = {"export": "composite_full_size", "review": "composite_full_size", "matte": "matte", "shot": "shot_full_size", "graph": "comfyui_graph",
-         "hdr": "hdr", "plate": "fluid_shot", "preview": "fluid_shot_preview",
-         "up": {"export": "composite_upscaled", "matte": "matte_upscaled"}}  # the zip's names, as the page sends them (logic.zipNames)
 
 class Request:  # what graph_post reads of a request: its query and its body
     def __init__(self, query, body):
@@ -55,8 +52,9 @@ class GraphInZip(unittest.TestCase):
         self.assertEqual(json.loads(answer.body), {"file": "scene.comfyui.json"})
         with open(os.path.join(self.folder, "scene.comfyui.json")) as f:
             self.assertEqual(json.load(f), graph)
-        self.assertIn("desk_comfyui_graph.json", [name for _, name in routes.collect(self.folder, ["export", "graph"], stem="desk", names=NAMES)])
-        with zipfile.ZipFile(routes.build_zip(self.folder, "shot", ["export", "graph"], stem="desk", names=NAMES)) as z:
+        files = routes.zip_entries([("composite_full_size", f"output:{self.rel}/export"), ("comfyui_graph", f"output:{self.rel}/{routes.GRAPH}")], "desk")
+        self.assertIn("desk_comfyui_graph.json", [name for _, name, _ in files])
+        with zipfile.ZipFile(routes.build_zip(self.folder, "shot", files, None, "desk")) as z:
             self.assertEqual(json.loads(z.read("desk_comfyui_graph.json")), graph)
 
     def test_a_body_that_is_not_json_and_a_folder_outside_are_refused(self):
@@ -114,7 +112,7 @@ class GraphImagesInZip(unittest.TestCase):
                  {"type": "PaintAPlate_KeyframeVideo", "widgets_values": [960, 512, 17, json.dumps([{"frame": 0, "image": "desk_e1_keyframe_12345678.png"}])]}]
         with open(os.path.join(run, routes.GRAPH), "w") as f:
             json.dump({"nodes": nodes}, f)
-        got = [arc for _, arc in routes.collect(run, ["graph"], stem="desk", names={"graph": "comfyui_graph"})]
+        got = [arc for _, arc, _ in routes.zip_entries([("comfyui_graph", f"output:paintaplate/graphimages{os.getpid()}/v1/{routes.GRAPH}")], "desk")]
         self.assertEqual(got, ["desk_comfyui_graph.json", "input/desk_e1_mask_0676e451.png", "input/desk_e1_strokes_7bcde075.png",
                                "input/desk_e1_keyframe_12345678.png"])
         print("The zip holds the graph and the images it loads, in input/")

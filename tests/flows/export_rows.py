@@ -1,12 +1,11 @@
-"""Export: each row of the dialog says what its file is, in the Render panel's own step names. A plate of EXR frames
-offers « Composite, full size » as its own frames and « Composite, full size, as a movie »; a movie plate offers its
-composite as a movie, with no second movie; a fluid shot alone offers « Fluid shot ». A hidden row adds nothing to the zip,
-even ticked on another plate, and the log's download line names the rows the zip holds. The Help's Export entry opens with
-the dialog's own line, then names the composite's step."""
+"""Export's ticks: the dialog shows the elements (What) and the stages (Stage) that the render displayed can give, in the
+dialog's words, and opens on the result at its last stage, each time it opens. A paint on a plate of EXR frames offers the
+plate, the shot, the layer, the matte and the composite; a fluid shot alone offers its plate alone. The log's download
+lines name the files the zip holds, in the Render panel's step names. The Help's Export entry opens with the dialog's line."""
 
-ROWS = """() => [...document.querySelectorAll('#export label.check')].filter((l) => !l.hidden)
-  .map((l) => [l.querySelector('input').id, l.querySelector('span').textContent, l.querySelector('small').textContent])"""
-STAGES = "() => [...document.querySelectorAll('#stages li')].map((li) => li.textContent).join(' | ')"
+TICKS = """() => [...document.querySelectorAll('#export label.check')].filter((l) => !l.hidden)
+  .map((l) => [l.querySelector('input').id, l.querySelector('span').textContent, l.querySelector('small')?.textContent ?? '', l.querySelector('input').checked])"""
+WHAT = ("x-plate", "x-shot", "x-layer", "x-matte", "x-composite", "x-graph")
 SAID = "() => [...document.querySelectorAll('#log li')].map((li) => li.textContent).filter((t) => t.includes('Download: ')).at(-1) ?? ''"
 
 
@@ -24,30 +23,29 @@ def run(browser, port, U):
     page = U.load(browser, port, errors=errors)
     U.open_plate(page, "paintaplate/hdr_room")  # a plate of EXR frames
     painted(page, U, full=True)
-    stages = page.evaluate(STAGES)
     page.click("#export-btn")
-    rows = page.evaluate(ROWS)
-    U.check([r[:2] for r in rows] == [["x-export", "Composite, full size"], ["x-review", "Composite, full size, as a movie"], ["x-matte", "Matte"],
-                                      ["x-shot", "Shot, full size"], ["x-source", "Source plate"], ["x-graph", "ComfyUI graph"]] and rows[0][2] == "EXR frames" and rows[1][2] == "H.264 MP4",
-            f"a plate of EXR frames: the composite as its own frames, and the same composite as a movie: {rows}")
-    U.check("Composite, full size" in stages and "Shot, full size" in stages, f"the rows take the Render panel's step names: {stages}")
-    page.check("#x-review")
+    ticks = page.evaluate(TICKS)
+    what, words, on = [t[:2] for t in ticks if t[0] in WHAT], {t[0]: t[2] for t in ticks}, [t[0] for t in ticks if t[3]]
+    U.check(what == [["x-plate", "Plate"], ["x-shot", "Shot"], ["x-layer", "Layer"], ["x-matte", "Matte"], ["x-composite", "Composite"], ["x-graph", "ComfyUI graph"]]
+            and words["x-plate"].startswith("the plate under the edits") and words["x-shot"] == "the frames the model made" and words["x-layer"] == "the shot as the composite blends it"
+            and words["x-matte"] == "where the plate changed, 16-bit PNG frames" and words["x-composite"] == "the result",
+            f"a paint on a plate of EXR frames: its five elements and the graph, in the dialog's words: {ticks}")
+    U.check("Full size" in [t[1] for t in ticks if t[0] not in WHAT] and on == ["x-composite", "x-full"], f"the dialog opens on the composite at full size: {ticks}")
+    page.check("#x-shot")
+    page.keyboard.press("Escape")
+    page.click("#export-btn")
+    U.check(not page.is_checked("#x-shot") and page.is_checked("#x-composite"), "the dialog opens again on the result at its last stage")
     page.keyboard.press("Escape")
     U.open_plate(page)  # plates/desk.mp4, an H.264 movie
     painted(page, U)
     page.click("#export-btn")
-    rows = page.evaluate(ROWS)
-    U.check([r[:2] for r in rows] == [["x-export", "Composite, full size"], ["x-matte", "Matte"], ["x-shot", "Shot, full size"], ["x-source", "Source plate"],
-                                      ["x-graph", "ComfyUI graph"]]
-            and rows[0][2] == "H.264 movie", f"a movie plate: its composite is a movie, with no second one: {rows}")
-    U.check(page.is_checked("#x-review"), "the composite's movie keeps its tick from the plate of frames, hidden")
     page.evaluate(U.WATCH)
     with page.expect_download(timeout=180000):
         page.click("#x-go")
     U.wait_log(page, U.added_line("Download: "), 60000, "the download's line")
     said = page.evaluate(SAID)
-    U.check("Composite, full size." in said and "Matte." in said and "as a movie" not in said and page.text_content("#status").startswith("Download: "),
-            f"the hidden row adds nothing, and the log names the rows the zip holds: {said!r}")
+    U.check("Composite, full size." in said and "Matte." not in said and page.text_content("#status").startswith("Download: "),
+            f"the log names the files the zip holds, in the Render panel's step names: {said!r}")
     page.click("#open-btn"); page.click("#open [data-tab=blank]")  # a fluid shot alone
     page.fill("#b-frames", "17"); page.dispatch_event("#b-frames", "input")
     page.evaluate(U.WATCH)
@@ -57,12 +55,13 @@ def run(browser, port, U):
     page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => /^Render v\\d+: Fluid shot, full size: done in /.test(e.textContent))",
                            timeout=240000)  # the fluid shot, made by its render's steps
     page.click("#export-btn")
-    rows = page.evaluate(ROWS)
-    U.check(rows[0] == ["x-export", "Fluid shot", "ProRes 4444 movie"] and not any(r[0] in ("x-review", "x-matte", "x-shot", "x-source") for r in rows),
-            f"a fluid shot alone: one row of its own: {rows}")
+    ticks = page.evaluate(TICKS)
+    shown, on = [t[0] for t in ticks if t[0] in WHAT], [t[0] for t in ticks if t[3]]
+    U.check(shown[:1] == ["x-plate"] and not set(shown) & {"x-shot", "x-layer", "x-matte", "x-composite"} and on == ["x-plate", "x-full"],
+            f"a fluid shot alone: its plate alone, at full size: {ticks}")
     page.keyboard.press("Escape")
     U.check(page.text_content("#help-export") == "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip. "
-            "Composite, full size keeps the plate's format. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.",
+            "Frames keep their format, and a movie gives ProRes 4444 XQ. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.",
             f"the Help's Export entry: the dialog's line, then the composite's step: {page.text_content('#help-export')!r}")
-    U.no_errors(errors, "after the three dialogs")
+    U.no_errors(errors, "after the dialogs")
     page.close()

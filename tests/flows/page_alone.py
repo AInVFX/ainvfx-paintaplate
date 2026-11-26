@@ -53,15 +53,15 @@ def run(browser, port, U):
     U.check(U.until(page, "document.querySelector('canvas[data-precision]')?.dataset.precision === 'float'", 60000),
             "the player shows the result's EXR frames at full precision")
     page.click("#export-btn")
-    hidden = page.evaluate("['matte', 'review', 'shot'].every((k) => document.querySelector(`#x-${k}`).closest('label').hidden)")
-    fmt, note = page.text_content("#x-format") or "", page.text_content("#x-note") or ""
-    U.check(hidden and fmt == "half-float EXR frames, ACES2065-1" and note.startswith("The plate in HDR"),
-            f"the Export dialog offers the plate in HDR alone: {fmt!r}, {note!r}")
+    hidden = page.evaluate("['shot', 'layer', 'matte', 'composite'].every((k) => document.querySelector(`#x-${k}`).closest('label').hidden)")
+    ticks, note = [k for k in ("plate", "full", "hdr") if page.is_checked(f"#x-{k}")], page.text_content("#x-note") or ""
+    U.check(hidden and ticks == ["plate", "hdr"] and note.startswith("The plate in HDR"),
+            f"the Export dialog offers the plate, and opens on the plate in HDR: {ticks}, {note!r}")
     with page.expect_download(timeout=60000) as dl:
         page.click("#x-go")
     z = zipfile.ZipFile(dl.value.path())
     names = z.namelist()
-    exrs = sorted(zip_rows.files(names, "hdr", (".exr",)))
+    exrs = sorted(zip_rows.files(names, "plate_hdr", (".exr",)))
     listed = "".join(z.read(n).decode() for n in zip_rows.files(names, "models"))
     with tempfile.TemporaryDirectory() as tmp:
         size = frame_size(z.extract(exrs[0], tmp)) if exrs else None
@@ -69,7 +69,7 @@ def run(browser, port, U):
             f"the zip holds the 49 EXR frames at the plate's size, 1280 x 704, and the models behind them: {len(exrs)} frames, {size}, {names[:2]}")
     status = page.text_content("#status") or ""
     said = U.log_lines(page)
-    U.check(status.startswith("Download: ") and status.endswith(".zip.") and any(t.startswith("Download: ") and "  HDR." in t for t in said) and any(
+    U.check(status.startswith("Download: ") and status.endswith(".zip.") and any(t.startswith("Download: ") and "  Plate, HDR." in t for t in said) and any(
         t.startswith("Export: done, in ComfyUI's output folder.") and "49 half-float EXR frames in ACES2065-1" in t for t in said),
         f"the status line names the zip, and the log what Export wrote and the row the zip holds: {status!r}")
     page.click("#finish-btn")

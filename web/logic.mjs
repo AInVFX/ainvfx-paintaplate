@@ -11,7 +11,7 @@
 export const OPTIONAL = { fit_keep: ["paint_matte"], fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_element: ["seed"], follow_base: ["base"], follow_named: ["name_request"], follow_removed: ["removed_request"],
   review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], plate_level: ["plate_width", "plate_height"],
   matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"],
-  export_plate: ["prefix"], export_exr: ["exr_prefix"], export_layer: ["layer_prefix"], export_layer_exr: ["layer_exr_prefix"],
+  export_plate: ["prefix"], export_exr: ["exr_prefix"], export_layer: ["layer_prefix"], export_layer_exr: ["layer_exr_prefix"], export_shot: ["shot_prefix"], export_clean: ["clean_prefix"],
   upscale_comp: ["comp_prefix"], upscale_matte: ["matte_prefix"] };
 
 // The matte's requests to the prompt upsampler: the words SAM 3.1 searches for, from an edit's text prompt.
@@ -755,8 +755,14 @@ export function logReport({ version, build, stats, browser, address, memory, pla
 }
 
 // The log's file name, in the browser's local time.
+// A name in a file's name: letters A to Z, digits, « . », « - » and « _ », every other run of characters one « _ », none at
+// either end. It names the zip, every file in it (routes.zip_name, the same rule) and the log's file.
+export const fileStem = (name) => String(name ?? "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+// The zip's name, without its extension: the stem, the render's version (v3, or fluid_v2 for a fluid shot alone), then what
+// it holds beyond full size, so that two zips of one render never share a name: desk_v3, desk_v3_hdr, desk_v3_hdr_upscaled.
+export const zipFileName = (stem, version, held = {}) => [fileStem(stem) || "no_plate", version, held.preview && "preview", held.hdr && "hdr", held.up && "upscaled"].filter(Boolean).join("_");
 export function logFileName(plate, d) {
-  const two = (n) => String(n).padStart(2, "0"), name = String(plate || "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "no_plate";
+  const two = (n) => String(n).padStart(2, "0"), name = fileStem(plate) || "no_plate";
   return `${name}_log_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}.txt`;
 }
 
@@ -877,65 +883,70 @@ export function stepOrder(steps, { done, at = () => undefined, now = null }) {
   return steps.map((id, i) => ({ id, i, k: rank(id) })).sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.i - b.i).map((x) => x.id);
 }
 
-// The Export dialog's words for every kind of result, from one source: the line above its rows, each row's label and detail
-// and whether it shows, the note under them, and the Help's Export entry. kind: "edits", "plate" (SDR to HDR on the plate,
-// with no edit), "relit" (a Light edit in HDR), "upscaled" (the plate alone, upscaled) or "fluid". The rows take the Render
-// panel's step names, which `steps` gives as the page names them (app.labelOf): comp, the composite at full size; shot, the
-// shot at full size; hdr, SDR to HDR; up, the Upscale step whose set the zip takes. ready: what Export takes its files from
-// is made; left: the time until it is, such as "about 10 min", or "". spec: the plate's spec, which names its format; exr:
-// the result is half-float EXR frames, an HDR result of a plate whose format holds nothing above 1.0; hdr: the fluid shot
-// went through SDR to HDR. The composite as a movie (the review movie) shows only where the composite is frames.
+// The Export dialog's words for every kind of result, from one source: the line above its ticks, each element's label and
+// detail (What), each stage's label (Stage), the note under them, and the Help's Export entry. kind: "edits", "plate" (SDR
+// to HDR on the plate, with no edit), "relit" (a Light edit in HDR), "upscaled" (the plate alone, upscaled) or "fluid".
+// ready: what Export takes its files from is made; left: the time until it is, such as "about 10 min", or "". hdr: the
+// fluid shot went through SDR to HDR. steps.comp: the composite at full size, as the Render panel names it (app.labelOf).
+// bytes: the source plate's size, once known.
 export const EXR_FRAMES = "half-float EXR frames, ACES2065-1";
-// source: the plate has files of its own to offer (no blank plate); bytes: their size, once known. last: SDR to HDR ran
-// after the composite, over the edits on a fluid shot, so its frames are the result; upHdr: Upscale's set is made from them.
-export function exportWords({ kind, ready = true, left = "", exr = false, hdr = false, last = false, upHdr = false, spec = null, steps = {}, source = false, bytes = 0 }) {
-  const hdrRow = "HDR"; // SDR to HDR's frames, named for what they hold: the step is SDR to HDR, its output is HDR
+export function exportWords({ kind, ready = true, left = "", hdr = false, steps = {}, bytes = 0 }) {
   const first = (step) => `${step} first${left ? `: ${left}` : ""}.`, inHdr = (what) => (ready ? `${what} in HDR.` : `${what} in HDR. ${first("SDR to HDR runs")}`);
-  const note = kind === "fluid" ? (hdr ? "The fluid shot in HDR, with the SDR shot in ProRes 4444." : "The fluid shot in ProRes 4444.")
+  const note = kind === "fluid" ? (hdr ? `The fluid shot in HDR, with the SDR shot in ${XQ}.` : `The fluid shot in ${XQ}.`)
     : kind === "plate" ? inHdr("The plate") : kind === "relit" ? inHdr("The relit result") : kind === "upscaled" ? (ready ? "" : first("Upscale runs"))
     : ready ? "" : first(`${steps.comp} renders`);
-  const format = (kind === "fluid" ? hdr : exr) ? EXR_FRAMES : kind === "fluid" ? "ProRes 4444 movie" : plateFormat(spec);
-  const edits = kind === "edits", frames = format === EXR_FRAMES || (!!spec && spec.kind !== "video");
   const hint = "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.";
-  const rows = {
-    export: { label: kind === "fluid" ? "Fluid shot" : kind === "plate" || kind === "relit" || last ? hdrRow : kind === "upscaled" ? steps.up : steps.comp, detail: format, shown: true },
-    review: { label: `${steps.comp}, as a movie`, detail: "H.264 MP4", shown: edits && frames },
-    matte: { label: "Matte", detail: "where the plate changed, PNG frames", shown: edits },
-    shot: { label: steps.shot, detail: "the whole frame as the model made it, H.264 MP4", shown: edits },
-    source: { label: "Source plate", detail: bytes > 0 ? `the plate's own files, ${gb(bytes)}` : "the plate's own files", shown: source && kind !== "fluid" },
-    graph: { label: "ComfyUI graph", detail: "the scene as one ComfyUI workflow, with the images it loads", shown: true }, // the page decides: the edits displayed, or a fluid shot alone
-    upscaled: { label: upHdr ? `${hdrRow}, upscaled` : steps.up, shown: true }, // no row: Finish > Upscale adds its set to the zip
-  };
-  return { hint, format, note, rows, zip: zipNames(rows, hdrRow, steps.comp), help: `${hint} ${steps.comp} keeps the plate's format. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.`,
-  };
+  const elements = { plate: { label: "Plate", detail: bytes > 0 ? `the plate under the edits, ${gb(bytes)}` : "the plate under the edits" },
+    shot: { label: "Shot", detail: "the frames the model made" }, layer: { label: "Layer", detail: "the shot as the composite blends it" },
+    matte: { label: "Matte", detail: "where the plate changed, 16-bit PNG frames" }, composite: { label: "Composite", detail: "the result" },
+    graph: { label: "ComfyUI graph", detail: "the scene as one ComfyUI workflow, with the images it loads" } };
+  const stages = { preview: { label: "Preview" }, full: { label: "Full size" }, hdr: { label: "HDR" }, up: { label: "Upscaled" } };
+  return { hint, note, elements, stages, help: `${hint} Frames keep their format, and a movie gives ${XQ}. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.` };
+}
+// The folder of a set of elements (the Finish layout): a Finish pass writes its set inside the folder of the set it reads,
+// so SDR to HDR's set is <run>/hdr, Upscale's <run>/upscale/<size>/out, and Upscale's of SDR to HDR's set
+// <run>/hdr/upscale/<size>/out. Finish's steps write by it, and Export reads by it (app.exportCells).
+export const setFolder = (run, { hdr = false, size = "" } = {}) => [run, hdr && "hdr", size && `upscale/${size}/out`].filter(Boolean).join("/");
+// Export's ticks: the elements (What) and the stages (Stage), in the dialog's order. The zip takes every element ticked at
+// every stage ticked that the render has a file for: a cell (app.exportCells) is one element at one stage, with its label,
+// its file, and whether it is the source plate's own files (source).
+export const X_ELEMENTS = ["plate", "shot", "layer", "matte", "composite"];
+// The labels of the cells the Render panel has no step for (app.exportCells): they name the files in the zip (zipName) and
+// the download's lines; Finish's sets take its own labels.
+export const X_LABELS = { source: "Source plate", matte: "Matte", mattePreview: "Matte, preview", layer: "Layer, full size", shotHdr: "Shot, HDR",
+  plateHdr: "Plate, HDR", layerHdr: "Layer, HDR", compHdr: "Composite, HDR", plateHdrUp: "Plate, HDR, upscaled", compHdrUp: "Composite, HDR, upscaled" };
+export const X_STAGES = ["preview", "full", "hdr", "up"];
+// The ticks the dialog shows: an element, or a stage, that has no cell for the render has no tick.
+export const xShown = (cells) => ({ elements: new Set(cells.map((c) => c.element)), stages: new Set(cells.map((c) => c.stage)) });
+// The ticks set as the dialog opens: the result (`first`: the composite, or the plate when it is all there is) at the last
+// stage the render has for it: Upscaled, else HDR, else Full size, else Preview.
+export function xDefaults(cells, first) {
+  const of = cells.filter((c) => c.element === first), stage = ["up", "hdr", "full", "preview"].find((s) => of.some((c) => c.stage === s));
+  return { elements: new Set([first]), stages: new Set(stage ? [stage] : []) };
+}
+// The zip's rows for the ticks: each cell of a ticked element at a ticked stage, once by its name in the zip, as
+// [name, label, file, source]. The matte is one picture at full size and in HDR, so it comes once.
+export function xRows(cells, { elements, stages }) {
+  const seen = new Set();
+  return cells.filter((c) => elements.has(c.element) && stages.has(c.stage)).map((c) => [zipName(c.source ? X_LABELS.source : c.label), c.label, c.file ?? null, !!c.source])
+    .filter(([name]) => !seen.has(name) && seen.add(name));
 }
 // A row's name in the zip: its label in lower case, its words joined by « _ », so the zip's names follow the dialog's words.
 export const zipName = (label) => String(label ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-// What the zip route calls each part (routes.zip_rows), from the row it belongs to (exportWords' rows). The composite as a
-// movie takes the composite's name (comp); a fluid shot's preview movie takes its shot's name with « _preview »; SDR to HDR's
-// frames take the name given (hdr); Upscale's result takes its step's name, and its matte the matte's name with « _upscaled ».
-export function zipNames(rows, hdr, comp = rows.export.label) {
-  const first = zipName(rows.export.label), matte = zipName(rows.matte.label);
-  const source = zipName(rows.source.label);
-  return { export: first, review: zipName(comp), matte, shot: zipName(rows.shot.label), source, hdr: zipName(hdr), plate: first, preview: `${first}_preview`,
-    graph: zipName(rows.graph.label), up: { export: zipName(rows.upscaled.label), matte: `${matte}_upscaled`, plate: `${source}_upscaled` } };
+// The format of the files the export writes, as the dialog, the Help, the status line and the graph's notes name it: a
+// sequence keeps its own file type, and every movie is ProRes 4444 XQ (plateio.VideoWriter). spec: the plate's spec.
+export const XQ = "ProRes 4444 XQ";
+export const exportFormat = (spec) => (!spec ? "" : spec.kind === "video" ? XQ : `${String(spec.ext ?? "").replace(/^\./, "").toUpperCase()} frames`);
+// What the log says once the zip downloads: its name, then one detail line per row the zip holds, in the dialog's words.
+export function downloadLines(zip, labels) {
+  return [`Download: ${zip}.`, ...[...new Set(labels)].map((label) => `  ${label}.`)].join("\n");
 }
-// A plate's format as the Export dialog names it: « H.264 movie », « ProRes 4444 movie », « EXR frames ». spec: the plate's
-// spec, with the codec and the profile its movie names (plateio).
-const CODECS = { h264: "H.264", hevc: "H.265", prores: "ProRes", av1: "AV1", vp9: "VP9", mpeg4: "MPEG-4", dnxhd: "DNxHD", ffv1: "FFV1", mjpeg: "Motion JPEG" };
-export function plateFormat(spec) {
-  if (!spec) return "";
-  if (spec.kind !== "video") return `${String(spec.ext ?? "").replace(/^\./, "").toUpperCase()} frames`;
-  const name = CODECS[spec.codec] ?? String(spec.codec ?? "").toUpperCase();
-  return `${name}${spec.codec === "prores" && spec.profile ? ` ${spec.profile}` : ""} movie`;
-}
-// What the log says once the zip downloads: its name, then one detail line per row of the dialog that the zip holds, in the
-// dialog's words (exportWords' rows). parts: the zip's parts, as the page asks the route for them. A part with no row of its
-// own (the layer) adds no line, and a fluid shot's files share the row « Fluid shot ».
-const ROW_OF = { export: "export", hdr: "export", plate: "export", preview: "export", matte: "matte", review: "review", shot: "shot", source: "source", graph: "graph", upscaled: "upscaled" };
-export function downloadLines(zip, parts, rows) {
-  const labels = [...new Set(parts.map((p) => rows[ROW_OF[p]]?.label).filter(Boolean))];
-  return [`Download: ${zip}.`, ...labels.map((label) => `  ${label}.`)].join("\n");
+// The line when a file the ticks ask for is not on disk: Export stops before its download (app.download).
+export const missingLine = (labels) => `Error: Export stopped: ${labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`} ${labels.length === 1 ? "has" : "have"} no file on disk.`;
+// The page path of a file that ComfyUI's /view serves from its output folder (comfy.viewUrl), or null.
+export function outputPath(url) {
+  const q = new URLSearchParams(String(url ?? "").split("?")[1] ?? "");
+  return q.get("type") === "output" && q.get("filename") ? `output:${[q.get("subfolder"), q.get("filename")].filter(Boolean).join("/")}` : null;
 }
 export const finishLabel = (on) => (on > 0 ? `Finish · ${on}` : "Finish"); // the Finish button: how many options are on
 

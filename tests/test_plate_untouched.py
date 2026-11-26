@@ -1,5 +1,5 @@
 """Where the export's matte shows 0, the export holds the plate's own samples. The scene has a soft edge, as Fit to Plate
-makes it with the export's grow, feather and steady, and its first 8-bit step holds pixels that the composite changed.
+makes it with the export's grow, feather and steady, and holds pixels below one 8-bit step, which the 16-bit matte shows.
 The frames are read back as the export's measures read them, with read_float, which reads each level of a still at
 its own depth."""
 import os
@@ -54,15 +54,16 @@ class UntouchedOnASoftMatte(unittest.TestCase):
             for i in range(N):  # Save Plate's copy, and the matte as Save Frames writes it
                 final = mathops.composite(plate[i], images[i], masks[i])
                 plateio.write_still(spec, i, final, None, plateio.untouched(masks[i]), out)
-            plateio.write_pngs(lambda i: plateio.core_uint8(np.repeat(masks[i][..., None], 3, -1)), mattes, workers=1)
-            first_step = []
+            png16 = lambda m: np.round(np.clip(m, 0, 1) * 65535.0).astype(np.uint16)  # noqa: E731  # as Save Frames writes the matte
+            plateio.write_pngs(lambda i: png16(np.repeat(masks[i][..., None], 3, -1)), mattes, workers=1)
+            faint = []
             for i, name in enumerate(sorted(os.listdir(out))):
-                result, stored = plateio.read_float(os.path.join(out, name)), plateio.core_uint8(masks[i])
+                result, stored = plateio.read_float(os.path.join(out, name)), png16(masks[i])
                 shows_0 = plateio.untouched(plateio.read_float(mattes[i])[..., 0])
                 np.testing.assert_array_equal(shows_0, stored == 0)
                 np.testing.assert_array_equal(result[shows_0], plate[i][shows_0])
-                first_step.append(np.abs(result - plate[i])[stored == 1].max(initial=0.0))
-            self.assertGreater(max(first_step), 0.0)  # the composite changed pixels of the matte's first step
+                faint.append(int(((stored > 0) & (stored < 257)).sum()))  # under one 8-bit step: an 8-bit matte showed them as 0
+            self.assertGreater(max(faint), 0)  # the soft edge holds pixels that the 16-bit matte shows
 
     def test_half_float_exr(self):
         self.export(".exr", lambda f, p: plateio.write_exrs(lambda i: f[i] * 6.0, p, workers=1, fps=24.0), 9.0)

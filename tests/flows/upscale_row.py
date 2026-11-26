@@ -23,7 +23,7 @@ def run(browser, port, U):
     page.keyboard.press("Escape")
     page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(U.REVIEWED), 240000, "the full-size composite of the paint")
-    page.click("#export-btn")
+    page.click("#export-btn"); page.check("#x-matte")  # beside the composite, upscaled, which the dialog opens on
     with page.expect_download(timeout=280000) as dl:
         page.click("#x-go")
     lines = U.log_lines(page)

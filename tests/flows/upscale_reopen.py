@@ -56,7 +56,7 @@ def run(browser, port, U):
     U.poll(page, lambda: made() and canvas() == [1600, 880], 3)
     U.check(made() and canvas() == [1600, 880] and status().startswith("Composite, upscaled: ready, in the viewer.") and not bad() and not grew.get("upscale: posted"),
             f"the scene opened again makes Upscale's steps from the windows the job index gives back, with none posted: {ups()}, canvas {canvas()}, {status()!r}, {grew}, {bad()}")
-    page.click("#export-btn")
+    page.click("#export-btn"); page.check("#x-matte")  # beside the composite, upscaled, which the dialog opens on
     with page.expect_download(timeout=240000) as dl:
         page.click("#x-go")
     parts = {zip_rows.row_of(n) for n in zipfile.ZipFile(dl.value.path()).namelist() if zip_rows.row_of(n).endswith("_upscaled")}

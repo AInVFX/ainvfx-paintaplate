@@ -32,10 +32,6 @@ def touch(path, data=b"x"):
         f.write(data)
 
 
-NAMES = {"export": "composite_full_size", "review": "composite_full_size", "matte": "matte", "shot": "shot_full_size", "graph": "comfyui_graph",
-         "hdr": "hdr", "plate": "fluid_shot", "preview": "fluid_shot_preview",
-         "up": {"export": "composite_upscaled", "matte": "matte_upscaled"}}  # the zip's names, as the page sends them (logic.zipNames)
-
 class Routes(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -65,60 +61,27 @@ class Routes(unittest.TestCase):
         stub = sys.modules["folder_paths"]
         stub.get_output_directory = lambda: alias
         try:
-            got = [arc for _, arc in routes.collect(routes.folders.run_folder("paintaplate/abc/v1"), ["export", "matte"], stem="desk", names=NAMES)]
+            got = [arc for _, arc, _ in routes.zip_entries([("composite_full_size", "output:paintaplate/abc/v1/export"), ("matte", "output:paintaplate/abc/v1/matte")], "desk")]
         finally:
             stub.get_output_directory = lambda: OUT
-        self.assertEqual(got, [arc for _, arc in routes.collect(self.folder, ["export", "matte"], stem="desk", names=NAMES)])
+        self.assertEqual(got, [arc for _, arc, _ in routes.zip_entries([("composite_full_size", "output:paintaplate/abc/v1/export"), ("matte", "output:paintaplate/abc/v1/matte")], "desk")])
         self.assertIn("composite_full_size/desk_composite_full_size.1001.exr", got)
         self.assertFalse([arc for arc in got if "leak" in arc])
 
-    def test_parts_of_a_run_laid_out_by_size(self):
-        """The export's full-size review and the full-size pass win over what a preview size made."""
-        with tempfile.TemporaryDirectory() as d:
-            for rel in ("export/shot.1001.exr", "640x352/comp_00001_.mp4", "640x352/raw_00001_.mp4", "review_00001_.mp4",
-                        "full/clean_00001_.mp4", "full/raw_00001_.mp4"):
-                os.makedirs(os.path.dirname(os.path.join(d, rel)) or d, exist_ok=True)
-                touch(os.path.join(d, rel))
-            got = dict((arc, os.path.relpath(path, d)) for path, arc in routes.collect(d, ["export", "review", "shot"], stem="desk", names=NAMES))
-            self.assertEqual(got["desk_composite_full_size.mp4"], "review_00001_.mp4")
-            self.assertEqual(got["desk_shot_full_size.mp4"], os.path.join("full", "raw_00001_.mp4"))
-            os.remove(os.path.join(d, "review_00001_.mp4"))  # before the export: the preview's composite
-            got = dict((arc, os.path.relpath(path, d)) for path, arc in routes.collect(d, ["review"], stem="desk", names=NAMES))
-            self.assertEqual(got["desk_composite_full_size.mp4"], os.path.join("640x352", "comp_00001_.mp4"))
-
-    def test_parts_and_names(self):
-        names = [arc for _, arc in routes.collect(self.folder, ["export", "matte", "review", "shot"], stem="desk", names=NAMES)]
-        self.assertEqual(names, ["composite_full_size/desk_composite_full_size.1001.exr", "composite_full_size/desk_composite_full_size.1002.exr",
-                                 "matte/desk_matte_00001_.png", "matte/desk_matte_00002_.png", "desk_composite_full_size.mp4", "desk_shot_full_size.mp4"])
-        self.assertFalse([n for n in names if "leak" in n])  # a symbolic link is never followed out of the run
-        self.assertEqual(routes.zip_name("shot 010/../x", self.folder), "shot_010_.._x")
-
-    def test_zip_is_built_once_then_rebuilt_when_files_change(self):
-        path = routes.build_zip(self.folder, "shot", ["export", "review"], stem="desk", names=NAMES)
-        self.assertEqual(sorted(zipfile.ZipFile(path).namelist()), ["composite_full_size/desk_composite_full_size.1001.exr", "composite_full_size/desk_composite_full_size.1002.exr", "desk_composite_full_size.mp4"])
-        first = os.path.getmtime(path)
-        self.assertEqual(routes.build_zip(self.folder, "shot", ["export", "review"], stem="desk", names=NAMES), path)
-        self.assertEqual(os.path.getmtime(path), first)  # reused while current
-        time.sleep(0.02)
-        touch(os.path.join(self.folder, "export", "shot.1003.exr"))
-        self.assertIn("composite_full_size/desk_composite_full_size.1003.exr", zipfile.ZipFile(routes.build_zip(self.folder, "shot", ["export", "review"], stem="desk", names=NAMES)).namelist())
-        self.assertFalse([f for f in os.listdir(self.folder) if f.endswith(".part")])
-        with self.assertRaises(FileNotFoundError):
-            routes.build_zip(os.path.join(OUT, "paintaplate", "abc", "v2"), "x", ["export", "matte"])
-
     def test_handler(self):
-        req = types.SimpleNamespace(query={"run": "paintaplate/abc/v1", "name": "shot", "parts": "export,bogus"})
+        req = types.SimpleNamespace(query={"run": "paintaplate/abc/v1", "name": "shot", "files": json.dumps([["composite_full_size", "output:paintaplate/abc/v1/export"]])})
         resp = asyncio.run(routes.download(req))
         self.assertIn('filename="shot.zip"', resp.headers["Content-Disposition"])
         with self.assertRaises(web.HTTPNotFound):
             asyncio.run(routes.download(types.SimpleNamespace(query={"run": "../../etc"})))
         app = types.SimpleNamespace(routes=web.RouteTableDef())
         routes.setup(app)
-        self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/download/size", "/paintaplate/graph", "/paintaplate/browse", "/paintaplate/thumb",
+        self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/download/check", "/paintaplate/download/size", "/paintaplate/graph", "/paintaplate/browse", "/paintaplate/thumb",
                          "/paintaplate/blank", "/paintaplate/jobs/{key}", "/paintaplate/jobs/{key}", "/paintaplate/live/{prompt}", "/paintaplate/cache", "/paintaplate/stat",
                          "/paintaplate/frames", "/paintaplate/pixel", "/paintaplate/scenes", "/paintaplate/scenes/{name}", "/paintaplate/scenes/{name}",
                          "/paintaplate/ocio", "/paintaplate/ocio/shader", "/paintaplate/version"])
-        print("download route: folders, parts, symlinks, zip reuse, handler: ok")
+        self.assertEqual(routes.zip_name("shot 010/../x", self.folder), "shot_010_.._x")
+        print("download route: folders, rows, symlinks, handler: ok")
 
 
 class PlateBrowser(unittest.TestCase):
@@ -498,24 +461,6 @@ class JobIndex(unittest.TestCase):
                 routes.plate_stat(bad)
 
 
-class FluidExport(unittest.TestCase):
-    def test_a_fluid_shot_zips_its_hdr_frames_its_plate_and_its_preview(self):
-        """A fluid shot exported by itself: the zip holds its HDR frames in a folder, then its shot and its preview movie at the top, each named after its row."""
-        import tempfile
-        with tempfile.TemporaryDirectory() as d:
-            for rel in ("hdr/f_00001_.exr", "hdr/f_00002_.exr", "plate/blank_960x512.mov", "preview_00001_.mp4", "hdr_movie_00001_.mp4"):
-                os.makedirs(os.path.join(d, os.path.dirname(rel)), exist_ok=True)
-                with open(os.path.join(d, rel), "wb") as f:
-                    f.write(b"x")
-            names = [name for _, name in routes.collect(d, ["hdr", "plate", "preview"], stem="smoke", names=NAMES)]
-            self.assertEqual(names, ["hdr/smoke_hdr_00001_.exr", "hdr/smoke_hdr_00002_.exr", "smoke_fluid_shot.mov", "smoke_fluid_shot_preview.mp4"])
-            import zipfile  # its zip needs no export folder (without it, the request answers 404 and the browser cancels the download)
-            with zipfile.ZipFile(routes.build_zip(d, "fluid_v1", ["hdr", "plate", "preview"], stem="smoke", names=NAMES)) as z:
-                self.assertEqual(sorted(z.namelist()), sorted(names))
-            with self.assertRaises(FileNotFoundError):
-                routes.build_zip(d, "fluid_v1", ["export", "matte"])
-
-
 class ModelsZipTest(unittest.TestCase):
     def test_models_md_lists_the_models_behind_an_export(self):
         """MODELS.md in an export's zip: the models the page names, with their licences from web/models.json."""
@@ -527,10 +472,11 @@ class ModelsZipTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, "export"))
             open(os.path.join(d, "export", "plate.mp4"), "wb").write(b"0")
-            path = routes.build_zip(d, "shot", ["export"], ["klein"], stem="desk")
+            files = [(os.path.join(d, "export", "plate.mp4"), "desk_composite_full_size.mp4", "composite_full_size")]
+            path = routes.build_zip(d, "shot", files, ["klein"], stem="desk")
             names = zipfile.ZipFile(path).namelist()
             self.assertIn("desk_models.md", names)
-            self.assertNotEqual(path, routes.build_zip(d, "shot", ["export"], ["klein", "ltx"]), "another list, another zip")
+            self.assertNotEqual(path, routes.build_zip(d, "shot", files, ["klein", "ltx"], stem="desk"), "another list, another zip")
         print("MODELS.md: the models behind an export with their licences, in its zip")
 
 

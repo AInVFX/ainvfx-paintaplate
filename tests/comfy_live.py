@@ -11,7 +11,7 @@
    The open's first frame and playback proxy hold the pixels of the whole plate converted as one batch: both ways
    write the proxy without loss for this, because x264 does not always make the same movie from the same frames.
 """
-import argparse, io, json, os, shutil, subprocess, sys, time, urllib.request, uuid, zipfile
+import argparse, io, json, os, shutil, subprocess, sys, time, urllib.parse, urllib.request, uuid, zipfile
 import numpy as np
 import zip_rows  # noqa: E402
 
@@ -151,8 +151,9 @@ def verify_export(kind, plate_dir, out_dir, relight):
             check(str(b.header()["compression"]) == str(a.header()["compression"]), "exr: compression kept")
     elif kind == "mov":
         spec_in = plateio.probe_plate(plate_dir); spec_out = plateio.probe_plate(os.path.join(out_dir, files[0]))
-        for k in ("codec", "pix_fmt", "width", "height", "fps_num", "fps_den", "timecode", "audio_streams", "colorspace"):
+        for k in ("codec", "width", "height", "fps_num", "fps_den", "timecode", "audio_streams", "colorspace"):
             check(spec_in[k] == spec_out[k], f"mov: {k} kept ({spec_out[k]})")
+        check((spec_out["profile"], spec_out["pix_fmt"]) == ("XQ", "yuv444p12le"), f"mov: ProRes 4444 XQ, 4:4:4 ({spec_out['profile']}, {spec_out['pix_fmt']})")
     elif kind == "png16":
         src = plateio.find_sequence(plate_dir)
         a = plateio.read_native(src[2], False); b = plateio.read_native(os.path.join(out_dir, files[2]), False)
@@ -396,7 +397,9 @@ def main():
                     verify_export(kind, os.path.join(input_dir, path), os.path.join(output_dir, exp_dir), relight)
                     mattes = sorted(os.listdir(os.path.join(output_dir, shot, "matte")))
                     check(len(mattes) == N, f"export {run}: matte saved, {len(mattes)} frames")
-                    blob, ctype = http(f"{url}/paintaplate/download?run={shot}&name=test_{run}&parts=export,matte,review")
+                    review = next((f for f in sorted(os.listdir(os.path.join(output_dir, shot))) if f.startswith("review_") and f.endswith(".mp4")), None)
+                    rows = [["composite_full_size", f"output:{exp_dir}"], ["matte", f"output:{shot}/matte"]] + ([["review", f"output:{shot}/{review}"]] if review else [])
+                    blob, ctype = http(f"{url}/paintaplate/download?" + urllib.parse.urlencode({"run": shot, "name": f"test_{run}", "files": json.dumps(rows)}))
                     names = zipfile.ZipFile(io.BytesIO(blob)).namelist() if "zip" in ctype else []
                     review = any(n.endswith("_review.mp4") for n in names) or relight  # the composite preview runs for the non-relight cases
                     exports = zip_rows.composite(names)  # its frames in export/, or its one movie at the top

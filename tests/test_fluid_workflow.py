@@ -42,7 +42,7 @@ class FluidSize(unittest.TestCase):
 class FluidFirstFrame(unittest.TestCase):
     def test_the_first_frame_is_frame_0_of_the_decoded_shot(self):
         """`first`: frame 0 of the decoded shot as a PNG, under `first_prefix`, as `ingest` writes a plate's first frame.
-        The preview movie and the shot in the blank plate's format come from the same decoded frames."""
+        The preview movie and the shot as ProRes 4444 XQ come from the same decoded frames."""
         prompt, _, outs = build_workflows.load("fluid", WORKFLOWS)
         save = prompt[outs["first"]]
         self.assertEqual((save["class_type"], save["_meta"]["title"]), ("SaveImage", "First frame"))

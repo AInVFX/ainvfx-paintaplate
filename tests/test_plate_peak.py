@@ -73,7 +73,8 @@ class Workflows(unittest.TestCase):
                 plate = [k for k, n in p.items() if n.get("_meta", {}).get("title") == "Plate in the model space"]
                 self.assertEqual(len(plate), 1)
                 takers = sorted((n["class_type"], k) for n in p.values() for k, v in n["inputs"].items() if v == [plate[0], 1])
-                self.assertEqual(takers, [("PaintAPlate_ColorSpace", "peak"), ("PaintAPlate_RelightTransfer", "peak")])
+                shots = 2 if name == "export" else 1  # the shot, and in export a Clean's pass, which it writes in the plate's colour space
+                self.assertEqual(takers, [("PaintAPlate_ColorSpace", "peak")] * shots + [("PaintAPlate_RelightTransfer", "peak")])
                 self.assertEqual([n["_meta"].get("title") for n in p.values() if "peak_of" in n["inputs"]], [])
 
 

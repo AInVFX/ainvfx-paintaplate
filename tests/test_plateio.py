@@ -102,7 +102,8 @@ class PlateIO(unittest.TestCase):
                 w.write(f)
             w.close()
             spec2 = plateio.probe_plate(out)
-            for k in ("codec", "pix_fmt", "width", "height", "fps_num", "fps_den", "color_primaries", "color_trc", "colorspace", "timecode", "audio_streams"):
+            self.assertEqual((spec2["codec"], spec2["profile"], spec2["pix_fmt"]), ("prores", "XQ", "yuv444p12le"))  # every movie: ProRes 4444 XQ
+            for k in ("width", "height", "fps_num", "fps_den", "color_primaries", "color_trc", "colorspace", "timecode", "audio_streams"):
                 assert spec2[k] == spec[k], (k, spec2[k], spec[k])
             again = decode_float(out)
             err = max(float(np.abs(a - b).mean()) for a, b in zip(frames, again))
@@ -219,18 +220,15 @@ class BlankCanvas(unittest.TestCase):
         print("blank canvas: ProRes 4444, 25 black frames: ok")
 
     def test_prores_4444_plate_exports(self):
-        """A ProRes 4444 plate decodes as 12-bit 4:4:4; the export writes it again with prores_ks, which takes 10-bit."""
+        """A ProRes 4444 plate decodes as 12-bit 4:4:4; the export writes it as ProRes 4444 XQ, which prores_ks takes in 10 bits."""
         spec = plateio.probe_plate(plateio.write_blank(os.path.join(tempfile.mkdtemp(), "p4444.mov"), 128, 64, 25, 9))
         self.assertEqual(spec["pix_fmt"], "yuv444p12le")
-        self.assertEqual(plateio.encoder_pix_fmt("prores_ks", "yuv444p12le"), "yuv444p10le")
-        self.assertEqual(plateio.encoder_pix_fmt("prores_ks", "yuv422p10le"), "yuv422p10le")
         writer = plateio.VideoWriter(spec, os.path.join(tempfile.mkdtemp(), "out.mov"))
         for _ in range(9):
             writer.write(np.full((64, 128, 3), 0.5, np.float32))
         writer.close()
         back = plateio.probe_plate(writer.path)
-        self.assertEqual((back["codec"], back["frames"]), ("prores", 9))
-        self.assertIn("4444", back["profile"])
+        self.assertEqual((back["codec"], back["profile"], back["frames"]), ("prores", "XQ", 9))
         print("ProRes 4444 plate export: ok", writer.notes)
 
     def test_an_8_bit_fluid_shot_keeps_its_frame_rate(self):
@@ -503,8 +501,9 @@ class StillAlphaTest(unittest.TestCase):
 
 
 class RawVideoNoteTest(unittest.TestCase):
-    """The export's note that untouched pixels are the source's own YUV samples, written only when they were: planar YUV
-    copies them; a video coded in RGB (here PNG in a QuickTime movie) is written through RGB, exactly, with no such note."""
+    """The export's note that untouched pixels are the source's own YUV samples, written only when they were: a planar YUV
+    source has them; a video coded in RGB (here PNG in a QuickTime movie) has none, and goes through RGB with no such note.
+    Every export is ProRes 4444 XQ, so a lossless source comes back within 2 of 255."""
 
     def export(self, codec, pix_fmt, ext):
         d = tempfile.mkdtemp()
@@ -541,12 +540,12 @@ class RawVideoNoteTest(unittest.TestCase):
     def test_planar_yuv_copies_the_samples_and_says_so(self):
         edit, untouched, notes = self.export("rawvideo", "yuv420p", ".mkv")
         self.assertLessEqual(edit, 6)
-        self.assertEqual(untouched, 0)
+        self.assertLessEqual(untouched, 2)
         self.assertIn("Untouched pixels are the source's own YUV samples.", notes)
 
     def test_rgb_video_says_nothing_of_yuv(self):
         edit, untouched, notes = self.export("png", "rgb24", ".mov")  # PNG in a QuickTime movie
-        self.assertEqual((edit, untouched), (0, 0))
+        self.assertLessEqual(max(edit, untouched), 2)
         self.assertNotIn("Untouched pixels are the source's own YUV samples.", notes)
         print("export note: untouched YUV samples named only when copied")
 
@@ -583,7 +582,7 @@ class DepthTest(unittest.TestCase):
         self.assertTrue(all(b.dtype == np.uint16 and np.array_equal(a, b) for a, b in zip(frames, back)))
         print("16-bit PNG frames: ok (RGB and RGBA, every 16-bit value exact)")
 
-    def test_export_keeps_each_kind_at_its_depth(self):
+    def test_export_keeps_a_sequence_at_its_depth_and_writes_a_movie_in_10_bits(self):
         d, grad, row = tempfile.mkdtemp(), self.gradient(), lambda a: len(np.unique(a[self.H // 2, :, 1]))
         found = {}
         for name, codec, fmt in (("8-bit MP4", "libx264", "yuv420p"), ("10-bit ProRes", "prores_ks", "yuv422p10le")):
@@ -618,13 +617,12 @@ class DepthTest(unittest.TestCase):
                 again, levels = str(g.dtype), len(np.unique(g[self.H // 2]))
             found[name] = (spec["pix_fmt"], again, levels)
         print("export depth per kind (plate, export, levels of the new content):", found)
-        self.assertEqual(found["8-bit MP4"][:2], ("yuv420p", "yuv420p"))
-        self.assertLessEqual(found["8-bit MP4"][2], 256)
-        self.assertEqual(found["10-bit ProRes"][:2], ("yuv422p10le", "yuv422p10le"))
+        self.assertEqual(found["8-bit MP4"][:2], ("yuv420p", "yuv444p12le"))  # every movie: ProRes 4444 XQ, 10 bits in
+        self.assertEqual(found["10-bit ProRes"][:2], ("yuv422p10le", "yuv444p12le"))
         self.assertEqual(found["16-bit PNG"][:2], ("rgb48be", "rgb48be"))
         self.assertEqual(found["half EXR"][1], "float16")
         self.assertEqual(found["float EXR"][1], "float32")
-        for name in ("10-bit ProRes", "16-bit PNG", "half EXR", "float EXR"):
+        for name in ("8-bit MP4", "10-bit ProRes", "16-bit PNG", "half EXR", "float EXR"):
             self.assertGreater(found[name][2], 256, name)
 
 
@@ -645,26 +643,26 @@ class NativeMovieTest(unittest.TestCase):
 
 class UntouchedTest(unittest.TestCase):
     def test_a_pixel_the_matte_shows_as_zero_is_the_source_pixel(self):
-        """Untouched pixels identical to the source (item 5): Save Plate keeps every pixel its 8-bit matte shows as 0, the
-        matte's faint edge included, so the export and its matte agree pixel for pixel."""
-        changed = np.array([0.0, 0.0005, 0.002, 0.0039, 1.0 / 255, 0.5, 1.0], np.float32)
+        """Untouched pixels identical to the source: Save Plate keeps every pixel its 16-bit matte shows as 0, the matte's
+        faint edge included, so the export and its matte agree pixel for pixel."""
+        changed = np.array([0.0, 5e-6, 7.6e-6, 7.7e-6, 1.0 / 65535, 0.002, 0.5, 1.0], np.float32)
         keep = plateio.untouched(changed)
-        shown = np.clip(255.0 * changed, 0, 255).astype(np.uint8)  # the matte as Save Frames writes it
+        shown = np.round(np.clip(changed, 0, 1) * 65535.0).astype(np.uint16)  # the matte as Save Frames writes it (png16)
         self.assertEqual(keep.tolist(), (shown == 0).tolist())
-        self.assertEqual(keep.tolist(), [True, True, True, True, False, False, False])
+        self.assertEqual(keep.tolist(), [True, True, True, False, False, False, False, False])
         d = tempfile.mkdtemp(); src = os.path.join(d, "src"); os.makedirs(src)
         rng = np.random.default_rng(5)
         plate = rng.random((8, 16, 3)).astype(np.float16)
         OpenEXR.File({"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}, {"RGB": plate}).write(os.path.join(src, "p.1001.exr"))
         spec = plateio.probe_plate(src)
-        tail = np.zeros((8, 16), np.float32); tail[:, 8:] = 0.002; tail[:, 12:] = 0.5  # a faint edge, then the edit
+        tail = np.zeros((8, 16), np.float32); tail[:, 8:] = 5e-6; tail[:, 12:] = 0.5  # a faint edge, then the edit
         out = os.path.join(d, "out"); os.makedirs(out)
         written = plateio.write_still(spec, 0, np.full((8, 16, 3), 3.0, np.float32), None, plateio.untouched(tail), out)
         with OpenEXR.File(written) as f:
             ch = f.channels(); got = ch["RGB"].pixels if "RGB" in ch else np.stack([ch[c].pixels for c in "RGB"], -1)
-        self.assertTrue(np.array_equal(got[:, :12], plate[:, :12]), "the faint edge, below one 8-bit step: the source's own half floats")
+        self.assertTrue(np.array_equal(got[:, :12], plate[:, :12]), "the faint edge, below half a 16-bit step: the source's own half floats")
         self.assertTrue(np.all(got[:, 12:] == 3.0), "the edit where the matte shows it")
-        print("untouched: every pixel the 8-bit matte shows as 0 is the source's own, its faint edge included")
+        print("untouched: every pixel the 16-bit matte shows as 0 is the source's own, its faint edge included")
 
 
 class StoppedWriters(unittest.TestCase):

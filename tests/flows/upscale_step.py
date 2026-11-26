@@ -104,7 +104,7 @@ def run(browser, port, U):
     U.check(made() and shown() == ["Composite, upscaled"] and canvas() == [1600, 880] and not jobs(start),
             f"Upscale on again takes its results back with no new job, and the player shows the upscaled composite: {rows()}, canvas {canvas()}, {jobs(start)}")
     start = len(U.log_lines(page))
-    page.click("#export-btn")
+    page.click("#export-btn"); page.check("#x-matte")  # beside the composite, upscaled, which the dialog opens on
     with page.expect_download(timeout=280000) as dl:
         page.click("#x-go")
     parts = {zip_rows.row_of(n) for n in zipfile.ZipFile(dl.value.path()).namelist() if zip_rows.row_of(n).endswith("_upscaled")}
