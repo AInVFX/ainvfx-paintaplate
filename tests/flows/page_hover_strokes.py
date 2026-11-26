@@ -48,13 +48,16 @@ def run(browser, port, U):
     got = hovered(row(2), paint_at)
     U.check(np.abs(got - plate_paint).sum() > 40, f"hovering the Paint edit's row shows its strokes: {got.tolist()} on a plate of {plate_paint.tolist()}")
 
-    # 2. The Light edit on again, then selected: the frame shows its result alone, never its light added once more
+    # 2. The Light edit on again, then selected with its pencil: the frame shows its strokes over the picture it paints on;
+    #    its result is left out, so its light is never added twice
     page.click(f"{row(1)} .eye")
     U.settled(page)
     page.keyboard.press("Home"); away()
     result = pixel(light_at)
     page.click(f"{row(1)} .edit"); away()
-    U.check(np.abs(pixel(light_at) - result).sum() <= 6, f"a selected Light edit shows its result alone: {pixel(light_at).tolist()} against {result.tolist()}")
+    got = pixel(light_at)
+    U.check(np.abs(got - result).sum() > 6 and np.abs(got - plate_light).sum() > 8,
+            f"a selected Light edit shows its strokes over the picture it paints on, its result left out: {got.tolist()}, its result {result.tolist()}, the plate {plate_light.tolist()}")
     page.keyboard.press("Escape")
 
     # 3. A fluid shot's row: hovering it shows its first keyframe
