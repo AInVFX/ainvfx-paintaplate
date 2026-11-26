@@ -35,7 +35,7 @@ def run(browser, port, U):
             f"an edit selected and not changed hides nothing: edit 1 shows {shown1.tolist()} on a plate of {plate1.tolist()}, edit 3 {shown3.tolist()} on {plate3.tolist()}")
 
     # 2. The second edit changed, by a rub: the edit above it is hidden, the edit under it stays
-    page.keyboard.press("e"); U.stroke(page, [(0.52, 0.50), (0.58, 0.50)]); page.keyboard.press("e"); away()
+    U.tap(page, "e"); U.stroke(page, [(0.52, 0.50), (0.58, 0.50)]); U.tap(page, "e"); away()
     U.check(np.abs(pixel(p3) - plate3).max() <= 16,
             f"while edit 2 is changed, the frame shows the plate where only edit 3 painted: {pixel(p3).tolist()} against the plate's {plate3.tolist()}")
     U.check(np.abs(pixel(p1) - shown1).max() <= 16, f"the edit under it stays on the frame: {pixel(p1).tolist()}, as before ({shown1.tolist()})")

@@ -80,7 +80,7 @@ def run(browser, port, U):
             f"the stopped edit stays the current edit, and its strokes stay on the frame: {pixel(kept).tolist()} on a plate of {plate.tolist()}")
 
     # 2. Half the stroke rubbed out, then Enter: a new result. The first LTX pass of its render is held for check 4
-    page.keyboard.press("e"); U.paint_once(page, "a red fire", [(0.37, 0.60), (0.44, 0.60)]); page.keyboard.press("e")
+    U.tap(page, "e"); U.paint_once(page, "a red fire", [(0.37, 0.60), (0.44, 0.60)]); U.tap(page, "e")
     hold(port, slot="live", seconds=40)
     page.keyboard.press("Enter")
     page.wait_for_function(U.DONE.format(n=1), timeout=120000); away()
@@ -89,7 +89,7 @@ def run(browser, port, U):
             f"Enter after the stop makes the edit from the changed strokes: its result shows at the stroke kept ({made.tolist()}), the plate where it was rubbed out ({pixel(gone).tolist()})")
 
     # 3. The made edit is changed: the first frame shows its strokes without its old result, so a rubbed stroke leaves no paint
-    page.keyboard.press("e"); U.paint_once(page, "a red fire", [(0.28, 0.60), (0.36, 0.60)]); page.keyboard.press("e"); away()
+    U.tap(page, "e"); U.paint_once(page, "a red fire", [(0.28, 0.60), (0.36, 0.60)]); U.tap(page, "e"); away()
     U.check(np.abs(pixel(kept) - plate).max() <= 16,
             f"rubbing a stroke of a made edit shows the plate there, not the old result: {pixel(kept).tolist()} against the plate's {plate.tolist()}")
     page.keyboard.press("Escape")  # the rub is dropped: the edit goes back to its result
@@ -109,7 +109,7 @@ def run(browser, port, U):
     # 5. Paint, rub, paint over the rubbed place: the last stroke is in the masks the page uploads
     page.keyboard.press("n")
     U.paint_once(page, "a blue vase", [(0.55, 0.30), (0.70, 0.30)])
-    page.keyboard.press("e"); U.paint_once(page, "a blue vase", [(0.58, 0.30), (0.67, 0.30)]); page.keyboard.press("e")
+    U.tap(page, "e"); U.paint_once(page, "a blue vase", [(0.58, 0.30), (0.67, 0.30)]); U.tap(page, "e")
     U.paint_once(page, "a blue vase", [(0.62, 0.30), (0.63, 0.30)])
     page.evaluate("window.__uploads = []")
     page.keyboard.press("Enter")

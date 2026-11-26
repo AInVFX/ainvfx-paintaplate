@@ -266,6 +266,17 @@ def wipe_compare(page, U):
     displayed, both named; the inspector reads the side its point is on, a preview pass at its own size; a second
     Ctrl+click, Esc or F6 ends it."""
     row = "#stages li.pick:has-text('Track the paint, preview')"
+
+    def held(span):  # a half's sums once the view holds still: the first read equal to the one before, 300 ms apart
+        last = page.evaluate(SUM, span)
+        for _ in range(30):
+            page.wait_for_timeout(300)
+            now = page.evaluate(SUM, span)
+            if now == last:
+                return now
+            last = now
+        return last
+
     names = lambda: [page.text_content("#wipe .label.left"), page.text_content("#wipe .label.right")]  # noqa: E731
     compared = lambda: page.evaluate("document.querySelector('#view').dataset.compared")  # noqa: E731
     page.keyboard.press("F6"); page.wait_for_timeout(300)
@@ -277,12 +288,12 @@ def wipe_compare(page, U):
     U.check(names() == ["Plate", "Track the paint, preview"] and compared() == "" and "Viewer: wipe, Plate against Track the paint, preview." in said,
             f"Ctrl+click on the pass displayed compares it with the plate, never with itself: {names()}, {said[-1:]}")
     page.click(row); page.wait_for_timeout(500); page.keyboard.press("F6"); page.wait_for_timeout(300)  # the latest result, and the wipe off
-    before = page.evaluate(SUM, [0.5, 1.0])
+    before = held([0.5, 1.0])
     page.click(row, modifiers=["Control"])
     page.wait_for_function("document.querySelector('#view').dataset.compared === 'drawn'", timeout=30000)  # its own frame: the plate shows until then
     U.check(page.is_visible("#wipe") and names() == ["Track the paint, preview", "Composite, full size"] and "compared" in page.get_attribute(row, "class"),
             f"Ctrl+click on a finished step puts that pass on the wipe's left side, against the pass displayed, both named: {names()}")
-    left, right = page.evaluate(SUM, [0.0, 0.5]), page.evaluate(SUM, [0.5, 1.0])
+    left, right = held([0.0, 0.5]), held([0.5, 1.0])
     U.check(left["spread"] <= 12 and left["white"] > 0 and right["sum"] == before["sum"],
             f"the left side shows the paint matte, grey with white where the edit is ({left}); the right side is the composite as before ({right['sum']} against {before['sum']})")
     page.keyboard.press("F5")
