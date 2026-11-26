@@ -893,8 +893,9 @@ def upscale():
     at the size the page sends (Slots width and height) by SeedVR2 7B, with core's SeedVR2 nodes wired as core's blueprint
     wires them.
 
-    SeedVR2 restores from at most half the target: a result larger than that first comes down to it (Slots source_width
-    and source_height; 0 x 0 keeps the window's size). A plate already at the target's size is then restored at its own.
+    SeedVR2 restores the window at the target size, as core's SeedVR2 path does: the window in the model space is sized to
+    the target in floats (Slot resize_method: bicubic, which leaves a window already at the target's size as it is, or area
+    for a smaller target; core's lanczos goes through 8 bits per channel), then restored.
 
     The page sends the export (Slot shot), in the plate's colour space (Slot color_space), and as many frames per job as
     the machine's RAM holds: the whole shot where it can, else windows. 121 frames at 3840 x 2160 in one job reach 52 GB
@@ -923,9 +924,7 @@ def upscale():
     load = g("PaintAPlate_LoadPlate", _title="Result", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
     window = g("ImageFromBatch", _title="The window", image=load[0], batch_index=Slot("first", 0), length=Slot("count", UPSCALE_CHUNK))
     model = colour(g, window, Slot("color_space", "@model"), "@model", "The window in the model space", peak_of=load[0])
-    source = g("ImageScale", _title="The window at the size SeedVR2 restores from", image=model, upscale_method="lanczos",
-               width=Slot("source_width", 0), height=Slot("source_height", 0), crop="disabled")
-    resized = g("ImageScale", _title="The window at the target size (Lanczos)", image=source, upscale_method="lanczos",
+    resized = g("ImageScale", _title="The window at the target size, in floats", image=model, upscale_method=Slot("resize_method", "bicubic"),
                 width=Slot("width", 3840), height=Slot("height", 2160), crop="disabled")
     vae = g("VAELoader", vae_name=SEEDVR2_VAE)
     unet = g("UNETLoader", unet_name=SEEDVR2, weight_dtype="default")

@@ -794,7 +794,7 @@ export function logFileName(plate, d) {
 // ---------- Upscale ----------
 // Finish > Upscale: after the export, SeedVR2 7B restores it at the size asked for, up to 3840 x 2160. The rules of
 // tests/upscale_plate.py, which runs the same workflows from a terminal (tests/test_upscale_rules.py keeps them equal).
-// long: the target's long side; factor: SeedVR2 restores from at most the target divided by it; chunk: the frames it
+// long: the target's long side; chunk: the frames it
 // samples at once, and step the frames each further chunk adds (chunks share one latent frame); modelRam: the GB the 7B
 // model holds in RAM on a GPU under bigVram GB; copies: the float32 copies of one frame at the target size a job holds,
 // and composeCopies those of a job that also composes the upscaled result (Paint and Clean). On a 96 GB GPU with 131 GB of RAM,
@@ -802,10 +802,10 @@ export function logFileName(plate, d) {
 // and 10.0 copies. A window of 21 frames on a 16 GB GPU held 8.
 // most: the largest target, its long and short sides; sizes: the long sides the menu lists beside the plate's own; least:
 // the smallest long side Custom… takes.
-export const UPSCALE = { long: 3840, most: [3840, 2160], sizes: [2560, 3840], least: 640, factor: 3, chunk: 21, step: 20, modelRam: 15.7,
-  bigVram: 32, copies: 8, composeCopies: 10, channels: 3072, passBase: 16.5, passPerMpx: 0.29, smallPass: 6, overlap: 3, share: 4 };
+export const UPSCALE = { long: 3840, most: [3840, 2160], sizes: [2560, 3840], least: 640, chunk: 21, step: 20, modelRam: 15.7,
+  bigVram: 32, copies: 8, composeCopies: 10, channels: 3072, passBase: 16.5, passPerMpx: 0.29, smallPassMpx: 64.3, overlap: 3, share: 4 };
 // One pass of SeedVR2 7B (upscalePass): channels, the model's; passBase and passPerMpx, its VRAM in GB, then per latent frame per
-// megapixel; smallPass, the latent frames of a pass on a GPU under bigVram GB; overlap, the latent frames two chunks share;
+// megapixel; smallPassMpx, the latent frames times the target's megapixels a pass holds on a GPU under bigVram GB; overlap, the latent frames two chunks share;
 // share, the frames two windows share, which the join crossfades (upscaleWindows).
 // The size a person asks for: { side, px }, side "long", "width" or "height". The default is 3840 px on the long side, and a
 // scene saved before sizes, with the switch on (true), asks for it too.
@@ -844,10 +844,9 @@ export function upscaleAskOf(saved) {
   const ok = saved && typeof saved === "object" && ["long", "width", "height"].includes(saved.side) && Number.isInteger(saved.px) && saved.px > 0;
   return ok ? { side: saved.side, px: saved.px } : false;
 }
-export function upscaleSource(width, height, [tw, th]) { // the size SeedVR2 restores from: [0, 0], the frames as they are, when the target is UPSCALE.factor times their size or more
-  if (Math.max(width, height) * UPSCALE.factor <= Math.max(tw, th)) return [0, 0];
-  return [2 * roundEven(tw / UPSCALE.factor / 2), 2 * roundEven(th / UPSCALE.factor / 2)];
-}
+// The filter that sizes the window to the target before SeedVR2, in floats (core's lanczos goes through 8 bits per channel):
+// bicubic, which leaves a window already at the target's size as it is, or area for a smaller target, which bicubic would alias.
+export const upscaleResize = (width, height, [tw, th]) => (tw < width || th < height ? "area" : "bicubic");
 // Frames per job on this machine, from the GB of RAM and VRAM ComfyUI reports: the whole shot when 90% of the RAM holds it,
 // else the most that fit as whole chunks (21, 41, 61 frames and on): a part of a chunk samples in nearly the time of a
 // whole one. Held aside: 2 GB, the shot at the plate's size, and the model on a GPU under bigVram GB. 21 frames on a 16 GB
@@ -885,10 +884,11 @@ export function upscaleSeconds([tw, th], frames, { passes = 1, parts = 1, profil
 // values, tokens being latent frames x pixels / 256; past it, CUDA reports an illegal memory access (on a 96 GB GPU at
 // 3840 x 2160, 81 frames held and 85 did not, with 29 GB of VRAM still free). The VRAM, on a GPU of bigVram GB or more, where
 // the model stays loaded: 16.5 GB, then 0.29 GB per latent frame per megapixel (measured on 96 GB from 13 to 31 latent frames
-// at 2560 x 1440 and 3840 x 2160). On a smaller GPU, where the model streams, the chunk of 21 frames that runs there.
+// at 2560 x 1440 and 3840 x 2160). On a smaller GPU, where the model streams: smallPassMpx latent frames times megapixels
+// (measured on 16 GB: 7 latent frames, 25 frames, held at 3840 x 2160 and 8 did not; 31, a shot's 121 frames, held at 1920 x 1080).
 export function upscalePass([width, height], vramGb) {
   const bound = Math.floor((2 ** 31 * 256) / (UPSCALE.channels * width * height));
-  const vram = vramGb >= UPSCALE.bigVram ? Math.floor((vramGb - UPSCALE.passBase) / (UPSCALE.passPerMpx * width * height / 1e6)) : UPSCALE.smallPass;
+  const vram = Math.floor(vramGb >= UPSCALE.bigVram ? (vramGb - UPSCALE.passBase) / (UPSCALE.passPerMpx * width * height / 1e6) : UPSCALE.smallPassMpx / (width * height / 1e6));
   return Math.max(1, Math.min(bound, vram));
 }
 // The chunks core's SeedVR2TemporalChunk makes of a window of count frames, chunks of frames frames sharing overlap latent frames.
@@ -929,10 +929,10 @@ export const upscaleKeeps = (tools) => tools.length > 0 && !tools.includes("ligh
 // writes the layer and the matte in the plate's own colour space: the upscaled plate, layer and matte come too. An EXR result of SDR to HDR is upscaled alone
 // What the row says when the size asked for is no larger than the plate: the plate's own size, or a smaller one.
 export function upscaleWhy(width, height, ask = UPSCALE_ASK) {
-  const [tw, th] = upscaleTarget(width, height, ask), part = { 2: "half", 3: "a third of" }[UPSCALE.factor] ?? `1/${UPSCALE.factor} of`;
+  const [tw, th] = upscaleTarget(width, height, ask);
   if (tw > width || th > height) return "";
-  const restore = `the result is brought down to ${part} that size, then SeedVR2 restores its detail. Every pixel is new.`;
-  return tw === width && th === height ? `At the plate's own size, ${restore}` : `This size is smaller than the plate, so the frames come out smaller: ${restore}`;
+  return tw === width && th === height ? "At the plate's own size, SeedVR2 restores the result's detail without changing its size. Every pixel is new."
+    : "This size is smaller than the plate, so the frames come out smaller: the result is brought down to that size, then SeedVR2 restores its detail. Every pixel is new.";
 }
 // Finish > Upscale's note under its size list: about how long the upscaled set takes on this GPU, for the size chosen and
 // the edits displayed (upscaleFigures).

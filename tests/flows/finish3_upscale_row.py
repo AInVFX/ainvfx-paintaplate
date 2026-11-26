@@ -43,7 +43,7 @@ def run(browser, port, U):
     with page.expect_download(timeout=280000) as dl:
         page.click("#x-go")
     lines = [t for t in U.log_lines(page) if t.startswith("Upscale: ")]
-    U.check(any(t.startswith("Upscale: 1600 x 880, upscaled from 534 x 294, 3 windows of 19 frames, each in one pass.") for t in lines),
+    U.check(any(t.startswith("Upscale: 1600 x 880, 3 windows of 19 frames, each in one pass.") for t in lines),
             f"the windows follow the machine's memory: {lines}")
     z = zipfile.ZipFile(dl.value.path())
     names = z.namelist()
