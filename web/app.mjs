@@ -3474,8 +3474,8 @@ function exportCells(r) {
     for (const stage of skip.has("hdr") ? ["full"] : ["full", "hdr"]) add("matte", stage, "Matte", () => r.exported?.mattePath); // one picture at full size and in HDR, which the zip takes once
   }
   if (!skip.has("hdr")) {
-    if (r.hdrAfter) add("composite", "hdr", "Composite, HDR", () => r.hdrFrames); // a relit result, or the edits over a fluid shot
-    else if (alone || fluid) add("plate", "hdr", "Plate, HDR", () => r.hdrFrames ?? (r.exported && `output:${setFolder(r.exported.run, { hdr: true })}`));
+    if (alone || fluid) add("plate", "hdr", "Plate, HDR", () => r.hdrFrames ?? (r.exported && `output:${setFolder(r.exported.run, { hdr: true })}`)); // its result is the plate
+    else if (r.hdrAfter) add("composite", "hdr", "Composite, HDR", () => r.hdrFrames); // a relit result, or the edits over a fluid shot
     else if (edits) add("shot", "hdr", "Shot, HDR", () => r.hdrFrames); // the shot made again in scene-linear values, before the composite
   }
   if (up && (alone || fluid)) add("plate", "up", upHdr ? "Plate, HDR, upscaled" : name("upplate"), out("export"));
