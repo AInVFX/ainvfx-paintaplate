@@ -883,19 +883,27 @@ function setFinish(opt, on) { // Finish's passes run on the render on show, plan
   if (S.pass && S.pass !== "first" && !(now && passMovie(S.pass, now, previewOf(now), passSpaces(), upOf(now)))) { S.pass = null; showLatest(); stagesUI(); }
   else if (opt.id === "hdr" && now && !S.pass) showLatest(); // the same render, its result as the switch stands
   if (opt.id === "upscale") latestUpscale();
+  if (opt.id === "hdr") { upscaleStale(); hdrStale(); } // a running step of either pass that no longer stands stops
   if (on && plateAlone(S.heroKey) && !fluidOnly() && !S.renders.get(S.heroKey)) { // the plate alone before Generate: what Generate runs, and about how long
     const skip = plan({ key: S.heroKey }, []).skip, steps = STAGES.filter((st) => !skip.has(st.id)), passes = steps.map((st) => (st.up ? "Upscale" : "SDR to HDR"));
     status(`Finish: ${opt.name} on. Generate runs ${passes.length > 1 ? passes.join(" and ") : "it"} on the plate: about ${span(steps.reduce((a, st) => a + estimate(st.id, skip), 0))}.`, "hint");
   }
 }
 // Upscale turned on or off, or another size: the player shows the latest result, unless a step of the plate's size is pinned
-// One of Upscale's steps stands while its render is on show, with Upscale on, at the size the step works at
-const upStands = (sized) => !!S.deliver.upscale && S.piping?.key === S.heroKey && upSize() === sized;
-// Upscale turned off, another size, or other edits on show, while one of its steps runs: the step stops at once, as for a new
-// edit (preempt). Its finished jobs stay in the job index, so it continues from them when it is asked for again.
+// One of Upscale's steps stands while its render is on show, with Upscale on, on the stage and at the size the step works at
+const upStands = (key) => !!S.deliver.upscale && S.piping?.key === S.heroKey && upKey(S.renders.get(S.heroKey)) === key;
+// Upscale turned off, another size, SDR to HDR turned on or off under it, or other edits on show, while one of its steps runs:
+// the step stops at once, as for a new edit (preempt). Its finished jobs stay in the job index, so it continues from them
+// when it is asked for again.
 function upscaleStale() {
   const st = S.stage;
   if (st && UP_IDS.has(st.id) && !upStands(st.sized)) cancel("export"); // Upscale's jobs are of the export's kind (upscalePart)
+}
+// SDR to HDR turned off, or other edits on show, while one of its Finish steps runs: the step stops at once, as Upscale's do.
+// Its finished jobs stay in the job index (the plate's « Plate, HDR » among them), so it continues from them when asked again.
+function hdrStale() {
+  const st = S.stage, def = st && STAGES.find((x) => x.id === st.id);
+  if (def?.hdr && !(hdrWanted() && S.piping?.key === S.heroKey)) cancel("hdr"); // SDR to HDR's jobs are of their own kind (hdrSteps, plateHdr)
 }
 function latestUpscale() {
   const r = S.renders.get(S.heroKey);
@@ -920,7 +928,7 @@ function upscaledShown(r, key) {
 async function upscaleResult(r) {
   const st = UPS.find((x) => x.id === "upplate" && !r.skip.has(x.id));
   if (!st || r.active?.some((e) => e.tool !== "fluid")) return; // an edit's upscaled steps read its sets (upscaleSteps)
-  const p = plateUnder(r), hdr = !r.skip.has("hdr"), sized = upSize(), store = ((r.ups ??= {})[sized] ??= {});
+  const p = plateUnder(r), hdr = !r.skip.has("hdr"), sized = upSize(), store = ((r.ups ??= {})[upKey(r)] ??= {});
   r.run ??= r.base; // a fluid shot's files sit in its render's folder, beside the upscaled set, which its zip takes (exportAlone)
   await step(r, st.id, async (progress) => {
     store[st.id] = await upscalePart("comp", { dir: setFolder(r.run, { hdr }), plate: p, result: hdr ? r.hdrFrames : p.path, space: hdr ? HDR_FRAMES : p.cs,
@@ -1004,7 +1012,7 @@ function recompose() {
   const key = keyOf(asAuto ? one : null);
   if (key === S.heroKey) return;
   S.heroKey = key;
-  upscaleStale(); // one of Upscale's steps that runs for the edits no longer on show stops
+  upscaleStale(); hdrStale(); // a Finish step that runs for the edits no longer on show stops
   const r = S.renders.get(key); // a set of edits seen before plays at once (a bypass turned back on, for example)
   S.exported = r?.exported ?? null;
   S.pass = null; // other edits: the viewer follows their latest result
@@ -2837,7 +2845,7 @@ function preempt() { // Generate: a full-size or export step in its first half s
   const st = S.stage, r = S.piping;
   if (!st || !r) return;
   const def = STAGES.find((x) => x.id === st.id), cls = !def.final ? "preview" : st.id === "export" ? "export" : "full", pct = Math.round(st.progress * 100);
-  if (!def.up && !stopsForEdit({ cls, progress: st.progress })) return void log( // Upscale's steps stop at once: their finished windows stay in the job index
+  if (!def.up && !def.hdr && !stopsForEdit({ cls, progress: st.progress })) return void log( // Finish's steps stop at once: their finished jobs stay in the job index
     `Render v${r.v}: ${labelOf(def, r)}: at ${pct}%, finishing before the new edit.`);
   log(`Render v${r.v}: ${labelOf(def, r)}: stopped at ${pct}% for the new edit. It continues when its edits are turned on again.`);
   cancel(...BACKGROUND);
@@ -2887,7 +2895,8 @@ const STAGES = [
 const REF = Object.fromEntries(STAGES.map((x) => [x.id, x.ref])); // each step's reference in seconds, by id (logic.stepGuess)
 const previewOf = (r) => r?.previews?.[S.plate.shot.join("x")]; // what this preview size made for a set of edits
 const upSize = () => upscaleTarget(S.plate.spec.width ?? S.plate.work[0], S.plate.spec.height ?? S.plate.work[1], S.deliver.upscale || S.upscaleAsk).join("x");
-const upOf = (r) => r?.ups?.[upSize()]; // what Upscale's steps made at the size asked for
+const upKey = (r) => `${hdrSet(r) ? "hdr/" : ""}${upSize()}`; // the stage and size Upscale works on, each with its own results, as their sets have their own folders (logic.setFolder)
+const upOf = (r) => r?.ups?.[upKey(r)]; // what Upscale's steps made on the last stage, at the size asked for
 const UPS = STAGES.filter((st) => st.up), UP_IDS = new Set(UPS.map((st) => st.id));
 $("#help-export").textContent = exportWords({ kind: "edits", steps: { comp: labelOf(STAGES.find((st) => st.id === "review"), null) } }).help; // the Help's Export entry: the dialog's own line, then the format the composite keeps
 const storeOf = (r, st) => (st.preview ? previewOf(r) : st.up ? upOf(r) : r); // where a step keeps its result: per preview size, per upscaled size, or once
@@ -2944,7 +2953,7 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   if (store.done?.[id] !== undefined || r.skip?.has(id)) return;
   if (S.running || S.queued || pickRender() !== r) throw YIELD; // an edit, or a step of a more urgent render, goes first
   const t0 = performance.now(), guess = Math.round(estimate(id, r.skip)), notRun = jobsNotRun();
-  S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null, sized: UP_IDS.has(id) ? upSize() : null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step; sized: the size one of Upscale's steps works at
+  S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null, sized: UP_IDS.has(id) ? upKey(r) : null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step; sized: the size one of Upscale's steps works at
   stagesUI();
   log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: about ${span(guess)}.`);
   const stage = S.stage;
@@ -3268,7 +3277,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   }
   async function upscaleSteps() { // Finish > Upscale's steps, kept with the size asked for (upOf): another size makes its own, a size made before comes back at once
     if (r.skip.has("upcomp")) return;
-    const sized = upSize(), store = ((r.ups ??= {})[sized] ??= {}), keeps = !r.skip.has("upplate");
+    const sized = upSize(), stage = upKey(r), store = ((r.ups ??= {})[stage] ??= {}), keeps = !r.skip.has("upplate");
     const parts = async (progress) => { // the last stage's set, which the windows read: SDR to HDR's when it is on (hdrSteps), else the export's parts
       const x = (r.upParts ??= await exportJob(progress));
       if (r.hdrAfter) return { dir: setFolder(x.run, { hdr: true }), plate: { ...plateUnder(r), path: r.hdrPlate, cs: HDR_FRAMES }, result: r.hdrFrames, space: HDR_FRAMES, float: true,
@@ -3278,10 +3287,10 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     const made = (part, keep, id) => async (progress) => { store[id] = await upscalePart(part, await parts((f) => progress(f / 10)), keep, (f) => progress(0.1 + f * 0.9), sized,
       { plate: store.upplate?.home, comp: store.uplayer?.comp }); };
     for (const [id, part, keep] of [["upplate", "plate", true], ["uplayer", "layer", true], ["upcomp", "comp", keeps]]) {
-      if (upSize() !== sized) throw YIELD; // another size is asked for between two steps: its own steps, from the first
+      if (upKey(r) !== stage) throw YIELD; // another size or stage is asked for between two steps: its own steps, from the first
       await step(r, id, made(part, keep, id), store);
     }
-    if (upSize() !== sized) throw YIELD;
+    if (upKey(r) !== stage) throw YIELD;
     upscaledShown(r, key);
   }
   async function hdrSteps() { // Finish > SDR to HDR after the composite (logic.hdrAfterComposite), on the elements as Upscale's steps are: the plate and the layer, then the composite made again from them with the export's matte (hdr_comp); a Light edit's one element, its relit composite
@@ -3374,7 +3383,7 @@ async function upscalePart(part, set, keeps, progress, sized, made = {}) {
   const total = mine.reduce((a, win) => a + win[1], 0) + size / 5; // a window weighs its frames, a part written a fifth of a window
   let before = 0;
   const job = async (name, v, wt) => {
-    if (!upStands(sized)) throw YIELD; // turned off, another size, or other edits on show, between two jobs
+    if (!upStands(S.stage?.sized)) throw YIELD; // turned off, another size or stage, or other edits on show, between two jobs
     const done = await run(name, v, { kind: "export", progress: (f) => progress((before + f * wt) / total) }).done;
     before += wt;
     progress(before / total);
