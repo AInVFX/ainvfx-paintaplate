@@ -23,7 +23,7 @@ def fluid16_scene(page, U):
     page.evaluate(U.WATCH)
     U.paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)])
     page.keyboard.press("Enter")
-    U.wait_log(page, U.added_line(("SDR to HDR: done in", "SDR to HDR took")), 240000, "the fluid shot through SDR to HDR")
+    U.wait_log(page, U.added_line(("Plate, HDR: done in", "Plate, HDR took")), 240000, "the fluid shot through SDR to HDR")
     page.keyboard.press("p")
     U.paint_once(page, "a lantern", [(0.3, 0.5), (0.34, 0.56)])
     page.keyboard.press("Enter")
@@ -120,8 +120,8 @@ def pass_rows(page, U):
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     page.evaluate(U.WATCH)
     U.paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)]); page.keyboard.press("Enter")
-    U.wait_log(page, U.added_line(("SDR to HDR: done in", "SDR to HDR took")), 240000, "the fluid shot through SDR to HDR")
-    steps = ["Fluid shot, full size", "SDR to HDR"]
+    U.wait_log(page, U.added_line(("Plate, HDR: done in", "Plate, HDR took")), 240000, "the fluid shot through SDR to HDR")
+    steps = ["Fluid shot, full size", "Plate, HDR"]
     U.check(rows(page)[-2:] == steps, f"the fluid shot's render lists its steps as every render does: {rows(page)}")
     for label in steps:  # each finished step shows its pass, and a second click gives the latest result back
         page.click(f"#stages li.pick:has-text('{label}')"); page.wait_for_timeout(800)
@@ -151,9 +151,10 @@ def hdr_video(page, U):
     page.evaluate("document.activeElement.blur()")
     page.evaluate(U.WATCH)
     page.keyboard.press("p"); U.paint_once(page, "a red lamp", [(0.3, 0.6), (0.36, 0.7)]); page.keyboard.press("Enter")
-    U.wait_log(page, U.added_line(U.REVIEWED), 240000, "the full-size composite with SDR to HDR")
+    U.wait_log(page, U.added_line("Composite, HDR: done in"), 240000, "the full-size composite, then SDR to HDR on its elements")
     lines = page.evaluate("window.__lines")
-    U.check(any("SDR to HDR took" in t or "SDR to HDR: done in" in t for t in lines), "the full-size shot went through SDR to HDR")
+    U.check(all(any(f"{name}: done in" in t or f"{name} took" in t for t in lines) for name in ("Plate, HDR", "Layer, HDR", "Composite, HDR")),
+            "the plate and the layer went through SDR to HDR, then « Composite, HDR » made the composite again")
     settled(page)
     page.keyboard.press("n")
     page.wait_for_function("document.querySelector('canvas[data-precision]').dataset.precision === 'float'", timeout=60000)

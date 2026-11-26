@@ -46,27 +46,13 @@ class ExportLayer(unittest.TestCase):
                          ("PaintAPlate_SavePlate", [pid, 2], False))
         self.assertEqual(self.slots["layer_prefix"], [[lid, "filename_prefix"]])
 
-    def test_beside_an_exr_result_the_layer_is_half_float_exr_in_aces2065_1(self):
-        _, exr = output(self.p, "layer_exr")
-        _, layer = output(self.p, "layer")
-        conv = self.p[str(exr["inputs"]["images"][0])]
-        self.assertEqual((exr["inputs"]["format"], exr["inputs"]["chromaticities"]), ("exr", "AP0"))
-        self.assertEqual((conv["class_type"], conv["inputs"]["image"], conv["inputs"]["destination"]),
-                         ("PaintAPlate_ColorSpace", layer["inputs"]["images"], build_workflows.HDR_SPACE))
-        (pid, _), = [(k, n) for k, n in of(self.p, "PaintAPlate_LoadPlate") if n["_meta"].get("title") == "Plate"]
-        self.assertEqual(exr["inputs"]["frames"], [pid, 4])  # Load Plate's padding stays out
-
-    def test_a_relight_leaves_the_layer_out_and_an_exr_result_keeps_only_its_exr_layer(self):
+    def test_a_relight_leaves_the_layer_out(self):
         titles = lambda p: {n.get("_meta", {}).get("title") for n in p.values()}  # noqa: E731
         outs = lambda p: {n["_meta"]["output"] for n in p.values() if "output" in n.get("_meta", {})}  # noqa: E731
         relit = build_workflows.fill("export", VALUES)
-        self.assertFalse({"layer", "layer_exr"} & outs(relit))
-        self.assertFalse({"Layer: the shot as the composite blends it", "The layer in ACES2065-1"} & titles(relit))
-        edit = build_workflows.fill("export", {**VALUES, "layer_prefix": "r/layer"})
-        self.assertEqual({"layer", "layer_exr"} & outs(edit), {"layer"})
-        self.assertNotIn("The layer in ACES2065-1", titles(edit))
-        hdr = build_workflows.fill("export", {**VALUES, "prefix": "", "exr_prefix": "r/export/f", "layer_exr_prefix": "r/layer/f"})
-        self.assertEqual({"export", "exr", "layer", "layer_exr"} & outs(hdr), {"exr", "layer_exr"})
+        self.assertNotIn("layer", outs(relit))
+        self.assertNotIn("Layer: the shot as the composite blends it", titles(relit))
+        self.assertIn("layer", outs(build_workflows.fill("export", {**VALUES, "layer_prefix": "r/layer"})))
 
     def test_the_parts_add_up_as_composite_frames_blends_them(self):
         rng = np.random.default_rng(7)

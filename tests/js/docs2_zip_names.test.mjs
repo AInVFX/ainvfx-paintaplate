@@ -10,12 +10,13 @@ import { exportWords, X_LABELS, zipName } from "../../web/logic.mjs";
 const read = (f) => readFileSync(new URL(`../../${f}`, import.meta.url), "utf8");
 const app = read("web/app.mjs"), routes = read("routes.py");
 const label = (id) => app.match(new RegExp(`id: "${id}", label: "([^"]+)"`))[1]; // a step's name in the Render panel (STAGES)
-const fluidUp = app.match(/\? "(Fluid: [^"]+)"/)[1]; // Upscale's step on a fluid shot alone (labelOf)
+const hdrUp = (id) => app.match(new RegExp(`${id}: "([^"]+, HDR, upscaled)"`))[1]; // Upscale's step on SDR to HDR's set (labelOf)
 
 function codeNames() {
   const cells = app.slice(app.indexOf("function exportCells("), app.indexOf("const ticked = ")); // the cells Export can zip
   const steps = [...new Set([...cells.matchAll(/name\("(\w+)"\)/g)].map(([, id]) => id))].map(label);
-  const labels = [...steps, fluidUp, ...Object.values(X_LABELS), exportWords({ kind: "edits" }).elements.graph.label];
+  const ups = [...new Set([...cells.matchAll(/name\("(up\w+)"\)/g)].map(([, id]) => id))].map(hdrUp); // Upscale's steps on SDR to HDR's set (labelOf)
+  const labels = [...steps, ...ups, ...Object.values(X_LABELS), exportWords({ kind: "edits" }).elements.graph.label];
   return new Set([routes.match(/f"\{stem\}_(\w+)\.md"/)[1], app.match(/\? `(\w+)_v\$\{fluidEdit/)[1], ...labels.map(zipName)]);
 }
 

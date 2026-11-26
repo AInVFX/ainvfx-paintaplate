@@ -61,7 +61,7 @@ def run(browser, port, U):
             f"a fluid shot alone: its plate alone, at full size: {ticks}")
     page.keyboard.press("Escape")
     U.check(page.text_content("#help-export") == "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip. "
-            "Frames keep their format, and a movie gives ProRes 4444 XQ. With SDR to HDR, a plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames.",
+            "Frames keep their format, and a movie gives ProRes 4444 XQ, or 16-bit PNG frames when it holds more than 10 bits. With SDR to HDR, « HDR » gives half-float EXR frames in ACES2065-1.",
             f"the Help's Export entry: the dialog's line, then the composite's step: {page.text_content('#help-export')!r}")
     U.no_errors(errors, "after the dialogs")
     page.close()

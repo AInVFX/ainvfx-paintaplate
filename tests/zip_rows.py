@@ -5,8 +5,8 @@ logic.zipName). Frames sit in a folder of the row's name; one movie, the graph a
 import os
 
 ROWS = ("source_plate", "fluid_shot_preview", "fluid_shot_full_size", "plate_hdr", "plate_upscaled", "plate_hdr_upscaled", "fluid_shot_upscaled",
-        "shot_preview", "clean_plate_pass_preview", "shot_full_size", "clean_plate_pass_full_size", "light_transfer_full_size", "shot_hdr",
-        "layer_full_size", "layer_hdr", "layer_upscaled", "matte", "matte_preview", "matte_upscaled",
+        "shot_preview", "clean_plate_pass_preview", "shot_full_size", "clean_plate_pass_full_size", "light_transfer_full_size",
+        "layer_full_size", "layer_hdr", "layer_upscaled", "layer_hdr_upscaled", "matte", "matte_preview", "matte_upscaled",
         "composite_preview", "composite_full_size", "composite_hdr", "composite_upscaled", "composite_hdr_upscaled", "comfyui_graph", "models",
         "hdr", "fluid_shot", "hdr_upscaled", "export", "review", "shot", "graph", "preview")  # the last: the names of zips from older runs
 # The result's rows, the first the zip holds: the composite at full size (a Light-only render names it after its step), else in

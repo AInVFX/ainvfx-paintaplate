@@ -1,6 +1,6 @@
 """Rule 2: the zip holds what rebuilds the composite. From the zip's own files, plate x (1 - matte) + layer x matte equals
-the zip's composite within each format's tolerance, at each stage the export offers on this branch: full size, and
-Upscale's set (SDR to HDR's set comes with the Finish layout). Each element is written as the export writes it: the
+the zip's composite within each format's tolerance, at each stage the export offers: full size, Upscale's set, SDR to HDR's set and
+SDR to HDR's set upscaled, each in its folder (logic.setFolder: <run>/hdr, <run>/upscale/<size>/out, under hdr/ for the last). Each element is written as the export writes it: the
 composite and the layer by Save Plate's writer (plateio.write_still for a sequence, plateio.VideoWriter for a movie, the
 composite keeping the plate's own pixels where the matte shows 0, nothing kept at another size), and the matte as the
 export workflow's Save Frames writes it, its format read from web/workflows/export.json. The plate is the source plate's
@@ -11,7 +11,10 @@ Tolerances, on values from 0 to 1, over every pixel of every frame:
 - a 16-bit PNG sequence: at most 2 of 65535, each element and the matte rounded to 16 bits;
 - an 8-bit H.264 movie, whose export is ProRes 4444 XQ: at most 4 of 255, and 0.5 of 255 on average. The composite and the
   layer are encoded at 10 bits in 4:4:4, and the decoder fills in the plate's 4:2:0 colour samples another way than the
-  writer's conversion does."""
+  writer's conversion does;
+- SDR to HDR's set, and its set upscaled: half-float EXR frames in ACES2065-1, as SDR to HDR's steps write them (Save
+  Frames) and as Save Plate writes an EXR set at another size. Their values go above 1.0, so the difference is read
+  relative to max(1, the value): at most 2^-9, three half-float roundings of 11 bits each."""
 import io
 import json
 import os
@@ -113,6 +116,11 @@ class Rebuild(unittest.TestCase):
             source.close()
         return self.page(writer.path)
 
+    def save_exrs(self, folder, frames):  # Save Frames' exr: half-float frames in ACES2065-1, as SDR to HDR's steps write them
+        os.makedirs(folder, exist_ok=True)
+        plateio.write_exrs(lambda i: frames[i], [os.path.join(folder, f"f_{i + 1:05}_.exr") for i in range(len(frames))], workers=1, fps=FPS, chromaticities="AP0")
+        return self.page(folder)
+
     def save_matte(self, folder, mattes, fmt):  # Save Frames
         os.makedirs(folder, exist_ok=True)
         plateio.write_pngs(lambda i: matte_png(mattes[i], fmt), [os.path.join(folder, f"matte_{i + 1:05}_.png") for i in range(len(mattes))], workers=1)
@@ -136,6 +144,17 @@ class Rebuild(unittest.TestCase):
         out = os.path.join(self.run, "upscale", f"{2 * W}x{2 * H}", "out")
         rows += [("plate_upscaled", self.save_plate(big, os.path.join(out, "plate"), p_up)), ("layer_upscaled", self.save_plate(big, os.path.join(out, "layer"), l_up)),
                  ("composite_upscaled", self.save_plate(big, os.path.join(out, "export"), c_up)), ("matte_upscaled", self.save_matte(os.path.join(out, "matte"), m_up, "png16"))]
+        hdr = os.path.join(self.run, "hdr")  # SDR to HDR's set: its plate and layer through SDR to HDR, composed with the export's matte
+        p_hdr, l_hdr = [np.asarray(f, np.float32)[..., :3] * 2.5 for f in plate], [np.asarray(f, np.float32) * 3.0 for f in layers]
+        c_hdr = [mathops.composite(p_hdr[i], l_hdr[i], written[i]) for i in range(N)]
+        rows += [("plate_hdr", self.save_exrs(os.path.join(hdr, "plate"), p_hdr)), ("layer_hdr", self.save_exrs(os.path.join(hdr, "layer"), l_hdr)),
+                 ("composite_hdr", self.save_exrs(os.path.join(hdr, "comp"), c_hdr))]
+        big_hdr = plateio.at_size(plateio.probe_plate(os.path.join(hdr, "plate")), 2 * W, 2 * H)  # Upscale on SDR to HDR's set, in its format
+        ph_up, lh_up = up(p_hdr), up(l_hdr)
+        ch_up = [mathops.composite(ph_up[i], lh_up[i], m_up[i]) for i in range(N)]
+        hout = os.path.join(hdr, "upscale", f"{2 * W}x{2 * H}", "out")
+        rows += [("plate_hdr_upscaled", self.save_plate(big_hdr, os.path.join(hout, "plate"), ph_up)), ("layer_hdr_upscaled", self.save_plate(big_hdr, os.path.join(hout, "layer"), lh_up)),
+                 ("composite_hdr_upscaled", self.save_plate(big_hdr, os.path.join(hout, "comp"), ch_up))]
         files = self.routes.zip_entries(rows, "desk", "source_plate", self.routes.plate_files(src))
         return zipfile.ZipFile(io.BytesIO(open(self.routes.build_zip(self.run, "desk_v1", files, None, "desk"), "rb").read()))
 
@@ -152,24 +171,29 @@ class Rebuild(unittest.TestCase):
         stage."""
         z, into, found = self.zipped(kind), os.path.join(self.run, "unzipped"), {}
         for stage, plate, layer, matte, comp in (("full size", "source_plate", "layer_full_size", "matte", "composite_full_size"),
-                                                 ("upscaled", "plate_upscaled", "layer_upscaled", "matte_upscaled", "composite_upscaled")):
+                                                 ("upscaled", "plate_upscaled", "layer_upscaled", "matte_upscaled", "composite_upscaled"),
+                                                 ("HDR", "plate_hdr", "layer_hdr", "matte", "composite_hdr"),  # the matte: one picture, the full size's
+                                                 ("HDR, upscaled", "plate_hdr_upscaled", "layer_hdr_upscaled", "matte_upscaled", "composite_hdr_upscaled")):
             p, l, m, c = (self.read(z, row, into) for row in (plate, layer, matte, comp))
             m = m[..., :1]
             d = np.abs(p[..., :3] * (1 - m) + l[..., :3] * m - c[..., :3])
-            found[stage] = (float(d.max()), float(d.mean()))
+            found[stage] = (float(d.max()), float(d.mean()), float((d / np.maximum(1.0, np.abs(c[..., :3]))).max()))
         return found
 
     def test_a_plate_of_16_bit_frames_rebuilds_within_2_of_65535(self):
         found = self.rebuilt("frames")
-        print("rebuild, 16-bit PNG frames:", {k: (round(a * 65535, 2), round(b * 65535, 3)) for k, (a, b) in found.items()}, "of 65535")
-        for stage, (most, _) in found.items():
-            self.assertLessEqual(most, 2 / 65535, stage)
+        print("rebuild, 16-bit PNG frames:", {k: (round(a * 65535, 2), round(b * 65535, 3), f"{r:.2e}") for k, (a, b, r) in found.items()}, "of 65535")
+        for stage, (most, _, relative) in found.items():
+            self.assertLessEqual(relative, 2 ** -9, stage) if "HDR" in stage else self.assertLessEqual(most, 2 / 65535, stage)
 
     @unittest.skipIf(av is None or "libx264" not in av.codecs_available, "PyAV with libx264 is needed")
     def test_a_movie_plate_rebuilds_within_4_of_255(self):
         found = self.rebuilt("movie")
-        print("rebuild, H.264 plate, ProRes 4444 XQ export:", {k: (round(a * 255, 2), round(b * 255, 3)) for k, (a, b) in found.items()}, "of 255")
-        for stage, (most, mean) in found.items():
+        print("rebuild, H.264 plate, ProRes 4444 XQ export:", {k: (round(a * 255, 2), round(b * 255, 3), f"{r:.2e}") for k, (a, b, r) in found.items()}, "of 255")
+        for stage, (most, mean, relative) in found.items():
+            if "HDR" in stage:
+                self.assertLessEqual(relative, 2 ** -9, stage)
+                continue
             self.assertLessEqual(most, 4 / 255, stage)
             self.assertLessEqual(mean, 0.5 / 255, stage)
 

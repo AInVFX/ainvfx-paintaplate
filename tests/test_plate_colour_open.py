@@ -85,7 +85,7 @@ class OpenedAs(unittest.TestCase):
         plateio.write_exrs(lambda i: np.full((36, 64, 3), 2.0, np.float32), [os.path.join(folder, "f_00001_.exr")], chromaticities="AP0")
         self.assertEqual(opened(folder), ("linear ACES2065-1", "ACES2065-1"))
         root = os.path.dirname(HERE)
-        for name in ("hdr", "export"):
+        for name in ("hdr", "hdr_comp"):  # SDR to HDR, and its set's composite and copies
             with open(os.path.join(root, "web", "workflows", f"{name}.json")) as f:
                 saves = [n for n in json.load(f).values() if n["class_type"] == "PaintAPlate_SaveFrames" and n["inputs"].get("format") == "exr"]
             self.assertTrue(saves, name)

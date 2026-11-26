@@ -1,6 +1,6 @@
 """SDR to HDR on a plate with no edit (logic.plateAlone). On desk.mp4,
 whose format holds nothing above 1.0, Finish > SDR to HDR turns it on and starts nothing: Generate starts it. The Render
-panel shows one step, SDR to HDR, with no Edited first frame row, and the job takes the plate itself, with the plate's size for
+panel shows one step, « Plate, HDR », with no Edited first frame row, and the job takes the plate itself, with the plate's size for
 HDR Match. Once it is done, the player shows its EXR frames at full precision, and Export downloads them as they are:
 half-float EXR frames at the plate's size, with the models behind them in the models' list. Turned off, the plate has nothing to
 export; turned on again, the result shows at once."""
@@ -35,12 +35,12 @@ def run(browser, port, U):
     U.check(status.startswith("Finish: SDR to HDR on. Generate runs it on the plate: about ") and status.endswith(" s."),
             f"the status line says what starts it, with its time: {status!r}")
     live = U.until(page, "!document.querySelector('#generate').disabled && !document.querySelector('#export-btn').disabled", 5000)
-    U.check(live and rows() == ["SDR to HDR"], f"Generate and Export are live, and the Render panel shows one step: {rows()}, "
+    U.check(live and rows() == ["Plate, HDR"], f"Generate and Export are live, and the Render panel shows one step: {rows()}, "
             f"Generate {'live' if page.is_enabled('#generate') else 'off'}, Export {'live' if page.is_enabled('#export-btn') else 'off'}")
     page.wait_for_timeout(1000)
-    U.check(not any("SDR to HDR: about" in t for t in U.log_lines(page)), "turning it on starts nothing: Generate does")
+    U.check(not any("Plate, HDR: about" in t for t in U.log_lines(page)), "turning it on starts nothing: Generate does")
     page.click("#generate")
-    U.wait_log(page, "[...document.querySelectorAll('#log li span')].some((e) => /Render v\\d+: SDR to HDR: done in/.test(e.textContent))",
+    U.wait_log(page, "[...document.querySelectorAll('#log li span')].some((e) => /Render v\\d+: Plate, HDR: done in/.test(e.textContent))",
                120000, "SDR to HDR on the plate")
     jobs = [json.loads(b)["prompt"] for b in posted if b and '"PaintAPlate_HDRMatch"' in b]
     nodes = list(jobs[-1].values()) if jobs else []
@@ -48,7 +48,7 @@ def run(browser, port, U):
     match = next((n["inputs"] for n in nodes if n["class_type"] == "PaintAPlate_HDRMatch"), {})
     U.check(len(jobs) == 1 and load.get("path") == "plates/desk.mp4" and {"plate", "mask", "hdr"} <= set(match),
             f"one job, on the plate itself, with the plate's size for HDR Match: {len(jobs)} job, {load.get('path')}, {sorted(match)}")
-    U.check(rows() == ["SDR to HDR"] and page.query_selector("#stages li.done") is not None and page.is_disabled("#generate"),
+    U.check(rows() == ["Plate, HDR"] and page.query_selector("#stages li.done") is not None and page.is_disabled("#generate"),
             f"its one step is done, and Generate has nothing left to start: {page.text_content('#stages')!r}")
     U.check(U.until(page, "document.querySelector('canvas[data-precision]')?.dataset.precision === 'float'", 60000),
             "the player shows the result's EXR frames at full precision")
@@ -78,7 +78,7 @@ def run(browser, port, U):
     page.click("#finish-hdr")
     page.click("#finish-hdr-yes")
     page.keyboard.press("Escape")
-    U.check(rows() == ["SDR to HDR"] and page.query_selector("#stages li.done") is not None and page.is_disabled("#generate"),
+    U.check(rows() == ["Plate, HDR"] and page.query_selector("#stages li.done") is not None and page.is_disabled("#generate"),
             "turned on again, its result shows at once, with nothing to generate")
     U.check(not errors, f"no console errors: {errors}")
     page.close()

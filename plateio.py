@@ -50,6 +50,26 @@ _PATTERN_RE = re.compile(r"^(?P<prefix>.*?)(?:#+|%0?\d*d)(?P<suffix>[^#%\d]*?)(?
 # Every movie the export writes is ProRes 4444 XQ in a .mov, whatever the plate's codec (VideoWriter): in 4:4:4 an edited
 # pixel and an untouched one share no colour sample, and XQ is the ProRes profile that keeps untouched pixels closest.
 MOVIE_ENCODER, MOVIE_PROFILE, MOVIE_EXT = "prores_ks", "5", ".mov"  # FFmpeg's ProRes encoder; its profile 5 is 4444 XQ
+# The most bits a sample keeps in that movie: FFmpeg's ProRes encoder takes 10. A movie deeper than that exports as 16-bit PNG
+# frames, which keep its samples (movie_writer), and a ProRes that FFmpeg wrote holds 10 bits whatever its decoder reports.
+MOVIE_BITS = 10
+FFMPEG_PRORES = (b"Lavc", b"fmpg")  # the encoder's code in each ProRes frame's header, as FFmpeg writes it
+
+
+def movie_bits(path: str, codec: str, pix_fmt: str) -> int:
+    """The bits a movie's samples hold: its pixel format's, except a ProRes that FFmpeg wrote, which holds 10 bits though its
+    decoder reports 12 for every 4444 (the encoder's code in its first frame: FFMPEG_PRORES)."""
+    m = re.search(r"p(\d+)(le|be)$", pix_fmt or "")
+    bits = int(m.group(1)) if m else 8
+    if codec == "prores" and bits > MOVIE_BITS and av is not None:
+        try:
+            with av.open(path) as c:
+                packet = next(p for p in c.demux(video=0) if p.size)
+                if bytes(packet)[12:16] in FFMPEG_PRORES:
+                    return MOVIE_BITS
+        except (av.error.FFmpegError, StopIteration, OSError):
+            pass
+    return bits
 
 
 # --------------------------------------------------------------------------
@@ -198,6 +218,7 @@ def probe_video(path: str) -> dict:
             "codec": cc.name,
             "profile": (cc.profile or ""),
             "pix_fmt": cc.pix_fmt or (vs.format.name if vs.format else ""),
+            "bits": movie_bits(path, cc.name, cc.pix_fmt or (vs.format.name if vs.format else "")),
             "width": cc.width,
             "height": cc.height,
             "fps": float(rate),
@@ -852,6 +873,36 @@ def keep_samples(frame, source, keep: np.ndarray):
     out.pts = frame.pts
     out.colorspace, out.color_range = frame.colorspace, frame.color_range  # ProRes writes them into each frame's header
     return out
+
+
+class FramesWriter:
+    """A movie deeper than MOVIE_BITS, written for compositing as 16-bit PNG frames, which keep its samples: ProRes 4444 XQ
+    from FFmpeg's encoder keeps 10 bits. The frames take the plate's name, numbered from 1, at the frames' own size. Where
+    `keep` holds, they are the source frame decoded at 16 bits per channel (`source`, from SourceFrames in rgb48le)."""
+    keeps = True
+    pix_fmt = "rgb48le"
+
+    def __init__(self, spec: dict, out_path: str, audio_source: str | None = None):
+        self.spec, self.paths = spec, []
+        self.stem = os.path.splitext(out_path)[0]
+        self.notes = [f"A {spec.get('bits', 16)}-bit movie: 16-bit PNG frames, which keep its samples."]
+
+    def write(self, rgb: np.ndarray, keep: np.ndarray | None = None, source=None) -> None:
+        out = np.round(np.clip(rgb[..., :3], 0, 1) * 65535.0).astype(np.uint16)
+        if keep is not None and source is not None:
+            out[keep] = source.to_ndarray()[keep]
+        path = f"{self.stem}_{len(self.paths) + 1:05}_.png"
+        write_pngs(lambda _: out, [path], workers=1)
+        self.paths.append(path)
+
+    def close(self) -> None:
+        pass
+
+
+def movie_writer(spec: dict, out_path: str, audio_source: str | None = None):
+    """The writer of a plate's movie for compositing: ProRes 4444 XQ (VideoWriter), or 16-bit PNG frames for a movie deeper
+    than MOVIE_BITS (FramesWriter)."""
+    return (FramesWriter if spec.get("bits", 8) > MOVIE_BITS else VideoWriter)(spec, out_path, audio_source)
 
 
 class SourceFrames:
