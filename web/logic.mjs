@@ -838,6 +838,20 @@ export function upscaleSeconds([tw, th], frames, { passes = 1, parts = 1, profil
 // frames under the edits), under a key of everything that changes their frames (the plate, its colour space and config,
 // the sizes, the window, the format, the build), so a changed setting never adds frames to old ones, and every render on
 // this plate finds them through the job index. FNV-1a, 32 bits, in hex.
+// Upscale's chunks in one window, as core's SeedVR2TemporalChunk cuts it: the frames per chunk with which every chunk is
+// full, none short at the window's end, at most `most` latent frames each, two neighbours sharing `overlap` latent frames
+// that core's merge crossfades (3: one latent frame half and half, with one of each chunk's own on each side). The window
+// itself when it holds in one chunk: one pass. Among the sizes that end full, the longest, which samples the fewest frames.
+// Frames counted as core counts them: latent frame 0 holds frame 0, latent frame k frames 4k - 3 to 4k.
+export function upscaleChunk(count, most, overlap = 3) {
+  const latent = Math.floor((count - 1) / 4) + 1;
+  if (latent <= most) return count;
+  const o = Math.min(overlap, most - 1);
+  const short = (size) => { let start = 0; while (start + size < latent) start += size - o; return size - (latent - start); }; // the last chunk's lack
+  let best = most;
+  for (let size = o + 1; size <= most; size++) if (short(size) < short(best) || (short(size) === short(best) && size > best)) best = size;
+  return 4 * (best - 1) + 1;
+}
 // The folder of a Finish pass's set, which the steps write and Export reads: a pass writes its set inside the folder of the
 // set it reads. SDR to HDR's set: <run>/hdr; Upscale's at a size: <run>/upscale/<size>/out, or <run>/hdr/upscale/<size>/out
 // on SDR to HDR's set. With neither, the plate-size set: <run> itself.
