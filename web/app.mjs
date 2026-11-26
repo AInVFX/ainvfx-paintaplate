@@ -3433,7 +3433,8 @@ async function upscalePart(part, set, keeps, progress, sized, made = {}) {
     matte: "", comp_prefix: "", matte_prefix: "", share: 0, chunk_frames: upscaleChunk(count, most), chunk_overlap: UPSCALE.overlap, ...more }); // one pass, or even chunks
   const out = setFolder(set.dir, { size: sized }); // the upscaled set of this size, which the zip names upscaled/ (download)
   const matte = (i, [first]) => ({ matte: set.matte ?? "", matte_prefix: set.matte ? `${out}/matte/matte` : "", // one frame per frame of the shot:
-    share: i ? windows[i - 1][0] + windows[i - 1][1] - first : 0 }); // a window saves no matte frame that the window before saved
+    share: set.matte && i ? windows[i - 1][0] + windows[i - 1][1] - first : 0 }); // a window saves no matte frame that the window before saved;
+  // with no matte to save, share stays 0, so a window's values (logic.indexValues) match the plate's own windows in the job index
   const [mw, mh] = colour.nativeSize(target[0], target[1], NATIVE_SIDE), view = float ? logSpace() : p.cs; // its viewer movie: the look of its frames
   const save = (shot, frames, name, space) => ["upscale_export", { shot, frames: `output:${frames}`, max_frames: p.frames, prefix: `${out}/${name}`,
     counts: windows.map(([, count]) => count).join(","), share: UPSCALE.share, // each window's frames, and the frames two neighbours share: the join crossfades them
