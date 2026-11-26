@@ -3020,7 +3020,7 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   if (store.done?.[id] !== undefined || r.skip?.has(id)) return;
   if (S.running || S.queued || pickRender() !== r) throw YIELD; // an edit, or a step of a more urgent render, goes first
   const t0 = performance.now(), before = familyNow(), guess = Math.round(estimate(id, r.skip, before)), notRun = jobsNotRun();
-  S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null, sized: UP_IDS.has(id) ? upKey(r) : null, page3Before: before }; // page3Before: the family loaded as it started // first, last: [seconds since t0, progress] at the sampler's first and latest step; sized: the size one of Upscale's steps works at
+  S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null, sized: UP_IDS.has(id) ? upKey(r) : null, page3Before: before }; // first, last: [seconds since t0, progress] at the sampler's first and latest step; sized: the size one of Upscale's steps works at; page3Before: the family loaded as it started
   stagesUI();
   log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: about ${span(guess)}.`);
   const stage = S.stage;
