@@ -995,7 +995,7 @@ addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#finish").hid
 
 function recompose() {
   if (!S.plate) return; // a plate that opens: nothing to compose yet
-  S.hero = layered();
+  S.hero = layered(S.edits.length, upToDate); // the first frame of the edits on show: a result made on another picture under it is left out
   const shown = S.edits.filter((e) => e.on && (e.patch || (e.tool === "fluid" && e.state === "done")) && e.state !== "generating" && upToDate(e)); // a fluid shot from its Generate on, as its steps make it
   const last = hdrLast(shown.map((e) => e.tool)), dflt = holdsHdr(S.plate?.spec, S.plate?.headroom);
   const keyOf = (auto) => { // a strategy: another render, its shot taken from the render of the same edits
@@ -1028,7 +1028,7 @@ function latestOf(r) { // a render's latest result: Upscale's last step at the s
 function showLatest() { // the latest result of the edits on show
   const key = S.heroKey, l = latestOf(S.renders.get(key));
   if (l) setShot(l.url, key, l.space, l.frames, { framesSpace: l.framesSpace });
-  else if (!key) setShot(null, key);
+  else if (!key || stale()) setShot(null, key); // no result yet: no result of other edits stays on screen, the plate and the first frame show until one comes
 }
 
 // Every movie the page plays comes at the plate's native size, up to NATIVE_SIDE on the long side, the size of the viewer's
@@ -1387,11 +1387,15 @@ function render() {
       if (still) keepFrame(pic);
       return "shot";
     }
+    const blank = S.edits.find((e) => e.tool === "fluid" && e.on && e.state === "done" && !e.patch); // a fluid shot with no picture yet: its keyframes, on the black plate, until its live preview comes
     if (still && S.frame === 0) { // the first frame with its edits, in the model space; with none, the plate itself
       if (S.heroKey) draw(firstFrame(), model); else drawPlate();
-      inWork(overlays); return "hero";
+      inWork(overlays);
+      if (blank) inWork((w, h) => rowStrokes(blank, 1, w, h));
+      return "hero";
     }
     drawPlate();
+    if (blank) inWork((w, h) => rowStrokes(blank, 1, w, h));
     return "plate";
   };
   const edited = () => { // the edited side, then the keyframe of the fluid row hovered or clicked, on this frame

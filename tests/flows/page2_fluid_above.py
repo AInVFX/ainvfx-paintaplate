@@ -1,7 +1,16 @@
 """A fluid shot made again with two Paint edits above it: both wait for its new first frame, outside the render, and their
-rows say so. The render displayed is the fluid shot alone, its preview then its full size. Then each Paint is made again
-in History's order, once each, and the render of all three edits starts after both. The mock holds the fluid shot's
-preview open, so the check always meets the wait."""
+rows say so. Meanwhile the viewer shows no old result: the fluid shot's keyframes on the black plate. The render displayed
+is the fluid shot alone, its preview then its full size. Then each Paint is made again in History's order, once each, and
+the render of all three edits starts after both. The mock holds the fluid shot's preview open, so the checks always meet
+the wait."""
+
+import pathlib
+import sys
+
+import numpy as np
+
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from viewer_edit import PIXEL  # noqa: E402
 
 FLUID = '#history li[data-id="fluid"]'
 LOG = "[...document.querySelectorAll('#log li')].map((e) => e.textContent)"
@@ -13,6 +22,16 @@ def run(browser, port, U):
     errors = []
     page = U.load(browser, port, errors=errors)
     lines = lambda: page.evaluate(LOG)
+    pixel = lambda at: np.array(page.evaluate(PIXEL, list(at)))
+    frame = lambda: int(page.text_content("#frame-now"))
+
+    def go(n):  # the plate's frame n, with the arrow keys, the pointer off History
+        page.mouse.move(5, 5)
+        page.keyboard.press("Home")
+        for _ in range(n - frame()):
+            page.keyboard.press("ArrowRight")
+        U.poll(page, lambda: frame() == n, 5)
+        page.wait_for_timeout(300)
     at = lambda part, since=0: next((i for i, line in enumerate(lines()) if i >= since and part in line), None)
 
     page.click("#open-btn"); page.click("#open [data-tab=blank]")
@@ -35,6 +54,14 @@ def run(browser, port, U):
     U.settled(page)
 
     # The fluid shot made again: one more stroke on its keyframe, its preview held open
+    page.keyboard.press("Home")
+    first = frame()
+    paint_at, key_at = (0.45, 0.5), (0.4, 0.6)  # inside Paint 2, away from the fluid's keyframe; on the keyframe
+    go(first)
+    red = pixel(paint_at)
+    go(first + 9)
+    later = pixel(paint_at)
+    U.check(red.sum() > 60 and later.sum() > 60, f"before: the Paint edit shows, on the first frame and later ({red.tolist()}, {later.tolist()})")
     since = len(lines())
     page.click(f"{FLUID} .edit")
     U.stroke(page, [(0.6, 0.3), (0.65, 0.35), (0.7, 0.3)])
@@ -42,6 +69,12 @@ def run(browser, port, U):
     page.keyboard.press("Enter")
     U.check(U.poll(page, lambda: any(e[0] == "held" for e in U.mock_route(port, "/mock/events")), 60), "the fluid shot's preview runs, held open: the fluid shot alone renders")
     rows = dict(page.evaluate(SMALL))
+    go(first)
+    at_first, keyframe = pixel(paint_at), pixel(key_at)
+    go(first + 9)
+    at_later = pixel(paint_at)
+    U.check(at_first.sum() < 60 and at_later.sum() < 60 and keyframe.min() > 150,
+            f"meanwhile no old result shows: black where Paint 2 was ({at_first.tolist()}, {at_later.tolist()}), the keyframe on the black plate ({keyframe.tolist()})")
     U.check(rows.get("2. Paint") == "Waits for the fluid shot" and rows.get("3. Paint") == "Waits for the fluid shot" and at(ALL, since) is None,
             f"while the fluid shot renders, both Paint edits wait outside the render, and their rows say so: {rows}")
     U.settled(page)
