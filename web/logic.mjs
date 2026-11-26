@@ -943,7 +943,7 @@ export const upscaleNote = (seconds) => `About ${Math.max(1, Math.round(seconds 
 // it asks before it turns on, when it changes what Export writes.
 export const FINISH = [
   { id: "hdr", name: "SDR to HDR",
-    line: "The result is made again with values above 1.0, matched to the plate. A plate that holds values up to 1.0 only, such as a movie, gives half-float EXR frames in ACES2065-1.",
+    line: "The result is made again with values above 1.0, matched to the plate. On a plate that holds values up to 1.0 only, such as a movie, it gives half-float EXR frames in ACES2065-1.",
     ask: "This plate holds values up to 1.0 only. With SDR to HDR, the plate and the new content become half-float EXR frames in ACES2065-1, in the viewer and in Export." },
   { id: "upscale", name: "Upscale",
     line: "The render's last step: SeedVR2 7B upscales the result to the size chosen, including layers and mattes. The player shows it, and Export writes it." },
