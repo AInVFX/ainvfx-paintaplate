@@ -88,7 +88,9 @@ def run(browser, port, U):
     U.check(np.abs(made - plate).sum() > 40 and np.abs(pixel(gone) - plate_gone).max() <= 16,
             f"Enter after the stop makes the edit from the changed strokes: its result shows at the stroke kept ({made.tolist()}), the plate where it was rubbed out ({pixel(gone).tolist()})")
 
-    # 3. The made edit is changed: the first frame shows its strokes without its old result, so a rubbed stroke leaves no paint
+    # 3. The made edit, selected with its pencil, is changed: the first frame shows its strokes without its old result, so a
+    #    rubbed stroke leaves no paint
+    page.click("#history li .edit")
     U.tap(page, "e"); U.paint_once(page, "a red fire", [(0.28, 0.60), (0.36, 0.60)]); U.tap(page, "e"); away()
     U.check(np.abs(pixel(kept) - plate).max() <= 16,
             f"rubbing a stroke of a made edit shows the plate there, not the old result: {pixel(kept).tolist()} against the plate's {plate.tolist()}")

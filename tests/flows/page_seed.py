@@ -32,7 +32,7 @@ def run(browser, port, U):
     lines = page.evaluate("window.__lines")
     U.check(any(t.startswith("Edit 1:") and "seed 7," in t for t in lines) and any(t.startswith("Render v1:") and "seed 7," in t for t in lines),
             "?seed=7: the new edit and its render start from seed 7")
-    page.click("#new-edit")  # edit 1 closes, so the next strokes make edit 2
+    # after Generate no edit stays selected, so the next strokes make edit 2
     page.click('.tools [data-tool="paint"]')
     U.paint_once(page, "a blue fire", [(0.6, 0.4), (0.65, 0.45)])
     page.keyboard.press("Enter")

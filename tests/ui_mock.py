@@ -407,7 +407,8 @@ def colour_flow(browser, port):
 def generate_flow(browser, port):
     """A first edit and its render: the strokes wait for Generate, Enter makes the edit, then the full-size composite and
     nothing for compositing software; Export writes the result and its matte, and the scene as one ComfyUI graph; paused,
-    the viewer shows the shot; Enter again with nothing changed runs nothing; the log says what happens under the hood."""
+    the viewer shows the shot; Enter again with nothing changed runs nothing, and says what to do; the log says what happens
+    under the hood."""
     errors = []
     page = load(browser, port, errors=errors)
     open_plate(page)
@@ -471,9 +472,9 @@ def generate_flow(browser, port):
     check(page.get_attribute("#view", "data-picture") == "shot", "paused, on frame 3 and on frame 0, the viewer shows the shot, not the plate")
     made, renders = klein_passes(page), page.locator("#log li:has-text('Render v')").count()
     page.keyboard.press("Enter")
-    until(page, "document.querySelector('#hud').textContent.includes('The result is up to date')")
-    check(klein_passes(page) == made and page.locator("#log li:has-text('Render v')").count() == renders and "The result is up to date" in page.text_content("#hud"),
-          "Enter again with nothing changed runs nothing twice: no Klein pass, no render step")
+    until(page, "document.querySelector('#hud').textContent.includes('Paint on the first frame, then press Enter.')")
+    check(klein_passes(page) == made and page.locator("#log li:has-text('Render v')").count() == renders and "Paint on the first frame, then press Enter." in page.text_content("#hud"),
+          "Enter again with nothing changed and no edit selected runs nothing twice, and says what to do: no Klein pass, no render step")
     log = log_lines(page)
     for key in (": done in", "prompt writer", "Klein edit preview"):
         check(any(any(k in line for k in key.split("|")) for line in log), f"the log says what happens under the hood: {key}")
@@ -571,8 +572,9 @@ def history_flow(browser, port):
 
 
 def one_edit_flow(browser, port):
-    """One edit at a time: new words and more strokes change the edit just made; New edit (the N key, the button, the
-    right-click menu) or another tool closes it, and the next strokes start a new one."""
+    """One edit at a time: after Generate no edit stays selected and the text prompt field empties, so the next strokes
+    start a new edit. The pencil selects an edit again: its words come back, and new words and more strokes change it.
+    New edit (the N key, the button, the right-click menu) or another tool deselects it."""
     errors = []
     page = load(browser, port, errors=errors)
     open_plate(page)
@@ -583,35 +585,41 @@ def one_edit_flow(browser, port):
     stroke(page, [(0.2, 0.7), (0.25, 0.75)])
     page.keyboard.press("Enter")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
-    check(row_titles(page)[0] == "1. Paint" and page.is_visible("#editing") and page.text_content("#editing") == "Editing 1 · Paint"
-          and page.input_value("#prompt") == "a dog", "the edit just made stays current, its words in the prompt")
+    check(row_titles(page)[0] == "1. Paint" and page.is_hidden("#editing") and page.input_value("#prompt") == "",
+          "after Generate no edit stays selected: the chip hides and the field is empty")
     page.locator(".promptbar").screenshot(path=os.path.join(SHOTS, "5_promptbar.png"))
+    page.click("#history li .edit")
+    check(page.is_visible("#editing") and page.text_content("#editing") == "Editing 1 · Paint" and page.input_value("#prompt") == "a dog",
+          "the pencil selects the edit: its chip shows, its words come back")
     page.fill("#prompt", "a cat"); page.evaluate("document.activeElement.blur()")
     stroke(page, [(0.26, 0.7), (0.3, 0.74)])
     page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('#history li small')?.textContent === 'a cat' && !document.querySelector('#history li.busy')",
                            timeout=120000)
-    check(len(row_titles(page)) == 1 and row_words(page)[0] == "a cat", f"new words and more strokes change the same edit: {row_titles(page)} {row_words(page)}")
+    check(len(row_titles(page)) == 1 and row_words(page)[0] == "a cat", f"new words and more strokes change the selected edit: {row_titles(page)} {row_words(page)}")
+    page.click("#history li .edit")
     page.keyboard.press("n")
-    check(page.is_hidden("#editing") and page.input_value("#prompt") == "" and page.is_disabled("#new-edit"), "N, New edit, closes the current edit")
+    check(page.is_hidden("#editing") and page.input_value("#prompt") == "" and page.is_disabled("#new-edit"), "N, New edit, deselects the selected edit")
     page.fill("#prompt", "a bird"); page.evaluate("document.activeElement.blur()")
     stroke(page, [(0.6, 0.7), (0.65, 0.72)])
     page.keyboard.press("Enter")
     page.wait_for_function(DONE.format(n=2), timeout=120000)
-    check(row_titles(page)[:2] == ["2. Paint", "1. Paint"] and row_words(page)[:2] == ["a bird", "a cat"], f"after New edit the strokes make edit 2: {row_titles(page)} {row_words(page)}")
+    check(row_titles(page)[:2] == ["2. Paint", "1. Paint"] and row_words(page)[:2] == ["a bird", "a cat"], f"with no edit selected the strokes make edit 2: {row_titles(page)} {row_words(page)}")
+    page.click("#history li .edit")
     page.keyboard.press("l")
-    check(page.is_hidden("#editing") and page.input_value("#prompt") == "", "another tool closes the current edit")
+    check(page.is_hidden("#editing") and page.input_value("#prompt") == "", "another tool deselects the selected edit")
     stroke(page, [(0.1, 0.1), (0.2, 0.12)])
     page.keyboard.press("Enter")
     page.wait_for_function(DONE.format(n=3), timeout=120000)
     check(row_titles(page)[0] == "3. Light" and row_words(page)[1] == "a bird", f"the light is a new edit: {row_titles(page)} {row_words(page)}")
+    page.click("#history li .edit")
     page.click("#new-edit")
-    check(page.is_hidden("#editing") and page.is_disabled("#new-edit"), "the New edit button closes it too")
+    check(page.is_hidden("#editing") and page.is_disabled("#new-edit"), "the New edit button deselects it too")
     page.click("#history li .edit")
     page.mouse.click(cx, cy, button="right")
     page.hover("#ctx > li:has(> span:first-child:text-is('Edit'))")
     page.click("#ctx .sub button:has-text('New edit')")
-    check(page.is_hidden("#editing") and len(row_titles(page)) == 3, "New edit in the right-click menu closes the selected edit")
+    check(page.is_hidden("#editing") and len(row_titles(page)) == 3, "New edit in the right-click menu deselects the selected edit")
     page.screenshot(path=os.path.join(SHOTS, "2_end.png"))
     no_errors(errors, "with one edit at a time")
     page.close()

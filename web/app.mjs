@@ -2046,6 +2046,7 @@ function editFluid() { // the fluid's keyframes and words again; the edits on it
 
 function leaveKeys() { // the keyframes close: the viewer shows the plate the fluid shot made, with the edits on it
   fluidEdit().editing = false;
+  if (!S.draft) $("#prompt").value = ""; // the field holds the selected edit's words: the fluid shot is no longer selected
   S.pass = null;
   S.heroKey = null; recompose(); // the shot of the edits displayed, or none
   fluidUI(); historyUI(); render();
@@ -2113,20 +2114,24 @@ function queue(fn) { // one edit at a time, in order. A stop, and the Enter that
   S.chain = S.chain.then(() => (epoch === S.viewEpoch ? fn() : undefined)).catch(quiet).finally(() => { S.queued--; touch(); });
 }
 
+const UP_TO_DATE = "The result is up to date. Press Ctrl+Enter to try another seed."; // Enter on a selected edit that nothing changed
+const PAINT_FIRST = "Paint on the first frame, then press Enter."; // Enter with nothing painted and no edit selected
+
 function launch(edit, another = false) { // Generate: the edit on the first frame, then its shot. A result it already has is used again. `another`: an edit already in History starts again with another seed
   if (S.draft === edit) S.draft = null;
   clearTimeout(S.prefetchTimer);
   if (!edit.strokes.length && !edit.keys?.length) return generateUI();
   takeInputs(edit);
   if (another && S.edits.includes(edit)) edit.seed = (Math.random() * 2 ** 31) | 0;
-  if (edit.tool === "fluid" && edit.state === "done" && edit.made === recordOf(edit)) { leaveKeys(); return hud("The result is up to date. Ctrl+Enter tries another seed.", 3000); } // made, or being made
+  if (edit.tool === "fluid" && edit.state === "done" && edit.made === recordOf(edit)) { leaveKeys(); return hud(UP_TO_DATE, 3000); } // made, or being made
   if (!S.edits.includes(edit)) S.edits.push(edit);
   edit.launched = performance.now();
-  if (edit.tool !== "fluid") S.selected = edit; // it stays the current edit: new words, more strokes or the switch change it, until New edit or another tool
+  S.selected = null; // made: no edit stays selected, so the next strokes and words start a new edit; the pencil selects one again
+  $("#prompt").value = "";
   S.peek = null;
   if (reuse(edit)) {
-    if (edit.tool === "fluid") { log(`Fluid shot v${edit.version}: reused, already made from the same keyframes, text prompt and seed.`); hud("The result is up to date. Ctrl+Enter tries another seed.", 3000); leaveKeys(); }
-    else { log(`Edit ${num(edit)}: unchanged, result reused.`); hud(`Edit ${num(edit)}: unchanged, result reused. Ctrl+Enter tries another seed.`, 3000); }
+    if (edit.tool === "fluid") { log(`Fluid shot v${edit.version}: reused, already made from the same keyframes, text prompt and seed.`); hud(UP_TO_DATE, 3000); leaveKeys(); }
+    else { log(`Edit ${num(edit)}: unchanged, result reused.`); hud(`Edit ${num(edit)}: unchanged, result reused. Press Ctrl+Enter to try another seed.`, 3000); }
     recompose(); historyUI(); render(); timelineUI();
     queueWaiting(() => queue(regenerateDependents));
     return;
@@ -4990,7 +4995,7 @@ function enter(another) { // Generate (Enter): the edit in progress, then its sh
     const r = S.renders.get(S.heroKey) ?? (plateAlone(S.heroKey) ? want(S.heroKey, true) : null); if (r) r.failed = null; touch(0);
     return hud(resumed ? "Generating again from where it stopped." : plateAlone(S.heroKey) ? `${S.heroKey === PLATE_UP ? "Upscale" : "SDR to HDR"} starts now.` : "The shot renders now.", 2000);
   }
-  hud(S.edits.length ? "The result is up to date. Ctrl+Enter tries another seed." : "Paint on the frame first, then Generate.", 3000);
+  hud(S.selected ? UP_TO_DATE : PAINT_FIRST, 3000);
 }
 
 function renderPending() { // the render of the edits displayed failed, or never started: Generate starts it again
