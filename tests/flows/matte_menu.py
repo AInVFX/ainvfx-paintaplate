@@ -18,7 +18,7 @@ SIGNATURE = """(() => { const c = document.querySelector('#view'), d = c.getCont
 def frees(page, port, U, seen_lines, seen_events):  # each « Memory freed before … » line with the free_memory the page posted
     lines = [t for t in U.log_lines(page)[seen_lines:] if t.startswith("Memory freed before")]
     events = [e for e in U.mock_route(port, "/mock/events") if e[0] == "free"][seen_events:]
-    return [(line.split(":")[0].removeprefix("Memory freed before "), e[2]) for line, e in zip(lines, events)], len(lines) == len(events)
+    return [(line.removeprefix("Memory freed before ").split(":")[0].split(".")[0], e[2]) for line, e in zip(lines, events)], len(lines) == len(events)
 
 
 def run(browser, port, U):

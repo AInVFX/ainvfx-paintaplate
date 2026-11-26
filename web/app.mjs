@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSampled, boxPlace, inspectorRows, pointsQuery, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, autoChose, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, deepLine, deepMovie, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, fileStem, FINISH, finishFolder, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName, zipName, autoplays, nearestKey, resultLine, stopsForPreview, strokesLabel, upscaleChunk, upscaleChunks, upscalePass, FAMILY, startsLoaded, stepFamily } from "./logic.mjs";
+import { askedText, asksName, autoChose, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, deepLine, deepMovie, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, fileStem, FINISH, finishFolder, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName, zipName, autoplays, nearestKey, resultLine, stopsForPreview, strokesLabel, upscaleChunk, upscaleChunks, upscalePass, FAMILY, startsLoaded, stepFamily, deepLoading, pictureName } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, exportDone, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_ALONE, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -1088,8 +1088,16 @@ function shownLabel() { // the pass displayed, by its row's name: the one clicke
   if (S.pass) return passLabel(S.pass);
   const r = S.renders.get(S.heroKey), pv = previewOf(r);
   return labelOf(STAGES.find((x) => !r?.skip?.has(x.id) && S.shot?.url && passMovie(x.id, r, pv, passSpaces(), upOf(r))?.url === S.shot.url), r) // among the render's own steps
-    ?? (S.shot ? "Result" : S.edits.length ? "First frame" : "Plate");
+    ?? pictureName({ shot: !!S.shot, edits: S.edits.length > 0, upscaled: otherSizeShown(r) });
 }
+function otherSizeShown(r) { // the Upscale result displayed, made at another size than the one asked for: its step's name and size
+  for (const [key, store] of Object.entries(r?.ups ?? {})) {
+    const st = key !== upKey(r) && S.shot?.url ? UPS.find((x) => store[x.id]?.url === S.shot.url) : null;
+    if (st) return { label: labelOf(st, r), size: key.replace(/^hdr\//, "").split("x") };
+  }
+  return null;
+}
+
 function comparePass(id) {
   if (S.cmp?.id === id) return endCompare();
   if (passLabel(id) === shownLabel()) return plateWipe(); // the pass displayed against itself shows nothing: the plate takes the left side
@@ -4244,11 +4252,11 @@ const holds = (cache) => { for (let f = S.inPt; f <= S.outPt; f++) if (!cache.fr
 function wantDeep() { // an image sequence's own values around the playhead: the plate, and its review once it plays
   const p = S.plate;
   if (!p?.deep || !look.ready) return;
-  fetchDeep(deep, p.path, p.name);
-  if (S.shot?.frames) fetchDeep(deepShot, S.shot.frames, "the full-size composite");
+  fetchDeep(deep, p.path, p.name, p.cs);
+  if (S.shot?.frames) fetchDeep(deepShot, S.shot.frames, shownLabel(), S.shot.framesSpace ?? p.cs); // the step displayed, in its frames' own colour space
 }
 
-function fetchDeep(cache, path, what) { // frames as RGB half floats from the frame route, ranked like the 8-bit cache
+function fetchDeep(cache, path, what, space) { // frames as RGB half floats from the frame route, ranked like the 8-bit cache
   const fresh = cache.fillDeep(async (first, count) => {
     try {
       const r = await fetch(`/paintaplate/frames?${new URLSearchParams({ path, first, count, side: DEEP_SIDE })}`);
@@ -4262,7 +4270,7 @@ function fetchDeep(cache, path, what) { // frames as RGB half floats from the fr
       throw err;
     }
   }, path);
-  if (fresh) log(`Full-precision frames of ${what}: loading in the background, ${DEEP_SIDE} px on the long side, ${S.plate.cs}.`);
+  if (fresh) log(deepLoading(what, DEEP_SIDE, space));
 }
 
 function setDisplay(change) {

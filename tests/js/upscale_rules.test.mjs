@@ -54,7 +54,7 @@ test("Paint and Clean keep the plate's untouched pixels; a Light edit, or no edi
 test("on a 16 GB GPU, SeedVR2's model leaves the memory before the 4K export and the next edit's models", () => {
   const small = { frees: true }, large = { frees: false };
   assert.deepEqual([FAMILY.upscale, FAMILY.upscale_export], ["seedvr2", "frames"]);
-  assert.equal(freesBefore(small, "export", "upscale"), true);
+  assert.equal(freesBefore(small, "export", "upscale"), false); // Export loads no model: the free before it left none
   assert.equal(freesBefore(small, "upscale", "upscale"), false);
   assert.equal(freesBefore(small, "upscale", "upscale_export"), true);
   assert.equal(freesBefore(large, "upscale", "upscale_export", { free: 150 * 2 ** 30, need: 20 * 2 ** 30 }), false);

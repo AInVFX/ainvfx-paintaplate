@@ -757,6 +757,9 @@ export function plainPaths(text, folder = "") {
 
 // The full-precision frames' failure (app.fetchDeep): refused, unanswered or malformed, the cache stops (frames.fillDeep) and
 // the viewer keeps the 8-bit movie. One line per source, an error, so the log and the status line show it in red.
+// The log's line as a source's full-precision frames start loading: `what`, the plate's name or the step displayed by its
+// Render panel name; `space`, the frames' own colour space.
+export const deepLoading = (what, side, space) => `Full-precision frames of ${what}: loading in the background, ${side} px on the long side, ${space}.`;
 export const deepStopped = (what, why) =>
   `Error: full-precision frames of ${what}: stopped (${String(why ?? "").replace(/\s+/g, " ").trim() || "no reason given"}). Viewer: 8-bit movie.`;
 
@@ -1320,7 +1323,7 @@ export const wantsHdrFor = (spec, headroom, deliverHdr) => holdsHdr(spec, headro
 // reports about 47.5 GiB, a 40 GB one about 39.6.
 export const BIG_PLATE = { side: 2048, vram: 46 * 2 ** 30 };
 export const bigPlateWarning = (spec, vram) => (spec && vram > 0 && Math.max(spec.width, spec.height) > BIG_PLATE.side && vram < BIG_PLATE.vram
-  ? `Warning: this plate is ${spec.width} x ${spec.height}, above 2K, and this GPU has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB GPU: its renders may run out of memory here.`
+  ? `Warning: this plate is ${spec.width} x ${spec.height}, above 2K, and this GPU has ${Math.round(vram / 2 ** 30)} GB of VRAM. Renders take much longer here: use a 96 GB GPU for plates above 2K.`
   : null);
 // ---------- How much of a plate opens: LTX 2.5's 20 seconds ----------
 // LTX 2.5 places each frame at its time in seconds, its number divided by the frame rate, and its positions span 20 s in
@@ -1652,8 +1655,7 @@ export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", clean: "ltx
 export const RAM_COPIES = 8, RAM_COPIES_OPEN = 3;
 export const framesNeed = (width, height, frames, name = "") => // bytes of RAM for the job `name`: the copies, and 4 GB to work in
   (name === "ingest" ? RAM_COPIES_OPEN : RAM_COPIES) * width * height * frames * 12 + 4 * 2 ** 30;
-// Each job's name in a line a person reads, as the Render panel names it where it can: « Memory freed before the shot: the
-// edit's models unloaded. »
+// Each job's name in a line a person reads, as the Render panel names it where it can: « Memory freed before the shot. »
 export const JOB_NAME = { ingest: "opening the plate", prompt: "the prompt writer", prefetch: "the prompt writer", edit: "the edit",
   snap: "the SAM mask", clean: "the clean plate pass", cleanup: "the clean plate pass", shot: "the shot", matte: "the matte",
   comp: "the composite", review: "the review movie", export: "Export", warm: "the warm-up", fluid: "the fluid shot", hdr: "SDR to HDR",
@@ -1665,23 +1667,25 @@ export const JOB_NAME = { ingest: "opening the plate", prompt: "the prompt write
 const KEEPS = new Set(["sam", "frames"]);
 export const keepsAnswers = (last, name) => KEEPS.has(FAMILY[last]) && KEEPS.has(FAMILY[name]);
 
-// Why ComfyUI's memory is freed before job `name` after job `last`, or null: on a small GPU, between families of models,
-// with { why, keep } between the matte and the frames steps, which keeps ComfyUI's cache unless RAM is short for the
-// frames (`room`); on a larger GPU, only when RAM is short. `room`: { free, need } in bytes, or null where unknown.
+// The log's line when ComfyUI's memory is freed before job `name` after job `last`, or null: on a small GPU, after a job of
+// another family that loaded models, with { why, keep } between the matte and the frames steps, which keeps ComfyUI's
+// cache unless RAM is short for the frames (`room`); on a larger GPU, only when RAM is short. `room`: { free, need } in
+// bytes, or null where unknown.
 export function freeAsk(profile, last, name, room = null, plate = true) {
+  const freed = `Memory freed before ${JOB_NAME[name] ?? name}`;
   if (freesBefore(profile, last, name)) {
-    const why = `${JOB_NAME[last] ?? last}'s models unloaded.\n  This GPU holds one model family at a time.`;
+    const why = `${freed}.\n  This GPU holds one model family at a time.`;
     return keepsAnswers(last, name) ? { why, keep: !room || room.free >= room.need } : why;
   }
   if (!plate || !last || FAMILY[name] === FAMILY[last] || !freesBefore(profile, last, name, room)) return null;
-  return `${Math.round(room.free / 2 ** 30)} GB of RAM free, ${Math.round(room.need / 2 ** 30)} GB needed for its frames.`;
+  return `${freed}: ${Math.round(room.free / 2 ** 30)} GB of RAM free, ${Math.round(room.need / 2 ** 30)} GB needed for its frames.`;
 }
 // Whether freeAsk needs the RAM figures for this pair: a free that may keep the cache, or a larger GPU's change of family
 export const freeNeedsRoom = (profile, last, name) => !!last && FAMILY[name] !== FAMILY[last] && (!profile?.frees || keepsAnswers(last, name));
 
 export function freesBefore(profile, last, name, room = null) { // room: { free, need } in bytes of RAM, where ComfyUI gives it
-  if (!last || FAMILY[name] === FAMILY[last]) return false;
-  return !!profile?.frees || (!!room && room.free < room.need);
+  if (!last || FAMILY[name] === FAMILY[last]) return false; // a job that loaded no model leaves none to unload: only RAM can call for a free
+  return (!!profile?.frees && FAMILY[last] !== "frames") || (!!room && room.free < room.need);
 }
 
 // ---------- How long a render step takes ----------
@@ -1722,6 +1726,11 @@ const REF_SIZE = 928 * 512 * 97; // pixels times frames, where the references we
 // same family. `before`: that job's or step's family (FAMILY, STEP_FAMILY), null when nothing ran before it.
 export const startsLoaded = (id, before) => !!before && STEP_FAMILY[id] === before;
 export const stepFamily = (id) => STEP_FAMILY[id] ?? null; // the models a step loads, null for a step that STEP_FAMILY does not list
+// The viewer's name for a picture that no step of the render shows: an Upscale result at another size than the one asked
+// for, by its step and its size (`upscaled`: { label, size }), until that size is made; else the result, the edited first
+// frame, or the plate.
+export const pictureName = ({ shot = false, edits = false, upscaled = null } = {}) =>
+  (upscaled ? `${upscaled.label} to ${upscaled.size.join(" x ")}` : shot ? "Result" : edits ? "Edited first frame" : "Plate");
 export function stepGuess(id, ref, plate, profile, hdr = false, before = null) { // seconds: the reference scaled to this plate (BIG_STEPS at 0.73 of it), then to this GPU; hdr: the render makes SDR to HDR; before: as startsLoaded
   const [w, h] = stepSizeOf(id, plate), scale = (w * h * plate.frames) / REF_SIZE * (BIG_STEPS.includes(id) ? 0.73 : 1);
   return (startsLoaded(id, before) ? 0 : SLOWER[profile]?.lead?.[STEP_FAMILY[id]] ?? 0) + (SLOWER[profile]?.fixed?.[id] ?? 0) + ref * Math.max(0.25, scale) ** (SLOWER[profile]?.grow?.[id] ?? 1) * slower(profile, id)

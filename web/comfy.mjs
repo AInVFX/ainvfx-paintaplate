@@ -1,7 +1,7 @@
 // The ComfyUI client of the page: workflows, jobs, the WebSocket, uploads. No DOM and no app state.
 // Every step of the app is a workflow from ./workflows, written by tools/build_workflows.py.
 
-import { JOB_NAME, fillWorkflow, indexValues, parseWorkflow } from "./logic.mjs";
+import { fillWorkflow, indexValues, parseWorkflow } from "./logic.mjs";
 
 const CLIENT = crypto.randomUUID();
 export const WF = {}; // name -> { prompt, slots, outputs, progress }
@@ -184,7 +184,7 @@ export function run(name, values, { kind = name, preview, progress, step, live: 
       await post("/free", { unload_models: true, free_memory: !why.keep }).catch(() => {}); // unanswered, the job still runs
       await new Promise((ok) => setTimeout(ok, FREE_SETTLE_MS));
       await released();
-      log(`Memory freed before ${JOB_NAME[name] ?? name}: ${why.why ?? why}`);
+      log(why.why ?? why); // logic.freeAsk's line
     }
     if (job.cancelled) return; // cancelled while the page read ComfyUI's free RAM, or while the memory was freed: nothing is posted
     Object.assign(job, { sent: Date.now(), started: null, at: null, cached: 0, previews: 0, inMain: false });

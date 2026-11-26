@@ -645,7 +645,7 @@ test("every workflow has a family, and the small profile frees ComfyUI's memory 
   assert.deepEqual(names.filter((n) => !FAMILY[n]), []);
   const small = memoryProfile({ vram: 17.2e9 }), large = memoryProfile({ vram: 100e9 });
   assert.equal(freesBefore(small, "shot", "matte"), true); // LTX and its text encoder leave before SAM tracks the paint
-  assert.equal(freesBefore(small, "ingest", "prompt"), true); // the open's frames leave before the edit models load
+  assert.equal(freesBefore(small, "ingest", "prompt"), false); // the open loads no model: none to unload, and ComfyUI drops its outputs as the next job starts
   assert.equal(freesBefore(small, "prompt", "edit"), false); // the same family
   assert.equal(freesBefore(small, "clean", "cleanup"), false);
   assert.equal(freesBefore(small, null, "ingest"), false); // the first job: nothing to free
