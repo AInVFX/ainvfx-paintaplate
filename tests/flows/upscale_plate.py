@@ -60,8 +60,8 @@ def run(browser, port, U):
         page.click("#x-go")
     zipped = zipfile.ZipFile(dl.value.path()).namelist()
     U.check(zip_rows.files(zipped, "plate_upscaled") and not jobs(start), f"Export posts no Upscale job, and zips the upscaled plate: {sorted({n.rsplit('/', 1)[0] for n in zipped})}")
-    page.keyboard.press("F6")  # the wipe: the plate against the step on show
+    page.keyboard.press("F6")  # the wipe: the plate against the step displayed
     page.wait_for_timeout(300)
     sides = page.evaluate("[document.querySelector('#wipe .label.left').textContent, document.querySelector('#wipe .label.right').textContent]")
-    U.check(sides == ["Plate", "Plate, upscaled"], f"the wipe names the step on show, among the render's own steps: {sides}")
+    U.check(sides == ["Plate", "Plate, upscaled"], f"the wipe names the step displayed, among the render's own steps: {sides}")
     page.close()

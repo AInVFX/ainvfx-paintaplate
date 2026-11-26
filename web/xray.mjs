@@ -1,5 +1,5 @@
-// The X-ray (X), as PlateLock's: where the edits on show change the plate, tinted over the picture. Its matte: the one
-// the composite of the size on show used (Fit to Plate's, aligned to the plate), or the export's once Export has made
+// The X-ray (X), as PlateLock's: where the edits displayed change the plate, tinted over the picture. Its matte: the one
+// the composite of the size displayed used (Fit to Plate's, aligned to the plate), or the export's once Export has made
 // one; before a composite exists, the tracking mattes. A light edit changes every pixel, so it tints the whole frame. Pure functions, tested in tests/js/xray.test.mjs; app.mjs draws them on the #xray overlay,
 // above the canvas, so the colour inspector and the colour picker read the picture without the tint.
 
@@ -7,7 +7,7 @@ const XRAY_TINT = [255, 0, 200]; // magenta, rare in plates
 export const XRAY_ALPHA = 0.5; // the tint's opacity where a matte is white
 export const XRAY_SIDE = 512; // px on the long side of the mattes it reads: where the model touched, not a measure
 
-// Which mattes: `tools` of the edits on show, the render `r`, its preview size `pv`, and whether the pass on show is full size
+// Which mattes: `tools` of the edits displayed, the render `r`, its preview size `pv`, and whether the pass displayed is full size
 export function xrayPlan({ tools = [], r, pv, full = false }) {
   if (!tools.length) return { from: "none", urls: [] };
   if (tools.includes("light")) return { from: "light", urls: [] };

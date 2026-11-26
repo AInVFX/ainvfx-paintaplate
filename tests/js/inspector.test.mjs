@@ -8,7 +8,7 @@ test("a point of the view gives the plate's own pixel, from the top left", () =>
   assert.equal(sourcePixel(1.2, 0.5, 3840, 2160).inside, false);
 });
 
-test("the file on show: EXR frames, else the movie in the output folder, else the plate", () => {
+test("the file displayed: EXR frames, else the movie in the output folder, else the plate", () => {
   assert.equal(sourcePath({ frames: "output:paintaplate/r/review", url: "/api/view?x" }, "plates/a.mp4"), "output:paintaplate/r/review");
   assert.equal(sourcePath({ url: "/api/view?filename=s.mp4&subfolder=paintaplate%2Fr&type=output" }, "p"), "output:paintaplate/r/s.mp4");
   assert.equal(sourcePath(null, "plates/a.mp4"), "plates/a.mp4");
@@ -42,7 +42,7 @@ test("the inspector says when its values come from a movie, and in which space",
 test("the side of the wipe a plate pixel falls on: left of the line, the plate or the pass compared", () => {
   assert.equal(wipeSide(959, 1920, 0.5), "left");
   assert.equal(wipeSide(960, 1920, 0.5), "right");
-  assert.equal(wipeSide(10, 1920, null), "right"); // no wipe: the pass on show everywhere
+  assert.equal(wipeSide(10, 1920, null), "right"); // no wipe: the pass displayed everywhere
 });
 
 test("the rows name the pass read; a picture the page drew is read as drawn", () => {

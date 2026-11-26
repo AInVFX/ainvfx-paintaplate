@@ -427,7 +427,7 @@ test("the Render panel shows each finished pass that made a movie", () => {
   assert.equal(passMovie("full", {}, pv), null);
 });
 
-test("Esc takes a pass on show back to the latest, after the selection and before a stop", () => {
+test("Esc takes a pass displayed back to the latest, after the selection and before a stop", () => {
   assert.equal(escapeAction({ editing: false, selected: false, pinned: true, generating: true }), "latest");
   assert.equal(escapeAction({ editing: false, selected: true, pinned: true, generating: true }), "deselect");
   assert.equal(escapeAction({ editing: false, selected: false, pinned: false, generating: true }), "stop");

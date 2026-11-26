@@ -1,6 +1,6 @@
-"""The Finish menu on a 16-bit blank plate, as a person uses it: open with the keyframes on show, SDR to HDR turns off before
+"""The Finish menu on a 16-bit blank plate, as a person uses it: open with the keyframes displayed, SDR to HDR turns off before
 Generate and on afterwards. The fluid shot alone has no « First frame » row; the render made when the switch turns on takes
-the fluid shot's preview and full size from the first render, and lists both. A step on display that the render on show no
+the fluid shot's preview and full size from the first render, and lists both. A displayed step that the displayed render no
 longer has gives way to the latest result. A Paint over the fluid shot has its first frame, and with SDR to HDR on, its
 plate (the fluid shot) and its layer go through SDR to HDR after « Composite, full size », and « Composite, HDR » follows."""
 import re
