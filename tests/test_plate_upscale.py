@@ -46,10 +46,10 @@ class UpscaleWorkflow(unittest.TestCase):
         self.assertEqual((into["inputs"]["image"], into["inputs"]["peak_of"], into["inputs"]["destination"]), ([cid, 0], [lid, 0], "@model"))
         self.assertEqual((back["inputs"]["source"], back["inputs"]["peak"], back["_meta"]["slots"]["destination"]), ("@model", [iid, 1], "color_space"))
 
-    def test_seedvr2_samples_chunks_of_21_frames_in_one_step(self):
+    def test_seedvr2_samples_in_one_step_in_the_chunks_its_slots_name(self):
         (_, chunk), = of(self.p, "SeedVR2TemporalChunk")
-        self.assertEqual(chunk["inputs"]["chunking_mode.frames_per_chunk"], build_workflows.UPSCALE_CHUNK)
-        self.assertEqual((chunk["inputs"]["temporal_overlap"], build_workflows.UPSCALE_OVERLAP), (1, 4))  # one latent frame
+        self.assertEqual(chunk["_meta"]["slots"], {"temporal_overlap": "chunk_overlap", "chunking_mode.frames_per_chunk": "chunk_frames"})
+        self.assertEqual((chunk["inputs"]["chunking_mode.frames_per_chunk"], chunk["inputs"]["temporal_overlap"]), (21, 1))  # by default: 21 frames, one shared latent frame
         self.assertEqual(build_workflows.UPSCALE_CHUNK, 21)
         (_, ks), = of(self.p, "KSampler")
         self.assertEqual((ks["inputs"]["steps"], ks["inputs"]["denoise"], ks["_meta"]["slots"]["seed"]), (1, 1.0, "seed"))

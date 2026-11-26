@@ -144,6 +144,12 @@
    "temporal_overlap": 1,
    "chunking_mode": "manual",
    "chunking_mode.frames_per_chunk": 21
+  },
+  "_meta": {
+   "slots": {
+    "temporal_overlap": "chunk_overlap",
+    "chunking_mode.frames_per_chunk": "chunk_frames"
+   }
   }
  },
  "11": {
