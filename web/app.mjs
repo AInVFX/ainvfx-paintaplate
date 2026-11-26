@@ -9,7 +9,7 @@ import { DeepFrames, FrameCache, outgrows } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
 import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
-import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
+import { INSPECT_SIZE, addSampled, boxPlace, inspectorRows, pointsQuery, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
 import { askedText, asksName, autoChose, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, deepLine, deepMovie, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, fileStem, FINISH, finishFolder, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName, zipName, autoplays, nearestKey, resultLine, stopsForPreview, strokesLabel, upscaleChunk, upscaleChunks, upscalePass } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
@@ -108,7 +108,7 @@ const S = {
   get color() { return this.colors[this.tool] ?? "#000000"; },
   frame: 0, playing: false, inPt: 0, outPt: 0, wipe: null, compare: false,
   fit: { w: 0, h: 0, x: 0, y: 0 }, zoom: { k: 1, x: 0, y: 0 },
-  display: { ...colour.DISPLAY }, mode: null, scrub: null, inspect: { on: false, pt: null, avg: null, busy: false, last: 0, key: null, got: null, final: null, sampling: false }, // the viewer's colour (display only), and its interactive edit as in RV
+  display: { ...colour.DISPLAY }, mode: null, scrub: null, inspect: { on: false, pt: null, page3Samples: [], busy: false, last: 0, key: null, got: null, final: null, sampling: false }, // the viewer's colour (display only), and its interactive edit as in RV
   fluidBlank: null, clip: null, fluidReady: true, // a blank plate ({ sceneName }), a copied keyframe
   upscaleReady: false, // Finish > Upscale: SeedVR2's files and core's SeedVR2 nodes are here (boot)
   upscaleAsk: UPSCALE_ASK, // Finish > Upscale: the size asked for on this plate ({ side, px }, logic.upscaleTarget); S.deliver.upscale holds it while the row is on
@@ -4371,7 +4371,7 @@ async function showModels() { await modelsUI(true); showHelp("models"); }
 
 function toggleInspector(on = !S.inspect.on) {
   const i = S.inspect;
-  i.on = on; i.avg = null;
+  i.on = on; i.page3Samples = [];
   $("#inspector").hidden = $("#inspector-mark").hidden = !on;
   if (on) refreshInspector(true);
   hud(on ? (i.pt ? "Colour Inspector: Shift+click samples a pixel, Shift+drag averages, drag the box to move it. F5 hides it."
@@ -4387,7 +4387,7 @@ function inspectSample(e, start) { // Shift+click, Shift+drag: RV's beginSamplin
   const i = S.inspect, at = inspectPoint(e);
   if (!at.inside) return;
   if (!i.on) toggleInspector(true);
-  if (start) i.avg = null;
+  if (start) i.page3Samples = [];
   i.sampling = true; i.pt = { x: at.x, y: at.y };
   refreshInspector(true);
 }
@@ -4431,13 +4431,14 @@ async function readPixel() {
   if (wait > 0) await new Promise((ok) => setTimeout(ok, wait));
   const pt = i.pt, frame = S.frame, src = inspectSource(), key = inspectKey();
   i.last = performance.now();
+  if (i.sampling) i.page3Samples = addSampled(i.page3Samples, pt);
   try { // the point in the plate's pixels (of): the route reads a pass with fewer pixels, such as a preview, at the same place
     const { width, height } = S.plate.spec, q = { path: src.path, frame, x: pt.x, y: pt.y, size: INSPECT_SIZE, of: `${width}x${height}` };
+    if (i.page3Samples.length > 1) q.pts = pointsQuery(i.page3Samples); // their average, from the same file and frame as the point
     const r = src.path ? await fetch(`/paintaplate/pixel?${new URLSearchParams(q)}`) : null; // a picture the page drew has no file
     const got = r ? await r.json() : {};
     if (r && !r.ok) throw new Error(got.error);
     i.got = { ...got, source: src, pt, frame, key };
-    if (i.sampling && got.value) i.avg = addSample(i.avg, got.value);
     showInspector(pt, frame, i.got, key === inspectKey());
   } catch (err) { i.got = null; showInspector(pt, frame, { error: err.message }); }
   finally {
@@ -4448,7 +4449,7 @@ async function readPixel() {
 
 function showInspector(pt, frame, got, live = true) { // live: the point and frame displayed now, so the display colour is theirs
   const box = $("#inspector"), i = S.inspect;
-  const rows = pt ? inspectorRows({ ...pt, ...(got ?? {}), final: live ? i.final : null, frame: S.plate.first + frame, average: i.avg })
+  const rows = pt ? inspectorRows({ ...pt, ...(got ?? {}), final: live ? i.final : null, frame: S.plate.first + frame })
     : [["Shift+click", "the frame to sample a pixel"]];
   box.replaceChildren(...rows.map(([k, v]) => {
     const row = document.createElement("div"), dt = document.createElement("span"), dd = document.createElement("span");
@@ -4469,7 +4470,7 @@ function showInspector(pt, frame, got, live = true) { // live: the point and fra
     e.preventDefault(); e.stopPropagation(); box.setPointerCapture(e.pointerId);
     const vr = view.getBoundingClientRect(), { width, height } = S.plate.spec, pt = S.inspect.pt;
     grab = [vr.left + ((pt.x + 0.5) / width) * vr.width - e.clientX, vr.top + ((pt.y + 0.5) / height) * vr.height - e.clientY];
-    S.inspect.sampling = false; S.inspect.avg = null;
+    S.inspect.sampling = false; S.inspect.page3Samples = [];
   });
   box.addEventListener("pointermove", (e) => {
     if (!grab) return;

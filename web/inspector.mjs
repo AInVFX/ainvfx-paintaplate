@@ -31,9 +31,12 @@ export const wipeSide = (x, width, wipe) => (wipe !== null && wipe !== undefined
 
 export const formatValue = (v) => (Number.isFinite(v) ? v.toFixed(6) : "nan"); // RV's "%f"
 
-export function addSample(avg, value) { // RV's running average while Shift is held
-  return avg ? { sum: avg.sum.map((s, i) => s + value[i]), n: avg.n + 1 } : { sum: [...value], n: 1 };
-}
+// The points sampled with Shift held, each pixel once, in the plate's pixels. RV keeps a running sum of the colours it
+// read while sampling; the page keeps the points, so that their average is read again, as the point is, from the step
+// displayed at the frame displayed (the pixel route's `pts`).
+export const addSampled = (points, { x, y }) => (points.some((p) => p.x === x && p.y === y) ? points : [...points, { x, y }]);
+
+export const pointsQuery = (points) => points.map((p) => `${p.x},${p.y}`).join(";"); // as the pixel route reads them
 
 // Where the box goes: beside the point, below and to the right, flipped to stay inside the viewport
 export function boxPlace(x, y, w, h, vw, vh, gap = 14) {
@@ -62,6 +65,6 @@ export function inspectorRows({ x, y, inside = true, frame, value, final, averag
   const rgb = (label, v) => [[label, ""], ...["Red", "Green", "Blue", "Alpha"].slice(0, v.length).map((n, i) => [n, formatValue(v[i])])];
   if (value) rows.push(...rgb("Source colour", value));
   if (final) rows.push(...rgb("Display colour", final));
-  if (average?.n > 1) rows.push(...rgb(`Average source colour of ${average.n}`, average.sum.map((s) => s / average.n)));
+  if (average?.n > 1) rows.push(...rgb(`Average source colour of ${average.n}`, average.value)); // the route's mean of the points
   return rows;
 }
