@@ -1,4 +1,4 @@
-"""Export's ticks: the dialog shows the elements (What) and the stages (Stage) that the render on show can give, in the
+"""Export's ticks: the dialog shows the elements (What) and the stages (Stage) that the render displayed can give, in the
 dialog's words, and opens on the result at its last stage, each time it opens. A paint on a plate of EXR frames offers the
 plate, the shot, the layer, the matte and the composite; a fluid shot alone offers its plate alone. The log's download
 lines name the files the zip holds, in the Render panel's step names. The Help's Export entry opens with the dialog's line."""

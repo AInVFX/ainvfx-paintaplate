@@ -3442,7 +3442,7 @@ async function modelsBehindResult() { // the models behind the result displayed:
 // The name every exported file starts with: the scene's name once it is saved or opened, for its plate, else the plate's name. A
 // fluid shot's plate is its blank plate, whose name its export takes.
 const exportStem = () => (S.exportStem && S.exportStem.plate === S.plate?.path ? S.exportStem.name : S.plate?.name) || "";
-// Every file the zip may take for the render on show, cell by cell: an element (logic.X_ELEMENTS) at a stage (X_STAGES),
+// Every file the zip may take for the render displayed, cell by cell: an element (logic.X_ELEMENTS) at a stage (X_STAGES),
 // with its label, which names it in the zip (logic.zipName) and in the download's lines, and its file once made (file).
 // The export step writes the full-size composite, layer and matte, and Export runs it; SDR to HDR's and Upscale's steps
 // write theirs first; a preview counts once the render made it. SDR to HDR's and Upscale's sets are 1.11.31's here: the
@@ -3758,12 +3758,12 @@ function exportWordsNow() {
   return exportWords({ kind, ready, left: ready ? "" : secs(renderLeft(true), ""), hdr: fluid && r?.done?.hdr !== undefined && !r.skip?.has("hdr"), // hdr: SDR to HDR made and on
     steps: { comp: labelOf(STAGES.find((st) => st.id === "review"), r) }, bytes: S.exportSource?.plate === S.plate?.path ? S.exportSource.bytes : 0 });
 }
-// The render on show, or, before Export makes it, its plan: the steps it will make (plan), which store nothing
+// The render displayed, or, before Export makes it, its plan: the steps it will make (plan), which store nothing
 function exportPlan() {
   const active = S.edits.filter((e) => e.on && e.state === "done" && (e.patch || e.tool === "fluid")); // as want() takes them
   return S.renders.get(S.heroKey) ?? Object.assign(plan({ key: S.heroKey }, active), { active });
 }
-function exportDialog() { // the ticks the render on show can give (exportCells), in one source's words (exportWordsNow), set to its result at its last stage
+function exportDialog() { // the ticks the render displayed can give (exportCells), in one source's words (exportWordsNow), set to its result at its last stage
   const words = exportWordsNow(), fluid = fluidOnly(), r = exportPlan(), cells = exportCells(r), shown = xShown(cells);
   const on = xDefaults(cells, fluid || plateAlone(S.heroKey) ? "plate" : "composite");
   const tick = (id, w, show, checked) => {
@@ -3774,7 +3774,7 @@ function exportDialog() { // the ticks the render on show can give (exportCells)
   };
   for (const k of X_ELEMENTS) tick(k, words.elements[k], shown.elements.has(k), on.elements.has(k));
   for (const k of X_STAGES) tick(k, words.stages[k], shown.stages.has(k), on.stages.has(k));
-  tick("graph", words.elements.graph, !plateAlone(S.heroKey) && (fluid ? graphsFluid() : S.edits.some((e) => e.on && e.patch && e.state === "done")), false); // the edits on show, or a fluid shot alone, as one ComfyUI workflow
+  tick("graph", words.elements.graph, !plateAlone(S.heroKey) && (fluid ? graphsFluid() : S.edits.some((e) => e.on && e.patch && e.state === "done")), false); // the edits displayed, or a fluid shot alone, as one ComfyUI workflow
   $("#x-hint").textContent = words.hint; $("#x-note").textContent = words.note;
   const go = () => { const ticks = exportTicks(); $("#x-go").disabled = !xRows(cells, ticks).length && !ticks.graph; }; // ticks that give no file give no zip
   $("#export").onchange = go; go();
@@ -4751,7 +4751,7 @@ $("#preview-size").onchange = (e) => setPreview(readPreview(e.target.value));
 
 $("#x-go").onclick = () => {
   const ticks = exportTicks(), r = S.renders.get(S.heroKey);
-  S.graph = ticks.graph ? graphFile().catch((err) => void quiet(err)) : null; // from the edits on show; the zip takes it
+  S.graph = ticks.graph ? graphFile().catch((err) => void quiet(err)) : null; // from the edits displayed; the zip takes it
   if (fluidOnly()) return void setTimeout(() => exportPlate(undefined, ticks), 0); // once the dialog has closed: as the plate alone exports
   if (plateAlone(S.heroKey) || (r?.hdrAfter && !r.fluid)) return void setTimeout(() => exportPlate(r, ticks), 0); // SDR to HDR's frames: the plate alone, or a relit result in HDR
   if (r?.exported && !r.hdrAfter && r.exported.plateText !== undefined) r.exported.text = r.exported.plateText; // SDR to HDR turned off after the export step
