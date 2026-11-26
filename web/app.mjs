@@ -871,7 +871,7 @@ function askFinish(opt, on) { // a pass that changes what Export writes asks fir
   $(`#finish-${opt.id}`).checked = false;
   ask.hidden = false;
 }
-function setFinish(opt, on) { // Finish's passes run on the render on show, planned again: their steps join the Render panel or leave it; Upscale's keep their results per size
+function setFinish(opt, on) { // Finish's passes run on the render displayed, planned again: their steps join the Render panel or leave it; Upscale's keep their results per size
   if (opt.id === "hdr") S.deliver.hdr = on;
   if (opt.id === "upscale") S.deliver.upscale = on ? S.upscaleAsk : false;
   const shown = S.renders.get(S.heroKey);
@@ -890,16 +890,16 @@ function setFinish(opt, on) { // Finish's passes run on the render on show, plan
   }
 }
 // Upscale turned on or off, or another size: the player shows the latest result, unless a step of the plate's size is pinned
-// One of Upscale's steps stands while its render is on show, with Upscale on, on the stage and at the size the step works at
+// One of Upscale's steps stands while its render is displayed, with Upscale on, on the stage and at the size the step works at
 const upStands = (key) => !!S.deliver.upscale && S.piping?.key === S.heroKey && upKey(S.renders.get(S.heroKey)) === key;
-// Upscale turned off, another size, SDR to HDR turned on or off under it, or other edits on show, while one of its steps runs:
+// Upscale turned off, another size, SDR to HDR turned on or off under it, or other edits displayed, while one of its steps runs:
 // the step stops at once, as for a new edit (preempt). Its finished jobs stay in the job index, so it continues from them
 // when it is asked for again.
 function upscaleStale() {
   const st = S.stage;
   if (st && UP_IDS.has(st.id) && !upStands(st.sized)) cancel("export"); // Upscale's jobs are of the export's kind (upscalePart)
 }
-// SDR to HDR turned off, or other edits on show, while one of its Finish steps runs: the step stops at once, as Upscale's do.
+// SDR to HDR turned off, or other edits displayed, while one of its Finish steps runs: the step stops at once, as Upscale's do.
 // Its finished jobs stay in the job index (the plate's « Plate, HDR » among them), so it continues from them when asked again.
 function hdrStale() {
   const st = S.stage, def = st && STAGES.find((x) => x.id === st.id);
@@ -1012,7 +1012,7 @@ function recompose() {
   const key = keyOf(asAuto ? one : null);
   if (key === S.heroKey) return;
   S.heroKey = key;
-  upscaleStale(); hdrStale(); // a Finish step that runs for the edits no longer on show stops
+  upscaleStale(); hdrStale(); // a Finish step that runs for the edits no longer displayed stops
   const r = S.renders.get(key); // a set of edits seen before plays at once (a bypass turned back on, for example)
   S.exported = r?.exported ?? null;
   S.pass = null; // other edits: the viewer follows their latest result
@@ -2914,7 +2914,7 @@ function plan(r, all) { // the steps this set of edits needs: the erase pass for
   const tools = active.map((e) => e.tool), hdrOn = r.key === PLATE_ALONE || hdrWanted(), relight = tools.includes("light"); // Finish > SDR to HDR as the switch stands: its steps run on this render; the plate alone's render is SDR to HDR's own (logic.PLATE_ALONE)
   r.hdrAfter = S.hdrReady && hdrAfterComposite(p.spec, tools, hdrOn, p.headroom); // SDR to HDR on the composite's elements, after it (logic.hdrAfterComposite)
   const elements = r.hdrAfter && !relight; // the plate and the layer through SDR to HDR, then the composite made again; a Light edit's one element is its composite
-  const up = !!S.deliver.upscale && S.upscaleReady, alone = !active.length, upAlone = r.key === PLATE_UP || (fl && alone && !(S.hdrReady && wantsHdr(p.spec, [], hdrOn))); // Finish > Upscale, as the switch stands: setFinish plans the render on show again
+  const up = !!S.deliver.upscale && S.upscaleReady, alone = !active.length, upAlone = r.key === PLATE_UP || (fl && alone && !(S.hdrReady && wantsHdr(p.spec, [], hdrOn))); // Finish > Upscale, as the switch stands: setFinish plans the render displayed again
   const keeps = up && !alone && upscaleKeeps(tools); // the plate and the layer are upscaled, then composited: SDR to HDR's when it is on
   const donor = fl ? fluidDonor(r, all.find((e) => e.tool === "fluid").version) : null, pvMade = !!donor?.previews?.[p.shot.join("x")]?.fluid; // made by another render
   r.skip = new Set([(!fl || (!pvMade && (!alone || !!donor))) && "fluid", !fl && "fluidfull", !erase && "erase", !erase && "clean", !carry && "shot", !paint && "track", (onePass || !erase) && "cleanfull",
@@ -3330,7 +3330,7 @@ function exportedParts(p, done, exr) {
     mattePath: matte ? `output:${matte.subfolder}` : null, space: exr ? HDR_FRAMES : p.cs, float: exr || /^\.exr$/i.test(p.spec.ext ?? "") };
 }
 
-function upscaleGuess(id) { // seconds for one of Upscale's steps on the render on show (logic.upscaleSeconds); no id: all of them
+function upscaleGuess(id) { // seconds for one of Upscale's steps on the render displayed (logic.upscaleSeconds); no id: all of them
   const r = S.renders.get(S.heroKey), f = upscaleFigures(), keeps = r?.skip ? !r.skip.has("uplayer") : upscaleKeeps((r?.active ?? []).map((e) => e.tool)); // as planned (plan)
   const pass = (passes, parts) => upscaleSeconds(f.target, f.frames, { passes, parts, profile: S.memoryProfile.name });
   if (!id) return keeps ? f.edit : f.alone;
@@ -3383,7 +3383,7 @@ async function upscalePart(part, set, keeps, progress, sized, made = {}) {
   const total = mine.reduce((a, win) => a + win[1], 0) + size / 5; // a window weighs its frames, a part written a fifth of a window
   let before = 0;
   const job = async (name, v, wt) => {
-    if (!upStands(S.stage?.sized)) throw YIELD; // turned off, another size or stage, or other edits on show, between two jobs
+    if (!upStands(S.stage?.sized)) throw YIELD; // turned off, another size or stage, or other edits displayed, between two jobs
     const done = await run(name, v, { kind: "export", progress: (f) => progress((before + f * wt) / total) }).done;
     before += wt;
     progress(before / total);
@@ -3642,8 +3642,8 @@ function stagesUI() {
     const movie = took !== undefined ? passMovie(st.id, r, previewOf(r), { log: logSpace(), data: matteSpace() }, upOf(r)) : null;
     if (movie) {
       pick(li, st.id, labelOf(st, planned).toLowerCase());
-      if (S.pass ? S.pass === st.id : movie.url === S.shot?.url) li.classList.add("shown"); // the row on show
-    } else if (now && S.pass) { // the step at work, while another is on show: a click ends the pin, and its live preview shows again
+      if (S.pass ? S.pass === st.id : movie.url === S.shot?.url) li.classList.add("shown"); // the row displayed
+    } else if (now && S.pass) { // the step at work, while another is displayed: a click ends the pin, and its live preview shows again
       li.classList.add("pick");
       li.onclick = () => choosePass(S.pass);
     }

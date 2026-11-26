@@ -1225,7 +1225,7 @@ export const wantsHdr = (spec, tools, on) => !!spec && !!on && !tools.includes("
 // to HDR itself (app.plateHdr). On a plate that holds values above 1.0, SDR to HDR runs on the new content before the
 // composite instead, which needs it, and a Light edit keeps the plate's values (wantsHdr). `tools`: the edits' tools.
 export const hdrAfterComposite = (spec, tools, on, headroom = 1) => !!spec && !!on && tools.length > 0 && !holdsHdr(spec, headroom);
-// The render key of what is on show: the edits' key, whatever the Finish menu asks, since its passes run on the render's
+// The render key of what is displayed: the edits' key, whatever the Finish menu asks, since its passes run on the render's
 // own result. A plate with no edit has a render only when the Finish menu asks: SDR to HDR of a plate whose format holds
 // nothing above 1.0, the key PLATE_ALONE, whose steps are SDR to HDR on the plate, then Upscale on its frames if asked.
 export const PLATE_ALONE = "|hdr";
