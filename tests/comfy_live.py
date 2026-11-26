@@ -151,8 +151,9 @@ def verify_export(kind, plate_dir, out_dir, relight):
             check(str(b.header()["compression"]) == str(a.header()["compression"]), "exr: compression kept")
     elif kind == "mov":
         spec_in = plateio.probe_plate(plate_dir); spec_out = plateio.probe_plate(os.path.join(out_dir, files[0]))
-        for k in ("codec", "pix_fmt", "width", "height", "fps_num", "fps_den", "timecode", "audio_streams", "colorspace"):
+        for k in ("codec", "width", "height", "fps_num", "fps_den", "timecode", "audio_streams", "colorspace"):
             check(spec_in[k] == spec_out[k], f"mov: {k} kept ({spec_out[k]})")
+        check((spec_out["profile"], spec_out["pix_fmt"]) == ("XQ", "yuv444p12le"), f"mov: ProRes 4444 XQ, 4:4:4 ({spec_out['profile']}, {spec_out['pix_fmt']})")
     elif kind == "png16":
         src = plateio.find_sequence(plate_dir)
         a = plateio.read_native(src[2], False); b = plateio.read_native(os.path.join(out_dir, files[2]), False)

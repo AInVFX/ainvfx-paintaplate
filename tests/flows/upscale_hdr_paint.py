@@ -22,10 +22,10 @@ def run(browser, port, U):
     U.check(any("SeedVR2 7B upscales the result." in t for t in lines) and "Composite, upscaled" in rows and not {"Plate, upscaled", "Layer, upscaled"} & set(rows),
             f"the render upscales SDR to HDR's result alone: {rows}, {[t for t in lines if t.startswith('Upscale')]}")
     start = len(U.log_lines(page))
-    page.click("#export-btn")
+    page.click("#export-btn"); page.check("#x-matte")  # beside the result, upscaled, which the dialog opens on
     with page.expect_download(timeout=240000) as dl:
         page.click("#x-go")
     parts = {zip_rows.row_of(n) for n in zipfile.ZipFile(dl.value.path()).namelist() if zip_rows.row_of(n).endswith("_upscaled")}
-    U.check(parts == {"composite_upscaled", "matte_upscaled"} and not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]),
+    U.check(parts == {"composite_hdr_upscaled", "matte_upscaled"} and not any(t.startswith("Upscale: ") for t in U.log_lines(page)[start:]),
             f"Export writes the upscaled result and its matte, no plate and no layer, with no Upscale job: {sorted(parts)}")
     page.close()

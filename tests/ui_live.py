@@ -399,7 +399,7 @@ def main():
     print(f"zip: {len(exports)} EXR frames, {len(mattes)} matte frames; console errors: {len(errors)}")
     for e in errors[:10]:
         print("  console:", e[:300])
-    passed = ok and exports and mattes and any(n.endswith("_composite_full_size.mov") for n in names) and not errors
+    passed = ok and exports and mattes and not errors  # the composite's EXR frames and the matte, which tick_offered ticked
     print("UI FLOW PASSED" if passed else "UI FLOW FAILED")
     return 0 if passed else 1
 
