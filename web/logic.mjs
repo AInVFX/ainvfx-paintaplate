@@ -913,9 +913,8 @@ export function exportWords({ kind, ready = true, left = "", hdr = false, steps 
 // its file, and whether it is the source plate's own files (source).
 export const X_ELEMENTS = ["plate", "shot", "layer", "matte", "composite"];
 // The labels of the cells the Render panel has no step for (app.exportCells): they name the files in the zip (zipName) and
-// the download's lines; Finish's sets take its own labels.
-export const X_LABELS = { source: "Source plate", matte: "Matte", mattePreview: "Matte, preview", layer: "Layer, full size", shotHdr: "Shot, HDR",
-  plateHdr: "Plate, HDR", layerHdr: "Layer, HDR", compHdr: "Composite, HDR", plateHdrUp: "Plate, HDR, upscaled", compHdrUp: "Composite, HDR, upscaled" };
+// the download's lines. Every other cell takes its step's label, Finish's sets included (app.labelOf).
+export const X_LABELS = { source: "Source plate", matte: "Matte", mattePreview: "Matte, preview", layer: "Layer, full size", matteUp: "Matte, upscaled" };
 export const X_STAGES = ["preview", "full", "hdr", "up"];
 // The ticks the dialog shows: an element, or a stage, that has no cell for the render has no tick.
 export const xShown = (cells) => ({ elements: new Set(cells.map((c) => c.element)), stages: new Set(cells.map((c) => c.stage)) });

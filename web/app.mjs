@@ -931,7 +931,7 @@ async function upscaleResult(r) {
   const p = plateUnder(r), hdr = !r.skip.has("hdr"), sized = upSize(), store = ((r.ups ??= {})[upKey(r)] ??= {});
   r.run ??= r.base; // a fluid shot's files sit in its render's folder, beside the upscaled set, which its zip takes (exportAlone)
   await step(r, st.id, async (progress) => {
-    store[st.id] = await upscalePart("comp", { dir: setFolder(r.run, { hdr }), plate: p, result: hdr ? r.hdrFrames : p.path, space: hdr ? HDR_FRAMES : p.cs,
+    store[st.id] = await upscalePart("comp", { dir: setFolder(r.run, { hdr }), plate: p, name: "plate", result: hdr ? r.hdrFrames : p.path, space: hdr ? HDR_FRAMES : p.cs,
       float: hdr || (r.fluid ? false : /^\.exr$/i.test(p.spec.ext ?? "")), layer: null, matte: null }, false, progress, sized);
     if (!hdr) Object.assign(r, { review: store[st.id]?.url ?? null, reviewSpace: store[st.id]?.space ?? p.cs }); // the plate alone's result
   }, store);
@@ -3395,7 +3395,7 @@ async function upscalePart(part, set, keeps, progress, sized, made = {}) {
     if (i === 0) [home, comp] = [parent(done, "frames") ?? home, part === "layer" ? parent(done, "comp") ?? comp : comp];
   }
   const done = await job(...(part === "plate" ? save(p.path, home, "plate", p.cs) : part === "layer" ? save(set.layer, home, "layer", set.space)
-    : save(set.result, keeps ? comp : home, "export", set.space)));
+    : save(set.result, keeps ? comp : home, set.name ?? "comp", set.space))); // a set's result is comp, a plate's or a fluid shot's alone plate (the layout)
   const file = outputFile("upscale_export", done, "video");
   return { url: file ? viewUrl(file) : null, space: view, size: [mw, mh], home, comp }; // what its row shows, and where its windows are
 }
@@ -3475,19 +3475,20 @@ async function modelsBehindResult() { // the models behind the result displayed:
 const exportStem = () => (S.exportStem && S.exportStem.plate === S.plate?.path ? S.exportStem.name : S.plate?.name) || "";
 // Every file the zip may take for the render displayed, cell by cell: an element (logic.X_ELEMENTS) at a stage (X_STAGES),
 // with its label, which names it in the zip (logic.zipName) and in the download's lines, and its file once made (file).
-// The export step writes the full-size composite, layer and matte, and Export runs it; SDR to HDR's and Upscale's steps
-// write theirs first; a preview counts once the render made it. SDR to HDR's and Upscale's sets are 1.11.31's here: the
-// HDR result is SDR to HDR's frames, or the export itself as EXR frames, and Upscale's result is out/export. Before the
-// render exists, its plan (exportPlan) says what it will make; the files come from the render itself, at download time.
+// The export step writes the full-size composite, layer, matte and shot, and Export runs it; Finish's steps write their
+// sets first, each in its folder (logic.setFolder): SDR to HDR's in <run>/hdr, Upscale's in <run>/upscale/<size>/out, under
+// hdr/ when it reads SDR to HDR's set. The matte is the full-size one, at full size and in HDR. A preview counts once the
+// render made it. Before the render exists, its plan (exportPlan) says what it will make; the files come from the render
+// itself, at download time.
 function exportCells(r) {
   if (!r) return [];
-  const p = S.plate, pv = () => previewOf(r) ?? {}, skip = r.skip ?? new Set();
-  const name = (id) => labelOf(STAGES.find((st) => st.id === id), r), out = (part) => () => r.exported && `output:${setFolder(r.exported.run, { size: upSize() })}/${part}`; // Upscale's set: here every one under upscale/, as 1.11.31 writes it
-  const fluid = fluidOnly(), alone = plateAlone(S.heroKey) && !fluid, relit = !!r.hdrAfter && !r.fluid, edits = !fluid && !alone && !relit;
-  const relight = (r.active ?? []).some((e) => e.tool === "light"), exr = edits && !r.hdrAfter && exportsExr(r), up = !!upLast(r);
-  const upHdr = up && (upLast(r).id === "uphdr" || exr), keeps = up && !skip.has("uplayer");
+  const p = S.plate, pv = () => previewOf(r) ?? {}, skip = r.skip ?? new Set(), hdr = hdrSet(r), up = !!upLast(r);
+  const name = (id) => labelOf(STAGES.find((st) => st.id === id), r);
+  const set = (stage, part) => () => r.exported && `output:${setFolder(r.exported.run, stage === "up" ? { hdr, size: upSize() } : { hdr: true })}/${part}`; // a set's element, by the layout
+  const fluid = fluidOnly(), alone = plateAlone(S.heroKey) && !fluid, edits = !fluid && !alone;
+  const relight = (r.active ?? []).some((e) => e.tool === "light"), keeps = up && !skip.has("uplayer");
   const cells = [], add = (element, stage, label, file, source = false) => cells.push({ element, stage, label, file: typeof file === "function" ? file : () => file, source,
-    hdr: stage === "hdr" || (stage === "up" && upHdr) }); // hdr: the file holds SDR to HDR's values, which the zip's name says
+    hdr: stage === "hdr" || (stage === "up" && hdr) }); // hdr: the file holds SDR to HDR's values, which the zip's name says
   const overFluid = !!r.fluid || !!fluidEdit()?.on; // a blank plate: the plate under the edits is the fluid shot
   if (overFluid && !skip.has("fluid")) add("plate", "preview", name("fluid"), () => outputPath(pv().fluid?.movie));
   if (!skip.has("shot")) add("shot", "preview", name("shot"), () => outputPath(pv().raw));
@@ -3499,22 +3500,20 @@ function exportCells(r) {
     const carry = !skip.has("full") || !skip.has("shot"), erase = !skip.has("cleanfull") || !skip.has("clean");
     if (carry) add("shot", "full", name("full"), () => r.exported?.shotPath);
     if (erase) add("shot", "full", name("cleanfull"), () => (carry ? r.exported?.cleanPath : r.exported?.shotPath));
+    add("composite", "full", name("review"), () => r.exported?.path);
+    if (!relight) add("layer", "full", X_LABELS.layer, () => r.exported?.layerPath); // a Light edit's one element is its composite
+    for (const stage of hdr ? ["full", "hdr"] : ["full"]) add("matte", stage, X_LABELS.matte, () => r.exported?.mattePath); // one picture, which the zip takes once
   }
-  if (edits) {
-    add("composite", exr ? "hdr" : "full", exr ? X_LABELS.compHdr : name("review"), () => r.exported?.path);
-    if (!relight) add("layer", exr ? "hdr" : "full", exr ? X_LABELS.layerHdr : X_LABELS.layer, () => r.exported?.layerPath);
-    for (const stage of skip.has("hdr") ? ["full"] : ["full", "hdr"]) add("matte", stage, X_LABELS.matte, () => r.exported?.mattePath); // one picture at full size and in HDR, which the zip takes once
+  if (hdr && (alone || fluid)) add("plate", "hdr", name("hdrplate"), set("hdr", "plate"));
+  else if (hdr && edits) {
+    if (!relight) { add("plate", "hdr", name("hdrplate"), set("hdr", "plate")); add("layer", "hdr", name("hdrlayer"), set("hdr", "layer")); }
+    add("composite", "hdr", name("hdr"), set("hdr", "comp"));
   }
-  if (!skip.has("hdr")) {
-    if (alone || fluid) add("plate", "hdr", X_LABELS.plateHdr, () => r.hdrFrames ?? (r.exported && `output:${setFolder(r.exported.run, { hdr: true })}`)); // its result is the plate
-    else if (r.hdrAfter) add("composite", "hdr", X_LABELS.compHdr, () => r.hdrFrames); // a relit result, or the edits over a fluid shot
-    else if (edits) add("shot", "hdr", X_LABELS.shotHdr, () => r.hdrFrames); // the shot made again in scene-linear values, before the composite
-  }
-  if (up && (alone || fluid)) add("plate", "up", upHdr ? X_LABELS.plateHdrUp : name("upplate"), out("export"));
+  if (up && (alone || fluid)) add("plate", "up", name("upplate"), set("up", "plate"));
   else if (up) {
-    add("composite", "up", upHdr ? X_LABELS.compHdrUp : name("upcomp"), out("export"));
-    if (keeps) { add("plate", "up", name("upplate"), out("plate")); add("layer", "up", name("uplayer"), out("layer")); }
-    if (edits) add("matte", "up", "Matte, upscaled", out("matte"));
+    add("composite", "up", name("upcomp"), set("up", "comp"));
+    if (keeps) { add("plate", "up", name("upplate"), set("up", "plate")); add("layer", "up", name("uplayer"), set("up", "layer")); }
+    add("matte", "up", X_LABELS.matteUp, set("up", "matte"));
   }
   return cells;
 }

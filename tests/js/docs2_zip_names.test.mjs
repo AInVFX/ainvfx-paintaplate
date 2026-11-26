@@ -15,7 +15,8 @@ const hdrUp = (id) => app.match(new RegExp(`${id}: "([^"]+, HDR, upscaled)"`))[1
 function codeNames() {
   const cells = app.slice(app.indexOf("function exportCells("), app.indexOf("const ticked = ")); // the cells Export can zip
   const steps = [...new Set([...cells.matchAll(/name\("(\w+)"\)/g)].map(([, id]) => id))].map(label);
-  const labels = [...steps, ...Object.values(X_LABELS), exportWords({ kind: "edits" }).elements.graph.label];
+  const ups = [...new Set([...cells.matchAll(/name\("(up\w+)"\)/g)].map(([, id]) => id))].map(hdrUp); // Upscale's steps on SDR to HDR's set (labelOf)
+  const labels = [...steps, ...ups, ...Object.values(X_LABELS), exportWords({ kind: "edits" }).elements.graph.label];
   return new Set([routes.match(/f"\{stem\}_(\w+)\.md"/)[1], app.match(/\? `(\w+)_v\$\{fluidEdit/)[1], ...labels.map(zipName)]);
 }
 
