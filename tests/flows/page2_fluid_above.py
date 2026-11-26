@@ -47,7 +47,7 @@ def run(browser, port, U):
     page.keyboard.press("Enter")
     page.wait_for_function(U.DONE.format(n=2), timeout=120000)
     U.settled(page)
-    page.click("#new-edit")
+    # after Generate no edit stays selected: these strokes make Paint 3
     U.paint_once(page, "a blue cube", [(0.45, 0.5), (0.5, 0.52), (0.55, 0.5)])
     page.keyboard.press("Enter")
     page.wait_for_function(U.DONE.format(n=3), timeout=120000)
