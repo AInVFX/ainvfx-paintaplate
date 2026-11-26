@@ -1838,6 +1838,14 @@ export function stepClasses(steps) {
   const first = steps.some((st) => st.preview) ? "preview" : "full";
   return Object.fromEntries(steps.map((st) => [st.id, st.onDemand ? "export" : st.up || st.hdr ? "finish" : st.final ? "full" : st.preview ? "preview" : first]));
 }
+// The line under the timeline, by the same classes: grey once the preview is made and the full size's steps run, green once
+// the full size is made, whatever Finish still runs, or once Finish is made where it is the render's only class; gold
+// before. `steps`: each planned step's class and whether it is done, as renderStatus takes them.
+export function timelineClass(steps) {
+  const due = (cls) => steps.some((s) => s.cls === cls && !s.done), has = (cls) => steps.some((s) => s.cls === cls);
+  if (has("full") ? !due("full") : has("finish") && !due("finish")) return "ready";
+  return has("preview") && !due("preview") ? "final" : "";
+}
 // The line names the class at work and the time until that class is done: « preview », « full size », then « finish ». At
 // the end it says what is ready, so a full size that is made is never announced again while Finish runs.
 // `steps`: each planned step's class, whether it is done, and its seconds left; busy: one of them runs now.
