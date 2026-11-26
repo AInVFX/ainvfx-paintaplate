@@ -5,7 +5,7 @@ that hold, and the latest result plays. The mock holds each fluid step open, so 
 
 def run(browser, port, U):
     errors = []
-    page = U.load(browser, port, errors=errors)
+    page = U.load(browser, port, errors=errors, autoplay=True)  # the flow of autoplay itself
     playing = lambda: page.evaluate("document.querySelector('#play-btn').classList.contains('playing')")
     status = lambda: page.text_content("#status")
 

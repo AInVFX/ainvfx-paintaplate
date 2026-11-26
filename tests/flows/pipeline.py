@@ -189,7 +189,7 @@ def movie_name(page, U):
 
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900}, accept_downloads=True)
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     movie_name(page, U)
     fluid16_scene(page, U)

@@ -721,7 +721,7 @@ export function logLevel(text) { // a log message's colour, from its words: red 
 // warning shows by its first line that starts with its word, in its colour (logLevel). A line that succeeds replaces a
 // fault that is over (`shown`: the status line's level), in the normal colour, unless it is bookkeeping. Every other event
 // reaches the status line from the code that makes it, with what to do next.
-const BOOKKEEPING = /^(Frame cache|Viewer|Played|Memory profile|Working sizes|Native frames|Job index off)\b/;
+const BOOKKEEPING = /^(Frame cache|Viewer|Played|Memory profile|Working sizes|Native frames|Job index off|Autoplay off)\b/;
 export function statusOf(text, shown = "") {
   const lines = String(text).split("\n"), level = logLevel(text), word = level === "error" ? "Error: " : "Warning: ";
   if (level) return { text: lines.map((l) => l.trim()).find((l) => l.startsWith(word)), level };

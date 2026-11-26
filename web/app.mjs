@@ -45,6 +45,7 @@ const HDR_FRAMES = "ACES2065-1"; // the colour space of the SDR-to-HDR frames (H
 const BLANK_AT_START = Q.get("blank") !== "0"; // with no plate open, a blank plate opens at start, ready for a fluid shot; ?blank=0 starts empty
 const SEED_ASKED = askedSeed(Q.get("seed")); // ?seed=<whole number>, for the tests: the first new edit and every new fluid shot start from it, each next edit from the next number (logic.editSeed), so a run makes the same pictures again. Without it the page draws each seed
 let editsSeeded = 0; // the new edits that took a seed from ?seed= so far
+const AUTOPLAY_ON = Q.get("autoplay") !== "0"; // ?autoplay=0, for the tests: a step's result waits, paused, as it is made, so a headless browser spends no time playing while the mock renders
 const INDEX_ON = Q.get("index") !== "0"; // ?index=0, for the tests: no job is taken from the job index and none is written to it, so every job runs and is timed
 // The memory profile (logic.memoryProfile): the GPU decides, unless ?memory=small, medium or large in the address, or the
 // name kept under paintaplate.memory, asks for one
@@ -3692,7 +3693,7 @@ function keepRows(list, rows) {
 function showStep(url, key, space, frames, opts, label, words = {}) {
   const pinned = !!S.pass, playing = S.playing; // showMade drops a pinned step for the newest result
   showMade(url, key, space, frames, opts);
-  const plays = autoplays({ playing, painting: !!S.draft || !!stroke, selected: !!S.selected, keying: keying(), pinned, heldHere: S.held === key, halted: S.halted });
+  const plays = (AUTOPLAY_ON || playing) && autoplays({ playing, painting: !!S.draft || !!stroke, selected: !!S.selected, keying: keying(), pinned, heldHere: S.held === key, halted: S.halted }); // ?autoplay=0: a player that plays still goes on
   if (plays) play();
   const line = resultLine(label, plays, words);
   hud(line, 2500);
@@ -3703,7 +3704,7 @@ function handPlay() { // Space, the play button: a pause by hand holds this rend
 }
 function wake() { // Esc leaves nothing selected or pinned: the pause by hand no longer holds, and the latest result plays
   S.held = null;
-  if (S.shot?.url && autoplays({ playing: S.playing, painting: !!S.draft || !!stroke, selected: !!S.selected, keying: keying(), pinned: !!S.pass, heldHere: false, halted: S.halted })) play();
+  if (AUTOPLAY_ON && S.shot?.url && autoplays({ playing: S.playing, painting: !!S.draft || !!stroke, selected: !!S.selected, keying: keying(), pinned: !!S.pass, heldHere: false, halted: S.halted })) play();
 }
 
 function showMade(url, key, space, frames = null, opts = {}) {
@@ -4724,6 +4725,7 @@ async function boot() { // the version and the build, the workflows, the WebSock
   log(`OCIO: ${S.ocio.info.label}${S.ocio.config === "$OCIO" ? " ($OCIO)" : ""}, display ${S.ocio.display}, view ${S.ocio.view}.`);
   if (SEED_ASKED !== null) log(`Seed ${SEED_ASKED} asked for in the address (?seed=): every new edit and every new fluid shot starts from it.`);
   if (!INDEX_ON) log("Job index off, asked for in the address (?index=0): every job runs, and none is kept for a later session.");
+  if (!AUTOPLAY_ON) log("Autoplay off, asked for in the address (?autoplay=0): a step's result waits, paused, as it is made.");
   status("Ready. Open a plate to start.", "hint");
   if (!S.plate && BLANK_AT_START && S.fluidReady) await openBlank().catch(quiet); // a canvas for a fluid shot, at the Blank tab's settings
   warmAll().catch(() => {}); // a ComfyUI that reports no GPU details simply skips it

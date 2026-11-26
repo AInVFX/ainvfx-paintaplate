@@ -13,7 +13,7 @@ import ui_live
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1280, "height": 800}, accept_downloads=True)
     page.set_default_timeout(10000)
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     picked, said = ui_live.pick, io.StringIO()
 

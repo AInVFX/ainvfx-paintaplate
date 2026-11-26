@@ -29,7 +29,7 @@ def logged(page, start):  # the log line that starts with `start`, once it is wr
 
 
 def run(browser, port, U):
-    address = f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0"
+    address = f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0"
     before = len(posts(port))
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(address + "&memory=small")  # a small GPU, asked for: the mock's GPU has 32 GB

@@ -236,7 +236,7 @@ def exposure_while_playing(browser, port, U):
     """With a frame budget too small for every EXR frame (?deep=8: about 5 of 17), a playing EXR plate shows its 8-bit
     movie at rest, and only its EXR frames once the exposure moves."""
     page = browser.new_page(viewport={"width": 1400, "height": 900})
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&deep=8")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0&deep=8")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     U.open_path(page, "paintaplate/hdr_room")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
@@ -263,7 +263,7 @@ SEEN = "(() => { const i = document.querySelector('#inspector'); return [i.datas
 def rendered(browser, port, U):
     """desk.mp4 with a paint edit made to its full-size composite, nothing selected: the Render panel's rows to compare."""
     page = browser.new_page(viewport={"width": 1400, "height": 900}, accept_downloads=True)
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden", timeout=60000)
@@ -384,7 +384,7 @@ def xray_view(page, U):
 
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     rows = parity_table(page)
     with open("/tmp/rv_parity.json", "w") as f:

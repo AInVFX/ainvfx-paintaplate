@@ -12,7 +12,7 @@ from viewer_edit import OPEN, PIXEL, STATUS, hold  # noqa: E402
 
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0")
     page.wait_for_function(f"{STATUS}.startsWith('Ready')", timeout=60000)
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function(OPEN, timeout=60000)

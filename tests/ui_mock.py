@@ -62,8 +62,12 @@ class HalfSize:
         return getattr(self.browser, name)
 
 
-def load(browser, port, query="?blank=0", errors=None, **context):
-    """A new page with the app loaded. `errors` collects console errors, page errors and failed requests, from the load on."""
+def load(browser, port, query="?blank=0", errors=None, autoplay=False, **context):
+    """A new page with the app loaded. `errors` collects console errors, page errors and failed requests, from the load on.
+    A step's result waits, paused, as it is made (?autoplay=0), unless `autoplay`: playing in a headless browser takes the
+    time of the mock's renders; the flows that test autoplay ask for it."""
+    if not autoplay:
+        query += ("&" if "?" in query else "?") + "autoplay=0"
     page = browser.new_page(viewport=VIEWPORT, **context)
     if errors is not None:
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
@@ -267,7 +271,7 @@ def start_flow(browser, port):
     """With no plate open, the page opens a blank plate at start, at the Blank tab's settings, in 8-bit (16-bit, with SDR to
     HDR, is the tab's other choice), its keyframes ready to paint (?blank=0 starts empty, as every other flow does)."""
     page = browser.new_page(viewport=VIEWPORT)
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?autoplay=0")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     spec = page.text_content("#spec")
     check("960 x 512, 25 fps, 121 frames" in spec and page.input_value("#b-depth") == "8" and not page.is_hidden("#fluid"),
@@ -627,7 +631,7 @@ def one_edit_flow(browser, port):
 
 def fluid_flow(browser, port):
     """A blank plate: keyframes on the LTX grid, copied, pasted, dragged, deleted and undone; then its shot, the first edit."""
-    page = load(browser, port)
+    page = load(browser, port, autoplay=True)  # its lines say a result plays as it is made
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
@@ -943,7 +947,7 @@ def hdr_flow(browser, port):
     check(page.is_disabled("#finish-hdr") and page.text_content("#finish-hdr-why") == "Off in this page's address (hdr=0)." and page.evaluate("document.querySelector('#b-depth').closest('label').style.display") == "none",
           "?hdr=0 turns SDR to HDR off: the Finish menu greys its switch and says why, and a blank plate offers no 16-bit")
     page.keyboard.press("Escape")
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     page.evaluate(WATCH)
     errors = []
@@ -1009,7 +1013,7 @@ def hdr_flow(browser, port):
 def fluid16_flow(browser, port):
     """A blank plate asked in 16-bit: Finish > SDR to HDR is on, as on any SDR plate. The fluid shot plays while SDR to HDR
     runs on it, the switch turns off and back on afterwards, and Export writes the HDR frames beside the shot."""
-    page = load(browser, port)
+    page = load(browser, port, autoplay=True)  # its lines say a result plays as it is made
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.click("#open-btn"); page.click("#open [data-tab=blank]")
@@ -1156,7 +1160,7 @@ def phone_flow(browser, port):
     open_plate(first)
     for name, size in (("upright", {"width": 390, "height": 844}), ("sideways", {"width": 844, "height": 390})):
         page = browser.new_page(viewport=size, is_mobile=True, has_touch=True, device_scale_factor=3)
-        page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+        page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0")
         page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=20000)
         page.click("#open-btn"); page.fill("#path", "plates/desk.mp4"); page.click("#open-go")
         page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)

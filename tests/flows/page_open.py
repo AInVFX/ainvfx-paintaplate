@@ -60,7 +60,7 @@ def run(browser, port, U):
     U.check(U.poll(page, lambda: opened() > before and not page.evaluate(SHOWN), 60), "a plate of that list opens by its full path")
     page.close()
     page = browser.new_page(viewport={"width": 1400, "height": 900})
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&remote=1")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0&remote=1")
     page.wait_for_function(READY, timeout=60000)
     page.click("#open-btn"); page.click("#open [data-tab=files]")
     U.check(page.is_hidden("#path-row") and page.is_visible("#path-remote") and "Upload tab" in page.text_content("#path-remote"),
