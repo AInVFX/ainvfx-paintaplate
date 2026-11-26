@@ -1,6 +1,6 @@
-"""The Finish menu on a 16-bit blank plate, as a person uses it: open with the keyframes on show, SDR to HDR turns off before
+"""The Finish menu on a 16-bit blank plate, as a person uses it: open with the keyframes displayed, SDR to HDR turns off before
 Generate and on afterwards. The fluid shot alone has no « First frame » row; the render made when the switch turns on takes
-the fluid shot's preview and full size from the first render, and lists both. A step on display that the render on show no
+the fluid shot's preview and full size from the first render, and lists both. A displayed step that the displayed render no
 longer has gives way to the latest result. A Paint over the fluid shot has its first frame, and with SDR to HDR on, its
 composite goes through SDR to HDR whole, after « Composite, full size »."""
 import re
@@ -38,7 +38,7 @@ def run(browser, port, U):
     U.check(rows[:3] == ["Fluid shot, preview", "Fluid shot, full size", "SDR to HDR"] and not any(re.match(r"Render v[2-9]", t) for t in new),
             f"SDR to HDR on afterwards: the same render runs it, as its last step, after its fluid steps: {rows}")
     page.click("#stages li.pick:has-text('SDR to HDR')")
-    U.check(U.until(page, "document.querySelector('#stages li.shown')?.textContent.includes('SDR to HDR') === true", 5000), "SDR to HDR's step on display")
+    U.check(U.until(page, "document.querySelector('#stages li.shown')?.textContent.includes('SDR to HDR') === true", 5000), "SDR to HDR's step displayed")
     page.click("#finish-btn"); page.click("#finish-hdr"); page.keyboard.press("Escape")
     U.check(U.until(page, "!document.querySelector('#stages li.shown')?.textContent.includes('SDR to HDR')", 5000),
             f"SDR to HDR off: its step gives way to the latest result: {page.evaluate(ROWS)}")

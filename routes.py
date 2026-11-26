@@ -931,7 +931,7 @@ def deep_frames(rel: str, first: int, count: int, side: int) -> tuple[bytes, int
 
     The viewer's colour tools read these, as OpenRV's cache keeps an EXR's half floats: values above 1.0 and below 0
     stay as stored, and nothing passes through an 8-bit video. A video plate's frames are its source file's, decoded at
-    full precision, for the frame on show while paused. A missing frame holds the one before (plateio), and a frame past
+    full precision, for the frame displayed while paused. A missing frame holds the one before (plateio), and a frame past
     the end holds the last, as Load Plate pads a shot.
     """
     full = folders.plate_path(rel)  # a plate, or a render's review frames
@@ -949,7 +949,7 @@ def deep_frames(rel: str, first: int, count: int, side: int) -> tuple[bytes, int
     return data.tobytes(), data.shape[2], data.shape[1]
 
 
-@functools.lru_cache(maxsize=2)  # the inspector reads many pixels of the frame on show
+@functools.lru_cache(maxsize=2)  # the inspector reads many pixels of the frame displayed
 def _frame_cached(full: str, index: int, mtime: float) -> np.ndarray:
     return frame_rgb(full, index)
 

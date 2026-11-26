@@ -549,7 +549,7 @@ def remote(a):
                     texts = page.eval_on_selector_all("#log li", "els => els.map(e => e.textContent)")
                     by_itself = any("Viewer: full-size shot until the full-size composite is ready." in t for t in texts)
                     mark(f"viewer: the full-size shot {'displayed' if by_itself else 'NOT displayed'} by itself before the composite; "
-                         f"on show at the end: {', '.join(page.eval_on_selector_all('#stages li.shown .name', 'els => els.map(e => e.textContent)')) or 'no row'}")
+                         f"displayed at the end: {', '.join(page.eval_on_selector_all('#stages li.shown .name', 'els => els.map(e => e.textContent)')) or 'no row'}")
                 page.keyboard.press("F6"); page.keyboard.press("End"); time.sleep(1); page.screenshot(path=f"{shots}/3_wipe.png")
                 page.keyboard.press("F6"); page.keyboard.press("Home"); page.keyboard.press("Space"); time.sleep(2)
                 page.keyboard.press("Space"); page.screenshot(path=f"{shots}/4_played.png")

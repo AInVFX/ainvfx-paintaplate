@@ -53,7 +53,7 @@ def run(browser, port, U):
     page.evaluate(MOVES)
     space(page)
     page.wait_for_function(f"{VIEW}.play === 'memory'", timeout=15000)
-    moved = U.until(page, "window.__moves >= 4", 60000)  # four new frames on show: the statistics of check 3 then count three frames or more
+    moved = U.until(page, "window.__moves >= 4", 60000)  # four new frames displayed: the statistics of check 3 then count three frames or more
     U.check(moved and page.evaluate(PAUSED),
             f"with every frame in memory the plate plays from memory: the videos stay paused and the playhead moves on the clock ({page.evaluate('window.__moves')} new frames)")
 
@@ -99,7 +99,7 @@ def run(browser, port, U):
     U.check(plan_line(small).count(" frames at ") == 1, f"a plate that opens logs its cache's plan, the same plate again too: {plan_line(small)[:70]}")
     small.close()
 
-    # 6. A shot on show: once its frames are in memory it plays from memory too
+    # 6. A shot displayed: once its frames are in memory it plays from memory too
     page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.30, 0.60), (0.40, 0.60)]); page.keyboard.press("Enter")
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
     space(page)

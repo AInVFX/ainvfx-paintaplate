@@ -10,7 +10,7 @@ import ui_live  # noqa: E402
 
 
 class Page:
-    """What the tool reads of the Export dialog: the boxes on show. Ticking a hidden box fails, as in the browser."""
+    """What the tool reads of the Export dialog: the boxes displayed. Ticking a hidden box fails, as in the browser."""
     def __init__(self, shown):
         self.shown, self.ticked = set(shown), []
 

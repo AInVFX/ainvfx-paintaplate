@@ -1,4 +1,4 @@
-// The X-ray shows the matte the composite of the size on show used (xray.xrayPlan): Fit to Plate's, aligned to the plate,
+// The X-ray shows the matte the composite of the size displayed used (xray.xrayPlan): Fit to Plate's, aligned to the plate,
 // which the comp and review jobs write as a grey movie. The tracking mattes stand in only until a composite exists.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -7,7 +7,7 @@ import { xrayPlan } from "../../web/xray.mjs";
 const r = { erased: { found: { movie_a: "a" } }, full: { found: { movie_a: "a", movie_b: "bf" } }, compMatte: "rm" };
 const pv = { mattes: { found: { movie_a: "a", movie_b: "bp" } }, compMatte: "pm" };
 
-test("a composite's own matte comes before the tracking mattes, at the size on show", () => {
+test("a composite's own matte comes before the tracking mattes, at the size displayed", () => {
   assert.deepEqual(xrayPlan({ tools: ["paint", "erase"], r, pv, full: true }), { from: "full", urls: ["rm"] });
   assert.deepEqual(xrayPlan({ tools: ["paint", "erase"], r, pv, full: false }), { from: "preview", urls: ["pm"] });
 });

@@ -115,22 +115,22 @@ test("the frame cache's line of the log: the budget and where it comes from, the
     "Frame cache, 8 MB (set in the address): 3 of the plate's 49 frames at 960 x 528; 1 of the shot's 1,250 EXR frames at 960 x 528.");
 });
 
-test("frames are kept at the size on show, smaller when the range does not fit, never under 960 px", () => {
+test("frames are kept at the size displayed, smaller when the range does not fit, never under 960 px", () => {
   const size = viewerFrames.cacheSize, uhd = [3840, 2160];
   const a = size({ budget: 512e6, frames: 121, movie: uhd, fit: [1700, 956] }); // a 3840 x 2160 shot of 121 frames in 512 MB
   assert.equal(a.fits, 121);
-  assert.equal(a.shrunk, true, "smaller than on show, so that all 121 frames fit");
+  assert.equal(a.shrunk, true, "smaller than displayed, so that all 121 frames fit");
   assert.ok(a.width >= 960 && a.width <= 1728 && 121 * a.width * a.height * 4 <= 512e6, JSON.stringify(a));
   assert.deepEqual(size({ budget: 4e9, frames: 121, movie: [1920, 1080], fit: [2400, 1350] }), { width: 1920, height: 1080, fits: 121, shrunk: false }); // never larger than the movie
   assert.deepEqual(size({ budget: 64e6, frames: 121, movie: uhd, fit: [1700, 956] }), { width: 960, height: 540, fits: 30, shrunk: true }); // at the floor: a window round the playhead
   assert.deepEqual(size({ budget: 512e6, frames: 121, movie: [640, 360], fit: [1700, 956] }), { width: 640, height: 360, fits: 121, shrunk: false });
 });
 
-test("one budget: the source on show first, both sides of the wipe in equal shares, EXR frames at their own size", () => {
+test("one budget: the source displayed first, both sides of the wipe in equal shares, EXR frames at their own size", () => {
   const plan = viewerFrames.cachePlan, uhd = [3840, 2160], fit = [1700, 956];
   const alone = plan({ budget: 512e6, frames: 121, fit, sources: [{ id: "plate", movie: uhd, show: false }, { id: "shot", movie: uhd, show: true }] });
   assert.equal(alone.shot.fits, 121);
-  assert.equal(alone.plate.fits, 0); // the shot on show took the budget
+  assert.equal(alone.plate.fits, 0); // the shot displayed took the budget
   const wipe = plan({ budget: 512e6, frames: 121, fit, sources: [{ id: "plate", movie: uhd, show: true }, { id: "shot", movie: uhd, show: true }] });
   assert.ok(wipe.plate.fits === 121 && wipe.shot.fits === 121 && wipe.plate.width >= 960 && wipe.shot.width >= 960, JSON.stringify(wipe));
   assert.ok(wipe.plate.budget + wipe.shot.budget <= 512e6);

@@ -1,5 +1,5 @@
 """mathops.seam_field on a fluid shot: smoke on pure black, and a shot whose black is a little green. The colour field at
-the matte's edge keeps the exposure fix and adds no tint (a magenta seam in the smoke before 24 Nov)."""
+the matte's edge keeps the exposure fix and adds no tint, where the ratio of two near-zero values would tint the smoke's edge magenta."""
 import os
 import sys
 import unittest

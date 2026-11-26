@@ -32,9 +32,9 @@ def run(browser, port, U):
     page.keyboard.press("p")
     U.check(on("paint") and not on("light"), "P picks Paint")
 
-    page.keyboard.press("e")
+    U.tap(page, "e")  # a tap of 50 ms by the key's own clock, whatever the page is doing meanwhile
     U.check(rub(), "a tap on E switches the eraser on")
-    page.keyboard.press("e")
+    U.tap(page, "e")
     U.check(not rub(), "a second tap switches it off")
     page.keyboard.down("e")
     U.check(rub(), "E held: the eraser is on while the key is down")
