@@ -1619,7 +1619,7 @@ view.addEventListener("pointerdown", (e) => {
   const jumped = S.frame !== 0; // a stroke on another frame: the viewer goes back to the first frame, where edits are painted
   if (jumped) { seek(0); hud("Edits are painted on the first frame.", 3000); }
   if (rub) return rubOut(e);
-  cancel("prefetch"); // a caption written for fewer strokes is outdated
+  cancelQuietly("prefetch"); // a caption written for fewer strokes is outdated: this stroke's request replaces it, no fact for the log
   clearTimeout(S.prefetchTimer);
   mark(); // one undo step per stroke
   let d = S.draft;
@@ -1667,7 +1667,7 @@ function rubOut(e) { // the eraser works on the strokes in progress, or on the c
   const target = S.selected;
   if (!d && target?.strokes.length) d = busy(target) ? reopen(target) : reopenDone(target);
   if (!d) return hud("Nothing to erase: select an edit in History, or paint first.");
-  cancel("prefetch");
+  cancelQuietly("prefetch"); // the request for the strokes before this erase is outdated: the next one replaces it
   clearTimeout(S.prefetchTimer);
   mark();
   view.setPointerCapture(e.pointerId);
