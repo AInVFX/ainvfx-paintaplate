@@ -85,3 +85,17 @@ test("one rule names the zip, its files and the log: ASCII letters, digits, « .
   assert.equal(zipFileName("", "v1", {}), "no_plate_v1");
   assert.ok(logFileName("Désk shot.01", new Date(2026, 10, 25, 9, 5)).startsWith("D_sk_shot.01_log_20261125_0905"));
 });
+
+test("the export writes the shot, and a Clean's pass under a paint, by Save Plate in the plate's colour space, only when the page asks", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { fillWorkflow, parseWorkflow } = await import("../../web/logic.mjs");
+  const wf = parseWorkflow(JSON.parse(readFileSync(new URL("../../web/workflows/export.json", import.meta.url), "utf8")));
+  const outputs = (prompt) => Object.values(prompt).map((n) => n._meta?.output).filter(Boolean);
+  const none = fillWorkflow(wf, { prefix: "x/export" }).prompt;
+  assert.ok(!outputs(none).includes("shot") && !outputs(none).includes("clean") && !Object.values(none).some((n) => n._meta?.title === "Clean plate pass"));
+  const both = fillWorkflow(wf, { prefix: "x/export", shot_prefix: "x/shot", clean_pass: "output:x/full/clean", clean_prefix: "x/clean" }).prompt;
+  const save = (out) => Object.values(both).find((n) => n._meta?.output === out);
+  const from = (node) => both[node.inputs.images[0]]._meta.title;
+  assert.deepEqual([save("shot").class_type, from(save("shot")), save("shot").inputs.keep_untouched], ["PaintAPlate_SavePlate", "Shot in the plate's colour space", false]);
+  assert.deepEqual([save("clean").class_type, from(save("clean")), save("clean").inputs.keep_untouched], ["PaintAPlate_SavePlate", "Clean plate pass in the plate's colour space", false]);
+});

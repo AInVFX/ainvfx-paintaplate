@@ -137,7 +137,7 @@ OPTIONAL = {"fit_keep": ("paint_matte",), "fit_mask": ("matte_a", "matte_b"), "n
             "follow_element": ("seed",), "follow_base": ("base",), "follow_named": ("name_request",), "follow_removed": ("removed_request",), "review_frames": ("frames_prefix",), "review_view": ("view_prefix",), "hdr_shot": ("hdr",), "plate_level": ("plate_width", "plate_height"),
             "matte_movie": ("video_prefix",), "export_matte_movie": ("matte_video_prefix",), "fluid_control": ("control_prefix",),
             "export_plate": ("prefix",), "export_exr": ("exr_prefix",), "export_layer": ("layer_prefix",),
-            "export_layer_exr": ("layer_exr_prefix",), "upscale_comp": ("comp_prefix",), "upscale_matte": ("matte_prefix",)}
+            "export_layer_exr": ("layer_exr_prefix",), "export_shot": ("shot_prefix",), "export_clean": ("clean_prefix",), "upscale_comp": ("comp_prefix",), "upscale_matte": ("matte_prefix",)}
 
 
 def drop_link(prompt, slots, link, sources, extra=()):
@@ -632,7 +632,7 @@ def composite(g):
     g.link_slot(shot, "mask", "fit_mask")  # no matte: the link goes, as Fit to Plate's does
     # the new pixels are matched to the plate they are composited onto: relit when the light changed
     fit, final = fitted(g, base, shot, union, paint)
-    return load, fit, final
+    return load, fit, final, gen_plate, model  # with the shot in the plate's colour space, and the plate as the models see it
 
 
 def review():
@@ -641,7 +641,7 @@ def review():
     plate's own colour space, which the viewer reads at full precision. It runs right after the full-size passes;
     nothing here is written for compositing software (that is export, when Export is pressed)."""
     g = Graph()
-    load, fit, final = composite(g)
+    load, fit, final, _, _ = composite(g)
     xray_matte(g, fit, load)
     # Each writer takes the composite as it is: it saves the plate's own frames (`frames`, without Load Plate's padding) and
     # converts each frame as it saves it, so no second batch of the shot is held
@@ -667,7 +667,7 @@ def export():
     and, for an edit that keeps the plate's untouched pixels, the layer the composite blends in:
     result = plate x (1 - matte) + layer x matte."""
     g = Graph()
-    load, fit, final = composite(g)
+    load, fit, final, shot_plate, model = composite(g)
     plate_out = g("PaintAPlate_SavePlate", _title="Export", _output="export", images=final, plate=load[2],
                   filename_prefix=Slot("prefix", "paintaplate/plate/export"), keep_untouched=Slot("keep_untouched", True),
                   changed=fit[1])
@@ -695,6 +695,17 @@ def export():
                   images=colour(g, layer, Slot("color_space", "@model"), HDR_SPACE, "The layer in ACES2065-1"),
                   filename_prefix=Slot("layer_exr_prefix", ""))
     g.link_slot(layer_exr, "images", "export_layer_exr")
+    # The shot as the model made it, and a Clean's pass when a paint rides on it: in the plate's colour space, written as every
+    # element is, by Save Plate in the export's format, at their own size, with none of the source's pixels. The page fills
+    # shot_prefix, and clean_pass with clean_prefix, when Export takes them (logic's OPTIONAL: export_shot, export_clean).
+    shot_out = g("PaintAPlate_SavePlate", _title="Shot: the frames the model made", _output="shot", images=shot_plate, plate=load[2],
+                 filename_prefix=Slot("shot_prefix", ""), keep_untouched=False)
+    g.link_slot(shot_out, "images", "export_shot")
+    clean = colour(g, g("PaintAPlate_LoadPlate", _title="Clean plate pass", path=Slot("clean_pass", ""), max_frames=1024, pad_8n1=False),
+                   "@model", Slot("color_space", "@model"), "Clean plate pass in the plate's colour space", peak=model[1])
+    clean_out = g("PaintAPlate_SavePlate", _title="Clean plate pass", _output="clean", images=clean, plate=load[2],
+                  filename_prefix=Slot("clean_prefix", ""), keep_untouched=False)
+    g.link_slot(clean_out, "images", "export_clean")
     matte_frames = g("MaskToImage", mask=fit[1])
     g("PaintAPlate_SaveFrames", _title="Matte: where the plate changed (16-bit PNG)", _output="matte", images=matte_frames, frames=load[4],
       format="png16", filename_prefix=Slot("matte_prefix", "paintaplate/plate/matte/matte"))

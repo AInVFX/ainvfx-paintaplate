@@ -456,6 +456,10 @@ async def execute(pid, prompt):
             mattes.append(m.astype(np.float16) if has_matte else np.zeros((h, w, 1), np.float16))
             frames[i] = None
         layer = [resize(shot[min(i, len(shot) - 1)], w, h) if not i else moved(resize(shot[min(i, len(shot) - 1)], w, h), back=True) for i in range(n)] if {"layer", "layer_exr"} & set(outs) else []
+        for part in ("shot", "clean"):  # the shot as the model made it, and a Clean's pass under a paint, as Save Plate writes them
+            if part in outs:
+                save_mp4(shot, f"{v[part + '_prefix']}/plate", spec["fps"])
+                o[outs[part]] = {"files": [{"filename": "plate_00001_.webm", "subfolder": v[part + "_prefix"], "type": "output"}]}
         del frames, shot
         if "matte_movie" in outs:  # the matte the composite used, as a grey movie: the X-ray reads a composite's small, the Export row shows the export's
             o[outs["matte_movie"]] = {"images": [save_mp4((np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes), v["matte_video_prefix"], spec["fps"], side=320 if "video" in outs else 0)], "animated": [True]}

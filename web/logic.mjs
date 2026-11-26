@@ -11,7 +11,7 @@
 export const OPTIONAL = { fit_keep: ["paint_matte"], fit_mask: ["matte_a", "matte_b"], named: ["words"], relit_frame: ["relight"], follow_element: ["seed"], follow_base: ["base"], follow_named: ["name_request"], follow_removed: ["removed_request"],
   review_frames: ["frames_prefix"], review_view: ["view_prefix"], hdr_shot: ["hdr"], plate_level: ["plate_width", "plate_height"],
   matte_movie: ["video_prefix"], export_matte_movie: ["matte_video_prefix"], fluid_control: ["control_prefix"],
-  export_plate: ["prefix"], export_exr: ["exr_prefix"], export_layer: ["layer_prefix"], export_layer_exr: ["layer_exr_prefix"],
+  export_plate: ["prefix"], export_exr: ["exr_prefix"], export_layer: ["layer_prefix"], export_layer_exr: ["layer_exr_prefix"], export_shot: ["shot_prefix"], export_clean: ["clean_prefix"],
   upscale_comp: ["comp_prefix"], upscale_matte: ["matte_prefix"] };
 
 // The matte's requests to the prompt upsampler: the words SAM 3.1 searches for, from an edit's text prompt.

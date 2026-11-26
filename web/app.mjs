@@ -3270,6 +3270,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     const dir = r.run ?? base, done = await run("export", { path: p.path, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, shot: final, ...hdr,
       ...r.full.values, relight, keep_untouched: !relight, prefix: exr ? "" : `${dir}/export`, exr_prefix: exr ? `${dir}/export/f` : "", matte_prefix: `${dir}/matte/matte`,
       layer_prefix: exr || relight ? "" : `${dir}/layer`, layer_exr_prefix: exr && !relight ? `${dir}/layer/f` : "",
+      shot_prefix: `${dir}/shot`, ...(erase && carry ? { clean_pass: (onePass ? pv : r).clean, clean_prefix: `${dir}/clean` } : {}), // as every element: the plate's rule
       matte_video_prefix: `${dir}/matte_movie/m`, ...plateMovie(p), grow: grow(p.spec.width, erase), feather: feather(p.spec.width) }, { kind: "export", progress }).done;
     const file = outputFile("export", done, exr ? "exr" : "export"); // a job taken from the index keeps its own folder
     return { done, exr, file, run: file ? file.subfolder.replace(/\/export$/, "") : dir, layer: !!outputFile("export", done, exr ? "layer_exr" : "layer"), parts: exportedParts(p, done, exr) };
@@ -3298,6 +3299,7 @@ function exportedParts(p, done, exr) {
   const at = (f) => f && (p.spec.kind === "video" && !exr ? `output:${f.subfolder}/${f.filename}` : `output:${f.subfolder}`);
   const matte = outputFile("export", done, "matte");
   return { path: at(outputFile("export", done, exr ? "exr" : "export")), layerPath: at(outputFile("export", done, exr ? "layer_exr" : "layer")),
+    shotPath: at(outputFile("export", done, "shot")), cleanPath: at(outputFile("export", done, "clean")),
     mattePath: matte ? `output:${matte.subfolder}` : null, space: exr ? HDR_FRAMES : p.cs, float: exr || /^\.exr$/i.test(p.spec.ext ?? "") };
 }
 
@@ -3450,7 +3452,7 @@ const exportStem = () => (S.exportStem && S.exportStem.plate === S.plate?.path ?
 // render exists, its plan (exportPlan) says what it will make; the files come from the render itself, at download time.
 function exportCells(r) {
   if (!r) return [];
-  const p = S.plate, pv = () => previewOf(r) ?? {}, full = () => (p.shot.join("x") === p.work.join("x") ? pv() : r), skip = r.skip ?? new Set(); // full: the full-size passes (plan's onePass)
+  const p = S.plate, pv = () => previewOf(r) ?? {}, skip = r.skip ?? new Set();
   const name = (id) => labelOf(STAGES.find((st) => st.id === id), r), out = (part) => () => r.exported && `output:${setFolder(r.exported.run, { size: upSize() })}/${part}`; // Upscale's set: here every one under upscale/, as 1.11.31 writes it
   const fluid = fluidOnly(), alone = plateAlone(S.heroKey) && !fluid, relit = !!r.hdrAfter && !r.fluid, edits = !fluid && !alone && !relit;
   const relight = (r.active ?? []).some((e) => e.tool === "light"), exr = edits && !r.hdrAfter && exportsExr(r), up = !!upLast(r);
@@ -3464,9 +3466,10 @@ function exportCells(r) {
   if (!skip.has("comp")) { add("matte", "preview", X_LABELS.mattePreview, () => outputPath(pv().compMatte)); add("composite", "preview", name("comp"), () => outputPath(pv().comp)); }
   if (overFluid) add("plate", "full", name("fluidfull"), () => r.fluid?.path);
   else add("plate", "full", X_LABELS.source, p.path, true); // the plate's own files, where they are
-  if (edits || relit) {
-    if (!skip.has("full")) add("shot", "full", name("full"), () => full().shot);
-    if (!skip.has("cleanfull")) add("shot", "full", name("cleanfull"), () => full().clean);
+  if (edits) { // as the export step writes them, by the plate's rule: a Clean alone's pass is the shot it loads
+    const carry = !skip.has("full") || !skip.has("shot"), erase = !skip.has("cleanfull") || !skip.has("clean");
+    if (carry) add("shot", "full", name("full"), () => r.exported?.shotPath);
+    if (erase) add("shot", "full", name("cleanfull"), () => (carry ? r.exported?.cleanPath : r.exported?.shotPath));
   }
   if (edits) {
     add("composite", exr ? "hdr" : "full", exr ? X_LABELS.compHdr : name("review"), () => r.exported?.path);
