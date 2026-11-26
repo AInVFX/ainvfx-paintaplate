@@ -1325,11 +1325,11 @@ function awaiting() {
   if (changing() >= 0 || !(S.queued || S.running || S.halted || S.edits.some(pendingPass))) return [];
   return awaitingPass(S.edits.map((e) => ({ ...record(e), basis: e.basis, on: e.on, made: !!e.patch, pending: pendingPass(e) }))).map((i) => S.edits[i]);
 }
-function firstFrame() {
-  const at = changing(), wait = awaiting();
+function firstFrame() { // the first frame of the edits displayed; for an edit changed, or selected with its pencil, the picture it paints on: the edits below it
+  const changed = changing(), at = changed >= 0 ? changed : S.selected && !S.draft ? S.edits.indexOf(S.selected) : -1, wait = awaiting();
   if (at < 0 && !wait.length) return S.hero;
   const key = `${S.plate.id}|${S.draft?.id ?? ""}|${at}|${S.heroKey}|${wait.map((e) => e.id)}`;
-  if (under.key !== key) Object.assign(under, { key, canvas: layered(at < 0 ? S.edits.length : at, (e) => !wait.includes(e)) });
+  if (under.key !== key) Object.assign(under, { key, canvas: layered(at < 0 ? S.edits.length : at, (e) => !wait.includes(e) && upToDate(e)) });
   return under.canvas;
 }
 
@@ -1489,7 +1489,7 @@ function overlays(W, H) { // on the first frame: the strokes, then the edit taki
   const shown = S.hover ?? S.selected; // History: which edit is which, and the one selected
   // A selected Light edit shows its result alone: its strokes add light, so drawn over its result they would count it twice.
   // Hovered, its strokes show while the pointer stays, as every edit's do.
-  if (shown && shown !== e && (S.hover || shown.tool !== "light") && shown.strokes.length) strokes(shown, S.hover ? 0.55 : 0.8);
+  if (shown && shown !== e && shown.strokes.length) strokes(shown, S.hover ? 0.55 : 1); // hovered, over the picture; selected, at full strength over the picture it paints on, a Light's too: its result is left out
   if (e && e.launched && !e.preview) { // the strokes stay until the first preview replaces them, then fade into it
     const t = e.shown ? (performance.now() - e.shown) / 350 : 0;
     if (t < 1) { strokes(e, 1 - t); if (e.shown) requestAnimationFrame(render); }
@@ -1880,16 +1880,16 @@ const plateUnder = (r) => (r?.fluid ? { ...S.plate, path: r.fluid.path, cs: mode
 // The edits are painted on the picture under them: over a fluid shot whose first frame is not made yet, an edit waits for it (fluidFirst)
 const pictureReady = (e) => { const i = S.edits.indexOf(e); return !(i < 0 ? S.edits : S.edits.slice(0, i)).some((b) => b.tool === "fluid" && b.on && b.state === "done" && !b.patch); };
 
-function enterFluid() { // a blank plate opens as a fluid shot: the paint tool in a fluid colour, the keyframes, the panel
+function enterFluid(view = "result") { // a blank plate opens as a fluid shot: the paint tool in a fluid colour, the keyframes, the panel. `view`: « keys » when its pencil selects it, so its keyframes show on the black plate
   const f = fluidEdit();
   setTool("paint");
   if (dark(S.colors.paint)) S.colors.paint = "#c8c8c8"; // black paint on a black plate shows nothing
   colorUI();
   $("#prompt").value = f.prompt ?? "";
   const made = fluidMade(f);
-  if (made?.movie) { f.view = "result"; setShot(made.movie, "fluid"); }
-  fluidUI(); timelineUI(); render();
-  status("Blank plate: paint your fluid on a keyframe, describe it in the text prompt, then Generate.", "hint");
+  if (made?.movie) { f.view = view; setShot(made.movie, "fluid"); }
+  fluidUI(); timelineUI(); editingUI(); render();
+  status(made ? "Fluid shot selected: change its keyframes or its text prompt, then press Enter." : "Blank plate: paint your fluid on a keyframe, describe it in the text prompt, then press Enter.", "hint");
 }
 
 function paintKey(e, rub) { // strokes go to the keyframe on the playhead's slot of the 8-frame grid
@@ -2040,8 +2040,8 @@ function editFluid() { // the fluid's keyframes and words again; the edits on it
   if (S.draft) launch(S.draft);
   Object.assign(S, { selected: null, peek: null, pass: null });
   f.editing = true;
-  pause(); seek(0);
-  enterFluid(); historyUI();
+  pause(); seek(nearestKey(f.keys.map((k) => k.frame), S.frame) ?? 0); // its keyframe nearest the frame displayed
+  enterFluid("keys"); historyUI();
 }
 
 function leaveKeys() { // the keyframes close: the viewer shows the plate the fluid shot made, with the edits on it
@@ -2196,7 +2196,7 @@ function select(edit) { // a History row becomes the current edit: its words in 
   S.peek = edit; // frame 0 shows its strokes until playback starts or an edit is launched
   if (edit) { setTool(edit.tool); $("#prompt").value = edit.prompt; if (edit.tool === "erase") $("#whole").checked = !!edit.whole; }
   else if (!S.draft) $("#prompt").value = "";
-  if (edit) hud(`Edit ${num(edit)} selected: change its text prompt, paint more or erase strokes, then Generate. N starts a new edit.`, 3500);
+  if (edit) hud(`Edit ${num(edit)} selected: change its text prompt or its strokes, then press Enter. Press N to start a new edit.`, 3500);
   historyUI(); render();
 }
 
@@ -2209,7 +2209,7 @@ function show(edit) { // a click on a History row: its strokes show on their fra
 }
 
 function editingUI() { // the Editing tag and the New edit button: which edit new strokes and words change
-  const e = S.selected ?? (S.edits.includes(S.draft) ? S.draft : null), tag = $("#editing");
+  const e = S.selected ?? (S.edits.includes(S.draft) ? S.draft : null) ?? (keying() ? fluidEdit() : null), tag = $("#editing");
   tag.hidden = !e;
   if (e) tag.textContent = `Editing ${num(e)} · ${NAME[e.tool]}`;
   $("#new-edit").disabled = !S.plate || keying() || (!S.draft && !S.selected);
@@ -2736,7 +2736,7 @@ function historyUI() {
     if (asked) li.dataset.asked = "1";
     if (left) li.dataset.left = "1";
     li.innerHTML = `<img class="thumb" alt=""><div class="what"><span class="title"></span><small></small></div>
-      <div class="acts"><button class="edit" title="${e.tool === "fluid" ? "Change the fluid shot's keyframes and text prompt." : "Change this edit's strokes and text prompt."}">${ICON.edit}</button><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
+      <div class="acts"><button class="edit" title="${e.tool === "fluid" ? "Edit the keyframes and the text prompt." : "Edit the strokes and the text prompt."}">${ICON.edit}</button><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
       <button class="again" title="Try another seed">${ICON.again}</button><button class="del" title="Remove this edit">${ICON.del}</button></div>`;
     const img = li.querySelector(".thumb");
     const thumb = e.tool === "fluid" && e.keys.length ? snap([...e.keys].sort((x, y) => x.frame - y.frame)[0].canvas, [120, 80], "#000").toDataURL("image/jpeg", 0.8) : e.thumb;
@@ -4814,7 +4814,7 @@ $("#prompt").oninput = () => { // the words belong to the edit being drawn, or t
   if (!S.draft && cur) { mark(); if (busy(cur)) reopen(cur); else reopenDone(cur); }
   if (S.draft) prepareSoon(true); else generateUI();
 };
-$("#editing").onclick = () => select(null);
+$("#editing").onclick = () => (keying() ? leaveKeys() : select(null)); // the chip deselects the edit, or the fluid shot's keyframes
 $("#new-edit").onclick = () => nextEdit();
 
 for (const id of ["#b-width", "#b-height", "#b-fps", "#b-frames"]) Object.assign($(id), { oninput: () => blankNote(), onchange: blankFit }); // the note while typing; the value used once the field is left

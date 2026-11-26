@@ -27,5 +27,5 @@ test("no line lists smoke, steam and fire as all a fluid shot makes", () => {
 });
 
 test("on a blank plate, the status line says the fluid is described in the text prompt", () => {
-  assert.ok(app.includes('"Blank plate: paint your fluid on a keyframe, describe it in the text prompt, then Generate."'));
+  assert.ok(app.includes('"Blank plate: paint your fluid on a keyframe, describe it in the text prompt, then press Enter."'));
 });
