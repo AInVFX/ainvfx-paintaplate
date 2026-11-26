@@ -938,7 +938,7 @@ async function upscaleResult(r) {
   }, store);
 }
 // A result made, as the status line says it
-const ready = (label, more = "", next = "Export writes it for compositing software.") => `${label}: ready, in the viewer${more}. ${next}`;
+const ready = (label, more = "", next = "Use Export to write it out for compositing.") => `${label}: ready, in the viewer${more}. ${next}`;
 // The confirmation's detail line when Upscale turns on
 const upscaleWhen = () => `Each render ends with Upscale at ${upscaleFigures().target.join(" x ")}: about ${span(upscaleGuess())} on this GPU.`;
 function upscaleSizeUI(opt, show) { // Finish > Upscale's size: the plate's sizes, then Custom…, with the size asked for chosen; shown while the row is on
@@ -2964,6 +2964,9 @@ const STAGES = [
   { id: "upcomp", label: "Composite, upscaled", ref: 0, final: true, up: true }, // Finish > Upscale (upscaleSteps, upscaleResult), on SDR to HDR's set when it is on
   { id: "export", label: "Export", ref: 10, final: true, onDemand: true },
 ];
+// The steps a render runs, in their order: those its plan keeps (`skip`), and Export only while Export asks for it. The time
+// left, the Render panel's status line, the line under the timeline, a stop and the log's « Steps: » read them.
+const stepsOf = (skip, exporting = false) => STAGES.filter((st) => !skip?.has(st.id) && (!st.onDemand || exporting));
 const REF = Object.fromEntries(STAGES.map((x) => [x.id, x.ref])); // each step's reference in seconds, by id (logic.stepGuess)
 const previewOf = (r) => r?.previews?.[S.plate.shot.join("x")]; // what this preview size made for a set of edits
 const upSize = () => upscaleTarget(S.plate.spec.width ?? S.plate.work[0], S.plate.spec.height ?? S.plate.work[1], S.deliver.upscale || S.upscaleAsk).join("x");
@@ -3030,13 +3033,13 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null, sized: UP_IDS.has(id) ? upKey(r) : null, page3Before: before }; // first, last: [seconds since t0, progress] at the sampler's first and latest step; sized: the size one of Upscale's steps works at; page3Before: the family loaded as it started
   stagesUI();
   log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: about ${span(guess)}.`);
-  const stage = S.stage;
-  await work((f) => {
+  const stage = S.stage, progress = (f) => {
     if (S.stage !== stage) return;
     if (f > (stage.last?.[1] ?? 0)) { stage.last = [(performance.now() - t0) / 1000, f]; stage.first ??= stage.last; }
     stage.progress = f;
     stagesUI();
-  });
+  };
+  await work(progress);
   dropLive();
   const dt = (performance.now() - t0) / 1000, t = timeStep(id);
   if (jobsNotRun() === notRun && !UP_IDS.has(id)) { // a step whose jobs were answered without running (the job index, ComfyUI's cache) keeps no time; Upscale's depends on the plate's windows the index holds (upscaleGuess)
@@ -3067,7 +3070,7 @@ async function plateHdr(r) { // the plate alone: SDR to HDR on the plate, Upscal
   if (!r.told) {
     r.told = true;
     const passes = [!r.skip.has("hdr") && "SDR to HDR", upLast(r) && "Upscale"].filter(Boolean);
-    log(`Render v${r.v}: no edit, the plate through ${passes.join(" and ")}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
+    log(`Render v${r.v}: no edit, the plate through ${passes.join(" and ")}.\n  Steps: ${stepsOf(r.skip).map((st) => labelOf(st, r)).join("; ")}.`);
   }
   await step(r, "hdr", async (progress) => {
     const out = await run("hdr", { ...S.memoryProfile.slots, path: p.path, color_space: p.cs, config: S.ocio.config, max_frames: p.frames,
@@ -3101,7 +3104,7 @@ async function fluidSteps(r, fl) {
   const p = S.plate, blank = p.path.split(/[\\/]/).pop(), alone = !r.active.some((e) => e.tool !== "fluid");
   if (!r.told && alone) {
     r.told = true;
-    log(`Render v${r.v}: 1 edit (Fluid 1), seed ${fl.seed}, ${S.previewCap ? `shot preview at ${fluidSize(p.shot).join(" x ")}` : "shot preview off"}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
+    log(`Render v${r.v}: 1 edit (Fluid 1), seed ${fl.seed}, ${S.previewCap ? `shot preview at ${fluidSize(p.shot).join(" x ")}` : "shot preview off"}.\n  Steps: ${stepsOf(r.skip).map((st) => labelOf(st, r)).join("; ")}.`);
   }
   const make = (dir, size) => async (progress) => {
     const keys = [];
@@ -3190,7 +3193,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const scene = erase ? erasePrompt(erases.map((e) => e.caption)) : ""; // the scene as it stays, never the erased object
   if (!r.told) {
     r.told = true;
-    log(`Render v${r.v}: ${r.active.length} edit${r.active.length === 1 ? "" : "s"} (${r.active.map((e) => (e.tool === "fluid" ? "Fluid 1" : `${NAME[e.tool]} ${num(e.src)}`)).join(", ")}), seed ${common.seed}, ${S.previewCap ? `shot preview at ${sw} x ${sh}` : "shot preview off"}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
+    log(`Render v${r.v}: ${r.active.length} edit${r.active.length === 1 ? "" : "s"} (${r.active.map((e) => (e.tool === "fluid" ? "Fluid 1" : `${NAME[e.tool]} ${num(e.src)}`)).join(", ")}), seed ${common.seed}, ${S.previewCap ? `shot preview at ${sw} x ${sh}` : "shot preview off"}.\n  Steps: ${stepsOf(r.skip).map((st) => labelOf(st, r)).join("; ")}.`);
     if (carry) log(`Render v${r.v}: LTX prompt: ${prompt}`);
     if (erase) log(`Render v${r.v}: Clean plate pass prompt: ${scene || "none."}`);
   }
@@ -3716,9 +3719,9 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
   const skip = r?.skip ?? plan({ key: S.heroKey }, active).skip;
   const before = familiesBefore(r, skip);
   let t = 0;
-  for (const st of STAGES) {
+  for (const st of stepsOf(skip, exporting)) {
     if (st.final && !finalToo) break;
-    if (skip.has(st.id) || doneOf(r, st) !== undefined || (st.onDemand && !exporting)) continue;
+    if (doneOf(r, st) !== undefined) continue;
     t += stepSecs(st, skip, before[st.id]);
   }
   return t;
@@ -3816,7 +3819,7 @@ function stagesUI() {
   if (rows[0] === first && fluidRows) rows.splice(fluidRows, 0, rows.shift()); // an edit's first frame is made on the fluid shot's: it follows its steps
   keepRows(list, rows);
   // the status line: the class of steps at work, the preview, the full size or Finish, and the time until it is done (logic.renderStatus)
-  const due = STAGES.filter((st) => !skip.has(st.id) && (!st.onDemand || S.wantDownload)), cls = stepClasses(due);
+  const due = stepsOf(skip, !!S.wantDownload), cls = stepClasses(due);
   $("#render-left").textContent = renderStatus(due.map((st) => ({ cls: cls[st.id], done: doneOf(r, st) !== undefined, left: stepSecs(st, skip, before[st.id]) })),
     { exporting: !!S.wantDownload, exported: !!r?.exported, busy: S.stage?.key === S.heroKey });
   timelineBar();
@@ -3826,7 +3829,7 @@ function timelineBar() { // the line under the timeline: the preview in gold, th
   const bar = $("#tl-render"), r = S.renders.get(S.heroKey);
   bar.className = "tl-render";
   if (!S.plate || !S.heroKey || !r) { bar.style.width = "0"; if (S.heroKey && stale()) bar.classList.add("stale"); return; }
-  const steps = STAGES.filter((st) => !r.skip?.has(st.id) && (!st.onDemand || S.wantDownload || r.exported));
+  const steps = stepsOf(r.skip, !!S.wantDownload || !!r.exported);
   const before = familiesBefore(r, r.skip);
   const total = steps.reduce((a, st) => a + estimate(st.id, r.skip, before[st.id]), 0);
   let done = steps.reduce((a, st) => a + (doneOf(r, st) !== undefined ? estimate(st.id, r.skip, before[st.id]) : 0), 0);
@@ -3880,7 +3883,7 @@ function previewFirst(size) {
   const st = S.stage, r = S.piping;
   if (!st || !r || r.key !== S.heroKey) return;
   plan(r, r.active);
-  const def = STAGES.find((x) => x.id === st.id), due = STAGES.filter((x) => !r.skip.has(x.id) && !x.onDemand);
+  const def = STAGES.find((x) => x.id === st.id), due = stepsOf(r.skip);
   const ahead = STAGES.some((x) => x.preview && !r.skip.has(x.id) && previewOf(r)?.done?.[x.id] === undefined); // a preview to make at the new size
   if (!ahead || !stopsForPreview(def, stepClasses(due, !!r.hdrAfter || plateAlone(r.key))[def.id])) return;
   log(`Render v${r.v}: ${labelOf(def, r)}: stopped at ${Math.round(st.progress * 100)}% for the ${size}-size preview.${def.preview ? "" : " It runs again after the preview."}`);
