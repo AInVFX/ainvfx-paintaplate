@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, autoChose, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, deepLine, deepMovie, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, fileStem, FINISH, finishFolder, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName, zipName } from "./logic.mjs";
+import { askedText, asksName, autoChose, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, deepLine, deepMovie, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, fileStem, FINISH, finishFolder, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName, zipName, autoplays, nearestKey, resultLine, stopsForPreview, strokesLabel } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, exportDone, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_ALONE, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -45,6 +45,7 @@ const HDR_FRAMES = "ACES2065-1"; // the colour space of the SDR-to-HDR frames (H
 const BLANK_AT_START = Q.get("blank") !== "0"; // with no plate open, a blank plate opens at start, ready for a fluid shot; ?blank=0 starts empty
 const SEED_ASKED = askedSeed(Q.get("seed")); // ?seed=<whole number>, for the tests: the first new edit and every new fluid shot start from it, each next edit from the next number (logic.editSeed), so a run makes the same pictures again. Without it the page draws each seed
 let editsSeeded = 0; // the new edits that took a seed from ?seed= so far
+const AUTOPLAY_ON = Q.get("autoplay") !== "0"; // ?autoplay=0, for the tests: a step's result waits, paused, as it is made, so a headless browser spends no time playing while the mock renders
 const INDEX_ON = Q.get("index") !== "0"; // ?index=0, for the tests: no job is taken from the job index and none is written to it, so every job runs and is timed
 // The memory profile (logic.memoryProfile): the GPU decides, unless ?memory=small, medium or large in the address, or the
 // name kept under paintaplate.memory, asks for one
@@ -79,6 +80,7 @@ const LIGHT = { flow: 0.3, shade: 0.35, spread: 1.6, spacing: 0.25 };
 const WORKFLOWS = ["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "warm", "fluid", "hdr", "hdr_comp", "upscale", "upscale_export"];
 const BACKGROUND = ["clean", "shot", "matte", "comp", "hdr", "review", "export"]; // the render's job kinds: Generate and a new plate stop them
 const STOPPED = ["edit", "fluid", "snap", "prefetch", ...BACKGROUND]; // the job kinds a stop ends: none of them is posted until Enter (design rule 13)
+const RENDER_KINDS = [...BACKGROUND, "fluid"]; // a render step's job kinds, the fluid shot's included: a step stopped for the preview at a new size posts none
 const UPSAMPLER = {}; // Black Forest Labs' system prompts for the prompt writer (upsampler.json)
 const SCENE = { format: "paintaplate-scene", version: 7 }; // 3: the OCIO config, the plate's colour space by its OCIO name, the display and view; 4: the SDR-to-HDR switch, the blank plate's bit depth; 5: the switch as set, null for the plate's default; 6: the Finish menu's passes (key « deliver »), the switch gone
 const OCIO_PREF = "paintaplate.ocio"; // the config, display, view and look, kept for the next session as RV keeps them
@@ -434,7 +436,7 @@ const ramRoom = async (name) => { // ComfyUI's free RAM and what this job's fram
 };
 onFree(async (last, name) => // why ComfyUI's memory is freed before this job, or null, or { why, keep } (logic.freeAsk): speed first where there is room
   freeAsk(S.memoryProfile, last, name, S.plate && freeNeedsRoom(S.memoryProfile, last, name) ? await ramRoom(name) : null, !!S.plate));
-onStop((kind) => S.halted && STOPPED.includes(kind)); // a stop stops everything: a render step that was uploading its images when the stop came posts no job after it
+onStop((kind) => (S.halted && STOPPED.includes(kind)) || (!!S.stage?.stopped && RENDER_KINDS.includes(kind))); // a stop stops everything, and a step stopped for the preview stops: a render step that was uploading its images when the stop came posts no job after it
 
 async function warmAll() { // every model loads while the person looks at the page: the first edit and the first shot start at once
   const t0 = performance.now(), start = $("#status").textContent; // what the page said at start: the warm-up's line replaces only that
@@ -918,8 +920,7 @@ const runsFirst = (label) => `Export: ${label} runs first. The zip downloads whe
 function upscaledShown(r, key) {
   const st = upLast(r), m = upOf(r)?.[st?.id];
   if (key !== S.heroKey || !m?.url || S.wantDownload) return; // Export goes on to the zip
-  showMade(m.url, key, m.space);
-  hud(`${labelOf(st, r)}: the viewer plays it.`, 2500);
+  showStep(m.url, key, m.space, null, {}, labelOf(st, r));
   stagesUI();
   status(ready(labelOf(st, r)), "hint");
 }
@@ -998,8 +999,8 @@ addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#finish").hid
 
 function recompose() {
   if (!S.plate) return; // a plate that opens: nothing to compose yet
-  S.hero = layered();
-  const shown = S.edits.filter((e) => e.on && (e.patch || (e.tool === "fluid" && e.state === "done")) && e.state !== "generating"); // a fluid shot from its Generate on, as its steps make it
+  S.hero = layered(S.edits.length, upToDate); // the first frame of the edits displayed: a result made on another picture under it is left out
+  const shown = S.edits.filter((e) => e.on && (e.patch || (e.tool === "fluid" && e.state === "done")) && e.state !== "generating" && upToDate(e)); // a fluid shot from its Generate on, as its steps make it
   const dflt = holdsHdr(S.plate?.spec, S.plate?.headroom);
   const keyOf = (auto) => { // a strategy: another render, its shot taken from the render of the same edits
     const edits = shown.map((e) => `${e.id}.${e.version}${auto === e ? "" : matteKey(e)}`).join(",");
@@ -1020,13 +1021,18 @@ function recompose() {
   stagesUI(); exportUI();
 }
 
-function showLatest() { // the latest result of the edits displayed: the full-size composite, else the full-size shot, else the preview
-  const key = S.heroKey, r = S.renders.get(key), pv = previewOf(r), review = r?.play ?? r?.review;
-  const up = r && upscaled(r) ? upOf(r)?.[upLast(r).id] : null; // Finish > Upscale's last step, once made, at the size asked for
-  if (up?.url) return void setShot(up.url, key, up.space);
-  const best = review ?? r?.raw ?? pv?.comp ?? pv?.raw;
-  if (best) setShot(best, key, best === review ? (r.playSpace ?? r.reviewSpace) : "@model", best === review ? r.reviewFrames : null, { framesSpace: best === review ? r.reviewFramesSpace : null });
-  else if (!key) setShot(null, key);
+function latestOf(r) { // a render's latest result: Upscale's last step at the size asked for, else the full-size composite, else the full-size shot, else the preview
+  const up = r && upscaled(r) ? upOf(r)?.[upLast(r).id] : null;
+  if (up?.url) return { url: up.url, space: up.space, frames: null, framesSpace: null };
+  const pv = previewOf(r), review = r?.play ?? r?.review, best = review ?? r?.raw ?? pv?.comp ?? pv?.raw;
+  if (!best) return null;
+  return best === review ? { url: best, space: r.playSpace ?? r.reviewSpace, frames: r.reviewFrames ?? null, framesSpace: r.reviewFramesSpace ?? null }
+    : { url: best, space: "@model", frames: null, framesSpace: null };
+}
+function showLatest() { // the latest result of the edits displayed
+  const key = S.heroKey, l = latestOf(S.renders.get(key));
+  if (l) setShot(l.url, key, l.space, l.frames, { framesSpace: l.framesSpace });
+  else if (!key || stale()) setShot(null, key); // no result yet: no result of other edits stays on screen, the plate and the first frame show until one comes
 }
 
 // Every movie the page plays comes at the plate's native size, up to NATIVE_SIDE on the long side, the size of the viewer's
@@ -1054,23 +1060,28 @@ function choosePass(id) {
   stagesUI();
 }
 
-// ---------- Two passes in the wipe (Ctrl+click on a finished Render step) ----------
+// ---------- Two passes in the wipe (Ctrl+click on a finished Render step or a History row) ----------
 // The wipe's left side shows a second pass of the edits displayed, against the pass displayed on its right, both named, so a
 // fault can be traced to the step it comes from: the shot against its composite, a matte against the picture, a preview
 // against the full size. Ctrl+click (Cmd+click on a Mac) puts a row there; the same again, Esc or F6 ends it. The left
-// side draws as the right does: paused, the frame at native size from the frames route; playing, its movie.
-S.cmp = null; // { id, label, url, space, frames, framesSpace, key, wiped }: the pass on the left, the edits it belongs to, and whether the wipe was on before
+// side draws as the right does: paused, the frame at native size from the frames route; playing, its movie. A History
+// row puts its strokes there instead, over the plate, on the frame that holds them (rowStrokes).
+S.cmp = null; // { id, label, url, space, frames, framesSpace, key, wiped, edit }: the pass on the left, the edits it belongs to, whether the wipe was on before, and a History row's edit for its strokes
 function compareRow(li, id) { // in the Render panel's pick helper: Ctrl+click compares, a plain click shows the pass
   const show = li.onclick;
   li.onclick = (e) => (e.ctrlKey || e.metaKey ? comparePass(id) : show(e));
   li.dataset.compare = id;
-  li.title += " Ctrl+click (Cmd+click on a Mac) puts it on the wipe's left side, against the displayed result.";
+  li.title += " Ctrl+click to add it to the wipe.";
   li.classList.toggle("compared", S.cmp?.id === id);
   if (S.xray) xrayLater(); // the rows changed: a matte the X-ray reads may have come
 }
 const passSpaces = () => ({ log: logSpace(), data: matteSpace(), hdr: HDR_FRAMES });
+const rowOf = (id) => S.edits.find((e) => `strokes:${e.id}` === id) ?? null; // a History row's strokes in the wipe: « strokes:<edit id> »
+const markCompared = () => { for (const li of $$("#history li[data-strokes]")) li.classList.toggle("compared", String(S.cmp?.edit?.id) === li.dataset.strokes); };
 function passLabel(id) {
   if (id === "first") return "Edited first frame";
+  const row = rowOf(id);
+  if (row) return strokesLabel(NAME[row.tool], num(row), row.tool === "fluid");
   return labelOf(STAGES.find((x) => x.id === id)) ?? id;
 }
 function shownLabel() { // the pass displayed, by its row's name: the one clicked, else the latest result
@@ -1082,8 +1093,8 @@ function shownLabel() { // the pass displayed, by its row's name: the one clicke
 function comparePass(id) {
   if (S.cmp?.id === id) return endCompare();
   if (passLabel(id) === shownLabel()) return plateWipe(); // the pass displayed against itself shows nothing: the plate takes the left side
-  const r = S.renders.get(S.heroKey);
-  const m = id === "first" ? { url: null, space: modelSpace(), frames: null } : passMovie(id, r, previewOf(r), passSpaces(), upOf(r));
+  const r = S.renders.get(S.heroKey), row = rowOf(id);
+  const m = row ? { url: null, space: modelSpace(), frames: null, edit: row } : id === "first" ? { url: null, space: modelSpace(), frames: null } : passMovie(id, r, previewOf(r), passSpaces(), upOf(r));
   if (!m) return;
   S.cmp = { ...m, id, key: S.heroKey, label: passLabel(id), wiped: S.cmp ? S.cmp.wiped : S.wipe !== null };
   sharp.cmp = null;
@@ -1091,21 +1102,27 @@ function comparePass(id) {
   else if (cmpVid.getAttribute("src") !== m.url) cmpVid.src = m.url;
   S.wipe ??= 0.5;
   $("#wipe-btn").setAttribute("aria-pressed", "true");
-  placeWipe(); render(); stagesUI();
-  hud(`Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right. Ctrl+click it again, Esc or F6 ends it.`, 3500);
+  placeWipe(); render(); stagesUI(); markCompared();
+  hud(`Wipe: ${S.cmp.label} on the left, ${shownLabel()} on the right. Press Esc or F6 to end it.`, 3500);
   log(`Viewer: wipe, ${S.cmp.label} against ${shownLabel()}.`);
 }
 // With the wipe on, comma steps its left side and period its right side through the passes on offer: on the left the
-// plate, the first frame and the Render panel's finished steps; on the right the latest result and the same steps. A pass
-// already on the other side is passed over: a pass against itself shows nothing.
+// plate, the first frame, the Render panel's finished steps and each History row's strokes; on the right the latest
+// result and the same steps. A pass already on the other side is passed over: a pass against itself shows nothing.
 function stepWipe(side) {
   if (S.wipe === null || !S.plate) return;
   const left = side === "left", rows = [...$$(left ? "#stages li[data-compare]" : "#stages li[data-pass]")].map((li) => (left ? li.dataset.compare : li.dataset.pass));
+  if (left) rows.push(...[...$$("#history li[data-strokes]")].reverse().map((li) => `strokes:${li.dataset.strokes}`)); // History's order: edit 1 first
   const offers = [left ? "plate" : null, ...rows], at = Math.max(0, offers.indexOf(left ? S.cmp?.id ?? "plate" : S.pass));
   for (let i = 1; i < offers.length; i++) {
     const id = offers[(at + i) % offers.length];
     if (left && id === "plate") { endCompare(); break; }
-    if (!left && id === null) { if (S.pass) choosePass(S.pass); break; } // the pinned row clicked again: the latest result
+    if (!left && id === null) { // the latest result, unless it is the picture of the step displayed now: then the next step
+      const r = S.renders.get(S.heroKey);
+      if (S.pass && passMovie(S.pass, r, previewOf(r), passSpaces(), upOf(r))?.url === latestOf(r)?.url) continue;
+      if (S.pass) choosePass(S.pass);
+      break;
+    }
     if (left ? passLabel(id) === shownLabel() : id === S.cmp?.id) continue;
     if (left) comparePass(id); else choosePass(id);
     break;
@@ -1195,6 +1212,7 @@ function endCompare(draw = true) { // the wipe goes back to the plate on its lef
   if (!S.cmp) return;
   const { wiped, label } = S.cmp;
   S.cmp = null; sharp.cmp = null;
+  markCompared();
   cmpVid.removeAttribute("src"); cmpVid.load();
   if (!wiped) { S.wipe = null; $("#wipe-btn").setAttribute("aria-pressed", "false"); }
   placeWipe(); stagesUI();
@@ -1206,6 +1224,7 @@ function endCompare(draw = true) { // the wipe goes back to the plate on its lef
 // wipe, the plate held with O, a stroke, a stop or other edits hide it. It is a looping picture of the whole shot, new at
 // each step, so it shows as an image over the frame: a canvas would draw its first frame alone, the edited first frame.
 S.liveKey = null;
+S.held = null; // the render the person paused by hand (Space, the play button): its later steps wait, paused (logic.autoplays)
 const onShow = () => (keying() ? "fluid" : S.heroKey); // what the viewer shows: a fluid shot's keyframes, or a set of edits
 // A step's name in the Render panel and the log. SDR to HDR's last step is « Plate, HDR » on the plate alone or a fluid shot
 // alone, « Composite, HDR » after a composite; Upscale's steps on SDR to HDR's set say so (« Composite, HDR, upscaled »)
@@ -1248,10 +1267,11 @@ function escape() { // Esc: logic.escapeAction. On the edit being generated it s
   if (what === "cancelOpen") return cancelOpen();
   if (what === "discard") return discard();
   if (what === "reopen") return stopGenerating();
-  if (what === "deselect") { select(null); if (busy) hud("Deselected. Esc again stops generating.", 2500); return; }
+  if (what === "deselect") { const was = S.selected; select(null); wake(); if (busy) hud(`Edit ${num(was)} deselected. Press Esc again to stop generating.`, 2500); return; }
   if (S.cmp) return endCompare(); // a comparison in the wipe ends before the pass displayed
-  if (what === "latest") return choosePass(S.pass); // a pass displayed: back to the latest
+  if (what === "latest") { choosePass(S.pass); return wake(); } // a pass displayed: back to the latest, which plays
   if (what === "stop") stopGenerating();
+  else if (!what) wake(); // nothing selected, pinned or running: the latest result plays
 }
 function stopGenerating() { // Esc on the edit being generated, or Stop: everything that generates stops where it is, and no job is posted until Enter. What finished is kept, the edit being generated keeps its strokes, and an edit that waited for its turn stays queued
   if (!generating()) return;
@@ -1314,11 +1334,11 @@ function awaiting() {
   if (changing() >= 0 || !(S.queued || S.running || S.halted || S.edits.some(pendingPass))) return [];
   return awaitingPass(S.edits.map((e) => ({ ...record(e), basis: e.basis, on: e.on, made: !!e.patch, pending: pendingPass(e) }))).map((i) => S.edits[i]);
 }
-function firstFrame() {
-  const at = changing(), wait = awaiting();
+function firstFrame() { // the first frame of the edits displayed; for an edit changed, or selected with its pencil, the picture it paints on: the edits below it
+  const changed = changing(), at = changed >= 0 ? changed : S.selected && !S.draft ? S.edits.indexOf(S.selected) : -1, wait = awaiting();
   if (at < 0 && !wait.length) return S.hero;
   const key = `${S.plate.id}|${S.draft?.id ?? ""}|${at}|${S.heroKey}|${wait.map((e) => e.id)}`;
-  if (under.key !== key) Object.assign(under, { key, canvas: layered(at < 0 ? S.edits.length : at, (e) => !wait.includes(e)) });
+  if (under.key !== key) Object.assign(under, { key, canvas: layered(at < 0 ? S.edits.length : at, (e) => !wait.includes(e) && upToDate(e)) });
   return under.canvas;
 }
 
@@ -1339,7 +1359,7 @@ function shotFrame() { // the shot at the playhead: a cached frame, the video wh
 function render() {
   if (!S.plate || !S.hero) { xray.el.hidden = true; return; }
   if (keying()) return renderFluid();
-  if (S.cmp && S.cmp.key !== S.heroKey) endCompare(false); // other edits displayed: the pass compared was the old edits'
+  if (S.cmp && (S.cmp.edit ? !S.edits.includes(S.cmp.edit) : S.cmp.key !== S.heroKey)) endCompare(false); // other edits displayed: the pass compared was the old edits'; a row's strokes stay while the row does
   $("#wipe .label.left").textContent = S.cmp?.label ?? "Plate";
   $("#wipe .label.right").textContent = shownLabel();
   wantDeep(); // an image sequence's own values load around the playhead, as OpenRV's cache does
@@ -1377,17 +1397,26 @@ function render() {
       if (still) keepFrame(pic);
       return "shot";
     }
+    const blank = S.edits.find((e) => e.tool === "fluid" && e.on && e.state === "done" && !e.patch); // a fluid shot with no picture yet: its keyframes, on the black plate, until its live preview comes
     if (still && S.frame === 0) { // the first frame with its edits, in the model space; with none, the plate itself
       if (S.heroKey) draw(firstFrame(), model); else drawPlate();
-      inWork(overlays); return "hero";
+      inWork(overlays);
+      if (blank) inWork((w, h) => rowStrokes(blank, 1, w, h));
+      return "hero";
     }
     drawPlate();
+    if (blank) inWork((w, h) => rowStrokes(blank, 1, w, h));
     return "plate";
   };
+  const edited = () => { // the edited side, then the keyframe of the fluid row hovered or clicked, on this frame
+    const side = drawEdited(), fl = still && [S.hover, S.peek].find((x) => x?.tool === "fluid");
+    if (fl) inWork((w, h) => rowStrokes(fl, 0.55, w, h));
+    return side;
+  };
   let compared = "waiting";
-  const drawCompared = () => { // the wipe's left side: the pass Ctrl+clicked in the Render panel, at this frame; the plate until it has one
+  const drawCompared = () => { // the wipe's left side: the pass Ctrl+clicked in the Render panel, at this frame, the plate until it has one; or a History row's strokes over the plate
     const c = S.cmp, at = Math.abs(cmpVid.currentTime - time(S.frame)) < 0.5 / p.fps;
-    if (c.black) { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, view.width, view.height); compared = "drawn"; return; } // a fluid shot's blank plate
+    if (c.edit) { drawPlate(); inWork((w, h) => rowStrokes(c.edit, 1, w, h)); compared = "drawn"; return; }
     const ok = c.id === "first" ? draw(S.hero, model) // the First frame row: the edit as Klein made it
       : (still && draw(sharpFrame("cmp", sourcePath(c, p.path)), c.frames ? c.framesSpace ?? p.cs : c.space)) // paused: native size
         || (cmpVid.readyState >= 2 && !cmpVid.seeking && (S.playing || at) && draw(cmpVid, c.space));
@@ -1399,9 +1428,9 @@ function render() {
   else if (S.wipe !== null) {
     if (S.cmp) drawCompared(); else drawPlate();
     ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip();
-    shown = drawEdited();
+    shown = edited();
     ctx.restore();
-  } else shown = drawEdited();
+  } else shown = edited();
   view.dataset.picture = shown; // what the edited side shows: hero, shot, held or plate (tests/ui_mock.py reads it)
   placeLive();
   view.dataset.precision = exact.length ? "float" : "8-bit"; // an image sequence's own values, or 8-bit frames
@@ -1422,12 +1451,13 @@ function renderFluid() { // a fluid shot: the keyframes on black, the shot LTX p
   const shot = () => ctx.drawImage(look.image(cached || shotVid, S.display, S.shot?.space ?? modelSpace()), 0, 0, W, H); // a decoded frame first: no seek shows
   if (f.version && S.wipe !== null && !S.compare && (cached || shotReady())) { // the wipe: this frame's painted keyframe, or black, against the shot
     const key = keyHere();
-    if (S.cmp) { if (!S.cmp.black && cmpVid.readyState >= 2) ctx.drawImage(look.image(cmpVid, S.display, S.cmp.space), 0, 0, W, H); } // a fluid row's input
+    if (S.cmp?.edit) inWork((w, h) => rowStrokes(S.cmp.edit, 1, w, h)); // a History row's strokes, over the blank plate
+    else if (S.cmp) { if (cmpVid.readyState >= 2) ctx.drawImage(look.image(cmpVid, S.display, S.cmp.space), 0, 0, W, H); } // a Render step
     else if (key) ctx.drawImage(key.canvas, 0, 0, W, H); // no onion skins: the left side shows what this frame was given
     ctx.save(); ctx.beginPath(); ctx.rect(S.wipe * W, 0, W - S.wipe * W, H); ctx.clip(); shot(); ctx.restore();
   } else if (f.version && (S.playing ? made : f.view === "result") && !S.compare && (cached || shotReady())) shot(); // playing a made shot: never the keyframes
   else keysLayer(W, H);
-  $("#wipe .label.left").textContent = S.cmp?.label ?? "Keyframe"; $("#wipe .label.right").textContent = S.cmp ? shownLabel() : "Result";
+  $("#wipe .label.left").textContent = S.cmp?.label ?? strokesLabel(NAME.fluid, num(f), true); $("#wipe .label.right").textContent = shownLabel();
   inWork(drawCursor);
   if (S.inspect.on) refreshInspector();
   if (!xray.el.hidden) drawXray(); // it hides: a fluid shot's keyframes have no matte
@@ -1444,6 +1474,16 @@ function keysLayer(W, H) { // the keyframe on this frame; between keyframes, the
   ctx.globalAlpha = 1;
 }
 
+// A History row's strokes on the frame displayed: a fluid shot's keyframe on its own frame, an edit's strokes on the first
+// frame, where edits are painted. A hovered or clicked fluid row shows its keyframe over the picture; the wipe's left side
+// shows a row's strokes over the plate. A frame that holds none shows nothing more.
+function rowStrokes(e, alpha, W, H) {
+  if (e.tool !== "fluid") { if (S.frame === 0) strokes(e, alpha); return; }
+  const key = e.keys.find((k) => k.frame === S.frame);
+  if (!key) return;
+  ctx.globalAlpha = alpha; ctx.drawImage(key.canvas, 0, 0, W, H); ctx.globalAlpha = 1;
+}
+
 function overlays(W, H) { // on the first frame: the strokes, then the edit taking shape inside them
   const e = S.running;
   if (e?.preview) ctx.drawImage(e.preview, 0, 0, W, H);
@@ -1458,9 +1498,7 @@ function overlays(W, H) { // on the first frame: the strokes, then the edit taki
   const shown = S.hover ?? S.selected; // History: which edit is which, and the one selected
   // A selected Light edit shows its result alone: its strokes add light, so drawn over its result they would count it twice.
   // Hovered, its strokes show while the pointer stays, as every edit's do.
-  if (shown && shown !== e && (S.hover || shown.tool !== "light") && shown.strokes.length) strokes(shown, S.hover ? 0.55 : 0.8);
-  const fl = [S.hover, S.peek].find((x) => x?.tool === "fluid"), key = fl?.keys.find((k) => k.frame === 0); // the fluid row hovered or shown: its first keyframe
-  if (key) { ctx.globalAlpha = 0.55; ctx.drawImage(key.canvas, 0, 0, W, H); ctx.globalAlpha = 1; }
+  if (shown && shown !== e && shown.strokes.length) strokes(shown, S.hover ? 0.55 : 1); // hovered, over the picture; selected, at full strength over the picture it paints on, a Light's too: its result is left out
   if (e && e.launched && !e.preview) { // the strokes stay until the first preview replaces them, then fade into it
     const t = e.shown ? (performance.now() - e.shown) / 350 : 0;
     if (t < 1) { strokes(e, 1 - t); if (e.shown) requestAnimationFrame(render); }
@@ -1595,7 +1633,7 @@ view.addEventListener("pointerdown", (e) => {
   const jumped = S.frame !== 0; // a stroke on another frame: the viewer goes back to the first frame, where edits are painted
   if (jumped) { seek(0); hud("Edits are painted on the first frame.", 3000); }
   if (rub) return rubOut(e);
-  cancel("prefetch"); // a caption written for fewer strokes is outdated
+  cancelQuietly("prefetch"); // a caption written for fewer strokes is outdated: this stroke's request replaces it, no fact for the log
   clearTimeout(S.prefetchTimer);
   mark(); // one undo step per stroke
   let d = S.draft;
@@ -1643,7 +1681,7 @@ function rubOut(e) { // the eraser works on the strokes in progress, or on the c
   const target = S.selected;
   if (!d && target?.strokes.length) d = busy(target) ? reopen(target) : reopenDone(target);
   if (!d) return hud("Nothing to erase: select an edit in History, or paint first.");
-  cancel("prefetch");
+  cancelQuietly("prefetch"); // the request for the strokes before this erase is outdated: the next one replaces it
   clearTimeout(S.prefetchTimer);
   mark();
   view.setPointerCapture(e.pointerId);
@@ -1672,7 +1710,7 @@ function prepareSoon(typing = false) { // the draft waits for Generate; SAM and 
   if (!S.draft) return generateUI();
   takeInputs(S.draft); // the prefetch sees them: SAM finds the whole object first, then the prompt writer writes for its box
   if (typing) S.prefetchTimer = setTimeout(() => prefetch(S.draft), PREFETCH_MS); // not on every keystroke
-  else { prefetch(S.draft); hud("Generate (Enter) makes the edit, then the shot. Esc cancels.", 2500); }
+  else { prefetch(S.draft); hud("Press Enter to make the edit, then the shot. Press Esc to cancel.", 2500); }
   generateUI();
 }
 
@@ -1851,16 +1889,16 @@ const plateUnder = (r) => (r?.fluid ? { ...S.plate, path: r.fluid.path, cs: mode
 // The edits are painted on the picture under them: over a fluid shot whose first frame is not made yet, an edit waits for it (fluidFirst)
 const pictureReady = (e) => { const i = S.edits.indexOf(e); return !(i < 0 ? S.edits : S.edits.slice(0, i)).some((b) => b.tool === "fluid" && b.on && b.state === "done" && !b.patch); };
 
-function enterFluid() { // a blank plate opens as a fluid shot: the paint tool in a fluid colour, the keyframes, the panel
+function enterFluid(view = "result") { // a blank plate opens as a fluid shot: the paint tool in a fluid colour, the keyframes, the panel. `view`: « keys » when its pencil selects it, so its keyframes show on the black plate
   const f = fluidEdit();
   setTool("paint");
   if (dark(S.colors.paint)) S.colors.paint = "#c8c8c8"; // black paint on a black plate shows nothing
   colorUI();
   $("#prompt").value = f.prompt ?? "";
   const made = fluidMade(f);
-  if (made?.movie) { f.view = "result"; setShot(made.movie, "fluid"); }
-  fluidUI(); timelineUI(); render();
-  status("Blank plate: paint your fluid on a keyframe, describe it in the text prompt, then Generate.", "hint");
+  if (made?.movie) { f.view = view; setShot(made.movie, "fluid"); }
+  fluidUI(); timelineUI(); editingUI(); render();
+  status(made ? "Fluid shot selected: change its keyframes or its text prompt, then press Enter." : "Blank plate: paint your fluid on a keyframe, describe it in the text prompt, then press Enter.", "hint");
 }
 
 function paintKey(e, rub) { // strokes go to the keyframe on the playhead's slot of the 8-frame grid
@@ -1963,6 +2001,7 @@ function dragKey(e, key, el) { // a keyframe dragged along the timeline lands on
     el.removeEventListener("pointermove", move);
     S.draggingKey = false;
     if (moved) hud(`Keyframe moved to frame ${S.plate.first + key.frame}.`); else { pause(); seek(key.frame); }
+    if (moved && !keying()) editFluid(); // a moved keyframe changes the fluid shot: it is selected, as its pencil selects it, so Enter makes it again on its seed
     keysUI(true);
   }, { once: true });
 }
@@ -2011,12 +2050,13 @@ function editFluid() { // the fluid's keyframes and words again; the edits on it
   if (S.draft) launch(S.draft);
   Object.assign(S, { selected: null, peek: null, pass: null });
   f.editing = true;
-  pause(); seek(0);
-  enterFluid(); historyUI();
+  pause(); seek(nearestKey(f.keys.map((k) => k.frame), S.frame) ?? 0); // its keyframe nearest the frame displayed
+  enterFluid("keys"); historyUI();
 }
 
 function leaveKeys() { // the keyframes close: the viewer shows the plate the fluid shot made, with the edits on it
   fluidEdit().editing = false;
+  if (!S.draft) $("#prompt").value = ""; // the field holds the selected edit's words: the fluid shot is no longer selected
   S.pass = null;
   S.heroKey = null; recompose(); // the shot of the edits displayed, or none
   fluidUI(); historyUI(); render();
@@ -2084,26 +2124,36 @@ function queue(fn) { // one edit at a time, in order. A stop, and the Enter that
   S.chain = S.chain.then(() => (epoch === S.viewEpoch ? fn() : undefined)).catch(quiet).finally(() => { S.queued--; touch(); });
 }
 
+const UP_TO_DATE = "The result is up to date. Press Ctrl+Enter to try another seed."; // Enter on a selected edit that nothing changed
+function heldFor(edit) { // an edit that stops for the person's words (an object's name, other words) stays selected: they go to it, then Enter
+  if (S.draft) return; // strokes in progress keep the field and their words
+  S.selected = edit;
+  $("#prompt").value = edit.prompt ?? "";
+}
+const PAINT_FIRST = "Paint on the first frame, then press Enter."; // Enter with nothing painted and no edit selected
+
 function launch(edit, another = false) { // Generate: the edit on the first frame, then its shot. A result it already has is used again. `another`: an edit already in History starts again with another seed
   if (S.draft === edit) S.draft = null;
   clearTimeout(S.prefetchTimer);
   if (!edit.strokes.length && !edit.keys?.length) return generateUI();
   takeInputs(edit);
   if (another && S.edits.includes(edit)) edit.seed = (Math.random() * 2 ** 31) | 0;
-  if (edit.tool === "fluid" && edit.state === "done" && edit.made === recordOf(edit)) { leaveKeys(); return hud("The result is up to date. Ctrl+Enter tries another seed.", 3000); } // made, or being made
+  if (edit.tool === "fluid" && edit.state === "done" && edit.made === recordOf(edit)) { leaveKeys(); return hud(UP_TO_DATE, 3000); } // made, or being made
   if (!S.edits.includes(edit)) S.edits.push(edit);
   edit.launched = performance.now();
-  if (edit.tool !== "fluid") S.selected = edit; // it stays the current edit: new words, more strokes or the switch change it, until New edit or another tool
+  S.selected = null; // made: no edit stays selected, so the next strokes and words start a new edit; the pencil selects one again
+  $("#prompt").value = "";
   S.peek = null;
   if (reuse(edit)) {
-    if (edit.tool === "fluid") { log(`Fluid shot v${edit.version}: reused, already made from the same keyframes, text prompt and seed.`); hud("The result is up to date. Ctrl+Enter tries another seed.", 3000); leaveKeys(); }
-    else { log(`Edit ${num(edit)}: unchanged, result reused.`); hud(`Edit ${num(edit)}: unchanged, result reused. Ctrl+Enter tries another seed.`, 3000); }
+    if (edit.tool === "fluid") { log(`Fluid shot v${edit.version}: reused, already made from the same keyframes, text prompt and seed.`); hud(UP_TO_DATE, 3000); leaveKeys(); }
+    else { log(`Edit ${num(edit)}: unchanged, result reused.`); hud(`Edit ${num(edit)}: unchanged, result reused. Press Ctrl+Enter to try another seed.`, 3000); }
     recompose(); historyUI(); render(); timelineUI();
     queueWaiting(() => queue(regenerateDependents));
     return;
   }
   if (edit.refused?.record === recordOf(edit)) { // refused at the check's question and unchanged since: it stays as « No » left it
     Object.assign(edit, { state: "failed", left: true });
+    heldFor(edit);
     recompose(); historyUI(); render(); timelineUI();
     return status(edit.refused.said, "hint");
   }
@@ -2162,21 +2212,20 @@ function select(edit) { // a History row becomes the current edit: its words in 
   S.peek = edit; // frame 0 shows its strokes until playback starts or an edit is launched
   if (edit) { setTool(edit.tool); $("#prompt").value = edit.prompt; if (edit.tool === "erase") $("#whole").checked = !!edit.whole; }
   else if (!S.draft) $("#prompt").value = "";
-  if (edit) hud(`Edit ${num(edit)} selected: change its text prompt, paint more or erase strokes, then Generate. N starts a new edit.`, 3500);
+  if (edit) hud(`Edit ${num(edit)} selected: change its text prompt or its strokes, then press Enter. Press N to start a new edit.`, 3500);
   historyUI(); render();
 }
 
-function show(edit) { // a click on a History row: frame 0 shows that edit's strokes and nothing is selected, so the next strokes start a new edit on top. Its pencil selects it
+function show(edit) { // a click on a History row: its strokes show on their frame and nothing is selected, so the next strokes start a new edit on top. Its pencil selects it
   if (S.selected && !S.draft) $("#prompt").value = "";
   S.selected = null;
-  S.peek = edit; // frame 0 shows its strokes until playback starts or an edit is launched
-  if (edit) hud(edit.tool === "fluid" ? "Fluid shot: first keyframe displayed. A new stroke starts a new edit on top. Use the pencil to change the fluid shot."
-    : `Edit ${num(edit)}: strokes displayed. A new stroke starts a new edit on top. Use the pencil to change edit ${num(edit)}.`, 3500);
+  S.peek = edit; // its strokes show until playback starts or an edit is launched
+  if (edit) hud(`${edit.tool === "fluid" ? `Fluid shot: keyframe ${S.plate.first + S.frame}` : `Edit ${num(edit)}: strokes`} displayed. Paint to start a new edit on top. Use the pencil to edit it.`, 3500);
   historyUI(); render();
 }
 
 function editingUI() { // the Editing tag and the New edit button: which edit new strokes and words change
-  const e = S.selected ?? (S.edits.includes(S.draft) ? S.draft : null), tag = $("#editing");
+  const e = S.selected ?? (S.edits.includes(S.draft) ? S.draft : null) ?? (keying() ? fluidEdit() : null), tag = $("#editing");
   tag.hidden = !e;
   if (e) tag.textContent = `Editing ${num(e)} · ${NAME[e.tool]}`;
   $("#new-edit").disabled = !S.plate || keying() || (!S.draft && !S.selected);
@@ -2261,6 +2310,7 @@ async function generate(edit) {
     if (!alive()) return;
     if (!cap) { // an erase with no words that the prompt writer took for another object (logic.asksName): no Klein pass, its name first
       Object.assign(edit, { patch: null, preview: null, latent: null, state: "failed", left: true, editAsked: writerSaw(edit.caption?.others), force: false }); // History marks its row (data-asked) with what the writer saw
+      heldFor(edit); // its name goes to it
       S.running = null;
       recompose(); historyUI(); render(); timelineUI();
       const fact = `Error: edit ${num(edit)}, the prompt writer took the stroke for another object. The edit stopped.`; // tests/ui_live.py reads « took the stroke for another object »
@@ -2353,6 +2403,7 @@ async function heldBack(edit, check, alive) {
   if (!anyway) {
     const said = `${lines.fact} ${leftHint(edit.prompt)}`;
     Object.assign(edit, { patch: null, refused: { record: recordOf(edit), said } });
+    heldFor(edit); // its new words go to it
     recompose(); historyUI(); render(); timelineUI();
     status(said, "hint");
     return false;
@@ -2497,6 +2548,10 @@ function footprint(edit) { // where the edit changed the frame, on a coarse grid
 
 const record = (e) => ({ id: e.id, version: e.version, tool: e.tool, foot: e.foot });
 const needsRegen = (edit) => edit.base !== S.plate?.path || dependsOnChange(edit, activeBefore(edit).map(record), edit.basis);
+// An edit's result holds while the picture under it is the one it was made on. One that waits for a fluid shot's first
+// frame, or depends on an edit made again under it, stays out of every render until it is made again, as the first frame
+// hides it: a fluid shot made again renders alone first. The render's key, its edits and the Render panel all read this.
+const upToDate = (e) => !e.waits && !needsRegen(e);
 
 // An edit's turn in a pass over History, once the plate under the edits is open. A result that holds for this plate and the
 // edits under it comes back with no pass: its own, or one made before (reuse), with « reused » in the log when it was not
@@ -2656,6 +2711,7 @@ const ICON = {
   del: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
 };
 const STATE = { drawing: "Drawing", queued: "Waiting", generating: "Generating", failed: "Failed: try again" };
+const WAITS_FLUID = "Waits for the fluid shot"; // an edit above a fluid shot whose first frame is not made yet (pictureReady)
 
 function thumbOf(edit) { // the frame after this edit, cropped to where it changed
   const c = layered(S.edits.indexOf(edit) + 1), f = edit.foot;
@@ -2698,13 +2754,13 @@ function historyUI() {
     if (asked) li.dataset.asked = "1";
     if (left) li.dataset.left = "1";
     li.innerHTML = `<img class="thumb" alt=""><div class="what"><span class="title"></span><small></small></div>
-      <div class="acts"><button class="edit" title="${e.tool === "fluid" ? "Change the fluid shot's keyframes and text prompt." : "Change this edit's strokes and text prompt."}">${ICON.edit}</button><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
+      <div class="acts"><button class="edit" title="${e.tool === "fluid" ? "Edit the keyframes and the text prompt." : "Edit the strokes and the text prompt."}">${ICON.edit}</button><button class="eye" aria-pressed="${e.on}" title="${e.on ? "Bypass this edit" : "Turn this edit back on"}">${e.on ? ICON.eye : ICON.off}</button>
       <button class="again" title="Try another seed">${ICON.again}</button><button class="del" title="Remove this edit">${ICON.del}</button></div>`;
     const img = li.querySelector(".thumb");
     const thumb = e.tool === "fluid" && e.keys.length ? snap([...e.keys].sort((x, y) => x.frame - y.frame)[0].canvas, [120, 80], "#000").toDataURL("image/jpeg", 0.8) : e.thumb;
     if (thumb) img.src = thumb; else img.removeAttribute("src");
-    li.title = "Show this edit's strokes on the first frame. Use the pencil to change it.";
-    if (e.tool === "fluid") li.title = "Show the fluid shot's first keyframe. Use the pencil to change it.";
+    li.title = `Click to show the painted ${e.tool === "fluid" ? "keyframes" : "strokes"}. Ctrl+click to add them to the wipe. Use the pencil to edit.`;
+    if (e.strokes.length || e.keys?.length) li.dataset.strokes = e.id; // the wipe's left side can show them (stepWipe)
     li.querySelector(".title").textContent = `${num(e)}. ${NAME[e.tool]}`;
     const what = e.tool === "fluid" ? e.prompt || `${e.keys.length} keyframe${e.keys.length === 1 ? "" : "s"}` : e.tool === "erase" ? (e.whole ? "Whole object" : "Painted area") : e.prompt || (e.tool === "light" ? "From the strokes" : "No text prompt");
     const small = li.querySelector("small");
@@ -2712,8 +2768,9 @@ function historyUI() {
     if (hidden.has(e)) small.textContent = `Hidden until edit ${num(S.draft)} is generated`;
     else if (forEnter || (STATE[e.state] && e.on)) {
       small.innerHTML = '<span class="state"></span>';
-      small.firstChild.textContent = forEnter ? "Waits for Enter" : asked ? askedText(asked) : left ? (e.leftWhy === "beyond" ? "The area around the object changed" : "The object may still be there") : STATE[e.state];
-    } else if (awaits.has(e)) small.textContent = "Waits to be generated again";
+      small.firstChild.textContent = forEnter ? "Waits for Enter" : asked ? askedText(asked) : left ? (e.leftWhy === "beyond" ? "The area around the object changed" : "The object may still be there") : pictureReady(e) || e.state === "drawing" ? STATE[e.state] : WAITS_FLUID;
+    } else if (e.on && !pictureReady(e)) small.textContent = WAITS_FLUID; // made on the fluid shot before it was made again: its turn comes with the new first frame
+    else if (awaits.has(e)) small.textContent = "Waits to be generated again";
     else small.textContent = e.on ? what : `Bypassed: ${what}`;
     small.title = e.caption?.text ? `What Klein received: ${e.caption.text}` : what;
     li.querySelector(".edit").onclick = () => { if (e.tool === "fluid") return editFluid(); if (keying()) leaveKeys(); pause(); seek(0); select(e); };
@@ -2724,10 +2781,17 @@ function historyUI() {
     if (matteChoices(e.tool).length) li.append(matteMenu(e));
     li.onmouseenter = () => { S.hover = e; render(); };
     li.onmouseleave = () => { S.hover = null; render(); };
-    li.onclick = (ev) => { if (!ev.target.closest("button")) { if (keying()) leaveKeys(); pause(); seek(0); show(S.peek === e && !S.selected ? null : e); } };
+    li.onclick = (ev) => {
+      if (ev.target.closest("button")) return;
+      if (ev.ctrlKey || ev.metaKey) return comparePass(`strokes:${e.id}`); // its strokes on the wipe's left side, over the plate
+      const at = e.tool === "fluid" ? nearestKey(e.keys.map((k) => k.frame), S.frame) ?? 0 : 0; // a fluid shot's keyframe nearest the frame displayed; an edit's first frame
+      if (keying()) leaveKeys();
+      pause(); seek(at); show(S.peek === e && !S.selected ? null : e);
+    };
     return li;
   }));
   if (S.hover && !$("#history").matches(":hover")) { S.hover = null; render(); } // a row rebuilt after the pointer left it: its strokes go
+  markCompared();
   undoUI();
   exportUI(); timelineUI();
 }
@@ -2791,7 +2855,7 @@ function freeze(e) { // what a render needs of an edit, as it is now: a later ch
 function want(key, asked = false) { // the set of edits displayed becomes the most recently shown render, made from what it is now
   let r = S.renders.get(key);
   if (!r) {
-    const active = S.edits.filter((e) => e.on && e.state === "done" && (e.patch || e.tool === "fluid"));
+    const active = S.edits.filter((e) => e.on && e.state === "done" && (e.patch || e.tool === "fluid") && upToDate(e));
     if (!active.length && !(plateAlone(key) && asked)) return null; // asked: Generate or Export makes the plate alone's render, minutes of work;
     r = { key, v: ++S.run, previews: {}, active: active.map(freeze), heroFrame: S.hero,
       cleanFrame: active.some((e) => e.tool === "erase") ? layered(S.edits.length, (e) => e.tool === "erase") : null };
@@ -2925,7 +2989,7 @@ function plan(r, all) { // the steps this set of edits needs: the erase pass for
     r.hdrAfter && relight && !fl && "export", // a relit result in HDR: Export zips SDR to HDR's frames (exportAlone)
     ...(active.length ? [] : ["comp", "review", "export"]), // the plate alone: SDR to HDR makes the result; Export zips its frames, and upscales them itself (exportAlone)
     !(keeps || (up && alone)) && "upplate", !keeps && "uplayer", !(up && !alone) && "upcomp",
-    ...(S.previewCap ? [] : STAGES.filter((st) => st.preview).map((st) => st.id))].filter(Boolean)); // no preview pass
+    ...STAGES.filter((st) => st.preview && (!S.previewCap || (r.review && previewOf(r)?.done?.[st.id] === undefined))).map((st) => st.id)].filter(Boolean)); // no preview pass with the Preview menu at Off or Latent, and none at a new size once the render's full size is made
   r.lightOnly = active.length > 0 && active.every((e) => e.tool === "light");
   if (r.compResult) { const res = r.skip.has("hdr") ? r.compResult : r.done?.hdr !== undefined ? r.hdrResult : null; if (res) Object.assign(r, res); } // the result as the switch stands: SDR to HDR's replaces the composite's while it is on
   return r;
@@ -3009,8 +3073,7 @@ async function plateHdr(r) { // the plate alone: SDR to HDR on the plate, Upscal
     r.hdrResult = resultOf(r);
   });
   if (r.done?.hdr !== undefined && key === S.heroKey && !upscaled(r)) { // SDR to HDR's result displayed; Upscale's step follows while it is on
-    showMade(r.review, key, r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace });
-    hud("SDR to HDR: the viewer plays it.", 2500);
+    showStep(r.review, key, r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace }, "SDR to HDR");
     stagesUI(); exportUI();
     const st = upLast(r);
     if (!S.wantDownload) status(st ? ready("SDR to HDR", ", its EXR frames at full precision as they load", `Upscale is next: about ${span(estimate(st.id, r.skip))}.`)
@@ -3040,7 +3103,7 @@ async function fluidSteps(r, fl) {
     const movie = outputFile("fluid", out, "video"), first = outputFile("fluid", out, "first");
     return { path: `${folderOf("fluid", out, "video")}/plate/${blank}`, movie: movie ? viewUrl(movie) : null, first: first ? viewUrl(first) : null };
   };
-  const shown = (made, line) => { if (alone && r.key === S.heroKey && made?.movie) { showMade(made.movie, r.key, "@model"); hud(line, 2500); status(line, "hint"); } }; // as an edit's step says it
+  const shown = (made, label, follows) => { if (alone && r.key === S.heroKey && made?.movie) status(showStep(made.movie, r.key, "@model", null, {}, label, { follows }), "hint"); }; // as an edit's step says it
   if (!r.skip.has("fluid")) {
     const size = fluidSize(p.shot), pv = (r.previews[p.shot.join("x")] ??= {}), made = fluidDonor(r, fl.version), kept = made?.previews?.[p.shot.join("x")]?.fluid;
     if (kept && pv.done?.fluid === undefined) { // the same version's preview, made by another render
@@ -3048,7 +3111,7 @@ async function fluidSteps(r, fl) {
       log(`Render v${r.v}: Fluid shot, preview: reused from render v${made.v}.`);
     }
     await step(r, "fluid", async (progress) => { pv.fluid = await make(`${r.base}/fluid_${size.join("x")}`, size)(progress); }, pv);
-    if (r.done?.fluidfull === undefined && !fluidDonor(r, fl.version)) shown(pv.fluid, "Fluid shot, preview: Space plays it. The full-size fluid shot follows.");
+    if (r.done?.fluidfull === undefined && !fluidDonor(r, fl.version)) shown(pv.fluid, "Fluid shot, preview", "The full-size fluid shot follows.");
   }
   const donor = r.fluid ? null : fluidDonor(r, fl.version);
   if (donor && r.done?.fluidfull === undefined) { // the same version, made by another render
@@ -3058,7 +3121,7 @@ async function fluidSteps(r, fl) {
   await step(r, "fluidfull", async (progress) => { r.fluid = await make(r.base, null)(progress); });
   if (alone) Object.assign(r, { review: r.fluid.movie, reviewSpace: "@model", run: r.run ?? r.base }); // the fluid shot alone: its result, and its files' folder
   await fluidFirst(r, fl);
-  if (!donor) shown(r.fluid, "Fluid shot, full size: Space plays it. Use Paint, Clean or Light to edit it further.");
+  if (!donor) shown(r.fluid, "Fluid shot, full size", "Use Paint, Clean or Light to edit it further.");
   else if (alone && r.key === S.heroKey && !S.pass) showLatest(); // taken from another render: its full size is the latest, not the preview
 }
 async function fluidFirst(r, fl) { // the full-size shot of a fluid version: its first frame is the picture the edits above are painted on
@@ -3068,8 +3131,9 @@ async function fluidFirst(r, fl) { // the full-size shot of a fluid version: its
   if (e.version !== fl.version || e.patch) return;
   e.patch = first;
   keep(e);
-  rebuild(); // the edits above are made again on it, or taken back when one was made on it before
-  for (const w of S.edits) if (w.waits) { w.waits = false; queue(() => generate(w)); } // the edits that waited for it
+  for (const w of S.edits) w.waits = false;
+  rebuild(); // the edits above are made again on it, or taken back when one was made on it before: once each (remakeAll)
+  for (const w of S.edits) if (w.on && w.state === "queued") queue(() => generate(w)); // a new edit that waited for it, which remakeAll leaves to its own turn
   historyUI(); exportUI();
 }
 async function exportAlone(r) { // Export on the plate alone, a fluid shot alone, or a relit composite after SDR to HDR (logic.hdrAfterComposite):
@@ -3180,8 +3244,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const off = !S.previewCap; // no preview pass: the four preview steps are in r.skip (plan)
   const made = off ? null : await passes(pv, p.shot, sized, false);
   if (!off && here() && !pv.taken && !pv.comp && !r.review && S.shot?.url !== pv.raw) { // a rough look at once: the whole frame as the model made it, until the composite
-    showMade(pv.raw, key, "@model");
-    hud("Shot, preview: Space plays it. The composite follows.", 2500);
+    showStep(pv.raw, key, "@model", null, {}, "Shot, preview", { follows: "The composite follows." });
   }
   if (!off) await step(r, "track", async (progress) => { pv.painted = await track(active, made, base, `_${sized}`, progress, null, ["paint"],
     underOf(pv), r.heroFrame); }, pv);
@@ -3195,15 +3258,13 @@ async function pipeline(r) { // a render's steps in order; a step made already i
     pv.compMatte = matte ? viewUrl(matte) : null;
   }, pv);
   if (!off && here() && !r.review && S.shot?.url !== pv.comp) {
-    showMade(pv.comp, key, "@model");
-    hud("Composite, preview: Space plays it. The full-size composite follows.", 2500);
+    showStep(pv.comp, key, "@model", null, {}, "Composite, preview", { follows: "The full-size composite follows." });
     status("Composite, preview: ready. The full-size passes follow; Export can write the result now.", "hint");
   }
   const onePass = !off && sw === p.work[0] && sh === p.work[1];
   const final = onePass ? made : await passes(r, p.work, "full", true);
   if (here() && !onePass && !r.taken && !r.review && r.raw && S.shot?.url !== r.raw) { // the full-size shot as LTX made it, until the full-size composite, in every Preview mode:
-    showMade(r.raw, key, "@model"); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640 px)
-    hud("Shot, full size: Space plays it as LTX made it. The full-size composite follows.", 2500);
+    showStep(r.raw, key, "@model", null, {}, "Shot, full size", { asMade: ", as LTX made it", follows: "The full-size composite follows." }); // the preview size can lose an effect that the full size keeps (a fire faded by 85% at 640 px)
     log("Viewer: full-size shot until the full-size composite is ready.");
   }
   await step(r, "trackfull", async (progress) => { r.full = await track(active, final, base, "_full", progress, pv.mattes, ["paint"],
@@ -3240,9 +3301,8 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   });
   await hdrSteps(); // Finish > SDR to HDR on the elements (or a Light edit's one element), after the composite
   if (!here()) return log(`Render v${r.v}: Composite, full size: ready, in the background.`);
-  showMade(r.play ?? r.review, key, r.playSpace ?? r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace });
   const hdrStep = STAGES.find((st) => st.id === "hdr"), hdrShown = r.hdrAfter && r.done?.hdr !== undefined; // SDR to HDR's result, made and on
-  hud(hdrShown ? `${labelOf(hdrStep, r)}: the viewer plays it.` : "Composite, full size: the viewer plays it.", 2500);
+  showStep(r.play ?? r.review, key, r.playSpace ?? r.reviewSpace, r.reviewFrames, { framesSpace: r.reviewFramesSpace }, hdrShown ? labelOf(hdrStep, r) : "Composite, full size");
   stagesUI(); exportUI();
   const upNext = UPS.some((st) => !r.skip.has(st.id) && doneOf(r, st) === undefined); // Upscale's steps follow the composite
   const upLeft = upNext ? `Upscale is next: about ${span(UPS.reduce((a, st) => a + (r.skip.has(st.id) || doneOf(r, st) !== undefined ? 0 : estimate(st.id, r.skip)), 0))}.` : undefined;
@@ -3626,7 +3686,7 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
   finalToo ||= !S.previewCap || plateAlone(S.heroKey); // with no preview pass, the next result is the full-size composite; the plate alone has no preview
   const p = S.plate, r = S.renders.get(S.heroKey), exporting = !!S.wantDownload;
   if (!p || !S.heroKey || (finalToo ? (exporting ? r?.exported : fullSizeMade(r)) : previewOf(r)?.comp || r?.review)) return 0;
-  const active = S.edits.filter((e) => e.on && e.patch && e.state === "done");
+  const active = S.edits.filter((e) => e.on && e.patch && e.state === "done" && upToDate(e));
   const skip = r?.skip ?? plan({ key: S.heroKey }, active).skip;
   let t = 0;
   for (const st of STAGES) {
@@ -3656,6 +3716,26 @@ function keepRows(list, rows) {
 
 // A result that has just been made takes the viewer: the shot and its composite at the preview size, the full-size shot,
 // the full-size composite. A pinned step gives way to it, so the newest result is displayed; the live preview does not.
+// A step's result as it is made: displayed, then playing at once unless the person is busy with something else
+// (logic.autoplays); a player that already plays goes on with it. Its line says which (logic.resultLine). Returns the line,
+// for a status line that says the same.
+function showStep(url, key, space, frames, opts, label, words = {}) {
+  const pinned = !!S.pass, playing = S.playing; // showMade drops a pinned step for the newest result
+  showMade(url, key, space, frames, opts);
+  const plays = (AUTOPLAY_ON || playing) && autoplays({ playing, painting: !!S.draft || !!stroke, selected: !!S.selected, keying: keying(), pinned, heldHere: S.held === key, halted: S.halted }); // ?autoplay=0: a player that plays still goes on
+  if (plays) play();
+  const line = resultLine(label, plays, words);
+  hud(line, 2500);
+  return line;
+}
+function handPlay() { // Space, the play button: a pause by hand holds this render's later steps still (logic.autoplays)
+  if (S.playing) { pause(); S.held = S.heroKey; } else { S.held = null; play(); }
+}
+function wake() { // Esc leaves nothing selected or pinned: the pause by hand no longer holds, and the latest result plays
+  S.held = null;
+  if (AUTOPLAY_ON && S.shot?.url && autoplays({ playing: S.playing, painting: !!S.draft || !!stroke, selected: !!S.selected, keying: keying(), pinned: !!S.pass, heldHere: false, halted: S.halted })) play();
+}
+
 function showMade(url, key, space, frames = null, opts = {}) {
   if (S.pass) { S.pass = null; }
   setShot(url, key, space, frames, opts);
@@ -3667,7 +3747,7 @@ function stagesUI() {
   if ($("#help").open && !$("#models").hidden) modelsUI().catch(quiet); // Models and licences follows the job's plan while it is open
   finishUI(); // the Render panel: every step, done, running or waiting, and the time left
   const list = $("#stages"), p = S.plate, r = S.renders.get(S.heroKey);
-  const active = S.edits.filter((e) => e.on && e.state === "done" && (e.patch || e.tool === "fluid"));
+  const active = S.edits.filter((e) => e.on && e.state === "done" && (e.patch || e.tool === "fluid") && upToDate(e));
   const alone = plateAlone(S.heroKey); // the plate alone: its one step, SDR to HDR
   const edits = (active.length || alone) && !keying();
   $("#render-full").hidden = !r?.donor || !edits; // a set that took another render's frames can still be made with its own shot
@@ -3753,13 +3833,30 @@ function setPreview(mode) { // the Preview menu (logic.readPreview): Off, Latent
   previewMode = mode;
   try { sessionStorage.setItem(PREVIEW_PREF, String(mode)); } catch { /* this page only */ }
   if (!S.plate) return;
+  const was = S.previewCap;
   S.previewCap = previewCap(S.plate.work, previewDivOf(mode));
   S.plate.shot = previewSize([S.plate.spec.width, S.plate.spec.height], S.plate.work, S.previewCap || previewCap(S.plate.work, PREVIEW_DIV));
   previewUI();
+  if (S.previewCap && S.previewCap !== was) previewFirst(mode === 2 ? "half" : "quarter");
   S.heroKey = ""; recompose(); // what this size made already plays at once; the full size and its export never depend on it
   status(S.previewCap ? `Preview: ${mode === 2 ? "half" : "quarter"} size (${S.plate.shot[0]} x ${S.plate.shot[1]}). The export stays at full size.`
     : mode === "off" ? "Preview: off. No live preview, no preview pass." : "Preview: latent preview. Each pass shows live in the player.");
   stagesUI(); exportUI(); touch();
+}
+
+// A new preview size while the render on display makes a step: the step stops, at any progress, when the preview at the
+// new size must come first (logic.stopsForPreview). The preview then runs and is displayed, then the full size runs again
+// from its start. The same for every render; a render with no preview to make at the new size goes on.
+function previewFirst(size) {
+  const st = S.stage, r = S.piping;
+  if (!st || !r || r.key !== S.heroKey) return;
+  plan(r, r.active);
+  const def = STAGES.find((x) => x.id === st.id), due = STAGES.filter((x) => !r.skip.has(x.id) && !x.onDemand);
+  const ahead = STAGES.some((x) => x.preview && !r.skip.has(x.id) && previewOf(r)?.done?.[x.id] === undefined); // a preview to make at the new size
+  if (!ahead || !stopsForPreview(def, stepClasses(due, !!r.hdrAfter || plateAlone(r.key))[def.id])) return;
+  log(`Render v${r.v}: ${labelOf(def, r)}: stopped at ${Math.round(st.progress * 100)}% for the ${size}-size preview.${def.preview ? "" : " It runs again after the preview."}`);
+  st.stopped = true; // a job the step asks for after this, its upload done, is not posted (onStop)
+  cancel(...RENDER_KINDS);
 }
 
 function previewUI() { // the Preview menu: Off, Latent preview, then half and a quarter of this plate's working size
@@ -4316,7 +4413,7 @@ function inspectSource() { // the file displayed at the point, on its side of th
   const p = S.plate, pt = S.inspect.pt, left = !keying() && pt && wipeSide(pt.x, p.spec.width, S.wipe) === "left";
   if (S.compare || (left && !S.cmp)) return { path: p.path, movie: false, space: p.cs, label: "Plate" }; // O held, or the wipe's plate side
   const sh = left ? S.cmp : S.shot, label = left ? S.cmp.label : sh ? shownLabel() : "Plate";
-  if (left && S.cmp.black) return { path: null, drawn: "Blank plate", label }; // a fluid shot's black blank plate: no file to read
+  if (left && S.cmp.edit) return { path: null, drawn: label, label }; // a History row's strokes over the plate: a drawing, not a file
   if ((left ? S.cmp.id : S.pass) === "first") return { path: null, drawn: "Edited first frame", label }; // Klein's edit: a picture, not a file
   const frames = !!sh?.frames, space = sh ? (frames ? sh.framesSpace ?? p.cs : sh.space) : p.cs;
   return { path: sourcePath(sh, p.path), movie: !!sh && !frames, space: space === "@model" ? modelSpace() : space, label };
@@ -4499,7 +4596,7 @@ function menuItems() { // [group, [[label, key, action, disabled, checked] or "-
       ["Colours…", "S", openColours, !p, $("#colours").open], ["Text prompt…", "T", openWords, !p], "-",
       ["Whole object", "", () => $("#whole").click(), !p, $("#whole").checked], ["Smaller brush", "-", () => setSize(S.size / 1.2), !p],
       ["Larger brush", "=", () => setSize(S.size * 1.2), !p]]],
-    ["Control", [["Play or pause", "Space", () => (S.playing ? pause() : play()), !p, S.playing], ["Next frame", "Right", step(1), !p],
+    ["Control", [["Play or pause", "Space", handPlay, !p, S.playing], ["Next frame", "Right", step(1), !p],
       ["Previous frame", "Left", step(-1), !p], "-", ["Go to the in point", "Home", () => { pause(); seek(S.inPt); }, !p],
       ["Go to the out point", "End", () => { pause(); seek(S.outPt); }, !p], ["Set the in point", "[", () => setIn(S.frame), !p],
       ["Set the out point", "]", () => setOut(S.frame), !p], ["Clear in and out", "\\", clearRange, !p]]],
@@ -4656,6 +4753,7 @@ async function boot() { // the version and the build, the workflows, the WebSock
   log(`OCIO: ${S.ocio.info.label}${S.ocio.config === "$OCIO" ? " ($OCIO)" : ""}, display ${S.ocio.display}, view ${S.ocio.view}.`);
   if (SEED_ASKED !== null) log(`Seed ${SEED_ASKED} asked for in the address (?seed=): every new edit and every new fluid shot starts from it.`);
   if (!INDEX_ON) log("Job index off, asked for in the address (?index=0): every job runs, and none is kept for a later session.");
+  if (!AUTOPLAY_ON) log("Autoplay off, asked for in the address (?autoplay=0): a step's result waits, paused, as it is made.");
   status("Ready. Open a plate to start.", "hint");
   if (!S.plate && BLANK_AT_START && S.fluidReady) await openBlank().catch(quiet); // a canvas for a fluid shot, at the Blank tab's settings
   warmAll().catch(() => {}); // a ComfyUI that reports no GPU details simply skips it
@@ -4754,7 +4852,7 @@ $("#prompt").oninput = () => { // the words belong to the edit being drawn, or t
   if (!S.draft && cur) { mark(); if (busy(cur)) reopen(cur); else reopenDone(cur); }
   if (S.draft) prepareSoon(true); else generateUI();
 };
-$("#editing").onclick = () => select(null);
+$("#editing").onclick = () => (keying() ? leaveKeys() : select(null)); // the chip deselects the edit, or the fluid shot's keyframes
 $("#new-edit").onclick = () => nextEdit();
 
 for (const id of ["#b-width", "#b-height", "#b-fps", "#b-frames"]) Object.assign($(id), { oninput: () => blankNote(), onchange: blankFit }); // the note while typing; the value used once the field is left
@@ -4774,7 +4872,7 @@ $("#menu-btn").onclick = (e) => { // the same menu as a right-click, for touch s
   const r = e.currentTarget.getBoundingClientRect();
   openMenu(r.left, r.bottom + 4);
 };
-$("#play-btn").onclick = () => (S.playing ? pause() : play());
+$("#play-btn").onclick = handPlay;
 $("#wipe-btn").onclick = () => setWipe(S.wipe === null);
 $("#export-btn").onclick = exportDialog;
 $("#preview-size").onchange = (e) => setPreview(readPreview(e.target.value));
@@ -4951,7 +5049,7 @@ addEventListener("keydown", (e) => {
   if (keying() && mod && !e.shiftKey && (low === "c" || low === "v") && !getSelection().toString()) { if (low === "c") copyKey(); else pasteKey(); return e.preventDefault(); }
   if (keying() && !mod && (k === "Delete" || k === "Backspace")) { deleteKey(); return e.preventDefault(); }
   if (keying() && e.altKey && (k === "ArrowLeft" || k === "ArrowRight")) { jumpKey(k === "ArrowLeft" ? -1 : 1); return e.preventDefault(); }
-  if (k === " " || k === "ArrowDown") S.playing ? pause() : play();
+  if (k === " " || k === "ArrowDown") handPlay(); // by hand: a pause holds this render's later steps still
   else if (k === "ArrowLeft" || k === "ArrowRight") { pause(); seek(S.frame + (k === "ArrowLeft" ? -1 : 1)); }
   else if (k === "Home") { pause(); seek(S.inPt); }
   else if (k === "End") { pause(); seek(S.outPt); }
@@ -4998,7 +5096,7 @@ function enter(another) { // Generate (Enter): the edit in progress, then its sh
     const r = S.renders.get(S.heroKey) ?? (plateAlone(S.heroKey) ? want(S.heroKey, true) : null); if (r) r.failed = null; touch(0);
     return hud(resumed ? "Generating again from where it stopped." : plateAlone(S.heroKey) ? `${S.heroKey === PLATE_UP ? "Upscale" : "SDR to HDR"} starts now.` : "The shot renders now.", 2000);
   }
-  hud(S.edits.length ? "The result is up to date. Ctrl+Enter tries another seed." : "Paint on the frame first, then Generate.", 3000);
+  hud(S.selected ? UP_TO_DATE : PAINT_FIRST, 3000);
 }
 
 function renderPending() { // the render of the edits displayed failed, or never started: Generate starts it again

@@ -50,6 +50,8 @@ def run(browser, port, U):
             f"one job, on the plate itself, with the plate's size for HDR Match: {len(jobs)} job, {load.get('path')}, {sorted(match)}")
     U.check(rows() == ["Plate, HDR"] and page.query_selector("#stages li.done") is not None and page.is_disabled("#generate"),
             f"its one step is done, and Generate has nothing left to start: {page.text_content('#stages')!r}")
+    if page.evaluate("document.querySelector('#play-btn').classList.contains('playing')"):  # its result plays as it is made; paused, the player shows its EXR frames
+        page.click("#play-btn")
     U.check(U.until(page, "document.querySelector('canvas[data-precision]')?.dataset.precision === 'float'", 60000),
             "the player shows the result's EXR frames at full precision")
     page.click("#export-btn")

@@ -154,6 +154,8 @@ def hdr_video(page, U):
             "the plate and the layer went through SDR to HDR, then « Composite, HDR » made the composite again")
     settled(page)
     page.keyboard.press("n")
+    if page.evaluate("document.querySelector('#play-btn').classList.contains('playing')"):  # its result plays as it is made; paused, the player shows its EXR frames
+        page.click("#play-btn")
     page.wait_for_function("document.querySelector('canvas[data-precision]').dataset.precision === 'float'", timeout=60000)
     U.check(True, "paused, the player shows the result's EXR frames at full precision")
     page.click("#export-btn")
@@ -185,7 +187,7 @@ def movie_name(page, U):
 
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900}, accept_downloads=True)
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     movie_name(page, U)
     fluid16_scene(page, U)

@@ -382,6 +382,7 @@ dialog.colours menu { margin-top: 10px; }
 #stages li.compared .dot { box-shadow: 0 0 0 2px #fff; }
 .xray { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
 #stages li.compared .name { text-decoration: underline dotted; text-underline-offset: 3px; }
+#history li.compared .title { text-decoration: underline dotted; text-underline-offset: 3px; }
 
 /* ---------- The Finish menu ---------- */
 .finish { position: fixed; z-index: 40; width: 380px; max-width: calc(100vw - 16px); box-sizing: border-box; padding: 12px 14px; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }

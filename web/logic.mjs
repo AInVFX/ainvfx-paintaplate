@@ -427,6 +427,19 @@ export const stageOne = ([w, h], step = 32) => [Math.max(step, Math.round(w / 2 
 // Generate stops a running render step only where that wastes least: a full-size or an export step in its first half. A step
 // past halfway costs less to finish than to run again, and a preview step is short and often reused by the new edit's render.
 export const stopsForEdit = ({ cls, progress }) => cls !== "preview" && progress < 0.5;
+// A step's result displayed as it is made plays at once, and a player that already plays goes on with it. It waits, paused,
+// while the person paints, has an edit or the keyframes selected, looks at a pinned step, or paused the player by hand
+// during this render (Space, the play button); a stop holds everything.
+export const autoplays = ({ playing, painting, selected, keying, pinned, heldHere, halted }) =>
+  !halted && (playing || !(painting || selected || keying || pinned || heldHere));
+// Its line, written once: « Shot, preview: playing. The composite follows. », or « …: ready. Press Space to play it. … ».
+// `asMade`: what follows the state, as « , as LTX made it »; `follows`: the step that comes next, or what to do.
+export const resultLine = (label, plays, { asMade = "", follows = "" } = {}) =>
+  `${label}: ${plays ? "playing" : "ready"}${asMade}. ${plays ? "" : "Press Space to play it. "}${follows}`.trim();
+// A new preview size while a render makes a step: the step stops, at any progress, when the preview at the new size must
+// come first: a preview at the old size, or a full-size step. A step that serves every size (the object tracked for
+// Clean), a Finish step and the export go on. `cls`: the step's class, as stepClasses gives it.
+export const stopsForPreview = (step, cls) => !!step.preview || (!!step.final && cls === "full");
 
 // ---------- The job index ----------
 // A job's key hashes its workflow and the values that change what it makes. Output folders (the prefixes) and the live
@@ -617,6 +630,18 @@ export function nearKeys(keys, frame) { // the keyframes before and after a fram
   }
   return { prev, next };
 }
+// The keyframe a click on the fluid shot's row goes to: the one nearest `frame`, the earlier one when two are as near.
+export function nearestKey(frames, frame) {
+  let best = null;
+  for (const f of frames) {
+    const d = Math.abs(f - frame), b = best === null ? Infinity : Math.abs(best - frame);
+    if (d < b || (d === b && f < best)) best = f;
+  }
+  return best;
+}
+// The wipe's name for a History row's strokes: « Paint 2, strokes », « Fluid 1, keyframes ». `name`: the tool's name, `n`:
+// the edit's number in History.
+export const strokesLabel = (name, n, fluid) => `${name} ${n}, ${fluid ? "keyframes" : "strokes"}`;
 
 // ---------- OCIO, as RV's menu shows it ----------
 
@@ -696,7 +721,7 @@ export function logLevel(text) { // a log message's colour, from its words: red 
 // warning shows by its first line that starts with its word, in its colour (logLevel). A line that succeeds replaces a
 // fault that is over (`shown`: the status line's level), in the normal colour, unless it is bookkeeping. Every other event
 // reaches the status line from the code that makes it, with what to do next.
-const BOOKKEEPING = /^(Frame cache|Viewer|Played|Memory profile|Working sizes|Native frames|Job index off)\b/;
+const BOOKKEEPING = /^(Frame cache|Viewer|Played|Memory profile|Working sizes|Native frames|Job index off|Autoplay off)\b/;
 export function statusOf(text, shown = "") {
   const lines = String(text).split("\n"), level = logLevel(text), word = level === "error" ? "Error: " : "Warning: ";
   if (level) return { text: lines.map((l) => l.trim()).find((l) => l.startsWith(word)), level };

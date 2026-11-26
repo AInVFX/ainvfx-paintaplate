@@ -62,8 +62,12 @@ class HalfSize:
         return getattr(self.browser, name)
 
 
-def load(browser, port, query="?blank=0", errors=None, **context):
-    """A new page with the app loaded. `errors` collects console errors, page errors and failed requests, from the load on."""
+def load(browser, port, query="?blank=0", errors=None, autoplay=False, **context):
+    """A new page with the app loaded. `errors` collects console errors, page errors and failed requests, from the load on.
+    A step's result waits, paused, as it is made (?autoplay=0), unless `autoplay`: playing in a headless browser takes the
+    time of the mock's renders; the flows that test autoplay ask for it."""
+    if not autoplay:
+        query += ("&" if "?" in query else "?") + "autoplay=0"
     page = browser.new_page(viewport=VIEWPORT, **context)
     if errors is not None:
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
@@ -267,7 +271,7 @@ def start_flow(browser, port):
     """With no plate open, the page opens a blank plate at start, at the Blank tab's settings, in 8-bit (16-bit, with SDR to
     HDR, is the tab's other choice), its keyframes ready to paint (?blank=0 starts empty, as every other flow does)."""
     page = browser.new_page(viewport=VIEWPORT)
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?autoplay=0")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('Fluid shot on a blank plate')", timeout=60000)
     spec = page.text_content("#spec")
     check("960 x 512, 25 fps, 121 frames" in spec and page.input_value("#b-depth") == "8" and not page.is_hidden("#fluid"),
@@ -407,7 +411,8 @@ def colour_flow(browser, port):
 def generate_flow(browser, port):
     """A first edit and its render: the strokes wait for Generate, Enter makes the edit, then the full-size composite and
     nothing for compositing software; Export writes the result and its matte, and the scene as one ComfyUI graph; paused,
-    the viewer shows the shot; Enter again with nothing changed runs nothing; the log says what happens under the hood."""
+    the viewer shows the shot; Enter again with nothing changed runs nothing, and says what to do; the log says what happens
+    under the hood."""
     errors = []
     page = load(browser, port, errors=errors)
     open_plate(page)
@@ -473,9 +478,9 @@ def generate_flow(browser, port):
     check(page.get_attribute("#view", "data-picture") == "shot", "paused, on frame 3 and on frame 0, the viewer shows the shot, not the plate")
     made, renders = klein_passes(page), page.locator("#log li:has-text('Render v')").count()
     page.keyboard.press("Enter")
-    until(page, "document.querySelector('#hud').textContent.includes('The result is up to date')")
-    check(klein_passes(page) == made and page.locator("#log li:has-text('Render v')").count() == renders and "The result is up to date" in page.text_content("#hud"),
-          "Enter again with nothing changed runs nothing twice: no Klein pass, no render step")
+    until(page, "document.querySelector('#hud').textContent.includes('Paint on the first frame, then press Enter.')")
+    check(klein_passes(page) == made and page.locator("#log li:has-text('Render v')").count() == renders and "Paint on the first frame, then press Enter." in page.text_content("#hud"),
+          "Enter again with nothing changed and no edit selected runs nothing twice, and says what to do: no Klein pass, no render step")
     log = log_lines(page)
     for key in (": done in", "prompt writer", "Klein edit preview"):
         check(any(any(k in line for k in key.split("|")) for line in log), f"the log says what happens under the hood: {key}")
@@ -573,8 +578,9 @@ def history_flow(browser, port):
 
 
 def one_edit_flow(browser, port):
-    """One edit at a time: new words and more strokes change the edit just made; New edit (the N key, the button, the
-    right-click menu) or another tool closes it, and the next strokes start a new one."""
+    """One edit at a time: after Generate no edit stays selected and the text prompt field empties, so the next strokes
+    start a new edit. The pencil selects an edit again: its words come back, and new words and more strokes change it.
+    New edit (the N key, the button, the right-click menu) or another tool deselects it."""
     errors = []
     page = load(browser, port, errors=errors)
     open_plate(page)
@@ -585,35 +591,41 @@ def one_edit_flow(browser, port):
     stroke(page, [(0.2, 0.7), (0.25, 0.75)])
     page.keyboard.press("Enter")
     page.wait_for_function(DONE.format(n=1), timeout=120000)
-    check(row_titles(page)[0] == "1. Paint" and page.is_visible("#editing") and page.text_content("#editing") == "Editing 1 · Paint"
-          and page.input_value("#prompt") == "a dog", "the edit just made stays current, its words in the prompt")
+    check(row_titles(page)[0] == "1. Paint" and page.is_hidden("#editing") and page.input_value("#prompt") == "",
+          "after Generate no edit stays selected: the chip hides and the field is empty")
     page.locator(".promptbar").screenshot(path=os.path.join(SHOTS, "5_promptbar.png"))
+    page.click("#history li .edit")
+    check(page.is_visible("#editing") and page.text_content("#editing") == "Editing 1 · Paint" and page.input_value("#prompt") == "a dog",
+          "the pencil selects the edit: its chip shows, its words come back")
     page.fill("#prompt", "a cat"); page.evaluate("document.activeElement.blur()")
     stroke(page, [(0.26, 0.7), (0.3, 0.74)])
     page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('#history li small')?.textContent === 'a cat' && !document.querySelector('#history li.busy')",
                            timeout=120000)
-    check(len(row_titles(page)) == 1 and row_words(page)[0] == "a cat", f"new words and more strokes change the same edit: {row_titles(page)} {row_words(page)}")
+    check(len(row_titles(page)) == 1 and row_words(page)[0] == "a cat", f"new words and more strokes change the selected edit: {row_titles(page)} {row_words(page)}")
+    page.click("#history li .edit")
     page.keyboard.press("n")
-    check(page.is_hidden("#editing") and page.input_value("#prompt") == "" and page.is_disabled("#new-edit"), "N, New edit, closes the current edit")
+    check(page.is_hidden("#editing") and page.input_value("#prompt") == "" and page.is_disabled("#new-edit"), "N, New edit, deselects the selected edit")
     page.fill("#prompt", "a bird"); page.evaluate("document.activeElement.blur()")
     stroke(page, [(0.6, 0.7), (0.65, 0.72)])
     page.keyboard.press("Enter")
     page.wait_for_function(DONE.format(n=2), timeout=120000)
-    check(row_titles(page)[:2] == ["2. Paint", "1. Paint"] and row_words(page)[:2] == ["a bird", "a cat"], f"after New edit the strokes make edit 2: {row_titles(page)} {row_words(page)}")
+    check(row_titles(page)[:2] == ["2. Paint", "1. Paint"] and row_words(page)[:2] == ["a bird", "a cat"], f"with no edit selected the strokes make edit 2: {row_titles(page)} {row_words(page)}")
+    page.click("#history li .edit")
     page.keyboard.press("l")
-    check(page.is_hidden("#editing") and page.input_value("#prompt") == "", "another tool closes the current edit")
+    check(page.is_hidden("#editing") and page.input_value("#prompt") == "", "another tool deselects the selected edit")
     stroke(page, [(0.1, 0.1), (0.2, 0.12)])
     page.keyboard.press("Enter")
     page.wait_for_function(DONE.format(n=3), timeout=120000)
     check(row_titles(page)[0] == "3. Light" and row_words(page)[1] == "a bird", f"the light is a new edit: {row_titles(page)} {row_words(page)}")
+    page.click("#history li .edit")
     page.click("#new-edit")
-    check(page.is_hidden("#editing") and page.is_disabled("#new-edit"), "the New edit button closes it too")
+    check(page.is_hidden("#editing") and page.is_disabled("#new-edit"), "the New edit button deselects it too")
     page.click("#history li .edit")
     page.mouse.click(cx, cy, button="right")
     page.hover("#ctx > li:has(> span:first-child:text-is('Edit'))")
     page.click("#ctx .sub button:has-text('New edit')")
-    check(page.is_hidden("#editing") and len(row_titles(page)) == 3, "New edit in the right-click menu closes the selected edit")
+    check(page.is_hidden("#editing") and len(row_titles(page)) == 3, "New edit in the right-click menu deselects the selected edit")
     page.screenshot(path=os.path.join(SHOTS, "2_end.png"))
     no_errors(errors, "with one edit at a time")
     page.close()
@@ -621,7 +633,7 @@ def one_edit_flow(browser, port):
 
 def fluid_flow(browser, port):
     """A blank plate: keyframes on the LTX grid, copied, pasted, dragged, deleted and undone; then its shot, the first edit."""
-    page = load(browser, port)
+    page = load(browser, port, autoplay=True)  # its lines say a result plays as it is made
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
@@ -669,7 +681,7 @@ def fluid_flow(browser, port):
           f"Enter generates with the trigger, the words and the three keyframes: {sent}")
     page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => /^Render v\\d+: Fluid shot, full size: done in /.test(e.textContent))", timeout=120000)
     log, rows = log_lines(page), row_titles(page)
-    check(page.text_content("#status") == "Fluid shot, full size: Space plays it. Use Paint, Clean or Light to edit it further.",
+    check(page.text_content("#status") == "Fluid shot, full size: playing. Use Paint, Clean or Light to edit it further.",
           f"the status line says what to do with the fluid shot, as an edit's step does: {page.text_content('#status')}")
     check(rows == ["1. Fluid"] and not any("under the edits" in line for line in log) and not page.is_disabled("[data-tool=erase]"),
           f"the render queue makes the fluid shot, the first edit, and nothing reopens it: Clean and Light work on it: {rows}")
@@ -937,7 +949,7 @@ def hdr_flow(browser, port):
     check(page.is_disabled("#finish-hdr") and page.text_content("#finish-hdr-why") == "Off in this page's address (hdr=0)." and page.evaluate("document.querySelector('#b-depth').closest('label').style.display") == "none",
           "?hdr=0 turns SDR to HDR off: the Finish menu greys its switch and says why, and a blank plate offers no 16-bit")
     page.keyboard.press("Escape")
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     page.evaluate(WATCH)
     errors = []
@@ -1003,7 +1015,7 @@ def hdr_flow(browser, port):
 def fluid16_flow(browser, port):
     """A blank plate asked in 16-bit: Finish > SDR to HDR is on, as on any SDR plate. The fluid shot plays while SDR to HDR
     runs on it, the switch turns off and back on afterwards, and Export writes the HDR frames beside the shot."""
-    page = load(browser, port)
+    page = load(browser, port, autoplay=True)  # its lines say a result plays as it is made
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.click("#open-btn"); page.click("#open [data-tab=blank]")
@@ -1019,7 +1031,7 @@ def fluid16_flow(browser, port):
     mock_route(port, "/mock/hold", {"output": "hdr", "seconds": 4, "times": 1})  # SDR to HDR lasts 4 s
     page.keyboard.press("Enter")
     page.wait_for_function("""document.querySelector('#stages li.now')?.textContent.includes('Plate, HDR') === true
-      && document.querySelector('#hud').textContent.includes('Fluid shot, full size: Space plays it.')""", timeout=120000)
+      && document.querySelector('#hud').textContent.includes('Fluid shot, full size: playing.')""", timeout=120000)
     check(True, "the fluid shot plays as soon as its full size is made, while SDR to HDR runs on it")
     wait_log(page, added_line(("Plate, HDR: done in", "Plate, HDR took")), 120000, "SDR to HDR on the fluid shot, « Plate, HDR »")
     new = page.evaluate("window.__lines")
@@ -1054,7 +1066,9 @@ def fluid16_flow(browser, port):
           f"on again, the zip holds the HDR frames and the shot as ProRes 4444 XQ, named after the blank plate: {names[:3]}")
     page.evaluate("""() => { const v = document.querySelector('canvas[data-precision]'); window.__prec = [];
       new MutationObserver(() => window.__prec.push(v.dataset.precision)).observe(v, { attributes: true, attributeFilter: ['data-precision'] }); }""")
-    page.click("#play-btn"); page.wait_for_function("window.__prec.length >= 34", timeout=30000); page.click("#play-btn")  # two rounds of its 17 frames
+    if not page.evaluate("document.querySelector('#play-btn').classList.contains('playing')"):  # a result plays as it is made
+        page.click("#play-btn")
+    page.wait_for_function("window.__prec.length >= 34", timeout=30000); page.click("#play-btn")  # two rounds of its 17 frames
     seen = page.evaluate("window.__prec")
     flips = sum(1 for a, b in zip(seen, seen[1:]) if a != b)
     check(flips <= 1, f"playing the HDR result, its EXR frames and its 8-bit movie never alternate: {flips} changes in {len(seen)} draws")
@@ -1148,7 +1162,7 @@ def phone_flow(browser, port):
     open_plate(first)
     for name, size in (("upright", {"width": 390, "height": 844}), ("sideways", {"width": 844, "height": 390})):
         page = browser.new_page(viewport=size, is_mobile=True, has_touch=True, device_scale_factor=3)
-        page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+        page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0")
         page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=20000)
         page.click("#open-btn"); page.fill("#path", "plates/desk.mp4"); page.click("#open-go")
         page.wait_for_function("document.querySelector('#spec').textContent.includes('fps') && document.querySelector('#opening').hidden", timeout=60000)

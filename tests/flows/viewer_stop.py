@@ -33,7 +33,7 @@ def posted(port):  # what each job posted so far writes, in order: a failed chec
 
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0")
     page.wait_for_function(f"{STATUS}.startsWith('Ready')", timeout=60000)
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function(OPEN, timeout=60000)
@@ -113,7 +113,7 @@ def run(browser, port, U):
 
     # 7. No result yet, a stop, then Esc drops the stopped edit: the Generate button stays live for the edit that waits
     page = browser.new_page(viewport={"width": 1400, "height": 900})
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0")
     page.wait_for_function(f"{STATUS}.startsWith('Ready')", timeout=60000)
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function(OPEN, timeout=60000)

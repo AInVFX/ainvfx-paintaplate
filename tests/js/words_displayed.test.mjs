@@ -15,5 +15,5 @@ test("the way back to the latest result is one sentence, written once", () => {
 });
 
 test("a finished step's tooltip, with the wipe's Ctrl+click, ends with one full stop", () => {
-  assert.ok(read("app.mjs").includes(`li.title += " Ctrl+click (Cmd+click on a Mac) puts it on the wipe's left side, against the displayed result.";`));
+  assert.ok(read("app.mjs").includes(`li.title += " Ctrl+click to add it to the wipe.";`));
 });

@@ -27,7 +27,7 @@ def mock(port, path, body=None):  # a route of the mock ComfyUI: a GET, or a POS
 
 
 def run(browser, port, U):
-    address = f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html"
+    address = f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?autoplay=0"
     mock(port, "/mock/card", {"vram": 17.2e9, "ram": 65.5e9})  # what a 16 GB GPU in a 64 GB machine reports
     page = browser.new_page(viewport={"width": 1400, "height": 900})
     page.goto(address)  # the blank plate opens at start

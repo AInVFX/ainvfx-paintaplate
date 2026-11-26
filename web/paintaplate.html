@@ -77,12 +77,12 @@
   <main class="stage">
     <div class="promptbar">
       <label for="prompt" class="prompt-label">Text prompt</label>
-      <button id="editing" class="editing" type="button" hidden title="Selected edit: change its text prompt or strokes. Click here or press Esc to deselect it."></button>
+      <button id="editing" class="editing" type="button" hidden title="Click to deselect this edit, or press Esc."></button>
       <input id="prompt" autocomplete="off" spellcheck="false" aria-label="Text prompt"
              placeholder="Describe what to paint, then paint it on the frame">
-      <button id="generate" class="primary generate" type="button" disabled title="Generate (Enter): the edit on the first frame, then the shot. Steps already made are reused.">Generate</button>
+      <button id="generate" class="primary generate" type="button" disabled title="Click or press Enter to make the edit, then the shot. Steps already made are reused.">Generate</button>
       <button id="stop" class="stop" type="button" hidden title="Stop (Esc): finished steps are kept. Generate continues from there.">Stop</button>
-      <button id="new-edit" class="new-edit" type="button" disabled title="New edit (N): the next strokes start a separate edit.">
+      <button id="new-edit" class="new-edit" type="button" disabled title="Click or press N to deselect this edit. The next strokes start a new edit.">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span>New edit</span>
       </button>
@@ -142,10 +142,10 @@
       </span>
     </div>
     <ol id="history"></ol>
-    <p id="history-empty" class="history-empty">Your edits appear here. Describe the edit in the text prompt, paint it on the frame, then Generate. Click an edit's pencil to change it.</p>
+    <p id="history-empty" class="history-empty">Your edits appear here. Describe the edit in the text prompt, paint it on the frame, then press Enter. Use the pencil to edit.</p>
     <section id="fluid" class="render fluid" hidden>
       <h2>Fluid shot <span id="fluid-state"></span></h2>
-      <p class="hint">Paint your fluid (smoke, fire, water and more) on the keyframes, describe it in the text prompt, then Generate.</p>
+      <p class="hint">Paint your fluid (smoke, fire, water and more) on the keyframes, describe it in the text prompt, then press Enter.</p>
     </section>
     <section id="render" class="render" hidden>
       <h2>Render <span id="render-left"></span></h2>
@@ -183,10 +183,10 @@
     </div>
     <section class="help-tab" data-help="start" role="tabpanel">
       <ol class="help-steps">
-        <li>Open a plate: Open, then ComfyUI files, Upload, Scenes or Blank plate. Sequence files and folders of frames are supported. A plate opens with up to 20 s of frames, or as many as this machine holds. A blank plate starts a fluid shot.</li>
+        <li>Click Open, then pick ComfyUI files, Upload, Scenes or Blank plate. Sequence files and folders of frames are supported. A plate opens with up to 20 s of frames, or as many as this machine holds. A blank plate starts a fluid shot.</li>
         <li>Pick a tool (Paint, Clean or Light), describe the change in the text prompt, then paint it on the first frame.</li>
-        <li>Generate: the edit on the first frame followed by the shot. The Render panel shows each step as it runs.</li>
-        <li>Play the shot, compare it with the plate in the wipe, then Export.</li>
+        <li>Press Enter to make the edit on the first frame, then the shot. The Render panel shows each step as it runs.</li>
+        <li>Press Space to play the shot, press F6 to compare it with the plate, then click Export.</li>
       </ol>
       <p class="hint">Every action is in the right-click menu, with its keyboard shortcut. The Keys tab lists them all.</p>
     </section>
@@ -195,9 +195,9 @@
         <dt>Paint</dt><dd>Adds what the text prompt describes, with the outline, pose and size of your strokes.</dd>
         <dt>Clean</dt><dd>Removes what you paint over and regenerates the background. With Whole object, SAM 3.1 finds the whole object under the stroke.</dd>
         <dt>Light</dt><dd>Paint where the light comes from, in its colour. A dark colour paints shade.</dd>
-        <dt>Eraser</dt><dd>Erases strokes of the edit in progress, or of the selected edit.</dd>
+        <dt>Eraser</dt><dd>Drag to erase strokes of the edit in progress, or of the selected edit.</dd>
         <dt>Pipette</dt><dd>Click the frame to take its colour, then paint with it.</dd>
-        <dt>History</dt><dd>One row per edit. Click a row to see its strokes, or its pencil to change the edit. Another tool starts a new edit.</dd>
+        <dt>History</dt><dd>One row per edit. Hover or click a row to show its strokes. Ctrl+click to add them to the wipe. Use the pencil to edit. After Generate, the next strokes start a new edit.</dd>
         <dt>Matte strategy</dt><dd>Sets how a paint edit is composited back into the plate. Object: the edit's object only, which keeps the most plate. Object and effects: the object, what it replaces, and what the shot changed around it: smoke, light, thin haze. Whole shot: every pixel comes from the regenerated shot. Auto picks Object or Object and effects, from what the edit changed.</dd>
         <dt>Undo</dt><dd>One step per stroke, per removal, per change of text prompt or seed.</dd>
         <dt>Fluid shot</dt><dd>On a blank plate: paint your fluid (smoke, fire, water and more) on keyframes in flat colours, and describe it in the text prompt. Drag a keyframe's diamond on the timeline to move it.</dd>
@@ -208,7 +208,7 @@
     <section class="help-tab" data-help="viewer" role="tabpanel" hidden>
       <dl>
         <dt>What the viewer displays</dt><dd>The latest result of the edits turned on. Hold O to see the plate. Click a finished Render step to display it alone.</dd>
-        <dt>Wipe</dt><dd>The plate on the left, the displayed result on the right. Click a Render step or a History row to change the right side; Ctrl+click a step to put it on the left.</dd>
+        <dt>Wipe</dt><dd>The plate on the left, the displayed result on the right. Click a Render step to display it on the right. Ctrl+click a Render step or a History row to add it to the left.</dd>
         <dt>X-ray</dt><dd>Tints where the edits turned on change the plate. A Light edit tints the whole frame.</dd>
         <dt>Full screen</dt><dd>The viewer fills the screen. The frame number shows in a corner while the frame changes.</dd>
         <dt>Cache memory</dt><dd>View > Cache memory: memory for decoded frames, for smooth playback. Auto sets it from this machine's RAM.</dd>
@@ -247,8 +247,8 @@
           <dt>E</dt><dd>Eraser: hold E while you drag, or tap E to turn it on or off.</dd>
           <dt>I</dt><dd>Pick a colour from the frame.</dd>
           <dt>S, T</dt><dd>Colours, text prompt: in a dialog over the frame.</dd>
-          <dt>Enter</dt><dd>Generate.</dd>
-          <dt>Ctrl+Enter</dt><dd>Another seed for the selected edit, or for the last edit.</dd>
+          <dt>Enter</dt><dd>Make the edit, then the shot.</dd>
+          <dt>Ctrl+Enter</dt><dd>Try another seed for the selected edit, or for the last edit.</dd>
           <dt>Esc</dt><dd>Cancel, deselect, end a comparison, then stop generating.</dd>
           <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo. Ctrl+Y redoes too.</dd>
           <dt>Hold O</dt><dd>See the plate.</dd>
@@ -272,8 +272,8 @@
           <dt>\</dt><dd>Clear the in and out points.</dd>
           <dt>Wheel</dt><dd>Step through frames.</dd>
           <dt>F6</dt><dd>Wipe: the plate against the displayed result.</dd>
-          <dt>Ctrl+click a Render step</dt><dd>Compare two steps in the wipe (Cmd+click on a Mac).</dd>
-          <dt>, and .</dt><dd>With the wipe on: the next step on the left, on the right.</dd>
+          <dt>Ctrl+click a Render step or a History row</dt><dd>Add it to the wipe's left side (Cmd+click on a Mac).</dd>
+          <dt>, and .</dt><dd>With the wipe on: show the next step on the left (,) or on the right (.). The left side also shows each edit's strokes.</dd>
           <dt>X</dt><dd>X-ray.</dd>
           <dt>`</dt><dd>Full screen.</dd>
         </dl>
