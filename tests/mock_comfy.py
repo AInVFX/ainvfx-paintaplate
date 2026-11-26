@@ -562,7 +562,9 @@ POSTS = []
 async def prompt_route(request):
     body = await request.json()
     live = next((n.get("inputs", {}).get("every") for n in body["prompt"].values() if n.get("class_type") == "PaintAPlate_LivePreview"), None)
-    POSTS.append({"outputs": sorted(outputs_of(body["prompt"])), "extra_data": body.get("extra_data"), "live": live})  # mock only: what each post asked for; `live`: an LTX pass sends a live preview every so many steps
+    chunk = next(([n["inputs"].get("chunking_mode.frames_per_chunk"), n["inputs"].get("temporal_overlap")] for n in body["prompt"].values()
+                  if isinstance(n, dict) and n.get("class_type") == "SeedVR2TemporalChunk"), None)  # Upscale's frames per chunk and shared latent frames
+    POSTS.append({"outputs": sorted(outputs_of(body["prompt"])), "extra_data": body.get("extra_data"), "live": live, "chunk": chunk})  # mock only: what each post asked for; `live`: an LTX pass sends a live preview every so many steps
     pid = str(uuid.uuid4())
     if "plate" in outputs_of(body["prompt"]):
         EVENTS.append(("prompt", time.time(), "fluid"))
