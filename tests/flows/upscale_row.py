@@ -27,7 +27,7 @@ def run(browser, port, U):
     with page.expect_download(timeout=280000) as dl:
         page.click("#x-go")
     lines = U.log_lines(page)
-    U.check(any(t.startswith("Upscale: 3840 x 2112, 3 windows of 21 frames.") for t in lines), f"the windows follow the machine's memory: {[t for t in lines if 'Upscale:' in t]}")
+    U.check(any(t.startswith("Upscale: 3840 x 2112, 3 windows of 19 frames, each in one pass.") for t in lines), f"the windows follow the machine's memory: {[t for t in lines if 'Upscale:' in t]}")
     names = zipfile.ZipFile(dl.value.path()).namelist()
     parts = {zip_rows.row_of(n) for n in names if zip_rows.row_of(n).endswith("_upscaled")}
     mattes = zip_rows.files(names, "matte_upscaled")

@@ -39,8 +39,7 @@ HDR_LORA = "ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors"  # Lightricks' SDR-t
 HDR_SCENE = "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors"  # its fixed scene embeddings: the prompt it takes (models/embeddings)
 SEEDVR2 = "seedvr2_7b_fp16.safetensors"  # SeedVR2 7B, a one-step video restoration model: Upscale (models/diffusion_models)
 SEEDVR2_VAE = "seedvr2_ema_vae_fp16.safetensors"  # its VAE (models/vae)
-UPSCALE_OVERLAP = 4  # frames two neighbouring chunks share, crossfaded by core's merge: one latent frame of SeedVR2's VAE
-UPSCALE_CHUNK = 21  # frames SeedVR2 samples at once: one pass over 121 frames at 3840 x 2160 overflows the model's MLP
+UPSCALE_CHUNK = 21  # a window's frames when the caller names none (Slot count), and the frames SeedVR2 samples at once (Slot chunk_frames)
 HDR_SPACE = "ACES2065-1"  # the SDR-to-HDR frames are saved in it: the colour space the config's file rules give an EXR
 FLUID_NEGATIVE = "blurry, low quality, distorted, watermark"  # the negative prompt of its model card's samples
 SNAP_POINTS = 5  # stroke points SAM looks at one by one
@@ -904,10 +903,11 @@ def upscale():
     of windows of 21 frames change across a window's edge no more than within a window. The window goes into the model space with the whole shot's peak (peak_of), so
     an HDR shot keeps one exposure from one window to the next, and comes back with that peak.
 
-    Lanczos brings the window to the target size. SeedVR2 restores it in chunks of UPSCALE_CHUNK frames, in one sampling
-    step: one pass over 121 frames at 3840 x 2160 overflows the model's MLP, and core's automatic chunk size takes the
-    whole shot on a large GPU. Neighbouring chunks share one latent frame, UPSCALE_OVERLAP frames, which core's merge
-    crossfades. The post-processing matches the colours to the Lanczos frames (Slot color_fix: lab, the node's default,
+    Lanczos brings the window to the target size. SeedVR2 restores it in one sampling step, in chunks of Slot chunk_frames
+    frames (UPSCALE_CHUNK by default), two neighbouring chunks sharing Slot chunk_overlap latent frames (one by default),
+    which core's merge crossfades; a chunk as long as the window is one pass. Core runs SeedVR2's MLP 8192 tokens at a time,
+    so what bounds a pass is the sampler's activations, which grow with the latent frames and the pixels; core's automatic
+    chunk size measures them on the 3B model, from the VRAM free before the model loads, so the caller chooses the chunk. The post-processing matches the colours to the Lanczos frames (Slot color_fix: lab, the node's default,
     or none). Save Frames writes the window: 16-bit PNG, or half-float EXR for a float plate (Slot format).
 
     Two optional parts make the upscaled set of an edit that keeps the plate's untouched pixels, where this window is the
@@ -930,8 +930,8 @@ def upscale():
     unet = g("UNETLoader", unet_name=SEEDVR2, weight_dtype="default")
     latent = g("VAEEncodeTiled", pixels=g("SeedVR2Preprocess", resized_images=resized), vae=vae, tile_size=512, overlap=128,
                temporal_size=64, temporal_overlap=8)
-    chunks = g("SeedVR2TemporalChunk", latent=latent, temporal_overlap=UPSCALE_OVERLAP // 4, chunking_mode="manual",
-               chunking_mode__frames_per_chunk=UPSCALE_CHUNK)
+    chunks = g("SeedVR2TemporalChunk", latent=latent, temporal_overlap=Slot("chunk_overlap", 1), chunking_mode="manual",
+               chunking_mode__frames_per_chunk=Slot("chunk_frames", UPSCALE_CHUNK))
     cond = g("SeedVR2Conditioning", model=unet, vae_conditioning=chunks[0])
     sampled = g("KSampler", _progress=True, model=unet, seed=Slot("seed", 42), steps=1, cfg=1.0, sampler_name="euler",
                 scheduler="simple", positive=cond[0], negative=cond[1], latent_image=chunks[0], denoise=1.0)
@@ -968,7 +968,7 @@ def upscale_export():
     g = Graph()
     shot = g("PaintAPlate_LoadPlate", _title="Result: its format", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
     frames = g("PaintAPlate_JoinWindows", _title="Upscaled windows, joined", folder=Slot("frames", ""),
-               count=Slot("count", 0), max_frames=Slot("max_frames", 121))
+               count=Slot("count", 0), max_frames=Slot("max_frames", 121), counts=Slot("counts", ""), share=Slot("share", 0))
     g("PaintAPlate_SavePlate", _title="Upscaled export", _output="export", images=frames, plate=shot[2],
       filename_prefix=Slot("prefix", "paintaplate/plate/upscaled"), keep_untouched=False)
     g("PaintAPlate_SaveMovie", width=Slot("movie_width", 0), height=Slot("movie_height", 0), _title="Viewer movie of the upscaled part, at its own size", _output="video",

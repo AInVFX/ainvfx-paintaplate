@@ -41,7 +41,7 @@ def run(browser, port, U):
     page.wait_for_function(RESTS, timeout=60000)
     U.settled(page)
     said = [t for t in U.log_lines(page) if t.startswith("Upscale: ")]
-    U.check(any("3 windows of 21 frames" in t for t in said), f"the plate's 49 frames make three windows: {said}")
+    U.check(any("3 windows of 19 frames" in t for t in said), f"the plate's 49 frames make three windows: {said}")
     name, _ = U.save_scene(page)
     page.reload()
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)

@@ -803,7 +803,10 @@ export function logFileName(plate, d) {
 // most: the largest target, its long and short sides; sizes: the long sides the menu lists beside the plate's own; least:
 // the smallest long side Custom… takes.
 export const UPSCALE = { long: 3840, most: [3840, 2160], sizes: [2560, 3840], least: 640, factor: 3, chunk: 21, step: 20, modelRam: 15.7,
-  bigVram: 32, copies: 8, composeCopies: 10 };
+  bigVram: 32, copies: 8, composeCopies: 10, channels: 3072, passBase: 16.5, passPerMpx: 0.29, smallPass: 6, overlap: 3, share: 4 };
+// One pass of SeedVR2 7B (upscalePass): channels, the model's; passBase and passPerMpx, its VRAM in GB, then per latent frame per
+// megapixel; smallPass, the latent frames of a pass on a GPU under bigVram GB; overlap, the latent frames two chunks share;
+// share, the frames two windows share, which the join crossfades (upscaleWindows).
 // The size a person asks for: { side, px }, side "long", "width" or "height". The default is 3840 px on the long side, and a
 // scene saved before sizes, with the switch on (true), asks for it too.
 export const UPSCALE_ASK = { side: "long", px: UPSCALE.long };
@@ -855,8 +858,16 @@ export function upscaleWindow(ramGb, vramGb, [tw, th], [pw, ph], frames, copies 
   if (fit >= frames) return frames;
   return UPSCALE.chunk + UPSCALE.step * Math.max(0, Math.floor((fit - UPSCALE.chunk) / UPSCALE.step));
 }
-export const upscaleWindows = (frames, size) => // [first, count] of each job: windows that follow one another and share no frame
-  Array.from({ length: Math.ceil(frames / size) }, (_, i) => [i * size, Math.min(size, frames - i * size)]);
+// [first, count] of each job: windows of at most `size` frames, spread evenly so none is short, two neighbours sharing
+// `share` frames, which Join Windows crossfades, so the frames at a window's edge are sampled with context on both sides
+// and the change from one window to the next spreads over them. One window when the shot holds in one.
+export function upscaleWindows(frames, size, share = UPSCALE.share) {
+  if (frames <= size) return [[0, frames]];
+  const n = Math.ceil((frames - share) / (size - share)), total = frames + (n - 1) * share, base = Math.floor(total / n), extra = total - n * base;
+  const out = [];
+  for (let i = 0, first = 0; i < n; i++) { const count = base + (i < extra ? 1 : 0); out.push([first, count]); first += count - share; }
+  return out;
+}
 // Seconds, from 121 frames of horse.mp4 at 3840 x 2160: a SeedVR2 pass took 1,332 s on a 16 GB GPU (six windows of 21
 // frames) and 388 s on a 96 GB GPU (one job); each part Save Plate writes at 4K took 28.5 s and 27.4 s. Scaled by the
 // target's pixels and the frames. Paint and Clean make two passes, the plate's and the layer's, and write three parts.
@@ -869,6 +880,39 @@ export function upscaleSeconds([tw, th], frames, { passes = 1, parts = 1, profil
 // frames under the edits), under a key of everything that changes their frames (the plate, its colour space and config,
 // the sizes, the window, the format, the build), so a changed setting never adds frames to old ones, and every render on
 // this plate finds them through the job index. FNV-1a, 32 bits, in hex.
+// What one pass of SeedVR2 7B holds, in latent frames (4 frames each, the first 1), at a target of width x height on a GPU
+// of vramGb GB: the smaller of two bounds. A 32-bit index: a tensor of tokens x the model's 3,072 channels stays under 2^31
+// values, tokens being latent frames x pixels / 256; past it, CUDA reports an illegal memory access (on a 96 GB GPU at
+// 3840 x 2160, 81 frames held and 85 did not, with 29 GB of VRAM still free). The VRAM, on a GPU of bigVram GB or more, where
+// the model stays loaded: 16.5 GB, then 0.29 GB per latent frame per megapixel (measured on 96 GB from 13 to 31 latent frames
+// at 2560 x 1440 and 3840 x 2160). On a smaller GPU, where the model streams, the chunk of 21 frames that runs there.
+export function upscalePass([width, height], vramGb) {
+  const bound = Math.floor((2 ** 31 * 256) / (UPSCALE.channels * width * height));
+  const vram = vramGb >= UPSCALE.bigVram ? Math.floor((vramGb - UPSCALE.passBase) / (UPSCALE.passPerMpx * width * height / 1e6)) : UPSCALE.smallPass;
+  return Math.max(1, Math.min(bound, vram));
+}
+// The chunks core's SeedVR2TemporalChunk makes of a window of count frames, chunks of frames frames sharing overlap latent frames.
+export function upscaleChunks(count, frames, overlap = UPSCALE.overlap) {
+  const latent = Math.floor((count - 1) / 4) + 1, size = Math.floor((frames - 1) / 4) + 1;
+  if (size >= latent) return 1;
+  let start = 0, chunks = 1;
+  while (start + size < latent) { start += size - Math.min(overlap, size - 1); chunks++; }
+  return chunks;
+}
+// Upscale's chunks in one window, as core's SeedVR2TemporalChunk cuts it: the frames per chunk with which every chunk is
+// full, none short at the window's end, at most `most` latent frames each, two neighbours sharing `overlap` latent frames
+// that core's merge crossfades (3: one latent frame half and half, with one of each chunk's own on each side). The window
+// itself when it holds in one chunk: one pass. Among the sizes that end full, the longest, which samples the fewest frames.
+// Frames counted as core counts them: latent frame 0 holds frame 0, latent frame k frames 4k - 3 to 4k.
+export function upscaleChunk(count, most, overlap = UPSCALE.overlap) {
+  const latent = Math.floor((count - 1) / 4) + 1;
+  if (latent <= most) return count;
+  const o = Math.min(overlap, most - 1);
+  const short = (size) => { let start = 0; while (start + size < latent) start += size - o; return size - (latent - start); }; // the last chunk's lack
+  let best = most;
+  for (let size = o + 1; size <= most; size++) if (short(size) < short(best) || (short(size) === short(best) && size > best)) best = size;
+  return 4 * (best - 1) + 1;
+}
 // The folder of a Finish pass's set, which the steps write and Export reads: a pass writes its set inside the folder of the
 // set it reads. SDR to HDR's set: <run>/hdr; Upscale's at a size: <run>/upscale/<size>/out, or <run>/hdr/upscale/<size>/out
 // on SDR to HDR's set. With neither, the plate-size set: <run> itself.

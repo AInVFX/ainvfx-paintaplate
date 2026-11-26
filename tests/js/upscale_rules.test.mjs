@@ -26,8 +26,10 @@ test("windows follow the machine: 21 frames on a 16 GB GPU under a 52 GB cap, on
   assert.equal(upscaleWindow(175.1, 95.0, UHD, HD, 121), 121);
   assert.equal(upscaleWindow(64.0, 95.0, UHD, HD, 121), 61);
   assert.equal(upscaleWindow(24.0, 8.0, UHD, HD, 121), 21); // at least one chunk
-  assert.deepEqual(upscaleWindows(121, 21), [[0, 21], [21, 21], [42, 21], [63, 21], [84, 21], [105, 16]]);
+  assert.deepEqual(upscaleWindows(121, 21), [[0, 21], [17, 21], [34, 21], [51, 21], [68, 21], [85, 20], [101, 20]], "even windows sharing 4 frames, none short");
+  assert.deepEqual(upscaleWindows(49, 21), [[0, 19], [15, 19], [30, 19]], "49 frames: three of 19, where windows that share nothing leave the last one 7");
   assert.deepEqual(upscaleWindows(121, 121), [[0, 121]]);
+  assert.deepEqual(upscaleWindows(121, 21, 0), [[0, 21], [21, 20], [41, 20], [61, 20], [81, 20], [101, 20]], "sharing nothing: even still");
 });
 
 test("a job that composes the 4K result holds 10 copies of a frame: the windows of Paint and Clean are sized for it", () => {

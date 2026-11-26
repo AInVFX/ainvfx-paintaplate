@@ -926,17 +926,21 @@ class JoinWindows(io.ComfyNode):
                              tooltip="Frames in each window. Each window reads its last 'count' frames, so a window saved twice counts once. 0 reads every frame."),
                 io.Int.Input("max_frames", default=0, min=0, max=MOST_FRAMES, optional=True,
                              tooltip="Frames in the shot. The last window reads what is left after the others. 0 reads every frame."),
+                io.String.Input("counts", default="", optional=True,
+                                tooltip="Frames in each window, in order, separated by commas: each window reads its newest frames. Empty: 'count' for every window."),
+                io.Int.Input("share", default=0, min=0, max=MOST_FRAMES, optional=True,
+                             tooltip="Frames two neighbouring windows share, which the join crossfades: the later window's weight rises across them. 0: windows that follow one another."),
             ],
             outputs=[io.Image.Output(display_name="images")],
         )
 
     @classmethod
-    def execute(cls, folder, count=0, max_frames=0) -> io.NodeOutput:
+    def execute(cls, folder, count=0, max_frames=0, counts="", share=0) -> io.NodeOutput:
         full = folders.plate_path(folder)
         windows = sorted(os.path.join(full, d) for d in os.listdir(full) if os.path.isdir(os.path.join(full, d)))
         if not windows:
             raise ValueError(f"Join Windows: no window folder in {folder}.")
-        rgb = plateio.join_windows(windows, WORKERS, count, max_frames)
+        rgb = plateio.join_windows(windows, WORKERS, count, max_frames, [int(c) for c in counts.split(",") if c.strip()], share)
         return io.NodeOutput(torch.from_numpy(rgb).to(device=mm.intermediate_device(), dtype=mm.intermediate_dtype()))
 
 

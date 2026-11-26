@@ -19,14 +19,18 @@
   "inputs": {
    "folder": "",
    "count": 0,
-   "max_frames": 121
+   "max_frames": 121,
+   "counts": "",
+   "share": 0
   },
   "_meta": {
    "title": "Upscaled windows, joined",
    "slots": {
     "folder": "frames",
     "count": "count",
-    "max_frames": "max_frames"
+    "max_frames": "max_frames",
+    "counts": "counts",
+    "share": "share"
    }
   }
  },

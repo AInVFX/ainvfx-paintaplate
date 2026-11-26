@@ -325,15 +325,33 @@ async def execute(pid, prompt):
             start = len(glob.glob(os.path.join(folder("output"), sub, f"{stem}_*_.png")))
             o[outs["matte"]] = {"images": [flat(m, v["matte_prefix"], start + i) for i, m in enumerate(mattes)][:1]}
     elif "export" in outs and "path" not in v:  # upscale_export: the windows joined in order, written as the export is (a movie here)
-        files = [f for d in sorted(glob.glob(os.path.join(resolve(v["frames"]), "*", ""))) for f in sorted(glob.glob(os.path.join(d, "*.png")))]
+        dirs, share = sorted(glob.glob(os.path.join(resolve(v["frames"]), "*", ""))), int(v.get("share") or 0)
+        counts = [int(c) for c in str(v.get("counts") or "").split(",") if c.strip()]
+
+        def joined():  # as Join Windows joins them: each window's newest frames, the frames two neighbours share crossfaded, streamed
+            held = []
+            for i, d in enumerate(dirs[:len(counts)] if counts else dirs):
+                files = sorted(glob.glob(os.path.join(d, "*.png")))
+                files, last = (files[len(files) - counts[i]:] if counts else files), i == (len(counts) if counts else len(dirs)) - 1
+                keep = []
+                for j, f in enumerate(files):
+                    x = np.asarray(Image.open(f).convert("RGB"), np.float32) / 255
+                    if j < len(held):
+                        w = (j + 1) / (share + 1)
+                        yield held[j] * (1 - w) + x * w
+                    elif share and not last and j >= len(files) - share:
+                        keep.append(x)
+                    else:
+                        yield x
+                held = keep
         await steps(pid, 1, 1.0)
         fps = read_plate(v["shot"], 1)[1]["fps"]
-        save_mp4((np.asarray(Image.open(f).convert("RGB"), np.float32) / 255 for f in files), f"{v['prefix']}/plate", fps)
+        save_mp4(joined(), f"{v['prefix']}/plate", fps)
         o[outs["export"]] = {"text": [f"Save Plate: 1 file written to {v['prefix']}."],
                              "files": [{"filename": "plate_00001_.webm", "subfolder": v["prefix"], "type": "output"}]}
         if "video" in outs and v.get("video_prefix"):  # the part's viewer movie, at the size the page asks for
             side = max(int(v.get("movie_width") or 0), int(v.get("movie_height") or 0))
-            o[outs["video"]] = {"images": [save_mp4((np.asarray(Image.open(f).convert("RGB"), np.float32) / 255 for f in files), v["video_prefix"], fps, side)], "animated": [True]}
+            o[outs["video"]] = {"images": [save_mp4(joined(), v["video_prefix"], fps, side)], "animated": [True]}
     elif "plate_prefix" in v and "layer" in v:  # hdr_comp: the HDR set's composite, the plate around the matte and the layer inside it, and the set's copies
         top = int(v.get("max_frames") or 1024)
         plate = [f[..., :3].astype(np.float16) for f in read_plate(v["plate"], top)[0]]  # half floats, as the EXR frames hold them: three inputs fit the mock's memory
@@ -552,7 +570,9 @@ POSTS = []
 async def prompt_route(request):
     body = await request.json()
     live = next((n.get("inputs", {}).get("every") for n in body["prompt"].values() if n.get("class_type") == "PaintAPlate_LivePreview"), None)
-    POSTS.append({"outputs": sorted(outputs_of(body["prompt"])), "extra_data": body.get("extra_data"), "live": live})  # mock only: what each post asked for; `live`: an LTX pass sends a live preview every so many steps
+    chunk = next(([n["inputs"].get("chunking_mode.frames_per_chunk"), n["inputs"].get("temporal_overlap")] for n in body["prompt"].values()
+                  if isinstance(n, dict) and n.get("class_type") == "SeedVR2TemporalChunk"), None)  # Upscale's frames per chunk and shared latent frames
+    POSTS.append({"outputs": sorted(outputs_of(body["prompt"])), "extra_data": body.get("extra_data"), "live": live, "chunk": chunk})  # mock only: what each post asked for; `live`: an LTX pass sends a live preview every so many steps
     pid = str(uuid.uuid4())
     if "plate" in outputs_of(body["prompt"]):
         EVENTS.append(("prompt", time.time(), "fluid"))

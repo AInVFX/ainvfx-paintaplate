@@ -46,10 +46,10 @@ class UpscaleWorkflow(unittest.TestCase):
         self.assertEqual((into["inputs"]["image"], into["inputs"]["peak_of"], into["inputs"]["destination"]), ([cid, 0], [lid, 0], "@model"))
         self.assertEqual((back["inputs"]["source"], back["inputs"]["peak"], back["_meta"]["slots"]["destination"]), ("@model", [iid, 1], "color_space"))
 
-    def test_seedvr2_samples_chunks_of_21_frames_in_one_step(self):
+    def test_seedvr2_samples_in_one_step_in_the_chunks_its_slots_name(self):
         (_, chunk), = of(self.p, "SeedVR2TemporalChunk")
-        self.assertEqual(chunk["inputs"]["chunking_mode.frames_per_chunk"], build_workflows.UPSCALE_CHUNK)
-        self.assertEqual((chunk["inputs"]["temporal_overlap"], build_workflows.UPSCALE_OVERLAP), (1, 4))  # one latent frame
+        self.assertEqual(chunk["_meta"]["slots"], {"temporal_overlap": "chunk_overlap", "chunking_mode.frames_per_chunk": "chunk_frames"})
+        self.assertEqual((chunk["inputs"]["chunking_mode.frames_per_chunk"], chunk["inputs"]["temporal_overlap"]), (21, 1))  # by default: 21 frames, one shared latent frame
         self.assertEqual(build_workflows.UPSCALE_CHUNK, 21)
         (_, ks), = of(self.p, "KSampler")
         self.assertEqual((ks["inputs"]["steps"], ks["inputs"]["denoise"], ks["_meta"]["slots"]["seed"]), (1, 1.0, "seed"))
@@ -104,18 +104,19 @@ class ExportJob(unittest.TestCase):
         (sid, shot), = of(p, "PaintAPlate_LoadPlate")
         (jid, join), = of(p, "PaintAPlate_JoinWindows")
         (_, save), = of(p, "PaintAPlate_SavePlate")
-        self.assertEqual((shot["_meta"]["slots"]["path"], join["_meta"]["slots"]), ("shot", {"folder": "frames", "count": "count", "max_frames": "max_frames"}))
+        self.assertEqual((shot["_meta"]["slots"]["path"], join["_meta"]["slots"]), ("shot", {"folder": "frames", "count": "count", "max_frames": "max_frames", "counts": "counts", "share": "share"}))
         self.assertEqual((save["inputs"]["images"], save["inputs"]["plate"], save["inputs"]["keep_untouched"]), ([jid, 0], [sid, 2], False))
         self.assertEqual(save["_meta"]["output"], "export")
         self.assertEqual(set(upscale_plate.export_values("plates/horse.mp4", 121)), slots(p))
 
-    def test_windows_follow_one_another_and_save_one_folder_each(self):
-        self.assertEqual(upscale_plate.windows(121, every=True), [(0, 21), (21, 21), (42, 21), (63, 21), (84, 21), (105, 16)])
+    def test_windows_are_the_pages_even_windows_sharing_4_frames_one_folder_each(self):
+        self.assertEqual(upscale_plate.windows(121, every=True), [(0, 21), (17, 21), (34, 21), (51, 21), (68, 21), (85, 20), (101, 20)])
         self.assertEqual(upscale_plate.windows(121, 0, 121, every=True), [(0, 121)])
         self.assertEqual(upscale_plate.windows(121, 84, 42), [(84, 37)])
         self.assertEqual((upscale_plate.WINDOW, upscale_plate.CHUNK_STEP), (build_workflows.UPSCALE_CHUNK, 20))
         self.assertEqual(upscale_plate.values("plates/horse.mp4", 1920, 1080, 121, window=3)["prefix"], "upscale/upscale/w003/f")
         self.assertEqual(upscale_plate.export_values("plates/horse.mp4", 121)["frames"], "output:upscale/upscale")
+        self.assertEqual({k: upscale_plate.export_values("plates/horse.mp4", 121)[k] for k in ("counts", "share")}, {"counts": "21,21,21,21,21,20,20", "share": 4})
         with open(os.path.join(ROOT, "folders.py")) as f:
             self.assertIn(f'\nOUTPUT = "{upscale_plate.OUTPUT}"', f.read())
 
