@@ -320,10 +320,10 @@ async def execute(pid, prompt):
         if "comp" in outs:  # the 4K plate's window around the matte, the layer inside it
             under = [np.asarray(Image.open(f).convert("RGB").getpixel((0, 0)), np.float32) / 255 for f in pngs(v["under"])]
             o[outs["comp"]] = {"images": [flat(c * m + u * (1 - m), v["comp_prefix"], i) for i, (c, u, m) in enumerate(zip(layer, under, mattes))][:1]}
-        if "matte" in outs:  # numbered on from the frames its folder holds, as Save Frames counts
+        if "matte" in outs:  # the frames the window before did not save, numbered on from the frames its folder holds, as Save Frames counts
             sub, _, stem = v["matte_prefix"].rpartition("/")
             start = len(glob.glob(os.path.join(folder("output"), sub, f"{stem}_*_.png")))
-            o[outs["matte"]] = {"images": [flat(m, v["matte_prefix"], start + i) for i, m in enumerate(mattes)][:1]}
+            o[outs["matte"]] = {"images": [flat(m, v["matte_prefix"], start + i) for i, m in enumerate(mattes[int(v.get("share") or 0):])][:1]}
     elif "export" in outs and "path" not in v:  # upscale_export: the windows joined in order, written as the export is (a movie here)
         dirs, share = sorted(glob.glob(os.path.join(resolve(v["frames"]), "*", ""))), int(v.get("share") or 0)
         counts = [int(c) for c in str(v.get("counts") or "").split(",") if c.strip()]

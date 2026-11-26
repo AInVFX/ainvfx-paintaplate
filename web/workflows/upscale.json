@@ -433,10 +433,28 @@
   }
  },
  "26": {
-  "class_type": "ImageScale",
+  "class_type": "ImageFromBatch",
   "inputs": {
    "image": [
     "20",
+    0
+   ],
+   "batch_index": 0,
+   "length": 21
+  },
+  "_meta": {
+   "title": "The window's matte frames that the window before did not save",
+   "slots": {
+    "batch_index": "share",
+    "length": "count"
+   }
+  }
+ },
+ "27": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "image": [
+    "26",
     0
    ],
    "upscale_method": "bilinear",
@@ -454,11 +472,11 @@
    "title": "The matte at the target size (bilinear, as Composite Frames sizes it)"
   }
  },
- "27": {
+ "28": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
-    "26",
+    "27",
     0
    ],
    "format": "png16",

@@ -3430,9 +3430,10 @@ async function upscalePart(part, set, keeps, progress, sized, made = {}) {
     + (keeps ? "SeedVR2 7B upscales the plate and the layer, then composites the result from them and the matte." : "SeedVR2 7B upscales the result."));
   const values = (shot, space, [first, count], more) => ({ shot, max_frames: p.frames, source_width: sw, source_height: sh, first, count,
     width: target[0], height: target[1], color_space: space, color_fix: "lab", format, seed: 42, config: S.ocio.config, under: "", under_space: space,
-    matte: "", comp_prefix: "", matte_prefix: "", chunk_frames: upscaleChunk(count, most), chunk_overlap: UPSCALE.overlap, ...more }); // one pass, or even chunks
+    matte: "", comp_prefix: "", matte_prefix: "", share: 0, chunk_frames: upscaleChunk(count, most), chunk_overlap: UPSCALE.overlap, ...more }); // one pass, or even chunks
   const out = setFolder(set.dir, { size: sized }); // the upscaled set of this size, which the zip names upscaled/ (download)
-  const matte = () => ({ matte: set.matte ?? "", matte_prefix: set.matte ? `${out}/matte/matte` : "" });
+  const matte = (i, [first]) => ({ matte: set.matte ?? "", matte_prefix: set.matte ? `${out}/matte/matte` : "", // one frame per frame of the shot:
+    share: i ? windows[i - 1][0] + windows[i - 1][1] - first : 0 }); // a window saves no matte frame that the window before saved
   const [mw, mh] = colour.nativeSize(target[0], target[1], NATIVE_SIDE), view = float ? logSpace() : p.cs; // its viewer movie: the look of its frames
   const save = (shot, frames, name, space) => ["upscale_export", { shot, frames: `output:${frames}`, max_frames: p.frames, prefix: `${out}/${name}`,
     counts: windows.map(([, count]) => count).join(","), share: UPSCALE.share, // each window's frames, and the frames two neighbours share: the join crossfades them
@@ -3442,8 +3443,8 @@ async function upscalePart(part, set, keeps, progress, sized, made = {}) {
   let comp = (part === "comp" ? made.comp : null) ?? `${set.dir}/upscale/${sized}/comp`; // the frames the layer's windows compose
   const under = made.plate ?? plateDir;
   const window = (win, i) => (part === "plate" ? values(p.path, p.cs, win, { prefix: `${home}/${n(i)}/f` })
-    : part === "layer" ? values(set.layer, set.space, win, { prefix: `${home}/${n(i)}/f`, ...matte(), under: `output:${under}/${n(i)}`, under_space: p.cs, comp_prefix: `${comp}/${n(i)}/f` })
-    : values(set.result, set.space, win, { prefix: `${home}/${n(i)}/f`, ...matte() }));
+    : part === "layer" ? values(set.layer, set.space, win, { prefix: `${home}/${n(i)}/f`, ...matte(i, win), under: `output:${under}/${n(i)}`, under_space: p.cs, comp_prefix: `${comp}/${n(i)}/f` })
+    : values(set.result, set.space, win, { prefix: `${home}/${n(i)}/f`, ...matte(i, win) }));
   const mine = part === "comp" && keeps ? [] : windows; // after the plate and the layer, « Composite, upscaled » has no window: the layer's jobs composed its frames
   const total = mine.reduce((a, win) => a + win[1], 0) + size / 5; // a window weighs its frames, a part written a fifth of a window
   let before = 0;

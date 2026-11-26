@@ -899,8 +899,8 @@ def upscale():
     The page sends the export (Slot shot), in the plate's colour space (Slot color_space), and as many frames per job as
     the machine's RAM holds: the whole shot where it can, else windows. 121 frames at 3840 x 2160 in one job reach 52 GB
     of RAM on a 96 GB GPU; on a 16 GB GPU the model's 15.7 GB stay in RAM as well, and a window of 42 frames goes past a
-    52 GB cap. Each window saves into a folder of its own (Slot prefix). Windows share no frames: on a 96 GB GPU, the frames
-    of windows of 21 frames change across a window's edge no more than within a window. The window goes into the model space with the whole shot's peak (peak_of), so
+    52 GB cap. Each window saves into a folder of its own (Slot prefix). Two neighbouring windows share frames, which Join
+    Windows crossfades (upscale_export). The window goes into the model space with the whole shot's peak (peak_of), so
     an HDR shot keeps one exposure from one window to the next, and comes back with that peak.
 
     Lanczos brings the window to the target size. SeedVR2 restores it in one sampling step, in chunks of Slot chunk_frames
@@ -916,7 +916,8 @@ def upscale():
     inside it, through Composite Frames. The matte (Slot matte, the export's, at the plate's size) is cut to the window
     and sized as Composite Frames sizes it, with a bilinear filter: never generated. The upscaled matte (Slot matte_prefix):
     that same picture as 16-bit PNG frames, so the upscaled result, plate, layer and matte add up to one code value. Every
-    window saves its matte into one folder, numbered on from the frames already there.
+    window saves into one folder the matte frames that it does not share with the window before (Slot share: 0 for the
+    first window), numbered on from the frames already there, so the folder holds one frame per frame of the shot.
     """
     g = Graph()
     load = g("PaintAPlate_LoadPlate", _title="Result", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
@@ -951,7 +952,9 @@ def upscale():
     saved = g("PaintAPlate_SaveFrames", _title="Upscaled result frames", _output="comp", images=comp, fps=load[3], format=Slot("format", "png16"),
               filename_prefix=Slot("comp_prefix", ""))
     g.link_slot(saved, "images", "upscale_comp")
-    big = g("ImageScale", _title="The matte at the target size (bilinear, as Composite Frames sizes it)", image=matte, upscale_method="bilinear",
+    new = g("ImageFromBatch", _title="The window's matte frames that the window before did not save", image=matte,
+            batch_index=Slot("share", 0), length=Slot("count", UPSCALE_CHUNK))
+    big = g("ImageScale", _title="The matte at the target size (bilinear, as Composite Frames sizes it)", image=new, upscale_method="bilinear",
             width=size[0], height=size[1], crop="disabled")
     saved = g("PaintAPlate_SaveFrames", _title="Upscaled matte", _output="matte", images=big, format="png16", filename_prefix=Slot("matte_prefix", ""))
     g.link_slot(saved, "images", "upscale_matte")
