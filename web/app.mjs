@@ -2300,7 +2300,7 @@ async function generate(edit) {
     cancel("warm"); // an edit never waits for the warm-up: what it needs loads now
     S.running = edit;
     edit.saw = activeBefore(edit).map(record); // the edits under it as it starts: a change to them restarts it (rebuild)
-    Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false, leftWhy: null, editAsked: false, refused: null });
+    Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false, leftWhy: null, editAsked: false, refused: null, page3Began: performance.now() }); // its time counts from here, a run of its own whatever started it
     recompose(); historyUI(); render();
     log(`Edit ${num(edit)}: ${NAME[edit.tool]} ${edit.prompt ? `"${edit.prompt}"` : "with no text prompt"}, seed ${edit.seed}${edit.tool === "erase" ? `, whole object ${edit.whole ? "on" : "off"}` : ""}, ${painted(edit)} stroke${painted(edit) === 1 ? "" : "s"}, over ${edit.saw.length} edit${edit.saw.length === 1 ? "" : "s"}.`);
     await edit.preparing; // the snap and the caption started when the strokes stopped: reused when nothing changed since
@@ -2374,7 +2374,7 @@ async function generate(edit) {
     keep(edit);
     historyUI(); render(); timelineUI();
     status(`Edit ${num(edit)}: on the first frame. The shot renders next.`);
-    log(`Edit ${num(edit)}: done in ${((performance.now() - edit.launched) / 1000).toFixed(1)} s.`);
+    log(`Edit ${num(edit)}: done in ${((performance.now() - edit.page3Began) / 1000).toFixed(1)} s.`);
   } catch (err) {
     if (edit.token === token) {
       Object.assign(edit, { state: edit.patch ? "done" : "failed", preview: null, latent: null });
