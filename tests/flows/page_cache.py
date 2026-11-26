@@ -45,7 +45,7 @@ def run(browser, port, U):
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function(OPEN, timeout=60000)
-    U.check(U.poll(page, lambda: any(t.startswith("Frame cache, 1.5 GB (View > Cache memory): ") for t in U.log_lines(page)), 10),
+    U.check(U.poll(page, lambda: any(t.startswith("Frame cache, 1.5 GB (View > Cache memory). ") for t in U.log_lines(page)), 10),
             f"the next session plans its frame cache on 1.5 GB: {[t for t in U.log_lines(page) if t.startswith('Frame cache')]}")
     lines = lambda: [t for t in U.log_lines(page) if t.startswith("Frame cache, ")]  # noqa: E731
     before, size = lines(), page.viewport_size
@@ -61,7 +61,7 @@ def run(browser, port, U):
     page.on("request", lambda r: asked.append(r.url) if "/paintaplate/frames?" in r.url else None)
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function(OPEN, timeout=60000)
-    U.check(U.poll(page, lambda: any(" at 960 x 528" in t for t in U.log_lines(page) if t.startswith("Frame cache, ")), 10),
+    U.check(U.poll(page, lambda: any("(960 x 528)" in t for t in U.log_lines(page) if t.startswith("Frame cache, ")), 10),
             f"40 MB keeps the frames smaller than the plate: {[t for t in U.log_lines(page) if t.startswith('Frame cache')]}")
     for _ in range(5):
         page.keyboard.press("ArrowRight")

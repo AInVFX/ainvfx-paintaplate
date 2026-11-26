@@ -504,14 +504,26 @@ function planCaches() { // each cache's share and frame size, when the budget, t
   const budget = cacheBudget(), frames = S.outPt - S.inPt + 1, shot = !!S.shot?.url, plateOn = !shot || S.wipe !== null;
   const exact = colour.nativeSize(p.spec.width, p.spec.height, DEEP_SIDE), size = (v) => [v.videoWidth, v.videoHeight];
   const sources = [
-    plateVid.videoWidth && { id: "plate", name: "the plate's", cache: caches.get(plateVid), movie: size(plateVid), show: plateOn && !p.deep },
-    shot && shotVid.videoWidth && { id: "shot", name: "the shot's", cache: caches.get(shotVid), movie: size(shotVid), show: !S.shot.frames },
-    p.deep && !DEEP_MB && { id: "deep", name: "the plate's", kind: "EXR", cache: deep, movie: exact, show: plateOn, bytes: 6 },
-    S.shot?.frames && !DEEP_MB && { id: "deepShot", name: "the shot's", kind: "EXR", cache: deepShot, movie: exact, show: true, bytes: 6 },
+    plateVid.videoWidth && { id: "plate", name: "Plate", cache: caches.get(plateVid), movie: size(plateVid), show: plateOn && !p.deep },
+    shot && shotVid.videoWidth && { id: "shot", name: shotLabel(), cache: caches.get(shotVid), movie: size(shotVid), show: !S.shot.frames },
+    p.deep && !DEEP_MB && { id: "deep", name: "Plate", kind: "EXR", cache: deep, movie: exact, show: plateOn, bytes: 6 },
+    S.shot?.frames && !DEEP_MB && { id: "deepShot", name: shotLabel(), kind: "EXR", cache: deepShot, movie: exact, show: true, bytes: 6 },
   ].filter(Boolean);
   if (!sources.length) return; // no movie has loaded yet
   const rest = JSON.stringify([frames, sources.map((s) => [s.id, s.movie, s.show])]), key = JSON.stringify([budget, rest]);
-  if (key === planned.key && !outgrows(planned.fit, fit)) return; // a resize keeps the frames (frames.mjs: outgrows)
+  // The line names each source and its frames in memory, once per plate: a change of the step displayed alone keeps the
+  // plan, and its line names that step (shotLabel); a source displayed comes first, as the plan reads them
+  const say = (shares) => {
+    const why = CACHE_MB ? "set in the address" : S.cache ? "View > Cache memory" : "Auto"; // the memory profile's line names the GPU
+    const said = cacheLine(memoryText(budget), why, [...sources].sort((x, y) => Number(!!y.show) - Number(!!x.show)).map((s) => ({ name: s.name, kind: s.kind, frames, show: s.show, movie: s.movie, ...shares[s.id] })));
+    if (planned.plate !== S.plate) Object.assign(planned, { plate: S.plate, saidAll: new Set() }); // a switch between sources displayed says nothing new
+    planned.named = JSON.stringify(sources.map((s) => s.name));
+    if (!planned.saidAll.has(said)) { planned.saidAll.add(said); log(said); }
+  };
+  if (key === planned.key && !outgrows(planned.fit, fit)) { // a resize keeps the frames (frames.mjs: outgrows)
+    if (planned.shares && JSON.stringify(sources.map((s) => s.name)) !== planned.named) say(planned.shares);
+    return;
+  }
   const fresh = key !== planned.key; // the log says what fits when the budget, the sources or the in and out points change
   // A new budget alone keeps every cache's frame size: a larger budget drops no decoded frame, a smaller one drops only
   // the frames that no longer fit. Anything else (a source, its size displayed, the in and out points) plans the sizes again.
@@ -525,10 +537,7 @@ function planCaches() { // each cache's share and frame size, when the budget, t
   Object.assign(planned, { key, rest, budget, shares, fit: keep ? planned.fit : fit });
   for (const s of sources) if (!s.show) s.cache.stopReader(); // the sources displayed read first
   for (const s of sources.sort((a, b) => Number(!!b.show) - Number(!!a.show))) s.cache.plan(shares[s.id].budget, s.bytes ? null : [shares[s.id].width, shares[s.id].height]);
-  const why = CACHE_MB ? "set in the address" : S.cache ? "View > Cache memory" : "Auto"; // the memory profile's line names the GPU
-  const said = cacheLine(memoryText(budget), why, sources.map((s) => ({ name: s.name, kind: s.kind, frames, show: s.show, movie: s.movie, ...shares[s.id] })));
-  if (planned.plate !== S.plate) Object.assign(planned, { plate: S.plate, saidAll: new Set() }); // each plan is said once per plate: a switch between sources displayed says nothing new
-  if (fresh && !planned.saidAll.has(said)) { planned.saidAll.add(said); log(said); }
+  if (fresh) say(shares);
   cacheUI();
 }
 function planSoon() { if (!planned.timer) planned.timer = setTimeout(() => { planned.timer = 0; planCaches(); }, 300); }
@@ -1085,7 +1094,9 @@ function passLabel(id) {
   return labelOf(STAGES.find((x) => x.id === id)) ?? id;
 }
 function shownLabel() { // the pass displayed, by its row's name: the one clicked, else the latest result
-  if (S.pass) return passLabel(S.pass);
+  return S.pass ? passLabel(S.pass) : shotLabel();
+}
+function shotLabel() { // the step whose movie the viewer holds (S.shot), by its row's name
   const r = S.renders.get(S.heroKey), pv = previewOf(r);
   return labelOf(STAGES.find((x) => !r?.skip?.has(x.id) && S.shot?.url && passMovie(x.id, r, pv, passSpaces(), upOf(r))?.url === S.shot.url), r) // among the render's own steps
     ?? pictureName({ shot: !!S.shot, edits: S.edits.length > 0, upscaled: otherSizeShown(r) });
@@ -1308,6 +1319,7 @@ function stoppedUI(edit = null) { // the status line under a stop (logic.stopHin
 function setShot(src, key, space = "@model", frames = null, { framesSpace = null } = {}) {
   dropLive(); // the shot itself, rough or composited, replaces the live preview
   S.shot = src ? { url: src, key, space, frames, framesSpace } : null;
+  planSoon(); // the frame cache's line names the step displayed (planCaches)
   if (src) { if (shotVid.getAttribute("src") !== src) shotVid.src = src; }
   else { shotVid.removeAttribute("src"); shotVid.load(); }
   fitCanvas(src, key);
@@ -4255,7 +4267,7 @@ function wantDeep() { // an image sequence's own values around the playhead: the
   const p = S.plate;
   if (!p?.deep || !look.ready) return;
   fetchDeep(deep, p.path, p.name, p.cs);
-  if (S.shot?.frames) fetchDeep(deepShot, S.shot.frames, shownLabel(), S.shot.framesSpace ?? p.cs); // the step displayed, in its frames' own colour space
+  if (S.shot?.frames) fetchDeep(deepShot, S.shot.frames, shotLabel(), S.shot.framesSpace ?? p.cs); // the step displayed, in its frames' own colour space
 }
 
 function fetchDeep(cache, path, what, space) { // frames as RGB half floats from the frame route, ranked like the 8-bit cache

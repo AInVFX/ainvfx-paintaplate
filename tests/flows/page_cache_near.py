@@ -5,7 +5,7 @@ falls below where it was."""
 import re
 
 OPEN = "document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden"
-SHOT = re.compile(r"(all|\d+) of the shot's (\d+) frames at (\d+) x (\d+)")
+SHOT = re.compile(r"\. (?!Plate:)[^.:]+: (?:all ([\d,]+)|([\d,]+) of ([\d,]+)) frames in memory, \w+ size \((\d+) x (\d+)\)")  # the step displayed's part
 STRIPE = """(() => { const c = document.querySelector('#tl-cache'), d = c.getContext('2d').getImageData(0, 0, c.width, 1).data;
   let lit = 0; for (let i = 0; i < c.width; i++) if (d[i * 4 + 1] > 120) lit++; return lit / c.width; })()"""
 WATCH = """(() => { window.__least = 1; const c = document.querySelector('#tl-cache');
@@ -15,7 +15,9 @@ WATCH = """(() => { window.__least = 1; const c = document.querySelector('#tl-ca
 
 
 def shot_lines(page, U):  # the shot's part of every « Frame cache » line: (frames in, frames in all, width, height)
-    return [tuple(int(m[2] if x == "all" else x) for x in m.groups()) for t in U.log_lines(page) if t.startswith("Frame cache, ") and (m := SHOT.search(t))]
+    n = (lambda x: int(x.replace(",", "")))
+    return [(n(m[1]), n(m[1]), int(m[4]), int(m[5])) if m[1] else (n(m[2]), n(m[3]), int(m[4]), int(m[5]))
+            for t in U.log_lines(page) if t.startswith("Frame cache, ") and (m := SHOT.search(t))]
 
 
 def run(browser, port, U):

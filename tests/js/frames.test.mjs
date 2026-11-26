@@ -104,15 +104,16 @@ test("the Auto budget: 512 MB beside ComfyUI on the small memory profile, 1 GB o
 
 test("the frame cache's line of the log: the budget and where it comes from, then what fits, with no GPU size", () => {
   const line = viewerFrames.cacheLine;
-  assert.equal(line("512 MB", "Auto", [{ name: "the plate's", fits: 121, frames: 121, width: 960, height: 512, show: true, movie: [960, 512] }]),
-    "Frame cache, 512 MB (Auto): all of the plate's 121 frames at 960 x 512, their own size.");
-  assert.equal(line("512 MB", "View > Cache memory", [{ name: "the shot's", fits: 121, frames: 121, width: 1366, height: 774, show: true, shrunk: true, movie: [1920, 1088] },
-    { name: "the plate's", fits: 0, frames: 121, width: 960, height: 544, movie: [1920, 1088] }]),
-    "Frame cache, 512 MB (View > Cache memory): all of the shot's 121 frames at 1366 x 774, to fit in 512 MB.", "only the sources that hold frames");
-  assert.equal(line("1 GB", "Auto", [{ name: "the plate's", fits: 121, frames: 121, width: 1472, height: 828, show: true, movie: [1920, 1080] }]),
-    "Frame cache, 1 GB (Auto): all of the plate's 121 frames at 1472 x 828, their size on screen.");
-  assert.equal(line("8 MB", "set in the address", [{ name: "the plate's", fits: 3, frames: 49, width: 960, height: 528, show: true }, { name: "the shot's", kind: "EXR", fits: 1, frames: 1250, width: 960, height: 528 }]),
-    "Frame cache, 8 MB (set in the address): 3 of the plate's 49 frames at 960 x 528; 1 of the shot's 1,250 EXR frames at 960 x 528.");
+  assert.equal(line("512 MB", "Auto", [{ name: "Plate", fits: 121, frames: 121, width: 960, height: 512, show: true, movie: [960, 512] }]),
+    "Frame cache, 512 MB (Auto). Plate: all 121 frames in memory, full size (960 x 512).");
+  assert.equal(line("512 MB", "View > Cache memory", [{ name: "Plate, upscaled", fits: 121, frames: 121, width: 1366, height: 774, show: true, shrunk: true, movie: [1920, 1088] },
+    { name: "Plate", fits: 0, frames: 121, width: 960, height: 544, movie: [1920, 1088] }]),
+    "Frame cache, 512 MB (View > Cache memory). Plate, upscaled: all 121 frames in memory, reduced size (1366 x 774).", "only the sources that hold frames");
+  assert.equal(line("1 GB", "Auto", [{ name: "Plate", fits: 121, frames: 121, width: 1472, height: 828, show: true, movie: [1920, 1080] }]),
+    "Frame cache, 1 GB (Auto). Plate: all 121 frames in memory, reduced size (1472 x 828).");
+  assert.equal(line("8 MB", "set in the address", [{ name: "Plate", fits: 3, frames: 49, width: 960, height: 528, show: true, movie: [1280, 704] }, { name: "Composite, full size", kind: "EXR", fits: 1, frames: 1250, width: 960, height: 528, movie: [960, 528] }]),
+    "Frame cache, 8 MB (set in the address). Plate: 3 of 49 frames in memory, reduced size (960 x 528). Composite, full size: 1 of 1,250 EXR frames in memory, full size (960 x 528).");
+  assert.equal(line("512 MB", "Auto", []), "Frame cache, 512 MB (Auto). No frame in memory yet.");
 });
 
 test("frames are kept at the size displayed, smaller when the range does not fit, never under 960 px", () => {
