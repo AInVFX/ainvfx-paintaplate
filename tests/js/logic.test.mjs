@@ -617,9 +617,9 @@ test("editList and stopHint: the status line names the edits stopped and waiting
   assert.equal(editList([3]), "edit 3");
   assert.equal(editList([3, 4]), "edits 3 and 4");
   assert.equal(editList([3, 4, 5]), "edits 3, 4 and 5");
-  assert.equal(stopHint({ edit: 2, waits: [3] }), "Stopped. Edit 2 keeps its strokes, text prompt and seed. Edit 3 waits. Enter generates again, Ctrl+Enter tries another seed, Esc removes the strokes.");
-  assert.equal(stopHint({ waits: [3, 4] }), "Stopped. Edits 3 and 4 wait. Enter continues from there.");
-  assert.equal(stopHint(), "Stopped. Enter continues from there.");
+  assert.equal(stopHint({ edit: 2, waits: [3] }), "Stopped. Edit 2 keeps its strokes, text prompt and seed. Edit 3 waits. Press Enter to generate it again. Press Ctrl+Enter to try another seed. Press Esc to remove the strokes.");
+  assert.equal(stopHint({ waits: [3, 4] }), "Stopped. Edits 3 and 4 wait. Press Enter to continue from there.");
+  assert.equal(stopHint(), "Stopped. Press Enter to continue from there.");
 });
 
 // ---------- Viewer, round 1, second pass, turn 2: after Generate, an edit above waits for its own pass ----------
@@ -742,6 +742,6 @@ test("an erase that left its object: the share of the object that changed on the
   const wire = rgba((x) => (x === 5 ? [40, 40, 40] : [200, 200, 200]));
   assert.equal(erasedShare(rgba(() => [200, 200, 200]), wire, mask, w, h), 4 / 12);
   assert.equal(erasedShare(mist, before, rgba(() => [0, 0, 0]), w, h), null); // no mask: nothing to judge, nothing is held back
-  assert.equal(leftHint(""), "Type its name in the text prompt, then Generate.");
-  assert.equal(leftHint("barn"), "Use another text prompt, then Generate, or Ctrl+Enter for another seed.");
+  assert.equal(leftHint(""), "Type its name in the text prompt, then press Enter.");
+  assert.equal(leftHint("barn"), "Use another text prompt, then press Enter. Press Ctrl+Enter to try another seed.");
 });

@@ -370,7 +370,7 @@ async function openPlate(list, typed, opts = {}) {
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
   const big = bigPlateWarning(spec, S.vram); // above 2K on a GPU under BIG_PLATE.vram: renders may not finish (README, GPU). status() logs it once
   if (big) setTimeout(() => status(big), 80);
-  const next = "Describe the edit in the text prompt, paint on the frame, then Generate.", plate = S.plate;
+  const next = "Describe the edit in the text prompt, paint it on the frame, then press Enter.", plate = S.plate;
   const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", from file"} (use right-click > OCIO > Plate to change it). ${next}`;
   status(opened, "hint");
   if (long) setTimeout(() => status(`${long.split("\n")[0]} ${next}`, "hint"), 90); // after the open's own sentence, as the lines above
@@ -4812,12 +4812,13 @@ const PICK_SIDE = 5;
 const pickCtx = Object.assign(document.createElement("canvas"), { width: PICK_SIDE, height: PICK_SIDE }).getContext("2d", { willReadFrequently: true });
 $("#pick").onclick = () => pickColor();
 function pickColor() { pickFrame(!S.picking); } // the pipette, or I: on, or off again
+const PICK_HINT = "Click the frame to pick a colour. Press Esc to cancel."; // the colour picker, as it starts and after a click outside the frame
 function pickFrame(on) {
   S.picking = on && !!S.plate;
   view.classList.toggle("picking", S.picking);
   $("#pick").setAttribute("aria-pressed", String(S.picking));
   colorUI();
-  if (S.picking) hud("Pick a colour: click the frame. Esc cancels.", 4000);
+  if (S.picking) hud(PICK_HINT, 4000);
   render();
 }
 // On the first frame a pick reads the frame's own values under the pointer, the ones Klein reads, with the paint in progress
@@ -4840,7 +4841,7 @@ function pickAt(e) {
     const [kx, ky] = toView(); // the canvas holds the plate at its own size
     color = pickedColor(readBack(view, Math.round(x * kx) - half, Math.round(y * ky) - half, n, n));
   }
-  if (!color) return void hud("Click on the frame to pick a colour. Esc cancels.", 2000); // outside the frame: still picking
+  if (!color) return void hud(PICK_HINT, 2000); // outside the frame: still picking
   pickFrame(false);
   takeColor(color, own ? "" : ", as the viewer shows it on this frame");
 }

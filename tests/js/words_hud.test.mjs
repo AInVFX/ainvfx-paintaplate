@@ -16,13 +16,13 @@ test("no idiom that a reader who is not fluent must decode", () => {
 });
 
 test("after a stop, Enter continues: one sentence, which the HUD and the status line share", () => {
-  assert.equal(stopHint(), "Stopped. Enter continues from there.");
-  assert.match(stopHint({ edit: 2 }), /Esc removes the strokes\.$/);
+  assert.equal(stopHint(), "Stopped. Press Enter to continue from there.");
+  assert.match(stopHint({ edit: 2 }), /Press Esc to remove the strokes\.$/);
   assert.match(app, /: stopHint\(\), 4000\);/);
 });
 
 test("once a plate is open, the status line says the edit is described in the text prompt", () => {
-  assert.ok(app.includes('const next = "Describe the edit in the text prompt, paint on the frame, then Generate."'));
+  assert.ok(app.includes('const next = "Describe the edit in the text prompt, paint it on the frame, then press Enter."'));
   assert.ok(app.includes("New edit: describe it in the text prompt, then paint."));
 });
 

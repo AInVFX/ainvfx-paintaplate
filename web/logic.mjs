@@ -1042,7 +1042,7 @@ export function strokeTarget({ draft, current, tool }) { // where a new stroke g
 export function hidesNote(n, above) {
   if (!above.length) return "";
   const names = above.length === 1 ? `Edit ${above[0]} hides` : `Edits ${above.slice(0, -1).join(", ")} and ${above.at(-1)} hide`;
-  return `Edit ${n} changes: ${names} until Generate. Esc cancels the change.`;
+  return `Edit ${n} changes: ${names} until you press Enter. Press Esc to cancel the change.`;
 }
 
 export function toolEndsEdit({ draft, current }, tool) { // picking another tool than the edit being worked on starts a new edit
@@ -1223,7 +1223,7 @@ export const beyondDetail = ({ beyond, beyondEdges }) => (beyond === null || bey
 
 // What to do next, for the status line: an object with no name gets one; a named object gets other words or another seed.
 export const leftHint = (words) =>
-  (words ? "Use another text prompt, then Generate, or Ctrl+Enter for another seed." : "Type its name in the text prompt, then Generate.");
+  (words ? "Use another text prompt, then press Enter. Press Ctrl+Enter to try another seed." : "Type its name in the text prompt, then press Enter.");
 
 // What the page says when the check holds an erase back. The check can be wrong on a thin or faint object, or on one behind a
 // fence, so the page asks: `fact`, a warning, goes to the log once and, after « No, cancel », to the status line before leftHint;
@@ -1414,8 +1414,8 @@ export const editList = (nums) => (nums.length === 1 ? `edit ${nums[0]}` : `edit
 export function stopHint({ edit = null, waits = [] } = {}) {
   const list = waits.length ? editList(waits) : "";
   const wait = list ? ` ${list[0].toUpperCase()}${list.slice(1)} ${waits.length > 1 ? "wait" : "waits"}.` : "";
-  return edit === null ? `Stopped.${wait} Enter continues from there.`
-    : `Stopped. Edit ${edit} keeps its strokes, text prompt and seed.${wait} Enter generates again, Ctrl+Enter tries another seed, Esc removes the strokes.`;
+  return edit === null ? `Stopped.${wait} Press Enter to continue from there.`
+    : `Stopped. Edit ${edit} keeps its strokes, text prompt and seed.${wait} Press Enter to generate it again. Press Ctrl+Enter to try another seed. Press Esc to remove the strokes.`;
 }
 
 // Edits are layers, after Generate. An edit above an edit that is made again stays hidden until its own
