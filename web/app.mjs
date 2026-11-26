@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, autoChose, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, fileStem, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_STAGES, xDefaults, xRows, xShown, zipFileName, zipName } from "./logic.mjs";
+import { askedText, asksName, autoChose, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, fileStem, FINISH, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleFolder, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, upscaleSource, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName, zipName } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, hdrOfKey, exportDone, exrResult, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -3461,26 +3461,26 @@ function exportCells(r) {
   if (overFluid && !skip.has("fluid")) add("plate", "preview", name("fluid"), () => outputPath(pv().fluid?.movie));
   if (!skip.has("shot")) add("shot", "preview", name("shot"), () => outputPath(pv().raw));
   if (!skip.has("clean")) add("shot", "preview", name("clean"), () => outputPath(pv().cleanRaw));
-  if (!skip.has("comp")) { add("matte", "preview", "Matte, preview", () => outputPath(pv().compMatte)); add("composite", "preview", name("comp"), () => outputPath(pv().comp)); }
+  if (!skip.has("comp")) { add("matte", "preview", X_LABELS.mattePreview, () => outputPath(pv().compMatte)); add("composite", "preview", name("comp"), () => outputPath(pv().comp)); }
   if (overFluid) add("plate", "full", name("fluidfull"), () => r.fluid?.path);
-  else add("plate", "full", "Source plate", p.path, true); // the plate's own files, where they are
+  else add("plate", "full", X_LABELS.source, p.path, true); // the plate's own files, where they are
   if (edits || relit) {
     if (!skip.has("full")) add("shot", "full", name("full"), () => full().shot);
     if (!skip.has("cleanfull")) add("shot", "full", name("cleanfull"), () => full().clean);
   }
   if (edits) {
-    add("composite", exr ? "hdr" : "full", exr ? "Composite, HDR" : name("review"), () => r.exported?.path);
-    if (!relight) add("layer", exr ? "hdr" : "full", exr ? "Layer, HDR" : "Layer, full size", () => r.exported?.layerPath);
-    for (const stage of skip.has("hdr") ? ["full"] : ["full", "hdr"]) add("matte", stage, "Matte", () => r.exported?.mattePath); // one picture at full size and in HDR, which the zip takes once
+    add("composite", exr ? "hdr" : "full", exr ? X_LABELS.compHdr : name("review"), () => r.exported?.path);
+    if (!relight) add("layer", exr ? "hdr" : "full", exr ? X_LABELS.layerHdr : X_LABELS.layer, () => r.exported?.layerPath);
+    for (const stage of skip.has("hdr") ? ["full"] : ["full", "hdr"]) add("matte", stage, X_LABELS.matte, () => r.exported?.mattePath); // one picture at full size and in HDR, which the zip takes once
   }
   if (!skip.has("hdr")) {
-    if (alone || fluid) add("plate", "hdr", "Plate, HDR", () => r.hdrFrames ?? (r.exported && `output:${setFolder(r.exported.run, { hdr: true })}`)); // its result is the plate
-    else if (r.hdrAfter) add("composite", "hdr", "Composite, HDR", () => r.hdrFrames); // a relit result, or the edits over a fluid shot
-    else if (edits) add("shot", "hdr", "Shot, HDR", () => r.hdrFrames); // the shot made again in scene-linear values, before the composite
+    if (alone || fluid) add("plate", "hdr", X_LABELS.plateHdr, () => r.hdrFrames ?? (r.exported && `output:${setFolder(r.exported.run, { hdr: true })}`)); // its result is the plate
+    else if (r.hdrAfter) add("composite", "hdr", X_LABELS.compHdr, () => r.hdrFrames); // a relit result, or the edits over a fluid shot
+    else if (edits) add("shot", "hdr", X_LABELS.shotHdr, () => r.hdrFrames); // the shot made again in scene-linear values, before the composite
   }
-  if (up && (alone || fluid)) add("plate", "up", upHdr ? "Plate, HDR, upscaled" : name("upplate"), out("export"));
+  if (up && (alone || fluid)) add("plate", "up", upHdr ? X_LABELS.plateHdrUp : name("upplate"), out("export"));
   else if (up) {
-    add("composite", "up", upHdr ? "Composite, HDR, upscaled" : name("upcomp"), out("export"));
+    add("composite", "up", upHdr ? X_LABELS.compHdrUp : name("upcomp"), out("export"));
     if (keeps) { add("plate", "up", name("upplate"), out("plate")); add("layer", "up", name("uplayer"), out("layer")); }
     if (edits) add("matte", "up", "Matte, upscaled", out("matte"));
   }

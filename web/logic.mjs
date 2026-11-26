@@ -911,6 +911,10 @@ export const setFolder = (run, { hdr = false, size = "" } = {}) => [run, hdr && 
 // every stage ticked that the render has a file for: a cell (app.exportCells) is one element at one stage, with its label,
 // its file, and whether it is the source plate's own files (source).
 export const X_ELEMENTS = ["plate", "shot", "layer", "matte", "composite"];
+// The labels of the cells the Render panel has no step for (app.exportCells): they name the files in the zip (zipName) and
+// the download's lines; Finish's sets take its own labels.
+export const X_LABELS = { source: "Source plate", matte: "Matte", mattePreview: "Matte, preview", layer: "Layer, full size", shotHdr: "Shot, HDR",
+  plateHdr: "Plate, HDR", layerHdr: "Layer, HDR", compHdr: "Composite, HDR", plateHdrUp: "Plate, HDR, upscaled", compHdrUp: "Composite, HDR, upscaled" };
 export const X_STAGES = ["preview", "full", "hdr", "up"];
 // The ticks the dialog shows: an element, or a stage, that has no cell for the render has no tick.
 export const xShown = (cells) => ({ elements: new Set(cells.map((c) => c.element)), stages: new Set(cells.map((c) => c.stage)) });
@@ -924,7 +928,7 @@ export function xDefaults(cells, first) {
 // [name, label, file, source]. The matte is one picture at full size and in HDR, so it comes once.
 export function xRows(cells, { elements, stages }) {
   const seen = new Set();
-  return cells.filter((c) => elements.has(c.element) && stages.has(c.stage)).map((c) => [c.source ? zipName("Source plate") : zipName(c.label), c.label, c.file ?? null, !!c.source])
+  return cells.filter((c) => elements.has(c.element) && stages.has(c.stage)).map((c) => [zipName(c.source ? X_LABELS.source : c.label), c.label, c.file ?? null, !!c.source])
     .filter(([name]) => !seen.has(name) && seen.add(name));
 }
 // A row's name in the zip: its label in lower case, its words joined by « _ », so the zip's names follow the dialog's words.
