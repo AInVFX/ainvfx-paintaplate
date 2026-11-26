@@ -9,14 +9,15 @@ import { exportWords } from "../../web/logic.mjs";
 const read = (f) => readFileSync(new URL(`../../${f}`, import.meta.url), "utf8");
 const app = read("web/app.mjs"), routes = read("routes.py");
 const label = (id) => app.match(new RegExp(`id: "${id}", label: "([^"]+)"`))[1]; // a step's name in the Render panel (STAGES)
-const fluidUp = app.match(/\? "(Fluid: [^"]+)"/)[1]; // Upscale's step on a fluid shot alone (labelOf)
+const hdrUp = (id) => app.match(new RegExp(`${id}: "([^"]+, HDR, upscaled)"`))[1]; // Upscale's step on SDR to HDR's set (labelOf)
 
 function codeNames() {
   const names = new Set([routes.match(/f"\{stem\}_(\w+)\.md"/)[1], app.match(/exportStem\(\)\}_(\w+)_v\$\{/)[1]]);
-  const ups = { edits: label("upcomp"), plate: label("upplate"), relit: label("uphdr"), fluid: fluidUp, upscaled: label("upcomp") };
-  for (const [kind, up] of Object.entries(ups)) {
+  const ups = { edits: "upcomp", plate: "upplate", relit: "upcomp", fluid: "upplate", upscaled: "upcomp" }; // the step whose set the zip takes
+  for (const [kind, id] of Object.entries(ups)) {
     for (const last of [false, true]) {
       for (const upHdr of [false, true]) {
+        const up = upHdr ? hdrUp(id) : label(id);
         const { zip } = exportWords({ kind, last, upHdr, steps: { comp: label("review"), shot: label("full"), up } });
         for (const value of Object.values(zip)) (typeof value === "string" ? [value] : Object.values(value)).forEach((n) => names.add(n));
       }
