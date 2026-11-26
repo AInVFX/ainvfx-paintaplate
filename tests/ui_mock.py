@@ -447,7 +447,7 @@ def generate_flow(browser, port):
     check(bool(full and done) and full[-1] < done[-1] and not any(line.startswith("Export: done") for line in lines),
           f"Generate makes the full-size composite and nothing for compositing software: the full-size shot plays, then the review: {full} {done}")
     with page.expect_download(timeout=120000) as dl:
-        page.click("#export-btn"); page.click("#x-go")
+        page.click("#export-btn"); page.check("#x-matte"); page.click("#x-go")  # the matte, beside the composite the dialog opens on
     zipped = zipfile.ZipFile(dl.value.path()).namelist()
     lines = log_lines(page)
     check(zip_rows.composite(zipped) and zip_rows.files(zipped, "matte") and any(line.startswith("Export: done") for line in lines),
@@ -1033,8 +1033,8 @@ def fluid16_flow(browser, port):
           "the plate's line says 16-bit and that Finish > SDR to HDR is on, and nothing reopens the fluid shot")
     check(not page.is_disabled("#export-btn"), "a fluid shot with no edit on it can be exported")
     page.click("#export-btn")
-    fmt = page.text_content("#x-format") or ""
-    check("half-float EXR" in fmt and page.is_hidden("#x-matte"), f"with SDR to HDR on, its export is its HDR frames: {fmt}")
+    ticks = [k for k in ("plate", "full", "hdr") if page.is_checked(f"#x-{k}")]
+    check(ticks == ["plate", "hdr"] and page.is_hidden("#x-matte"), f"with SDR to HDR on, Export opens on its HDR frames: {ticks}")
     page.keyboard.press("Escape")
     page.evaluate(WATCH)
     page.click("#finish-btn"); page.click("#finish-hdr")  # off: a render without SDR to HDR, which takes the fluid shot made already
@@ -1044,20 +1044,20 @@ def fluid16_flow(browser, port):
     check(not any(t.startswith("Render v") for t in new),
           f"turned off afterwards, the same render shows its fluid shot again: no other render, no step: {[t[:60] for t in new if t.startswith('Render')]}")
     page.click("#export-btn")
-    fmt = page.text_content("#x-format") or ""
-    check(not page.evaluate("document.querySelector('#finish-hdr').checked") and "ProRes 4444" in fmt, f"turned off afterwards, the fluid shot exports in ProRes 4444: {fmt}")
+    ticks = [k for k in ("plate", "full", "hdr") if page.is_checked(f"#x-{k}")]
+    check(not page.evaluate("document.querySelector('#finish-hdr').checked") and ticks == ["plate", "full"], f"turned off afterwards, Export opens on the fluid shot at full size: {ticks}")
     page.keyboard.press("Escape")
     page.click("#finish-btn"); page.click("#finish-hdr")  # on again: it asks under its row, then the HDR render comes back
     page.wait_for_function("!document.querySelector('#finish-hdr-ask').hidden", timeout=10000)
     page.click("#finish-hdr-yes")
     page.wait_for_function("document.querySelector('#finish-hdr').checked", timeout=10000)
     page.keyboard.press("Escape")
-    page.click("#export-btn")
+    page.click("#export-btn"); page.check("#x-full")  # beside the HDR frames, which the dialog opens on
     with page.expect_download() as dl:
         page.click("#x-go")
     names = zipfile.ZipFile(dl.value.path()).namelist()
-    check(zip_rows.files(names, "hdr", (".exr",)) and zip_rows.files(names, "fluid_shot") and all(n.rsplit("/", 1)[-1].startswith("fluid_") for n in names),
-          f"on again, the zip holds the HDR frames and the shot in the blank plate's format, named after the blank plate: {names[:3]}")
+    check(zip_rows.files(names, "plate_hdr", (".exr",)) and zip_rows.files(names, "fluid_shot_full_size") and all(n.rsplit("/", 1)[-1].startswith("fluid_") for n in names),
+          f"on again, the zip holds the HDR frames and the shot as ProRes 4444 XQ, named after the blank plate: {names[:3]}")
     page.evaluate("""() => { const v = document.querySelector('canvas[data-precision]'); window.__prec = [];
       new MutationObserver(() => window.__prec.push(v.dataset.precision)).observe(v, { attributes: true, attributeFilter: ['data-precision'] }); }""")
     if not page.evaluate("document.querySelector('#play-btn').classList.contains('playing')"):  # a result plays as it is made

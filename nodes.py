@@ -200,11 +200,13 @@ class SavePlate(io.ComfyNode):
             node_id="PaintAPlate_SavePlate",
             display_name="Save Plate",
             category=CATEGORY,
-            description="Writes frames in the plate's own format: same file type, bit depth, frame numbers, "
-                        "colour tags, timecode and audio. For EXR, every other layer and header attribute "
-                        "is kept, and the data window grows only to hold an edit outside it. The plate's own "
-                        "alpha is kept as it is. Outside 'changed', the exact source pixels are written back. Frames of "
-                        "another size are written at their own size, in the same format, with none of the source's pixels.",
+            description="Writes frames for compositing. A sequence keeps the plate's own format: file type, bit "
+                        "depth, frame numbers and colour tags; for EXR, every other layer and header attribute is kept, and "
+                        "the data window grows only to hold an edit outside it. A movie is written as ProRes 4444 XQ in a "
+                        ".mov, with the plate's size, frame rate, colour tags, timecode and audio. The plate's own alpha is "
+                        "kept as it is. Outside 'changed', the source's own pixels are written back: exactly in a sequence, "
+                        "as the source's own samples in a movie. Frames of another size are written at their own size, with "
+                        "none of the source's pixels.",
             is_output_node=True,
             inputs=[
                 io.Image.Input("images", tooltip="Frames in the plate's colour space."),
@@ -231,7 +233,7 @@ class SavePlate(io.ComfyNode):
             writer = plateio.VideoWriter(spec, os.path.join(out_dir, os.path.basename(spec["source"])),
                                          audio_source=spec["source"])
             bar = comfy.utils.ProgressBar(count)
-            src = plateio.SourceFrames(spec["source"], writer.pix_fmt) if keep_untouched and changed is not None else None
+            src = plateio.SourceFrames(spec["source"], writer.pix_fmt) if keep_untouched and changed is not None and writer.keeps else None
             try:
                 for i, frame in enumerate(frames_np(images[:count])):
                     keep = None if src is None else plateio.untouched(changed[min(i, changed.shape[0] - 1)].float().cpu().numpy())

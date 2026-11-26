@@ -246,7 +246,7 @@ def flow(page, url, open_plate, shots, wait_s=120):
     page.keyboard.press("F6")  # wipe on, at frame 10
     page.keyboard.press("End")
     page.screenshot(path=f"{shots}/3_full_size_wipe.png")
-    with page.expect_download(timeout=wait_s * 3000) as dl:  # Export: only now is the result written in the plate's format
+    with page.expect_download(timeout=wait_s * 3000) as dl:  # Export: only now is the result written in its export format
         page.click("#export-btn")
         tick_offered(page)  # the composite's movie, where the dialog offers it: a composite of frames
         page.click("#x-go")
@@ -276,10 +276,11 @@ PREVIEW = {"off": "off", "latent": "latent", "half": "2", "quarter": "4"}  # the
 
 
 def tick_offered(page, graph=False):
-    """In the Export dialog: ticks the review movie, as the flow does (a real ComfyUI writes it as an MP4), and with
-    `graph` the ComfyUI graph, which then comes in the same zip. Each box only when the dialog offers it: a relit result
-    in HDR has no review movie, and a fluid shot alone or a plate alone has neither. Returns the boxes it ticked."""
-    ticked = [box for box in ["#x-review"] + (["#x-graph"] if graph else []) if page.is_visible(box)]
+    """In the Export dialog, beside the result it opens on: ticks the matte, which the case's sheet reads, and the Preview
+    stage, so the zip holds the movies the viewer plays (a real ComfyUI writes them as MP4), and with `graph` the ComfyUI
+    graph, which then comes in the same zip. Each tick only when the dialog offers it: a relit result in HDR has no matte,
+    a render with no preview has no Preview tick, and a plate alone has no graph. Returns the ticks it set."""
+    ticked = [box for box in ["#x-matte", "#x-preview"] + (["#x-graph"] if graph else []) if page.is_visible(box)]
     for box in ticked:
         page.check(box)
     return ticked
@@ -398,7 +399,7 @@ def main():
     print(f"zip: {len(exports)} EXR frames, {len(mattes)} matte frames; console errors: {len(errors)}")
     for e in errors[:10]:
         print("  console:", e[:300])
-    passed = ok and exports and mattes and any(n.endswith("_composite_full_size.mp4") for n in names) and not errors
+    passed = ok and exports and mattes and not errors  # the composite's EXR frames and the matte, which tick_offered ticked
     print("UI FLOW PASSED" if passed else "UI FLOW FAILED")
     return 0 if passed else 1
 

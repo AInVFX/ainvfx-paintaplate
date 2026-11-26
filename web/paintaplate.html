@@ -320,13 +320,20 @@
     <form method="dialog">
       <h2>Export</h2>
       <p id="x-hint" class="hint"></p>
-      <label class="check"><input id="x-export" type="checkbox" checked disabled> <span></span> <small id="x-format"></small></label>
-      <label class="check"><input id="x-review" type="checkbox"> <span></span> <small></small></label>
-      <label class="check"><input id="x-matte" type="checkbox" checked> <span></span> <small></small></label>
-      <label class="check"><input id="x-shot" type="checkbox"> <span></span> <small></small></label>
-      <label class="check"><input id="x-source" type="checkbox"> <span></span> <small></small></label>
-      <label class="check" title="Open it in ComfyUI to keep editing the scene there."><input id="x-graph" type="checkbox"> <span></span> <small></small></label>
-
+      <fieldset><legend>What</legend>
+        <label class="check"><input id="x-plate" type="checkbox"> <span></span> <small></small></label>
+        <label class="check"><input id="x-shot" type="checkbox"> <span></span> <small></small></label>
+        <label class="check"><input id="x-layer" type="checkbox"> <span></span> <small></small></label>
+        <label class="check"><input id="x-matte" type="checkbox"> <span></span> <small></small></label>
+        <label class="check"><input id="x-composite" type="checkbox"> <span></span> <small></small></label>
+        <label class="check" title="Open it in ComfyUI to keep editing the scene there."><input id="x-graph" type="checkbox"> <span></span> <small></small></label>
+      </fieldset>
+      <fieldset><legend>Stage</legend>
+        <label class="check"><input id="x-preview" type="checkbox"> <span></span></label>
+        <label class="check"><input id="x-full" type="checkbox"> <span></span></label>
+        <label class="check"><input id="x-hdr" type="checkbox"> <span></span></label>
+        <label class="check"><input id="x-up" type="checkbox"> <span></span></label>
+      </fieldset>
       <p id="x-note" class="hint"></p>
       <menu><button value="cancel">Cancel</button><button id="x-go" value="ok" class="primary">Export</button></menu>
     </form>

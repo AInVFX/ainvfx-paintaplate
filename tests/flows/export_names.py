@@ -16,10 +16,10 @@ def run(browser, port, U):
     U.paint_once(page, "a lantern", [(0.3, 0.5), (0.36, 0.5)]); page.keyboard.press("Enter")
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
     page.click("#export-btn")
-    for box in ("#x-matte", "#x-shot", "#x-source", "#x-graph"):
+    for box in ("#x-plate", "#x-shot", "#x-matte", "#x-graph"):  # beside the composite at full size, which the dialog opens on
         page.check(box)
-    page.wait_for_function("/the plate's own files, [0-9.]+ [KMG]B$/.test(document.querySelector('#x-source').closest('label').querySelector('small').textContent)",
-                           timeout=10000)  # the source plate's row shows its size
+    page.wait_for_function("/the plate under the edits, [0-9.]+ [KMG]B$/.test(document.querySelector('#x-plate').closest('label').querySelector('small').textContent)",
+                           timeout=10000)  # the plate's tick shows its own files' size
     with page.expect_download(timeout=180000) as dl:
         page.click("#x-go")
     names = zipfile.ZipFile(dl.value.path()).namelist()
@@ -37,15 +37,18 @@ def run(browser, port, U):
     U.paint_once(page, "thick white smoke", [(0.4, 0.8), (0.5, 0.7), (0.6, 0.8)]); page.keyboard.press("Enter")
     page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => /^Render v\\d+: Fluid shot, full size: done in /.test(e.textContent))",
                            timeout=240000)  # the fluid shot, made by its render's steps
+    with page.expect_download(timeout=180000) as first:  # before the save: the zip takes the blank plate's name
+        page.click("#export-btn"); page.click("#x-go")
+    before = first.value.suggested_filename
     page.click("#save-btn")
     page.wait_for_selector("#ask-field", state="visible", timeout=10000)
-    page.fill("#ask-field", "smoke"); page.click("#ask-yes")
-    U.wait_log(page, U.added_line("Scene smoke saved"), 20000, "the save")
+    page.fill("#ask-field", "Désk shot.01"); page.click("#ask-yes")  # a space, an accent and a dot: one name, D_sk_shot.01
+    U.wait_log(page, U.added_line("Scene D_sk_shot.01 saved"), 20000, "the save")
     page.click("#export-btn")
     with page.expect_download(timeout=180000) as dl:
         page.click("#x-go")
     names = zipfile.ZipFile(dl.value.path()).namelist()
-    U.check(dl.value.suggested_filename == "smoke_fluid_v1.zip" and names and all(n.rsplit("/", 1)[-1].startswith("smoke_") for n in names)
-            and zip_rows.files(names, "fluid_shot"), f"a saved scene names its export after itself: {dl.value.suggested_filename}, {names}")
+    U.check(dl.value.suggested_filename == "D_sk_shot.01_fluid_v1.zip" and before.endswith("_fluid_v1.zip") and not before.startswith("D_sk") and names and all(n.rsplit("/", 1)[-1].startswith("D_sk_shot.01_") for n in names)
+            and zip_rows.files(names, "fluid_shot_full_size"), f"the same render, exported again once saved as a scene, names its zip after the scene: {before} then {dl.value.suggested_filename}, {names}")
     U.no_errors(errors, "after the two exports")
     page.close()

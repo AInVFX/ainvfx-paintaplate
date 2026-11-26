@@ -405,7 +405,7 @@ async def execute(pid, prompt):
             strategy = v.get("strategy", "Auto")
             line = f"Auto chose {STATE['follow']['auto']}: the edit spreads past the object (23% of the frame)." if strategy == "Auto" else f"{strategy}."
             o[outs["follow"]] = {"text": [f"tracked on {len(frames)} of {len(frames)} frames.\n  Strategy: {line}"]}
-    elif "plate" in outs:  # fluid: each keyframe softened into a cloud, crossfaded to the next, written in the blank plate's format
+    elif "plate" in outs:  # fluid: each keyframe softened into a cloud, crossfaded to the next, written as Save Plate writes it
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         h, w = frames[0].shape[:2]
         if int(v.get("width") or 0) and int(v.get("height") or 0):  # the shot preview's size, as ImageScale makes it
@@ -456,6 +456,10 @@ async def execute(pid, prompt):
             mattes.append(m.astype(np.float16) if has_matte else np.zeros((h, w, 1), np.float16))
             frames[i] = None
         layer = [resize(shot[min(i, len(shot) - 1)], w, h) if not i else moved(resize(shot[min(i, len(shot) - 1)], w, h), back=True) for i in range(n)] if {"layer", "layer_exr"} & set(outs) else []
+        for part in ("shot", "clean"):  # the shot as the model made it, and a Clean's pass under a paint, as Save Plate writes them
+            if part in outs:
+                save_mp4(shot, f"{v[part + '_prefix']}/plate", spec["fps"])
+                o[outs[part]] = {"files": [{"filename": "plate_00001_.webm", "subfolder": v[part + "_prefix"], "type": "output"}]}
         del frames, shot
         if "matte_movie" in outs:  # the matte the composite used, as a grey movie: the X-ray reads a composite's small, the Export row shows the export's
             o[outs["matte_movie"]] = {"images": [save_mp4((np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes), v["matte_video_prefix"], spec["fps"], side=320 if "video" in outs else 0)], "animated": [True]}
@@ -474,7 +478,7 @@ async def execute(pid, prompt):
                 names = [f"f_{i + 1:05d}_.exr" for i in range(n)]
                 plateio.write_exrs(lambda i: out[i], [os.path.join(folder("output"), sub, f) for f in names])
                 o[outs["exr"]] = {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
-            if "layer" in outs:  # the shot as the composite blends it, in the plate's format
+            if "layer" in outs:  # the shot as the composite blends it, as Save Plate writes it
                 save_mp4(layer, f"{v['layer_prefix']}/plate", spec["fps"])
                 o[outs["layer"]] = {"files": [{"filename": "plate_00001_.webm", "subfolder": v["layer_prefix"], "type": "output"}]}
             if "layer_exr" in outs:  # beside an EXR result: half-float EXR frames

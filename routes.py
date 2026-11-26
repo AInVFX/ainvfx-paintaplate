@@ -19,12 +19,12 @@ output:, or, on a ComfyUI that answers this machine alone, an absolute path.
     GET  /paintaplate/scenes, GET|POST /paintaplate/scenes/<name>  scenes saved on this ComfyUI (output/paintaplate/scenes)
     GET  /paintaplate/ocio?config=...                  the OCIO config: colour spaces by family, displays and views, looks
     GET  /paintaplate/ocio/shader?config=&space=&display=&view=&look=   the viewer's GLSL and lookup tables for a source
-    GET  /paintaplate/download?run=paintaplate/<plate>/v3&name=shot010_paintaplate_v3&parts=export,matte
+    GET  /paintaplate/download?run=paintaplate/<plate>/v3&name=desk_v3&stem=desk&files=[["composite_full_size","output:…/desk.mov"]]
+    GET  /paintaplate/download/check?files=…          the rows of a zip whose files are not on disk: the page stops before it
     POST /paintaplate/graph?run=paintaplate/<plate>/v3     Export's ComfyUI graph, into the run's folder for its zip
-`parts` chooses what the zip holds (default: export,matte): export is the composite in the plate's own format, matte its PNG
-frames, review the composite as a movie, shot the regenerated shot, hdr, plate and preview a fluid shot's own files, graph the
-scene as one ComfyUI workflow, upscaled Upscale's result and matte at the size asked for. `stem` and `names` name the files:
-every name starts with the plate's or the scene's name, then the part's name, from the Export dialog's rows (zipped). Only render folders under output/paintaplate are zipped, and only plain files inside them.
+`files` names each row of the zip and its file, its folder or its frame pattern under output/paintaplate, as the page knows
+them from the jobs it ran (zip_list, row_files); `plate` adds the source plate's own files, in a folder of the row
+`source`. Every name in the zip starts with `stem`, the plate's or the scene's name, then the row's name (zip_entries).
 Everything here is plain functions (tests/test_routes.py); setup() adds the routes to ComfyUI's server, and gives the
 page's own files, which ComfyUI serves from ./web, the rule « Cache-Control: no-cache » (fresh_page).
 """
@@ -33,7 +33,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
-import glob
 import hashlib
 import io
 import json
@@ -82,43 +81,33 @@ THUMBS_AT_ONCE = asyncio.Semaphore(4)  # a folder of thousands of outputs asks f
 # and the export's review movie at the top; the last patterns read older runs.
 GRAPH = "scene.comfyui.json"  # Export's ComfyUI graph, in its run's folder
 GRAPH_MAX = 16 << 20  # bytes: a scene's graph is far smaller
-PARTS = {"export": (["export"], True), "matte": (["matte"], True),
-         "review": (["review_*", "*/comp_*", "comp_*"], False),
-         "shot": (["full/raw_*", "full/clean_*", "*/raw_*", "*/clean_*", "full_*", "raw_*"], False),
-         # the source plate: its own files, read where they are (plate_files); its zip streams (stream_zip)
-         "source": ([], True),
-         # a fluid shot exported by itself: its HDR frames, the shot in the blank plate's format, its preview movie
-         "hdr": (["hdr"], True), "plate": (["plate"], True), "preview": (["preview_*"], False),
-         # Upscale: its set's result and matte (UPSCALED_PARTS); the upscaled plate and layer stay on disk
-         "upscaled": (["upscaled"], True),
-         # Export's ComfyUI graph: the scene as one workflow, which the page writes into the run's folder (graph_post)
-         "graph": ([GRAPH], False)}
-DEFAULT_PARTS = ["export", "matte"]
-UPSCALED_SET = re.compile(r"upscale/\d+x\d+/out")  # an upscaled set's folder under its run, as the page names it: one per size
-UPSCALED_PARTS = ("export", "matte")  # the upscaled set's folders that the zip takes: the result and its matte; the plate, with the source plate
-MOVIES = (".mp4", ".mov", ".webm")  # a part that is one such file sits at the top of the zip
-ROW_NAME = re.compile(r"[a-z0-9_]{1,60}")  # a part's name in the zip, as the page sends it
+ZIP_ROWS = 64  # rows one zip takes at most
+ROW_NAME = re.compile(r"[a-z0-9_]{1,60}")  # a row's name in the zip, as the page sends it (logic.zipName)
 FRAME_TAIL = re.compile(r"[._-]?\d+_?\.[A-Za-z0-9]+$")  # a frame's number, the mark before it, and its extension
 GRAPH_IMAGE = re.compile(r"[\w.-]+\.png")  # an image a graph loads: a file at the top of ComfyUI's input folder
+ZIP_TYPES = plateio.IMAGE_EXTS | plateio.VIDEO_EXTS  # what a row holds: frames, or one movie; and the graph (GRAPH)
 
 
 def zip_name(name: str, folder: str) -> str:
-    """A file name made only of letters, digits, '.', '-' and '_'."""
-    return re.sub(r"[^\w.-]", "_", name or os.path.basename(folder))[:120]
+    """A name in a file's name: letters A to Z, digits, '.', '-' and '_', every other run of characters one '_', none at
+    either end (logic.fileStem, the same rule on the page). With no name, the run's folder's."""
+    clean = lambda text: re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_")  # noqa: E731
+    return (clean(name or "") or clean(os.path.basename(folder)))[:120]
 
 
-def zip_rows(text: str) -> dict:
-    """The page's names for the parts in the zip (logic.zipNames), sent as JSON: {part: name, "up": {folder: name}}. A name
-    that is not made of lower-case letters, digits and « _ » is left out, and its part keeps its id."""
+def zip_list(text: str) -> list[tuple[str, str]]:
+    """The zip's rows, as the page sends them: a JSON list of [name, path], each name made of lower-case letters, digits
+    and « _ » (logic.zipName), given once, each path a page path. ValueError for any other form, or more than ZIP_ROWS."""
     try:
-        raw = json.loads(text) if text else {}
-    except ValueError:
-        return {}
-    if not isinstance(raw, dict):
-        return {}
-    rows = {k: v for k, v in raw.items() if k in PARTS and isinstance(v, str) and ROW_NAME.fullmatch(v)}
-    if isinstance(raw.get("up"), dict):
-        rows["up"] = {k: v for k, v in raw["up"].items() if k in UPSCALED_PARTS + ("plate",) and isinstance(v, str) and ROW_NAME.fullmatch(v)}
+        raw = json.loads(text) if text else []
+    except ValueError as exc:
+        raise ValueError("Export: the list of files is not JSON.") from exc
+    if (not isinstance(raw, list) or len(raw) > ZIP_ROWS
+            or not all(isinstance(r, list) and len(r) == 2 and all(isinstance(v, str) for v in r) for r in raw)):
+        raise ValueError("Export: the list of files is not a list of [name, path].")
+    rows = [(name, path.strip()) for name, path in raw]
+    if any(not ROW_NAME.fullmatch(name) for name, _ in rows) or len({name for name, _ in rows}) != len(rows):
+        raise ValueError("Export: a row's name holds other characters than a-z, 0-9 and « _ », or comes twice.")
     return rows
 
 
@@ -161,75 +150,80 @@ def graph_images(path: str) -> list[str]:
     return images
 
 
-def collect(folder: str, parts: list[str], upscaled: str = "", stem: str = "", names: dict | None = None,
-            sources: list[str] | None = None) -> list[tuple[str, str]]:
-    """(path on disk, name in the zip) for each part asked for, in a fixed order (zipped)."""
-    return [(path, arc) for path, arc, _ in zipped(folder, parts, upscaled, stem, names, sources)]
+def row_files(rel: str) -> list[str]:
+    """The files of one row of the zip, by folders.plate_path's rules (no symbolic link, nothing outside ComfyUI's
+    folders), under output/paintaplate only: a file, each frame of a frame pattern once (plate_files), or the files of a
+    folder; frames, movies and the graph the page wrote (GRAPH) only. ValueError when it is refused, FileNotFoundError
+    when it is not on disk."""
+    if not rel.startswith(folders.OUTPUT):
+        raise ValueError(f"Export zips files under output/paintaplate only: {rel}.")
+    full = folders.plate_path(rel)
+    root = os.path.realpath(os.path.join(folder_paths.get_output_directory(), "paintaplate"))
+    if os.path.commonpath([os.path.realpath(full), root]) != root:
+        raise ValueError(f"Export zips files under output/paintaplate only: {rel}.")
+    if os.path.isdir(full):
+        files = [os.path.join(full, f) for f in sorted(os.listdir(full))]
+        files = [f for f in files if os.path.isfile(f) and not os.path.islink(f)]
+    elif plateio.is_sequence(full):
+        files = plate_files(full)
+    elif os.path.splitext(full)[1].lower() in ZIP_TYPES or os.path.basename(full) == GRAPH:
+        return [full]
+    else:
+        raise ValueError(f"Export zips frames, movies and its ComfyUI graph only: {rel}.")
+    files = [f for f in files if os.path.splitext(f)[1].lower() in ZIP_TYPES]
+    if not files:
+        raise FileNotFoundError(f"Export: nothing to zip at {rel}.")
+    return files
 
 
-def zipped(folder: str, parts: list[str], upscaled: str = "", stem: str = "", names: dict | None = None,
-           sources: list[str] | None = None) -> list[tuple[str, str, str]]:
-    """(path on disk, name in the zip, part) for each part asked for, in a fixed order. Every name starts with `stem`, the
-    plate's or the scene's name (the run folder's own name when it is empty), then the part's name: names[part], which the
-    page takes from the Export dialog's rows, else the part's id. A part that is one movie sits at the top, as
-    <stem>_<name>.<ext>. A part's frames sit in a folder of its name, each as <stem>_<name><frame>.<ext> (frame_tail).
-    The graph comes with the images its nodes load, in input/ (graph_images). The source plate's files (`sources`, which
-    plate_files lists) keep their own names, in a folder of the part's name.
-    `upscaled`: the folder under the run's that holds the upscaled set of the size asked for, as UPSCALED_SET; its result and
-    its matte come, named by names["up"], else <folder>_upscaled. A value in another form gives no file, and no folder is read
-    for it. A name already taken keeps its first file: the composite's movie never replaces a composite that is a movie."""
-    real = os.path.realpath(folder)  # compared as real paths: the output folder itself may be a symbolic link
-    stem, names = zip_name(stem, folder)[:80], names or {}
+def missing_rows(rows: list[tuple[str, str]]) -> list[str]:
+    """The rows whose files are not on disk (row_files): the page stops before the download and names them."""
+    missing = []
+    for name, rel in rows:
+        try:
+            row_files(rel)
+        except FileNotFoundError:
+            missing.append(name)
+    return missing
 
-    def inside(path):
-        return not os.path.islink(path) and os.path.commonpath([os.path.realpath(path), real]) == real
 
-    def walk(base):  # the files under base, in the order of their names, with their path from base
-        found = []
-        for d, dirs, fnames in os.walk(base):
-            dirs.sort()
-            found += [(p, os.path.relpath(p, base)) for p in (os.path.join(d, f) for f in sorted(fnames)) if inside(p)]
-        return found
+def zip_entries(rows: list[tuple[str, str]], stem: str, source: str = "", sources: list[str] | None = None) -> list[tuple[str, str, str]]:
+    """(path on disk, name in the zip, row) for each row the page sends (zip_list), in its order, then the source plate's.
+    Every name starts with `stem`, the plate's or the scene's name, then the row's name: a row that is one movie sits at
+    the top, as <stem>_<row>.<ext>; a row of frames sits in a folder of its name, each as <stem>_<row><frame>.<ext>
+    (frame_tail); the graph comes as <stem>_<row>.json, with the images its nodes load in input/ (graph_images). The
+    source plate's files (`sources`, which plate_files lists) keep their own names, in a folder named `source`. A name
+    already taken keeps its first file. FileNotFoundError names every row whose files are not on disk."""
+    files, taken, missing = [], set(), []
 
-    files, taken = [], set()
-
-    def add(path, arc, part):
+    def add(path, arc, row):
         if arc not in taken:
             taken.add(arc)
-            files.append((path, arc, part))
+            files.append((path, arc, row))
 
-    def place(found, row, part):  # one movie at the top, frames in the folder of their name
-        if len(found) == 1 and found[0][1].lower().endswith(MOVIES):
-            add(found[0][0], f"{stem}_{row}{os.path.splitext(found[0][1])[1].lower()}", part)
-            return
-        for path, rel in found:
-            sub, fname = os.path.split(rel)
-            add(path, "/".join(x for x in (row, sub, f"{stem}_{row}{frame_tail(fname)}") if x), part)
-
-    for part in [p for p in PARTS if p in parts]:
-        patterns, is_folder = PARTS[part]
-        if part == "source":
-            for path in sources or []:
-                add(path, f"{names.get(part) or part}/{os.path.basename(path)}", part)
-        elif part == "upscaled":
-            if upscaled and not UPSCALED_SET.fullmatch(upscaled):
-                continue
-            base = os.path.join(folder, upscaled or patterns[0])
-            for sub in UPSCALED_PARTS + (("plate",) if "source" in parts else ()):
-                place(walk(os.path.join(base, sub)), names.get("up", {}).get(sub) or f"{sub}_upscaled", part)
-        elif is_folder:
-            place(walk(os.path.join(folder, patterns[0])), names.get(part) or part, part)
+    for name, rel in rows:
+        try:
+            found = row_files(rel)
+        except FileNotFoundError:
+            missing.append(name)
+            continue
+        ext = os.path.splitext(found[0])[1].lower()
+        if len(found) == 1 and os.path.basename(found[0]) == GRAPH:  # with the images its nodes load, from ComfyUI's input folder
+            add(found[0], f"{stem}_{name}.json", name)
+            inputs = os.path.realpath(folder_paths.get_input_directory())
+            for image in graph_images(found[0]):
+                path = os.path.join(inputs, image)
+                if os.path.isfile(path) and not os.path.islink(path) and os.path.dirname(os.path.realpath(path)) == inputs:
+                    add(path, f"input/{image}", name)
+        elif len(found) == 1 and ext in plateio.VIDEO_EXTS:
+            add(found[0], f"{stem}_{name}{ext}", name)
         else:
-            found = next((m for pat in patterns for m in sorted(glob.glob(os.path.join(folder, pat)))
-                          if inside(m) and (part == "graph" or m.lower().endswith(MOVIES))), None)
-            if found:
-                add(found, f"{stem}_{names.get(part) or part}{os.path.splitext(found)[1].lower()}", part)
-                if part == "graph":  # the images its nodes load, from the top of ComfyUI's input folder, under the names it uses
-                    inputs = os.path.realpath(folder_paths.get_input_directory())
-                    for image in graph_images(found):
-                        path = os.path.join(inputs, image)
-                        if os.path.isfile(path) and not os.path.islink(path) and os.path.dirname(os.path.realpath(path)) == inputs:
-                            add(path, f"input/{image}", part)
+            for path in found:
+                add(path, f"{name}/{stem}_{name}{frame_tail(os.path.basename(path))}", name)
+    if missing:
+        raise FileNotFoundError(f"Export: no file on disk for {', '.join(missing)}.")
+    for path in sources or []:
+        add(path, f"{source}/{os.path.basename(path)}", source)
     return files
 
 
@@ -378,19 +372,8 @@ logging.info("[Paint a plate] %s: build %s.\n  Build parts: ComfyUI %s; ComfyUI-
              sum(len(m) == 3 for m in _built["models"]), len(_built["models"]))
 
 
-def zip_files(folder: str, parts: list[str], upscaled: str = "", stem: str = "", names: dict | None = None,
-              sources: list[str] | None = None) -> list[tuple[str, str, str]]:
-    """zipped, refused when the export asked for is not there, or when nothing is."""
-    files = zipped(folder, parts, upscaled, stem, names, sources)
-    if "export" in parts and not any(part == "export" for _, _, part in files):
-        raise FileNotFoundError("Export not found for this run. Run Export first.")
-    if not files:  # a fluid shot's zip holds no export: its HDR frames, its plate and its preview
-        raise FileNotFoundError("Download: no files in this run.")
-    return files
-
-
 def write_zip(fp, files: list[tuple[str, str, str]], models: list[str] | None, stem: str) -> None:
-    """The zip of `files`, as zipped lists them, stored (EXR, PNG and video are already compressed), into `fp`, with the
+    """The zip of `files`, as zip_entries lists them, stored (EXR, PNG and video are already compressed), into `fp`, with the
     models' list (<stem>_models.md) when the page names the models behind the result."""
     with zipfile.ZipFile(fp, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
         for path, arc, _ in sorted(files, key=lambda f: f[1]):
@@ -399,15 +382,13 @@ def write_zip(fp, files: list[tuple[str, str, str]], models: list[str] | None, s
             z.writestr(f"{stem}_models.md", models_md(models))
 
 
-def build_zip(folder: str, name: str, parts: list[str], models: list[str] | None = None, upscaled: str = "", stem: str = "",
-              names: dict | None = None) -> str:
-    """The zip of `parts` (zip_files, write_zip), kept in the run's folder and reused while it is current."""
-    files = zip_files(folder, parts, upscaled, stem, names)
-    stem = zip_name(stem, folder)[:80]
-    mark = f"__m{hashlib.sha1(','.join(models).encode()).hexdigest()[:8]}" if models else ""  # another list of models, another zip
-    mark += f"__u{hashlib.sha1(upscaled.encode()).hexdigest()[:8]}" if upscaled and "upscaled" in parts else ""  # another size, another zip
-    mark += f"__n{hashlib.sha1(json.dumps([stem, names or {}], sort_keys=True).encode()).hexdigest()[:8]}"  # other names, another zip
-    target = os.path.join(folder, f"{name}__{'-'.join(p for p in PARTS if p in parts)}{mark}.zip")
+def build_zip(folder: str, name: str, files: list[tuple[str, str, str]], models: list[str] | None = None, stem: str = "") -> str:
+    """The zip of `files` (zip_entries, write_zip), kept in the run's folder and reused while it is current: another list
+    of files, of models or another stem makes another zip."""
+    if not files:
+        raise FileNotFoundError("Export: nothing to zip.")
+    mark = hashlib.sha1(json.dumps([[p, a] for p, a, _ in files] + [models or [], stem]).encode()).hexdigest()[:12]
+    target = os.path.join(folder, f"{name}__{mark}.zip")
     newest = max(os.path.getmtime(p) for p, _, _ in files)
     if os.path.exists(target) and os.path.getmtime(target) >= newest:
         return target
@@ -439,7 +420,8 @@ class _Chunks(io.RawIOBase):
 
 
 async def stream_zip(request: web.Request, name: str, files: list[tuple[str, str, str]], models: list[str], stem: str) -> web.StreamResponse:
-    """The zip of `files`, written as it downloads, with no copy of it on disk: a source plate's files can be large."""
+    """The zip of `files`, written as it downloads, with no copy of it on disk: a source plate's files can be large. A file
+    that cannot be read ends the response before its last chunk, so the browser reports the download as failed."""
     response = web.StreamResponse(headers={"Content-Type": "application/zip", "Content-Disposition": f'attachment; filename="{name}.zip"'})
     await response.prepare(request)
     loop, queue, stop = asyncio.get_running_loop(), asyncio.Queue(maxsize=8), threading.Event()
@@ -462,31 +444,44 @@ async def stream_zip(request: web.Request, name: str, files: list[tuple[str, str
         raise
     finally:
         await asyncio.gather(task, return_exceptions=True)
+    await task  # the writer's error, such as a file that cannot be read: the response ends here, without its last chunk
     await response.write_eof()
     return response
 
 
 async def download(request: web.Request) -> web.StreamResponse:
-    asked = [p for p in request.query.get("parts", "").split(",") if p in PARTS] or DEFAULT_PARTS
     try:
         folder = folders.run_folder(request.query.get("run", ""))
         name = zip_name(request.query.get("name", ""), folder)
         models = [m for m in request.query.get("models", "").split(",") if m]
-        stem = request.query.get("stem", "") or re.sub(r"_v\d+$", "", name)  # the page sends it; else the zip's name, less its version
-        rows, upscaled = zip_rows(request.query.get("names", "")), request.query.get("upscaled", "")
-        if "source" in asked:  # the plate's own files, where they are, by folders.plate_path's rules: the zip streams
-            plate = request.query.get("plate", "").strip()
+        stem = zip_name(request.query.get("stem", "") or re.sub(r"_v\d+$", "", name), folder)[:80]  # the page sends it; else the zip's name, less its version
+        rows = zip_list(request.query.get("files", ""))
+        plate, source = request.query.get("plate", "").strip(), request.query.get("source", "") or "source"
+        if not ROW_NAME.fullmatch(source):
+            raise ValueError("Export: the source plate's row holds other characters than a-z, 0-9 and « _ ».")
+        if plate:  # the plate's own files, where they are, by folders.plate_path's rules: the zip streams
             if folders.absolute(plate) and any(h in request.headers for h in FORWARDED):
                 raise PermissionError(folders.THIS_MACHINE_ONLY)
             sources = await asyncio.to_thread(lambda: plate_files(folders.plate_path(plate)))
-            files = await asyncio.to_thread(zip_files, folder, asked, upscaled, stem, rows, sources)
-            return await stream_zip(request, name, files, models, zip_name(stem, folder)[:80])
-        path = await asyncio.to_thread(build_zip, folder, name, asked, models, upscaled, stem, rows)
+            files = await asyncio.to_thread(zip_entries, rows, stem, source, sources)
+            return await stream_zip(request, name, files, models, stem)
+        files = await asyncio.to_thread(zip_entries, rows, stem)
+        path = await asyncio.to_thread(build_zip, folder, name, files, models, stem)
     except (PermissionError, ValueError) as exc:
         raise web.HTTPForbidden(text=str(exc)) from exc
     except FileNotFoundError as exc:
         raise web.HTTPNotFound(text=str(exc)) from exc
     return web.FileResponse(path, headers={"Content-Disposition": f'attachment; filename="{name}.zip"'})
+
+
+async def download_check(request: web.Request) -> web.Response:
+    """The rows of a zip whose files are not on disk, as {"missing": [names]}: the page stops before the download and names
+    them. 403 for a list in another form, or a path that leaves output/paintaplate."""
+    try:
+        missing = await asyncio.to_thread(missing_rows, zip_list(request.query.get("files", "")))
+    except (PermissionError, ValueError) as exc:
+        raise web.HTTPForbidden(text=str(exc)) from exc
+    return web.json_response({"missing": missing})
 
 
 async def download_size(request: web.Request) -> web.Response:
@@ -523,7 +518,7 @@ def save_graph(folder: str, body: bytes) -> None:
 
 
 async def graph_post(request: web.Request) -> web.Response:
-    """Export's ComfyUI graph, written into its run's folder as scene.comfyui.json, so that its zip takes it (PARTS)."""
+    """Export's ComfyUI graph, written into its run's folder as scene.comfyui.json, so that its zip takes it as a row (zip_list)."""
     try:
         folder = folders.run_folder(request.query.get("run", ""))
         await asyncio.to_thread(save_graph, folder, await request.read())
@@ -1187,6 +1182,7 @@ def setup(server) -> None:
         app.on_startup.append(_pulse)
         logging.info("[Paint a plate] Trace: on.\n  One line per request to ComfyUI, at its start and at its end.")
     server.routes.get("/paintaplate/download")(download)
+    server.routes.get("/paintaplate/download/check")(download_check)
     server.routes.get("/paintaplate/download/size")(this_machine(download_size))
     server.routes.post("/paintaplate/graph")(graph_post)
     server.routes.get("/paintaplate/browse")(this_machine(browse_route))

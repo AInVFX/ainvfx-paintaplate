@@ -1,15 +1,17 @@
-"""An export's zip, read by its rows (routes.zipped). Every name starts with the export's stem, the plate's or the scene's
-name, then its row's name, which the page takes from the Export dialog's rows (logic.zipNames). Frames sit in a folder of
-the row's name; one movie, the graph and the models' list sit at the top, as <stem>_<row>.<ext>."""
+"""An export's zip, read by its rows (routes.zip_entries). Every name starts with the export's stem, the plate's or the
+scene's name, then its row's name, which the page takes from the Export dialog's ticks: an element at a stage (app.exportCells,
+logic.zipName). Frames sit in a folder of the row's name; one movie, the graph and the models' list sit at the top, as
+<stem>_<row>.<ext>; the source plate's files keep their own names in source_plate/."""
 import os
 
-# The rows the page names, then the route's own names for a request that names none (its parts' ids)
-ROWS = ("composite_full_size", "light_transfer_full_size", "shot_full_size", "matte", "comfyui_graph", "models", "hdr",
-        "fluid_shot", "fluid_shot_preview", "composite_upscaled", "matte_upscaled", "plate_upscaled", "hdr_upscaled",
-        "fluid_shot_upscaled", "export", "review", "shot", "graph", "preview")
-# The composite's row: a Light-only render names it after its step, and the route names it export when a request names no
-# row (tests/comfy_live.py), as in the zips of older runs
-COMPOSITE = ("composite_full_size", "light_transfer_full_size", "export")
+ROWS = ("source_plate", "fluid_shot_preview", "fluid_shot_full_size", "plate_hdr", "plate_upscaled", "plate_hdr_upscaled", "fluid_shot_upscaled",
+        "shot_preview", "clean_plate_pass_preview", "shot_full_size", "clean_plate_pass_full_size", "light_transfer_full_size", "shot_hdr",
+        "layer_full_size", "layer_hdr", "layer_upscaled", "matte", "matte_preview", "matte_upscaled",
+        "composite_preview", "composite_full_size", "composite_hdr", "composite_upscaled", "composite_hdr_upscaled", "comfyui_graph", "models",
+        "hdr", "fluid_shot", "hdr_upscaled", "export", "review", "shot", "graph", "preview")  # the last: the names of zips from older runs
+# The result's rows, the first the zip holds: the composite at full size (a Light-only render names it after its step), else in
+# HDR; export, in the zips of older runs, whose route named a part by its id when the request named no row
+COMPOSITE = ("composite_full_size", "light_transfer_full_size", "composite_hdr", "export")
 
 
 def row_of(name: str) -> str:
@@ -26,6 +28,9 @@ def files(names, row: str, ext=()) -> list:
 
 
 def composite(names, ext=()) -> list:
-    """The composite's names: its frames in its folder, else its one movie at the top."""
-    found = [n for row in COMPOSITE for n in files(names, row, ext)]
-    return [n for n in found if "/" in n] or found
+    """The result's names, from the first row of COMPOSITE the zip holds: its frames in its folder, else its one movie."""
+    for row in COMPOSITE:
+        found = files(names, row, ext)
+        if found:
+            return [n for n in found if "/" in n] or found
+    return []

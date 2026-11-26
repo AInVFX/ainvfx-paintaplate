@@ -15,7 +15,7 @@ def run(browser, port, U):
     page.click('.tools [data-tool="paint"]')
     U.paint_once(page, "a lantern", [(0.3, 0.5), (0.36, 0.5)]); page.keyboard.press("Enter")
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
-    page.click("#export-btn"); page.check("#x-graph")
+    page.click("#export-btn"); page.check("#x-graph"); page.check("#x-matte")
     with page.expect_download(timeout=180000) as dl:
         page.click("#x-go")
     names = zipfile.ZipFile(dl.value.path()).namelist()

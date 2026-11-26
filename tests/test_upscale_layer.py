@@ -2,7 +2,6 @@
 the plate, the layer and the matte (result = plate x (1 - matte) + layer x matte)."""
 import os
 import sys
-import tempfile
 import unittest
 
 import numpy as np
@@ -27,9 +26,6 @@ def output(prompt, name):
     return next((k, n) for k, n in prompt.items() if n.get("_meta", {}).get("output") == name)
 
 
-NAMES = {"export": "composite_full_size", "review": "composite_full_size", "matte": "matte", "shot": "shot_full_size", "graph": "comfyui_graph",
-         "hdr": "hdr", "plate": "fluid_shot", "preview": "fluid_shot_preview",
-         "up": {"export": "composite_upscaled", "matte": "matte_upscaled"}}  # the zip's names, as the page sends them (logic.zipNames)
 
 class ExportLayer(unittest.TestCase):
     def setUp(self):
@@ -78,29 +74,6 @@ class ExportLayer(unittest.TestCase):
         matte = rng.random((6, 8), np.float32)
         expected = matte[..., None] * layer + (1 - matte[..., None]) * plate
         np.testing.assert_array_equal(mathops.composite(plate, layer, matte), expected)
-
-
-class LayerInTheZip(unittest.TestCase):
-    def test_the_zip_leaves_the_layer_on_disk(self):
-        import test_routes  # its stand-in for ComfyUI's folder_paths, which routes imports
-        routes = test_routes.routes
-        with tempfile.TemporaryDirectory() as run:
-            for part in ("export", "layer", "matte"):
-                os.makedirs(os.path.join(run, part))
-                open(os.path.join(run, part, f"{part}_00001_.png"), "w").close()
-            names = [arc for _, arc in routes.collect(run, ["matte", "layer", "export"], stem="desk", names=NAMES)]
-        self.assertEqual(names, ["composite_full_size/desk_composite_full_size_00001_.png", "matte/desk_matte_00001_.png"])
-
-    def test_the_4k_set_is_one_folder_of_the_zip_and_its_windows_stay_out(self):
-        import test_routes
-        routes = test_routes.routes
-        with tempfile.TemporaryDirectory() as run:
-            for part in ("upscaled/export", "upscaled/plate", "upscaled/layer", "upscaled/matte", "upscale/comp/w000", "export"):
-                os.makedirs(os.path.join(run, part))
-                open(os.path.join(run, part, "f_00001_.png"), "w").close()
-            names = [arc for _, arc in routes.collect(run, ["export", "upscaled"], stem="desk", names=NAMES)]
-        self.assertEqual(names, ["composite_full_size/desk_composite_full_size_00001_.png", "composite_upscaled/desk_composite_upscaled_00001_.png",
-                                 "matte_upscaled/desk_matte_upscaled_00001_.png"])
 
 
 if __name__ == "__main__":

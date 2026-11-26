@@ -2,6 +2,7 @@
 own names in source_plate/, streamed as the zip downloads, with no copy of them on disk; a path that leaves ComfyUI's
 folders is refused; the size route answers their bytes."""
 import asyncio
+import json
 import os
 import shutil
 import sys
@@ -58,8 +59,8 @@ class SourcePlate(unittest.TestCase):
         return asyncio.run(go())
 
     def test_a_movie_comes_under_its_own_name_and_no_zip_stays_on_disk(self):
-        status, body = self.get({"run": self.rel, "name": "desk_v1", "stem": "desk", "parts": "export,source",
-                                 "names": '{"export": "composite_full_size", "source": "source_plate"}', "plate": f"sourcetest{os.getpid()}/desk.mp4"})
+        status, body = self.get({"run": self.rel, "name": "desk_v1", "stem": "desk", "files": json.dumps([["composite_full_size", f"output:{self.rel}/export/plate_00001_.mp4"]]),
+                                 "source": "source_plate", "plate": f"sourcetest{os.getpid()}/desk.mp4"})
         self.assertEqual(status, 200)
         with zipfile.ZipFile(io.BytesIO(body)) as z:
             self.assertEqual(sorted(z.namelist()), ["desk_composite_full_size.mp4", "source_plate/desk.mp4"])
@@ -68,8 +69,8 @@ class SourcePlate(unittest.TestCase):
         print("The source plate's movie comes in source_plate/, streamed, with no zip left on disk")
 
     def test_each_frame_of_a_folder_comes_once(self):
-        status, body = self.get({"run": self.rel, "name": "room_v1", "stem": "room", "parts": "export,source",
-                                 "names": '{"source": "source_plate"}', "plate": f"sourcetest{os.getpid()}/room"})
+        status, body = self.get({"run": self.rel, "name": "room_v1", "stem": "room", "files": json.dumps([["composite_full_size", f"output:{self.rel}/export/plate_00001_.mp4"]]),
+                                 "source": "source_plate", "plate": f"sourcetest{os.getpid()}/room"})
         self.assertEqual(status, 200)
         with zipfile.ZipFile(io.BytesIO(body)) as z:
             self.assertEqual([n for n in sorted(z.namelist()) if n.startswith("source_plate/")],
@@ -77,7 +78,7 @@ class SourcePlate(unittest.TestCase):
         print("Each frame of the source plate comes once, under its own name")
 
     def test_a_path_that_leaves_comfyuis_folders_is_refused(self):
-        status, _ = self.get({"run": self.rel, "name": "x", "parts": "export,source", "plate": "../../etc"})
+        status, _ = self.get({"run": self.rel, "name": "x", "files": json.dumps([["composite_full_size", f"output:{self.rel}/export/plate_00001_.mp4"]]), "plate": "../../etc"})
         self.assertEqual(status, 403)
         print("A source plate outside ComfyUI's folders is refused")
 
