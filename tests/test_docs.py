@@ -1,6 +1,6 @@
 """ARCHITECTURE.md and TESTING.md against the repository. Every file they name exists, the version and the pins they
-state are the code's, and every flow, mock hook and section of app.mjs they name exists. With DOCS_COMPLETE=1 it also
-checks the other way: every flow, hook and section is in the docs (the closing check before a version goes to main: flows
+state are the code's, and every flow, mock hook, test module and section of app.mjs they name exists. With DOCS_COMPLETE=1
+it also checks the other way: every flow, hook, test module, file of tests/js and section is in the docs (the closing check before a version goes to main: flows
 and hooks are added on branches, and the docs follow them in one edit)."""
 import os
 import re
@@ -24,6 +24,7 @@ def table(text, header):
 ARCHITECTURE, TESTING = read("ARCHITECTURE.md"), read("TESTING.md")
 FLOWS = set(re.findall(r'"(\w+)": \w+_flow', read("tests", "ui_mock.py"))) | {n[:-3] for n in os.listdir(os.path.join(ROOT, "tests", "flows")) if n.endswith(".py")}
 HOOKS = set(re.findall(r'add_(?:get|post)\("(/mock/\w+)"', read("tests", "mock_comfy.py")))
+MODULES_NAMED = [m for cell in table(TESTING, "| Module | What it proves | Needs |") for m in re.split(r"`?,\s*`?", cell)]  # a row may name several
 SECTIONS = [line[len("// ---------- "):] for line in read("web", "app.mjs").splitlines() if line.startswith("// ---------- ")]
 
 
@@ -46,6 +47,8 @@ class Docs(unittest.TestCase):
     def test_what_they_name_exists(self):
         self.assertEqual(sorted(set(table(TESTING, "| Flow | What it proves |")) - FLOWS), [], "TESTING.md names flows that do not exist")
         self.assertEqual(sorted(set(re.findall(r"/mock/\w+", TESTING)) - HOOKS), [], "TESTING.md names mock routes that do not exist")
+        self.assertEqual([m for m in MODULES_NAMED if not os.path.exists(os.path.join(ROOT, "tests", f"{m}.py")) and not os.path.isdir(os.path.join(ROOT, m))], [],
+                         "TESTING.md names test modules that do not exist")
         gone = [row for row in table(ARCHITECTURE, "| Section | What it holds |") if not any(s.startswith(row) for s in SECTIONS)]
         self.assertEqual(gone, [], "ARCHITECTURE.md, section 11, names sections that web/app.mjs does not have")
 
@@ -53,6 +56,10 @@ class Docs(unittest.TestCase):
     def test_everything_is_in_the_docs(self):
         self.assertEqual(sorted(FLOWS - set(table(TESTING, "| Flow | What it proves |"))), [], "TESTING.md: add a row for each of these flows")
         self.assertEqual(sorted(HOOKS - set(re.findall(r"/mock/\w+", TESTING))), [], "TESTING.md: add these mock routes to the table")
+        modules = {n[:-3] for n in os.listdir(os.path.join(ROOT, "tests")) if n.startswith("test_") and n.endswith(".py")}
+        self.assertEqual(sorted(modules - set(MODULES_NAMED)), [], "TESTING.md: add a row for each of these test modules")
+        scripts = [n for n in os.listdir(os.path.join(ROOT, "tests", "js")) if n.endswith(".test.mjs")]
+        self.assertEqual(sorted(n for n in scripts if f"`{n}`" not in TESTING and f"`tests/js/{n}`" not in TESTING), [], "TESTING.md: name each of these files of tests/js")
         rows = table(ARCHITECTURE, "| Section | What it holds |")
         self.assertEqual([s for s in SECTIONS if not any(s.startswith(row) for row in rows)], [], "ARCHITECTURE.md, section 11: add a row for each of these sections of web/app.mjs")
 
