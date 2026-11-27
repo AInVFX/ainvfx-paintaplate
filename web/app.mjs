@@ -3590,7 +3590,8 @@ function exportCells(r) {
     if (erase) add("shot", "full", name("cleanfull"), () => (carry ? r.exported?.cleanPath : r.exported?.shotPath));
     add("composite", "full", name("review"), () => r.exported?.path);
     if (!relight) add("layer", "full", X_LABELS.layer, () => r.exported?.layerPath); // a Light edit's one element is its composite
-    for (const stage of hdr ? ["full", "hdr"] : ["full"]) add("matte", stage, X_LABELS.matte, () => r.exported?.mattePath); // one picture, which the zip takes once
+    if (!(relight && r.hdrAfter)) // a relit composite through SDR to HDR is exported whole (exportAlone), with no matte
+      for (const stage of hdr ? ["full", "hdr"] : ["full"]) add("matte", stage, X_LABELS.matte, () => r.exported?.mattePath); // one picture, which the zip takes once
   }
   if (hdr && (alone || fluid)) add("plate", "hdr", name("hdrplate"), set("hdr", "plate"));
   else if (hdr && edits) {
