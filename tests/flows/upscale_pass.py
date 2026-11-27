@@ -1,7 +1,7 @@
 """Upscale's pass follows the GPU (logic.upscalePass): the log's « Upscale: … » line says what runs, and each job asks SeedVR2's
-chunk node for the same. On a 16 GB card under a 52 GB cap, a fluid shot of 121 frames upscaled to 1600 runs in one job of
-14 even chunks of 17 frames, two neighbours sharing 3 latent frames; on a 96 GB card, desk.mp4 upscaled to 1600 runs in one
-pass."""
+chunk node for the same. On a 16 GB card with 128 GB of RAM, a fluid shot of 121 frames upscaled to 2560 runs in one job of
+4 even chunks of 37 frames, two neighbours sharing 3 latent frames: a pass there holds 15 latent frames (64.3 latent frames
+times megapixels, as a 16 GB GPU measured); on a 96 GB card, desk.mp4 upscaled to 1600 runs in one pass."""
 SIZE = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
 
 
@@ -18,7 +18,7 @@ def said(page, U, port, start):  # the lines « Upscale: … » and the chunk no
 
 
 def run(browser, port, U):
-    U.mock_route(port, "/mock/card", {"vram": 17.2e9, "ram": 52 * 2 ** 30})
+    U.mock_route(port, "/mock/card", {"vram": 17.2e9, "ram": 128 * 2 ** 30})  # the shot in one job at 2560 x 1600
     page = U.load(browser, port)
     page.click("#open-btn"); page.click("#open [data-tab=blank]")
     page.select_option("#b-depth", "8"); page.fill("#b-width", "512"); page.fill("#b-height", "320"); page.select_option("#b-fps", "24"); page.fill("#b-frames", "121")
@@ -28,11 +28,11 @@ def run(browser, port, U):
     page.evaluate(U.WATCH); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("Fluid shot, full size: done in"), 240000, "the fluid shot")
     start = len(U.mock_route(port, "/mock/posts"))
-    custom(page, U, "1600")
+    custom(page, U, "2560")
     U.wait_log(page, U.added_line("Plate, upscaled: done in"), 240000, "Upscale on a 16 GB card")
     lines, chunks = said(page, U, port, start)
-    U.check(any("1 job, in 14 chunks of 17 frames, each sharing 12 frames with the next." in t for t in lines) and chunks and all(c == [17, 3] for c in chunks),
-            f"16 GB: even chunks of 17 frames sharing 3 latent frames, said and asked for: {lines}, {chunks}")
+    U.check(any("1 job, in 4 chunks of 37 frames, each sharing 12 frames with the next." in t for t in lines) and chunks and all(c == [37, 3] for c in chunks),
+            f"16 GB: even chunks of 37 frames sharing 3 latent frames, said and asked for: {lines}, {chunks}")
     page.close()
     U.mock_route(port, "/mock/card", {"vram": 102e9, "ram": 131 * 2 ** 30})
     page = U.load(browser, port)

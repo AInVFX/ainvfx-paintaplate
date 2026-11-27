@@ -28,8 +28,8 @@ class SameRules(unittest.TestCase):
 
     def test_the_constants_are_the_tools(self):
         u = self.page("m.UPSCALE")
-        self.assertEqual((u["long"], u["factor"], u["chunk"], u["step"], u["modelRam"], u["copies"]),
-                         (upscale_plate.LONG_SIDE, upscale_plate.FACTOR, build_workflows.UPSCALE_CHUNK, upscale_plate.CHUNK_STEP,
+        self.assertEqual((u["long"], u["chunk"], u["step"], u["modelRam"], u["copies"]),
+                         (upscale_plate.LONG_SIDE, build_workflows.UPSCALE_CHUNK, upscale_plate.CHUNK_STEP,
                           upscale_plate.MODEL_RAM, upscale_plate.FRAME_COPIES))
         self.assertEqual((tuple(u["most"]), tuple(u["sizes"]), u["least"]), (upscale_plate.MOST, upscale_plate.SIZES, upscale_plate.LEAST))
 
@@ -43,11 +43,11 @@ class SameRules(unittest.TestCase):
     def test_sizes_and_windows_are_the_tools(self):
         cases = [[w, h, ram, vram] for w, h in PLATES for ram, vram in MACHINES]
         page = self.page(f"{json.dumps(cases)}.map(([w, h, ram, vram]) => {{ const t = m.upscaleTarget(w, h); "
-                         "const n = m.upscaleWindow(ram, vram, t, [w, h], 121); return [t, m.upscaleSource(w, h, t), n, m.upscaleWindows(121, n)]; })")
-        for (w, h, ram, vram), (target, source, window, windows) in zip(cases, page):
+                         "const n = m.upscaleWindow(ram, vram, t, [w, h], 121); return [t, m.upscaleResize(w, h, t), n, m.upscaleWindows(121, n)]; })")
+        for (w, h, ram, vram), (target, resize, window, windows) in zip(cases, page):
             t = upscale_plate.target_size(w, h)
             self.assertEqual(tuple(target), t, (w, h))
-            self.assertEqual(tuple(source), upscale_plate.source_size(w, h, t), (w, h))
+            self.assertEqual(resize, upscale_plate.resize_method(w, h, t), (w, h))
             self.assertEqual(window, upscale_plate.window_frames(ram, vram, t, (w, h), 121), (w, h, ram, vram))
             self.assertEqual([tuple(x) for x in windows], upscale_plate.windows(121, count=window, every=True))
 

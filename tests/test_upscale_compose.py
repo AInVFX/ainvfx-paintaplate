@@ -13,7 +13,7 @@ import build_workflows  # noqa: E402
 import upscale_plate  # noqa: E402
 
 LAYER = {"under": "output:p/upscale/plate/w001", "under_space": "sRGB", "matte": "output:r/matte", "comp_prefix": "r/upscale/comp/w001/f",
-         "matte_prefix": "r/upscaled/matte/matte"}
+         "matte_prefix": "r/upscaled/matte/matte", "share": 4}  # a window after the first: it shares 4 frames with the window before
 
 
 def by_title(prompt, title):
@@ -43,14 +43,16 @@ class LayerWindow(unittest.TestCase):
         _, saved = output(self.p, "comp")
         self.assertEqual((saved["inputs"]["filename_prefix"], saved["inputs"]["format"]), (LAYER["comp_prefix"], "png16"))
 
-    def test_the_matte_is_cut_to_the_window_and_sized_as_composite_frames_sizes_it(self):
+    def test_the_matte_is_cut_to_the_window_sized_as_composite_frames_sizes_it_and_saved_without_the_shared_frames(self):
         _, comp = by_title(self.p, "Upscaled result: the plate's window around the matte, the layer inside it")
         wid, window = by_title(self.p, "The window of the matte")
         self.assertEqual((window["inputs"]["batch_index"], window["inputs"]["length"]), (21, 21))
         mask = self.p[str(comp["inputs"]["mask"][0])]
         self.assertEqual((mask["class_type"], mask["inputs"]["image"]), ("ImageToMask", [wid, 0]))
+        nid, new = by_title(self.p, "The window's matte frames that the window before did not save")
+        self.assertEqual((new["inputs"]["image"], new["inputs"]["batch_index"], new["inputs"]["length"]), ([wid, 0], 4, 21))
         _, big = by_title(self.p, "The matte at the target size (bilinear, as Composite Frames sizes it)")
-        self.assertEqual((big["inputs"]["image"], big["inputs"]["upscale_method"], big["inputs"]["crop"]), ([wid, 0], "bilinear", "disabled"))
+        self.assertEqual((big["inputs"]["image"], big["inputs"]["upscale_method"], big["inputs"]["crop"]), ([nid, 0], "bilinear", "disabled"))
         self.assertEqual((big["inputs"]["width"], big["inputs"]["height"]), (comp["inputs"]["width"], comp["inputs"]["height"]))
         _, saved = output(self.p, "matte")
         self.assertEqual((saved["inputs"]["format"], saved["inputs"]["filename_prefix"]), ("png16", LAYER["matte_prefix"]))

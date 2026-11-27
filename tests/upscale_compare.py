@@ -9,7 +9,7 @@
           against the original, the mean difference of each channel, and centre crops of one frame, for a sheet.
           python tests/upscale_compare.py colour --comfy /workspace/ComfyUI --original PATH --runs lab none --out DIR
   crops   One frame of several results (--result label=folder, once for each), the same box (--box X Y W H) of each
-          at full size, side by side with its label: the sheet of a half against a third.
+          at full size, side by side with its label, for a sheet.
   parts   The upscaled set of one export (upscaled/ of its zip, unpacked, or of the render's folder): for each frame, how far the upscaled
           result is from upscaled plate x (1 - upscaled matte) + upscaled layer x upscaled matte (the mean and the largest difference, and the
           share of pixels more than 2 steps off, in 8-bit steps), and crops at 1:1 along the matte's edge on a few frames:

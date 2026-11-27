@@ -1,5 +1,5 @@
 """tests/upscale_compare.py crops: the same frame of several results, the same box of each at full size, side by side, for
-the sheet of a half against a third; and tests/upscale_plate.py's source at a third."""
+a sheet; and the filter tests/upscale_plate.py sizes a window with, as the page's."""
 import os
 import sys
 import tempfile
@@ -40,10 +40,10 @@ class Crops(unittest.TestCase):
             self.assertEqual(upscale_plate.shot_path(tmp, "plates/horse.mp4"), os.path.join(tmp, "input", "plates", "horse.mp4"))
             self.assertEqual(upscale_plate.shot_path(tmp, "elsewhere/horse.mp4"), os.path.join(tmp, "input", "plates", "horse.mp4"))
 
-    def test_the_source_at_a_third(self):
-        self.assertEqual(upscale_plate.source_size(1920, 1080, (3840, 2160)), (1280, 720))  # a third, the page's
-        self.assertEqual(upscale_plate.source_size(1920, 1080, (3840, 2160), 2), (0, 0))  # twice the shot: it goes in as it is
-        self.assertEqual(upscale_plate.values("plates/horse.mp4", 1920, 1080, 121, factor=3)["source_width"], 1280)
+    def test_the_window_is_sized_in_floats(self):
+        self.assertEqual(upscale_plate.resize_method(1920, 1080, (3840, 2160)), "bicubic")  # up, as the page sizes it
+        self.assertEqual(upscale_plate.resize_method(3840, 2160, (2560, 1440)), "area")  # down, with no aliasing
+        self.assertEqual(upscale_plate.values("plates/horse.mp4", 1920, 1080, 121)["resize_method"], "bicubic")
 
 
 if __name__ == "__main__":

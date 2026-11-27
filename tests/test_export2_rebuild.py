@@ -158,27 +158,11 @@ class Rebuild(unittest.TestCase):
         files = self.routes.zip_entries(rows, "desk", "source_plate", self.routes.plate_files(src))
         return zipfile.ZipFile(io.BytesIO(open(self.routes.build_zip(self.run, "desk_v1", files, None, "desk"), "rb").read()))
 
-    def read(self, z, row, into):  # one row of the zip, as Load Plate reads it: frames, or one movie
-        import zip_rows
-        names = zip_rows.files(z.namelist(), row)
-        z.extractall(into, names)
-        if len(names) == 1 and names[0].lower().endswith(tuple(plateio.VIDEO_EXTS)):
-            return np.asarray(plateio.decode_video(os.path.join(into, names[0]), N, FPS)[0], np.float32)[:N]
-        return np.stack([plateio.read_float(os.path.join(into, n)) for n in sorted(names)])
-
     def rebuilt(self, kind):
-        """The largest and the mean difference between the zip's composite and the one its plate, layer and matte rebuild, by
-        stage."""
-        z, into, found = self.zipped(kind), os.path.join(self.run, "unzipped"), {}
-        for stage, plate, layer, matte, comp in (("full size", "source_plate", "layer_full_size", "matte", "composite_full_size"),
-                                                 ("upscaled", "plate_upscaled", "layer_upscaled", "matte_upscaled", "composite_upscaled"),
-                                                 ("HDR", "plate_hdr", "layer_hdr", "matte", "composite_hdr"),  # the matte: one picture, the full size's
-                                                 ("HDR, upscaled", "plate_hdr_upscaled", "layer_hdr_upscaled", "matte_upscaled", "composite_hdr_upscaled")):
-            p, l, m, c = (self.read(z, row, into) for row in (plate, layer, matte, comp))
-            m = m[..., :1]
-            d = np.abs(p[..., :3] * (1 - m) + l[..., :3] * m - c[..., :3])
-            found[stage] = (float(d.max()), float(d.mean()), float((d / np.maximum(1.0, np.abs(c[..., :3]))).max()))
-        return found
+        """The largest and the mean difference between the zip's composite and the one its plate, layer and matte rebuild, and
+        the largest relative to the composite, by stage (zip_rebuild.rebuilt reads every row as Load Plate reads it)."""
+        import zip_rebuild
+        return {stage: v[4:] for stage, v in zip_rebuild.rebuilt(self.zipped(kind), os.path.join(self.run, "unzipped"), N).items()}
 
     def test_a_plate_of_16_bit_frames_rebuilds_within_2_of_65535(self):
         found = self.rebuilt("frames")

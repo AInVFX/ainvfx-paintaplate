@@ -21,7 +21,8 @@ test("one pass holds the smaller of the 32-bit bound and the VRAM, as measured o
   assert.equal(upscalePass([3840, 2048], 95.6), 22);
   assert.equal(upscalePass([2560, 1440], 95.6), 48, "the 32-bit bound, the VRAM holding more");
   assert.equal(upscalePass([1600, 880], 32), 37, "on 32 GB the VRAM bounds a pass first");
-  assert.equal(upscalePass([3840, 2160], 15.6), 6, "under 32 GB the model streams: chunks of 21 frames, as before");
+  assert.equal(upscalePass([3840, 2160], 15.6), 7, "under 32 GB the model streams: on 16 GB, 25 frames held at 3840 x 2160 and 29 did not");
+  assert.equal(upscalePass([1920, 1080], 15.6), 31, "on 16 GB, a shot's 121 frames held at 1920 x 1080");
 });
 
 test("a window longer than one pass runs in even chunks, counted as core makes them", () => {

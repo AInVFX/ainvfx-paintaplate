@@ -1,7 +1,7 @@
 // Upscale's rules: the target and source sizes, the windows by the machine's memory, the estimate, the row.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FAMILY, FINISH, freesBefore, finishFolder, setFolder, upscaleKeeps, upscaleSeconds, upscaleSource, upscaleTarget, upscaleWindow, upscaleWindows } from "../../web/logic.mjs";
+import { FAMILY, FINISH, freesBefore, finishFolder, setFolder, upscaleKeeps, upscaleSeconds, upscaleResize, upscaleTarget, upscaleWindow, upscaleWindows } from "../../web/logic.mjs";
 
 const UHD = [3840, 2160], HD = [1920, 1080];
 
@@ -13,12 +13,11 @@ test("the target is 3840 px on the long side with the plate's aspect, and a larg
   assert.deepEqual(upscaleTarget(4096, 2160), [4096, 2160]);
 });
 
-test("SeedVR2 restores from a third of the target: a larger shot comes down to it first, a smaller one goes in as it is", () => {
-  assert.deepEqual(upscaleSource(1920, 1080, UHD), [1280, 720]);
-  assert.deepEqual(upscaleSource(1280, 720, UHD), [0, 0]);
-  assert.deepEqual(upscaleSource(3840, 2160, UHD), [1280, 720]);
-  assert.deepEqual(upscaleSource(2560, 1440, UHD), [1280, 720]);
-  assert.deepEqual(upscaleSource(1920, 1080, [2560, 1440]), [854, 480]);
+test("Upscale sizes the window to the target in floats, with no step down: bicubic up, which leaves a window at the target's size as it is, area down", () => {
+  assert.equal(upscaleResize(1920, 1080, UHD), "bicubic");
+  assert.equal(upscaleResize(1280, 720, UHD), "bicubic");
+  assert.equal(upscaleResize(3840, 2160, UHD), "bicubic");
+  assert.equal(upscaleResize(3840, 2160, [2560, 1440]), "area");
 });
 
 test("windows follow the machine: 21 frames on a 16 GB GPU under a 52 GB cap, one job on a 96 GB GPU with 175 GB of RAM", () => {

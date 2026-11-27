@@ -302,6 +302,9 @@ async def execute(pid, prompt):
                 o[outs["named"]] = {"images": []}
         await steps(pid, 2, 0.5)
     elif "color_fix" in v:  # upscale: a window at the target size, each frame flat in its mean colour (4K frames stay cheap here)
+        f = int(v.get("chunk_frames") or 0)  # core's SeedVR2TemporalChunk takes 4n+1 frames per chunk and fails the job on any other count
+        if f and (f - 1) % 4:
+            raise ValueError(f"SeedVR2TemporalChunk: frames_per_chunk must be a 4n+1 pixel-frame count (1, 5, 9, 13, 17, 21, ...); got {f}.")
         frames = read_plate(v["shot"], int(v["max_frames"]))[0]
         first, count, w, h = int(v["first"]), int(v["count"]), int(v["width"]), int(v["height"])
         await steps(pid, 1, 2.0)
@@ -320,10 +323,10 @@ async def execute(pid, prompt):
         if "comp" in outs:  # the 4K plate's window around the matte, the layer inside it
             under = [np.asarray(Image.open(f).convert("RGB").getpixel((0, 0)), np.float32) / 255 for f in pngs(v["under"])]
             o[outs["comp"]] = {"images": [flat(c * m + u * (1 - m), v["comp_prefix"], i) for i, (c, u, m) in enumerate(zip(layer, under, mattes))][:1]}
-        if "matte" in outs:  # numbered on from the frames its folder holds, as Save Frames counts
+        if "matte" in outs:  # the frames the window before did not save, numbered on from the frames its folder holds, as Save Frames counts
             sub, _, stem = v["matte_prefix"].rpartition("/")
             start = len(glob.glob(os.path.join(folder("output"), sub, f"{stem}_*_.png")))
-            o[outs["matte"]] = {"images": [flat(m, v["matte_prefix"], start + i) for i, m in enumerate(mattes)][:1]}
+            o[outs["matte"]] = {"images": [flat(m, v["matte_prefix"], start + i) for i, m in enumerate(mattes[int(v.get("share") or 0):])][:1]}
     elif "export" in outs and "path" not in v:  # upscale_export: the windows joined in order, written as the export is (a movie here)
         dirs, share = sorted(glob.glob(os.path.join(resolve(v["frames"]), "*", ""))), int(v.get("share") or 0)
         counts = [int(c) for c in str(v.get("counts") or "").split(",") if c.strip()]
@@ -550,15 +553,15 @@ async def worker():
         t0 = time.time()
         try:
             outputs = await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(execute(pid, prompt), LOOPS["jobs"]))
-            HISTORY[pid] = {"outputs": outputs, "status": {"completed": True, "status_str": "success", "messages": []}}
+            HISTORY[pid] = {"prompt": [len(HISTORY), pid, prompt, {}, []], "outputs": outputs, "status": {"completed": True, "status_str": "success", "messages": []}}
             await send({"type": "execution_success", "data": {"prompt_id": pid}})
         except asyncio.CancelledError:
-            HISTORY[pid] = {"outputs": {}, "status": {"completed": False, "status_str": "error", "messages": []}}
+            HISTORY[pid] = {"prompt": [len(HISTORY), pid, prompt, {}, []], "outputs": {}, "status": {"completed": False, "status_str": "error", "messages": []}}
             await send({"type": "execution_interrupted", "data": {"prompt_id": pid}})
         except Exception as exc:  # report like ComfyUI does
             import traceback
             traceback.print_exc()
-            HISTORY[pid] = {"outputs": {}, "status": {"completed": False, "status_str": "error", "messages": []}}
+            HISTORY[pid] = {"prompt": [len(HISTORY), pid, prompt, {}, []], "outputs": {}, "status": {"completed": False, "status_str": "error", "messages": []}}
             await send({"type": "execution_error", "data": {"prompt_id": pid, "node_type": "Mock", "exception_message": str(exc)}})
         STATE["running"] = None
         print(f"{pid[:8]} {'+'.join(sorted(outputs_of(prompt))) or 'no output'}: {time.time() - t0:.2f} s", flush=True)  # each job, by its outputs, and its time
@@ -779,7 +782,8 @@ async def start():
     threading.Thread(target=LOOPS["jobs"].run_forever, name="jobs", daemon=True).start()
     app = web.Application(client_max_size=1024 ** 3)
     app.router.add_post("/prompt", prompt_route)
-    app.router.add_get("/history", lambda r: web.json_response({}))  # the page reads it once at start, for the models already loaded
+    app.router.add_get("/history", lambda r: web.json_response(dict(list(HISTORY.items())[-int(r.query["max_items"]):]) if "max_items" in r.query else {}))
+    # bare, as the page reads it once at start (the models already loaded: none here); with max_items, the last jobs with their prompts, as ComfyUI answers
     app.router.add_get("/history/{pid}", history_route)
     app.router.add_get("/view", view_route)
     app.router.add_post("/upload/image", upload_route)

@@ -33,7 +33,6 @@ LONG_SIDE = 3840
 MOST = (3840, 2160)  # the largest target: its long side and its short side
 SIZES = (2560, 3840)  # the long sides the page's menu lists beside the shot's own size
 LEAST = 640  # the smallest long side the page's Custom… takes
-FACTOR = 3  # SeedVR2 restores from at most the target divided by this: a third
 WINDOW = UPSCALE_CHUNK  # the smallest window: one chunk
 CHUNK_OVERLAP = 1  # latent frames two neighbouring chunks share when --overlap names none: the workflow's own (Slot chunk_overlap)
 CHUNK_STEP = 4 * ((UPSCALE_CHUNK - 1) // 4 + 1 - CHUNK_OVERLAP)  # 20: the frames each further chunk adds to a window sized to the machine
@@ -60,12 +59,10 @@ def target_size(width: int, height: int, px: int = LONG_SIDE, side: str = "long"
     return (_even(px), _even(px * height / width)) if asked == "width" else (_even(px * width / height), _even(px))
 
 
-def source_size(width: int, height: int, target: tuple, factor: int = FACTOR) -> tuple:
-    """The size SeedVR2 restores from: 0 x 0 (the shot as it is) when the target is `factor` times its size or more, else
-    the target divided by `factor`, in even numbers."""
-    if max(width, height) * factor <= max(target):
-        return 0, 0
-    return 2 * round(target[0] / factor / 2), 2 * round(target[1] / factor / 2)
+def resize_method(width: int, height: int, target: tuple) -> str:
+    """The filter that sizes the window to the target before SeedVR2, in floats, as logic.upscaleResize: bicubic, which
+    leaves a window already at the target's size as it is, or area for a smaller target."""
+    return "area" if target[0] < width or target[1] < height else "bicubic"
 
 
 WINDOW_SHARE = 4  # frames two neighbouring windows share, which the join crossfades: the page's UPSCALE.share
@@ -138,6 +135,12 @@ def frame_size(path: str) -> tuple:
         return struct.unpack(">II", f.read(24)[16:24])
 
 
+def one_pass(count: int) -> int:
+    """One pass over a window of `count` frames: the window padded to 4n+1 frames, as SeedVR2Preprocess pads it, since core's
+    chunk node takes no other count (logic.upscaleChunk)."""
+    return 4 * -(-(count - 1) // 4) + 1
+
+
 def even_chunk(count: int, chunk: int, overlap: int) -> int:
     """The longest chunk of at most `chunk` frames with which core's split ends on a full chunk in a window of `count` frames,
     chunks sharing `overlap` latent frames: chunks spread evenly, none short, the fewest frames sampled among them. The window
@@ -157,17 +160,16 @@ def even_chunk(count: int, chunk: int, overlap: int) -> int:
 
 def values(shot: str, width: int, height: int, frames: int, label: str = "upscale", first: int = 0, count: int = WINDOW,
            color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16", seed: int = 42, window: int = 0,
-           px: int = LONG_SIDE, side: str = "long", factor: int = FACTOR, chunk: int = UPSCALE_CHUNK, overlap: int = CHUNK_OVERLAP, even: bool = False) -> dict:
+           px: int = LONG_SIDE, side: str = "long", chunk: int = UPSCALE_CHUNK, overlap: int = CHUNK_OVERLAP, even: bool = False) -> dict:
     """The slots of the upscale workflow for window number `window` of a shot of `frames` frames: its own folder. `chunk`: the
     frames SeedVR2 samples at once, 0 for one pass over the window; `overlap`: the latent frames two neighbouring chunks share;
     `even`: chunks of at most `chunk` frames, spread evenly over the window (even_chunk)."""
     n = max(1, min(count, frames - first))
     w, h = target_size(width, height, px, side)
-    sw, sh = source_size(width, height, (w, h), factor)
-    return {"shot": shot, "max_frames": frames, "source_width": sw, "source_height": sh, "first": first, "count": max(1, min(count, frames - first)), "width": w,
+    return {"shot": shot, "max_frames": frames, "resize_method": resize_method(width, height, (w, h)), "first": first, "count": max(1, min(count, frames - first)), "width": w,
             "height": h, "color_space": color_space, "color_fix": color_fix, "format": fmt, "seed": seed,
             "prefix": f"{label}/upscale/w{window:03}/f", "under": "", "under_space": color_space, "matte": "", "comp_prefix": "",
-            "matte_prefix": "", "chunk_frames": (even_chunk(n, chunk, overlap) if even else chunk) if chunk else n, "chunk_overlap": overlap}
+            "matte_prefix": "", "share": 0, "chunk_frames": (even_chunk(n, chunk, overlap) if even else chunk) if chunk else one_pass(n), "chunk_overlap": overlap}
 
 
 def decode_tiles(prompt: dict, tile: int, overlap: int) -> int:
@@ -180,7 +182,7 @@ def decode_tiles(prompt: dict, tile: int, overlap: int) -> int:
 
 def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first: int = 0, count: int = WINDOW,
         every: bool = False, color_space: str = "@model", color_fix: str = "lab", fmt: str = "png16",
-        px: int = LONG_SIDE, decode_tile: str = "", side: str = "long", factor: int = FACTOR, chunk: int = UPSCALE_CHUNK,
+        px: int = LONG_SIDE, decode_tile: str = "", side: str = "long", chunk: int = UPSCALE_CHUNK,
         overlap: int = CHUNK_OVERLAP, even: bool = False) -> dict:
     import build_workflows
     from hdr_plate import _comfy_pid, _plate_info, node_rows, run_prompt
@@ -188,18 +190,19 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
     shutil.rmtree(os.path.join(comfy, "output", label), ignore_errors=True)
     target = target_size(w, h, px, side)
     count = count or window_frames(*machine(url), target, (w, h), n)
-    jobs = [("upscale", values(shot, w, h, n, label, f, c, color_space, color_fix, fmt, window=k, px=px, side=side, factor=factor, chunk=chunk, overlap=overlap, even=even))
+    jobs = [("upscale", values(shot, w, h, n, label, f, c, color_space, color_fix, fmt, window=k, px=px, side=side, chunk=chunk, overlap=overlap, even=even))
             for k, (f, c) in enumerate(windows(n, first, count, every))]
     if every:
         jobs.append(("upscale_export", export_values(shot, n, label, count)))
     gb = lambda x: "not read" if x is None else f"{x:.1f} GB"  # noqa: E731
-    rows, nodes, seconds = [], [], []
+    rows, nodes, seconds, failed = [], [], [], []
     for name, v in jobs:
         prompt = build_workflows.fill(name, v)
         if decode_tile and name == "upscale":
             decode_tiles(prompt, *(int(x) for x in decode_tile.split("/")))
         r = run_prompt(url, prompt, pid=_comfy_pid())
         status = (r["history"].get("status") or {}).get("status_str", "no status")
+        failed += [] if status == "success" else [name]
         what = f"frames {v['first'] + 1} to {v['first'] + v['count']}" if name == "upscale" else "the export"
         rows.append(f"| {name} | {what} | {status} | {r['seconds']:.1f} | {gb(r['peaks']['vram'])} | {gb(r['peaks']['ram'])} |")
         nodes += [f"| {name}, {what} | {node} | {s:.1f} |" for node, s in node_rows(r["spent"], prompt)]
@@ -210,8 +213,7 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
     lines = [f"# Upscale: `{shot}`", "", "| | |", "| --- | --- |", f"| ComfyUI | {url} |",
              f"| Shot | {w} x {h}, {n} frames; {len(jobs) - every} " + ("window" if len(jobs) - every == 1 else "windows")
              + f" of up to {count} frames |",
-             f"| Target | {v['width']} x {v['height']}, from " + (f"{v['source_width']} x {v['source_height']}" if v["source_width"] else "the shot's size")
-             + f", colour correction {color_fix}, {fmt} |",
+             f"| Target | {v['width']} x {v['height']}, from the shot's size by {v['resize_method']}, colour correction {color_fix}, {fmt} |",
              f"| Frames | {len(files)} files" + (f" at {size[0]} x {size[1]}" if size else "") + " |"]
     if every:
         exported = sorted(os.listdir(os.path.join(comfy, "output", label, "export"))) if os.path.isdir(os.path.join(comfy, "output", label, "export")) else []
@@ -224,7 +226,7 @@ def run(url: str, comfy: str, shot: str, out: str, label: str = "upscale", first
     with open(os.path.join(out, f"{label}.md"), "w") as f:
         f.write(text)
     print(text)
-    return {"seconds": seconds, "frames": len(files), "size": size, "rows": rows}
+    return {"seconds": seconds, "frames": len(files), "size": size, "rows": rows, "failed": failed}
 
 
 if __name__ == "__main__":
@@ -243,12 +245,11 @@ if __name__ == "__main__":
     ap.add_argument("--long-side", type=int, default=LONG_SIDE, help="the target's long side in px")
     ap.add_argument("--width", type=int, default=0, help="the target's width in px, in place of --long-side; the height follows the shot")
     ap.add_argument("--height", type=int, default=0, help="the target's height in px, in place of --long-side; the width follows the shot")
-    ap.add_argument("--factor", type=int, default=FACTOR, help="SeedVR2 restores from the target divided by this: 3, the page's, or 2 for a half")
     ap.add_argument("--decode-tile", default="", help="T/O: the tile and the overlap of SeedVR2's decode in px; 4096/128 decodes whole")
     ap.add_argument("--chunk", type=int, default=UPSCALE_CHUNK, help="the frames SeedVR2 samples at once; 0: one pass over each window")
     ap.add_argument("--overlap", type=int, default=CHUNK_OVERLAP, help="the latent frames two neighbouring chunks share, which core's merge crossfades")
     ap.add_argument("--even", action="store_true", help="chunks of at most --chunk frames, spread evenly over each window, none short")
     a = ap.parse_args()
-    run(a.url, a.comfy, a.shot, os.path.expanduser(a.out), a.label, a.first, a.count, a.all, a.color_space, a.color_fix, a.format,
-        a.width or a.height or a.long_side, a.decode_tile, "width" if a.width else "height" if a.height else "long", factor=a.factor,
-        chunk=a.chunk, overlap=a.overlap, even=a.even)
+    sys.exit(1 if run(a.url, a.comfy, a.shot, os.path.expanduser(a.out), a.label, a.first, a.count, a.all, a.color_space, a.color_fix, a.format,
+        a.width or a.height or a.long_side, a.decode_tile, "width" if a.width else "height" if a.height else "long",
+        chunk=a.chunk, overlap=a.overlap, even=a.even)["failed"] else 0)  # a job that fails stops a loop of runs (|| break)

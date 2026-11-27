@@ -48,7 +48,7 @@ test("a scene's switch: true asks for the default, a size is kept, anything else
 
 test("the row says what a size no larger than the plate does, and nothing for a larger one", () => {
   assert.equal(upscaleWhy(1920, 1080), "");
-  assert.match(upscaleWhy(3840, 2160), /^At the plate's own size, the result is brought down to (half|a third of) that size/);
+  assert.equal(upscaleWhy(3840, 2160), "At the plate's own size, SeedVR2 restores the result's detail without changing its size. Every pixel is new.");
   assert.match(upscaleWhy(1920, 1080, { side: "long", px: 1920 }), /^At the plate's own size/);
   assert.match(upscaleWhy(1920, 1080, { side: "width", px: 1280 }), /^This size is smaller than the plate, so the frames come out smaller/);
 });

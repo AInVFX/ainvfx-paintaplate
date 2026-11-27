@@ -62,70 +62,51 @@
     "3",
     0
    ],
-   "upscale_method": "lanczos",
-   "width": 0,
-   "height": 0,
-   "crop": "disabled"
-  },
-  "_meta": {
-   "title": "The window at the size SeedVR2 restores from",
-   "slots": {
-    "width": "source_width",
-    "height": "source_height"
-   }
-  }
- },
- "5": {
-  "class_type": "ImageScale",
-  "inputs": {
-   "image": [
-    "4",
-    0
-   ],
-   "upscale_method": "lanczos",
+   "upscale_method": "bicubic",
    "width": 3840,
    "height": 2160,
    "crop": "disabled"
   },
   "_meta": {
-   "title": "The window at the target size (Lanczos)",
+   "title": "The window at the target size, in floats",
    "slots": {
+    "upscale_method": "resize_method",
     "width": "width",
     "height": "height"
    }
   }
  },
- "6": {
+ "5": {
   "class_type": "VAELoader",
   "inputs": {
    "vae_name": "seedvr2_ema_vae_fp16.safetensors"
   }
  },
- "7": {
+ "6": {
   "class_type": "UNETLoader",
   "inputs": {
    "unet_name": "seedvr2_7b_fp16.safetensors",
    "weight_dtype": "default"
   }
  },
- "8": {
+ "7": {
   "class_type": "SeedVR2Preprocess",
   "inputs": {
    "resized_images": [
-    "5",
+    "4",
     0
    ]
   }
  },
- "9": {
+ "8": {
   "class_type": "VAEEncodeTiled",
   "inputs": {
    "pixels": [
-    "8",
+    "7",
     0
    ],
    "vae": [
-    "6",
+    "5",
     0
    ],
    "tile_size": 512,
@@ -134,11 +115,11 @@
    "temporal_overlap": 8
   }
  },
- "10": {
+ "9": {
   "class_type": "SeedVR2TemporalChunk",
   "inputs": {
    "latent": [
-    "9",
+    "8",
     0
    ],
    "temporal_overlap": 1,
@@ -152,24 +133,24 @@
    }
   }
  },
- "11": {
+ "10": {
   "class_type": "SeedVR2Conditioning",
   "inputs": {
    "model": [
-    "7",
+    "6",
     0
    ],
    "vae_conditioning": [
-    "10",
+    "9",
     0
    ]
   }
  },
- "12": {
+ "11": {
   "class_type": "KSampler",
   "inputs": {
    "model": [
-    "7",
+    "6",
     0
    ],
    "seed": 42,
@@ -178,15 +159,15 @@
    "sampler_name": "euler",
    "scheduler": "simple",
    "positive": [
-    "11",
+    "10",
     0
    ],
    "negative": [
-    "11",
+    "10",
     1
    ],
    "latent_image": [
-    "10",
+    "9",
     0
    ],
    "denoise": 1.0
@@ -198,28 +179,28 @@
    "progress": true
   }
  },
- "13": {
+ "12": {
   "class_type": "SeedVR2TemporalMerge",
   "inputs": {
    "latents": [
-    "12",
+    "11",
     0
    ],
    "temporal_overlap": [
-    "10",
+    "9",
     1
    ]
   }
  },
- "14": {
+ "13": {
   "class_type": "VAEDecodeTiled",
   "inputs": {
    "samples": [
-    "13",
+    "12",
     0
    ],
    "vae": [
-    "6",
+    "5",
     0
    ],
    "tile_size": 512,
@@ -228,15 +209,15 @@
    "temporal_overlap": 8
   }
  },
- "15": {
+ "14": {
   "class_type": "SeedVR2PostProcessing",
   "inputs": {
    "images": [
-    "14",
+    "13",
     0
    ],
    "original_resized_images": [
-    "5",
+    "4",
     0
    ],
    "color_correction_method": "lab"
@@ -247,11 +228,11 @@
    }
   }
  },
- "16": {
+ "15": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
-    "15",
+    "14",
     0
    ],
    "config": "ocio://studio-config-latest",
@@ -270,11 +251,11 @@
    }
   }
  },
- "17": {
+ "16": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
-    "16",
+    "15",
     0
    ],
    "fps": [
@@ -293,16 +274,16 @@
    "output": "frames"
   }
  },
- "18": {
+ "17": {
   "class_type": "GetImageSize",
   "inputs": {
    "image": [
-    "16",
+    "15",
     0
    ]
   }
  },
- "19": {
+ "18": {
   "class_type": "PaintAPlate_LoadPlate",
   "inputs": {
    "path": "",
@@ -317,13 +298,13 @@
    }
   }
  },
- "20": {
+ "19": {
   "class_type": "ImageFromBatch",
   "inputs": {
    "batch_index": 0,
    "length": 21,
    "image": [
-    "19",
+    "18",
     0
    ]
   },
@@ -335,7 +316,7 @@
    }
   }
  },
- "21": {
+ "20": {
   "class_type": "PaintAPlate_LoadPlate",
   "inputs": {
    "path": "",
@@ -350,11 +331,11 @@
    }
   }
  },
- "22": {
+ "21": {
   "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
-    "21",
+    "20",
     0
    ],
    "config": "ocio://studio-config-latest",
@@ -370,37 +351,37 @@
    }
   }
  },
- "23": {
+ "22": {
   "class_type": "ImageToMask",
   "inputs": {
    "image": [
-    "20",
+    "19",
     0
    ],
    "channel": "red"
   }
  },
- "24": {
+ "23": {
   "class_type": "PaintAPlate_CompositeFrames",
   "inputs": {
    "destination": [
-    "22",
+    "21",
     0
    ],
    "source": [
-    "16",
+    "15",
     0
    ],
    "mask": [
-    "23",
+    "22",
     0
    ],
    "width": [
-    "18",
+    "17",
     0
    ],
    "height": [
-    "18",
+    "17",
     1
    ]
   },
@@ -408,11 +389,11 @@
    "title": "Upscaled result: the plate's window around the matte, the layer inside it"
   }
  },
- "25": {
+ "24": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
-    "24",
+    "23",
     0
    ],
    "fps": [
@@ -432,20 +413,38 @@
    "output": "comp"
   }
  },
+ "25": {
+  "class_type": "ImageFromBatch",
+  "inputs": {
+   "image": [
+    "19",
+    0
+   ],
+   "batch_index": 0,
+   "length": 21
+  },
+  "_meta": {
+   "title": "The window's matte frames that the window before did not save",
+   "slots": {
+    "batch_index": "share",
+    "length": "count"
+   }
+  }
+ },
  "26": {
   "class_type": "ImageScale",
   "inputs": {
    "image": [
-    "20",
+    "25",
     0
    ],
    "upscale_method": "bilinear",
    "width": [
-    "18",
+    "17",
     0
    ],
    "height": [
-    "18",
+    "17",
     1
    ],
    "crop": "disabled"
