@@ -501,6 +501,7 @@ const planned = { key: "", rest: "", budget: 0, said: "", timer: 0, fit: null, s
 function planCaches() { // each cache's share and frame size, when the budget, the sources displayed or the in and out points change, or the view outgrows the frames
   const p = S.plate, fit = [S.fit.w, S.fit.h].map((v) => Math.round(v * devicePixelRatio));
   if (!p || !fit[0] || !fit[1]) return;
+  if (planned.plate !== p) Object.assign(planned, { plate: p, saidAll: new Set(), key: "", rest: "", shares: null }); // a new plate plans afresh: no frame of the last one to keep, each plan said once
   const budget = cacheBudget(), frames = S.outPt - S.inPt + 1, shot = !!S.shot?.url, plateOn = !shot || S.wipe !== null;
   const exact = colour.nativeSize(p.spec.width, p.spec.height, DEEP_SIDE), size = (v) => [v.videoWidth, v.videoHeight];
   const sources = [
@@ -516,7 +517,6 @@ function planCaches() { // each cache's share and frame size, when the budget, t
   const say = (shares) => {
     const why = CACHE_MB ? "set in the address" : S.cache ? "View > Cache memory" : "Auto"; // the memory profile's line names the GPU
     const said = cacheLine(memoryText(budget), why, [...sources].sort((x, y) => Number(!!y.show) - Number(!!x.show)).map((s) => ({ name: s.name, kind: s.kind, frames, show: s.show, movie: s.movie, ...shares[s.id] })));
-    if (planned.plate !== S.plate) Object.assign(planned, { plate: S.plate, saidAll: new Set() }); // a switch between sources displayed says nothing new
     planned.named = JSON.stringify(sources.map((s) => s.name));
     if (!planned.saidAll.has(said)) { planned.saidAll.add(said); log(said); }
   };
