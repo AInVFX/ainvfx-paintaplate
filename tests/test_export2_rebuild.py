@@ -156,13 +156,15 @@ class Rebuild(unittest.TestCase):
         rows += [("plate_hdr_upscaled", self.save_plate(big_hdr, os.path.join(hout, "plate"), ph_up)), ("layer_hdr_upscaled", self.save_plate(big_hdr, os.path.join(hout, "layer"), lh_up)),
                  ("composite_hdr_upscaled", self.save_plate(big_hdr, os.path.join(hout, "comp"), ch_up))]
         files = self.routes.zip_entries(rows, "desk", "source_plate", self.routes.plate_files(src))
-        return zipfile.ZipFile(io.BytesIO(open(self.routes.build_zip(self.run, "desk_v1", files, None, "desk"), "rb").read()))
+        with open(self.routes.build_zip(self.run, "desk_v1", files, None, "desk"), "rb") as fh:
+            return zipfile.ZipFile(io.BytesIO(fh.read()))
 
     def rebuilt(self, kind):
         """The largest and the mean difference between the zip's composite and the one its plate, layer and matte rebuild, and
         the largest relative to the composite, by stage (zip_rebuild.rebuilt reads every row as Load Plate reads it)."""
         import zip_rebuild
-        return {stage: v[4:] for stage, v in zip_rebuild.rebuilt(self.zipped(kind), os.path.join(self.run, "unzipped"), N).items()}
+        with self.zipped(kind) as z:
+            return {stage: v[4:] for stage, v in zip_rebuild.rebuilt(z, os.path.join(self.run, "unzipped"), N).items()}
 
     def test_a_plate_of_16_bit_frames_rebuilds_within_2_of_65535(self):
         found = self.rebuilt("frames")
