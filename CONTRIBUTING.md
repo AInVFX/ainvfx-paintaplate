@@ -24,7 +24,7 @@ Run the tests as [TESTING.md](TESTING.md) describes, including [the page against
 
 ## 4. Push, and let CI run
 
-Push your branch to your fork. [CI](TESTING.md#ci) runs three jobs on each push: the unit tests, the page tests in six shards, and the live tests with ComfyUI on a CPU. They need no GPU and no secret. When the three jobs pass on your fork, your change passes the same tests as the project.
+Push your branch to your fork. [CI](TESTING.md#ci) runs three jobs on each push: the unit tests, the page tests in seven shards, and the live tests with ComfyUI on a CPU. They need no GPU and no secret. When the three jobs pass on your fork, your change passes the same tests as the project.
 
 ## 5. Open a pull request
 
