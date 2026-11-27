@@ -33,8 +33,14 @@ export const formatValue = (v) => (Number.isFinite(v) ? v.toFixed(6) : "nan"); /
 
 // The points sampled with Shift held, each pixel once, in the plate's pixels. RV keeps a running sum of the colours it
 // read while sampling; the page keeps the points, so that their average is read again, as the point is, from the step
-// displayed at the frame displayed (the pixel route's `pts`).
-export const addSampled = (points, { x, y }) => (points.some((p) => p.x === x && p.y === y) ? points : [...points, { x, y }]);
+// displayed at the frame displayed (the pixel route's `pts`). The points travel in the request's address, and the server
+// takes a line of about 8,000 characters: at SAMPLED_MOST points every other one goes, so a long drag still reads its
+// average, from points along the whole stroke.
+export const SAMPLED_MOST = 400;
+export const addSampled = (points, { x, y }) => {
+  if (points.some((p) => p.x === x && p.y === y)) return points;
+  return [...(points.length >= SAMPLED_MOST ? points.filter((_, k) => k % 2 === 0) : points), { x, y }];
+};
 
 export const pointsQuery = (points) => points.map((p) => `${p.x},${p.y}`).join(";"); // as the pixel route reads them
 
