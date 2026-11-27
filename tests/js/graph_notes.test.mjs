@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { EXR_FRAMES, graphImageName, parseWorkflow } from "../../web/logic.mjs";
+import { graphImageName, parseWorkflow } from "../../web/logic.mjs";
 import { fluidGraph, sceneGraph } from "../../web/graph.mjs";
 
 const read = (f) => readFileSync(new URL(`../../${f}`, import.meta.url), "utf8");
@@ -49,19 +49,19 @@ const image = (k, kind) => graphImageName("horse", k, kind, `${k}${kind}`.padEnd
 const edit = (tool, k) => ({ tool, seed: k, caption: `${tool} caption`, words: `${tool} words`, quick: pass, full: pass, mask: image(k, "mask"),
   layer: tool === "paint" ? image(k, "strokes") : null });
 const scene = (tools, more = {}) => sceneGraph(WF, { plate, edits: tools.map((t, i) => edit(t, i + 1)), render: { ...render, ...more }, about: { name: "horse" } });
-const fluid = (hdr) => fluidGraph(WF, { plate: { path: "output:paintaplate/blank/b.mov", config: plate.config, frames: 17, fps: 25, size: [960, 512] },
-  fluid: { keys: [{ frame: 0, image: graphImageName("smoke", 1, "keyframe", "1".padEnd(32, "0")) }], prompt: "smoke", seed: 3, hdr, prefix: "paintaplate/blank/f" },
+const fluid = () => fluidGraph(WF, { plate: { path: "output:paintaplate/blank/b.mov", config: plate.config, frames: 17, fps: 25, size: [960, 512] },
+  fluid: { keys: [{ frame: 0, image: graphImageName("smoke", 1, "keyframe", "1".padEnd(32, "0")) }], prompt: "smoke", seed: 3, prefix: "paintaplate/blank/f" },
   about: { name: "smoke" } });
 const notes = (api) => Object.values(api).filter((n) => n.class_type === "PrimitiveStringMultiline").map((n) => Object.values(n.inputs).find((v) => typeof v === "string"));
 
 test("every note of a scene's graph names what the graph and the page have: each tool, SDR to HDR, Upscale", () => {
-  for (const api of [scene(["erase", "paint", "light"], { hdr: true, upscale: true }), scene(["paint"]), scene(["erase"]), scene(["light"], { hdr: true })]) {
+  for (const api of [scene(["erase", "paint", "light"], { hdr: true }), scene(["paint"]), scene(["erase"]), scene(["light"], { hdr: true })]) {
     assert.deepEqual(stale(api), []);
   }
 });
 
-test("every note of a fluid shot's graph names what the graph and the page have, with SDR to HDR and without", () => {
-  for (const api of [fluid(true), fluid(false)]) assert.deepEqual(stale(api), []);
+test("every note of a fluid shot's graph names what the graph and the page have", () => {
+  assert.deepEqual(stale(fluid()), []);
 });
 
 test("a note that names what its graph or the page lacks is caught", () => {
@@ -73,10 +73,10 @@ test("a note that names what its graph or the page lacks is caught", () => {
     ["file gone.png", "mark [keyframes]", "node Keyframe Video", "section EDIT 4", "section FLUID SHOT", "the page's « Nothing of the page »"]);
 });
 
-test("the notes take their words from the page: « Text prompt », SAM's answers, and Upscale outside the graph", () => {
-  const all = notes(scene(["erase", "paint", "light"], { hdr: true, upscale: true })).join("\n");
+test("the notes take their words from the page: « Text prompt », SAM's answers; Finish's steps are another graph's", () => {
+  const all = notes(scene(["erase", "paint", "light"], { hdr: true })).join("\n");
   assert.ok(all.includes("Its « Text prompt » is the node marked [caption].") && !/\bcaption is\b/.test(all));
   assert.ok(all.includes("Follow Matte judges SAM's answers") && !all.includes("Follow Matte keeps the matte on the object"));
-  assert.ok(all.includes("Finish > Upscale is not part of this graph") && !notes(scene(["paint"])).join("\n").includes("Upscale"));
-  assert.ok(notes(fluid(true)).join("\n").includes(`SDR to HDR turns it into ${EXR_FRAMES}`));
+  assert.ok(!all.includes("Upscale") && !all.includes("Finish"), "the list's notes say which graph runs Finish's steps (orderText)");
+  assert.ok(!notes(fluid()).join("\n").includes("SDR to HDR"), "the fluid shot's graph makes the fluid shot only");
 });

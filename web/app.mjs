@@ -10,7 +10,7 @@ import { XRAY_SIDE, XRAY_TEXT, alphaFromHalfs, tintPixels, xrayPlan } from "./xr
 import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSampled, boxPlace, inspectorRows, pointsQuery, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
-import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
+import { editorGraph, finishGraph, fluidGraph, sceneGraph } from "./graph.mjs";
 import { askedText, asksName, autoChose, autoplays, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, coreBox, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, deepLine, deepLoading, deepMovie, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, FAMILY, fileStem, FINISH, finishFolder, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, graphRows, HDR_DEPTH, hdrCompSeconds, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearestKey, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, pictureName, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, resultLine, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, startsLoaded, statusOf, stepFamily, stepLabel, stepOrder, stopsForEdit, stopsForPreview, strokesLabel, strokeTarget, timelineClass, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleChunk, upscaleChunks, upscaleCustom, upscaleKeeps, upscaleNote, upscalePass, upscaleResize, upscaleSeconds, upscaleSizes, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, exportDone, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_ALONE, PLATE_UP } from "./logic.mjs";
@@ -959,7 +959,7 @@ async function upscaleResult(r) {
   r.run ??= r.base; // a fluid shot's files sit in its render's folder, beside the upscaled set, which its zip takes (exportAlone)
   await step(r, st.id, async (progress) => {
     store[st.id] = await upscalePart("comp", { dir: setFolder(r.run, { hdr }), plate: p, name: "plate", result: hdr ? r.hdrFrames : p.path, space: hdr ? HDR_FRAMES : p.cs,
-      float: hdr || (r.fluid ? false : /^\.exr$/i.test(p.spec.ext ?? "")), layer: null, matte: null }, false, progress, sized);
+      float: hdr || (r.fluid ? false : /^\.exr$/i.test(p.spec.ext ?? "")), layer: null, matte: null }, false, progress, sized, {}, finishJobs(store, st.id));
     if (!hdr) Object.assign(r, { review: store[st.id]?.url ?? null, reviewSpace: store[st.id]?.space ?? p.cs }); // the plate alone's result
   }, store);
 }
@@ -3096,6 +3096,12 @@ function reused(r, store, id, take) { // a step that a render with the same eras
   log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: reused from an earlier render (same Clean edits).`);
 }
 
+// A Finish step's jobs, kept with its result as the page posts them, or takes them from the job index (comfy.run): Finish's
+// ComfyUI graph instantiates them (finishJobsOf, graph.finishGraph), so one source gives each job to the post and to the graph.
+// A step made again keeps only its own jobs.
+const finishJobs = (store, id) => ((store.export3Jobs ??= {})[id] = []);
+function finishRun(jobs, name, values, opts) { jobs.push({ name, values: { ...values } }); return run(name, values, opts); }
+
 // SDR to HDR on a plate with no edit (logic.plateAlone): one step on the plate itself, at the working size, its frames brought
 // back to the plate's size and level by HDR Match in the workflow. The viewer plays them, and Export zips them as they are.
 async function plateHdr(r) { // the plate alone: SDR to HDR on the plate, Upscale on its result, or both
@@ -3107,7 +3113,7 @@ async function plateHdr(r) { // the plate alone: SDR to HDR on the plate, Upscal
     log(`Render v${r.v}: no edit, the plate through ${passes.join(" and ")}.\n  Steps: ${stepsOf(r.skip).map((st) => labelOf(st, r)).join("; ")}.`);
   }
   await step(r, "hdr", async (progress) => {
-    const out = await run("hdr", { ...S.memoryProfile.slots, path: p.path, color_space: p.cs, config: S.ocio.config, max_frames: p.frames,
+    const out = await finishRun(finishJobs(r, "hdr"), "hdr", { ...S.memoryProfile.slots, path: p.path, color_space: p.cs, config: S.ocio.config, max_frames: p.frames,
       width: p.work[0], height: p.work[1], plate_width: p.spec.width, plate_height: p.spec.height, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps),
       ...plateMovie(p), prefix: `${setFolder(base, { hdr: true })}/plate/f`, video_prefix: `${setFolder(base, { hdr: true })}/plate_movie`, view_space: logSpace(), movie_fps: p.fps, live: liveEvery(previewMode) },
       { kind: "hdr", progress, live: showLive }).done;
@@ -3392,7 +3398,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
       return { dir: x.run, plate: plateUnder(r), result: x.parts.path, space: x.parts.space, float: x.parts.float, layer: x.layer ? x.parts.layerPath : null, matte: x.parts.mattePath };
     };
     const made = (part, keep, id) => async (progress) => { store[id] = await upscalePart(part, await parts((f) => progress(f / 10)), keep, (f) => progress(0.1 + f * 0.9), sized,
-      { plate: store.upplate?.home, comp: store.uplayer?.comp }); };
+      { plate: store.upplate?.home, comp: store.uplayer?.comp }, finishJobs(store, id)); };
     for (const [id, part, keep] of [["upplate", "plate", true], ["uplayer", "layer", true], ["upcomp", "comp", keeps]]) {
       if (upKey(r) !== stage) throw YIELD; // another size or stage is asked for between two steps: its own steps, from the first
       const had = store[id]; // a step made before at this size shows nothing: only a new result plays as it is made
@@ -3405,25 +3411,25 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   async function hdrSteps() { // Finish > SDR to HDR after the composite (logic.hdrAfterComposite), on the elements as Upscale's steps are: the plate and the layer, then the composite made again from them with the export's matte (hdr_comp); a Light edit's one element, its relit composite
     if (!r.hdrAfter) return;
     const parts = async (progress) => (r.upParts ??= await exportJob(progress)); // the export's parts: the layer, its matte, the result
-    const regenerate = (path, cs, dir, progress) => run("hdr", { ...S.memoryProfile.slots, path, color_space: cs, config: S.ocio.config, max_frames: p.frames, // as on a plate with no edit (plateHdr)
+    const regenerate = (jobs, path, cs, dir, progress) => finishRun(jobs, "hdr", { ...S.memoryProfile.slots, path, color_space: cs, config: S.ocio.config, max_frames: p.frames, // as on a plate with no edit (plateHdr)
       width: p.work[0], height: p.work[1], plate_width: p.spec.width, plate_height: p.spec.height, fps: Math.round(p.fps), cond_fps: hdrFps(p.fps), ...plateMovie(p),
       prefix: `${dir}/f`, video_prefix: `${dir}_movie`, view_space: logSpace(), movie_fps: p.fps, live: liveEvery(previewMode) }, { kind: "hdr", progress, live: showLive }).done;
     const made = (flow, out, name) => { const f = outputFile(flow, out, name), m = outputFile(flow, out, "movie"); return [f ? `output:${f.subfolder}/${framePattern(f.filename)}` : null, m ? viewUrl(m) : null]; };
     const had = [r.hdrPlateMovie, r.hdrLayerMovie]; // a step made before shows nothing: only a new result plays as it is made
     await step(r, "hdrplate", async (progress) => { // the plate under the edits, once per plate: every render on it takes this job from the index (logic.finishFolder)
-      const u = plateUnder(r), out = await regenerate(u.path, u.cs, `${finishFolder(S.plate.id, "hdr", [u.path, u.cs, S.ocio.config, p.work, S.build])}/plate`, progress);
+      const u = plateUnder(r), out = await regenerate(finishJobs(r, "hdrplate"), u.path, u.cs, `${finishFolder(S.plate.id, "hdr", [u.path, u.cs, S.ocio.config, p.work, S.build])}/plate`, progress);
       [r.hdrPlate, r.hdrPlateMovie] = made("hdr", out, "hdr");
     });
     if (r.hdrPlateMovie !== had[0]) finishShown(r, key, "hdrplate", r.hdrPlateMovie, logSpace(), r.hdrPlate, { framesSpace: HDR_FRAMES }); // « Plate, HDR »
     await step(r, "hdrlayer", async (progress) => { // the export's layer: the shot as the composite blends it, at the plate's size and level
-      const x = await parts((f) => progress(f / 10)), out = await regenerate(x.parts.layerPath, x.parts.space, `${setFolder(x.run, { hdr: true })}/layer`, (f) => progress(0.1 + f * 0.9));
+      const x = await parts((f) => progress(f / 10)), out = await regenerate(finishJobs(r, "hdrlayer"), x.parts.layerPath, x.parts.space, `${setFolder(x.run, { hdr: true })}/layer`, (f) => progress(0.1 + f * 0.9));
       [r.hdrLayer, r.hdrLayerMovie] = made("hdr", out, "hdr");
     });
     if (r.hdrLayerMovie !== had[1]) finishShown(r, key, "hdrlayer", r.hdrLayerMovie, logSpace(), r.hdrLayer, { framesSpace: HDR_FRAMES }); // « Layer, HDR »
     await step(r, "hdr", async (progress) => { // the composite made again from the set's elements, or a Light edit's relit composite through SDR to HDR whole
       const x = await parts((f) => progress(f / 10)), dir = setFolder(x.run, { hdr: true }), rest = (f) => progress(0.1 + f * 0.9);
-      const out = relight ? await regenerate(x.parts.path, x.parts.space, `${dir}/comp`, rest)
-        : await run("hdr_comp", { plate: r.hdrPlate, layer: r.hdrLayer, matte: x.parts.mattePath, max_frames: p.frames, ...plateMovie(p), movie_fps: p.fps, view_space: logSpace(),
+      const jobs = finishJobs(r, "hdr"), out = relight ? await regenerate(jobs, x.parts.path, x.parts.space, `${dir}/comp`, rest)
+        : await finishRun(jobs, "hdr_comp", { plate: r.hdrPlate, layer: r.hdrLayer, matte: x.parts.mattePath, max_frames: p.frames, ...plateMovie(p), movie_fps: p.fps, view_space: logSpace(),
           comp_prefix: `${dir}/comp/f`, plate_prefix: `${dir}/plate/f`, matte_prefix: `${dir}/matte/matte`, video_prefix: `${dir}/comp_movie` }, { kind: "hdr", progress: rest }).done;
       [r.hdrFrames, r.hdrMovie] = made(relight ? "hdr" : "hdr_comp", out, relight ? "hdr" : "comp");
       r.compResult ??= resultOf(r); // the composite's own result, which SDR to HDR's replaces while the switch is on (plan)
@@ -3466,7 +3472,8 @@ function upscaleGuess(id) { // seconds for one of Upscale's steps on the render 
 // folders: the first window says where the part's windows are, the others are written beside it, and what reads them reads
 // them there (the layer's windows under the plate's, the join). `made`: where the plate's windows and the composed frames
 // are, as their parts returned them. A join is not kept in the job index: it writes its part into this render's folder.
-async function upscalePart(part, set, keeps, progress, sized, made = {}) {
+// `jobs`: the step's list of jobs (finishJobs), which each window's job and the join join as they are posted.
+async function upscalePart(part, set, keeps, progress, sized, made = {}, jobs = []) {
   const p = set.plate, [w, h] = [p.spec.width ?? p.work[0], p.spec.height ?? p.work[1]];
   const stats = await fetch("/system_stats").then((res) => res.json()).catch(() => null), gib = 2 ** 30;
   const target = sized.split("x").map(Number), resize = upscaleResize(w, h, target); // each size keeps its own windows
@@ -3503,7 +3510,7 @@ async function upscalePart(part, set, keeps, progress, sized, made = {}) {
   let before = 0;
   const job = async (name, v, wt) => {
     if (!upStands(S.stage?.sized)) throw YIELD; // turned off, another size or stage, or other edits displayed, between two jobs
-    const done = await run(name, v, { kind: "export", progress: (f) => progress((before + f * wt) / total) }).done;
+    const done = await finishRun(jobs, name, v, { kind: "export", progress: (f) => progress((before + f * wt) / total) }).done;
     before += wt;
     progress(before / total);
     return done;
@@ -3566,7 +3573,7 @@ function mattesOf(found) { // a missing matte is the other one again: the workfl
 
 // Export with ComfyUI graph ticked, on a ComfyUI that does not write the graph (the pack updated, ComfyUI not yet restarted):
 // the fact, for the log, and what to do, which the status line adds (told)
-const GRAPH_UNWRITTEN = ["Warning: the ComfyUI graph was not written. The zip holds the other files.", "Restart ComfyUI after an update of Paint a plate, then export again."];
+const graphUnwritten = (n) => [`Warning: the ComfyUI graph${n > 1 ? "s were" : " was"} not written. The zip holds the other files.`, "Restart ComfyUI after an update of Paint a plate, then export again."];
 
 // The models of the job displayed, as planned from its start (models.modelsBehind): the edits displayed and the one being
 // painted, every step their render will run (plan, STEP_FLOWS), Upscale and SDR to HDR when Finish asks for them, a
@@ -3640,7 +3647,7 @@ const ticked = (sel) => $(sel).checked && !$(sel).closest("label").hidden; // a 
 const exportTicks = () => ({ elements: new Set(X_ELEMENTS.filter((k) => ticked(`#x-${k}`))), stages: new Set(X_STAGES.filter((k) => ticked(`#x-${k}`))), graph: ticked("#x-graph") });
 async function download(ticks) { // the zip of the ticked cells (exportCells), each file named as the page knows it from the job that made it
   const r = S.renders.get(S.heroKey), ex = S.exported;
-  const graphs = (await S.graph) ?? []; S.graph = null; // Export's ComfyUI graphs (graphFiles), written into the run's folder so that the zip takes them
+  const graphs = ticks.graph ? (await graphFiles().catch((err) => void quiet(err))) ?? [] : []; // Export's ComfyUI graphs, made once Finish's steps ran, written into the run's folder so that the zip takes them
   const posted = [];
   for (const g of graphs) posted.push(await fetch(`/paintaplate/graph?${new URLSearchParams({ run: ex.run, name: g.kind })}`, { method: "POST", body: JSON.stringify(g.file, null, 1) })
     .then((res) => (res.ok ? res.json() : null), () => null).then((j) => (j?.file === `${g.kind}.comfyui.json` ? [g.row, g.label, `output:${ex.run}/${j.file}`] : null))); // another file: an older pack's route
@@ -3663,7 +3670,7 @@ async function download(ticks) { // the zip of the ticked cells (exportCells), e
   document.body.append(a); a.click(); a.remove();
   const said = downloadLines(`${name}.zip`, [...rows, ...graphRow].map((row) => row[1])); // one detail line per row the zip holds, in the dialog's words
   log(said); showStatus(said.split("\n")[0]);
-  if (unwritten) told(...GRAPH_UNWRITTEN); // after the download's line, so the status line keeps the warning and what to do
+  if (unwritten) told(...graphUnwritten(posted.length)); // after the download's line, so the status line keeps the warning and what to do
 }
 
 // ---------- Interface ----------
@@ -4191,22 +4198,31 @@ async function sceneTarget(name) { // a scene of this name saved here: the page 
 }
 
 // The scene's ComfyUI graphs, in the order a person runs them (logic.graphRows): the fluid shot's, when its keyframes
-// displayed made the fluid shot under the result (graphsFluid), then the edits'. Each graph reads what the graph before it
-// writes, under the graphs' own folder (graphFolder): the edits' graph reads the fluid shot that the fluid shot's graph writes.
+// displayed made the fluid shot under the result (graphsFluid), the edits', then Finish's, when the render displayed plans a
+// Finish step. Each graph reads what the graph before it writes, under the graphs' own folder (graphFolder): the edits' graph
+// reads the fluid shot, and Finish's the plate under the edits, the composite, the layer and the matte.
 const graphFolder = () => `paintaplate/${S.plate.id}/graph`;
 const graphEdits = () => S.edits.filter((e) => e.tool !== "fluid" && e.on && e.patch && e.state === "done"); // the edits displayed, as the edits' graph makes them
 function graphKinds() {
   if (!S.plate) return [];
-  const edits = !fluidOnly() && !plateAlone(S.heroKey) && graphEdits().length > 0;
-  return [graphsFluid() && (fluidOnly() || (edits && !!fluidEdit()?.on)) && "fluid_shot", edits && "edits"].filter(Boolean);
+  const edits = !fluidOnly() && !plateAlone(S.heroKey) && graphEdits().length > 0, r = exportPlan(), finish = !!r?.skip && FINISH_STEPS.some((id) => !r.skip.has(id));
+  return [graphsFluid() && (fluidOnly() || (edits && !!fluidEdit()?.on)) && "fluid_shot", edits && "edits", finish && "finish"].filter(Boolean);
+}
+const FINISH_STEPS = ["hdrplate", "hdrlayer", "hdr", ...UP_IDS]; // Finish's steps: SDR to HDR on the plate alone or after the composite, then Upscale
+function finishJobsOf(r) { // the jobs of Finish's steps of the render displayed, in the order they ran (finishJobs), Upscale's at the size displayed
+  const up = upOf(r) ?? {};
+  return STAGES.filter((st) => FINISH_STEPS.includes(st.id) && !r.skip.has(st.id))
+    .flatMap((st) => ((st.up ? up : r).export3Jobs?.[st.id] ?? []).map((job) => ({ ...job, step: st.id, label: labelOf(st, r) })));
 }
 async function graphFiles() { // Export's zip: [{ kind, row, label, file }], each graph in the editor's format; null when this ComfyUI lacks a class
   const rows = graphRows(graphKinds()), stem = fileStem(exportStem());
   const fluidShot = `output:${graphFolder()}/plate/${S.plate.path.split(/[\\/]/).pop()}`; // Save Plate names the movie after the blank plate
-  const writes = { fluid_shot: { what: "the fluid shot", path: fluidShot } }; // what each graph writes for the graph after it
+  const relight = graphEdits().some((e) => e.tool === "light"), writes = { fluid_shot: { what: "the fluid shot", path: fluidShot }, // what each graph writes for the graph after it
+    edits: { what: relight ? "the composite and its matte" : "the composite, its layer and its matte", path: `output:${graphFolder()}` } };
   const list = rows.map((x) => ({ file: `${stem}_${x.row}.json`, ...writes[x.kind] })), files = [];
   for (const [at, x] of rows.entries()) {
-    const chain = { list, at }, graph = x.kind === "fluid_shot" ? await fluidGraphOf(chain) : await editsGraphOf(chain, rows[0].kind === "fluid_shot" ? fluidShot : null);
+    const chain = { list, at }, graph = x.kind === "fluid_shot" ? await fluidGraphOf(chain) : x.kind === "finish" ? finishGraphOf(chain)
+      : await editsGraphOf(chain, rows[0].kind === "fluid_shot" ? fluidShot : null);
     const made = graph && (await editorFile(graph));
     if (!made) return null;
     files.push({ ...x, file: made.file });
@@ -4221,10 +4237,10 @@ async function editsGraphOf(chain, fluidShot) { // the edits displayed as one wo
     mask: await uploadGraphImage(maskAt(e, p.work), i + 1, "mask"),
     layer: e.tool === "paint" ? await uploadGraphImage(snap(e.paint, p.work), i + 1, "strokes") : null,
     quick: editSettings(e, p.prev, QUICK), full: editSettings(e, p.work, FULL) });
-  const erase = active.some((e) => e.tool === "erase"), hdr = S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), hdrWanted());
+  const erase = active.some((e) => e.tool === "erase"), r = exportPlan(), hdr = !!r?.skip && !r.skip.has("hdrshot"); // SDR to HDR before the composite, where the plan runs it
   return sceneGraph(WF, { edits, chain, about: { version: S.version, name: p.name },
     plate: { path: p.path, config: S.ocio.config, cs: p.cs, frames: p.frames, fps: p.fps, work: p.work, prev: p.prev, track: p.track, trackErase: p.trackErase },
-    render: { upscale: !!S.deliver.upscale, prompt: shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt, hue: e.hue ?? hueOf(e.src ?? e) }))), seed: active[0].seed,
+    render: { prompt: shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt, hue: e.hue ?? hueOf(e.src ?? e) }))), seed: active[0].seed,
       erasePrompt: erasePrompt(active.filter((e) => e.tool === "erase").map((e) => e.caption?.text)),
       grow: grow(p.spec.width, erase), feather: feather(p.spec.width), prefix: graphFolder(),
       hdr, format: exportFormat(p.spec) } }); // format: the export's, as Save Plate writes it
@@ -4236,7 +4252,11 @@ async function fluidGraphOf(chain) { // the fluid shot as Generate made it: its 
   for (const [i, k] of [...f.keys].sort((a, b) => a.frame - b.frame).entries()) // as the fluid shot was asked for: the paint on black, at the shot's size
     redrawKey(k), keys.push({ frame: k.frame, image: await uploadGraphImage(snap(k.canvas, size, "#000"), i + 1, "keyframe") });
   return fluidGraph(WF, { chain, about: { version: S.version, name: p.name }, plate: { path: p.path, config: S.ocio.config, frames: p.frames, fps: p.fps, size },
-    fluid: { keys, prompt: fluidPrompt(f.prompt), seed: f.seed, hdr: S.hdrReady && !!S.deliver.hdr && fluidOnly(), prefix: graphFolder() } }); // under edits, the fluid shot alone: they read it
+    fluid: { keys, prompt: fluidPrompt(f.prompt), seed: f.seed, prefix: graphFolder() } });
+}
+function finishGraphOf(chain) { // Finish's steps of the render displayed, job for job (finishJobsOf)
+  const r = S.renders.get(S.heroKey), jobs = r ? finishJobsOf(r) : [];
+  return jobs.length ? finishGraph(WF, { jobs, chain, folder: graphFolder(), about: { version: S.version, name: S.plate.name } }) : null;
 }
 
 async function editorFile(graph) { // what this ComfyUI says of each node class, then the editor's own format: { file }, or nothing when a class is missing
@@ -4976,7 +4996,6 @@ $("#preview-size").onchange = (e) => setPreview(readPreview(e.target.value));
 
 $("#x-go").onclick = () => {
   const ticks = exportTicks(), r = S.renders.get(S.heroKey);
-  S.graph = ticks.graph ? graphFiles().catch((err) => void quiet(err)) : null; // from the scene displayed; the zip takes them
   if (fluidOnly()) return void setTimeout(() => exportPlate(undefined, ticks), 0); // once the dialog has closed: as the plate alone exports
   if (!plateAlone(S.heroKey) && deepLine(S.plate.spec)) log(deepLine(S.plate.spec)); // edits on a movie deeper than 10 bits: 16-bit PNG frames keep it
   if (plateAlone(S.heroKey) || (r?.hdrAfter && !r.fluid && r.active?.some((e) => e.tool === "light"))) return void setTimeout(() => exportPlate(r, ticks), 0); // SDR to HDR's frames: the plate alone, or a Light edit's relit result in HDR

@@ -2,7 +2,7 @@
 // opens in ComfyUI and keeps working there. Laid out for a person who takes it over: numbered sections in the order they
 // run, each opening with a README note. Pure functions over workflows parsed by logic.mjs, tested in Node.
 
-import { fillWorkflow, nameRequest, sharedMatte, stageOne, EXR_FRAMES, XQ } from "./logic.mjs";
+import { fillWorkflow, nameRequest, sharedMatte, stageOne, XQ } from "./logic.mjs";
 
 const LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]); // the input loaders: a link can stand in for one, and none is a model
 const EDIT_OUT = ["result", "patch", "relit"]; // an edit's saved images: inside one scene, links carry them
@@ -186,7 +186,7 @@ export function sceneGraph(WF, { plate, edits, render, about = {}, chain = { lis
     cond_fps: Math.min(30, fps), prefix: out("hdr/f") }, { path: made }, { drop: ["hdr"] })).hdr : null;
   sec = "output";
   add(instantiate(WF.export, "export", { ...common, relight, keep_untouched: !relight, grow: render.grow, feather: render.feather,
-    hdr_grow: render.grow + render.feather, prefix: out("export"),
+    hdr_grow: render.grow + render.feather, prefix: out("export"), layer_prefix: relight ? "" : out("layer"), // the layer: Finish's graph reads it
     matte_prefix: out("matte/matte"), paint_matte: paintMatte ? "paint" : "" }, // paint_matte: a painted object keeps its colours
     { shot: made, ...(hdr ? { hdr } : {}), ...(a ? { matte_a: a, matte_b: paintMatte ?? erasedMatte } : {}) }));
   const files = `output/${render.prefix}`, n = edits.length, painting = edits.filter((e) => e.tool === "paint").length;
@@ -196,7 +196,7 @@ export function sceneGraph(WF, { plate, edits, render, about = {}, chain = { lis
       orderText(chain.list, chain.at),
       [`It makes ${n} edit${n === 1 ? "" : "s"} on frame 0, then renders them through the whole shot at full size, as Paint a plate's Export does:`,
         ...edits.map((e, k) => `- Edit ${k + 1}: ${TOOLS[e.tool]}${quoted(e.words)}, seed ${e.seed}.`)].join("\n"),
-      `To run it, press Run. These files must be in ComfyUI's input folder, where Paint a plate put them when it saved this graph: ${chain.at ? "" : `the plate, ${plate.path}, and `}${images.join(", ")}. On another machine, copy the input folder of Export's zip into ComfyUI's input folder${chain.at ? "" : ", and the plate to the same path"}. The images sit at the top of that folder, because ComfyUI's image loaders list only the files there. If ComfyUI was already open when Paint a plate saved this graph, choose Edit > Refresh Node Definitions in ComfyUI first: it reads those lists again. The model files are the ones MODELS loads. It writes the result as ${render.format} to ${files}/export, and its matte to ${files}/matte.${render.upscale ? " Finish > Upscale is not part of this graph: Paint a plate runs it as the last steps of its render." : ""}`,
+      `To run it, press Run. These files must be in ComfyUI's input folder, where Paint a plate put them when it saved this graph: ${chain.at ? "" : `the plate, ${plate.path}, and `}${images.join(", ")}. On another machine, copy the input folder of Export's zip into ComfyUI's input folder${chain.at ? "" : ", and the plate to the same path"}. The images sit at the top of that folder, because ComfyUI's image loaders list only the files there. If ComfyUI was already open when Paint a plate saved this graph, choose Edit > Refresh Node Definitions in ComfyUI first: it reads those lists again. The model files are the ones MODELS loads. It writes the result as ${render.format} to ${files}/export, ${relight ? "" : `its layer to ${files}/layer, `}and its matte to ${files}/matte.`,
       "To read it: each section takes a hundred node ids and opens with a README note like this one, and every node title starts with its section. Brackets list the values Paint a plate set on a node. Model loaders sit in MODELS, shared by every step.",
       "To change an edit: in its section, change the node marked [caption], its « Text prompt », or [seed], then Run. The edits after it, and the render, follow."].filter(Boolean).join("\n\n")],
     ["input", "INPUT", `The plate. Load Plate reads ${plate.path}${plate.frames ? `, ${plate.frames} frames` : ""}${plate.fps ? ` at ${plate.fps} fps` : ""}. Colour Space turns it from ${plate.cs} into the sRGB the models work in. Frame 0, scaled to ${by(plate.work)}, is the frame the edits paint on.\n\nOut: the plate, every frame, and frame 0.`],
@@ -210,7 +210,7 @@ export function sceneGraph(WF, { plate, edits, render, about = {}, chain = { lis
     ["shot", "SHOT", `LTX 2.5 with WepeNerd's Ripple IC-LoRA carries the edited frame 0 through the shot, over ${clean ? "the clean plate" : "the plate"}, seed ${render.seed}. Its prompt is the node marked [prompt].\n\nIn: the edited frame 0 and ${clean ? "the clean plate" : "the plate"}. Out: the shot, every frame.`],
     ["paintTrack", "PAINT TRACKING", `SAM 3.1 follows the painted area${painting > 1 ? "s" : ""} through the shot at ${by(plate.track)}, asked several questions: Klein's prompt upsampler names the painted object, and SAM Words keeps the words SAM searches for. Follow Matte judges SAM's answers by how much the shot changed, and the paint matte comes from them. Its strategy is the one under the paint's row, « Matte strategy »: ${sharedMatte(edits.filter((e) => e.tool === "paint"))}.\n\nIn: the shot and the painted areas. Out: the paint matte, every frame.`],
     ["hdr", "SDR TO HDR", `Lightricks' SDR-to-HDR IC-LoRA turns the shot into scene-linear values.\n\nIn: the shot. Out: the HDR shot, every frame.`],
-    ["output", "OUTPUT", `Fit to Plate puts the shot over the plate inside the mattes, grown by ${render.grow} px and feathered by ${render.feather} px, and matches its colour at their edge${relight ? "; Relight Transfer carries the new light over the plate" : ""}. Save Plate writes the result to ${files}/export as ${render.format}${relight ? "" : ", every pixel outside the mattes the plate's own"}, and the matte to ${files}/matte.\n\nIn: the plate, the shot and the mattes. Out: the files.`],
+    ["output", "OUTPUT", `Fit to Plate puts the shot over the plate inside the mattes, grown by ${render.grow} px and feathered by ${render.feather} px, and matches its colour at their edge${relight ? "; Relight Transfer carries the new light over the plate" : ""}. Save Plate writes the result to ${files}/export as ${render.format}${relight ? "" : `, every pixel outside the mattes the plate's own, and the layer to ${files}/layer`}, and the matte to ${files}/matte.\n\nIn: the plate, the shot and the mattes. Out: the files.`],
   ];
   const shared = (kept, gone) => { // one node serving both passes of an edit, or both stages of the erase pass, says so
     const [sa, ...ra] = (where[kept]?.label ?? "").split(" · "), [, ...rb] = (where[gone]?.label ?? "").split(" · ");
@@ -220,9 +220,8 @@ export function sceneGraph(WF, { plate, edits, render, about = {}, chain = { lis
   return organise(merge(parts, shared), where, sections);
 }
 
-// A fluid shot alone as one ComfyUI workflow, as Paint a plate's Generate makes it: its keyframes painted on black become
-// the control video, LTX 2.5 with ainvfx-fluid makes the shot as ProRes 4444 XQ, and SDR to HDR, for a 16-bit
-// shot, turns it into half-float EXR frames.
+// A fluid shot as one ComfyUI workflow, as Paint a plate's Generate makes it: its keyframes painted on black become the
+// control video, and LTX 2.5 with ainvfx-fluid makes the shot as ProRes 4444 XQ. Finish's steps are Finish's graph's.
 export function fluidGraph(WF, { plate, fluid, about = {}, chain = { list: [], at: 0 } }) {
   const parts = [], where = {}, out = (s) => `${fluid.prefix}/${s}`, fps = plate.fps ?? 24;
   const add = (inst, sec) => {
@@ -235,22 +234,86 @@ export function fluidGraph(WF, { plate, fluid, about = {}, chain = { list: [], a
   };
   const made = instantiate(WF.fluid, "fluid shot", { path: plate.path, config: plate.config, color_space: "@model", max_frames: plate.frames,
     keys: JSON.stringify(fluid.keys), prompt: fluid.prompt, seed: fluid.seed, prefix: out("plate"), video_prefix: out("preview"), control_prefix: out("control/c"), first_prefix: out("first") });
-  const shot = add(made, "fluid"), loader = Object.keys(made.nodes).find((id) => made.nodes[id].class_type === "PaintAPlate_LoadPlate"); // the blank plate's loader
-  if (fluid.hdr) add(instantiate(WF.hdr, "SDR to HDR", { config: plate.config, max_frames: plate.frames, fps: Math.round(fps), cond_fps: Math.min(30, fps),
-    prefix: out("hdr/f") }, { path: shot.plate }, { plate: loader }), "hdr"); // the shot by link, its rate and length from the blank plate
+  add(made, "fluid");
   const n = fluid.keys.length, images = fluid.keys.map((k) => k.image), files = `output/${fluid.prefix}`;
   const sections = [
     ["readme", "How this graph works", [`AInVFX Paint a plate${about.version ? ` ${about.version}` : ""}: the fluid shot of ${about.name ?? plate.path}, as one ComfyUI workflow.`,
       orderText(chain.list, chain.at),
-      `It paints ${n} keyframe${n === 1 ? "" : "s"} on black, at frame${n === 1 ? "" : "s"} ${fluid.keys.map((k) => k.frame).join(", ")}, into a control video. LTX 2.5 with ainvfx-fluid then makes the fluid shot, ${by(plate.size)}, ${plate.frames} frames at ${fps} fps, seed ${fluid.seed}${fluid.hdr ? `, and SDR to HDR turns it into ${EXR_FRAMES}` : ""}, as Paint a plate's Generate does.`,
+      `It paints ${n} keyframe${n === 1 ? "" : "s"} on black, at frame${n === 1 ? "" : "s"} ${fluid.keys.map((k) => k.frame).join(", ")}, into a control video. LTX 2.5 with ainvfx-fluid then makes the fluid shot, ${by(plate.size)}, ${plate.frames} frames at ${fps} fps, seed ${fluid.seed}, as Paint a plate's Generate does.`,
       `To run it, press Run. These files must be where Paint a plate put them when it saved this graph: the blank plate, ${plate.path}, and, in ComfyUI's input folder, ${images.join(", ")}. On another machine, copy the input folder of Export's zip into ComfyUI's input folder.`,
       "To change the fluid: in FLUID SHOT, change the node marked [prompt] or [seed], then Run."].filter(Boolean).join("\n\n")],
     ["input", "INPUT", `The blank plate. Load Plate reads ${plate.path}, ${plate.frames} frames at ${fps} fps: black frames of ${by(plate.size)}, which set the shot's size, length and rate.`],
-    ["models", "MODELS", `The models, each loaded once and shared by every step that uses it: LTX 2.5, Gemma and its VAEs, with AInVFX's ainvfx-fluid IC-LoRA${fluid.hdr ? " and Lightricks' SDR-to-HDR IC-LoRA" : ""}.`],
+    ["models", "MODELS", `The models, each loaded once and shared by every step that uses it: LTX 2.5, Gemma and its VAEs, with AInVFX's ainvfx-fluid IC-LoRA.`],
     ["fluid", "FLUID SHOT", [`Keyframe Video paints the keyframes on black at their frames: the control video. LTX 2.5 with AInVFX's ainvfx-fluid IC-LoRA turns it into the fluid, seed ${fluid.seed}. Its prompt is the node marked [prompt].`,
       `In: the blank plate, and the keyframes (${images.join(", ")}) from ComfyUI's input folder.`,
-      `Out: the fluid shot as ${XQ}, its first frame, its preview movie and the control video, in ${files}${fluid.hdr ? "; the shot also goes on to SDR TO HDR" : ""}.`].join("\n\n")],
-    ...(fluid.hdr ? [["hdr", "SDR TO HDR", `Lightricks' SDR-to-HDR IC-LoRA turns the fluid shot into scene-linear values, written as ${EXR_FRAMES}, in ${files}/hdr.`]] : []),
+      `Out: the fluid shot as ${XQ}, its first frame, its preview movie and the control video, in ${files}.`].join("\n\n")],
+  ];
+  return organise(merge(parts), where, sections);
+}
+
+// ---------- Finish's graph ----------
+// Finish's steps as one ComfyUI workflow: each job they posted (app.finishRun), in the order they ran, with its workflow and
+// its values; only the paths move under the graphs' folder (graphPath). The jobs pass files to each other as the page's do: a
+// job saves its frames, and the next job reads them. ComfyUI runs the branches of one prompt in an order of its own, so each
+// file a job reads comes through an order gate (gate) that waits for the images the job before it saved.
+const READERS = { PaintAPlate_LoadPlate: "path", PaintAPlate_JoinWindows: "folder" }; // the nodes that read files, by the input that names them
+const SAVES = new Set(["PaintAPlate_SaveFrames", "PaintAPlate_SavePlate", "PaintAPlate_SaveMovie"]);
+const LETTERS = "abcdefghijklmnopqrstuvwxyz"; // Math Expression's values: a to z
+
+// A path of the page's folders, under the graphs' folder `folder`: a render's folder (paintaplate/<plate>/v<N>) becomes the
+// graphs' folder itself, so a job reads the files the graphs before it write there, and a Finish folder that a plate's renders
+// share (logic.finishFolder: paintaplate/<plate>/<pass>/<hash>) becomes <folder>/<pass>/<hash>. Any other value stays.
+export const graphPath = (value, folder) => (typeof value !== "string" ? value
+  : value.replace(/^(output:)?paintaplate\/[^/]+\/(?:v\d+|((?:hdr|upscale)\/[0-9a-f]{8}))(?=\/|$)/, (_, out, shared) => `${out ?? ""}${folder}${shared ? `/${shared}` : ""}`));
+
+// The order gate, as the course files make it (build_pack.py, the order gate of STB 11.3): `value` goes into both inputs of
+// core's If/Else Switch, whose switch is Math Expression « min(a, b, …) > 0 » over Get Image Size's batch size on each of
+// `images`. The switch hands the value on once those images exist. Each is the image a save receives: ComfyUI runs a ready
+// output node before any other node (comfy_execution/graph.py, ux_friendly_pick_node), so the saves have written their
+// files when the gate opens.
+function gate(tag, value, images) {
+  const id = (n) => `${tag}: ${n}`, nodes = { [id("path")]: { class_type: "PrimitiveString", inputs: { value }, _meta: { title: id("path") } } };
+  images.forEach((image, i) => (nodes[id(`saved ${LETTERS[i]}`)] = { class_type: "GetImageSize", inputs: { image }, _meta: { title: id(`saved ${LETTERS[i]}`) } }));
+  const names = images.map((_, i) => LETTERS[i]);
+  nodes[id("saved")] = { class_type: "ComfyMathExpression", _meta: { title: id("saved") }, inputs: { expression: names.length > 1 ? `min(${names.join(", ")}) > 0` : "a > 0",
+    ...Object.fromEntries(names.map((n) => [`values.${n}`, [id(`saved ${n}`), 2]])) } };
+  nodes[id("gate")] = { class_type: "ComfySwitchNode", inputs: { switch: [id("saved"), 2], on_false: [id("path"), 0], on_true: [id("path"), 0] }, _meta: { title: id("gate") } };
+  return { nodes, out: [id("gate"), 0] };
+}
+
+// `jobs`: [{ step, label, name, values }], each a job as the page posted it, in the order they ran; `folder`: the graphs'
+// folder; `chain`: the scene's graphs and this one's place among them (orderText).
+export function finishGraph(WF, { jobs, folder, about = {}, chain = { list: [], at: 0 } }) {
+  const parts = [], where = {}, steps = [];
+  let saved = []; // the images the job before saved: the next job's files wait for them
+  jobs.forEach((job, k) => {
+    const tag = `job ${k + 1}`, values = Object.fromEntries(Object.entries(job.values).map(([key, v]) => [key, graphPath(v, folder)]));
+    const { nodes } = instantiate(WF[job.name], tag, values);
+    if (!steps.some((s) => s.step === job.step)) steps.push({ step: job.step, label: job.label, jobs: [] });
+    steps.find((s) => s.step === job.step).jobs.push(job.name);
+    const mark = (id, label) => (where[id] = { sec: job.step, label });
+    for (const [id, n] of Object.entries(nodes)) {
+      mark(id, `${tag} · ${n._meta.title.slice(n._meta.title.indexOf(": ") + 2)}`);
+      const input = READERS[n.class_type];
+      if (!input || !saved.length || typeof n.inputs[input] !== "string") continue;
+      const g = gate(`${id} · order`, n.inputs[input], saved);
+      for (const [gid, gn] of Object.entries(g.nodes)) { parts.push({ [gid]: gn }); mark(gid, `${tag} · order gate · ${gn._meta.title.split(" · order: ")[1]}`); }
+      n.inputs[input] = g.out;
+    }
+    parts.push(nodes);
+    saved = Object.values(nodes).filter((n) => SAVES.has(n.class_type) && Array.isArray(n.inputs.images)).map((n) => n.inputs.images);
+  });
+  const by = (name) => ({ hdr: "Lightricks' SDR-to-HDR IC-LoRA makes its element again in scene-linear values, written as half-float EXR frames.",
+    hdr_comp: "Composite Frames makes the composite again from the plate and the layer in HDR, inside the export's matte.",
+    upscale: "SeedVR2 7B upscales one window of frames.", upscale_export: "Join Windows joins the windows, and Save Plate writes the part." })[name];
+  const sections = [
+    ["readme", "How this graph works", [`AInVFX Paint a plate${about.version ? ` ${about.version}` : ""}: Finish's steps of ${about.name ?? "the scene"}, as one ComfyUI workflow.`,
+      orderText(chain.list, chain.at),
+      `It runs each job of Finish's steps as Paint a plate ran it, in the same order and with the same values: ${steps.map((s) => s.label).join(", then ")}. Only the paths differ: the files are in output/${folder}.`,
+      "Each job saves its frames, and the next job reads them. An order gate in front of each file a job reads makes ComfyUI run the jobs in that order: core's If/Else Switch hands on the path once Get Image Size has read the images that the job before saved.",
+      "To run it, press Run. The model files are the ones MODELS loads."].filter(Boolean).join("\n\n")],
+    ["models", "MODELS", "The models, each loaded once and shared by every job that uses it."],
+    ...steps.map((s) => [s.step, s.label.toUpperCase(), `${s.label}: ${s.jobs.length} job${s.jobs.length === 1 ? "" : "s"}. ${[...new Set(s.jobs)].map(by).join(" ")}`]),
   ];
   return organise(merge(parts), where, sections);
 }

@@ -20,9 +20,9 @@ const written = (g) => Object.values(g).filter((n) => n._meta.title.startsWith("
 const note = (g, name) => Object.values(g).find((n) => n._meta.title === `README · ${name}`)?.inputs.value ?? "";
 
 test("the saved graph writes what Export writes, and its notes name the format", () => {
-  const own = [["PaintAPlate_SaveFrames", "paintaplate/x/graph/matte/matte"], ["PaintAPlate_SavePlate", "paintaplate/x/graph/export"]];
+  const own = [["PaintAPlate_SaveFrames", "paintaplate/x/graph/matte/matte"], ["PaintAPlate_SavePlate", "paintaplate/x/graph/export"], ["PaintAPlate_SavePlate", "paintaplate/x/graph/layer"]];
   const sdr = scene({}), hdr = scene({ hdr: true });
-  assert.deepEqual(written(sdr), own, "no SDR to HDR: Save Plate, and the matte");
+  assert.deepEqual(written(sdr), own, "no SDR to HDR: Save Plate, its layer, which Finish's graph reads, and the matte");
   assert.deepEqual(written(hdr), own, "a plate that holds values above 1.0 keeps its own format");
   assert.equal(note(sdr, "SDR TO HDR"), "", "no SDR to HDR, no section");
   assert.doesNotMatch(note(hdr, "SDR TO HDR"), /EXR/);
