@@ -87,7 +87,7 @@ The steps are the same on Windows and Linux. Run each command with the Python th
 Runpod rents GPUs by the hour, in the cloud. Its 96 GB GPUs run every tool of Paint a plate at full speed, plates above 2K included, with no powerful GPU of your own.
 
 1. Accept the four models' terms and create a Hugging Face read token, as in [step 2 of Install](#install).
-2. Start a pod: an RTX PRO 6000, the image `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`, a host with CUDA 13.0 or newer, a 150 GB container disk, ports 8188 and 8888, and your token in an `HF_TOKEN` environment variable.
+2. Start a pod: an RTX PRO 6000, Runpod's PyTorch template on Ubuntu 24.04 (tested with the image `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`), a host with CUDA 13.0 or newer, a 150 GB container disk, ports 8188 and 8888, and your token in an `HF_TOKEN` environment variable of the pod. To keep the token as a Runpod secret, create a secret named `HF_TOKEN`, then give the pod's `HF_TOKEN` variable the value `{{ RUNPOD_SECRET_HF_TOKEN }}`: a secret alone does not reach the pod.
 3. In the pod's JupyterLab terminal, run:
 
    ```sh

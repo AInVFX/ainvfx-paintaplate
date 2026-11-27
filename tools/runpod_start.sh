@@ -8,6 +8,7 @@
 # PLATES=1 adds the example plates to ComfyUI's input/plates folder, where the Open plate dialog lists them:
 #   PLATES=1 bash tools/runpod_start.sh         (or, on a pod that is already running: python get_plates.py)
 # Each start keeps the log of the ComfyUI that ran before, as comfyui.<date>-<time>.log: after a stop, it holds what ran.
+# The Hugging Face token comes from the pod's HF_TOKEN variable, whose value can be a Runpod secret: {{ RUNPOD_SECRET_HF_TOKEN }}.
 # As a container's start command (process 1), it also starts Runpod's services and keeps the pod running.
 set -uo pipefail
 W=${WORKDIR:-/workspace}; VENV=${VENV:-/opt/venv}
@@ -19,7 +20,20 @@ if [ $$ -eq 1 ]; then main=1; fi
 if [ "$main" = 1 ] && [ -x /start.sh ]; then  # JupyterLab and SSH, as in Runpod's own images
   /start.sh > "$W/runpod_services.log" 2>&1 &
 fi
-[ -n "${HF_TOKEN:-}" ] || log "HF_TOKEN is not set: the FLUX 3 Image Klein and LTX 2.5 downloads need it"
+# The Hugging Face token. A Runpod secret reaches a pod only through a variable of the pod whose value is
+# {{ RUNPOD_SECRET_HF_TOKEN }}, and an SSH session receives only the pod's RUNPOD_ variables. So the token is read under
+# both names, here and in the environment of the pod's first process, which holds every variable of the pod.
+pod_var() { { tr '\0' '\n' < /proc/1/environ; } 2>/dev/null | sed -n "s/^$1=//p" | head -n 1; }
+for name in HF_TOKEN RUNPOD_SECRET_HF_TOKEN; do
+  [ -z "${HF_TOKEN:-}" ] || break
+  HF_TOKEN=${!name:-}
+  [ -n "$HF_TOKEN" ] || HF_TOKEN=$(pod_var "$name")
+done
+export HF_TOKEN
+case "$HF_TOKEN" in
+  "") log "HF_TOKEN is not set: the FLUX 3 Image Klein and LTX 2.5 downloads need it. On Runpod, give the pod a variable HF_TOKEN: your token, or {{ RUNPOD_SECRET_HF_TOKEN }} for a secret named HF_TOKEN" ;;
+  "{{"*) log "HF_TOKEN holds $HF_TOKEN as it was typed: Runpod found no secret of that name. Create the secret, then restart the pod" ;;
+esac
 if [ "${1:-}" = "--restart" ] && pkill -f "^$VENV/bin/python main.py"; then  # the pattern never matches this script
   log "stopped the running ComfyUI"
   for _ in $(seq 30); do curl -s -m 1 -o /dev/null http://127.0.0.1:8188/system_stats || break; sleep 1; done
