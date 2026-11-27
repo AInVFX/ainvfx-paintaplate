@@ -22,7 +22,7 @@ output:, or, on a ComfyUI that answers this machine alone, an absolute path.
     GET  /paintaplate/ocio/shader?config=&space=&display=&view=&look=   the viewer's GLSL and lookup tables for a source
     GET  /paintaplate/download?run=paintaplate/<plate>/v3&name=desk_v3&stem=desk&files=[["composite_full_size","output:…/desk.mov"]]
     GET  /paintaplate/download/check?files=…          the rows of a zip whose files are not on disk: the page stops before it
-    POST /paintaplate/graph?run=paintaplate/<plate>/v3     Export's ComfyUI graph, into the run's folder for its zip
+    POST /paintaplate/graph?run=paintaplate/<plate>/v3&name=edits     One of Export's ComfyUI graphs, into the run's folder for its zip
 `files` names each row of the zip and its file, its folder or its frame pattern under output/paintaplate, as the page knows
 them from the jobs it ran (zip_list, row_files); `plate` adds the source plate's own files, in a folder of the row
 `source`. Every name in the zip starts with `stem`, the plate's or the scene's name, then the row's name (zip_entries).
@@ -80,13 +80,13 @@ THUMBS_AT_ONCE = asyncio.Semaphore(4)  # a folder of thousands of outputs asks f
 # part: (paths in the run folder, the first match wins for a file; True for a folder of frames, or of one movie). The page
 # keeps each preview size's composite and passes in a folder named after the size (640x352/), the full-size passes in full/,
 # and the export's review movie at the top; the last patterns read older runs.
-GRAPH = "scene.comfyui.json"  # Export's ComfyUI graph, in its run's folder
+GRAPH = re.compile(r"[a-z_]{1,40}\.comfyui\.json")  # Export's ComfyUI graphs in their run's folder, each named after what it makes (app.graphFiles)
 GRAPH_MAX = 16 << 20  # bytes: a scene's graph is far smaller
 ZIP_ROWS = 64  # rows one zip takes at most
 ROW_NAME = re.compile(r"[a-z0-9_]{1,60}")  # a row's name in the zip, as the page sends it (logic.zipName)
 FRAME_TAIL = re.compile(r"[._-]?\d+_?\.[A-Za-z0-9]+$")  # a frame's number, the mark before it, and its extension
 GRAPH_IMAGE = re.compile(r"[\w.-]+\.png")  # an image a graph loads: a file at the top of ComfyUI's input folder
-ZIP_TYPES = plateio.IMAGE_EXTS | plateio.VIDEO_EXTS  # what a row holds: frames, or one movie; and the graph (GRAPH)
+ZIP_TYPES = plateio.IMAGE_EXTS | plateio.VIDEO_EXTS  # what a row holds: frames, or one movie; and a graph (GRAPH)
 
 
 def zip_name(name: str, folder: str) -> str:
@@ -154,7 +154,7 @@ def graph_images(path: str) -> list[str]:
 def row_files(rel: str) -> list[str]:
     """The files of one row of the zip, by folders.plate_path's rules (no symbolic link, nothing outside ComfyUI's
     folders), under output/paintaplate only: a file, each frame of a frame pattern once (plate_files), or the files of a
-    folder; frames, movies and the graph the page wrote (GRAPH) only. ValueError when it is refused, FileNotFoundError
+    folder; frames, movies and the graphs the page wrote (GRAPH) only. ValueError when it is refused, FileNotFoundError
     when it is not on disk."""
     if not rel.startswith(folders.OUTPUT):
         raise ValueError(f"Export zips files under output/paintaplate only: {rel}.")
@@ -167,7 +167,7 @@ def row_files(rel: str) -> list[str]:
         files = [f for f in files if os.path.isfile(f) and not os.path.islink(f)]
     elif plateio.is_sequence(full):
         files = plate_files(full)
-    elif os.path.splitext(full)[1].lower() in ZIP_TYPES or os.path.basename(full) == GRAPH:
+    elif os.path.splitext(full)[1].lower() in ZIP_TYPES or GRAPH.fullmatch(os.path.basename(full)):
         return [full]
     else:
         raise ValueError(f"Export zips frames, movies and its ComfyUI graph only: {rel}.")
@@ -192,7 +192,7 @@ def zip_entries(rows: list[tuple[str, str]], stem: str, source: str = "", source
     """(path on disk, name in the zip, row) for each row the page sends (zip_list), in its order, then the source plate's.
     Every name starts with `stem`, the plate's or the scene's name, then the row's name: a row that is one movie sits at
     the top, as <stem>_<row>.<ext>; a row of frames sits in a folder of its name, each as <stem>_<row><frame>.<ext>
-    (frame_tail); the graph comes as <stem>_<row>.json, with the images its nodes load in input/ (graph_images). The
+    (frame_tail); a graph comes as <stem>_<row>.json, with the images its nodes load in input/ (graph_images). The
     source plate's files (`sources`, which plate_files lists) keep their own names, in a folder named `source`. A name
     already taken keeps its first file. FileNotFoundError names every row whose files are not on disk."""
     files, taken, missing = [], set(), []
@@ -209,7 +209,7 @@ def zip_entries(rows: list[tuple[str, str]], stem: str, source: str = "", source
             missing.append(name)
             continue
         ext = os.path.splitext(found[0])[1].lower()
-        if len(found) == 1 and os.path.basename(found[0]) == GRAPH:  # with the images its nodes load, from ComfyUI's input folder
+        if len(found) == 1 and GRAPH.fullmatch(os.path.basename(found[0])):  # with the images its nodes load, from ComfyUI's input folder
             add(found[0], f"{stem}_{name}.json", name)
             inputs = os.path.realpath(folder_paths.get_input_directory())
             for image in graph_images(found[0]):
@@ -495,8 +495,9 @@ async def download_size(request: web.Request) -> web.Response:
     return web.json_response({"files": len(files), "bytes": size})
 
 
-def save_graph(folder: str, body: bytes) -> None:
-    """Writes Export's ComfyUI graph into its run's folder. ValueError for a body larger than GRAPH_MAX, or that is not a
+def save_graph(folder: str, name: str, body: bytes) -> None:
+    """Writes one of Export's ComfyUI graphs into its run's folder, as <name>.comfyui.json. ValueError for a name that is
+    not lower-case letters and « _ », for a body larger than GRAPH_MAX, or that is not a
     ComfyUI workflow in the editor's format. The new file takes the old one's place whole, so a symbolic link of that
     name is replaced, never written through."""
     if len(body) > GRAPH_MAX:
@@ -507,7 +508,9 @@ def save_graph(folder: str, body: bytes) -> None:
         raise ValueError(f"ComfyUI graph not written: not JSON ({exc}).") from exc
     if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
         raise ValueError("ComfyUI graph not written: not a ComfyUI workflow.")
-    path = os.path.join(folder, GRAPH)
+    if not GRAPH.fullmatch(f"{name}.comfyui.json"):
+        raise ValueError("ComfyUI graph not written: its name is not made of a to z and « _ ».")
+    path = os.path.join(folder, f"{name}.comfyui.json")
     part = f"{path}.{uuid.uuid4().hex}.part"
     try:
         with open(part, "wb") as fh:
@@ -519,15 +522,17 @@ def save_graph(folder: str, body: bytes) -> None:
 
 
 async def graph_post(request: web.Request) -> web.Response:
-    """Export's ComfyUI graph, written into its run's folder as scene.comfyui.json, so that its zip takes it as a row (zip_list)."""
+    """One of Export's ComfyUI graphs (app.graphFiles), written into its run's folder as <name>.comfyui.json, so that its
+    zip takes it as a row (zip_list). The name says what the graph makes: fluid_shot, edits or finish."""
+    name = request.query.get("name", "")
     try:
         folder = folders.run_folder(request.query.get("run", ""))
-        await asyncio.to_thread(save_graph, folder, await request.read())
+        await asyncio.to_thread(save_graph, folder, name, await request.read())
     except FileNotFoundError as exc:
         raise web.HTTPNotFound(text=str(exc)) from exc
     except ValueError as exc:
         raise web.HTTPBadRequest(text=str(exc)) from exc
-    return web.json_response({"file": GRAPH})
+    return web.json_response({"file": f"{name}.comfyui.json"})
 
 
 # ---------- The plate browser ----------

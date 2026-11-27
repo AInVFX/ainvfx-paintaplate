@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSampled, boxPlace, inspectorRows, pointsQuery, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, autoChose, autoplays, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, coreBox, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, deepLine, deepLoading, deepMovie, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, FAMILY, fileStem, FINISH, finishFolder, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, HDR_DEPTH, hdrCompSeconds, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearestKey, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, pictureName, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, resultLine, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, startsLoaded, statusOf, stepFamily, stepLabel, stepOrder, stopsForEdit, stopsForPreview, strokesLabel, strokeTarget, timelineClass, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleChunk, upscaleChunks, upscaleCustom, upscaleKeeps, upscaleNote, upscalePass, upscaleResize, upscaleSeconds, upscaleSizes, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName, zipName } from "./logic.mjs";
+import { askedText, asksName, autoChose, autoplays, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, coreBox, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, deepLine, deepLoading, deepMovie, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, FAMILY, fileStem, FINISH, finishFolder, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, graphRows, HDR_DEPTH, hdrCompSeconds, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearestKey, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, pictureName, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, resultLine, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, startsLoaded, statusOf, stepFamily, stepLabel, stepOrder, stopsForEdit, stopsForPreview, strokesLabel, strokeTarget, timelineClass, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleChunk, upscaleChunks, upscaleCustom, upscaleKeeps, upscaleNote, upscalePass, upscaleResize, upscaleSeconds, upscaleSizes, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, exportDone, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_ALONE, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -3639,14 +3639,15 @@ function exportCells(r) {
 const ticked = (sel) => $(sel).checked && !$(sel).closest("label").hidden; // a hidden tick asks for nothing, even ticked
 const exportTicks = () => ({ elements: new Set(X_ELEMENTS.filter((k) => ticked(`#x-${k}`))), stages: new Set(X_STAGES.filter((k) => ticked(`#x-${k}`))), graph: ticked("#x-graph") });
 async function download(ticks) { // the zip of the ticked cells (exportCells), each file named as the page knows it from the job that made it
-  const words = exportWordsNow(), r = S.renders.get(S.heroKey), ex = S.exported;
-  const graph = await S.graph; S.graph = null; // Export's ComfyUI graph, written into the run's folder so that the zip takes it
-  const posted = graph ? await fetch(`/paintaplate/graph?${new URLSearchParams({ run: ex.run })}`, { method: "POST", body: JSON.stringify(graph.file, null, 1) })
-    .then((res) => (res.ok ? res.json() : false), () => false) : null; // null: no graph asked for, or none to write, which graphFile said
+  const r = S.renders.get(S.heroKey), ex = S.exported;
+  const graphs = (await S.graph) ?? []; S.graph = null; // Export's ComfyUI graphs (graphFiles), written into the run's folder so that the zip takes them
+  const posted = [];
+  for (const g of graphs) posted.push(await fetch(`/paintaplate/graph?${new URLSearchParams({ run: ex.run, name: g.kind })}`, { method: "POST", body: JSON.stringify(g.file, null, 1) })
+    .then((res) => (res.ok ? res.json() : null), () => null).then((j) => (j?.file === `${g.kind}.comfyui.json` ? [g.row, g.label, `output:${ex.run}/${j.file}`] : null))); // another file: an older pack's route
+  const unwritten = posted.some((row) => !row), graphRow = unwritten ? [] : posted; // every graph or none: each reads the one before it
   const cells = exportCells(r).map((c) => ({ ...c, file: c.file() })), rows = xRows(cells, ticks), plate = rows.find((row) => row[3]); // plate: the source plate's own files
   const held = cells.filter((c) => ticks.elements.has(c.element) && ticks.stages.has(c.stage));
   const name = zipFileName(exportStem(), fluidOnly() ? `fluid_v${fluidEdit()?.version}` : `v${r.v}`, { preview: held.some((c) => c.stage === "preview"), hdr: held.some((c) => c.hdr), up: held.some((c) => c.stage === "up") });
-  const graphRow = posted ? [[zipName(words.elements.graph.label), words.elements.graph.label, `output:${ex.run}/${posted.file}`]] : [];
   const listed = [...rows.filter((row) => !row[3]), ...graphRow], files = JSON.stringify(listed.filter((row) => row[2]).map(([name, , path]) => [name, path]));
   try {
     const gone = await fetch(`/paintaplate/download/check?${new URLSearchParams({ files })}`).then((res) => (res.ok ? res.json() : res.text().then((text) => { throw new Error(text); })));
@@ -3662,7 +3663,7 @@ async function download(ticks) { // the zip of the ticked cells (exportCells), e
   document.body.append(a); a.click(); a.remove();
   const said = downloadLines(`${name}.zip`, [...rows, ...graphRow].map((row) => row[1])); // one detail line per row the zip holds, in the dialog's words
   log(said); showStatus(said.split("\n")[0]);
-  if (posted === false) told(...GRAPH_UNWRITTEN); // after the download's line, so the status line keeps the warning and what to do
+  if (unwritten) told(...GRAPH_UNWRITTEN); // after the download's line, so the status line keeps the warning and what to do
 }
 
 // ---------- Interface ----------
@@ -3976,7 +3977,7 @@ function exportDialog() { // the ticks the render displayed can give (exportCell
   };
   for (const k of X_ELEMENTS) tick(k, words.elements[k], shown.elements.has(k), on.elements.has(k));
   for (const k of X_STAGES) tick(k, words.stages[k], shown.stages.has(k), on.stages.has(k));
-  tick("graph", words.elements.graph, !plateAlone(S.heroKey) && (fluid ? graphsFluid() : S.edits.some((e) => e.on && e.patch && e.state === "done")), false); // the edits displayed, or a fluid shot alone, as one ComfyUI workflow
+  tick("graph", words.elements.graph, graphKinds().length > 0, false); // the scene's graphs (graphKinds): the fluid shot's, the edits'
   $("#x-hint").textContent = words.hint; $("#x-note").textContent = words.note;
   const go = () => { const ticks = exportTicks(); $("#x-go").disabled = !xRows(cells, ticks).length && !ticks.graph; }; // ticks that give no file give no zip
   $("#export").onchange = go; go();
@@ -4189,33 +4190,53 @@ async function sceneTarget(name) { // a scene of this name saved here: the page 
   return name;
 }
 
-async function graphFile() { // the whole scene as one ComfyUI workflow, for Export's zip, or null
-  if (fluidOnly()) return fluidGraphFile();
-  const p = S.plate && plateUnder(S.renders.get(S.heroKey)), active = S.edits.filter((e) => e.tool !== "fluid" && e.on && e.patch && e.state === "done");
-  if (!p || !active.length) return null;
+// The scene's ComfyUI graphs, in the order a person runs them (logic.graphRows): the fluid shot's, when its keyframes
+// displayed made the fluid shot under the result (graphsFluid), then the edits'. Each graph reads what the graph before it
+// writes, under the graphs' own folder (graphFolder): the edits' graph reads the fluid shot that the fluid shot's graph writes.
+const graphFolder = () => `paintaplate/${S.plate.id}/graph`;
+const graphEdits = () => S.edits.filter((e) => e.tool !== "fluid" && e.on && e.patch && e.state === "done"); // the edits displayed, as the edits' graph makes them
+function graphKinds() {
+  if (!S.plate) return [];
+  const edits = !fluidOnly() && !plateAlone(S.heroKey) && graphEdits().length > 0;
+  return [graphsFluid() && (fluidOnly() || (edits && !!fluidEdit()?.on)) && "fluid_shot", edits && "edits"].filter(Boolean);
+}
+async function graphFiles() { // Export's zip: [{ kind, row, label, file }], each graph in the editor's format; null when this ComfyUI lacks a class
+  const rows = graphRows(graphKinds()), stem = fileStem(exportStem());
+  const fluidShot = `output:${graphFolder()}/plate/${S.plate.path.split(/[\\/]/).pop()}`; // Save Plate names the movie after the blank plate
+  const writes = { fluid_shot: { what: "the fluid shot", path: fluidShot } }; // what each graph writes for the graph after it
+  const list = rows.map((x) => ({ file: `${stem}_${x.row}.json`, ...writes[x.kind] })), files = [];
+  for (const [at, x] of rows.entries()) {
+    const chain = { list, at }, graph = x.kind === "fluid_shot" ? await fluidGraphOf(chain) : await editsGraphOf(chain, rows[0].kind === "fluid_shot" ? fluidShot : null);
+    const made = graph && (await editorFile(graph));
+    if (!made) return null;
+    files.push({ ...x, file: made.file });
+  }
+  return files;
+}
+async function editsGraphOf(chain, fluidShot) { // the edits displayed as one workflow; its plate the fluid shot that the graph before it writes, if any
+  const under = plateUnder(S.renders.get(S.heroKey)), p = fluidShot ? { ...under, path: fluidShot, cs: modelSpace() } : under, active = graphEdits();
+  if (!active.length) return null;
   const edits = [];
   for (const [i, e] of active.entries()) edits.push({ tool: e.tool, words: e.prompt, seed: e.seed, matte: matteOf(e), caption: e.caption?.text || templateCaption(e),
     mask: await uploadGraphImage(maskAt(e, p.work), i + 1, "mask"),
     layer: e.tool === "paint" ? await uploadGraphImage(snap(e.paint, p.work), i + 1, "strokes") : null,
     quick: editSettings(e, p.prev, QUICK), full: editSettings(e, p.work, FULL) });
   const erase = active.some((e) => e.tool === "erase"), hdr = S.hdrReady && wantsHdr(p.spec, active.map((e) => e.tool), hdrWanted());
-  const graph = sceneGraph(WF, { edits, about: { version: S.version, name: p.name },
+  return sceneGraph(WF, { edits, chain, about: { version: S.version, name: p.name },
     plate: { path: p.path, config: S.ocio.config, cs: p.cs, frames: p.frames, fps: p.fps, work: p.work, prev: p.prev, track: p.track, trackErase: p.trackErase },
     render: { upscale: !!S.deliver.upscale, prompt: shotPrompt(active.map((e) => ({ tool: e.tool, words: e.prompt, hue: e.hue ?? hueOf(e.src ?? e) }))), seed: active[0].seed,
       erasePrompt: erasePrompt(active.filter((e) => e.tool === "erase").map((e) => e.caption?.text)),
-      grow: grow(p.spec.width, erase), feather: feather(p.spec.width), prefix: `paintaplate/${p.id}/graph`,
+      grow: grow(p.spec.width, erase), feather: feather(p.spec.width), prefix: graphFolder(),
       hdr, format: exportFormat(p.spec) } }); // format: the export's, as Save Plate writes it
-  return editorFile(graph);
 }
 
 const graphsFluid = () => { const f = fluidEdit(); return !!f && f.state === "done" && sameKeys(fluidSig(), f.made); }; // the keyframes displayed made the fluid shot: its graph makes it again
-async function fluidGraphFile() { // a fluid shot alone: its keyframes, and the text prompt and seed it was made with
+async function fluidGraphOf(chain) { // the fluid shot as Generate made it: its keyframes, and the text prompt and seed it was made with
   const p = S.plate, f = fluidEdit(), size = [p.spec.width, p.spec.height], keys = [];
-  if (!graphsFluid()) return null;
   for (const [i, k] of [...f.keys].sort((a, b) => a.frame - b.frame).entries()) // as the fluid shot was asked for: the paint on black, at the shot's size
     redrawKey(k), keys.push({ frame: k.frame, image: await uploadGraphImage(snap(k.canvas, size, "#000"), i + 1, "keyframe") });
-  return editorFile(fluidGraph(WF, { about: { version: S.version, name: p.name }, plate: { path: p.path, config: S.ocio.config, frames: p.frames, fps: p.fps, size },
-    fluid: { keys, prompt: fluidPrompt(f.prompt), seed: f.seed, hdr: S.hdrReady && !!S.deliver.hdr, prefix: `paintaplate/${p.id}/graph` } }));
+  return fluidGraph(WF, { chain, about: { version: S.version, name: p.name }, plate: { path: p.path, config: S.ocio.config, frames: p.frames, fps: p.fps, size },
+    fluid: { keys, prompt: fluidPrompt(f.prompt), seed: f.seed, hdr: S.hdrReady && !!S.deliver.hdr && fluidOnly(), prefix: graphFolder() } }); // under edits, the fluid shot alone: they read it
 }
 
 async function editorFile(graph) { // what this ComfyUI says of each node class, then the editor's own format: { file }, or nothing when a class is missing
@@ -4955,7 +4976,7 @@ $("#preview-size").onchange = (e) => setPreview(readPreview(e.target.value));
 
 $("#x-go").onclick = () => {
   const ticks = exportTicks(), r = S.renders.get(S.heroKey);
-  S.graph = ticks.graph ? graphFile().catch((err) => void quiet(err)) : null; // from the edits displayed; the zip takes it
+  S.graph = ticks.graph ? graphFiles().catch((err) => void quiet(err)) : null; // from the scene displayed; the zip takes them
   if (fluidOnly()) return void setTimeout(() => exportPlate(undefined, ticks), 0); // once the dialog has closed: as the plate alone exports
   if (!plateAlone(S.heroKey) && deepLine(S.plate.spec)) log(deepLine(S.plate.spec)); // edits on a movie deeper than 10 bits: 16-bit PNG frames keep it
   if (plateAlone(S.heroKey) || (r?.hdrAfter && !r.fluid && r.active?.some((e) => e.tool === "light"))) return void setTimeout(() => exportPlate(r, ticks), 0); // SDR to HDR's frames: the plate alone, or a Light edit's relit result in HDR

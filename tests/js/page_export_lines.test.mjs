@@ -50,5 +50,5 @@ test("a ComfyUI graph that was not written: one warning for the log, and what to
   const app = read("app.mjs");
   assert.ok(app.includes('const GRAPH_UNWRITTEN = ["Warning: the ComfyUI graph was not written. The zip holds the other files.", "Restart ComfyUI after an update of Paint a plate, then export again."];'));
   assert.equal(app.split("the ComfyUI graph was not written").length - 1, 1);
-  assert.ok(app.includes("if (posted === false) told(...GRAPH_UNWRITTEN);"));
+  assert.ok(app.includes("if (unwritten) told(...GRAPH_UNWRITTEN);"));
 });

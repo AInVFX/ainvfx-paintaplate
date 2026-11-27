@@ -90,6 +90,15 @@ function organise(prompt, where, sections) { // sections: [key, name, README tex
   return out;
 }
 
+// A graph's place among the scene's graphs (logic.graphRows), for its README: `list` holds each graph in the order they run,
+// as { file, what, path }: its file in the zip, then what it writes for the graph after it, and where. The first graph has
+// no « First run », the last no « Then run ».
+export function orderText(list, at) {
+  const before = list[at - 1], after = list[at + 1];
+  return [before && `First run ${before.file}. It writes ${before.what}, ${before.path}, which this graph reads.`,
+    after && `Then run ${after.file}. It reads ${list[at].what}, which this graph writes.`].filter(Boolean).join(" ");
+}
+
 const TOOLS = { erase: "Clean", paint: "Paint", light: "Light" };
 const by = ([w, h]) => `${w} x ${h}`;
 const quoted = (words) => (words ? ` "${words.length > 40 ? `${words.slice(0, 39)}…` : words}"` : "");
@@ -97,7 +106,8 @@ const quoted = (words) => (words ? ` "${words.length > 40 ? `${words.slice(0, 39
 // The scene as one prompt. Each edit brings its mask and, for paint and light, its strokes as images already in ComfyUI's
 // input folder, its caption, seed and the settings of its two Klein passes. The passes chain as the page layers them; the
 // erases alone make the erase pass's first frame; the render runs at full size, as the export does: the erase pass in two stages.
-export function sceneGraph(WF, { plate, edits, render, about = {} }) {
+// `chain`: the scene's graphs and this one's place among them (orderText); a graph before this one makes its plate.
+export function sceneGraph(WF, { plate, edits, render, about = {}, chain = { list: [], at: 0 } }) {
   const parts = [], where = {};
   let sec = "input";
   const add = (inst, stage = "") => { // an instance of a workflow, in the section at work, its step named after the workflow's node
@@ -183,11 +193,12 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
   const images = edits.flatMap((e) => [e.mask, e.layer].filter(Boolean)); // what the graph reads from the input folder
   const sections = [
     ["readme", "How this graph works", [`AInVFX Paint a plate${about.version ? ` ${about.version}` : ""}: the scene of ${about.name ?? plate.path}, as one ComfyUI workflow.`,
+      orderText(chain.list, chain.at),
       [`It makes ${n} edit${n === 1 ? "" : "s"} on frame 0, then renders them through the whole shot at full size, as Paint a plate's Export does:`,
         ...edits.map((e, k) => `- Edit ${k + 1}: ${TOOLS[e.tool]}${quoted(e.words)}, seed ${e.seed}.`)].join("\n"),
-      `To run it, press Run. These files must be in ComfyUI's input folder, where Paint a plate put them when it saved this graph: the plate, ${plate.path}, and ${images.join(", ")}. On another machine, copy the input folder of Export's zip into ComfyUI's input folder, and the plate to the same path. The images sit at the top of that folder, because ComfyUI's image loaders list only the files there. If ComfyUI was already open when Paint a plate saved this graph, choose Edit > Refresh Node Definitions in ComfyUI first: it reads those lists again. The model files are the ones MODELS loads. It writes the result as ${render.format} to ${files}/export, and its matte to ${files}/matte.${render.upscale ? " Finish > Upscale is not part of this graph: Paint a plate runs it as the last steps of its render." : ""}`,
+      `To run it, press Run. These files must be in ComfyUI's input folder, where Paint a plate put them when it saved this graph: ${chain.at ? "" : `the plate, ${plate.path}, and `}${images.join(", ")}. On another machine, copy the input folder of Export's zip into ComfyUI's input folder${chain.at ? "" : ", and the plate to the same path"}. The images sit at the top of that folder, because ComfyUI's image loaders list only the files there. If ComfyUI was already open when Paint a plate saved this graph, choose Edit > Refresh Node Definitions in ComfyUI first: it reads those lists again. The model files are the ones MODELS loads. It writes the result as ${render.format} to ${files}/export, and its matte to ${files}/matte.${render.upscale ? " Finish > Upscale is not part of this graph: Paint a plate runs it as the last steps of its render." : ""}`,
       "To read it: each section takes a hundred node ids and opens with a README note like this one, and every node title starts with its section. Brackets list the values Paint a plate set on a node. Model loaders sit in MODELS, shared by every step.",
-      "To change an edit: in its section, change the node marked [caption], its « Text prompt », or [seed], then Run. The edits after it, and the render, follow."].join("\n\n")],
+      "To change an edit: in its section, change the node marked [caption], its « Text prompt », or [seed], then Run. The edits after it, and the render, follow."].filter(Boolean).join("\n\n")],
     ["input", "INPUT", `The plate. Load Plate reads ${plate.path}${plate.frames ? `, ${plate.frames} frames` : ""}${plate.fps ? ` at ${plate.fps} fps` : ""}. Colour Space turns it from ${plate.cs} into the sRGB the models work in. Frame 0, scaled to ${by(plate.work)}, is the frame the edits paint on.\n\nOut: the plate, every frame, and frame 0.`],
     ["models", "MODELS", "The models, each loaded once and shared by every step that uses it: FLUX 3 Image Klein, its text encoder and VAE for the edits; LTX 2.5, Gemma, its VAEs and IC-LoRAs for the passes; SAM 3.1 for the tracking."],
     ...edits.map((e, k) => [`edit${k + 1}`, `EDIT ${k + 1} · ${TOOLS[e.tool]}${quoted(e.words)}`, [
@@ -212,7 +223,7 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
 // A fluid shot alone as one ComfyUI workflow, as Paint a plate's Generate makes it: its keyframes painted on black become
 // the control video, LTX 2.5 with ainvfx-fluid makes the shot as ProRes 4444 XQ, and SDR to HDR, for a 16-bit
 // shot, turns it into half-float EXR frames.
-export function fluidGraph(WF, { plate, fluid, about = {} }) {
+export function fluidGraph(WF, { plate, fluid, about = {}, chain = { list: [], at: 0 } }) {
   const parts = [], where = {}, out = (s) => `${fluid.prefix}/${s}`, fps = plate.fps ?? 24;
   const add = (inst, sec) => {
     for (const [id, n] of Object.entries(inst.nodes)) {
@@ -223,16 +234,17 @@ export function fluidGraph(WF, { plate, fluid, about = {} }) {
     return inst.saved;
   };
   const made = instantiate(WF.fluid, "fluid shot", { path: plate.path, config: plate.config, color_space: "@model", max_frames: plate.frames,
-    keys: JSON.stringify(fluid.keys), prompt: fluid.prompt, seed: fluid.seed, prefix: out("plate"), video_prefix: out("preview"), control_prefix: out("control/c") });
+    keys: JSON.stringify(fluid.keys), prompt: fluid.prompt, seed: fluid.seed, prefix: out("plate"), video_prefix: out("preview"), control_prefix: out("control/c"), first_prefix: out("first") });
   const shot = add(made, "fluid"), loader = Object.keys(made.nodes).find((id) => made.nodes[id].class_type === "PaintAPlate_LoadPlate"); // the blank plate's loader
   if (fluid.hdr) add(instantiate(WF.hdr, "SDR to HDR", { config: plate.config, max_frames: plate.frames, fps: Math.round(fps), cond_fps: Math.min(30, fps),
     prefix: out("hdr/f") }, { path: shot.plate }, { plate: loader }), "hdr"); // the shot by link, its rate and length from the blank plate
   const n = fluid.keys.length, images = fluid.keys.map((k) => k.image), files = `output/${fluid.prefix}`;
   const sections = [
     ["readme", "How this graph works", [`AInVFX Paint a plate${about.version ? ` ${about.version}` : ""}: the fluid shot of ${about.name ?? plate.path}, as one ComfyUI workflow.`,
+      orderText(chain.list, chain.at),
       `It paints ${n} keyframe${n === 1 ? "" : "s"} on black, at frame${n === 1 ? "" : "s"} ${fluid.keys.map((k) => k.frame).join(", ")}, into a control video. LTX 2.5 with ainvfx-fluid then makes the fluid shot, ${by(plate.size)}, ${plate.frames} frames at ${fps} fps, seed ${fluid.seed}${fluid.hdr ? `, and SDR to HDR turns it into ${EXR_FRAMES}` : ""}, as Paint a plate's Generate does.`,
       `To run it, press Run. These files must be where Paint a plate put them when it saved this graph: the blank plate, ${plate.path}, and, in ComfyUI's input folder, ${images.join(", ")}. On another machine, copy the input folder of Export's zip into ComfyUI's input folder.`,
-      "To change the fluid: in FLUID SHOT, change the node marked [prompt] or [seed], then Run."].join("\n\n")],
+      "To change the fluid: in FLUID SHOT, change the node marked [prompt] or [seed], then Run."].filter(Boolean).join("\n\n")],
     ["input", "INPUT", `The blank plate. Load Plate reads ${plate.path}, ${plate.frames} frames at ${fps} fps: black frames of ${by(plate.size)}, which set the shot's size, length and rate.`],
     ["models", "MODELS", `The models, each loaded once and shared by every step that uses it: LTX 2.5, Gemma and its VAEs, with AInVFX's ainvfx-fluid IC-LoRA${fluid.hdr ? " and Lightricks' SDR-to-HDR IC-LoRA" : ""}.`],
     ["fluid", "FLUID SHOT", [`Keyframe Video paints the keyframes on black at their frames: the control video. LTX 2.5 with AInVFX's ainvfx-fluid IC-LoRA turns it into the fluid, seed ${fluid.seed}. Its prompt is the node marked [prompt].`,

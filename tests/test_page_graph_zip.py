@@ -1,6 +1,7 @@
-"""Export's ComfyUI graph in its zip: POST /paintaplate/graph writes the page's graph into the run's folder as
-scene.comfyui.json, and the zip takes the file. It refuses a folder outside output/paintaplate and a body that is not
-JSON, is not a ComfyUI workflow or is larger than 16 MB, and it never writes through a symbolic link."""
+"""Export's ComfyUI graphs in its zip: POST /paintaplate/graph writes each of the page's graphs into the run's folder as
+<name>.comfyui.json, named after what it makes, and the zip takes each file. It refuses a name that is not a to z and « _ »,
+a folder outside output/paintaplate and a body that is not JSON, is not a ComfyUI workflow or is larger than 16 MB, and it
+never writes through a symbolic link."""
 import asyncio
 import json
 import os
@@ -48,29 +49,46 @@ class GraphInZip(unittest.TestCase):
 
     def test_the_route_writes_the_graph_and_the_zip_takes_it(self):
         graph = {"nodes": [{"id": 1, "type": "LoadImage"}], "groups": []}
-        answer = asyncio.run(routes.graph_post(Request({"run": self.rel}, json.dumps(graph))))
-        self.assertEqual(json.loads(answer.body), {"file": "scene.comfyui.json"})
-        with open(os.path.join(self.folder, "scene.comfyui.json")) as f:
+        answer = asyncio.run(routes.graph_post(Request({"run": self.rel, "name": "edits"}, json.dumps(graph))))
+        self.assertEqual(json.loads(answer.body), {"file": "edits.comfyui.json"})
+        with open(os.path.join(self.folder, "edits.comfyui.json")) as f:
             self.assertEqual(json.load(f), graph)
-        files = routes.zip_entries([("composite_full_size", f"output:{self.rel}/export"), ("comfyui_graph", f"output:{self.rel}/{routes.GRAPH}")], "desk")
+        files = routes.zip_entries([("composite_full_size", f"output:{self.rel}/export"), ("comfyui_graph", f"output:{self.rel}/edits.comfyui.json")], "desk")
         self.assertIn("desk_comfyui_graph.json", [name for _, name, _ in files])
         with zipfile.ZipFile(routes.build_zip(self.folder, "shot", files, None, "desk")) as z:
             self.assertEqual(json.loads(z.read("desk_comfyui_graph.json")), graph)
 
+    def test_two_graphs_side_by_side_each_named_after_what_it_makes(self):
+        made = {"fluid_shot": {"nodes": [{"id": 1, "type": "PaintAPlate_KeyframeVideo"}]}, "edits": {"nodes": [{"id": 1, "type": "LoadImage"}]}}
+        for name, graph in made.items():
+            answer = asyncio.run(routes.graph_post(Request({"run": self.rel, "name": name}, json.dumps(graph))))
+            self.assertEqual(json.loads(answer.body), {"file": f"{name}.comfyui.json"})
+        rows = [(f"{name}_comfyui_graph", f"output:{self.rel}/{name}.comfyui.json") for name in made]
+        files = routes.zip_entries(rows, "desk")
+        self.assertEqual([arc for _, arc, _ in files], ["desk_fluid_shot_comfyui_graph.json", "desk_edits_comfyui_graph.json"])
+        with zipfile.ZipFile(routes.build_zip(self.folder, "shot", files, None, "desk")) as z:
+            self.assertEqual({n: json.loads(z.read(f"desk_{n}_comfyui_graph.json")) for n in made}, made)
+
+    def test_a_name_that_is_not_a_to_z_is_refused(self):
+        for name in ("", "Edits", "../edits", "edits.json", "a" * 41):
+            with self.assertRaises(web.HTTPBadRequest, msg=name):
+                asyncio.run(routes.graph_post(Request({"run": self.rel, "name": name}, '{"nodes": []}')))
+        self.assertEqual(os.listdir(self.folder), ["export"])
+
     def test_a_body_that_is_not_json_and_a_folder_outside_are_refused(self):
         with self.assertRaises(web.HTTPBadRequest):
-            asyncio.run(routes.graph_post(Request({"run": self.rel}, "not json")))
+            asyncio.run(routes.graph_post(Request({"run": self.rel, "name": "edits"}, "not json")))
         with self.assertRaises(web.HTTPNotFound):
-            asyncio.run(routes.graph_post(Request({"run": "../elsewhere"}, "{}")))
-        self.assertFalse(os.path.exists(os.path.join(self.folder, "scene.comfyui.json")))
+            asyncio.run(routes.graph_post(Request({"run": "../elsewhere", "name": "edits"}, "{}")))
+        self.assertFalse(os.path.exists(os.path.join(self.folder, "edits.comfyui.json")))
 
     def test_a_body_that_is_no_workflow_or_is_too_large_is_refused(self):
         for body in ("{}", "[]", '{"nodes": 3}', "7"):  # JSON, but not a workflow in the editor's format: no list of nodes
             with self.assertRaises(web.HTTPBadRequest, msg=body):
-                asyncio.run(routes.graph_post(Request({"run": self.rel}, body)))
+                asyncio.run(routes.graph_post(Request({"run": self.rel, "name": "edits"}, body)))
         large = b'{"nodes": [], "pad": "' + b"x" * routes.GRAPH_MAX + b'"}'
         with self.assertRaises(web.HTTPBadRequest) as refused:
-            asyncio.run(routes.graph_post(Request({"run": self.rel}, large)))
+            asyncio.run(routes.graph_post(Request({"run": self.rel, "name": "edits"}, large)))
         self.assertIn("larger than 16 MB", refused.exception.text)
         self.assertEqual(os.listdir(self.folder), ["export"])  # nothing written, and no part file left
 
@@ -80,13 +98,13 @@ class GraphInZip(unittest.TestCase):
         self.addCleanup(shutil.rmtree, os.path.dirname(outside), True)
         open(outside, "w").write("kept")
         try:
-            os.symlink(outside, os.path.join(self.folder, "scene.comfyui.json"))
+            os.symlink(outside, os.path.join(self.folder, "edits.comfyui.json"))
         except OSError:
             self.skipTest("this account cannot make symbolic links")
-        asyncio.run(routes.graph_post(Request({"run": self.rel}, '{"nodes": []}')))
+        asyncio.run(routes.graph_post(Request({"run": self.rel, "name": "edits"}, '{"nodes": []}')))
         self.assertEqual(open(outside).read(), "kept")  # the file behind the link is as it was
-        self.assertFalse(os.path.islink(os.path.join(self.folder, "scene.comfyui.json")))
-        with open(os.path.join(self.folder, "scene.comfyui.json")) as f:
+        self.assertFalse(os.path.islink(os.path.join(self.folder, "edits.comfyui.json")))
+        with open(os.path.join(self.folder, "edits.comfyui.json")) as f:
             self.assertEqual(json.load(f), {"nodes": []})
 
 
@@ -110,9 +128,9 @@ class GraphImagesInZip(unittest.TestCase):
                  {"type": "LoadImage", "widgets_values": ["../secret.png", "image"]}, {"type": "LoadImage", "widgets_values": ["gone.png", "image"]},
                  {"type": "MarkdownNote", "widgets_values": ["text"]},
                  {"type": "PaintAPlate_KeyframeVideo", "widgets_values": [960, 512, 17, json.dumps([{"frame": 0, "image": "desk_e1_keyframe_12345678.png"}])]}]
-        with open(os.path.join(run, routes.GRAPH), "w") as f:
+        with open(os.path.join(run, "edits.comfyui.json"), "w") as f:
             json.dump({"nodes": nodes}, f)
-        got = [arc for _, arc, _ in routes.zip_entries([("comfyui_graph", f"output:paintaplate/graphimages{os.getpid()}/v1/{routes.GRAPH}")], "desk")]
+        got = [arc for _, arc, _ in routes.zip_entries([("comfyui_graph", f"output:paintaplate/graphimages{os.getpid()}/v1/edits.comfyui.json")], "desk")]
         self.assertEqual(got, ["desk_comfyui_graph.json", "input/desk_e1_mask_0676e451.png", "input/desk_e1_strokes_7bcde075.png",
                                "input/desk_e1_keyframe_12345678.png"])
         print("The zip holds the graph and the images it loads, in input/")
