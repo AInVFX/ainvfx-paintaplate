@@ -42,4 +42,5 @@ test("on a 16 GB GPU a step pays its family's load only after a job of another f
 
 test("a step that starts with its models loaded keeps its seconds apart", () => {
   assert.deepEqual([timeId("shot", false, true), timeId("review", true, true), timeId("review", true), timeId("shot")], ["shot+loaded", "review+hdr+loaded", "review+hdr", "shot"]);
+  assert.equal(timeId("fluidfull", false, false), "fluidfull+cold"); // a mean kept before loaded and cold were told apart is not read as a cold one
 });

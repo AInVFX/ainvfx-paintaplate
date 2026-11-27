@@ -3028,7 +3028,7 @@ try { TIMES = JSON.parse(localStorage.getItem(TIMES_KEY) ?? "{}") ?? {}; } catch
 const stepSize = (id) => stepSizeOf(id, S.plate);
 const stepKey = (id, hdr = false, loaded = false) => timeKey(timeId(id, hdr, loaded), stepSize(id), S.plate.frames, S.memoryProfile.name);
 const familyNow = () => FAMILY[lastJob()] ?? null; // the models on the GPU as the next job starts: the last job's
-const loadedFor = (id, before) => !!S.memoryProfile.frees && startsLoaded(id, before); // its times are kept apart (logic.timeId)
+const loadedFor = (id, before) => (S.memoryProfile.frees ? startsLoaded(id, before) : null); // on a GPU that frees memory: loaded or cold, kept apart (logic.timeId)
 const makesHdr = (skip) => !!skip && !skip.has("hdrshot"); // SDR to HDR before the composite (a plate that holds values above 1.0) slows the steps after it
 const timeStep = (id) => (id === "cleanfull" && startsFromPreview(S.plate, S.previewCap) ? "cleanup" : id); // the name a step's seconds go under: stage 2 alone apart from both stages
 

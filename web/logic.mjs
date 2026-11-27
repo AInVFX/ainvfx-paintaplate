@@ -1743,8 +1743,9 @@ export const startsFromPreview = (plate, previewCap) => { if (!plate?.work || !p
 // (ref: each step's reference, by id). Its seconds are kept as « cleanup », apart from the pass that makes both stages.
 export const stageTwoGuess = (ref, plate, profile) => Math.max(1, stepGuess("cleanfull", ref.cleanfull, plate, profile) - stepGuess("clean", ref.clean, plate, profile));
 // The name a step's seconds are kept under: with SDR to HDR on, the steps it slows (SLOWER's withHdr) are kept apart; on a
-// GPU that frees memory between families, a step that starts with its models loaded (`loaded`, startsLoaded) too.
-export const timeId = (id, hdr, loaded = false) => `${id}${hdr && Object.values(SLOWER).some((p) => p.withHdr?.[id]) ? "+hdr" : ""}${loaded ? "+loaded" : ""}`;
+// GPU that frees memory between families (`loaded` true or false, startsLoaded), a step that starts with its models
+// loaded and one that loads them each under its own name, so a mean kept before the two were told apart is not read.
+export const timeId = (id, hdr, loaded = null) => `${id}${hdr && Object.values(SLOWER).some((p) => p.withHdr?.[id]) ? "+hdr" : ""}${loaded === true ? "+loaded" : loaded === false ? "+cold" : ""}`;
 export function stepLeft({ est, run, first = null, last = null, tail = null }) { // seconds left in the step that runs; first and last: [seconds since its start, progress]
   const after = tail ?? est * 0.15;
   if (first && last && last[1] - first[1] >= 0.2 && last[0] > first[0]) { // the sampler's own pace, over a fifth of its steps or more
