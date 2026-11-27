@@ -81,10 +81,10 @@ class ZipRows(unittest.TestCase):
         self.assertEqual(self.routes.missing_rows(self.rows(("matte", f"{self.v3}/matte"), ("layer", f"{self.v3}/layer"))), ["layer"])
 
     def test_the_graph_comes_with_the_images_it_loads(self):
-        write(os.path.join(self.out, self.v3, self.routes.GRAPH), json.dumps({"nodes": [{"type": "LoadImage", "widgets_values": [f"zt{os.getpid()}.png"]}]}).encode())
+        write(os.path.join(self.out, self.v3, "edits.comfyui.json"), json.dumps({"nodes": [{"type": "LoadImage", "widgets_values": [f"zt{os.getpid()}.png"]}]}).encode())
         write(os.path.join(self.inp, f"zt{os.getpid()}.png"), b"p")
         self.addCleanup(os.remove, os.path.join(self.inp, f"zt{os.getpid()}.png"))
-        files = self.routes.zip_entries(self.rows(("comfyui_graph", f"{self.v3}/{self.routes.GRAPH}")), "desk")
+        files = self.routes.zip_entries(self.rows(("comfyui_graph", f"{self.v3}/{"edits.comfyui.json"}")), "desk")
         self.assertEqual([a for _, a, _ in files], ["desk_comfyui_graph.json", f"input/zt{os.getpid()}.png"])
 
     def test_a_zip_is_built_once_then_again_when_a_file_changes(self):

@@ -186,9 +186,9 @@ test("a node's widgets: a seed keeps its control, an image upload its button, a 
   assert.throws(() => editorGraph(api, { ...INFO, KSamplerSelect: undefined }), /ComfyUI does not know the node KSamplerSelect/);
 });
 
-test("a fluid shot alone is one prompt: its keyframes by name, its text prompt and seed, and SDR to HDR only when 16-bit", () => {
+test("a fluid shot is one prompt: its keyframes by name, its text prompt and seed; SDR to HDR is Finish's graph's", () => {
   const blank = { path: "output:paintaplate/b/blank_960x512.mov", config: plate.config, frames: 121, fps: 25, size: [960, 512] };
-  const fluid = { keys: [{ frame: 0, image: "k1.png" }, { frame: 60, image: "k2.png" }], prompt: "Thick white smoke.", seed: 7, hdr: false, prefix: "paintaplate/x/graph" };
+  const fluid = { keys: [{ frame: 0, image: "k1.png" }, { frame: 60, image: "k2.png" }], prompt: "Thick white smoke.", seed: 7, prefix: "paintaplate/x/graph" };
   const g = fluidGraph(WF, { plate: blank, fluid });
   linked(g);
   const key = Object.values(g).find((n) => n.class_type === "PaintAPlate_KeyframeVideo");
@@ -196,8 +196,5 @@ test("a fluid shot alone is one prompt: its keyframes by name, its text prompt a
   const values = Object.values(g).flatMap((n) => Object.values(n.inputs));
   assert.ok(values.includes(7) && values.includes("Thick white smoke."), "the seed and the text prompt the shot was made with");
   assert.equal(count(g, "PaintAPlate_LoadPlate"), 1);
-  const hdr = fluidGraph(WF, { plate: blank, fluid: { ...fluid, hdr: true } });
-  linked(hdr);
-  assert.equal(count(hdr, "PaintAPlate_LoadPlate"), 1, "SDR to HDR takes the fluid shot by link");
-  assert.ok(Object.keys(hdr).length > Object.keys(g).length, "SDR to HDR adds its pass");
+  assert.equal(count(g, "LTXVLoadConditioning"), 0, "no SDR to HDR: its jobs are in Finish's graph");
 });

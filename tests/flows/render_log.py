@@ -35,8 +35,8 @@ def run(browser, port, U):
     for start in ("Memory profile", "ingest "):
         page.wait_for_function(LOGGED, arg=start, timeout=20000)
     log = page.eval_on_selector_all("#log li span", "els => els.map((e) => e.textContent)")
-    pairs = page.eval_on_selector_all("#log li", "els => els.map((e) => [e.firstChild.textContent, e.lastChild.textContent])")
-    U.check(page.eval_on_selector_all("#log li", ui_live.LOG_LINES) == [f"{t} {x}" for t, x in pairs],
+    lines, pairs = page.eval_on_selector_all("#log li", f"els => [({ui_live.LOG_LINES})(els), els.map((e) => [e.firstChild.textContent, e.lastChild.textContent])]")  # one read: lines keep arriving
+    U.check(lines == [f"{t} {x}" for t, x in pairs],
             "page_log.txt: each line holds the time, a space, then the text, as the log's export writes it")
     profile = [t for t in log if "Memory profile" in t]
     U.check(profile == [PROFILE], f"the memory profile is one entry: the GPU in GB (bytes / 2**30), then what the page does on it: {profile}")

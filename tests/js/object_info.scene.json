@@ -1,5 +1,5 @@
 {
- "about": "What ComfyUI's /object_info says about the node classes of a scene's graph (with and without SDR to HDR), in the fields graph.editorGraph reads: each input in order with its type and six of its options (default, forceInput, control_after_generate, image_upload, multiline, dynamicPrompts), and the outputs. A combo's choices are left out. Read from a running ComfyUI 0.45.3 by tests/object_info_fixture.py.",
+ "about": "What ComfyUI's /object_info says about the node classes of a scene's graphs (the edits', with and without SDR to HDR, the fluid shot's and Finish's, with its order gates), in the fields graph.editorGraph reads: each input in order with its type and six of its options (default, forceInput, control_after_generate, image_upload, multiline, dynamicPrompts), and the outputs. A combo's choices are left out. Read from a running ComfyUI 0.45.3 by tests/object_info_fixture.py.",
  "nodes": {
   "BasicScheduler": {
    "input": {
@@ -146,6 +146,33 @@
     "MODEL",
     "CLIP",
     "VAE"
+   ]
+  },
+  "ComfyMathExpression": {
+   "input": {
+    "required": {
+     "expression": [
+      "STRING",
+      {
+       "default": "a + b",
+       "multiline": true
+      }
+     ],
+     "values": [
+      "COMFY_AUTOGROW_V3",
+      {}
+     ]
+    }
+   },
+   "output": [
+    "FLOAT",
+    "INT",
+    "BOOLEAN"
+   ],
+   "output_name": [
+    "FLOAT",
+    "INT",
+    "BOOL"
    ]
   },
   "ComfySwitchNode": {
@@ -1447,6 +1474,51 @@
     "image"
    ]
   },
+  "PaintAPlate_JoinWindows": {
+   "input": {
+    "required": {
+     "folder": [
+      "STRING",
+      {
+       "multiline": false
+      }
+     ]
+    },
+    "optional": {
+     "count": [
+      "INT",
+      {
+       "default": 0
+      }
+     ],
+     "max_frames": [
+      "INT",
+      {
+       "default": 0
+      }
+     ],
+     "counts": [
+      "STRING",
+      {
+       "default": "",
+       "multiline": false
+      }
+     ],
+     "share": [
+      "INT",
+      {
+       "default": 0
+      }
+     ]
+    }
+   },
+   "output": [
+    "IMAGE"
+   ],
+   "output_name": [
+    "images"
+   ]
+  },
   "PaintAPlate_KeepBlack": {
    "input": {
     "required": {
@@ -2175,6 +2247,121 @@
    ],
    "output_name": [
     "video"
+   ]
+  },
+  "SeedVR2Conditioning": {
+   "input": {
+    "required": {
+     "model": [
+      "MODEL",
+      {}
+     ],
+     "vae_conditioning": [
+      "LATENT",
+      {}
+     ]
+    }
+   },
+   "output": [
+    "CONDITIONING",
+    "CONDITIONING"
+   ],
+   "output_name": [
+    "positive",
+    "negative"
+   ]
+  },
+  "SeedVR2PostProcessing": {
+   "input": {
+    "required": {
+     "images": [
+      "IMAGE",
+      {}
+     ],
+     "original_resized_images": [
+      "IMAGE",
+      {}
+     ],
+     "color_correction_method": [
+      "COMBO",
+      {
+       "default": "lab"
+      }
+     ]
+    }
+   },
+   "output": [
+    "IMAGE"
+   ],
+   "output_name": [
+    "images"
+   ]
+  },
+  "SeedVR2Preprocess": {
+   "input": {
+    "required": {
+     "resized_images": [
+      "IMAGE",
+      {}
+     ]
+    }
+   },
+   "output": [
+    "IMAGE"
+   ],
+   "output_name": [
+    "images"
+   ]
+  },
+  "SeedVR2TemporalChunk": {
+   "input": {
+    "required": {
+     "latent": [
+      "LATENT",
+      {}
+     ],
+     "temporal_overlap": [
+      "INT",
+      {
+       "default": 0
+      }
+     ],
+     "chunking_mode": [
+      "COMFY_DYNAMICCOMBO_V3",
+      {}
+     ]
+    }
+   },
+   "output": [
+    "LATENT",
+    "INT"
+   ],
+   "output_name": [
+    "latents",
+    "temporal_overlap"
+   ]
+  },
+  "SeedVR2TemporalMerge": {
+   "input": {
+    "required": {
+     "latents": [
+      "LATENT",
+      {}
+     ],
+     "temporal_overlap": [
+      "INT",
+      {
+       "default": 0,
+       "forceInput": true
+      }
+     ]
+    }
+   },
+   "output": [
+    "LATENT"
+   ],
+   "output_name": [
+    "latent"
    ]
   },
   "SetLatentNoiseMask": {

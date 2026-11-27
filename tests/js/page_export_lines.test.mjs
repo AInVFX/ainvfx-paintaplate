@@ -48,7 +48,7 @@ test("the Help's Keys tab lists Shift+End beside Shift+Home, as the OCIO menu na
 
 test("a ComfyUI graph that was not written: one warning for the log, and what to do for the status line, written once", () => {
   const app = read("app.mjs");
-  assert.ok(app.includes('const GRAPH_UNWRITTEN = ["Warning: the ComfyUI graph was not written. The zip holds the other files.", "Restart ComfyUI after an update of Paint a plate, then export again."];'));
-  assert.equal(app.split("the ComfyUI graph was not written").length - 1, 1);
-  assert.ok(app.includes("if (posted === false) told(...GRAPH_UNWRITTEN);"));
+  assert.ok(app.includes('const graphUnwritten = (n) => [`Warning: the ComfyUI graph${n > 1 ? "s were" : " was"} not written. The zip holds the other files.`, "Restart ComfyUI after an update of Paint a plate, then export again."];'));
+  assert.equal(app.split("not written. The zip holds the other files.").length - 1, 1);
+  assert.ok(app.includes("if (unwritten) told(...graphUnwritten(posted.length));"));
 });

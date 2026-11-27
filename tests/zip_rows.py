@@ -7,7 +7,7 @@ import os
 ROWS = ("source_plate", "fluid_shot_preview", "fluid_shot_full_size", "plate_hdr", "plate_upscaled", "plate_hdr_upscaled", "fluid_shot_upscaled",
         "shot_preview", "clean_plate_pass_preview", "shot_full_size", "clean_plate_pass_full_size", "light_transfer_full_size",
         "layer_full_size", "layer_hdr", "layer_upscaled", "layer_hdr_upscaled", "matte", "matte_preview", "matte_upscaled",
-        "composite_preview", "composite_full_size", "composite_hdr", "composite_upscaled", "composite_hdr_upscaled", "comfyui_graph", "models",
+        "composite_preview", "composite_full_size", "composite_hdr", "composite_upscaled", "composite_hdr_upscaled", "comfyui_graph", "fluid_shot_comfyui_graph", "edits_comfyui_graph", "finish_comfyui_graph", "models",
         "hdr", "fluid_shot", "hdr_upscaled", "export", "review", "shot", "graph", "preview")  # the last: the names of zips from older runs
 # The result's rows, the first the zip holds: the composite at full size (a Light-only render names it after its step), else in
 # HDR; export, in the zips of older runs, whose route named a part by its id when the request named no row

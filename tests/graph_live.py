@@ -16,7 +16,13 @@ hold. PLAYWRIGHT_CHANNEL picks the browser (default: chrome).
     python tests/graph_live.py --offline --graph <scene.comfyui.json>
 
 --offline needs no ComfyUI and no browser: the classes come from tests/js/object_info.scene.json, the sizes are the
-saved ones, and check 3, which needs the editor, is left out."""
+saved ones, and check 3, which needs the editor, is left out.
+
+    python tests/graph_live.py --zip <export.zip> --out ~/paintaplate_gpu/graph_live
+
+--zip checks every graph of an export's zip, each in its own folder of --out, named after its row: comfyui_graph, or
+fluid_shot_comfyui_graph, edits_comfyui_graph and finish_comfyui_graph. It ends with 0 when every graph passes."""
+import zipfile
 import argparse
 import json
 import pathlib
@@ -176,19 +182,44 @@ def in_editor(a, graph, out):
 def main():
     ap = argparse.ArgumentParser(description="A scene's graph in ComfyUI's own editor: red nodes, nodes over another, values against the page's API graph, image files, the layout")
     ap.add_argument("--url", default="http://127.0.0.1:8188", help="ComfyUI")
-    ap.add_argument("--graph", required=True, help="a graph the page saved: a GPU case's scene.comfyui.json, or File > ComfyUI graph")
+    ap.add_argument("--graph", help="a graph the page saved: a GPU case's scene.comfyui.json, or one graph of Export's zip")
+    ap.add_argument("--zip", help="an export's zip: every ComfyUI graph it holds, each checked in its own folder of --out")
     ap.add_argument("--out", default=".", help="where graph_live.png and graph_live.json go")
     ap.add_argument("--headed", action="store_true", help="show the browser's window")
     ap.add_argument("--rebuild", action="store_true", help="first rebuild the editor's graph from the file's API graph with this checkout's web/graph.mjs (Node): "
                     "a change of the layout is checked on a saved graph, with no GPU run; the rebuilt graph goes to --out as scene.rebuilt.comfyui.json")
     ap.add_argument("--offline", action="store_true", help="no ComfyUI and no browser: classes from tests/js/object_info.scene.json, sizes as saved, no check 3")
     a = ap.parse_args()
+    if bool(a.graph) == bool(a.zip):
+        ap.error("give --graph or --zip")
+    if not a.zip:
+        return check(a, a.graph, os.path.expanduser(a.out))
+    with zipfile.ZipFile(os.path.expanduser(a.zip)) as z:
+        names = sorted(n for n in z.namelist() if n.endswith("comfyui_graph.json") and "/" not in n)
+        if not names:
+            sys.exit(f"{a.zip} holds no ComfyUI graph: export again with « ComfyUI graph » ticked.")
+        results = []
+        for name in names:
+            row = next((r for r in ("fluid_shot_comfyui_graph", "edits_comfyui_graph", "finish_comfyui_graph") if name.endswith(f"_{r}.json")), "comfyui_graph")
+            out = os.path.join(os.path.expanduser(a.out), row)
+            os.makedirs(out, exist_ok=True)
+            path = os.path.join(out, name)
+            with open(path, "wb") as f:
+                f.write(z.read(name))
+            print(f"== {row}")
+            results.append(check(a, path, out))
+    print("ALL GRAPHS PASSED" if not any(results) else "A GRAPH FAILED")
+    return 1 if any(results) else 0
+
+
+def check(a, path, out):
+    """The four checks of one graph file, with its findings and picture in `out`: 0 when they hold."""
+    a.graph = path
     with open(os.path.expanduser(a.graph)) as f:
         graph = json.load(f)
     api = ((graph.get("extra") or {}).get("paintaplate") or {}).get("prompt")
     if not api:
         sys.exit("This file holds no API graph (extra.paintaplate.prompt): save the scene's graph again from the page.")
-    out = os.path.expanduser(a.out)
     os.makedirs(out, exist_ok=True)
     if a.rebuild:
         if a.offline:

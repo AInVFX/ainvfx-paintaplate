@@ -969,18 +969,21 @@ export function stepOrder(steps, { done, at = () => undefined, now = null }) {
 // to HDR on the plate, with no edit), "relit" (a Light edit in HDR), "upscaled" (the plate alone, upscaled) or "fluid".
 // ready: what Export takes its files from is made; left: the time until it is, such as "about 10 min", or "". hdr: the
 // fluid shot went through SDR to HDR. steps.comp: the composite at full size, as the Render panel names it (app.labelOf).
-// bytes: the source plate's size, once known.
+// bytes: the source plate's size, once known. graphs: the scene's ComfyUI graphs, in the order they run (graphRows).
 export const EXR_FRAMES = "half-float EXR frames, ACES2065-1";
-export function exportWords({ kind, ready = true, left = "", hdr = false, steps = {}, bytes = 0 }) {
+export function exportWords({ kind, ready = true, left = "", hdr = false, steps = {}, bytes = 0, graphs = [] }) {
   const first = (step) => `${step} first${left ? `: ${left}` : ""}.`, inHdr = (what) => (ready ? `${what} in HDR.` : `${what} in HDR. ${first("SDR to HDR runs")}`);
   const note = kind === "fluid" ? (hdr ? `The fluid shot in HDR, with the SDR shot in ${XQ}.` : `The fluid shot in ${XQ}.`)
     : kind === "plate" ? inHdr("The plate") : kind === "relit" ? inHdr("The relit result") : kind === "upscaled" ? (ready ? "" : first("Upscale runs"))
     : ready ? "" : first(`${steps.comp} renders`);
   const hint = "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.";
-  const elements = { plate: { label: "Plate", detail: bytes > 0 ? `the plate under the edits, ${gb(bytes)}` : "the plate under the edits" },
+  const plate = kind === "fluid" ? "the fluid shot" : kind === "plate" || kind === "upscaled" ? "the plate itself" : "the plate under the edits";
+  const elements = { plate: { label: "Plate", detail: bytes > 0 ? `${plate}, ${gb(bytes)}` : plate },
     shot: { label: "Shot", detail: "the frames the model made" }, layer: { label: "Layer", detail: "the shot as the composite blends it" },
     matte: { label: "Matte", detail: "where the plate changed, 16-bit PNG frames" }, composite: { label: "Composite", detail: "the result" },
-    graph: { label: "ComfyUI graph", detail: "the scene as one ComfyUI workflow, with the images it loads" } };
+    graph: { label: GRAPH_LABEL, detail: graphs.length > 1 ? `the scene as ${graphs.length} ComfyUI workflows, run one after the other, with the images they load`
+      : graphs[0] === "finish" ? "Finish's steps as one ComfyUI workflow" : graphs[0] === "fluid_shot" ? "the fluid shot as one ComfyUI workflow, with the images it loads"
+      : "the scene as one ComfyUI workflow, with the images it loads" } };
   const stages = { preview: { label: "Preview" }, full: { label: "Full size" }, hdr: { label: "HDR" }, up: { label: "Upscaled" } };
   return { hint, note, elements, stages, help: `${hint} Frames keep their format, and a movie gives ${XQ}, or ${DEEP_FRAMES} when it holds more than 10 bits. With SDR to HDR, « HDR » gives half-float EXR frames in ACES2065-1.` };
 }
@@ -1009,6 +1012,13 @@ export function xRows(cells, { elements, stages }) {
 }
 // A row's name in the zip: its label in lower case, its words joined by « _ », so the zip's names follow the dialog's words.
 export const zipName = (label) => String(label ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+// The scene's ComfyUI graphs, in the order a person runs them (app.graphFiles): the fluid shot's, the edits', Finish's. Each
+// has its row in the zip, which names its file <stem>_<row>.json (routes.zip_entries), and its label in the download's
+// lines. One graph alone is « comfyui_graph »; several are named after what each makes, and their labels give the order.
+export const GRAPH_LABEL = "ComfyUI graph";
+export const GRAPH_KINDS = { fluid_shot: "fluid shot", edits: "edits", finish: "Finish" };
+export const graphRows = (kinds) => kinds.map((kind, i) => (kinds.length === 1 ? { kind, row: "comfyui_graph", label: GRAPH_LABEL }
+  : { kind, row: `${kind}_comfyui_graph`, label: `${GRAPH_LABEL} ${i + 1} of ${kinds.length}, ${GRAPH_KINDS[kind]}` }));
 // The format of the files the export writes, as the dialog, the Help, the status line and the graph's notes name it: a
 // sequence keeps its own file type, and every movie is ProRes 4444 XQ (plateio.VideoWriter). spec: the plate's spec.
 export const XQ = "ProRes 4444 XQ";

@@ -4,7 +4,8 @@ tests/js/object_info.scene.json, which graph.editorGraph's Node tests and the mo
     python tests/object_info_fixture.py --url http://127.0.0.1:8188
 
 The classes are those already in the file, those of the workflows a scene's graph is made of (web/workflows: edit, matte,
-clean, cleanup, shot, export, hdr, fluid), and those of any graph given with --graph. Each keeps the fields editorGraph reads:
+clean, cleanup, shot, export, hdr, fluid, and Finish's hdr_comp, upscale and upscale_export), and those of any graph given
+with --graph. Each keeps the fields editorGraph reads:
 every input in order, with its type and six of its options, and the outputs. A combo's choices are left out. A class
 that this ComfyUI does not have keeps its entry, and the script names it."""
 import argparse
@@ -16,7 +17,7 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FILE = os.path.join(HERE, "js", "object_info.scene.json")
-SCENE = ("edit", "matte", "clean", "cleanup", "shot", "export", "hdr", "fluid")  # the workflows a scene's graph is made of: graph.sceneGraph, graph.fluidGraph
+SCENE = ("edit", "matte", "clean", "cleanup", "shot", "export", "hdr", "fluid", "hdr_comp", "upscale", "upscale_export")  # graph.sceneGraph, fluidGraph, finishGraph
 KEEP = ("default", "forceInput", "control_after_generate", "image_upload", "multiline", "dynamicPrompts")
 FRONTEND_ONLY = {"MarkdownNote", "Note", "Reroute", "PrimitiveNode"}  # drawn by the editor, with no class in /object_info
 
