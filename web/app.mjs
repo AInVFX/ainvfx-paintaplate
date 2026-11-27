@@ -3966,7 +3966,7 @@ function exportWordsNow() {
   const kind = fluid ? "fluid" : alone ? (S.heroKey === PLATE_UP ? "upscaled" : "plate") : relitHdr ? "relit" : "edits";
   const ready = fluid || (alone ? !!r?.review : relitHdr ? !!r.hdrFrames : !!(r?.exported || r?.review));
   return exportWords({ kind, ready, left: ready ? "" : secs(renderLeft(true), ""), hdr: fluid && r?.done?.hdr !== undefined && !r.skip?.has("hdr"), // hdr: SDR to HDR made and on
-    steps: { comp: labelOf(STAGES.find((st) => st.id === "review"), r) }, bytes: S.exportSource?.plate === S.plate?.path ? S.exportSource.bytes : 0 });
+    steps: { comp: labelOf(STAGES.find((st) => st.id === "review"), r) }, bytes: S.exportSource?.plate === S.plate?.path ? S.exportSource.bytes : 0, graphs: graphKinds() });
 }
 // The render displayed, or, before Export makes it, its plan: the steps it will make (plan), which store nothing
 function exportPlan() {

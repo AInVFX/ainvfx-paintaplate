@@ -969,18 +969,21 @@ export function stepOrder(steps, { done, at = () => undefined, now = null }) {
 // to HDR on the plate, with no edit), "relit" (a Light edit in HDR), "upscaled" (the plate alone, upscaled) or "fluid".
 // ready: what Export takes its files from is made; left: the time until it is, such as "about 10 min", or "". hdr: the
 // fluid shot went through SDR to HDR. steps.comp: the composite at full size, as the Render panel names it (app.labelOf).
-// bytes: the source plate's size, once known.
+// bytes: the source plate's size, once known. graphs: the scene's ComfyUI graphs, in the order they run (graphRows).
 export const EXR_FRAMES = "half-float EXR frames, ACES2065-1";
-export function exportWords({ kind, ready = true, left = "", hdr = false, steps = {}, bytes = 0 }) {
+export function exportWords({ kind, ready = true, left = "", hdr = false, steps = {}, bytes = 0, graphs = [] }) {
   const first = (step) => `${step} first${left ? `: ${left}` : ""}.`, inHdr = (what) => (ready ? `${what} in HDR.` : `${what} in HDR. ${first("SDR to HDR runs")}`);
   const note = kind === "fluid" ? (hdr ? `The fluid shot in HDR, with the SDR shot in ${XQ}.` : `The fluid shot in ${XQ}.`)
     : kind === "plate" ? inHdr("The plate") : kind === "relit" ? inHdr("The relit result") : kind === "upscaled" ? (ready ? "" : first("Upscale runs"))
     : ready ? "" : first(`${steps.comp} renders`);
   const hint = "Export writes the selected files to ComfyUI's output folder, then downloads them as one zip.";
-  const elements = { plate: { label: "Plate", detail: bytes > 0 ? `the plate under the edits, ${gb(bytes)}` : "the plate under the edits" },
+  const plate = kind === "fluid" ? "the fluid shot" : kind === "plate" || kind === "upscaled" ? "the plate itself" : "the plate under the edits";
+  const elements = { plate: { label: "Plate", detail: bytes > 0 ? `${plate}, ${gb(bytes)}` : plate },
     shot: { label: "Shot", detail: "the frames the model made" }, layer: { label: "Layer", detail: "the shot as the composite blends it" },
     matte: { label: "Matte", detail: "where the plate changed, 16-bit PNG frames" }, composite: { label: "Composite", detail: "the result" },
-    graph: { label: GRAPH_LABEL, detail: "the scene as one ComfyUI workflow, with the images it loads" } };
+    graph: { label: GRAPH_LABEL, detail: graphs.length > 1 ? `the scene as ${graphs.length} ComfyUI workflows, run one after the other, with the images they load`
+      : graphs[0] === "finish" ? "Finish's steps as one ComfyUI workflow" : graphs[0] === "fluid_shot" ? "the fluid shot as one ComfyUI workflow, with the images it loads"
+      : "the scene as one ComfyUI workflow, with the images it loads" } };
   const stages = { preview: { label: "Preview" }, full: { label: "Full size" }, hdr: { label: "HDR" }, up: { label: "Upscaled" } };
   return { hint, note, elements, stages, help: `${hint} Frames keep their format, and a movie gives ${XQ}, or ${DEEP_FRAMES} when it holds more than 10 bits. With SDR to HDR, « HDR » gives half-float EXR frames in ACES2065-1.` };
 }
