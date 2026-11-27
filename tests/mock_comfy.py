@@ -553,15 +553,15 @@ async def worker():
         t0 = time.time()
         try:
             outputs = await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(execute(pid, prompt), LOOPS["jobs"]))
-            HISTORY[pid] = {"outputs": outputs, "status": {"completed": True, "status_str": "success", "messages": []}}
+            HISTORY[pid] = {"prompt": [len(HISTORY), pid, prompt, {}, []], "outputs": outputs, "status": {"completed": True, "status_str": "success", "messages": []}}
             await send({"type": "execution_success", "data": {"prompt_id": pid}})
         except asyncio.CancelledError:
-            HISTORY[pid] = {"outputs": {}, "status": {"completed": False, "status_str": "error", "messages": []}}
+            HISTORY[pid] = {"prompt": [len(HISTORY), pid, prompt, {}, []], "outputs": {}, "status": {"completed": False, "status_str": "error", "messages": []}}
             await send({"type": "execution_interrupted", "data": {"prompt_id": pid}})
         except Exception as exc:  # report like ComfyUI does
             import traceback
             traceback.print_exc()
-            HISTORY[pid] = {"outputs": {}, "status": {"completed": False, "status_str": "error", "messages": []}}
+            HISTORY[pid] = {"prompt": [len(HISTORY), pid, prompt, {}, []], "outputs": {}, "status": {"completed": False, "status_str": "error", "messages": []}}
             await send({"type": "execution_error", "data": {"prompt_id": pid, "node_type": "Mock", "exception_message": str(exc)}})
         STATE["running"] = None
         print(f"{pid[:8]} {'+'.join(sorted(outputs_of(prompt))) or 'no output'}: {time.time() - t0:.2f} s", flush=True)  # each job, by its outputs, and its time
@@ -782,7 +782,8 @@ async def start():
     threading.Thread(target=LOOPS["jobs"].run_forever, name="jobs", daemon=True).start()
     app = web.Application(client_max_size=1024 ** 3)
     app.router.add_post("/prompt", prompt_route)
-    app.router.add_get("/history", lambda r: web.json_response({}))  # the page reads it once at start, for the models already loaded
+    app.router.add_get("/history", lambda r: web.json_response(dict(list(HISTORY.items())[-int(r.query["max_items"]):]) if "max_items" in r.query else {}))
+    # bare, as the page reads it once at start (the models already loaded: none here); with max_items, the last jobs with their prompts, as ComfyUI answers
     app.router.add_get("/history/{pid}", history_route)
     app.router.add_get("/view", view_route)
     app.router.add_post("/upload/image", upload_route)
