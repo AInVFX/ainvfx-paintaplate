@@ -15,12 +15,12 @@ test("between the matte and the frames steps a free keeps the cache, both ways",
 });
 
 test("a small GPU frees between families: the matte and the frames keep the cache unless RAM is short; a larger GPU frees when RAM is short", () => {
-  assert.deepEqual(freeAsk(small, "matte", "review", { free: 30 * GB, need: 14 * GB }), { why: "the matte's models unloaded.\n  This GPU holds one model family at a time.", keep: true });
+  assert.deepEqual(freeAsk(small, "matte", "review", { free: 30 * GB, need: 14 * GB }), { why: "Memory freed before the review movie.\n  This GPU holds one model family at a time.", keep: true });
   assert.equal(freeAsk(small, "matte", "review", { free: 4 * GB, need: 14 * GB }).keep, false);
-  assert.equal(freeAsk(small, "review", "matte", null).keep, true);
-  assert.equal(freeAsk(small, "shot", "matte", null), "the shot's models unloaded.\n  This GPU holds one model family at a time.");
+  assert.equal(freeAsk(small, "review", "matte", null), null); // the review movie loads no model: nothing to unload
+  assert.equal(freeAsk(small, "shot", "matte", null), "Memory freed before the matte.\n  This GPU holds one model family at a time.");
   assert.equal(freeAsk(small, "matte", "matte", null), null);
-  assert.equal(freeAsk(large, "matte", "review", { free: 4 * GB, need: 14 * GB }), "4 GB of RAM free, 14 GB needed for its frames.");
+  assert.equal(freeAsk(large, "matte", "review", { free: 4 * GB, need: 14 * GB }), "Memory freed before the review movie: 4 GB of RAM free, 14 GB needed for its frames.");
   assert.equal(freeAsk(large, "matte", "review", { free: 30 * GB, need: 14 * GB }), null);
   assert.equal(freeAsk(large, "matte", "review", { free: 4 * GB, need: 14 * GB }, false), null);
   assert.equal(freeNeedsRoom(small, "matte", "review"), true);

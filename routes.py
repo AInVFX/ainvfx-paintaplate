@@ -11,7 +11,8 @@ output:, or, on a ComfyUI that answers this machine alone, an absolute path.
                                                       a plate's size and time (job index keys change with them), its spec
                                                       and its guessed file colour space in that OCIO config
     GET  /paintaplate/frames?path=...&first=0&count=4&side=960   frames of an image sequence or a video as RGB half floats
-    GET  /paintaplate/pixel?path=...&frame=0&x=0&y=0&size=1      one pixel at full precision and native size (colour inspector)
+    GET  /paintaplate/pixel?path=...&frame=0&x=0&y=0&size=1      one pixel at full precision and native size, and the mean of
+                                                                 the points sampled (&pts=x,y;x,y) (colour inspector)
     POST /paintaplate/blank {width, height, fps, frames}         a black ProRes 4444 plate for a fluid shot
     GET  /paintaplate/jobs/<key>, POST /paintaplate/jobs/<key>   the job index: a finished job's outputs by the hash of its inputs
     POST /paintaplate/live/<prompt>                       removes a finished prompt's live previews from ComfyUI's temp folder
@@ -954,26 +955,34 @@ def _frame_cached(full: str, index: int, mtime: float) -> np.ndarray:
     return frame_rgb(full, index)
 
 
-def pixel(rel: str, frame: int, x: int, y: int, size: int = 1, of: str = "") -> dict:
+def pixel(rel: str, frame: int, x: int, y: int, size: int = 1, of: str = "", pts: str = "") -> dict:
     """The colour inspector's read: the pixel at (x, y) of a frame, at native size, in the file's own values (an EXR's
     half floats as stored, above 1.0 and below 0), and the mean of the `size` x `size` pixels around it.
 
     `of` is the size of the grid (x, y) is in, as "3840x2160": the plate's. A frame of another size, such as a preview
-    pass, is read at the same place of the picture in its own pixels, which the reply names."""
+    pass, is read at the same place of the picture in its own pixels, which the reply names. `pts` lists the points sampled
+    with Shift held, in the same grid, as "x,y;x,y": the reply's `average` is their mean in this frame, and their count."""
     full = folders.plate_path(rel)
     stamp = os.path.getmtime(full if os.path.exists(full) else os.path.dirname(full))
     rgb = _frame_cached(full, max(0, frame), stamp)
     h, w = rgb.shape[:2]
-    if of:
-        ow, oh = (int(v) for v in of.lower().split("x"))
+    ow, oh = (int(v) for v in of.lower().split("x")) if of else (w, h)
+
+    def native(px: int, py: int) -> tuple[int, int]:  # a point of the plate's grid, in this frame's own pixels
         if ow > 0 and oh > 0 and (ow, oh) != (w, h):
-            x, y = int((x + 0.5) * w / ow), int((y + 0.5) * h / oh)
-    if not (0 <= x < w and 0 <= y < h):
-        raise ValueError(f"Pixel {x}, {y} outside the frame ({w} x {h}).")
+            px, py = int((px + 0.5) * w / ow), int((py + 0.5) * h / oh)
+        if not (0 <= px < w and 0 <= py < h):
+            raise ValueError(f"Pixel {px}, {py} outside the frame ({w} x {h}).")
+        return px, py
+
+    x, y = native(x, y)
     r = max(1, min(int(size), 64)) // 2
     block = rgb[max(0, y - r): y + r + 1, max(0, x - r): x + r + 1].reshape(-1, 3)
     out = {"width": w, "height": h, "x": x, "y": y, "frame": frame, "value": [float(v) for v in rgb[y, x]],
            "mean": [float(v) for v in block.mean(0)], "size": 2 * r + 1}
+    if pts:
+        at = [native(*(int(v) for v in p.split(","))) for p in pts.split(";")]
+        out["average"] = {"value": [float(v) for v in rgb[[py for _, py in at], [px for px, _ in at]].mean(0)], "n": len(at)}
     if not (plateio.is_sequence(full) or full.lower().endswith(STILLS)):  # a movie: say what its samples are
         out["movie"] = _movie_info(full, stamp)
     return out
@@ -992,7 +1001,7 @@ async def pixel_route(request):
     q = request.rel_url.query
     try:
         out = await asyncio.to_thread(pixel, q.get("path", ""), int(q.get("frame", 0)), int(q.get("x", 0)), int(q.get("y", 0)),
-                                      int(q.get("size", 1)), q.get("of", ""))
+                                      int(q.get("size", 1)), q.get("of", ""), q.get("pts", ""))
     except (FileNotFoundError, ValueError) as e:
         return web.json_response({"error": str(e)}, status=404, headers={"Cache-Control": "no-store"})
     return web.json_response(out, headers={"Cache-Control": "no-store"})

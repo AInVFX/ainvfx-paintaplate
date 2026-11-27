@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addSample, formatValue, inspectorRows, sourcePath, sourcePixel, wipeSide } from "../../web/inspector.mjs";
+import { formatValue, inspectorRows, sourcePath, sourcePixel, wipeSide } from "../../web/inspector.mjs";
 
 test("a point of the view gives the plate's own pixel, from the top left", () => {
   assert.deepEqual(sourcePixel(0, 0, 3840, 2160), { x: 0, y: 0, inside: true });
@@ -14,11 +14,10 @@ test("the file displayed: EXR frames, else the movie in the output folder, else 
   assert.equal(sourcePath(null, "plates/a.mp4"), "plates/a.mp4");
 });
 
-test("values as RV prints them, above 1.0 and below 0, and the running average", () => {
+test("values as RV prints them, above 1.0 and below 0, and the average of the points sampled", () => {
   assert.equal(formatValue(4), "4.000000");
   assert.equal(formatValue(-0.0999755859375), "-0.099976");
-  const avg = addSample(addSample(null, [1, 2, 3]), [3, 2, 1]);
-  const rows = inspectorRows({ x: 4, y: 5, frame: 1001, value: [4, 0.5, -0.1], final: [1, 0.5, 0], average: avg });
+  const rows = inspectorRows({ x: 4, y: 5, frame: 1001, value: [4, 0.5, -0.1], final: [1, 0.5, 0], average: { value: [2, 2, 2], n: 2 } });
   assert.deepEqual(rows[0], ["Native Pixel", "4, 5"]);
   assert.deepEqual(rows.find((r) => r[0] === "Red"), ["Red", "4.000000"]);
   assert.ok(rows.some((r) => r[0] === "Average source colour of 2"));

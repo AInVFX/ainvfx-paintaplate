@@ -20,7 +20,7 @@ test("no idiom that a reader who is not fluent must decode", () => {
 
 test("Generate's tooltip says what it reuses, and Stop's what it keeps", () => {
   assert.ok(titles.includes("Click or press Enter to make the edit, then the shot. Steps already made are reused."));
-  assert.ok(titles.includes("Stop (Esc): finished steps are kept. Generate continues from there."));
+  assert.ok(titles.includes("Click or press Esc to stop. Finished steps are kept. Press Enter to continue from there."));
 });
 
 test("the Scenes tab's note is one sentence", () => {

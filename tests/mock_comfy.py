@@ -555,14 +555,15 @@ async def worker():
             outputs = await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(execute(pid, prompt), LOOPS["jobs"]))
             HISTORY[pid] = {"prompt": [len(HISTORY), pid, prompt, {}, []], "outputs": outputs, "status": {"completed": True, "status_str": "success", "messages": []}}
             await send({"type": "execution_success", "data": {"prompt_id": pid}})
-        except asyncio.CancelledError:
-            HISTORY[pid] = {"prompt": [len(HISTORY), pid, prompt, {}, []], "outputs": {}, "status": {"completed": False, "status_str": "error", "messages": []}}
+        except asyncio.CancelledError:  # the history keeps the message, as ComfyUI keeps its status_messages (execution.py)
+            HISTORY[pid] = {"prompt": [len(HISTORY), pid, prompt, {}, []], "outputs": {}, "status": {"completed": False, "status_str": "error", "messages": [["execution_interrupted", {"prompt_id": pid}]]}}
             await send({"type": "execution_interrupted", "data": {"prompt_id": pid}})
         except Exception as exc:  # report like ComfyUI does
             import traceback
             traceback.print_exc()
-            HISTORY[pid] = {"prompt": [len(HISTORY), pid, prompt, {}, []], "outputs": {}, "status": {"completed": False, "status_str": "error", "messages": []}}
-            await send({"type": "execution_error", "data": {"prompt_id": pid, "node_type": "Mock", "exception_message": str(exc)}})
+            err = {"prompt_id": pid, "node_type": "Mock", "exception_message": str(exc)}
+            HISTORY[pid] = {"prompt": [len(HISTORY), pid, prompt, {}, []], "outputs": {}, "status": {"completed": False, "status_str": "error", "messages": [["execution_error", err]]}}
+            await send({"type": "execution_error", "data": err})
         STATE["running"] = None
         print(f"{pid[:8]} {'+'.join(sorted(outputs_of(prompt))) or 'no output'}: {time.time() - t0:.2f} s", flush=True)  # each job, by its outputs, and its time
 

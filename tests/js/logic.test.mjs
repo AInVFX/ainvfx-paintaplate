@@ -617,9 +617,9 @@ test("editList and stopHint: the status line names the edits stopped and waiting
   assert.equal(editList([3]), "edit 3");
   assert.equal(editList([3, 4]), "edits 3 and 4");
   assert.equal(editList([3, 4, 5]), "edits 3, 4 and 5");
-  assert.equal(stopHint({ edit: 2, waits: [3] }), "Stopped. Edit 2 keeps its strokes, text prompt and seed. Edit 3 waits. Enter generates again, Ctrl+Enter tries another seed, Esc removes the strokes.");
-  assert.equal(stopHint({ waits: [3, 4] }), "Stopped. Edits 3 and 4 wait. Enter continues from there.");
-  assert.equal(stopHint(), "Stopped. Enter continues from there.");
+  assert.equal(stopHint({ edit: 2, waits: [3] }), "Stopped. Edit 2 keeps its strokes, text prompt and seed. Edit 3 waits. Press Enter to generate it again. Press Ctrl+Enter to try another seed. Press Esc to remove the strokes.");
+  assert.equal(stopHint({ waits: [3, 4] }), "Stopped. Edits 3 and 4 wait. Press Enter to continue from there.");
+  assert.equal(stopHint(), "Stopped. Press Enter to continue from there.");
 });
 
 // ---------- Viewer, round 1, second pass, turn 2: after Generate, an edit above waits for its own pass ----------
@@ -645,7 +645,7 @@ test("every workflow has a family, and the small profile frees ComfyUI's memory 
   assert.deepEqual(names.filter((n) => !FAMILY[n]), []);
   const small = memoryProfile({ vram: 17.2e9 }), large = memoryProfile({ vram: 100e9 });
   assert.equal(freesBefore(small, "shot", "matte"), true); // LTX and its text encoder leave before SAM tracks the paint
-  assert.equal(freesBefore(small, "ingest", "prompt"), true); // the open's frames leave before the edit models load
+  assert.equal(freesBefore(small, "ingest", "prompt"), false); // the open loads no model: none to unload, and ComfyUI drops its outputs as the next job starts
   assert.equal(freesBefore(small, "prompt", "edit"), false); // the same family
   assert.equal(freesBefore(small, "clean", "cleanup"), false);
   assert.equal(freesBefore(small, null, "ingest"), false); // the first job: nothing to free
@@ -691,7 +691,7 @@ test("the time left in a step follows the sampler's own pace, not the time the m
   assert.equal(stepLeft({ est: 42, run: 80, first: [37, 0.125], last: [51, 1], tail: 6 }), 1); // never less than a second
   assert.equal(stepLeft({ est: 42, run: 60 }), 4.2); // a step with no progress, past its estimate: a tenth of it
   assert.equal(slower("small", "full"), 1.1); // render_estimates.test.mjs holds the steps measured on a 16 GB GPU
-  assert.equal(slower("large", "full"), 1);
+  assert.equal(slower("medium", "full"), 1); // the large profile's factors: page3_estimates.test.mjs
   const key = timeKey("shot", [640, 352], 121, "small");
   assert.equal(key, "shot|640x352x121|small");
   let times = remember({}, key, { total: 57.6, lead: 37, tail: 6, at: 1 });
@@ -742,6 +742,6 @@ test("an erase that left its object: the share of the object that changed on the
   const wire = rgba((x) => (x === 5 ? [40, 40, 40] : [200, 200, 200]));
   assert.equal(erasedShare(rgba(() => [200, 200, 200]), wire, mask, w, h), 4 / 12);
   assert.equal(erasedShare(mist, before, rgba(() => [0, 0, 0]), w, h), null); // no mask: nothing to judge, nothing is held back
-  assert.equal(leftHint(""), "Type its name in the text prompt, then Generate.");
-  assert.equal(leftHint("barn"), "Use another text prompt, then Generate, or Ctrl+Enter for another seed.");
+  assert.equal(leftHint(""), "Type its name in the text prompt, then press Enter.");
+  assert.equal(leftHint("barn"), "Use another text prompt, then press Enter. Press Ctrl+Enter to try another seed.");
 });

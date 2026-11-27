@@ -7,7 +7,7 @@ HINT = "Ready. Open a plate to start."
 SAID = """() => { window.__said = []; const line = document.querySelector('#status');
   new MutationObserver(() => window.__said.push(line.textContent)).observe(line, { childList: true, characterData: true, subtree: true }); }"""  # every sentence the status line shows from now on: a later one cannot hide it
 PLAYABLE = "() => { window.__playable = 0; document.addEventListener('canplaythrough', () => { window.__playable += 1; }, true); }"  # counts each time a video can play through: the open's last sentence comes then
-NEXT = "Describe the edit in the text prompt, paint on the frame, then Generate."
+NEXT = "Describe the edit in the text prompt, paint it on the frame, then press Enter."
 FLUID = "Blank plate: paint your fluid on a keyframe, describe it in the text prompt, then press Enter."
 OPENED = re.compile(r"^Plate \S+: opened in [\d.]+ s\.\n  (\d+) x (\d+), (\d+) frames?, (\d+-bit|float), (.+)\.$")  # the plate's line: the open's time, the size, the frames, the bit depth, the colour space
 SIZES = re.compile(r"^Working sizes: edits and shots at \d+ x \d+(, shot preview at \d+ x \d+)?, tracking at \d+ x \d+\.$")

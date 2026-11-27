@@ -45,7 +45,7 @@ def run(browser, port, U):
     U.check(bool(loads) and loads[0].get("max_frames") == 1001, f"the plate's ingest asks Load Plate for 1001 frames: {[x.get('max_frames') for x in loads]}")
     U.check("Warning: plate long_50fps: 1,001 of its 1,250 frames opened.\n  Frames 1002 to 1250 are left out: LTX 2.5 makes shots of up to 20 s, 1,001 frames at 50 fps."
             in "\n".join(U.log_lines(page)), "the log names the frames left out, and why")
-    U.check(U.poll(page, lambda: page.text_content("#status").startswith("Warning: plate long_50fps: 1,001 of its 1,250 frames opened. Describe the edit in the text prompt, paint on the frame, then Generate."), 5),
+    U.check(U.poll(page, lambda: page.text_content("#status").startswith("Warning: plate long_50fps: 1,001 of its 1,250 frames opened. Describe the edit in the text prompt, paint it on the frame, then press Enter."), 5),
             f"the status line shows the warning, then the next step: {page.text_content('#status')!r}")
     U.open_path(page, mid)
     U.check(U.until(page, "document.querySelector('#spec').textContent.startsWith('mid_30fps') && document.querySelector('#spec').textContent.includes(', 200 frames,')", 60000),

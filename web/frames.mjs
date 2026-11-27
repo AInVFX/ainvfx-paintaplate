@@ -225,15 +225,14 @@ export function autoBudget({ host = "", profile = "small", deviceMemory = 0 }) {
   return deviceMemory ? Math.min(2e9, Math.max(512e6, (deviceMemory * 1e9) / 4)) : 1e9;
 }
 
-// The frame cache's line of the log: the budget and where it comes from, then what each source holds, for the sources
-// that hold frames. A source displayed says why its frames have that size: the movie's own, their size on screen, or
-// smaller so that all of them fit the budget. `sources`: [{ name (« the plate's »), kind (« EXR » or none), fits,
-// frames, width, height, show, shrunk, movie: [w, h] }]. Paused, the viewer reads each frame at its own size anyway.
+// The frame cache's line of the log: the budget and where it comes from, then each source that holds frames, one sentence
+// each: its name, how many of its frames are in memory, and their size, full (the movie's own) or reduced. `sources`:
+// [{ name (« Plate », or the step displayed by its Render panel name), kind (« EXR » or none), fits, frames, width, height,
+// movie: [w, h] }]. Paused, the viewer reads each frame at its own size anyway.
 export const cacheLine = (budget, why, sources) => {
-  const why2 = (s) => (!s.show || s.kind || s.fits < s.frames ? "" : s.shrunk ? `, to fit in ${budget}` : s.movie?.[0] === s.width ? ", their own size" : ", their size on screen");
-  const part = (s) => `${s.fits === s.frames ? "all" : countText(s.fits)} of ${s.name} ${countText(s.frames)}${s.kind ? ` ${s.kind}` : ""} frames at ${s.width} x ${s.height}${why2(s)}`;
+  const part = (s) => `${s.name}: ${s.fits === s.frames ? "all " : `${countText(s.fits)} of `}${countText(s.frames)}${s.kind ? ` ${s.kind}` : ""} frames in memory, ${s.width >= (s.movie?.[0] ?? s.width) ? "full" : "reduced"} size (${s.width} x ${s.height}).`;
   const held = sources.filter((s) => s.fits > 0);
-  return `Frame cache, ${budget} (${why}): ${held.length ? held.map(part).join("; ") : "no frame yet"}.`;
+  return `Frame cache, ${budget} (${why}). ${held.length ? held.map(part).join(" ") : "No frame in memory yet."}`;
 };
 
 // The size a source's frames are kept at, and how many fit. `movie`: the movie's own size; `fit`: the size the frame is

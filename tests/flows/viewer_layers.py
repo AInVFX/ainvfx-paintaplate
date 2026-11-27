@@ -40,7 +40,7 @@ def run(browser, port, U):
     U.check(np.abs(pixel(p3) - plate3).max() <= 16,
             f"while edit 2 is changed, the frame shows the plate where only edit 3 painted: {pixel(p3).tolist()} against the plate's {plate3.tolist()}")
     U.check(np.abs(pixel(p1) - shown1).max() <= 16, f"the edit under it stays on the frame: {pixel(p1).tolist()}, as before ({shown1.tolist()})")
-    U.check(U.until(page, "(() => { const n = document.querySelector('#status-note'); return !n.hidden && n.textContent === 'Edit 2 changes: Edit 3 hides until Generate. Esc cancels the change.'; })()", 3000),
+    U.check(U.until(page, "(() => { const n = document.querySelector('#status-note'); return !n.hidden && n.textContent === 'Edit 2 changes: Edit 3 hides until you press Enter. Press Esc to cancel the change.'; })()", 3000),
             f"the status line's note names the hidden edit: {page.text_content('#status-note')}")
     U.check(hidden() == ["3. Paint: Hidden until edit 2 is generated"], f"History dims the hidden row and says why: {hidden()}")
 

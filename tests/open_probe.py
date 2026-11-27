@@ -38,6 +38,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 from build_workflows import fill, load  # noqa: E402
 from comfy_live import frames_apart, http  # noqa: E402
+from erase_probe import page as logic  # noqa: E402  (web/logic.mjs's own functions, run by Node)
 
 GB = 2 ** 30
 RATE = 4  # readings of the memory a second
@@ -236,13 +237,13 @@ def page_values(path, st, run, config="", color_space="", proxy_space=""):
 
 def job_values(workflow, path, st, run, config=""):
     """What the page sends with a workflow other than `ingest`, as far as the plate decides it: the plate as `path`, its
-    frames and frame rate (the conditioning one at most 30, as hdrFps in web/logic.mjs), and every file under the probe's
+    frames and frame rate (the conditioning one from logic.hdrFps, run by Node), and every file under the probe's
     folder. The other slots keep the workflow's saved values; --set gives the page's own, such as its memory profile's
     (MEMORY in web/logic.mjs)."""
     slots = load(workflow)[1]
     fps = float(st.get("fps") or 24)
     values = {"path": path, "config": config, "max_frames": st.get("frames") or 121, "fps": round(fps),
-              "cond_fps": min(30.0, fps), "movie_fps": fps}
+              "cond_fps": logic(("hdrFps", fps))[0], "movie_fps": fps}
     values.update({slot: f"{run}/{slot}" for slot in slots if slot.endswith("prefix")})
     return {slot: value for slot, value in values.items() if slot in slots}
 
@@ -328,7 +329,7 @@ def main(argv=None):
     ap.add_argument("--config", default="", help="the OCIO config the page sends (default: the built-in one)")
     ap.add_argument("--color-space", default="", help="the plate's colour space (default: read from the file, as the page does)")
     ap.add_argument("--proxy-space", default="", help=f"the playback movie's colour space (default: the plate's for a video, {LOG_SPACE} for frames)")
-    ap.add_argument("--max-frames", type=int, help="the page sends none: the workflow's own 121")
+    ap.add_argument("--max-frames", type=int, help="frames the job reads; by default the plate's own, as the page sends the frames it opened")
     ap.add_argument("--workflow", default="ingest", help="the page's workflow to run (default: ingest, the open); another takes "
                                                          "the plate as its path and writes its files under the probe's folder")
     ap.add_argument("--set", action="append", default=[], metavar="SLOT=VALUE",
@@ -377,7 +378,7 @@ def main(argv=None):
         except ValueError:
             values[slot] = text
     prompt = fill(a.workflow, values)
-    frames = min(st.get("frames") or 121, a.max_frames or 121)
+    frames = int(values.get("max_frames") or st.get("frames") or 121)  # what the job reads
     copy = st["width"] * st["height"] * frames * 12  # float32 RGB
     soft, memory = versions(stats)
     say(f"{'Open probe' if ingest else f'Probe of {a.workflow}'}: {a.plate} on {url}.\n  {soft}" + (f"\n  {memory}" if memory else ""))

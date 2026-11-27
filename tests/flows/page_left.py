@@ -9,7 +9,7 @@ waits for that answer. The mock answers the next edit jobs with the frame as it 
 FACT = "Warning: edit 1, the object may still be there ("  # the log's line and the status line after Cancel
 ASKS = "Edit 1: the object may still be there ("  # the dialog's question
 QUESTION = ". Render the shot anyway?"
-NAME = "Type its name in the text prompt, then Generate."
+NAME = "Type its name in the text prompt, then press Enter."
 ANYWAY = "Edit 1: kept at your request. The check found the object still there."
 ROW = """(() => { const li = document.querySelector('#history li');
   return li ? [li.className, li.dataset.left ?? '', li.querySelector('small').textContent] : null; })()"""

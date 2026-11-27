@@ -80,7 +80,7 @@ def run(browser, port, U):
     U.stroke(page, E3); away()
     U.until(page, f"{NOTE}.startsWith('Edit 1 changes')", 5000)
     s2 = pixel(P2)
-    U.check(note() == "Edit 1 changes: Edit 2 hides until Generate. Esc cancels the change." and hidden() == ["2. Paint"] and np.abs(s2 - plate2).max() <= 16,
+    U.check(note() == "Edit 1 changes: Edit 2 hides until you press Enter. Press Esc to cancel the change." and hidden() == ["2. Paint"] and np.abs(s2 - plate2).max() <= 16,
             f"while Edit 1 changes, Edit 2 hides and the status line's note names it: {note()!r}, rows {hidden()}, {s2.tolist()} on {plate2.tolist()}")
     page.keyboard.press("Control+z"); away()
     U.check(page.is_hidden("#editing") and note() == "" and not hidden(), f"an undo ends the selection and the note: {note()!r}, rows {hidden()}")

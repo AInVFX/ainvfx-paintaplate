@@ -757,6 +757,9 @@ export function plainPaths(text, folder = "") {
 
 // The full-precision frames' failure (app.fetchDeep): refused, unanswered or malformed, the cache stops (frames.fillDeep) and
 // the viewer keeps the 8-bit movie. One line per source, an error, so the log and the status line show it in red.
+// The log's line as a source's full-precision frames start loading: `what`, the plate's name or the step displayed by its
+// Render panel name; `space`, the frames' own colour space.
+export const deepLoading = (what, side, space) => `Full-precision frames of ${what}: loading in the background, ${side} px on the long side, ${space}.`;
 export const deepStopped = (what, why) =>
   `Error: full-precision frames of ${what}: stopped (${String(why ?? "").replace(/\s+/g, " ").trim() || "no reason given"}). Viewer: 8-bit movie.`;
 
@@ -1043,7 +1046,7 @@ export function strokeTarget({ draft, current, tool }) { // where a new stroke g
 export function hidesNote(n, above) {
   if (!above.length) return "";
   const names = above.length === 1 ? `Edit ${above[0]} hides` : `Edits ${above.slice(0, -1).join(", ")} and ${above.at(-1)} hide`;
-  return `Edit ${n} changes: ${names} until Generate. Esc cancels the change.`;
+  return `Edit ${n} changes: ${names} until you press Enter. Press Esc to cancel the change.`;
 }
 
 export function toolEndsEdit({ draft, current }, tool) { // picking another tool than the edit being worked on starts a new edit
@@ -1224,7 +1227,7 @@ export const beyondDetail = ({ beyond, beyondEdges }) => (beyond === null || bey
 
 // What to do next, for the status line: an object with no name gets one; a named object gets other words or another seed.
 export const leftHint = (words) =>
-  (words ? "Use another text prompt, then Generate, or Ctrl+Enter for another seed." : "Type its name in the text prompt, then Generate.");
+  (words ? "Use another text prompt, then press Enter. Press Ctrl+Enter to try another seed." : "Type its name in the text prompt, then press Enter.");
 
 // What the page says when the check holds an erase back. The check can be wrong on a thin or faint object, or on one behind a
 // fence, so the page asks: `fact`, a warning, goes to the log once and, after « No, cancel », to the status line before leftHint;
@@ -1324,7 +1327,7 @@ export const wantsHdrFor = (spec, headroom, deliverHdr) => holdsHdr(spec, headro
 // reports about 47.5 GiB, a 40 GB one about 39.6.
 export const BIG_PLATE = { side: 2048, vram: 46 * 2 ** 30 };
 export const bigPlateWarning = (spec, vram) => (spec && vram > 0 && Math.max(spec.width, spec.height) > BIG_PLATE.side && vram < BIG_PLATE.vram
-  ? `Warning: this plate is ${spec.width} x ${spec.height}, above 2K, and this GPU has ${Math.round(vram / 2 ** 30)} GB of VRAM. A plate above 2K needs a 96 GB GPU: its renders may run out of memory here.`
+  ? `Warning: this plate is ${spec.width} x ${spec.height}, above 2K, and this GPU has ${Math.round(vram / 2 ** 30)} GB of VRAM. Renders take much longer here: use a 96 GB GPU for plates above 2K.`
   : null);
 // ---------- How much of a plate opens: LTX 2.5's 20 seconds ----------
 // LTX 2.5 places each frame at its time in seconds, its number divided by the frame rate, and its positions span 20 s in
@@ -1415,8 +1418,8 @@ export const editList = (nums) => (nums.length === 1 ? `edit ${nums[0]}` : `edit
 export function stopHint({ edit = null, waits = [] } = {}) {
   const list = waits.length ? editList(waits) : "";
   const wait = list ? ` ${list[0].toUpperCase()}${list.slice(1)} ${waits.length > 1 ? "wait" : "waits"}.` : "";
-  return edit === null ? `Stopped.${wait} Enter continues from there.`
-    : `Stopped. Edit ${edit} keeps its strokes, text prompt and seed.${wait} Enter generates again, Ctrl+Enter tries another seed, Esc removes the strokes.`;
+  return edit === null ? `Stopped.${wait} Press Enter to continue from there.`
+    : `Stopped. Edit ${edit} keeps its strokes, text prompt and seed.${wait} Press Enter to generate it again. Press Ctrl+Enter to try another seed. Press Esc to remove the strokes.`;
 }
 
 // Edits are layers, after Generate. An edit above an edit that is made again stays hidden until its own
@@ -1656,8 +1659,7 @@ export const FAMILY = { prompt: "klein", edit: "klein", shot: "ltx", clean: "ltx
 export const RAM_COPIES = 8, RAM_COPIES_OPEN = 3;
 export const framesNeed = (width, height, frames, name = "") => // bytes of RAM for the job `name`: the copies, and 4 GB to work in
   (name === "ingest" ? RAM_COPIES_OPEN : RAM_COPIES) * width * height * frames * 12 + 4 * 2 ** 30;
-// Each job's name in a line a person reads, as the Render panel names it where it can: « Memory freed before the shot: the
-// edit's models unloaded. »
+// Each job's name in a line a person reads, as the Render panel names it where it can: « Memory freed before the shot. »
 export const JOB_NAME = { ingest: "opening the plate", prompt: "the prompt writer", prefetch: "the prompt writer", edit: "the edit",
   snap: "the SAM mask", clean: "the clean plate pass", cleanup: "the clean plate pass", shot: "the shot", matte: "the matte",
   comp: "the composite", review: "the review movie", export: "Export", warm: "the warm-up", fluid: "the fluid shot", hdr: "SDR to HDR",
@@ -1669,23 +1671,25 @@ export const JOB_NAME = { ingest: "opening the plate", prompt: "the prompt write
 const KEEPS = new Set(["sam", "frames"]);
 export const keepsAnswers = (last, name) => KEEPS.has(FAMILY[last]) && KEEPS.has(FAMILY[name]);
 
-// Why ComfyUI's memory is freed before job `name` after job `last`, or null: on a small GPU, between families of models,
-// with { why, keep } between the matte and the frames steps, which keeps ComfyUI's cache unless RAM is short for the
-// frames (`room`); on a larger GPU, only when RAM is short. `room`: { free, need } in bytes, or null where unknown.
+// The log's line when ComfyUI's memory is freed before job `name` after job `last`, or null: on a small GPU, after a job of
+// another family that loaded models, with { why, keep } between the matte and the frames steps, which keeps ComfyUI's
+// cache unless RAM is short for the frames (`room`); on a larger GPU, only when RAM is short. `room`: { free, need } in
+// bytes, or null where unknown.
 export function freeAsk(profile, last, name, room = null, plate = true) {
+  const freed = `Memory freed before ${JOB_NAME[name] ?? name}`;
   if (freesBefore(profile, last, name)) {
-    const why = `${JOB_NAME[last] ?? last}'s models unloaded.\n  This GPU holds one model family at a time.`;
+    const why = `${freed}.\n  This GPU holds one model family at a time.`;
     return keepsAnswers(last, name) ? { why, keep: !room || room.free >= room.need } : why;
   }
   if (!plate || !last || FAMILY[name] === FAMILY[last] || !freesBefore(profile, last, name, room)) return null;
-  return `${Math.round(room.free / 2 ** 30)} GB of RAM free, ${Math.round(room.need / 2 ** 30)} GB needed for its frames.`;
+  return `${freed}: ${Math.round(room.free / 2 ** 30)} GB of RAM free, ${Math.round(room.need / 2 ** 30)} GB needed for its frames.`;
 }
 // Whether freeAsk needs the RAM figures for this pair: a free that may keep the cache, or a larger GPU's change of family
 export const freeNeedsRoom = (profile, last, name) => !!last && FAMILY[name] !== FAMILY[last] && (!profile?.frees || keepsAnswers(last, name));
 
 export function freesBefore(profile, last, name, room = null) { // room: { free, need } in bytes of RAM, where ComfyUI gives it
-  if (!last || FAMILY[name] === FAMILY[last]) return false;
-  return !!profile?.frees || (!!room && room.free < room.need);
+  if (!last || FAMILY[name] === FAMILY[last]) return false; // a job that loaded no model leaves none to unload: only RAM can call for a free
+  return (!!profile?.frees && FAMILY[last] !== "frames") || (!!room && room.free < room.need);
 }
 
 // ---------- How long a render step takes ----------
@@ -1697,30 +1701,43 @@ export function freesBefore(profile, last, name, room = null) { // room: { free,
 // each step's total, lead and tail per size, frame count and memory profile, in paintaplate.step-times).
 const STEP_FAMILY = { fluid: "ltx", fluidfull: "ltx", erase: "sam", clean: "ltx", shot: "ltx", track: "sam", comp: "frames", cleanfull: "ltx", full: "ltx", trackfull: "sam", hdr: "ltx", review: "frames", export: "frames" };
 // A step's time before it ever ran on this machine (stepGuess): the 96 GB GPU's reference (STAGES' ref, in seconds at
-// REF_SIZE), scaled to the plate, then to the GPU. A 16 GB GPU, the small profile, holds one family of models at a time,
-// so each job loads its models again: a lead in seconds per family, then a factor per step on the reference's scaled
-// seconds. Measured on a 16 GB GPU with 52 GB of RAM, horse.mp4 at
-// 1920 x 1080 and 121 frames: the lead is what a job spent outside its sampler or its tracking loop in ComfyUI's trace,
-// and each factor makes the rest. SDR to HDR grows faster than its pixels (`grow`, the power of its scale): 172 s at
-// 1280 x 704 and 606 s at 1920 x 1088, 121 frames each, the same workflow for a fluid shot and a render. The full-size shot grows the same way: 79.8 s at
-// 960 x 512, 156.6 s at 1280 x 704 and 576.4 s at 1920 x 1088. A composite also spends `fixed` seconds whatever its size:
-// comp took 7.8 s at 480 x 256 and 13.7 to 15.3 s at 960 x 544, review 13.5 s at 1280 x 704 and 23.2 to 26.0 s at
-// 1920 x 1088, 121 frames each. Other
-// profiles announce the references as they are. With SDR to HDR on, the full-size composite (review) and the export write
-// half-float EXR frames: `withHdr` multiplies their seconds (37.7 s and 14.6 s on the HDR test plate made from horse.mp4,
-// 1920 x 1080 and 121 frames). tests/js/render_estimates.test.mjs holds every measured step within 25%.
+// REF_SIZE), scaled to the plate, then to the GPU. A 16 GB GPU, the small profile, holds one family of models at a time:
+// a step after a job of another family loads its models first, which costs its family's `lead` in seconds; a step after
+// one of its own family finds them loaded (startsLoaded). Each factor makes the rest. Measured on a 16 GB GPU with 52 GB of
+// RAM, horse.mp4 at 1920 x 1080 and 121 frames: the lead is what a job spent outside its sampler or its tracking loop in
+// ComfyUI's trace. SDR to HDR grows faster than its pixels (`grow`, the power of its scale): 172 s at 1280 x 704 and 606 s
+// at 1920 x 1088, 121 frames each, the same workflow for a fluid shot and a render. The full-size shot grows the same way:
+// 79.8 s at 960 x 512, 156.6 s at 1280 x 704 and 576.4 s at 1920 x 1088. The matte's steps (track, trackfull, erase): 95.7 s
+// for « Track the paint, full size » and 45.6 s for « Track the object to clean » at 1920 x 1080. A composite also spends
+// `fixed` seconds whatever its size: comp took 7.8 s at 480 x 256 and 13.7 to 15.3 s at 960 x 544, review 13.5 s at
+// 1280 x 704 and 23.2 to 26.0 s at 1920 x 1088, 121 frames each. With SDR to HDR on, the full-size composite (review)
+// and the export write half-float EXR frames: `withHdr` multiplies their seconds (37.7 s and 14.6 s on the HDR test plate
+// made from horse.mp4, 1920 x 1080 and 121 frames). On a 96 GB GPU, the large profile, the full-size shot also grows faster
+// than its pixels: 146 s at 1920 x 1088 and 121 frames, 457 s at 960 x 544 and 1001 frames, 1402 s at 1920 x 1088 and 497
+// frames; its full-size composite grows slower: 51, 63 and 78 s for the same plates. The medium profile announces the
+// references as they are. tests/js/render_estimates.test.mjs and page3_estimates.test.mjs hold every measure within 25%.
 export const SLOWER = {
-  small: { lead: { ltx: 38, sam: 11, frames: 0 }, fluid: 1.1, fluidfull: 1.1, erase: 2.1, track: 1, trackfull: 1, clean: 3.35, shot: 1.64, cleanfull: 1.18,
+  small: { lead: { ltx: 38, sam: 11, frames: 0 }, fluid: 1.1, fluidfull: 1.45, erase: 4.2, track: 3.9, trackfull: 3.9, clean: 3.35, shot: 1.45, cleanfull: 1.18,
     full: 1.1, hdr: 1.166, comp: 0.42, review: 0.42, export: 0.235, grow: { hdr: 1.72, full: 1.72, fluidfull: 1.72 }, withHdr: { review: 1.9, export: 1.6 },
     fixed: { comp: 6.4, review: 3 } },
+  large: { full: 0.21, review: 0.18, grow: { full: 1.78 }, fixed: { full: 36, review: 42 } },
 };
 export const slower = (profile, id) => SLOWER[profile]?.[id] ?? 1;
 const BIG_STEPS = ["fluidfull", "full", "cleanfull", "cleanup", "hdrshot", "hdrplate", "hdrlayer", "hdr", "review", "export"]; // the steps made at the working size (cleanup: stageTwoGuess)
 export const stepSizeOf = (id, plate) => (BIG_STEPS.includes(id) ? plate.work : ["erase", "track", "trackfull"].includes(id) ? plate.track : plate.shot);
 const REF_SIZE = 928 * 512 * 97; // pixels times frames, where the references were measured
-export function stepGuess(id, ref, plate, profile, hdr = false) { // seconds: the reference scaled to this plate (BIG_STEPS at 0.73 of it), then to this GPU; hdr: the render makes SDR to HDR
+// Whether a step starts with its models loaded: the job before it, or the step before it in a render's plan, loaded the
+// same family. `before`: that job's or step's family (FAMILY, STEP_FAMILY), null when nothing ran before it.
+export const startsLoaded = (id, before) => !!before && STEP_FAMILY[id] === before;
+export const stepFamily = (id) => STEP_FAMILY[id] ?? null; // the models a step loads, null for a step that STEP_FAMILY does not list
+// The viewer's name for a picture that no step of the render shows: an Upscale result at another size than the one asked
+// for, by its step and its size (`upscaled`: { label, size }), until that size is made; else the result, the edited first
+// frame, or the plate.
+export const pictureName = ({ shot = false, edits = false, upscaled = null } = {}) =>
+  (upscaled ? `${upscaled.label} to ${upscaled.size.join(" x ")}` : shot ? "Result" : edits ? "Edited first frame" : "Plate");
+export function stepGuess(id, ref, plate, profile, hdr = false, before = null) { // seconds: the reference scaled to this plate (BIG_STEPS at 0.73 of it), then to this GPU; hdr: the render makes SDR to HDR; before: as startsLoaded
   const [w, h] = stepSizeOf(id, plate), scale = (w * h * plate.frames) / REF_SIZE * (BIG_STEPS.includes(id) ? 0.73 : 1);
-  return (SLOWER[profile]?.lead?.[STEP_FAMILY[id]] ?? 0) + (SLOWER[profile]?.fixed?.[id] ?? 0) + ref * Math.max(0.25, scale) ** (SLOWER[profile]?.grow?.[id] ?? 1) * slower(profile, id)
+  return (startsLoaded(id, before) ? 0 : SLOWER[profile]?.lead?.[STEP_FAMILY[id]] ?? 0) + (SLOWER[profile]?.fixed?.[id] ?? 0) + ref * Math.max(0.25, scale) ** (SLOWER[profile]?.grow?.[id] ?? 1) * slower(profile, id)
     * (hdr ? SLOWER[profile]?.withHdr?.[id] ?? 1 : 1);
 }
 // Whether the full-size clean plate pass starts from the preview's own pass: the Preview pass is on (previewCap, 0 when Off)
@@ -1729,8 +1746,10 @@ export const startsFromPreview = (plate, previewCap) => { if (!plate?.work || !p
 // The full-size clean plate pass when its first stage is the preview's own pass, made already: the pass less that stage
 // (ref: each step's reference, by id). Its seconds are kept as « cleanup », apart from the pass that makes both stages.
 export const stageTwoGuess = (ref, plate, profile) => Math.max(1, stepGuess("cleanfull", ref.cleanfull, plate, profile) - stepGuess("clean", ref.clean, plate, profile));
-// The name a step's seconds are kept under: with SDR to HDR on, the steps it slows (SLOWER's withHdr) are kept apart.
-export const timeId = (id, hdr) => (hdr && Object.values(SLOWER).some((p) => p.withHdr?.[id]) ? `${id}+hdr` : id);
+// The name a step's seconds are kept under: with SDR to HDR on, the steps it slows (SLOWER's withHdr) are kept apart; on a
+// GPU that frees memory between families (`loaded` true or false, startsLoaded), a step that starts with its models
+// loaded and one that loads them each under its own name, so a mean kept before the two were told apart is not read.
+export const timeId = (id, hdr, loaded = null) => `${id}${hdr && Object.values(SLOWER).some((p) => p.withHdr?.[id]) ? "+hdr" : ""}${loaded === true ? "+loaded" : loaded === false ? "+cold" : ""}`;
 export function stepLeft({ est, run, first = null, last = null, tail = null }) { // seconds left in the step that runs; first and last: [seconds since its start, progress]
   const after = tail ?? est * 0.15;
   if (first && last && last[1] - first[1] >= 0.2 && last[0] > first[0]) { // the sampler's own pace, over a fifth of its steps or more
@@ -1824,13 +1843,23 @@ export function stepClasses(steps) {
   const first = steps.some((st) => st.preview) ? "preview" : "full";
   return Object.fromEntries(steps.map((st) => [st.id, st.onDemand ? "export" : st.up || st.hdr ? "finish" : st.final ? "full" : st.preview ? "preview" : first]));
 }
+// The line under the timeline, by the same classes: grey once the preview is made and the full size's steps run, green once
+// the full size is made, whatever Finish still runs, or once Finish is made where it is the render's only class; gold
+// before. `steps`: each planned step's class and whether it is done, as renderStatus takes them; `running`: as there.
+export function timelineClass(steps, { running = true } = {}) {
+  const due = (cls) => steps.some((s) => s.cls === cls && !s.done), has = (cls) => steps.some((s) => s.cls === cls);
+  if (has("full") ? !due("full") : has("finish") && !due("finish")) return "ready";
+  return running && has("preview") && !due("preview") ? "final" : "";
+}
 // The line names the class at work and the time until that class is done: « preview », « full size », then « finish ». At
-// the end it says what is ready, so a full size that is made is never announced again while Finish runs.
+// the end it says what is ready, so a full size that is made is never announced again while Finish runs. A time left only
+// while the render displayed runs (`running`): before Enter, or once it stops, the line says what is made, or nothing.
 // `steps`: each planned step's class, whether it is done, and its seconds left; busy: one of them runs now.
-export function renderStatus(steps, { exporting = false, exported = false, busy = false } = {}) {
+export function renderStatus(steps, { exporting = false, exported = false, busy = false, running = true } = {}) {
   const due = (...cls) => steps.filter((s) => cls.includes(s.cls) && !s.done), has = (cls) => steps.some((s) => s.cls === cls);
   const say = (name, list) => { const t = list.reduce((a, s) => a + s.left, 0); return t ? `${name} ${secs(t)}` : busy ? `${name} almost ready` : ""; };
   if (exported) return "exported";
+  if (!running) return has("finish") && !due("finish").length ? "finish ready" : has("full") && !due("full").length ? "full size ready" : "";
   if (exporting) return say("export", due("preview", "full", "finish", "export"));
   for (const [cls, name] of [["preview", "preview"], ["full", "full size"], ["finish", "finish"]]) if (due(cls).length) return say(name, due(cls));
   return has("finish") ? "finish ready" : has("full") ? "full size ready" : "";

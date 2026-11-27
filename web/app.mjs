@@ -3,15 +3,15 @@
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
-import { cancel, cancelQuietly, connect, hashHex, jobsNotRun, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl, WF } from "./comfy.mjs";
+import { cancel, cancelQuietly, connect, hashHex, jobsNotRun, lastJob, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl, WF } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache, outgrows } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
 import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
-import { INSPECT_SIZE, addSample, boxPlace, inspectorRows, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
+import { INSPECT_SIZE, addSampled, boxPlace, inspectorRows, pointsQuery, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, autoChose, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, boxOf, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, corePixels, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, deepLine, deepMovie, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, fileStem, FINISH, finishFolder, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, HDR_DEPTH, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, statusOf, stepLabel, stepOrder, stopsForEdit, strokeTarget, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleCustom, upscaleKeeps, upscaleNote, upscaleSeconds, upscaleSizes, hdrCompSeconds, upscaleResize, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName, zipName, autoplays, nearestKey, resultLine, stopsForPreview, strokesLabel, upscaleChunk, upscaleChunks, upscalePass } from "./logic.mjs";
+import { askedText, asksName, autoChose, autoplays, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, coreBox, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, deepLine, deepLoading, deepMovie, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, FAMILY, fileStem, FINISH, finishFolder, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, HDR_DEPTH, hdrCompSeconds, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearestKey, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, pictureName, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, resultLine, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, startsLoaded, statusOf, stepFamily, stepLabel, stepOrder, stopsForEdit, stopsForPreview, strokesLabel, strokeTarget, timelineClass, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleChunk, upscaleChunks, upscaleCustom, upscaleKeeps, upscaleNote, upscalePass, upscaleResize, upscaleSeconds, upscaleSizes, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName, zipName } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, exportDone, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_ALONE, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -108,7 +108,7 @@ const S = {
   get color() { return this.colors[this.tool] ?? "#000000"; },
   frame: 0, playing: false, inPt: 0, outPt: 0, wipe: null, compare: false,
   fit: { w: 0, h: 0, x: 0, y: 0 }, zoom: { k: 1, x: 0, y: 0 },
-  display: { ...colour.DISPLAY }, mode: null, scrub: null, inspect: { on: false, pt: null, avg: null, busy: false, last: 0, key: null, got: null, final: null, sampling: false }, // the viewer's colour (display only), and its interactive edit as in RV
+  display: { ...colour.DISPLAY }, mode: null, scrub: null, inspect: { on: false, pt: null, page3Samples: [], busy: false, last: 0, key: null, got: null, final: null, sampling: false }, // the viewer's colour (display only), and its interactive edit as in RV
   fluidBlank: null, clip: null, fluidReady: true, // a blank plate ({ sceneName }), a copied keyframe
   upscaleReady: false, // Finish > Upscale: SeedVR2's files and core's SeedVR2 nodes are here (boot)
   upscaleAsk: UPSCALE_ASK, // Finish > Upscale: the size asked for on this plate ({ side, px }, logic.upscaleTarget); S.deliver.upscale holds it while the row is on
@@ -146,8 +146,8 @@ const quiet = (e) => { // work stopped: the status line says so, and the log too
   const text = e?.message ?? String(e);
   status(text.startsWith("Error: ") ? text : `Error: ${text}`, e?.logged ? "hint" : "");
 };
-const num = (e) => { const i = S.edits.indexOf(e); return (i < 0 ? S.edits.length : i) + 1; };
-const editName = (e) => (e.tool === "fluid" ? `Fluid shot v${e.version}` : `Edit ${num(e)}`); // as History and the log name it // a blank plate's fluid shot is 1; an edit's number: its place in History, 1 at the bottom; a draft's, the place it will take
+const num = (e) => { const i = S.edits.indexOf(e); return (i < 0 ? S.edits.length : i) + 1; }; // an edit's number: its place in History, 1 at the bottom (a blank plate's fluid shot is 1); a draft's, the place it will take
+const editName = (e) => (e.tool === "fluid" ? `Fluid shot v${e.version}` : `Edit ${num(e)}`); // as History and the log name it
 const snapKeyOf = (e) => `${painted(e)}|${e.whole ? e.prompt : ""}`; // what SAM's answer depends on: the strokes, and the name when it searches by name
 // An image is uploaded under the hash of its content: once per session, and under the same name in every session, so a job
 // that reads it keeps its job index key when a scene opens again. Without WebCrypto (plain http) each upload has its own name.
@@ -370,7 +370,7 @@ async function openPlate(list, typed, opts = {}) {
   if (gaps) setTimeout(() => status(gaps.trim()), 50);
   const big = bigPlateWarning(spec, S.vram); // above 2K on a GPU under BIG_PLATE.vram: renders may not finish (README, GPU). status() logs it once
   if (big) setTimeout(() => status(big), 80);
-  const next = "Describe the edit in the text prompt, paint on the frame, then Generate.", plate = S.plate;
+  const next = "Describe the edit in the text prompt, paint it on the frame, then press Enter.", plate = S.plate;
   const opened = `${plate.name} in ${cs}${opts.cs ? "" : ", from file"} (use right-click > OCIO > Plate to change it). ${next}`;
   status(opened, "hint");
   if (long) setTimeout(() => status(`${long.split("\n")[0]} ${next}`, "hint"), 90); // after the open's own sentence, as the lines above
@@ -501,17 +501,30 @@ const planned = { key: "", rest: "", budget: 0, said: "", timer: 0, fit: null, s
 function planCaches() { // each cache's share and frame size, when the budget, the sources displayed or the in and out points change, or the view outgrows the frames
   const p = S.plate, fit = [S.fit.w, S.fit.h].map((v) => Math.round(v * devicePixelRatio));
   if (!p || !fit[0] || !fit[1]) return;
+  if (planned.path !== p.path) Object.assign(planned, { path: p.path, key: "", rest: "", shares: null }); // another plate's file plans afresh: no frame of the last one to keep
   const budget = cacheBudget(), frames = S.outPt - S.inPt + 1, shot = !!S.shot?.url, plateOn = !shot || S.wipe !== null;
   const exact = colour.nativeSize(p.spec.width, p.spec.height, DEEP_SIDE), size = (v) => [v.videoWidth, v.videoHeight];
   const sources = [
-    plateVid.videoWidth && { id: "plate", name: "the plate's", cache: caches.get(plateVid), movie: size(plateVid), show: plateOn && !p.deep },
-    shot && shotVid.videoWidth && { id: "shot", name: "the shot's", cache: caches.get(shotVid), movie: size(shotVid), show: !S.shot.frames },
-    p.deep && !DEEP_MB && { id: "deep", name: "the plate's", kind: "EXR", cache: deep, movie: exact, show: plateOn, bytes: 6 },
-    S.shot?.frames && !DEEP_MB && { id: "deepShot", name: "the shot's", kind: "EXR", cache: deepShot, movie: exact, show: true, bytes: 6 },
+    plateVid.videoWidth && { id: "plate", name: "Plate", cache: caches.get(plateVid), movie: size(plateVid), show: plateOn && !p.deep },
+    shot && shotVid.videoWidth && { id: "shot", name: shotLabel(), cache: caches.get(shotVid), movie: size(shotVid), show: !S.shot.frames },
+    p.deep && !DEEP_MB && { id: "deep", name: "Plate", kind: "EXR", cache: deep, movie: exact, show: plateOn, bytes: 6 },
+    S.shot?.frames && !DEEP_MB && { id: "deepShot", name: shotLabel(), kind: "EXR", cache: deepShot, movie: exact, show: true, bytes: 6 },
   ].filter(Boolean);
   if (!sources.length) return; // no movie has loaded yet
   const rest = JSON.stringify([frames, sources.map((s) => [s.id, s.movie, s.show])]), key = JSON.stringify([budget, rest]);
-  if (key === planned.key && !outgrows(planned.fit, fit)) return; // a resize keeps the frames (frames.mjs: outgrows)
+  // The line names each source and its frames in memory, once per plate: a change of the step displayed alone keeps the
+  // plan, and its line names that step (shotLabel); a source displayed comes first, as the plan reads them
+  const say = (shares) => {
+    const why = CACHE_MB ? "set in the address" : S.cache ? "View > Cache memory" : "Auto"; // the memory profile's line names the GPU
+    const said = cacheLine(memoryText(budget), why, [...sources].sort((x, y) => Number(!!y.show) - Number(!!x.show)).map((s) => ({ name: s.name, kind: s.kind, frames, show: s.show, movie: s.movie, ...shares[s.id] })));
+    if (planned.plate !== S.plate) Object.assign(planned, { plate: S.plate, saidAll: new Set() }); // each plan is said once per plate opened
+    planned.named = JSON.stringify(sources.map((s) => s.name));
+    if (!planned.saidAll.has(said)) { planned.saidAll.add(said); log(said); }
+  };
+  if (key === planned.key && !outgrows(planned.fit, fit)) { // a resize keeps the frames (frames.mjs: outgrows)
+    if (planned.shares && JSON.stringify(sources.map((s) => s.name)) !== planned.named) say(planned.shares);
+    return;
+  }
   const fresh = key !== planned.key; // the log says what fits when the budget, the sources or the in and out points change
   // A new budget alone keeps every cache's frame size: a larger budget drops no decoded frame, a smaller one drops only
   // the frames that no longer fit. Anything else (a source, its size displayed, the in and out points) plans the sizes again.
@@ -525,10 +538,7 @@ function planCaches() { // each cache's share and frame size, when the budget, t
   Object.assign(planned, { key, rest, budget, shares, fit: keep ? planned.fit : fit });
   for (const s of sources) if (!s.show) s.cache.stopReader(); // the sources displayed read first
   for (const s of sources.sort((a, b) => Number(!!b.show) - Number(!!a.show))) s.cache.plan(shares[s.id].budget, s.bytes ? null : [shares[s.id].width, shares[s.id].height]);
-  const why = CACHE_MB ? "set in the address" : S.cache ? "View > Cache memory" : "Auto"; // the memory profile's line names the GPU
-  const said = cacheLine(memoryText(budget), why, sources.map((s) => ({ name: s.name, kind: s.kind, frames, show: s.show, movie: s.movie, ...shares[s.id] })));
-  if (planned.plate !== S.plate) Object.assign(planned, { plate: S.plate, saidAll: new Set() }); // each plan is said once per plate: a switch between sources displayed says nothing new
-  if (fresh && !planned.saidAll.has(said)) { planned.saidAll.add(said); log(said); }
+  if (fresh) say(shares);
   cacheUI();
 }
 function planSoon() { if (!planned.timer) planned.timer = setTimeout(() => { planned.timer = 0; planCaches(); }, 300); }
@@ -954,7 +964,7 @@ async function upscaleResult(r) {
   }, store);
 }
 // A result made, as the status line says it
-const ready = (label, more = "", next = "Export writes it for compositing software.") => `${label}: ready, in the viewer${more}. ${next}`;
+const ready = (label, more = "", next = "Use Export to write it out for compositing.") => `${label}: ready, in the viewer${more}. ${next}`;
 // The confirmation's detail line when Upscale turns on
 const upscaleWhen = () => `Each render ends with Upscale at ${upscaleFigures().target.join(" x ")}: about ${span(upscaleGuess())} on this GPU.`;
 function upscaleSizeUI(opt, show) { // Finish > Upscale's size: the plate's sizes, then Custom…, with the size asked for chosen; shown while the row is on
@@ -1101,11 +1111,21 @@ function passLabel(id) {
   return labelOf(STAGES.find((x) => x.id === id)) ?? id;
 }
 function shownLabel() { // the pass displayed, by its row's name: the one clicked, else the latest result
-  if (S.pass) return passLabel(S.pass);
+  return S.pass ? passLabel(S.pass) : shotLabel();
+}
+function shotLabel() { // the step whose movie the viewer holds (S.shot), by its row's name
   const r = S.renders.get(S.heroKey), pv = previewOf(r);
   return labelOf(STAGES.find((x) => !r?.skip?.has(x.id) && S.shot?.url && passMovie(x.id, r, pv, passSpaces(), upOf(r))?.url === S.shot.url), r) // among the render's own steps
-    ?? (S.shot ? "Result" : S.edits.length ? "First frame" : "Plate");
+    ?? pictureName({ shot: !!S.shot, edits: S.edits.length > 0, upscaled: otherSizeShown(r) });
 }
+function otherSizeShown(r) { // the Upscale result displayed, made at another size than the one asked for: its step's name and size
+  for (const [key, store] of Object.entries(r?.ups ?? {})) {
+    const st = key !== upKey(r) && S.shot?.url ? UPS.find((x) => store[x.id]?.url === S.shot.url) : null;
+    if (st) return { label: labelOf(st, r), size: key.replace(/^hdr\//, "").split("x") };
+  }
+  return null;
+}
+
 function comparePass(id) {
   if (S.cmp?.id === id) return endCompare();
   if (passLabel(id) === shownLabel()) return plateWipe(); // the pass displayed against itself shows nothing: the plate takes the left side
@@ -1278,6 +1298,9 @@ function dropLive() { // the pass that sent it ended, stopped or failed: nothing
 }
 
 function generating() { return !!(S.queued || S.piping); }
+function runsNow(r, steps) { // the render displayed runs, or will at its next step, or an edit of it runs: the Render panel's line counts its time; not after Esc. Read only: no plan()
+  return !S.halted && (S.piping?.key === S.heroKey || !!S.running || !!S.queued || (!!r && !r.failed && steps.some((st) => doneOf(r, st) === undefined)));
+}
 function escape() { // Esc: logic.escapeAction. On the edit being generated it stops everything, and that edit keeps its strokes; a selection goes before what else generates
   const busy = generating(), what = escapeAction({ opening: !!openCtl, editing: !!S.draft, running: !!S.running, selected: !!S.selected, pinned: !!S.pass, generating: busy });
   if (what === "cancelOpen") return cancelOpen();
@@ -1316,6 +1339,7 @@ function stoppedUI(edit = null) { // the status line under a stop (logic.stopHin
 function setShot(src, key, space = "@model", frames = null, { framesSpace = null } = {}) {
   dropLive(); // the shot itself, rough or composited, replaces the live preview
   S.shot = src ? { url: src, key, space, frames, framesSpace } : null;
+  planSoon(); // the frame cache's line names the step displayed (planCaches)
   if (src) { if (shotVid.getAttribute("src") !== src) shotVid.src = src; }
   else { shotVid.removeAttribute("src"); shotVid.load(); }
   fitCanvas(src, key);
@@ -2316,7 +2340,7 @@ async function generate(edit) {
     cancel("warm"); // an edit never waits for the warm-up: what it needs loads now
     S.running = edit;
     edit.saw = activeBefore(edit).map(record); // the edits under it as it starts: a change to them restarts it (rebuild)
-    Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false, leftWhy: null, editAsked: false, refused: null });
+    Object.assign(edit, { state: "generating", preview: null, latent: null, shown: null, left: false, leftWhy: null, editAsked: false, refused: null, page3Began: performance.now() }); // its time counts from here, a run of its own whatever started it
     recompose(); historyUI(); render();
     log(`Edit ${num(edit)}: ${NAME[edit.tool]} ${edit.prompt ? `"${edit.prompt}"` : "with no text prompt"}, seed ${edit.seed}${edit.tool === "erase" ? `, whole object ${edit.whole ? "on" : "off"}` : ""}, ${painted(edit)} stroke${painted(edit) === 1 ? "" : "s"}, over ${edit.saw.length} edit${edit.saw.length === 1 ? "" : "s"}.`);
     await edit.preparing; // the snap and the caption started when the strokes stopped: reused when nothing changed since
@@ -2390,7 +2414,7 @@ async function generate(edit) {
     keep(edit);
     historyUI(); render(); timelineUI();
     status(`Edit ${num(edit)}: on the first frame. The shot renders next.`);
-    log(`Edit ${num(edit)}: done in ${((performance.now() - edit.launched) / 1000).toFixed(1)} s.`);
+    log(`Edit ${num(edit)}: done in ${((performance.now() - edit.page3Began) / 1000).toFixed(1)} s.`);
   } catch (err) {
     if (edit.token === token) {
       Object.assign(edit, { state: edit.patch ? "done" : "failed", preview: null, latent: null });
@@ -2510,9 +2534,8 @@ async function findWhole(edit, before, kind) { // SAM 3.1 finds the whole object
   const objects = pickObjects({ painted, area,
     named: await Promise.all(outputFiles("snap", out, "named").map(fileBits)),
     points: await Promise.all(picks.map((_, j) => outputFile("snap", out, `point_${j}`)).filter(Boolean).map(fileBits)) });
-  // no words: the prompt writer's box, cut to the stroke and to what most of these masks hold (logic.corePixels, writerBoxes);
-  const core = objects.length && !String(edit.prompt ?? "").trim() ? corePixels({ painted, masks: objects, w: size[0], h: size[1] }) : null;
-  edit.editCore = core && boxOf(core, size[0], size[1]);
+  // no words: the prompt writer's box, cut to the stroke and to what most of these masks hold (logic.coreBox, writerBoxes);
+  edit.editCore = objects.length && !String(edit.prompt ?? "").trim() ? coreBox({ painted, masks: objects, w: size[0], h: size[1] }) : null;
   const found = Math.max(0, outputFiles("snap", out, "named").length - 1), many = (k, one) => `${k} ${one}${k === 1 ? "" : "s"}`; // the blank frame comes first
   log(`Edit ${num(edit)}: SAM masks, ${objects.length} kept.\n  ${edit.prompt ? `${many(found, "object")} named "${edit.prompt}", ` : ""}${many(picks.length, "stroke point")}.`);
   if (!objects.length) return status(`Edit ${num(edit)}: no single object under the stroke. Clean removes the painted pixels only.`);
@@ -2973,6 +2996,9 @@ const STAGES = [
   { id: "upcomp", label: "Composite, upscaled", ref: 0, final: true, up: true }, // Finish > Upscale (upscaleSteps, upscaleResult), on SDR to HDR's set when it is on
   { id: "export", label: "Export", ref: 10, final: true, onDemand: true },
 ];
+// The steps a render runs, in their order: those its plan keeps (`skip`), and Export only while Export asks for it. The time
+// left, the Render panel's status line, the line under the timeline, a stop and the log's « Steps: » read them.
+const stepsOf = (skip, exporting = false) => STAGES.filter((st) => !skip?.has(st.id) && (!st.onDemand || exporting));
 const REF = Object.fromEntries(STAGES.map((x) => [x.id, x.ref])); // each step's reference in seconds, by id (logic.stepGuess)
 const previewOf = (r) => r?.previews?.[S.plate.shot.join("x")]; // what this preview size made for a set of edits
 const upSize = () => upscaleTarget(S.plate.spec.width ?? S.plate.work[0], S.plate.spec.height ?? S.plate.work[1], S.deliver.upscale || S.upscaleAsk).join("x");
@@ -3017,41 +3043,43 @@ const TIMES_KEY = "paintaplate.step-times"; // only the steps whose jobs ran (lo
 let TIMES = {};
 try { TIMES = JSON.parse(localStorage.getItem(TIMES_KEY) ?? "{}") ?? {}; } catch { TIMES = {}; }
 const stepSize = (id) => stepSizeOf(id, S.plate);
-const stepKey = (id, hdr = false) => timeKey(timeId(id, hdr), stepSize(id), S.plate.frames, S.memoryProfile.name);
+const stepKey = (id, hdr = false, loaded = false) => timeKey(timeId(id, hdr, loaded), stepSize(id), S.plate.frames, S.memoryProfile.name);
+const familyNow = () => FAMILY[lastJob()] ?? null; // the models on the GPU as the next job starts: the last job's
+const loadedFor = (id, before) => (S.memoryProfile.frees ? startsLoaded(id, before) : null); // on a GPU that frees memory: loaded or cold, kept apart (logic.timeId)
 const makesHdr = (skip) => !!skip && !skip.has("hdrshot"); // SDR to HDR before the composite (a plate that holds values above 1.0) slows the steps after it
 const timeStep = (id, skip) => (id === "cleanfull" && startsFromPreview(S.plate, S.previewCap) ? "cleanup" // the name a step's seconds go under: stage 2 alone apart from both stages,
   : id === "hdr" && skip && !skip.has("hdrlayer") ? "hdrcomp" : id); // and « Composite, HDR » made again from SDR to HDR's elements (no model) apart from SDR to HDR's model pass
 
-function estimate(id, skip) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess. skip: the render's steps left out
+function estimate(id, skip, before = familyNow()) { // seconds: what this step took last time on this plate, else on this machine at this size, else logic.stepGuess. skip: the render's steps left out; before: the family loaded as it starts (logic.startsLoaded)
   if (UP_IDS.has(id)) return upscaleGuess(id);
-  const hdr = makesHdr(skip), t = timeStep(id, skip);
-  if (S.took[timeId(t, hdr)]) return S.took[timeId(t, hdr)];
-  const known = TIMES[stepKey(t, hdr)];
+  const hdr = makesHdr(skip), t = timeStep(id, skip), loaded = loadedFor(t, before);
+  if (S.took[timeId(t, hdr, loaded)]) return S.took[timeId(t, hdr, loaded)];
+  const known = TIMES[stepKey(t, hdr, loaded)];
   if (known?.total) return known.total;
   if (t === "hdrcomp") return hdrCompSeconds(S.plate.frames, S.plate.work); // a job with no model, which SDR to HDR's reference would count as one
-  return t === "cleanup" ? stageTwoGuess(REF, S.plate, S.memoryProfile.name) : stepGuess(id, REF[id], S.plate, S.memoryProfile.name, hdr);
+  return t === "cleanup" ? stageTwoGuess(REF, S.plate, S.memoryProfile.name) : stepGuess(id, REF[id], S.plate, S.memoryProfile.name, hdr, before);
 }
 
 async function step(r, id, work, store = r) { // run one step of a render, timed and shown; preview steps keep their result per size
   if (store.done?.[id] !== undefined || r.skip?.has(id)) return;
   if (S.running || S.queued || pickRender() !== r) throw YIELD; // an edit, or a step of a more urgent render, goes first
-  const t0 = performance.now(), guess = Math.round(estimate(id, r.skip)), notRun = jobsNotRun();
-  S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null, sized: UP_IDS.has(id) ? upKey(r) : null }; // first, last: [seconds since t0, progress] at the sampler's first and latest step; sized: the size one of Upscale's steps works at
+  const t0 = performance.now(), before = familyNow(), guess = Math.round(estimate(id, r.skip, before)), notRun = jobsNotRun();
+  S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null, sized: UP_IDS.has(id) ? upKey(r) : null, page3Before: before }; // first, last: [seconds since t0, progress] at the sampler's first and latest step; sized: the size one of Upscale's steps works at; page3Before: the family loaded as it started
   stagesUI();
   log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: about ${span(guess)}.`);
-  const stage = S.stage;
-  await work((f) => {
+  const stage = S.stage, progress = (f) => {
     if (S.stage !== stage) return;
     if (f > (stage.last?.[1] ?? 0)) { stage.last = [(performance.now() - t0) / 1000, f]; stage.first ??= stage.last; }
     stage.progress = f;
     stagesUI();
-  });
+  };
+  await work(progress);
   dropLive();
   const dt = (performance.now() - t0) / 1000, t = timeStep(id, r.skip);
   if (jobsNotRun() === notRun && !UP_IDS.has(id)) { // a step whose jobs were answered without running (the job index, ComfyUI's cache) keeps no time; Upscale's depends on the plate's windows the index holds (upscaleGuess)
-    TIMES = remember(TIMES, stepKey(t, makesHdr(r.skip)), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
+    TIMES = remember(TIMES, stepKey(t, makesHdr(r.skip), loadedFor(t, before)), { total: dt, lead: stage.first?.[0] ?? dt, tail: stage.last?.[1] >= 0.99 ? dt - stage.last[0] : 0, at: Date.now() });
     try { localStorage.setItem(TIMES_KEY, JSON.stringify(TIMES)); } catch { /* a private window: the session's own times still serve */ }
-    S.took[timeId(t, makesHdr(r.skip))] = dt;
+    S.took[timeId(t, makesHdr(r.skip), loadedFor(t, before))] = dt;
   }
   (store.done ??= {})[id] = dt; (store.at ??= {})[id] = ++stepSeq;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
@@ -3076,7 +3104,7 @@ async function plateHdr(r) { // the plate alone: SDR to HDR on the plate, Upscal
   if (!r.told) {
     r.told = true;
     const passes = [!r.skip.has("hdr") && "SDR to HDR", upLast(r) && "Upscale"].filter(Boolean);
-    log(`Render v${r.v}: no edit, the plate through ${passes.join(" and ")}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
+    log(`Render v${r.v}: no edit, the plate through ${passes.join(" and ")}.\n  Steps: ${stepsOf(r.skip).map((st) => labelOf(st, r)).join("; ")}.`);
   }
   await step(r, "hdr", async (progress) => {
     const out = await run("hdr", { ...S.memoryProfile.slots, path: p.path, color_space: p.cs, config: S.ocio.config, max_frames: p.frames,
@@ -3111,7 +3139,7 @@ async function fluidSteps(r, fl) {
   const p = S.plate, blank = p.path.split(/[\\/]/).pop(), alone = !r.active.some((e) => e.tool !== "fluid");
   if (!r.told && alone) {
     r.told = true;
-    log(`Render v${r.v}: 1 edit (Fluid 1), seed ${fl.seed}, ${S.previewCap ? `shot preview at ${fluidSize(p.shot).join(" x ")}` : "shot preview off"}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
+    log(`Render v${r.v}: 1 edit (Fluid 1), seed ${fl.seed}, ${S.previewCap ? `shot preview at ${fluidSize(p.shot).join(" x ")}` : "shot preview off"}.\n  Steps: ${stepsOf(r.skip).map((st) => labelOf(st, r)).join("; ")}.`);
   }
   const make = (dir, size) => async (progress) => {
     const keys = [];
@@ -3200,7 +3228,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const scene = erase ? erasePrompt(erases.map((e) => e.caption)) : ""; // the scene as it stays, never the erased object
   if (!r.told) {
     r.told = true;
-    log(`Render v${r.v}: ${r.active.length} edit${r.active.length === 1 ? "" : "s"} (${r.active.map((e) => (e.tool === "fluid" ? "Fluid 1" : `${NAME[e.tool]} ${num(e.src)}`)).join(", ")}), seed ${common.seed}, ${S.previewCap ? `shot preview at ${sw} x ${sh}` : "shot preview off"}.\n  Steps: ${STAGES.filter((st) => !r.skip.has(st.id)).map((st) => labelOf(st, r)).join("; ")}.`);
+    log(`Render v${r.v}: ${r.active.length} edit${r.active.length === 1 ? "" : "s"} (${r.active.map((e) => (e.tool === "fluid" ? "Fluid 1" : `${NAME[e.tool]} ${num(e.src)}`)).join(", ")}), seed ${common.seed}, ${S.previewCap ? `shot preview at ${sw} x ${sh}` : "shot preview off"}.\n  Steps: ${stepsOf(r.skip).map((st) => labelOf(st, r)).join("; ")}.`);
     if (carry) log(`Render v${r.v}: LTX prompt: ${prompt}`);
     if (erase) log(`Render v${r.v}: Clean plate pass prompt: ${scene || "none."}`);
   }
@@ -3707,10 +3735,23 @@ async function exportLog() { // the log's export (logic.logReport): the log with
 }
 $("#log-export").addEventListener("click", exportLog);
 
-function stepSecs(st, skip) { // seconds a step has left: its estimate, less what the step at work has run
-  const est = estimate(st.id, skip);
+function stepSecs(st, skip, before) { // seconds a step has left: its estimate, less what the step at work has run; before: as estimate
+  const est = estimate(st.id, skip, before);
   return S.stage?.id === st.id && S.stage.key === S.heroKey
-    ? stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(timeStep(st.id, skip), makesHdr(skip))]?.tail ?? null }) : est;
+    ? stepLeft({ est, run: (performance.now() - S.stage.t0) / 1000, first: S.stage.first, last: S.stage.last, tail: TIMES[stepKey(timeStep(st.id, skip), makesHdr(skip), loadedFor(timeStep(st.id, skip), before))]?.tail ?? null }) : est;
+}
+
+// The family loaded as each step of a render starts (logic.startsLoaded), in the order they run: the step at work keeps the
+// one it started with, each later step takes the family of the step before it, and the first takes the last job's.
+function familiesBefore(r, skip) {
+  const out = {};
+  let before = familyNow();
+  for (const st of STAGES) {
+    if (skip?.has(st.id) || doneOf(r, st) !== undefined) continue;
+    out[st.id] = S.stage?.id === st.id && S.stage.key === r?.key ? S.stage.page3Before : before;
+    before = stepFamily(st.id) ?? before;
+  }
+  return out;
 }
 
 function renderLeft(finalToo = false) { // seconds until the preview, or the full-size composite (and the export once asked for), is ready
@@ -3719,11 +3760,12 @@ function renderLeft(finalToo = false) { // seconds until the preview, or the ful
   if (!p || !S.heroKey || (finalToo ? (exporting ? r?.exported : fullSizeMade(r)) : previewOf(r)?.comp || r?.review)) return 0;
   const active = S.edits.filter((e) => e.on && e.patch && e.state === "done" && upToDate(e));
   const skip = r?.skip ?? plan({ key: S.heroKey }, active).skip;
+  const before = familiesBefore(r, skip);
   let t = 0;
-  for (const st of STAGES) {
+  for (const st of stepsOf(skip, exporting)) {
     if (st.final && !finalToo) break;
-    if (skip.has(st.id) || doneOf(r, st) !== undefined || (st.onDemand && !exporting)) continue;
-    t += stepSecs(st, skip);
+    if (doneOf(r, st) !== undefined) continue;
+    t += stepSecs(st, skip, before[st.id]);
   }
   return t;
 }
@@ -3786,6 +3828,7 @@ function stagesUI() {
   list.hidden = !edits;
   if (!p || !edits) { keepRows(list, []); $("#render-left").textContent = ""; return timelineBar(); }
   const planned = r?.skip ? r : plan({ key: S.heroKey }, active), skip = planned.skip;
+  const before = familiesBefore(r, skip); // the family loaded as each step starts (logic.startsLoaded)
   const pick = (li, id, label) => { // a finished pass with a picture: a click shows it on every frame, a second click the latest
     li.classList.add("pick");
     li.title = `${label}: click to display it. ${BACK_TO_LATEST}.`;
@@ -3804,7 +3847,7 @@ function stagesUI() {
     li.innerHTML = '<span class="dot"></span><span class="name"></span><span class="time"></span>';
     li.children[1].textContent = labelOf(st, planned); // as planned, before the render exists too
     li.children[2].textContent = from ? `from v${from}` : took !== undefined ? span(took) : now ? `${Math.round(S.stage.progress * 100)}%`
-      : `~${span(estimate(st.id, skip))}`;
+      : `~${span(estimate(st.id, skip, before[st.id]))}`;
     const movie = took !== undefined ? passMovie(st.id, r, previewOf(r), { log: logSpace(), data: matteSpace() }, upOf(r)) : null;
     if (movie) {
       pick(li, st.id, labelOf(st, planned).toLowerCase());
@@ -3819,9 +3862,9 @@ function stagesUI() {
   if (rows[0] === first && fluidRows) rows.splice(fluidRows, 0, rows.shift()); // an edit's first frame is made on the fluid shot's: it follows its steps
   keepRows(list, rows);
   // the status line: the class of steps at work, the preview, the full size or Finish, and the time until it is done (logic.renderStatus)
-  const due = STAGES.filter((st) => !skip.has(st.id) && (!st.onDemand || S.wantDownload)), cls = stepClasses(due);
-  $("#render-left").textContent = renderStatus(due.map((st) => ({ cls: cls[st.id], done: doneOf(r, st) !== undefined, left: stepSecs(st, skip) })),
-    { exporting: !!S.wantDownload, exported: !!r?.exported, busy: S.stage?.key === S.heroKey });
+  const due = stepsOf(skip, !!S.wantDownload), cls = stepClasses(due);
+  $("#render-left").textContent = renderStatus(due.map((st) => ({ cls: cls[st.id], done: doneOf(r, st) !== undefined, left: stepSecs(st, skip, before[st.id]) })),
+    { exporting: !!S.wantDownload, exported: !!r?.exported, busy: S.stage?.key === S.heroKey, running: runsNow(r, due) });
   timelineBar();
 }
 
@@ -3829,13 +3872,14 @@ function timelineBar() { // the line under the timeline: the preview in gold, th
   const bar = $("#tl-render"), r = S.renders.get(S.heroKey);
   bar.className = "tl-render";
   if (!S.plate || !S.heroKey || !r) { bar.style.width = "0"; if (S.heroKey && stale()) bar.classList.add("stale"); return; }
-  const steps = STAGES.filter((st) => !r.skip?.has(st.id) && (!st.onDemand || S.wantDownload || r.exported));
-  const total = steps.reduce((a, st) => a + estimate(st.id, r.skip), 0);
-  let done = steps.reduce((a, st) => a + (doneOf(r, st) !== undefined ? estimate(st.id, r.skip) : 0), 0);
-  if (S.stage?.key === S.heroKey) done += estimate(S.stage.id, r.skip) * S.stage.progress;
+  const steps = stepsOf(r.skip, !!S.wantDownload || !!r.exported);
+  const before = familiesBefore(r, r.skip);
+  const total = steps.reduce((a, st) => a + estimate(st.id, r.skip, before[st.id]), 0);
+  let done = steps.reduce((a, st) => a + (doneOf(r, st) !== undefined ? estimate(st.id, r.skip, before[st.id]) : 0), 0);
+  if (S.stage?.key === S.heroKey) done += estimate(S.stage.id, r.skip, S.stage.page3Before) * S.stage.progress;
   bar.style.width = `${Math.round((done / Math.max(1, total)) * 100)}%`;
-  if (r.review) bar.classList.add("ready");
-  else if (previewOf(r)?.comp) bar.classList.add("final"); // the preview is made: the full-size passes run
+  const cls = stepClasses(steps), state = timelineClass(steps.map((st) => ({ cls: cls[st.id], done: doneOf(r, st) !== undefined })), { running: runsNow(r, steps) });
+  if (state) bar.classList.add(state); // the status line's classes: grey once the preview is made, green once the full size is
 }
 
 function timelineUI() {
@@ -3882,7 +3926,7 @@ function previewFirst(size) {
   const st = S.stage, r = S.piping;
   if (!st || !r || r.key !== S.heroKey) return;
   plan(r, r.active);
-  const def = STAGES.find((x) => x.id === st.id), due = STAGES.filter((x) => !r.skip.has(x.id) && !x.onDemand);
+  const def = STAGES.find((x) => x.id === st.id), due = stepsOf(r.skip);
   const ahead = STAGES.some((x) => x.preview && !r.skip.has(x.id) && previewOf(r)?.done?.[x.id] === undefined); // a preview to make at the new size
   if (!ahead || !stopsForPreview(def, stepClasses(due, !!r.hdrAfter || plateAlone(r.key))[def.id])) return;
   log(`Render v${r.v}: ${labelOf(def, r)}: stopped at ${Math.round(st.progress * 100)}% for the ${size}-size preview.${def.preview ? "" : " It runs again after the preview."}`);
@@ -4253,11 +4297,11 @@ const holds = (cache) => { for (let f = S.inPt; f <= S.outPt; f++) if (!cache.fr
 function wantDeep() { // an image sequence's own values around the playhead: the plate, and its review once it plays
   const p = S.plate;
   if (!p?.deep || !look.ready) return;
-  fetchDeep(deep, p.path, p.name);
-  if (S.shot?.frames) fetchDeep(deepShot, S.shot.frames, "the full-size composite");
+  fetchDeep(deep, p.path, p.name, p.cs);
+  if (S.shot?.frames) fetchDeep(deepShot, S.shot.frames, shotLabel(), S.shot.framesSpace ?? p.cs); // the step displayed, in its frames' own colour space
 }
 
-function fetchDeep(cache, path, what) { // frames as RGB half floats from the frame route, ranked like the 8-bit cache
+function fetchDeep(cache, path, what, space) { // frames as RGB half floats from the frame route, ranked like the 8-bit cache
   const fresh = cache.fillDeep(async (first, count) => {
     try {
       const r = await fetch(`/paintaplate/frames?${new URLSearchParams({ path, first, count, side: DEEP_SIDE })}`);
@@ -4271,7 +4315,7 @@ function fetchDeep(cache, path, what) { // frames as RGB half floats from the fr
       throw err;
     }
   }, path);
-  if (fresh) log(`Full-precision frames of ${what}: loading in the background, ${DEEP_SIDE} px on the long side, ${S.plate.cs}.`);
+  if (fresh) log(deepLoading(what, DEEP_SIDE, space));
 }
 
 function setDisplay(change) {
@@ -4398,7 +4442,7 @@ async function showModels() { await modelsUI(true); showHelp("models"); }
 
 function toggleInspector(on = !S.inspect.on) {
   const i = S.inspect;
-  i.on = on; i.avg = null;
+  i.on = on; i.page3Samples = [];
   $("#inspector").hidden = $("#inspector-mark").hidden = !on;
   if (on) refreshInspector(true);
   hud(on ? (i.pt ? "Colour Inspector: Shift+click samples a pixel, Shift+drag averages, drag the box to move it. F5 hides it."
@@ -4414,7 +4458,7 @@ function inspectSample(e, start) { // Shift+click, Shift+drag: RV's beginSamplin
   const i = S.inspect, at = inspectPoint(e);
   if (!at.inside) return;
   if (!i.on) toggleInspector(true);
-  if (start) i.avg = null;
+  if (start) i.page3Samples = [];
   i.sampling = true; i.pt = { x: at.x, y: at.y };
   refreshInspector(true);
 }
@@ -4458,13 +4502,14 @@ async function readPixel() {
   if (wait > 0) await new Promise((ok) => setTimeout(ok, wait));
   const pt = i.pt, frame = S.frame, src = inspectSource(), key = inspectKey();
   i.last = performance.now();
+  if (i.sampling) i.page3Samples = addSampled(i.page3Samples, pt);
   try { // the point in the plate's pixels (of): the route reads a pass with fewer pixels, such as a preview, at the same place
     const { width, height } = S.plate.spec, q = { path: src.path, frame, x: pt.x, y: pt.y, size: INSPECT_SIZE, of: `${width}x${height}` };
+    if (i.page3Samples.length > 1) q.pts = pointsQuery(i.page3Samples); // their average, from the same file and frame as the point
     const r = src.path ? await fetch(`/paintaplate/pixel?${new URLSearchParams(q)}`) : null; // a picture the page drew has no file
     const got = r ? await r.json() : {};
     if (r && !r.ok) throw new Error(got.error);
     i.got = { ...got, source: src, pt, frame, key };
-    if (i.sampling && got.value) i.avg = addSample(i.avg, got.value);
     showInspector(pt, frame, i.got, key === inspectKey());
   } catch (err) { i.got = null; showInspector(pt, frame, { error: err.message }); }
   finally {
@@ -4475,7 +4520,7 @@ async function readPixel() {
 
 function showInspector(pt, frame, got, live = true) { // live: the point and frame displayed now, so the display colour is theirs
   const box = $("#inspector"), i = S.inspect;
-  const rows = pt ? inspectorRows({ ...pt, ...(got ?? {}), final: live ? i.final : null, frame: S.plate.first + frame, average: i.avg })
+  const rows = pt ? inspectorRows({ ...pt, ...(got ?? {}), final: live ? i.final : null, frame: S.plate.first + frame })
     : [["Shift+click", "the frame to sample a pixel"]];
   box.replaceChildren(...rows.map(([k, v]) => {
     const row = document.createElement("div"), dt = document.createElement("span"), dd = document.createElement("span");
@@ -4496,7 +4541,7 @@ function showInspector(pt, frame, got, live = true) { // live: the point and fra
     e.preventDefault(); e.stopPropagation(); box.setPointerCapture(e.pointerId);
     const vr = view.getBoundingClientRect(), { width, height } = S.plate.spec, pt = S.inspect.pt;
     grab = [vr.left + ((pt.x + 0.5) / width) * vr.width - e.clientX, vr.top + ((pt.y + 0.5) / height) * vr.height - e.clientY];
-    S.inspect.sampling = false; S.inspect.avg = null;
+    S.inspect.sampling = false; S.inspect.page3Samples = [];
   });
   box.addEventListener("pointermove", (e) => {
     if (!grab) return;
@@ -4813,12 +4858,13 @@ const PICK_SIDE = 5;
 const pickCtx = Object.assign(document.createElement("canvas"), { width: PICK_SIDE, height: PICK_SIDE }).getContext("2d", { willReadFrequently: true });
 $("#pick").onclick = () => pickColor();
 function pickColor() { pickFrame(!S.picking); } // the pipette, or I: on, or off again
+const PICK_HINT = "Click the frame to pick a colour. Press Esc to cancel."; // the colour picker, as it starts and after a click outside the frame
 function pickFrame(on) {
   S.picking = on && !!S.plate;
   view.classList.toggle("picking", S.picking);
   $("#pick").setAttribute("aria-pressed", String(S.picking));
   colorUI();
-  if (S.picking) hud("Pick a colour: click the frame. Esc cancels.", 4000);
+  if (S.picking) hud(PICK_HINT, 4000);
   render();
 }
 // On the first frame a pick reads the frame's own values under the pointer, the ones Klein reads, with the paint in progress
@@ -4841,7 +4887,7 @@ function pickAt(e) {
     const [kx, ky] = toView(); // the canvas holds the plate at its own size
     color = pickedColor(readBack(view, Math.round(x * kx) - half, Math.round(y * ky) - half, n, n));
   }
-  if (!color) return void hud("Click on the frame to pick a colour. Esc cancels.", 2000); // outside the frame: still picking
+  if (!color) return void hud(PICK_HINT, 2000); // outside the frame: still picking
   pickFrame(false);
   takeColor(color, own ? "" : ", as the viewer shows it on this frame");
 }

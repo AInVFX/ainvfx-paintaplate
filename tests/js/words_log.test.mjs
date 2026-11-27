@@ -23,7 +23,7 @@ test("a keyframe snaps to the first frame, the last frame or every 8 frames betw
 test("every workflow the page posts has a name for the log", () => {
   const kinds = JSON.parse(app.match(/const WORKFLOWS = (\[[^\]]*\]);/)[1]);
   assert.deepEqual(kinds.filter((k) => !logic.JOB_NAME?.[k]), []);
-  assert.match(all, /Memory freed before \$\{JOB_NAME\[name\] \?\? name\}: /);
+  assert.equal(logic.freeAsk({ frees: true }, "edit", "shot"), "Memory freed before the shot.\n  This GPU holds one model family at a time.");
 });
 
 test("an erase that worked says the object is gone, and SeedVR2 7B upscales the result", () => {

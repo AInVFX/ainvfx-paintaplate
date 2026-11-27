@@ -1,7 +1,7 @@
 // The ComfyUI client of the page: workflows, jobs, the WebSocket, uploads. No DOM and no app state.
 // Every step of the app is a workflow from ./workflows, written by tools/build_workflows.py.
 
-import { JOB_NAME, fillWorkflow, indexValues, parseWorkflow } from "./logic.mjs";
+import { fillWorkflow, indexValues, parseWorkflow } from "./logic.mjs";
 
 const CLIENT = crypto.randomUUID();
 export const WF = {}; // name -> { prompt, slots, outputs, progress }
@@ -58,6 +58,7 @@ async function indexed(key) { // the outputs a finished job with this key made, 
 export const onNotice = (fn) => { notice = fn; }; // what the client has to tell the person (a retry, for example)
 let freeFirst = () => null, lastPosted = null; // the page's rule (logic.freesBefore): why ComfyUI's memory is freed before this job, or null, or { why, keep } to keep its cache; and the workflow of the last job posted
 export const onFree = (fn) => { freeFirst = fn; };
+export const lastJob = () => lastPosted; // the workflow of the last job posted: its models are those on the GPU (logic.FAMILY)
 let stopped = () => false; // the page's rule (design rule 13): whether a stop is in force for a job of this kind. Such a job is not posted
 export const onStop = (fn) => { stopped = fn; };
 const FREE_SETTLE_MS = 600; // ComfyUI's worker applies a free when it wakes: a job posted in the same instant would run first
@@ -183,7 +184,7 @@ export function run(name, values, { kind = name, preview, progress, step, live: 
       await post("/free", { unload_models: true, free_memory: !why.keep }).catch(() => {}); // unanswered, the job still runs
       await new Promise((ok) => setTimeout(ok, FREE_SETTLE_MS));
       await released();
-      log(`Memory freed before ${JOB_NAME[name] ?? name}: ${why.why ?? why}`);
+      log(why.why ?? why); // logic.freeAsk's line
     }
     if (job.cancelled) return; // cancelled while the page read ComfyUI's free RAM, or while the memory was freed: nothing is posted
     Object.assign(job, { sent: Date.now(), started: null, at: null, cached: 0, previews: 0, inMain: false });

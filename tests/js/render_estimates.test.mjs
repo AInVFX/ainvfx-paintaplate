@@ -12,16 +12,15 @@ const REF = Object.fromEntries([...app.matchAll(/\{ id: "(\w+)", label: "[^"]*",
 const HORSE = { work: [1920, 1088], track: [960, 544], shot: [640, 352], frames: 121 };
 const FLUID = { work: [1280, 704], track: [928, 512], shot: [640, 352], frames: 121 };
 const HALF = { ...HORSE, shot: [960, 544] }, TOS = { work: [960, 512], track: [960, 512], shot: [480, 256], frames: 121 }, CAR = FLUID;
-const MEASURED = [ // [case, step, seconds, plate, SDR to HDR on]
-  ["horse_erase", "erase", 28.7], ["horse_erase", "clean", 59.1], ["horse_erase", "comp", 11.9],
+const MEASURED = [ // [case, step, seconds, plate, SDR to HDR on]; the matte's steps as they are now: page3_estimates.test.mjs
+  ["horse_erase", "clean", 59.1], ["horse_erase", "comp", 11.9],
   ["horse_erase", "cleanfull", 194.3], ["horse_erase", "export", 9.3],
-  ["horse_erase_barn", "erase", 27.7], ["horse_erase_barn", "clean", 57.0], ["horse_erase_barn", "comp", 11.5],
+  ["horse_erase_barn", "clean", 57.0], ["horse_erase_barn", "comp", 11.5],
   ["horse_erase_barn", "cleanfull", 186.7], ["horse_erase_barn", "export", 9.3],
-  ["horse_cow", "shot", 58.2], ["horse_cow", "track", 32.3], ["horse_cow", "comp", 10.4], ["horse_cow", "full", 576.5],
-  ["horse_cow", "trackfull", 34.4], ["horse_cow", "export", 10.0],
+  ["horse_cow", "shot", 58.2], ["horse_cow", "comp", 10.4], ["horse_cow", "full", 576.5], ["horse_cow", "export", 10.0],
   ["horse_light", "shot", 56.6], ["horse_light", "comp", 8.9], ["horse_light", "full", 574.8],
   ["horse_light", "export", 6.1],
-  ["horse_erase 1.11.10", "erase", 28.5], ["horse_erase 1.11.10", "clean", 57.4], ["horse_erase 1.11.10", "comp", 10.9],
+  ["horse_erase 1.11.10", "clean", 57.4], ["horse_erase 1.11.10", "comp", 10.9],
   ["horse_erase 1.11.10", "cleanfull", 186.1], ["horse_erase 1.11.10", "export", 9.0],
   ["fluid_720", "hdr", 175.3, FLUID], // the fluid shot's SDR to HDR: the same workflow as the render's
   ["fluid_720 0.45.3", "hdr", 172.1, FLUID], ["hdr_cow", "hdr", 606.4], // SDR to HDR at 1280 x 704 and at 1920 x 1088
@@ -44,8 +43,8 @@ test("before a step ever ran on a 16 GB GPU, its announcement holds within 25% o
   assert.deepEqual(off.map(([where, id]) => `${where} ${id}`), Object.keys(OUTSIDE));
 });
 
-test("other GPUs announce the references as they are", () => {
-  assert.equal(Math.round(stepGuess("full", REF.full, HORSE, "large")), 180); // the pod measured 141 to 152 s
+test("the medium profile announces the references as they are", () => { // the large profile's measures: page3_estimates.test.mjs
+  assert.equal(Math.round(stepGuess("full", REF.full, HORSE, "medium")), 180);
   assert.equal(Math.round(stepGuess("clean", REF.clean, HORSE, "medium")), 6);
 });
 

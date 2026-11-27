@@ -59,7 +59,9 @@ def run(browser, port, U):
     U.check(not ups() and page.text_content("#render-left") == "full size ready", f"with Upscale off, the render ends at the composite: {rows()}")
     switch(True)
     U.poll(page, planned, 1.5)
-    U.check(planned() and page.text_content("#render-left") not in ("full size ready", "finish ready"), f"once the render is made, Upscale on adds its steps at once, and the render is no longer ready: {rows()}")
+    counts = lambda: page.text_content("#render-left").startswith("finish ") and page.text_content("#render-left") != "finish ready"  # noqa: E731
+    U.poll(page, counts, 10)
+    U.check(planned() and counts(), f"once the render is made, Upscale on adds its steps at once; they run, and the status line counts them: {page.text_content('#render-left')!r}, {rows()}")
     U.wait_log(page, U.added_line("Composite, upscaled: done in"), 240000, "Upscale's steps, with no Export")
     U.poll(page, lambda: made() and page.text_content("#render-left") == "finish ready", 3)
     U.check(made() and page.text_content("#render-left") == "finish ready", f"the three steps are made, then « finish ready »: {rows()}")

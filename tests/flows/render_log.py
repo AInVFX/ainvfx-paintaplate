@@ -70,8 +70,8 @@ def run(browser, port, U):
     # models are not the edit's, and again before the tracking job that follows it
     U.wait_log(page, r"window.__lines.some((t) => /^matte [0-9a-f]{8}: done in /.test(t))", 120000, "the line of the tracking job that follows the preview shot")
     lines = page.evaluate("window.__lines")
-    freed = [t.split(":")[0].removeprefix("Memory freed before ") for t in lines if t.startswith("Memory freed before ")]
+    freed = [t.removeprefix("Memory freed before ").split(":")[0].split(".")[0] for t in lines if t.startswith("Memory freed before ")]
     at = lambda start: next((i for i, t in enumerate(lines) if t.startswith(start)), -1)  # noqa: E731
-    U.check(freed.count("the shot") == 1 and freed.count("the matte") == 1 and 0 <= at("Memory freed before the shot:") < at("shot ") < at("Memory freed before the matte:") < at("matte "),
+    U.check(freed.count("the shot") == 1 and freed.count("the matte") == 1 and 0 <= at("Memory freed before the shot") < at("shot ") < at("Memory freed before the matte") < at("matte "),
             f"a GPU under 24 GB holds one family of models at a time: memory freed before {freed}")
     page.close()

@@ -10,6 +10,7 @@ CACHE = "(() => { const c = document.querySelector('#tl-cache').dataset; return 
 FULL = "(() => { const c = document.querySelector('#tl-cache').dataset; return +c.frames > 1 && c.cached === c.frames && !!c.size; })()"
 VIEW = "document.querySelector('#view').dataset"
 PAUSED = "[...document.querySelectorAll('video')].every((v) => v.paused)"
+OTHER = re.compile(r"\. (?!Plate:)[^.:]+: (all [\d,]+|[\d,]+ of [\d,]+) (EXR )?frames in memory")  # a source other than the plate: the step displayed
 PLAN = "([...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('Frame cache, ')).pop()?.textContent ?? '')"  # the log's last line about the cache's plan
 MOVES = """() => { const el = document.querySelector('#frame-now'); let last = el.textContent; window.__moves = 0;
   new MutationObserver(() => { if (el.textContent !== last) { last = el.textContent; window.__moves += 1; } })
@@ -46,7 +47,7 @@ def run(browser, port, U):
     cached, frames, size = page.evaluate(CACHE)
     w, h = (int(v) for v in size.split("x"))
     said = plan_line(page)
-    U.check(cached == frames and 960 <= w <= 1280 and "1 GB (Auto): " in said and f"all of the plate's {frames} frames at {w} x {h}" in said,
+    U.check(cached == frames and 960 <= w <= 1280 and "1 GB (Auto). " in said and f"Plate: all {frames} frames in memory, " in said and f"({w} x {h})" in said,
             f"the stripe fills: {cached} of {frames} frames in memory at {w} x {h}, the size the frame is shown, inside the Auto budget ({said[:60]})")
 
     # 2. With every frame in memory the plate plays from memory: the videos stay paused, a clock moves the playhead
@@ -83,7 +84,7 @@ def run(browser, port, U):
         small.wait_for_timeout(500); seen.append(small.evaluate(CACHE)[0])  # the one read on the clock in this flow: the budget is sampled for 4 s, to show that it holds
     cached, frames, size = small.evaluate(CACHE)
     said = plan_line(small)
-    U.check(0 < max(seen) <= 3 and size == "960x528" and "8 MB (set in the address)" in said and f"3 of the plate's {frames} frames at 960 x 528" in said,
+    U.check(0 < max(seen) <= 3 and size == "960x528" and "8 MB (set in the address)" in said and f"Plate: 3 of {frames} frames in memory, reduced size (960 x 528)" in said,
             f"a budget of 8 MB holds: at most {max(seen)} frames in memory at {size} ({said[:60]})")
     small.evaluate(MOVES)
     space(small)
@@ -96,7 +97,7 @@ def run(browser, port, U):
     before = sum("Frame cache, " in line for line in lines(small))
     U.open_path(small, "plates/desk.mp4")
     U.wait_log(small, f"[...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('Frame cache, ')).length > {before}", 60000, "cache plan of the plate opened again")
-    U.check(plan_line(small).count(" frames at ") == 1, f"a plate that opens logs its cache's plan, the same plate again too: {plan_line(small)[:70]}")
+    U.check(plan_line(small).count(" frames in memory, ") == 1, f"a plate that opens logs its cache's plan, the same plate again too: {plan_line(small)[:70]}")
     small.close()
 
     # 6. A shot displayed: once its frames are in memory it plays from memory too
@@ -104,10 +105,10 @@ def run(browser, port, U):
     page.wait_for_function(U.DONE.format(n=1), timeout=120000)
     space(page)
     U.wait_log(page, f"{VIEW}.play === 'memory' && {VIEW}.picture === 'shot'", 150000, "shot playing from memory")
-    SHOT_PLAN = """[...document.querySelectorAll('#log li span')].some((e) => e.textContent.startsWith('Frame cache, ') && e.textContent.includes(" of the shot's "))"""
+    SHOT_PLAN = r"""[...document.querySelectorAll('#log li span')].some((e) => e.textContent.startsWith('Frame cache, ') && /\. (?!Plate:)[^.:]+: (all [0-9,]+|[0-9,]+ of [0-9,]+) frames in memory/.test(e.textContent))"""
     U.wait_log(page, SHOT_PLAN, 30000, "cache plan that names the shot")  # each plan is logged once per plate: read the one that names the shot
-    said = next((t for t in reversed(lines(page)) if t.startswith("Frame cache, ") and " of the shot's " in t), "")
-    U.check(" of the shot's " in said and page.evaluate(PAUSED), f"the shot of the edits plays from memory once its frames are in ({said[-62:]})")
+    said = next((t for t in reversed(lines(page)) if t.startswith("Frame cache, ") and OTHER.search(t)), "")
+    U.check(OTHER.search(said) is not None and page.evaluate(PAUSED), f"the shot of the edits plays from memory once its frames are in ({said[-62:]})")
     space(page)
     page.close()
 
@@ -116,5 +117,5 @@ def run(browser, port, U):
     small = opened(browser, port, U)
     U.wait_log(small, FULL, 150000, "frame cache with every frame of the plate, on the small memory profile")
     said = plan_line(small)
-    U.check(re.fullmatch(r"Frame cache, 512 MB \(Auto\): all of the plate's \d+ frames at \d+ x \d+(, [^.;]+)?\.", said) is not None, f"on a 16 GB GPU beside ComfyUI the Auto budget is 512 MB, and the line names no GPU: {said}")
+    U.check(re.fullmatch(r"Frame cache, 512 MB \(Auto\)\. Plate: all \d+ frames in memory, (full|reduced) size \(\d+ x \d+\)\.", said) is not None, f"on a 16 GB GPU beside ComfyUI the Auto budget is 512 MB, and the line names no GPU: {said}")
     small.close()
