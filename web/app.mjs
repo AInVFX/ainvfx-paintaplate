@@ -4208,7 +4208,6 @@ async function graphFile() { // the whole scene as one ComfyUI workflow, for Exp
   return editorFile(graph);
 }
 
-const keysOf = (sig) => JSON.stringify(JSON.parse(sig)[0]); // a fluid shot's keyframes, from its signature (fluidSig)
 const graphsFluid = () => { const f = fluidEdit(); return !!f && f.state === "done" && sameKeys(fluidSig(), f.made); }; // the keyframes displayed made the fluid shot: its graph makes it again
 async function fluidGraphFile() { // a fluid shot alone: its keyframes, and the text prompt and seed it was made with
   const p = S.plate, f = fluidEdit(), size = [p.spec.width, p.spec.height], keys = [];
