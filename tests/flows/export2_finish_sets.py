@@ -7,7 +7,6 @@ import zipfile
 
 import zip_rows
 
-SIZE = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
 TICKS = "[...document.querySelectorAll('#export label.check')].filter((l) => !l.hidden).map((l) => '#' + l.querySelector('input').id)"
 FULL = ("fluid_shot_full_size", "shot_full_size", "layer_full_size", "matte", "composite_full_size")
 
@@ -43,9 +42,7 @@ def run(browser, port, U):
     hdr = ("plate_hdr", "layer_hdr", "composite_hdr")
     U.check(set(FULL + hdr) <= rows and not any("upscaled" in r for r in rows), f"SDR to HDR: each element at full size and in HDR: {sorted(rows)}")
     page.click("#finish-btn"); page.click("#finish-upscale")
-    page.select_option("#finish-upscale-size", "custom"); page.wait_for_selector("#ask-field", state="visible", timeout=10000)
-    page.fill("#ask-field", "1024"); page.keyboard.press("Enter"); page.wait_for_selector("#ask", state="hidden", timeout=10000)
-    U.poll(page, lambda: "1024 x 640" in page.evaluate(SIZE), 3)
+    U.upscale_custom(page, "1024")
     page.keyboard.press("Escape")
     U.wait_log(page, U.added_line("Composite, HDR, upscaled: done in"), 300000, "Upscale on SDR to HDR's set")
     rows = every_tick(page, U)

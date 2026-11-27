@@ -4,7 +4,6 @@
 line says to use Export. Upscale turned off, then on over the result it made: that result plays again, named. The plate
 alone's SDR to HDR step is « Plate, HDR » (labelOf), in the HUD and the status line."""
 RESTS = "['full size ready', 'finish ready'].includes(document.querySelector('#render-left').textContent) || document.querySelector('#status').textContent.startsWith('Error')"
-SIZE = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
 SEEN = """window.__seen = []; for (const id of ['#status', '#hud']) new MutationObserver(() => window.__seen.push(document.querySelector(id).textContent))
   .observe(document.querySelector(id), { childList: true, subtree: true, characterData: true });"""  # the status line and the HUD, each text they show
 STEPS = ["Plate, HDR", "Layer, HDR", "Composite, HDR", "Plate, HDR, upscaled", "Layer, HDR, upscaled", "Composite, HDR, upscaled"]
@@ -25,9 +24,7 @@ def run(browser, port, U):
             f"the plate alone's step is « Plate, HDR », in the HUD and the status line: {status!r}")
     page.evaluate("window.__seen = []")
     page.click("#finish-btn"); page.click("#finish-upscale")
-    page.select_option("#finish-upscale-size", "custom"); page.wait_for_selector("#ask-field", state="visible", timeout=10000)
-    page.fill("#ask-field", "1600"); page.keyboard.press("Enter"); page.wait_for_selector("#ask", state="hidden", timeout=10000)
-    U.poll(page, lambda: "1600 x " in page.evaluate(SIZE), 3)
+    U.upscale_custom(page, "1600")
     page.keyboard.press("Escape")
     page.wait_for_function(RESTS, timeout=240000)  # the plate alone's Upscale step runs at once: the paint comes after it
     page.evaluate("window.__seen = []")

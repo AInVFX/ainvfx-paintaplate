@@ -2,14 +2,11 @@
 chunk node for the same. On a 16 GB card with 128 GB of RAM, a fluid shot of 121 frames upscaled to 2560 runs in one job of
 4 even chunks of 37 frames, two neighbours sharing 3 latent frames: a pass there holds 15 latent frames (64.3 latent frames
 times megapixels, as a 16 GB GPU measured); on a 96 GB card, desk.mp4 upscaled to 1600 runs in one pass."""
-SIZE = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
 
 
 def custom(page, U, px):  # Finish > Upscale on, at a custom long side
     page.click("#finish-btn"); page.click("#finish-upscale")
-    page.select_option("#finish-upscale-size", "custom"); page.wait_for_selector("#ask-field", state="visible", timeout=10000)
-    page.fill("#ask-field", px); page.keyboard.press("Enter"); page.wait_for_selector("#ask", state="hidden", timeout=10000)
-    U.poll(page, lambda: f"{px} x " in page.evaluate(SIZE), 3)
+    U.upscale_custom(page, px)
     page.keyboard.press("Escape")
 
 

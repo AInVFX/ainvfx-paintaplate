@@ -7,7 +7,6 @@ viewer's picture compares them."""
 MEAN = """(() => { const c = document.querySelector('#view'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
   let s = 0, n = 0; for (let i = 0; i < d.length; i += 4 * 97) { s += d[i] + d[i + 1] + d[i + 2]; n += 3; } return s / n / 255; })()"""
 SHOWN = "document.querySelector('#stages li.shown .name')?.textContent ?? ''"
-SIZE = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
 
 
 def level(page):  # the viewer's mean level from 0 to 1, once two reads a quarter of a second apart agree
@@ -44,9 +43,7 @@ def run(browser, port, U):
     page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("Composite, full size: done in"), 240000, "the Paint's full-size composite")
     page.click("#finish-btn"); page.click("#finish-upscale")
-    page.select_option("#finish-upscale-size", "custom"); page.wait_for_selector("#ask-field", state="visible", timeout=10000)
-    page.fill("#ask-field", "1024"); page.keyboard.press("Enter"); page.wait_for_selector("#ask", state="hidden", timeout=10000)
-    U.poll(page, lambda: "1024 x 640" in page.evaluate(SIZE), 3)
+    U.upscale_custom(page, "1024")
     page.keyboard.press("Escape")
     U.wait_log(page, U.added_line("Composite, upscaled: done in"), 240000, "Upscale's steps over the fluid shot")
     comp = shows(page, U, "Composite, upscaled", click=False)

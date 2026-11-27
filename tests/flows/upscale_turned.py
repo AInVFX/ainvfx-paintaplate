@@ -36,8 +36,7 @@ def run(browser, port, U):
 
     def size(px):  # typed in Custom…
         menu(True)
-        page.select_option("#finish-upscale-size", "custom"); page.wait_for_selector("#ask-field", state="visible", timeout=10000)
-        page.fill("#ask-field", px); page.keyboard.press("Enter"); page.wait_for_selector("#ask", state="hidden", timeout=10000)
+        U.upscale_custom(page, px)
         menu(False)
 
     switch(True); size("1600")

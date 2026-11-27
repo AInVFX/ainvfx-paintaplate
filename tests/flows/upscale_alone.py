@@ -11,9 +11,7 @@ CANVAS = "() => { const c = document.querySelector('canvas[data-picture]'); retu
 
 
 def custom(page, U, px):  # Finish > Upscale's size, typed in Custom…, with the menu open
-    page.select_option("#finish-upscale-size", "custom"); page.wait_for_selector("#ask-field", state="visible", timeout=10000)
-    page.fill("#ask-field", px); page.keyboard.press("Enter"); page.wait_for_selector("#ask", state="hidden", timeout=10000)
-    U.poll(page, lambda: f"{px} x " in page.evaluate(SIZE), 3)
+    U.upscale_custom(page, px)
 
 
 def run(browser, port, U):

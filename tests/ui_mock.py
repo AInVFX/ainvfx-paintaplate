@@ -179,6 +179,16 @@ def poll(page, test, seconds=5):
     return True
 
 
+UPSCALE_SIZE = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
+
+
+def upscale_custom(page, px):
+    """Finish > Upscale > Custom…: the long side `px` typed and Enter pressed; returns once the size menu shows it."""
+    page.select_option("#finish-upscale-size", "custom"); page.wait_for_selector("#ask-field", state="visible", timeout=10000)
+    page.fill("#ask-field", str(px)); page.keyboard.press("Enter"); page.wait_for_selector("#ask", state="hidden", timeout=10000)
+    poll(page, lambda: f"{px} x " in page.evaluate(UPSCALE_SIZE), 3)
+
+
 def settled(page, timeout=180000):
     """No edit and no render step left: nothing generates for 700 ms running. A render starts 300 ms after a change (IDLE_MS
     in app.mjs), so a shorter calm can be the gap before the next step."""
