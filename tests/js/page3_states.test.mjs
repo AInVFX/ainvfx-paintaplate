@@ -22,8 +22,8 @@ test("a plate alone with Finish: green once Finish is made", () => {
   assert.equal(timelineClass(steps(["finish", true])), "ready");
 });
 
-// The Render panel's status line names a time left only while the render displayed runs (G9): each state the orchestrator
-// named, with what the line and the line under the timeline show
+// The Render panel's status line names a time left only while the render displayed runs: each state,
+// with what the line and the line under the timeline show
 const rows = (...r) => r.map(([cls, done, left = 60]) => ({ cls, done, left }));
 const both = (steps, running) => [renderStatus(steps, { running }), timelineClass(steps, { running })];
 

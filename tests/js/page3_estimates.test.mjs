@@ -1,5 +1,5 @@
-// What a step announces before it ever ran (logic.stepGuess), against what it took. Small: an RTX 4090 Laptop GPU, 16 GB of
-// VRAM, 52 GB of RAM. Large: an RTX PRO 6000 Blackwell Server Edition, 96 GB of VRAM, 175 GB of RAM, ComfyUI started with
+// What a step announces before it ever ran (logic.stepGuess), against what it took. Small: a 16 GB GPU with 52 GB of
+// RAM. Large: an RTX PRO 6000 Blackwell Server Edition, 96 GB of VRAM, 175 GB of RAM, ComfyUI started with
 // --highvram. ComfyUI 0.45.3 on both. Every row holds within 25% of its measure.
 import { test } from "node:test";
 import assert from "node:assert/strict";

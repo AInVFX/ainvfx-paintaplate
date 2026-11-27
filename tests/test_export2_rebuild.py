@@ -1,4 +1,4 @@
-"""Rule 2: the zip holds what rebuilds the composite. From the zip's own files, plate x (1 - matte) + layer x matte equals
+"""The zip holds what rebuilds the composite. From the zip's own files, plate x (1 - matte) + layer x matte equals
 the zip's composite within each format's tolerance, at each stage the export offers: full size, Upscale's set, SDR to HDR's set and
 SDR to HDR's set upscaled, each in its folder (logic.setFolder: <run>/hdr, <run>/upscale/<size>/out, under hdr/ for the last). Each element is written as the export writes it: the
 composite and the layer by Save Plate's writer (plateio.write_still for a sequence, plateio.VideoWriter for a movie, the

@@ -88,7 +88,7 @@ test("full-precision frames: a failed path is not fetched again; a full budget f
   assert.equal(calls, made); // the budget holds the four frames of most use: nothing more to fetch
 });
 
-// ---------- The viewer, round 1: one cache budget, the size frames are kept at, playback statistics ----------
+// ---------- The viewer: one cache budget, the size frames are kept at, playback statistics ----------
 import * as viewerFrames from "../../web/frames.mjs";
 
 test("the Auto budget: 512 MB beside ComfyUI on the small memory profile, 1 GB on the others, up to 2 GB with ComfyUI elsewhere", () => {

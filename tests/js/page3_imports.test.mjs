@@ -1,6 +1,6 @@
 // Every module of the page loads, and the names it uses from the page's other modules are its own: a name it calls from
 // another module is imported, or declared in it; a name it imports is not declared again, which stops the module from
-// loading (a SyntaxError that only a browser or node --check shows: G1's « addPoint »).
+// loading (a SyntaxError that only a browser or node --check shows).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
