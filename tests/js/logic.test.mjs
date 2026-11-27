@@ -250,10 +250,8 @@ test("the full size's first stage is half the working size, in multiples of 32",
 });
 
 
-test("Generate stops only a full-size or export step in its first half", () => {
-  assert.equal(stopsForEdit({ cls: "full", progress: 0.3 }), true);
-  assert.equal(stopsForEdit({ cls: "export", progress: 0.1 }), true);
-  assert.equal(stopsForEdit({ cls: "full", progress: 0.6 }), false, "past halfway it finishes");
+test("Generate stops a full-size or export step at any progress; a preview step finishes", () => {
+  for (const progress of [0, 0.3, 0.6, 0.99]) for (const cls of ["full", "export"]) assert.equal(stopsForEdit({ cls, progress }), true, `${cls} at ${progress}`);
   assert.equal(stopsForEdit({ cls: "preview", progress: 0.05 }), false, "a preview step always finishes");
 });
 

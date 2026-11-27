@@ -28,7 +28,7 @@ def run(browser, port, U):
     page.wait_for_function(U.DONE.format(n=1) + " && document.querySelector('#fluid').hidden", timeout=30000)
     page.click('.tools [data-tool="paint"]')
     U.paint_once(page, "a red ball", [(0.4, 0.5), (0.45, 0.52), (0.5, 0.5)])
-    page.keyboard.press("Enter")  # Generate: the full size, in its first half, stops for the new edit
+    page.keyboard.press("Enter")  # Generate: the full size stops for the new edit
     U.wait_log(page, U.added_line(STOP), 10000, "line of the stop for the new edit")
     U.mock_route(port, "/mock/release", {})
     page.wait_for_function(U.DONE.format(n=2), timeout=120000)

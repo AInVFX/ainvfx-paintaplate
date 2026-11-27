@@ -2197,7 +2197,7 @@ function launch(edit, another = false) { // Generate: the edit on the first fram
     recompose(); historyUI(); render(); timelineUI();
     return status(edit.refused.said, "hint");
   }
-  preempt(); // Generate: a full-size or export step in its first half stops for this edit, and runs again later
+  preempt(); // Generate: a full-size or export step stops for this edit, and runs again later
   edit.state = "queued";
   if (edit.tool !== "fluid") edit.thumb ??= strokesThumb(edit); // a fluid shot's thumbnail is its first keyframe
   historyUI(); render();
@@ -2644,7 +2644,7 @@ function again(edit) { // a new seed for one edit; the edits above it follow if 
   if (!(edit.strokes.length || edit.keys?.length) || edit.state === "drawing") return;
   mark();
   Object.assign(edit, { seed: (Math.random() * 2 ** 31) | 0, on: true, force: true, launched: performance.now() });
-  preempt(); // another try is a Generate: a full-size or export step in its first half stops for it
+  preempt(); // another try is a Generate: a full-size or export step stops for it
   const said = `${editName(edit)}: another try, seed ${edit.seed}`;
   if (S.halted) told(said, "It waits for Enter."); else status(`${said}.`);
   rebuild();
@@ -2881,7 +2881,7 @@ function touch(ms = IDLE_MS) { clearTimeout(idleTimer); idleTimer = setTimeout(i
 // passes with their composite (the review), and the export, which runs only when Export asks for it. One step runs at a time,
 // for the set of edits displayed alone (pickRender): its preview, then its full size, then its export. A set no longer displayed
 // waits, and goes on at its next step when it shows again. Nothing stops a step but Generate: a bypass, an undo or another
-// edit lets it finish and keeps its result. Generate stops a full-size or export step in its first half (logic.stopsForEdit).
+// edit lets it finish and keeps its result. Generate stops a full-size or export step at any progress, and lets a preview step finish (logic.stopsForEdit).
 // What every job made is also in the job index on disk.
 const YIELD = new Error("yield"); // a render step gives way to an edit, or to the render of another set of edits now displayed
 
@@ -2944,11 +2944,11 @@ function pickRender() { // the render displayed, while it has a step to make: no
   return r && nextClass(r) ? r : null;
 }
 
-function preempt() { // Generate: a full-size or export step in its first half stops for the new edit, and runs again later
+function preempt() { // Generate: a full-size or export step stops for the new edit, at any progress, and runs again later
   const st = S.stage, r = S.piping;
   if (!st || !r) return;
   const def = STAGES.find((x) => x.id === st.id), cls = !def.final ? "preview" : st.id === "export" ? "export" : "full", pct = Math.round(st.progress * 100);
-  if (!def.up && !def.hdr && !stopsForEdit({ cls, progress: st.progress })) return void log( // Finish's steps stop at once: their finished jobs stay in the job index
+  if (!def.up && !def.hdr && !stopsForEdit({ cls })) return void log( // a preview step finishes; Finish's steps stop as the full size does: their finished jobs stay in the job index
     `Render v${r.v}: ${labelOf(def, r)}: at ${pct}%, finishing before the new edit.`);
   log(`Render v${r.v}: ${labelOf(def, r)}: stopped at ${pct}% for the new edit. It continues when its edits are turned on again.`);
   st.stopped = true; // a job the step asks for after this, its upload done, is not posted (onStop)
