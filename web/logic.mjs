@@ -867,6 +867,9 @@ export function upscaleWindows(frames, size, share = UPSCALE.share) {
   for (let i = 0, first = 0; i < n; i++) { const count = base + (i < extra ? 1 : 0); out.push([first, count]); first += count - share; }
   return out;
 }
+// « Composite, HDR » made again from SDR to HDR's plate, layer and matte (hdr_comp): no model; it reads three sets of EXR
+// frames and writes one, and its movie. On a 16 GB GPU, 17 frames at 960 x 512 took 1.4 s: 0.17 s per frame per megapixel.
+export const hdrCompSeconds = (frames, [w, h]) => 0.17 * frames * (w * h) / 1e6;
 // Seconds, from 121 frames of horse.mp4 at 3840 x 2160: a SeedVR2 pass took 1,332 s on a 16 GB GPU (six windows of 21
 // frames) and 388 s on a 96 GB GPU (one job); each part Save Plate writes at 4K took 28.5 s and 27.4 s. Scaled by the
 // target's pixels and the frames. Paint and Clean make two passes, the plate's and the layer's, and write three parts.
