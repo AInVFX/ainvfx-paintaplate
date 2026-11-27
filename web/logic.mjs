@@ -863,6 +863,9 @@ export function upscaleWindow(ramGb, vramGb, [tw, th], [pw, ph], frames, copies 
 // [first, count] of each job: windows of at most `size` frames, spread evenly so none is short, two neighbours sharing
 // `share` frames, which Join Windows crossfades, so the frames at a window's edge are sampled with context on both sides
 // and the change from one window to the next spreads over them. One window when the shot holds in one.
+// A window's matte frames (app.upscalePart): those the window before did not save (share, the frames they have in common),
+// numbered by their frame in the shot from 1 (first), so a window job that runs again writes the same files again
+export const matteWindow = (windows, i) => { const share = i ? windows[i - 1][0] + windows[i - 1][1] - windows[i][0] : 0; return { share, first: windows[i][0] + share + 1 }; };
 export function upscaleWindows(frames, size, share = UPSCALE.share) {
   if (frames <= size) return [[0, frames]];
   const n = Math.ceil((frames - share) / (size - share)), total = frames + (n - 1) * share, base = Math.floor(total / n), extra = total - n * base;

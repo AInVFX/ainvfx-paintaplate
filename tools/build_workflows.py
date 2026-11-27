@@ -918,7 +918,8 @@ def upscale():
     and sized as Composite Frames sizes it, with a bilinear filter: never generated. The upscaled matte (Slot matte_prefix):
     that same picture as 16-bit PNG frames, so the upscaled result, plate, layer and matte add up to one code value. Every
     window saves into one folder the matte frames that it does not share with the window before (Slot share: 0 for the
-    first window), numbered on from the frames already there, so the folder holds one frame per frame of the shot.
+    first window), each numbered by its frame in the shot (Slot matte_first, the first's number), so the folder holds one
+    frame per frame of the shot, and a window job that runs again writes its frames again.
     """
     g = Graph()
     load = g("PaintAPlate_LoadPlate", _title="Result", path=Slot("shot", ""), max_frames=Slot("max_frames", 121), pad_8n1=False)
@@ -955,7 +956,8 @@ def upscale():
             batch_index=Slot("share", 0), length=Slot("count", UPSCALE_CHUNK))
     big = g("ImageScale", _title="The matte at the target size (bilinear, as Composite Frames sizes it)", image=new, upscale_method="bilinear",
             width=size[0], height=size[1], crop="disabled")
-    saved = g("PaintAPlate_SaveFrames", _title="Upscaled matte", _output="matte", images=big, format="png16", filename_prefix=Slot("matte_prefix", ""))
+    saved = g("PaintAPlate_SaveFrames", _title="Upscaled matte", _output="matte", images=big, format="png16", first=Slot("matte_first", 0),
+              filename_prefix=Slot("matte_prefix", ""))
     g.link_slot(saved, "images", "upscale_matte")
     g.save("upscale")
 

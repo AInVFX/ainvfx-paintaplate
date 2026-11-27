@@ -461,11 +461,13 @@
     0
    ],
    "format": "png16",
+   "first": 0,
    "filename_prefix": ""
   },
   "_meta": {
    "title": "Upscaled matte",
    "slots": {
+    "first": "matte_first",
     "filename_prefix": "matte_prefix",
     "images": "upscale_matte"
    },

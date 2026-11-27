@@ -712,6 +712,13 @@ def join_windows(folders: list, workers: int = 8, count: int = 0, max_frames: in
     return out
 
 
+def save_names(name: str, counter: int, n: int, ext: str, first: int = 0) -> list:
+    """The files of n frames that Save Frames saves under `name`: numbered on from `counter`, the number after the files
+    already there (core Save Image's rule), or from `first` when it is given, so a job that runs again writes the same
+    files again."""
+    return [f"{name}_{(first or counter) + i:05}_.{ext}" for i in range(n)]
+
+
 def write_pngs(frame_at, paths: list, workers: int = 8, level: int = 1, tick=None) -> None:
     """Write frame_at(i), an (H, W, 3 or 4) uint8 or uint16 array, to paths[i] as an 8 or 16-bit PNG, several frames at
     once: PyAV releases the GIL

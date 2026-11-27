@@ -169,7 +169,7 @@ def values(shot: str, width: int, height: int, frames: int, label: str = "upscal
     return {"shot": shot, "max_frames": frames, "resize_method": resize_method(width, height, (w, h)), "first": first, "count": max(1, min(count, frames - first)), "width": w,
             "height": h, "color_space": color_space, "color_fix": color_fix, "format": fmt, "seed": seed,
             "prefix": f"{label}/upscale/w{window:03}/f", "under": "", "under_space": color_space, "matte": "", "comp_prefix": "",
-            "matte_prefix": "", "share": 0, "chunk_frames": (even_chunk(n, chunk, overlap) if even else chunk) if chunk else one_pass(n), "chunk_overlap": overlap}
+            "matte_prefix": "", "share": 0, "matte_first": 0, "chunk_frames": (even_chunk(n, chunk, overlap) if even else chunk) if chunk else one_pass(n), "chunk_overlap": overlap}
 
 
 def decode_tiles(prompt: dict, tile: int, overlap: int) -> int:

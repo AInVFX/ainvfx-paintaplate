@@ -747,15 +747,18 @@ class SaveFrames(io.ComfyNode):
                 io.Combo.Input("chromaticities", options=["none", *plateio.CHROMATICITIES], default="none", optional=True,
                                tooltip="exr only: the gamut written in each frame's header, so the frames open in their "
                                        "colour space. none writes none, which reads as Rec.709."),
+                io.Int.Input("first", default=0, min=0, max=MOST_FRAMES, optional=True,
+                             tooltip="The number of the first frame's file. 0 numbers on from the files the folder holds, as Save Image "
+                                     "does; a number names the files from it, so a job that runs again writes the same files again."),
             ],
             is_output_node=True,
         )
 
     @classmethod
-    def execute(cls, images, filename_prefix, format="png", fps=0.0, frames=0, chromaticities="none") -> io.NodeOutput:
+    def execute(cls, images, filename_prefix, format="png", fps=0.0, frames=0, first=0, chromaticities="none") -> io.NodeOutput:
         n, h, w = min(frames, images.shape[0]) if frames else images.shape[0], images.shape[1], images.shape[2]
         folder, name, counter, sub, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory(), w, h)
-        names = [f"{name}_{counter + i:05}_.{'png' if format == 'png16' else format}" for i in range(n)]
+        names = plateio.save_names(name, counter, n, "png" if format == "png16" else format, first)
         paths, bar = [os.path.join(folder, f) for f in names], comfy.utils.ProgressBar(n)
         if format == "exr":
             plateio.write_exrs(stoppable(lambda i: images[i].float().cpu().numpy()), paths, workers=WORKERS, tick=lambda: bar.update(1), fps=fps,

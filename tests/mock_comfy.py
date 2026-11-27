@@ -325,7 +325,7 @@ async def execute(pid, prompt):
             o[outs["comp"]] = {"images": [flat(c * m + u * (1 - m), v["comp_prefix"], i) for i, (c, u, m) in enumerate(zip(layer, under, mattes))][:1]}
         if "matte" in outs:  # the frames the window before did not save, numbered on from the frames its folder holds, as Save Frames counts
             sub, _, stem = v["matte_prefix"].rpartition("/")
-            start = len(glob.glob(os.path.join(folder("output"), sub, f"{stem}_*_.png")))
+            start = int(v["matte_first"]) - 1 if v.get("matte_first") else len(glob.glob(os.path.join(folder("output"), sub, f"{stem}_*_.png")))  # its frame in the shot, else on from the files there
             o[outs["matte"]] = {"images": [flat(m, v["matte_prefix"], start + i) for i, m in enumerate(mattes[int(v.get("share") or 0):])][:1]}
     elif "export" in outs and "path" not in v:  # upscale_export: the windows joined in order, written as the export is (a movie here)
         dirs, share = sorted(glob.glob(os.path.join(resolve(v["frames"]), "*", ""))), int(v.get("share") or 0)
