@@ -135,6 +135,12 @@ def frame_size(path: str) -> tuple:
         return struct.unpack(">II", f.read(24)[16:24])
 
 
+def one_pass(count: int) -> int:
+    """One pass over a window of `count` frames: the window padded to 4n+1 frames, as SeedVR2Preprocess pads it, since core's
+    chunk node takes no other count (logic.upscaleChunk)."""
+    return 4 * -(-(count - 1) // 4) + 1
+
+
 def even_chunk(count: int, chunk: int, overlap: int) -> int:
     """The longest chunk of at most `chunk` frames with which core's split ends on a full chunk in a window of `count` frames,
     chunks sharing `overlap` latent frames: chunks spread evenly, none short, the fewest frames sampled among them. The window
@@ -163,7 +169,7 @@ def values(shot: str, width: int, height: int, frames: int, label: str = "upscal
     return {"shot": shot, "max_frames": frames, "resize_method": resize_method(width, height, (w, h)), "first": first, "count": max(1, min(count, frames - first)), "width": w,
             "height": h, "color_space": color_space, "color_fix": color_fix, "format": fmt, "seed": seed,
             "prefix": f"{label}/upscale/w{window:03}/f", "under": "", "under_space": color_space, "matte": "", "comp_prefix": "",
-            "matte_prefix": "", "share": 0, "chunk_frames": (even_chunk(n, chunk, overlap) if even else chunk) if chunk else n, "chunk_overlap": overlap}
+            "matte_prefix": "", "share": 0, "chunk_frames": (even_chunk(n, chunk, overlap) if even else chunk) if chunk else one_pass(n), "chunk_overlap": overlap}
 
 
 def decode_tiles(prompt: dict, tile: int, overlap: int) -> int:

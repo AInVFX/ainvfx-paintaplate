@@ -893,7 +893,7 @@ export function upscalePass([width, height], vramGb) {
 }
 // The chunks core's SeedVR2TemporalChunk makes of a window of count frames, chunks of frames frames sharing overlap latent frames.
 export function upscaleChunks(count, frames, overlap = UPSCALE.overlap) {
-  const latent = Math.floor((count - 1) / 4) + 1, size = Math.floor((frames - 1) / 4) + 1;
+  const latent = Math.ceil((count - 1) / 4) + 1, size = Math.floor((frames - 1) / 4) + 1; // the window's latent frames, its last frame's included
   if (size >= latent) return 1;
   let start = 0, chunks = 1;
   while (start + size < latent) { start += size - Math.min(overlap, size - 1); chunks++; }
@@ -901,12 +901,13 @@ export function upscaleChunks(count, frames, overlap = UPSCALE.overlap) {
 }
 // Upscale's chunks in one window, as core's SeedVR2TemporalChunk cuts it: the frames per chunk with which every chunk is
 // full, none short at the window's end, at most `most` latent frames each, two neighbours sharing `overlap` latent frames
-// that core's merge crossfades (3: one latent frame half and half, with one of each chunk's own on each side). The window
-// itself when it holds in one chunk: one pass. Among the sizes that end full, the longest, which samples the fewest frames.
+// that core's merge crossfades (3: one latent frame half and half, with one of each chunk's own on each side). One pass when
+// one chunk holds the window: the window padded to 4n+1 frames, as SeedVR2Preprocess pads it, since core's chunk node takes
+// 4n+1 frames and no other count (63 frames: 65). Among the sizes that end full, the longest, which samples the fewest frames.
 // Frames counted as core counts them: latent frame 0 holds frame 0, latent frame k frames 4k - 3 to 4k.
 export function upscaleChunk(count, most, overlap = UPSCALE.overlap) {
-  const latent = Math.floor((count - 1) / 4) + 1;
-  if (latent <= most) return count;
+  const latent = Math.ceil((count - 1) / 4) + 1; // the window's latent frames, its last frame's included
+  if (latent <= most) return 4 * (latent - 1) + 1;
   const o = Math.min(overlap, most - 1);
   const short = (size) => { let start = 0; while (start + size < latent) start += size - o; return size - (latent - start); }; // the last chunk's lack
   let best = most;

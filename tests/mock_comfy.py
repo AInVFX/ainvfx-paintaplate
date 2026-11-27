@@ -302,6 +302,9 @@ async def execute(pid, prompt):
                 o[outs["named"]] = {"images": []}
         await steps(pid, 2, 0.5)
     elif "color_fix" in v:  # upscale: a window at the target size, each frame flat in its mean colour (4K frames stay cheap here)
+        f = int(v.get("chunk_frames") or 0)  # core's SeedVR2TemporalChunk takes 4n+1 frames per chunk and fails the job on any other count
+        if f and (f - 1) % 4:
+            raise ValueError(f"SeedVR2TemporalChunk: frames_per_chunk must be a 4n+1 pixel-frame count (1, 5, 9, 13, 17, 21, ...); got {f}.")
         frames = read_plate(v["shot"], int(v["max_frames"]))[0]
         first, count, w, h = int(v["first"]), int(v["count"]), int(v["width"]), int(v["height"])
         await steps(pid, 1, 2.0)
