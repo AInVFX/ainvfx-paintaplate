@@ -423,10 +423,6 @@ export function erasePrompt(captions) {
 // stage refines it at full size in 2 steps (8 steps at full size take 181 s on a 1080p plate).
 export const stageOne = ([w, h], step = 32) => [Math.max(step, Math.round(w / 2 / step) * step), Math.max(step, Math.round(h / 2 / step) * step)];
 
-// ---------- A render step and a new edit ----------
-// Generate stops a running full-size or export step for the new edit, at any progress: the person chose to edit. A preview
-// step finishes: it is short, and the new edit's render often uses its result again.
-export const stopsForEdit = ({ cls }) => cls !== "preview";
 // A step's result displayed as it is made plays at once, and a player that already plays goes on with it. It waits, paused,
 // while the person paints, has an edit or the keyframes selected, looks at a pinned step, or paused the player by hand
 // during this render (Space, the play button); a stop holds everything.

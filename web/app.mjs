@@ -11,7 +11,7 @@ import * as colour from "./display.mjs"; // the colour tools as OpenRV's RVColor
 import { modelsBehind } from "./models.mjs";
 import { INSPECT_SIZE, addSampled, boxPlace, inspectorRows, pointsQuery, sourcePixel, sourcePath, wipeSide } from "./inspector.mjs";
 import { editorGraph, finishGraph, fluidGraph, sceneGraph } from "./graph.mjs";
-import { askedText, asksName, autoChose, autoplays, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, coreBox, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, deepLine, deepLoading, deepMovie, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, FAMILY, fileStem, FINISH, finishFolder, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, graphRows, HDR_DEPTH, hdrCompSeconds, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, matteWindow, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearestKey, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, pictureName, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, resultLine, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, startsLoaded, statusOf, stepFamily, stepLabel, stepOrder, stopsForEdit, stopsForPreview, strokesLabel, strokeTarget, timelineClass, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleChunk, upscaleChunks, upscaleCustom, upscaleKeeps, upscaleNote, upscalePass, upscaleResize, upscaleSeconds, upscaleSizes, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName } from "./logic.mjs";
+import { askedText, asksName, autoChose, autoplays, beyondDetail, blankChanges, blankDepth, blankLimits, blankSpec, browseItems, CACHE_LEAST, CACHE_MOST, caption, changedMask, colorShares, coreBox, countText, crumbs, DAB_PROFILE, dabFlow, dabsAlong, dabsBox, dark, deepLine, deepLoading, deepMovie, dependsOnChange, dimOutside, donorFor, downloadLines, drawsDeep, eraseCheck, erasePrompt, erasesPaint, escapeAction, exportFormat, exportWords, FAMILY, fileStem, FINISH, finishFolder, finishLabel, fitSize, FLUID, fluidPrompt, framePattern, freeAsk, freeName, freeNeedsRoom, fullPath, gb, graphRows, HDR_DEPTH, hdrCompSeconds, hdrFps, hidesNote, inHues, keepReason, keySlots, leftHint, leftLines, lengthWarning, lightColor, liveEvery, logFileName, logLevel, logReport, MATTE_TIPS, matteChoices, matteKey, matteOf, matteWindow, memoryBytes, missingFileHint, missingLine, moveKey, nameRequest, nativeCause, nearestKey, nearKeys, ocioTree, outputPath, paintBoxes, paintColors, panelSize, passMovie, pickedColor, pickObjects, pictureName, plainError, plateAlone, plateKeep, PREVIEW_DEFAULT, previewCap, previewDivOf, previewSize, previewSizes, readPreview, reconcile, removedNames, renderKey, resultLine, rubDabs, sceneName, sceneV7, secs, setFolder, shadowBox, shadowOf, sharedMatte, sharedMatteLine, shotPrompt, snapKey, splitTable, stageOne, startsLoaded, statusOf, stepFamily, stepLabel, stepOrder, stopsForPreview, strokesLabel, strokeTarget, timelineClass, toolEndsEdit, upsampleRequest, UPSCALE, UPSCALE_ASK, upscaleAskOf, upscaleChunk, upscaleChunks, upscaleCustom, upscaleKeeps, upscaleNote, upscalePass, upscaleResize, upscaleSeconds, upscaleSizes, upscaleTarget, upscaleWhy, upscaleWindow, upscaleWindows, viewerSpace, wantsHdr, workflowClasses, writerBoxes, writerSaw, X_ELEMENTS, X_LABELS, X_STAGES, xDefaults, xRows, xShown, zipFileName } from "./logic.mjs";
 import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFromPreview, stepGuess, timeId, stepLeft, stepSizeOf, timeKey } from "./logic.mjs"; // the pipeline: the memory profile, each step's estimate and its time
 import { dataSpace, plateDepth, exportDone, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_ALONE, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
@@ -2197,7 +2197,7 @@ function launch(edit, another = false) { // Generate: the edit on the first fram
     recompose(); historyUI(); render(); timelineUI();
     return status(edit.refused.said, "hint");
   }
-  preempt(); // Generate: a full-size or export step stops for this edit, and runs again later
+  preempt(); // Generate: the render step at work stops for this edit, and runs again later
   edit.state = "queued";
   if (edit.tool !== "fluid") edit.thumb ??= strokesThumb(edit); // a fluid shot's thumbnail is its first keyframe
   historyUI(); render();
@@ -2644,7 +2644,7 @@ function again(edit) { // a new seed for one edit; the edits above it follow if 
   if (!(edit.strokes.length || edit.keys?.length) || edit.state === "drawing") return;
   mark();
   Object.assign(edit, { seed: (Math.random() * 2 ** 31) | 0, on: true, force: true, launched: performance.now() });
-  preempt(); // another try is a Generate: a full-size or export step stops for it
+  preempt(); // another try is a Generate: the render step at work stops for it
   const said = `${editName(edit)}: another try, seed ${edit.seed}`;
   if (S.halted) told(said, "It waits for Enter."); else status(`${said}.`);
   rebuild();
@@ -2881,7 +2881,7 @@ function touch(ms = IDLE_MS) { clearTimeout(idleTimer); idleTimer = setTimeout(i
 // passes with their composite (the review), and the export, which runs only when Export asks for it. One step runs at a time,
 // for the set of edits displayed alone (pickRender): its preview, then its full size, then its export. A set no longer displayed
 // waits, and goes on at its next step when it shows again. Nothing stops a step but Generate: a bypass, an undo or another
-// edit lets it finish and keeps its result. Generate stops a full-size or export step at any progress, and lets a preview step finish (logic.stopsForEdit).
+// edit lets it finish and keeps its result. Generate stops the step at work, whatever it is and wherever it is (preempt): nothing waits for a step to end.
 // What every job made is also in the job index on disk.
 const YIELD = new Error("yield"); // a render step gives way to an edit, or to the render of another set of edits now displayed
 
@@ -2944,13 +2944,10 @@ function pickRender() { // the render displayed, while it has a step to make: no
   return r && nextClass(r) ? r : null;
 }
 
-function preempt() { // Generate: a full-size or export step stops for the new edit, at any progress, and runs again later
+function preempt() { // Generate: the render step at work stops for the new edit, whatever the step and wherever it is: nothing waits. It runs again later
   const st = S.stage, r = S.piping;
   if (!st || !r) return;
-  const def = STAGES.find((x) => x.id === st.id), cls = !def.final ? "preview" : st.id === "export" ? "export" : "full", pct = Math.round(st.progress * 100);
-  if (!def.up && !def.hdr && !stopsForEdit({ cls })) return void log( // a preview step finishes; Finish's steps stop as the full size does: their finished jobs stay in the job index
-    `Render v${r.v}: ${labelOf(def, r)}: at ${pct}%, finishing before the new edit.`);
-  log(`Render v${r.v}: ${labelOf(def, r)}: stopped at ${pct}% for the new edit. It continues when its edits are turned on again.`);
+  log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === st.id), r)}: stopped at ${Math.round(st.progress * 100)}% for the new edit. It continues when its edits are turned on again.`);
   st.stopped = true; // a job the step asks for after this, its upload done, is not posted (onStop)
   cancel(...RENDER_KINDS);
 }

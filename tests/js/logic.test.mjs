@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { changedMask, erasePrompt, erasesPaint, indexValues, paintBoxes, pickedColor, stageOne, stopsForEdit, blankSpec, caption, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize, wantsHdr, hdrFps, blankDepth, escapeAction } from "../../web/logic.mjs";
+import { changedMask, erasePrompt, erasesPaint, indexValues, paintBoxes, pickedColor, stageOne, blankSpec, caption, fluidPrompt, keySlots, moveKey, nearKeys, snapKey, dependsOnChange, fillWorkflow, fitSize, frameUse, gb, parseWorkflow, plainError, previewSize, previewSizes, secs, strokeTarget, toolEndsEdit, panelSize, wantsHdr, hdrFps, blankDepth, escapeAction } from "../../web/logic.mjs";
 
 const workflow = (name) => parseWorkflow(JSON.parse(readFileSync(new URL(`../../web/workflows/${name}.json`, import.meta.url))));
 const classes = (wf) => Object.values(wf.prompt).map((n) => n.class_type);
@@ -249,11 +249,6 @@ test("the full size's first stage is half the working size, in multiples of 32",
   assert.deepEqual(stageOne([1920, 800]), [960, 416]);
 });
 
-
-test("Generate stops a full-size or export step at any progress; a preview step finishes", () => {
-  for (const progress of [0, 0.3, 0.6, 0.99]) for (const cls of ["full", "export"]) assert.equal(stopsForEdit({ cls, progress }), true, `${cls} at ${progress}`);
-  assert.equal(stopsForEdit({ cls: "preview", progress: 0.05 }), false, "a preview step always finishes");
-});
 
 test("a job index key leaves out output folders and the live preview rate, and keeps every value that changes the result", () => {
   const a = indexValues({ seed: 4, prefix: "paintaplate/x/v1/clean/f", video_prefix: "v1/clean", live: 2, hero: "up/ab.png", prompt: "A street." });
