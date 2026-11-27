@@ -3750,7 +3750,7 @@ function familiesBefore(r, skip) {
   for (const st of STAGES) {
     if (skip?.has(st.id) || doneOf(r, st) !== undefined) continue;
     out[st.id] = S.stage?.id === st.id && S.stage.key === r?.key ? S.stage.page3Before : before;
-    before = stepFamily(st.id) ?? before;
+    before = stepFamily(st.id);
   }
   return out;
 }
