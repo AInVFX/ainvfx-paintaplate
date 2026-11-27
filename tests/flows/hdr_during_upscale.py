@@ -3,7 +3,6 @@ is no longer the last stage, whichever job it runs (the export's parts it fetche
 Upscale's jobs is held 8 s on the mock, so the switch meets it running. 1600 x 880, a size the mock holds in a small machine."""
 RESTS = "['full size ready', 'finish ready'].includes(document.querySelector('#render-left').textContent) || document.querySelector('#status').textContent.startsWith('Error')"
 NAMES = "els => els.map((e) => e.querySelector('.name').textContent)"
-SIZE = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
 finish = lambda rows: rows[rows.index("Composite, full size") + 1:] if "Composite, full size" in rows else []  # noqa: E731  # the Finish steps' rows
 
 
@@ -12,9 +11,7 @@ def run(browser, port, U):
     U.open_plate(page)
     page.evaluate(U.WATCH)
     page.click("#finish-btn"); page.click("#finish-upscale")
-    page.select_option("#finish-upscale-size", "custom"); page.wait_for_selector("#ask-field", state="visible", timeout=10000)
-    page.fill("#ask-field", "1600"); page.keyboard.press("Enter"); page.wait_for_selector("#ask", state="hidden", timeout=10000)
-    U.poll(page, lambda: "1600 x " in page.evaluate(SIZE), 3)
+    U.upscale_custom(page, "1600")
     page.keyboard.press("Escape")
     page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(U.REVIEWED), 240000, "the full-size composite")

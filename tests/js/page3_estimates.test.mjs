@@ -1,10 +1,10 @@
-// What a step announces before it ever ran (logic.stepGuess), against what it took. Small: an RTX 4090 Laptop GPU, 16 GB of
-// VRAM, 52 GB of RAM. Large: an RTX PRO 6000 Blackwell Server Edition, 96 GB of VRAM, 175 GB of RAM, ComfyUI started with
+// What a step announces before it ever ran (logic.stepGuess), against what it took. Small: a 16 GB GPU with 52 GB of
+// RAM. Large: an RTX PRO 6000 Blackwell Server Edition, 96 GB of VRAM, 175 GB of RAM, ComfyUI started with
 // --highvram. ComfyUI 0.45.3 on both. Every row holds within 25% of its measure.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { SLOWER, startsLoaded, stepFamily, stepGuess, timeId } from "../../web/logic.mjs";
+import { loadSeconds, startsLoaded, stepFamily, stepGuess, timeId } from "../../web/logic.mjs";
 
 const app = readFileSync(new URL("../../web/app.mjs", import.meta.url), "utf8");
 const REF = Object.fromEntries([...app.matchAll(/\{ id: "(\w+)", label: "[^"]*", ref: (\d+)/g)].map((m) => [m[1], Number(m[2])]));
@@ -34,10 +34,10 @@ test("each measure holds within 25% of what the step announces", () => {
 test("on a 16 GB GPU a step pays its family's load only after a job of another family", () => {
   const after = (before) => stepGuess("shot", REF.shot, HORSE, "small", false, before);
   assert.equal(after(null), after("klein")); // nothing before it, or the edit's models: LTX loads first
-  assert.ok(Math.abs(after("klein") - after("ltx") - SLOWER.small.lead.ltx) < 1e-9);
+  assert.ok(Math.abs(after("klein") - after("ltx") - loadSeconds("ltx", HORSE, "small")) < 1e-9);
   assert.equal(stepGuess("full", REF.full, HORSE, "large", false, "klein"), stepGuess("full", REF.full, HORSE, "large", false, "ltx")); // a large GPU keeps its models
   assert.deepEqual([startsLoaded("fluidfull", "ltx"), startsLoaded("track", "ltx"), startsLoaded("shot", null)], [true, false, false]);
-  assert.deepEqual([stepFamily("trackfull"), stepFamily("review"), stepFamily("upcomp")], ["sam", "frames", null]);
+  assert.deepEqual([stepFamily("trackfull"), stepFamily("review"), stepFamily("upcomp")], ["sam", "frames", "seedvr2"]);
 });
 
 test("a step that starts with its models loaded keeps its seconds apart", () => {

@@ -12,7 +12,6 @@ from PIL import Image
 
 import zip_rows  # noqa: E402
 
-SIZE = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
 
 
 def grey(z, name):  # the mean of a frame in 8-bit levels, read as the mock reads the plate-size matte
@@ -33,9 +32,7 @@ def run(browser, port, U):
     U.check(page.is_hidden("#finish-upscale-ask") and page.is_checked("#finish-upscale") and page.text_content("#finish-btn") == "Finish · 1"
             and any(t.startswith("Finish: Upscale on.") for t in U.log_lines(page)[start:]), "its switch turns it on with no question, and the log says so")
     U.check(note.startswith("About ") and note.endswith(" min on this GPU."), f"the note under the size list gives the time on this GPU: {note!r}")
-    page.select_option("#finish-upscale-size", "custom"); page.wait_for_selector("#ask-field", state="visible", timeout=10000)
-    page.fill("#ask-field", "1600"); page.keyboard.press("Enter"); page.wait_for_selector("#ask", state="hidden", timeout=10000)
-    U.poll(page, lambda: "1600 x " in page.evaluate(SIZE), 3)
+    U.upscale_custom(page, "1600")
     page.keyboard.press("Escape")
     page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(U.REVIEWED), 240000, "the full-size composite of the paint")

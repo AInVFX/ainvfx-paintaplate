@@ -41,9 +41,7 @@ def run(browser, port, U):
 
     switch(True)  # the size asked for stays with the plate while the switch is off
     page.click("#finish-btn")
-    page.select_option("#finish-upscale-size", "custom"); page.wait_for_selector("#ask-field", state="visible", timeout=10000)
-    page.fill("#ask-field", "1600"); page.keyboard.press("Enter"); page.wait_for_selector("#ask", state="hidden", timeout=10000)
-    U.poll(page, lambda: "1600 x 880" in page.evaluate(SIZE), 3)
+    U.upscale_custom(page, "1600")
     switch(False)
     U.check("1600 x 880" in page.evaluate(SIZE) and not page.is_checked("#finish-upscale"), f"a size of 1600 x 880 is chosen, with the switch off: {page.evaluate(SIZE)!r}")
     page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")

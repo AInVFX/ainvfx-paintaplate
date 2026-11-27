@@ -1,5 +1,5 @@
 """The GPU sheet reads a zip's result by its row (tests/zip_rows.py, gpu_matrix.sheet): a Light edit in HDR, whose zip holds
-its result as composite_hdr/ EXR frames and no full-size composite, gives a sheet, where it stopped on « IndexError »."""
+its result as composite_hdr/ EXR frames and no full-size composite, gives a sheet."""
 import os
 import shutil
 import sys

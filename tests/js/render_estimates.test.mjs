@@ -1,5 +1,5 @@
 // The time a step announces before it ever ran on a machine: logic.stepGuess, the 96 GB GPU's reference from STAGES, scaled
-// to the plate, then to the GPU. The rows are measures on an RTX 4090 Laptop GPU (16 GB of VRAM, 52 GB of RAM), read from the
+// to the plate, then to the GPU. The rows are measures on a 16 GB GPU with 52 GB of RAM, read from the
 // page's log. Every row holds within 25% of its measure, except those OUTSIDE names, each with why.
 import { test } from "node:test";
 import assert from "node:assert/strict";

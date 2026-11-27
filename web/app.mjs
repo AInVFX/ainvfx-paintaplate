@@ -2951,7 +2951,8 @@ function preempt() { // Generate: a full-size or export step in its first half s
   if (!def.up && !def.hdr && !stopsForEdit({ cls, progress: st.progress })) return void log( // Finish's steps stop at once: their finished jobs stay in the job index
     `Render v${r.v}: ${labelOf(def, r)}: at ${pct}%, finishing before the new edit.`);
   log(`Render v${r.v}: ${labelOf(def, r)}: stopped at ${pct}% for the new edit. It continues when its edits are turned on again.`);
-  cancel(...BACKGROUND);
+  st.stopped = true; // a job the step asks for after this, its upload done, is not posted (onStop)
+  cancel(...RENDER_KINDS);
 }
 
 function idle() { // one render step at a time, from the render queue; the edits on the first frame go first
@@ -3749,7 +3750,7 @@ function familiesBefore(r, skip) {
   for (const st of STAGES) {
     if (skip?.has(st.id) || doneOf(r, st) !== undefined) continue;
     out[st.id] = S.stage?.id === st.id && S.stage.key === r?.key ? S.stage.page3Before : before;
-    before = stepFamily(st.id) ?? before;
+    before = stepFamily(st.id);
   }
   return out;
 }

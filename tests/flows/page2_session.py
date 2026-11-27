@@ -1,4 +1,4 @@
-"""The laptop's session for P8 and autoplay, end to end, with autoplay on as a person has it: a fluid shot with two
+"""A whole session, end to end, with autoplay on as a person has it: a fluid shot with two
 keyframes, then a Paint edit on it; each step's result plays as it is made and the text prompt field empties after each
 Generate; the Paint edit's pencil shows its strokes over the picture it paints on; Esc plays the latest result; the fluid
 shot's pencil goes to its nearest keyframe on the black plate; the fluid shot made again shows no old result while it

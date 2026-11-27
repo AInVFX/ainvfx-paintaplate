@@ -19,8 +19,8 @@ Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com
 | **Light** | Relights the shot. Paint where the light comes from, in its colour. Paint in black to darken an area |
 | **A fluid shot** | Starts from a blank plate. Paint your fluid (smoke, fire, water and more) in flat colours on a few keyframes, and ainvfx-fluid, our fluid model, generates the shot as the first row of History. Then edit it with Paint, Clean or Light, as any plate |
 | **Review** | The viewer follows [OpenRV](https://github.com/AcademySoftwareFoundation/OpenRV), the Academy Software Foundation's review player: colour through OpenColorIO (OCIO), the same keys, a wipe against the plate, the Colour Inspector |
-| **Finish** | Enable **SDR to HDR** to turn a standard dynamic range plate, edited or not, into high dynamic range: half-float EXR frames in ACES2065-1. Enable **Upscale** to upscale the result with ByteDance's SeedVR2 7B, up to 3840 x 2160 |
-| **Export** | Writes the result in the plate's own format (file type, bit depth, frame numbers, colour tags, timecode, audio, EXR layers), with its matte, as one zip. The matte is the mask of what the edit changed. Each file is named after the plate, or the scene once saved, then its row in the Export dialog. Enable **ComfyUI graph** to export every step as one ComfyUI workflow, with the images it loads, to open and change in ComfyUI |
+| **Finish** | Enable **SDR to HDR** to turn a standard dynamic range plate, edited or not, into high dynamic range: half-float EXR frames in ACES2065-1. Enable **Upscale** to upscale the result with ByteDance's SeedVR2 7B: at the plate's own size, at 2560 or 3840 px on the long side, or at a long side you type, from 640 to 3840 px, up to 3840 x 2160. Each step plays in the viewer as it is made |
+| **Export** | Writes the files you tick in the Export dialog as one zip: the plate, the shot, the layer, the matte and the composite, at each stage the render made (preview, full size, HDR, upscaled). The matte is the mask of what the edit changed. Frames keep the plate's format. A movie becomes ProRes 4444 XQ, with its colour tags, timecode and audio, or 16-bit PNG frames when it holds more than 10 bits. With SDR to HDR, the HDR stage gives half-float EXR frames in ACES2065-1. Each file is named after the plate, or the scene once saved, then its row in the Export dialog. Enable **ComfyUI graph** to export every step as one ComfyUI workflow, with the images it loads, to open and change in ComfyUI |
 
 ## What you need
 
@@ -129,7 +129,7 @@ Each edit stays in History, and you can add as many as you need. Hover or click 
 
 - **The log.** The **Log** button opens it. It records what happened, one line per fact, and the button is highlighted when an error arrives. The download icon beside it saves the log as a text file, with the versions and the machine as ComfyUI reports them. Its paths start at ComfyUI's folder, as `output/paintaplate/…`, so it shows nothing of your own folders.
 - **The memory profile.** Its line in the log says how the page uses your GPU, from its VRAM: see [What you need](#what-you-need).
-- **Stop.** Esc, or **Stop** beside Generate, stops what generates. Finished steps are kept; Enter continues from there.
+- **Stop.** Esc, or **Stop** beside Generate, stops what generates. Finished steps are kept. Press Enter to continue from there.
 - **ComfyUI's memory grows, or the page waits and nothing runs.** Start ComfyUI with `PAINTAPLATE_TRACE=1` in its environment. Every request then writes a line in ComfyUI's terminal when it starts and when it ends, with the memory the process holds. Add these lines to your report: [TESTING.md](TESTING.md#the-trace-when-comfyuis-memory-grows-and-no-job-runs) explains them.
 - **A model or a node is missing.** The page names it at start. `python get_models.py --list` shows what is in place.
 - **Report a fault** in the [issues](https://github.com/AInVFX/ainvfx-paintaplate/issues), with the saved log attached.
@@ -163,10 +163,15 @@ Paint a plate is a web page that ComfyUI serves, with a pack of 16 nodes. Each s
 
 **Memory and time**
 
-- RAM grows with a plate's length and size. On a 64 GB machine, with 52 GB of it for ComfyUI and a 16 GB GPU, a 1920 x 1080 plate opens with 121 frames. With 175 GB of RAM and a 96 GB GPU, it opens with 513 frames, and a 3840 x 2160 plate with 129. A 3840 x 2160 plate of 121 frames ran on a 96 GB GPU with 188 GB of RAM, where ComfyUI held up to 164 GB.
+- RAM grows with a plate's length and size. With 52 GB of RAM for ComfyUI and a 16 GB GPU, a 1920 x 1080 plate opens with 121 frames. With 175 GB of RAM and a 96 GB GPU, it opens with 513 frames, and a 3840 x 2160 plate with 129. A 3840 x 2160 plate of 121 frames ran on a 96 GB GPU with 188 GB of RAM, where ComfyUI held up to 164 GB.
 - Under 16 GB of VRAM, LTX works in 256 px tiles, and a soft band can show where two tiles overlap, most in SDR to HDR's frames.
 - Upscale runs again with each new render. At 3840 x 2160, for 121 frames, it takes about 46 min for Paint or Clean on a 16 GB GPU, 23 min for the result alone, and about 14 min on a 96 GB GPU.
-- Upscale works in chunks of 21 frames, and two chunks meet with no blend: a jump can show there.
+- On a 16 GB GPU, one pass of Upscale holds 25 frames at 3840 x 2160 and 121 frames at 1920 x 1080. A longer shot runs in passes and windows that share frames, blended where they meet.
+- On a 16 GB GPU, Upscale at 2560 px on the long side can run out of VRAM: at 2560 x 1408, a window of 63 frames ran once, then ran out of VRAM the next time.
+
+**Export**
+
+- A movie that holds more than 10 bits exports as 16-bit PNG frames, which keep all its bits: FFmpeg's ProRes encoder writes 10 bits.
 
 **The matte, for Paint and Clean**
 

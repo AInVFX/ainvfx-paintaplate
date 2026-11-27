@@ -19,12 +19,12 @@ test("on a 96 GB GPU, the fluid shot's preview and full size announce themselves
   assert.deepEqual(off, []);
 });
 
-// Measures on an RTX 4090 Laptop GPU (16 GB of VRAM, 52 GB of RAM): a 16-bit fluid shot at 1280 x 704, 121
+// Measures on a 16 GB GPU with 52 GB of RAM: a 16-bit fluid shot at 1280 x 704, 121
 // frames, the preview at Half size, the models loading for the first pass
-const LAPTOP = [["fluid_1280x704_25fps_121f", "fluid", 45.1, P704], ["fluid_1280x704_25fps_121f", "fluidfull", 83.7, P704]];
+const SMALL16 = [["fluid_1280x704_25fps_121f", "fluid", 45.1, P704], ["fluid_1280x704_25fps_121f", "fluidfull", 83.7, P704]];
 
 test("on a 16 GB GPU, the fluid shot's steps announce themselves within 25% of what they took", () => {
   const after = (id) => (id === "fluidfull" ? "ltx" : null); // the full size runs right after the preview: LTX is loaded
-  const off = LAPTOP.map(([name, id, s, plate]) => [`${name} ${id}`, s, stepGuess(id, REF[id], plate, "small", false, after(id))]).filter(([, s, g]) => Math.abs(g - s) > 0.25 * s);
+  const off = SMALL16.map(([name, id, s, plate]) => [`${name} ${id}`, s, stepGuess(id, REF[id], plate, "small", false, after(id))]).filter(([, s, g]) => Math.abs(g - s) > 0.25 * s);
   assert.deepEqual(off, []);
 });

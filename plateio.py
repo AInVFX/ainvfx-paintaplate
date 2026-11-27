@@ -2,8 +2,8 @@
 
 Image sequences and frame patterns, the plate spec and its colour guess, the plate browser's folder scan, video and
 sequence decoding with core's pictures (each frame written into its place in one array), EXR writing that keeps every
-untouched channel, layer, part and header attribute (OpenEXR, optional), stills in the plate's format, video in the
-source codec, pixel format, colour tags and timecode with the source audio copied, PNG, EXR and H.264 writers that work
+untouched channel, layer, part and header attribute (OpenEXR, optional), stills in the plate's format, video as ProRes 4444 XQ
+with the source's colour tags and timecode and its audio copied, PNG, EXR and H.264 writers that work
 on several frames at once, a shot's windows joined, and the blank canvas of a fluid shot.
 
 Everything here is plain Python with numpy, PyAV and (optionally) OpenEXR, so it runs and is tested outside ComfyUI.

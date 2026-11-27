@@ -539,7 +539,7 @@ test("SDR to HDR: on its own for a plate that holds values above 1.0, else only 
   assert.equal(wantsHdrFor(mp4, 1, true), true, "an SDR video with Deliver's bit-depth pass on");
 });
 
-// ---------- The viewer, round 1: a stop keeps the strokes ----------
+// ---------- The viewer: a stop keeps the strokes ----------
 import * as viewerRules from "../../web/logic.mjs";
 
 test("Esc drops the strokes in progress first, then stops the edit being generated, which keeps its strokes", () => {
@@ -558,7 +558,7 @@ test("strokes replay in the order they were made; SAM's object comes last, cut b
   assert.deepEqual(viewerRules.replayOrder([], true), [{ sam: true, cuts: [] }]);
 });
 
-// ---------- The pipeline, round 1: the memory profile (the paint matte's report: matte_summary.test.mjs) ----------
+// ---------- The pipeline: the memory profile (the paint matte's report: matte_summary.test.mjs) ----------
 import { readFileSync as readFlow } from "node:fs";
 import { MEMORY, memoryProfile, fillWorkflow as fillFor, parseWorkflow as parseFor } from "../../web/logic.mjs";
 
@@ -601,7 +601,7 @@ test("a memory profile changes slot values only: one set of workflows, whole dec
   assert.deepEqual([encodes({ ...MEMORY.small.slots }), encodes({ ...memoryProfile({ vram: 12.9e9 }).slots })], [[4096], [256]]);
 });
 
-// ---------- Viewer, round 1, second pass: edits are layers, and a stop stops everything ----------
+// ---------- The viewer: edits are layers, and a stop stops everything ----------
 import { editList, hiddenAbove, stopHint } from "../../web/logic.mjs";
 
 test("hiddenAbove: while an edit of History is changed, the made edits above it are hidden", () => {
@@ -622,7 +622,7 @@ test("editList and stopHint: the status line names the edits stopped and waiting
   assert.equal(stopHint(), "Stopped. Press Enter to continue from there.");
 });
 
-// ---------- Viewer, round 1, second pass, turn 2: after Generate, an edit above waits for its own pass ----------
+// ---------- The viewer: after Generate, an edit above waits for its own pass ----------
 import { awaitingPass } from "../../web/logic.mjs";
 
 test("awaitingPass: an edit above an edit made again waits for its own pass when it depends on it", () => {

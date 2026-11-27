@@ -3,7 +3,6 @@ join after SDR to HDR's, on its set, to « finish ready ». « Plate, HDR » is 
 running. 1600 x 880, a size the mock holds in a small machine's memory."""
 RESTS = "['full size ready', 'finish ready'].includes(document.querySelector('#render-left').textContent) || document.querySelector('#status').textContent.startsWith('Error')"
 NAMES = "els => els.map((e) => e.querySelector('.name').textContent)"
-SIZE = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
 finish = lambda rows: [x for x in rows[rows.index("Composite, full size") + 1:] if x != "Export"] if "Composite, full size" in rows else []  # noqa: E731  # the Finish steps' rows
 
 
@@ -17,9 +16,7 @@ def run(browser, port, U):
     U.wait_log(page, U.added_line("Plate, HDR: about"), 240000, "the first of SDR to HDR's steps")
     start = len(U.log_lines(page))
     page.click("#finish-btn"); page.click("#finish-upscale")
-    page.select_option("#finish-upscale-size", "custom"); page.wait_for_selector("#ask-field", state="visible", timeout=10000)
-    page.fill("#ask-field", "1600"); page.keyboard.press("Enter"); page.wait_for_selector("#ask", state="hidden", timeout=10000)
-    U.poll(page, lambda: "1600 x " in page.evaluate(SIZE), 3)
+    U.upscale_custom(page, "1600")
     page.keyboard.press("Escape")
     U.wait_log(page, U.added_line("Composite, HDR, upscaled: done in"), 300000, "Upscale's steps on SDR to HDR's set")
     page.wait_for_function(RESTS, timeout=60000)

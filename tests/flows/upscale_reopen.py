@@ -31,8 +31,7 @@ def run(browser, port, U):
         page.click("#finish-btn")
         if not page.is_checked("#finish-upscale"):
             page.click("#finish-upscale")
-        page.select_option("#finish-upscale-size", "custom"); page.wait_for_selector("#ask-field", state="visible", timeout=10000)
-        page.fill("#ask-field", px); page.keyboard.press("Enter"); page.wait_for_selector("#ask", state="hidden", timeout=10000)
+        U.upscale_custom(page, px)
         page.click("#finish-btn")
 
     upscale_at("1600")

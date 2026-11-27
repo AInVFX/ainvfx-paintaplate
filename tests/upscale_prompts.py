@@ -3,7 +3,7 @@ ran (its node ids, classes, inputs and titles), the windows' upscale jobs in the
 (upscale_export). Dropped on ComfyUI's canvas, a file opens as the graph that ran; Queue runs it again on the same files of
 the output folder.
 
-  python tests/upscale_prompts.py --url http://127.0.0.1:8188 --out ~/paintaplate_gpu/w18/prompts [--last 50]
+  python tests/upscale_prompts.py --url http://127.0.0.1:8188 --out ~/paintaplate_gpu/prompts [--last 50]
 
 --last: how many of ComfyUI's latest jobs to read (its history keeps the latest, up to its own limit)."""
 import argparse

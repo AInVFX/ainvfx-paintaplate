@@ -10,7 +10,7 @@ const PASSES = [ // [target, frames, seconds measured]
   [[1920, 1080], 49, 120.7], [[1920, 1080], 81, 196.4], [[1920, 1080], 121, 303.6],
 ];
 
-test("Upscale's estimate on a 16 GB GPU holds each pass the laptop measured within 25%", () => {
+test("Upscale's estimate on a 16 GB GPU holds each pass measured there within 25%", () => {
   for (const [target, frames, measured] of PASSES) {
     const est = upscaleSeconds(target, frames, { parts: 0, profile: "small" });
     assert.ok(Math.abs(est / measured - 1) <= 0.25, `${target.join(" x ")}, ${frames} frames: ${est.toFixed(1)} s for ${measured} s`);
