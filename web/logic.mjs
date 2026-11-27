@@ -984,9 +984,9 @@ export function exportWords({ kind, ready = true, left = "", hdr = false, steps 
   const elements = { plate: { label: "Plate", detail: bytes > 0 ? `${plate}, ${gb(bytes)}` : plate },
     shot: { label: "Shot", detail: "the frames the model made" }, layer: { label: "Layer", detail: "the shot as the composite blends it" },
     matte: { label: "Matte", detail: "where the plate changed, 16-bit PNG frames" }, composite: { label: "Composite", detail: "the result" },
-    graph: { label: GRAPH_LABEL, detail: graphs.length > 1 ? `the scene as ${graphs.length} ComfyUI workflows, run one after the other, with the images they load`
-      : graphs[0] === "finish" ? "Finish's steps as one ComfyUI workflow" : graphs[0] === "fluid_shot" ? "the fluid shot as one ComfyUI workflow, with the images it loads"
-      : "the scene as one ComfyUI workflow, with the images it loads" } };
+    graph: { label: GRAPH_LABEL, detail: graphs.length > 1 ? `the scene as ${graphs.length} ComfyUI workflows, run one after the other, with their source images`
+      : graphs[0] === "finish" ? "Finish's steps as one ComfyUI workflow" : graphs[0] === "fluid_shot" ? "the fluid shot as one ComfyUI workflow, with its source images"
+      : "the scene as one ComfyUI workflow, with its source images" } };
   const stages = { preview: { label: "Preview" }, full: { label: "Full size" }, hdr: { label: "HDR" }, up: { label: "Upscaled" } };
   return { hint, note, elements, stages, help: `${hint} Frames keep their format, and a movie gives ${XQ}, or ${DEEP_FRAMES} when it holds more than 10 bits. With SDR to HDR, « HDR » gives half-float EXR frames in ACES2065-1.` };
 }

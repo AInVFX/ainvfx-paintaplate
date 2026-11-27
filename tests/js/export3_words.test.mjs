@@ -13,8 +13,8 @@ test("the Plate tick names the plate itself, or the fluid shot, where there is n
 
 test("the graph tick says what its workflows make, and how many run one after the other", () => {
   const detail = (graphs) => exportWords({ kind: "edits", graphs }).elements.graph.detail;
-  assert.equal(detail(["edits"]), "the scene as one ComfyUI workflow, with the images it loads");
+  assert.equal(detail(["edits"]), "the scene as one ComfyUI workflow, with its source images");
   assert.equal(detail(["finish"]), "Finish's steps as one ComfyUI workflow");
-  assert.equal(detail(["fluid_shot"]), "the fluid shot as one ComfyUI workflow, with the images it loads");
-  assert.equal(detail(["fluid_shot", "edits", "finish"]), "the scene as 3 ComfyUI workflows, run one after the other, with the images they load");
+  assert.equal(detail(["fluid_shot"]), "the fluid shot as one ComfyUI workflow, with its source images");
+  assert.equal(detail(["fluid_shot", "edits", "finish"]), "the scene as 3 ComfyUI workflows, run one after the other, with their source images");
 });

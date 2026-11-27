@@ -133,7 +133,7 @@ class GraphImagesInZip(unittest.TestCase):
         got = [arc for _, arc, _ in routes.zip_entries([("comfyui_graph", f"output:paintaplate/graphimages{os.getpid()}/v1/edits.comfyui.json")], "desk")]
         self.assertEqual(got, ["desk_comfyui_graph.json", "input/desk_e1_mask_0676e451.png", "input/desk_e1_strokes_7bcde075.png",
                                "input/desk_e1_keyframe_12345678.png"])
-        print("The zip holds the graph and the images it loads, in input/")
+        print("The zip holds the graph and its source images, in input/")
 
 
 if __name__ == "__main__":
