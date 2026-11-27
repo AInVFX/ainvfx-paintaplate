@@ -7,7 +7,7 @@ import re
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NOT_OURS = {"scene.comfyui.json": "the graph's file in a run's folder", "ocio_source_setup.py": "a file of OpenRV"}
+NOT_OURS = {"ocio_source_setup.py": "a file of OpenRV"}
 
 
 def read(*path):

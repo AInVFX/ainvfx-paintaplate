@@ -19,8 +19,8 @@ Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com
 | **Light** | Relights the shot. Paint where the light comes from, in its colour. Paint in black to darken an area |
 | **A fluid shot** | Starts from a blank plate. Paint your fluid (smoke, fire, water and more) in flat colours on a few keyframes, and ainvfx-fluid, our fluid model, generates the shot as the first row of History. Then edit it with Paint, Clean or Light, as any plate |
 | **Review** | The viewer follows [OpenRV](https://github.com/AcademySoftwareFoundation/OpenRV), the Academy Software Foundation's review player: colour through OpenColorIO (OCIO), the same keys, a wipe against the plate, the Colour Inspector |
-| **Finish** | Enable **SDR to HDR** to turn a standard dynamic range plate, edited or not, into high dynamic range: half-float EXR frames in ACES2065-1. Enable **Upscale** to upscale the result with ByteDance's SeedVR2 7B: at the plate's own size, at 2560 or 3840 px on the long side, or at a long side you type, from 640 to 3840 px, up to 3840 x 2160. Each step plays in the viewer as it is made |
-| **Export** | Writes the files you tick in the Export dialog as one zip: the plate, the shot, the layer, the matte and the composite, at each stage the render made (preview, full size, HDR, upscaled). The matte is the mask of what the edit changed. Frames keep the plate's format. A movie becomes ProRes 4444 XQ, with its colour tags, timecode and audio, or 16-bit PNG frames when it holds more than 10 bits. With SDR to HDR, the HDR stage gives half-float EXR frames in ACES2065-1. Each file is named after the plate, or the scene once saved, then its row in the Export dialog. Enable **ComfyUI graph** to export every step as one ComfyUI workflow, with the images it loads, to open and change in ComfyUI |
+| **Finish** | Enable **SDR to HDR** to turn a standard dynamic range plate, edited or not, into high dynamic range: half-float EXR frames in ACES2065-1. Enable **Upscale** to upscale or restore the result with ByteDance's SeedVR2 7B: from the plate's own size up to 3840 x 2160 |
+| **Export** | Writes the files you tick in the Export dialog as one zip: the plate, the shot, the layer, the matte and the composite, at each stage the render made (preview, full size, HDR, upscaled). The matte is the mask of what the edit changed. Frames keep the plate's format. A movie becomes ProRes 4444 XQ, with its colour tags, timecode and audio, or 16-bit PNG frames when it holds more than 10 bits. With SDR to HDR, the HDR stage gives half-float EXR frames in ACES2065-1. Each file is named after the plate, or the scene once saved, then its row in the Export dialog. Enable **ComfyUI graph** to export every step as ComfyUI workflows, with the images they load, to open and change in ComfyUI: one for the fluid shot, one for the edits and one for Finish's steps, to run in that order |
 
 ## What you need
 
@@ -120,9 +120,9 @@ Each edit stays in History, and you can add as many as you need. Hover or click 
 - Paint a plate reads each plate's colour space from its file, and the export writes every pixel back in that space. Change it only for a camera's log footage, which no file tag describes: right-click > OCIO > Plate, then the camera's log space.
 - Open the EXR frames of SDR to HDR in ACES2065-1, in a viewer or in compositing software. Read with a plain gamma, they look darker and less saturated than the plate.
 - Open a plate behind a symbolic link inside ComfyUI's input or output folder by its full path, when ComfyUI runs on your own machine: the Open dialog does not follow such a link. The input or output folder itself can be a link, or set with ComfyUI's `--input-directory` and `--output-directory`.
-- Export's zip names each file after the plate, or the scene once saved, then its row: for a plate named `desk`, `desk_v1.zip` holds `desk_composite_full_size.mp4`, the matte's frames in `matte/`, `desk_shot_full_size.mp4`, `desk_comfyui_graph.json` and `desk_models.md`. With SDR to HDR, its frames are the row **HDR**, in `hdr/`.
+- Export's zip names each file after the plate, or the scene once saved, then its row: for a plate named `desk`, `desk_v1.zip` holds `desk_composite_full_size.mov`, the matte's frames in `matte/`, `desk_shot_full_size.mp4`, `desk_comfyui_graph.json` and `desk_models.md`. When the zip holds several ComfyUI graphs, each is named after what it makes: `desk_fluid_shot_comfyui_graph.json`, `desk_edits_comfyui_graph.json` and `desk_finish_comfyui_graph.json`. With SDR to HDR, its frames are the row **HDR**, in `hdr/`.
 - **Source plate**, off by default, adds the plate's own files to the zip, in `source_plate/`. A plate of 4K EXR frames can take many gigabytes: the dialog shows their size first, and the zip downloads as it is written.
-- To run the exported ComfyUI graph on another machine, copy the zip's `input/` folder into ComfyUI's input folder, and the plate to the path the graph names.
+- To run the exported ComfyUI graphs on another machine, copy the zip's `input/` folder into ComfyUI's input folder and the plate to the path the graphs name, then run the graphs in their order: each reads what the one before it wrote.
 - Press `?` for the keys. The backquote key shows the viewer full screen, where S opens the colours and T the edit's text prompt. The right-click menu lists every action with its keyboard shortcut, and the viewer's colour tools under **OCIO**.
 
 ## When something goes wrong
@@ -166,12 +166,12 @@ Paint a plate is a web page that ComfyUI serves, with a pack of 16 nodes. Each s
 - RAM grows with a plate's length and size. With 52 GB of RAM for ComfyUI and a 16 GB GPU, a 1920 x 1080 plate opens with 121 frames. With 175 GB of RAM and a 96 GB GPU, it opens with 513 frames, and a 3840 x 2160 plate with 129. A 3840 x 2160 plate of 121 frames ran on a 96 GB GPU with 188 GB of RAM, where ComfyUI held up to 164 GB.
 - Under 16 GB of VRAM, LTX works in 256 px tiles, and a soft band can show where two tiles overlap, most in SDR to HDR's frames.
 - Upscale runs again with each new render. At 3840 x 2160, for 121 frames, it takes about 46 min for Paint or Clean on a 16 GB GPU, 23 min for the result alone, and about 14 min on a 96 GB GPU.
-- On a 16 GB GPU, one pass of Upscale holds 25 frames at 3840 x 2160 and 121 frames at 1920 x 1080. A longer shot runs in passes and windows that share frames, blended where they meet.
-- On a 16 GB GPU, Upscale at 2560 px on the long side can run out of VRAM: at 2560 x 1408, a window of 63 frames ran once, then ran out of VRAM the next time.
+- On a 16 GB GPU, one pass of Upscale holds 25 frames at 3840 x 2160 and 121 frames at 1920 x 1080. A longer shot runs in passes and windows, with overlapped frames where they blend.
+- On a 16 GB GPU, Upscale above 2K on the long side can run out of VRAM.
 
 **Export**
 
-- A movie that holds more than 10 bits exports as 16-bit PNG frames, which keep all its bits: FFmpeg's ProRes encoder writes 10 bits.
+- Due to the 10-bit limit of FFmpeg's ProRes encoder, a movie that holds more than 10 bits is currently exported as 16-bit PNG frames.
 
 **The matte, for Paint and Clean**
 
