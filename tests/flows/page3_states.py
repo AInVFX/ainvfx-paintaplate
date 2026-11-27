@@ -1,5 +1,7 @@
 """The line under the timeline follows the Render panel's status line: for a fluid shot alone, which makes no composite,
-it turns grey once the preview is made and while the full size runs, then green once the full size is made."""
+it turns grey once the preview is made and while the full size runs, then green once the full size is made. On a plate
+with no edit, a Finish switch turned on lists its step, and the status line names no time before Enter: it counts once
+the render runs, then says « finish ready »."""
 
 
 def run(browser, port, U):
@@ -20,4 +22,20 @@ def run(browser, port, U):
     U.wait_log(page, U.added_line("Fluid shot, full size: done in"), 120000, "the fluid shot's full size")
     U.check(U.poll(page, lambda: "ready" in bar().split(), 5),
             f"a fluid shot alone, made at full size: the line under the timeline is green ({bar()!r}), as the status line reads « {page.text_content('#render-left')} »")
+    page.close()
+
+    page = U.load(browser, port)
+    U.open_plate(page)
+    page.evaluate(U.WATCH)
+    page.click("#finish-btn"); page.click("#finish-upscale"); page.keyboard.press("Escape")
+    left = lambda: page.text_content("#render-left")  # noqa: E731
+    U.check(U.poll(page, lambda: page.locator("#stages li", has_text="Plate, upscaled").count() == 1, 5),
+            "Upscale on, on a plate with no edit: its step is listed, to come")
+    page.wait_for_timeout(1000)
+    U.check(left() == "" and "final" not in bar().split() and "ready" not in bar().split(),
+            f"before Enter no render runs: the status line names no time ({left()!r}), and the line under the timeline agrees ({bar()!r})")
+    page.keyboard.press("Enter")
+    U.check(U.poll(page, lambda: left().startswith("finish") and left() != "finish ready", 10), f"after Enter the render runs, and the line counts: {left()!r}")
+    U.wait_log(page, U.added_line("Plate, upscaled: done in"), 240000, "the plate's upscaled step")
+    U.check(U.poll(page, lambda: left() == "finish ready" and "ready" in bar().split(), 5), f"made: « finish ready », the line under the timeline green: {left()!r}, {bar()!r}")
     page.close()

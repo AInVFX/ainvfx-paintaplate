@@ -1281,6 +1281,9 @@ function dropLive() { // the pass that sent it ended, stopped or failed: nothing
 }
 
 function generating() { return !!(S.queued || S.piping); }
+function runsNow() { // the render displayed runs, or will at its next step (pickRender), or an edit of it runs: the Render panel's line counts its time; not after Esc
+  return !S.halted && (S.piping?.key === S.heroKey || !!S.running || !!S.queued || !!pickRender());
+}
 function escape() { // Esc: logic.escapeAction. On the edit being generated it stops everything, and that edit keeps its strokes; a selection goes before what else generates
   const busy = generating(), what = escapeAction({ opening: !!openCtl, editing: !!S.draft, running: !!S.running, selected: !!S.selected, pinned: !!S.pass, generating: busy });
   if (what === "cancelOpen") return cancelOpen();
@@ -3833,7 +3836,7 @@ function stagesUI() {
   // the status line: the class of steps at work, the preview, the full size or Finish, and the time until it is done (logic.renderStatus)
   const due = stepsOf(skip, !!S.wantDownload), cls = stepClasses(due);
   $("#render-left").textContent = renderStatus(due.map((st) => ({ cls: cls[st.id], done: doneOf(r, st) !== undefined, left: stepSecs(st, skip, before[st.id]) })),
-    { exporting: !!S.wantDownload, exported: !!r?.exported, busy: S.stage?.key === S.heroKey });
+    { exporting: !!S.wantDownload, exported: !!r?.exported, busy: S.stage?.key === S.heroKey, running: runsNow() });
   timelineBar();
 }
 
@@ -3847,7 +3850,7 @@ function timelineBar() { // the line under the timeline: the preview in gold, th
   let done = steps.reduce((a, st) => a + (doneOf(r, st) !== undefined ? estimate(st.id, r.skip, before[st.id]) : 0), 0);
   if (S.stage?.key === S.heroKey) done += estimate(S.stage.id, r.skip, S.stage.page3Before) * S.stage.progress;
   bar.style.width = `${Math.round((done / Math.max(1, total)) * 100)}%`;
-  const cls = stepClasses(steps), state = timelineClass(steps.map((st) => ({ cls: cls[st.id], done: doneOf(r, st) !== undefined })));
+  const cls = stepClasses(steps), state = timelineClass(steps.map((st) => ({ cls: cls[st.id], done: doneOf(r, st) !== undefined })), { running: runsNow() });
   if (state) bar.classList.add(state); // the status line's classes: grey once the preview is made, green once the full size is
 }
 

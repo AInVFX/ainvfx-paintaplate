@@ -1840,19 +1840,21 @@ export function stepClasses(steps) {
 }
 // The line under the timeline, by the same classes: grey once the preview is made and the full size's steps run, green once
 // the full size is made, whatever Finish still runs, or once Finish is made where it is the render's only class; gold
-// before. `steps`: each planned step's class and whether it is done, as renderStatus takes them.
-export function timelineClass(steps) {
+// before. `steps`: each planned step's class and whether it is done, as renderStatus takes them; `running`: as there.
+export function timelineClass(steps, { running = true } = {}) {
   const due = (cls) => steps.some((s) => s.cls === cls && !s.done), has = (cls) => steps.some((s) => s.cls === cls);
   if (has("full") ? !due("full") : has("finish") && !due("finish")) return "ready";
-  return has("preview") && !due("preview") ? "final" : "";
+  return running && has("preview") && !due("preview") ? "final" : "";
 }
 // The line names the class at work and the time until that class is done: « preview », « full size », then « finish ». At
-// the end it says what is ready, so a full size that is made is never announced again while Finish runs.
+// the end it says what is ready, so a full size that is made is never announced again while Finish runs. A time left only
+// while the render displayed runs (`running`): before Enter, or once it stops, the line says what is made, or nothing.
 // `steps`: each planned step's class, whether it is done, and its seconds left; busy: one of them runs now.
-export function renderStatus(steps, { exporting = false, exported = false, busy = false } = {}) {
+export function renderStatus(steps, { exporting = false, exported = false, busy = false, running = true } = {}) {
   const due = (...cls) => steps.filter((s) => cls.includes(s.cls) && !s.done), has = (cls) => steps.some((s) => s.cls === cls);
   const say = (name, list) => { const t = list.reduce((a, s) => a + s.left, 0); return t ? `${name} ${secs(t)}` : busy ? `${name} almost ready` : ""; };
   if (exported) return "exported";
+  if (!running) return has("finish") && !due("finish").length ? "finish ready" : has("full") && !due("full").length ? "full size ready" : "";
   if (exporting) return say("export", due("preview", "full", "finish", "export"));
   for (const [cls, name] of [["preview", "preview"], ["full", "full size"], ["finish", "finish"]]) if (due(cls).length) return say(name, due(cls));
   return has("finish") ? "finish ready" : has("full") ? "full size ready" : "";
