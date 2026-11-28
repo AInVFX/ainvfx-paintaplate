@@ -47,6 +47,7 @@ SNAP_POINTS = 5  # stroke points SAM looks at one by one
 INPAINT_SIGMAS = "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
 REFINE_SIGMAS = "0.725, 0.421875, 0.0"  # the high-resolution stage of Lightricks' two-stage LTX 2.5 workflows: 2 steps
 EDIT_PREFIX = "paintaplate/edits/edit"  # an edit's outputs are saved, so the job index finds them after a restart
+SNAP_PREFIX = "paintaplate/snap/s"  # SAM's masks are saved too: the job index answers a scene's Clean edits when it opens again
 RIPPLE_PROMPT = ("Use the reference video for motion, timing, camera movement, framing and lighting changes; "
                  "follow the edited first frame for every change of content, light and style.")
 NEGATIVE = "blurry, low resolution, ugly, garbled mess, compression artifacts, glitch, flicker, still image"
@@ -300,15 +301,16 @@ def snap():
     for k in range(SNAP_POINTS):  # one prompt per point: given together, the points ask SAM for one region that holds them all
         found = g("SAM3_Detect", model=sam, image=image, positive_coords=Slot(f"point_{k}", "[]"), threshold=0.5,
                   refine_iterations=2, individual_masks=False)
-        g("PreviewImage", _title=f"Object at point {k + 1}", _output=f"point_{k}", images=g("MaskToImage", mask=found))
+        g("SaveImage", _title=f"Object at point {k + 1}", _output=f"point_{k}", images=g("MaskToImage", mask=found),
+          filename_prefix=Slot("prefix", SNAP_PREFIX))
     named = g("SAM3_Detect", model=sam, image=image, conditioning=g("CLIPTextEncode", text=Slot("words", ""), clip=sam[1]),
               threshold=0.4, refine_iterations=2, individual_masks=True)
     g.link_slot(named, "conditioning", "named")  # dropped when the erase has no words
-    # a blank frame first: when nothing has that name, Preview Image would get an empty batch and fail the whole prompt
+    # a blank frame first: when nothing has that name, Save Image would get an empty batch and fail the whole prompt
     size = g("GetImageSize", image=image)
     blank = g("EmptyImage", width=size[0], height=size[1], batch_size=1, color=0)
-    g("PreviewImage", _title="Objects with that name", _output="named",
-      images=g("BatchImagesNode", images__image0=blank, images__image1=g("MaskToImage", mask=named)))
+    g("SaveImage", _title="Objects with that name", _output="named",
+      images=g("BatchImagesNode", images__image0=blank, images__image1=g("MaskToImage", mask=named)), filename_prefix=Slot("prefix", SNAP_PREFIX))
     g.save("snap")
 
 

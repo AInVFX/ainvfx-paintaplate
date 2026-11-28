@@ -54,15 +54,19 @@
   }
  },
  "5": {
-  "class_type": "PreviewImage",
+  "class_type": "SaveImage",
   "inputs": {
    "images": [
     "4",
     0
-   ]
+   ],
+   "filename_prefix": "paintaplate/snap/s"
   },
   "_meta": {
    "title": "Object at point 1",
+   "slots": {
+    "filename_prefix": "prefix"
+   },
    "output": "point_0"
   }
  },
@@ -98,15 +102,19 @@
   }
  },
  "8": {
-  "class_type": "PreviewImage",
+  "class_type": "SaveImage",
   "inputs": {
    "images": [
     "7",
     0
-   ]
+   ],
+   "filename_prefix": "paintaplate/snap/s"
   },
   "_meta": {
    "title": "Object at point 2",
+   "slots": {
+    "filename_prefix": "prefix"
+   },
    "output": "point_1"
   }
  },
@@ -142,15 +150,19 @@
   }
  },
  "11": {
-  "class_type": "PreviewImage",
+  "class_type": "SaveImage",
   "inputs": {
    "images": [
     "10",
     0
-   ]
+   ],
+   "filename_prefix": "paintaplate/snap/s"
   },
   "_meta": {
    "title": "Object at point 3",
+   "slots": {
+    "filename_prefix": "prefix"
+   },
    "output": "point_2"
   }
  },
@@ -186,15 +198,19 @@
   }
  },
  "14": {
-  "class_type": "PreviewImage",
+  "class_type": "SaveImage",
   "inputs": {
    "images": [
     "13",
     0
-   ]
+   ],
+   "filename_prefix": "paintaplate/snap/s"
   },
   "_meta": {
    "title": "Object at point 4",
+   "slots": {
+    "filename_prefix": "prefix"
+   },
    "output": "point_3"
   }
  },
@@ -230,15 +246,19 @@
   }
  },
  "17": {
-  "class_type": "PreviewImage",
+  "class_type": "SaveImage",
   "inputs": {
    "images": [
     "16",
     0
-   ]
+   ],
+   "filename_prefix": "paintaplate/snap/s"
   },
   "_meta": {
    "title": "Object at point 5",
+   "slots": {
+    "filename_prefix": "prefix"
+   },
    "output": "point_4"
   }
  },
@@ -329,15 +349,19 @@
   }
  },
  "24": {
-  "class_type": "PreviewImage",
+  "class_type": "SaveImage",
   "inputs": {
    "images": [
     "23",
     0
-   ]
+   ],
+   "filename_prefix": "paintaplate/snap/s"
   },
   "_meta": {
    "title": "Objects with that name",
+   "slots": {
+    "filename_prefix": "prefix"
+   },
    "output": "named"
   }
  }

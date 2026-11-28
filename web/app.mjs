@@ -2554,7 +2554,7 @@ async function findWhole(edit, before, kind) { // SAM 3.1 finds the whole object
   status(`Edit ${num(edit)}: SAM 3.1 looking for the ${edit.prompt || "object"} under the stroke.`);
   const current = standing(edit), frame = await uploadCanvas(snap(before, size), `e${edit.id}_snap.png`);
   current();
-  const out = await run("snap", { image: frame, words: edit.prompt, ...points }, { kind, front: true }).done;
+  const out = await run("snap", { image: frame, words: edit.prompt, ...points, prefix: snapPrefix() }, { kind, front: true }).done;
   const painted = canvasBits(maskAt(edit, size), size), fileBits = (f) => maskBits(f, size);
   const objects = pickObjects({ painted, area,
     named: await Promise.all(outputFiles("snap", out, "named").map(fileBits)),
@@ -2587,7 +2587,7 @@ async function joinShadow(edit, before, kind) { // the object's cast shadow join
   status(`Edit ${num(edit)}: SAM 3.1 looking for the shadow of the ${name}.`);
   const current = standing(edit), frame = await uploadCanvas(snap(before, found.size), `e${edit.id}_shadow.png`);
   current();
-  const out = await run("snap", { image: frame, words: "shadow" }, { kind: kind === "edit" ? "snap" : kind, front: true }).done;
+  const out = await run("snap", { image: frame, words: "shadow", prefix: snapPrefix() }, { kind: kind === "edit" ? "snap" : kind, front: true }).done;
   const shadow = shadowOf({ object: found.bits, box, w, h, shadows: await Promise.all(outputFiles("snap", out, "named").slice(1).map((f) => maskBits(f, found.size))) });
   found.shadow = JSON.stringify(box); // looked for: Generate after a prefetch does not ask again
   if (!shadow) { log(`Edit ${num(edit)}: no shadow of the ${name} next to it or under it.\n  Its SAM mask covers the ${name} only.`); return false; }
@@ -4251,6 +4251,7 @@ async function sceneTarget(name) { // a scene of this name saved here: the page 
 // Finish step. Each graph reads what the graph before it writes, under the graphs' own folder (graphFolder): the edits' graph
 // reads the fluid shot, and Finish's the plate under the edits, the composite, the layer and the matte.
 const graphFolder = () => `paintaplate/${S.plate.id}/graph`;
+const snapPrefix = () => `paintaplate/${S.plate.id}/snap/s`; // SAM's masks, saved so that the job index keeps them (comfy.INDEXED)
 const graphEdits = () => S.edits.filter((e) => e.tool !== "fluid" && e.on && e.patch && e.state === "done"); // the edits displayed, as the edits' graph makes them
 function graphKinds() {
   if (!S.plate) return [];
