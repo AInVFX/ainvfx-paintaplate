@@ -8,7 +8,9 @@ Google Chrome opens ComfyUI's editor and loads the file with app.loadGraphData, 
 3. app.graphToPrompt() gives back, value for value, the API graph that the page saved in the same file
    (extra.paintaplate.prompt, written by graph.editorGraph). An input that only the editor holds is listed apart: an
    optional input that the page leaves out, at its default.
-4. each image loader reads a file at the top of ComfyUI's input folder, and the README note names that file.
+4. no core image loader reads a file: ComfyUI's editor (frontend 1.59) checks such a file against the input folder as it was
+   when the editor opened, so a file saved after that reads as missing. Each image is read by its name with Load Plate, at
+   the top of the input folder, and the README note names that file.
 It measures the layout too: the canvas, and the links longer than 1500 px, each from its output slot to its input slot.
 It writes graph_live.png (the whole graph on the canvas) and graph_live.json (every finding), and ends with 0 when 1 to 4
 hold. PLAYWRIGHT_CHANNEL picks the browser (default: chrome).
@@ -36,7 +38,8 @@ import urllib.request
 FRONTEND_ONLY = {"MarkdownNote", "Note", "Reroute", "PrimitiveNode"}  # nodes the editor draws with no class in /object_info
 FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "js", "object_info.scene.json")  # --offline: a copy saved from a running ComfyUI
 TITLE, SLOT, LONG = 30, 20, 1500  # px: LiteGraph's title bar and slot row; a link longer than LONG crosses most of a screen
-LOADERS = ("LoadImage", "LoadImageMask")
+LOADERS = ("LoadImage", "LoadImageMask")  # core's image loaders: the editor checks their file against its list of the input folder
+READER = "PaintAPlate_LoadPlate"  # reads its file by its name: the plate, and each image of the graph
 APP = "(window.app ?? window.comfyAPI?.app?.app)"
 BOXES = f"""() => {{ const a = {APP}, t = window.LiteGraph?.NODE_TITLE_HEIGHT ?? 30;
   return (a.graph._nodes ?? a.graph.nodes).map((n) => [String(n.id), n.title, n.pos[0], n.pos[1] - t, n.size[0], n.size[1] + t]); }}"""
@@ -141,12 +144,14 @@ def spread(boxes, links):
 
 
 def loaders(graph):
-    """The image loaders' files: those in a subfolder, which ComfyUI's loaders do not list, and those the README note does
-    not name."""
-    files = [n["widgets_values"][0] for n in graph["nodes"] if n["type"] in LOADERS and n.get("widgets_values")]
+    """Two lists of image files: those that core's image loaders read, which the editor checks against its list of the input
+    folder; and those that the README note does not name, among them and the images Load Plate reads at the top of the input
+    folder (the plate sits in a folder, or in the output folder)."""
+    values = lambda types: [n["widgets_values"][0] for n in graph["nodes"] if n["type"] in types and n.get("widgets_values")]  # noqa: E731
+    listed, images = values(LOADERS), [f for f in values((READER,)) if not any(c in f for c in "/\\:")]
     note = " ".join(str(v) for n in graph["nodes"] if n["type"] == "MarkdownNote" for v in n.get("widgets_values") or [])
     named = {w.strip(",.;:()«»\"'") for w in note.split()}
-    return [f for f in files if "/" in f or "\\" in f], [f for f in files if f not in named]
+    return listed, [f for f in listed + images if f not in named]
 
 
 def known_classes(url, types):
@@ -242,15 +247,15 @@ def check(a, path, out):
         known = known_classes(a.url, types)
         boxes, made = in_editor(a, graph, out)
         wrong, added = differences(api, made)
-    deep, unnamed = loaders(graph)
+    listed, unnamed = loaders(graph)
     found = {"graph": a.graph, "offline": a.offline, "nodes": len(types), "red": red(types, known), "over": overlaps(boxes), "wrong": wrong,
-             "added": added, "deep": deep, "unnamed": unnamed, "spread": spread(boxes, graph["links"])}
+             "added": added, "listed": listed, "unnamed": unnamed, "spread": spread(boxes, graph["links"])}
     with open(os.path.join(out, "graph_live.json"), "w") as f:
         json.dump(found, f, indent=1, ensure_ascii=False)
     sizes = "saved in the file" if a.offline else "ComfyUI drew"
     for key, what in (("red", "classes this ComfyUI does not know: the editor draws them red"), ("over", f"pairs of nodes over each other, at the sizes {sizes}"),
                       ("wrong", "differences from the page's API graph"), ("added", "inputs that only the editor holds: optional, at their default"),
-                      ("deep", "image files in a subfolder: ComfyUI's loaders list only the top of the input folder"), ("unnamed", "image files the README note does not name")):
+                      ("listed", "image files read by a core loader: the editor checks them against the input folder as it was when it opened"), ("unnamed", "image files the README note does not name")):
         print(f"{len(found[key])} {what}")
         for line in found[key][:40]:
             print(f"  {line}")
@@ -258,7 +263,7 @@ def check(a, path, out):
     print(f"Layout: canvas {s['canvas'][0]} x {s['canvas'][1]} px; {s['long']} of {s['links']} links longer than {LONG} px; the longest {s['longest']} px")
     if a.offline:
         print("Check 3, the values against the page's API graph, needs ComfyUI's editor: run it without --offline")
-    ok = not (found["red"] or found["over"] or found["wrong"] or found["deep"] or found["unnamed"])
+    ok = not (found["red"] or found["over"] or found["wrong"] or found["listed"] or found["unnamed"])
     print("GRAPH LIVE PASSED" if ok else "GRAPH LIVE FAILED")
     return 0 if ok else 1
 

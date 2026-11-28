@@ -1,7 +1,7 @@
-"""The check of the scene's ComfyUI graph and its images (tests/flows/README.md). ComfyUI's image loaders
-list only the files at the top of the input folder, and its editor marks any other file as missing. So every image loader
-of the saved graph reads a file at the top of input, the file is there, the README note names it, and the API graph in
-the same file reads the same files."""
+"""The check of the scene's ComfyUI graph and its images (tests/flows/README.md). ComfyUI's editor checks a core image
+loader's file against the input folder as it was when the editor opened, and the page saves the graph's images after that.
+So no core image loader is left: the graph reads each image by its name with Load Plate, a file at the top of input that is
+there, that the README note names, and that the API graph in the same file reads too."""
 import json
 import zipfile
 import urllib.parse
@@ -23,7 +23,9 @@ def run(browser, port, U):
     with page.expect_download(timeout=180000) as dl:  # the graph comes in Export's zip
         page.click("#export-btn"); page.check("#x-graph"); page.click("#x-go")
     graph = json.loads((z := zipfile.ZipFile(dl.value.path())).read(zip_rows.files(z.namelist(), "comfyui_graph")[0]))
-    loaders = {n["title"]: n["widgets_values"][0] for n in graph["nodes"] if n["type"] in ("LoadImage", "LoadImageMask")}
+    image = lambda path: not any(c in path for c in "/\\:")  # noqa: E731  # an image of the graph: the plate sits in a folder
+    loaders = {n["title"]: n["widgets_values"][0] for n in graph["nodes"] if n["type"] == "PaintAPlate_LoadPlate" and image(n["widgets_values"][0])}
+    core = [n["title"] for n in graph["nodes"] if n["type"] in ("LoadImage", "LoadImageMask")]
     readme = next(n for n in graph["nodes"] if n["type"] == "MarkdownNote")["widgets_values"][0]
 
     def there(name):
@@ -35,11 +37,11 @@ def run(browser, port, U):
             return False
 
     names = sorted(loaders.values())
-    U.check(len(names) == 2 and all("/" not in v and v.startswith("desk_e1_") for v in names),
-            f"each image loader of the graph reads a file at the top of the input folder: {loaders}")
+    U.check(not core and len(names) == 2 and all(v.startswith("desk_e1_") for v in names),
+            f"no core image loader, and Load Plate reads each image by its name, at the top of the input folder: {loaders}, {core}")
     U.check(all(there(v) for v in names), f"each of those files is in the input folder: {[(v, there(v)) for v in names]}")
     U.check("must be in ComfyUI's input folder" in readme and all(v in readme for v in names), f"the README note names the files that must be on disk: {readme[:500]!r}")
     api = graph["extra"]["paintaplate"]["prompt"]
-    U.check(sorted(n["inputs"]["image"] for n in api.values() if n["class_type"] in ("LoadImage", "LoadImageMask")) == names,
+    U.check(sorted(n["inputs"]["path"] for n in api.values() if n["class_type"] == "PaintAPlate_LoadPlate" and image(n["inputs"]["path"])) == names,
             "the API graph in the same file reads the same files")
     page.close()

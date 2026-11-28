@@ -123,9 +123,10 @@ class GraphImagesInZip(unittest.TestCase):
             with open(os.path.join(inputs, name), "wb") as f:
                 f.write(b"png")
             self.addCleanup(os.remove, os.path.join(inputs, name))
-        nodes = [{"type": "LoadImageMask", "widgets_values": ["desk_e1_mask_0676e451.png", "red", "image"]},
-                 {"type": "LoadImage", "widgets_values": ["desk_e1_strokes_7bcde075.png", "image"]},
-                 {"type": "LoadImage", "widgets_values": ["../secret.png", "image"]}, {"type": "LoadImage", "widgets_values": ["gone.png", "image"]},
+        nodes = [{"type": "PaintAPlate_LoadPlate", "widgets_values": ["plates/desk.mp4", 121, False]},  # the plate, in a folder: left out
+                 {"type": "PaintAPlate_LoadPlate", "widgets_values": ["desk_e1_mask_0676e451.png", 1, False]},
+                 {"type": "PaintAPlate_LoadPlate", "widgets_values": ["desk_e1_strokes_7bcde075.png", 1, False]},
+                 {"type": "PaintAPlate_LoadPlate", "widgets_values": ["../secret.png", 1, False]}, {"type": "PaintAPlate_LoadPlate", "widgets_values": ["gone.png", 1, False]},
                  {"type": "MarkdownNote", "widgets_values": ["text"]},
                  {"type": "PaintAPlate_KeyframeVideo", "widgets_values": [960, 512, 17, json.dumps([{"frame": 0, "image": "desk_e1_keyframe_12345678.png"}])]}]
         with open(os.path.join(run, "edits.comfyui.json"), "w") as f:

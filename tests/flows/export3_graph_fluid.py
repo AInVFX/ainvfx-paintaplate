@@ -41,11 +41,11 @@ def run(browser, port, U):
     fg, eg = json.loads(z.read(fluid[0])), json.loads(z.read(edits[0]))
     keys = [k["image"] for vals in widgets(fg, "PaintAPlate_KeyframeVideo") for v in vals if isinstance(v, str) and v.startswith("[") for k in json.loads(v)]
     U.check(keys and all(f"input/{k}" in names for k in keys), f"every keyframe's image is in input/: {keys}")
-    images = [vals[0] for cls in ("LoadImage", "LoadImageMask") for vals in widgets(eg, cls)]
+    images = [vals[0] for vals in widgets(eg, "PaintAPlate_LoadPlate") if not any(c in vals[0] for c in "/\\:")]  # the edit's images: the plate sits in the output folder
     U.check(images and all(f"input/{v}" in names for v in images), f"every image of the edit is in input/: {images}")
     blank = widgets(fg, "PaintAPlate_LoadPlate")[0][0]
     shot = f"output:{widgets(fg, 'PaintAPlate_SavePlate')[0][0]}/{os.path.basename(blank)}"  # Save Plate names the movie after the blank plate
-    U.check([vals[0] for vals in widgets(eg, "PaintAPlate_LoadPlate")] == [shot], f"the edits' graph reads the fluid shot its graph writes: {shot}")
+    U.check([vals[0] for vals in widgets(eg, "PaintAPlate_LoadPlate") if vals[0] not in images] == [shot], f"the edits' graph reads the fluid shot its graph writes: {shot}")
     U.check(f"Then run {edits[0]}." in readme(fg) and f"First run {fluid[0]}." in readme(eg),
             "each README names the graph to run before it or after it, by its name in the zip")
     lines = U.log_lines(page)

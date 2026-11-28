@@ -1082,8 +1082,8 @@ export const keyframeSlotLine = (frame) => `Keyframes snap to the first frame, t
 // « Rec. » standards, such as Rec.709 and Rec.2020. RV and Nuke show the config's own names. The spaces keep theirs.
 const FAMILIES = { Display: "Display-referred", ITU: "ITU (International Telecommunication Union)" };
 export function plateFamily(name) { return FAMILIES[name] ?? name; }
-// An image that the scene's ComfyUI graph reads. It sits at the top of ComfyUI's input folder: LoadImage lists only the files
-// there, and the editor marks an image input whose file is not in that list as missing. Named after the export's stem (the
+// An image that the scene's ComfyUI graph reads by its name with Load Plate (graph.sceneGraph), at the top of ComfyUI's input
+// folder, where the graph's README says it must be. Named after the export's stem (the
 // plate's or the scene's name), the edit, what it holds and its hash, so two scenes never share a name; the export's zip
 // holds it under the same name, in input/ (routes.graph_images).
 export function graphImageName(name, edit, kind, hash) {
