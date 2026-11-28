@@ -2,11 +2,13 @@
 
 **Winner of the Open Weights Only category and of the "VFX Workflow Built with LTX" bonus in Comfy's [Open Source Higgsfield](https://comfy.org/open-source-higgsfield/) contest** (November 2026). #OpenSourceHiggsfield
 
+[![The deep dive on Paint a plate on YouTube: a one-hour guide, from the install to the export](https://img.youtube.com/vi/6uVHvw6gsC8/maxresdefault.jpg)](https://youtu.be/6uVHvw6gsC8)
+
+**[▶ Watch the deep dive (1 hour)](https://youtu.be/6uVHvw6gsC8)**: a complete guide, from the install to the export.
+
 [![The showcase of Paint a plate on YouTube: painted fire, smoke and water, a set extension, a green screen, a relight](https://img.youtube.com/vi/EsL3O7WvBr4/maxresdefault.jpg)](https://youtu.be/EsL3O7WvBr4)
 
 **[▶ Watch the showcase (4 minutes)](https://youtu.be/EsL3O7WvBr4)**: shots made live with Paint a plate.
-
-**[▶ Watch the deep dive (1 hour)](https://youtu.be/6uVHvw6gsC8)**: a complete guide, from the install to the export.
 
 **Contents:** [What it does](#what-it-does) · [What you need](#what-you-need) · [Install](#install) · [A first edit](#a-first-edit) · [Tips](#tips) · [When something goes wrong](#when-something-goes-wrong) · [How it works](#how-it-works) · [Questions from the community](#questions-from-the-community) · [Limits](#limits) · [Contributing](#contributing) · [Credits and licences](#credits-and-licences) · [Links](#links)
 
