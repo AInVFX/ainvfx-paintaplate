@@ -4967,7 +4967,8 @@ function pickAt(e) {
   const own = !S.playing && S.frame === 0 && !!S.original && !keying();
   let color;
   if (own) {
-    const sx = Math.round(x) - half, sy = Math.round(y) - half;
+    const sx = Math.round(x) - half, sy = Math.round(y) - half, painted = strokeColour(sx, sy);
+    if (painted) { pickFrame(false); return takeColor(painted, ", the stroke's own"); }
     pickCtx.clearRect(0, 0, n, n);
     pickCtx.drawImage(S.heroKey ? firstFrame() : S.original, -sx, -sy);
     if (S.draft?.tool === "paint") pickCtx.drawImage(S.draft.paint, -sx, -sy);
@@ -4979,6 +4980,22 @@ function pickAt(e) {
   if (!color) return void hud(PICK_HINT, 2000); // outside the frame: still picking
   pickFrame(false);
   takeColor(color, own ? "" : ", as the viewer shows it on this frame");
+}
+// A stroke displayed on the first frame under the pick: the colour it was painted with, from its edit's own canvas (the most
+// opaque pixel of the square, so an edge picks it too), or null. The draft's strokes, those of the edit whose History row shows
+// them (show), the selected edit's, and those of an edit that runs until its first preview replaces them (overlays). The
+// picture under them, Klein's or the plate's, is left out.
+function strokeColour(sx, sy) {
+  for (const e of [S.draft, S.peek, S.selected, S.running?.launched && !S.running.preview ? S.running : null]) {
+    if (!e?.paint || (e.tool !== "paint" && e.tool !== "light")) continue;
+    pickCtx.clearRect(0, 0, PICK_SIDE, PICK_SIDE);
+    pickCtx.drawImage(e.paint, -sx, -sy);
+    const d = pickCtx.getImageData(0, 0, PICK_SIDE, PICK_SIDE).data;
+    let at = 3;
+    for (let i = 7; i < d.length; i += 4) if (d[i] > d[at]) at = i;
+    if (d[at] >= 128) return `#${[d[at - 3], d[at - 2], d[at - 1]].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+  }
+  return null;
 }
 function takeColor(hex, how = "") {
   if (S.tool === "erase") pickTool("paint");
