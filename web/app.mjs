@@ -903,7 +903,7 @@ function setFinish(opt, on) { // Finish's passes run on the render displayed, pl
 function waitLine(what) {
   const r = S.renders.get(S.heroKey), alone = !r && plateAlone(S.heroKey) && !fluidOnly();
   const skip = r ? plan(r, r.active).skip : alone ? plan({ key: S.heroKey }, []).skip : null;
-  const steps = skip ? stepsOf(skip).filter((st) => ofFinish(st) && (alone || (waits(r, st) && doneOf(r, st) === undefined))) : [];
+  const steps = skip ? stepsOf(skip).filter((st) => ofFinish(st) && (alone || waits(r, st))) : [];
   if (!steps.length) return;
   const passes = finishNames(steps);
   status(`${what} Generate runs ${passes.length > 1 ? passes.join(" and ") : "it"}${alone ? " on the plate" : ""}: about ${span(steps.reduce((a, st) => a + estimate(st.id, skip), 0))}.`, "hint");
@@ -3028,7 +3028,7 @@ const upscaled = (r) => !!upLast(r) && doneOf(r, upLast(r)) !== undefined; // Up
 // start of its steps until it has nothing left to make (idle). A Finish switch turned on, or another size, after that adds
 // Finish's steps in grey: they wait for Generate (enter). While the render's steps run, they join them.
 const ofFinish = (st) => !!(st.hdr || st.up);
-const waits = (r, st) => ofFinish(st) && !r.go && !(S.wantDownload && r.key === S.heroKey);
+const waits = (r, st) => ofFinish(st) && !r.go && doneOf(r, st) === undefined && !(S.wantDownload && r.key === S.heroKey); // a Finish step not made yet
 const finishNames = (steps) => FINISH.filter((o) => steps.some((st) => (o.id === "upscale" ? st.up : st.hdr))).map((o) => o.name); // the Finish passes these steps belong to
 const fullSizeMade = (r) => !!r?.review && STAGES.every((st) => !(st.hdr || st.up) || r.skip?.has(st.id) || doneOf(r, st) !== undefined); // the result is made: the composite, then each of Finish's steps the render plans
 S.took = {}; // measured seconds per step, for this plate: the next estimates use them
@@ -5243,7 +5243,7 @@ function finishNext(r) { // the Finish passes whose steps are all that a render 
   const left = stepsOf(plan(r, r.active).skip).filter((st) => doneOf(r, st) === undefined);
   return left.length && left.every(ofFinish) ? finishNames(left) : [];
 }
-const finishWaits = (r) => !r.go && stepsOf(plan(r, r.active).skip).some((st) => waits(r, st) && doneOf(r, st) === undefined);
+const finishWaits = (r) => !r.go && stepsOf(plan(r, r.active).skip).some((st) => waits(r, st));
 function renderPending() { // the render of the edits displayed failed, never started, or has Finish steps that wait: Generate starts it
   const r = S.renders.get(S.heroKey);
   if (S.halted && S.edits.some((e) => e.on && e.state === "queued")) return true; // the viewer: under a stop an edit waits for its turn, and Generate runs it (queueWaiting)
