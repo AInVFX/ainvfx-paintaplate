@@ -17,6 +17,7 @@ import { dataSpace, plateDepth, exportDone, holdsHdr, bigPlateWarning, STEP_FLOW
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
 import { dropRefusal, plateFile } from "./logic.mjs"; // a drop: what it may open, and why it opens nothing
+import { matteShort } from "./logic.mjs"; // a paint's matte that follows its object on few of the shot's frames
 import { askedSeed, editSeed, gridGrow } from "./logic.mjs"; // the tests: a seed asked for in the address, and each edit's seed from it
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
 import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, nearSize, sameMachine, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
@@ -2990,7 +2991,7 @@ function idle() { // one render step at a time, from the render queue; the edits
   }
   S.piping = r;
   r.go = true; // its steps run, and Finish's join them
-  pipeline(r).then(() => tallied(r)).catch((e) => {
+  pipeline(r).then(() => { tallied(r); if (r.warning && r.key === S.heroKey) told(...r.warning); }).catch((e) => { // a warning stays the last line
     if (e === YIELD || e?.message === "cancelled") return;
     const st = STAGES.find((x) => x.id === S.stage?.id), mine = r.key === S.heroKey;
     r.failed = st?.id ?? "render"; // it waits for Generate, which tries it again
@@ -3606,6 +3607,8 @@ async function track(active, shotPath, base, suffix, progress, previous, tools, 
     if (movie) found[key === "matte_a" ? "movie_a" : "movie_b"] = viewUrl(movie);
     const note = outputText("matte", out, "follow");
     if (note) log(`${tool === "erase" ? "Clean" : "Paint"} matte${suffix ? ` (${suffix.slice(1)})` : ""}: ${note}`);
+    const short = tool === "paint" && matteShort(note);
+    if (short && S.piping) told(...(S.piping.warning = [`Warning: ${short}`, "Choose « Whole shot » in Matte strategy to keep the paint on every frame."])); // the render shows it again once made (idle)
     found[key] = folderOf("matte", out, "frames");
     if (tool === "paint") { found.chose = autoChose(note); setTimeout(historyUI); } // the menu's « Auto » shows its choice, once the render holds this matte
   }

@@ -1286,6 +1286,13 @@ export function dropRefusal(names, folders = 0, loose = 0) {
   return null;
 }
 
+// A paint's matte that SAM 3.1 follows on fewer than half of the shot's frames: what the warning says, or null. The matte's
+// note says « tracked on N of M frames. » (mathops.follow_votes), and the paint shows only where its matte holds it.
+export function matteShort(note) {
+  const m = /tracked on (\d+) of (\d+) frames/.exec(note ?? "");
+  return m && +m[1] * 2 < +m[2] ? `the paint's matte follows the object on ${m[1]} of ${m[2]} frames` : null;
+}
+
 export function plateStem(file, sequence) {
   const base = String(file ?? "").split(/[\\/]/).pop().replace(/\.[^.]+$/, "");
   return (sequence ? base.replace(/[._]?\d+$/, "") : base) || "plate";

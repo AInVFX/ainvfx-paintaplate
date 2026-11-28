@@ -112,6 +112,7 @@ The other files of `tests/js`:
 | `finish_preview.test.mjs` | The Preview menu's choices as `tests/ui_live.py --preview` stores them: the page reads each one back as that choice |
 | `page_alone.test.mjs` | The render key of a plate with no edit (`logic.renderKey`): a render only when the Finish menu asks SDR to HDR of a plate whose format holds nothing above 1.0, under `PLATE_ALONE` |
 | `fix4_drop.test.mjs` | What a drop may open (`logic.dropRefusal`): one movie, or the frames of one sequence, as files or as one folder; several movies, a movie with frames, several folders or a folder with files open nothing, with the reason; the extensions are the Upload tab's |
+| `fix4_matte.test.mjs` | A paint's matte that SAM 3.1 follows on fewer than half of the shot's frames warns, with the count (`logic.matteShort`); half or more, or no count, warns of nothing |
 | `page_graph.test.mjs` | A saved editor graph carries the page's API graph (`graph.editorGraph`), which `tests/graph_live.py` compares in ComfyUI's own editor |
 | `page_open.test.mjs` | The Open dialog's trail (`logic.crumbs`): Input or Output and the folders below, or a full path's own folders |
 | `page_tools.test.mjs` | The eraser's key (`logic.eraserAfterKey`): held during a drag, or tapped to switch it |
