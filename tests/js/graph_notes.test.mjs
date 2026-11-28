@@ -21,7 +21,8 @@ export function stale(api) {
   const sections = new Set(titles.map((t) => t.split(" · ")[0]));
   const marks = new Set(titles.flatMap((t) => (t.match(/\[([^\]]+)\]$/)?.[1] ?? "").split(", ")));
   const classes = new Set(nodes.map((n) => n.class_type));
-  const files = new Set(nodes.flatMap((n) => [n.inputs?.image, ...(n.class_type === "PaintAPlate_KeyframeVideo" ? JSON.parse(n.inputs.keys || "[]").map((k) => k.image) : [])]));
+  const files = new Set(nodes.flatMap((n) => [n.inputs?.image, n.class_type === "PaintAPlate_LoadPlate" ? n.inputs.path : null,
+    ...(n.class_type === "PaintAPlate_KeyframeVideo" ? JSON.parse(n.inputs.keys || "[]").map((k) => k.image) : [])]));
   const problems = [];
   for (const n of nodes.filter((x) => x.class_type === "PrimitiveStringMultiline")) {
     let text = Object.values(n.inputs).find((v) => typeof v === "string");

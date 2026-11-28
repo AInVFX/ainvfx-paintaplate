@@ -20,10 +20,10 @@ function linked(g) { // every link points at a node of the graph
 test("a scene is one prompt: files only for the plate and the strokes, frames between steps by link, each model loaded once", () => {
   const g = sceneGraph(WF, { plate, edits: [edit("erase", 1), edit("paint", 2), edit("light", 3)], render });
   linked(g);
-  const files = Object.values(g).filter((n) => ["LoadImage", "LoadImageMask"].includes(n.class_type)).map((n) => n.inputs.image).sort();
-  assert.deepEqual(files, ["l2.png", "l3.png", "m1.png", "m2.png", "m3.png"]);
-  assert.ok(Object.values(g).every((n) => n.class_type !== "PaintAPlate_LoadPlate" || n.inputs.path === plate.path));
-  assert.equal(count(g, "PaintAPlate_LoadPlate"), 1); // the plate decodes once
+  const reads = Object.values(g).filter((n) => n.class_type === "PaintAPlate_LoadPlate").map((n) => n.inputs.path);
+  assert.deepEqual(reads.filter((p) => p !== plate.path).sort(), ["l2.png", "l3.png", "m1.png", "m2.png", "m3.png"]); // each image by its name
+  assert.equal(reads.filter((p) => p === plate.path).length, 1); // the plate decodes once
+  assert.equal(count(g, "LoadImage") + count(g, "LoadImageMask"), 0); // no core image loader: the editor checks its file against a list
   assert.equal(count(g, "UNETLoader"), 2); // Klein and LTX 2.5
   assert.equal(count(g, "SaveImage"), 0);
   assert.equal(count(g, "PaintAPlate_SaveFrames"), 1); // the export's matte; the frames handed between steps are links

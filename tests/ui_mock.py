@@ -540,8 +540,13 @@ def history_flow(browser, port):
     lines = log_lines(page)[seen:]
     stopped = [line for line in lines if re.match(r"^(clean|cleanup|shot|matte|comp|review|export) \S+: cancelled", line)]
     check(not stopped, f"a removal stops no render step: the render it leaves keeps what it made {stopped}")
-    shown = {re.match(r"^Render v(\d+):", line)[1] for line in lines if re.match(r"^Render v\d+: .*: about \d+ s", line)}
-    check(len(shown) == 1, f"only the set displayed renders: the render of the edits before the removal waits (renders {sorted(shown)})")
+    steps = {}  # each render's steps named after the removal: a step says its time once it posts a job, so the step under way at the removal can say it after
+    for line in lines:
+        m = re.match(r"^Render v(\d+): (.+?): (?:about \d|done in|from the job index|took)", line)
+        if m:
+            steps.setdefault(m[1], set()).add(m[2])
+    shown = {v for v, names in steps.items() if len(names) > 1}
+    check(len(shown) == 1, f"only the set displayed renders: the render of the edits before the removal ends the step under way, then waits ({steps})")
     steps = [(i, line) for i, line in enumerate(lines) if re.match(r"^Render v\d+: .*(?: \(about |: about )\d+ s", line)]
     comp = next((i for i, line in steps if re.search(r"Composite, preview(?: \(|: )about", line)), None)
     full = next((i for i, line in steps if re.search(r"(, full size|Export)(?: \(|: )about", line)), None)

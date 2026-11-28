@@ -128,9 +128,9 @@ def plate_files(full: str) -> list[str]:
 
 
 def graph_images(path: str) -> list[str]:
-    """The images that the ComfyUI graph at `path` loads, by the names its nodes give: LoadImage's and LoadImageMask's image,
+    """The images that the ComfyUI graph at `path` loads, by the names its nodes give: the files that Load Plate reads by name,
     and the keyframes that Keyframe Video takes as a JSON list. They are files at the top of ComfyUI's input folder, where the
-    page puts them (logic.graphImageName). A name with a folder in it is left out."""
+    page puts them (logic.graphImageName); the plate, which sits in a folder or in the output folder, is left out."""
     try:
         with open(path) as f:
             nodes = json.load(f).get("nodes", [])
@@ -139,7 +139,7 @@ def graph_images(path: str) -> list[str]:
     images = []
     for node in nodes if isinstance(nodes, list) else []:
         values = (node.get("widgets_values") or []) if isinstance(node, dict) else []
-        found = values[:1] if isinstance(node, dict) and node.get("type") in ("LoadImage", "LoadImageMask") else []
+        found = values[:1] if isinstance(node, dict) and node.get("type") == "PaintAPlate_LoadPlate" else []
         if isinstance(node, dict) and node.get("type") == "PaintAPlate_KeyframeVideo":  # its keyframes: the JSON list of its keys
             for value in values:
                 try:

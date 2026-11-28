@@ -12,7 +12,7 @@ def run(browser, port, U):
     U.open_plate(page)
     page.click('.tools [data-tool="light"]'); U.paint_once(page, "warm sunset light", [(0.70, 0.30), (0.74, 0.34)])
     page.keyboard.press("Enter"); settle("the Light edit's render")
-    page.click("#finish-btn"); page.click("#finish-hdr"); page.click("#finish-hdr-yes"); page.keyboard.press("Escape")
+    page.click("#finish-btn"); page.click("#finish-hdr"); page.click("#finish-hdr-yes"); page.keyboard.press("Escape"); page.click("#generate")
     left = page.evaluate("""() => new Promise((done) => { const t0 = Date.now(), tick = () => {
       const now = document.querySelector('#stages li.now');
       if (now && now.textContent.includes('Composite, HDR')) return done(document.querySelector('#render-left').textContent);

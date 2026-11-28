@@ -120,6 +120,10 @@ export function sceneGraph(WF, { plate, edits, render, about = {}, chain = { lis
   const scale = (id, image, [width, height]) => node(id, "ImageScale", { image, upscale_method: "lanczos", width, height, crop: "disabled" });
   const scaleMask = (id, mask, size) => node(id, "ImageToMask", { image: scale(`${id}, image`, node(`${id}, as image`, "MaskToImage", { mask }), size), channel: "red" });
   const over = (id, destination, source, mask) => node(id, "ImageCompositeMasked", { destination, source, x: 0, y: 0, resize_source: false, mask });
+  // An image the page uploaded, read by its name in the input folder with Load Plate (its alpha the second output). Core's image
+  // loaders keep the name in a list, which ComfyUI's editor (frontend 1.59) checks against the input folder as it was when the
+  // editor opened, so a file uploaded after that would read as missing.
+  const picture = (id, name) => node(id, "PaintAPlate_LoadPlate", { path: name, max_frames: 1, pad_8n1: false });
   const union = (id, masks, size) => scaleMask(id, masks.slice(1).reduce((a, m, i) =>
     node(`${id} ${i + 2}`, "MaskComposite", { destination: a, source: m, x: 0, y: 0, operation: "add" }), masks[0]), size);
   const common = { path: plate.path, config: plate.config, color_space: plate.cs, max_frames: plate.frames }, out = (s) => `${render.prefix}/${s}`, drop = ["frames"];
@@ -130,9 +134,8 @@ export function sceneGraph(WF, { plate, edits, render, about = {}, chain = { lis
   const erased = [], painted = [];
   edits.forEach((e, k) => {
     sec = `edit${k + 1}`;
-    const t = `edit ${k + 1}`, mask = node(`${t} mask`, "LoadImageMask", { image: e.mask, channel: "red" });
-    const ref = e.layer ? over(`${t} reference`, frame, node(`${t} strokes`, "LoadImage", { image: e.layer }),
-      node(`${t} strokes alpha`, "InvertMask", { mask: [`${t} strokes`, 1] })) : frame;
+    const t = `edit ${k + 1}`, mask = node(`${t} mask`, "ImageToMask", { image: picture(`${t} mask file`, e.mask), channel: "red" });
+    const ref = e.layer ? over(`${t} reference`, frame, picture(`${t} strokes`, e.layer), [`${t} strokes`, 1]) : frame;
     const qBase = scale(`${t} base at 768`, frame, plate.prev), qRef = e.layer ? scale(`${t} reference at 768`, ref, plate.prev) : qBase;
     const quick = add(instantiate(WF.edit, `${t} quick`, { caption: e.caption, seed: e.seed, ...e.quick },
       { base: qBase, reference: qRef, start: e.tool === "light" ? qBase : qRef, mask: scaleMask(`${t} mask at 768`, mask, plate.prev) }, { drop: EDIT_OUT }),

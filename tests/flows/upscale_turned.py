@@ -1,7 +1,7 @@
 """Finish > Upscale turned off, or set to another size, while one of its steps runs. The step stops at once, as for a new edit, and
-its finished jobs stay in the job index. Off: nothing more runs, and no upscaled step is made. On again: the steps run. Another
+its finished jobs stay in the job index. Off: nothing more runs, and no upscaled step is made. On again: Generate runs the steps. Another
 size inside a step: that size's own steps run from the first, to « finish ready », with no error. Back at the first size, the
-step it had made is still made, and the others run. The sizes, 1600 x 880 and 1400 x 770, are above the plate's 1280 x 704 and
+step it had made is still made, and Generate runs the others. The sizes, 1600 x 880 and 1400 x 770, are above the plate's 1280 x 704 and
 fit the mock in a small machine's memory."""
 
 ROWS = "els => els.map((e) => [e.querySelector('.name').textContent, e.querySelector('.time').textContent, e.className])"
@@ -50,8 +50,9 @@ def run(browser, port, U):
             f"Upscale off inside « Plate, upscaled » stops the step at once, and nothing more runs: {rows()}, {lines(start)}")
     start = len(lines(0))
     switch(True)
+    page.click("#generate")
     page.wait_for_function("(n) => [...document.querySelectorAll('#log li')].slice(n).some((e) => e.textContent.includes('Layer, upscaled: about'))", arg=start, timeout=120000)
-    U.check(any("Plate, upscaled: done in" in t for t in lines(start)) and not bad(start), f"on again, the steps run: {ups()}, {bad(start)}")
+    U.check(any("Plate, upscaled: done in" in t for t in lines(start)) and not bad(start), f"on again, Generate runs the steps: {ups()}, {bad(start)}")
     start = len(lines(0))
     size("1400")
     U.poll(page, lambda: bool(stopped(start)), 5)
@@ -64,6 +65,8 @@ def run(browser, port, U):
     size("1600")
     U.poll(page, lambda: [r[0] for r in ups() if "done" in r[2].split()][:1] == ["Plate, upscaled"], 3)
     kept = [r[0] for r in ups() if "done" in r[2].split()]
+    page.click("#generate")
+    page.wait_for_function("(n) => [...document.querySelectorAll('#log li')].slice(n).some((e) => e.textContent.includes('Composite, upscaled: done in'))", arg=start, timeout=200000)
     page.wait_for_function(RESTS, timeout=200000)
     U.poll(page, lambda: made() and canvas() == [1600, 880], 3)
     U.check(kept[:1] == ["Plate, upscaled"] and made() and canvas() == [1600, 880] and not any("Plate, upscaled: about" in t for t in lines(start)) and not bad(start),

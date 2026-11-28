@@ -1082,8 +1082,8 @@ export const keyframeSlotLine = (frame) => `Keyframes snap to the first frame, t
 // « Rec. » standards, such as Rec.709 and Rec.2020. RV and Nuke show the config's own names. The spaces keep theirs.
 const FAMILIES = { Display: "Display-referred", ITU: "ITU (International Telecommunication Union)" };
 export function plateFamily(name) { return FAMILIES[name] ?? name; }
-// An image that the scene's ComfyUI graph reads. It sits at the top of ComfyUI's input folder: LoadImage lists only the files
-// there, and the editor marks an image input whose file is not in that list as missing. Named after the export's stem (the
+// An image that the scene's ComfyUI graph reads by its name with Load Plate (graph.sceneGraph), at the top of ComfyUI's input
+// folder, where the graph's README says it must be. Named after the export's stem (the
 // plate's or the scene's name), the edit, what it holds and its hash, so two scenes never share a name; the export's zip
 // holds it under the same name, in input/ (routes.graph_images).
 export function graphImageName(name, edit, kind, hash) {
@@ -1269,6 +1269,30 @@ export function panelSize(kind, wanted, view, { least, stage, around }) {
 // without the frame number. Trailing digits are a frame number only in an image sequence: « train_v2.mp4 » is train_v2 and
 // « room.1001.exr » is room. Read as a frame number, the digits would show train_v2.mp4 and chalet_v2.mp4 as « train_v » and
 // « chalet_v », so two movies could share a name in the page, in scenes and in exports.
+// What a drop may open: one movie, or the frames of one sequence, dropped as files or as one folder (app.openDropped). The
+// extensions are the Open dialog's Upload tab's (#files in paintaplate.html).
+export const FRAME_FILE = /\.(exr|png|tiff?|dpx)$/i;
+export const MOVIE_FILE = /\.(mov|mp4|mkv|mxf|webm|webp|gif)$/i;
+export const plateFile = (name) => FRAME_FILE.test(name) || MOVIE_FILE.test(name);
+// Why a drop opens nothing, or null. names: its files' names, a folder's own files included; folders: the folders dropped;
+// loose: the files dropped beside them. The page checks it before any upload, so the plate open stays displayed.
+export function dropRefusal(names, folders = 0, loose = 0) {
+  const movies = names.filter((n) => MOVIE_FILE.test(n)).length, frames = names.filter((n) => FRAME_FILE.test(n)).length;
+  if (folders > 1) return `this drop holds ${folders} folders`;
+  if (folders && loose) return "this drop holds a folder and files";
+  if (movies > 1) return `this drop holds ${movies} movies`;
+  if (movies && frames) return "this drop holds a movie and frames";
+  if (!movies && !frames) return folders ? "the folder holds no EXR, PNG, TIFF or DPX frames" : "this drop holds no movie and no frames";
+  return null;
+}
+
+// A paint's matte that SAM 3.1 follows on fewer than half of the shot's frames: what the warning says, or null. The matte's
+// note says « tracked on N of M frames. » (mathops.follow_votes), and the paint shows only where its matte holds it.
+export function matteShort(note) {
+  const m = /tracked on (\d+) of (\d+) frames/.exec(note ?? "");
+  return m && +m[1] * 2 < +m[2] ? `the paint's matte follows the object on ${m[1]} of ${m[2]} frames` : null;
+}
+
 export function plateStem(file, sequence) {
   const base = String(file ?? "").split(/[\\/]/).pop().replace(/\.[^.]+$/, "");
   return (sequence ? base.replace(/[._]?\d+$/, "") : base) || "plate";

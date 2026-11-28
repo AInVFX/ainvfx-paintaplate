@@ -3,7 +3,7 @@
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
-import { cancel, cancelQuietly, connect, hashHex, jobsNotRun, lastJob, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl, WF } from "./comfy.mjs";
+import { cancel, cancelQuietly, connect, getSalt, hashHex, onPost, jobsNotRun, lastJob, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl, WF } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache, outgrows } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
@@ -16,6 +16,8 @@ import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFr
 import { dataSpace, plateDepth, exportDone, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_ALONE, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
+import { dropRefusal, plateFile } from "./logic.mjs"; // a drop: what it may open, and why it opens nothing
+import { matteShort } from "./logic.mjs"; // a paint's matte that follows its object on few of the shot's frames
 import { askedSeed, editSeed, gridGrow } from "./logic.mjs"; // the tests: a seed asked for in the address, and each edit's seed from it
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
 import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, nearSize, sameMachine, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
@@ -272,11 +274,12 @@ async function openPlate(list, typed, opts = {}) {
   let fileSpace = null; // the colour space the file says it holds: the OCIO menu tells it from one the person chose
   if (!list.length && !typed) return status("Open plate: choose files, or type a path in ComfyUI's input folder.", "hint");
   const began = performance.now();
+  const before = S.plate ? { state: { plate: S.plate, hero: S.hero, original: S.original, deliver: S.deliver, upscaleAsk: S.upscaleAsk }, salt: getSalt() } : null; // the plate open now comes back if this one cannot open (comeBack)
   stopEverything();
   if (!opts.under) { S.halted = false; S.viewStopped = false; S.viewEpoch++; } // another plate, or a scene: what generates stops, a stop in force ends, and what waited for it is void
   if (!opts.under) [S.deliver, S.upscaleAsk] = [{ hdr: false, upscale: false }, UPSCALE_ASK]; // a new plate: the Finish menu's passes off; the fluid shot under the edits keeps them
   if (openCtl) { openCtl.abort(); cancel("ingest"); } // a plate still opening gives way to this one
-  const ctl = (openCtl = new AbortController()); // Cancel on the opening screen, or Esc, aborts it (cancelOpen)
+  const ctl = (openCtl = Object.assign(new AbortController(), { before })); // Cancel on the opening screen, or Esc, aborts it (cancelOpen)
   Object.assign(S, { plate: null, hero: null, original: null }); // nothing to draw while the new plate loads
   const id = Date.now().toString(36), sub = `paintaplate/${id}`;
   let path = typed, out, cs, headroom = 1, total = null, keep = null; // total: the frames the file holds, when it holds more than open
@@ -317,8 +320,8 @@ async function openPlate(list, typed, opts = {}) {
   } catch (err) {
     if (openCtl === ctl) { // cancelOpen has emptied the page already when it stopped this opening
       openCtl = null;
-      $("#empty").hidden = false; $("#opening").hidden = true;
-      for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = true;
+      if (before) comeBack(before);
+      else { $("#opening").hidden = true; $("#empty").hidden = false; for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = true; }
     }
     throw err;
   }
@@ -392,22 +395,34 @@ function stopEverything() {
 
 let openCtl = null; // the plate opening now: its AbortController, until its first frame shows
 
-function cancelOpen() { // Cancel on the opening screen, or Esc: the upload and the reading stop, and the page is empty again
+// A plate that cannot open, or an opening cancelled: the plate open before it shows again as it was. openPlate clears its edits,
+// renders and caches only once the new plate has opened, so its jobs go on from where they stopped, with its own job index keys.
+function comeBack(before) {
+  $("#opening").hidden = true;
+  Object.assign(S, before.state);
+  setSalt(before.salt);
+  render(); finishUI(); stagesUI(); exportUI(); generateUI(); touch();
+}
+
+function cancelOpen() { // Cancel on the opening screen, or Esc: the upload and the reading stop, and the plate open before comes back
   if (!openCtl) return;
   const ctl = openCtl;
   openCtl = null;
   ctl.abort(); cancel("ingest");
   log("Opening cancelled.");
-  closePlate("Opening cancelled. Open a plate to start.");
+  if (!ctl.before) return closePlate("Opening cancelled. Open a plate to start."); // no plate before it: the page is empty again
+  comeBack(ctl.before);
+  status("Opening cancelled.", "hint");
 }
 
-// File > Close plate, the × after the plate's name, or a cancelled opening. Every job of the page stops, the plate's frames
+// File > Close plate, the × after the plate's name, or an opening cancelled with no plate before it. Every job of the page stops, the plate's frames
 // and movies leave the browser's memory, and the page is empty as at start. ComfyUI keeps its models loaded, so the next
 // plate opens and edits at once, and the files made stay in its output folder for the job index.
 function closePlate(message = "Plate closed: its frames left the browser's memory. Open a plate to start.") {
   if (openCtl) { openCtl.abort(); cancel("ingest"); openCtl = null; }
   const had = S.plate?.name;
   stopEverything();
+  cancel(...RENDER_KINDS); S.viewEpoch++; // the render's jobs stop, and what was queued for the plate (a scene's edits) is void
   if (S.picking) pickFrame(false);
   if (S.mode) leaveMode();
   closeMenu(); dropLive(); leaveFull();
@@ -436,6 +451,7 @@ const ramRoom = async (name) => { // ComfyUI's free RAM and what this job's fram
 };
 onFree(async (last, name) => // why ComfyUI's memory is freed before this job, or null, or { why, keep } (logic.freeAsk): speed first where there is room
   freeAsk(S.memoryProfile, last, name, S.plate && freeNeedsRoom(S.memoryProfile, last, name) ? await ramRoom(name) : null, !!S.plate));
+onPost(() => { const st = S.stage; if (st && !st.posted) { st.posted = true; st.announce(); } }); // a render step says its time once it posts a job: a step the job index answers says none
 onStop((kind) => (S.halted && STOPPED.includes(kind)) || (!!S.stage?.stopped && RENDER_KINDS.includes(kind))); // a stop stops everything, and a step stopped for the preview stops: a render step that was uploading its images when the stop came posts no job after it
 
 async function warmAll() { // every model loads while the person looks at the page: the first edit and the first shot start at once
@@ -890,16 +906,23 @@ function setFinish(opt, on) { // Finish's passes run on the render displayed, pl
   if ((opt.id === "upscale" || opt.id === "hdr") && shown) plan(shown, shown.active); // its steps join the Render panel, or leave it, at once; SDR to HDR's result replaces the composite's while it is on
   confirmed(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Result: the plate and the new content regenerated in scene-linear values, fitted to the plate, then composited again.\n  Format: half-float EXR frames in ACES2065-1, in the viewer and in Export."
     : opt.id === "upscale" ? `\n  ${upscaleWhen()}` : ""}` : `Finish: ${opt.name} off.`, 1500);
-  finishUI(); recompose(); stagesUI(); exportUI(); touch();
+  finishUI(); recompose(); stagesUI(); exportUI(); generateUI(); touch();
   const now = S.renders.get(S.heroKey); // a displayed step that the displayed render does not have: the latest result instead
   if (S.pass && S.pass !== "first" && !(now && passMovie(S.pass, now, previewOf(now), passSpaces(), upOf(now)))) { S.pass = null; showLatest(); stagesUI(); }
   else if (opt.id === "hdr" && now && !S.pass) finishLatest(on); // the same render, its result as the switch stands
   if (opt.id === "upscale") latestUpscale(on);
   if (opt.id === "hdr") { upscaleStale(); hdrStale(); } // a running step of either pass that no longer stands stops
-  if (on && plateAlone(S.heroKey) && !fluidOnly() && !S.renders.get(S.heroKey)) { // the plate alone before Generate: what Generate runs, and about how long
-    const skip = plan({ key: S.heroKey }, []).skip, steps = STAGES.filter((st) => !skip.has(st.id)), passes = steps.map((st) => (st.up ? "Upscale" : "SDR to HDR"));
-    status(`Finish: ${opt.name} on. Generate runs ${passes.length > 1 ? passes.join(" and ") : "it"} on the plate: about ${span(steps.reduce((a, st) => a + estimate(st.id, skip), 0))}.`, "hint");
-  }
+  if (on) waitLine(`Finish: ${opt.name} on.`);
+}
+// A Finish switch turned on, or another size, while nothing generates: Finish's steps wait in the Render panel (waits), and the
+// status line says what Generate runs and about how long. The plate alone has no render before Generate (want).
+function waitLine(what) {
+  const r = S.renders.get(S.heroKey), alone = !r && plateAlone(S.heroKey) && !fluidOnly();
+  const skip = r ? plan(r, r.active).skip : alone ? plan({ key: S.heroKey }, []).skip : null;
+  const steps = skip ? stepsOf(skip).filter((st) => ofFinish(st) && (alone || waits(r, st))) : [];
+  if (!steps.length) return;
+  const passes = finishNames(steps);
+  status(`${what} Generate runs ${passes.length > 1 ? passes.join(" and ") : "it"}${alone ? " on the plate" : ""}: about ${span(steps.reduce((a, st) => a + estimate(st.id, skip), 0))}.`, "hint");
 }
 // Upscale turned on or off, or another size: the player shows the latest result, unless a step of the plate's size is pinned
 // One of Upscale's steps stands while its render is displayed, with Upscale on, on the stage and at the size the step works at
@@ -1002,9 +1025,11 @@ function customUpscale() { // Finish > Upscale > Custom…: the long side in px;
 function setUpscaleAsk(asked) { // the size asked for: kept for this plate, and in the scene while the row is on
   S.upscaleAsk = asked;
   if (S.deliver.upscale) S.deliver.upscale = asked;
-  confirmed(`Finish: Upscale at ${upscaleFigures().target.join(" x ")}.`, 1500);
-  finishUI(); stagesUI(); exportUI(); touch(); // another size: its own steps (upOf)
+  const what = `Finish: Upscale at ${upscaleFigures().target.join(" x ")}.`;
+  confirmed(what, 1500);
+  finishUI(); stagesUI(); exportUI(); generateUI(); touch(); // another size: its own steps (upOf)
   latestUpscale();
+  if (S.deliver.upscale) waitLine(what);
 }
 function openFinish(open = $("#finish").hidden) { // the menu opens under its button; Esc, a click outside or the button closes it
   if (!open) return closeFinish();
@@ -1299,7 +1324,7 @@ function dropLive() { // the pass that sent it ended, stopped or failed: nothing
 
 function generating() { return !!(S.queued || S.piping); }
 function runsNow(r, steps) { // the render displayed runs, or will at its next step, or an edit of it runs: the Render panel's line counts its time; not after Esc. Read only: no plan()
-  return !S.halted && (S.piping?.key === S.heroKey || !!S.running || !!S.queued || (!!r && !r.failed && steps.some((st) => doneOf(r, st) === undefined)));
+  return !S.halted && (S.piping?.key === S.heroKey || !!S.running || !!S.queued || (!!r && !r.failed && steps.some((st) => doneOf(r, st) === undefined && !waits(r, st))));
 }
 function escape() { // Esc: logic.escapeAction. On the edit being generated it stops everything, and that edit keeps its strokes; a selection goes before what else generates
   const busy = generating(), what = escapeAction({ opening: !!openCtl, editing: !!S.draft, running: !!S.running, selected: !!S.selected, pinned: !!S.pass, generating: busy });
@@ -2129,7 +2154,7 @@ function blankFit() { // a field left, or Open: every field shows the value the 
   blankNote(changed);
 }
 
-async function openBlank() { // a black canvas LTX and ainvfx-fluid take, then a fluid shot on it
+async function openBlank(atStart = false) { // a black canvas LTX and ainvfx-fluid take, then a fluid shot on it
   if (!S.fluidReady) return status(FLUID_MISSING);
   blankFit(); // the fields show what is posted
   const spec = blankForm(), depth = blankDepth($("#b-depth").value);
@@ -2137,6 +2162,7 @@ async function openBlank() { // a black canvas LTX and ainvfx-fluid take, then a
   const r = await post("/paintaplate/blank", spec);
   if (!r.ok) throw new Error(await r.text());
   const { path } = await r.json();
+  if (atStart && (S.plate || openCtl || $("#open").open)) return; // the page's start: the invitation's Open dialog, or a plate opened while the canvas was made, stays
   $("#open").close();
   await openPlate([], path, { fluid: { depth }, cs: modelSpace(), chosen: false });
   if (depth === HDR_DEPTH) { S.deliver.hdr = true; finishUI(); } // 16-bit: Finish > SDR to HDR, as on any SDR plate
@@ -2529,7 +2555,7 @@ async function findWhole(edit, before, kind) { // SAM 3.1 finds the whole object
   status(`Edit ${num(edit)}: SAM 3.1 looking for the ${edit.prompt || "object"} under the stroke.`);
   const current = standing(edit), frame = await uploadCanvas(snap(before, size), `e${edit.id}_snap.png`);
   current();
-  const out = await run("snap", { image: frame, words: edit.prompt, ...points }, { kind, front: true }).done;
+  const out = await run("snap", { image: frame, words: edit.prompt, ...points, prefix: snapPrefix() }, { kind, front: true }).done;
   const painted = canvasBits(maskAt(edit, size), size), fileBits = (f) => maskBits(f, size);
   const objects = pickObjects({ painted, area,
     named: await Promise.all(outputFiles("snap", out, "named").map(fileBits)),
@@ -2562,7 +2588,7 @@ async function joinShadow(edit, before, kind) { // the object's cast shadow join
   status(`Edit ${num(edit)}: SAM 3.1 looking for the shadow of the ${name}.`);
   const current = standing(edit), frame = await uploadCanvas(snap(before, found.size), `e${edit.id}_shadow.png`);
   current();
-  const out = await run("snap", { image: frame, words: "shadow" }, { kind: kind === "edit" ? "snap" : kind, front: true }).done;
+  const out = await run("snap", { image: frame, words: "shadow", prefix: snapPrefix() }, { kind: kind === "edit" ? "snap" : kind, front: true }).done;
   const shadow = shadowOf({ object: found.bits, box, w, h, shadows: await Promise.all(outputFiles("snap", out, "named").slice(1).map((f) => maskBits(f, found.size))) });
   found.shadow = JSON.stringify(box); // looked for: Generate after a prefetch does not ask again
   if (!shadow) { log(`Edit ${num(edit)}: no shadow of the ${name} next to it or under it.\n  Its SAM mask covers the ${name} only.`); return false; }
@@ -2623,6 +2649,11 @@ function toggle(edit) {
   if (!edit.on && S.running === edit) stopEdit(edit);
   status(switched(editName(edit), edit.on));
   rebuild();
+  const r = S.renders.get(S.heroKey); // the set displayed now: made, it plays at once (showLatest); never made, it renders
+  if (S.heroKey && !plateAlone(S.heroKey) && !(r && latestOf(r))) {
+    pause(); seek(0); // its first frame, as the edits on make it, shows while it renders
+    status(`${switched(editName(edit), edit.on)} This set of edits renders now: its first frame shows until its shot is made.`, "hint");
+  }
 }
 
 function removeEdit(edit) {
@@ -2880,7 +2911,8 @@ function touch(ms = IDLE_MS) { clearTimeout(idleTimer); idleTimer = setTimeout(i
 // Every set of edits shown since the plate opened is a render. Its steps fall in three classes: the preview, the full-size
 // passes with their composite (the review), and the export, which runs only when Export asks for it. One step runs at a time,
 // for the set of edits displayed alone (pickRender): its preview, then its full size, then its export. A set no longer displayed
-// waits, and goes on at its next step when it shows again. Nothing stops a step but Generate: a bypass, an undo or another
+// waits, and goes on at its next step when it shows again. Finish's steps run with the render's other steps, or wait for
+// Generate when they are asked for after the render has made everything (waits). Nothing stops a step but Generate: a bypass, an undo or another
 // edit lets it finish and keeps its result. Generate stops the step at work, whatever it is and wherever it is (preempt): nothing waits for a step to end.
 // What every job made is also in the job index on disk.
 const YIELD = new Error("yield"); // a render step gives way to an edit, or to the render of another set of edits now displayed
@@ -2934,6 +2966,7 @@ function nextClass(r) { // the class of a render's next step: "preview", "full" 
   const pv = r.previews[S.plate.shot.join("x")] ?? {}, exporting = !!S.wantDownload && r.key === S.heroKey;
   for (const st of STAGES) {
     if (r.skip.has(st.id) || (st.preview ? pv : storeOf(r, st))?.done?.[st.id] !== undefined) continue;
+    if (waits(r, st)) return null; // Finish's steps wait for Generate: every step before them is made
     return !st.final ? "preview" : !st.onDemand ? "full" : exporting ? "export" : null;
   }
   return null;
@@ -2958,16 +2991,21 @@ function idle() { // one render step at a time, from the render queue; the edits
   if (S.heroKey) want(S.heroKey);
   if (S.piping) return; // the running step finishes; its render gives way at its next step when another must go first
   const r = pickRender();
-  if (!r) return generateUI(); // nothing to render, as after an edit that ended without a result: Stop goes, Generate says what Enter can start
+  if (!r) { // nothing to render, as after an edit that ended without a result: Stop goes, Generate says what Enter can start
+    if (S.renders.has(S.heroKey)) settle(S.renders.get(S.heroKey));
+    return generateUI();
+  }
   S.piping = r;
-  pipeline(r).catch((e) => {
+  r.go = true; // its steps run, and Finish's join them
+  pipeline(r).then(() => { tallied(r); if (r.warning && r.key === S.heroKey) told(...r.warning); }).catch((e) => { // a warning stays the last line
     if (e === YIELD || e?.message === "cancelled") return;
     const st = STAGES.find((x) => x.id === S.stage?.id), mine = r.key === S.heroKey;
     r.failed = st?.id ?? "render"; // it waits for Generate, which tries it again
     const err = explained(e, `${labelOf(st, r) ?? "The render"}${mine ? "" : ` of v${r.v}, in the background,`}`);
     if (mine) { quiet(err); S.wantDownload = null; } // explained() logged the fact; a render in the background says no more
-  }).finally(() => { S.piping = null; S.stage = null; dropLive(); stagesUI(); exportUI(); generateUI(); touch(); });
+  }).finally(() => { settle(r); S.piping = null; S.stage = null; dropLive(); stagesUI(); exportUI(); generateUI(); touch(); });
 }
+function settle(r) { if (S.plate && !nextClass(r)) r.go = false; } // a render with nothing left to make, its plate still open: its generation is over, and a Finish step added now waits for Generate (waits)
 
 const grow = (w, erase) => Math.max(4, Math.round(w / (erase ? COMPOSITE_GROW.erase : COMPOSITE_GROW.other))); // pixels at width w
 const feather = (w) => Math.max(6, Math.round(w / COMPOSITE_FEATHER));
@@ -3008,6 +3046,12 @@ const storeOf = (r, st) => (st.preview ? previewOf(r) : st.up ? upOf(r) : r); //
 const doneOf = (r, st) => storeOf(r, st)?.done?.[st.id]; // seconds a step took, if it ran
 const upLast = (r) => (r?.skip ? UPS.filter((st) => !r.skip.has(st.id)).at(-1) : undefined); // the last of Upscale's steps this render makes: its result is the latest
 const upscaled = (r) => !!upLast(r) && doneOf(r, upLast(r)) !== undefined; // Upscale's steps made their set, at the size asked for
+// Finish's steps run within a generation: Generate's, a set of edits that renders, or Export's. A render's `go` holds from the
+// start of its steps until it has nothing left to make (idle). A Finish switch turned on, or another size, after that adds
+// Finish's steps in grey: they wait for Generate (enter). While the render's steps run, they join them.
+const ofFinish = (st) => !!(st.hdr || st.up);
+const waits = (r, st) => ofFinish(st) && !r.go && doneOf(r, st) === undefined && !(S.wantDownload && r.key === S.heroKey); // a Finish step not made yet
+const finishNames = (steps) => FINISH.filter((o) => steps.some((st) => (o.id === "upscale" ? st.up : st.hdr))).map((o) => o.name); // the Finish passes these steps belong to
 const fullSizeMade = (r) => !!r?.review && STAGES.every((st) => !(st.hdr || st.up) || r.skip?.has(st.id) || doneOf(r, st) !== undefined); // the result is made: the composite, then each of Finish's steps the render plans
 S.took = {}; // measured seconds per step, for this plate: the next estimates use them
 let stepSeq = 0; // the order in which steps finish, kept per render (store.at): the Render panel lists them so (stepsInOrder)
@@ -3063,8 +3107,9 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   if (S.running || S.queued || pickRender() !== r) throw YIELD; // an edit, or a step of a more urgent render, goes first
   const t0 = performance.now(), before = familyNow(), guess = Math.round(estimate(id, r.skip, before)), notRun = jobsNotRun();
   S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null, sized: UP_IDS.has(id) ? upKey(r) : null, page3Before: before }; // first, last: [seconds since t0, progress] at the sampler's first and latest step; sized: the size one of Upscale's steps works at; page3Before: the family loaded as it started
+  const label = labelOf(STAGES.find((x) => x.id === id), r);
+  Object.assign(S.stage, { posted: false, announce: () => log(`Render v${r.v}: ${label}: about ${span(guess)}.`) }); // logged as its first job is posted (onPost)
   stagesUI();
-  log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: about ${span(guess)}.`);
   const stage = S.stage, progress = (f) => {
     if (S.stage !== stage) return;
     if (f > (stage.last?.[1] ?? 0)) { stage.last = [(performance.now() - t0) / 1000, f]; stage.first ??= stage.last; }
@@ -3082,8 +3127,15 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   (store.done ??= {})[id] = dt; (store.at ??= {})[id] = ++stepSeq;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
   S.stage = null;
-  log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: ${doneIn(dt, guess)}.`);
+  const fromIndex = !stage.posted && jobsNotRun() > notRun; // every job of the step taken from the job index: no time to tell
+  (r.tally ??= { index: 0, ran: 0 })[fromIndex ? "index" : "ran"]++;
+  log(`Render v${r.v}: ${label}: ${fromIndex ? "from the job index" : doneIn(dt, guess)}.`);
   stagesUI();
+}
+function tallied(r) { // a render made: how many of its steps came from the job index, and how many ran, once it took any from it
+  const t = r.tally;
+  r.tally = null;
+  if (t?.index) log(`Render v${r.v}: ${t.index} step${t.index === 1 ? "" : "s"} came from the job index, ${t.ran ? `${t.ran} ran` : "none ran"}.`);
 }
 
 function reused(r, store, id, take) { // a step that a render with the same erases made already: its result is used again
@@ -3225,6 +3277,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const E = erase ? S.erases.get(ekey) ?? S.erases.set(ekey, { sizes: {} }).get(ekey) : null;
   r.hero ??= await uploadCanvas(r.heroFrame, `hero_v${r.v}.png`);
   if (erase) r.clean0 ??= E.clean0 ??= await uploadCanvas(r.cleanFrame, `clean_v${r.v}.png`);
+  if (S.renders.get(key) !== r) throw YIELD; // its plate closed, or another opened, while its frames uploaded: nothing of it starts
   // frames_format: the shot's and the erase pass's frames at the plate's depth (logic.plateDepth): 8-bit PNG, 16-bit PNG or half-float EXR
   const common = { ...S.memoryProfile.slots, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, seed: active[0].seed, frames_format: plateDepth(p.spec).frames,
     ...plateMovie(p) }; // every pass movie at the plate's native size, the size of the viewer's canvas
@@ -3560,6 +3613,8 @@ async function track(active, shotPath, base, suffix, progress, previous, tools, 
     if (movie) found[key === "matte_a" ? "movie_a" : "movie_b"] = viewUrl(movie);
     const note = outputText("matte", out, "follow");
     if (note) log(`${tool === "erase" ? "Clean" : "Paint"} matte${suffix ? ` (${suffix.slice(1)})` : ""}: ${note}`);
+    const short = tool === "paint" && matteShort(note);
+    if (short && S.piping) told(...(S.piping.warning = [`Warning: ${short}`, "Choose « Whole shot » in Matte strategy to keep the paint on every frame."])); // the render shows it again once made (idle)
     found[key] = folderOf("matte", out, "frames");
     if (tool === "paint") { found.chose = autoChose(note); setTimeout(historyUI); } // the menu's « Auto » shows its choice, once the render holds this matte
   }
@@ -3880,7 +3935,7 @@ function timelineBar() { // the line under the timeline: the preview in gold, th
   const bar = $("#tl-render"), r = S.renders.get(S.heroKey);
   bar.className = "tl-render";
   if (!S.plate || !S.heroKey || !r) { bar.style.width = "0"; if (S.heroKey && stale()) bar.classList.add("stale"); return; }
-  const steps = stepsOf(r.skip, !!S.wantDownload || !!r.exported);
+  const steps = stepsOf(r.skip, !!S.wantDownload || !!r.exported).filter((st) => !waits(r, st)); // a Finish step that waits for Generate is not under way
   const before = familiesBefore(r, r.skip);
   const total = steps.reduce((a, st) => a + estimate(st.id, r.skip, before[st.id]), 0);
   let done = steps.reduce((a, st) => a + (doneOf(r, st) !== undefined ? estimate(st.id, r.skip, before[st.id]) : 0), 0);
@@ -4202,6 +4257,7 @@ async function sceneTarget(name) { // a scene of this name saved here: the page 
 // Finish step. Each graph reads what the graph before it writes, under the graphs' own folder (graphFolder): the edits' graph
 // reads the fluid shot, and Finish's the plate under the edits, the composite, the layer and the matte.
 const graphFolder = () => `paintaplate/${S.plate.id}/graph`;
+const snapPrefix = () => `paintaplate/${S.plate.id}/snap/s`; // SAM's masks, saved so that the job index keeps them (comfy.INDEXED)
 const graphEdits = () => S.edits.filter((e) => e.tool !== "fluid" && e.on && e.patch && e.state === "done"); // the edits displayed, as the edits' graph makes them
 function graphKinds() {
   if (!S.plate) return [];
@@ -4871,7 +4927,7 @@ async function boot() { // the version and the build, the workflows, the WebSock
   if (!INDEX_ON) log("Job index off, asked for in the address (?index=0): every job runs, and none is kept for a later session.");
   if (!AUTOPLAY_ON) log("Autoplay off, asked for in the address (?autoplay=0): a step's result waits, paused, as it is made.");
   status("Ready. Open a plate to start.", "hint");
-  if (!S.plate && BLANK_AT_START && S.fluidReady) await openBlank().catch(quiet); // a canvas for a fluid shot, at the Blank tab's settings
+  if (!S.plate && BLANK_AT_START && S.fluidReady) await openBlank(true).catch(quiet); // a canvas for a fluid shot, at the Blank tab's settings
   warmAll().catch(() => {}); // a ComfyUI that reports no GPU details simply skips it
 }
 
@@ -4918,7 +4974,8 @@ function pickAt(e) {
   const own = !S.playing && S.frame === 0 && !!S.original && !keying();
   let color;
   if (own) {
-    const sx = Math.round(x) - half, sy = Math.round(y) - half;
+    const sx = Math.round(x) - half, sy = Math.round(y) - half, painted = strokeColour(sx, sy);
+    if (painted) { pickFrame(false); return takeColor(painted, ", the stroke's own"); }
     pickCtx.clearRect(0, 0, n, n);
     pickCtx.drawImage(S.heroKey ? firstFrame() : S.original, -sx, -sy);
     if (S.draft?.tool === "paint") pickCtx.drawImage(S.draft.paint, -sx, -sy);
@@ -4930,6 +4987,22 @@ function pickAt(e) {
   if (!color) return void hud(PICK_HINT, 2000); // outside the frame: still picking
   pickFrame(false);
   takeColor(color, own ? "" : ", as the viewer shows it on this frame");
+}
+// A stroke displayed on the first frame under the pick: the colour it was painted with, from its edit's own canvas (the most
+// opaque pixel of the square, so an edge picks it too), or null. The draft's strokes, those of the edit whose History row shows
+// them (show), the selected edit's, and those of an edit that runs until its first preview replaces them (overlays). The
+// picture under them, Klein's or the plate's, is left out.
+function strokeColour(sx, sy) {
+  for (const e of [S.draft, S.peek, S.selected, S.running?.launched && !S.running.preview ? S.running : null]) {
+    if (!e?.paint || (e.tool !== "paint" && e.tool !== "light")) continue;
+    pickCtx.clearRect(0, 0, PICK_SIDE, PICK_SIDE);
+    pickCtx.drawImage(e.paint, -sx, -sy);
+    const d = pickCtx.getImageData(0, 0, PICK_SIDE, PICK_SIDE).data;
+    let at = 3;
+    for (let i = 7; i < d.length; i += 4) if (d[i] > d[at]) at = i;
+    if (d[at] >= 128) return `#${[d[at - 3], d[at - 2], d[at - 1]].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+  }
+  return null;
 }
 function takeColor(hex, how = "") {
   if (S.tool === "erase") pickTool("paint");
@@ -5129,9 +5202,31 @@ for (const el of [$("#viewport"), timeline]) el.addEventListener("wheel", (e) =>
 document.addEventListener("dragover", (e) => e.preventDefault());
 document.addEventListener("drop", (e) => {
   e.preventDefault();
-  const list = [...e.dataTransfer.files];
-  if (list.length) openPlate(list, "").catch(quiet);
+  const folders = [], files = [];
+  for (const it of e.dataTransfer.items) { // read now: the drop's data is gone once this handler returns
+    if (it.kind !== "file") continue;
+    const entry = it.webkitGetAsEntry?.();
+    if (entry?.isDirectory) folders.push(entry); else if (it.getAsFile()) files.push(it.getAsFile());
+  }
+  if (folders.length || files.length) openDropped(folders, files).catch(quiet);
 });
+// A drop opens one movie, or the frames of one sequence: its files, or one folder of frames. The browser hands a folder over as
+// an entry that cannot be read as a file, so its files are read from the entry. Anything else is refused before any upload,
+// and the plate open stays displayed (logic.dropRefusal).
+async function openDropped(folders, files) {
+  const inside = folders.length === 1 && !files.length ? await folderFiles(folders[0]).catch(() => null) : [];
+  if (!inside) return stopped("Nothing opened: the browser could not read the folder", "Select the frames inside the folder, and drop them.");
+  const list = [...files, ...inside].filter((f) => plateFile(f.name)), why = dropRefusal(list.map((f) => f.name), folders.length, folders.length ? files.length : 0);
+  if (why) return stopped(`Nothing opened: ${why}`, "Drop one movie, or one folder of frames.");
+  return openPlate(list, "");
+}
+function folderFiles(folder) { // a folder's files, its sub-folders left out; readEntries gives them in batches, until an empty one
+  const reader = folder.createReader(), found = [];
+  return new Promise((done, fail) => {
+    const next = () => reader.readEntries((batch) => (batch.length ? (found.push(...batch.filter((en) => en.isFile)), next()) : done(found)), fail);
+    next();
+  }).then((entries) => Promise.all(entries.map((en) => new Promise((done, fail) => en.file(done, fail)))));
+}
 
 addEventListener("keydown", (e) => {
   const files = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && ["o", "s"].includes(e.key.toLowerCase());
@@ -5208,17 +5303,24 @@ function enter(another) { // Generate (Enter): the edit in progress, then its sh
   if (S.draft) return launch(S.draft, another); // Ctrl+Enter on a stopped or reopened edit: another seed
   if (resumed) queueWaiting(); // the viewer: with no edit in progress, the edits that waited at the stop run before the render goes on
   if (another) { const target = S.selected ?? S.edits.at(-1); if (target) again(target); return; }
-  if (resumed || renderPending()) { // a stopped or failed render goes on
-    const r = S.renders.get(S.heroKey) ?? (plateAlone(S.heroKey) ? want(S.heroKey, true) : null); if (r) r.failed = null; touch(0);
-    return hud(resumed ? "Generating again from where it stopped." : plateAlone(S.heroKey) ? `${S.heroKey === PLATE_UP ? "Upscale" : "SDR to HDR"} starts now.` : "The shot renders now.", 2000);
+  if (resumed || renderPending()) { // a stopped, failed or waiting render goes on, Finish's steps with it
+    const r = S.renders.get(S.heroKey) ?? (plateAlone(S.heroKey) ? want(S.heroKey, true) : null), next = r && !resumed ? finishNext(r) : [];
+    if (r) { r.failed = null; r.go = true; }
+    touch(0);
+    return hud(resumed ? "Generating again from where it stopped." : next.length ? `${next.join(" and ")} ${next.length > 1 ? "start" : "starts"} now.` : "The shot renders now.", 2000);
   }
   hud(S.selected ? UP_TO_DATE : PAINT_FIRST, 3000);
 }
 
-function renderPending() { // the render of the edits displayed failed, or never started: Generate starts it again
+function finishNext(r) { // the Finish passes whose steps are all that a render has left to make: what Generate starts
+  const left = stepsOf(plan(r, r.active).skip).filter((st) => doneOf(r, st) === undefined);
+  return left.length && left.every(ofFinish) ? finishNames(left) : [];
+}
+const finishWaits = (r) => !r.go && stepsOf(plan(r, r.active).skip).some((st) => waits(r, st));
+function renderPending() { // the render of the edits displayed failed, never started, or has Finish steps that wait: Generate starts it
   const r = S.renders.get(S.heroKey);
   if (S.halted && S.edits.some((e) => e.on && e.state === "queued")) return true; // the viewer: under a stop an edit waits for its turn, and Generate runs it (queueWaiting)
-  return !!S.plate && !keying() && !!S.heroKey && !S.running && !S.queued && (S.halted || (r ? !!r.failed : !S.piping));
+  return !!S.plate && !keying() && !!S.heroKey && !S.running && !S.queued && (S.halted || (r ? !!r.failed || finishWaits(r) : !S.piping));
 }
 
 function generateUI() { // the Generate button is live when Enter has something to start

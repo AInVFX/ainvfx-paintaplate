@@ -1,6 +1,6 @@
 """Finish > Upscale's steps are steps of the render, as SDR to HDR's is. Its switch changes the Render panel at once: on, with a
 Paint, « Plate, upscaled », « Layer, upscaled » and « Composite, upscaled » follow the full-size composite and run with the render,
-with no Export, and « finish ready » waits for them; off, their rows go; on again, they come back made, with no new job.
+with no Export, and « finish ready » waits for them; turned on once the render is made, they wait in grey for Generate; off, their rows go; on again, they come back made, with no new job.
 Export then posts no Upscale job, and the zip holds the upscaled set. The player shows each made step as any step: the upscaled
 composite as the latest result, the canvas at its own size, 1600 x 880, a size above the plate's 1280 x 704 that the mock holds
 in a small machine's memory (upscale_size checks the sizes)."""
@@ -57,9 +57,12 @@ def run(browser, port, U):
     U.check(not ups() and page.text_content("#render-left") == "full size ready", f"with Upscale off, the render ends at the composite: {rows()}")
     switch(True)
     U.poll(page, planned, 1.5)
+    U.check(planned() and page.text_content("#render-left") == "full size ready" and page.is_enabled("#generate"),
+            f"once the render is made, Upscale on adds its steps at once, in grey: the status line names no time, and Generate is live: {page.text_content('#render-left')!r}, {rows()}")
+    page.click("#generate")
     counts = lambda: page.text_content("#render-left").startswith("finish ") and page.text_content("#render-left") != "finish ready"  # noqa: E731
     U.poll(page, counts, 10)
-    U.check(planned() and counts(), f"once the render is made, Upscale on adds its steps at once; they run, and the status line counts them: {page.text_content('#render-left')!r}, {rows()}")
+    U.check(planned() and counts(), f"Generate runs them, and the status line counts them: {page.text_content('#render-left')!r}, {rows()}")
     U.wait_log(page, U.added_line("Composite, upscaled: done in"), 240000, "Upscale's steps, with no Export")
     U.poll(page, lambda: made() and page.text_content("#render-left") == "finish ready", 3)
     U.check(made() and page.text_content("#render-left") == "finish ready", f"the three steps are made, then « finish ready »: {rows()}")

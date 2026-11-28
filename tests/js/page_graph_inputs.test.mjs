@@ -1,7 +1,8 @@
 // Tests of what a scene's ComfyUI graph needs on disk (graph.sceneGraph, logic.graphImageName).
-// ComfyUI's editor marks an image input as missing when its file is not in the loader's list (ComfyUI_frontend,
-// missingMediaScan.ts), and LoadImage lists only the files at the top of the input folder (ComfyUI, nodes.py). A graph that
-// reads paintaplate/up/<hash>.png makes the editor say that both of its images have no file selected.
+// ComfyUI's editor (frontend 1.59) marks a core image loader's file as missing when the file is not in the loader's list as the
+// editor read it when it opened (ComfyUI_frontend, missingMediaScan.ts). Paint a plate uploads a graph's images when it saves
+// the graph, often after the editor opened, so the graph reads each image by its name with Load Plate, whose path is no list.
+// The images stay at the top of the input folder, where the README says they must be.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -24,10 +25,11 @@ test("an image of the graph is named after the plate, the edit and what it holds
   assert.equal(graphImageName("shots/a b", 3, "strokes", "0123456789"), "shots_a_b_e3_strokes_01234567.png");
 });
 
-test("every image loader reads a file at the top of the input folder, and the README names each file that must be there", () => {
+test("every image is read by its name at the top of the input folder, by no core loader, and the README names each file", () => {
   const edits = [edit("erase", 1), edit("paint", 2), edit("light", 3)];
   const api = sceneGraph(WF, { plate, edits, render, about: { version: "1.11.13", name: "horse" } });
-  const read = Object.values(api).filter((n) => ["LoadImage", "LoadImageMask"].includes(n.class_type)).map((n) => n.inputs.image);
+  assert.ok(Object.values(api).every((n) => !["LoadImage", "LoadImageMask"].includes(n.class_type)), "no core image loader");
+  const read = Object.values(api).filter((n) => n.class_type === "PaintAPlate_LoadPlate" && n.inputs.path !== plate.path).map((n) => n.inputs.path);
   const files = edits.flatMap((e) => [e.mask, e.layer].filter(Boolean));
   assert.deepEqual([...new Set(read)].sort(), [...files].sort());
   assert.ok(read.every((name) => !name.includes("/")), `no image in a subfolder of input: ${read}`);

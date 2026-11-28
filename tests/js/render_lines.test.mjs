@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 
 test("every line of a render's step names the step, then a colon, then what happened", () => {
   const app = readFileSync(new URL("../../web/app.mjs", import.meta.url), "utf8");
-  const lines = [...app.matchAll(/log\(`Render v\$\{r\.v\}: \$\{labelOf\((?:def|STAGES\.find\(\(x\) => x\.id === id\)), r\)\}([^`]*)`\)/g)].map((m) => m[1]);
+  const lines = [...app.matchAll(/log\(`Render v\$\{r\.v\}: \$\{(?:labelOf\((?:def|STAGES\.find\(\(x\) => x\.id === id\)), r\)|label)\}([^`]*)`\)/g)].map((m) => m[1]);
   assert.ok(lines.length >= 5, `${lines.length} step lines found`);
   for (const rest of lines) assert.match(rest, /^: /, rest);
 });

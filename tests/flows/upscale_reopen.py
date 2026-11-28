@@ -64,7 +64,7 @@ def run(browser, port, U):
     page.evaluate(U.WATCH)
     upscale_at("1600")
     page.click("#generate")
-    page.wait_for_function("window.__lines.some((t) => t.includes('Plate, upscaled: done in')) || document.querySelector('#status').textContent.startsWith('Error')", timeout=200000)
+    page.wait_for_function("window.__lines.some((t) => t.includes('Plate, upscaled: done in') || t.includes('Plate, upscaled: from the job index')) || document.querySelector('#status').textContent.startsWith('Error')", timeout=200000)
     U.settled(page)
     grew = U.added(page, ("upscale", "upscale_export"))
     U.poll(page, lambda: canvas() == [1600, 880], 3)

@@ -276,6 +276,7 @@ async def execute(pid, prompt):
             o[outs["relit"]] = {"images": [save_png(result, saved, f"paintaplate/{pid[:8]}_relit")]}
     elif "point_0" in outs:  # snap: an object around each point it was given; by name, only what /mock/named armed
         img = load_image(v["image"])
+        kept = "output" if prompt[outs["point_0"]]["class_type"] == "SaveImage" else "temp"  # saved masks: the job index keeps them
         h, w = img.shape[:2]
         yy, xx = np.mgrid[0:h, 0:w]
         extra = STATE.get("snap")  # armed by /mock/snap: another object that some masks take in, as SAM can take in part of a neighbour
@@ -289,15 +290,15 @@ async def execute(pid, prompt):
             if armed and k in extra["points"] and disc.any():
                 cx, cy, rx, ry = extra["extra"]
                 disc |= ((xx - cx * w) / (rx * w)) ** 2 + ((yy - cy * h) / (ry * h)) ** 2 < 1
-            o[outs[f"point_{k}"]] = {"images": [save_png(disc.astype(np.float32), "temp", f"paintaplate/{pid[:8]}_snap{k}")]}
+            o[outs[f"point_{k}"]] = {"images": [save_png(disc.astype(np.float32), kept, f"paintaplate/{pid[:8]}_snap{k}")]}
         if "named" in outs:  # by name: the object that /mock/named armed, after the blank frame that the graph puts first
             found = STATE.get("named")
             if found and found["times"] > 0 and (v.get("words") or "").strip():
                 found["times"] -= 1
                 cx, cy, rx, ry = found["ellipse"]
                 obj = ((xx - cx * w) / (rx * w)) ** 2 + ((yy - cy * h) / (ry * h)) ** 2 < 1
-                o[outs["named"]] = {"images": [save_png(np.zeros((h, w), np.float32), "temp", f"paintaplate/{pid[:8]}_named0"),
-                                               save_png(obj.astype(np.float32), "temp", f"paintaplate/{pid[:8]}_named1")]}
+                o[outs["named"]] = {"images": [save_png(np.zeros((h, w), np.float32), kept, f"paintaplate/{pid[:8]}_named0"),
+                                               save_png(obj.astype(np.float32), kept, f"paintaplate/{pid[:8]}_named1")]}
             else:
                 o[outs["named"]] = {"images": []}
         await steps(pid, 2, 0.5)

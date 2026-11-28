@@ -64,17 +64,18 @@ class GraphLive(unittest.TestCase):
         links = [[1, 1, 0, 2, 0, "IMAGE"], [2, 1, 1, 3, 0, "MASK"], [3, 9, 0, 2, 1, "INT"]]  # the third leaves from no node
         self.assertEqual(graph_live.spread(boxes, links), {"canvas": [1800, 300], "links": 2, "long": 1, "longest": 1600})
 
-    def test_an_image_file_in_a_subfolder_or_not_named_by_the_note_is_named(self):
+    def test_an_image_file_read_by_a_core_loader_or_not_named_by_the_note_is_named(self):
         graph = {"nodes": [{"type": "MarkdownNote", "widgets_values": ["These files must be in ComfyUI's input folder: plates/a.mp4, and m_1.png."]},
-                           {"type": "LoadImageMask", "widgets_values": ["m_1.png", "alpha"]}, {"type": "LoadImage", "widgets_values": ["paintaplate/s_1.png", "image"]},
+                           {"type": "PaintAPlate_LoadPlate", "widgets_values": ["plates/a.mp4", 121, False]},
+                           {"type": "PaintAPlate_LoadPlate", "widgets_values": ["m_1.png", 1, False]}, {"type": "PaintAPlate_LoadPlate", "widgets_values": ["s_1.png", 1, False]},
                            {"type": "LoadImage", "widgets_values": ["p_1.png", "image"]}]}
-        self.assertEqual(graph_live.loaders(graph), (["paintaplate/s_1.png"], ["paintaplate/s_1.png", "p_1.png"]))
+        self.assertEqual(graph_live.loaders(graph), (["p_1.png"], ["p_1.png", "s_1.png"]))
 
     def test_offline_checks_a_saved_graph_with_no_comfyui_and_no_browser(self):
         graph = {"nodes": [{"id": 1, "type": "MarkdownNote", "title": "README", "pos": [0, 0], "size": [400, 300], "widgets_values": ["Files: m_1.png."]},
-                           {"id": 2, "type": "LoadImageMask", "pos": [500, 0], "size": [300, 300], "widgets_values": ["m_1.png", "alpha"]},
+                           {"id": 2, "type": "PaintAPlate_LoadPlate", "pos": [500, 0], "size": [300, 300], "widgets_values": ["m_1.png", 1, False]},
                            {"id": 3, "type": "NoSuchNode", "pos": [900, 0], "size": [200, 100], "widgets_values": []}],
-                 "links": [[1, 2, 0, 3, 0, "MASK"]], "extra": {"paintaplate": {"prompt": {"2": {"class_type": "LoadImageMask", "inputs": {"image": "m_1.png"}}}}}}
+                 "links": [[1, 2, 0, 3, 0, "MASK"]], "extra": {"paintaplate": {"prompt": {"2": {"class_type": "PaintAPlate_LoadPlate", "inputs": {"path": "m_1.png", "max_frames": 1, "pad_8n1": False}}}}}}
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "g.json"), "w") as f:
                 json.dump(graph, f)
@@ -82,7 +83,7 @@ class GraphLive(unittest.TestCase):
                 code = graph_live.main()
             with open(os.path.join(d, "graph_live.json")) as f:
                 found = json.load(f)
-        self.assertEqual((code, found["red"], found["over"], found["deep"], found["unnamed"]), (1, ["NoSuchNode"], [], [], []))
+        self.assertEqual((code, found["red"], found["over"], found["listed"], found["unnamed"]), (1, ["NoSuchNode"], [], [], []))
         self.assertEqual(found["spread"], {"canvas": [1100, 330], "links": 1, "long": 0, "longest": 100})
         self.assertIn("Check 3, the values against the page's API graph, needs ComfyUI's editor", said.getvalue())
 
