@@ -890,16 +890,23 @@ function setFinish(opt, on) { // Finish's passes run on the render displayed, pl
   if ((opt.id === "upscale" || opt.id === "hdr") && shown) plan(shown, shown.active); // its steps join the Render panel, or leave it, at once; SDR to HDR's result replaces the composite's while it is on
   confirmed(on ? `Finish: ${opt.name} on.${opt.id === "hdr" ? "\n  Result: the plate and the new content regenerated in scene-linear values, fitted to the plate, then composited again.\n  Format: half-float EXR frames in ACES2065-1, in the viewer and in Export."
     : opt.id === "upscale" ? `\n  ${upscaleWhen()}` : ""}` : `Finish: ${opt.name} off.`, 1500);
-  finishUI(); recompose(); stagesUI(); exportUI(); touch();
+  finishUI(); recompose(); stagesUI(); exportUI(); generateUI(); touch();
   const now = S.renders.get(S.heroKey); // a displayed step that the displayed render does not have: the latest result instead
   if (S.pass && S.pass !== "first" && !(now && passMovie(S.pass, now, previewOf(now), passSpaces(), upOf(now)))) { S.pass = null; showLatest(); stagesUI(); }
   else if (opt.id === "hdr" && now && !S.pass) finishLatest(on); // the same render, its result as the switch stands
   if (opt.id === "upscale") latestUpscale(on);
   if (opt.id === "hdr") { upscaleStale(); hdrStale(); } // a running step of either pass that no longer stands stops
-  if (on && plateAlone(S.heroKey) && !fluidOnly() && !S.renders.get(S.heroKey)) { // the plate alone before Generate: what Generate runs, and about how long
-    const skip = plan({ key: S.heroKey }, []).skip, steps = STAGES.filter((st) => !skip.has(st.id)), passes = steps.map((st) => (st.up ? "Upscale" : "SDR to HDR"));
-    status(`Finish: ${opt.name} on. Generate runs ${passes.length > 1 ? passes.join(" and ") : "it"} on the plate: about ${span(steps.reduce((a, st) => a + estimate(st.id, skip), 0))}.`, "hint");
-  }
+  if (on) waitLine(`Finish: ${opt.name} on.`);
+}
+// A Finish switch turned on, or another size, while nothing generates: Finish's steps wait in the Render panel (waits), and the
+// status line says what Generate runs and about how long. The plate alone has no render before Generate (want).
+function waitLine(what) {
+  const r = S.renders.get(S.heroKey), alone = !r && plateAlone(S.heroKey) && !fluidOnly();
+  const skip = r ? plan(r, r.active).skip : alone ? plan({ key: S.heroKey }, []).skip : null;
+  const steps = skip ? stepsOf(skip).filter((st) => ofFinish(st) && (alone || (waits(r, st) && doneOf(r, st) === undefined))) : [];
+  if (!steps.length) return;
+  const passes = finishNames(steps);
+  status(`${what} Generate runs ${passes.length > 1 ? passes.join(" and ") : "it"}${alone ? " on the plate" : ""}: about ${span(steps.reduce((a, st) => a + estimate(st.id, skip), 0))}.`, "hint");
 }
 // Upscale turned on or off, or another size: the player shows the latest result, unless a step of the plate's size is pinned
 // One of Upscale's steps stands while its render is displayed, with Upscale on, on the stage and at the size the step works at
@@ -1002,9 +1009,11 @@ function customUpscale() { // Finish > Upscale > Custom…: the long side in px;
 function setUpscaleAsk(asked) { // the size asked for: kept for this plate, and in the scene while the row is on
   S.upscaleAsk = asked;
   if (S.deliver.upscale) S.deliver.upscale = asked;
-  confirmed(`Finish: Upscale at ${upscaleFigures().target.join(" x ")}.`, 1500);
-  finishUI(); stagesUI(); exportUI(); touch(); // another size: its own steps (upOf)
+  const what = `Finish: Upscale at ${upscaleFigures().target.join(" x ")}.`;
+  confirmed(what, 1500);
+  finishUI(); stagesUI(); exportUI(); generateUI(); touch(); // another size: its own steps (upOf)
   latestUpscale();
+  if (S.deliver.upscale) waitLine(what);
 }
 function openFinish(open = $("#finish").hidden) { // the menu opens under its button; Esc, a click outside or the button closes it
   if (!open) return closeFinish();
@@ -1299,7 +1308,7 @@ function dropLive() { // the pass that sent it ended, stopped or failed: nothing
 
 function generating() { return !!(S.queued || S.piping); }
 function runsNow(r, steps) { // the render displayed runs, or will at its next step, or an edit of it runs: the Render panel's line counts its time; not after Esc. Read only: no plan()
-  return !S.halted && (S.piping?.key === S.heroKey || !!S.running || !!S.queued || (!!r && !r.failed && steps.some((st) => doneOf(r, st) === undefined)));
+  return !S.halted && (S.piping?.key === S.heroKey || !!S.running || !!S.queued || (!!r && !r.failed && steps.some((st) => doneOf(r, st) === undefined && !waits(r, st))));
 }
 function escape() { // Esc: logic.escapeAction. On the edit being generated it stops everything, and that edit keeps its strokes; a selection goes before what else generates
   const busy = generating(), what = escapeAction({ opening: !!openCtl, editing: !!S.draft, running: !!S.running, selected: !!S.selected, pinned: !!S.pass, generating: busy });
@@ -2880,7 +2889,8 @@ function touch(ms = IDLE_MS) { clearTimeout(idleTimer); idleTimer = setTimeout(i
 // Every set of edits shown since the plate opened is a render. Its steps fall in three classes: the preview, the full-size
 // passes with their composite (the review), and the export, which runs only when Export asks for it. One step runs at a time,
 // for the set of edits displayed alone (pickRender): its preview, then its full size, then its export. A set no longer displayed
-// waits, and goes on at its next step when it shows again. Nothing stops a step but Generate: a bypass, an undo or another
+// waits, and goes on at its next step when it shows again. Finish's steps run with the render's other steps, or wait for
+// Generate when they are asked for after the render has made everything (waits). Nothing stops a step but Generate: a bypass, an undo or another
 // edit lets it finish and keeps its result. Generate stops the step at work, whatever it is and wherever it is (preempt): nothing waits for a step to end.
 // What every job made is also in the job index on disk.
 const YIELD = new Error("yield"); // a render step gives way to an edit, or to the render of another set of edits now displayed
@@ -2934,6 +2944,7 @@ function nextClass(r) { // the class of a render's next step: "preview", "full" 
   const pv = r.previews[S.plate.shot.join("x")] ?? {}, exporting = !!S.wantDownload && r.key === S.heroKey;
   for (const st of STAGES) {
     if (r.skip.has(st.id) || (st.preview ? pv : storeOf(r, st))?.done?.[st.id] !== undefined) continue;
+    if (waits(r, st)) return null; // Finish's steps wait for Generate: every step before them is made
     return !st.final ? "preview" : !st.onDemand ? "full" : exporting ? "export" : null;
   }
   return null;
@@ -2958,8 +2969,13 @@ function idle() { // one render step at a time, from the render queue; the edits
   if (S.heroKey) want(S.heroKey);
   if (S.piping) return; // the running step finishes; its render gives way at its next step when another must go first
   const r = pickRender();
-  if (!r) return generateUI(); // nothing to render, as after an edit that ended without a result: Stop goes, Generate says what Enter can start
+  if (!r) { // nothing to render, as after an edit that ended without a result: Stop goes, Generate says what Enter can start
+    const shown = S.renders.get(S.heroKey);
+    if (shown) shown.go = false; // its generation is over: a Finish step added now waits for Generate (waits)
+    return generateUI();
+  }
   S.piping = r;
+  r.go = true; // its steps run, and Finish's join them
   pipeline(r).catch((e) => {
     if (e === YIELD || e?.message === "cancelled") return;
     const st = STAGES.find((x) => x.id === S.stage?.id), mine = r.key === S.heroKey;
@@ -3008,6 +3024,12 @@ const storeOf = (r, st) => (st.preview ? previewOf(r) : st.up ? upOf(r) : r); //
 const doneOf = (r, st) => storeOf(r, st)?.done?.[st.id]; // seconds a step took, if it ran
 const upLast = (r) => (r?.skip ? UPS.filter((st) => !r.skip.has(st.id)).at(-1) : undefined); // the last of Upscale's steps this render makes: its result is the latest
 const upscaled = (r) => !!upLast(r) && doneOf(r, upLast(r)) !== undefined; // Upscale's steps made their set, at the size asked for
+// Finish's steps run within a generation: Generate's, a set of edits that renders, or Export's. A render's `go` holds from the
+// start of its steps until it has nothing left to make (idle). A Finish switch turned on, or another size, after that adds
+// Finish's steps in grey: they wait for Generate (enter). While the render's steps run, they join them.
+const ofFinish = (st) => !!(st.hdr || st.up);
+const waits = (r, st) => ofFinish(st) && !r.go && !(S.wantDownload && r.key === S.heroKey);
+const finishNames = (steps) => FINISH.filter((o) => steps.some((st) => (o.id === "upscale" ? st.up : st.hdr))).map((o) => o.name); // the Finish passes these steps belong to
 const fullSizeMade = (r) => !!r?.review && STAGES.every((st) => !(st.hdr || st.up) || r.skip?.has(st.id) || doneOf(r, st) !== undefined); // the result is made: the composite, then each of Finish's steps the render plans
 S.took = {}; // measured seconds per step, for this plate: the next estimates use them
 let stepSeq = 0; // the order in which steps finish, kept per render (store.at): the Render panel lists them so (stepsInOrder)
@@ -3870,7 +3892,7 @@ function stagesUI() {
   if (rows[0] === first && fluidRows) rows.splice(fluidRows, 0, rows.shift()); // an edit's first frame is made on the fluid shot's: it follows its steps
   keepRows(list, rows);
   // the status line: the class of steps at work, the preview, the full size or Finish, and the time until it is done (logic.renderStatus)
-  const due = stepsOf(skip, !!S.wantDownload), cls = stepClasses(due);
+  const due = stepsOf(skip, !!S.wantDownload).filter((st) => !r || !waits(r, st)), cls = stepClasses(due); // a Finish step that waits for Generate counts no time
   $("#render-left").textContent = renderStatus(due.map((st) => ({ cls: cls[st.id], done: doneOf(r, st) !== undefined, left: stepSecs(st, skip, before[st.id]) })),
     { exporting: !!S.wantDownload, exported: !!r?.exported, busy: S.stage?.key === S.heroKey, running: runsNow(r, due) });
   timelineBar();
@@ -3880,7 +3902,7 @@ function timelineBar() { // the line under the timeline: the preview in gold, th
   const bar = $("#tl-render"), r = S.renders.get(S.heroKey);
   bar.className = "tl-render";
   if (!S.plate || !S.heroKey || !r) { bar.style.width = "0"; if (S.heroKey && stale()) bar.classList.add("stale"); return; }
-  const steps = stepsOf(r.skip, !!S.wantDownload || !!r.exported);
+  const steps = stepsOf(r.skip, !!S.wantDownload || !!r.exported).filter((st) => !waits(r, st)); // a Finish step that waits for Generate is not under way
   const before = familiesBefore(r, r.skip);
   const total = steps.reduce((a, st) => a + estimate(st.id, r.skip, before[st.id]), 0);
   let done = steps.reduce((a, st) => a + (doneOf(r, st) !== undefined ? estimate(st.id, r.skip, before[st.id]) : 0), 0);
@@ -5208,17 +5230,24 @@ function enter(another) { // Generate (Enter): the edit in progress, then its sh
   if (S.draft) return launch(S.draft, another); // Ctrl+Enter on a stopped or reopened edit: another seed
   if (resumed) queueWaiting(); // the viewer: with no edit in progress, the edits that waited at the stop run before the render goes on
   if (another) { const target = S.selected ?? S.edits.at(-1); if (target) again(target); return; }
-  if (resumed || renderPending()) { // a stopped or failed render goes on
-    const r = S.renders.get(S.heroKey) ?? (plateAlone(S.heroKey) ? want(S.heroKey, true) : null); if (r) r.failed = null; touch(0);
-    return hud(resumed ? "Generating again from where it stopped." : plateAlone(S.heroKey) ? `${S.heroKey === PLATE_UP ? "Upscale" : "SDR to HDR"} starts now.` : "The shot renders now.", 2000);
+  if (resumed || renderPending()) { // a stopped, failed or waiting render goes on, Finish's steps with it
+    const r = S.renders.get(S.heroKey) ?? (plateAlone(S.heroKey) ? want(S.heroKey, true) : null), next = r && !resumed ? finishNext(r) : [];
+    if (r) { r.failed = null; r.go = true; }
+    touch(0);
+    return hud(resumed ? "Generating again from where it stopped." : next.length ? `${next.join(" and ")} ${next.length > 1 ? "start" : "starts"} now.` : "The shot renders now.", 2000);
   }
   hud(S.selected ? UP_TO_DATE : PAINT_FIRST, 3000);
 }
 
-function renderPending() { // the render of the edits displayed failed, or never started: Generate starts it again
+function finishNext(r) { // the Finish passes whose steps are all that a render has left to make: what Generate starts
+  const left = stepsOf(plan(r, r.active).skip).filter((st) => doneOf(r, st) === undefined);
+  return left.length && left.every(ofFinish) ? finishNames(left) : [];
+}
+const finishWaits = (r) => !r.go && stepsOf(plan(r, r.active).skip).some((st) => waits(r, st) && doneOf(r, st) === undefined);
+function renderPending() { // the render of the edits displayed failed, never started, or has Finish steps that wait: Generate starts it
   const r = S.renders.get(S.heroKey);
   if (S.halted && S.edits.some((e) => e.on && e.state === "queued")) return true; // the viewer: under a stop an edit waits for its turn, and Generate runs it (queueWaiting)
-  return !!S.plate && !keying() && !!S.heroKey && !S.running && !S.queued && (S.halted || (r ? !!r.failed : !S.piping));
+  return !!S.plate && !keying() && !!S.heroKey && !S.running && !S.queued && (S.halted || (r ? !!r.failed || finishWaits(r) : !S.piping));
 }
 
 function generateUI() { // the Generate button is live when Enter has something to start
