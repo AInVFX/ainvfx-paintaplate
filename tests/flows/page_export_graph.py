@@ -7,10 +7,10 @@ import zipfile
 import zip_rows  # noqa: E402
 
 
-def loaded(graph):  # the images a graph loads: its image loaders' images, and the keyframes of its Keyframe Video
+def loaded(graph):  # the images a graph loads: those Load Plate reads by name at the top of the input folder (the plate sits in a folder), and the keyframes of its Keyframe Video
     names = []
     for n in graph["nodes"]:
-        if n.get("type") in ("LoadImage", "LoadImageMask"):
+        if n.get("type") == "PaintAPlate_LoadPlate" and not any(c in n["widgets_values"][0] for c in "/\\:"):
             names.append(n["widgets_values"][0])
         elif n.get("type") == "PaintAPlate_KeyframeVideo":
             names += [k["image"] for v in n.get("widgets_values", []) if isinstance(v, str) and v.startswith("[") for k in json.loads(v)]
