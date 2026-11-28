@@ -2648,6 +2648,11 @@ function toggle(edit) {
   if (!edit.on && S.running === edit) stopEdit(edit);
   status(switched(editName(edit), edit.on));
   rebuild();
+  const r = S.renders.get(S.heroKey); // the set displayed now: made, it plays at once (showLatest); never made, it renders
+  if (S.heroKey && !plateAlone(S.heroKey) && !(r && latestOf(r))) {
+    pause(); seek(0); // its first frame, as the edits on make it, shows while it renders
+    status(`${switched(editName(edit), edit.on)} This set of edits renders now: its first frame shows until its shot is made.`, "hint");
+  }
 }
 
 function removeEdit(edit) {
