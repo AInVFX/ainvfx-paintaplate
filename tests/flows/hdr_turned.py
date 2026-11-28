@@ -1,5 +1,5 @@
 """Finish > SDR to HDR turned off while one of its steps runs: the step stops at once, as Upscale's do, nothing more of SDR to
-HDR runs, and the render rests at « full size ready ». On again: its steps run to « finish ready ». « Plate, HDR » is held 8 s
+HDR runs, and the render rests at « full size ready ». On again, Generate runs its steps to « finish ready ». « Plate, HDR » is held 8 s
 on the mock, so the switch meets it running."""
 RESTS = "['full size ready', 'finish ready'].includes(document.querySelector('#render-left').textContent) || document.querySelector('#status').textContent.startsWith('Error')"
 NAMES = "els => els.map((e) => e.querySelector('.name').textContent)"
@@ -21,8 +21,8 @@ def run(browser, port, U):
     lines, left = U.log_lines(page)[start:], page.text_content("#render-left")
     U.check(left == "full size ready" and any(t.startswith("hdr ") and ": stopped after " in t for t in lines) and not any(" HDR: done in " in t for t in lines),
             f"turned off during « Plate, HDR »: the step stops at once, and nothing more of SDR to HDR runs: {left!r}, {[t[:70] for t in lines]}")
-    page.click("#finish-btn"); page.click("#finish-hdr"); page.click("#finish-hdr-yes"); page.keyboard.press("Escape")
-    U.wait_log(page, U.added_line("Composite, HDR: done in"), 240000, "SDR to HDR's steps, asked for again")
+    page.click("#finish-btn"); page.click("#finish-hdr"); page.click("#finish-hdr-yes"); page.keyboard.press("Escape"); page.click("#generate")
+    U.wait_log(page, U.added_line("Composite, HDR: done in"), 240000, "SDR to HDR's steps, asked for again with Generate")
     page.wait_for_function(RESTS, timeout=60000)
     rows = page.eval_on_selector_all("#stages li", NAMES)
     U.check(page.text_content("#render-left") == "finish ready" and finish(rows) == ["Plate, HDR", "Layer, HDR", "Composite, HDR"],

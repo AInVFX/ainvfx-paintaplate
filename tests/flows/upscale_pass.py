@@ -25,7 +25,9 @@ def run(browser, port, U):
     page.evaluate(U.WATCH); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("Fluid shot, full size: done in"), 240000, "the fluid shot")
     start = len(U.mock_route(port, "/mock/posts"))
+    U.settled(page)
     custom(page, U, "2560")
+    page.click("#generate")
     U.wait_log(page, U.added_line("Plate, upscaled: done in"), 240000, "Upscale on a 16 GB card")
     lines, chunks = said(page, U, port, start)
     U.check(any("1 job, in 4 chunks of 37 frames, each sharing 12 frames with the next." in t for t in lines) and chunks and all(c == [37, 3] for c in chunks),

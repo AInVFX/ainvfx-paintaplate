@@ -2970,8 +2970,7 @@ function idle() { // one render step at a time, from the render queue; the edits
   if (S.piping) return; // the running step finishes; its render gives way at its next step when another must go first
   const r = pickRender();
   if (!r) { // nothing to render, as after an edit that ended without a result: Stop goes, Generate says what Enter can start
-    const shown = S.renders.get(S.heroKey);
-    if (shown) shown.go = false; // its generation is over: a Finish step added now waits for Generate (waits)
+    if (S.renders.has(S.heroKey)) settle(S.renders.get(S.heroKey));
     return generateUI();
   }
   S.piping = r;
@@ -2982,8 +2981,9 @@ function idle() { // one render step at a time, from the render queue; the edits
     r.failed = st?.id ?? "render"; // it waits for Generate, which tries it again
     const err = explained(e, `${labelOf(st, r) ?? "The render"}${mine ? "" : ` of v${r.v}, in the background,`}`);
     if (mine) { quiet(err); S.wantDownload = null; } // explained() logged the fact; a render in the background says no more
-  }).finally(() => { S.piping = null; S.stage = null; dropLive(); stagesUI(); exportUI(); generateUI(); touch(); });
+  }).finally(() => { settle(r); S.piping = null; S.stage = null; dropLive(); stagesUI(); exportUI(); generateUI(); touch(); });
 }
+function settle(r) { if (S.plate && !nextClass(r)) r.go = false; } // a render with nothing left to make, its plate still open: its generation is over, and a Finish step added now waits for Generate (waits)
 
 const grow = (w, erase) => Math.max(4, Math.round(w / (erase ? COMPOSITE_GROW.erase : COMPOSITE_GROW.other))); // pixels at width w
 const feather = (w) => Math.max(6, Math.round(w / COMPOSITE_FEATHER));
@@ -3892,7 +3892,7 @@ function stagesUI() {
   if (rows[0] === first && fluidRows) rows.splice(fluidRows, 0, rows.shift()); // an edit's first frame is made on the fluid shot's: it follows its steps
   keepRows(list, rows);
   // the status line: the class of steps at work, the preview, the full size or Finish, and the time until it is done (logic.renderStatus)
-  const due = stepsOf(skip, !!S.wantDownload).filter((st) => !r || !waits(r, st)), cls = stepClasses(due); // a Finish step that waits for Generate counts no time
+  const due = stepsOf(skip, !!S.wantDownload), cls = stepClasses(due);
   $("#render-left").textContent = renderStatus(due.map((st) => ({ cls: cls[st.id], done: doneOf(r, st) !== undefined, left: stepSecs(st, skip, before[st.id]) })),
     { exporting: !!S.wantDownload, exported: !!r?.exported, busy: S.stage?.key === S.heroKey, running: runsNow(r, due) });
   timelineBar();

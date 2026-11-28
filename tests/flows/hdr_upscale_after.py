@@ -1,4 +1,4 @@
-"""Finish > SDR to HDR turned on after a render whose Upscale ran on the plate-size set: SDR to HDR's steps run, then Upscale's
+"""Finish > SDR to HDR turned on after a render whose Upscale ran on the plate-size set: Generate runs SDR to HDR's steps, then Upscale's
 again, on SDR to HDR's set, with jobs of their own. Off again: the plate-size set's upscaled steps come back made, with no new
 job. Each stage keeps its own upscaled results, as its set has its own folder. It asks for 1600 x 880, a size the mock holds
 in a small machine's memory."""
@@ -18,7 +18,7 @@ def run(browser, port, U):
     U.wait_log(page, U.added_line("Composite, upscaled: done in"), 240000, "Upscale on the plate-size set")
     page.wait_for_function(RESTS, timeout=60000)
     start = len(U.log_lines(page))
-    page.click("#finish-btn"); page.click("#finish-hdr"); page.click("#finish-hdr-yes"); page.keyboard.press("Escape")
+    page.click("#finish-btn"); page.click("#finish-hdr"); page.click("#finish-hdr-yes"); page.keyboard.press("Escape"); page.click("#generate")
     U.wait_log(page, U.added_line("Composite, HDR, upscaled: done in"), 300000, "Upscale again, on SDR to HDR's set")
     page.wait_for_function(RESTS, timeout=60000)
     rows, jobs = page.eval_on_selector_all("#stages li", NAMES), [t for t in U.log_lines(page)[start:] if t.startswith("upscale ") and " done in " in t]

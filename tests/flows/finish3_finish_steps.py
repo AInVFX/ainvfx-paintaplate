@@ -25,8 +25,9 @@ def run(browser, port, U):
     page.evaluate("window.__seen = []")
     page.click("#finish-btn"); page.click("#finish-upscale")
     U.upscale_custom(page, "1600")
-    page.keyboard.press("Escape")
-    page.wait_for_function(RESTS, timeout=240000)  # the plate alone's Upscale step runs at once: the paint comes after it
+    page.keyboard.press("Escape"); page.click("#generate")  # the plate alone's Upscale step, from Generate: the paint comes after it
+    U.wait_log(page, U.added_line("Plate, HDR, upscaled: done in"), 240000, "Upscale on the plate alone, from Generate")
+    page.wait_for_function(RESTS, timeout=240000)
     page.evaluate("window.__seen = []")
     page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line("Composite, HDR, upscaled: done in"), 300000, "both passes on the paint")
