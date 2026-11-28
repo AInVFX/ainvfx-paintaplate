@@ -62,6 +62,8 @@ export const onFree = (fn) => { freeFirst = fn; };
 export const lastJob = () => lastPosted; // the workflow of the last job posted: its models are those on the GPU (logic.FAMILY)
 let stopped = () => false; // the page's rule (design rule 13): whether a stop is in force for a job of this kind. Such a job is not posted
 export const onStop = (fn) => { stopped = fn; };
+let posting = () => {}; // the page's: a job is about to be posted, as no job index answered it
+export const onPost = (fn) => { posting = fn; };
 const FREE_SETTLE_MS = 600; // ComfyUI's worker applies a free when it wakes: a job posted in the same instant would run first
 // Until ComfyUI has released its models after /free: half of the GPU free, or `limit` ms. Its prompt worker applies a free
 // between prompts, so the retry of a job that ran out of memory waits for it.
@@ -188,6 +190,7 @@ export function run(name, values, { kind = name, preview, progress, step, live: 
       log(why.why ?? why); // logic.freeAsk's line
     }
     if (job.cancelled) return; // cancelled while the page read ComfyUI's free RAM, or while the memory was freed: nothing is posted
+    posting(name);
     Object.assign(job, { sent: Date.now(), started: null, at: null, cached: 0, previews: 0, inMain: false });
     return post("/prompt", promptBody(wf.prompt, { front, preview: !!preview })).then(answer).then((j) => {
       if (!j.prompt_id) throw new Error(rejection(j));

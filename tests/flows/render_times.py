@@ -15,7 +15,7 @@ def erase(page, U):
     page.click('.tools [data-tool="erase"]')
     U.paint_once(page, "the mug", [(0.45, 0.55), (0.5, 0.6)])
     page.keyboard.press("Enter")
-    U.wait_log(page, U.added_line("Composite, full size: done in"), 240000, "the full-size composite")
+    U.wait_log(page, U.added_line(("Composite, full size: done in", "Composite, full size: from the job index")), 240000, "the full-size composite")
 
 
 def run(browser, port, U):

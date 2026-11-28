@@ -1,7 +1,7 @@
 """A saved scene opened again in a new session takes every job from the job index, on the same build. A paint renders to its full-size
 composite and is saved as a scene; the page loads again, ComfyUI's cache is emptied (/free, as a restart does), and the
 scene opens: nothing is posted to ComfyUI, every job of the edit and of the render comes from the job index, and the scene's line
-says so."""
+says so. No render step says a time it will not take, and one line counts the steps that came from the index."""
 
 STEPS = ("ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review")
 ROWS = """(() => { const t = [...document.querySelectorAll('#history li .title')].map((e) => e.textContent);
@@ -33,6 +33,9 @@ def run(browser, port, U):
     grew = U.added(page, STEPS)
     posted = {k: v for k, v in grew.items() if k.endswith("posted") and v}
     U.check(not posted, f"the scene opened again in a new session posts no job: {posted}; from the index: {[k for k, v in grew.items() if k.endswith('before') and v]}")
+    lines = page.evaluate("window.__lines")
+    timed, tally = [t for t in lines if t.startswith("Render v") and ": about " in t], [t for t in lines if t.endswith("came from the job index, none ran.")]
+    U.check(not timed and len(tally) == 1, f"no step the job index answers says a time, and one line counts its steps: {timed[:3]}, {tally}")
     said = page.evaluate("window.__lines.filter((t) => t.startsWith('Scene opened'))")
     U.check(any("already made on this machine are reused" in t for t in said), f"the scene's line says where its results come from: {said}")
     U.no_errors(errors, "in the scene opened again")

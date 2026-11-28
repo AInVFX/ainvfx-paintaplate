@@ -3,7 +3,7 @@
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
-import { cancel, cancelQuietly, connect, getSalt, hashHex, jobsNotRun, lastJob, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl, WF } from "./comfy.mjs";
+import { cancel, cancelQuietly, connect, getSalt, hashHex, onPost, jobsNotRun, lastJob, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl, WF } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache, outgrows } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
@@ -421,6 +421,7 @@ function closePlate(message = "Plate closed: its frames left the browser's memor
   if (openCtl) { openCtl.abort(); cancel("ingest"); openCtl = null; }
   const had = S.plate?.name;
   stopEverything();
+  cancel(...RENDER_KINDS); S.viewEpoch++; // the render's jobs stop, and what was queued for the plate (a scene's edits) is void
   if (S.picking) pickFrame(false);
   if (S.mode) leaveMode();
   closeMenu(); dropLive(); leaveFull();
@@ -449,6 +450,7 @@ const ramRoom = async (name) => { // ComfyUI's free RAM and what this job's fram
 };
 onFree(async (last, name) => // why ComfyUI's memory is freed before this job, or null, or { why, keep } (logic.freeAsk): speed first where there is room
   freeAsk(S.memoryProfile, last, name, S.plate && freeNeedsRoom(S.memoryProfile, last, name) ? await ramRoom(name) : null, !!S.plate));
+onPost(() => { const st = S.stage; if (st && !st.posted) { st.posted = true; st.announce(); } }); // a render step says its time once it posts a job: a step the job index answers says none
 onStop((kind) => (S.halted && STOPPED.includes(kind)) || (!!S.stage?.stopped && RENDER_KINDS.includes(kind))); // a stop stops everything, and a step stopped for the preview stops: a render step that was uploading its images when the stop came posts no job after it
 
 async function warmAll() { // every model loads while the person looks at the page: the first edit and the first shot start at once
@@ -2988,7 +2990,7 @@ function idle() { // one render step at a time, from the render queue; the edits
   }
   S.piping = r;
   r.go = true; // its steps run, and Finish's join them
-  pipeline(r).catch((e) => {
+  pipeline(r).then(() => tallied(r)).catch((e) => {
     if (e === YIELD || e?.message === "cancelled") return;
     const st = STAGES.find((x) => x.id === S.stage?.id), mine = r.key === S.heroKey;
     r.failed = st?.id ?? "render"; // it waits for Generate, which tries it again
@@ -3098,8 +3100,9 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   if (S.running || S.queued || pickRender() !== r) throw YIELD; // an edit, or a step of a more urgent render, goes first
   const t0 = performance.now(), before = familyNow(), guess = Math.round(estimate(id, r.skip, before)), notRun = jobsNotRun();
   S.stage = { key: r.key, id, progress: 0, t0, first: null, last: null, sized: UP_IDS.has(id) ? upKey(r) : null, page3Before: before }; // first, last: [seconds since t0, progress] at the sampler's first and latest step; sized: the size one of Upscale's steps works at; page3Before: the family loaded as it started
+  const label = labelOf(STAGES.find((x) => x.id === id), r);
+  Object.assign(S.stage, { posted: false, announce: () => log(`Render v${r.v}: ${label}: about ${span(guess)}.`) }); // logged as its first job is posted (onPost)
   stagesUI();
-  log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: about ${span(guess)}.`);
   const stage = S.stage, progress = (f) => {
     if (S.stage !== stage) return;
     if (f > (stage.last?.[1] ?? 0)) { stage.last = [(performance.now() - t0) / 1000, f]; stage.first ??= stage.last; }
@@ -3117,8 +3120,15 @@ async function step(r, id, work, store = r) { // run one step of a render, timed
   (store.done ??= {})[id] = dt; (store.at ??= {})[id] = ++stepSeq;
   for (const n of STEP_FLOWS[id] ?? []) (r.flows ??= new Set()).add(n); // the render's record of its workflows
   S.stage = null;
-  log(`Render v${r.v}: ${labelOf(STAGES.find((x) => x.id === id), r)}: ${doneIn(dt, guess)}.`);
+  const fromIndex = !stage.posted && jobsNotRun() > notRun; // every job of the step taken from the job index: no time to tell
+  (r.tally ??= { index: 0, ran: 0 })[fromIndex ? "index" : "ran"]++;
+  log(`Render v${r.v}: ${label}: ${fromIndex ? "from the job index" : doneIn(dt, guess)}.`);
   stagesUI();
+}
+function tallied(r) { // a render made: how many of its steps came from the job index, and how many ran, once it took any from it
+  const t = r.tally;
+  r.tally = null;
+  if (t?.index) log(`Render v${r.v}: ${t.index} step${t.index === 1 ? "" : "s"} came from the job index, ${t.ran ? `${t.ran} ran` : "none ran"}.`);
 }
 
 function reused(r, store, id, take) { // a step that a render with the same erases made already: its result is used again
@@ -3260,6 +3270,7 @@ async function pipeline(r) { // a render's steps in order; a step made already i
   const E = erase ? S.erases.get(ekey) ?? S.erases.set(ekey, { sizes: {} }).get(ekey) : null;
   r.hero ??= await uploadCanvas(r.heroFrame, `hero_v${r.v}.png`);
   if (erase) r.clean0 ??= E.clean0 ??= await uploadCanvas(r.cleanFrame, `clean_v${r.v}.png`);
+  if (S.renders.get(key) !== r) throw YIELD; // its plate closed, or another opened, while its frames uploaded: nothing of it starts
   // frames_format: the shot's and the erase pass's frames at the plate's depth (logic.plateDepth): 8-bit PNG, 16-bit PNG or half-float EXR
   const common = { ...S.memoryProfile.slots, config: S.ocio.config, color_space: p.cs, max_frames: p.frames, seed: active[0].seed, frames_format: plateDepth(p.spec).frames,
     ...plateMovie(p) }; // every pass movie at the plate's native size, the size of the viewer's canvas
