@@ -1269,6 +1269,23 @@ export function panelSize(kind, wanted, view, { least, stage, around }) {
 // without the frame number. Trailing digits are a frame number only in an image sequence: « train_v2.mp4 » is train_v2 and
 // « room.1001.exr » is room. Read as a frame number, the digits would show train_v2.mp4 and chalet_v2.mp4 as « train_v » and
 // « chalet_v », so two movies could share a name in the page, in scenes and in exports.
+// What a drop may open: one movie, or the frames of one sequence, dropped as files or as one folder (app.openDropped). The
+// extensions are the Open dialog's Upload tab's (#files in paintaplate.html).
+export const FRAME_FILE = /\.(exr|png|tiff?|dpx)$/i;
+export const MOVIE_FILE = /\.(mov|mp4|mkv|mxf|webm|webp|gif)$/i;
+export const plateFile = (name) => FRAME_FILE.test(name) || MOVIE_FILE.test(name);
+// Why a drop opens nothing, or null. names: its files' names, a folder's own files included; folders: the folders dropped;
+// loose: the files dropped beside them. The page checks it before any upload, so the plate open stays displayed.
+export function dropRefusal(names, folders = 0, loose = 0) {
+  const movies = names.filter((n) => MOVIE_FILE.test(n)).length, frames = names.filter((n) => FRAME_FILE.test(n)).length;
+  if (folders > 1) return `this drop holds ${folders} folders`;
+  if (folders && loose) return "this drop holds a folder and files";
+  if (movies > 1) return `this drop holds ${movies} movies`;
+  if (movies && frames) return "this drop holds a movie and frames";
+  if (!movies && !frames) return folders ? "the folder holds no EXR, PNG, TIFF or DPX frames" : "this drop holds no movie and no frames";
+  return null;
+}
+
 export function plateStem(file, sequence) {
   const base = String(file ?? "").split(/[\\/]/).pop().replace(/\.[^.]+$/, "");
   return (sequence ? base.replace(/[._]?\d+$/, "") : base) || "plate";

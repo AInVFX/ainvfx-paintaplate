@@ -26,6 +26,7 @@ const INDEXED = new Set(["ingest", "prompt", "edit", "clean", "cleanup", "shot",
 const hashes = {}; // workflow name -> hash of its file: a new workflow makes new keys
 let salt = null; // the plate's identity (path, size, time); null: no index, as when the plate could not be checked
 export const setSalt = (s) => { salt = s; };
+export const getSalt = () => salt;
 let build = ""; // the server's build (/paintaplate/version, routes.build_parts): what computes; "": not known, so no index
 export const setBuild = (value) => { build = value || ""; };
 

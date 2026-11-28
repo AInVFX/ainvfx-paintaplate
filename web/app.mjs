@@ -3,7 +3,7 @@
 // pure rules live in logic.mjs (tested in Node), canvas helpers in canvas.mjs, the frame cache in frames.mjs.
 
 import { bounds, blob, canvas, loadImage, snap, whiteOf } from "./canvas.mjs";
-import { cancel, cancelQuietly, connect, hashHex, jobsNotRun, lastJob, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl, WF } from "./comfy.mjs";
+import { cancel, cancelQuietly, connect, getSalt, hashHex, jobsNotRun, lastJob, loadWorkflows, objectInfo, onBack, onFree, onLog, onNotice, onStop, outputFile, outputFiles, outputText, post, run, setBuild, setSalt, upload, viewUrl, WF } from "./comfy.mjs";
 import { Display } from "./display.mjs";
 import { DeepFrames, FrameCache, outgrows } from "./frames.mjs";
 import { XRAY_SIDE, XRAY_TEXT, alphaFromHalfs, tintPixels, xrayPlan } from "./xray.mjs";
@@ -16,6 +16,7 @@ import { foldersIn, framesNeed, memoryProfile, remember, stageTwoGuess, startsFr
 import { dataSpace, plateDepth, exportDone, holdsHdr, bigPlateWarning, STEP_FLOWS, resultFlows, wantsHdrFor, warmEnd, plateStem, span, doneIn, PLATE_ALONE, PLATE_UP } from "./logic.mjs";
 import { awaitingPass, editList, eraserAfterKey, hiddenAbove, keyframeSlotLine, graphImageName, plateFamily, plateSpaceLine, remakeQuestion, stopHint } from "./logic.mjs";
 import { replayOrder } from "./logic.mjs"; // the viewer: the order an edit's strokes replay in
+import { dropRefusal, plateFile } from "./logic.mjs"; // a drop: what it may open, and why it opens nothing
 import { askedSeed, editSeed, gridGrow } from "./logic.mjs"; // the tests: a seed asked for in the address, and each edit's seed from it
 import { plateIdentity } from "./logic.mjs"; // the job index: the plate's identity in a key
 import { CACHE_CHOICES, PlayStats, autoBudget, cacheLine, cachePlan, nearSize, sameMachine, statsLine } from "./frames.mjs"; // the viewer: one cache budget, playback statistics
@@ -272,6 +273,7 @@ async function openPlate(list, typed, opts = {}) {
   let fileSpace = null; // the colour space the file says it holds: the OCIO menu tells it from one the person chose
   if (!list.length && !typed) return status("Open plate: choose files, or type a path in ComfyUI's input folder.", "hint");
   const began = performance.now();
+  const before = S.plate ? { state: { plate: S.plate, hero: S.hero, original: S.original, deliver: S.deliver, upscaleAsk: S.upscaleAsk }, salt: getSalt() } : null; // the plate open now comes back if this one cannot open (comeBack)
   stopEverything();
   if (!opts.under) { S.halted = false; S.viewStopped = false; S.viewEpoch++; } // another plate, or a scene: what generates stops, a stop in force ends, and what waited for it is void
   if (!opts.under) [S.deliver, S.upscaleAsk] = [{ hdr: false, upscale: false }, UPSCALE_ASK]; // a new plate: the Finish menu's passes off; the fluid shot under the edits keeps them
@@ -317,8 +319,9 @@ async function openPlate(list, typed, opts = {}) {
   } catch (err) {
     if (openCtl === ctl) { // cancelOpen has emptied the page already when it stopped this opening
       openCtl = null;
-      $("#empty").hidden = false; $("#opening").hidden = true;
-      for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = true;
+      $("#opening").hidden = true;
+      if (before) comeBack(before);
+      else { $("#empty").hidden = false; for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = true; }
     }
     throw err;
   }
@@ -391,6 +394,14 @@ function stopEverything() {
 }
 
 let openCtl = null; // the plate opening now: its AbortController, until its first frame shows
+
+// A plate that cannot open: the plate open before it shows again as it was. openPlate clears its edits, renders and caches only
+// once the new plate has opened, so its jobs go on from where they stopped, with its own job index keys.
+function comeBack(before) {
+  Object.assign(S, before.state);
+  setSalt(before.salt);
+  render(); finishUI(); stagesUI(); exportUI(); generateUI(); touch();
+}
 
 function cancelOpen() { // Cancel on the opening screen, or Esc: the upload and the reading stop, and the page is empty again
   if (!openCtl) return;
@@ -5151,9 +5162,31 @@ for (const el of [$("#viewport"), timeline]) el.addEventListener("wheel", (e) =>
 document.addEventListener("dragover", (e) => e.preventDefault());
 document.addEventListener("drop", (e) => {
   e.preventDefault();
-  const list = [...e.dataTransfer.files];
-  if (list.length) openPlate(list, "").catch(quiet);
+  const folders = [], files = [];
+  for (const it of e.dataTransfer.items) { // read now: the drop's data is gone once this handler returns
+    if (it.kind !== "file") continue;
+    const entry = it.webkitGetAsEntry?.();
+    if (entry?.isDirectory) folders.push(entry); else if (it.getAsFile()) files.push(it.getAsFile());
+  }
+  if (folders.length || files.length) openDropped(folders, files).catch(quiet);
 });
+// A drop opens one movie, or the frames of one sequence: its files, or one folder of frames. The browser hands a folder over as
+// an entry that cannot be read as a file, so its files are read from the entry. Anything else is refused before any upload,
+// and the plate open stays displayed (logic.dropRefusal).
+async function openDropped(folders, files) {
+  const inside = folders.length === 1 && !files.length ? await folderFiles(folders[0]).catch(() => null) : [];
+  if (!inside) return stopped("Nothing opened: the browser could not read the folder", "Select the frames inside the folder, and drop them.");
+  const list = [...files, ...inside].filter((f) => plateFile(f.name)), why = dropRefusal(list.map((f) => f.name), folders.length, folders.length ? files.length : 0);
+  if (why) return stopped(`Nothing opened: ${why}`, "Drop one movie, or one folder of frames.");
+  return openPlate(list, "");
+}
+function folderFiles(folder) { // a folder's files, its sub-folders left out; readEntries gives them in batches, until an empty one
+  const reader = folder.createReader(), found = [];
+  return new Promise((done, fail) => {
+    const next = () => reader.readEntries((batch) => (batch.length ? (found.push(...batch.filter((en) => en.isFile)), next()) : done(found)), fail);
+    next();
+  }).then((entries) => Promise.all(entries.map((en) => new Promise((done, fail) => en.file(done, fail)))));
+}
 
 addEventListener("keydown", (e) => {
   const files = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && ["o", "s"].includes(e.key.toLowerCase());
