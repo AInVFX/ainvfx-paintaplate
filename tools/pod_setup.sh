@@ -4,7 +4,9 @@
 # PLATES=1 also downloads the example plates into ComfyUI's input/plates folder (get_plates.py, at the root of the pack);
 # FLUID=0 skips AInVFX's ainvfx-fluid IC-LoRA (0.65 GB), which the blank plate's fluid shots need. The models and their
 # revisions are in get_models.py, at the root of the pack.
-# The refs default to the tested commits, in tools/pins.sh. The pack is the repo this script lives in.
+# The refs default to the latest: ComfyUI's newest release and ComfyUI-LTXVideo's main branch, so that a pod meets what people
+# install today. tools/pins.sh holds the versions the tests ran on; COMFY_REF and LTX_REF, or the two arguments, take any ref.
+# The pack is the repo this script lives in.
 # Code, models and pins live in $WORKDIR (a network volume survives the pod); the Python env
 # goes on the fast container disk. Accept the Hugging Face licences of FLUX 3 Image Klein,
 # LTX 2.5, the LTX in-outpainting IC-LoRA and the SDR-to-HDR IC-LoRA first: the downloads use your token.
@@ -12,7 +14,9 @@ set -euo pipefail
 W=${WORKDIR:-/workspace}; VENV=${VENV:-/opt/venv}
 # shellcheck source-path=SCRIPTDIR source=pins.sh
 . "$(dirname "$0")/pins.sh"
-COMFY_REF=${1:-${COMFY_REF:-$COMFY_PIN}}; LTX_REF=${2:-${LTX_REF:-$LTX_PIN}}
+latest_comfy() { timeout 60 git ls-remote --tags --refs --sort=-v:refname https://github.com/comfyanonymous/ComfyUI 'v*' 2>/dev/null | sed -n '1s|.*refs/tags/||p'; }
+COMFY_REF=${1:-${COMFY_REF:-$(latest_comfy)}}; COMFY_REF=${COMFY_REF:-$COMFY_PIN}  # GitHub gave no tag: the version the tests ran on
+LTX_REF=${2:-${LTX_REF:-origin/HEAD}}
 PACK=${PACK:-$(cd "$(dirname "$0")/.." && pwd)}
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 # Code comes from GitHub. A copy without git history is used as it is; git never waits more than a minute for GitHub.

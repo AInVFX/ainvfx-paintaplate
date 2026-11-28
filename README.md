@@ -61,7 +61,7 @@ The steps are the same on Windows and Linux. Run each command with the Python th
      python -m pip install -r ComfyUI-LTXVideo/requirements.txt
      ```
 4. **Restart ComfyUI.**
-5. **Download the models** into ComfyUI's `models` folders: 17 files, 79 GB in all. Get the ones you lack by hand, from the pages of the [models table](#credits-and-licences), or with [`get_models.py`](get_models.py). For the script, go to the pack's folder, `custom_nodes/ainvfx-paintaplate`, and set your token: `export HF_TOKEN=hf_...` on Linux, `$env:HF_TOKEN = "hf_..."` in PowerShell on Windows. Then run:
+5. **Download the models** into ComfyUI's `models` folders: 17 files, 79 GB in all. Get the ones you lack by hand, from [the model files](#the-model-files), which gives each file's link and folder, or with [`get_models.py`](get_models.py). For the script, go to the pack's folder, `custom_nodes/ainvfx-paintaplate`, and set your token: `export HF_TOKEN=hf_...` on Linux, `$env:HF_TOKEN = "hf_..."` in PowerShell on Windows. Then run:
 
    ```sh
    python get_models.py --list    # each file, its folder and size, and whether it is in place
@@ -87,7 +87,7 @@ The steps are the same on Windows and Linux. Run each command with the Python th
 Runpod rents GPUs by the hour, in the cloud. Its 96 GB GPUs run every tool of Paint a plate at full speed, plates above 2K included, with no powerful GPU of your own.
 
 1. Accept the four models' terms and create a Hugging Face read token, as in [step 2 of Install](#install).
-2. Start a pod: an RTX PRO 6000, Runpod's PyTorch template on Ubuntu 24.04 (tested with the image `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`), a host with CUDA 13.0 or newer, a 150 GB container disk, ports 8188 and 8888, and your token in an `HF_TOKEN` environment variable of the pod. To keep the token as a Runpod secret, create a secret named `HF_TOKEN`, then give the pod's `HF_TOKEN` variable the value `{{ RUNPOD_SECRET_HF_TOKEN }}`: a secret alone does not reach the pod.
+2. Start a pod: an RTX PRO 6000, Runpod's latest official PyTorch template (tested with the image `runpod/pytorch:2.2.0-cu1320-torch2150-ubuntu2404`), a host with CUDA 13.0 or newer, a 150 GB container disk, ports 8188 and 8888, and your token in an `HF_TOKEN` environment variable of the pod. To keep the token as a Runpod secret, create a secret named `HF_TOKEN`, then give the pod's `HF_TOKEN` variable the value `{{ RUNPOD_SECRET_HF_TOKEN }}`: a secret alone does not reach the pod.
 3. In the pod's JupyterLab terminal, run:
 
    ```sh
@@ -95,7 +95,7 @@ Runpod rents GPUs by the hour, in the cloud. Its 96 GB GPUs run every tool of Pa
    PLATES=1 bash /workspace/ainvfx-paintaplate/tools/runpod_start.sh
    ```
 
-   [The script](tools/runpod_start.sh) installs the tested ComfyUI and ComfyUI-LTXVideo, links this pack into ComfyUI, downloads the models and the example plates, and starts ComfyUI. Then it prints the page's address.
+   [The script](tools/runpod_start.sh) installs the latest ComfyUI and ComfyUI-LTXVideo, links this pack into ComfyUI, downloads the models and the example plates, and starts ComfyUI. Then it prints the page's address.
 
 After a `git pull`, `bash tools/runpod_start.sh --restart` loads the new code. Port 8188 has no password: anyone with the pod's address can use the page.
 
@@ -225,6 +225,30 @@ Paint a plate builds on the work of others:
 | [LTX 2.5 SDR-to-HDR IC-LoRA (Lightricks), Its fixed scene embeddings](https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR) | Turns the SDR shot into scene-linear HDR. The prompt that SDR to HDR uses | [LTX-2.x Community License](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x) |
 | [ainvfx-fluid IC-LoRA (AInVFX)](https://huggingface.co/AInVFX/ainvfx-fluid) | Turns painted keyframes into a fluid: smoke, fire, water and more | [LTX-2.x Community License](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x) |
 | [SeedVR2 7B (fp16), ByteDance's video restoration model, SeedVR2's VAE](https://huggingface.co/Comfy-Org/SeedVR2) | Upscales the result to the size chosen, up to 3840 x 2160. Encodes and decodes the frames that SeedVR2 7B upscales | [Apache-2.0](https://huggingface.co/Comfy-Org/SeedVR2/blob/main/README.md) |
+
+### The model files
+
+Each file, with its page on Hugging Face and the folder it goes in, under ComfyUI's `models` folder. [`get_models.py`](get_models.py) downloads the same files to the same folders. Five files are optional: without `ainvfx-fluid.safetensors`, fluid shots switch off; without `ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors` and `ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors`, SDR to HDR; without `seedvr2_7b_fp16.safetensors` and `seedvr2_ema_vae_fp16.safetensors`, Upscale. The rest works without them.
+
+| File | Folder | Size |
+| --- | --- | --- |
+| [`flux3-image-klein-int8-convrot.safetensors`](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/blob/main/diffusion_models/flux3-image-klein-int8-convrot.safetensors) | `models/diffusion_models/` | 5.8 GB |
+| [`qwen3vl_4b_int8_convrot.safetensors`](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/blob/main/text_encoders/qwen3vl_4b_int8_convrot.safetensors) | `models/text_encoders/` | 4.9 GB |
+| [`qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors`](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/blob/main/text_encoders/qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors) | `models/text_encoders/` | 6.7 GB |
+| [`flux2-vae.safetensors`](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/blob/main/vae/flux2-vae.safetensors) | `models/vae/` | 336 MB |
+| [`ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors`](https://huggingface.co/Lightricks/LTX-2.5/blob/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors) | `models/diffusion_models/` | 21.5 GB |
+| [`gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors`](https://huggingface.co/Lightricks/LTX-2.5/blob/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors) | `models/text_encoders/` | 15.4 GB |
+| [`ltx-2.5-video-vae-conv-bf16.safetensors`](https://huggingface.co/Lightricks/LTX-2.5/blob/main/vae/ltx-2.5-video-vae-conv-bf16.safetensors) | `models/vae/` | 1.5 GB |
+| [`ltx-2.5-audio-vae-bf16.safetensors`](https://huggingface.co/Lightricks/LTX-2.5/blob/main/vae/ltx-2.5-audio-vae-bf16.safetensors) | `models/vae/` | 365 MB |
+| [`LTX25_Ripple_v11.safetensors`](https://huggingface.co/WepeNerd/LTX-Ripple/blob/main/LTX25_Ripple_v11.safetensors) | `models/loras/` | 654 MB |
+| [`ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors`](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-In-Outpainting/blob/main/ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors) | `models/loras/` | 1.3 GB |
+| [`sam3.1_multiplex_fp16.safetensors`](https://huggingface.co/Comfy-Org/sam3.1/blob/main/checkpoints/sam3.1_multiplex_fp16.safetensors) | `models/checkpoints/` | 1.7 GB |
+| [`taeltx2_3.safetensors`](https://huggingface.co/Kijai/LTX2.3_comfy/blob/main/vae/taeltx2_3.safetensors) | `models/vae_approx/` | 24 MB |
+| [`ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors`](https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR/blob/main/ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors) | `models/loras/` | 1.3 GB |
+| [`ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors`](https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR/blob/main/ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors) | `models/embeddings/` | 13 MB |
+| [`ainvfx-fluid.safetensors`](https://huggingface.co/AInVFX/ainvfx-fluid/blob/main/ltx-2.5/ainvfx-fluid.safetensors) | `models/loras/` | 654 MB |
+| [`seedvr2_7b_fp16.safetensors`](https://huggingface.co/Comfy-Org/SeedVR2/blob/main/diffusion_models/seedvr2_7b_fp16.safetensors) | `models/diffusion_models/` | 16.5 GB |
+| [`seedvr2_ema_vae_fp16.safetensors`](https://huggingface.co/Comfy-Org/SeedVR2/blob/main/vae/seedvr2_ema_vae_fp16.safetensors) | `models/vae/` | 501 MB |
 
 **The licences in short.** This table sums up what each licence asks. Each licence's own text is what binds you: read it before you use a model.
 
