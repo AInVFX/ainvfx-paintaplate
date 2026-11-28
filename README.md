@@ -6,6 +6,8 @@
 
 **[▶ Watch the showcase (4 minutes)](https://youtu.be/EsL3O7WvBr4)**: shots made live with Paint a plate.
 
+**[▶ Watch the deep dive (1 hour)](https://youtu.be/6uVHvw6gsC8)**: a complete guide, from the install to the export.
+
 **Contents:** [What it does](#what-it-does) · [What you need](#what-you-need) · [Install](#install) · [A first edit](#a-first-edit) · [Tips](#tips) · [When something goes wrong](#when-something-goes-wrong) · [How it works](#how-it-works) · [Questions from the community](#questions-from-the-community) · [Limits](#limits) · [Contributing](#contributing) · [Credits and licences](#credits-and-licences) · [Links](#links)
 
 Paint a plate is a visual effects tool that runs in [ComfyUI](https://github.com/comfyanonymous/ComfyUI), on your own machine, with open weights only. A plate is the filmed shot that the effects go into. Paint on the first frame of a plate to erase, add or relight, watch the edit carry through the shot, and export it in the plate's own format, layers and untouched pixels. FLUX 3 Image Klein, Black Forest Labs' image model, makes the edit on the first frame in seconds. LTX 2.5, Lightricks' video model, extends it to the whole shot. Every untouched pixel of the result is identical to the plate.
