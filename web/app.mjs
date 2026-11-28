@@ -2154,7 +2154,7 @@ function blankFit() { // a field left, or Open: every field shows the value the 
   blankNote(changed);
 }
 
-async function openBlank() { // a black canvas LTX and ainvfx-fluid take, then a fluid shot on it
+async function openBlank(atStart = false) { // a black canvas LTX and ainvfx-fluid take, then a fluid shot on it
   if (!S.fluidReady) return status(FLUID_MISSING);
   blankFit(); // the fields show what is posted
   const spec = blankForm(), depth = blankDepth($("#b-depth").value);
@@ -2162,6 +2162,7 @@ async function openBlank() { // a black canvas LTX and ainvfx-fluid take, then a
   const r = await post("/paintaplate/blank", spec);
   if (!r.ok) throw new Error(await r.text());
   const { path } = await r.json();
+  if (atStart && (S.plate || openCtl || $("#open").open)) return; // the page's start: the invitation's Open dialog, or a plate opened while the canvas was made, stays
   $("#open").close();
   await openPlate([], path, { fluid: { depth }, cs: modelSpace(), chosen: false });
   if (depth === HDR_DEPTH) { S.deliver.hdr = true; finishUI(); } // 16-bit: Finish > SDR to HDR, as on any SDR plate
@@ -4926,7 +4927,7 @@ async function boot() { // the version and the build, the workflows, the WebSock
   if (!INDEX_ON) log("Job index off, asked for in the address (?index=0): every job runs, and none is kept for a later session.");
   if (!AUTOPLAY_ON) log("Autoplay off, asked for in the address (?autoplay=0): a step's result waits, paused, as it is made.");
   status("Ready. Open a plate to start.", "hint");
-  if (!S.plate && BLANK_AT_START && S.fluidReady) await openBlank().catch(quiet); // a canvas for a fluid shot, at the Blank tab's settings
+  if (!S.plate && BLANK_AT_START && S.fluidReady) await openBlank(true).catch(quiet); // a canvas for a fluid shot, at the Blank tab's settings
   warmAll().catch(() => {}); // a ComfyUI that reports no GPU details simply skips it
 }
 
