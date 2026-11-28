@@ -278,7 +278,7 @@ async function openPlate(list, typed, opts = {}) {
   if (!opts.under) { S.halted = false; S.viewStopped = false; S.viewEpoch++; } // another plate, or a scene: what generates stops, a stop in force ends, and what waited for it is void
   if (!opts.under) [S.deliver, S.upscaleAsk] = [{ hdr: false, upscale: false }, UPSCALE_ASK]; // a new plate: the Finish menu's passes off; the fluid shot under the edits keeps them
   if (openCtl) { openCtl.abort(); cancel("ingest"); } // a plate still opening gives way to this one
-  const ctl = (openCtl = new AbortController()); // Cancel on the opening screen, or Esc, aborts it (cancelOpen)
+  const ctl = (openCtl = Object.assign(new AbortController(), { before })); // Cancel on the opening screen, or Esc, aborts it (cancelOpen)
   Object.assign(S, { plate: null, hero: null, original: null }); // nothing to draw while the new plate loads
   const id = Date.now().toString(36), sub = `paintaplate/${id}`;
   let path = typed, out, cs, headroom = 1, total = null, keep = null; // total: the frames the file holds, when it holds more than open
@@ -319,9 +319,8 @@ async function openPlate(list, typed, opts = {}) {
   } catch (err) {
     if (openCtl === ctl) { // cancelOpen has emptied the page already when it stopped this opening
       openCtl = null;
-      $("#opening").hidden = true;
       if (before) comeBack(before);
-      else { $("#empty").hidden = false; for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = true; }
+      else { $("#opening").hidden = true; $("#empty").hidden = false; for (const b of ["#play-btn", "#wipe-btn"]) $(b).disabled = true; }
     }
     throw err;
   }
@@ -395,24 +394,27 @@ function stopEverything() {
 
 let openCtl = null; // the plate opening now: its AbortController, until its first frame shows
 
-// A plate that cannot open: the plate open before it shows again as it was. openPlate clears its edits, renders and caches only
-// once the new plate has opened, so its jobs go on from where they stopped, with its own job index keys.
+// A plate that cannot open, or an opening cancelled: the plate open before it shows again as it was. openPlate clears its edits,
+// renders and caches only once the new plate has opened, so its jobs go on from where they stopped, with its own job index keys.
 function comeBack(before) {
+  $("#opening").hidden = true;
   Object.assign(S, before.state);
   setSalt(before.salt);
   render(); finishUI(); stagesUI(); exportUI(); generateUI(); touch();
 }
 
-function cancelOpen() { // Cancel on the opening screen, or Esc: the upload and the reading stop, and the page is empty again
+function cancelOpen() { // Cancel on the opening screen, or Esc: the upload and the reading stop, and the plate open before comes back
   if (!openCtl) return;
   const ctl = openCtl;
   openCtl = null;
   ctl.abort(); cancel("ingest");
   log("Opening cancelled.");
-  closePlate("Opening cancelled. Open a plate to start.");
+  if (!ctl.before) return closePlate("Opening cancelled. Open a plate to start."); // no plate before it: the page is empty again
+  comeBack(ctl.before);
+  status("Opening cancelled.", "hint");
 }
 
-// File > Close plate, the × after the plate's name, or a cancelled opening. Every job of the page stops, the plate's frames
+// File > Close plate, the × after the plate's name, or an opening cancelled with no plate before it. Every job of the page stops, the plate's frames
 // and movies leave the browser's memory, and the page is empty as at start. ComfyUI keeps its models loaded, so the next
 // plate opens and edits at once, and the files made stay in its output folder for the job index.
 function closePlate(message = "Plate closed: its frames left the browser's memory. Open a plate to start.") {
