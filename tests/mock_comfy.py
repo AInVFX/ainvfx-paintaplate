@@ -1,15 +1,18 @@
 """A stand-in ComfyUI for working on the page without a GPU: the same HTTP and WebSocket API, fake models.
 
-    python tests/mock_comfy.py --root /tmp/mock --port 8199 [--plate]
+    python tests/mock_comfy.py --root /tmp/mock --port 8199 [--plate] [--speed 8]
 
 It serves web/ at /extensions/ainvfx-paintaplate/, answers /object_info, /upload/image, /prompt, /history,
-/view, /queue, /interrupt and /ws, and runs each workflow with numpy instead of models: an edit tints and
+/view, /queue, /interrupt, /system_stats, /free and /ws, and runs each workflow with numpy instead of models: an edit tints and
 blurs the reference inside the mask and streams step previews, the shot pastes the edited first frame over
 every frame, the matte repeats the first mask, the composite and the export blend through the matte. The
 download route and the plate browser are the pack's own routes.py. --plate writes a 1280 x 704 test plate to input/plates/desk.mp4.
-Each job waits a little, so the page's progress, cancelling and ordering behave as they do on a GPU.
+Each job waits a little, so the page's progress, cancelling and ordering behave as they do on a GPU. The jobs run
+on a thread of their own, as ComfyUI runs its prompts beside its server: every route answers while a job writes its files. --speed divides
+these waits (the page suite runs with it). The windows a check holds open keep their own time: /mock/slow, /mock/oom,
+/mock/hold and the second after /free.
 """
-import argparse, asyncio, importlib, io, json, os, struct, sys, time, types, uuid
+import argparse, asyncio, glob, importlib, io, itertools, json, os, re, struct, sys, threading, time, types, uuid
 from fractions import Fraction
 
 import av
@@ -21,12 +24,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path[:0] = [REPO, os.path.join(REPO, "tools")]
 import plateio  # noqa: E402
+import mathops  # noqa: E402
 from build_workflows import outputs_of  # noqa: E402
 
 A = None  # parsed arguments
 JOBS, HISTORY, SOCKETS = [], {}, {}
 STATE = {"running": None, "interrupt": False, "oom": {}}
 EVENTS = []  # (what, time, ...) for the out-of-memory test: the failure, /free, every fluid job posted
+LOOPS = {}  # "server": the loop of the routes, which owns the WebSockets; "jobs": the loop of the jobs, on its own thread
 
 
 def folder(kind):
@@ -91,6 +96,12 @@ def load_image(name, mode="RGB"):
     return np.asarray(Image.open(path).convert(mode), np.float32) / 255
 
 
+def moved(img, back=False):  # the drift /mock/shift armed, by a fraction of the frame: forward for a shot and its tracking matte, back for the composite
+    fx, fy = STATE.get("shift", (0.0, 0.0))
+    dx, dy = round(fx * img.shape[1]), round(fy * img.shape[0])
+    return np.roll(img, (-dy, -dx) if back else (dy, dx), axis=(0, 1)) if dx or dy else img
+
+
 def resize(img, w, h):
     mode = "L" if img.ndim == 2 else ("RGBA" if img.shape[2] == 4 else "RGB")
     arr = (np.clip(img, 0, 1) * 255).astype(np.uint8)
@@ -103,26 +114,31 @@ def save_png(img, kind, prefix, i=None):
     os.makedirs(d, exist_ok=True)
     name = f"{stem}_{(i or 0) + 1:05d}_.png"
     mode = "L" if img.ndim == 2 else ("RGBA" if img.shape[2] == 4 else "RGB")
-    Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8), mode).save(os.path.join(d, name))
+    # the fastest compression: a PNG keeps every pixel at any level
+    Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8), mode).save(os.path.join(d, name), compress_level=1)
     return {"filename": name, "subfolder": sub, "type": kind}
 
 
 MOVIE = [0, 0]  # the movie size the job asks for (movie_width, movie_height), as Save Movie takes it; 0: the frames' own
 
 
-def save_mp4(frames, prefix, fps=24.0):
-    if all(MOVIE) and frames[0].shape[:2] != (MOVIE[1], MOVIE[0]):
-        frames = [np.asarray(Image.fromarray((np.clip(f, 0, 1) * 255).astype(np.uint8)).resize(tuple(MOVIE), Image.LANCZOS), np.float32) / 255 for f in frames]
+def save_mp4(frames, prefix, fps=24.0, side=0):  # frames: any iterable, each read as it is written (a 4K shot does not fit the mock's memory); side: px on the long side, else the job's movie size
+    frames = iter(frames)
+    first = next(frames)
+    size = (max(2, round(side * first.shape[1] / max(first.shape[:2]))), max(2, round(side * first.shape[0] / max(first.shape[:2])))) if side else tuple(MOVIE)
+    if all(size) and first.shape[:2] != (size[1], size[0]):
+        sized = lambda f: np.asarray(Image.fromarray((np.clip(f, 0, 1) * 255).astype(np.uint8)).resize(size, Image.LANCZOS), np.float32) / 255  # noqa: E731
+        first, frames = sized(first), map(sized, frames)
     sub, _, stem = prefix.rpartition("/")
     d = os.path.join(folder("output"), sub)
     os.makedirs(d, exist_ok=True)
     name = f"{stem}_00001_.webm"  # VP9: Playwright's Chromium has no H.264 decoder; ComfyUI itself writes H.264 MP4
-    h, w = frames[0].shape[:2]
+    h, w = first.shape[:2]
     out = av.open(os.path.join(d, name), "w")
     vs = out.add_stream("libvpx-vp9", rate=Fraction(fps).limit_denominator(1001))
     vs.width, vs.height, vs.pix_fmt = w - w % 2, h - h % 2, "yuv420p"
     vs.codec_context.options = {"deadline": "realtime", "cpu-used": "8", "crf": "34", "b": "0"}
-    for i, f in enumerate(frames):
+    for i, f in enumerate(itertools.chain([first], frames)):
         fr = av.VideoFrame.from_ndarray((np.clip(f[: h - h % 2, : w - w % 2, :3], 0, 1) * 255).astype(np.uint8), format="rgb24")
         fr.pts = i
         for p in vs.encode(fr):
@@ -140,6 +156,11 @@ def acescct(x):  # ACEScct codes of linear values, primaries left as they are: t
 
 # ---------- the fake workflows ----------
 
+def locked_left(request):  # the left edges of the locked boxes of a prompt-writer request (logic.upsampleRequest), 0 to 1000
+    m = re.search(r"LOCKED BOUNDING-BOX ANNOTATIONS[^\n]*\n(\[.*?\])\n", request, re.S)
+    return [r["src_bbox"][1] for r in json.loads(m[1]) if r.get("src_bbox")] if m else []
+
+
 def inputs_by_slot(prompt):
     vals = {}
     for node in prompt.values():
@@ -151,15 +172,19 @@ def inputs_by_slot(prompt):
 
 async def steps(pid, total, seconds, preview=None, live=None):
     every, frame = live or (0, None)
+    held = STATE.get("held", {}).get(pid)  # a job /mock/hold keeps open lasts the seconds asked for: --speed leaves it alone
+    wait = seconds / total / A.speed if held is None else held / total
     for k in range(total):
         if STATE["interrupt"]:
             raise asyncio.CancelledError()
-        await asyncio.sleep(seconds / total)
+        await asyncio.sleep(wait)
         await send({"type": "progress", "data": {"prompt_id": pid, "value": k + 1, "max": total}})
         if every and k % every == 0:  # as Live Preview: the first at step 1, then every few steps, a WebP in the temp folder
             name = f"{pid}_{k + 1:03d}.webp"
             os.makedirs(os.path.join(folder("temp"), "paintaplate_live"), exist_ok=True)
-            Image.fromarray((np.clip(frame, 0, 1) * 255).astype(np.uint8)).resize((160, 90)).save(os.path.join(folder("temp"), "paintaplate_live", name), "WEBP")
+            frames = [frame] + [frame * (0.5 + 0.5 * (k + 1) / total)] * 2  # a looping shot: frame 1 stays at every step, as a shot starts from the edited first frame
+            pics = [Image.fromarray((np.clip(f, 0, 1) * 255).astype(np.uint8)).resize((160, 90)) for f in frames]
+            pics[0].save(os.path.join(folder("temp"), "paintaplate_live", name), "WEBP", save_all=True, append_images=pics[1:], duration=100, loop=0)
             await send({"type": "paintaplate.live", "data": {"prompt_id": pid, "step": k + 1, "steps": total,
                                                               "image": {"filename": name, "subfolder": "paintaplate_live", "type": "temp"}}})
         if preview is not None:
@@ -170,9 +195,7 @@ async def send_preview(pid, img):
     buf = io.BytesIO()
     Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8)).save(buf, "JPEG", quality=80)
     meta = json.dumps({"prompt_id": pid, "image_type": "image/jpeg", "node_id": "16"}).encode()
-    msg = struct.pack(">II", 4, len(meta)) + meta + buf.getvalue()
-    for ws in list(SOCKETS.values()):
-        await ws.send_bytes(msg)
+    await to_pages(struct.pack(">II", 4, len(meta)) + meta + buf.getvalue())
 
 
 async def execute(pid, prompt):
@@ -184,6 +207,11 @@ async def execute(pid, prompt):
         await steps(pid, 1, 0.2)
         raise RuntimeError("Allocation on device 0 would exceed allowed memory. (out of memory)")
     v = inputs_by_slot(prompt)
+    hold = STATE.get("hold")  # armed by /mock/hold: this job's steps last `seconds`, so a page check meets the pass it stops
+    if hold and hold["times"] > 0 and (hold["output"] in outs or v.get(hold["slot"])):
+        hold["times"] -= 1
+        STATE.setdefault("held", {})[pid] = hold["seconds"]
+        EVENTS.append(("held", time.time()))  # a check waits for it: the job it holds open now runs
     MOVIE[:] = [int(v.get('movie_width') or 0), int(v.get('movie_height') or 0)]  # as Save Movie takes them
     o = {}
     if "spec" in outs:  # ingest
@@ -199,18 +227,34 @@ async def execute(pid, prompt):
                             "animated": [True]}
         o[outs["spec"]] = {"text": [plateio.spec_json(spec)]}
         await steps(pid, 2, 0.4)
-    elif "text" in outs:  # prompt: the request comes back as the caption
-        o[outs["text"]] = {"text": [v.get("request", "")]}
+    elif "text" in outs:  # prompt: the request comes back as the caption, or the answer that /mock/writer armed
+        writer = STATE.get("writer")
+        armed = bool(writer) and writer["times"] > 0
+        if armed:
+            writer["times"] -= 1
+        text = writer["text"] if armed else v.get("request", "")
+        wide = armed and writer.get("wide")
+        if wide and min(locked_left(v.get("request", "")), default=1000) < wide["x_min_below"]:
+            text = wide["text"]  # a box that reaches the other object: the writer removes that one, as Klein's prompt writer does
+        o[outs["text"]] = {"text": [text]}
         await steps(pid, 1, 0.2)
     elif "patch" in outs:  # edit: a tinted, softened copy of the reference inside the mask, with step previews
         base, ref = load_image(v["base"]), load_image(v["reference"])
         mask = load_image(v["mask"], "L")
         soft = np.asarray(Image.fromarray((mask * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(9)).filter(
             ImageFilter.GaussianBlur(max(2, base.shape[1] / 120))), np.float32) / 255
-        if "Relight" in v["caption"]:
+        if STATE.get("spill", 0) > 0 and (v["caption"].startswith("Remove") or "\nRemove the " in v["caption"]):
+            STATE["spill"] -= 1  # armed by /mock/spill: the erase reaches far beyond its object, as a Klein pass that removes a neighbour
+            wide = np.asarray(Image.fromarray((mask * 255).astype(np.uint8)).filter(ImageFilter.BoxBlur(max(2, base.shape[1] // 24))), np.float32) > 0
+            soft = np.asarray(Image.fromarray((wide * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(2)), np.float32) / 255
+        if STATE.get("leave", 0) > 0:  # armed by /mock/leave: Klein answers with the frame as it was, so an erased object stays
+            STATE["leave"] -= 1
+            new = base
+        elif "Relight" in v["caption"]:
             new = base * np.array([1.18, 1.0, 0.8]) + 0.12 * ref
-        elif v["caption"].startswith("Remove"):
+        elif v["caption"].startswith("Remove") or "\nRemove the " in v["caption"]:  # an erase, by the page's own caption or the prompt writer's: softened, and every value moved by 0.2, as an object that goes
             new = np.asarray(Image.fromarray((ref * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(3)), np.float32) / 255
+            new = np.where(new < 0.5, new + 0.2, new - 0.2)
         else:
             new = np.asarray(Image.fromarray((ref * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(2)), np.float32) / 255
             new = new * np.array([1.0, 0.95, 0.9])
@@ -230,21 +274,122 @@ async def execute(pid, prompt):
         o[outs["patch"]] = {"images": [save_png(np.dstack([new, soft]), saved, f"paintaplate/{pid[:8]}_patch")]}
         if "relit" in outs:
             o[outs["relit"]] = {"images": [save_png(result, saved, f"paintaplate/{pid[:8]}_relit")]}
-    elif "point_0" in outs:  # snap: an object around each point it was given, none found by name
+    elif "point_0" in outs:  # snap: an object around each point it was given; by name, only what /mock/named armed
         img = load_image(v["image"])
+        kept = "output" if prompt[outs["point_0"]]["class_type"] == "SaveImage" else "temp"  # saved masks: the job index keeps them
         h, w = img.shape[:2]
         yy, xx = np.mgrid[0:h, 0:w]
+        extra = STATE.get("snap")  # armed by /mock/snap: another object that some masks take in, as SAM can take in part of a neighbour
+        armed = bool(extra) and extra["times"] > 0
+        if armed:
+            extra["times"] -= 1
         for k in range(5):
             disc = np.zeros((h, w), bool)
             for p in json.loads(v.get(f"point_{k}") or "[]"):
                 disc |= ((xx - p["x"]) / (0.05 * w)) ** 2 + ((yy - p["y"]) / (0.14 * h)) ** 2 < 1
-            o[outs[f"point_{k}"]] = {"images": [save_png(disc.astype(np.float32), "temp", f"paintaplate/{pid[:8]}_snap{k}")]}
-        if "named" in outs:
-            o[outs["named"]] = {"images": []}
+            if armed and k in extra["points"] and disc.any():
+                cx, cy, rx, ry = extra["extra"]
+                disc |= ((xx - cx * w) / (rx * w)) ** 2 + ((yy - cy * h) / (ry * h)) ** 2 < 1
+            o[outs[f"point_{k}"]] = {"images": [save_png(disc.astype(np.float32), kept, f"paintaplate/{pid[:8]}_snap{k}")]}
+        if "named" in outs:  # by name: the object that /mock/named armed, after the blank frame that the graph puts first
+            found = STATE.get("named")
+            if found and found["times"] > 0 and (v.get("words") or "").strip():
+                found["times"] -= 1
+                cx, cy, rx, ry = found["ellipse"]
+                obj = ((xx - cx * w) / (rx * w)) ** 2 + ((yy - cy * h) / (ry * h)) ** 2 < 1
+                o[outs["named"]] = {"images": [save_png(np.zeros((h, w), np.float32), kept, f"paintaplate/{pid[:8]}_named0"),
+                                               save_png(obj.astype(np.float32), kept, f"paintaplate/{pid[:8]}_named1")]}
+            else:
+                o[outs["named"]] = {"images": []}
         await steps(pid, 2, 0.5)
+    elif "color_fix" in v:  # upscale: a window at the target size, each frame flat in its mean colour (4K frames stay cheap here)
+        f = int(v.get("chunk_frames") or 0)  # core's SeedVR2TemporalChunk takes 4n+1 frames per chunk and fails the job on any other count
+        if f and (f - 1) % 4:
+            raise ValueError(f"SeedVR2TemporalChunk: frames_per_chunk must be a 4n+1 pixel-frame count (1, 5, 9, 13, 17, 21, ...); got {f}.")
+        frames = read_plate(v["shot"], int(v["max_frames"]))[0]
+        first, count, w, h = int(v["first"]), int(v["count"]), int(v["width"]), int(v["height"])
+        await steps(pid, 1, 2.0)
+        def flat(c, prefix, i):  # one colour at the target size: PIL fills and writes it, with no float copy of a 4K frame
+            sub, _, stem = prefix.rpartition("/")
+            os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
+            name, grey = f"{stem}_{i + 1:05d}_.png", np.ndim(c) == 0
+            fill = round(float(c) * 255) if grey else tuple(round(float(x) * 255) for x in c)
+            Image.new("L" if grey else "RGB", (w, h), fill).save(os.path.join(folder("output"), sub, name), compress_level=1)
+            return {"filename": name, "subfolder": sub, "type": "output"}
+        layer = [frames[i][..., :3].reshape(-1, 3).mean(0) for i in range(first, min(first + count, len(frames)))]
+        o[outs["frames"]] = {"images": [flat(c, v["prefix"], i) for i, c in enumerate(layer)][:1]}
+        pngs = lambda path: sorted(glob.glob(os.path.join(resolve(path), "*.png")))  # noqa: E731
+        if {"comp", "matte"} & set(outs):
+            mattes = [float(np.asarray(Image.open(f).convert("L"), np.float32).mean()) / 255 for f in pngs(v["matte"])[first:first + count]]
+        if "comp" in outs:  # the 4K plate's window around the matte, the layer inside it
+            under = [np.asarray(Image.open(f).convert("RGB").getpixel((0, 0)), np.float32) / 255 for f in pngs(v["under"])]
+            o[outs["comp"]] = {"images": [flat(c * m + u * (1 - m), v["comp_prefix"], i) for i, (c, u, m) in enumerate(zip(layer, under, mattes))][:1]}
+        if "matte" in outs:  # the frames the window before did not save, numbered on from the frames its folder holds, as Save Frames counts
+            sub, _, stem = v["matte_prefix"].rpartition("/")
+            start = int(v["matte_first"]) - 1 if v.get("matte_first") else len(glob.glob(os.path.join(folder("output"), sub, f"{stem}_*_.png")))  # its frame in the shot, else on from the files there
+            o[outs["matte"]] = {"images": [flat(m, v["matte_prefix"], start + i) for i, m in enumerate(mattes[int(v.get("share") or 0):])][:1]}
+    elif "export" in outs and "path" not in v:  # upscale_export: the windows joined in order, written as the export is (a movie here)
+        dirs, share = sorted(glob.glob(os.path.join(resolve(v["frames"]), "*", ""))), int(v.get("share") or 0)
+        counts = [int(c) for c in str(v.get("counts") or "").split(",") if c.strip()]
+
+        def joined():  # as Join Windows joins them: each window's newest frames, the frames two neighbours share crossfaded, streamed
+            held = []
+            for i, d in enumerate(dirs[:len(counts)] if counts else dirs):
+                files = sorted(glob.glob(os.path.join(d, "*.png")))
+                files, last = (files[len(files) - counts[i]:] if counts else files), i == (len(counts) if counts else len(dirs)) - 1
+                keep = []
+                for j, f in enumerate(files):
+                    x = np.asarray(Image.open(f).convert("RGB"), np.float32) / 255
+                    if j < len(held):
+                        w = (j + 1) / (share + 1)
+                        yield held[j] * (1 - w) + x * w
+                    elif share and not last and j >= len(files) - share:
+                        keep.append(x)
+                    else:
+                        yield x
+                held = keep
+        await steps(pid, 1, 1.0)
+        fps = read_plate(v["shot"], 1)[1]["fps"]
+        save_mp4(joined(), f"{v['prefix']}/plate", fps)
+        o[outs["export"]] = {"text": [f"Save Plate: 1 file written to {v['prefix']}."],
+                             "files": [{"filename": "plate_00001_.webm", "subfolder": v["prefix"], "type": "output"}]}
+        if "video" in outs and v.get("video_prefix"):  # the part's viewer movie, at the size the page asks for
+            side = max(int(v.get("movie_width") or 0), int(v.get("movie_height") or 0))
+            o[outs["video"]] = {"images": [save_mp4(joined(), v["video_prefix"], fps, side)], "animated": [True]}
+    elif "plate_prefix" in v and "layer" in v:  # hdr_comp: the HDR set's composite, the plate around the matte and the layer inside it, and the set's copies
+        top = int(v.get("max_frames") or 1024)
+        plate = [f[..., :3].astype(np.float16) for f in read_plate(v["plate"], top)[0]]  # half floats, as the EXR frames hold them: three inputs fit the mock's memory
+        h, w = plate[0].shape[:2]
+        sized = lambda f: f if f.shape[:2] == (h, w) else mathops.resize_to(f, h, w)  # noqa: E731
+        layer = [sized(f[..., :3]).astype(np.float16) for f in read_plate(v["layer"], top)[0]]
+        mattes = [sized(f)[..., :1].astype(np.float16) for f in read_plate(v["matte"], top)[0]]
+        await steps(pid, 1, 1.0)
+        comp = lambda i: (plate[i].astype(np.float32) * (1 - mattes[i]) + layer[i] * mattes[i]).astype(np.float32)  # noqa: E731  # each frame as it is written
+
+        def written(prefix, ext, frame):  # the frames under the job's prefix, as Save Frames numbers them
+            sub, _, stem = v[prefix].rpartition("/")
+            os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
+            names = [f"{stem}_{i + 1:05d}_.{ext}" for i in range(len(plate))]
+            paths = [os.path.join(folder("output"), sub, f) for f in names]
+            if ext == "exr":
+                plateio.write_exrs(frame, paths)
+            else:
+                for i, path in enumerate(paths):
+                    Image.fromarray(np.round(np.clip(frame(i).astype(np.float32), 0, 1) * 65535).astype(np.uint16)[..., 0]).save(path)  # 16-bit grey, as Save Frames writes the matte
+            return {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
+        o[outs["comp"]] = written("comp_prefix", "exr", comp)
+        o[outs["plate"]] = written("plate_prefix", "exr", lambda i: plate[i].astype(np.float32))
+        o[outs["matte"]] = written("matte_prefix", "png", lambda i: mattes[i])
+        o[outs["movie"]] = {"images": [save_mp4((acescct(comp(i)) for i in range(len(plate))), v["video_prefix"], v.get("movie_fps", 24.0))], "animated": [True]}
     elif "hdr" in outs:  # SDR to HDR: the shot decoded from sRGB, its brightest values lifted above 1.0, as half-float EXR frames
         frames, spec = read_plate(v["path"], v.get("max_frames", 1024), pad=True)
         await steps(pid, 8, 2.0, live=(v.get("live") or 0, frames[0]))
+        # Save Frames and Save Movie keep Load Plate's frame count, without the 8n+1 padding. A plate with no edit runs at
+        # the working size (width, height) and comes back at its own size (plate_width, plate_height); a shot keeps its size
+        frames = frames[:len(read_plate(v["path"], v.get("max_frames", 1024))[0])]
+        for w, h in ((v.get("width"), v.get("height")), (v.get("plate_width"), v.get("plate_height"))):
+            if w and h:
+                frames = [mathops.resize_to(f, h, w) for f in frames]
         sub, _, stem = v["prefix"].rpartition("/")
         os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
         names = [f"{stem}_{i + 1:05d}_.exr" for i in range(len(frames))]
@@ -263,12 +408,17 @@ async def execute(pid, prompt):
         shot, _ = read_plate(v.get("hdr") or v["shot"], 1024)
         matte = read_plate(v["matte_a"], 1024)[0] if v.get("matte_a") else None
         await steps(pid, 6, 2.0)
-        out = []
+        out, mattes = [], []
         for i in range(n):
             p, g = frames[i], resize(shot[min(i, len(shot) - 1)], w, h)
             m = resize(matte[min(i, len(matte) - 1)][..., 0], w, h)[..., None] if matte is not None else np.ones((h, w, 1), np.float32)
+            if i:  # Fit to Plate aligns the shot to the plate, and its matte with it
+                g, m = moved(g, back=True), moved(m, back=True)
             out.append(g * m + p * (1 - m))
+            mattes.append(m.astype(np.float16))
         o[outs["review"]] = {"images": [save_mp4(out, v["review_prefix"], spec["fps"])], "animated": [True]}
+        if "matte_movie" in outs:  # the matte the composite used, as a grey movie, for the X-ray, which reads it small; one frame at a time, so the mattes are never held twice
+            o[outs["matte_movie"]] = {"images": [save_mp4((np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes), v["matte_video_prefix"], spec["fps"], side=320)], "animated": [True]}
         if "frames" in outs:
             sub, _, stem = v["frames_prefix"].rpartition("/")
             os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
@@ -286,20 +436,30 @@ async def execute(pid, prompt):
         changed = np.asarray(Image.fromarray((changed * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(5)), np.float32)[..., None] / 255
         await steps(pid, v.get("steps", 8), 3.0, live=(v.get("live") or 0, hero))
         shot = [hero * changed + f * (1 - changed) for f in frames]
-        shot[0] = hero
+        shot = [hero] + [moved(f) for f in shot[1:]]  # the frames after the first drift by what /mock/shift armed
         o[outs["frames"]] = {"images": [save_png(f, "output", v["prefix"], i) for i, f in enumerate(shot)][:1]}
         o[outs["video"]] = {"images": [save_mp4(shot, v["video_prefix"], spec["fps"])], "animated": [True]}
     elif "frames" in outs:  # matte: the first mask on every frame
         frames, _ = read_plate(v["path"], v["max_frames"], pad=True)
         m = resize(load_image(v["mask"], "L"), v["width"], v["height"])
         await steps(pid, 4, 1.0)
-        o[outs["frames"]] = {"images": [save_png(m, "output", v["prefix"], i) for i in range(len(frames))][:1]}
+        ms = [m] + [moved(m) for _ in frames[1:]]  # the tracking matte follows the shot's drift
+        o[outs["frames"]] = {"images": [save_png(ms[i], "output", v["prefix"], i) for i in range(len(frames))][:1]}
         if "movie" in outs:  # its grey movie, for its row in the Render panel
-            grey = np.dstack([np.asarray(m, np.float32).reshape(m.shape[:2])] * 3)
-            o[outs["movie"]] = {"images": [save_mp4([grey] * len(frames), v["video_prefix"], v.get("fps", 24.0))], "animated": [True]}
-    elif "plate" in outs:  # fluid: each keyframe softened into a cloud, crossfaded to the next, written in the blank plate's format
+            greys = [np.dstack([np.asarray(x, np.float32).reshape(x.shape[:2])] * 3) for x in ms]
+            o[outs["movie"]] = {"images": [save_mp4(greys, v["video_prefix"], v.get("fps", 24.0))], "animated": [True]}
+        if "follow" in outs and STATE.get("follow"):  # Follow Matte's summary with its strategy line, once /mock/follow armed it
+            strategy = v.get("strategy", "Auto")
+            line = f"Auto chose {STATE['follow']['auto']}: the edit spreads past the object (23% of the frame)." if strategy == "Auto" else f"{strategy}."
+            o[outs["follow"]] = {"text": [f"tracked on {len(frames)} of {len(frames)} frames.\n  Strategy: {line}"]}
+    elif "plate" in outs:  # fluid: each keyframe softened into a cloud, crossfaded to the next, written as Save Plate writes it
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
         h, w = frames[0].shape[:2]
+        if int(v.get("width") or 0) and int(v.get("height") or 0):  # the shot preview's size, as ImageScale makes it
+            w, h = int(v["width"]), int(v["height"])
+            spec = {**spec, "width": w, "height": h}
+        if w % 64 or h % 64:  # ainvfx-fluid's IC-LoRA guide halves the latent, as ComfyUI-LTXVideo says it on a GPU
+            raise RuntimeError(f"Latent spatial size {w // 32}x{h // 32} must be divisible by latent_downscale_factor 2.0")
         keys = sorted(json.loads(v.get("keys") or "[]"), key=lambda k: k["frame"])
         clouds = [(k["frame"], np.asarray(Image.open(resolve(k["image"])).convert("RGB").resize((w, h)).filter(ImageFilter.GaussianBlur(4)),
                                           np.float32) / 255) for k in keys]
@@ -316,48 +476,53 @@ async def execute(pid, prompt):
         for f in shot:
             writer.write(f)
         writer.close()
-        o[outs["plate"]] = {"text": [f"1 file(s) in {d}\n{os.path.basename(writer.path)}"]}
+        o[outs["plate"]] = {"text": [f"Save Plate: 1 file written to {d}.\n  First files: {os.path.basename(writer.path)}."]}
         if "control" in outs:  # the control video: black, each keyframe at its frame
             at = {k["frame"]: np.asarray(Image.open(resolve(k["image"])).convert("RGB").resize((w, h)), np.float32) / 255 for k in keys}
             o[outs["control"]] = {"images": [save_mp4([at.get(i, np.zeros((h, w, 3), np.float32)) for i in range(len(frames))],
                                                        v["control_prefix"], spec["fps"])], "animated": [True]}
         o[outs["video"]] = {"images": [save_mp4(shot, v["video_prefix"], spec["fps"])], "animated": [True]}
-    elif "video" in outs or "export" in outs or "exr" in outs:  # comp and export: blend the shot over the plate through the matte
+        if "first" in outs:  # frame 0 of the shot, as Save Image writes it
+            o[outs["first"]] = {"images": [save_png(shot[0], "output", v["first_prefix"], 0)]}
+    elif "video" in outs or "export" in outs:  # comp and export: blend the shot over the plate through the matte
+        half = lambda fs: [f.astype(np.float16) for f in fs]  # noqa: E731  the plate, the shot, the matte and the result are held at once, in half floats
         frames, spec = read_plate(v["path"], v["max_frames"], pad=True)
-        n = spec["frames"]
+        frames, n = half(frames), spec["frames"]
         h, w = (v["height"], v["width"]) if "video" in outs else frames[0].shape[:2]
-        shot, _ = read_plate(v.get("hdr") or v["shot"], 1024)
+        shot = half(read_plate(v.get("hdr") or v["shot"], 1024)[0])
         has_matte = bool(v.get("matte_a"))
-        matte = read_plate(v["matte_a"], 1024)[0] if has_matte else None
+        matte = half(read_plate(v["matte_a"], 1024)[0]) if has_matte else None
         await steps(pid, 6, 1.5 if "video" in outs else 3.0)
-        out = []
+        out, mattes = [], []
         for i in range(n):
             p, g = resize(frames[i], w, h), resize(shot[min(i, len(shot) - 1)], w, h)
             m = resize(matte[min(i, len(matte) - 1)][..., 0], w, h)[..., None] if has_matte else np.ones((h, w, 1), np.float32)
-            out.append(g * m + p * (1 - m))
+            if i:  # Fit to Plate aligns the shot to the plate, and its matte with it
+                g, m = moved(g, back=True), moved(m, back=True)
+            out.append((g * m + p * (1 - m)).astype(np.float16))
+            mattes.append(m.astype(np.float16) if has_matte else np.zeros((h, w, 1), np.float16))
+            frames[i] = None
+        layer = [resize(shot[min(i, len(shot) - 1)], w, h) if not i else moved(resize(shot[min(i, len(shot) - 1)], w, h), back=True) for i in range(n)] if "layer" in outs else []
+        for part in ("shot", "clean"):  # the shot as the model made it, and a Clean's pass under a paint, as Save Plate writes them
+            if part in outs:
+                save_mp4(shot, f"{v[part + '_prefix']}/plate", spec["fps"])
+                o[outs[part]] = {"files": [{"filename": "plate_00001_.webm", "subfolder": v[part + "_prefix"], "type": "output"}]}
+        del frames, shot
+        if "matte_movie" in outs:  # the matte the composite used, as a grey movie: the X-ray reads a composite's small, and the export's
+            o[outs["matte_movie"]] = {"images": [save_mp4((np.dstack([x[..., 0]] * 3).astype(np.float32) for x in mattes), v["matte_video_prefix"], spec["fps"], side=320 if "video" in outs else 0)], "animated": [True]}
         if "video" in outs:
             o[outs["video"]] = {"images": [save_mp4(out, v["video_prefix"], spec["fps"])], "animated": [True]}
         else:
-            d = os.path.join(folder("output"), v.get("prefix") or v.get("exr_prefix", "").rpartition("/")[0])
+            d = os.path.join(folder("output"), v["prefix"])
             os.makedirs(d, exist_ok=True)
-            if "export" in outs:  # Save Plate: dropped for an HDR result of a video plate, which writes EXR frames instead
+            if "export" in outs:  # Save Plate
                 save_mp4(out, f"{v['prefix']}/plate", spec["fps"])
-            if "matte" in outs:
-                for i in range(n):
-                    save_png(resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w)),
-                             "output", v["matte_prefix"], i)
-            if "matte_movie" in outs:  # the export's matte as a grey movie, for the Export row
-                greys = [np.dstack([resize(matte[min(i, len(matte) - 1)][..., 0], w, h) if has_matte else np.zeros((h, w), np.float32)] * 3) for i in range(n)]
-                o[outs["matte_movie"]] = {"images": [save_mp4(greys, v["matte_video_prefix"], spec["fps"])], "animated": [True]}
-            if "exr" in outs:  # an HDR result of a video plate: half-float EXR frames instead of the plate's format
-                sub = v["exr_prefix"].rpartition("/")[0]
-                os.makedirs(os.path.join(folder("output"), sub), exist_ok=True)
-                names = [f"f_{i + 1:05d}_.exr" for i in range(n)]
-                plateio.write_exrs(lambda i: out[i], [os.path.join(folder("output"), sub, f) for f in names])
-                o[outs["exr"]] = {"images": [{"filename": names[0], "subfolder": sub, "type": "output"}]}
-            if "export" not in outs:
-                return o
-            o[outs["export"]] = {"text": [f"1 file(s) in {d}\nplate_00001_.webm"],
+            if "matte" in outs:  # Save Frames' record, as ComfyUI answers it: the first frame
+                o[outs["matte"]] = {"images": [save_png(mattes[i][..., 0].astype(np.float32), "output", v["matte_prefix"], i) for i in range(n)][:1]}
+            if "layer" in outs:  # the shot as the composite blends it, as Save Plate writes it
+                save_mp4(layer, f"{v['layer_prefix']}/plate", spec["fps"])
+                o[outs["layer"]] = {"files": [{"filename": "plate_00001_.webm", "subfolder": v["layer_prefix"], "type": "output"}]}
+            o[outs["export"]] = {"text": [f"Save Plate: 1 file written to {d}.\n  First files: plate_00001_.webm."],
                                  "files": [{"filename": "plate_00001_.webm", "subfolder": v["prefix"], "type": "output"}]}
     else:
         await steps(pid, 1, 0.2)
@@ -367,8 +532,15 @@ async def execute(pid, prompt):
 # ---------- the API ----------
 
 async def send(msg):
+    await to_pages(json.dumps(msg))
+
+
+async def to_pages(data):
+    """Text or bytes to every page's WebSocket, on the loop of the routes: a job calls it from its own thread."""
+    if asyncio.get_running_loop() is not LOOPS["server"]:
+        return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(to_pages(data), LOOPS["server"]))
     for ws in list(SOCKETS.values()):
-        await ws.send_str(json.dumps(msg))
+        await (ws.send_bytes(data) if isinstance(data, bytes) else ws.send_str(data))
 
 
 async def worker():
@@ -379,23 +551,33 @@ async def worker():
         pid, prompt = JOBS.pop(0)
         STATE.update(running=pid, interrupt=False)
         await send({"type": "execution_start", "data": {"prompt_id": pid}})
+        t0 = time.time()
         try:
-            outputs = await execute(pid, prompt)
-            HISTORY[pid] = {"outputs": outputs, "status": {"completed": True, "status_str": "success", "messages": []}}
+            outputs = await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(execute(pid, prompt), LOOPS["jobs"]))
+            HISTORY[pid] = {"prompt": [len(HISTORY), pid, prompt, {}, []], "outputs": outputs, "status": {"completed": True, "status_str": "success", "messages": []}}
             await send({"type": "execution_success", "data": {"prompt_id": pid}})
-        except asyncio.CancelledError:
-            HISTORY[pid] = {"outputs": {}, "status": {"completed": False, "status_str": "error", "messages": []}}
+        except asyncio.CancelledError:  # the history keeps the message, as ComfyUI keeps its status_messages (execution.py)
+            HISTORY[pid] = {"prompt": [len(HISTORY), pid, prompt, {}, []], "outputs": {}, "status": {"completed": False, "status_str": "error", "messages": [["execution_interrupted", {"prompt_id": pid}]]}}
             await send({"type": "execution_interrupted", "data": {"prompt_id": pid}})
         except Exception as exc:  # report like ComfyUI does
             import traceback
             traceback.print_exc()
-            HISTORY[pid] = {"outputs": {}, "status": {"completed": False, "status_str": "error", "messages": []}}
-            await send({"type": "execution_error", "data": {"prompt_id": pid, "node_type": "Mock", "exception_message": str(exc)}})
+            err = {"prompt_id": pid, "node_type": "Mock", "exception_message": str(exc)}
+            HISTORY[pid] = {"prompt": [len(HISTORY), pid, prompt, {}, []], "outputs": {}, "status": {"completed": False, "status_str": "error", "messages": [["execution_error", err]]}}
+            await send({"type": "execution_error", "data": err})
         STATE["running"] = None
+        print(f"{pid[:8]} {'+'.join(sorted(outputs_of(prompt))) or 'no output'}: {time.time() - t0:.2f} s", flush=True)  # each job, by its outputs, and its time
+
+
+POSTS = []
 
 
 async def prompt_route(request):
     body = await request.json()
+    live = next((n.get("inputs", {}).get("every") for n in body["prompt"].values() if n.get("class_type") == "PaintAPlate_LivePreview"), None)
+    chunk = next(([n["inputs"].get("chunking_mode.frames_per_chunk"), n["inputs"].get("temporal_overlap")] for n in body["prompt"].values()
+                  if isinstance(n, dict) and n.get("class_type") == "SeedVR2TemporalChunk"), None)  # Upscale's frames per chunk and shared latent frames
+    POSTS.append({"outputs": sorted(outputs_of(body["prompt"])), "extra_data": body.get("extra_data"), "live": live, "chunk": chunk})  # mock only: what each post asked for; `live`: an LTX pass sends a live preview every so many steps
     pid = str(uuid.uuid4())
     if "plate" in outputs_of(body["prompt"]):
         EVENTS.append(("prompt", time.time(), "fluid"))
@@ -450,7 +632,7 @@ async def interrupt_route(request):
     return web.json_response({})
 
 
-
+SPECS = json.load(open(os.path.join(REPO, "tests", "js", "object_info.scene.json")))["nodes"]
 
 
 async def object_info_route(request):
@@ -461,13 +643,20 @@ async def object_info_route(request):
             for k, val in node["inputs"].items():
                 if isinstance(val, str) and val.endswith(".safetensors"):
                     models.setdefault(node["class_type"], {}).setdefault(k, []).append(val)
-    required = {k: [opts] for k, opts in models.get(cls, {}).items()}
+    spec = json.loads(json.dumps(SPECS.get(cls, {"input": {"required": {}}})))  # the copy of /object_info, for the classes it holds
+    for k, opts in models.get(cls, {}).items():  # with the model files the workflows name, as the choices of their input
+        spec["input"].setdefault("optional" if k in spec["input"].get("optional", {}) else "required", {})[k] = [opts]
+    return web.json_response({cls: spec})
 
-    return web.json_response({cls: {"input": {"required": required}}})
+
+async def quit_route(request):  # the mock stops at once, as a ComfyUI that the system stopped for its memory: nothing answers any more
+    asyncio.get_running_loop().call_later(0.2, os._exit, 0)
+    return web.json_response({})
 
 
-async def free_route(request):  # ComfyUI releases memory between prompts: here, one second after /free
-    EVENTS.append(("free", time.time()))
+async def free_route(request):  # ComfyUI releases memory between prompts: here, one second after /free; the event keeps whether its cache goes too
+    body = await request.json() if request.can_read_body else {}
+    EVENTS.append(("free", time.time(), body.get("free_memory")))
     STATE["release_at"] = time.time() + 1.0
     return web.json_response({})
 
@@ -475,6 +664,12 @@ async def free_route(request):  # ComfyUI releases memory between prompts: here,
 async def slow_route(request):  # mock only: the next `times` uploads wait `seconds` before they are read
     body = await request.json()
     STATE["slow"] = [float(body.get("seconds", 3)), int(body.get("times", 1))]
+    return web.json_response({})
+
+
+async def hold_route(request):  # mock only: the next `times` jobs that write `output`, or fill `slot`, last `seconds` each; an interrupt still ends them
+    body = await request.json()
+    STATE["hold"] = {"output": body.get("output", ""), "slot": body.get("slot", ""), "seconds": float(body.get("seconds", 20)), "times": int(body.get("times", 1))}
     return web.json_response({})
 
 
@@ -491,11 +686,67 @@ async def oom_route(request):  # mock only: the next `times` jobs of `workflow` 
     return web.json_response({})
 
 
+async def shift_route(request):  # mock only: every shot's frames after the first drift by dx and dy, fractions of the frame; its tracking matte follows, and the composite moves both back, as Fit to Plate aligns a shot to the plate
+    body = await request.json()
+    STATE["shift"] = (float(body.get("dx", 0)), float(body.get("dy", 0)))
+    return web.json_response({})
+
+
+async def leave_route(request):  # mock only: the next `times` edit jobs answer with the frame as it was, as a Klein pass that leaves its object (an edit is two jobs)
+    STATE["leave"] = int((await request.json()).get("times", 2))
+    return web.json_response({})
+
+
+async def spill_route(request):  # mock only: the next `times` erase jobs reach far beyond their object, as a Klein pass that removes a neighbour (an edit is two jobs)
+    STATE["spill"] = int((await request.json()).get("times", 2))
+    return web.json_response({})
+
+
+async def writer_route(request):  # mock only: the next `times` prompt-writer jobs answer `text`, as a writer that takes the stroke for another object
+    body = await request.json()
+    STATE["writer"] = {"times": int(body.get("times", 1)), "text": str(body.get("text", "")), "wide": body.get("wide")}
+    return web.json_response({})
+
+
+async def follow_route(request):  # mock only: the matte answers with Follow Matte's summary, its strategy line naming `auto` as Auto's choice
+    body = await request.json()
+    STATE["follow"] = {"auto": str(body.get("auto", "Object"))}
+    return web.json_response({})
+
+
+async def snap_route(request):  # mock only: the next `times` snap jobs take another object, an ellipse (x, y, rx, ry as fractions of the frame), into the masks of the points listed
+    body = await request.json()
+    STATE["snap"] = {"times": int(body.get("times", 1)), "extra": body["extra"], "points": body.get("points", [0, 1])}
+    return web.json_response({})
+
+
+async def named_route(request):  # mock only: the next `times` snap jobs with words find one object by them, an ellipse (x, y, rx, ry as fractions of the frame)
+    body = await request.json()
+    STATE["named"] = {"times": int(body.get("times", 1)), "ellipse": body["ellipse"]}
+    return web.json_response({})
+
+
+async def pack_version_route(request):  # mock only: the version and the build /paintaplate/version answers from now on, as a ComfyUI restarted on other code would: it also drops every WebSocket, and open pages connect again
+    body, served = await request.json(), sys.modules["routes"]
+    served.VERSION, served.BUILD = body.get("version", served.VERSION), body.get("build", served.BUILD)
+    for ws in list(SOCKETS.values()):
+        await ws.close()
+    return web.json_response({})
+
+
+async def card_route(request):  # mock only: the GPU /system_stats reports from now on, in bytes: {"vram": 17.2e9, "ram": 65.5e9} is a 16 GB GPU with 61 GB of RAM; "ram_free" is the RAM it reports as free
+    STATE["card"] = await request.json()
+    return web.json_response({})
+
+
 async def system_stats_route(request):  # once armed, the GPU's memory: nearly full until /free releases it
     if STATE.get("armed"):
         low = time.time() < STATE.get("release_at", float("inf"))
         return web.json_response({"system": {}, "devices": [{"name": "mock", "vram_total": 96e9, "vram_free": 2e9 if low else 90e9}]})
-    return web.json_response({"system": {}, "devices": [{"name": "mock", "vram_total": 32e9, "vram_free": 30e9}]})  # live previews on, no LTX warm-up
+    card = STATE.get("card", {})  # set by /mock/card; else a 32 GB GPU: the medium profile, no LTX warm-up
+    vram = float(card.get("vram", 32e9))
+    system = {name: float(card[key]) for key, name in (("ram", "ram_total"), ("ram_free", "ram_free")) if key in card}  # under ComfyUI's own names
+    return web.json_response({"system": system, "devices": [{"name": "mock", "vram_total": vram, "vram_free": vram - 2e9}]})
 
 
 async def ws_route(request):
@@ -517,15 +768,24 @@ def download_routes():
     fp.get_input_directory = lambda: folder("input")
     fp.get_temp_directory = lambda: folder("temp")
     sys.modules["folder_paths"] = fp
+    # ComfyUI's own arguments, as folders.listens reads them: the mock listens on 127.0.0.1 alone, so a full path opens here as
+    # on a ComfyUI started without --listen, and routes.this_machine still refuses one in a request that a proxy passed on
+    cli = types.ModuleType("comfy.cli_args")
+    cli.args = types.SimpleNamespace(listen="127.0.0.1")
+    sys.modules.setdefault("comfy", types.ModuleType("comfy")).cli_args = cli
+    sys.modules["comfy.cli_args"] = cli
     server = types.SimpleNamespace(routes=web.RouteTableDef())
     importlib.import_module("routes").setup(server)
     return server.routes
 
 
 async def start():
+    LOOPS["server"], LOOPS["jobs"] = asyncio.get_running_loop(), asyncio.new_event_loop()
+    threading.Thread(target=LOOPS["jobs"].run_forever, name="jobs", daemon=True).start()
     app = web.Application(client_max_size=1024 ** 3)
     app.router.add_post("/prompt", prompt_route)
-    app.router.add_get("/history", lambda r: web.json_response({}))  # the page reads it once at start, for the models already loaded
+    app.router.add_get("/history", lambda r: web.json_response(dict(list(HISTORY.items())[-int(r.query["max_items"]):]) if "max_items" in r.query else {}))
+    # bare, as the page reads it once at start (the models already loaded: none here); with max_items, the last jobs with their prompts, as ComfyUI answers
     app.router.add_get("/history/{pid}", history_route)
     app.router.add_get("/view", view_route)
     app.router.add_post("/upload/image", upload_route)
@@ -534,10 +794,22 @@ async def start():
     app.router.add_get("/object_info/{cls}", object_info_route)
     app.router.add_get("/system_stats", system_stats_route)
     app.router.add_post("/free", free_route)
+    app.router.add_post("/mock/quit", quit_route)
     app.router.add_post("/mock/oom", oom_route)
     app.router.add_post("/mock/slow", slow_route)
+    app.router.add_post("/mock/hold", hold_route)
     app.router.add_post("/mock/release", release_route)
+    app.router.add_post("/mock/card", card_route)
+    app.router.add_post("/mock/version", pack_version_route)
+    app.router.add_post("/mock/leave", leave_route)
+    app.router.add_post("/mock/shift", shift_route)
+    app.router.add_post("/mock/spill", spill_route)
+    app.router.add_post("/mock/writer", writer_route)
+    app.router.add_post("/mock/snap", snap_route)
+    app.router.add_post("/mock/follow", follow_route)
+    app.router.add_post("/mock/named", named_route)
     app.router.add_get("/mock/events", lambda r: web.json_response(EVENTS))
+    app.router.add_get("/mock/posts", lambda r: web.json_response(POSTS))
     app.router.add_get("/ws", ws_route)
     app.router.add_routes(download_routes())
     app.router.add_static("/extensions/ainvfx-paintaplate/", os.path.join(REPO, "web"))
@@ -553,10 +825,10 @@ if __name__ == "__main__":
     ap.add_argument("--root", default="/tmp/mock_comfy")
     ap.add_argument("--port", type=int, default=8199)
     ap.add_argument("--plate", action="store_true")
+    ap.add_argument("--speed", type=float, default=1.0)
     A = ap.parse_args()
     for k in ("input", "output", "temp"):
         os.makedirs(folder(k), exist_ok=True)
     if A.plate:
         make_plate(os.path.join(folder("input"), "plates", "desk.mp4"))
-    t0 = time.time()
     asyncio.run(start())

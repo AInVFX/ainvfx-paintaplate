@@ -1,6 +1,9 @@
 """The download route: which folders it reads, what each zip holds, and that it stays inside output/paintaplate."""
 import asyncio
+import json
+import logging
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -19,6 +22,7 @@ sys.modules["folder_paths"] = types.SimpleNamespace(get_output_directory=lambda:
 sys.path.insert(0, ROOT)
 import routes  # noqa: E402
 import test_plateio  # noqa: E402
+from test_web import node  # noqa: E402
 from aiohttp import web  # noqa: E402
 
 
@@ -57,60 +61,27 @@ class Routes(unittest.TestCase):
         stub = sys.modules["folder_paths"]
         stub.get_output_directory = lambda: alias
         try:
-            got = [arc for _, arc in routes.collect(routes.folders.run_folder("paintaplate/abc/v1"), ["export", "matte"])]
+            got = [arc for _, arc, _ in routes.zip_entries([("composite_full_size", "output:paintaplate/abc/v1/export"), ("matte", "output:paintaplate/abc/v1/matte")], "desk")]
         finally:
             stub.get_output_directory = lambda: OUT
-        self.assertEqual(got, [arc for _, arc in routes.collect(self.folder, ["export", "matte"])])
-        self.assertIn("export/shot.1001.exr", got)
-        self.assertNotIn("export/leak.exr", got)
-
-    def test_parts_of_a_run_laid_out_by_size(self):
-        """The export's full-size review and the full-size pass win over what a preview size made."""
-        with tempfile.TemporaryDirectory() as d:
-            for rel in ("export/shot.1001.exr", "640x352/comp_00001_.mp4", "640x352/raw_00001_.mp4", "review_00001_.mp4",
-                        "full/clean_00001_.mp4", "full/raw_00001_.mp4"):
-                os.makedirs(os.path.dirname(os.path.join(d, rel)) or d, exist_ok=True)
-                touch(os.path.join(d, rel))
-            got = dict((arc, os.path.relpath(path, d)) for path, arc in routes.collect(d, ["export", "review", "shot"]))
-            self.assertEqual(got["review.mp4"], "review_00001_.mp4")
-            self.assertEqual(got["regenerated_shot.mp4"], os.path.join("full", "raw_00001_.mp4"))
-            os.remove(os.path.join(d, "review_00001_.mp4"))  # before the export: the preview's composite
-            got = dict((arc, os.path.relpath(path, d)) for path, arc in routes.collect(d, ["review"]))
-            self.assertEqual(got["review.mp4"], os.path.join("640x352", "comp_00001_.mp4"))
-
-    def test_parts_and_names(self):
-        names = [arc for _, arc in routes.collect(self.folder, ["export", "matte", "review", "shot"])]
-        self.assertEqual(names, ["export/shot.1001.exr", "export/shot.1002.exr", "matte/matte_00001_.png",
-                                 "matte/matte_00002_.png", "review.mp4", "regenerated_shot.mp4"])
-        self.assertNotIn("export/leak.exr", names)  # a symbolic link is never followed out of the run
-        self.assertEqual(routes.zip_name("shot 010/../x", self.folder), "shot_010_.._x")
-
-    def test_zip_is_built_once_then_rebuilt_when_files_change(self):
-        path = routes.build_zip(self.folder, "shot", ["export", "review"])
-        self.assertEqual(sorted(zipfile.ZipFile(path).namelist()), ["export/shot.1001.exr", "export/shot.1002.exr", "review.mp4"])
-        first = os.path.getmtime(path)
-        self.assertEqual(routes.build_zip(self.folder, "shot", ["export", "review"]), path)
-        self.assertEqual(os.path.getmtime(path), first)  # reused while current
-        time.sleep(0.02)
-        touch(os.path.join(self.folder, "export", "shot.1003.exr"))
-        self.assertIn("export/shot.1003.exr", zipfile.ZipFile(routes.build_zip(self.folder, "shot", ["export", "review"])).namelist())
-        self.assertFalse([f for f in os.listdir(self.folder) if f.endswith(".part")])
-        with self.assertRaises(FileNotFoundError):
-            routes.build_zip(os.path.join(OUT, "paintaplate", "abc", "v2"), "x", ["export", "matte"])
+        self.assertEqual(got, [arc for _, arc, _ in routes.zip_entries([("composite_full_size", "output:paintaplate/abc/v1/export"), ("matte", "output:paintaplate/abc/v1/matte")], "desk")])
+        self.assertIn("composite_full_size/desk_composite_full_size.1001.exr", got)
+        self.assertFalse([arc for arc in got if "leak" in arc])
 
     def test_handler(self):
-        req = types.SimpleNamespace(query={"run": "paintaplate/abc/v1", "name": "shot", "parts": "export,bogus"})
+        req = types.SimpleNamespace(query={"run": "paintaplate/abc/v1", "name": "shot", "files": json.dumps([["composite_full_size", "output:paintaplate/abc/v1/export"]])})
         resp = asyncio.run(routes.download(req))
         self.assertIn('filename="shot.zip"', resp.headers["Content-Disposition"])
         with self.assertRaises(web.HTTPNotFound):
             asyncio.run(routes.download(types.SimpleNamespace(query={"run": "../../etc"})))
         app = types.SimpleNamespace(routes=web.RouteTableDef())
         routes.setup(app)
-        self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/browse", "/paintaplate/thumb",
-                         "/paintaplate/blank", "/paintaplate/jobs/{key}", "/paintaplate/jobs/{key}", "/paintaplate/stat",
+        self.assertEqual([r.path for r in app.routes], ["/paintaplate/download", "/paintaplate/download/check", "/paintaplate/download/size", "/paintaplate/graph", "/paintaplate/browse", "/paintaplate/thumb",
+                         "/paintaplate/blank", "/paintaplate/jobs/{key}", "/paintaplate/jobs/{key}", "/paintaplate/live/{prompt}", "/paintaplate/cache", "/paintaplate/stat",
                          "/paintaplate/frames", "/paintaplate/pixel", "/paintaplate/scenes", "/paintaplate/scenes/{name}", "/paintaplate/scenes/{name}",
                          "/paintaplate/ocio", "/paintaplate/ocio/shader", "/paintaplate/version"])
-        print("download route: folders, parts, symlinks, zip reuse, handler: ok")
+        self.assertEqual(routes.zip_name("shot 010/../x", self.folder), "shot_010_.._x")
+        print("download route: folders, rows, symlinks, handler: ok")
 
 
 class PlateBrowser(unittest.TestCase):
@@ -137,6 +108,26 @@ class PlateBrowser(unittest.TestCase):
         frames = [Image.new("RGB", (96, 48), (40 * k, 0, 0)) for k in range(4)]
         frames[0].save(os.path.join(OUT, "anim_00001_.webp"), save_all=True, append_images=frames[1:], duration=40)
 
+    def test_a_thumbnail_of_files_named_by_the_millisecond(self):
+        """ComfyUI's clipspace files in the input folder: the Open dialog lists them as one pattern, the plate has as many
+        frames as files, and its thumbnail is the first file's picture. Without that, this request can take all of ComfyUI's memory."""
+        import numpy as np
+        from PIL import Image
+        stamps = (1791816680123, 1791819680130, 1791821680123)
+        paths = [os.path.join(INPUT, f"clipspace-mask-{n}.png") for n in stamps]
+        for k, path in enumerate(paths):
+            Image.new("RGB", (96, 48), (220, 0, 0) if k == 0 else (0, 0, 220)).save(path)
+        try:
+            item = next(i for i in routes.browse("")["items"] if i["name"].startswith("clipspace-mask-"))
+            self.assertEqual(item["kind"], "sequence")
+            self.assertEqual(routes.plate_info(item["path"])["frames"], 3)
+            thumb = np.asarray(Image.open(routes.thumbnail(item["path"])).convert("RGB"), np.float32)
+            self.assertGreater(thumb[..., 0].mean(), 150)
+            self.assertLess(thumb[..., 2].mean(), 60)
+        finally:
+            for path in paths:
+                os.remove(path)
+
     def test_browse_lists_folders_without_opening_files(self):
         """input and output, subfolders, videos, frame patterns; no text file, no link, nothing outside."""
         got = routes.browse("plates")
@@ -153,7 +144,7 @@ class PlateBrowser(unittest.TestCase):
         self.assertEqual(kinds["output:ComfyUI_#####_.png"], "sequence")  # core Save Image's names, one plate
         self.assertEqual(kinds["output:anim_00001_.webp"], "video")  # core Save Animated WEBP
         self.assertEqual(routes.browse("output:video")["parent"], "output:")
-        for bad in ("../", "output:../", "plates/shot.mov", "/etc"):
+        for bad in ("../", "output:../", "plates/shot.mov"):  # an absolute folder lists: test_plate_paths
             with self.assertRaises((FileNotFoundError, ValueError), msg=bad):
                 routes.browse(bad)
 
@@ -184,7 +175,7 @@ class PlateBrowser(unittest.TestCase):
         import json, tomllib
         with open(os.path.join(ROOT, "pyproject.toml"), "rb") as f:
             self.assertEqual(routes.VERSION, tomllib.load(f)["project"]["version"])
-        self.assertEqual(json.loads(asyncio.run(routes.version_route(None)).text), {"version": routes.VERSION})
+        self.assertEqual(json.loads(asyncio.run(routes.version_route(None)).text), {"version": routes.VERSION, "build": routes.BUILD, "folder": ""})  # the stub has no base_path
 
     def test_plate_info_names_the_colour_space_in_the_config(self):
         info = routes.plate_info("plates/exr_shot")
@@ -227,7 +218,7 @@ class PlateBrowser(unittest.TestCase):
             time.sleep(0.02)
             self.assertEqual(routes.thumbnail(rel, width=48), path)
             self.assertEqual(os.path.getmtime(path), first)  # reused, not rewritten
-        for bad in ("plates/notes.txt", "plates/link.mov", "../elsewhere.txt", "elsewhere.txt", "", os.path.join(INPUT, "plates", "shot.mov")):
+        for bad in ("plates/notes.txt", "plates/link.mov", "../elsewhere.txt", "elsewhere.txt", ""):
             with self.assertRaises((FileNotFoundError, StopIteration, ValueError, OSError), msg=bad):
                 routes.thumbnail(bad)
 
@@ -258,20 +249,97 @@ class PlateBrowser(unittest.TestCase):
 
 
 
+class Build(unittest.TestCase):
+    """/paintaplate/version's build: a hash of what computes, made when ComfyUI starts. The page puts it
+    in every job index key in place of the version (comfy.indexParts)."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="paintaplate_build_")
+        self.pack, self.comfy, self.ltx = (os.path.join(self.dir, n) for n in ("pack", "ComfyUI", "ComfyUI-LTXVideo"))
+        touch(os.path.join(self.pack, "nodes.py"), b"STRENGTH = 1\n")
+        touch(os.path.join(self.pack, "pyproject.toml"), b'version = "1.11.12"\n')
+        touch(os.path.join(self.pack, "tests", "test_nodes.py"), b"")
+        touch(os.path.join(self.comfy, "comfyui_version.py"), b'__version__ = "0.42.1"\n')
+        touch(os.path.join(self.ltx, ".git", "HEAD"), b"ref: refs/heads/master\n")
+        touch(os.path.join(self.ltx, ".git", "refs", "heads", "master"), b"a" * 40 + b"\n")
+        touch(os.path.join(self.dir, "models", "ltx.safetensors"), b"weights")
+
+    def build(self):
+        find = lambda name: os.path.join(self.dir, "models", name)  # noqa: E731
+        stats = routes.model_stats(["ltx.safetensors", "hdr.safetensors"], find)
+        return routes.build_hash(routes.build_parts(self.pack, self.comfy, self.ltx, stats))
+
+    def test_the_build_is_16_hex_digits_made_at_start(self):
+        self.assertRegex(routes.BUILD, r"^[0-9a-f]{16}$")
+        self.assertEqual(routes.build_hash(routes.build_parts()), routes.BUILD, "the same code and files as at start")
+
+    def test_what_computes_makes_another_build(self):
+        builds = [self.build()]
+        self.assertEqual(self.build(), builds[0], "the same code and the same files: the same build")
+        changes = [  # each one alone makes a build no index has seen
+            lambda: touch(os.path.join(self.pack, "nodes.py"), b"STRENGTH = 2\n"),  # a branch or a local edit of one version
+            lambda: touch(os.path.join(self.pack, "plateio.py"), b""),  # a new Python file
+            lambda: touch(os.path.join(self.comfy, "comfyui_version.py"), b'__version__ = "0.43.0"\n'),
+            lambda: touch(os.path.join(self.ltx, ".git", "refs", "heads", "master"), b"b" * 40 + b"\n"),
+            lambda: touch(os.path.join(self.dir, "models", "ltx.safetensors"), b"other weights"),  # a new file, an old name
+            lambda: os.utime(os.path.join(self.dir, "models", "ltx.safetensors"), (1e9, 1e9)),  # the same size, another time
+            lambda: touch(os.path.join(self.dir, "models", "hdr.safetensors"), b"hdr"),  # a model file that was missing
+        ]
+        for change in changes:
+            change()
+            builds.append(self.build())
+        self.assertEqual(len(set(builds)), len(builds), builds)
+
+    def test_what_does_not_compute_leaves_it(self):
+        before = self.build()
+        touch(os.path.join(self.pack, "pyproject.toml"), b'version = "1.11.13"\n')  # a new version number alone
+        touch(os.path.join(self.pack, "tests", "test_nodes.py"), b"# a new test\n")  # tests do not run in ComfyUI
+        touch(os.path.join(self.pack, "web", "app.mjs"), b"")  # the page: its workflows and values are in each key already
+        self.assertEqual(self.build(), before)
+
+    def test_a_clone_s_commit_is_read_from_its_git_folder(self):
+        sha = "c" * 40
+        touch(os.path.join(self.dir, "packed", ".git", "HEAD"), b"ref: refs/heads/main\n")
+        touch(os.path.join(self.dir, "packed", ".git", "packed-refs"), f"# pack-refs\n{sha} refs/heads/main\n".encode())
+        touch(os.path.join(self.dir, "detached", ".git", "HEAD"), f"{sha}\n".encode())
+        commits = [routes.git_commit(os.path.join(self.dir, n)) for n in ("ComfyUI-LTXVideo", "packed", "detached", "pack")]
+        self.assertEqual(commits, ["a" * 40, sha, sha, ""])
+
+    def test_ltx_without_git_counts_by_its_python_files(self):
+        import shutil
+        shutil.rmtree(os.path.join(self.ltx, ".git"))
+        touch(os.path.join(self.ltx, "nodes", "guide.py"), b"A = 1\n")
+        before = self.build()
+        touch(os.path.join(self.ltx, "nodes", "guide.py"), b"A = 2\n")
+        self.assertNotEqual(self.build(), before, "installed from a zip: a change in any of its Python files makes another build")
+
+    def test_a_model_file_is_found_in_any_model_folder(self):
+        from unittest import mock
+        folders = {"loras": [os.path.join(self.dir, "loras")], "vae": [os.path.join(self.dir, "models")]}
+        full = lambda kind, name: next((os.path.join(p, name) for p in folders[kind] if os.path.isfile(os.path.join(p, name))), None)  # noqa: E731
+        with mock.patch.object(routes, "folder_paths", types.SimpleNamespace(folder_names_and_paths=folders, get_full_path=full)):
+            self.assertEqual(routes.model_path("ltx.safetensors"), os.path.join(self.dir, "models", "ltx.safetensors"))
+            self.assertIsNone(routes.model_path("hdr.safetensors"))
+
+
 class BlankPlate(unittest.TestCase):
     def test_blank_plate_route(self):
-        """A black canvas in input/paintaplate/blank: written once, refused outside 64-multiples, 8k + 1 frames and 1 to 120 fps."""
+        """A black canvas in input/paintaplate/blank, written once. Refused outside the Blank plate tab's sides (256 to
+        1920 px, in multiples of 64), its frame rates (24, 25 or 50 fps) and its lengths (8k + 1 frames, from 9 up to LTX
+        2.5's 20 s at the rate: 481, 497 and 1001 frames)."""
+        self.assertEqual([routes.blank_frames(r) for r in routes.BLANK_RATES], [481, 497, 1001])
         require("av", "numpy")
-        rel = routes.blank_plate(128, 64, 25, 17)
-        self.assertEqual(rel, "paintaplate/blank/fluid_128x64_25fps_17f.mov")
+        rel = routes.blank_plate(256, 320, 25, 17)
+        self.assertEqual(rel, "paintaplate/blank/fluid_256x320_25fps_17f.mov")
         full = os.path.join(INPUT, rel)
         spec = routes.plateio.probe_plate(full)
-        self.assertEqual((spec["codec"], spec["width"], spec["height"], spec["frames"], spec["fps"]), ("prores", 128, 64, 17, 25.0))
+        self.assertEqual((spec["codec"], spec["width"], spec["height"], spec["frames"], spec["fps"]), ("prores", 256, 320, 17, 25.0))
         first = os.path.getmtime(full)
         time.sleep(0.02)
-        self.assertEqual(routes.blank_plate(128, 64, 25, 17), rel)
+        self.assertEqual(routes.blank_plate(256, 320, 25, 17), rel)
         self.assertEqual(os.path.getmtime(full), first)  # reused, not rewritten
-        for bad in ((100, 64, 25, 17), (128, 64, 25, 16), (128, 64, 0, 17)):
+        for bad in ((192, 320, 25, 17), (1984, 320, 25, 17), (300, 320, 25, 17), (256, 320, 25, 16), (256, 320, 25, 505), (256, 320, 50, 1009),
+                    (256, 320, 30, 17), (256, 320, 0, 17), (256, 320, float("nan"), 17)):
             with self.assertRaises(ValueError, msg=str(bad)):
                 routes.blank_plate(*bad)
 
@@ -282,11 +350,26 @@ class BlankPlate(unittest.TestCase):
             app.add_routes(table)
             from aiohttp.test_utils import TestClient, TestServer
             async with TestClient(TestServer(app)) as client:
-                r = await client.post("/paintaplate/blank", json={"width": 128, "height": 64, "fps": 25, "frames": 17})
+                r = await client.post("/paintaplate/blank", json={"width": 256, "height": 320, "fps": 25, "frames": 17})
                 self.assertEqual((r.status, (await r.json())["path"]), (200, rel))
-                r = await client.post("/paintaplate/blank", json={"width": 130, "height": 64, "fps": 25, "frames": 17})
+                r = await client.post("/paintaplate/blank", json={"width": 130, "height": 320, "fps": 25, "frames": 17})
                 self.assertEqual(r.status, 400)
+                r = await client.post("/paintaplate/blank", json={"width": 256, "height": 320, "fps": 30, "frames": 17})
+                self.assertEqual((r.status, await r.text()), (400, "Blank plate: frame rate must be 24, 25 or 50 fps."))
         asyncio.run(run())
+
+    def test_page_and_server_take_the_same_blank_plates(self):
+        """The Blank plate tab and /paintaplate/blank take the same sides, frame rates and lengths: logic.FLUID and
+        logic.plateLength on the page, routes.BLANK_SIDES, BLANK_RATES, BLANK_FEWEST and blank_frames on the server."""
+        code = ("import('./web/logic.mjs').then((m) => console.log(JSON.stringify({ f: m.FLUID, s: m.LENGTH.seconds, "
+                "most: m.FLUID.rates.map((r) => m.plateLength(r).frames) })))")
+        r = subprocess.run([node(), "--input-type=module", "-e", code], capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        p = json.loads(r.stdout)
+        f = p["f"]
+        self.assertEqual(((f["minSide"], f["maxSide"], f["step"]), tuple(f["rates"]), f["minFrames"], p["s"], p["most"]),
+                         (routes.BLANK_SIDES, routes.BLANK_RATES, routes.BLANK_FEWEST, routes.LTX_SECONDS,
+                          [routes.blank_frames(r) for r in routes.BLANK_RATES]))
 
 
 class DeepFramesTest(unittest.TestCase):
@@ -378,24 +461,6 @@ class JobIndex(unittest.TestCase):
                 routes.plate_stat(bad)
 
 
-class FluidExport(unittest.TestCase):
-    def test_a_fluid_shot_zips_its_hdr_frames_its_plate_and_its_preview(self):
-        """A fluid shot exported by itself: the zip holds its HDR frames and its shot as folders, and its preview movie."""
-        import tempfile
-        with tempfile.TemporaryDirectory() as d:
-            for rel in ("hdr/f_00001_.exr", "hdr/f_00002_.exr", "plate/blank_960x512.mov", "preview_00001_.mp4", "hdr_movie_00001_.mp4"):
-                os.makedirs(os.path.join(d, os.path.dirname(rel)), exist_ok=True)
-                with open(os.path.join(d, rel), "wb") as f:
-                    f.write(b"x")
-            names = [name for _, name in routes.collect(d, ["hdr", "plate", "preview"])]
-            self.assertEqual(names, ["hdr/f_00001_.exr", "hdr/f_00002_.exr", "plate/blank_960x512.mov", "preview.mp4"])
-            import zipfile  # its zip needs no export folder (it answered 404 on 2 Nov, and the browser cancelled the download)
-            with zipfile.ZipFile(routes.build_zip(d, "fluid_v1", ["hdr", "plate", "preview"])) as z:
-                self.assertEqual(sorted(z.namelist()), sorted(names))
-            with self.assertRaises(FileNotFoundError):
-                routes.build_zip(d, "fluid_v1", ["export", "matte"])
-
-
 class ModelsZipTest(unittest.TestCase):
     def test_models_md_lists_the_models_behind_an_export(self):
         """MODELS.md in an export's zip: the models the page names, with their licences from web/models.json."""
@@ -407,8 +472,45 @@ class ModelsZipTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, "export"))
             open(os.path.join(d, "export", "plate.mp4"), "wb").write(b"0")
-            path = routes.build_zip(d, "shot", ["export"], ["klein"])
+            files = [(os.path.join(d, "export", "plate.mp4"), "desk_composite_full_size.mp4", "composite_full_size")]
+            path = routes.build_zip(d, "shot", files, ["klein"], stem="desk")
             names = zipfile.ZipFile(path).namelist()
-            self.assertIn("MODELS.md", names)
-            self.assertNotEqual(path, routes.build_zip(d, "shot", ["export"], ["klein", "ltx"]), "another list, another zip")
+            self.assertIn("desk_models.md", names)
+            self.assertNotEqual(path, routes.build_zip(d, "shot", files, ["klein", "ltx"], stem="desk"), "another list, another zip")
         print("MODELS.md: the models behind an export with their licences, in its zip")
+
+
+class TraceTest(unittest.TestCase):
+    """PAINTAPLATE_TRACE=1: every request says when it starts and when it ends, with what the process holds."""
+
+    def call(self, method, path_qs, seconds=0.0):
+        async def handler(request):
+            await asyncio.sleep(seconds)
+            return "answer"
+        request = types.SimpleNamespace(method=method, path_qs=path_qs, path=path_qs.split("?")[0])
+        return asyncio.run(routes.trace(request, handler))
+
+    def test_a_request_says_when_it_starts_and_when_it_ends(self):
+        with self.assertLogs(level="INFO") as said:
+            self.assertEqual(self.call("GET", "/paintaplate/thumb?path=plates/horse.mp4"), "answer")
+        lines = [r.getMessage() for r in said.records]
+        self.assertEqual(len(lines), 2)
+        self.assertRegex(lines[0], r"^\[Paint a plate\] Trace: GET /paintaplate/thumb\?path=plates/horse\.mp4 started, RAM \d+\.\d GB\.$")
+        self.assertRegex(lines[1], r"^\[Paint a plate\] Trace: GET /paintaplate/thumb\?path=plates/horse\.mp4 ended, done in \d+\.\d\d s, RAM \d+\.\d GB\.$")
+
+    def test_a_front_end_file_is_said_only_when_it_is_slow(self):
+        with self.assertLogs(level="INFO") as said:
+            logging.getLogger().info("so that assertLogs has a line")
+            self.call("GET", "/extensions/ainvfx-paintaplate/app.mjs")
+        self.assertEqual(len(said.records), 1)
+        with self.assertLogs(level="INFO") as said:
+            self.call("GET", "/extensions/ainvfx-paintaplate/app.mjs", seconds=0.6)
+        self.assertIn("GET /extensions/ainvfx-paintaplate/app.mjs ended, done in 0.6", said.records[0].getMessage())
+
+    def test_a_request_that_fails_still_says_that_it_ended(self):
+        async def handler(request):
+            raise web.HTTPNotFound(text="No thumbnail")
+        request = types.SimpleNamespace(method="GET", path_qs="/paintaplate/thumb?path=x", path="/paintaplate/thumb")
+        with self.assertLogs(level="INFO") as said, self.assertRaises(web.HTTPNotFound):
+            asyncio.run(routes.trace(request, handler))
+        self.assertIn("GET /paintaplate/thumb?path=x ended, done in ", said.records[-1].getMessage())

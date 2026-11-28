@@ -4,10 +4,10 @@
 // after its OCIO function (OCIOIPNode.cpp). OpenColorIO writes the two OCIO functions as GLSL ES 3.0 on the server
 // (ocio.py), with their lookup tables, from the same GPU processor OpenRV asks for (OPTIMIZATION_DEFAULT). A program is
 // made once per colour space and view: changing the plate's colour space, the display or the view swaps it, so it applies
-// while the shot plays. Frames of an image sequence (DeepFrames in frames.mjs, 960 px) and the paused frame on show at
+// while the shot plays. Frames of an image sequence (DeepFrames in frames.mjs, 960 px) and the paused frame displayed at
 // native size (sharpFrame in app.mjs) arrive as RGB half floats, so values above 1.0 reach the shader; video frames and
 // canvases are 8 bits.
-// OpenRV read at 0bd9675 (main, 2 Nov 2026): src/lib/ip/IPBaseNodes/ColorIPNode.cpp, src/lib/ip/OCIONodes/OCIOIPNode.cpp,
+// OpenRV at 0bd9675 (main): src/lib/ip/IPBaseNodes/ColorIPNode.cpp, src/lib/ip/OCIONodes/OCIOIPNode.cpp,
 // src/lib/ip/IPCore/glsl/ColorGamma.glsl and ColorMatrix.glsl.
 
 // ---------- The plate's own size on the canvas (OpenRV shows a plate at its resolution; key 1 is 1:1) ----------
@@ -15,14 +15,12 @@ export function nativeSize(width, height, max) { // the canvas: the plate's size
   const k = Math.min(1, max / Math.max(width, height));
   return [Math.round(width * k), Math.round(height * k)];
 }
-// The zoom at which one canvas pixel covers one screen pixel: the frame fits at `fitWidth` CSS pixels
-export const oneToOne = (canvasWidth, fitWidth, dpr = 1) => canvasWidth / (fitWidth * dpr);
 
 // ---------- Zoom and pan, as OpenRV's rvui.mu (0bd9675): f fits, Ctrl+F fits the width, 1 to 8 show N:1, Ctrl+2 to
 // Ctrl+8 show 1:N (here Shift+2 to Shift+8: Chrome keeps Ctrl and Alt with a digit for its tabs), Ctrl+drag zooms about the
 // press point (dragZoom), Alt+drag and the middle button pan (dragMoveLocked), Shift locks the pan to one axis. The wheel
 // steps frames. A scale is relative to the fitted frame, as RV's setScale. ----------
-export const ZOOM_LIMITS = [0.01, 64];
+const ZOOM_LIMITS = [0.01, 64];
 export const clampZoom = (k) => Math.min(ZOOM_LIMITS[1], Math.max(ZOOM_LIMITS[0], k));
 // N plate pixels per device pixel side: n = 1 is 1:1, n = 4 is 4:1, n = 1 / 4 is 1:4
 export const pixelScale = (n, canvasWidth, fitWidth, dpr = 1) => clampZoom((n * canvasWidth) / (fitWidth * dpr));
@@ -40,9 +38,9 @@ export const pointIn = (rect, clientX, clientY, w, h) => [((clientX - rect.left)
 
 // ---------- Which frame a playing source shows once the colour tools move ----------
 // At rest a playing source shows its 8-bit movie until all its EXR frames are in. That movie holds ACEScct codes in
-// H.264: pushed four stops up, a fluid shot's dark background moved by 4 display levels at the median and 24 at p99
-// against its EXR frames, with H.264's 8 px blocks visible (GPU check, 2 Nov). So once a colour tool moves, a source with
-// EXR frames shows only those, as RV plays only what it has decoded: the frame on show if it is in, else the nearest
+// H.264: pushed four stops up, a fluid shot's dark background moves by 4 display levels at the median and 24 at p99
+// against its EXR frames, with H.264's 8 px blocks visible. So once a colour tool moves, a source with
+// EXR frames shows only those, as RV plays only what it has decoded: the frame displayed if it is in, else the nearest
 // one before it, else the nearest after (the cache keeps frames ahead of the playhead). Null when none is in.
 export function exactFrame(frames, f) {
   if (frames.has(f)) return f;
@@ -157,14 +155,14 @@ void main() {
 
 const floats = (b64) => { const s = atob(b64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return new Float32Array(u.buffer); };
 
-export const viewKey = ({ config = "", display = "", view = "", look = "" }, space) => JSON.stringify([config, space, display, view, look]);
+const viewKey = ({ config = "", display = "", view = "", look = "" }, space) => JSON.stringify([config, space, display, view, look]);
 
 export class Display {
   // onready(): a program arrived, so the viewer draws again; onerror(message): OCIO refused a colour space or a view
   constructor({ onready = () => {}, onerror = () => {} } = {}) {
     Object.assign(this, { onready, onerror, programs: new Map(), view: null });
     this.canvas = document.createElement("canvas");
-    const gl = (this.gl = this.canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, premultipliedAlpha: false, preserveDrawingBuffer: true }));
+    const gl = (this.gl = this.canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, premultipliedAlpha: false })); // every frame drawn here is copied in the same task, so the drawing buffer is not preserved
     if (!gl) return;
     this.linearFloats = !!gl.getExtension("OES_texture_float_linear"); // else filtered tables go in half floats
     gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
@@ -200,7 +198,7 @@ export class Display {
       if (!r.ok) throw new Error(s.error ?? `OCIO shader: ${r.status}`);
       Object.assign(entry, this.compile(s), { identity: s.identity, ready: true });
       this.onready();
-    }).catch((err) => { entry.failed = true; this.onerror(err.message); });
+    }).catch((err) => this.onerror(err.message));
     return null;
   }
 

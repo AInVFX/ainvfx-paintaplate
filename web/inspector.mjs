@@ -1,7 +1,7 @@
-// The colour inspector, as OpenRV's (src/lib/app/mu_rvui/inspector.mu at 0bd9675, read 2 Nov 2026): F5 shows it, as
+// The colour inspector, as OpenRV's (src/lib/app/mu_rvui/inspector.mu at 0bd9675): F5 shows it, as
 // toggleColorInspector in rvui.mu; Shift+click samples, Shift+drag averages, the box drags the point with it. RV lists the pixel in the image's own pixels (Native Pixel), its values as "%f", and
 // the average of the pixels sampled with Shift held. RV shows either the source colour or the final colour; this
-// inspector shows both: the source values at full precision and native size, read on the server from the file on show
+// inspector shows both: the source values at full precision and native size, read on the server from the file displayed
 // (/paintaplate/pixel), and the values drawn on screen, as 0 to 1 like RV's framebuffer read. Pure functions, tested in
 // tests/js/inspector.test.mjs.
 
@@ -15,7 +15,7 @@ export function sourcePixel(fx, fy, width, height) {
   return { x: clamp(fx, width), y: clamp(fy, height), inside };
 }
 
-// The file on show: a shot's EXR frames when it has them, else its movie (an output file named by ComfyUI's view URL),
+// The file displayed: a shot's EXR frames when it has them, else its movie (an output file named by ComfyUI's view URL),
 // else the plate.
 export function sourcePath(shot, plate) {
   if (shot?.frames) return shot.frames;
@@ -31,9 +31,18 @@ export const wipeSide = (x, width, wipe) => (wipe !== null && wipe !== undefined
 
 export const formatValue = (v) => (Number.isFinite(v) ? v.toFixed(6) : "nan"); // RV's "%f"
 
-export function addSample(avg, value) { // RV's running average while Shift is held
-  return avg ? { sum: avg.sum.map((s, i) => s + value[i]), n: avg.n + 1 } : { sum: [...value], n: 1 };
-}
+// The points sampled with Shift held, each pixel once, in the plate's pixels. RV keeps a running sum of the colours it
+// read while sampling; the page keeps the points, so that their average is read again, as the point is, from the step
+// displayed at the frame displayed (the pixel route's `pts`). The points travel in the request's address, and the server
+// takes a line of about 8,000 characters: at SAMPLED_MOST points every other one goes, so a long drag still reads its
+// average, from points along the whole stroke.
+export const SAMPLED_MOST = 400;
+export const addSampled = (points, { x, y }) => {
+  if (points.some((p) => p.x === x && p.y === y)) return points;
+  return [...(points.length >= SAMPLED_MOST ? points.filter((_, k) => k % 2 === 0) : points), { x, y }];
+};
+
+export const pointsQuery = (points) => points.map((p) => `${p.x},${p.y}`).join(";"); // as the pixel route reads them
 
 // Where the box goes: beside the point, below and to the right, flipped to stay inside the viewport
 export function boxPlace(x, y, w, h, vw, vh, gap = 14) {
@@ -46,9 +55,9 @@ export function boxPlace(x, y, w, h, vw, vh, gap = 14) {
 // not the pass's values: the line says so.
 export function sourceLine(source, movie) {
   if (!source) return null;
-  if (source.drawn) return `${source.drawn}, as drawn: the final colour only`;
+  if (source.drawn) return `${source.drawn}, as drawn: the display colour only`;
   if (!movie && !source.movie) return `${source.space}, as stored`;
-  return `${movie?.bits ?? 8}-bit movie: ${source.space} codes${source.movie ? ", not the pass's own values" : ""}`;
+  return `${movie?.bits ?? 8}-bit movie, ${source.space}`;
 }
 
 // The rows the inspector shows, top to bottom.
@@ -60,8 +69,8 @@ export function inspectorRows({ x, y, inside = true, frame, value, final, averag
   if (line) rows.push(["Values", line]);
   if (error) return [...rows, ["Error", error]];
   const rgb = (label, v) => [[label, ""], ...["Red", "Green", "Blue", "Alpha"].slice(0, v.length).map((n, i) => [n, formatValue(v[i])])];
-  if (value) rows.push(...rgb("Source Color", value));
-  if (final) rows.push(...rgb("Final Color", final));
-  if (average?.n > 1) rows.push(...rgb(`Average of ${average.n}`, average.sum.map((s) => s / average.n)));
+  if (value) rows.push(...rgb("Source colour", value));
+  if (final) rows.push(...rgb("Display colour", final));
+  if (average?.n > 1) rows.push(...rgb(`Average source colour of ${average.n}`, average.value)); // the route's mean of the points
   return rows;
 }

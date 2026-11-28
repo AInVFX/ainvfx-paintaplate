@@ -2,20 +2,23 @@
 
     python tests/ui_live.py --comfy /path/to/ComfyUI --python /path/to/python
 
-The pack is copied to a temporary folder where `edit`, `snap`, `shot` and `matte` are replaced by
-stand-ins built from core nodes only (same slots and outputs, no models), so the whole flow runs on a
-CPU: open a plate, play it, paint, erase and light, start each edit with Generate (Enter), bypass and bring back
+The pack is copied to a temporary folder where the workflows that load a model and that this flow posts (`edit`, `snap`,
+`prompt`, `matte`, `shot`, `clean` and its second stage `cleanup`) are replaced by stand-ins built from
+core nodes only (same slots and outputs, no models), so the whole flow runs on a CPU, the full-size passes included: open a plate, play it, paint, erase and light, start each edit with Generate (Enter), bypass and bring back
 an edit, let the idle time render the shot, the composite and the export, wipe, then download the zip.
 `ingest`, `comp` and `export` are the real workflows. Screenshots go to /tmp/paintaplate_ui.
 """
-import argparse, glob, json, os, shutil, subprocess, sys, time, zipfile
+import argparse, glob, json, os, re, shutil, subprocess, sys, time, urllib.request, zipfile
+import zip_rows  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path[:0] = [REPO, HERE, os.path.join(REPO, "tools")]
 import comfy_live  # noqa: E402
 from build_workflows import Graph, Slot, plate  # noqa: E402
-from playwright.sync_api import sync_playwright  # noqa: E402
+
+# The log's lines as the page's own export writes them: each <li> holds a <time> and a <span>, written with a space between
+LOG_LINES = "els => els.map((e) => e.firstChild.textContent + ' ' + e.lastChild.textContent)"
 
 SHOTS = "/tmp/paintaplate_ui"
 
@@ -44,7 +47,8 @@ def stand_ins(out):
     g("SaveVideo", _output="video", video=g("CreateVideo", images=ref, fps=load[3], bit_depth=8, color_space="sRGB", codec="none"),
       filename_prefix=Slot("video_prefix", "x/v"), format="auto", format__codec="auto")
     g.save("shot", out)
-    g.save("clean", out)  # the erase pass: the same stand-in, saved under its name
+    for name in ("clean", "cleanup"):  # the erase pass and its second stage: the same stand-in, saved under each name
+        g.save(name, out)
 
     g = Graph()  # matte: the first-frame mask repeated over every frame
     _, srgb = plate(g, pad=True)
@@ -69,6 +73,87 @@ def stand_ins(out):
     g.save("prompt", out)
 
 
+def executing(events, t0):
+    """A listener for the page's WebSocket that keeps each « executing » message of ComfyUI, with the seconds since t0 when it
+    arrived: when each node started. gpu_matrix.py makes each node's seconds of them (node_times). Previews are binary."""
+    def heard(payload):
+        if isinstance(payload, str) and '"executing"' in payload:
+            try:
+                msg = json.loads(payload)
+            except ValueError:
+                return
+            if msg.get("type") == "executing":
+                data = msg.get("data") or {}
+                events.append([round(time.time() - t0, 3), data.get("prompt_id"), data.get("node")])
+    return lambda ws: ws.on("framereceived", heard)
+
+
+def deliver_hdr(page):
+    """--hdr: SDR to HDR on for this run, before any edit, as a render's key holds the switch. On a plate whose format holds
+    nothing above 1.0, the switch asks to confirm; an EXR plate that holds values above 1.0 runs it on its own. The switch
+    is in the Finish menu (#finish-btn), or under Deliver on a page without that menu."""
+    if page.query_selector("#finish-btn"):
+        page.click("#finish-btn")
+        box, why, ask, yes = "#finish-hdr", "#finish-hdr-why", "#finish-hdr-ask", "#finish-hdr-yes"
+        if page.is_disabled(box):
+            on = page.is_checked(box)
+            page.keyboard.press("Escape")
+            if on:
+                return "SDR to HDR: on its own for this plate"
+            raise RuntimeError(f"--hdr: the Finish menu offers no SDR to HDR on this page: {page.text_content(why)}")
+    else:
+        box, ask, yes = "#deliver-hdr", "#deliver-confirm", "#deliver-yes"
+        if page.is_visible("#deliver-auto"):
+            return "SDR to HDR: on its own for this plate"
+        if not page.is_visible(box):
+            raise RuntimeError("--hdr: the Finish menu offers no SDR to HDR on this page (?hdr=0, or its model files or nodes are missing)")
+    page.click(box)
+    if page.is_visible(ask):
+        page.click(yes)
+    page.wait_for_function(f"document.querySelector('{box}').checked", timeout=10000)
+    if box == "#finish-hdr":
+        page.keyboard.press("Escape")
+    return "SDR to HDR: on, asked for by --hdr"
+
+
+def deliver_upscale(page, size: str = ""):
+    """--upscale: Finish > Upscale on for this run, before any edit, at `size`: the long side in px, as Custom… takes
+    it. The row's list gives the size when one of its entries has that long side, else Custom… does;
+    with no size, the page's own. Upscale's steps then follow the full-size composite, and the zip holds their
+    upscaled set under upscaled/."""
+    page.click("#finish-btn")
+    if page.is_disabled("#finish-upscale"):
+        why = page.text_content("#finish-upscale-why")
+        page.keyboard.press("Escape")
+        raise RuntimeError(f"--upscale: the Finish menu offers no Upscale on this page: {why}")
+    page.click("#finish-upscale")
+    page.wait_for_function("document.querySelector('#finish-upscale').checked", timeout=10000)
+    if size:  # the list sits in the Finish menu: chosen while the menu is open
+        listed = page.evaluate("""(size) => [...document.querySelectorAll('#finish-upscale-size option')]
+          .find((o) => o.value !== 'custom' && Math.max(...(o.textContent.match(/\\d+/g) ?? []).slice(0, 2).map(Number)) === +size)?.value ?? null""", size)
+        page.select_option("#finish-upscale-size", listed or "custom")
+        if not listed:
+            page.wait_for_selector("#ask-field", state="visible", timeout=10000)
+            page.fill("#ask-field", size)
+            page.keyboard.press("Enter")
+            page.wait_for_selector("#ask", state="hidden", timeout=10000)
+    read = "() => { const s = document.querySelector('#finish-upscale-size'); return s?.options[s.selectedIndex]?.textContent ?? ''; }"
+    want = str(2 * round(int(size) / 2)) if size.strip().isdigit() else None
+    end = time.time() + 10  # Custom…'s answer reaches the page one task after its dialog closes: wait for the size it sets
+    while want and want not in re.findall(r"\d+", page.evaluate(read)) and time.time() < end:
+        page.wait_for_timeout(50)
+    chosen = page.evaluate(read)
+    page.keyboard.press("Escape")
+    if want and want not in re.findall(r"\d+", chosen):
+        raise RuntimeError(f"--upscale {size}: the page kept {chosen or 'no size'}")
+    return f"Upscale: on at {chosen or 'the page size'}, asked for by --upscale"
+
+
+def pick(page, tool):
+    """Pick a tool by its button, as a person clicks it: its data-tool (paint, erase, light) stays when a label or a key changes."""
+    page.click(f'.tools [data-tool="{tool}"]')
+
+
 def stroke(page, box, pts):
     page.mouse.move(box["x"] + pts[0][0] * box["width"], box["y"] + pts[0][1] * box["height"])
     page.mouse.down()
@@ -77,7 +162,53 @@ def stroke(page, box, pts):
     page.mouse.up()
 
 
+def paths(pts):
+    """The strokes of one edit: a case's points as one path of [x, y], or a list of such paths, drawn in turn before
+    Generate. The page joins the strokes of a draft into one edit."""
+    return pts if pts and isinstance(pts[0][0], (list, tuple)) else [pts]
+
+
 DONE = "document.querySelectorAll('#history li').length === {n} && !document.querySelector('#history li.busy')"
+
+LEFT = "#history li:is([data-left], [data-asked])"  # History's marks: an erase that the page's check holds back (logic.eraseCheck, data-left), or an edit that asks for its object's name (data-asked)
+ASKED = "document.querySelector('#ask').open"  # the page's question dialog: while it is open, the page behind it takes no click
+# While a render runs, a finished Render row pressed as long as a person presses displays its step: (the step that runs,
+# the finished row's data-pass, its name). The step's progress must change its row's time and replace no row.
+VIEWER_CHECKS = (("Track the paint, full size", "full", "Shot, full size"), ("Composite, full size", "trackfull", "Track the paint, full size"))
+WATCH_ROWS = """() => { window.__gone = 0; window.__ticks = 0; new MutationObserver((ms) => { for (const m of ms) {
+  window.__gone += [...m.removedNodes].filter((n) => n.nodeName === 'LI').length; if (m.target.classList?.contains('time')) window.__ticks++; } })
+  .observe(document.querySelector('#stages'), { childList: true, subtree: true }); }"""
+RUNS_WITH = """([now, row]) => [...document.querySelectorAll('#stages li.now .name')].some((e) => e.textContent === now)
+  && !!document.querySelector(`#stages li.pick[data-pass="${row}"]`)"""
+
+
+def viewer_check(page, now, row, label):
+    """The mark of one viewer check: while `now` runs, press the finished row `row` for 700 ms, as a person presses."""
+    page.evaluate(WATCH_ROWS)
+    until = time.time() + 15
+    while time.time() < until and page.evaluate("window.__ticks + window.__gone") == 0:
+        time.sleep(0.2)
+    ticks, gone = page.evaluate("[window.__ticks, window.__gone]")
+    page.click(f"#stages li.pick[data-pass='{row}']", delay=700)
+    time.sleep(0.5)
+    shown = any(f"Viewer: {label}." in t for t in page.eval_on_selector_all("#log li", "els => els.slice(-8).map(e => e.textContent)"))
+    return (f"viewer: {label} {'displayed' if shown else 'NOT displayed'} on a click while « {now} » runs; "
+            f"its progress changed the time {ticks} times and replaced {gone} rows")
+
+
+def open_scene(page, name, timeout=60000):
+    """Open plate > Scenes: the scene saved on that ComfyUI under `name` opens with its plate, and its edits and their
+    render run again, each with its own seed and words."""
+    page.click("#open-btn"); page.click("#open [data-tab=scenes]")
+    page.dblclick(f"#scenes .scene:has(.name:text-is({json.dumps(name)}))", timeout=timeout)
+
+
+ENDED = ("Export: done", "Download: ")  # the status line once the export is written, then once its zip downloads
+NAME_ASKED = "took the stroke for another object"  # the page's line when an erase with no text prompt asks for its object's name (logic.asksName)
+
+
+class NameAsked(Exception):
+    """The page asked for an erase's object by name, and ran nothing: the case ends there (gpu_matrix.json, « expect »)."""
 
 
 def flow(page, url, open_plate, shots, wait_s=120):
@@ -90,17 +221,22 @@ def flow(page, url, open_plate, shots, wait_s=120):
     playing_frame = page.inner_text("#frame-now")
     page.keyboard.press("Home")
     box = page.locator("#view").bounding_box()
-    for i, (key, words, pts) in enumerate((("b", "a fire", [(0.3, 0.6), (0.4, 0.5), (0.45, 0.65)]),
-                                           ("e", "", [(0.7, 0.3), (0.75, 0.4)]),
-                                           ("l", "warm sunset", [(0.1, 0.1), (0.2, 0.15)]))):
-        page.keyboard.press(key)
+    for i, (tool, words, pts) in enumerate((("paint", "a fire", [(0.3, 0.6), (0.4, 0.5), (0.45, 0.65)]),
+                                           ("erase", "", [(0.7, 0.3), (0.75, 0.4)]),
+                                           ("light", "warm sunset", [(0.1, 0.1), (0.2, 0.15)]))):
+        pick(page, tool)
         page.fill("#prompt", words)
         page.locator("#prompt").blur()
         stroke(page, box, pts)
         page.keyboard.press("Enter")  # Generate: the edit, then its shot
-        page.wait_for_function(DONE.format(n=i + 1), timeout=wait_s * 1000)
-        page.screenshot(path=f"{shots}/2_{key}_done.png")
-        print(f"edit {key}: done |", status())
+        settled = f"({DONE.format(n=i + 1)}) && !document.querySelector('{LEFT}')"
+        page.wait_for_function(f"{ASKED} || ({settled})", timeout=wait_s * 1000)
+        if page.evaluate(ASKED):  # the check holds this erase back: a stand-in edit keeps the object's edges. « Render anyway » keeps the first frame, and its shot renders
+            print(f"edit {tool}: asked |", page.inner_text("#ask-text"))
+            page.click("#ask-yes")
+            page.wait_for_function(f"!{ASKED} && ({settled})", timeout=wait_s * 1000)
+        page.screenshot(path=f"{shots}/2_{tool}_done.png")
+        print(f"edit {tool}: done |", status())
     page.locator("#history li").nth(1).locator(".eye").click()  # bypass the erase, then bring it back
     page.wait_for_function("document.querySelectorAll('#history li.off').length === 1 && !document.querySelector('#history li.busy')",
                            timeout=wait_s * 1000)
@@ -110,9 +246,9 @@ def flow(page, url, open_plate, shots, wait_s=120):
     page.keyboard.press("F6")  # wipe on, at frame 10
     page.keyboard.press("End")
     page.screenshot(path=f"{shots}/3_full_size_wipe.png")
-    with page.expect_download(timeout=wait_s * 3000) as dl:  # Export: only now is the result written in the plate's format
+    with page.expect_download(timeout=wait_s * 3000) as dl:  # Export: only now is the result written in its export format
         page.click("#export-btn")
-        page.check("#x-review")
+        tick_offered(page)  # the composite's movie, where the dialog offers it: a composite of frames
         page.click("#x-go")
     final = status()
     print("final:", final, "| frame while playing:", playing_frame, "| steps:", page.inner_text("#stages").replace("\n", " "))
@@ -123,20 +259,80 @@ def flow(page, url, open_plate, shots, wait_s=120):
     return final, names
 
 
+def rows(i, fluid):
+    """History's rows once edit `i` (from 0) is made: a fluid shot has a row of its own."""
+    return i + 1 + bool(fluid)
+
+
+READY = ("full size ready", "finish ready")  # the render's status once every step is made: « finish ready » when a Finish pass follows the full size
+
+
+def stage(note):
+    """The stage that a note of the render names: « preview about 14 s left » and « preview almost ready » are « preview »."""
+    return note.split(" about ")[0].split(" almost ")[0]
+
+
+PREVIEW = {"off": "off", "latent": "latent", "half": "2", "quarter": "4"}  # the Preview menu's choices, as the page stores them (logic.readPreview)
+
+
+def tick_offered(page, graph=False):
+    """In the Export dialog, beside the result it opens on: ticks the matte, which the case's sheet reads, and the Preview
+    stage, so the zip holds the movies the viewer plays (a real ComfyUI writes them as MP4), and with `graph` the ComfyUI
+    graph, which then comes in the same zip. Each tick only when the dialog offers it: a relit result in HDR has no matte,
+    a render with no preview has no Preview tick, and a plate alone has no graph. Returns the ticks it set."""
+    ticked = [box for box in ["#x-matte", "#x-preview"] + (["#x-graph"] if graph else []) if page.is_visible(box)]
+    for box in ticked:
+        page.check(box)
+    return ticked
+
+
+def preview_script(choice: str) -> str:
+    """The script that stores the Preview menu's choice before the page loads, where the page keeps it for the session."""
+    return f"sessionStorage.setItem('paintaplate.preview-menu', '{PREVIEW[choice]}');"
+
+
+def address(url, memory="", seed=None, options=()):
+    """The page's address for a run on real models. ?index=0: the page leaves its job index alone, so every job runs, and
+    each time and each peak of memory is a measured one, on a machine that ran the same strokes before too. ?seed=: the
+    first new edit and every new fluid shot start from this seed, each next edit from the next number, so the next run starts
+    from the same."""
+    options = ["blank=0", "index=0"] + ([f"memory={memory}"] if memory else []) + ([f"seed={seed}"] if seed is not None else []) + list(options)
+    return f"{url}/extensions/ainvfx-paintaplate/paintaplate.html?" + "&".join(options)
+
+
+def answers(url):
+    """Whether the ComfyUI at `url` still answers. When a memory cap stops ComfyUI during a render, the page waits, and this
+    script with it: without this check, no report is written."""
+    try:
+        urllib.request.urlopen(url + "/system_stats", timeout=5).close()
+        return True
+    except Exception:
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--comfy", required=True); ap.add_argument("--python", default=sys.executable)
     ap.add_argument("--port", type=int, default=8190)
     ap.add_argument("--url", default="", help="a running ComfyUI with the real workflows and models (no stand-ins)")
     ap.add_argument("--path", default="", help="plate path in that ComfyUI's input folder, typed into the open dialog")
+    ap.add_argument("--scene", default="", help="instead of --path and --strokes: a scene saved on that ComfyUI, by its name; it opens with its plate and every edit, and its render runs")
 
-    ap.add_argument("--strokes", default="", help='JSON list of [key, words, [[x, y], ...], brush size, {"whole": false, "color": "#d32f2f"}]')
+    ap.add_argument("--strokes", default="", help='JSON list of [tool, words, [[x, y], ...], brush size, {"whole": false, "color": "#d32f2f"}]; a list of such [[x, y], ...] draws several strokes for one edit')
     ap.add_argument("--fluid", default="", help='with --url: a fluid shot from a blank plate first, as fluid_shot() describes; '
                     '--strokes then edit it as the plate')
     ap.add_argument("--timeout", type=int, default=150)
     ap.add_argument("--out", default=SHOTS, help="folder for screenshots and timings")
     ap.add_argument("--think", type=float, default=0, help="seconds between opening the plate and the first stroke")
-    ap.add_argument("--graph", action="store_true", help="after the export, also save the scene's ComfyUI graph")
+    ap.add_argument("--graph", action="store_true", help="tick ComfyUI graph in the Export dialog, and save the scene's graph from the zip beside it")
+    ap.add_argument("--option", action="append", default=[], help="with --url: one more option of the page's address, such as hdr=0 (SDR to HDR off)")
+    ap.add_argument("--memory", default="", help="with --url: the page's memory profile, small, medium or large (by default the GPU decides)")
+    ap.add_argument("--preview", default="", choices=("", *PREVIEW), help="with --url: the Preview menu's choice, stored before the page loads (by default the page's own)")
+    ap.add_argument("--upscale", nargs="?", const="on", default="", help="with --url, at the size given (the long side in px, as Custom… takes it; alone, the page's own): turn Finish > Upscale on before painting, so the render's steps "
+                    "make the upscaled set, which the zip holds; the zip waits up to 3 hours")
+    ap.add_argument("--hdr", action="store_true", help="with --url: turn SDR to HDR on in the Finish menu before painting, so the render makes "
+                    "its full-size shot again in scene-linear values and HDR Match fits it to the plate")
+    ap.add_argument("--seed", type=int, default=None, help="with --url: the page's ?seed=: the first new edit and each fluid shot start from it, each next edit from the next number (by default the page draws each seed)")
     ap.add_argument("--channel", default="", help="a browser channel, such as chrome (it plays H.264; Playwright's Chromium does not)")
     a = ap.parse_args()
     if a.url:
@@ -168,6 +364,7 @@ def main():
                 if time.time() - t0 > 150:
                     raise SystemExit("ComfyUI did not start")
                 time.sleep(1)
+        from playwright.sync_api import sync_playwright  # here and not at the top: the pure functions of this file are read without Playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(channel=os.environ.get("PLAYWRIGHT_CHANNEL") or None)
             page = browser.new_page(viewport={"width": 1280, "height": 800}, accept_downloads=True)
@@ -188,7 +385,7 @@ def main():
                 print("status:", page.inner_text("#status"))
                 page.screenshot(path=f"{SHOTS}/fail.png")
                 raise
-            ok = final.startswith("Exported") or final.startswith("Downloading")
+            ok = final.startswith(ENDED)
             browser.close()
     except Exception as exc:
         print("FAILED AT:", type(exc).__name__, str(exc).splitlines()[0][:200])
@@ -197,17 +394,17 @@ def main():
         os.remove(link)
         if real:
             os.symlink(real, link)
-    exports = [n for n in names if n.startswith("export/") and n.endswith(".exr")]
-    mattes = [n for n in names if n.startswith("matte/")]
+    exports = zip_rows.composite(names, (".exr",))
+    mattes = zip_rows.files(names, "matte")
     print(f"zip: {len(exports)} EXR frames, {len(mattes)} matte frames; console errors: {len(errors)}")
     for e in errors[:10]:
         print("  console:", e[:300])
-    passed = ok and exports and mattes and "review.mp4" in names and not errors
+    passed = ok and exports and mattes and not errors  # the composite's EXR frames and the matte, which tick_offered ticked
     print("UI FLOW PASSED" if passed else "UI FLOW FAILED")
     return 0 if passed else 1
 
 
-def fluid_shot(page, spec, shots, mark):
+def fluid_shot(page, spec, shots, mark, wait_s=900):
     """A fluid shot from a blank plate: the keyframes painted stroke by stroke, then one ainvfx-fluid pass.
 
     `spec`: {"size": [w, h], "fps": 24, "frames": 121, "words": "...", "keys": [[frame, colour, [[x, y], ...], brush], ...]}.
@@ -243,44 +440,70 @@ def fluid_shot(page, spec, shots, mark):
     mark(f"fluid: {len(frames)} keyframes, {len(spec['keys'])} strokes")
     page.evaluate("document.activeElement.blur()")
     page.keyboard.press("Enter")
-    page.wait_for_function("/generating/.test(document.querySelector('#fluid-state').textContent)", timeout=60000)
-    mark("fluid: generating")
-    page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
-      return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden && document.querySelector('#opening').hidden; })()""",
-                           timeout=900000)  # made: the first edit, and the plate under the next ones
+    page.wait_for_function("document.querySelector('#stages li.now')?.textContent.includes('Fluid shot') === true", timeout=wait_s * 1000)
+    mark("fluid: its first step runs")
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => / Fluid shot, full size: done in /.test(e.textContent))",
+                           timeout=wait_s * 1000)  # made: History's first row, the picture under the next edits; a small GPU needs longer
     mark("fluid: shot ready | " + page.inner_text("#status"))
+
+
+def open_listed(page, path, timeout=30000):
+    """Opens `path`, a plate of ComfyUI's input folder or of its output folder (output:...), in the Open dialog's Files tab.
+    On ComfyUI's own machine the path field takes it. A page served through a proxy hides that field (frames.sameMachine):
+    then each folder down to the plate's opens in the list, and a double click opens the plate."""
+    page.click("#open-btn"); page.click("#open [data-tab=files]")
+    if page.is_visible("#path"):
+        page.fill("#path", path); page.click("#open-go")
+        return
+    base = "output:" if path.startswith("output:") else ""
+    if base:
+        page.click("#open [data-root='output:']")
+    parts = path[len(base):].split("/")
+    for i in range(1, len(parts)):
+        page.click(f"#browse .item.folder[data-path='{base + '/'.join(parts[:i])}']", timeout=timeout)
+        page.wait_for_function("(name) => document.querySelector('#crumbs button:last-child')?.textContent === name", arg=parts[i - 1], timeout=timeout)
+    page.dblclick(f"#browse .item[data-path='{path}']", timeout=timeout)
 
 
 def remote(a):
     """The real page, workflows and models on a remote ComfyUI: a timed mark for every stage."""
     shots = a.out
+    nodes, began = [], time.time()  # when ComfyUI started each node: nodes.json, for the report's node times
     shutil.rmtree(shots, ignore_errors=True); os.makedirs(shots)
     fluid = json.loads(a.fluid) if a.fluid else None
-    default = [] if fluid else [["b", "a small campfire", [[0.45, 0.8], [0.5, 0.75], [0.55, 0.8]]]]
-    strokes = json.loads(a.strokes) if a.strokes else default
+    default = [] if fluid else [["paint", "a small campfire", [[0.45, 0.8], [0.5, 0.75], [0.55, 0.8]]]]
+    strokes = [] if a.scene else json.loads(a.strokes) if a.strokes else default  # a scene brings its own edits
     marks, errors, t0 = [], [], time.time()
     mark = lambda what: (marks.append((round(time.time() - t0, 1), what)), print(f"{marks[-1][0]:7.1f} s  {what}"))  # noqa: E731
+    from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch(channel=a.channel or None)
         page = browser.new_page(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+        page.on("websocket", executing(nodes, began))
         page.on("console", lambda m: m.type == "error" and errors.append(m.text))
         page.on("pageerror", lambda e: errors.append(str(e)))
         status = lambda: page.inner_text("#status")  # noqa: E731
         try:
-            page.goto(f"{a.url}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+            if a.preview:
+                page.add_init_script(preview_script(a.preview))
+            page.goto(address(a.url, a.memory, a.seed, a.option))
             page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
             mark("page ready: " + status())
             if fluid:  # a fluid shot first: once made, it is the plate the strokes are painted on
-                fluid_shot(page, fluid, shots, mark)
+                fluid_shot(page, fluid, shots, mark, wait_s=max(900, 4 * a.timeout))
             else:
-                page.click("#open-btn"); page.click("#open [data-tab=files]"); page.fill("#path", a.path); page.click("#open-go")
+                open_scene(page, a.scene) if a.scene else open_listed(page, a.path)
                 page.wait_for_function("document.querySelector('#spec').textContent && document.querySelector('#opening').hidden", timeout=300000)
-            if strokes:
+            if strokes or a.scene:
                 mark("plate open: " + page.inner_text("#spec")); page.screenshot(path=f"{shots}/1_open.png")
+                if a.hdr:
+                    mark(deliver_hdr(page))
+                if a.upscale:
+                    mark(deliver_upscale(page, "" if a.upscale == "on" else a.upscale))
                 box = page.locator("#view").bounding_box()
                 page.wait_for_timeout(a.think * 1000)  # a person looks at the frame before painting
-                for i, (key, words, pts, *size) in enumerate(strokes):
-                    page.keyboard.press(key); page.fill("#prompt", words); page.locator("#prompt").blur()
+                for i, (tool, words, pts, *size) in enumerate(strokes):
+                    pick(page, tool); page.fill("#prompt", words); page.locator("#prompt").blur()
                     if size:  # brush size in frame pixels, set on the slider
                         page.eval_on_selector("#size", "(el, v) => { el.value = v; el.dispatchEvent(new Event('input')); }", size[0])
                     opts = size[1] if len(size) > 1 else {}  # options after the brush size
@@ -288,44 +511,84 @@ def remote(a):
                         page.set_checked("#whole", opts["whole"])
                     if "color" in opts:  # {"color": "#d32f2f"}: a swatch for the paint or the light
                         page.click(f".swatches .sw[data-color='{opts['color']}']")
-                    stroke(page, box, pts); mark(f"{key} stroke")
+                    for path in paths(pts):
+                        stroke(page, box, path)
+                    mark(f"{tool} stroke")
                     page.keyboard.press("Enter")  # Generate
                     page.wait_for_function("document.querySelector('#history li.busy .state')", timeout=60000)
-                    page.wait_for_function(DONE.format(n=i + 1), timeout=300000)
-                    mark(f"{key} edit on the first frame | {status()}"); page.screenshot(path=f"{shots}/2_{key}_done.png")
-                seen = set()
+                    # a small GPU loads its models in turn. A row marked left ends the wait at once: behind the page's dialog
+                    # (« Render anyway » or « Cancel ») the row can stay busy, which held the wait to its timeout
+                    page.wait_for_function(f"({DONE.format(n=rows(i, fluid))}) || !!document.querySelector('{LEFT}')", timeout=max(300, 2 * a.timeout) * 1000)
+                    if page.query_selector(LEFT):  # no shot will render: without this the run waited 8 times --timeout for one
+                        page.screenshot(path=f"{shots}/2_{tool}_done.png")
+                        said = [status(), *page.eval_on_selector_all("#log li", "els => els.slice(-5).map(e => e.textContent)")]
+                        if any(NAME_ASKED in line for line in said):
+                            raise NameAsked(next(line for line in said if NAME_ASKED in line))
+                        raise RuntimeError("the erase left its object")
+                    mark(f"{tool} edit on the first frame | {status()}"); page.screenshot(path=f"{shots}/2_{tool}_done.png")
+                seen, silent, asked, viewed = set(), 0, time.time(), set()
                 deadline = time.time() + a.timeout * 8
                 while time.time() < deadline:
+                    for check in VIEWER_CHECKS:
+                        if check not in viewed and a.url and page.evaluate(RUNS_WITH, list(check[:2])):
+                            viewed.add(check); mark(viewer_check(page, *check))
                     note = page.inner_text("#render-left")
-                    tag = note.rsplit(" ", 1)[0] if note else status()[:40]
+                    tag = stage(note) if note else status()[:40]
                     if tag not in seen:
                         seen.add(tag); mark("stage: " + (note or status()))
-                    if note == "full size ready" or "Error" in status() or status().startswith("Missing"):
+                    if note in READY or "Error" in status() or status().startswith("Missing"):
                         break
+                    if time.time() - asked >= 10:  # a ComfyUI stopped for its memory leaves the page waiting: the case ends here, with what it has
+                        asked, silent = time.time(), 0 if answers(a.url) else silent + 1
+                        if silent >= 3:
+                            mark(f"FAILED: ComfyUI stopped answering in « {note or status()[:60]} ».")
+                            break
                     time.sleep(1)
                 mark("final: " + status())
+                if a.url:  # the viewer, by itself: the full-size shot once made, then the full-size composite over any pinned step
+                    texts = page.eval_on_selector_all("#log li", "els => els.map(e => e.textContent)")
+                    by_itself = any("Viewer: full-size shot until the full-size composite is ready." in t for t in texts)
+                    mark(f"viewer: the full-size shot {'displayed' if by_itself else 'NOT displayed'} by itself before the composite; "
+                         f"displayed at the end: {', '.join(page.eval_on_selector_all('#stages li.shown .name', 'els => els.map(e => e.textContent)')) or 'no row'}")
                 page.keyboard.press("F6"); page.keyboard.press("End"); time.sleep(1); page.screenshot(path=f"{shots}/3_wipe.png")
                 page.keyboard.press("F6"); page.keyboard.press("Home"); page.keyboard.press("Space"); time.sleep(2)
                 page.keyboard.press("Space"); page.screenshot(path=f"{shots}/4_played.png")
-                if page.inner_text("#render-left") == "full size ready":  # Export writes the result, then the zip downloads
-                    with page.expect_download(timeout=600000) as dl:
+                if page.inner_text("#render-left") in READY:  # Export writes the result, then the zip downloads
+                    with page.expect_download(timeout=3 * 3600000 if a.upscale else 600000) as dl:  # the upscaled set: about 45 min on a 16 GB GPU
                         page.click("#export-btn")
+                        tick_offered(page, a.graph)
                         page.click("#x-go")
                     dl.value.save_as(f"{shots}/export.zip")
-                    mark(f"downloaded {len(zipfile.ZipFile(f'{shots}/export.zip').namelist())} files")
-                    if a.graph:  # the scene as one ComfyUI workflow, from the Export dialog
-                        page.click("#export-btn")
-                        with page.expect_download(timeout=120000) as dl:
-                            page.click("#x-graph")
-                        dl.value.save_as(f"{shots}/scene.comfyui.json")
-                        mark(f"ComfyUI graph saved: {len(json.load(open(f'{shots}/scene.comfyui.json')))} nodes")
+                    names = zipfile.ZipFile(f"{shots}/export.zip").namelist()
+                    movies = [n for n in names if n.lower().endswith((".mp4", ".mov", ".webm"))]
+                    mark(f"downloaded {len(names)} files; movies: {', '.join(movies) or 'none'}")
+                    if a.graph:  # the scene as one ComfyUI workflow, from the export's zip. A case does not depend on it
+                        try:
+                            with open(f"{shots}/scene.comfyui.json", "wb") as f:
+                                f.write(zipfile.ZipFile(f"{shots}/export.zip").read(zip_rows.files(names, "comfyui_graph")[0]))
+                            mark(f"ComfyUI graph saved: {len(json.load(open(f'{shots}/scene.comfyui.json'))['nodes'])} nodes and notes")
+                        except Exception as exc:
+                            mark(f"ComfyUI graph not saved: {type(exc).__name__}: {str(exc).splitlines()[0][:120]} | status: {status()}")
+            elif fluid and a.upscale:  # a fluid shot alone: Upscale's step follows the shot with no Generate, then Export zips both
+                mark(deliver_upscale(page, "" if a.upscale == "on" else a.upscale))
+                page.wait_for_function("['full size ready', 'finish ready'].includes(document.querySelector('#render-left').textContent) || document.querySelector('#status').textContent.startsWith('Error')",
+                                       timeout=a.timeout * 8 * 1000)
+                mark("final: " + status()); page.screenshot(path=f"{shots}/4_played.png")
+                with page.expect_download(timeout=3 * 3600000) as dl:
+                    page.click("#export-btn"); page.click("#x-go")
+                dl.value.save_as(f"{shots}/export.zip")
+                names = zipfile.ZipFile(f"{shots}/export.zip").namelist()
+                mark(f"downloaded {len(names)} files; upscaled: {', '.join(sorted({n.split('/')[1] for n in names if n.startswith('upscaled/')})) or 'none'}")
+        except NameAsked as exc:
+            mark(f"name asked: {exc}")
         except Exception as exc:
             mark(f"FAILED: {type(exc).__name__}: {str(exc).splitlines()[0][:160]} | status: {status()}")
             page.screenshot(path=f"{shots}/fail.png")
-        page_log = page.eval_on_selector_all("#log li", "els => els.map(e => e.textContent)")  # what ran, with which values
+        page_log = page.eval_on_selector_all("#log li", LOG_LINES)  # what ran, with which values
         browser.close()
     open(f"{shots}/page_log.txt", "w").write("\n".join(page_log) + "\n")
     json.dump({"marks": marks, "errors": errors}, open(f"{shots}/timings.json", "w"), indent=1)
+    json.dump(nodes, open(f"{shots}/nodes.json", "w"))
     print("console errors:", errors[:5])
     return 0
 

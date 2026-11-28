@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addSample, formatValue, inspectorRows, sourcePath, sourcePixel, wipeSide } from "../../web/inspector.mjs";
+import { formatValue, inspectorRows, sourcePath, sourcePixel, wipeSide } from "../../web/inspector.mjs";
 
 test("a point of the view gives the plate's own pixel, from the top left", () => {
   assert.deepEqual(sourcePixel(0, 0, 3840, 2160), { x: 0, y: 0, inside: true });
@@ -8,20 +8,19 @@ test("a point of the view gives the plate's own pixel, from the top left", () =>
   assert.equal(sourcePixel(1.2, 0.5, 3840, 2160).inside, false);
 });
 
-test("the file on show: EXR frames, else the movie in the output folder, else the plate", () => {
+test("the file displayed: EXR frames, else the movie in the output folder, else the plate", () => {
   assert.equal(sourcePath({ frames: "output:paintaplate/r/review", url: "/api/view?x" }, "plates/a.mp4"), "output:paintaplate/r/review");
   assert.equal(sourcePath({ url: "/api/view?filename=s.mp4&subfolder=paintaplate%2Fr&type=output" }, "p"), "output:paintaplate/r/s.mp4");
   assert.equal(sourcePath(null, "plates/a.mp4"), "plates/a.mp4");
 });
 
-test("values as RV prints them, above 1.0 and below 0, and the running average", () => {
+test("values as RV prints them, above 1.0 and below 0, and the average of the points sampled", () => {
   assert.equal(formatValue(4), "4.000000");
   assert.equal(formatValue(-0.0999755859375), "-0.099976");
-  const avg = addSample(addSample(null, [1, 2, 3]), [3, 2, 1]);
-  const rows = inspectorRows({ x: 4, y: 5, frame: 1001, value: [4, 0.5, -0.1], final: [1, 0.5, 0], average: avg });
+  const rows = inspectorRows({ x: 4, y: 5, frame: 1001, value: [4, 0.5, -0.1], final: [1, 0.5, 0], average: { value: [2, 2, 2], n: 2 } });
   assert.deepEqual(rows[0], ["Native Pixel", "4, 5"]);
   assert.deepEqual(rows.find((r) => r[0] === "Red"), ["Red", "4.000000"]);
-  assert.ok(rows.some((r) => r[0] === "Average of 2"));
+  assert.ok(rows.some((r) => r[0] === "Average source colour of 2"));
   assert.equal(rows.at(-3)[1], "2.000000");
 });
 
@@ -32,21 +31,21 @@ test("the box sits beside the point and stays inside the viewport", () => {
   assert.deepEqual(boxPlace(900, 550, 220, 120, 1000, 600), [666, 416]);
 });
 
-test("the inspector says when its values are a movie's codes", () => {
+test("the inspector says when its values come from a movie, and in which space", () => {
   assert.equal(sourceLine({ space: "ACES2065-1", movie: false }, null), "ACES2065-1, as stored");
-  assert.equal(sourceLine({ space: "ACEScct", movie: true }, { bits: 8 }), "8-bit movie: ACEScct codes, not the pass's own values");
-  assert.equal(sourceLine({ space: "sRGB Encoded Rec.709 (sRGB)", movie: false }, { bits: 10 }), "10-bit movie: sRGB Encoded Rec.709 (sRGB) codes");
+  assert.equal(sourceLine({ space: "ACEScct", movie: true }, { bits: 8 }), "8-bit movie, ACEScct");
+  assert.equal(sourceLine({ space: "sRGB Encoded Rec.709 (sRGB)", movie: false }, { bits: 10 }), "10-bit movie, sRGB Encoded Rec.709 (sRGB)");
   assert.equal(sourceLine(null, null), null);
 });
 
 test("the side of the wipe a plate pixel falls on: left of the line, the plate or the pass compared", () => {
   assert.equal(wipeSide(959, 1920, 0.5), "left");
   assert.equal(wipeSide(960, 1920, 0.5), "right");
-  assert.equal(wipeSide(10, 1920, null), "right"); // no wipe: the pass on show everywhere
+  assert.equal(wipeSide(10, 1920, null), "right"); // no wipe: the pass displayed everywhere
 });
 
 test("the rows name the pass read; a picture the page drew is read as drawn", () => {
   const rows = inspectorRows({ x: 1, y: 2, frame: 1001, source: { label: "Shot, preview", space: "ACEScg", movie: true }, value: [0.5, 0.5, 0.5] });
   assert.deepEqual(rows.slice(0, 3), [["Native Pixel", "1, 2"], ["Frame", "1001"], ["Source", "Shot, preview"]]);
-  assert.equal(sourceLine({ drawn: "First frame", label: "First frame" }), "First frame, as drawn: the final colour only");
+  assert.equal(sourceLine({ drawn: "First frame", label: "First frame" }), "First frame, as drawn: the display colour only");
 });

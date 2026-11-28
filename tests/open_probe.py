@@ -1,0 +1,463 @@
+"""Runs one of the page's workflows on a running ComfyUI, the open (`ingest`) by default, and says what each node takes in memory.
+
+    python tests/open_probe.py horse.mp4 [--url http://127.0.0.1:8188] [--fresh] [--csv readings.csv] [--same <folder>]
+
+`plate` is the path the page sends: a video or a folder of frames under ComfyUI's input folder, or `output:<path>` under its
+output folder. Run it with ComfyUI's own Python, or after `pip install -r tests/requirements.txt`.
+
+1. It asks /paintaplate/stat for the plate and fills `ingest` with the values the page sends (openPlate, web/app.mjs).
+2. It reads the memory four times a second. On ComfyUI's machine: what ComfyUI's process holds (VmRSS in /proc/<pid>/status),
+   the most it ever held (VmHWM, which no reading can miss) and the count of its cgroup (memory.current: the container on a
+   pod, the scope under systemd-run). From another machine: the RAM in use, as /system_stats reports it.
+3. It listens to ComfyUI's websocket for the node that runs, and prints one row per node: the memory at its start, its
+   peak, the memory at its end, its seconds. While the job runs, a line every five seconds says where the memory is and in
+   which node: when ComfyUI is killed for its memory, the lines already printed name the node.
+4. With --same and the folder of an earlier probe (paintaplate/probe_<time>, which each probe prints), it says whether
+   this open made the same pictures: the first frame and every frame of the playback movie, by their decoded pixels.
+   A change to the open is measured at both versions, and must leave the pictures as they were.
+
+The frame and the movie it makes land in ComfyUI's output folder, under paintaplate/probe_<time>: delete them freely.
+"""
+import argparse
+import asyncio
+import functools
+import json
+import os
+import re
+import sys
+import threading
+import time
+import urllib.parse
+import urllib.request
+
+import aiohttp
+import av
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
+from build_workflows import fill, load  # noqa: E402
+from comfy_live import frames_apart, http  # noqa: E402
+from erase_probe import page as logic  # noqa: E402  (web/logic.mjs's own functions, run by Node)
+
+GB = 2 ** 30
+RATE = 4  # readings of the memory a second
+BEAT = 5  # seconds between two lines about a job that still runs
+NATIVE_SIDE = 4096  # the long side of the playback movie, at most (web/app.mjs)
+LOG_SPACE = "ACEScct"  # an image sequence's playback movie holds log values: the built-in config's choice (logic.viewerSpace)
+CLIENT = "paintaplate-probe"
+say = functools.partial(print, flush=True)
+
+
+# ---------- The memory ----------
+
+def _links(folder):
+    try:
+        names = os.listdir(folder)
+    except OSError:  # another user's process, or one that has just ended
+        return
+    for name in names:
+        try:
+            yield os.readlink(os.path.join(folder, name))
+        except OSError:
+            pass
+
+
+def listener_pid(port, proc="/proc"):
+    """The process of this machine that listens on a TCP port: the socket's inode in /proc/net/tcp or tcp6, then the
+    process that holds it. None when nothing listens there, or when the process belongs to another user."""
+    sockets = set()
+    for table in ("tcp", "tcp6"):
+        try:
+            with open(os.path.join(proc, "net", table)) as f:
+                lines = f.read().splitlines()[1:]
+        except OSError:
+            continue
+        for fields in map(str.split, lines):
+            if len(fields) > 9 and fields[3] == "0A" and int(fields[1].rsplit(":", 1)[1], 16) == port:  # 0A: it listens
+                sockets.add(f"socket:[{fields[9]}]")
+    for pid in sorted(int(p) for p in os.listdir(proc) if p.isdigit()) if sockets else ():
+        if any(link in sockets for link in _links(os.path.join(proc, str(pid), "fd"))):
+            return pid
+    return None
+
+
+def local_pid(url, proc="/proc"):
+    """ComfyUI's process when its address is this machine's, else None."""
+    u = urllib.parse.urlsplit(url)
+    return listener_pid(u.port or 80, proc) if u.hostname in ("127.0.0.1", "localhost", "::1") else None
+
+
+def status_bytes(pid, field, proc="/proc"):
+    """One memory field of /proc/<pid>/status, in bytes: VmRSS is the RAM the process holds now, VmHWM the most it has held."""
+    with open(os.path.join(proc, str(pid), "status")) as f:
+        for line in f:
+            if line.startswith(field + ":"):
+                return int(line.split()[1]) * 1024
+    raise OSError(f"process {pid} has no {field}: it has ended")
+
+
+def cgroup_file(pid, proc="/proc", cgroups="/sys/fs/cgroup"):
+    """The memory count of the cgroup a process runs in (memory.current of cgroup v2): the container's on a pod, the scope's
+    under systemd-run. None where the kernel keeps no such count: the root of a machine, or cgroup v1."""
+    try:
+        with open(os.path.join(proc, str(pid), "cgroup")) as f:
+            rel = next(line.split("::", 1)[1].strip() for line in f if line.startswith("0::"))
+    except (OSError, StopIteration):
+        return None
+    path = os.path.join(cgroups, rel.lstrip("/"), "memory.current")
+    return path if os.path.isfile(path) else None
+
+
+class Process:
+    """ComfyUI's own process, on this machine."""
+
+    def __init__(self, pid, proc="/proc", cgroups="/sys/fs/cgroup"):
+        self.pid, self.proc, self.group = pid, proc, cgroup_file(pid, proc, cgroups)
+        with open(os.path.join(proc, str(pid), "cmdline"), "rb") as f:
+            command = f.read().replace(b"\0", b" ").decode(errors="replace").strip()
+        self.name = f"process {pid} ({command[:90]}), VmRSS"
+
+    def read(self):
+        group = None
+        if self.group:
+            with open(self.group) as f:
+                group = int(f.read())
+        return status_bytes(self.pid, "VmRSS", self.proc), group
+
+    def most(self):
+        return status_bytes(self.pid, "VmHWM", self.proc)
+
+
+class Machine:
+    """The RAM in use on ComfyUI's machine, as /system_stats reports it: for a probe that runs on another machine. Inside a
+    container it is the host's figure, so on a pod run the probe on the pod."""
+
+    def __init__(self, url):
+        self.url, self.name = url, "the RAM in use on ComfyUI's machine (/system_stats)"
+
+    def read(self):
+        system = http(f"{self.url}/system_stats", timeout=5)[0]["system"]
+        return system["ram_total"] - system["ram_free"], None
+
+    def most(self):
+        return None
+
+
+class Sampler(threading.Thread):
+    """Reads the memory RATE times a second as (time, bytes, cgroup bytes), until stop() or until it cannot be read any more."""
+
+    def __init__(self, source):
+        super().__init__(daemon=True)
+        self.source, self.samples, self.halt = source, [], threading.Event()
+
+    def run(self):
+        while not self.halt.is_set():
+            try:
+                self.samples.append((time.monotonic(), *self.source.read()))
+            except (OSError, KeyError, TypeError, ValueError):  # the process has ended, or ComfyUI answers no more
+                return
+            self.halt.wait(1 / RATE)
+
+    def stop(self):
+        self.halt.set()
+        self.join(5)
+
+
+# ---------- The job ----------
+
+class Job:
+    """What ComfyUI says about one prompt: the node that runs and when, the nodes it took from its cache, how it ended."""
+
+    def __init__(self, prompt):
+        self.classes = {node: spec["class_type"] for node, spec in prompt.items()}
+        self.id = self.posted = self.started = self.end = self.error = None
+        self.events, self.cached = [], []  # events: (time, node), in the order ComfyUI ran them
+
+    def take(self, message, t):
+        """One websocket message, as ComfyUI sends it. True once the job has ended."""
+        data = message.get("data") or {}
+        if self.id is None or data.get("prompt_id") != self.id:
+            return False
+        kind = message.get("type")
+        if kind == "execution_start":
+            self.started = t
+        elif kind == "execution_cached":
+            self.cached = [str(node) for node in data.get("nodes") or []]
+        elif kind == "executing" and data.get("node") is not None:
+            self.events.append((t, str(data["node"])))
+        elif kind in ("execution_success", "execution_error", "execution_interrupted"):
+            self.end = t
+            if kind == "execution_error":
+                self.error = f"{data.get('node_type')}: {str(data.get('exception_message', '')).strip()[:300]}"
+            elif kind == "execution_interrupted":
+                self.error = "it was stopped"
+            return True
+        return False
+
+    def node_at(self, t):
+        """The node that ran at a time, as `node (class)`, or None before the first one."""
+        ran = [node for at, node in self.events if at <= t]
+        return f"node {ran[-1]} ({self.classes.get(ran[-1], '?')})" if ran else None
+
+
+def span(samples, t0, t1):
+    """(start, peak, end) of the memory between two times: the reading before t0, then every reading up to t1. A node
+    shorter than the time between two readings takes the reading before it."""
+    values = [v for t, v, _ in samples if t <= t0][-1:] + [v for t, v, _ in samples if t0 < t <= t1]
+    values = values or [samples[0][1]]
+    return values[0], max(values), values[-1]
+
+
+def _row(node, name, memory, seconds):
+    return f"{node:<5}{name[:33]:<34}" + "".join(f"{v / GB:8.1f}" for v in memory) + f"{seconds:9.1f}"
+
+
+def table(samples, job, t0, t1):
+    """The report's lines, in GB: one per node that ran, then the whole job from its post to its end."""
+    lines = [f"{'node':<5}{'class':<34}{'start':>8}{'peak':>8}{'end':>8}{'seconds':>9}"]
+    for i, (t, node) in enumerate(job.events):
+        until = job.events[i + 1][0] if i + 1 < len(job.events) else t1
+        lines.append(_row(node, job.classes.get(node, "?"), span(samples, t, until), until - t))
+    lines.append(_row("", "the whole job", span(samples, t0, t1), t1 - t0))
+    return lines
+
+
+def page_values(path, st, run, config="", color_space="", proxy_space=""):
+    """What openPlate (web/app.mjs) sends with `ingest`, from the answer of /paintaplate/stat: the plate's colour space as
+    read from the file, and a playback movie at the plate's own size, up to NATIVE_SIDE on the long side."""
+    k = min(1, NATIVE_SIDE / max(st["width"], st["height"]))
+    w, h = int(st["width"] * k + 0.5), int(st["height"] * k + 0.5)  # display.nativeSize: Math.round
+    cs = color_space or st["color_space"]
+    return {"path": path, "config": config, "color_space": cs,
+            "proxy_space": proxy_space or (cs if st["kind"] == "video" else LOG_SPACE),
+            "proxy_size": max(w, h), "movie_width": w - w % 2, "movie_height": h - h % 2,
+            "prefix": f"{run}/hero", "video_prefix": f"{run}/proxy"}
+
+
+def job_values(workflow, path, st, run, config=""):
+    """What the page sends with a workflow other than `ingest`, as far as the plate decides it: the plate as `path`, its
+    frames and frame rate (the conditioning one from logic.hdrFps, run by Node), and every file under the probe's
+    folder. The other slots keep the workflow's saved values; --set gives the page's own, such as its memory profile's
+    (MEMORY in web/logic.mjs)."""
+    slots = load(workflow)[1]
+    fps = float(st.get("fps") or 24)
+    values = {"path": path, "config": config, "max_frames": st.get("frames") or 121, "fps": round(fps),
+              "cond_fps": logic(("hdrFps", fps))[0], "movie_fps": fps}
+    values.update({slot: f"{run}/{slot}" for slot in slots if slot.endswith("prefix")})
+    return {slot: value for slot, value in values.items() if slot in slots}
+
+
+def view(url, folder, name):
+    """One file of ComfyUI's output folder, as bytes."""
+    query = urllib.parse.urlencode({"filename": name, "subfolder": folder, "type": "output"})
+    with urllib.request.urlopen(f"{url}/view?{query}", timeout=300) as r:
+        return r.read()
+
+
+def same_pictures(url, job, other):
+    """(whether the pictures of a job are the ones under `other`, the folder of an earlier probe; the line that says so).
+    Each file the job saved is compared with the file of the same name there, by their decoded pixels: a PNG's bytes
+    also hold its workflow."""
+    entry = (http(f"{url}/history/{job}")[0] or {}).get(job) or {}
+    names = [(f["subfolder"], f["filename"]) for o in (entry.get("outputs") or {}).values() for f in o.get("images", [])]
+    if not names:
+        return False, f"Not compared with {other}: ComfyUI lists no picture for this job"
+    apart = {}
+    for folder, name in names:
+        try:
+            apart[name] = frames_apart(view(url, folder, name), view(url, other, name))
+        except (OSError, ValueError, av.error.FFmpegError) as exc:  # no such file there, or one that does not decode
+            return False, f"Not compared with {other}: {name} cannot be read ({type(exc).__name__}: {exc})"
+    if any(apart.values()):
+        return False, f"Not the same pictures as under {other}: " + ", ".join(f"{n} frames differ in {name}" for name, n in apart.items() if n)
+    return True, f"The same pictures as under {other}, by their decoded pixels: {' and '.join(apart)}"
+
+
+def versions(stats):
+    """ComfyUI's versions, then its RAM and VRAM: two detail lines of the probe's headline."""
+    system, devices = stats.get("system") or {}, stats.get("devices") or []
+    names = (("ComfyUI", "comfyui_version"), ("Python", "python_version"), ("PyTorch", "pytorch_version"))
+    soft = ", ".join(f"{label} {str(system[key]).split()[0]}" for label, key in names if system.get(key)) or "No version reported"
+    memory = [f"RAM {system['ram_total'] / GB:.1f} GB"] if system.get("ram_total") else []
+    if devices and devices[0].get("vram_total"):
+        memory.append(f"VRAM {devices[0]['vram_total'] / GB:.0f} GB")
+    return f"{soft}.", ", ".join(memory) + "." if memory else ""
+
+
+async def _beats(job, sampler):
+    while True:
+        await asyncio.sleep(BEAT)
+        t, held = sampler.samples[-1][:2]
+        say(f"  {t - job.posted:5.0f} s: {held / GB:.1f} GB, in {job.node_at(t) or 'the queue'}")
+
+
+async def follow(url, prompt, job, sampler):
+    """Posts the prompt once the websocket is open, then hears ComfyUI until the job ends. False when the workflow is
+    refused, or when ComfyUI stops answering before the end."""
+    async with aiohttp.ClientSession() as session, session.ws_connect(f"ws{url[4:]}/ws?clientId={CLIENT}", max_msg_size=0) as ws:
+        answer, _ = http(f"{url}/prompt", {"prompt": prompt, "client_id": CLIENT})
+        if not isinstance(answer, dict) or "prompt_id" not in answer:
+            job.error = f"ComfyUI refused the workflow: {json.dumps(answer)[:600] if isinstance(answer, dict) else answer[:300]}"
+            return False
+        job.id, job.posted = answer["prompt_id"], time.monotonic()
+        beats = asyncio.create_task(_beats(job, sampler))
+        try:
+            async for message in ws:
+                if message.type is aiohttp.WSMsgType.TEXT and job.take(json.loads(message.data), time.monotonic()):
+                    return True
+            return False
+        finally:
+            beats.cancel()
+
+
+def write_csv(path, samples, job):
+    with open(path, "w") as f:
+        f.write("seconds,bytes,cgroup_bytes,node\n")
+        for t, held, group in samples:
+            node = ([n for at, n in job.events if at <= t] or [""])[-1]
+            f.write(f"{t - job.posted:.2f},{held},{'' if group is None else group},{node}\n")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("plate", help="the plate as the page names it: a path under ComfyUI's input folder, or output:<path>; "
+                                  "blank:<width>x<height> is a black shot of that size, 121 frames at 24 fps, from the page's own route")
+    ap.add_argument("--url", default="http://127.0.0.1:8188")
+    ap.add_argument("--pid", type=int, help="ComfyUI's process, when the probe does not find it from the port")
+    ap.add_argument("--remote", action="store_true", help="read the memory from /system_stats, also on ComfyUI's machine")
+    ap.add_argument("--config", default="", help="the OCIO config the page sends (default: the built-in one)")
+    ap.add_argument("--color-space", default="", help="the plate's colour space (default: read from the file, as the page does)")
+    ap.add_argument("--proxy-space", default="", help=f"the playback movie's colour space (default: the plate's for a video, {LOG_SPACE} for frames)")
+    ap.add_argument("--max-frames", type=int, help="frames the job reads; by default the plate's own, as the page sends the frames it opened")
+    ap.add_argument("--workflow", default="ingest", help="the page's workflow to run (default: ingest, the open); another takes "
+                                                         "the plate as its path and writes its files under the probe's folder")
+    ap.add_argument("--set", action="append", default=[], metavar="SLOT=VALUE",
+                    help="a slot's value as the page sends it, in JSON or as text, such as the memory profile's: --set tile=256")
+    ap.add_argument("--fresh", action="store_true", help="first POST /free: ComfyUI drops its cached results, and unloads its models")
+    ap.add_argument("--settle", type=float, default=5, help="seconds of readings after the job, for what stays (default 5)")
+    ap.add_argument("--limit", type=float, default=1800, help="seconds before the probe stops waiting (default 1800)")
+    ap.add_argument("--csv", help="write every reading to this file: seconds, bytes, cgroup bytes, node")
+    ap.add_argument("--same", help="the folder of an earlier probe (paintaplate/probe_<time>): say whether this open made the same pictures")
+    a = ap.parse_args(argv)
+    url = a.url.rstrip("/")
+    try:
+        stats, _ = http(f"{url}/system_stats", timeout=10)
+    except OSError as exc:
+        reason = re.sub(r"^\[Errno -?\d+\] ", "", str(getattr(exc, "reason", exc)))
+        say(f"ComfyUI not answering at {url}: {reason[:1].lower() + reason[1:]}.\n  Start ComfyUI, then run the probe again.")
+        return 1
+    if a.plate.startswith("blank:"):
+        try:
+            width, height = (int(side) for side in a.plate[len("blank:"):].split("x"))
+        except ValueError:
+            say(f"Blank shot not understood: {a.plate}.\n  Write blank:<width>x<height>, such as blank:1920x1088.")
+            return 1
+        made, _ = http(f"{url}/paintaplate/blank", {"width": width, "height": height, "fps": 24, "frames": 121})
+        if not isinstance(made, dict) or "path" not in made:
+            say(str(made).strip() if isinstance(made, str) and made.strip() else f"Blank shot not made: {width} x {height}.")
+            return 1
+        a.plate = made["path"]
+    st, _ = http(f"{url}/paintaplate/stat?{urllib.parse.urlencode({'path': a.plate, 'config': a.config, 'cs': a.color_space})}")
+    if not isinstance(st, dict) or "width" not in st:
+        say(f"ComfyUI cannot read {a.plate}: {st.get('error') if isinstance(st, dict) else 'nothing answers at /paintaplate/stat'}")
+        return 1
+    run = f"paintaplate/probe_{int(time.time())}"
+    ingest = a.workflow == "ingest"
+    values = page_values(a.plate, st, run, a.config, a.color_space, a.proxy_space) if ingest else job_values(a.workflow, a.plate, st, run, a.config)
+    if a.max_frames:
+        values["max_frames"] = a.max_frames
+    slots = load(a.workflow)[1]
+    for pair in a.set:
+        slot, _, text = pair.partition("=")
+        if slot not in slots:
+            say(f"Slot not in the {a.workflow} workflow: {slot}.\n  Its slots: {', '.join(sorted(slots))}.")
+            return 1
+        try:
+            values[slot] = json.loads(text)
+        except ValueError:
+            values[slot] = text
+    prompt = fill(a.workflow, values)
+    frames = int(values.get("max_frames") or st.get("frames") or 121)  # what the job reads
+    copy = st["width"] * st["height"] * frames * 12  # float32 RGB
+    soft, memory = versions(stats)
+    say(f"{'Open probe' if ingest else f'Probe of {a.workflow}'}: {a.plate} on {url}.\n  {soft}" + (f"\n  {memory}" if memory else ""))
+    say(f"This Python: PyAV {av.__version__}, libavcodec {'.'.join(map(str, av.library_versions['libavcodec']))}.\n"
+        "  For ComfyUI's figures, run it with ComfyUI's Python.")
+    kind = {"video": "movie", "sequence": "image sequence", "still": "image"}.get(st.get("kind"), st.get("kind") or "plate")
+    say(f"Plate: {' '.join(filter(None, [st.get('codec') or st.get('ext'), st.get('pix_fmt'), kind]))}, {st['width']} x {st['height']}, "
+        f"{frames} frames, {values.get('color_space') or st.get('color_space', '')}.\n  One float32 copy: {copy / GB:.2f} GB.")
+    if a.fresh:
+        http(f"{url}/free", {"free_memory": True})
+        time.sleep(2)
+        say("ComfyUI was asked to drop its cached results and to unload its models (POST /free)")
+    try:
+        pid = None if a.remote else a.pid or local_pid(url)
+        source = Process(pid) if pid else Machine(url)
+    except OSError as exc:
+        say(f"Process {pid} cannot be read: {exc}")
+        return 1
+    sampler = Sampler(source)
+    sampler.start()
+    time.sleep(1)
+    if not sampler.samples:
+        say(f"The memory cannot be read from {source.name}")
+        return 1
+    before, most_before = sampler.samples[-1], source.most()
+    say(f"Memory: {source.name}, {RATE} readings a second. Before the job: {before[1] / GB:.1f} GB")
+    job = Job(prompt)
+    try:
+        ended = asyncio.run(asyncio.wait_for(follow(url, prompt, job, sampler), a.limit))
+    except asyncio.TimeoutError:
+        ended, job.error = False, f"it still ran after {a.limit:.0f} s"
+    except (aiohttp.ClientError, OSError) as exc:
+        ended, job.error = False, f"ComfyUI stopped answering ({type(exc).__name__})"
+    if job.posted is None:
+        sampler.stop()
+        say(job.error or "The websocket did not open")
+        return 1
+    if ended:
+        time.sleep(a.settle)
+    sampler.stop()
+    samples = sampler.samples
+    t1 = job.end or samples[-1][0]
+    if job.started and job.started - job.posted > 1:
+        say(f"The job waited {job.started - job.posted:.1f} s in ComfyUI's queue")
+    say("\n".join(table(samples, job, job.posted, t1)))
+    peak = span(samples, job.posted, t1)[1]
+    peak_at = next(t for t, v, _ in samples if v == peak and t <= t1)
+    say(f"Peak RAM: {peak / GB:.1f} GB, in {job.node_at(peak_at) or 'the job'}.\n  Above the level before the job: "
+        f"{(peak - before[1]) / GB:.1f} GB, {(peak - before[1]) / copy:.1f} plate copies.")
+    if ended:
+        after, stays = samples[-1][1], samples[-1][1] - before[1]
+        say(f"RAM {a.settle:.0f} s after the job: {after / GB:.1f} GB, " + (f"{stays / GB:.1f} GB above the level before ({stays / copy:.1f} plate copies)."
+                                                                         if stays > 0.05 * GB else "the level before the job."))
+    try:
+        most = source.most()
+    except OSError:
+        most = None
+    if most:
+        say(f"Process RAM, highest ever (VmHWM): {most / GB:.1f} GB, " + ("during this job." if most > most_before else "before this job."))
+    groups = [g for t, _, g in samples if g is not None and job.posted <= t <= t1]
+    if groups:
+        say(f"Cgroup memory (memory.current, with the file cache and the other processes): {before[2] / GB:.1f} GB before, "
+            f"{max(groups) / GB:.1f} GB at the peak, {samples[-1][2] / GB:.1f} GB at the end.")
+    if job.cached:
+        say(f"{len(job.cached)} of {len(prompt)} nodes came from ComfyUI's cache and did not run ({', '.join(sorted(job.cached, key=lambda n: (len(n), n)))}): "
+            "run again with --fresh for a full measure")
+    if a.csv:
+        write_csv(a.csv, samples, job)
+    if not ended or job.error:
+        say(f"The job did not finish: {job.error or 'ComfyUI stopped answering'}, {t1 - job.posted:.1f} s after the post, in "
+            f"{job.node_at(t1) or 'the queue'}. The table holds what was read until then")
+        return 1
+    say(f"Output: first frame and movie in output/{run}." if ingest else f"Output: files in output/{run}.")
+    if a.same:
+        same, line = same_pictures(url, job.id, a.same.strip("/"))
+        say(line)
+        return 0 if same else 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

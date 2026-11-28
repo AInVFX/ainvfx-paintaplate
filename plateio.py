@@ -1,22 +1,17 @@
-"""Plate input and output helpers that core ComfyUI does not provide.
+"""Files: what a plate needs that core ComfyUI does not read or write.
 
-Core already decodes EXR, 16-bit PNG and video frames to float (Load Image and
-Load Video go through PyAV) and writes single-layer EXR and PNG (Save Image
-(Advanced)). This module fills the remaining gaps only:
+Image sequences and frame patterns, the plate spec and its colour guess, the plate browser's folder scan, video and
+sequence decoding with core's pictures (each frame written into its place in one array), EXR writing that keeps every
+untouched channel, layer, part and header attribute (OpenEXR, optional), stills in the plate's format, video as ProRes 4444 XQ
+with the source's colour tags and timecode and its audio copied, PNG, EXR and H.264 writers that work
+on several frames at once, a shot's windows joined, and the blank canvas of a fluid shot.
 
-* image sequences (a folder of numbered frames) and their spec,
-* the source spec of a plate, so the export can match it,
-* EXR export that keeps every untouched channel, layer, part and header
-  attribute of the source frame (OpenEXR, optional),
-* video export in the source codec, pixel format, colour tags and timecode,
-  with the source audio copied.
-
-Everything here is plain Python with numpy, PyAV and (optionally) OpenEXR, so
-it runs and is tested outside ComfyUI.
+Everything here is plain Python with numpy, PyAV and (optionally) OpenEXR, so it runs and is tested outside ComfyUI.
 """
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
@@ -38,6 +33,12 @@ try:
 except ImportError:
     OpenEXR = None
 
+# The pack's ceilings of size and length, one home each. NATIVE_SIDE: the long side a plate is read at for the viewer,
+# at most (the frames route; web/app.mjs keeps the same NATIVE_SIDE, and tests/test_time_sizes.py keeps them equal).
+# MOST_SIDE: the largest width or height a node takes. MOST_FRAMES: the most frames a node takes; the page's LENGTH.most
+# (web/logic.mjs) is the largest 8k + 1 count within it.
+NATIVE_SIDE, MOST_SIDE, MOST_FRAMES = 4096, 8192, 4096
+
 IMAGE_EXTS = {".exr", ".png", ".tif", ".tiff", ".dpx", ".jpg", ".jpeg", ".webp", ".avif"}
 VIDEO_EXTS = {".mov", ".mp4", ".mkv", ".mxf", ".avi", ".webm", ".m4v"}
 ANIMATIONS = {".gif", ".webp"}  # animated images, as core's Save Animated WEBP writes them: videos, never frames of a sequence
@@ -46,26 +47,29 @@ _FRAME_RE = re.compile(r"^(?P<prefix>.*?)(?P<num>\d+)(?P<suffix>[^\d]*?)(?P<ext>
 # One sequence of a folder, as RV and Nuke name it: shot.####.exr, ComfyUI_#####_.png or shot.%04d.exr
 _PATTERN_RE = re.compile(r"^(?P<prefix>.*?)(?:#+|%0?\d*d)(?P<suffix>[^#%\d]*?)(?P<ext>\.[A-Za-z0-9]+)$")
 
-# Encoder to use for each decoder name found in a source file.
-_ENCODERS = {
-    "prores": "prores_ks",
-    "h264": "libx264",
-    "hevc": "libx265",
-    "dnxhd": "dnxhd",
-    "mjpeg": "mjpeg",
-    "ffv1": "ffv1",
-    "av1": "libaom-av1",
-    "vp9": "libvpx-vp9",
-}
-# Fallback pixel format per encoder when the source one is not accepted.
-_DEFAULT_PIX = {
-    "prores_ks": "yuv422p10le",
-    "libx264": "yuv420p",
-    "libx265": "yuv420p10le",
-    "dnxhd": "yuv422p10le",
-    "ffv1": "yuv444p16le",
-}
-_PRORES_PROFILES = {"proxy": 0, "lt": 1, "standard": 2, "hq": 3, "4444": 4, "4444xq": 5}
+# Every movie the export writes is ProRes 4444 XQ in a .mov, whatever the plate's codec (VideoWriter): in 4:4:4 an edited
+# pixel and an untouched one share no colour sample, and XQ is the ProRes profile that keeps untouched pixels closest.
+MOVIE_ENCODER, MOVIE_PROFILE, MOVIE_EXT = "prores_ks", "5", ".mov"  # FFmpeg's ProRes encoder; its profile 5 is 4444 XQ
+# The most bits a sample keeps in that movie: FFmpeg's ProRes encoder takes 10. A movie deeper than that exports as 16-bit PNG
+# frames, which keep its samples (movie_writer), and a ProRes that FFmpeg wrote holds 10 bits whatever its decoder reports.
+MOVIE_BITS = 10
+FFMPEG_PRORES = (b"Lavc", b"fmpg")  # the encoder's code in each ProRes frame's header, as FFmpeg writes it
+
+
+def movie_bits(path: str, codec: str, pix_fmt: str) -> int:
+    """The bits a movie's samples hold: its pixel format's, except a ProRes that FFmpeg wrote, which holds 10 bits though its
+    decoder reports 12 for every 4444 (the encoder's code in its first frame: FFMPEG_PRORES)."""
+    m = re.search(r"p(\d+)(le|be)$", pix_fmt or "")
+    bits = int(m.group(1)) if m else 8
+    if codec == "prores" and bits > MOVIE_BITS and av is not None:
+        try:
+            with av.open(path) as c:
+                packet = next(p for p in c.demux(video=0) if p.size)
+                if bytes(packet)[12:16] in FFMPEG_PRORES:
+                    return MOVIE_BITS
+        except (av.error.FFmpegError, StopIteration, OSError):
+            pass
+    return bits
 
 
 # --------------------------------------------------------------------------
@@ -89,6 +93,13 @@ def is_sequence(path: str) -> bool:
 
 def pattern_of(prefix: str, suffix: str, ext: str, digits: int) -> str:
     return f"{prefix}{'#' * max(1, digits)}{suffix}{ext}"
+
+
+# A group of numbered images is a frame sequence when at least one of every SPARSEST numbers between its first and its
+# last exists. Sparser than that, the numbers are not frames: ComfyUI's mask editor names its files by the millisecond
+# (clipspace-mask-1791816680123.png), and a walk from the first number to the last would hold billions of entries.
+# Such numbers count files: one frame per file, nothing missing.
+SPARSEST = 100
 
 
 def find_sequence(folder: str) -> list[str]:
@@ -122,7 +133,8 @@ def sequence_frames(folder: str) -> tuple[list[str], int, list[int]]:
         num = int(m.group("num")) if m else 0
         groups.setdefault(key, []).append((num, full))
     if not groups:
-        raise FileNotFoundError(f"No image frames found in {folder if not pattern else os.path.join(folder, pattern_of(*pattern[1:], 4))}")
+        raise FileNotFoundError(f"Image sequence not found: {folder if not pattern else os.path.join(folder, pattern_of(*pattern[1:], 4))}. "
+                                "Check the folder and the frame numbers.")
     key, best = max(groups.items(), key=lambda kv: len(kv[1]))
     if key[1] == "_":  # core Save Image's counter names (f_00001_.png): numbers count files, not frames
         return [p for _, p in sorted(best)], 1, []
@@ -134,6 +146,8 @@ def sequence_frames(folder: str) -> tuple[list[str], int, list[int]]:
     for a, b in zip(nums, nums[1:]):
         step = math.gcd(step, b - a)
     step = step or 1
+    if (nums[-1] - nums[0]) // step + 1 > SPARSEST * len(nums):  # numbers too far apart to be frames: they count files
+        return [found[num] for num in nums], 1, []
     files, missing, last = [], [], found[nums[0]]
     for num in range(nums[0], nums[-1] + 1, step):
         if num in found:
@@ -147,9 +161,22 @@ def sequence_frames(folder: str) -> tuple[list[str], int, list[int]]:
 # --------------------------------------------------------------------------
 # Spec
 # --------------------------------------------------------------------------
-def _fps_fields(fps_hint) -> dict:
-    """The frame rate of a still plate, as a float and as an exact fraction."""
-    rate = fps_hint if isinstance(fps_hint, Fraction) else Fraction(float(fps_hint or 24.0)).limit_denominator(100000)
+def exr_rate(path: str) -> Fraction | None:
+    """An EXR frame's own frame rate: `framesPerSecond`, a standard attribute of OpenEXR's header, stored as a rational
+    number (24000/1001 is exact). None when the frame carries none, or when OpenEXR is not installed."""
+    if OpenEXR is None:
+        return None
+    with OpenEXR.File(path, header_only=True) as f:
+        rates = [part.header.get("framesPerSecond") for part in f.parts]
+    return next((Fraction(rate) for rate in rates if rate and rate > 0), None)
+
+
+def _fps_fields(path: str, fps_hint) -> dict:
+    """The frame rate of a still plate, as a float and as an exact fraction: an EXR frame's own rate when its header
+    holds one (exr_rate), else the hint."""
+    rate = exr_rate(path) if path.lower().endswith(".exr") else None
+    if rate is None:
+        rate = fps_hint if isinstance(fps_hint, Fraction) else Fraction(float(fps_hint or 24.0)).limit_denominator(100000)
     return {"fps": float(rate), "fps_num": rate.numerator, "fps_den": rate.denominator}
 
 
@@ -181,7 +208,7 @@ def exr_info(path: str) -> dict:
 
 def probe_video(path: str) -> dict:
     if av is None:
-        raise RuntimeError("PyAV is required to read video plates")
+        raise RuntimeError("PyAV missing: video plates cannot be read. Install the pack's requirements.")
     with av.open(path) as c:
         vs = c.streams.video[0]
         cc = vs.codec_context
@@ -191,6 +218,7 @@ def probe_video(path: str) -> dict:
             "codec": cc.name,
             "profile": (cc.profile or ""),
             "pix_fmt": cc.pix_fmt or (vs.format.name if vs.format else ""),
+            "bits": movie_bits(path, cc.name, cc.pix_fmt or (vs.format.name if vs.format else "")),
             "width": cc.width,
             "height": cc.height,
             "fps": float(rate),
@@ -228,7 +256,7 @@ def probe_plate(path: str, fps_hint: float = 24.0) -> dict:
         first = files[0]
         ext = os.path.splitext(first)[1].lower()
         spec = {"kind": "sequence", "source": path, "files": files, "ext": ext, "step": step, "missing": missing,
-                "first_frame": frame_number(first) or 0, "frames": len(files), **_fps_fields(fps_hint)}
+                "first_frame": frame_number(first) or 0, "frames": len(files), **_fps_fields(first, fps_hint)}
         spec.update({k: v for k, v in probe_still(first).items() if k not in spec})
         if ext == ".exr":
             spec["exr"] = exr_info(first)
@@ -240,19 +268,41 @@ def probe_plate(path: str, fps_hint: float = 24.0) -> dict:
         return spec
     if ext in IMAGE_EXTS:
         spec = {"kind": "image", "source": path, "files": [path], "ext": ext, "frames": 1,
-                "first_frame": frame_number(path) or 0, **_fps_fields(fps_hint)}
+                "first_frame": frame_number(path) or 0, **_fps_fields(path, fps_hint)}
         spec.update({k: v for k, v in probe_still(path).items() if k not in spec})
         if ext == ".exr":
             spec["exr"] = exr_info(path)
         return spec
-    raise ValueError(f"Unsupported plate: {path}")
+    raise ValueError(f"Plate not supported: {path}. Use a movie, an image or an image sequence.")
+
+
+CHROMATICITIES = {  # an EXR's chromaticities (red, green, blue and white, as x and y), and the scene-linear space they name
+    "AP0": ((0.7347, 0.2653, 0.0, 1.0, 0.0001, -0.077, 0.32168, 0.33767), "linear ACES2065-1"),
+    "AP1": ((0.713, 0.293, 0.165, 0.83, 0.128, 0.044, 0.32168, 0.33767), "linear ACEScg"),
+    "Rec.2020": ((0.708, 0.292, 0.17, 0.797, 0.131, 0.046, 0.3127, 0.329), "linear Rec.2020"),
+    "P3-D65": ((0.68, 0.32, 0.265, 0.69, 0.15, 0.06, 0.3127, 0.329), "linear P3-D65"),
+    "Rec.709": ((0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329), "linear"),
+}
+
+
+def gamut_of(chromaticities: str) -> str | None:
+    """The scene-linear space an EXR's chromaticities name, by its red primary and its white point; None for another."""
+    nums = [float(x) for x in re.findall(r"-?\d+\.\d+(?:[eE][-+]?\d+)?", chromaticities or "")]
+    if len(nums) < 8:
+        return None
+    seen = nums[0:2] + nums[6:8]
+    for xy, name in CHROMATICITIES.values():
+        if all(abs(a - b) < 0.002 for a, b in zip(seen, xy[0:2] + xy[6:8])):
+            return name
+    return None
 
 
 def guess_color_space(spec: dict) -> str:
     """A starting guess from the file; the user can always override it in the app.
 
-    EXR is scene-linear by convention: its chromaticities say which gamut.
-    ACEScg (AP1) has its red primary at (0.713, 0.293).
+    A movie tagged PQ, HLG or linear says so. EXR is scene-linear by convention, and its chromaticities name its gamut
+    (CHROMATICITIES): ACES2065-1, ACEScg, Rec.2020, P3-D65 or Rec.709. An EXR without them, or with other ones, reads as
+    linear Rec.709, and every other file as sRGB.
     """
     trc = spec.get("color_trc")  # FFmpeg's numbers: 16 SMPTE ST 2084, 18 ARIB STD-B67, 8 linear
     if spec.get("kind") == "video" and trc in (16, 18, 8):
@@ -260,9 +310,9 @@ def guess_color_space(spec: dict) -> str:
     if spec.get("ext") != ".exr":
         return "sRGB"
     for part in spec.get("exr", {}).get("parts", []):
-        nums = [float(x) for x in re.findall(r"-?\d+\.\d+", part.get("chromaticities", ""))]
-        if len(nums) >= 2 and abs(nums[0] - 0.713) < 0.002 and abs(nums[1] - 0.293) < 0.002:
-            return "linear ACEScg"
+        name = gamut_of(part.get("chromaticities", ""))
+        if name:
+            return name
     return "linear"
 
 
@@ -277,6 +327,18 @@ def spec_json(spec: dict) -> str:
 def pad_count_8n1(n: int) -> int:
     """Smallest 8k+1 frame count that holds n frames (LTX needs 8k+1)."""
     return n if (n - 1) % 8 == 0 else n + (8 - (n - 1) % 8)
+
+
+def largest_side(width: int, height: int, largest: int) -> tuple[int, int]:
+    """(width, height) with the longer side at `largest`, rounded as core's Scale Image to Max Dimension rounds them
+    (comfy_extras/nodes_images.py at ComfyUI v0.45.3, the pin). 0 keeps the size."""
+    if not largest:
+        return width, height
+    if height > width:
+        return round((width / height) * largest), largest
+    if width > height:
+        return largest, round((height / width) * largest)
+    return largest, largest
 
 
 # --------------------------------------------------------------------------
@@ -313,7 +375,8 @@ def _place(chans: dict, header: dict, new: dict, keep: np.ndarray | None) -> dic
     px0, py0, px1, py1 = _window(header, "displayWindow")
     h, w = next(iter(new.values())).shape[:2]
     if (h, w) != (py1 - py0 + 1, px1 - px0 + 1):
-        raise ValueError(f"Size mismatch: the frame is {w} x {h}, the display window {px1 - px0 + 1} x {py1 - py0 + 1}")
+        raise ValueError(f"EXR frame size mismatch: frame {w} x {h}, display window {px1 - px0 + 1} x {py1 - py0 + 1}. "
+                         "Check the frame's data and display windows.")
     inside = np.zeros((h, w), bool)  # the display pixels the data window holds
     inside[max(dy0 - py0, 0):max(dy1 - py0 + 1, 0), max(dx0 - px0, 0):max(dx1 - px0 + 1, 0)] = True
     made = np.zeros((h, w), bool)
@@ -353,7 +416,7 @@ def write_exr_like(src_path: str, rgb: np.ndarray, alpha: np.ndarray | None, out
     window outside the display window (overscan) stay the source's.
     """
     if OpenEXR is None:
-        raise RuntimeError("OpenEXR is not installed")
+        raise RuntimeError("OpenEXR missing: EXR frames cannot be written. Install the pack's requirements.")
     with OpenEXR.File(src_path, separate_channels=True) as f:
         parts_out = []
         rgb_done = False
@@ -376,12 +439,38 @@ def write_exr_like(src_path: str, rgb: np.ndarray, alpha: np.ndarray | None, out
                      for i, p in enumerate(parts_out)]
             OpenEXR.File(parts).write(out_path)
 
+SIZED = ("channels", "dataWindow", "displayWindow", "chunkCount", "type", "name", "tiles", "version")  # header keys of one size
+
+
+def at_size(spec: dict, width: int, height: int) -> dict:
+    """The spec that writes the plate's frames at another size: the same format, codec, bit depth, frame numbers, colour
+    tags, timecode and audio. `scaled_from` holds the plate's size. No source pixel, other EXR channel or own alpha has
+    the new size, so none of them is written. At the plate's own size, the spec itself."""
+    if (width, height) == (spec.get("width"), spec.get("height")):
+        return spec
+    return dict(spec, width=width, height=height, scaled_from=(spec.get("width"), spec.get("height")))
+
+
+def write_exr_scaled(src_path: str, rgb: np.ndarray, alpha: np.ndarray | None, out_path: str) -> None:
+    """Write `rgb` (H, W, 3 float), a frame at another size than the source EXR frame, in the pixel type of the source's
+    RGB channels and with every header attribute of their part that holds at any size: compression, chromaticities,
+    frame rate, timecode and the others. Its windows take the new size."""
+    with OpenEXR.File(src_path, separate_channels=True) as f:
+        part = next(p for p in f.parts if set(RGB_NAMES) <= set(p.channels))
+        dtype = part.channels[RGB_NAMES[0]].pixels.dtype
+        header = {k: v for k, v in dict(part.header).items() if k not in SIZED}
+    chans = {name: np.ascontiguousarray(rgb[..., i], dtype=dtype) for i, name in enumerate(RGB_NAMES)}
+    if alpha is not None:
+        chans["A"] = np.ascontiguousarray(alpha, dtype=dtype)
+    OpenEXR.File(header, chans).write(out_path)
+
+
 def read_native(path: str, with_alpha: bool, eight: bool = False) -> np.ndarray:
     """Read one still frame exactly, as integers (RGB or RGBA): 8 bits for an 8-bit target, else 16.
 
     Core decodes to float through swscale, which can move a 16-bit value by a few codes. The export copies untouched
-    pixels from this exact read instead. An 8-bit frame is read at 8 bits: swscale's 16 to 8-bit step is not the
-    inverse of its 8 to 16-bit one, and moved 123 of the 256 levels up by one (29 Oct 2026).
+    pixels from this exact read instead. An 8-bit frame is read at 8 bits, so no step to 8 bits follows: from the
+    exact 16-bit value k x 257, swscale's step to 8 bits moves 123 of the 256 levels up by one (PyAV 19.0.2).
     """
     with av.open(path) as c:
         frame = next(c.decode(video=0))
@@ -403,7 +492,7 @@ PLANAR_FLOATS = {"gbrpf16le": "<f2", "gbrapf16le": "<f2", "gbrpf32le": "<f4", "g
 
 def read_float(path: str) -> np.ndarray:
     """One still frame in its own values, as float32 RGB (H, W, 3): an EXR's linear light above 1.0 and below 0 as stored,
-    other formats scaled to 0 to 1. The viewer's colour tools read these, as OpenRV's cache keeps an EXR's half floats."""
+    other formats scaled to 0 to 1 at their own depth: an 8-bit level k reads k / 255, a deeper one k / 65535. The viewer's colour tools read these, as OpenRV's cache keeps an EXR's half floats."""
     with av.open(path) as c:
         frame = next(c.decode(video=0))
         dtype = PLANAR_FLOATS.get(frame.format.name)
@@ -414,24 +503,227 @@ def read_float(path: str) -> np.ndarray:
                 planes.append(a[: frame.height * (p.line_size // a.itemsize)].reshape(frame.height, -1)[:, : frame.width])
             g, b, r = planes
             return np.stack([r, g, b], -1).astype(np.float32)
+        if max(c.bits for c in frame.format.components) <= 8:  # at its own depth: swscale's 16-bit output of an 8-bit
+            return frame.to_ndarray(format="rgb24").astype(np.float32) / 255.0  # level k is near k * 256, not k * 257: white reads 0.9962
         return frame.to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
 
 
-MATTE_STEP = 1.0 / 255  # the export's matte is 8-bit PNG, scaled by 255 and truncated: below one step it reads 0
+# What core's decoder reads plane by plane as floats, and what it decodes to 8 bits then divides by 255 (comfy_api's
+# VideoFromFile at ComfyUI 71096d1a, the pin in tools/pins.sh); every other format it converts to 32-bit float planes
+CORE_FLOATS = ("gbrpf16le", "gbrpf16be", "gbrapf16le", "gbrapf16be", "grayf16le", "grayf16be",
+               "gbrpf32le", "gbrpf32be", "gbrapf32le", "gbrapf32be", "grayf32le", "grayf32be")
+CORE_BYTES = ("yuvj420p", "yuvj422p", "yuvj444p", "rgb24", "rgba", "pal8")
+
+
+def _core_frames(path: str, duration: float = 0.0):
+    """Each frame core's decoder keeps from `path`, as it makes it: (the image, uint8 or float32 (H, W, C); whether its
+    values are 8-bit, which core divides by 255; whether its last channel is alpha). `duration` 0 keeps every frame.
+    Core's steps one by one: its trim window, the first frame's choice of 8 bits or float, float planes read as stored,
+    a width off a multiple of 32 padded with a smeared border, the rotation."""
+    with av.open(path) as container:
+        if not len(container.streams.video):
+            raise ValueError(f"Plate has no video stream: {path}. Use a movie file that holds video.")
+        stream = container.streams.video[0]
+        stream.thread_type = "AUTO"
+        end_pts = int(duration / stream.time_base)
+        fmt, byte8, has_alpha, align = "", False, False, None
+        for packet in container.demux(stream):
+            try:
+                for frame in packet.decode():
+                    if frame.pts < 0:  # before the window's start, as core skips them
+                        continue
+                    if duration and frame.pts >= end_pts:
+                        return
+                    if not fmt:  # the first frame decides for the whole file, as in core
+                        has_alpha = any(c.is_alpha for c in frame.format.components) or frame.format.name == "pal8"
+                        byte8 = frame.format.name in CORE_BYTES
+                        fmt = ("rgba" if has_alpha else "rgb24") if byte8 else ("gbrapf32le" if has_alpha else "gbrpf32le")
+                    if frame.format.name in CORE_FLOATS:  # read as stored: swscale can clip values above 1.0
+                        dtype = np.dtype(f"{'>' if frame.format.is_big_endian else '<'}f{frame.format.components[0].bits // 8}")
+                        planes = [np.ndarray((frame.height, frame.width), dtype=dtype, buffer=frame.planes[c.plane],
+                                             strides=(frame.planes[c.plane].line_size, dtype.itemsize)) for c in frame.format.components]
+                        img = np.stack(planes * 3 if len(planes) == 1 else planes, axis=-1, dtype=np.float32)
+                    elif fmt in ("gbrpf32le", "gbrapf32le") and frame.width % 32 != 0:  # core's fix for a nondeterministic decode
+                        if align is None:
+                            pad_w, pad_h = (frame.width + 31) // 32 * 32, (frame.height + 31) // 32 * 32
+                            g = av.filter.Graph()
+                            src = g.add_buffer(width=frame.width, height=frame.height, format=frame.format.name,
+                                               time_base=stream.time_base)
+                            pad = g.add("pad", f"{pad_w}:{pad_h}:0:0")
+                            fill = g.add("fillborders", f"left=0:right={pad_w - frame.width}:top=0:bottom={pad_h - frame.height}:mode=smear")
+                            sink = g.add("buffersink")
+                            src.link_to(pad)
+                            pad.link_to(fill)
+                            fill.link_to(sink)
+                            g.configure()
+                            align = (g, src, sink)
+                        align[1].push(frame)
+                        img = align[2].pull().to_ndarray(format=fmt)[:frame.height, :frame.width]
+                    else:
+                        img = frame.to_ndarray(format=fmt)
+                    turn = int(round(frame.rotation // 90)) % 4 if frame.rotation else 0
+                    yield (np.rot90(img, k=turn, axes=(0, 1)) if turn else img), byte8, has_alpha
+            except av.error.InvalidDataError:  # core skips the rest of a packet that fails to decode
+                logging.warning("[Paint a plate] Warning: a packet of %s did not decode.", path)
+
+
+def _put(rgb, alpha, i: int, img, byte8: bool) -> None:
+    """One frame of _core_frames into row `i`, as core's values: 8 bits as float32 divided by 255, floats as they are."""
+    if byte8:
+        np.divide(img[..., :3], np.float32(255.0), out=rgb[i], dtype=np.float32)
+        if alpha is not None:
+            np.divide(img[..., -1], np.float32(255.0), out=alpha[i], dtype=np.float32)
+    else:
+        rgb[i] = img[..., :3]
+        if alpha is not None:
+            alpha[i] = img[..., -1]
+
+
+def _padded(rgb, alpha, count: int, pad_8n1: bool):
+    """The rows decoded, and with `pad_8n1` the 8k+1 padding after them: the last frame repeated, in the same array."""
+    if rgb is None:
+        return np.zeros((0, 0, 0, 3), np.float32), None, 0
+    n = pad_count_8n1(count) if pad_8n1 else count
+    if len(rgb) != n:  # exactly the rows decoded and their padding: in place, shrunk or grown
+        rgb.resize((n, *rgb.shape[1:]), refcheck=False)
+        if alpha is not None:
+            alpha.resize((n, *alpha.shape[1:]), refcheck=False)
+    rgb[count:n] = rgb[count - 1]
+    if alpha is not None:
+        alpha[count:n] = alpha[count - 1]
+    return rgb, alpha, count
+
+
+def _frames_said(path: str) -> int:
+    """How many frames a video's header says it holds: its stream's count, else its duration at its average rate, else 0."""
+    with av.open(path) as c:
+        if not c.streams.video:
+            return 0
+        s = c.streams.video[0]
+        if s.frames:
+            return int(s.frames)
+        seconds = float(s.duration * s.time_base) if s.duration else (c.duration / 1e6 if c.duration else 0.0)
+        return max(0, round(seconds * float(s.average_rate))) if s.average_rate else 0
+
+
+def decode_video(path: str, max_frames: int, fps: float, pad_8n1: bool = False):
+    """A video's first `max_frames` frames as core's decoder gives them, each written into its place in one array.
+
+    Core (VideoFromFile(path, duration=max_frames / fps).get_components()) holds the plate twice: its list of frames,
+    then their stack, and padding that stack to 8k+1 frames copies it once more. Returns (RGB float32 (N, H, W, 3),
+    alpha float32 (N, H, W) or None, the frames decoded); with `pad_8n1`, N also counts the padding. The live tests compare
+    it with core's decoder (tests/decode_parity.py), so a ComfyUI pin that changes core's pictures fails a test.
+
+    The array holds what the file's header says it holds (_frames_said), up to `max_frames`, not `max_frames` rows: the
+    node allows 1,024, and on Windows a row reserved for a frame that does not exist still takes memory. A file that holds more grows the array as its frames come; one that holds fewer shrinks it in place. Either
+    way the pictures are core's."""
+    expected = min(max_frames, _frames_said(path)) or min(max_frames, 8)
+    limit = pad_count_8n1(max_frames) if pad_8n1 else max_frames
+    rgb = alpha = None
+    count = 0
+    for img, byte8, has_alpha in _core_frames(path, float(max_frames / fps)):
+        if rgb is None:
+            rows = pad_count_8n1(expected) if pad_8n1 else expected
+            rgb = np.empty((rows, *img.shape[:2], 3), np.float32)
+            alpha = np.empty((rows, *img.shape[:2]), np.float32) if has_alpha else None
+        elif count == len(rgb):  # the file holds more than its header says: a quarter more, at least 8 frames
+            rows = min(limit, count + max(8, count // 4))
+            rgb.resize((rows, *rgb.shape[1:]), refcheck=False)
+            if alpha is not None:
+                alpha.resize((rows, *alpha.shape[1:]), refcheck=False)
+        _put(rgb, alpha, count, img, byte8)
+        count += 1
+        if count == max_frames:  # Load Plate keeps no more
+            break
+    return _padded(rgb, alpha, count, pad_8n1)
+
+
+def decode_frames(files: list, pad_8n1: bool = False, workers: int = 8, each=None):
+    """An image sequence as core's decoder gives it file by file (VideoFromFile(file).get_components(), then joined),
+    each file written into its place in one array, the padding too: core's join holds the frames twice. Files decode in
+    parallel; `each(i)` runs before file i (Load Plate's stop and progress). Returns what decode_video returns."""
+    def one(i):
+        if each:
+            each(i)
+        got = list(_core_frames(files[i]))
+        if len(got) != 1:
+            raise ValueError(f"Image sequence: {files[i]} holds {len(got)} frames, 1 expected. Write one frame per file.")
+        return got[0]
+    img, byte8, has_alpha = one(0)
+    rows = pad_count_8n1(len(files)) if pad_8n1 else len(files)
+    rgb = np.empty((rows, *img.shape[:2], 3), np.float32)
+    alpha = np.empty((rows, *img.shape[:2]), np.float32) if has_alpha else None
+    _put(rgb, alpha, 0, img, byte8)
+
+    def rest(i):
+        img, byte8, has = one(i)
+        if has != has_alpha:  # core's join would fail there too
+            raise ValueError(f"Image sequence: {files[i]} {'has alpha, the first frame has none' if has else 'has no alpha, the first frame has'}. "
+                             "Give every frame the same channels.")
+        _put(rgb, alpha, i, img, byte8)
+    with ThreadPoolExecutor(max(1, workers)) as pool:
+        list(pool.map(rest, range(1, len(files))))
+    return _padded(rgb, alpha, len(files), pad_8n1)
+
+
+MATTE_STEP = 0.5 / 65535  # the export's matte is 16-bit PNG, scaled by 65535 and rounded: below half a step it reads 0
 
 
 def untouched(changed: np.ndarray) -> np.ndarray:
-    """The pixels the export copies from the source, exactly: those its delivered matte shows as 0. Until 3 Nov the
-    threshold was 1/1024, so the matte's faint edge (weights between 1/1024 and 1/255) was blended while the 8-bit matte
-    showed nothing: on a 4K EXR plate 1.2% of the pixels outside the matte differed from the source, by up to 0.012."""
+    """The pixels the export copies from the source: those its delivered matte shows as 0. The matte is 16-bit PNG,
+    65535 times the weight rounded (Save Frames' png16), so a weight under half of 1/65535 shows 0. Read back with
+    read_float, a level k reads k / 65535, so this rule reads the delivered matte too."""
     return np.asarray(changed) < MATTE_STEP
+
+
+def join_windows(folders: list, workers: int = 8, count: int = 0, max_frames: int = 0, counts: list = None, share: int = 0) -> np.ndarray:
+    """The frames of a shot's windows, saved one folder each, joined in order into one float32 batch, one window read at
+    a time. With `count`, the frames in each window, and `max_frames`, the frames in the shot, window i reads its last
+    min(count, max_frames - i * count) frames: a window job that runs again numbers its frames on in its folder (as
+    Save Image does), so its newest frames are kept, and a folder beyond the shot reads none. With either at 0, every
+    frame of every window is read. With `counts`, each window's own frames, window i reads its last counts[i] frames. With
+    `share`, two neighbours share that many frames, which are crossfaded: across them the later window's weight rises from
+    1 / (share + 1) to share / (share + 1)."""
+    files = [find_sequence(f) for f in folders]
+    if counts:
+        if len(counts) > len(files):
+            raise ValueError(f"Join Windows: {len(files)} window folders for {len(counts)} windows.")
+        for folder, names, k in zip(folders, files, counts):
+            if len(names) < k:
+                raise ValueError(f"Join Windows: window {os.path.basename(os.path.normpath(folder))} holds {len(names)} of its {k} frames.")
+        files = [names[len(names) - k:] for names, k in zip(files, counts)]
+    elif count and max_frames:
+        own = [max(0, min(count, max_frames - i * count)) for i in range(len(files))]
+        for folder, names, k in zip(folders, files, own):
+            if len(names) < k:
+                raise ValueError(f"Join Windows: window {os.path.basename(os.path.normpath(folder))} holds {len(names)} of its {k} frames.")
+        files = [names[len(names) - k:] for names, k in zip(files, own) if k]
+    out, pos = None, 0
+    for i, names in enumerate(files):
+        rgb = decode_frames(names, False, workers)[0]
+        if out is None:
+            out = np.empty((sum(len(f) for f in files) - share * max(0, len(files) - 1),) + rgb.shape[1:], np.float32)
+        s = share if i else 0
+        for j in range(s):  # the frames this window shares with the one before
+            w = (j + 1) / (share + 1)
+            out[pos - s + j] = out[pos - s + j] * (1 - w) + rgb[j] * w
+        out[pos:pos + len(rgb) - s] = rgb[s:]
+        pos += len(rgb) - s
+    return out
+
+
+def save_names(name: str, counter: int, n: int, ext: str, first: int = 0) -> list:
+    """The files of n frames that Save Frames saves under `name`: numbered on from `counter`, the number after the files
+    already there (core Save Image's rule), or from `first` when it is given, so a job that runs again writes the same
+    files again."""
+    return [f"{name}_{(first or counter) + i:05}_.{ext}" for i in range(n)]
 
 
 def write_pngs(frame_at, paths: list, workers: int = 8, level: int = 1, tick=None) -> None:
     """Write frame_at(i), an (H, W, 3 or 4) uint8 or uint16 array, to paths[i] as an 8 or 16-bit PNG, several frames at
     once: PyAV releases the GIL
     while it compresses. Core Save Image writes one frame after another at zlib level 4: 35.3 s for 121 frames at
-    1920 x 1088 on an RTX PRO 6000 pod (28 Oct). Level 1 compresses 3.5 times faster for files about 11% larger
+    1920 x 1088 on an RTX PRO 6000 pod. Level 1 compresses 3.5 times faster for files about 11% larger
     (one such frame: 111 ms against 392 ms, 3.08 MB against 2.78 MB)."""
     def one(i):
         a = np.ascontiguousarray(frame_at(i))
@@ -449,14 +741,22 @@ def write_pngs(frame_at, paths: list, workers: int = 8, level: int = 1, tick=Non
         list(pool.map(one, range(len(paths))))
 
 
-def write_exrs(frame_at, paths: list, workers: int = 8, tick=None) -> None:
+def write_exrs(frame_at, paths: list, workers: int = 8, tick=None, fps: float = 0.0, chromaticities: str | None = None) -> None:
     """Write frame_at(i), an (H, W, 3) float array, to paths[i] as a half-float EXR with lossless PIZ compression, several
-    frames at once: OpenEXR releases the GIL while it compresses (a 1080p frame: 83 ms, 5.3 MB, 29 Oct). These are the
-    review frames the viewer reads at full precision; the export keeps the plate's own EXR layers and header instead."""
+    frames at once: OpenEXR releases the GIL while it compresses (a 1080p frame: 83 ms, 5.3 MB). These are the
+    review frames the viewer reads at full precision; the export keeps the plate's own EXR layers and header instead.
+    With `fps`, each header says the shot's frame rate (`framesPerSecond`, which exr_rate reads): the frames of a 16-bit
+    fluid shot open as a plate, and a plate has a rate."""
+    header = {"compression": OpenEXR.PIZ_COMPRESSION, "type": OpenEXR.scanlineimage}
+    if fps:
+        header["framesPerSecond"] = Fraction(fps).limit_denominator(1001)
+    if chromaticities:  # the gamut of the frames, a key of CHROMATICITIES: they then open in their colour space
+        header["chromaticities"] = CHROMATICITIES[chromaticities][0]
+
     def one(i):
         rgb = np.ascontiguousarray(np.nan_to_num(frame_at(i)[..., :3], nan=0.0, posinf=65504.0, neginf=-65504.0)
                                    .clip(-65504.0, 65504.0).astype(np.float16))
-        with OpenEXR.File({"compression": OpenEXR.PIZ_COMPRESSION, "type": OpenEXR.scanlineimage}, {"RGB": rgb}) as f:
+        with OpenEXR.File(dict(header), {"RGB": rgb}) as f:
             f.write(paths[i])
         if tick:
             tick()
@@ -506,33 +806,62 @@ def write_movie(frame_at, n: int, path: str, fps: float, workers: int = 8, crf: 
                 tick=None, size: tuple | None = None) -> None:
     """An H.264 movie for the page to play, as core Save Video makes it (crf 18, yuv420p, BT.709 matrix and primaries, the
     sRGB transfer tag, limited range), only faster: the frames convert to YUV several at once and x264 runs at preset
-    veryfast with its own threads. Core took 8.3 s for 121 frames at 1920 x 1088 on an RTX PRO 6000 pod (28 Oct)."""
+    veryfast with its own threads. Core takes 8.3 s for 121 frames at 1920 x 1088 on an RTX PRO 6000 pod. At most
+    twice `workers` frames are converted ahead of x264, so converted frames never wait in memory for a slower x264."""
     first = np.ascontiguousarray(frame_at(0))
     h, w = first.shape[:2]
     if size and all(size):  # (width, height): scaled with swscale's Lanczos while converting, as the viewer's canvas wants it
         w, h = size[0] - size[0] % 2, size[1] - size[1] % 2
-    with av.open(path, "w") as out:
-        st = out.add_stream("libx264", rate=Fraction(fps).limit_denominator(1001))
-        st.width, st.height, st.pix_fmt = w, h, "yuv420p"
-        st.options = {"crf": str(crf), "preset": preset}
-        cc = st.codec_context
-        cc.thread_count = 0  # x264 picks its threads
-        cc.color_primaries, cc.color_trc, cc.colorspace, cc.color_range = 1, 13, 1, 1  # BT.709, sRGB, BT.709, limited
+    try:
+        with av.open(path, "w") as out:
+            st = out.add_stream("libx264", rate=Fraction(fps).limit_denominator(1001))
+            st.width, st.height, st.pix_fmt = w, h, "yuv420p"
+            st.options = {"crf": str(crf), "preset": preset}
+            cc = st.codec_context
+            cc.thread_count = 0  # x264 picks its threads
+            cc.color_primaries, cc.color_trc, cc.colorspace, cc.color_range = 1, 13, 1, 1  # BT.709, sRGB, BT.709, limited
 
-        def yuv(i):  # swscale with the BT.709 matrix, full-range RGB in and limited range out, as core converts
-            a = first if i == 0 else np.ascontiguousarray(frame_at(i))
-            f = av.VideoFrame.from_ndarray(a, format="rgb24").reformat(width=w, height=h, format="yuv420p", dst_colorspace=1,
-                                                                        interpolation="LANCZOS")
-            if tick:
-                tick()
-            return f
-        with ThreadPoolExecutor(max(1, workers)) as pool:
-            for i, f in enumerate(pool.map(yuv, range(n))):
-                f.pts = i
-                for p in st.encode(f):
-                    out.mux(p)
-        for p in st.encode(None):
-            out.mux(p)
+            def yuv(i):  # swscale with the BT.709 matrix, full-range RGB in and limited range out, as core converts
+                a = first if i == 0 else np.ascontiguousarray(frame_at(i))
+                f = av.VideoFrame.from_ndarray(a, format="rgb24").reformat(width=w, height=h, format="yuv420p", dst_colorspace=1,
+                                                                            interpolation="LANCZOS")
+                if tick:
+                    tick()
+                return f
+            ahead = 2 * max(1, workers)
+            with ThreadPoolExecutor(max(1, workers)) as pool:
+                pending = [pool.submit(yuv, i) for i in range(min(n, ahead))]
+                try:
+                    for i in range(n):
+                        f = pending.pop(0).result()
+                        if i + ahead < n:
+                            pending.append(pool.submit(yuv, i + ahead))
+                        f.pts = i
+                        for p in st.encode(f):
+                            out.mux(p)
+                finally:  # stopped or failed: the frames not yet converted are dropped
+                    for later in pending:
+                        later.cancel()
+            for p in st.encode(None):
+                out.mux(p)
+    except BaseException:  # stopped (nodes.py asks ComfyUI before each frame) or failed: no half-written movie stays
+        if os.path.exists(path):
+            os.remove(path)
+        raise
+
+
+def core_uint8(frame: np.ndarray, rows: int = 64) -> np.ndarray:
+    """A float frame as core's Save Image and Save Video write it: scaled by 255, clipped to 0 to 255, truncated to 8 bits.
+    The bytes of np.clip(255.0 * frame, 0, 255).astype(np.uint8), made `rows` lines at a time: the float32 temporary is a
+    strip, where that expression makes two the size of the frame in each of Save Movie's threads."""
+    out = np.empty(frame.shape, np.uint8)
+    strip = np.empty((min(rows, len(frame)),) + frame.shape[1:], np.float32)
+    for y in range(0, len(frame), rows):
+        part = strip[: len(frame[y:y + rows])]
+        np.multiply(frame[y:y + rows], np.float32(255.0), out=part)
+        np.clip(part, 0.0, 255.0, out=part)
+        np.copyto(out[y:y + rows], part, casting="unsafe")
+    return out
 
 
 def plane_array(plane, itemsize: int) -> np.ndarray:
@@ -544,9 +873,10 @@ def plane_array(plane, itemsize: int) -> np.ndarray:
 def keep_samples(frame, source, keep: np.ndarray):
     """`frame` (planar YUV) with `source`'s own samples wherever `keep` (H, W) holds for every pixel a sample covers.
 
-    Untouched pixels then reach the encoder as the source's YUV samples, with no RGB round trip: a 4:2:0 plate lost up
-    to 12/255 to that round trip, even with a lossless encode (42.25 dB, 28 Oct). A chroma sample shared by four pixels
-    is kept only when all four are untouched.
+    Untouched pixels then reach the encoder as the source's YUV samples, with no RGB round trip: a 4:2:0 plate loses up
+    to 12/255 to that round trip, even with a lossless encode (42.25 dB). A chroma sample shared by four pixels
+    is kept only when all four are untouched. The new frame takes `frame`'s colour matrix and range, which a reader
+    decodes it by.
     """
     itemsize = 2 if re.search(r"p1[0246]", frame.format.name) else 1
     out = av.VideoFrame(frame.width, frame.height, frame.format.name)
@@ -561,7 +891,38 @@ def keep_samples(frame, source, keep: np.ndarray):
         buf[:, : a.shape[1]] = a
         p_out.update(buf.tobytes())
     out.pts = frame.pts
+    out.colorspace, out.color_range = frame.colorspace, frame.color_range  # ProRes writes them into each frame's header
     return out
+
+
+class FramesWriter:
+    """A movie deeper than MOVIE_BITS, written for compositing as 16-bit PNG frames, which keep its samples: ProRes 4444 XQ
+    from FFmpeg's encoder keeps 10 bits. The frames take the plate's name, numbered from 1, at the frames' own size. Where
+    `keep` holds, they are the source frame decoded at 16 bits per channel (`source`, from SourceFrames in rgb48le)."""
+    keeps = True
+    pix_fmt = "rgb48le"
+
+    def __init__(self, spec: dict, out_path: str, audio_source: str | None = None):
+        self.spec, self.paths = spec, []
+        self.stem = os.path.splitext(out_path)[0]
+        self.notes = [f"A {spec.get('bits', 16)}-bit movie: 16-bit PNG frames, which keep its samples."]
+
+    def write(self, rgb: np.ndarray, keep: np.ndarray | None = None, source=None) -> None:
+        out = np.round(np.clip(rgb[..., :3], 0, 1) * 65535.0).astype(np.uint16)
+        if keep is not None and source is not None:
+            out[keep] = source.to_ndarray()[keep]
+        path = f"{self.stem}_{len(self.paths) + 1:05}_.png"
+        write_pngs(lambda _: out, [path], workers=1)
+        self.paths.append(path)
+
+    def close(self) -> None:
+        pass
+
+
+def movie_writer(spec: dict, out_path: str, audio_source: str | None = None):
+    """The writer of a plate's movie for compositing: ProRes 4444 XQ (VideoWriter), or 16-bit PNG frames for a movie deeper
+    than MOVIE_BITS (FramesWriter)."""
+    return (FramesWriter if spec.get("bits", 8) > MOVIE_BITS else VideoWriter)(spec, out_path, audio_source)
 
 
 class SourceFrames:
@@ -605,7 +966,7 @@ def encode_still(rgb: np.ndarray, alpha: np.ndarray | None, codec: str, pix_fmt:
     PyAV takes planar float formats as (H, W, C) arrays in RGB order.
     """
     if av is None:
-        raise RuntimeError("PyAV is required")
+        raise RuntimeError("PyAV missing: stills cannot be written. Install the pack's requirements.")
     h, w = rgb.shape[:2]
     if codec == "exr":
         data = rgb.astype(np.float32)
@@ -674,8 +1035,16 @@ def write_still(spec: dict, index: int, rgb: np.ndarray, alpha: np.ndarray | Non
     the path. Where `keep` (H, W) holds, the source's exact pixels. The plate's own alpha stays sample for sample, since
     no edit works on it, unless a new `alpha` is given."""
     src, out = spec["files"][index], output_frame_name(spec, index, out_dir)
+    if "scaled_from" in spec and spec["ext"] == ".exr" and OpenEXR is not None:
+        write_exr_scaled(src, rgb, alpha, out)
+        return out
     if spec["ext"] == ".exr" and OpenEXR is not None:
         write_exr_like(src, rgb, alpha, out, keep=keep)
+        return out
+    if "scaled_from" in spec:  # another size: the new frame alone, in the plate's format
+        codec, pix_fmt, options = still_target(spec, alpha is not None)
+        with open(out, "wb") as f:
+            f.write(encode_still(rgb, alpha, codec, pix_fmt, options))
         return out
     own = alpha is None and carries_alpha(spec.get("pix_fmt", ""))
     codec, pix_fmt, options = still_target(spec, alpha is not None or own)
@@ -699,7 +1068,7 @@ def write_blank(path: str, width: int, height: int, fps: float, frames: int) -> 
     1920 x 1088 x 121 canvas takes about a second instead of half a minute.
     """
     if av is None:
-        raise RuntimeError("PyAV is required")
+        raise RuntimeError("PyAV missing: blank plates cannot be written. Install the pack's requirements.")
     rate = Fraction(fps).limit_denominator(1001)
     with av.open(path, "w") as out:
         stream = out.add_stream("prores_ks", rate=rate)
@@ -724,61 +1093,25 @@ def write_blank(path: str, width: int, height: int, fps: float, frames: int) -> 
     return path
 
 
-def encoder_pix_fmt(encoder: str, want: str) -> str:
-    """The pixel format nearest `want` that `encoder` writes: the same chroma layout at the highest depth it offers.
-
-    FFmpeg's ProRes decoder reports a 4444 plate as yuv444p12le, and prores_ks writes yuv444p10le: asked to open with
-    the decoder's format, the encoder refused it and the export failed.
-    """
-    try:
-        offered = [f.name for f in (av.codec.Codec(encoder, "w").video_formats or [])]
-    except (AVError, ValueError, TypeError):
-        offered = []
-    if not offered or want in offered:
-        return want
-    family = lambda f: (re.match(r"^([a-z]+\d*)p", f) or re.match(r"^(.*)$", f)).group(1)  # yuv444, yuva444, yuv420, gbr
-    depth = lambda f: int((re.findall(r"p(\d+)", f) or ["8"])[0])
-    same = [f for f in offered if family(f) == family(want)]
-    if same:
-        return max(same, key=depth)
-    return _DEFAULT_PIX.get(encoder) if _DEFAULT_PIX.get(encoder) in offered else offered[0]
-
-
 class VideoWriter:
-    """Encode frames in the source codec, pixel format, colour tags and timecode.
-
-    Falls back to ProRes 4444 in a .mov when the source encoder is missing.
-    Audio from the source file is copied packet for packet on close().
-    """
+    """Writes a plate's frames as a movie for compositing software: ProRes 4444 XQ, 10 bits in 4:4:4, with an alpha channel
+    where the plate has one, at the plate's size and frame rate, with its colour tags and timecode, in a .mov named as
+    `out_path`. Audio from the source file is copied packet for packet on close()."""
 
     def __init__(self, spec: dict, out_path: str, audio_source: str | None = None):
         if av is None:
-            raise RuntimeError("PyAV is required")
+            raise RuntimeError("PyAV missing: movies cannot be written. Install the pack's requirements.")
         self.spec = spec
         self.notes: list[str] = []
-        codec = spec.get("codec", "prores")
-        encoder = _ENCODERS.get(codec, codec)
-        if encoder not in av.codecs_available:
-            self.notes.append(f"Encoder {encoder} not available: writing ProRes 4444 instead.")
-            encoder, out_path = "prores_ks", os.path.splitext(out_path)[0] + ".mov"
-        self.path = out_path
-        self.out = av.open(out_path, "w")
+        self.path = os.path.splitext(out_path)[0] + MOVIE_EXT
+        self.out = av.open(self.path, "w")
         rate = Fraction(spec.get("fps_num") or 24, spec.get("fps_den") or 1)
-        self.stream = self.out.add_stream(encoder, rate=rate)
+        self.stream = self.out.add_stream(MOVIE_ENCODER, rate=rate)
         self.stream.width = spec["width"]
         self.stream.height = spec["height"]
-        pix = spec.get("pix_fmt") or _DEFAULT_PIX.get(encoder, "yuv420p")
-        if (written := encoder_pix_fmt(encoder, pix)) != pix:
-            self.notes.append(f"{encoder} does not write {pix}: using {written}.")
-            pix = written
-        try:
-            self.stream.pix_fmt = pix
-        except (ValueError, AVError):
-            pix = _DEFAULT_PIX.get(encoder, "yuv420p")
-            self.stream.pix_fmt = pix
-            self.notes.append(f"Pixel format {spec.get('pix_fmt')} refused by {encoder}: using {pix}.")
-        self.pix_fmt = pix
-        self.eight = eight_bit_rgb(pix)  # written from 8-bit values (write)
+        alpha = re.match(r"(yuva|gbrap|rgba|bgra|argb|abgr|ya\d)", spec.get("pix_fmt") or "") is not None
+        self.pix_fmt = self.stream.pix_fmt = "yuva444p10le" if alpha else "yuv444p10le"
+        self.keeps = (spec.get("pix_fmt") or "").startswith("yuv")  # the source has YUV samples of its own to keep (write)
         cc = self.stream.codec_context
         for attr in ("color_primaries", "color_trc", "colorspace", "color_range"):
             value = spec.get(attr)
@@ -787,16 +1120,7 @@ class VideoWriter:
                     setattr(cc, attr, value)
                 except (ValueError, TypeError, AVError):
                     self.notes.append(f"Could not copy {attr}.")
-        opts = {}
-        if encoder == "prores_ks":
-            prof = str(spec.get("profile", "")).lower().replace(" ", "")
-            opts["profile"] = str(next((v for k, v in sorted(_PRORES_PROFILES.items(), key=lambda kv: -len(kv[0])) if k in prof), 4 if "444" in pix else 3))
-        elif encoder in ("libx264", "libx265"):
-            # crf 8 is visually lossless: the codec is the only loss on untouched pixels. The preset trades encode
-            # time for file size at the same quality; medium encodes about twice as fast as slow (checked on x264).
-            opts["crf"] = "8"
-            opts["preset"] = "medium"
-        cc.options = opts
+        cc.options = {"profile": MOVIE_PROFILE}
         if spec.get("timecode"):
             self.stream.metadata["timecode"] = spec["timecode"]
         # Streams must all exist before the first packet is written.
@@ -815,22 +1139,20 @@ class VideoWriter:
 
     def write(self, rgb: np.ndarray, keep: np.ndarray | None = None, source=None) -> None:
         """`rgb` is display-referred float (H, W, 3) in 0..1, as decoded by core. Where `keep` (H, W) holds, the source
-        frame's own YUV samples are written instead (`keep_samples`)."""
-        if self.eight:  # 8-bit RGB: rounded here, since swscale's 16 to 8-bit step moves most levels up by one
-            frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(to_uint8(rgb)), format="rgb24")
-        else:
-            frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(to_uint16(rgb)), format="rgb48le")
+        frame's own YUV samples are written instead (`keep_samples`), when it has them (`keeps`): a movie coded in RGB goes
+        through RGB."""
+        frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(to_uint16(rgb)), format="rgb48le")
         kwargs = {"format": self.pix_fmt}
         if self.dst_colorspace not in (None, 2):  # 2 = unspecified
             kwargs["dst_colorspace"] = self.dst_colorspace
-        if self.pix_fmt.startswith("yuv") and self.dst_range in (None, 0, 1):  # limited range video
+        if self.dst_range in (None, 0, 1):  # limited range video
             kwargs["src_color_range"] = 2  # full range RGB in
             kwargs["dst_color_range"] = 1
         try:
             frame = frame.reformat(**kwargs)
         except (ValueError, TypeError, AVError):  # an older PyAV without colour-range arguments
             frame = frame.reformat(format=self.pix_fmt)
-        if keep is not None and source is not None and self.pix_fmt.startswith("yuv"):
+        if keep is not None and source is not None and self.keeps:
             frame = keep_samples(frame, source, keep)
             self.samples_kept = True
         frame.pts = self.index

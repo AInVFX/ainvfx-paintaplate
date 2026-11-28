@@ -11,20 +11,25 @@ const early = new Map(); // results that arrived before /prompt answered
 const memo = new Map(); // prompt -> outputs, for prompts ComfyUI serves entirely from its cache
 const MEMO_MAX = 64;
 const QUIET_MS = 15000; // a prompt not heard of for this long is looked up in /history
-let running = null; // the prompt ComfyUI is executing now
 let socket = false; // the WebSocket is open: when it is not, finished prompts are found by polling /history
 let notice = () => {};
 let log = () => {};
 const infos = new Map(); // class -> /object_info answer, asked once
 // The job index (routes.py): a finished job's outputs on disk, by the hash of its workflow, the plate and its values. A job
 // that matches takes them back instead of running, in this session or a later one on the same machine. Only workflows whose
-// outputs are saved files take part: the warm-up exists for its side effect, and SAM's object search keeps previews.
-// SDR to HDR takes part too: run again, it rewrote a 16-bit fluid shot's EXR frames, the plate under its edits, so the
-// plate's time changed and every job on it missed the index when its scene was opened again (2 Nov).
-const INDEXED = new Set(["ingest", "prompt", "edit", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "fluid", "hdr"]);
+// outputs are saved files take part; the warm-up, which exists for its side effect, does not. SAM's object search (snap)
+// saves its masks in the plate's folder, so a scene's Clean edits take them back when it opens again.
+// SDR to HDR takes part too: run again, it would rewrite a 16-bit fluid shot's EXR frames, the plate under its edits; the
+// plate's time would then change, and every job on it would miss the index when its scene opens again. Upscale's window
+// jobs take part, so a plate's upscaled windows serve its next export; its export job does not: a key leaves the prefixes out,
+// and each render's upscaled set is written in its own folder.
+const INDEXED = new Set(["ingest", "prompt", "edit", "snap", "clean", "cleanup", "shot", "matte", "comp", "review", "export", "fluid", "hdr", "upscale"]);
 const hashes = {}; // workflow name -> hash of its file: a new workflow makes new keys
 let salt = null; // the plate's identity (path, size, time); null: no index, as when the plate could not be checked
 export const setSalt = (s) => { salt = s; };
+export const getSalt = () => salt;
+let build = ""; // the server's build (/paintaplate/version, routes.build_parts): what computes; "": not known, so no index
+export const setBuild = (value) => { build = value || ""; };
 
 export async function hashHex(data) { // SHA-256 of a string or a Blob, in hex; null where the page has no WebCrypto (plain http)
   if (!globalThis.crypto?.subtle) return null;
@@ -32,14 +37,35 @@ export async function hashHex(data) { // SHA-256 of a string or a Blob, in hex; 
   return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-const indexKey = async (name, values) => (INDEXED.has(name) && salt !== null && hashes[name]
-  ? hashHex(JSON.stringify([hashes[name], salt, indexValues(values)])) : null);
+// What a job index key is made of: the server's build, the workflow file's hash, the plate's identity and the job's values.
+// The build is a hash of what computes, made when ComfyUI starts (routes.build_parts): the pack's Python files, ComfyUI's
+// version, ComfyUI-LTXVideo's commit, and each model file's name, size and time. Other code can change what a node makes
+// from the same workflow file and the same values, and so can a new model file under an old
+// name: a result made by other code or other weights never comes back. A new version number alone changes nothing. null:
+// no index for this job (the build is not known, the workflow has no hash, or the plate could not be checked).
+export const indexParts = (build, workflow, plate, values) =>
+  (build && workflow && plate !== null ? JSON.stringify([build, workflow, plate, indexValues(values)]) : null);
+const indexKey = async (name, values) => {
+  const parts = INDEXED.has(name) ? indexParts(build, hashes[name], salt, values) : null;
+  return parts === null ? null : hashHex(parts);
+};
+
+let notRun = 0; // jobs answered without running: taken from the job index, or made before, every output from ComfyUI's cache
+export const jobsNotRun = () => notRun; // a render's step whose jobs were answered so keeps no time (app.mjs, step)
 
 async function indexed(key) { // the outputs a finished job with this key made, if its files are all still there
   try { const r = await fetch(`/paintaplate/jobs/${key}`); return r.ok ? (await r.json()).outputs : null; } catch { return null; }
 }
 
-export const onNotice = (fn) => { notice = fn; };
+export const onNotice = (fn) => { notice = fn; }; // what the client has to tell the person (a retry, for example)
+let freeFirst = () => null, lastPosted = null; // the page's rule (logic.freesBefore): why ComfyUI's memory is freed before this job, or null, or { why, keep } to keep its cache; and the workflow of the last job posted
+export const onFree = (fn) => { freeFirst = fn; };
+export const lastJob = () => lastPosted; // the workflow of the last job posted: its models are those on the GPU (logic.FAMILY)
+let stopped = () => false; // the page's rule (design rule 13): whether a stop is in force for a job of this kind. Such a job is not posted
+export const onStop = (fn) => { stopped = fn; };
+let posting = () => {}; // the page's: a job is about to be posted, as no job index answered it
+export const onPost = (fn) => { posting = fn; };
+const FREE_SETTLE_MS = 600; // ComfyUI's worker applies a free when it wakes: a job posted in the same instant would run first
 // Until ComfyUI has released its models after /free: half of the GPU free, or `limit` ms. Its prompt worker applies a free
 // between prompts, so the retry of a job that ran out of memory waits for it.
 async function released(limit = 15000) {
@@ -47,13 +73,36 @@ async function released(limit = 15000) {
     const gpu = (await fetch("/system_stats").then((r) => r.json()).catch(() => null))?.devices?.[0];
     if (!gpu?.vram_total || gpu.vram_free > gpu.vram_total / 2) return;
   }
-} // what the client has to tell the person (a retry, for example)
-export const onLog = (fn) => { log = fn; }; // every job posted, started, finished, failed or cancelled, with its timing
+}
+export const onLog = (fn) => { log = fn; }; // a job's lines (below), and why a live preview could not be made
+
+// ---------- A job's lines in the log ----------
+// The log says each fact once. A job writes one line when it ends, with what matters folded in: its nodes, those ComfyUI
+// took from its cache, the previews the page received. It writes one line more only when it starts after more than
+// QUEUE_SAID_MS in ComfyUI's queue. A job that was stopped says in its line where it was: in the queue, or in which node.
+export const QUEUE_SAID_MS = 1000;
 const short = (id) => (id ? String(id).slice(0, 8) : "?");
-const took = (job) => `${((Date.now() - job.posted) / 1000).toFixed(1)} s`;
+const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
+const count = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const head = (job) => `${job.name} ${short(job.id)}`;
+const folded = (job, more = "") => [count(job.nodes, "node"), job.cached ? `${job.cached} from ComfyUI's cache` : "",
+  job.previews ? count(job.previews, "preview") : "", more].filter(Boolean).join(", ");
+export function jobWaited(job, now) { // null for a job that starts within QUEUE_SAID_MS of its post
+  if (!(now - job.sent > QUEUE_SAID_MS)) return null;
+  const how = [job.number != null ? `number ${job.number}` : "", job.front ? "posted at the front" : ""].filter(Boolean).join(", ");
+  return `${head(job)}: started after ${secs(now - job.sent)} in ComfyUI's queue${how ? ` (${how})` : ""}`;
+}
+const stop = (s) => (/[.!?]$/.test(s) ? s : `${s}.`); // every line ends with a full stop
+// `fresh` false: ComfyUI ran nothing and listed no output, so the page took the outputs this prompt gave before
+export const jobDone = (job, now, fresh = true) => `${head(job)}: done in ${secs(now - job.posted)} (${folded(job, fresh ? "" : "outputs as it made them before")}).`;
+export const jobFailed = (job, now, error) => `${head(job)}: failed after ${secs(now - job.posted)}. ${stop(error)}`; // ComfyUI's error names the node
+export function jobStopped(job, now, heard = true) { // `heard` false: the WebSocket is closed, so the page does not know whether the job had started
+  const where = !job.id ? " before ComfyUI answered its post" : job.started != null ? (job.at ? ` in ${job.at}` : "") : heard ? " in ComfyUI's queue" : "";
+  return `${head(job)}: stopped after ${secs(now - job.posted)}${where} (${folded(job)})`;
+}
 
 // A server's answer as JSON, whatever its status (ComfyUI explains a refused job in JSON). An error page, such as a proxy's
-// HTML while ComfyUI restarts, or an empty answer, says so plainly instead of the browser's "Unexpected token '<'" (29 Oct)
+// HTML while ComfyUI restarts, or an empty answer, says so plainly instead of the browser's "Unexpected token '<'"
 export async function answer(r) {
   const text = await r.text();
   try { return JSON.parse(text); } catch { /* not JSON: said below */ }
@@ -61,12 +110,30 @@ export async function answer(r) {
   throw new Error(`No answer from ComfyUI (HTTP ${r.status}${what}): it may be restarting, or the connection dropped`);
 }
 
+// ComfyUI sends a sampler's step previews only when it was started with --preview-method, and by default it sends none.
+// So every job says what it wants in its own post (extra_data.preview_method, read by ComfyUI's execution.py): for a job
+// that shows its steps, latent2rgb, which needs no decoder file (taesd needs one in models/vae_approx, which the pack
+// does not download) and costs one small matrix product per step; for every
+// other job, none, so an LTX pass, which has its own Live Preview node, never pays for ComfyUI's previews as well.
+export const PREVIEW_METHOD = "latent2rgb";
+export const promptBody = (prompt, { front = false, preview = false } = {}) =>
+  ({ prompt, client_id: CLIENT, front, extra_data: { preview_method: preview ? PREVIEW_METHOD : "none" } });
+
+const unseen = new Set(); // why a live preview could not be made (nodes.py, Live Preview): each reason is said once
+function liveOff(reason) {
+  if (unseen.has(reason)) return;
+  unseen.add(reason);
+  log(`Warning: live preview off: ${stop(reason)}`);
+}
+
 export const post = (path, body) =>
   fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-export async function loadWorkflows(names) { // all at once: ten small files, one round trip
+export async function loadWorkflows(names) { // all at once: the small files load in parallel
   const loaded = await Promise.all(names.map(async (name) => {
-    const text = await (await fetch(`workflows/${name}.json`)).text();
+    // "no-cache": the browser asks the server each time, so a workflow always matches the pack that runs (a copy kept
+    // from an earlier version would post inputs the page no longer fills)
+    const text = await (await fetch(`workflows/${name}.json`, { cache: "no-cache" })).text();
     return [name, parseWorkflow(JSON.parse(text)), await hashHex(text)];
   }));
   for (const [name, wf, hash] of loaded) [WF[name], hashes[name]] = [wf, hash];
@@ -87,7 +154,7 @@ export function upload(blob, name, sub, onProgress, signal) { // XMLHttpRequest,
     const x = new XMLHttpRequest();
     x.open("POST", "/upload/image");
     x.upload.onprogress = (e) => onProgress?.(e.loaded);
-    x.onerror = () => reject(new Error(`Upload failed: ${name}`));
+    x.onerror = () => reject(new Error(`Upload failed: ${name}: No answer from ComfyUI`)); // the request never arrived: ComfyUI is not there
     x.onabort = () => reject(new Error("cancelled")); // Cancel on the opening screen
     signal?.addEventListener("abort", () => x.abort(), { once: true });
     x.onload = () => { // an answer that is not ComfyUI's JSON (a proxy's error page) fails the upload, never hangs it
@@ -105,18 +172,37 @@ export function upload(blob, name, sub, onProgress, signal) { // XMLHttpRequest,
 // `live` receives the live previews of a shot.
 export function run(name, values, { kind = name, preview, progress, step, live: onLive, front = false } = {}) {
   const wf = fillWorkflow(WF[name], values);
-  const job = { kind, name, preview, progress, live: onLive, retries: 1, key: JSON.stringify(wf.prompt), main: wf.progress, posted: Date.now(),
+  const job = { kind, name, preview, progress, live: onLive, retries: 1, key: JSON.stringify(wf.prompt), main: wf.progress, posted: Date.now(), front, nodes: Object.keys(wf.prompt).length,
     step: step && ((id) => step(wf.prompt[id]?.class_type)), classes: Object.fromEntries(Object.entries(wf.prompt).map(([id, n]) => [id, n.class_type])) };
   job.done = new Promise((resolve, reject) => Object.assign(job, { resolve, reject }));
-  job.submit = () => post("/prompt", { prompt: wf.prompt, client_id: CLIENT, front }).then(answer).then((j) => {
-    if (!j.prompt_id) throw new Error(rejection(j));
-    job.id = j.prompt_id;
-    job.heard = Date.now();
-    log(`${name}: posted as ${short(job.id)} (${Object.keys(wf.prompt).length} nodes${front ? ", front of the queue" : ""}${j.number != null ? `, number ${j.number}` : ""})`);
-    if (job.cancelled) return void drop(job); // cancelled while it was being posted
-    byId.set(job.id, job);
-    if (early.has(job.id)) finish(job.id, early.get(job.id));
-  }).catch((e) => job.reject(e));
+  if (stopped(kind)) { // work that was between two jobs when the stop came (an upload, a read) asks for its next job: it ends as a cancelled job, and nothing is posted
+    job.cancelled = true;
+    job.reject(new Error("cancelled"));
+    return job;
+  }
+  job.submit = async () => { // each post counts for itself: a job is posted again after a stray interrupt or a memory stop
+    const before = lastPosted;
+    lastPosted = name;
+    const why = await freeFirst(before, name); // a reason, or { why, keep }: keep ComfyUI's cache, only the models go
+    if (why) { // a small GPU holds one family of models at a time; a larger one frees only when RAM is short
+      await post("/free", { unload_models: true, free_memory: !why.keep }).catch(() => {}); // unanswered, the job still runs
+      await new Promise((ok) => setTimeout(ok, FREE_SETTLE_MS));
+      await released();
+      log(why.why ?? why); // logic.freeAsk's line
+    }
+    if (job.cancelled) return; // cancelled while the page read ComfyUI's free RAM, or while the memory was freed: nothing is posted
+    posting(name);
+    Object.assign(job, { sent: Date.now(), started: null, at: null, cached: 0, previews: 0, inMain: false });
+    return post("/prompt", promptBody(wf.prompt, { front, preview: !!preview })).then(answer).then((j) => {
+      if (!j.prompt_id) throw new Error(rejection(j));
+      job.id = j.prompt_id;
+      job.number = j.number;
+      job.heard = Date.now();
+      if (job.cancelled) return void drop(job); // cancelled while it was being posted
+      byId.set(job.id, job);
+      if (early.has(job.id)) finish(job.id, early.get(job.id));
+    }).catch((e) => job.reject(e));
+  };
   live.add(job);
   indexKey(name, values).then(async (key) => { // the job index first: a job made before with the same inputs is not run again
     job.index = key;
@@ -124,7 +210,8 @@ export function run(name, values, { kind = name, preview, progress, step, live: 
     if (job.cancelled) return;
     if (!outputs) return job.submit();
     live.delete(job);
-    log(`${name}: made before with the same inputs, taken from the job index`);
+    notRun++;
+    log(`${name}: taken from the job index (same inputs as an earlier job).`);
     progress?.(1);
     job.resolve(outputs);
   }).catch(() => { if (!job.cancelled) job.submit(); });
@@ -138,28 +225,29 @@ function rejection(j) {
 }
 
 async function finish(id, error) {
-  if (id === running) running = null;
   const job = byId.get(id);
   if (!job) return void early.set(id, error);
   byId.delete(id);
   early.delete(id);
   // An interrupt can land on the next prompt when the one it targeted had just finished: run it again once.
-  if (error === "cancelled" && !job.cancelled && job.retries-- > 0) { log(`${job.name} ${short(id)}: interrupted by a stray interrupt, posted again`); return job.submit(); }
+  if (error === "cancelled" && !job.cancelled && job.retries-- > 0) { log(`${job.name} ${short(id)}: interrupted by another client. Posted again.`); return job.submit(); }
   if (error && /out of memory|allocation on device/i.test(error) && !job.freed) { // models and caches piled up on the GPU
     job.freed = true;
     notice("The GPU ran out of memory: freeing ComfyUI's memory, then trying once more.");
     await post("/free", { unload_models: true, free_memory: true }).catch(() => {}); // unanswered, the retry still runs
-    await released(); // ComfyUI frees between prompts: a job posted at once ran first, with every model still loaded (29 Oct)
+    await released(); // ComfyUI frees between prompts: a job posted at once would run first, with every model still loaded
     return job.submit();
   }
   live.delete(job);
-  if (error) { log(`${job.name} ${short(id)}: failed after ${took(job)}: ${error}`, "error"); return job.reject(new Error(error)); }
+  if (job.previews) post(`/paintaplate/live/${id}`, {}).catch(() => {}); // its live previews served their pass: ComfyUI's temp folder keeps none
+  if (error) { log(jobFailed(job, Date.now(), error)); return job.reject(new Error(error)); }
   let out = (await historyRecord(id))?.outputs ?? {};
   const fresh = files(out).length || Object.values(out).some((o) => o.text?.length);
   if (fresh) memo.set(job.key, out);
   else out = memo.get(job.key) ?? out;
   if (memo.size > MEMO_MAX) memo.delete(memo.keys().next().value);
-  log(`${job.name} ${short(id)}: done in ${took(job)}${fresh ? "" : " (served from ComfyUI's cache)"}`);
+  if (!fresh) notRun++; // made before: ComfyUI answered every output from its cache
+  log(jobDone(job, Date.now(), !!fresh));
   if (job.index && (files(out).length || Object.values(out).some((o) => o.text?.length))) // recorded for later sessions
     if (recordable(out)) post(`/paintaplate/jobs/${job.index}`, { workflow: job.name, outputs: out }).catch(() => {});
   job.resolve(out);
@@ -167,7 +255,7 @@ async function finish(id, error) {
 
 // ComfyUI reports success from inside the run and records the history just after (execution.py, then main.py's
 // task_done): read too early, the record is missing and the outputs look empty. So wait for the record. A read that
-// fails (a dropped connection, a proxy's error page) is asked again: thrown from finish(), it left a done job waiting.
+// fails (a dropped connection, a proxy's error page) is asked again: thrown from finish(), it would leave a done job waiting.
 export async function historyRecord(id, { tries = 100, wait = 100 } = {}) {
   for (let i = 0; i < tries; i++) {
     const record = await fetch(`/history/${id}`).then((r) => r.json()).then((h) => h?.[id]).catch(() => undefined);
@@ -183,14 +271,18 @@ function drop(job) { // remove it from the queue, and stop it if it is the one r
   post("/interrupt", { prompt_id: job.id });
 }
 
-export function cancel(...kinds) {
+export function cancel(...kinds) { stopJobs(kinds, true); }
+// A newer request of the same kind replaces these jobs, as the next stroke's prefetch does: they stop with no line, since
+// the log says each fact once and a request replaced before its answer is none
+export function cancelQuietly(...kinds) { stopJobs(kinds, false); }
+function stopJobs(kinds, said) {
   for (const job of live) {
     if (!kinds.includes(job.kind)) continue;
     job.cancelled = true;
     live.delete(job);
     byId.delete(job.id);
     job.reject(new Error("cancelled"));
-    log(`${job.name} ${short(job.id)}: cancelled after ${took(job)}`);
+    if (said) log(jobStopped(job, Date.now(), socket));
     drop(job);
   }
 }
@@ -201,31 +293,40 @@ function message({ data }) {
     if (v.getUint32(0) !== 4) return;
     const n = v.getUint32(4);
     const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(data, 8, n)));
-    byId.get(meta.prompt_id)?.preview?.(new Blob([new Uint8Array(data, 8 + n)], { type: meta.image_type }));
+    const shown = byId.get(meta.prompt_id);
+    if (shown?.preview) { shown.previews += 1; shown.preview(new Blob([new Uint8Array(data, 8 + n)], { type: meta.image_type })); }
     return;
   }
   const { type, data: d } = JSON.parse(data);
   const job = byId.get(d?.prompt_id);
   if (job) job.heard = Date.now();
-  if (type === "execution_start") { running = d.prompt_id; job?.progress?.(0); if (job) log(`${job.name} ${short(d.prompt_id)}: ComfyUI started it ${took(job)} after the post`); }
-  else if (type === "execution_cached" && job && d.nodes?.length) log(`${job.name} ${short(d.prompt_id)}: ${d.nodes.length} of ${Object.keys(job.classes).length} nodes from ComfyUI's cache`);
+  if (type === "execution_start") { job?.progress?.(0); if (job) { job.started = Date.now(); const waited = jobWaited(job, job.started); if (waited) log(waited); } }
+  else if (type === "execution_cached" && job) job.cached = d.nodes?.length ?? 0; // folded into the job's line when it ends
   else if (type === "executing" && d.node) {
     job?.step?.(d.node);
-    if (job?.main.has(String(d.node))) { if (!job.inMain) log(`${job.name} ${short(d.prompt_id)}: ${job.classes[String(d.node)]} is running`); job.inMain = true; }
+    if (job) job.at = job.classes[String(d.node)] ?? job.at; // the node that runs: a stopped job's line names it
+    if (job?.main.has(String(d.node))) job.inMain = true;
     else if (job?.inMain) job.progress?.(0.97); // the main node is done; saving remains
   } else if (type === "progress") {
     if (job && (!job.main.size || job.main.has(String(d.node)))) job.progress?.(0.02 + (0.93 * d.value) / d.max);
-  } else if (type === "paintaplate.live") job?.live?.(d); // a live preview of a shot being sampled (nodes.py, Live Preview)
+  } else if (type === "paintaplate.live") { if (d.off) liveOff(d.off); else if (job) { job.previews += 1; job.live?.(d); } } // a live preview of a shot being sampled, or why there is none (nodes.py, Live Preview)
   else if (type === "execution_success") finish(d.prompt_id);
   else if (type === "execution_error") finish(d.prompt_id, `${d.node_type}: ${d.exception_message}`);
   else if (type === "execution_interrupted") finish(d.prompt_id, "cancelled");
 }
 
+// ComfyUI can stop while a job runs: a memory limit, a crash, a closed terminal. Its socket closes and it answers nothing,
+// so a job would wait for ever and the page with it (as on a 16 GB GPU under a memory cap). After GONE_POLLS
+// polls in a row with the socket closed and no answer, every job ComfyUI held fails, with what to do in its error.
+export const GONE = "ComfyUI stopped answering"; // logic.plainError says what to do
+const GONE_POLLS = 10; // 15 s
+let unanswered = 0;
 async function poll() { // some networks block WebSockets: then, and for prompts gone quiet, ask /history
+  let missed = false;
   for (const job of [...byId.values()]) {
     if (socket && Date.now() - job.heard < QUIET_MS) continue;
     let st;
-    try { st = (await (await fetch(`/history/${job.id}`)).json())[job.id]?.status; } catch { continue; }
+    try { st = (await (await fetch(`/history/${job.id}`)).json())[job.id]?.status; } catch { missed = true; continue; }
     if (!st || !byId.has(job.id)) continue;
     job.heard = Date.now();
     const err = st.messages?.find((m) => m[0] === "execution_error")?.[1];
@@ -233,14 +334,22 @@ async function poll() { // some networks block WebSockets: then, and for prompts
       : err ? `${err.node_type}: ${err.exception_message}` : "The workflow failed");
     else if (st.completed) finish(job.id);
   }
+  unanswered = missed && !socket ? unanswered + 1 : 0;
+  if (unanswered >= GONE_POLLS) {
+    unanswered = 0;
+    for (const id of [...byId.keys()]) finish(id, GONE);
+  }
 }
 
+let back = () => {}; // the page's check when ComfyUI answers again after its WebSocket closed: it may have restarted on other code
+export const onBack = (fn) => { back = fn; };
 export function connect() {
+  let closed = false; // the WebSocket closed since it last opened: ComfyUI stopped, or the network did
   const open = () => {
     const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?clientId=${CLIENT}`);
     ws.binaryType = "arraybuffer";
-    ws.onopen = () => { socket = true; ws.send(JSON.stringify({ type: "feature_flags", data: { supports_preview_metadata: true } })); };
-    ws.onclose = () => { socket = false; setTimeout(open, 2000); };
+    ws.onopen = () => { socket = true; ws.send(JSON.stringify({ type: "feature_flags", data: { supports_preview_metadata: true } })); if (closed) back(); closed = false; };
+    ws.onclose = () => { socket = false; closed = true; setTimeout(open, 2000); };
     ws.onmessage = message;
   };
   open();

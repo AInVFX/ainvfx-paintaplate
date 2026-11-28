@@ -15,12 +15,20 @@ from build_workflows import load  # noqa: E402
 
 
 def scan(files):
-    nodes, parents = {}, {}
+    nodes, parents, classes, schema_parents = {}, {}, {}, {}
     for path in files:
         src = open(path, encoding="utf-8", errors="ignore").read()
         # V3: node_id="X" ... Input("name" or id="name", until the next schema.
+        # A schema built on its parent's (super().define_schema(), as core's deprecated TextGenerate on TextGenerateV2
+        # since v0.44) declares its own inputs before node_id and takes the parent's too.
         for m in re.finditer(r'(?<![\w])node_id\s*=\s*"([^"]+)"', src):
             block = re.split(r'(?<![\w])node_id\s*=\s*"|\nclass ', src[m.end(): m.end() + 12000])[0]
+            head = src[src.rfind("\nclass ", 0, m.start()) + 1: m.start()]  # this class, from its header to its node_id
+            owner = re.match(r'class (\w+)(?:\((\w+)\))?', head)
+            if owner:
+                classes[owner.group(1)] = m.group(1)
+                if owner.group(2) and "super().define_schema()" in head:
+                    block, schema_parents[m.group(1)] = head + block, owner.group(2)
             names = set(re.findall(r'\.Input\(\s*"([^"]+)"', block)) | set(re.findall(r'\bid\s*=\s*"([^"]+)"', block))
             nodes.setdefault(m.group(1), set()).update(names)
         # V1: NODE_CLASS_MAPPINGS entries or @comfy_node(name=...) classes, inputs from INPUT_TYPES (and the parent's, via super()).
@@ -34,6 +42,8 @@ def scan(files):
                     parents[key] = cm.group(1)
     for key, parent in parents.items():
         nodes[key] |= nodes.get(parent, set())
+    for key, parent in schema_parents.items():
+        nodes[key] |= nodes.get(classes.get(parent), set())
     return nodes
 
 

@@ -1,10 +1,13 @@
-"""The numpy maths behind the nodes: fitting generated frames to the plate, filling, relighting.
+"""The numpy maths behind the nodes: fitting generated frames to the plate, compositing, filling an erase, relighting,
+mattes that follow an object, the HDR level and the keyframe video.
 
 Frames are (H, W, C) float arrays and masks (H, W); stacks add a first axis. Nothing here imports
 torch or ComfyUI, so every function is tested in plain Python (tests/test_mathops.py).
 """
 from __future__ import annotations
 
+import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -29,23 +32,41 @@ def structure(img: np.ndarray, sigma: float = 8.0) -> np.ndarray:
     return log - ndimage.gaussian_filter(log, sigma)
 
 
-def phase_shift(ref: np.ndarray, img: np.ndarray, max_shift: float) -> tuple[float, float]:
-    """Sub-pixel (dy, dx) that moves `img` onto `ref` (2D float arrays)."""
+def phase_shift(ref: np.ndarray, img: np.ndarray, max_shift: float, fine: bool = False) -> tuple[float, float]:
+    """Sub-pixel (dy, dx) that moves `img` onto `ref` (2D float arrays): the peak of their phase correlation, found to the
+    whole pixel on the inverse FFT, then refined. With `fine`, the inverse DFT is evaluated on a grid around the peak,
+    twice (steps of 1/10 px over 2 px, then of 1/100 px over 0.2 px), and a shift reads to 1/100 px. Without it, a
+    parabola through the peak's three samples refines it, and a sub-pixel shift reads short, since the peak is sharp:
+    0.2 px reads 0.13 on a smooth texture."""
     h, w = ref.shape
     win = np.outer(np.hanning(h), np.hanning(w)).astype(np.float32)
-    fa, fb = np.fft.rfft2(ref * win), np.fft.rfft2(img * win)
-    cross = fa * np.conj(fb)
-    corr = np.fft.irfft2(cross / (np.abs(cross) + 1e-9), s=(h, w))
+    if not fine:
+        cross = np.fft.rfft2(ref * win) * np.conj(np.fft.rfft2(img * win))
+        corr = np.fft.irfft2(cross / (np.abs(cross) + 1e-9), s=(h, w))
+    else:
+        cross = np.fft.fft2(ref * win) * np.conj(np.fft.fft2(img * win))
+        size = np.abs(cross)
+        if not size.max() > 0:
+            return 0.0, 0.0  # nothing to correlate
+        cross /= size + 1e-9 * size.max()
+        corr = np.fft.ifft2(cross).real
     py, px = np.unravel_index(np.argmax(corr), corr.shape)
+    if fine:
+        dy, dx = float(py - h if py > h / 2 else py), float(px - w if px > w / 2 else px)
+        fy, fx = np.fft.fftfreq(h), np.fft.fftfreq(w)
+        for step in (0.1, 0.01):
+            ys, xs = dy + np.arange(-10, 11) * step, dx + np.arange(-10, 11) * step
+            grid = (np.exp(2j * np.pi * np.outer(ys, fy)) @ cross @ np.exp(2j * np.pi * np.outer(fx, xs))).real
+            iy, ix = np.unravel_index(np.argmax(grid), grid.shape)
+            dy, dx = float(ys[iy]), float(xs[ix])
+    else:
+        def refine(c_m, c_0, c_p):  # parabola through three samples around the peak
+            d = c_m - 2 * c_0 + c_p
+            return 0.0 if abs(d) < 1e-12 else 0.5 * (c_m - c_p) / d
 
-    def refine(c_m, c_0, c_p):  # parabola through three samples around the peak
-        d = c_m - 2 * c_0 + c_p
-        return 0.0 if abs(d) < 1e-12 else 0.5 * (c_m - c_p) / d
-
-    dy = py + refine(corr[py - 1, px], corr[py, px], corr[(py + 1) % h, px])
-    dx = px + refine(corr[py, px - 1], corr[py, px], corr[py, (px + 1) % w])
-    dy = dy - h if dy > h / 2 else dy
-    dx = dx - w if dx > w / 2 else dx
+        dy = py + refine(corr[py - 1, px], corr[py, px], corr[(py + 1) % h, px])
+        dx = px + refine(corr[py, px - 1], corr[py, px], corr[py, (px + 1) % w])
+        dy, dx = (dy - h if dy > h / 2 else dy), (dx - w if dx > w / 2 else dx)
     if abs(dy) > max_shift or abs(dx) > max_shift:
         return 0.0, 0.0  # not a small misalignment: leave the frame alone
     return float(dy), float(dx)
@@ -102,15 +123,16 @@ AP1_LUMA = np.array([0.2722287168, 0.6740817658, 0.0536895174], np.float32)  # A
 
 
 def keep_black(hdr: np.ndarray, sdr: np.ndarray, low: float = 0.001, high: float = 0.01) -> np.ndarray:
-    """Where the SDR shot is black, its own black instead of SDR to HDR's: the IC-LoRA's frames carry noise there (a
-    16-bit fluid shot on a blank plate, 2 Nov: 67% of its pixels below 0.01, median 6.6e-4, its channels spread by 41%
-    of the luminance), while the shot they come from holds the plate's black. `hdr` and `sdr` in ACEScg, scene-linear:
-    below `low` (the SDR shot's luminance) the frame takes the SDR values, above `high` SDR to HDR's, a smooth step
-    between; values above 1.0 stay wherever the shot is not black."""
+    """Where the SDR shot is black, its own black instead of SDR to HDR's: the IC-LoRA's frames carry noise there (on a
+    16-bit fluid shot of a blank plate, 67% of the pixels below 0.01, median 6.6e-4, the channels spread by 41% of the
+    luminance), while the shot they come from holds the plate's black. `hdr` and `sdr` in ACEScg, scene-linear: below
+    `low` (the SDR shot's luminance) the frame takes the SDR values, above `high` SDR to HDR's, a smooth step between;
+    values above 1.0 stay wherever the shot is not black. No value is below 0: ACEScct codes under 0.0729 decode to
+    small negative values, which Lightricks' LTXVHDRDecodePostprocess also clamps to 0."""
     y = np.asarray(sdr[..., :3], np.float32) @ AP1_LUMA
     t = np.clip((y - low) / max(high - low, 1e-9), 0.0, 1.0)
     w = (t * t * (3.0 - 2.0 * t))[..., None]
-    out = np.array(hdr, np.float32, copy=True)
+    out = np.maximum(np.asarray(hdr, np.float32), 0.0)
     out[..., :3] = sdr[..., :3] * (1.0 - w) + out[..., :3] * w
     return out
 
@@ -131,10 +153,21 @@ def lanczos_taps(n_out: int, n_in: int, start: int = 0, count: int | None = None
     return np.clip(k, 0, n_in - 1), wts.astype(np.float32)
 
 
+def composite(destination: np.ndarray, source: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """`source` inside `mask` and `destination` around it: one frame, (H, W, C) float32, with a mask (H, W) in 0 to 1.
+
+    The arithmetic of core's Image Composite Masked (mask * source + (1 - mask) * destination), so a node that calls it
+    frame by frame makes that node's pictures. Core works on the whole batch: at its peak it holds
+    four copies of the shot and two of its mask, 13.2 GB for 121 frames at 1920 x 1088.
+    """
+    m = mask[..., None].astype(np.float32)
+    return m * source + (np.float32(1) - m) * destination
+
+
 def resize_lanczos(img: np.ndarray, h: int, w: int, window: tuple | None = None) -> np.ndarray:
     """(H, W[, C]) float to (h, w[, C]) with a separable Lanczos-3, or only the output rows y0:y1 and columns x0:x1 of
-    `window`, reading just the source pixels they need. The floor for new content enlarged to a plate's native size
-    (Adrien's handover, item 5): no clipping, so values above 1.0 and below 0 stay."""
+    `window`, reading just the source pixels they need. The floor for new content enlarged to a plate's native size,
+    with no clipping: values above 1.0 and below 0 stay."""
     y0, y1, x0, x1 = window or (0, h, 0, w)
     iy, wy = lanczos_taps(h, img.shape[0], y0, y1 - y0)
     ix, wx = lanczos_taps(w, img.shape[1], x0, x1 - x0)
@@ -149,9 +182,9 @@ def resize_lanczos(img: np.ndarray, h: int, w: int, window: tuple | None = None)
 def resize_to(img: np.ndarray, h: int, w: int) -> np.ndarray:
     """Resample the first two axes to exactly (h, w): separable bilinear, pixel centres aligned, edges clamped.
 
-    The same result as scipy's zoom (order 1, grid_mode) and torch's bilinear interpolate without align_corners,
-    in a quarter of the time: two gathers and two blends in numpy, no spline machinery. Enlarging the masks and
-    colour fields to full size was the composite's largest cost.
+    The same result as scipy's zoom (order 1, grid_mode) and torch's bilinear interpolate without align_corners, in
+    about a fifth of the time (a 480 x 270 field to 1920 x 1088 on one CPU: 63 ms against 295 ms): two gathers and two
+    blends in numpy, no spline machinery. fit_to_plate enlarges every mask and colour field to full size with it.
     """
     if img.shape[:2] == (h, w):
         return img
@@ -209,7 +242,7 @@ def level_fill(fill: np.ndarray, alpha: np.ndarray, base: np.ndarray, paint: np.
     """An erase's fill, levelled with the background it continues: (the fill, how far it moved on average, in levels).
 
     Klein's fill can sit a few levels off the background around it: a pale, soft shape where the object was, which LTX
-    then animated into smoke (+4 to +6 levels on a backdrop at 18, 28 Oct). The background inside the fill is estimated
+    then animates into smoke (+4 to +6 levels on a backdrop at 18). The background inside the fill is estimated
     from the frame around it on a grid of `cell` pixels, per brightness band, so a backdrop continues the backdrop and not
     the lit floor below it, with `push_pull`. Where the fill is flat and close to that estimate, the difference goes, low
     frequencies only. Where they differ a lot (an edge, a revealed object) or the fill is textured, nothing changes. The
@@ -319,17 +352,24 @@ def smooth_track(track: np.ndarray, radius: int) -> np.ndarray:
     return ndimage.uniform_filter1d(t, 2 * radius + 1, axis=0, mode="nearest")
 
 
+SEAM_DARK = 0.03  # seam_field leaves out the ring's pixels darker than this in the plate or the shot (sRGB-encoded luma)
+
+
 def seam_field(plate: np.ndarray, gen: np.ndarray, mask: np.ndarray, band: float) -> np.ndarray:
     """Log ratio (H, W, 3) that brings `gen` to the colour and exposure of `plate` at the edge of `mask`.
 
     It is measured on a ring just outside the mask, where the composite shows the plate, and
     spread smoothly inside it, as a Poisson blend would: colour and exposure drift are fixed,
-    texture is left alone. Work at low resolution: the field is smooth by design.
+    texture is left alone. Work at low resolution: the field is smooth by design. The ring leaves out
+    the near black (SEAM_DARK): there a ratio of two tiny values tints the edge (magenta on a fluid
+    shot's black, where the shot's black is a little green).
     """
     outside = mask < 0.02
     if outside.all() or not outside.any():
         return np.zeros(plate.shape[:2] + (3,), np.float32)
-    ring = outside & (ndimage.distance_transform_edt(outside) <= band)
+    luma = np.array([0.2126, 0.7152, 0.0722], np.float32)
+    lit = np.minimum(plate[..., :3] @ luma, gen[..., :3] @ luma) > SEAM_DARK  # in the near black, the ratio is noise: a fluid on black
+    ring = outside & (ndimage.distance_transform_edt(outside) <= band) & lit
     if ring.sum() < 16:
         return np.zeros(plate.shape[:2] + (3,), np.float32)
     d = np.log(np.maximum(plate[..., :3], 1e-4)) - np.log(np.maximum(gen[..., :3], 1e-4))
@@ -339,16 +379,38 @@ def seam_field(plate: np.ndarray, gen: np.ndarray, mask: np.ndarray, band: float
     return np.clip(field, -0.4, 0.4).astype(np.float32)
 
 
+def kept_edges(plate: np.ndarray, gen: np.ndarray, level: float = 0.06) -> np.ndarray:
+    """Where the plate and the generated frame both have an edge (H, W): the outline of what stays, a person beside a
+    cleaned object, a window frame. An edge only the plate has (the object a Clean removed) is not one."""
+    def edges(img):
+        y = img[..., :3] @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+        return np.hypot(ndimage.sobel(y, 0), ndimage.sobel(y, 1)) / 8.0 > level
+    return ndimage.binary_dilation(edges(plate) & edges(gen))  # one pixel wider: a diagonal step cannot slip through
+
+
+def edge_grow(mask: np.ndarray, stop: np.ndarray, steps: float) -> np.ndarray:
+    """`mask` grown by `steps` pixels, one at a time, never into `stop`: a Clean's margin stops at what stays."""
+    steps = int(round(steps))
+    if steps < 1:
+        return mask
+    return np.maximum(ndimage.binary_dilation(mask > 0.5, iterations=steps, mask=~stop).astype(np.float32), mask)
+
+
 def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0, match_color=True, grain=1.0,
-                 grow=8, feather=12, steady=2, workers=8, progress=None):
+                 grow=8, feather=12, steady=2, workers=8, progress=None, keep=None):
     """Fit `n` generated frames to the plate they are composited onto. Returns (images, masks), full size.
 
     `plate_at(i)` gives frame i as an (h, w, C) float array; `gen_at(i)` gives it at the plate's size or smaller (a shot
     made at the working size of a 4K plate): then only the window around the matte is enlarged, with a Lanczos-3
     (`resize_lanczos`), frame by frame. `masks` is (N or 1, any height, any width). The mask edge, the shift and the colour match are smoothed over
     `steady` frames on each side, so nothing in the composite changes from one frame to the next unless
-    the shot does. Masks and colour fields are computed at about 480 px, alignment at about 512 px.
+    the shot does. Masks and colour fields are computed at about 480 px, alignment at about 512 px. `keep` (N or 1, any
+    size), optional: where the shot keeps its own colours, a painted object. The colour match then fixes only the edge the
+    composite adds around it, and any other area of the matte (a cleaned one), so a painted object keeps its colours.
     """
+    if os.environ.get("PAINTAPLATE_RECORD"):  # what the composite was given (record_fit): tests/matte_study.py reads it
+        record_fit(os.environ["PAINTAPLATE_RECORD"], n, plate_at, gen_at, masks, keep, {"align": align, "max_shift": max_shift,
+                   "match_color": match_color, "grain": grain, "grow": grow, "feather": feather, "steady": steady})
     tick = progress or (lambda: None)
 
     def full(g):  # a frame at the plate's size
@@ -360,19 +422,40 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
     if len(masks) < n:  # a shorter matte holds its last frame
         masks = np.concatenate([masks, np.repeat(masks[-1:], n - len(masks), 0)])
     small = np.stack([resize_to(m, hl, wl) for m in masks])
-    small = steady_masks(small, steady, grow / lo, feather / lo)
-    band = max(4.0, (grow + feather) / lo)
-    ha, wa = max(1, h // al), max(1, w // al)
-
     def low(g, factor, hh, ww):  # a frame at low resolution: shrunk if it has the plate's size, else resized from its own
         return shrink(g, factor) if g.shape[:2] == (h, w) else resize_lanczos(g, hh, ww)
+
+    kept = painted = None
+    if keep is not None:  # a painted object: the colour field leaves it as the shot made it, steady from frame to frame
+        keep = np.asarray(keep, np.float32)[:n]
+        if len(keep) < n:
+            keep = np.concatenate([keep, np.repeat(keep[-1:], n - len(keep), 0)])
+        painted = np.stack([resize_to(m, hl, wl) for m in keep])
+        kept = steady_masks(painted, steady, 0.0, max(1.0, feather / lo / 2))
+    cleaned = small if painted is None else np.clip(small - painted, 0.0, 1.0)  # the part of the matte that a Clean regenerates
+    if cleaned.max() > 0.02 and grow > feather:  # a Clean's wide margin: all of the object, its soft edges and what it blurs
+        near = dilate(cleaned, feather / lo)  # its first stretch, as wide as the feather, always grows: the object's rim and outline go whole
+
+        def margin(i):  # the rest stops at the edges the plate and the clean plate both keep, the outline of what stays; its soft edge too
+            stop = kept_edges(low(plate_at(i), lo, hl, wl), low(gen_at(i), lo, hl, wl))
+            grown = edge_grow(near[i], stop, (grow - feather) / lo)
+            return grown, edge_grow(grown, stop, 2 * feather / lo)
+        with ThreadPoolExecutor(workers) as pool:
+            grown, limits = (np.stack(part) for part in zip(*pool.map(margin, range(n))))
+        small = np.maximum(steady_masks(near, steady, 0.0, feather / lo), steady_masks(grown, steady, 0.0, feather / lo) * limits)
+        if painted is not None:
+            small = np.maximum(small, steady_masks(painted, steady, grow / lo, feather / lo))
+    else:
+        small = steady_masks(small, steady, grow / lo, feather / lo)
+    band = max(4.0, (grow + feather) / lo)
+    ha, wa = max(1, h // al), max(1, w // al)
 
     def measure(i):  # pass 1: the shift and the colour field of one frame, at low resolution
         p, g = plate_at(i), gen_at(i)
         dy = dx = 0.0
         if align:
-            keep = 1.0 - resize_to(small[i], ha, wa)
-            dy, dx = phase_shift(structure(shrink(p, al)) * keep, structure(low(g, al, ha, wa)) * keep, max_shift / al)
+            plain = 1.0 - resize_to(small[i], ha, wa)  # where the composite shows the plate: the two frames are compared there
+            dy, dx = phase_shift(structure(shrink(p, al)) * plain, structure(low(g, al, ha, wa)) * plain, max_shift / al, fine=True)
             dy, dx = dy * al, dx * al
         field = None
         if match_color and small[i].max() > 0.02:
@@ -415,8 +498,11 @@ def fit_to_plate(n, h, w, plate_at, gen_at, masks, *, align=True, max_shift=8.0,
         g = np.array(g, np.float32, copy=True)
         if len(ys):
             y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
-            if fields is not None:  # the colour field, enlarged like the mask
-                g[y0:y1, x0:x1, :3] *= np.exp(resize_to(fields[i], h, w)[y0:y1, x0:x1])
+            if fields is not None:  # the colour field, enlarged like the mask; none on a painted object (keep)
+                f = resize_to(fields[i], h, w)[y0:y1, x0:x1]
+                if kept is not None:
+                    f = f * (1.0 - np.clip(resize_to(kept[i], h, w)[y0:y1, x0:x1], 0.0, 1.0))[..., None]
+                g[y0:y1, x0:x1, :3] *= np.exp(f)
             if np.any(level > 0):
                 g[y0:y1, x0:x1] = add_grain_level(g[y0:y1, x0:x1], level, np.random.default_rng(i))
         tick()
@@ -440,20 +526,16 @@ def keyframe_video(keys, width: int, height: int, frames: int, read) -> np.ndarr
     return video
 
 
-# Relight Transfer (31 Oct). The regenerated frame brings the new light; the plate keeps its fine detail and its own values.
+# Relight Transfer. The regenerated frame brings the new light; the plate keeps its fine detail and its own values.
 # The change of light is the log of the frame's luminance over the plate's, smoothed by a Gaussian of `radius` pixels, plus
 # the change of each channel's share of the luminance, smoothed over LIGHT_COLOUR_SPREAD radii, with a channel never counted
 # below CHANNEL_FLOOR of the luminance, so a dark channel cannot swing the colour. The filters are fixed: nothing depends on
-# a frame's own figures, so a steady shot gives a steady result (Adrien, 31 Oct: the full-size shot was steady, and the
-# composite's edge-aware filter and anchor gains made it flicker).
+# a frame's own figures, so a steady shot gives a steady result (an edge-aware filter, or gains anchored on each
+# frame, makes a steady full-size shot flicker).
 LIGHT_EPS = 1.0 / 512.0  # linear light: darker than this counts as this dark when the change is measured
 LIGHT_COLOUR_SPREAD = 4.0
 CHANNEL_FLOOR = 0.1
 RATIO_RANGE = (1.0 / 64.0, 64.0)  # a safety net, not a limit: a painted sun can be 30 times the sky it covers
-# Where a light stroke is strong, the relit frame keeps at least the plate with that light added, in display values, as the
-# brush showed it (Adrien, 31 Oct: the painted sun lost its brightness once made). In full from KEEP_LIGHT_AT of light, one
-# stroke's peak; less on a stroke's soft edge. Klein relights the rest of the frame.
-KEEP_LIGHT_AT = 0.3
 
 
 def light_change(source: np.ndarray, relit: np.ndarray, radius: float) -> np.ndarray:
@@ -486,20 +568,6 @@ def relight(plate: np.ndarray, source: np.ndarray, relit: np.ndarray, radius: fl
     return out
 
 
-def keep_light(out: np.ndarray, plate: np.ndarray, light: np.ndarray) -> np.ndarray:
-    """`out`, relit from `plate` (both linear light), raised where a light stroke is strong to the plate with that light
-    added, as the brush showed it. `light`: the painted light in display values (sRGB), black where none, any size."""
-    light = np.asarray(light, np.float32)[..., :3]
-    if light.shape[:2] != out.shape[:2]:
-        light = resize_to(light, out.shape[0], out.shape[1])
-    shown, under = linear_to_srgb(out[..., :3]), linear_to_srgb(plate[..., :3])
-    painted = np.minimum(under + light, np.maximum(under, 1.0))  # the brush adds in display values, up to white
-    weight = np.clip(light.max(-1, keepdims=True) / KEEP_LIGHT_AT, 0.0, 1.0)
-    out = out.copy()
-    out[..., :3] = srgb_to_linear(shown + weight * np.maximum(painted - shown, 0.0))
-    return out
-
-
 def srgb_to_linear(x: np.ndarray) -> np.ndarray:
     """The sRGB transfer function, decoded (IEC 61966-2-1): display values to linear light."""
     x = np.asarray(x, np.float32)
@@ -517,7 +585,7 @@ def frame_shift(source: np.ndarray, relit: np.ndarray, plate_width: int, shot_sp
     their structure, up to 8 plate pixels."""
     if shot_space == "sRGB":
         source, relit = srgb_to_linear(source[..., :3]), srgb_to_linear(relit[..., :3])
-    return phase_shift(structure(source), structure(relit), 8.0 * source.shape[1] / plate_width)
+    return phase_shift(structure(source), structure(relit), 8.0 * source.shape[1] / plate_width, fine=True)
 
 
 def shot_shift(shifts) -> tuple:
@@ -526,25 +594,9 @@ def shot_shift(shifts) -> tuple:
     return (float(np.median(s[:, 0])), float(np.median(s[:, 1]))) if len(s) else (0.0, 0.0)
 
 
-def shade_frame(img: np.ndarray, shade: np.ndarray, density: float = 0.7, space: str = "linear") -> np.ndarray:
-    """Darkens a frame where its shade is painted, in linear light, as a compositor multiplies a shadow: `shade` is white
-    where the shadow is full (its soft edge as painted), `density` how much light it takes away there. Klein ignores a
-    painted shadow (3 Nov test), so a light edit's shade strokes come through here, exactly where they are painted."""
-    m = np.asarray(shade, np.float32)
-    m = m.mean(-1) if m.ndim == 3 else m
-    if m.shape != img.shape[:2]:
-        from PIL import Image
-        m = np.asarray(Image.fromarray(np.clip(m * 255, 0, 255).astype(np.uint8)).resize((img.shape[1], img.shape[0]), Image.BILINEAR), np.float32) / 255
-    k = (1 - np.clip(density, 0, 1) * np.clip(m, 0, 1))[..., None]
-    rgb = img[..., :3]
-    out = linear_to_srgb(srgb_to_linear(rgb) * k) if space == "sRGB" else rgb * k
-    return np.concatenate([out, img[..., 3:]], -1) if img.shape[-1] > 3 else out
-
-
 def relight_frame(plate: np.ndarray, source: np.ndarray, relit: np.ndarray, radius: float, strength: float = 1.0,
-                  shift=(0.0, 0.0), plate_space: str = "linear", shot_space: str = "linear", light=None) -> np.ndarray:
-    """One frame of Relight Transfer: `relit` moved by `shift` onto `source`, then its light moved onto `plate`, and with
-    `light` the painted light kept where it is strong (`keep_light`).
+                  shift=(0.0, 0.0), plate_space: str = "linear", shot_space: str = "linear") -> np.ndarray:
+    """One frame of Relight Transfer: `relit` moved by `shift` onto `source`, then its light moved onto `plate`.
 
     The change of light is measured at the size of `source` and `relit`, then enlarged to the plate. The workflows give
     them at half the plate's size, where `radius` 1 still lets the shot's light through almost pixel for pixel.
@@ -557,92 +609,472 @@ def relight_frame(plate: np.ndarray, source: np.ndarray, relit: np.ndarray, radi
     if plate_space == "sRGB":  # decoded here, frame by frame, then encoded back: far cheaper than core at full size
         plate = np.concatenate([srgb_to_linear(plate[..., :3]), plate[..., 3:]], -1)
     out = relight(plate, source, relit, max(0.5, radius), strength).astype(np.float32)
-    if light is not None:
-        out = keep_light(out, plate, light).astype(np.float32)
     if plate_space == "sRGB":
         out[..., :3] = linear_to_srgb(out[..., :3])
     return out
 
 
-def follow_matte(masks: np.ndarray, n: int, first: np.ndarray, shot=None, base=None, zone: float = 1 / 16,
-                 threshold: float = 0.1, workers: int = 8, element=None):
-    """One matte per frame from a tracker's masks, made safe for the composite. Returns (mattes (n, H, W), summary).
+FOLLOW_FLICKER = 3  # frames: a piece of the matte that comes and goes within this many frames is a flicker (matte_flicker)
+FOLLOW_SHIFT = 1 / 320  # of the width (2 px at 640): a pixel of the shot within the plate's own range this far around it is no change
 
-    A tracker can return no masks, fewer than the frames, lose part of an object, or find other objects by itself
-    (SAM 3.1's video tracker found some on 102 of 121 frames from an empty first-frame mask, 28 Oct). A broken matte
-    drops a good result from the composite, or leaves the erase pass with no frames to read. So the matte follows the
-    object's own region, which starts as `element` (for paint, the pixels the edit changed on the first frame) or else
-    as the first-frame mask, and moves by at most `zone` of the width per frame:
-    - the tracker's mask within `zone` of the width of that region is the object; the rest is left out, even where a
-      thin line joins it to the object (SAM's paint matte traced a smoke plume's edges, joined to a painted car). After
-      frames where the object was not seen, the search grows by `zone` per frame, up to four times, so an object that
-      comes back nearby is found again. The region keeps only the object's thick parts (an opening of 1/240 of the
-      width), so it never creeps along a thin line; the matte itself keeps the thin parts near the object;
-    - a frame where the object is not seen keeps the previous matte (with no mask at all, the first-frame mask holds);
-    - with `shot` and `base` (the regenerated frames and the plate they were made over, (N, H, W, 3) in 0 to 1), the
-      matte also takes every pixel the shot changed by `threshold` or more within `zone` of the object's region: a
-      generated element stays in where the tracker dropped it, and the region moves with it. Where the shot equals the
-      plate, losing the matte changes nothing visible.
-    """
-    masks = np.asarray(masks, np.float32).reshape((-1,) + np.shape(masks)[-2:]) if np.size(masks) else np.zeros((0, 1, 1), np.float32)
-    first = np.asarray(first, np.float32)
-    first = first[0] if first.ndim == 3 else first
-    h, w = (shot.shape[1:3] if shot is not None else masks.shape[1:3] if len(masks) else first.shape[-2:])
-    fit = lambda m: (m if m.shape == (h, w) else resize_to(m.astype(np.float32), h, w)) > 0.5  # noqa: E731
-    seed = fit(first)
-    el = None if element is None or not np.size(element) else fit(np.asarray(element, np.float32).reshape(np.shape(element)[-2:]))
-    tracked = lambda t: fit(masks[t]) if t < len(masks) else np.zeros((h, w), bool)  # noqa: E731
-    grow = lambda m, r: dilate(m.astype(np.uint8), min(r, max(h, w))) > 0  # noqa: E731
 
-    changes = None
-    if shot is not None and base is not None:
-        def change(t):  # where the shot differs from the plate under it, without one-pixel edges from a small shift
-            b = base[min(t, len(base) - 1)]
-            b = b if b.shape[:2] == (h, w) else resize_to(b, h, w)
-            d = ndimage.gaussian_filter(np.abs(shot[min(t, len(shot) - 1)][..., :3] - b[..., :3]).max(axis=-1), 1.0)
-            return ndimage.binary_opening(d > threshold, structure=np.ones((3, 3), bool))
-        with ThreadPoolExecutor(max(1, workers)) as pool:  # numpy and scipy release the GIL
-            changes = list(pool.map(change, range(n)))
-    reach, thin = max(2.0, zone * w), max(1.0, w / 240)
-    line = el if el is not None and el.any() else seed  # the object's own region
-    out, prev, peak = np.zeros((n, h, w), np.float32), seed, int(seed.sum())
-    seen = strays = held = added = lost = 0
-    most = 1.0
+def shot_change(shot: np.ndarray, plate: np.ndarray) -> np.ndarray:
+    """How far a regenerated frame is from the plate's frame under it, per pixel: (H, W) from two (H, W, 3) frames in
+    0 to 1. Each pixel counts from the plate's own range of values FOLLOW_SHIFT of the width around it, so a road that
+    the shot only shifted is no change, then the result is softened by one pixel. Follow Matte's test of change."""
+    size = (2 * max(1, round(FOLLOW_SHIFT * plate.shape[1])) + 1,) * 2 + (1,)
+    return ndimage.gaussian_filter(np.maximum(ndimage.minimum_filter(plate, size) - shot, shot - ndimage.maximum_filter(plate, size)).max(axis=-1).clip(0), 1.0)
+
+
+def reference_frames(n: int) -> list:
+    """The frames that a matte's references are drawn on: the first, the last and three between (0, 30, 60, 90 and 120
+    of 121 frames). record_fit keeps them at full size."""
+    return sorted({0, n // 4, n // 2, (3 * n) // 4, n - 1}) if n > 0 else []
+
+
+def record_fit(folder: str, n: int, plate_at, gen_at, masks, keep, values: dict) -> str:
+    """With PAINTAPLATE_RECORD=<folder> in ComfyUI's environment, what Fit to Plate was given, as one .npz file beside
+    Follow Matte's: every frame of the plate and of the generated frames (the shot, or a Clean's clean plate pass) at
+    the matte's size, the frames of reference_frames at their own sizes, the mattes and `keep` as given, in half floats,
+    and the node's values. A Clean's clean plate pass is recorded nowhere else. replay_fit reads it back. Returns the
+    file's path."""
+    m = np.asarray(masks, np.float32)
+    mh, mw = m.shape[-2:]
+    h, w = np.shape(plate_at(0))[:2]
+
+    def small(f):  # a frame at the matte's size: whole blocks averaged, then resampled
+        f = np.asarray(f, np.float32)[..., :3]
+        return resize_to(shrink(f, max(1, min(f.shape[0] // mh, f.shape[1] // mw))), mh, mw).astype(np.float16)
+
+    whole = lambda f: np.asarray(f, np.float32)[..., :3].astype(np.float16)  # noqa: E731
+    pick = reference_frames(n)
+    names = sorted(values)
+    os.makedirs(folder, exist_ok=True)
+    stamp = f"{time.strftime('%Y%m%d_%H%M%S')}_{int(time.time() * 1000) % 1000:03d}"
+    path = os.path.join(folder, f"fit_to_plate_{w}x{h}_{n}f_{stamp}.npz")
+    np.savez_compressed(path, plate=np.stack([small(plate_at(t)) for t in range(n)]), image=np.stack([small(gen_at(t)) for t in range(n)]),
+                        spread_plate=np.stack([whole(plate_at(t)) for t in pick]), spread_image=np.stack([whole(gen_at(t)) for t in pick]),
+                        masks=m.astype(np.float16), keep=np.zeros((0,), np.float16) if keep is None else np.asarray(keep, np.float16),
+                        pick=np.array(pick), names=np.array(names), values=np.array([float(values[k]) for k in names]), n=n)
+    return path
+
+
+def replay_fit(path: str) -> dict:
+    """What record_fit wrote, in floats: `plate` and `image` (N, h, w, 3) at the matte's size, `spread_plate` and
+    `spread_image` on the frames of `pick`, `masks`, `keep` (or None) and the node's `values` by name. An array kept in
+    8 bits, as in a smaller copy of the file, reads from 0 to 1, as in replay."""
+    d = np.load(path)
+    f = lambda k: d[k].astype(np.float32) / (255.0 if d[k].dtype == np.uint8 else 1.0)  # noqa: E731
+    return {"n": int(d["n"]), "plate": f("plate"), "image": f("image"), "spread_plate": f("spread_plate"), "spread_image": f("spread_image"),
+            "masks": f("masks"), "keep": f("keep") if d["keep"].size else None, "pick": [int(t) for t in d["pick"]],
+            "values": {str(k): float(v) for k, v in zip(d["names"], d["values"])}}
+
+
+def matte_flicker(mattes, run: int = 3) -> np.ndarray:
+    """How much a matte flickers, frame by frame (a detection per frame can lose an arm on 18
+    of 121 frames): the share of the matte that appears or disappears for `run` frames at most, then comes back as it was.
+    A piece counts on frames s to s+L-1 (L <= run) when frames s-1 and s+L agree on it and every frame between differs,
+    and when it reaches more than (L+1) * r px inside both, or outside both, with r = max(1, W / 240): a move of r px a
+    frame does not count. The value on a frame is the pieces' area against the largest matte of frames s-1 to s+L. A
+    matte that comes or goes for good (the object hidden, back, or gone) does not count."""
+    M = np.asarray(mattes) > 0.5
+    n, w = len(M), M.shape[-1]
+    r, area, out = max(1, round(w / 240)), M.reshape(n, -1).sum(1), np.zeros(n)
+
+    def whole(piece, seed):  # the pieces that reach the seed, whole
+        labels, _ = ndimage.label(piece)
+        ids = np.unique(labels[piece & seed])
+        return int(np.isin(labels, ids[ids > 0]).sum())
+    for run_ in range(1, run + 1):
+        for s in range(1, n - run_):
+            before, after, between = M[s - 1], M[s + run_], M[s:s + run_]
+            lost, extra, k = before & after & ~between.any(0), ~before & ~after & between.all(0), 0
+            if lost.any():
+                k += whole(lost, ndimage.binary_erosion(before & after, iterations=(run_ + 1) * r))
+            if extra.any():
+                k += whole(extra, ~ndimage.binary_dilation(before | after, iterations=(run_ + 1) * r))
+            if k:
+                out[s:s + run_] = np.maximum(out[s:s + run_], k / max(int(area[s - 1:s + run_ + 1].max()), 1))
+    return out
+
+
+VOTES_ALONE = 0.3  # of a SAM mask's piece: changed by a quarter of the threshold over this share, it is the edit, whole
+VOTES_KEPT = 0.5  # of a piece, or of a kept thing: this share on what the plate keeps, or in the element, decides
+VOTES_GLOW = 1 / 160  # of the width: what the shot changed this close to the matte joins it, on that frame only
+VOTES_PATIENCE = 2  # empty frames in a row before the object counts as hidden or gone
+VOTES_SUBJECT = 0.75  # of a kept thing on its first frame: this share in the area the edit works on makes it the edit's subject
+
+
+def _first_present(m) -> int:
+    seen = np.flatnonzero(np.asarray(m).reshape(len(m), -1).any(axis=1))
+    return int(seen[0]) if len(seen) else -1
+
+
+def _edge(m) -> bool:
+    return bool(m[:2].any() or m[-2:].any() or m[:, :2].any() or m[:, -2:].any())
+
+
+def _close(m, r):
+    r = int(r)
+    return ndimage.binary_closing(np.pad(m, r), iterations=r)[r:-r, r:-r] if r > 0 and m.any() else m
+
+
+def kept_things(objects, region) -> np.ndarray:
+    """What the plate keeps, (N, H, W) booleans from SAM's objects (N, K, H, W): each object, unless on its first frame
+    VOTES_SUBJECT of it or more lies in `region`, the area the edit works on: there it is the edit's own subject (a barn
+    that a Clean removes, a horse that a paint turns into a robot), not a thing to keep. A horse with a paint on its
+    belly lies about half in it, and stays a thing to keep: the matte then cuts SAM's whole horse to the change."""
+    objects = np.asarray(objects) > 0.5
+    if objects.ndim == 3:  # one thing, (N, H, W)
+        objects = objects[:, None]
+    out = np.zeros((objects.shape[0],) + objects.shape[2:], bool)
+    for k in range(objects.shape[1]):
+        m = objects[:, k]
+        f0 = _first_present(m)
+        if f0 >= 0 and (m[f0] & region).sum() < VOTES_SUBJECT * m[f0].sum():
+            out |= m
+    return out
+
+
+def follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, threshold: float = 0.1,
+                 zone: float = 1 / 16, first_frame: int = 1, tick=None, strategy: str = "Object"):
+    if os.environ.get("PAINTAPLATE_RECORD"):
+        record_votes(os.environ["PAINTAPLATE_RECORD"], "paint", strategy=strategy, shot_masks=shot_masks, word_masks=word_masks,
+                     plate_masks=plate_masks, kept=kept, element=element, shot=shot, base=base, threshold=threshold, zone=zone,
+                     first_frame=first_frame)
+    out, summary = _follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, threshold, zone, first_frame, tick)
+    return with_strategy(strategy, out, summary, shot=shot, base=base, old=plate_masks, threshold=threshold, zone=zone, tick=tick)
+
+
+def _follow_votes(shot_masks, word_masks, plate_masks, kept, element, shot, base, threshold, zone, first_frame, tick):
+    """A paint's matte from SAM 3.1's answers, judged by how much the shot changed (votes). Returns (mattes, summary).
+
+    `shot_masks` and `word_masks` are SAM's masks on the shot (N, H, W), given the element with the object's name and
+    the name alone; `plate_masks` its masks on the plate given the element (the object the edit replaces); `kept` what
+    the plate keeps (SAM's objects (N, K, H, W), or one (N, H, W), filtered by kept_things against the element closed by
+    1/60 of the width); `element` where the edit changed the first frame; `shot` and `base` the
+    shot and the plate (N, H, W, 3) in 0 to 1. On the first frame a mask given the element answers with it: the second
+    frame's stands in for it. Each piece of the masks is then judged on its frame:
+    - a piece that lies mostly on what the plate keeps is cut to the change, closed by 1/320 of the width: a whole horse
+      for a paint on its belly keeps the painted part, a patch on a large kept thing stays whole; a cut under 2% of the
+      piece is that thing regenerated, and is left out;
+    - any other piece is the edit, whole, when the shot changed it by a quarter of the threshold over VOTES_ALONE of it
+      (thin smoke changes the plate by a few percent), else it is cut to the change;
+    - the plate's masks join where the shot changed, near the shot's masks: the old object, which the new one covers.
+    The matte then follows a state. Present, it takes the pieces that lie at least half within the last matte grown by
+    `zone` of the width (a mask can jump onto a far thing in the frame its object leaves: a boat's wake). Hidden (it
+    vanished inside the frame for VOTES_PATIENCE frames), it takes pieces within the last matte grown by one more zone per
+    frame, never one that lies mostly on what the plate keeps. Gone (it vanished after touching the frame's edge), it
+    takes nothing. On each frame alone, what the shot changed above the threshold within VOTES_GLOW of the width of the
+    matte joins it (a beam's glow, a wing's blur), so it cannot creep. What the plate keeps wins wherever the shot did
+    not change. Frames are named by the plate's numbers: `first_frame` is the first one's."""
+    n = len(shot)
+    h, w = shot.shape[1:3]
+    tick = tick or (lambda: None)
+    frames = lambda a: np.asarray(a, np.float32)[:n] > 0.5 if a is not None and np.size(a) else np.zeros((n, h, w), bool)  # noqa: E731
+    shot_m, word_m, plate_m = frames(shot_masks), frames(word_masks), frames(plate_masks)
+    if n > 1:
+        shot_m[0] = shot_m[1]
+    union = shot_m | word_m
+    seed = np.asarray(element, np.float32).reshape(-1, h, w)[0] > 0.5 if element is not None and np.size(element) else np.zeros((h, w), bool)
+    seed = _close(seed, max(2, round(w / 60)))
+    kept = kept_things(np.asarray(kept, np.float32)[:n], seed) if kept is not None and np.size(kept) else np.zeros((n, h, w), bool)
+    reach, near, close = max(2.0, zone * w), max(1.0, w * VOTES_GLOW), max(1, round(w / 320))
+    grow = lambda m, px: dilate(m.astype(np.uint8), px) > 0 if m.any() else m  # noqa: E731
+    out = np.zeros((n, h, w), np.float32)
+    state, prev, hidden_for, empty = "present", np.zeros((h, w), bool), 0, 0
+    counts = dict(old=0, cut=0, away=0, added=0, kept=0)
+    hidden, gone_at = [], None
+    with ThreadPoolExecutor(min(16, os.cpu_count() or 4)) as pool:  # each frame's change on its own: scipy's filters release the GIL
+        diffs = list(pool.map(lambda t: shot_change(shot[t], base[t]), range(n)))
     for t in range(n):
-        s = tracked(t)
-        near = grow(line, reach * min(1 + lost, 4)) if line.any() else np.ones((h, w), bool)
-        core = s & near  # SAM's mask near the region: what lies further away is left out, even joined to it
-        strays += bool((s & ~near).any())
-        peak = max(peak, int(core.sum()))
-        found = core
-        if changes is not None:
-            gain = changes[t] & grow(core | line, reach)
-            if int(gain.sum()) > 3 * max(peak, 1):  # never a runaway: changes far beyond the object's size stay out
-                gain = changes[t] & grow(core, reach) if core.any() else np.zeros_like(s)
-            if int((gain & ~core).sum()) > 0.25 * int(core.sum()) + 16:
-                added += 1
-                most = max(most, float((core | gain).sum()) / max(int(core.sum()), 1))
-            found = core | gain
-        seen += bool(core.any())
-        if found.any():
-            f = ndimage.binary_fill_holes(found)
-            thick = grow(~grow(~found, thin), thin)  # the object without its thin lines: the region never creeps along them
-            line, lost = (ndimage.binary_fill_holes(thick) if thick.any() else f), 0
-        else:  # the object is not seen: the last matte holds, and the search grows
-            f, lost = prev, lost + 1
-            held += bool(prev.any())
-        out[t], prev = f, f
-    if not len(masks) or not masks.any():
-        summary = "SAM 3.1 returned no mask: the first-frame mask holds on every frame"
-    else:
-        summary = f"SAM 3.1 found the object on {seen} of {n} frames"
-        if strays:
-            summary += f"; what it found further than the object can move, on {strays} frame(s), is left out"
-        if held:
-            summary += f"; the last matte held on {held} frame(s) where the object was not seen"
-        if added:
-            summary += f"; the shot's changes near the object added area on {added} frame(s), up to {most:.1f} times SAM's mask"
-    return out, summary
+        d = diffs[t]
+        away_from = ~grow(union[t] | plate_m[t], reach)
+        level = float(np.median(d[away_from])) if away_from.sum() > 256 else float(np.median(d))
+        changed, moved = d > level + threshold, d > level + 0.25 * threshold
+        labels, count = ndimage.label(union[t])
+        cand, cut = np.zeros((h, w), bool), np.zeros((h, w), bool)
+        for k in range(1, count + 1):
+            piece = labels == k
+            if (piece & kept[t]).sum() >= VOTES_KEPT * piece.sum():
+                c = piece & grow(changed, 2)
+                if c.sum() >= 0.02 * piece.sum():  # less is the kept thing regenerated: specks
+                    cut |= c
+            elif moved[piece].mean() >= VOTES_ALONE:
+                cand |= piece
+            else:
+                cut |= piece & grow(changed, 2)
+        counts["cut"] += bool(cut.any())
+        cand |= _close(cut, close)
+        old = plate_m[t] & grow(changed, 2)
+        if old.any():
+            ol, _ = ndimage.label(old)
+            hit = np.unique(ol[old & grow(union[t], reach)])
+            old = np.isin(ol, hit[hit > 0])
+            counts["old"] += bool(old.any())
+        cand = ndimage.binary_fill_holes(cand | old)
+        if t == 0:
+            allowed = grow(seed, reach) if seed.any() else np.ones((h, w), bool)
+        elif state == "present":
+            allowed = grow(prev, reach)
+        elif state == "hidden":
+            allowed = grow(prev, reach * (1 + hidden_for))
+        else:
+            allowed = np.zeros((h, w), bool)
+        labels, count = ndimage.label(cand)
+        m = np.zeros((h, w), bool)
+        left_out = False
+        for k in range(1, count + 1):
+            piece = labels == k
+            if (piece & allowed).sum() < 0.5 * piece.sum() or (state == "hidden" and (piece & kept[t]).sum() >= VOTES_KEPT * piece.sum()):
+                left_out = True
+                continue
+            m |= piece
+        counts["away"] += left_out
+        if m.any():
+            glow = changed & grow(m, near) & ~m
+            counts["added"] += bool(glow.any())
+            m |= glow
+            if state == "hidden" and hidden and hidden[-1][1] is None:
+                hidden[-1][1] = t - 1
+            state, prev, hidden_for, empty = "present", m, 0, 0
+        else:
+            empty += 1
+            if state == "present" and t > 0 and empty >= VOTES_PATIENCE:
+                if _edge(prev):
+                    state, gone_at = "gone", t - empty + 1
+                else:
+                    state, hidden_for = "hidden", 1
+                    hidden.append([t - empty + 1, None])
+            elif state == "hidden":
+                hidden_for += 1
+        dropped = m & kept[t] & ~moved
+        counts["kept"] += bool(dropped.any())
+        out[t] = m & ~dropped
+        tick()
+    if hidden and hidden[-1][1] is None:
+        hidden[-1][1] = n - 1
+    flicker = matte_flicker(out)
+    worst = int(np.argmax(flicker)) if len(flicker) else 0
+    return out, votes_summary(n, int(union.reshape(n, -1).any(axis=1).sum()), counts, hidden, gone_at,
+                              (int((flicker > 0).sum()), float(flicker.max()) if len(flicker) else 0.0, worst), first_frame)
+
+
+SAM_WORDS_CUT = (" with ", " in ", " on ", " at ", " from ", " behind ", " outside ", " including ", " that ", " which ", ",",
+                 " standing", " landing", " rising", " hanging", " overlapping")
+
+
+def sam_words(answer: str, kind: str = "thing") -> str:
+    """The words SAM 3.1 searches for, from the prompt upsampler's answer. `kind` "thing": the edit's object, a short
+    noun phrase: a longer answer keeps its first one (« bald eagle landing on the fence post » gives « bald eagle »).
+    "kept": what the plate keeps, the first entry of the list the upsampler gives, its main person, animal or vehicle
+    (« person », « horse », « white van »): the entries after it name parts and accessories (« blue-sleeved arm »), which
+    the edit may change. Entries of more than four words, denials (« no other people ») and « none » never count.
+    Lowercase, without a final full stop."""
+    text = " ".join(str(answer or "").strip().strip(".").lower().split())
+    if kind == "kept":
+        items = [x.strip().strip(".") for x in text.split(",")]
+        items = [x for x in items if x and x != "none" and len(x.split()) <= 4 and not x.startswith("no ") and "visible" not in x]
+        return items[0] if items else ""
+    for word in SAM_WORDS_CUT:
+        if word in f" {text} ":
+            text = f" {text} ".split(word)[0].strip()
+    return text
+
+
+def clean_votes(zone_masks, named, kept, zone, first_frame: int = 1, strategy: str = "Object"):
+    if os.environ.get("PAINTAPLATE_RECORD"):
+        record_votes(os.environ["PAINTAPLATE_RECORD"], "clean", strategy=strategy, zone_masks=zone_masks, named=named, kept=kept, zone=zone,
+                     first_frame=first_frame)
+    out, summary = _clean_votes(zone_masks, named, kept, zone, first_frame)
+    return with_strategy(strategy, out, summary)
+
+
+def _clean_votes(zone_masks, named, kept, zone, first_frame):
+    """A Clean's matte from SAM 3.1's answers on the plate. Returns (mattes, summary). `zone_masks` (N, H, W) is SAM's
+    track of the zone; `named` (N, K, H, W) its objects of the removed thing's name, or None; `kept` SAM's objects of what
+    the plate keeps (N, K, H, W), filtered by kept_things against the zone, so the removed thing is not among them;
+    `zone` (H, W) the painted
+    area. On the first frame SAM's track answers with the zone: the named objects that lie mostly in it stand in for
+    it. The matte is the track minus what the plate keeps (a person in front of the palm behind her)."""
+    m = np.asarray(zone_masks, np.float32) > 0.5
+    n = len(m)
+    zone = np.asarray(zone, np.float32).reshape(-1, *m.shape[1:])[0] > 0.5
+    if named is not None and np.size(named):
+        named = np.asarray(named, np.float32) > 0.5
+        first = np.zeros(m.shape[1:], bool)
+        for k in range(named.shape[1]):
+            a = named[0, k]
+            if a.any() and (a & zone).sum() >= VOTES_KEPT * a.sum():
+                first |= a
+        if first.any():
+            m[0] = first
+    kept = kept_things(np.asarray(kept, np.float32)[:n], zone) if kept is not None and np.size(kept) else np.zeros_like(m)
+    out = m & ~kept
+    seen = int(m.reshape(n, -1).any(axis=1).sum())
+    left = int((m & kept).reshape(n, -1).any(axis=1).sum())
+    lines = [f"tracked on {seen} of {n} frames."] + [f"Left out: what the plate keeps (person, animal, vehicle), on {left} frame" + ("" if left == 1 else "s") + "."] * bool(left)
+    return out.astype(np.float32), "\n  ".join(lines)
+
+
+# The matte strategies: how much of the shot the composite takes. One function applies each to Follow Matte's matte.
+MATTE_STRATEGIES = ("Auto", "Object", "Object and effects", "Whole shot")
+EFFECTS_WEAK = 0.2  # a change this share of the threshold joins « Object and effects » where it continues the object's
+EFFECTS_LIGHT = 0.03  # or a change of light and colour this large, the shot and the plate blurred
+EFFECTS_HOLD = 2  # frames on each side over which « Object and effects » holds what it found (thin smoke comes and goes)
+AUTO_SPREAD = 0.05  # « Auto »: the edit spreads when the shot changed this share of the frame away from the object
+AUTO_QUIET = 0.05  # « Auto »: or when what « Object and effects » adds differs from the plate over less than this share
+
+
+def effects_matte(today, shot, base, old=None, threshold: float = 0.1, zone: float = 1 / 16, tick=None, workers: int = 8):
+    """« Object and effects »: the matte `today` (N, H, W), what the edit replaces whole (`old`, SAM's masks of the plate
+    from the element), and what the shot changed around them. Returns (mattes, spread, quiet).
+
+    On each frame the seed is the matte, the old object and the shot's strong change (shot_change above the frame's level
+    away from the object plus `threshold`) closed over 1/40 of the width, holes filled. The weak change that continues the
+    seed within 1/5 of the width joins it: a change EFFECTS_WEAK times the threshold, or a change of light and colour above
+    EFFECTS_LIGHT (both frames blurred over 1/120 of the width, so thin smoke over busy ground counts). The whole is closed
+    over 1/80 of the width, holes filled, pieces under 1/2000 of the frame left out, held over EFFECTS_HOLD frames on each
+    side and grown by 1/64 of the width. Solid: thin smoke shows at full strength, and Fit to Plate softens the edge.
+    The frames run on `workers` threads.
+
+    `spread`: the mean share of each frame, beyond 1/5 of the width from the matte, where shot_change passes the threshold.
+    `quiet`: the mean share of each frame inside the result but outside the matte, weighted by shot_change over the
+    threshold (up to 1): how much of the plate it gives up visibly."""
+    today = np.asarray(today) > 0.5
+    n, h, w = today.shape
+    oldm = np.zeros((n, h, w), bool)
+    if old is not None and np.size(old):
+        o = np.asarray(old, np.float32)
+        o = o.max(1) if o.ndim == 4 else o
+        for t in range(n):
+            f = o[min(t, len(o) - 1)]
+            oldm[t] = (f if f.shape == (h, w) else resize_to(f[..., None], h, w)[..., 0]) > 0.5
+    sigma, reach, speck = max(1.0, w / 120), w / 5, h * w / 2000
+
+    def frame(t):  # one frame's (what it adds, spread, shot_change); the frames run on `workers` threads
+        if tick:
+            tick()
+        g, b = (np.asarray(a[t], np.float32)[..., :3] for a in (shot, base))
+        if g.shape[:2] != (h, w):
+            g = resize_to(g, h, w)
+        if b.shape[:2] != (h, w):
+            b = resize_to(b, h, w)
+        d = shot_change(g, b)
+        far = ~(dilate(today[t].astype(np.uint8), reach) > 0) if today[t].any() else np.ones((h, w), bool)
+        spread = float((d[far] > threshold).mean()) if far.any() else 0.0
+        obj = today[t] | oldm[t]
+        away = ~(dilate(obj.astype(np.uint8), max(2.0, zone * w)) > 0) if obj.any() else np.ones((h, w), bool)
+        if away.sum() < 256:
+            away = np.ones((h, w), bool)
+        light = np.abs(ndimage.gaussian_filter(g, (sigma, sigma, 0)) - ndimage.gaussian_filter(b, (sigma, sigma, 0))).max(-1)
+        level, level_light = float(np.median(d[away])), float(np.median(light[away]))
+        seed = obj | ndimage.binary_fill_holes(_close(d > level + threshold, max(2, round(w / 40))))
+        if not seed.any():
+            return seed, spread, d
+        weak = ((d > level + EFFECTS_WEAK * threshold) | (light > level_light + EFFECTS_LIGHT)) & (dilate(seed.astype(np.uint8), reach) > 0)
+        lab, _ = ndimage.label(weak | seed)
+        ids = np.unique(lab[seed])
+        m = ndimage.binary_fill_holes(_close(np.isin(lab, ids[ids > 0]), max(2, round(w / 80))))
+        lab, k = ndimage.label(m)
+        if k:
+            m = np.isin(lab, np.flatnonzero(ndimage.sum(m, lab, np.arange(1, k + 1)) >= speck) + 1)
+        return m, spread, d
+
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, n or 1))) as pool:
+        found = list(pool.map(frame, range(n)))
+    out = today | oldm
+    for t, (m, _, _) in enumerate(found):
+        out[t] |= m
+    spread, changes = [f[1] for f in found], [f[2] for f in found]
+    held = np.stack([out[max(0, t - EFFECTS_HOLD):t + EFFECTS_HOLD + 1].any(0) for t in range(n)]) if n else out
+    grown = np.stack([dilate(m.astype(np.uint8), max(1.0, w / 64)) > 0 if m.any() else m for m in held]) if n else held
+    quiet = [float((np.minimum(1.0, changes[t] / threshold) * (grown[t] & ~today[t])).sum() / (h * w)) for t in range(len(changes))]
+    return grown, float(np.mean(spread)) if spread else 0.0, float(np.mean(quiet)) if quiet else 0.0
+
+
+def with_strategy(strategy: str, mattes, summary: str, shot=None, base=None, old=None, threshold: float = 0.1,
+                  zone: float = 1 / 16, tick=None):
+    """Follow Matte's matte through a strategy (MATTE_STRATEGIES). Returns (mattes, summary) with one line that names the
+    strategy that ran and, for « Auto », why. « Object »: the matte as Follow Matte made it, which keeps the most plate.
+    « Object and effects »: effects_matte. « Whole shot »: every pixel from the shot. « Auto » takes « Object and
+    effects » when the edit spreads (spread over AUTO_SPREAD) or when what it adds differs little from the plate (quiet
+    under AUTO_QUIET), else « Object ». A Clean (no shot here) runs « Object » for « Auto » and « Object and effects »."""
+    mattes = np.asarray(mattes, np.float32)
+    if strategy not in MATTE_STRATEGIES:
+        raise ValueError(f"matte strategy {strategy!r}: one of {', '.join(MATTE_STRATEGIES)}")
+    if strategy == "Whole shot":
+        return np.ones_like(mattes), f"{summary}\n  Strategy: Whole shot, every pixel comes from the regenerated shot."
+    if shot is None or base is None:
+        why = "Strategy: Auto chose Object: a Clean keeps to its object." if strategy == "Auto" else "Strategy: Object."
+        return mattes, f"{summary}\n  {why}"
+    if strategy == "Object":
+        return mattes, f"{summary}\n  Strategy: Object."
+    effects, spread, quiet = effects_matte(mattes, shot, base, old, threshold, zone, tick)
+    if strategy == "Object and effects":
+        return effects.astype(np.float32), f"{summary}\n  Strategy: Object and effects."
+    if spread > AUTO_SPREAD:
+        return effects.astype(np.float32), f"{summary}\n  Strategy: Auto chose Object and effects: the edit spreads past the object ({100 * spread:.0f}% of the frame)."
+    if quiet < AUTO_QUIET:
+        return effects.astype(np.float32), f"{summary}\n  Strategy: Auto chose Object and effects: it barely changes the plate around the object ({100 * quiet:.0f}% of the frame)."
+    return mattes, f"{summary}\n  Strategy: Auto chose Object: Object and effects would change {100 * quiet:.0f}% of the frame around the object."
+
+
+def record_votes(folder: str, kind: str, strategy: str = "Object", **arrays) -> str:
+    """With PAINTAPLATE_RECORD=<folder>, what Follow Matte was given, as one .npz file: SAM 3.1's answers, the element or
+    the zone, the shot and the plate, in half floats, with the values and the strategy. replay_votes reads it back, so the matte runs
+    again on a CPU (tests/matte_study.py). Returns the file's path."""
+    os.makedirs(folder, exist_ok=True)
+    out = {"kind": np.array(kind), "strategy": np.array(str(strategy))}
+    for k, v in arrays.items():
+        out[k] = np.zeros((0,), np.float16) if v is None or not np.size(v) else np.asarray(v, np.float32).astype(np.float16)
+    first = next((a for a in arrays.values() if a is not None and np.ndim(a) >= 3), None)
+    n, h, w = (np.shape(first)[0], np.shape(first)[1], np.shape(first)[2]) if first is not None else (0, 0, 0)
+    path = os.path.join(folder, f"follow_votes_{kind}_{w}x{h}_{n}f_{time.strftime('%Y%m%d_%H%M%S')}.npz")
+    np.savez_compressed(path, **out)
+    return path
+
+
+def replay_votes(path: str) -> dict:
+    """What record_votes wrote: {"kind": "paint" or "clean", "args": the arguments of follow_votes or clean_votes}. A
+    recording without a strategy replays as « Object »."""
+    d = np.load(path)
+    back = lambda k: d[k].astype(np.float32) if d[k].size else None  # noqa: E731
+    kind = str(d["kind"])
+    scalars = {k: (int(d[k]) if k == "first_frame" else float(d[k])) for k in ("threshold", "zone", "first_frame") if k in d.files and d[k].ndim == 0}
+    names = ("shot_masks", "word_masks", "plate_masks", "kept", "element", "shot", "base") if kind == "paint" else ("zone_masks", "named", "kept", "zone")
+    args = {k: back(k) for k in names if k in d.files}
+    if kind == "clean":
+        scalars.pop("threshold", None)
+        args["zone"] = back("zone")
+    scalars["strategy"] = str(d["strategy"]) if "strategy" in d.files else "Object"  # an older recording made today's matte
+    return {"kind": kind, "args": {**args, **scalars}}
+
+
+def votes_summary(n: int, seen: int, counts: dict, hidden=(), gone_at=None, flicker=None, first_frame: int = 1) -> str:
+    """Follow Matte's summary for a person: the headline, then one line per rule that acted, the plate's numbers for
+    frames. The page writes « Paint matte (…): » or « Clean matte (…): » before it."""
+    on = lambda k: f"{k} frame" + ("" if k == 1 else "s")  # noqa: E731
+    lines = [f"tracked on {seen} of {n} frames."]
+    if counts.get("old"):
+        lines.append(f"Old object added where the shot changed, on {on(counts['old'])}.")
+    if counts.get("cut"):
+        lines.append(f"Cut to the change: SAM masks over what the plate keeps, on {on(counts['cut'])}.")
+    if counts.get("kept"):
+        lines.append(f"Left out: what the plate keeps (person, animal, vehicle) where the shot did not change, on {on(counts['kept'])}.")
+    if counts.get("away"):
+        lines.append(f"Left out: SAM masks away from the object, on {on(counts['away'])}.")
+    if counts.get("added"):
+        lines.append(f"Added: what the shot changed beside the object, on {on(counts['added'])}.")
+    for a, b in hidden:
+        lines.append(f"Object hidden from frame {a + first_frame} to {b + first_frame}.")
+    if gone_at is not None:
+        lines.append(f"Object out of the frame from frame {gone_at + first_frame}.")
+    if flicker is not None and flicker[0]:
+        share = f"{100 * flicker[1]:.0f}%" if flicker[1] >= 0.1 else f"{100 * flicker[1]:.1f}%"
+        lines.append(f"Flicker: pieces of the matte for {FOLLOW_FLICKER} frames or fewer, on {on(flicker[0])} (up to {share} of the matte at frame {flicker[2] + first_frame}).")
+    return "\n  ".join(lines)
+
 
 GRAIN_UNIT = _grain_unit()
 
@@ -650,6 +1082,8 @@ GRAIN_UNIT = _grain_unit()
 # ---------- SDR to HDR: the HDR shot's level fitted to the plate ----------
 HDR_FLOOR = 2.0 ** -14  # the smallest normal half float: darker values carry no usable ratio
 HDR_MIDTONES = (2.0 ** -6, 2.0 ** -0.5)  # plate luminance where the level is measured: above the noise, below SDR's white
+HDR_SPAN = 9  # frames over which each frame's gain is smoothed (smooth_gains)
+HDR_FRAME_LEAST = 256  # untouched mid-tone samples a frame needs for a gain of its own
 
 
 def hdr_level(shot: np.ndarray, plate: np.ndarray, band=HDR_MIDTONES, least: int = 2048):
@@ -672,21 +1106,40 @@ def apply_level(img: np.ndarray, stops) -> np.ndarray:
     return np.where(good, out * np.exp2(np.asarray(stops, np.float32)), 0.0).astype(np.float32)
 
 
+def smooth_gains(gains: list, span: int = HDR_SPAN) -> list:
+    """Each frame's gain (stops per channel) as the value at that frame of a straight line fitted, by least squares, to the
+    gains of the frames within span // 2 of it. A line follows a drift to the shot's first and last frames, where a mean
+    would lag, and a frame whose own gain is off by noise moves its result by a fraction of that. A frame with no gain of its
+    own (None) takes the line of its neighbours; None where no frame in reach has one."""
+    n, half, out = len(gains), span // 2, []
+    for i in range(n):
+        near = [(j - i, gains[j]) for j in range(max(0, i - half), min(n, i + half + 1)) if gains[j] is not None]
+        if not near:
+            out.append(None)
+            continue
+        x, y = np.array([d for d, _ in near], np.float64), np.array([g for _, g in near], np.float64)
+        out.append(y.mean(axis=0) if len(near) < 2 else np.polyfit(x, y, 1)[1])
+    return out
+
+
 def hdr_match(n: int, shot_at, plate_at, changed_at, *, grow: float = 24.0, step: int = 8, samples: int = 1_500_000,
               workers: int = 8):
     """The HDR shot at the level of the plate it is composited onto: (frames, report).
 
-    SDR to HDR picks its own exposure and white balance, while the plate's untouched pixels hold the scene's real values.
-    One gain per channel (hdr_level) is measured where the edits changed nothing (outside `changed_at(i)`, a mask at any
-    size, grown by `grow` plate pixels), on a grid every `step` plate pixels, over the whole shot, so the level cannot
-    flicker; the mid-tones decide it, then every pixel is scaled by it. A gain keeps every ratio, so new content keeps the
-    range SDR to HDR gave it above the plate's white. Frames may differ in size: samples are taken at the same places of
-    each frame. Too few untouched mid-tones (an edit over the whole frame) leave the shot as it was made."""
+    SDR to HDR picks its own exposure and white balance, and its level drifts over a shot (0.2 stops over 121 frames of
+    horse.mp4), while the plate's untouched pixels hold the scene's real values. Each frame's gain per channel (hdr_level)
+    is measured where the edits changed nothing (outside `changed_at(i)`, a mask at any size, grown by `grow` plate pixels),
+    on a grid every `step` plate pixels; the mid-tones decide it. The gains are smoothed over HDR_SPAN frames
+    (smooth_gains), so the level follows the plate with no flicker, then every pixel of a frame is scaled by its gain. A
+    frame with too few untouched mid-tones takes its neighbours' line, or the whole shot's gain. A gain keeps every ratio,
+    so new content keeps the range SDR to HDR gave it above the plate's white. Frames may differ in size: samples are taken
+    at the same places of each frame. Too few untouched mid-tones over the whole shot (an edit over the whole frame) leave
+    the shot as it was made."""
     first = plate_at(0)
     hp, wp = first.shape[:2]
     ys = np.minimum(np.arange(step // 2, hp, step), hp - 1)
     xs = np.minimum(np.arange(step // 2, wp, step), wp - 1)
-    stride = max(1, int(np.ceil(n * len(ys) * len(xs) / samples)))
+    cap = max(HDR_FRAME_LEAST, samples // max(1, n))  # samples kept per frame
 
     def sample(i):
         s, p, m = shot_at(i), plate_at(i), changed_at(i)
@@ -694,25 +1147,35 @@ def hdr_match(n: int, shot_at, plate_at, changed_at, *, grow: float = 24.0, step
         hm, wm = m.shape[:2]
         near = dilate((m > 0.02).astype(np.float32), grow * hm / hp)
         keep = near[(ys * hm // hp)[:, None], (xs * wm // wp)[None, :]] < 0.5
-        return s[(ys * hs // hp)[:, None], (xs * ws // wp)[None, :], :3][keep], p[ys[:, None], xs[None, :], :3][keep]
+        a, b = s[(ys * hs // hp)[:, None], (xs * ws // wp)[None, :], :3][keep], p[ys[:, None], xs[None, :], :3][keep]
+        pick = np.linspace(0, len(a) - 1, cap).astype(int) if len(a) > cap else slice(None)
+        return a[pick], b[pick]
 
     with ThreadPoolExecutor(max(1, workers)) as pool:  # numpy releases the GIL
-        parts = list(pool.map(sample, range(0, n, stride)))
+        parts = list(pool.map(sample, range(n)))
     shot = np.concatenate([a for a, _ in parts]) if parts else np.zeros((0, 3), np.float32)
     plate = np.concatenate([b for _, b in parts]) if parts else np.zeros((0, 3), np.float32)
     stops = hdr_level(shot, plate)
     if stops is None:
         return [np.array(shot_at(i)[..., :3], np.float32) for i in range(n)], {
             "samples": len(shot), "fitted": False,
-            "text": f"{len(shot)} untouched samples, too few mid-tones to measure: the HDR shot as it was made"}
-    fitted, lum = apply_level(shot, stops), plate @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+            "text": f"HDR shot kept as made.\n  Untouched samples: {len(shot):,}, too few mid-tones to measure."}
+    gains = smooth_gains([hdr_level(a, b, least=HDR_FRAME_LEAST) for a, b in parts])
+    gains = [stops if g is None else np.asarray(g, np.float32) for g in gains]
+    fitted = np.concatenate([apply_level(a, g) for (a, _), g in zip(parts, gains)])
+    lum = plate @ np.array([0.2126, 0.7152, 0.0722], np.float32)
     mid = np.all((fitted > HDR_FLOOR) & (plate > HDR_FLOOR), axis=-1) & (lum >= HDR_MIDTONES[0]) & (lum <= HDR_MIDTONES[1])
     error = float(np.median(np.abs(np.log2(fitted[mid] / plate[mid])))) if mid.any() else float("nan")
     with ThreadPoolExecutor(max(1, workers)) as pool:
-        frames = list(pool.map(lambda i: apply_level(shot_at(i), stops), range(n)))
+        frames = list(pool.map(lambda i: apply_level(shot_at(i), gains[i]), range(n)))
+    means = [float(np.mean(g)) for g in gains]
     return frames, {"samples": len(shot), "fitted": True, "stops": [float(x) for x in stops], "error": error,
-                    "text": f"{len(shot)} untouched samples; the level moves by {', '.join(f'{x:+.2f}' for x in stops)} stops "
-                            f"(R, G, B), nothing compressed; median mid-tone error after it {error:.3f} stops"}
+                    "frames": [[float(x) for x in g] for g in gains],
+                    "text": f"HDR shot fitted to the plate frame by frame on {len(shot):,} untouched samples, each frame's gain "
+                            f"smoothed over {HDR_SPAN} frames.\n  Level change (R, G, B) over the shot: "
+                            f"{', '.join(f'{x:+.2f}' for x in stops)} stops; by frame, the mean of R, G and B from "
+                            f"{min(means):+.2f} to {max(means):+.2f} stops.\n  Nothing compressed.\n"
+                            f"  Median mid-tone error after the fit: {error:.3f} stops."}
 
 AP1_TO_REC709 = np.array([[1.70505, -0.62179, -0.08326], [-0.13026, 1.14080, -0.01055], [-0.02400, -0.12897, 1.15297]], np.float32)
 

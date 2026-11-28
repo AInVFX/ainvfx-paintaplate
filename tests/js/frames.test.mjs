@@ -87,3 +87,91 @@ test("full-precision frames: a failed path is not fetched again; a full budget f
   await tick();
   assert.equal(calls, made); // the budget holds the four frames of most use: nothing more to fetch
 });
+
+// ---------- The viewer: one cache budget, the size frames are kept at, playback statistics ----------
+import * as viewerFrames from "../../web/frames.mjs";
+
+test("the Auto budget: 512 MB beside ComfyUI on the small memory profile, 1 GB on the others, up to 2 GB with ComfyUI elsewhere", () => {
+  const auto = viewerFrames.autoBudget;
+  assert.equal(auto({ host: "127.0.0.1", profile: "small" }), 512e6);
+  assert.equal(auto({ host: "localhost" }), 512e6); // the GPU is not known yet: the page starts on the small profile
+  assert.equal(auto({ host: "[::1]", profile: "medium" }), 1e9);
+  assert.equal(auto({ host: "[::1]", profile: "large" }), 1e9);
+  assert.equal(auto({ host: "abc-8188.proxy.runpod.net", profile: "large", deviceMemory: 8 }), 2e9);
+  assert.equal(auto({ host: "abc-8188.proxy.runpod.net", deviceMemory: 2 }), 512e6);
+  assert.equal(auto({ host: "abc-8188.proxy.runpod.net" }), 1e9); // Firefox and Safari do not report the device's memory
+});
+
+test("the frame cache's line of the log: the budget and where it comes from, then what fits, with no GPU size", () => {
+  const line = viewerFrames.cacheLine;
+  assert.equal(line("512 MB", "Auto", [{ name: "Plate", fits: 121, frames: 121, width: 960, height: 512, show: true, movie: [960, 512] }]),
+    "Frame cache, 512 MB (Auto). Plate: all 121 frames in memory, full size (960 x 512).");
+  assert.equal(line("512 MB", "View > Cache memory", [{ name: "Plate, upscaled", fits: 121, frames: 121, width: 1366, height: 774, show: true, shrunk: true, movie: [1920, 1088] },
+    { name: "Plate", fits: 0, frames: 121, width: 960, height: 544, movie: [1920, 1088] }]),
+    "Frame cache, 512 MB (View > Cache memory). Plate, upscaled: all 121 frames in memory, reduced size (1366 x 774).", "only the sources that hold frames");
+  assert.equal(line("1 GB", "Auto", [{ name: "Plate", fits: 121, frames: 121, width: 1472, height: 828, show: true, movie: [1920, 1080] }]),
+    "Frame cache, 1 GB (Auto). Plate: all 121 frames in memory, reduced size (1472 x 828).");
+  assert.equal(line("8 MB", "set in the address", [{ name: "Plate", fits: 3, frames: 49, width: 960, height: 528, show: true, movie: [1280, 704] }, { name: "Composite, full size", kind: "EXR", fits: 1, frames: 1250, width: 960, height: 528, movie: [960, 528] }]),
+    "Frame cache, 8 MB (set in the address). Plate: 3 of 49 frames in memory, reduced size (960 x 528). Composite, full size: 1 of 1,250 EXR frames in memory, full size (960 x 528).");
+  assert.equal(line("512 MB", "Auto", []), "Frame cache, 512 MB (Auto). No frame in memory yet.");
+});
+
+test("frames are kept at the size displayed, smaller when the range does not fit, never under 960 px", () => {
+  const size = viewerFrames.cacheSize, uhd = [3840, 2160];
+  const a = size({ budget: 512e6, frames: 121, movie: uhd, fit: [1700, 956] }); // a 3840 x 2160 shot of 121 frames in 512 MB
+  assert.equal(a.fits, 121);
+  assert.equal(a.shrunk, true, "smaller than displayed, so that all 121 frames fit");
+  assert.ok(a.width >= 960 && a.width <= 1728 && 121 * a.width * a.height * 4 <= 512e6, JSON.stringify(a));
+  assert.deepEqual(size({ budget: 4e9, frames: 121, movie: [1920, 1080], fit: [2400, 1350] }), { width: 1920, height: 1080, fits: 121, shrunk: false }); // never larger than the movie
+  assert.deepEqual(size({ budget: 64e6, frames: 121, movie: uhd, fit: [1700, 956] }), { width: 960, height: 540, fits: 30, shrunk: true }); // at the floor: a window round the playhead
+  assert.deepEqual(size({ budget: 512e6, frames: 121, movie: [640, 360], fit: [1700, 956] }), { width: 640, height: 360, fits: 121, shrunk: false });
+});
+
+test("one budget: the source displayed first, both sides of the wipe in equal shares, EXR frames at their own size", () => {
+  const plan = viewerFrames.cachePlan, uhd = [3840, 2160], fit = [1700, 956];
+  const alone = plan({ budget: 512e6, frames: 121, fit, sources: [{ id: "plate", movie: uhd, show: false }, { id: "shot", movie: uhd, show: true }] });
+  assert.equal(alone.shot.fits, 121);
+  assert.equal(alone.plate.fits, 0); // the shot displayed took the budget
+  const wipe = plan({ budget: 512e6, frames: 121, fit, sources: [{ id: "plate", movie: uhd, show: true }, { id: "shot", movie: uhd, show: true }] });
+  assert.ok(wipe.plate.fits === 121 && wipe.shot.fits === 121 && wipe.plate.width >= 960 && wipe.shot.width >= 960, JSON.stringify(wipe));
+  assert.ok(wipe.plate.budget + wipe.shot.budget <= 512e6);
+  const exr = plan({ budget: 1e9, frames: 121, fit, sources: [{ id: "plate", movie: [960, 540], show: false }, { id: "deep", movie: [960, 540], show: true, bytes: 6 }] });
+  assert.deepEqual([exr.deep.width, exr.deep.height, exr.deep.fits], [960, 540, 121]);
+  assert.ok(exr.deep.budget + exr.plate.budget <= 1e9 && exr.plate.fits === 121);
+});
+
+test("a cache follows its plan: a smaller share frees the frames of least use, another size starts again, no share keeps nothing", () => {
+  const frame = () => ({ width: 10, height: 10, close() {} }); // 400 bytes
+  const c = new viewerFrames.FrameCache({ getAttribute: () => "a.mp4" }, { view: () => ({ fps: 24, frame: 0, inPt: 0, outPt: 9 }), budget: 4000 });
+  c.reset();
+  for (let f = 0; f < 10; f++) c.put(f, frame());
+  assert.deepEqual([c.frames.size, c.missing()], [10, []]);
+  c.plan(1600);
+  assert.ok(c.frames.size === 4 && c.bytes === 1600 && [0, 1, 2].every((f) => c.frames.has(f)), [...c.frames.keys()].join());
+  c.plan(1600, [5, 5]);
+  assert.equal(c.frames.size, 0);
+  c.plan(0, [5, 5]); c.put(0, frame());
+  assert.equal(c.frames.size, 0);
+});
+
+test("the hidden reader fills faster than real time, and slower once it misses frames", () => {
+  assert.deepEqual([24, 50, 12].map((fps) => viewerFrames.fillRate(fps)), [2.5, 1.2, 4]);
+  assert.deepEqual([viewerFrames.fillRate(24, 1), viewerFrames.fillRate(24, 5)], [1.25, 1]);
+});
+
+test("playback statistics: frames on time on a 60 Hz screen are not late, a stall skips frames, a slow player is late", () => {
+  const st = new viewerFrames.PlayStats(50, "memory");
+  let last = -1, t = 0;
+  for (; t < 2000; t += 1000 / 60) { st.tick(t); const f = Math.floor(t * 0.05 + 1e-6) % 121; if (f !== last) st.shown((last = f), t, 121); }
+  let r = st.report();
+  assert.deepEqual([r.frames, r.late, r.skipped, Math.round(r.screen), Math.round(r.fps)], [100, 0, 0, 60, 50]);
+  t += 80; st.tick(t); st.shown(Math.floor(t * 0.05) % 121, t, 121); // the page stalled for 80 ms
+  assert.equal(st.report().skipped, Math.floor(t * 0.05) - 100);
+  st.time("draw", 2); st.time("draw", 4); st.time("look", 1);
+  assert.match(viewerFrames.statsLine(st.report(), "1371 x 771"), /^Played 101 frames in 2\.\d\d s: \d+\.\d fps of 50, 0 late, \d skipped; from memory at 1371 x 771, screen 60 Hz; draw 3\.0 ms, median \(look 1\.0\)$/);
+  const slow = new viewerFrames.PlayStats(50, "video");
+  for (let f = 0; f < 60; f++) { slow.tick(f * 25); slow.shown(f, f * 25, 121); } // 25 ms a frame where 20 are due
+  r = slow.report();
+  assert.ok(Math.round(r.fps) === 40 && r.late > 5 && r.skipped === 0, JSON.stringify(r));
+  assert.match(viewerFrames.statsLine(r), /from the video, screen 40 Hz/);
+});

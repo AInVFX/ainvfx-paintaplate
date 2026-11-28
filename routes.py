@@ -1,34 +1,47 @@
-"""The page's HTTP routes. Every path is a page path (folders.py): under the input folder, or the output folder with output:.
+"""The page's HTTP routes. Every path is a page path (folders.py): under the input folder, under the output folder with
+output:, or, on a ComfyUI that answers this machine alone, an absolute path.
     GET  /paintaplate/browse?path=output:video        a folder for the Open dialog: subfolders, videos, sequences, scenes;
                                                       at a root, also the newest plates of the folders below it
-    GET  /paintaplate/version                         the pack's version, from pyproject.toml: the page's top bar and log
+    GET  /paintaplate/version                         the pack's version, from pyproject.toml: the page's top bar and log;
+                                                      and its build, a hash of what computes (build_parts): job index keys;
+                                                      and ComfyUI's folder, from which the log's export writes the paths it holds
     GET  /paintaplate/thumb?path=output:a.mp4         the first frame of a plate as a small JPEG, made once, kept in temp
     GET  /paintaplate/stat?path=plates/boat.mp4&config=ocio://studio-config-latest
+    GET  /paintaplate/download/size?path=plates/boat.mp4   the bytes of a plate's own files (Export's « Source plate » row)
                                                       a plate's size and time (job index keys change with them), its spec
                                                       and its guessed file colour space in that OCIO config
     GET  /paintaplate/frames?path=...&first=0&count=4&side=960   frames of an image sequence or a video as RGB half floats
-    GET  /paintaplate/pixel?path=...&frame=0&x=0&y=0&size=1      one pixel at full precision and native size (colour inspector)
+    GET  /paintaplate/pixel?path=...&frame=0&x=0&y=0&size=1      one pixel at full precision and native size, and the mean of
+                                                                 the points sampled (&pts=x,y;x,y) (colour inspector)
     POST /paintaplate/blank {width, height, fps, frames}         a black ProRes 4444 plate for a fluid shot
     GET  /paintaplate/jobs/<key>, POST /paintaplate/jobs/<key>   the job index: a finished job's outputs by the hash of its inputs
+    POST /paintaplate/live/<prompt>                       removes a finished prompt's live previews from ComfyUI's temp folder
+    POST /paintaplate/cache                               the unused cache under the output folder (cache.py): its size, or cleared
     GET  /paintaplate/scenes, GET|POST /paintaplate/scenes/<name>  scenes saved on this ComfyUI (output/paintaplate/scenes)
     GET  /paintaplate/ocio?config=...                  the OCIO config: colour spaces by family, displays and views, looks
     GET  /paintaplate/ocio/shader?config=&space=&display=&view=&look=   the viewer's GLSL and lookup tables for a source
-    GET  /paintaplate/download?run=paintaplate/<plate>/v3&name=shot010_paintaplate_v3&parts=export,matte
-`parts` chooses what the zip holds (default: export,matte): export is the result in the plate's own format, matte where
-the plate changed, review the full-size review movie (else the preview composite), shot the whole frame as the model made
-it (the full-size pass first). Only render folders under output/paintaplate are zipped, and only plain files inside them.
-Everything here is plain functions (tests/test_routes.py); setup() adds the routes to ComfyUI's server.
+    GET  /paintaplate/download?run=paintaplate/<plate>/v3&name=desk_v3&stem=desk&files=[["composite_full_size","output:…/desk.mov"]]
+    GET  /paintaplate/download/check?files=…          the rows of a zip whose files are not on disk: the page stops before it
+    POST /paintaplate/graph?run=paintaplate/<plate>/v3&name=edits     One of Export's ComfyUI graphs, into the run's folder for its zip
+`files` names each row of the zip and its file, its folder or its frame pattern under output/paintaplate, as the page knows
+them from the jobs it ran (zip_list, row_files); `plate` adds the source plate's own files, in a folder of the row
+`source`. Every name in the zip starts with `stem`, the plate's or the scene's name, then the row's name (zip_entries).
+Everything here is plain functions (tests/test_routes.py); setup() adds the routes to ComfyUI's server, and gives the
+page's own files, which ComfyUI serves from ./web, the rule « Cache-Control: no-cache » (fresh_page).
 """
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import functools
-import glob
 import hashlib
+import io
 import json
+import logging
 import os
 import re
+import threading
+import time
 import uuid
 import zipfile
 
@@ -38,9 +51,9 @@ import av
 import numpy as np
 
 try:
-    from . import folders, mathops, ocio, plateio
+    from . import cache, folders, mathops, ocio, plateio
 except ImportError:  # imported as a plain module by the tests, outside the package
-    import folders, mathops, ocio, plateio
+    import cache, folders, mathops, ocio, plateio
 
 BLANK = "paintaplate/blank"  # the folder under the input folder that holds the black canvases of fluid shots
 FOUND_MAX = 60  # plates the Open dialog lists at a root from the folders below it, newest first
@@ -49,10 +62,10 @@ FOUND_FOLDERS = 400  # folders read at most for them, breadth first: a root of t
 FOUND_SKIP = {"output:paintaplate", "paintaplate/up", "paintaplate/blank", "paintaplate/warm"}
 
 
-def pack_version() -> str:
-    """The pack's version, from the pyproject.toml beside this file (the Registry package keeps it)."""
+def pack_version(folder: str | None = None) -> str:
+    """A pack's version, from its pyproject.toml: this pack's (the Registry package keeps it), or the pack in `folder`."""
     try:
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyproject.toml"), encoding="utf-8") as f:
+        with open(os.path.join(folder or os.path.dirname(os.path.abspath(__file__)), "pyproject.toml"), encoding="utf-8") as f:
             m = re.search(r'^version\s*=\s*"([^"]+)"', f.read(), re.M)
         return m.group(1) if m else "unknown"
     except OSError:
@@ -64,41 +77,154 @@ SCENES = "paintaplate/scenes"  # scenes saved on this ComfyUI, under the output 
 THUMB_WIDTH = 240
 THUMBS_AT_ONCE = asyncio.Semaphore(4)  # a folder of thousands of outputs asks for its thumbnails as they scroll into view
 
-# part: (paths in the run folder, the first match wins for a file; its name in the zip, None for a folder).
-# The page keeps each preview size's composite and passes in a folder named after the size (640x352/), the
-# full-size passes in full/, and the export's review movie at the top; the last patterns read older runs.
-PARTS = {"export": (["export"], None), "matte": (["matte"], None),
-         "review": (["review_*.mp4", "*/comp_*.mp4", "comp_*.mp4"], "review.mp4"),
-         "shot": (["full/raw_*.mp4", "full/clean_*.mp4", "*/raw_*.mp4", "*/clean_*.mp4", "full_*.mp4", "raw_*.mp4"],
-                  "regenerated_shot.mp4"),
-         # a fluid shot exported by itself: its HDR frames, the shot in the blank plate's format, its preview movie
-         "hdr": (["hdr"], None), "plate": (["plate"], None), "preview": (["preview_*.mp4"], "preview.mp4")}
-DEFAULT_PARTS = ["export", "matte"]
+# part: (paths in the run folder, the first match wins for a file; True for a folder of frames, or of one movie). The page
+# keeps each preview size's composite and passes in a folder named after the size (640x352/), the full-size passes in full/,
+# and the export's review movie at the top; the last patterns read older runs.
+GRAPH = re.compile(r"[a-z_]{1,40}\.comfyui\.json")  # Export's ComfyUI graphs in their run's folder, each named after what it makes (app.graphFiles)
+GRAPH_MAX = 16 << 20  # bytes: a scene's graph is far smaller
+ZIP_ROWS = 64  # rows one zip takes at most
+ROW_NAME = re.compile(r"[a-z0-9_]{1,60}")  # a row's name in the zip, as the page sends it (logic.zipName)
+FRAME_TAIL = re.compile(r"[._-]?\d+_?\.[A-Za-z0-9]+$")  # a frame's number, the mark before it, and its extension
+GRAPH_IMAGE = re.compile(r"[\w.-]+\.png")  # an image a graph loads: a file at the top of ComfyUI's input folder
+ZIP_TYPES = plateio.IMAGE_EXTS | plateio.VIDEO_EXTS  # what a row holds: frames, or one movie; and a graph (GRAPH)
 
 
 def zip_name(name: str, folder: str) -> str:
-    """A file name made only of letters, digits, '.', '-' and '_'."""
-    return re.sub(r"[^\w.-]", "_", name or os.path.basename(folder))[:120]
+    """A name in a file's name: letters A to Z, digits, '.', '-' and '_', every other run of characters one '_', none at
+    either end (logic.fileStem, the same rule on the page). With no name, the run's folder's."""
+    clean = lambda text: re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_")  # noqa: E731
+    return (clean(name or "") or clean(os.path.basename(folder)))[:120]
 
 
-def collect(folder: str, parts: list[str]) -> list[tuple[str, str]]:
-    """(path on disk, name in the zip) for each part asked for, in a fixed order."""
-    real = os.path.realpath(folder)  # compared as real paths: the output folder itself may be a symbolic link
+def zip_list(text: str) -> list[tuple[str, str]]:
+    """The zip's rows, as the page sends them: a JSON list of [name, path], each name made of lower-case letters, digits
+    and « _ » (logic.zipName), given once, each path a page path. ValueError for any other form, or more than ZIP_ROWS."""
+    try:
+        raw = json.loads(text) if text else []
+    except ValueError as exc:
+        raise ValueError("Export: the list of files is not JSON.") from exc
+    if (not isinstance(raw, list) or len(raw) > ZIP_ROWS
+            or not all(isinstance(r, list) and len(r) == 2 and all(isinstance(v, str) for v in r) for r in raw)):
+        raise ValueError("Export: the list of files is not a list of [name, path].")
+    rows = [(name, path.strip()) for name, path in raw]
+    if any(not ROW_NAME.fullmatch(name) for name, _ in rows) or len({name for name, _ in rows}) != len(rows):
+        raise ValueError("Export: a row's name holds other characters than a-z, 0-9 and « _ », or comes twice.")
+    return rows
 
-    def inside(path):
-        return not os.path.islink(path) and os.path.commonpath([os.path.realpath(path), real]) == real
 
-    files = []
-    for part in [p for p in PARTS if p in parts]:
-        patterns, single = PARTS[part]
-        if single is None:  # a folder, kept as a folder
-            files += [(path, os.path.relpath(path, folder))
-                      for d, _, names in os.walk(os.path.join(folder, patterns[0]))
-                      for path in (os.path.join(d, f) for f in sorted(names)) if inside(path)]
+def frame_tail(name: str) -> str:
+    """What tells a frame apart in its file's name: its number, the mark before it, and its extension. matte_00001_.png gives
+    _00001_.png, and room.1001.exr gives .1001.exr. A name with no number keeps itself, after an « _ »."""
+    m = FRAME_TAIL.search(name)
+    return m.group(0) if m else f"_{name}"
+
+
+def plate_files(full: str) -> list[str]:
+    """The files of the plate at `full`, as folders.plate_path gives it: the file itself, or each frame of its sequence once, a
+    folder's or a frame pattern's (plateio.sequence_frames). A frame that is a symbolic link is left out."""
+    if not plateio.is_sequence(full):
+        return [full]
+    return [p for p in dict.fromkeys(plateio.sequence_frames(full)[0]) if not os.path.islink(p)]
+
+
+def graph_images(path: str) -> list[str]:
+    """The images that the ComfyUI graph at `path` loads, by the names its nodes give: the files that Load Plate reads by name,
+    and the keyframes that Keyframe Video takes as a JSON list. They are files at the top of ComfyUI's input folder, where the
+    page puts them (logic.graphImageName); the plate, which sits in a folder or in the output folder, is left out."""
+    try:
+        with open(path) as f:
+            nodes = json.load(f).get("nodes", [])
+    except (OSError, ValueError, AttributeError):
+        return []
+    images = []
+    for node in nodes if isinstance(nodes, list) else []:
+        values = (node.get("widgets_values") or []) if isinstance(node, dict) else []
+        found = values[:1] if isinstance(node, dict) and node.get("type") == "PaintAPlate_LoadPlate" else []
+        if isinstance(node, dict) and node.get("type") == "PaintAPlate_KeyframeVideo":  # its keyframes: the JSON list of its keys
+            for value in values:
+                try:
+                    keys = json.loads(value) if isinstance(value, str) and value.startswith("[") else []
+                except ValueError:
+                    keys = []
+                found += [k.get("image") for k in keys if isinstance(k, dict)]
+        images += [v for v in dict.fromkeys(found) if isinstance(v, str) and GRAPH_IMAGE.fullmatch(v) and v not in images]
+    return images
+
+
+def row_files(rel: str) -> list[str]:
+    """The files of one row of the zip, by folders.plate_path's rules (no symbolic link, nothing outside ComfyUI's
+    folders), under output/paintaplate only: a file, each frame of a frame pattern once (plate_files), or the files of a
+    folder; frames, movies and the graphs the page wrote (GRAPH) only. ValueError when it is refused, FileNotFoundError
+    when it is not on disk."""
+    if not rel.startswith(folders.OUTPUT):
+        raise ValueError(f"Export zips files under output/paintaplate only: {rel}.")
+    full = folders.plate_path(rel)
+    root = os.path.realpath(os.path.join(folder_paths.get_output_directory(), "paintaplate"))
+    if os.path.commonpath([os.path.realpath(full), root]) != root:
+        raise ValueError(f"Export zips files under output/paintaplate only: {rel}.")
+    if os.path.isdir(full):
+        files = [os.path.join(full, f) for f in sorted(os.listdir(full))]
+        files = [f for f in files if os.path.isfile(f) and not os.path.islink(f)]
+    elif plateio.is_sequence(full):
+        files = plate_files(full)
+    elif os.path.splitext(full)[1].lower() in ZIP_TYPES or GRAPH.fullmatch(os.path.basename(full)):
+        return [full]
+    else:
+        raise ValueError(f"Export zips frames, movies and its ComfyUI graph only: {rel}.")
+    files = [f for f in files if os.path.splitext(f)[1].lower() in ZIP_TYPES]
+    if not files:
+        raise FileNotFoundError(f"Export: nothing to zip at {rel}.")
+    return files
+
+
+def missing_rows(rows: list[tuple[str, str]]) -> list[str]:
+    """The rows whose files are not on disk (row_files): the page stops before the download and names them."""
+    missing = []
+    for name, rel in rows:
+        try:
+            row_files(rel)
+        except FileNotFoundError:
+            missing.append(name)
+    return missing
+
+
+def zip_entries(rows: list[tuple[str, str]], stem: str, source: str = "", sources: list[str] | None = None) -> list[tuple[str, str, str]]:
+    """(path on disk, name in the zip, row) for each row the page sends (zip_list), in its order, then the source plate's.
+    Every name starts with `stem`, the plate's or the scene's name, then the row's name: a row that is one movie sits at
+    the top, as <stem>_<row>.<ext>; a row of frames sits in a folder of its name, each as <stem>_<row><frame>.<ext>
+    (frame_tail); a graph comes as <stem>_<row>.json, with the images its nodes load in input/ (graph_images). The
+    source plate's files (`sources`, which plate_files lists) keep their own names, in a folder named `source`. A name
+    already taken keeps its first file. FileNotFoundError names every row whose files are not on disk."""
+    files, taken, missing = [], set(), []
+
+    def add(path, arc, row):
+        if arc not in taken:
+            taken.add(arc)
+            files.append((path, arc, row))
+
+    for name, rel in rows:
+        try:
+            found = row_files(rel)
+        except FileNotFoundError:
+            missing.append(name)
             continue
-        found = next((m for pat in patterns for m in sorted(glob.glob(os.path.join(folder, pat))) if inside(m)), None)
-        if found:
-            files.append((found, single))
+        ext = os.path.splitext(found[0])[1].lower()
+        if len(found) == 1 and GRAPH.fullmatch(os.path.basename(found[0])):  # with the images its nodes load, from ComfyUI's input folder
+            add(found[0], f"{stem}_{name}.json", name)
+            inputs = os.path.realpath(folder_paths.get_input_directory())
+            for image in graph_images(found[0]):
+                path = os.path.join(inputs, image)
+                if os.path.isfile(path) and not os.path.islink(path) and os.path.dirname(os.path.realpath(path)) == inputs:
+                    add(path, f"input/{image}", name)
+        elif len(found) == 1 and ext in plateio.VIDEO_EXTS:
+            add(found[0], f"{stem}_{name}{ext}", name)
+        else:
+            for path in found:
+                add(path, f"{name}/{stem}_{name}{frame_tail(os.path.basename(path))}", name)
+    if missing:
+        raise FileNotFoundError(f"Export: no file on disk for {', '.join(missing)}.")
+    for path in sources or []:
+        add(path, f"{source}/{os.path.basename(path)}", source)
     return files
 
 
@@ -119,26 +245,157 @@ def models_md(ids: list[str]) -> str:
     return "\n".join(out) + "\n"
 
 
-def build_zip(folder: str, name: str, parts: list[str], models: list[str] | None = None) -> str:
-    """The zip of `parts`, stored (EXR, PNG and video are already compressed) and reused while it is current, with
-    MODELS.md when the page names the models behind the result."""
-    files = collect(folder, parts)
-    if "export" in parts and not any(arc.startswith("export/") for _, arc in files):
-        raise FileNotFoundError("This run has no export yet")
-    if not files:  # a fluid shot's zip holds no export: its HDR frames, its plate and its preview
-        raise FileNotFoundError("Nothing to download in this run")
-    mark = f"__m{hashlib.sha1(','.join(models).encode()).hexdigest()[:8]}" if models else ""  # another list of models, another zip
-    target = os.path.join(folder, f"{name}__{'-'.join(p for p in PARTS if p in parts)}{mark}.zip")
-    newest = max(os.path.getmtime(p) for p, _ in files)
+# ---------- The build: what computes, in every job index key ----------
+# The page puts it in every key in place of the pack's version (comfy.indexParts). A branch or a local edit of one version,
+# an update of ComfyUI or of ComfyUI-LTXVideo, and a new model file under an old name each make new keys, so a result made by
+# other code or other weights is never taken back. It is made once, when ComfyUI starts: the code that runs is the code
+# ComfyUI imported then, whatever changes on disk later.
+PACK = os.path.dirname(os.path.abspath(__file__))
+
+
+def python_digest(folder: str, deep: bool = False) -> str:
+    """SHA-256 of a folder's Python files, by name and content: its top level, or its subfolders too with `deep`."""
+    digest = hashlib.sha256()
+    for top, dirs, names in os.walk(folder):
+        dirs[:] = sorted(d for d in dirs if deep and not d.startswith(".") and d != "__pycache__")
+        for name in sorted(n for n in names if n.endswith(".py")):
+            path = os.path.join(top, name)
+            with open(path, "rb") as f:
+                digest.update(f"{os.path.relpath(path, folder)}\0".encode() + f.read() + b"\0")
+    return digest.hexdigest()
+
+
+def git_commit(folder: str) -> str:
+    """The commit a git clone is on, read from its .git folder with no git command; "" for a folder that is not a clone."""
+    git = os.path.join(folder, ".git")
+    try:
+        if os.path.isfile(git):  # a submodule or a worktree: "gitdir: <path>"
+            with open(git, encoding="utf-8") as f:
+                git = os.path.join(folder, f.read().split(":", 1)[1].strip())
+        with open(os.path.join(git, "HEAD"), encoding="utf-8") as f:
+            head = f.read().strip()
+        if not head.startswith("ref: "):
+            return head  # a detached HEAD holds the commit itself
+        ref = head[5:]
+        if os.path.isfile(os.path.join(git, ref)):
+            with open(os.path.join(git, ref), encoding="utf-8") as f:
+                return f.read().strip()
+        with open(os.path.join(git, "packed-refs"), encoding="utf-8") as f:
+            return next((line.split()[0] for line in f if line.rstrip().endswith(f" {ref}")), "")
+    except (OSError, IndexError):
+        return ""
+
+
+def comfy_version(root: str) -> str:
+    """ComfyUI's version, from comfyui_version.py at its root; "" when there is none."""
+    try:
+        with open(os.path.join(root, "comfyui_version.py"), encoding="utf-8") as f:
+            m = re.search(r"""__version__\s*=\s*["']([^"']+)""", f.read())
+        return m.group(1) if m else ""
+    except OSError:
+        return ""
+
+
+def ltx_folder() -> str:
+    """ComfyUI-LTXVideo's folder among the custom nodes; "" when it is not there (the page then stops on its nodes)."""
+    roots = getattr(folder_paths, "get_folder_paths", lambda _: [])("custom_nodes") or [os.path.dirname(PACK)]
+    for root in roots:
+        try:
+            names = sorted(os.listdir(root))
+        except OSError:
+            continue
+        for name in names:
+            if name.lower().startswith("comfyui-ltxvideo") and not name.endswith(".disabled") and os.path.isdir(os.path.join(root, name)):
+                return os.path.join(root, name)
+    return ""
+
+
+def model_path(name: str) -> str | None:
+    """Where this ComfyUI keeps a model file, in any of its model folders (extra_model_paths.yaml's too); None: nowhere."""
+    for kind in list(getattr(folder_paths, "folder_names_and_paths", {})):
+        try:
+            path = folder_paths.get_full_path(kind, name)
+        except Exception:  # build_parts runs this at import, where a raise would stop the pack loading
+            path = None
+        if path:
+            return path
+    return None
+
+
+def model_stats(names: list[str], find=model_path) -> list:
+    """Each model file as [name, size, time], or [name] when this ComfyUI has none."""
+    stats = []
+    for name in names:
+        try:
+            st = os.stat(find(name) or "")
+            stats.append([name, st.st_size, int(st.st_mtime)])
+        except OSError:
+            stats.append([name])
+    return stats
+
+
+def build_parts(pack: str = PACK, root: str | None = None, ltx: str | None = None, models: list | None = None) -> dict:
+    """What computes: the pack's Python files (its top level, the modules ComfyUI imports), ComfyUI's version and commit,
+    ComfyUI-LTXVideo's commit (the hash of its Python files when it is not a git clone), and the name, size and time of
+    each model file of web/models.json. pyproject.toml is not in it: a new version number alone changes nothing."""
+    if root is None:
+        root = os.path.dirname(os.path.abspath(folder_paths.__file__)) if getattr(folder_paths, "__file__", None) else ""
+    ltx = ltx_folder() if ltx is None else ltx
+    if models is None:
+        with open(MODELS_JSON, encoding="utf-8") as f:
+            models = model_stats([m["file"] for m in json.load(f)["models"]])
+    return {"pack": python_digest(pack), "comfyui": [comfy_version(root), git_commit(root)] if root else [],
+            "ltx": (git_commit(ltx) or python_digest(ltx, deep=True)) if ltx else "", "models": models}
+
+
+def ltx_label(ltx: str, value: str) -> str:
+    """ComfyUI-LTXVideo as the build line names it: its commit when the folder is a git clone; otherwise its version, from
+    its pyproject.toml, and the hash of its Python files, said as such. That hash reads like a commit, and could be
+    taken for one and compared with the pin. `value`: build_parts' « ltx », which the key keeps as it is."""
+    if not value:
+        return "not found"
+    if git_commit(ltx):
+        return value[:7]
+    version = pack_version(ltx)
+    return (f"{version}, " if version[:1].isdigit() else "") + f"files {value[:7]} (not a git clone)"
+
+
+def build_hash(parts: dict) -> str:
+    """The build: 16 hex digits of the SHA-256 of build_parts."""
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()[:16]
+
+
+_built = build_parts()
+BUILD = build_hash(_built)
+_comfy = [x[:7] for x in _built["comfyui"] if x]  # its version, then its commit
+logging.info("[Paint a plate] %s: build %s.\n  Build parts: ComfyUI %s; ComfyUI-LTXVideo %s; model files: %d of %d.",
+             VERSION, BUILD, f"{_comfy[0]} ({_comfy[1]})" if len(_comfy) == 2 else " ".join(_comfy) or "unknown", ltx_label(ltx_folder(), _built["ltx"]),
+             sum(len(m) == 3 for m in _built["models"]), len(_built["models"]))
+
+
+def write_zip(fp, files: list[tuple[str, str, str]], models: list[str] | None, stem: str) -> None:
+    """The zip of `files`, as zip_entries lists them, stored (EXR, PNG and video are already compressed), into `fp`, with the
+    models' list (<stem>_models.md) when the page names the models behind the result."""
+    with zipfile.ZipFile(fp, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
+        for path, arc, _ in sorted(files, key=lambda f: f[1]):
+            z.write(path, arc)
+        if models:
+            z.writestr(f"{stem}_models.md", models_md(models))
+
+
+def build_zip(folder: str, name: str, files: list[tuple[str, str, str]], models: list[str] | None = None, stem: str = "") -> str:
+    """The zip of `files` (zip_entries, write_zip), kept in the run's folder and reused while it is current: another list
+    of files, of models or another stem makes another zip."""
+    if not files:
+        raise FileNotFoundError("Export: nothing to zip.")
+    mark = hashlib.sha1(json.dumps([[p, a] for p, a, _ in files] + [models or [], stem]).encode()).hexdigest()[:12]
+    target = os.path.join(folder, f"{name}__{mark}.zip")
+    newest = max(os.path.getmtime(p) for p, _, _ in files)
     if os.path.exists(target) and os.path.getmtime(target) >= newest:
         return target
     part = f"{target}.{uuid.uuid4().hex}.part"  # two downloads at once never write the same file
     try:
-        with zipfile.ZipFile(part, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
-            for path, arc in sorted(files, key=lambda f: f[1]):
-                z.write(path, arc)
-            if models:
-                z.writestr("MODELS.md", models_md(models))
+        write_zip(part, files, models, stem)
         os.replace(part, target)
     finally:
         if os.path.exists(part):
@@ -146,16 +403,136 @@ def build_zip(folder: str, name: str, parts: list[str], models: list[str] | None
     return target
 
 
+class _Chunks(io.RawIOBase):
+    """What zipfile writes, handed to the coroutine that sends it (stream_zip). It cannot seek, so zipfile writes each file's
+    sizes after its data. Once `stop` is set, a write raises, and the zip ends."""
+
+    def __init__(self, loop, queue, stop):
+        self.loop, self.queue, self.stop = loop, queue, stop
+
+    def writable(self):
+        return True
+
+    def write(self, b):
+        if self.stop.is_set():
+            raise OSError("The download stopped.")
+        asyncio.run_coroutine_threadsafe(self.queue.put(bytes(b)), self.loop).result()
+        return len(b)
+
+
+async def stream_zip(request: web.Request, name: str, files: list[tuple[str, str, str]], models: list[str], stem: str) -> web.StreamResponse:
+    """The zip of `files`, written as it downloads, with no copy of it on disk: a source plate's files can be large. A file
+    that cannot be read ends the response before its last chunk, so the browser reports the download as failed."""
+    response = web.StreamResponse(headers={"Content-Type": "application/zip", "Content-Disposition": f'attachment; filename="{name}.zip"'})
+    await response.prepare(request)
+    loop, queue, stop = asyncio.get_running_loop(), asyncio.Queue(maxsize=8), threading.Event()
+
+    def write():
+        try:
+            with io.BufferedWriter(_Chunks(loop, queue, stop), buffer_size=1 << 20) as fp:
+                write_zip(fp, files, models, stem)
+        finally:
+            asyncio.run_coroutine_threadsafe(queue.put(None), loop).result()
+
+    task = loop.run_in_executor(None, write)
+    try:
+        while (chunk := await queue.get()) is not None:
+            await response.write(chunk)
+    except BaseException:
+        stop.set()  # the writer ends at its next write; its last item comes, then the error goes on
+        while await queue.get() is not None:
+            pass
+        raise
+    finally:
+        await asyncio.gather(task, return_exceptions=True)
+    await task  # the writer's error, such as a file that cannot be read: the response ends here, without its last chunk
+    await response.write_eof()
+    return response
+
+
 async def download(request: web.Request) -> web.StreamResponse:
-    asked = [p for p in request.query.get("parts", "").split(",") if p in PARTS] or DEFAULT_PARTS
     try:
         folder = folders.run_folder(request.query.get("run", ""))
         name = zip_name(request.query.get("name", ""), folder)
         models = [m for m in request.query.get("models", "").split(",") if m]
-        path = await asyncio.to_thread(build_zip, folder, name, asked, models)
+        stem = zip_name(request.query.get("stem", "") or re.sub(r"_v\d+$", "", name), folder)[:80]  # the page sends it; else the zip's name, less its version
+        rows = zip_list(request.query.get("files", ""))
+        plate, source = request.query.get("plate", "").strip(), request.query.get("source", "") or "source"
+        if not ROW_NAME.fullmatch(source):
+            raise ValueError("Export: the source plate's row holds other characters than a-z, 0-9 and « _ ».")
+        if plate:  # the plate's own files, where they are, by folders.plate_path's rules: the zip streams
+            if folders.absolute(plate) and any(h in request.headers for h in FORWARDED):
+                raise PermissionError(folders.THIS_MACHINE_ONLY)
+            sources = await asyncio.to_thread(lambda: plate_files(folders.plate_path(plate)))
+            files = await asyncio.to_thread(zip_entries, rows, stem, source, sources)
+            return await stream_zip(request, name, files, models, stem)
+        files = await asyncio.to_thread(zip_entries, rows, stem)
+        path = await asyncio.to_thread(build_zip, folder, name, files, models, stem)
+    except (PermissionError, ValueError) as exc:
+        raise web.HTTPForbidden(text=str(exc)) from exc
     except FileNotFoundError as exc:
         raise web.HTTPNotFound(text=str(exc)) from exc
     return web.FileResponse(path, headers={"Content-Disposition": f'attachment; filename="{name}.zip"'})
+
+
+async def download_check(request: web.Request) -> web.Response:
+    """The rows of a zip whose files are not on disk, as {"missing": [names]}: the page stops before the download and names
+    them. 403 for a list in another form, or a path that leaves output/paintaplate."""
+    try:
+        missing = await asyncio.to_thread(missing_rows, zip_list(request.query.get("files", "")))
+    except (PermissionError, ValueError) as exc:
+        raise web.HTTPForbidden(text=str(exc)) from exc
+    return web.json_response({"missing": missing})
+
+
+async def download_size(request: web.Request) -> web.Response:
+    """The bytes of a plate's own files (plate_files), which Export's « Source plate » row shows."""
+    try:
+        files = await asyncio.to_thread(lambda: plate_files(folders.plate_path(request.query.get("path", ""))))
+        size = await asyncio.to_thread(lambda: sum(os.path.getsize(p) for p in files))
+    except (ValueError, FileNotFoundError) as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    return web.json_response({"files": len(files), "bytes": size})
+
+
+def save_graph(folder: str, name: str, body: bytes) -> None:
+    """Writes one of Export's ComfyUI graphs into its run's folder, as <name>.comfyui.json. ValueError for a name that is
+    not lower-case letters and « _ », for a body larger than GRAPH_MAX, or that is not a
+    ComfyUI workflow in the editor's format. The new file takes the old one's place whole, so a symbolic link of that
+    name is replaced, never written through."""
+    if len(body) > GRAPH_MAX:
+        raise ValueError(f"ComfyUI graph not written: larger than {GRAPH_MAX >> 20} MB.")
+    try:
+        graph = json.loads(body)
+    except ValueError as exc:
+        raise ValueError(f"ComfyUI graph not written: not JSON ({exc}).") from exc
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+        raise ValueError("ComfyUI graph not written: not a ComfyUI workflow.")
+    if not GRAPH.fullmatch(f"{name}.comfyui.json"):
+        raise ValueError("ComfyUI graph not written: its name is not made of a to z and « _ ».")
+    path = os.path.join(folder, f"{name}.comfyui.json")
+    part = f"{path}.{uuid.uuid4().hex}.part"
+    try:
+        with open(part, "wb") as fh:
+            fh.write(body)
+        os.replace(part, path)
+    finally:
+        if os.path.exists(part):
+            os.remove(part)
+
+
+async def graph_post(request: web.Request) -> web.Response:
+    """One of Export's ComfyUI graphs (app.graphFiles), written into its run's folder as <name>.comfyui.json, so that its
+    zip takes it as a row (zip_list). The name says what the graph makes: fluid_shot, edits or finish."""
+    name = request.query.get("name", "")
+    try:
+        folder = folders.run_folder(request.query.get("run", ""))
+        await asyncio.to_thread(save_graph, folder, name, await request.read())
+    except FileNotFoundError as exc:
+        raise web.HTTPNotFound(text=str(exc)) from exc
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    return web.json_response({"file": f"{name}.comfyui.json"})
 
 
 # ---------- The plate browser ----------
@@ -165,9 +542,13 @@ def browse(rel: str) -> dict:
     Each item carries the page path that opens it: a frame pattern for a sequence, the file for a video or a scene."""
     full = folders.plate_path(rel, folder=True)
     if not os.path.isdir(full):
-        raise FileNotFoundError("Not a folder")
-    page = folders.page_path(full)
+        raise FileNotFoundError(f"Folder not found: {rel}.")
     listed = plateio.scan_folder(full)
+    if folders.absolute(rel):  # a folder of the machine: its subfolders and plates, each by its absolute path
+        items = [dict(i, path=os.path.join(full, i["name"])) for i in listed["items"] if i["kind"] != "scene"]
+        up = os.path.dirname(full)
+        return {"path": full, "parent": None if up == full else up, **listed, "items": items, "found": []}
+    page = folders.page_path(full)
     for item in listed["items"]:
         item["path"] = f"{page}/{item['name']}" if page not in ("", folders.OUTPUT) else page + item["name"]
     parent = None if page in ("", folders.OUTPUT) else (page.rsplit("/", 1)[0] if "/" in page else
@@ -197,12 +578,12 @@ def plates_below(full: str, page: str) -> list:
     return sorted(found, key=lambda i: -i["mtime"])[:FOUND_MAX]
 
 
-def first_frame(full: str) -> np.ndarray:
-    """The first frame of a plate as float RGB: an image sequence's first file, a video's or an animated image's first
-    frame. Float formats keep their values (plateio.read_float); 8-bit ones come back from 0 to 1."""
-    if plateio.is_sequence(full):
-        return plateio.read_float(plateio.find_sequence(full)[0])
-    with plateio.av.open(full) as c:
+def first_image(first: str, still: bool) -> np.ndarray:
+    """The first frame of a plate as float RGB: `first` is an image sequence's first file (`still`), or a video or an
+    animated image. Float formats keep their values (plateio.read_float); 8-bit ones come back from 0 to 1."""
+    if still:
+        return plateio.read_float(first)
+    with av.open(first) as c:
         return next(c.decode(video=0)).to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
 
 
@@ -212,18 +593,19 @@ def thumbnail(rel: str, width: int = THUMB_WIDTH) -> str:
     from PIL import Image
 
     full = folders.plate_path(rel)
-    first = plateio.find_sequence(full)[0] if plateio.is_sequence(full) else full
+    still = plateio.is_sequence(full)
+    first = plateio.find_sequence(full)[0] if still else full  # the folder is listed once
     folder = os.path.join(folder_paths.get_temp_directory(), "paintaplate_thumbs")
     os.makedirs(folder, exist_ok=True)
     key = hashlib.sha1(f"{full}|{os.path.getmtime(first)}|{width}".encode()).hexdigest()[:20]
     target = os.path.join(folder, f"{key}.jpg")
     if os.path.exists(target):
         return target
-    rgb = first_frame(full)
+    rgb = first_image(first, still)
     h, w = rgb.shape[:2]
     k = min(1.0, width / max(h, w))
     small = mathops.resize_to(rgb, max(1, round(h * k)), max(1, round(w * k))) if k < 1.0 else rgb
-    spec = {"ext": os.path.splitext(first)[1].lower(), "kind": "sequence" if plateio.is_sequence(full) else "video"}
+    spec = {"ext": os.path.splitext(first)[1].lower(), "kind": "sequence" if still else "video"}
     if spec["ext"] == ".exr":
         spec["exr"] = plateio.exr_info(first)
     shown = ocio.display_rgb(small, "", ocio.guess("", plateio.guess_color_space(spec), first))
@@ -234,7 +616,9 @@ def thumbnail(rel: str, width: int = THUMB_WIDTH) -> str:
 
 
 async def version_route(request: web.Request) -> web.Response:
-    return web.json_response({"version": VERSION})
+    # ComfyUI's folder: the log's export writes a path under it from it (web/logic.mjs: plainPaths). A folder_paths
+    # without it, as the mock's, gives none, and the export then writes every path by its last two parts.
+    return web.json_response({"version": VERSION, "build": BUILD, "folder": getattr(folder_paths, "base_path", "")})
 
 
 async def browse_route(request: web.Request) -> web.Response:
@@ -248,24 +632,40 @@ async def thumb(request: web.Request) -> web.StreamResponse:
     try:
         async with THUMBS_AT_ONCE:
             path = await asyncio.to_thread(thumbnail, request.query.get("path", ""))
-    except (FileNotFoundError, StopIteration, ValueError, OSError) as exc:
+    except (StopIteration, ValueError, OSError) as exc:
         raise web.HTTPNotFound(text=f"No thumbnail: {exc}") from exc
     return web.FileResponse(path, headers={"Cache-Control": "max-age=3600"})
 
 
 # ---------- The blank plate of a fluid shot ----------
+# The sizes, lengths and frame rates that ainvfx-fluid takes, as the page's Blank plate tab holds them (FLUID in
+# web/logic.mjs): sides in multiples of 64, the three trained rates, 8k + 1 frames up to LTX 2.5's 20 s at the rate.
+# tests/test_routes.py keeps the two equal.
+BLANK_SIDES = (256, 1920, 64)  # the smallest side, the largest, and the step between sides
+BLANK_RATES = (24, 25, 50)
+BLANK_FEWEST = 9  # frames; the most are blank_frames(fps)
+LTX_SECONDS = 20  # LTX 2.5's positions span 20 s, as LENGTH.seconds in web/logic.mjs
+
+
+def blank_frames(fps: float) -> int:
+    """The most frames of a blank plate at `fps`: the longest 8k + 1 count within LTX 2.5's 20 s (logic.plateLength)."""
+    most = int(LTX_SECONDS * fps + 1 + 1e-9)
+    return most - (most - 1) % 8
+
 
 def blank_plate(width: int, height: int, fps: float, frames: int) -> str:
     """The input-folder path of a black plate of this size, frame rate and length, written once (ProRes 4444).
 
-    LTX and ainvfx-fluid need sides in multiples of 64 and 8k + 1 frames; the page keeps to the trained limits.
+    It takes the plates the Blank plate tab offers (BLANK_SIDES, BLANK_RATES, BLANK_FEWEST to blank_frames) and refuses any other.
     """
-    if not (64 <= width <= 4096 and 64 <= height <= 4096 and width % 64 == 0 and height % 64 == 0):
-        raise ValueError("width and height must be multiples of 64, from 64 to 4096")
-    if not (9 <= frames <= 1025 and (frames - 1) % 8 == 0):
-        raise ValueError("the length must be 8k + 1 frames, from 9 to 1025")
-    if not 1 <= fps <= 120:
-        raise ValueError("the frame rate must be from 1 to 120")
+    least, most, step = BLANK_SIDES
+    if not (least <= width <= most and least <= height <= most and width % step == 0 and height % step == 0):
+        raise ValueError(f"Blank plate: width and height must be multiples of {step}, from {least} to {most} px.")
+    if fps not in BLANK_RATES:
+        raise ValueError(f"Blank plate: frame rate must be {', '.join(map(str, BLANK_RATES[:-1]))} or {BLANK_RATES[-1]} fps.")
+    most = blank_frames(fps)
+    if not (BLANK_FEWEST <= frames <= most and (frames - 1) % 8 == 0):
+        raise ValueError(f"Blank plate: length must be 8k + 1 frames, from {BLANK_FEWEST} to {most:,} at {fps:g} fps.")
     rel = f"{BLANK}/fluid_{width}x{height}_{fps:g}fps_{frames}f.mov"
     full = os.path.join(os.path.abspath(folder_paths.get_input_directory()), rel)
     if not os.path.exists(full):
@@ -285,7 +685,7 @@ async def blank(request: web.Request) -> web.Response:
         body = await request.json()
         rel = await asyncio.to_thread(blank_plate, int(body["width"]), int(body["height"]), float(body["fps"]), int(body["frames"]))
     except (KeyError, TypeError, ValueError) as exc:
-        raise web.HTTPBadRequest(text=f"No blank plate: {exc}") from exc
+        raise web.HTTPBadRequest(text=str(exc) if str(exc).startswith("Blank plate:") else f"Blank plate: request not valid ({exc}).") from exc
     return web.json_response({"path": rel})
 
 
@@ -354,6 +754,43 @@ def write_job(key: str, outputs, workflow: str = "") -> None:
     os.replace(tmp, path)
 
 
+LIVE_FOLDER = "paintaplate_live"  # the live previews' WebP files in ComfyUI's temp folder (nodes.py, Live Preview)
+
+
+def clear_live(prompt: str, temp: str | None = None) -> int:
+    """Removes one prompt's live previews from ComfyUI's temp folder once its pass ended, and says how many. A prompt id
+    is letters, digits and hyphens: anything else removes nothing."""
+    if not re.fullmatch(r"[0-9A-Za-z-]{1,64}", prompt or ""):
+        return 0
+    folder = os.path.join(temp or folder_paths.get_temp_directory(), LIVE_FOLDER)
+    names = [n for n in os.listdir(folder) if n.startswith(f"{prompt}_") and n.endswith(".webp")] if os.path.isdir(folder) else []
+    for name in names:
+        os.remove(os.path.join(folder, name))
+    return len(names)
+
+
+async def live_clear(request: web.Request) -> web.Response:
+    """POST /paintaplate/live/<prompt>: the page asks it when a job that sent live previews ends."""
+    return web.json_response({"removed": clear_live(request.match_info["prompt"])})
+
+
+async def cache_route(request: web.Request) -> web.Response:
+    """POST /paintaplate/cache {keep, clear}: the unused cache under the output folder (cache.py), in files and bytes;
+    removed when clear is true. keep: the folders of the plate the page shows."""
+    try:
+        body = await request.json() if request.can_read_body else {}
+        keep, clear = [k for k in body.get("keep") or [] if isinstance(k, str)], bool(body.get("clear"))
+    except (ValueError, AttributeError, TypeError) as e:  # a malformed body is refused, never a server error
+        return web.json_response({"error": str(e)}, status=400)
+    out = folder_paths.get_output_directory()
+    if clear:  # the walk and the removals leave ComfyUI's event loop free, as every route that touches files does
+        files, size = await asyncio.to_thread(cache.clear, out, keep)
+    else:
+        found = await asyncio.to_thread(cache.unused, out, keep)
+        files, size = len(found), sum(s for _, s in found)
+    return web.json_response({"files": files, "bytes": size, "cleared": clear})
+
+
 async def job_get(request: web.Request) -> web.Response:
     try:
         rec = await asyncio.to_thread(read_job, request.match_info["key"])
@@ -383,7 +820,7 @@ def plate_stat(rel: str) -> dict:
 
 def headroom(config: str, cs: str) -> float:
     """The scene-linear value that code value 1.0 decodes to in colour space `cs`: 1.0 for sRGB, a display or a linear
-    space; above 1.0 for a log encoding (in the studio config, 2 Nov: ACEScct 222.9, ARRI LogC4 469.8, ADX16 65504), so
+    space; above 1.0 for a log encoding (in the studio config: ACEScct 222.9, ARRI LogC4 469.8, ADX16 65504), so
     an integer plate in such a space still holds the values above 1.0 that SDR to HDR makes. 1.0 when it cannot be read."""
     try:
         return round(float(np.max(ocio.convert([np.ones((1, 1, 3), np.float32)], config, cs, "@linear")[0])), 3)
@@ -395,6 +832,11 @@ def plate_info(rel: str, config: str = "", cs: str = "") -> dict:
     """What the Open dialog says about a plate, its file colour space guessed in `config`, for the viewer's OCIO, and the
     headroom of `cs` (else of that guess)."""
     full = folders.plate_path(rel)
+    if os.path.isdir(full) and folders.absolute(rel):
+        try:
+            plateio.find_sequence(full)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"No plate in {rel}.") from None
     spec = plateio.probe_plate(full)
     first = spec["files"][0] if spec.get("files") else full
     keep = ("kind", "ext", "codec", "pix_fmt", "width", "height", "frames", "fps", "first_frame", "missing")
@@ -423,8 +865,9 @@ PLANAR_YUV = re.compile(r"^yuva?4(20|22|44)p(\d+)?(le)?$")
 def _video_rgb(frame) -> np.ndarray:
     """A decoded video frame as float32 RGB, in its own values (0 to 1, or beyond for out-of-range codes). Planar YUV goes
     through the file's own matrix and range in float, from its samples at their bit depth, as OpenRV converts a source's
-    YUV in its shader; swscale's 16-bit output was 0.77 of an 8-bit level off on a BT.709 red (2 Nov). Chroma is repeated
-    over the pixels it covers. Other formats (RGB, NV12) go through swscale at 16 bits."""
+    YUV in its shader. swscale's 16-bit output is less exact: with PyAV 19.0.2, a BT.709 limited-range red (Y 63, Cb 102,
+    Cr 240) comes out 2.5 8-bit levels low on red. Chroma is repeated over the pixels it covers. Other formats (RGB, NV12)
+    go through swscale at 16 bits."""
     m = PLANAR_YUV.match(frame.format.name)
     if not m:
         return frame.to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
@@ -471,7 +914,7 @@ def video_frames(path: str, first: int, count: int) -> list[np.ndarray]:
                 if len(out) == count:
                     break
         if last is None:
-            raise ValueError("No frames in this video")
+            raise ValueError("Plate has no frames. Check the file.")
     return out + [out[-1] if out else _video_rgb(last)] * (count - len(out))
 
 
@@ -481,7 +924,7 @@ def frame_rgb(full: str, index: int) -> np.ndarray:
     if plateio.is_sequence(full):
         files = plateio.sequence_frames(full)[0]
         if not files:
-            raise ValueError("No frames in this plate")
+            raise ValueError("Plate has no frames. Check the file.")
         return plateio.read_float(files[min(max(0, index), len(files) - 1)])
     if full.lower().endswith(STILLS):
         return plateio.read_float(full)
@@ -494,11 +937,11 @@ def deep_frames(rel: str, first: int, count: int, side: int) -> tuple[bytes, int
 
     The viewer's colour tools read these, as OpenRV's cache keeps an EXR's half floats: values above 1.0 and below 0
     stay as stored, and nothing passes through an 8-bit video. A video plate's frames are its source file's, decoded at
-    full precision, for the frame on show while paused. A missing frame holds the one before (plateio), and a frame past
+    full precision, for the frame displayed while paused. A missing frame holds the one before (plateio), and a frame past
     the end holds the last, as Load Plate pads a shot.
     """
     full = folders.plate_path(rel)  # a plate, or a render's review frames
-    first, count, side = max(0, first), min(max(1, count), DEEP_FRAMES_MAX), min(max(64, side), 4096)
+    first, count, side = max(0, first), min(max(1, count), DEEP_FRAMES_MAX), min(max(64, side), plateio.NATIVE_SIDE)
     if plateio.is_sequence(full) or full.lower().endswith(STILLS):
         frames = [frame_rgb(full, i) for i in range(first, first + count)]
     else:
@@ -512,32 +955,39 @@ def deep_frames(rel: str, first: int, count: int, side: int) -> tuple[bytes, int
     return data.tobytes(), data.shape[2], data.shape[1]
 
 
-@functools.lru_cache(maxsize=2)  # the inspector reads many pixels of the frame on show
+@functools.lru_cache(maxsize=2)  # the inspector reads many pixels of the frame displayed
 def _frame_cached(full: str, index: int, mtime: float) -> np.ndarray:
     return frame_rgb(full, index)
 
 
-def pixel(rel: str, frame: int, x: int, y: int, size: int = 1, of: str = "") -> dict:
+def pixel(rel: str, frame: int, x: int, y: int, size: int = 1, of: str = "", pts: str = "") -> dict:
     """The colour inspector's read: the pixel at (x, y) of a frame, at native size, in the file's own values (an EXR's
     half floats as stored, above 1.0 and below 0), and the mean of the `size` x `size` pixels around it.
 
     `of` is the size of the grid (x, y) is in, as "3840x2160": the plate's. A frame of another size, such as a preview
-    pass, is read at the same place of the picture in its own pixels, which the reply names (1.7.0 read the plate's
-    pixel numbers in a 640 x 352 preview and failed)."""
+    pass, is read at the same place of the picture in its own pixels, which the reply names. `pts` lists the points sampled
+    with Shift held, in the same grid, as "x,y;x,y": the reply's `average` is their mean in this frame, and their count."""
     full = folders.plate_path(rel)
     stamp = os.path.getmtime(full if os.path.exists(full) else os.path.dirname(full))
     rgb = _frame_cached(full, max(0, frame), stamp)
     h, w = rgb.shape[:2]
-    if of:
-        ow, oh = (int(v) for v in of.lower().split("x"))
+    ow, oh = (int(v) for v in of.lower().split("x")) if of else (w, h)
+
+    def native(px: int, py: int) -> tuple[int, int]:  # a point of the plate's grid, in this frame's own pixels
         if ow > 0 and oh > 0 and (ow, oh) != (w, h):
-            x, y = int((x + 0.5) * w / ow), int((y + 0.5) * h / oh)
-    if not (0 <= x < w and 0 <= y < h):
-        raise ValueError(f"Pixel {x}, {y} is outside the {w} x {h} frame")
+            px, py = int((px + 0.5) * w / ow), int((py + 0.5) * h / oh)
+        if not (0 <= px < w and 0 <= py < h):
+            raise ValueError(f"Pixel {px}, {py} outside the frame ({w} x {h}).")
+        return px, py
+
+    x, y = native(x, y)
     r = max(1, min(int(size), 64)) // 2
     block = rgb[max(0, y - r): y + r + 1, max(0, x - r): x + r + 1].reshape(-1, 3)
     out = {"width": w, "height": h, "x": x, "y": y, "frame": frame, "value": [float(v) for v in rgb[y, x]],
            "mean": [float(v) for v in block.mean(0)], "size": 2 * r + 1}
+    if pts:
+        at = [native(*(int(v) for v in p.split(","))) for p in pts.split(";")]
+        out["average"] = {"value": [float(v) for v in rgb[[py for _, py in at], [px for px, _ in at]].mean(0)], "n": len(at)}
     if not (plateio.is_sequence(full) or full.lower().endswith(STILLS)):  # a movie: say what its samples are
         out["movie"] = _movie_info(full, stamp)
     return out
@@ -556,7 +1006,7 @@ async def pixel_route(request):
     q = request.rel_url.query
     try:
         out = await asyncio.to_thread(pixel, q.get("path", ""), int(q.get("frame", 0)), int(q.get("x", 0)), int(q.get("y", 0)),
-                                      int(q.get("size", 1)), q.get("of", ""))
+                                      int(q.get("size", 1)), q.get("of", ""), q.get("pts", ""))
     except (FileNotFoundError, ValueError) as e:
         return web.json_response({"error": str(e)}, status=404, headers={"Cache-Control": "no-store"})
     return web.json_response(out, headers={"Cache-Control": "no-store"})
@@ -581,7 +1031,7 @@ SCENE_MAX = 64 << 20  # bytes: strokes are saved as drawn
 
 def scene_path(name: str) -> str:
     if not SCENE_NAME.match(name or "") or name.startswith("."):
-        raise ValueError("A scene name is letters, digits, '.', '-' and '_'")
+        raise ValueError("Scene name not allowed. Use letters, digits, '.', '-' and '_'.")
     return os.path.join(folder_paths.get_output_directory(), SCENES, f"{name.removesuffix('.paintaplate.json')}.paintaplate.json")
 
 
@@ -589,7 +1039,7 @@ def list_scenes() -> list[dict]:
     """Scenes saved here, newest first, with what the Open dialog shows: the plate's name and the number of edits."""
     folder = os.path.join(folder_paths.get_output_directory(), SCENES)
     out = []
-    for e in sorted(os.scandir(folder), key=lambda e: -e.stat().st_mtime) if os.path.isdir(folder) else []:
+    for e in sorted(os.scandir(folder), key=lambda e: -e.stat(follow_symlinks=False).st_mtime) if os.path.isdir(folder) else []:
         if not e.name.endswith(".paintaplate.json") or e.is_symlink():
             continue
         try:
@@ -602,18 +1052,20 @@ def list_scenes() -> list[dict]:
     return out
 
 
-def save_scene(name: str, body: bytes) -> None:
+def save_scene(name: str, body: bytes) -> str:
+    """Writes the scene, then returns its file's full path on this machine."""
     if len(body) > SCENE_MAX:
-        raise ValueError("Scene too large")
+        raise ValueError(f"Scene not saved: larger than {SCENE_MAX >> 20} MB.")
     scene = json.loads(body)
     if not isinstance(scene, dict) or scene.get("format") != "paintaplate-scene":
-        raise ValueError("Not a Paint a plate scene")
+        raise ValueError("Scene not saved: not a Paint a plate scene.")
     path = scene_path(name)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = f"{path}.{uuid.uuid4().hex}.tmp"
     with open(tmp, "wb") as fh:
         fh.write(body)
     os.replace(tmp, path)
+    return path
 
 
 async def scenes(request: web.Request) -> web.Response:
@@ -632,10 +1084,10 @@ async def scene_get(request: web.Request) -> web.StreamResponse:
 
 async def scene_post(request: web.Request) -> web.Response:
     try:
-        await asyncio.to_thread(save_scene, request.match_info["name"], await request.read())
+        path = await asyncio.to_thread(save_scene, request.match_info["name"], await request.read())
     except ValueError as exc:
         raise web.HTTPBadRequest(text=str(exc)) from exc
-    return web.json_response({"saved": request.match_info["name"]})
+    return web.json_response({"saved": request.match_info["name"], "path": path})
 
 
 # ---------- OpenColorIO, for the viewer ----------
@@ -657,17 +1109,106 @@ async def ocio_shader(request: web.Request) -> web.Response:
     return web.json_response(out, headers={"Cache-Control": "no-store"})  # a new $OCIO or an updated pack shows at once
 
 
+# ---------- A trace of every request, for the day ComfyUI's memory grows and no job runs ----------
+
+TRACE = os.environ.get("PAINTAPLATE_TRACE") == "1"
+TRACE_QUIET = (".js", ".mjs", ".css", ".map", ".svg", ".png", ".ico", ".woff", ".woff2", ".ttf", ".html", ".json")  # the front ends' own files
+
+
+def held() -> float:
+    """What this process holds now, in GB (VmRSS): 0.0 where /proc is not there."""
+    try:
+        with open("/proc/self/status") as f:
+            return next(int(line.split()[1]) for line in f if line.startswith("VmRSS")) / 2**20
+    except (OSError, StopIteration, ValueError):
+        return 0.0
+
+
+@web.middleware
+async def trace(request: web.Request, handler):
+    """One line in ComfyUI's log when a request starts and one when it ends: its method and address, the seconds, and the
+    memory the process holds. Every request to ComfyUI passes here, the pack's routes and the others. A request that
+    starts and never ends is one that ran when ComfyUI stopped. A front end's own file is said only when it is slow or
+    heavy. On with PAINTAPLATE_TRACE=1 in ComfyUI's environment: ComfyUI's own log names no request, so memory that
+    grows while no job runs shows no cause there."""
+    what, t0, before = f"{request.method} {request.path_qs[:240]}", time.perf_counter(), held()
+    quiet = request.method == "GET" and request.path.endswith(TRACE_QUIET) and not request.path.startswith("/paintaplate/")
+    if not quiet:
+        logging.info("[Paint a plate] Trace: %s started, RAM %.1f GB.", what, before)
+    try:
+        return await handler(request)
+    finally:
+        seconds, after = time.perf_counter() - t0, held()
+        if not quiet or seconds >= 0.5 or after - before >= 0.1:
+            logging.info("[Paint a plate] Trace: %s ended, done in %.2f s, RAM %.1f GB.", what, seconds, after)
+
+
+async def _pulse(app) -> None:
+    """With the trace on: one line each time the memory has moved by half a GB, so growth between two requests shows."""
+    async def watch():
+        last = held()
+        while True:
+            await asyncio.sleep(1)
+            now = held()
+            if abs(now - last) >= 0.5:
+                logging.info("[Paint a plate] Trace: process RAM %.1f GB.", now)
+                last = now
+    app["paintaplate_pulse"] = asyncio.create_task(watch())
+
+
+FORWARDED = ("X-Forwarded-For", "Forwarded")  # what a proxy adds to a request it passes on
+
+
+def this_machine(handler):
+    """`handler`, a route that reads `path`, behind the rules of an absolute path. One in a request that a proxy passed on
+    is refused: a proxy on this machine opens a loopback listener to other machines. A path that folders.plate_path
+    refuses for its listener, or that the machine may not read, answers 403 with its sentence."""
+    async def guarded(request: web.Request):
+        try:
+            if folders.absolute(request.query.get("path", "").strip()) and any(h in request.headers for h in FORWARDED):
+                raise PermissionError(folders.THIS_MACHINE_ONLY)
+            return await handler(request)
+        except PermissionError as exc:
+            return web.json_response({"error": str(exc)}, status=403)
+    return guarded
+
+
+PAGE = f"/extensions/{os.path.basename(os.path.dirname(os.path.abspath(__file__)))}/"  # where ComfyUI serves ./web: under the pack's folder name
+
+
+async def fresh_page(request: web.Request, response: web.StreamResponse) -> None:
+    """The page's own files are checked with the server at each load (« Cache-Control: no-cache »). ComfyUI gives its rule
+    to .js and .css files and none to .mjs, .html or .json, so a browser could run a module that it kept from an earlier
+    version of the pack with this version's workflows. With « no-cache » the browser still keeps a file, and asks first
+    whether it changed: an unchanged file costs one short answer. A rule already set on an answer stays."""
+    if request.path.startswith(PAGE):
+        response.headers.setdefault("Cache-Control", "no-cache")
+
+
 def setup(server) -> None:
-    """Add the routes to ComfyUI's server (or to anything with an aiohttp RouteTableDef as `routes`)."""
+    """Add the routes to ComfyUI's server (or to anything with an aiohttp RouteTableDef as `routes`), and the page's
+    cache rule (fresh_page) to its application."""
+    app = getattr(server, "app", None)
+    if app is not None:
+        app.on_response_prepare.append(fresh_page)
+    if TRACE and app is not None:
+        app.middlewares.append(trace)
+        app.on_startup.append(_pulse)
+        logging.info("[Paint a plate] Trace: on.\n  One line per request to ComfyUI, at its start and at its end.")
     server.routes.get("/paintaplate/download")(download)
-    server.routes.get("/paintaplate/browse")(browse_route)
-    server.routes.get("/paintaplate/thumb")(thumb)
+    server.routes.get("/paintaplate/download/check")(download_check)
+    server.routes.get("/paintaplate/download/size")(this_machine(download_size))
+    server.routes.post("/paintaplate/graph")(graph_post)
+    server.routes.get("/paintaplate/browse")(this_machine(browse_route))
+    server.routes.get("/paintaplate/thumb")(this_machine(thumb))
     server.routes.post("/paintaplate/blank")(blank)
     server.routes.get("/paintaplate/jobs/{key}")(job_get)
     server.routes.post("/paintaplate/jobs/{key}")(job_post)
-    server.routes.get("/paintaplate/stat")(stat)
-    server.routes.get("/paintaplate/frames")(frames)
-    server.routes.get("/paintaplate/pixel")(pixel_route)
+    server.routes.post("/paintaplate/live/{prompt}")(live_clear)
+    server.routes.post("/paintaplate/cache")(cache_route)
+    server.routes.get("/paintaplate/stat")(this_machine(stat))
+    server.routes.get("/paintaplate/frames")(this_machine(frames))
+    server.routes.get("/paintaplate/pixel")(this_machine(pixel_route))
     server.routes.get("/paintaplate/scenes")(scenes)
     server.routes.get("/paintaplate/scenes/{name}")(scene_get)
     server.routes.post("/paintaplate/scenes/{name}")(scene_post)

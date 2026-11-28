@@ -47,13 +47,13 @@ test("the channel is picked after the display, as OCIODisplay floods it; luminan
   assert.deepEqual(displayUniforms({ ...DISPLAY, channel: "l" }).pick[2], LUMA);
 });
 
-import { nativeSize, oneToOne } from "../../web/display.mjs";
+import { nativeSize } from "../../web/display.mjs";
 
 test("the canvas holds the plate at its own size, up to the frames route's 4096; 1:1 counts device pixels", () => {
   assert.deepEqual(nativeSize(3840, 2160, 4096), [3840, 2160]);
   assert.deepEqual(nativeSize(8192, 4320, 4096), [4096, 2160]);
-  assert.equal(oneToOne(3840, 960, 2), 2);
-  assert.equal(oneToOne(1920, 1920, 1), 1);
+  assert.equal(pixelScale(1, 3840, 960, 2), 2);
+  assert.equal(pixelScale(1, 1920, 1920, 1), 1);
 });
 
 import { dragZoomScale, lockAxis, pixelScale, pointIn, zoomAbout } from "../../web/display.mjs";

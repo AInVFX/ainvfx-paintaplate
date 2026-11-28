@@ -1,0 +1,121 @@
+"""The viewer's checks on playback. The frame cache fills inside one memory budget, at the size the frame is shown. Once
+every frame between the in and out points is in memory, the plate and the shot play from memory, on a clock, with the
+videos paused. A pause writes one line of statistics. A budget too small for the range keeps a window of frames, and the
+videos play. The mock serves VP9 and the headless browser draws WebGL in software: these checks prove the logic, a GPU the speed.
+A playback check waits until the playhead has shown four new frames (MOVES), however slow the machine draws."""
+import re
+
+OPEN = "document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden"
+CACHE = "(() => { const c = document.querySelector('#tl-cache').dataset; return [+c.cached, +c.frames, c.size || '']; })()"
+FULL = "(() => { const c = document.querySelector('#tl-cache').dataset; return +c.frames > 1 && c.cached === c.frames && !!c.size; })()"
+VIEW = "document.querySelector('#view').dataset"
+PAUSED = "[...document.querySelectorAll('video')].every((v) => v.paused)"
+OTHER = re.compile(r"\. (?!Plate:)[^.:]+: (all [\d,]+|[\d,]+ of [\d,]+) (EXR )?frames in memory")  # a source other than the plate: the step displayed
+PLAN = "([...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('Frame cache, ')).pop()?.textContent ?? '')"  # the log's last line about the cache's plan
+MOVES = """() => { const el = document.querySelector('#frame-now'); let last = el.textContent; window.__moves = 0;
+  new MutationObserver(() => { if (el.textContent !== last) { last = el.textContent; window.__moves += 1; } })
+    .observe(el, { childList: true, characterData: true, subtree: true }); }"""  # counts each new frame number of the playhead, from now on
+
+
+def opened(browser, port, U, query=""):
+    page = browser.new_page(viewport={"width": 1400, "height": 900})
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0&stats=1{query}")
+    page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
+    U.open_path(page, "plates/desk.mp4")
+    page.wait_for_function(OPEN, timeout=60000)
+    return page
+
+
+def lines(page):
+    return page.eval_on_selector_all("#log li span", "els => els.map(e => e.textContent)")
+
+
+def plan_line(page):  # the last line of the log about the cache's plan
+    return next((line for line in reversed(lines(page)) if "Frame cache, " in line), "")
+
+
+def space(page):  # play or pause, whatever had the focus
+    page.evaluate("document.activeElement.blur()")
+    page.keyboard.press("Space")
+
+
+def run(browser, port, U):
+    page = opened(browser, port, U)
+
+    # 1. The stripe fills: every frame of the plate, at the size it is shown, inside the Auto budget
+    U.wait_log(page, FULL, 150000, "frame cache with every frame of the plate")
+    cached, frames, size = page.evaluate(CACHE)
+    w, h = (int(v) for v in size.split("x"))
+    said = plan_line(page)
+    U.check(cached == frames and 960 <= w <= 1280 and "1 GB (Auto). " in said and f"Plate: all {frames} frames in memory, " in said and f"({w} x {h})" in said,
+            f"the stripe fills: {cached} of {frames} frames in memory at {w} x {h}, the size the frame is shown, inside the Auto budget ({said[:60]})")
+
+    # 2. With every frame in memory the plate plays from memory: the videos stay paused, a clock moves the playhead
+    page.evaluate(MOVES)
+    space(page)
+    page.wait_for_function(f"{VIEW}.play === 'memory'", timeout=15000)
+    moved = U.until(page, "window.__moves >= 4", 60000)  # four new frames displayed: the statistics of check 3 then count three frames or more
+    U.check(moved and page.evaluate(PAUSED),
+            f"with every frame in memory the plate plays from memory: the videos stay paused and the playhead moves on the clock ({page.evaluate('window.__moves')} new frames)")
+
+    # 3. A pause writes one line of statistics
+    space(page)
+    page.wait_for_function(f"({VIEW}.stats || '').startsWith('Played')", timeout=10000)
+    stats = page.evaluate(f"{VIEW}.stats")
+    m = re.match(r"Played (\d+) frames in [\d.]+ s: [\d.]+ fps of 24, \d+ late, \d+ skipped; from memory at \d+ x \d+", stats)
+    U.check(bool(m) and int(m.group(1)) >= 3 and "draw " in stats and any(stats in line for line in lines(page)) and page.evaluate(f"{VIEW}.play") == "",
+            f"a pause writes one line of statistics in the log: {stats}")
+
+    # 4. View > Cache memory sets the budget and keeps it; View > Playback statistics turns the line off
+    U.menu(page, "View", "Cache memory", "512 MB")
+    page.wait_for_function("localStorage.getItem('paintaplate.cache') === '512000000'", timeout=5000)
+    planned = U.until(page, f"{PLAN}.includes('512 MB (View > Cache memory)')", 10000)
+    U.check(planned, f"View > Cache memory sets the budget and keeps it for the next session: {plan_line(page)[:70]}")
+    page.click("#view", button="right")  # a ticked entry: U.menu finds an entry by its exact name, without a tick
+    page.locator("#ctx li.group > span:first-child", has_text=re.compile("^View$")).first.hover()
+    page.locator("#ctx li", has_text="Playback statistics").last.click()
+    U.check("Playback statistics off" in page.text_content("#hud"), "View > Playback statistics, ticked while the statistics are on, turns them off")
+
+    # 5. A budget too small for the range: the cache keeps a window of frames at 960 px, never more than fit, and the videos play
+    small = opened(browser, port, U, "&cache=8")
+    small.wait_for_function("+document.querySelector('#tl-cache').dataset.cached > 0", timeout=60000)
+    seen = []
+    for _ in range(8):
+        small.wait_for_timeout(500); seen.append(small.evaluate(CACHE)[0])  # the one read on the clock in this flow: the budget is sampled for 4 s, to show that it holds
+    cached, frames, size = small.evaluate(CACHE)
+    said = plan_line(small)
+    U.check(0 < max(seen) <= 3 and size == "960x528" and "8 MB (set in the address)" in said and f"Plate: 3 of {frames} frames in memory, reduced size (960 x 528)" in said,
+            f"a budget of 8 MB holds: at most {max(seen)} frames in memory at {size} ({said[:60]})")
+    small.evaluate(MOVES)
+    space(small)
+    small.wait_for_function(f"{VIEW}.play === 'video'", timeout=15000)
+    moved = U.until(small, "window.__moves >= 4", 60000)
+    U.check(moved and not small.evaluate(PAUSED), f"without every frame in memory the videos play, and the playhead follows them ({small.evaluate('window.__moves')} new frames)")
+    space(small)
+    small.wait_for_function(f"({VIEW}.stats || '').includes('from the video')", timeout=10000)
+    U.check(True, f"and the statistics name the path: {small.evaluate(f'{VIEW}.stats')[:110]}")
+    before = sum("Frame cache, " in line for line in lines(small))
+    U.open_path(small, "plates/desk.mp4")
+    U.wait_log(small, f"[...document.querySelectorAll('#log li span')].filter((e) => e.textContent.includes('Frame cache, ')).length > {before}", 60000, "cache plan of the plate opened again")
+    U.check(plan_line(small).count(" frames in memory, ") == 1, f"a plate that opens logs its cache's plan, the same plate again too: {plan_line(small)[:70]}")
+    small.close()
+
+    # 6. A shot displayed: once its frames are in memory it plays from memory too
+    page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.30, 0.60), (0.40, 0.60)]); page.keyboard.press("Enter")
+    page.wait_for_function(U.DONE.format(n=1), timeout=120000)
+    space(page)
+    U.wait_log(page, f"{VIEW}.play === 'memory' && {VIEW}.picture === 'shot'", 150000, "shot playing from memory")
+    SHOT_PLAN = r"""[...document.querySelectorAll('#log li span')].some((e) => e.textContent.startsWith('Frame cache, ') && /\. (?!Plate:)[^.:]+: (all [0-9,]+|[0-9,]+ of [0-9,]+) frames in memory/.test(e.textContent))"""
+    U.wait_log(page, SHOT_PLAN, 30000, "cache plan that names the shot")  # each plan is logged once per plate: read the one that names the shot
+    said = next((t for t in reversed(lines(page)) if t.startswith("Frame cache, ") and OTHER.search(t)), "")
+    U.check(OTHER.search(said) is not None and page.evaluate(PAUSED), f"the shot of the edits plays from memory once its frames are in ({said[-62:]})")
+    space(page)
+    page.close()
+
+    # A 16 GB GPU: the small memory profile gives 512 MB, and the line names no GPU
+    U.mock_route(port, "/mock/card", {"vram": 17.2e9, "ram": 65.5e9})
+    small = opened(browser, port, U)
+    U.wait_log(small, FULL, 150000, "frame cache with every frame of the plate, on the small memory profile")
+    said = plan_line(small)
+    U.check(re.fullmatch(r"Frame cache, 512 MB \(Auto\)\. Plate: all \d+ frames in memory, (full|reduced) size \(\d+ x \d+\)\.", said) is not None, f"on a 16 GB GPU beside ComfyUI the Auto budget is 512 MB, and the line names no GPU: {said}")
+    small.close()

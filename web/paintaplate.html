@@ -13,41 +13,47 @@
   <header class="top">
     <img class="logo" src="logo.png" alt="AInVFX">
     <img class="mark" src="brand/paint-a-plate.png" alt="Paint a plate">
-    <span id="version" class="version" title="The version of AInVFX Paint a plate on this ComfyUI"></span>
+    <span id="version" class="version" title="The version of AInVFX Paint a plate on this ComfyUI."></span>
     <span id="spec" class="spec"></span>
-    <button id="close-btn" class="quiet close-plate" type="button" hidden title="Close the plate: stop its renders and free its frames from the browser's memory" aria-label="Close the plate">×</button>
-    <button id="menu-btn" class="quiet menu-btn" title="Every action, with its key (or right-click on the frame)" aria-label="Menu" aria-haspopup="menu">
+    <button id="close-btn" class="quiet close-plate" type="button" hidden title="Close the plate: stops its renders and frees its frames from the browser's memory." aria-label="Close the plate">×</button>
+    <button id="menu-btn" class="quiet menu-btn" title="Every action, with its keyboard shortcut (or right-click the frame)." aria-label="Menu" aria-haspopup="menu">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
-    <button id="help-btn" class="quiet" title="Keys (?)" aria-label="Keys">?</button>
+    <button id="help-btn" class="quiet" title="Keys (?)." aria-label="Keys">?</button>
     <button id="open-btn">Open plate</button>
-    <button id="save-btn" disabled title="Save the scene: the plate and every edit with its strokes, words and seed">Save scene</button>
-    <button id="export-btn" class="primary" disabled title="Write the result in the plate's own format and its matte, then download one zip">Export</button>
+    <button id="save-btn" disabled title="Save the scene: the plate and every edit with its strokes, text prompt and seed.">Save scene</button>
+    <button id="finish-btn" type="button" disabled aria-haspopup="dialog" aria-expanded="false" title="Finish: SDR to HDR and Upscale, after the full-size composite.">Finish</button>
+    <button id="export-btn" class="primary" disabled title="Export: the result and its matte, in one zip.">Export</button>
   </header>
+  <div id="finish" class="finish" role="dialog" aria-label="Finish" hidden>
+    <h2>Finish</h2>
+    <p class="hint">The passes on the whole plate after the full-size composite, in the order they run.</p>
+    <ol id="finish-list"></ol>
+  </div>
 
   <nav class="tools" aria-label="Tools">
-    <button data-tool="paint" title="Paint something new (B)">
+    <button data-tool="paint" title="Paint something new (P).">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20c2 0 4-1 4-4 0-1.5 1-2.5 2.5-2.5S13 14.5 13 16c0 3-3 4-9 4zM12.5 12.5 20 5l-1-1-7.5 7.5"/></svg>
       <span>Paint</span>
     </button>
     <div class="tool-group">
-      <button data-tool="erase" title="Erase to the clean plate (E)">
+      <button data-tool="erase" title="Clean: remove an object and regenerate the background behind it (C).">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4l5 5-9 9H6l-2-2 11-12zM9 18h11"/></svg>
-        <span>Erase</span>
+        <span>Clean</span>
       </button>
-      <label class="whole" title="SAM 3.1 grows the stroke to the whole object under it">
+      <label class="whole" title="SAM 3.1 extends the stroke to the whole object under it.">
         <input id="whole" type="checkbox" checked><span>Whole object</span>
       </label>
     </div>
-    <button data-tool="light" title="Paint where the light comes from (L)">
+    <button data-tool="light" title="Paint where the light comes from (L).">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>
       <span>Light</span>
     </button>
     <div class="brush">
       <label for="size">Brush</label>
-      <input id="size" type="range" min="4" max="320" value="48" title="Brush size (- and =)">
+      <input id="size" type="range" min="4" max="320" value="48" title="Brush size (- and =).">
       <output id="size-out" for="size">48</output>
-      <button id="rub-btn" class="rub" aria-pressed="false" title="Eraser: rub out strokes you just painted (X)">
+      <button id="rub-btn" class="rub" aria-pressed="false" title="Eraser (E): erases strokes. Hold E while you drag, or tap E to turn it on or off.">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3l5 5-10 10H6l-3-3L16 3zM9 9l6 6M6 21h14"/></svg>
         <span>Eraser</span>
       </button>
@@ -63,20 +69,20 @@
       <button class="sw" data-color="#1976d2" style="--c:#1976d2" title="Blue" aria-label="Blue"></button>
       <button class="sw" data-color="#6d4c41" style="--c:#6d4c41" title="Brown" aria-label="Brown"></button>
       <button class="sw" data-color="#ffd890" style="--c:#ffd890" title="Warm light" aria-label="Warm light"></button>
-      <button class="sw pick" id="pick" hidden title="Pick a colour from the frame (I)" aria-label="Pick a colour from the frame" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.2 1.6a1.9 1.9 0 0 1 2.7 2.7l-1.6 1.6.7.7-1 1-.7-.7-5.6 5.6H3.6v-2.1l5.6-5.6-.7-.7 1-1 .7.7z"/></svg></button>
-      <label class="sw custom" title="Any colour"><input id="color" type="color" value="#000000" aria-label="Any colour"></label>
+      <button class="sw pick" id="pick" title="Pick a colour from the frame (I)." aria-label="Pick a colour from the frame" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.2 1.6a1.9 1.9 0 0 1 2.7 2.7l-1.6 1.6.7.7-1 1-.7-.7-5.6 5.6H3.6v-2.1l5.6-5.6-.7-.7 1-1 .7.7z"/></svg></button>
+      <label class="sw custom" title="Any colour."><input id="color" type="color" value="#000000" aria-label="Any colour"></label>
     </div>
   </nav>
 
   <main class="stage">
     <div class="promptbar">
-      <label for="prompt" class="prompt-label">Prompt</label>
-      <button id="editing" class="editing" type="button" hidden title="This edit is selected: its words and strokes are yours to change. Click, or press Esc, to deselect"></button>
-      <input id="prompt" autocomplete="off" spellcheck="false" aria-label="Describe the edit"
+      <label for="prompt" class="prompt-label">Text prompt</label>
+      <button id="editing" class="editing" type="button" hidden title="Click to deselect this edit, or press Esc."></button>
+      <input id="prompt" autocomplete="off" spellcheck="false" aria-label="Text prompt"
              placeholder="Describe what to paint, then paint it on the frame">
-      <button id="generate" class="primary generate" type="button" disabled title="Generate (Enter): the edit on the first frame, then its shot. What is already made never runs again">Generate</button>
-      <button id="stop" class="stop" type="button" hidden title="Stop generating (Esc): what finished is kept, and Generate goes on from there">Stop</button>
-      <button id="new-edit" class="new-edit" type="button" disabled title="New edit (N): this edit is done, the next strokes start a separate one">
+      <button id="generate" class="primary generate" type="button" disabled title="Click or press Enter to make the edit, then the shot. Steps already made are reused.">Generate</button>
+      <button id="stop" class="stop" type="button" hidden title="Click or press Esc to stop. Finished steps are kept. Press Enter to continue from there.">Stop</button>
+      <button id="new-edit" class="new-edit" type="button" disabled title="Click or press N to deselect this edit. The next strokes start a new edit.">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span>New edit</span>
       </button>
@@ -84,19 +90,19 @@
     <div id="viewport" class="viewport">
       <canvas id="view"></canvas>
       <canvas id="xray" class="xray" hidden aria-hidden="true"></canvas>
-      <figure id="live-inset" class="live-inset" hidden><img alt="Live preview of the pass in progress"><figcaption></figcaption></figure>
+      <figure id="live" class="live" hidden><img alt="Live preview of the pass in progress"><figcaption></figcaption></figure>
       <div id="wipe" class="wipe" hidden>
-        <span class="label left">Plate</span><span class="label right">Result</span><span class="grip" title="Drag to compare"></span>
+        <span class="label left">Plate</span><span class="label right">Result</span><span class="grip" title="Drag to compare."></span>
       </div>
       <div id="inspector-mark" class="inspector-mark" hidden></div>
-      <div id="inspector" class="inspector" hidden aria-live="polite" title="Drag to move the point it reads"></div>
+      <div id="inspector" class="inspector" hidden aria-live="polite" title="Drag to move the point it reads."></div>
       <p id="hud" class="hud" aria-live="polite"></p>
       <div id="opening" class="opening" hidden>
         <p id="op-title" class="op-title">Opening the plate</p>
         <div class="op-bar"><div id="op-bar"></div></div>
         <p id="op-step" class="op-step"></p>
         <ol id="op-steps" class="op-steps"></ol>
-        <button id="op-cancel" type="button" class="op-cancel" title="Stop opening this plate (Esc)">Cancel</button>
+        <button id="op-cancel" type="button" class="op-cancel" title="Stop opening this plate (Esc).">Cancel</button>
       </div>
       <div id="empty" class="empty">
         <p>Open a plate to start: a video file, or a folder of EXR, PNG, TIFF or DPX frames. You can also drop it here.</p>
@@ -106,66 +112,59 @@
       <video id="shot-video" muted playsinline preload="auto" hidden></video>
     </div>
     <div class="transport">
-      <button id="play-btn" class="play" aria-label="Play (Space)" title="Play or pause (Space)" disabled>
+      <button id="play-btn" class="play" aria-label="Play (Space)" title="Play or pause (Space)." disabled>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-play" d="M8 5v14l11-7z"/><path class="i-pause" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
       </button>
-      <output id="frame-now" class="frame-now" title="Current frame">0</output>
+      <output id="frame-now" class="frame-now" title="Current frame.">0</output>
       <div id="timeline" class="timeline" role="slider" tabindex="0" aria-label="Frame" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
         <div id="tl-range" class="tl-range"></div>
-        <canvas id="tl-cache" class="tl-cache" title="Frames cached in memory: they show at once"></canvas>
+        <canvas id="tl-cache" class="tl-cache" title="Frames cached in memory: they display immediately."></canvas>
         <div id="tl-render" class="tl-render"></div>
-        <div id="tl-key" class="tl-key" hidden title="Edits are painted on this frame"></div>
+        <div id="tl-key" class="tl-key" hidden title="Edits are painted on this frame."></div>
         <div id="tl-keys" class="tl-keys"></div>
         <div id="tl-head" class="tl-head"></div>
       </div>
       <output id="frame-total" class="frame-total"></output>
       <span id="fps" class="fps"></span>
-      <button id="display-state" class="display-state" hidden title="The viewer's colour, display only: the export never changes. Click to reset"></button>
-      <button id="wipe-btn" class="quiet" aria-pressed="false" title="Compare the plate and the result (F6)" disabled>Wipe</button>
+      <button id="display-state" class="display-state" hidden title="Display only: the export keeps its colours. Click to reset."></button>
+      <button id="wipe-btn" class="quiet" aria-pressed="false" title="Compare the plate and the result (F6)." disabled>Wipe</button>
     </div>
   </main>
 
   <div id="split-side" class="split split-side" role="separator" aria-orientation="vertical" aria-label="History width"
-       title="Drag to resize. Double-click: the first size" tabindex="0"></div>
+       title="Drag to resize. Double-click to reset the size." tabindex="0"></div>
   <aside class="side">
     <div class="history-head">
       <h2>History</h2>
       <span class="undo">
-        <button id="undo-btn" class="quiet" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
-        <button id="redo-btn" class="quiet" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
+        <button id="undo-btn" class="quiet" title="Undo (Ctrl+Z)." aria-label="Undo" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+        <button id="redo-btn" class="quiet" title="Redo (Ctrl+Shift+Z)." aria-label="Redo" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
       </span>
     </div>
     <ol id="history"></ol>
-    <p id="history-empty" class="history-empty">Your edits appear here. Describe, paint on the frame, then Generate. Click an edit to change its words or strokes.</p>
+    <p id="history-empty" class="history-empty">Your edits appear here. Describe the edit in the text prompt, paint it on the frame, then press Enter. Use the pencil to edit.</p>
     <section id="fluid" class="render fluid" hidden>
       <h2>Fluid shot <span id="fluid-state"></span></h2>
-      <p class="hint">Paint smoke, steam or fire on the keyframes, describe it, then Generate.</p>
-      <div class="fluid-actions">
-        <button id="fluid-again" type="button" title="Generate with another seed (Ctrl+Enter)">Another seed</button>
-      </div>
+      <p class="hint">Paint your fluid (smoke, fire, water and more) on the keyframes, describe it in the text prompt, then press Enter.</p>
     </section>
     <section id="render" class="render" hidden>
       <h2>Render <span id="render-left"></span></h2>
-      <label class="preview-size">Preview size
-        <select id="preview-size" title="The shot preview and its composite, in sizes this plate divides into. Smaller renders faster; the export stays at full size."></select>
+      <label class="preview-size">Preview
+        <select id="preview-size"></select>
       </label>
+      <p class="preview-note">Latent preview, the default: each pass displays live. <span id="preview-parts">Half or Quarter size: a quick pass of the whole shot first, then the full size. </span>Off: the full size only. Export is always full size.</p>
       <ol id="stages"></ol>
-      <p class="hint render-hint">Click a finished step to show it on every frame; click it again, or Esc, for the latest.</p>
-      <button id="render-full" type="button" class="quiet render-full" hidden title="These edits took the frames of an earlier render whose other edits are far away: only the tracking and the composites ran. Render them in full, with their own shot, the same edits and seeds">Render in full</button>
-    </section>
-    <section id="deliver" class="deliver" hidden>
-      <h2>Deliver</h2>
-      <p class="hint">Passes that run after the full-size composite, each on or off.</p>
-      <label id="deliver-hdr-row" title="Lightricks' SDR-to-HDR IC-LoRA on the new content of a plate whose format holds nothing above 1.0: the result becomes an EXR sequence"><input type="checkbox" id="deliver-hdr"> Bit depth: SDR to HDR, delivered as EXR</label>
-      <div id="deliver-confirm" class="hdr-confirm" hidden><p>This plate's format cannot hold values above 1.0. With SDR to HDR, the result becomes an EXR sequence: the player shows its frames, and Export writes them as half-float EXR in ACES2065-1.</p><button id="deliver-yes">Turn on</button> <button id="deliver-no">Cancel</button></div>
-      <p id="deliver-auto" class="hint" hidden>This plate holds values above 1.0: its new content goes through SDR to HDR on its own.</p>
+      <p class="hint render-hint"></p>
+      <button id="render-full" type="button" class="quiet render-full" hidden title="These edits reused the shot of an earlier render: only their tracking and composites ran. Click to render their own shot, with the same edits and seeds.">Render in full</button>
     </section>
   </aside>
 
   <footer class="log">
     <div id="split-log" class="split split-log" role="separator" aria-orientation="horizontal" aria-label="Log height"
-         title="Drag to resize. Double-click: the first size" tabindex="0" hidden></div>
+         title="Drag to resize. Double-click to reset the size." tabindex="0" hidden></div>
     <p id="status" role="status">Starting</p>
+    <p id="status-note" hidden></p>
+    <button id="log-export" class="quiet log-export" type="button" aria-label="Export the log" title="Export the log as a text file, to share for troubleshooting. It contains only the log, the software and system versions, the GPU, the RAM, the browser and the page's settings."><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
     <button id="log-btn" class="quiet" aria-expanded="false" aria-controls="log">Log</button>
     <ol id="log" hidden></ol>
   </footer>
@@ -174,102 +173,145 @@
   <dialog id="help" class="help">
     <h2>Help</h2>
     <div class="tabs" role="tablist" aria-label="Help">
-      <button type="button" role="tab" data-help="start" aria-selected="false">Getting started</button>
+      <button type="button" role="tab" data-help="start" aria-selected="true">Getting started</button>
       <button type="button" role="tab" data-help="tools" aria-selected="false">Tools</button>
-      <button type="button" role="tab" data-help="keys" aria-selected="true">Keys</button>
-      <button type="button" role="tab" data-help="colour" aria-selected="false">Viewer and colour</button>
+      <button type="button" role="tab" data-help="viewer" aria-selected="false">Viewer</button>
+      <button type="button" role="tab" data-help="colour" aria-selected="false">Colour</button>
       <button type="button" role="tab" data-help="render" aria-selected="false">Render and export</button>
+      <button type="button" role="tab" data-help="keys" aria-selected="false">Keys</button>
       <button type="button" role="tab" data-help="models" aria-selected="false">Models and licences</button>
     </div>
-    <section class="help-tab" data-help="start" role="tabpanel" hidden>
+    <section class="help-tab" data-help="start" role="tabpanel">
       <ol class="help-steps">
-        <li>Open a plate: Open, then ComfyUI files, Upload, Scenes or Blank plate. A blank plate starts a fluid shot.</li>
-        <li>Pick a tool (Paint, Erase or Light: B, E, L), describe the change, then paint it on the first frame.</li>
-        <li>Generate (Enter): the edit on the first frame, then its shot through the whole plate.</li>
-        <li>Play it, compare it with the plate in the wipe (F6), then Export.</li>
+        <li>Click Open, then pick ComfyUI files, Upload, Scenes or Blank plate. Sequence files and folders of frames are supported. A plate opens with up to 20 s of frames, or as many as this machine holds. A blank plate starts a fluid shot.</li>
+        <li>Pick a tool (Paint, Clean or Light), describe the change in the text prompt, then paint it on the first frame.</li>
+        <li>Press Enter to make the edit on the first frame, then the shot. The Render panel shows each step as it runs.</li>
+        <li>Press Space to play the shot, press F6 to compare it with the plate, then click Export.</li>
       </ol>
-      <p class="hint">Every action is in the right-click menu, with its key. ? shows the keys.</p>
+      <p class="hint">Every action is in the right-click menu, with its keyboard shortcut. The Keys tab lists them all.</p>
     </section>
     <section class="help-tab" data-help="tools" role="tabpanel" hidden>
-    <h3>Painting</h3>
-    <dl>
-      <dt>B, E, L</dt><dd>Paint, Erase, Light. Another tool starts a new edit</dd>
-      <dt>N</dt><dd>New edit: the next strokes start a separate edit</dd>
-      <dt>- and =</dt><dd>Brush size</dd>
-      <dt>X</dt><dd>Eraser: rub out the strokes you just painted</dd>
-      <dt>I</dt><dd>Pick a colour: in Chrome and Edge, the browser's eyedropper, anywhere on the screen; in Firefox and Safari, click the frame. Then paint with it. Esc cancels</dd>
-      <dt>Enter</dt><dd>Generate: the edit on the first frame, then its shot. Pressed again with nothing changed, nothing runs twice</dd>
-      <dt>Ctrl+Enter</dt><dd>Try another seed on the selected edit, else the last one</dd>
-      <dt>Click an edit</dt><dd>Select it: its words come back; retype them, paint more, rub strokes out or switch Whole object, then Generate. Esc deselects</dd>
-      <dt>Esc</dt><dd>Cancel a plate that is opening; else cancel the edit in progress, then deselect, then end a comparison in the wipe, then the latest result for a pass on show, then stop generating (Stop, beside Generate, does the same). What finished is kept, and Enter goes on from there</dd>
-      <dt>× after the plate's name</dt><dd>Close the plate (also right-click > File > Close plate): every render stops and its frames leave the browser's memory</dd>
-      <dt>Two fingers</dt><dd>On a touch screen: pan and zoom the frame. ☰ at the top holds every action</dd>
-      <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo (Ctrl+Y redoes too): one step per stroke, per removal, per change of words or seed</dd>
-      <dt>Hold O</dt><dd>See the plate</dd>
-      <dt>?</dt><dd>Show or hide these keys</dd>
-    </dl>
-    <h3>Fluid shot, on a blank plate</h3>
-    <dl>
-      <dt>Paint</dt><dd>Flat colour blobs: light grey smoke, white steam, orange and yellow fire. Keyframes snap to frame 0, the last frame and the 8-frame grid</dd>
-      <dt>Ctrl+C, Ctrl+V</dt><dd>Copy the keyframe on this frame, paste it on another</dd>
-      <dt>Drag a diamond</dt><dd>Move a keyframe along the timeline</dd>
-      <dt>Delete</dt><dd>Delete the keyframe on this frame</dd>
-      <dt>Alt+Left, Alt+Right</dt><dd>Previous, next keyframe</dd>
-      <dt>Enter, Ctrl+Enter</dt><dd>Generate the fluid shot, then with another seed</dd>
-    </dl>
+      <dl>
+        <dt>Paint</dt><dd>Adds what the text prompt describes, with the outline, pose and size of your strokes.</dd>
+        <dt>Clean</dt><dd>Removes what you paint over and regenerates the background. With Whole object, SAM 3.1 finds the whole object under the stroke.</dd>
+        <dt>Light</dt><dd>Paint where the light comes from, in its colour. A dark colour paints shade.</dd>
+        <dt>Eraser</dt><dd>Drag to erase strokes of the edit in progress, or of the selected edit.</dd>
+        <dt>Pipette</dt><dd>Click the frame to take its colour, then paint with it.</dd>
+        <dt>History</dt><dd>One row per edit. Hover or click a row to show its strokes. Ctrl+click to add them to the wipe. Use the pencil to edit. After Generate, the next strokes start a new edit.</dd>
+        <dt>Matte strategy</dt><dd>Sets how a paint edit is composited back into the plate. Object: the edit's object only, which keeps the most plate. Object and effects: the object, what it replaces, and what the shot changed around it: smoke, light, thin haze. Whole shot: every pixel comes from the regenerated shot. Auto picks Object or Object and effects, from what the edit changed.</dd>
+        <dt>Undo</dt><dd>One step per stroke, per removal, per change of text prompt or seed.</dd>
+        <dt>Fluid shot</dt><dd>On a blank plate: paint your fluid (smoke, fire, water and more) on keyframes in flat colours, and describe it in the text prompt. Drag a keyframe's diamond on the timeline to move it.</dd>
+        <dt>Close the plate</dt><dd>× after the plate's name, or right-click > File > Close plate. It stops every render and frees the browser's memory.</dd>
+        <dt>Touch screen</dt><dd>Two fingers pan and zoom the frame. ☰ at the top lists every action.</dd>
+      </dl>
     </section>
-    <section class="help-tab" data-help="keys" role="tabpanel">
-    <h3>Playback, as in RV</h3>
-    <dl>
-      <dt>Space, Down</dt><dd>Play or pause</dd>
-      <dt>Left, Right</dt><dd>Step one frame</dd>
-      <dt>Home, End</dt><dd>Go to the in point, the out point</dd>
-      <dt>[ and ]</dt><dd>Set the in point, the out point</dd>
-      <dt>\</dt><dd>Clear the in and out points</dd>
-      <dt>Wheel</dt><dd>Step through frames</dd>
-      <dt>F6</dt><dd>Wipe between the plate and the result</dd>
-      <dt>Ctrl+click a Render step</dt><dd>Compare two passes: that pass on the wipe's left side, against the pass on show, both named (Cmd+click on a Mac). Ctrl+click it again, Esc or F6 ends it</dd>
-      <dt>W</dt><dd>X-ray: tint, over the picture, where the edits on show change the plate: from the export's matte once Export made one, else from the tracking mattes of the size on show. A light edit tints the whole frame</dd>
-      <dt>Alt + drag, middle drag</dt><dd>Pan, as in RV. Add Shift to keep to one axis</dd>
-      <dt>Ctrl + drag</dt><dd>Zoom about the point pressed, as RV: right to zoom in, left to zoom out. Alt with both buttons too</dd>
-      <dt>f, Ctrl+F</dt><dd>Fit the frame; fit its width</dd>
-      <dt>1 to 8</dt><dd>1:1 to 8:1, plate pixels to screen pixels, as in RV. Shift+2 to Shift+8 give 1:2 to 1:8 (RV's Ctrl+2 to Ctrl+8: Chrome keeps those for its tabs)</dd>
-      <dt>`</dt><dd>Full screen</dd>
-    </dl>
+    <section class="help-tab" data-help="viewer" role="tabpanel" hidden>
+      <dl>
+        <dt>What the viewer displays</dt><dd>The latest result of the edits turned on. Hold O to see the plate. Click a finished Render step to display it alone.</dd>
+        <dt>Wipe</dt><dd>The plate on the left, the displayed result on the right. Click a Render step to display it on the right. Ctrl+click a Render step or a History row to add it to the left.</dd>
+        <dt>X-ray</dt><dd>Tints where the edits turned on change the plate. A Light edit tints the whole frame.</dd>
+        <dt>Full screen</dt><dd>The viewer fills the screen. The frame number shows in a corner while the frame changes.</dd>
+        <dt>Cache memory</dt><dd>View > Cache memory: memory for decoded frames, for smooth playback. Auto sets it from this machine's RAM.</dd>
+        <dt>Playback statistics</dt><dd>View > Playback statistics: play, then pause, for one line of figures in the log.</dd>
+      </dl>
     </section>
     <section class="help-tab" data-help="colour" role="tabpanel" hidden>
-    <h3>Colour, as in RV: the viewer only, the export never changes</h3>
+      <h3>Colour: display only</h3>
+      <p>Exposure, contrast, gamma, saturation, hue, the channels and invert change the display only. The export keeps the plate's colours.</p>
+      <p>Use the Colour Inspector (F5) to read the plate's pixel values.</p>
+      <h3>OCIO (OpenColorIO): right-click > OCIO</h3>
     <dl>
-      <dt>Shift+E, K, Y</dt><dd>Exposure, contrast, gamma: then drag on the frame, or use the wheel, - and =</dd>
-      <dt>Shift+Home</dt><dd>Reset all colour, as in RV</dd>
-      <dt>Shift+S, H</dt><dd>Saturation, hue, the same way. Backspace resets the one you edit, Esc leaves</dd>
-      <dt>Shift+C, R, G, B, L</dt><dd>All channels, red, green, blue, luminance</dd>
-      <dt>Shift+I</dt><dd>Invert</dd>
-      <dt>F5</dt><dd>Color Inspector, as in RV: Shift+click a pixel to read it, Shift+drag to average; drag the box to move its point. It reads the plate's own pixels and values, and the values on screen, on every frame. The brush still paints with a plain click. The page takes F5, so it does not reload</dd>
-      <dt>Right-click</dt><dd>Every action, by menu, with its key</dd>
-    </dl>
-    <p class="hint">RV uses E, C, R, G, B and L without Shift. Here E, B and L pick the tools. The values are RV's: contrast is 0 at rest and turns about 0.5, gamma acts before the other tools, invert before exposure.</p>
-    <h3>OCIO, as in RV: right-click, then OCIO</h3>
-    <dl>
-      <dt>File Color Space</dt><dd>The plate's colour space, by family. The viewer shows it at once; the models and the export use it too, so the edits are made again in it</dd>
-      <dt>Look, Displays</dt><dd>The look, then the display and its view: the viewer only, while the shot plays</dd>
-      <dt>Change Config</dt><dd>The config named by $OCIO when it is set, as in RV, else OCIO's built-in configs</dd>
+      <dt>Plate (affects generation)</dt><dd>The plate's colour space, read from its file. Change it only for a camera's log footage. A change regenerates the first frame and the edits; when an edit has a result, the page asks first.</dd>
+      <dt>View (display only)</dt><dd>The view, the display and the look (when the config has looks).</dd>
+      <dt>Config</dt><dd>The config that $OCIO names, or else OCIO's built-in configs. A change regenerates the first frame and the edits, as Plate does.</dd>
     </dl>
     </section>
     <section class="help-tab" data-help="render" role="tabpanel" hidden>
       <dl>
-        <dt>Enter</dt><dd>Generate: the edit on the first frame, then its shot through the plate. The steps show beside the edits as they run</dd>
-        <dt>A finished step</dt><dd>Click its row to show that pass alone; click it again to come back to the result</dd>
-        <dt>Esc</dt><dd>Stop what generates</dd>
-        <dt>Export</dt><dd>Writes the result in the plate's own format, with its matte, in ComfyUI's output folder, then downloads one zip</dd>
+        <dt>Steps</dt><dd>The Render panel lists each step of Generate with its time.</dd>
+        <dt>Preview</dt><dd id="help-preview"></dd>
+        <dt>Stop</dt><dd>Esc, or Stop beside Generate. Finished steps are kept. Press Enter to continue from there.</dd>
+        <dt>Status line</dt><dd>The latest event: an error in red, a warning in amber. The log has the details.</dd>
+        <dt>Finish</dt><dd>SDR to HDR (standard to high dynamic range) regenerates the result as scene-linear, half-float EXR frames in ACES2065-1. Upscale adds steps to the render that make the result larger, up to 3840 x 2160, with SeedVR2 7B. Click a row to display it.</dd>
+        <dt>Export</dt><dd><span id="help-export"></span></dd>
+        <dt>Save scene</dt><dd>Saves the plate and every edit on this ComfyUI. Open > Scenes opens it again.</dd>
       </dl>
+    </section>
+    <section class="help-tab help-keys" data-help="keys" role="tabpanel" hidden>
+      <div>
+        <h3>Edits</h3>
+      <dl>
+          <dt>P, C, L</dt><dd>Paint, Clean, Light.</dd>
+          <dt>N</dt><dd>New edit: the next strokes start a separate edit.</dd>
+          <dt>- and =</dt><dd>Brush size.</dd>
+          <dt>E</dt><dd>Eraser: hold E while you drag, or tap E to turn it on or off.</dd>
+          <dt>I</dt><dd>Pick a colour from the frame.</dd>
+          <dt>S, T</dt><dd>Colours, text prompt: in a dialog over the frame.</dd>
+          <dt>Enter</dt><dd>Make the edit, then the shot.</dd>
+          <dt>Ctrl+Enter</dt><dd>Try another seed for the selected edit, or for the last edit.</dd>
+          <dt>Esc</dt><dd>Cancel, deselect, end a comparison, then stop generating.</dd>
+          <dt>Ctrl+Z, Ctrl+Shift+Z</dt><dd>Undo, redo. Ctrl+Y redoes too.</dd>
+          <dt>Hold O</dt><dd>See the plate.</dd>
+        </dl>
+      </div>
+      <div>
+        <h3>Fluid shot</h3>
+      <dl>
+          <dt>Ctrl+C, Ctrl+V</dt><dd>Copy the keyframe on this frame, paste it on another.</dd>
+          <dt>Delete</dt><dd>Delete the keyframe on this frame.</dd>
+          <dt>Alt+Left, Alt+Right</dt><dd>Previous, next keyframe.</dd>
+        </dl>
+      </div>
+      <div>
+        <h3>Playback</h3>
+      <dl>
+          <dt>Space, Down</dt><dd>Play or pause.</dd>
+          <dt>Left, Right</dt><dd>Step one frame.</dd>
+          <dt>Home, End</dt><dd>Go to the in point, the out point.</dd>
+          <dt>[ and ]</dt><dd>Set the in point, the out point.</dd>
+          <dt>\</dt><dd>Clear the in and out points.</dd>
+          <dt>Wheel</dt><dd>Step through frames.</dd>
+          <dt>F6</dt><dd>Wipe: the plate against the displayed result.</dd>
+          <dt>Ctrl+click a Render step or a History row</dt><dd>Add it to the wipe's left side (Cmd+click on a Mac).</dd>
+          <dt>, and .</dt><dd>With the wipe on: show the next step on the left (,) or on the right (.). The left side also shows each edit's strokes.</dd>
+          <dt>X</dt><dd>X-ray.</dd>
+          <dt>`</dt><dd>Full screen.</dd>
+        </dl>
+      </div>
+      <div>
+        <h3>Zoom and pan</h3>
+      <dl>
+          <dt>Alt + drag, middle drag</dt><dd>Pan. Shift keeps to one axis.</dd>
+          <dt>Ctrl + drag</dt><dd>Zoom around the point you press: drag right to zoom in, left to zoom out.</dd>
+          <dt>f, Ctrl+F</dt><dd>Fit the frame, fit its width.</dd>
+          <dt>1 to 8, Shift+2 to Shift+8</dt><dd>1:1 to 8:1, then 1:2 to 1:8, plate pixels to screen pixels.</dd>
+        </dl>
+      </div>
+      <div>
+        <h3>Colour</h3>
+      <dl>
+          <dt>Shift+E, K, Y</dt><dd>Exposure, contrast, gamma: then drag on the frame, or use the wheel, - and =.</dd>
+          <dt>Shift+S, H</dt><dd>Saturation, hue, the same way. Backspace resets the value; Esc closes it.</dd>
+          <dt>Shift+C, R, G, B, L</dt><dd>All channels, red, green, blue, luminance.</dd>
+          <dt>Shift+I</dt><dd>Invert.</dd>
+          <dt>Shift+Home</dt><dd>Reset all colour.</dd>
+          <dt>Shift+End</dt><dd>Reset OCIO: the config's display and view.</dd>
+          <dt>F5</dt><dd>Colour Inspector.</dd>
+        </dl>
+      </div>
+      <div>
+        <h3>Everywhere</h3>
+      <dl>
+          <dt>Ctrl+O, Ctrl+S</dt><dd>Open a plate, save the scene.</dd>
+          <dt>Right-click</dt><dd>Every action, with its keyboard shortcut.</dd>
+          <dt>?</dt><dd>Show or hide the keys.</dd>
+        </dl>
+      </div>
     </section>
     <section id="models" class="help-tab models" data-help="models" role="tabpanel" hidden>
       <p class="hint">Each model keeps its own licence: the one its Hugging Face repository states at the revision Paint a plate downloads. The app code is Apache 2.0.</p>
-      <h3>Behind the result on show</h3>
-      <div id="models-shown"></div>
-      <h3>Every model</h3>
-      <div id="models-all"></div>
+      <p id="models-shown"></p>
+      <div id="models-all" class="model-cards"></div>
     </section>
     <form method="dialog"><button class="primary">Close</button></form>
   </dialog>
@@ -277,15 +319,42 @@
   <dialog id="export">
     <form method="dialog">
       <h2>Export</h2>
-      <p class="hint">The viewer already plays the full-size composite. Export writes the result in the plate's own format and its matte, in ComfyUI's output folder, then downloads one zip.</p>
-      <label class="check"><input type="checkbox" checked disabled> The result <small id="x-format"></small></label>
-      <label class="check"><input id="x-matte" type="checkbox" checked> Its matte <small>where the plate changed, PNG frames</small></label>
-      <label class="check"><input id="x-review" type="checkbox"> The review movie <small>H.264 MP4 of the full-size composite</small></label>
-      <label class="check"><input id="x-shot" type="checkbox"> The regenerated shot <small>the whole frame as the model made it, MP4</small></label>
-
+      <p id="x-hint" class="hint"></p>
+      <fieldset><legend>What</legend>
+        <label class="check"><input id="x-plate" type="checkbox"> <span></span> <small></small></label>
+        <label class="check"><input id="x-shot" type="checkbox"> <span></span> <small></small></label>
+        <label class="check"><input id="x-layer" type="checkbox"> <span></span> <small></small></label>
+        <label class="check"><input id="x-matte" type="checkbox"> <span></span> <small></small></label>
+        <label class="check"><input id="x-composite" type="checkbox"> <span></span> <small></small></label>
+        <label class="check" title="Open it in ComfyUI to keep editing the scene there."><input id="x-graph" type="checkbox"> <span></span> <small></small></label>
+      </fieldset>
+      <fieldset><legend>Stage</legend>
+        <label class="check"><input id="x-preview" type="checkbox"> <span></span></label>
+        <label class="check"><input id="x-full" type="checkbox"> <span></span></label>
+        <label class="check"><input id="x-hdr" type="checkbox"> <span></span></label>
+        <label class="check"><input id="x-up" type="checkbox"> <span></span></label>
+      </fieldset>
       <p id="x-note" class="hint"></p>
-      <menu><button id="x-graph" value="cancel" title="One ComfyUI workflow for the whole scene: the edits, their captions and seeds, and the render, to keep editing in ComfyUI">ComfyUI graph</button>
-        <button value="cancel">Cancel</button><button id="x-go" value="ok" class="primary">Export</button></menu>
+      <menu><button value="cancel">Cancel</button><button id="x-go" value="ok" class="primary">Export</button></menu>
+    </form>
+  </dialog>
+
+  <dialog id="colours" class="colours" aria-label="Colours">
+    <h2>Colours</h2>
+    <menu><button id="colours-close" type="button">Close</button></menu>
+  </dialog>
+  <dialog id="words" class="words" aria-label="Text prompt">
+    <form method="dialog">
+      <h2>Text prompt</h2>
+      <input id="words-field" autocomplete="off" spellcheck="false" aria-label="Text prompt">
+      <menu><button value="close">Close</button><button id="words-apply" type="button" class="primary">Apply</button></menu>
+    </form>
+  </dialog>
+  <dialog id="ask" class="ask">
+    <form method="dialog">
+      <p id="ask-text"></p>
+      <input id="ask-field" autocomplete="off" spellcheck="false" aria-label="Answer" hidden>
+      <menu><button id="ask-no" value="no">Cancel</button><button id="ask-yes" value="yes" class="primary">Continue</button></menu>
     </form>
   </dialog>
 
@@ -308,28 +377,31 @@
         <div id="browse" class="browse" role="listbox" aria-label="Folders and plates"></div>
         <p id="browse-note" class="hint"></p>
         <p id="browse-info" class="browse-info" aria-live="polite"></p>
-        <label>Or type a path: in the input folder, or output:… for the output folder
-          <input id="path" placeholder="plates/shot010.mp4, output:video/ComfyUI_00001_.mp4 or output:frames/f_#####_.png"></label>
+        <label id="path-row">Full path on this machine: a movie, a frame of a sequence or a folder of frames
+          <input id="path" autocomplete="off" spellcheck="false" placeholder="/data/plates/shot010.mov or D:\plates\shot010\shot010.1001.exr"></label>
+        <p id="path-error" class="path-error" role="alert"></p>
+        <p id="path-remote" class="hint" hidden>ComfyUI runs on another machine. To open a file from this computer, use the Upload tab.</p>
       </section>
       <section class="tab" data-tab="upload" role="tabpanel" hidden>
-        <label id="drop" class="drop">Drop a video file, or the frames of one sequence, here. Or click to choose them.
+        <label id="drop" class="drop">Drop a video file or the frames of one sequence here, or click to choose them.
           <input id="files" type="file" multiple accept=".exr,.png,.tif,.tiff,.dpx,.mov,.mp4,.mkv,.mxf,.webm,.webp,.gif"></label>
         <p id="files-note" class="hint"></p>
         <p class="hint">The files go to ComfyUI's input folder, then open as the plate.</p>
       </section>
       <section class="tab" data-tab="scenes" role="tabpanel" hidden>
-        <p class="hint">Scenes saved on this ComfyUI with Save scene. A scene opens its plate, then makes every edit again: what this machine made already comes back from the job index.</p>
+        <p class="hint">Scenes saved on this ComfyUI with Save scene.</p>
         <ul id="scenes" class="scenes"></ul>
         <p id="scenes-empty" class="hint" hidden>No scene saved on this ComfyUI yet.</p>
-        <label>Or a scene file from this computer <input id="scene" type="file" accept=".json,application/json"></label>
+        <label>A scene file from this computer <input id="scene" type="file" accept=".json,application/json"></label>
       </section>
       <section class="tab" data-tab="blank" role="tabpanel" hidden>
-        <p class="hint">A fluid shot: paint flat colour keyframes, and AInVFX's ainvfx-fluid IC-LoRA turns them into smoke, steam or fire, as a new plate. Sides in multiples of 64, 8k + 1 frames, 24, 25 or 50 fps.</p>
+        <p class="hint">A fluid shot: paint your fluid (smoke, fire, water and more) on keyframes, and AInVFX's ainvfx-fluid IC-LoRA turns it into a shot: the first row of History.</p>
+        <p class="hint" id="b-limits"></p>
         <div class="blank-row">
           <label>Width <input id="b-width" type="number" min="256" max="1920" step="64" value="960"></label>
           <label>Height <input id="b-height" type="number" min="256" max="1920" step="64" value="512"></label>
           <label>Frame rate <select id="b-fps"><option>24</option><option selected>25</option><option>50</option></select></label>
-          <label>Frames <input id="b-frames" type="number" min="9" max="321" step="8" value="121"></label>
+          <label>Frames <input id="b-frames" type="number" min="9" step="8" value="121"></label>
           <label>Bit depth <select id="b-depth"><option value="8" selected>8-bit</option><option value="16">16-bit half float</option></select></label>
         </div>
         <p id="b-note" class="hint"></p>

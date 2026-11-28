@@ -1,31 +1,33 @@
 #!/usr/bin/env bash
 # Standalone setup of a Paint a plate GPU machine (tested on a Runpod RTX PRO 6000).
 #   HF_TOKEN=... [PLATES=1] bash tools/pod_setup.sh [comfyui_ref] [ltxvideo_ref]
-# PLATES=1 also downloads the AInVFX test plates into ComfyUI's input/plates folder (tools/get_plates.sh);
+# PLATES=1 also downloads the example plates into ComfyUI's input/plates folder (get_plates.py, at the root of the pack);
 # FLUID=0 skips AInVFX's ainvfx-fluid IC-LoRA (0.65 GB), which the blank plate's fluid shots need. The models and their
 # revisions are in get_models.py, at the root of the pack.
-# The refs default to the tested commits, in tools/pins.sh. The pack is the repo this script lives in.
+# The refs default to the latest: ComfyUI's newest release and ComfyUI-LTXVideo's main branch, so that a pod meets what people
+# install today. tools/pins.sh holds the versions the tests ran on; COMFY_REF and LTX_REF, or the two arguments, take any ref.
+# The pack is the repo this script lives in.
 # Code, models and pins live in $WORKDIR (a network volume survives the pod); the Python env
 # goes on the fast container disk. Accept the Hugging Face licences of FLUX 3 Image Klein,
-# LTX 2.5 and the LTX in-outpainting IC-LoRA first: the downloads use your token.
+# LTX 2.5, the LTX in-outpainting IC-LoRA and the SDR-to-HDR IC-LoRA first: the downloads use your token.
 set -euo pipefail
 W=${WORKDIR:-/workspace}; VENV=${VENV:-/opt/venv}
 # shellcheck source-path=SCRIPTDIR source=pins.sh
 . "$(dirname "$0")/pins.sh"
-COMFY_REF=${1:-${COMFY_REF:-$COMFY_PIN}}; LTX_REF=${2:-${LTX_REF:-$LTX_PIN}}
+latest_comfy() { timeout 60 git ls-remote --tags --refs --sort=-v:refname https://github.com/comfyanonymous/ComfyUI 'v*' 2>/dev/null | sed -n '1s|.*refs/tags/||p'; }
+COMFY_REF=${1:-${COMFY_REF:-$(latest_comfy)}}; COMFY_REF=${COMFY_REF:-$COMFY_PIN}  # GitHub gave no tag: the version the tests ran on
+LTX_REF=${2:-${LTX_REF:-origin/HEAD}}
 PACK=${PACK:-$(cd "$(dirname "$0")/.." && pwd)}
 log() { echo "[$(date +%H:%M:%S)] $*"; }
-# Code comes from GitHub, or from an upload when a pod cannot reach it (tools/offline_bundle.sh).
-# A copy without git history is used as it is; git never waits more than a minute for GitHub.
+# Code comes from GitHub. A copy without git history is used as it is; git never waits more than a minute for GitHub.
 fetch() { timeout 60 git fetch -q origin || log "git fetch failed: using the local copy"; }
 pin() { # name: record the version of the folder we are in
   if [ -d .git ]; then echo "$1 $(git rev-parse --short HEAD) $(git log -1 --format=%cd)"
-  else echo "$1 $(cat PINNED 2>/dev/null || echo "copy without git history")"; fi
+  else echo "$1 copy without git history"; fi
 }
 clone() { # url, folder
   timeout 300 git clone -q "$1" "$2" && return
   log "cannot clone $1: GitHub does not answer from this machine."
-  log "Upload the offline bundle instead: see the comments at the top of tools/offline_bundle.sh"
   exit 1
 }
 
@@ -38,14 +40,20 @@ pip install -q -U pip uv huggingface_hub hf_transfer
 log "models (in the background)"
 M=$W/models; mkdir -p "$M"
 # get_models.py, at the root of the pack, holds every model file and its tested revision: FLUID=0 skips ainvfx-fluid, HDR=0 the SDR-to-HDR IC-LoRA,
-# WITH_NVFP4=1 adds FLUX 3 Image Klein's nvfp4 file (only tests/gpu_bench.py compares it)
-flags=(); [ "${FLUID:-1}" = 0 ] && flags+=(--no-fluid); [ "${HDR:-1}" = 0 ] && flags+=(--no-hdr); [ "${WITH_NVFP4:-0}" = 1 ] && flags+=(--nvfp4)
+# UPSCALE=0 SeedVR2 7B and its VAE. The feature that needs a skipped file is then off, and the rest works
+flags=(); [ "${FLUID:-1}" = 0 ] && flags+=(--no-fluid); [ "${HDR:-1}" = 0 ] && flags+=(--no-hdr); [ "${UPSCALE:-1}" = 0 ] && flags+=(--no-upscale)
 ( HF_HUB_ENABLE_HF_TRANSFER=1 python "$PACK/get_models.py" "$M" ${flags[@]+"${flags[@]}"} || log "model files missing: see above"; log "models done" ) > "$W/models.log" 2>&1 &
 
 log "ComfyUI $COMFY_REF"
+# At the pin, a clone one commit deep from the pin's tag comes first: GitHub can reset a full clone of ComfyUI, and a
+# shallow clone of the tag passes. Another ref, or a tag that is not at the pin, takes the full clone.
+if [ ! -d "$W/ComfyUI" ] && [ "$COMFY_REF" = "$COMFY_PIN" ]; then
+  timeout 300 git -c advice.detachedHead=false clone -q --depth 1 --branch "$COMFY_TAG" https://github.com/comfyanonymous/ComfyUI "$W/ComfyUI" \
+    && [ "$(git -C "$W/ComfyUI" rev-parse --short=8 HEAD)" = "${COMFY_PIN:0:8}" ] || rm -rf "$W/ComfyUI"
+fi
 [ -d "$W/ComfyUI" ] || clone https://github.com/comfyanonymous/ComfyUI "$W/ComfyUI"
 cd "$W/ComfyUI"
-if [ -d .git ]; then
+if [ -d .git ] && [ "$(git rev-parse --short=8 HEAD)" != "${COMFY_REF:0:8}" ]; then  # a clone at the ref fetches nothing
   fetch
   git checkout -q "$COMFY_REF"
   git pull -q --ff-only 2>/dev/null || true  # moves a branch forward; a pinned commit stays as it is
@@ -81,8 +89,8 @@ if [ "$PACK" != "$dst" ]; then
   ln -sfn "$PACK" "$dst"
 fi
 uv pip install -q -r "$PACK/requirements.txt"
-if [ "${PLATES:-0}" != 0 ]; then  # the AInVFX test plates into input/plates, where the Open plate dialog lists them
-  log "test plates from Hugging Face"
-  bash "$PACK/tools/get_plates.sh" "$W/ComfyUI" || log "the test plates did not download: run bash tools/get_plates.sh later"
+if [ "${PLATES:-0}" != 0 ]; then  # the example plates into input/plates, where the Open plate dialog lists them
+  log "example plates from Hugging Face"
+  python "$PACK/get_plates.py" "$W/ComfyUI/input/plates" || log "example plates missing: run python get_plates.py later"
 fi
 cat "$W/pins.txt"; log "setup done"

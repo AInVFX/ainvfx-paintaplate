@@ -8,9 +8,12 @@
    Model files may be empty placeholders: model workflows are cancelled right after validation.
 4. Runs `ingest`, `comp` and `export` end to end on an EXR sequence with extra layers, a ProRes MOV
    with audio and timecode, and a 16-bit PNG sequence, then checks the files on disk and the zip.
+   The open's first frame and playback proxy hold the pixels of the whole plate converted as one batch: both ways
+   write the proxy without loss for this, because x264 does not always make the same movie from the same frames.
 """
-import argparse, io, json, os, shutil, subprocess, sys, time, urllib.request, uuid, zipfile
+import argparse, io, json, os, shutil, subprocess, sys, time, urllib.parse, urllib.request, uuid, zipfile
 import numpy as np
+import zip_rows  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -19,9 +22,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 import plateio  # noqa: E402
 import test_plateio  # noqa: E402
 import OpenEXR  # noqa: E402
-from build_workflows import fill  # noqa: E402
+import av  # noqa: E402
+from build_workflows import OCIO_CONFIG, Graph, fill  # noqa: E402
 
 N, W, H = 17, 192, 108
+RATE = 25.0  # the EXR plate's frame rate, in its header: the review's EXR frames must say it
 FAILS = []
 
 
@@ -72,7 +77,7 @@ def wait(url, pid, limit=240):
 
 def settle(url, pid, limit=60):
     """Wait for a cancelled prompt to leave ComfyUI's queue. A prompt deleted before it started never reaches the history,
-    so waiting for its record would only run out the clock (60 s a workflow, before 0.5.0)."""
+    so waiting for its record would only run out the clock."""
     t0 = time.time()
     while time.time() - t0 < limit:
         q, _ = http(f"{url}/queue")
@@ -98,7 +103,7 @@ def make_plates(input_dir):
     root = os.path.join(input_dir, "paintaplate_test")
     shutil.rmtree(root, ignore_errors=True)
     os.makedirs(os.path.join(root, "exr"))
-    test_plateio.make_exr_sequence(os.path.join(root, "exr"), n=N, h=H, w=W)
+    test_plateio.make_exr_sequence(os.path.join(root, "exr"), n=N, h=H, w=W, fps=RATE)
     test_plateio.make_prores(os.path.join(root, "plate.mov"), n=N, w=W, h=H)
     png = os.path.join(root, "png16"); os.makedirs(png)
     rng = np.random.default_rng(5)
@@ -146,14 +151,79 @@ def verify_export(kind, plate_dir, out_dir, relight):
             check(str(b.header()["compression"]) == str(a.header()["compression"]), "exr: compression kept")
     elif kind == "mov":
         spec_in = plateio.probe_plate(plate_dir); spec_out = plateio.probe_plate(os.path.join(out_dir, files[0]))
-        for k in ("codec", "pix_fmt", "width", "height", "fps_num", "fps_den", "timecode", "audio_streams", "colorspace"):
+        for k in ("codec", "width", "height", "fps_num", "fps_den", "timecode", "audio_streams", "colorspace"):
             check(spec_in[k] == spec_out[k], f"mov: {k} kept ({spec_out[k]})")
+        check((spec_out["profile"], spec_out["pix_fmt"]) == ("XQ", "yuv444p12le"), f"mov: ProRes 4444 XQ, 4:4:4 ({spec_out['profile']}, {spec_out['pix_fmt']})")
     elif kind == "png16":
         src = plateio.find_sequence(plate_dir)
         a = plateio.read_native(src[2], False); b = plateio.read_native(os.path.join(out_dir, files[2]), False)
         outside = np.zeros((H, W), bool); outside[92:, :] = True; outside[:, 160:] = True
         check(np.array_equal(a[outside], b[outside]), "png16: pixels outside the edit bit-identical (exact 16-bit read)")
         check(len(files) == N, f"png16: {N} frames")
+
+
+def pixels(source):
+    """The decoded frames of a PNG or of a movie, from its path or its bytes, one array per frame. A PNG's bytes also hold
+    its workflow, so two files are compared by their pixels."""
+    with av.open(io.BytesIO(source) if isinstance(source, bytes) else source) as c:
+        return [f.to_ndarray() for f in c.decode(video=0)]
+
+
+def differences(a, b):
+    """How the decoded frames of two files differ: (frames that differ, frames in the longer file, the largest difference
+    in levels, the first sample that differs with its level in each file). A frame one file lacks counts as one that
+    differs. A frame is named from 1, as a movie's frames are; a sample by its place in the decoded array: (row, column, channel) of a PNG, (row, column) of a
+    movie's Y, U and V planes one under the other."""
+    a, b = pixels(a), pixels(b)
+    count, largest, first = abs(len(a) - len(b)), 0, ""
+    for i, (x, y) in enumerate(zip(a, b)):
+        if x.shape != y.shape:
+            count, first = count + 1, first or f"frame {i + 1} is {x.shape} and {y.shape}"
+            continue
+        d = np.abs(x.astype(np.int64) - y.astype(np.int64))
+        if d.any():
+            at = tuple(int(v) for v in np.argwhere(d)[0])
+            count, largest = count + 1, max(largest, int(d.max()))
+            first = first or f"frame {i + 1}, sample {at}: {int(x[at])} and {int(y[at])}"
+    return count, max(len(a), len(b)), largest, first or "a frame is missing"
+
+
+def frames_apart(a, b):
+    """How many frames of two files differ in their decoded pixels. A frame one file lacks counts."""
+    return differences(a, b)[0]
+
+
+def lossless(prompt):
+    """The same workflow with its movies written without loss (crf 0): their decoded pixels are then the frames Save Movie
+    was handed. With loss, x264 does not always make the same movie from the same frames (its MB-tree, in assembly: up to
+    7 different movies in 12 from 17 frames of 960 x 540 at crf 12), so two such movies cannot be compared
+    pixel for pixel."""
+    for node in prompt.values():
+        if node["class_type"] == "PaintAPlate_SaveMovie":
+            node["inputs"]["crf"] = 0
+    return prompt
+
+
+def saved(entry, output_dir):
+    """{extension: path} of the pictures a job saved, from its history entry."""
+    return {os.path.splitext(f["filename"])[1]: os.path.join(output_dir, f["subfolder"], f["filename"])
+            for o in entry["outputs"].values() for key in ("images", "gifs", "video") for f in o.get(key, [])}
+
+
+def whole_plate_open(path, cs, prefix):
+    """The heavy open, for reference: the whole plate converted as one batch, then its first frame taken; the real frames
+    copied, converted and sized as batches. The pictures the lighter `ingest` must make, with the proxy written without
+    loss (see `lossless`)."""
+    g = Graph()
+    load = g("PaintAPlate_LoadPlate", path=path, max_frames=121, pad_8n1=True)
+    space = {"config": OCIO_CONFIG, "source": cs, "destination": "@model"}
+    first = g("ImageFromBatch", image=g("PaintAPlate_ColorSpace", image=load[0], **space), batch_index=0, length=1)
+    g("SaveImage", images=g("ImageScaleToMaxDimension", image=first, upscale_method="lanczos", largest_size=1920),
+      filename_prefix=f"{prefix}/hero")
+    real = g("ImageFromBatch", image=load[0], batch_index=0, length=load[4])
+    proxy = g("ImageScaleToMaxDimension", image=g("PaintAPlate_ColorSpace", image=real, **space), upscale_method="area", largest_size=960)
+    g("PaintAPlate_SaveMovie", images=proxy, fps=load[3], crf=0, filename_prefix=f"{prefix}/proxy")
+    return g.prompt
 
 
 def main():
@@ -189,6 +259,9 @@ def main():
         check(b"Paint a plate" in page, "app page served")
         _, ctype = http(f"{url}/extensions/ainvfx-paintaplate/app.mjs")
         check("javascript" in ctype, f"app.mjs served as JavaScript ({ctype})")
+        with urllib.request.urlopen(f"{url}/extensions/ainvfx-paintaplate/app.mjs", timeout=30) as r:
+            rule = r.headers.get("Cache-Control", "")
+        check(rule == "no-cache", f"the page's files are checked with the server at each load (Cache-Control: {rule!r})")
         exts, _ = http(f"{url}/extensions")
         check(any(e.endswith("ainvfx-paintaplate/open.js") for e in exts) and not any(e.endswith("app.mjs") for e in exts),
               "only open.js loads into the graph editor")
@@ -259,6 +332,18 @@ def main():
                 texts = [t for o in outs.values() for t in o.get("text", [])]
                 spec = json.loads(texts[0]) if texts else {}
                 check(spec.get("frames") == N and spec.get("width") == W, f"ingest {kind}: spec {spec.get('kind')}, {spec.get('width')}x{spec.get('height')}, {spec.get('frames')} frames, guess {spec.get('color_space_guess')}")
+                exact = lossless(fill("ingest", {**values["ingest"], "path": path, "color_space": cs, "prefix": f"paintaplate_test/{kind}/exact/hero",
+                                                 "video_prefix": f"paintaplate_test/{kind}/exact/proxy"}))
+                files = []  # the open's files with the proxy written without loss, then the whole plate's
+                for prompt in (exact, whole_plate_open(path, cs, f"paintaplate_test/{kind}/whole")):
+                    res = submit(url, prompt)
+                    done = wait(url, res["prompt_id"])[0] if "prompt_id" in res else None
+                    files.append(saved(done, output_dir) if done and not error_of(done) else {})
+                for ext, what in ((".png", "first frame"), (".mp4", "playback proxy")):
+                    both = ext in files[0] and ext in files[1]
+                    count, of, largest, first = differences(files[0][ext], files[1][ext]) if both else (1, 1, 0, "a job saved no such file")
+                    check(not count, f"ingest {kind}: the {what} holds the pixels of the whole plate converted"
+                          + (f": {count} of {of} frames differ, by {largest} levels at most; {first}" if count else ""))
             for relight in (False, True) if kind == "exr" else (False,):
                 run = f"{kind}_r{int(relight)}"
                 shot = fake_shot_and_matte(output_dir, run)
@@ -275,6 +360,7 @@ def main():
                     frames = plateio.probe_video(os.path.join(output_dir, vids[0]["subfolder"], vids[0]["filename"]))["frames"] if ok else -1
                     check(ok and frames in (N, 0), f"comp {run}: composite MP4 in {dt:.1f} s, {frames} frames" + (f" -> {err}" if err else ""))
                 seq = kind != "mov"  # the review of an image sequence also writes half-float EXR frames for the viewer
+                shutil.rmtree(os.path.join(output_dir, shot, "review"), ignore_errors=True)  # a second run on the same ComfyUI counts its own frames
                 res = submit(url, fill("review", {"path": path, "color_space": cs, "max_frames": N, "shot": f"output:{shot}/shot",
                                                   "matte_a": f"output:{shot}/matte_a", "matte_b": f"output:{shot}/matte_a",
                                                   "relight": relight, "grow": 4, "feather": 6, "movie_space": "@model" if seq else cs,
@@ -285,13 +371,16 @@ def main():
                 rdir = os.path.join(output_dir, shot, "review")
                 exrs = sorted(f for f in os.listdir(rdir) if f.endswith(".exr")) if os.path.isdir(rdir) else []
                 check(len(exrs) == (N if seq else 0), f"review {run}: {len(exrs)} EXR frames (an image sequence: one per frame; a video: none)")
+                if kind == "exr" and exrs:  # the plate's rate goes from its header to the review's frames
+                    rates = sorted({float(plateio.exr_rate(os.path.join(rdir, f)) or 0) for f in exrs})
+                    check(rates == [RATE], f"review {run}: its EXR frames say {rates} fps, the plate {RATE:g}")
                 if seq and exrs and not relight:  # outside the edit the review holds the plate's own values, as half floats
                     src = plateio.find_sequence(os.path.join(input_dir, path))
-                    a, b = plateio.read_float(src[3]), plateio.read_float(os.path.join(rdir, exrs[3]))
+                    own, seen = plateio.read_float(src[3]), plateio.read_float(os.path.join(rdir, exrs[3]))
                     out = np.zeros((H, W), bool); out[92:, :] = True; out[:, 160:] = True
                     tol = 2e-4 if kind == "exr" else 1.5e-3  # half floats; core's decode moves 16-bit PNG values by up to 0.0005
-                    check(np.allclose(a[out], b[out], rtol=2e-3, atol=tol), f"review {run}: untouched pixels are the plate's own values "
-                          f"(largest difference {float(np.abs(a[out] - b[out]).max()):.5f})")
+                    check(np.allclose(own[out], seen[out], rtol=2e-3, atol=tol), f"review {run}: untouched pixels are the plate's own values "
+                          f"(largest difference {float(np.abs(own[out] - seen[out]).max()):.5f})")
                 exp_dir = f"{shot}/export"
                 for folder in (exp_dir, f"{shot}/matte"):  # a second run on the same ComfyUI starts clean
                     shutil.rmtree(os.path.join(output_dir, folder), ignore_errors=True)
@@ -308,15 +397,22 @@ def main():
                     verify_export(kind, os.path.join(input_dir, path), os.path.join(output_dir, exp_dir), relight)
                     mattes = sorted(os.listdir(os.path.join(output_dir, shot, "matte")))
                     check(len(mattes) == N, f"export {run}: matte saved, {len(mattes)} frames")
-                    blob, ctype = http(f"{url}/paintaplate/download?run={shot}&name=test_{run}&parts=export,matte,review")
+                    review = next((f for f in sorted(os.listdir(os.path.join(output_dir, shot))) if f.startswith("review_") and f.endswith(".mp4")), None)
+                    rows = [["composite_full_size", f"output:{exp_dir}"], ["matte", f"output:{shot}/matte"]] + ([["review", f"output:{shot}/{review}"]] if review else [])
+                    blob, ctype = http(f"{url}/paintaplate/download?" + urllib.parse.urlencode({"run": shot, "name": f"test_{run}", "files": json.dumps(rows)}))
                     names = zipfile.ZipFile(io.BytesIO(blob)).namelist() if "zip" in ctype else []
-                    review = "review.mp4" in names or relight  # the composite preview runs for the non-relight cases
-                    check(any(n.startswith("export/") for n in names) and sum(n.startswith("matte/") for n in names) == N and review,
-                          f"download {run}: zip with {sum(n.startswith('export/') for n in names)} export and "
-                          f"{sum(n.startswith('matte/') for n in names)} matte files{', a review movie' if 'review.mp4' in names else ''}")
+                    review = any(n.endswith("_review.mp4") for n in names) or relight  # the composite preview runs for the non-relight cases
+                    exports = zip_rows.composite(names)  # its frames in export/, or its one movie at the top
+                    check(bool(exports) and sum(n.startswith("matte/") for n in names) == N and review,
+                          f"download {run}: zip with {len(exports)} export and "
+                          f"{sum(n.startswith('matte/') for n in names)} matte files{', a review movie' if any(n.endswith('_review.mp4') for n in names) else ''}")
     finally:
         if proc:
             proc.terminate(); proc.wait(20)
+    # our video decoder against core's, frame for frame, in ComfyUI's own Python (8 and 10 bits, alpha, trims)
+    r = subprocess.run([a.python, os.path.join(os.path.dirname(os.path.abspath(__file__)), "decode_parity.py"), "--comfy", a.comfy],
+                       capture_output=True, text=True, timeout=600)
+    check("DECODE SAME" in r.stdout, "our video decoder makes core's pictures: " + ((r.stdout.strip().splitlines() or [""])[-1] or r.stderr[-300:]))
     print("\nALL PASSED" if not FAILS else f"\n{len(FAILS)} FAILED")
     return 1 if FAILS else 0
 

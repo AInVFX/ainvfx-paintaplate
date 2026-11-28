@@ -35,3 +35,14 @@ export function whiteOf(img, tint) { // an image's alpha (where an edit put new 
   x.putImageData(d, 0, 0);
   return c;
 }
+
+// A few pixels of a canvas as RGBA bytes, read through a small scratch canvas. getImageData on the canvas itself makes
+// Chrome move it off the GPU after a few reads, and every later frame is then drawn in software.
+let scratch = null;
+export function readBack(src, x, y, w = 1, h = 1) {
+  scratch ??= canvas([8, 8]).getContext("2d", { willReadFrequently: true });
+  if (scratch.canvas.width < w || scratch.canvas.height < h) Object.assign(scratch.canvas, { width: w, height: h });
+  scratch.clearRect(0, 0, w, h);
+  scratch.drawImage(src, x, y, w, h, 0, 0, w, h);
+  return scratch.getImageData(0, 0, w, h).data;
+}

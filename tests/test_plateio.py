@@ -11,7 +11,8 @@ import plateio  # noqa: E402
 import av, OpenEXR  # noqa: E402
 
 
-def make_exr_sequence(folder, n=3, h=36, w=64):
+def make_exr_sequence(folder, n=3, h=36, w=64, fps=0.0):
+    from fractions import Fraction
     rng = np.random.default_rng(0)
     for i in range(n):
         rgb = (rng.random((h, w, 3)) * 4.0).astype(np.float16)  # values above 1.0 on purpose
@@ -20,6 +21,8 @@ def make_exr_sequence(folder, n=3, h=36, w=64):
         ch = {"R": rgb[..., 0].copy(), "G": rgb[..., 1].copy(), "B": rgb[..., 2].copy(),
               "A": np.ones((h, w), np.float16), "depth.Z": rng.random((h, w)).astype(np.float32),
               "diffuse.R": rgb[..., 0].copy(), "diffuse.G": rgb[..., 1].copy(), "diffuse.B": rgb[..., 2].copy()}
+        if fps:  # the shot's frame rate in the header, which plateio.exr_rate reads
+            header["framesPerSecond"] = Fraction(fps).limit_denominator(1001)
         OpenEXR.File(header, ch).write(os.path.join(folder, f"shot_v001.{1001 + i:04d}.exr"))
 
 
@@ -99,7 +102,8 @@ class PlateIO(unittest.TestCase):
                 w.write(f)
             w.close()
             spec2 = plateio.probe_plate(out)
-            for k in ("codec", "pix_fmt", "width", "height", "fps_num", "fps_den", "color_primaries", "color_trc", "colorspace", "timecode", "audio_streams"):
+            self.assertEqual((spec2["codec"], spec2["profile"], spec2["pix_fmt"]), ("prores", "XQ", "yuv444p12le"))  # every movie: ProRes 4444 XQ
+            for k in ("width", "height", "fps_num", "fps_den", "color_primaries", "color_trc", "colorspace", "timecode", "audio_streams"):
                 assert spec2[k] == spec[k], (k, spec2[k], spec[k])
             again = decode_float(out)
             err = max(float(np.abs(a - b).mean()) for a, b in zip(frames, again))
@@ -133,8 +137,54 @@ class PlateIO(unittest.TestCase):
         assert [plateio.pad_count_8n1(n) for n in (1, 2, 9, 10, 97, 100, 121)] == [1, 9, 9, 17, 97, 105, 121]
         print("8n+1 padding: ok")
 
+    def test_a_movie_without_loss_holds_the_frames_it_was_given(self):
+        """At crf 0 a movie's decoded pixels are the YUV frames the encoder was given, whatever x264 decided. The live
+        tests compare the open's two ways on such movies: with loss, x264 does not always make the same movie from the
+        same frames (its MB-tree, in assembly), and two equal batches could give two different movies."""
+        rng = np.random.default_rng(3)
+        frames = [np.repeat(np.repeat(rng.integers(0, 256, (27, 48, 3), dtype=np.uint8), 4, 0), 4, 1) for _ in range(9)]
+        given = [av.VideoFrame.from_ndarray(f, format="rgb24").reformat(width=192, height=108, format="yuv420p", dst_colorspace=1,
+                                                                        interpolation="LANCZOS").to_ndarray() for f in frames]
+        with tempfile.TemporaryDirectory() as folder:
+            for run in range(3):
+                path = os.path.join(folder, f"{run}.mp4")
+                plateio.write_movie(lambda i: frames[i].copy(), len(frames), path, 24.0, workers=2, crf=0)
+                with av.open(path) as c:
+                    decoded = [f.to_ndarray() for f in c.decode(video=0)]
+                assert len(decoded) == len(given) and all(np.array_equal(a, b) for a, b in zip(decoded, given)), run
+        print("a movie at crf 0 holds the frames it was given: ok")
+
+    def test_largest_side(self):
+        """Save Movie sizes a frame as core's Scale Image to Max Dimension would: the same width and height."""
+        sizes = [((1920, 1080), 1920), ((3840, 2160), 1920), ((1080, 1920), 960), ((2048, 858), 960), ((192, 108), 960),
+                 ((64, 64), 32), ((5120, 2701), 4096), ((1920, 1080), 0)]
+        assert [plateio.largest_side(w, h, n) for (w, h), n in sizes] == [
+            (1920, 1080), (1920, 1080), (540, 960), (960, 402), (960, 540), (32, 32), (4096, 2161), (1920, 1080)]
+        print("the longer side at a size, as core rounds it: ok")
+
 
 class Sequences(unittest.TestCase):
+    def test_numbers_too_far_apart_count_files(self):
+        """ComfyUI's mask editor names its files by the millisecond. Three of them, 50 and 33 minutes apart, are three frames.
+        A walk over every number from the first to the last made 5,000,001 entries here, and billions on a real folder."""
+        import tracemalloc
+        stamps = (1791816680123, 1791819680130, 1791821680123)  # 3,000,007 then 1,999,993 apart: no common step
+        with tempfile.TemporaryDirectory() as d:
+            for n in stamps:
+                Image.fromarray(np.zeros((4, 4, 3), np.uint8)).save(os.path.join(d, f"clipspace-mask-{n}.png"))
+            tracemalloc.start()
+            files, step, missing = plateio.sequence_frames(d)
+            peak = tracemalloc.get_traced_memory()[1]
+            tracemalloc.stop()
+            self.assertEqual(([os.path.basename(f) for f in files], step, missing), ([f"clipspace-mask-{n}.png" for n in stamps], 1, []))
+            self.assertLess(peak, 1 << 20)
+            self.assertEqual(plateio.probe_plate(d)["frames"], 3)
+        with tempfile.TemporaryDirectory() as d:  # 147 frames missing of 150 is still a sequence: every number keeps its place
+            for n in (1, 100, 150):
+                Image.fromarray(np.zeros((4, 4, 3), np.uint8)).save(os.path.join(d, f"shot.{n:04d}.png"))
+            files, step, missing = plateio.sequence_frames(d)
+            self.assertEqual((len(files), step, len(missing)), (150, 1, 147))
+
     def test_missing_frames_keep_their_numbers(self):
         """As in OpenRV: a missing frame holds the one before, later frames keep their numbers, frames on twos stay on twos."""
         with tempfile.TemporaryDirectory() as d:
@@ -170,19 +220,29 @@ class BlankCanvas(unittest.TestCase):
         print("blank canvas: ProRes 4444, 25 black frames: ok")
 
     def test_prores_4444_plate_exports(self):
-        """A ProRes 4444 plate decodes as 12-bit 4:4:4; the export writes it again with prores_ks, which takes 10-bit."""
+        """A ProRes 4444 plate decodes as 12-bit 4:4:4; the export writes it as ProRes 4444 XQ, which prores_ks takes in 10 bits."""
         spec = plateio.probe_plate(plateio.write_blank(os.path.join(tempfile.mkdtemp(), "p4444.mov"), 128, 64, 25, 9))
         self.assertEqual(spec["pix_fmt"], "yuv444p12le")
-        self.assertEqual(plateio.encoder_pix_fmt("prores_ks", "yuv444p12le"), "yuv444p10le")
-        self.assertEqual(plateio.encoder_pix_fmt("prores_ks", "yuv422p10le"), "yuv422p10le")
         writer = plateio.VideoWriter(spec, os.path.join(tempfile.mkdtemp(), "out.mov"))
         for _ in range(9):
             writer.write(np.full((64, 128, 3), 0.5, np.float32))
         writer.close()
         back = plateio.probe_plate(writer.path)
-        self.assertEqual((back["codec"], back["frames"]), ("prores", 9))
-        self.assertIn("4444", back["profile"])
+        self.assertEqual((back["codec"], back["profile"], back["frames"]), ("prores", "XQ", 9))
         print("ProRes 4444 plate export: ok", writer.notes)
+
+    def test_an_8_bit_fluid_shot_keeps_its_frame_rate(self):
+        """The fluid plate of an 8-bit blank plate is a ProRes 4444 file that Save Plate writes from the blank plate's
+        spec: made at 50 fps it is probed at 50 fps, as at the other rates the Blank plate tab offers."""
+        for fps in (24, 25, 50):
+            spec = plateio.probe_plate(plateio.write_blank(os.path.join(tempfile.mkdtemp(), "blank.mov"), 128, 64, fps, 9))
+            self.assertEqual((spec["fps"], spec["fps_num"], spec["fps_den"]), (float(fps), fps, 1))
+            writer = plateio.VideoWriter(spec, os.path.join(tempfile.mkdtemp(), "fluid.mov"))
+            for _ in range(9):
+                writer.write(np.full((64, 128, 3), 0.5, np.float32))
+            writer.close()
+            back = plateio.probe_plate(writer.path)
+            self.assertEqual((back["fps"], back["fps_num"], back["fps_den"], back["frames"]), (float(fps), fps, 1, 9), fps)
 
 
 class WritePngsTest(unittest.TestCase):
@@ -273,6 +333,36 @@ class Browser(unittest.TestCase):
             plateio.write_exrs(lambda i: frames[i], paths)
             for f, p in zip(frames, paths):
                 np.testing.assert_array_equal(plateio.read_float(p), f)
+
+    def test_exr_frames_say_their_frame_rate(self):
+        """A sequence written at 50 fps is probed at 50 fps: the frames of a 16-bit fluid shot open as a plate, and that
+        plate took 24 fps (on a pod). The rate is OpenEXR's standard attribute framesPerSecond, a rational number, so
+        24000/1001 is exact. Frames without it are probed as before: the hint, 24 by default."""
+        frames = [np.full((6, 8, 3), v, np.float32) for v in (4.0, -0.5, 0.25)]
+        with tempfile.TemporaryDirectory() as d:
+            def written(name, **rate):
+                os.mkdir(os.path.join(d, name))
+                paths = [os.path.join(d, name, f"f_{k:05d}_.exr") for k in (1, 2, 3)]
+                plateio.write_exrs(lambda i: frames[i], paths, **rate)
+                return paths
+            for name, fps, exact in (("fifty", 50.0, Fraction(50)), ("ntsc", 24000 / 1001, Fraction(24000, 1001)), ("pal", 25, Fraction(25))):
+                paths = written(name, fps=fps)
+                self.assertEqual([plateio.exr_rate(p) for p in paths], [exact] * 3)
+                for path in (os.path.join(d, name), os.path.join(d, name, "f_#####_.exr"), paths[0]):  # a folder, a frame pattern, one frame
+                    spec = plateio.probe_plate(path, fps_hint=30.0)  # the frames' own rate wins over the hint
+                    self.assertEqual((spec["fps"], spec["fps_num"], spec["fps_den"]), (float(exact), exact.numerator, exact.denominator), path)
+                for f, p in zip(frames, paths):  # the attribute changes no value
+                    np.testing.assert_array_equal(plateio.read_float(p), f)
+            bare = written("bare")
+            self.assertEqual([plateio.exr_rate(p) for p in bare], [None] * 3)
+            spec = plateio.probe_plate(os.path.join(d, "bare"))
+            self.assertEqual((spec["fps"], spec["fps_num"], spec["fps_den"]), (24.0, 24, 1))
+            self.assertEqual(plateio.probe_plate(os.path.join(d, "bare"), fps_hint=25.0)["fps"], 25.0)
+            self.assertEqual(plateio.probe_plate(bare[0])["fps"], 24.0)
+            # the export of an EXR plate copies the source frame's header: an edited frame keeps the plate's rate
+            out = os.path.join(d, "export.exr")
+            plateio.write_exr_like(written("plate", fps=50)[0], np.zeros((6, 8, 3), np.float32), None, out)
+            self.assertEqual(plateio.exr_rate(out), Fraction(50))
 
     def test_an_animated_image_is_a_video_plate(self):
         from PIL import Image
@@ -411,8 +501,9 @@ class StillAlphaTest(unittest.TestCase):
 
 
 class RawVideoNoteTest(unittest.TestCase):
-    """The export's note that untouched pixels are the source's own YUV samples, written only when they were: planar YUV
-    copies them; a video coded in RGB (here PNG in a QuickTime movie) is written through RGB, exactly, with no such note."""
+    """The export's note that untouched pixels are the source's own YUV samples, written only when they were: a planar YUV
+    source has them; a video coded in RGB (here PNG in a QuickTime movie) has none, and goes through RGB with no such note.
+    Every export is ProRes 4444 XQ, so a lossless source comes back within 2 of 255."""
 
     def export(self, codec, pix_fmt, ext):
         d = tempfile.mkdtemp()
@@ -449,12 +540,12 @@ class RawVideoNoteTest(unittest.TestCase):
     def test_planar_yuv_copies_the_samples_and_says_so(self):
         edit, untouched, notes = self.export("rawvideo", "yuv420p", ".mkv")
         self.assertLessEqual(edit, 6)
-        self.assertEqual(untouched, 0)
+        self.assertLessEqual(untouched, 2)
         self.assertIn("Untouched pixels are the source's own YUV samples.", notes)
 
     def test_rgb_video_says_nothing_of_yuv(self):
         edit, untouched, notes = self.export("png", "rgb24", ".mov")  # PNG in a QuickTime movie
-        self.assertEqual((edit, untouched), (0, 0))
+        self.assertLessEqual(max(edit, untouched), 2)
         self.assertNotIn("Untouched pixels are the source's own YUV samples.", notes)
         print("export note: untouched YUV samples named only when copied")
 
@@ -491,7 +582,7 @@ class DepthTest(unittest.TestCase):
         self.assertTrue(all(b.dtype == np.uint16 and np.array_equal(a, b) for a, b in zip(frames, back)))
         print("16-bit PNG frames: ok (RGB and RGBA, every 16-bit value exact)")
 
-    def test_export_keeps_each_kind_at_its_depth(self):
+    def test_export_keeps_a_sequence_at_its_depth_and_writes_a_movie_in_10_bits(self):
         d, grad, row = tempfile.mkdtemp(), self.gradient(), lambda a: len(np.unique(a[self.H // 2, :, 1]))
         found = {}
         for name, codec, fmt in (("8-bit MP4", "libx264", "yuv420p"), ("10-bit ProRes", "prores_ks", "yuv422p10le")):
@@ -526,13 +617,12 @@ class DepthTest(unittest.TestCase):
                 again, levels = str(g.dtype), len(np.unique(g[self.H // 2]))
             found[name] = (spec["pix_fmt"], again, levels)
         print("export depth per kind (plate, export, levels of the new content):", found)
-        self.assertEqual(found["8-bit MP4"][:2], ("yuv420p", "yuv420p"))
-        self.assertLessEqual(found["8-bit MP4"][2], 256)
-        self.assertEqual(found["10-bit ProRes"][:2], ("yuv422p10le", "yuv422p10le"))
+        self.assertEqual(found["8-bit MP4"][:2], ("yuv420p", "yuv444p12le"))  # every movie: ProRes 4444 XQ, 10 bits in
+        self.assertEqual(found["10-bit ProRes"][:2], ("yuv422p10le", "yuv444p12le"))
         self.assertEqual(found["16-bit PNG"][:2], ("rgb48be", "rgb48be"))
         self.assertEqual(found["half EXR"][1], "float16")
         self.assertEqual(found["float EXR"][1], "float32")
-        for name in ("10-bit ProRes", "16-bit PNG", "half EXR", "float EXR"):
+        for name in ("8-bit MP4", "10-bit ProRes", "16-bit PNG", "half EXR", "float EXR"):
             self.assertGreater(found[name][2], 256, name)
 
 
@@ -553,23 +643,48 @@ class NativeMovieTest(unittest.TestCase):
 
 class UntouchedTest(unittest.TestCase):
     def test_a_pixel_the_matte_shows_as_zero_is_the_source_pixel(self):
-        """Untouched pixels identical to the source (item 5): Save Plate keeps every pixel its 8-bit matte shows as 0, the
-        matte's faint edge included, so the export and its matte agree pixel for pixel."""
-        changed = np.array([0.0, 0.0005, 0.002, 0.0039, 1.0 / 255, 0.5, 1.0], np.float32)
+        """Untouched pixels identical to the source: Save Plate keeps every pixel its 16-bit matte shows as 0, the matte's
+        faint edge included, so the export and its matte agree pixel for pixel."""
+        changed = np.array([0.0, 5e-6, 7.6e-6, 7.7e-6, 1.0 / 65535, 0.002, 0.5, 1.0], np.float32)
         keep = plateio.untouched(changed)
-        shown = np.clip(255.0 * changed, 0, 255).astype(np.uint8)  # the matte as Save Frames writes it
+        shown = np.round(np.clip(changed, 0, 1) * 65535.0).astype(np.uint16)  # the matte as Save Frames writes it (png16)
         self.assertEqual(keep.tolist(), (shown == 0).tolist())
-        self.assertEqual(keep.tolist(), [True, True, True, True, False, False, False])
+        self.assertEqual(keep.tolist(), [True, True, True, False, False, False, False, False])
         d = tempfile.mkdtemp(); src = os.path.join(d, "src"); os.makedirs(src)
         rng = np.random.default_rng(5)
         plate = rng.random((8, 16, 3)).astype(np.float16)
         OpenEXR.File({"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}, {"RGB": plate}).write(os.path.join(src, "p.1001.exr"))
         spec = plateio.probe_plate(src)
-        tail = np.zeros((8, 16), np.float32); tail[:, 8:] = 0.002; tail[:, 12:] = 0.5  # a faint edge, then the edit
+        tail = np.zeros((8, 16), np.float32); tail[:, 8:] = 5e-6; tail[:, 12:] = 0.5  # a faint edge, then the edit
         out = os.path.join(d, "out"); os.makedirs(out)
         written = plateio.write_still(spec, 0, np.full((8, 16, 3), 3.0, np.float32), None, plateio.untouched(tail), out)
         with OpenEXR.File(written) as f:
             ch = f.channels(); got = ch["RGB"].pixels if "RGB" in ch else np.stack([ch[c].pixels for c in "RGB"], -1)
-        self.assertTrue(np.array_equal(got[:, :12], plate[:, :12]), "the faint edge, below one 8-bit step: the source's own half floats")
+        self.assertTrue(np.array_equal(got[:, :12], plate[:, :12]), "the faint edge, below half a 16-bit step: the source's own half floats")
         self.assertTrue(np.all(got[:, 12:] == 3.0), "the edit where the matte shows it")
-        print("untouched: every pixel the 8-bit matte shows as 0 is the source's own, its faint edge included")
+        print("untouched: every pixel the 16-bit matte shows as 0 is the source's own, its faint edge included")
+
+
+class StoppedWriters(unittest.TestCase):
+    """nodes.py asks ComfyUI before each frame and raises when the person stopped the job: the writers stop there."""
+
+    @staticmethod
+    def frames(stop_at):
+        def at(i):
+            if i >= stop_at:
+                raise RuntimeError("stopped")
+            return np.full((32, 48, 3), 40 + i, np.uint8)
+        return at
+
+    def test_frames_stop_and_a_stopped_movie_leaves_no_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            paths = [os.path.join(d, f"f_{i:05}_.png") for i in range(12)]
+            with self.assertRaises(RuntimeError):
+                plateio.write_pngs(self.frames(3), paths, workers=2)
+            self.assertEqual(sorted(os.listdir(d)), [os.path.basename(p) for p in paths[:3]])  # the frames before the stop, none after
+            movie = os.path.join(d, "m.mp4")
+            with self.assertRaises(RuntimeError):
+                plateio.write_movie(self.frames(3), 12, movie, 24.0, workers=2)
+            self.assertFalse(os.path.exists(movie))  # no half-written movie stays in the output folder
+            plateio.write_movie(self.frames(99), 12, movie, 24.0, workers=2)
+            self.assertGreater(os.path.getsize(movie), 0)  # a movie that finishes is kept

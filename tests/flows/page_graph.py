@@ -1,0 +1,47 @@
+"""The check of the scene's ComfyUI graph and its images (tests/flows/README.md). ComfyUI's editor checks a core image
+loader's file against the input folder as it was when the editor opened, and the page saves the graph's images after that.
+So no core image loader is left: the graph reads each image by its name with Load Plate, a file at the top of input that is
+there, that the README note names, and that the API graph in the same file reads too."""
+import json
+import zipfile
+import urllib.parse
+import urllib.request
+import zip_rows  # noqa: E402
+
+OPEN = "document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden"
+
+
+def run(browser, port, U):
+    page = U.load(browser, port)
+    U.open_path(page, "plates/desk.mp4")
+    page.wait_for_function(OPEN, timeout=60000)
+    page.click('.tools [data-tool="paint"]')
+    U.paint_once(page, "a lantern", [(0.30, 0.50), (0.36, 0.50)])
+    page.evaluate("document.activeElement.blur()")
+    page.keyboard.press("Enter")
+    page.wait_for_function(U.DONE.format(n=1), timeout=120000)
+    with page.expect_download(timeout=180000) as dl:  # the graph comes in Export's zip
+        page.click("#export-btn"); page.check("#x-graph"); page.click("#x-go")
+    graph = json.loads((z := zipfile.ZipFile(dl.value.path())).read(zip_rows.files(z.namelist(), "comfyui_graph")[0]))
+    image = lambda path: not any(c in path for c in "/\\:")  # noqa: E731  # an image of the graph: the plate sits in a folder
+    loaders = {n["title"]: n["widgets_values"][0] for n in graph["nodes"] if n["type"] == "PaintAPlate_LoadPlate" and image(n["widgets_values"][0])}
+    core = [n["title"] for n in graph["nodes"] if n["type"] in ("LoadImage", "LoadImageMask")]
+    readme = next(n for n in graph["nodes"] if n["type"] == "MarkdownNote")["widgets_values"][0]
+
+    def there(name):
+        query = urllib.parse.urlencode({"filename": name, "type": "input", "subfolder": ""})
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/view?{query}", timeout=10) as r:
+                return r.status == 200
+        except OSError:
+            return False
+
+    names = sorted(loaders.values())
+    U.check(not core and len(names) == 2 and all(v.startswith("desk_e1_") for v in names),
+            f"no core image loader, and Load Plate reads each image by its name, at the top of the input folder: {loaders}, {core}")
+    U.check(all(there(v) for v in names), f"each of those files is in the input folder: {[(v, there(v)) for v in names]}")
+    U.check("must be in ComfyUI's input folder" in readme and all(v in readme for v in names), f"the README note names the files that must be on disk: {readme[:500]!r}")
+    api = graph["extra"]["paintaplate"]["prompt"]
+    U.check(sorted(n["inputs"]["path"] for n in api.values() if n["class_type"] == "PaintAPlate_LoadPlate" and image(n["inputs"]["path"])) == names,
+            "the API graph in the same file reads the same files")
+    page.close()

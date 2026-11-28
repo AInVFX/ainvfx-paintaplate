@@ -55,7 +55,7 @@
    "pad_8n1": false
   },
   "_meta": {
-   "title": "Erase matte",
+   "title": "Clean matte",
    "slots": {
     "path": "matte_a"
    }
@@ -103,20 +103,10 @@
    "crop": "disabled"
   },
   "_meta": {
-   "title": "Erase matte at the paint matte's size"
+   "title": "Clean matte at the paint matte's size"
   }
  },
  "8": {
-  "class_type": "ImageToMask",
-  "inputs": {
-   "image": [
-    "7",
-    0
-   ],
-   "channel": "red"
-  }
- },
- "9": {
   "class_type": "ImageToMask",
   "inputs": {
    "image": [
@@ -126,15 +116,25 @@
    "channel": "red"
   }
  },
+ "9": {
+  "class_type": "ImageToMask",
+  "inputs": {
+   "image": [
+    "7",
+    0
+   ],
+   "channel": "red"
+  }
+ },
  "10": {
   "class_type": "MaskComposite",
   "inputs": {
    "destination": [
-    "8",
+    "9",
     0
    ],
    "source": [
-    "9",
+    "8",
     0
    ],
    "x": 0,
@@ -151,7 +151,11 @@
    ],
    "config": "ocio://studio-config-latest",
    "source": "@model",
-   "destination": "@model"
+   "destination": "@model",
+   "peak": [
+    "2",
+    1
+   ]
   },
   "_meta": {
    "title": "Shot in the plate's colour space",
@@ -248,7 +252,11 @@
    "shot_space": "sRGB",
    "radius": 1,
    "strength": 1.0,
-   "align": true
+   "align": true,
+   "peak": [
+    "2",
+    1
+   ]
   },
   "_meta": {
    "slots": {
@@ -378,7 +386,11 @@
    "grain": 1.0,
    "grow": 8,
    "feather": 12,
-   "steady": 2
+   "steady": 2,
+   "keep": [
+    "8",
+    0
+   ]
   },
   "_meta": {
    "slots": {
@@ -386,13 +398,23 @@
     "grow": "grow",
     "feather": "feather",
     "steady": "steady",
-    "mask": "fit_mask"
+    "mask": "fit_mask",
+    "keep": "fit_keep"
    },
    "progress": true
   }
  },
  "24": {
-  "class_type": "ImageCompositeMasked",
+  "class_type": "GetImageSize",
+  "inputs": {
+   "image": [
+    "19",
+    0
+   ]
+  }
+ },
+ "25": {
+  "class_type": "PaintAPlate_CompositeFrames",
   "inputs": {
    "destination": [
     "19",
@@ -402,11 +424,16 @@
     "23",
     0
    ],
-   "x": 0,
-   "y": 0,
-   "resize_source": false,
    "mask": [
     "23",
+    1
+   ],
+   "width": [
+    "24",
+    0
+   ],
+   "height": [
+    "24",
     1
    ]
   },
@@ -414,38 +441,13 @@
    "title": "Composite"
   }
  },
- "25": {
-  "class_type": "ImageFromBatch",
-  "inputs": {
-   "image": [
-    "24",
-    0
-   ],
-   "batch_index": 0,
-   "length": [
-    "1",
-    4
-   ]
-  }
- },
  "26": {
-  "class_type": "PaintAPlate_ColorSpace",
+  "class_type": "MaskToImage",
   "inputs": {
-   "image": [
-    "25",
-    0
-   ],
-   "config": "ocio://studio-config-latest",
-   "source": "@model",
-   "destination": "@model"
-  },
-  "_meta": {
-   "title": "Movie values",
-   "slots": {
-    "config": "config",
-    "source": "color_space",
-    "destination": "movie_space"
-   }
+   "mask": [
+    "23",
+    1
+   ]
   }
  },
  "27": {
@@ -457,6 +459,43 @@
     "26",
     0
    ],
+   "frames": [
+    "1",
+    4
+   ],
+   "fps": [
+    "1",
+    3
+   ],
+   "crf": 18,
+   "filename_prefix": ""
+  },
+  "_meta": {
+   "title": "Matte movie (grey): the X-ray shows it",
+   "slots": {
+    "width": "movie_width",
+    "height": "movie_height",
+    "filename_prefix": "matte_video_prefix"
+   },
+   "output": "matte_movie"
+  }
+ },
+ "28": {
+  "class_type": "PaintAPlate_SaveMovie",
+  "inputs": {
+   "width": 0,
+   "height": 0,
+   "images": [
+    "25",
+    0
+   ],
+   "frames": [
+    "1",
+    4
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "@model",
    "fps": [
     "1",
     3
@@ -469,19 +508,30 @@
    "slots": {
     "width": "movie_width",
     "height": "movie_height",
+    "config": "config",
+    "source": "color_space",
+    "destination": "movie_space",
     "filename_prefix": "review_prefix"
    },
    "output": "review"
   }
  },
- "28": {
+ "29": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
     "25",
     0
    ],
+   "frames": [
+    "1",
+    4
+   ],
    "format": "exr",
+   "fps": [
+    "1",
+    3
+   ],
    "filename_prefix": ""
   },
   "_meta": {
@@ -493,35 +543,22 @@
    "output": "frames"
   }
  },
- "29": {
-  "class_type": "PaintAPlate_ColorSpace",
-  "inputs": {
-   "image": [
-    "25",
-    0
-   ],
-   "config": "ocio://studio-config-latest",
-   "source": "@model",
-   "destination": "ACEScct"
-  },
-  "_meta": {
-   "title": "Viewer movie values",
-   "slots": {
-    "config": "config",
-    "source": "color_space",
-    "destination": "view_space"
-   }
-  }
- },
  "30": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
    "width": 0,
    "height": 0,
    "images": [
-    "29",
+    "25",
     0
    ],
+   "frames": [
+    "1",
+    4
+   ],
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "ACEScct",
    "fps": [
     "1",
     3
@@ -534,6 +571,9 @@
    "slots": {
     "width": "movie_width",
     "height": "movie_height",
+    "config": "config",
+    "source": "color_space",
+    "destination": "view_space",
     "filename_prefix": "view_prefix",
     "images": "review_view"
    },

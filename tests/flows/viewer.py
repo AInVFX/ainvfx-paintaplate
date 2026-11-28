@@ -1,4 +1,4 @@
-"""The viewer workstream's page checks: the colour on the canvas against OpenRV (tests/test_rv_parity.py), and the colour
+"""The viewer's page checks: the colour on the canvas against OpenRV (tests/test_rv_parity.py), and the colour
 inspector. Each colour check draws fixed half-float pixels through the real shader (display.mjs) and reads the canvas:
 a pixel sampled from a playing shot depends on the browser."""
 import json
@@ -28,6 +28,22 @@ DRAW = """async ({ cases, halfs, w }) => {
   return out;
 }"""
 
+
+
+
+def steady(page, span):  # the sums of a span of the picture once the view holds still: the first read equal to the one before, 300 ms apart
+    last = page.evaluate(SUM, span)
+    for _ in range(30):
+        page.wait_for_timeout(300)
+        now = page.evaluate(SUM, span)
+        if now == last:
+            return now
+        last = now
+    return last
+
+def playing(page, on, key=None):  # the player plays (on) or holds still, by the play button or by `key`: a result already plays as it is made
+    if page.evaluate("document.querySelector('#play-btn').classList.contains('playing')") != on:
+        page.keyboard.press(key) if key else page.click("#play-btn")
 
 def parity_table(page):
     """Every case of the parity table: the page's 8-bit values and OpenRV's, and the largest difference."""
@@ -74,7 +90,7 @@ def native_and_inspector(page, port, U):
     U.check(all(abs(a - b) > 200 for a, b in zip(checker, checker[1:])),
             f"one source pixel per canvas pixel: a one-pixel checker of 4.0 and 0.0 alternates on the canvas: {checker[:8]}")
     page.keyboard.press("F5")
-    U.check(page.is_visible("#inspector"), "F5 shows the Color Inspector")
+    U.check(page.is_visible("#inspector"), "F5 shows the Colour Inspector")
     ATTR = "(() => { const i = document.querySelector('#inspector'); return [i.dataset.pixel, i.dataset.value, i.dataset.frame]; })()"
 
     def client(x, y):
@@ -85,7 +101,7 @@ def native_and_inspector(page, port, U):
         page.keyboard.down("Shift"); page.mouse.click(*client(x, y)); page.keyboard.up("Shift")
         page.wait_for_function(f"document.querySelector('#inspector').dataset.pixel === '{x},{y}' && !!document.querySelector('#inspector').dataset.value", timeout=20000)
         return [float(v) for v in page.evaluate(ATTR)[1].split(",")]
-    def inspect_held(x, y):  # the same, with the read held open while the frame redraws: the race CI met on 3 Nov
+    def inspect_held(x, y):  # the same, with the read held open while the frame redraws: a race that CI can meet
         hold = {"on": True, "routes": []}
         page.route("**/paintaplate/pixel?*", lambda r: hold["routes"].append(r) if hold["on"] else r.continue_())
         page.evaluate(PAIRS)
@@ -122,7 +138,7 @@ def native_and_inspector(page, port, U):
     want = client(20, 10)
     U.check(abs(mark[0] - want[0]) < 3 and abs(mark[1] - want[1]) < 3, f"zoomed, the inspector's point follows the frame: {mark} against {want}")
     page.keyboard.press("f")
-    page.keyboard.press("b")
+    page.keyboard.press("p")
     cx, cy = client(1920, 1080); xy = page.evaluate(TO_CANVAS, [cx, cy]); before = page.evaluate(PIXEL, xy)
     page.mouse.move(cx - 3, cy); page.mouse.down(); page.mouse.move(cx + 3, cy, steps=4); page.mouse.up(); page.wait_for_timeout(300)
     U.check(page.evaluate(PIXEL, xy) != before and page.evaluate(ATTR)[0] == "20,10",
@@ -144,8 +160,8 @@ TO_CANVAS = """(([cx, cy]) => { const v = document.querySelector('#view'), r = v
 
 
 def zoom_and_paint(page, U):
-    """RV's zoom keys, and a stroke lands under the pointer at 4:1 and at 1:2 (the plate on show is 4K, the edits 1920)."""
-    page.keyboard.press("Home"); page.keyboard.press("b"); page.click(".sw[data-color='#d32f2f']")
+    """RV's zoom keys, and a stroke lands under the pointer at 4:1 and at 1:2 (the plate displayed is 4K, the edits 1920)."""
+    page.keyboard.press("Home"); page.keyboard.press("p"); page.click(".sw[data-color='#d32f2f']")
     box = page.eval_on_selector("#viewport", "e => { const r = e.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }")
     for key, n, at in (("4", 4, (0.5, 0.5)), ("Shift+2", 0.5, (0.45, 0.5))):
         page.keyboard.press(key); page.wait_for_timeout(300)
@@ -175,11 +191,12 @@ def fluid_wipe_and_models(page, U):
     page.keyboard.press("Enter")
     page.wait_for_function("""(() => { const r = document.querySelector('#history li[data-id="fluid"]');
       return !!r && !r.classList.contains('busy') && document.querySelector('#fluid').hidden; })()""", timeout=120000)
+    page.wait_for_function("[...document.querySelectorAll('#log li span')].some((e) => /^Render v\\d+: Fluid shot, full size: done in /.test(e.textContent))", timeout=120000)
     page.click('#history li[data-id="fluid"] .edit')  # the keyframes again: the fluid shot is the result
     page.keyboard.press("Home"); page.keyboard.press("F6"); page.wait_for_timeout(800)
     xy = page.evaluate(TO_CANVAS, list(spot))
     key0 = page.evaluate(PIXEL, xy)
-    U.check(min(key0) > 200 and page.text_content("#wipe .label.left") == "Keyframe",
+    U.check(min(key0) > 200 and page.text_content("#wipe .label.left") == "Fluid 1, keyframes",
             f"the wipe on a fluid shot shows the painted keyframe on its frame: {key0}, label {page.text_content('#wipe .label.left')!r}")
     for _ in range(5): page.keyboard.press("ArrowRight")
     page.wait_for_timeout(800)
@@ -188,7 +205,7 @@ def fluid_wipe_and_models(page, U):
     page.keyboard.down("Shift"); page.mouse.click(*spot); page.keyboard.up("Shift")  # Shift+click shows the inspector, as RV
     page.wait_for_function("document.querySelector('#inspector').dataset.movie === 'true'", timeout=20000)
     rows = page.eval_on_selector_all("#inspector div", "els => els.map(e => e.textContent)")
-    U.check(any(r.startswith("Values8-bit movie:") and "not the pass's own values" in r for r in rows),
+    U.check(any(r.startswith("Values8-bit movie, ") for r in rows),
             f"on a shot shown by its movie, the inspector says its values are the movie's codes: {[r for r in rows if r.startswith('Values')]}")
     page.keyboard.press("F5")
     page.click("#view", button="right")
@@ -196,16 +213,17 @@ def fluid_wipe_and_models(page, U):
     page.get_by_role("menuitem", name="Models and licences", exact=True).click()
     page.wait_for_function("document.querySelector('#help').open && !document.querySelector('#models').hidden", timeout=10000)
     shown = page.get_attribute("#models", "data-shown").split(",")
-    rows = page.eval_on_selector_all("#models-all tr", "els => els.length")
-    U.check({"fluid", "ltx", "ltx-text", "ltx-vae"} <= set(shown) and "klein" not in shown and rows == 15,
-            f"Models and licences: the models behind the fluid shot, then every model: {shown}, {rows} rows")
+    cards = page.eval_on_selector_all("#models-all article", "els => els.map((e) => [e.dataset.id, e.classList.contains('behind')])")
+    marked = {i for i, behind in cards if behind}
+    U.check({"fluid", "ltx", "ltx-text", "ltx-vae"} <= set(shown) and "klein" not in shown and len(cards) == 17 and marked == set(shown),
+            f"Models and licences: every model in cards, those behind the fluid shot marked: {shown}, {len(cards)} cards, marked {sorted(marked)}")
     page.keyboard.press("Escape")
     page.keyboard.press("?")
     shown = page.evaluate("[...document.querySelectorAll('#help .help-tab')].filter((t) => !t.hidden).map((t) => t.dataset.help)")
     page.click("#help [role=tab][data-help=start]")
     start = page.evaluate("[...document.querySelectorAll('#help .help-tab')].filter((t) => !t.hidden).map((t) => t.dataset.help)")
     tabs = page.eval_on_selector_all("#help [role=tab]", "els => els.map((e) => e.textContent)")
-    U.check(shown == ["keys"] and start == ["start"] and len(tabs) == 6,
+    U.check(shown == ["keys"] and start == ["start"] and len(tabs) == 7,
             f"Help is in tabs: ? opens Keys, a tab shows its part alone: {shown}, {start}, {tabs}")
     page.keyboard.press("Escape")
 
@@ -218,7 +236,7 @@ def exposure_while_playing(browser, port, U):
     """With a frame budget too small for every EXR frame (?deep=8: about 5 of 17), a playing EXR plate shows its 8-bit
     movie at rest, and only its EXR frames once the exposure moves."""
     page = browser.new_page(viewport={"width": 1400, "height": 900})
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&deep=8")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0&deep=8")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     U.open_path(page, "paintaplate/hdr_room")
     page.wait_for_function("document.querySelector('#spec').textContent.includes('EXR') && document.querySelector('#opening').hidden", timeout=60000)
@@ -226,7 +244,7 @@ def exposure_while_playing(browser, port, U):
     seen = {}
     for name, keys in (("at rest", []), ("at +2 stops", ["Shift+E"] + ["="] * 20 + ["Escape"])):
         for k in keys: page.keyboard.press(k)
-        page.evaluate(PREC); page.keyboard.press("Space"); page.wait_for_timeout(2500); page.keyboard.press("Space")
+        page.evaluate(PREC); playing(page, True, "Space"); page.wait_for_timeout(2500); playing(page, False, "Space")
         seen[name] = sorted(set(page.evaluate("window.__prec")))
     U.check("8-bit" in seen["at rest"] and seen["at +2 stops"] == ["float"],
             f"playing, a source shows its 8-bit movie at rest and only its EXR frames once the exposure moves: {seen}")
@@ -245,12 +263,12 @@ SEEN = "(() => { const i = document.querySelector('#inspector'); return [i.datas
 def rendered(browser, port, U):
     """desk.mp4 with a paint edit made to its full-size composite, nothing selected: the Render panel's rows to compare."""
     page = browser.new_page(viewport={"width": 1400, "height": 900}, accept_downloads=True)
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     U.open_path(page, "plates/desk.mp4")
     page.wait_for_function("document.querySelector('#spec').textContent.startsWith('desk') && document.querySelector('#opening').hidden", timeout=60000)
     page.evaluate(U.WATCH)
-    page.keyboard.press("b"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
+    page.keyboard.press("p"); U.paint_once(page, "a red fire", [(0.3, 0.6), (0.35, 0.65)]); page.keyboard.press("Enter")
     U.wait_log(page, U.added_line(U.REVIEWED), 300000, "the full-size composite of the paint")
     calm = 0
     while calm < 3:  # Generate reads Generate for three seconds running: no step left
@@ -261,16 +279,27 @@ def rendered(browser, port, U):
 
 def wipe_compare(page, U):
     """Two passes in the wipe: Ctrl+click on a finished Render step puts that pass on the wipe's left side, against the pass
-    on show, both named; the inspector reads the side its point is on, a preview pass at its own size; a second
+    displayed, both named; the inspector reads the side its point is on, a preview pass at its own size; a second
     Ctrl+click, Esc or F6 ends it."""
     row = "#stages li.pick:has-text('Track the paint, preview')"
+
     names = lambda: [page.text_content("#wipe .label.left"), page.text_content("#wipe .label.right")]  # noqa: E731
-    before = page.evaluate(SUM, [0.5, 1.0])
+    compared = lambda: page.evaluate("document.querySelector('#view').dataset.compared")  # noqa: E731
+    page.keyboard.press("F6"); page.wait_for_timeout(300)
+    U.check(names() == ["Plate", "Composite, full size"], f"F6: the plate on the left, the pass displayed on the right, both named: {names()}")
+    page.click(row); page.wait_for_timeout(500)
+    U.check(names() == ["Plate", "Track the paint, preview"], f"F6, then a click on a Render step: the right side takes the step's name: {names()}")
+    page.click(row, modifiers=["Control"]); page.wait_for_timeout(300)
+    said = page.evaluate("[...document.querySelectorAll('#log li span')].map((s) => s.textContent)")
+    U.check(names() == ["Plate", "Track the paint, preview"] and compared() == "" and "Viewer: wipe, Plate against Track the paint, preview." in said,
+            f"Ctrl+click on the pass displayed compares it with the plate, never with itself: {names()}, {said[-1:]}")
+    page.click(row); page.wait_for_timeout(500); page.keyboard.press("F6"); page.wait_for_timeout(300)  # the latest result, and the wipe off
+    before = steady(page, [0.5, 1.0])
     page.click(row, modifiers=["Control"])
     page.wait_for_function("document.querySelector('#view').dataset.compared === 'drawn'", timeout=30000)  # its own frame: the plate shows until then
     U.check(page.is_visible("#wipe") and names() == ["Track the paint, preview", "Composite, full size"] and "compared" in page.get_attribute(row, "class"),
-            f"Ctrl+click on a finished step puts that pass on the wipe's left side, against the pass on show, both named: {names()}")
-    left, right = page.evaluate(SUM, [0.0, 0.5]), page.evaluate(SUM, [0.5, 1.0])
+            f"Ctrl+click on a finished step puts that pass on the wipe's left side, against the pass displayed, both named: {names()}")
+    left, right = steady(page, [0.0, 0.5]), steady(page, [0.5, 1.0])
     U.check(left["spread"] <= 12 and left["white"] > 0 and right["sum"] == before["sum"],
             f"the left side shows the paint matte, grey with white where the edit is ({left}); the right side is the composite as before ({right['sum']} against {before['sum']})")
     page.keyboard.press("F5")
@@ -286,7 +315,7 @@ def wipe_compare(page, U):
     pv = inspect(0.95, 0.95, "Shot, preview")
     size = [r for r in pv[2] if r.startswith("Size")]
     U.check(not any(r.startswith("Error") for r in pv[2]) and pv[1] and size,
-            f"a preview pass reads at its own size, in its own pixels, at the plate's point (1.7.0: « outside the 640 x 352 frame »): {size}, {pv[1]}")
+            f"a preview pass reads at its own size, in its own pixels, at the plate's point: {size}, {pv[1]}")
     page.keyboard.press("F5")
     page.keyboard.press("Escape"); page.wait_for_timeout(400)
     U.check(page.is_hidden("#wipe") and page.evaluate("document.querySelector('#view').dataset.compared") == "" and "compared" not in (page.get_attribute(row, "class") or ""),
@@ -305,14 +334,16 @@ XSTAT = """(() => { const x = document.querySelector('#xray'), d = x.getContext(
 
 
 def xray_view(page, U):
-    """W tints, over the picture, where the edits on show change the plate: the tracking mattes of the size on show, then
-    the export's matte once Export made one; a light edit tints the whole frame. The canvas itself stays the picture."""
-    page.keyboard.press("Home"); pic = page.evaluate(SUM, [0.0, 1.0])
-    page.keyboard.press("w")
+    """X tints, over the picture, where the edits displayed change the plate: the matte the composite of the size displayed
+    used, then the export's matte once Export made one; a light edit tints the whole frame. The canvas itself stays the picture."""
+    page.keyboard.press("Home")  # paused at the first frame: the frame at its native size, once it has come
+    page.wait_for_function("(() => { const v = document.querySelector('#view'); return v.dataset.native === 'true' && v.dataset.picture !== 'held'; })()", timeout=30000)
+    pic = steady(page, [0.0, 1.0])
+    page.keyboard.press("x")
     page.wait_for_function("(() => { const x = document.querySelector('#xray'); return !x.hidden && x.dataset.frame === '0'; })()", timeout=30000)
     got = page.evaluate(XSTAT)
-    U.check(got["from"] == "full" and 0 < got["share"] < 0.5 and got["at"][0] < 0.5 and page.evaluate(SUM, [0.0, 1.0])["sum"] == pic["sum"],
-            f"W tints where the paint changes the plate, from the full-size tracking mattes, and leaves the canvas's picture as it was: {got}")
+    U.check(got["from"] == "full" and 0 < got["share"] < 0.5 and got["at"][0] < 0.5 and steady(page, [0.0, 1.0])["sum"] == pic["sum"],
+            f"X tints where the paint changes the plate, from the full-size composite's matte, and leaves the canvas's picture as it was: {got}")
     page.keyboard.press("ArrowRight")
     page.wait_for_function("document.querySelector('#xray').dataset.frame === '1'", timeout=30000)
     page.keyboard.press("Home")
@@ -322,24 +353,45 @@ def xray_view(page, U):
     page.wait_for_function("(() => { const x = document.querySelector('#xray'); return x.dataset.from === 'export' && x.dataset.frame === '0'; })()", timeout=60000)
     got = page.evaluate(XSTAT)
     U.check(0 < got["share"] < 0.5, f"once Export has made its matte, the X-ray reads it: {got}")
+    tint = "(() => { const x = document.querySelector('#xray'), d = x.getContext('2d').getImageData(0, 0, x.width, x.height).data; let s = 0; for (let i = 3; i < d.length; i += 4) s += d[i]; return [Number(x.dataset.frame), s]; })()"
+    playing(page, True)  # the button: after Export, a key could go to the button that has the focus
+    probe = "[document.querySelector('#frame-now').textContent, document.querySelector('#xray').dataset.frame, document.querySelector('#view').dataset.play]"
+    trail = [page.evaluate(probe)]
+    for _ in range(60):  # the shot starts to play: up to 15 s
+        if trail[-1][1] not in ("", "0"):
+            break
+        page.wait_for_timeout(250); trail.append(page.evaluate(probe))
+    seen = {}
+    for _ in range(16):
+        page.wait_for_timeout(120); f, s = page.evaluate(tint); seen.setdefault(f, s)
+    playing(page, False)
+    page.evaluate("document.activeElement.blur()")
+    same = []
+    for f in sorted(seen)[1:4]:
+        page.keyboard.press("Home")
+        for _ in range(f):
+            page.keyboard.press("ArrowRight")
+        page.wait_for_function(f"document.querySelector('#xray').dataset.frame === '{f}'", timeout=30000)
+        same.append(page.evaluate(tint)[1] == seen[f])
+    U.check(len(seen) > 2 and len(same) == 3 and all(same), f"while the shot plays, the X-ray tints each frame with that frame's matte, as it does paused: frames {sorted(seen)}, same {same}, start {trail[:2]} to {trail[-1]}")
     page.keyboard.press("l"); U.paint_once(page, "warm sunset light", [(0.7, 0.3), (0.75, 0.35)]); page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('#xray').dataset.from === 'light'", timeout=120000)
     got = page.evaluate(XSTAT)
-    U.check(got["share"] == 1 and not got["hidden"], f"with a light edit on show, the X-ray tints the whole frame: {got}")
-    page.keyboard.press("w")
-    U.check(page.is_hidden("#xray"), "W again hides the X-ray")
+    U.check(got["share"] == 1 and not got["hidden"], f"with a light edit displayed, the X-ray tints the whole frame: {got}")
+    page.keyboard.press("x")
+    U.check(page.is_hidden("#xray"), "X again hides the X-ray")
 
 
 def run(browser, port, U):
     page = browser.new_page(viewport={"width": 1400, "height": 900})
-    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0")
+    page.goto(f"http://127.0.0.1:{port}/extensions/ainvfx-paintaplate/paintaplate.html?blank=0&autoplay=0")
     page.wait_for_function("document.querySelector('#status').textContent.startsWith('Ready')", timeout=60000)
     rows = parity_table(page)
     with open("/tmp/rv_parity.json", "w") as f:
         json.dump(rows, f)
     bad = [(r["case"], r["max_diff"]) for r in rows if r["max_diff"] is None or r["max_diff"] > 1]
     U.check(not bad, f"the canvas matches OpenRV within 1 code value: {len(rows)} cases, 12 pixels each; over 1: {bad}")
-    # F5 shows the Color Inspector and the browser does not reload
+    # F5 shows the Colour Inspector and the browser does not reload
     page.evaluate("window.__alive = 1")
     page.keyboard.press("F5")
     U.check(page.evaluate("window.__alive") == 1, "F5 is the page's: it does not reload")

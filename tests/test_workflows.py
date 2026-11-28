@@ -65,9 +65,10 @@ class Workflows(unittest.TestCase):
         """The page picks results by output name, not by position."""
         wanted = {"ingest": {"hero", "proxy", "spec"}, "prompt": {"text"}, "edit": {"patch", "relit", "result"},
                   "snap": {"named"} | {f"point_{k}" for k in range(5)}, "clean": {"frames", "video"}, "cleanup": {"frames", "video"}, "shot": {"frames", "video"},
-                  "matte": {"follow", "frames", "movie"}, "comp": {"video"}, "review": {"review", "frames", "view"},
-                  "export": {"export", "exr", "matte", "matte_movie"}, "warm": {"frame"},
-                  "fluid": {"plate", "video", "control"}, "hdr": {"hdr", "movie"}}
+                  "matte": {"follow", "frames", "movie"}, "comp": {"video", "matte_movie"}, "review": {"review", "frames", "view", "matte_movie"},
+                  "export": {"clean", "export", "layer", "matte", "matte_movie", "shot"}, "warm": {"frame"},
+                  "fluid": {"plate", "video", "control", "first"}, "hdr": {"hdr", "movie"},
+                  "hdr_comp": {"comp", "plate", "matte", "movie"}}
         for name, keys in wanted.items():
             self.assertEqual(set(build_workflows.load(name, WORKFLOWS)[2]), keys, name)
 
@@ -120,8 +121,8 @@ class ViewerMovies(unittest.TestCase):
         used = {str(v[0]) for n in video.values() for v in n["inputs"].values() if isinstance(v, list)}
         idle = [n["class_type"] for nid, n in video.items() if nid not in used and "output" not in n.get("_meta", {})]
         self.assertEqual(idle, [], "a dropped link leaves no node that feeds nothing")
-        conv = seq[str(seq[outputs["view"]]["inputs"]["images"][0])]  # Save Movie scales it to the size the page sends
-        self.assertEqual(conv["inputs"]["destination"], "ACEScct")
+        movie = seq[outputs["view"]]  # Save Movie converts each frame as it saves it, and scales it to the size the page sends
+        self.assertEqual(movie["inputs"]["destination"], "ACEScct")
 
     def test_hdr_writes_a_log_movie_beside_its_frames(self):
         _, _, outputs = build_workflows.load("hdr")
@@ -131,8 +132,80 @@ class ViewerMovies(unittest.TestCase):
         conv = wf[str(movie["inputs"]["images"][0])]
         self.assertEqual((conv["inputs"]["source"], conv["inputs"]["destination"]), ("ACEScg", "ACEScct"))
 
+    def test_exr_frames_take_the_shots_frame_rate(self):
+        """Every Save Frames node that writes EXR frames of a shot is given the shot's frame rate, which it writes in each
+        frame's header: SDR to HDR takes the rate the page sends for its movie, and the review takes the plate's own. A 16-bit fluid shot's frames open as a plate, and that plate took 24 fps for a shot made at 50."""
+        def exr_frames(name):
+            with open(os.path.join(WORKFLOWS, f"{name}.json")) as f:
+                wf = json.load(f)
+            return wf, [n for n in wf.values() if n["class_type"] == "PaintAPlate_SaveFrames" and n["inputs"].get("format") == "exr"]
+        wf, [frames] = exr_frames("hdr")
+        [movie] = [n for n in wf.values() if n["class_type"] == "PaintAPlate_SaveMovie"]
+        self.assertEqual((frames["_meta"]["slots"]["fps"], movie["_meta"]["slots"]["fps"]), ("movie_fps", "movie_fps"))
+        self.assertEqual(frames["inputs"]["fps"], movie["inputs"]["fps"])
+        for name, fed, its, count in (("review", "PaintAPlate_SaveMovie", "fps", 1),):
+            wf, frames = exr_frames(name)  # the export writes its result and its layer
+            self.assertEqual(len(frames), count, name)
+            for each in frames:
+                loader, output = each["inputs"]["fps"]
+                self.assertEqual((wf[loader]["class_type"], output), ("PaintAPlate_LoadPlate", 3), name)
+                plates = {n["inputs"][its][0] for n in wf.values() if n["class_type"] == fed}  # the plate's loader: it feeds these
+                self.assertEqual(plates, {loader}, f"{name}: the frames take the plate's rate")
+
     def test_hdr_decodes_in_128_frame_temporal_tiles(self):
-        """64-frame temporal tiles with 8 of overlap made a 0.32-stop jump at frame 56 of a 121-frame HDR shot (2 Nov)."""
+        """64-frame temporal tiles with 8 of overlap made a 0.32-stop jump at frame 56 of a 121-frame HDR shot."""
         prompt, _, _ = build_workflows.load("hdr")
         tiled = [n["inputs"] for n in prompt.values() if n["class_type"] == "VAEDecodeTiled"]
         self.assertEqual([(t["temporal_size"], t["temporal_overlap"]) for t in tiled], [(128, 32)])
+
+
+class MemorySlots(unittest.TestCase):
+    def test_the_memory_profile_slots_default_to_a_large_gpus_values(self):
+        """`tile`, `encode_tile` and `guide_tiled` (logic.memoryProfile on the page): unfilled, a workflow runs as on a large
+        GPU, every LTX decode and the encode of the full-size clean plate pass whole (WHOLE)."""
+        import json
+        folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web", "workflows")
+        for name, tiles, encodes, guides in (("clean", 0, 0, 1), ("cleanup", 1, 1, 0), ("shot", 1, 0, 1),
+                                             ("fluid", 1, 0, 1), ("hdr", 1, 0, 1)):
+            with open(os.path.join(folder, f"{name}.json")) as f:
+                prompt = json.load(f)
+            slots = {slot: (node["class_type"], node["inputs"][key]) for node in prompt.values() for key, slot in node.get("_meta", {}).get("slots", {}).items()}
+            tile = [n for n in prompt.values() if n.get("_meta", {}).get("slots", {}).get("tile_size") == "tile"]
+            encode = [n for n in prompt.values() if n.get("_meta", {}).get("slots", {}).get("tile_size") == "encode_tile"]
+            guide = [n for n in prompt.values() if n.get("_meta", {}).get("slots", {}).get("use_tiled_encode") == "guide_tiled"]
+            self.assertEqual((len(tile), len(encode), len(guide)), (tiles, encodes, guides), name)
+            self.assertTrue(all(n["class_type"] == "VAEDecodeTiled" and n["inputs"]["tile_size"] == 4096 for n in tile), name)
+            self.assertTrue(all(n["class_type"] == "VAEEncodeTiled" and n["inputs"]["tile_size"] == 4096 for n in encode), name)
+            self.assertTrue(all(n["inputs"]["use_tiled_encode"] is False for n in guide), name)
+            self.assertEqual("tile" in slots, bool(tiles), name)
+
+    def test_cleanup_makes_its_start_one_frame_at_a_time(self):
+        """The second stage of the erase pass stopped ComfyUI on a 52 GB machine: Image Scale and Image Composite
+        Masked held the whole shot at full size nine times before LTX started. Composite Frames takes the plate, the first
+        stage and the blocks at their own sizes."""
+        with open(os.path.join(WORKFLOWS, "cleanup.json")) as f:
+            prompt = json.load(f)
+        title = lambda link: prompt[link[0]].get("_meta", {}).get("title")  # noqa: E731
+        self.assertNotIn("ImageCompositeMasked", [node["class_type"] for node in prompt.values()])
+        (composite,) = [node for node in prompt.values() if node["class_type"] == "PaintAPlate_CompositeFrames"]
+        inputs = composite["inputs"]
+        self.assertEqual((title(inputs["destination"]), title(inputs["source"])), ("Plate in the model space", "Clean plate pass at half size"))
+        self.assertEqual(prompt[inputs["source"][0]]["class_type"], "PaintAPlate_LoadPlate")
+        self.assertEqual(prompt[inputs["mask"][0]]["class_type"], "GrowMask", "the blocks on LTX's grid, at the grid's size")
+        self.assertEqual(composite["_meta"]["slots"], {"width": "width", "height": "height"})
+        sized = sorted(prompt[node["inputs"]["image"][0]]["class_type"] for node in prompt.values() if node["class_type"] == "ImageScale")
+        self.assertEqual(sized, ["LoadImage", "PaintAPlate_LoadPlate"], "only the erased first frame and the erase matte are sized as a batch")
+
+
+class OpeningSteps(unittest.TestCase):
+    def test_every_class_the_opening_screen_waits_for_is_in_the_ingest_workflow(self):
+        """INGEST in web/app.mjs maps ingest's node classes to the opening screen's steps: a class the workflow no longer
+        runs never arrives, and its step never shows (ImageColorSpace, CreateVideo and SaveVideo stayed there until 1.11.1)."""
+        import json, re
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web")
+        with open(os.path.join(root, "app.mjs"), encoding="utf-8") as f:
+            named = re.findall(r"(\w+): \"", re.search(r"const INGEST = \{(.*?)\};", f.read(), re.S).group(1))
+        with open(os.path.join(root, "workflows", "ingest.json")) as f:
+            classes = {node["class_type"] for node in json.load(f).values()}
+        self.assertTrue(named)
+        self.assertEqual([c for c in named if c not in classes], [])

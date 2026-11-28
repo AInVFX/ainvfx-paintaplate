@@ -8,7 +8,7 @@ into the model space, and the edited pixels back into the plate's colour space f
 The model space is the sRGB-encoded Rec.709 the models were trained on (FLUX 3 Image Klein, LTX 2.5, SAM 3.1). Into it,
 values above 1.0 are tone-mapped as core ComfyUI's Convert Image Color Space maps them to sRGB: an extended Reinhard on
 luminance with the batch's peak as white point, then the same gamut compression (comfy_extras/nodes_images.py at
-v0.43.0). A plate's model inputs are the ones core made. Out of the model space, values are decoded as they are, as core
+ComfyUI v0.45.3, the pin). A plate's model inputs are the ones core made. Out of the model space, values are decoded as they are, as core
 decodes sRGB.
 
 Two names stand for spaces derived from the model space, so every config works: "@model", the model space entered through
@@ -26,9 +26,9 @@ import numpy as np
 import PyOpenColorIO as OCIO
 
 ENV = "$OCIO"  # the config name that means the file the OCIO environment variable names
-BUILTIN = "ocio://studio-config-latest"  # ACES 2.1 with the camera log spaces (ARRI, Sony, RED, Canon, ...)
+BUILTIN = "ocio://studio-config-latest"  # with PyOpenColorIO 2.6: ACES 2.1 with the camera log spaces (ARRI, Sony, RED, Canon, ...)
 MODEL, LINEAR = "@model", "@linear"
-WORKERS = min(16, os.cpu_count() or 4)  # frames in parallel: OCIO releases the GIL while it converts (measured 29 Oct)
+WORKERS = min(16, os.cpu_count() or 4)  # frames in parallel: OCIO releases the GIL while it converts
 _POOL = ThreadPoolExecutor(WORKERS)
 # The model space's names and aliases in the ACES configs, then the roles that usually point at it
 MODEL_NAMES = ("srgb_tx", "sRGB Encoded Rec.709 (sRGB)", "sRGB - Texture", "Utility - sRGB - Texture",
@@ -38,6 +38,9 @@ FAMILIAR = {
     "sRGB": MODEL_NAMES,
     "linear": ("lin_rec709_srgb", "Linear Rec.709 (sRGB)", "Utility - Linear - sRGB", "lin_srgb", "Linear Rec.709"),
     "linear ACEScg": ("ACEScg", "lin_ap1", "ACES - ACEScg"),
+    "linear ACES2065-1": ("ACES2065-1", "lin_ap0", "ACES - ACES2065-1"),
+    "linear Rec.2020": ("Linear Rec.2020", "lin_rec2020", "Utility - Linear - Rec.2020"),
+    "linear P3-D65": ("Linear P3-D65", "lin_p3d65", "Utility - Linear - P3-D65"),
     "HDR ACEScct": ("ACEScct", "acescct_ap1", "ACES - ACEScct"),
     "HDR LogC3": ("ARRI LogC3 (EI800)", "arri_logc3_ei800", "Input - ARRI - V3 LogC (EI800) - Wide Gamut"),
     "HDR": ("Rec.2100-HLG - Display", "rec2100_hlg_display"),
@@ -69,10 +72,10 @@ def config(name: str = "") -> OCIO.Config:
     name = name or default_config()
     if name == ENV:
         if not os.environ.get("OCIO"):
-            raise ValueError("The OCIO environment variable is not set")
+            raise ValueError("OCIO config not found: $OCIO is not set. Set it, or choose a built-in config.")
         return OCIO.Config.CreateFromFile(os.environ["OCIO"])
     if name not in {c["name"] for c in configs()}:
-        raise ValueError(f"Unknown OCIO config: {name}")
+        raise ValueError(f"OCIO config not found: {name}. Choose a built-in config, or a config file that exists.")
     return OCIO.Config.CreateFromFile(name)
 
 
@@ -88,7 +91,7 @@ def find(cfg: OCIO.Config, names) -> str | None:
 def model_space(cfg: OCIO.Config) -> str:
     found = find(cfg, MODEL_NAMES)
     if not found:
-        raise ValueError("This OCIO config has no sRGB-encoded Rec.709 space (role texture_paint): the models need it")
+        raise ValueError("OCIO config not usable: no sRGB-encoded Rec.709 space (role texture_paint). Choose a config that has one.")
     return found
 
 
@@ -98,7 +101,7 @@ def real(cfg: OCIO.Config, name: str) -> str:
         return model_space(cfg)
     cs = cfg.getColorSpace(name)
     if cs is None:
-        raise ValueError(f"The OCIO config has no colour space named {name!r}")
+        raise ValueError(f"Colour space not in the OCIO config: {name!r}. Choose one of its colour spaces.")
     return cs.getName()
 
 
@@ -160,6 +163,20 @@ def _each(fn, frames):
     return list(_POOL.map(fn, frames))
 
 
+def _fill(fn, frames):
+    """`fn` on each frame, frames in parallel, written into one array: one copy of the batch, with no list of frames to
+    stack after it."""
+    first = fn(frames[0])
+    out = np.empty((len(frames), *first.shape), first.dtype)
+    out[0] = first
+
+    def put(i):
+        out[i] = fn(frames[i])
+
+    list(_POOL.map(put, range(1, len(frames))))
+    return out
+
+
 def _rgb(fn):
     """fn on the RGB of a frame; an alpha channel stays as it is."""
     def one(f):
@@ -168,23 +185,68 @@ def _rgb(fn):
     return one
 
 
-def _ocio(name, src, dst, frames):
+def _ocio(name, src, dst):
+    """One frame from `src` to `dst` through the config's processor. None when they are one space: nothing to do."""
     if src == dst:
-        return list(frames)
+        return None
     cpu = _cpu(name, src, dst)
 
     def apply(rgb):
         cpu.applyRGB(rgb)
         return rgb
-    return _each(_rgb(apply), frames)
+    return _rgb(apply)
 
 
-def _into_model(frames):
-    """Core's linear Rec.709 to sRGB for SDR output: tone mapping with the batch's peak, gamut compression, encoding."""
-    peak = max(1.0, max((float(np.max(f[..., :3] @ REC709_LUMA, initial=0.0)) for f in frames), default=1.0))
+def _route(name: str, src: str, dst: str):
+    """(one frame's way from `src` to `dst`, whether core's tone mapping follows it). Into @model the way ends in linear
+    Rec.709: the config's own when it has one, else the model space decoded. The tone mapping needs the batch's peak, so
+    it is not a step of the way: convert and batch_peak share the way, and so agree bit for bit."""
+    cfg = config(name)
+    lin = find(cfg, FAMILIAR["linear"])
+
+    def where(n):  # (the config's name, whether the values are the model space decoded to linear light)
+        if n == LINEAR:
+            return (lin, False) if lin else (model_space(cfg), True)
+        return real(cfg, n), False
+    (rs, s_dec), (rd, d_dec) = where(src), where(dst)
+    tone = dst == MODEL and src != MODEL
+    if tone:
+        steps = (_ocio(name, rs, lin),) if lin else (_ocio(name, rs, model_space(cfg)), _rgb(decode))
+    else:
+        steps = (_ocio(name, rs, rd), _rgb(decode) if d_dec else None)
+    steps = [step for step in (_rgb(encode) if s_dec else None, *steps) if step]
+
+    def one(f):
+        for step in steps:
+            f = step(f)
+        return f
+    return one, tone
+
+
+TONE_ABOVE = 1.0001  # core tone-maps a batch whose peak is above this: it allows transfer-function roundoff at SDR white
+
+
+def _brightest(f) -> float:
+    """The highest luminance of a frame in linear Rec.709."""
+    return float(np.max(f[..., :3] @ REC709_LUMA, initial=0.0))
+
+
+def batch_peak(frames, name: str, src: str) -> float:
+    """The peak core's tone mapping takes for a batch on its way from `src` into @model: its highest luminance in linear
+    Rec.709, and 1.0 at least. Each frame is converted, measured and dropped, so a whole plate is read without a second
+    copy of it. `convert(part, name, src, MODEL, peak)` then gives a part of the batch the values it has in the whole."""
+    if src == MODEL:
+        return 1.0
+    one, _ = _route(name, src, MODEL)
+    return max(1.0, max(_POOL.map(lambda f: _brightest(one(f)), frames), default=1.0))
+
+
+def _into_model(frames, peak: float):
+    """Core's linear Rec.709 to sRGB for SDR output: tone mapping with the batch's peak (convert_with_peak reads it),
+    gamut compression, encoding."""
 
     def one(rgb):
-        if peak > 1.0001:  # core allows transfer-function roundoff at SDR white without tone mapping
+        if peak > TONE_ABOVE:
             lum = np.maximum(rgb @ REC709_LUMA, 0.0)[..., None]
             rgb = rgb * ((1.0 + lum / (peak * peak)) / (1.0 + lum))
         lum = np.clip(rgb @ REC709_LUMA, 0.0, 1.0)[..., None]
@@ -197,27 +259,65 @@ def _into_model(frames):
     return _each(_rgb(one), frames)
 
 
-def convert(frames, name: str, src: str, dst: str) -> list[np.ndarray]:
-    """Each frame's RGB from `src` to `dst` in config `name`, frames in parallel; alpha untouched. Either may be @model or
+def undo_tone(rgb: np.ndarray, peak: float) -> np.ndarray:
+    """Core's tone mapping undone on RGB in linear Rec.709: each pixel's luminance goes back to the one that
+    L (1 + L / peak²) / (1 + L) came from, and its channels keep their ratios. `peak` is the one the way in took
+    (batch_peak); at or under TONE_ABOVE there was no tone mapping, and the RGB comes back as it is. A colour that the
+    gamut compression moved into Rec.709 keeps its luminance, not its saturation."""
+    if peak <= TONE_ABOVE:
+        return rgb
+    lum = np.maximum(rgb @ REC709_LUMA, 0.0)[..., None]
+    was = 2.0 * lum / ((1.0 - lum) + np.sqrt((1.0 - lum) ** 2 + 4.0 * lum / (peak * peak)))
+    return (rgb * (was / np.maximum(lum, np.finfo(np.float32).tiny))).astype(np.float32)
+
+
+def out_of_model(f: np.ndarray, peak: float) -> np.ndarray:
+    """One frame as the models see and make it (sRGB-encoded Rec.709) back to the linear Rec.709 it came from: core's
+    sRGB decode, then undo_tone with `peak`. Alpha untouched. Relight Transfer measures the light so."""
+    return _rgb(lambda rgb: undo_tone(decode(rgb), peak))(f)
+
+
+def _from_model(name: str, dst: str, peak: float):
+    """One frame's way out of @model with core's tone mapping undone: to linear Rec.709, undo_tone, then on to `dst`."""
+    steps = [_route(name, MODEL, LINEAR)[0], _rgb(lambda rgb: undo_tone(rgb, peak))]
+    if dst != LINEAR:
+        steps.append(_route(name, LINEAR, dst)[0])
+
+    def one(f):
+        for step in steps:
+            f = step(f)
+        return f
+    return one
+
+
+def convert(frames, name: str, src: str, dst: str, peak: float | None = None) -> np.ndarray | list[np.ndarray]:
+    """Each frame's RGB from `src` to `dst` in config `name`, frames in parallel into one array; alpha untouched. Either may be @model or
     @linear. @linear is the config's Linear Rec.709 when it has one (a matrix from ACEScg, nothing clipped), else the model
-    space decoded; into @model, frames pass through it, then core's tone mapping and gamut compression."""
+    space decoded; into @model, frames pass through it, then core's tone mapping and gamut compression. The tone mapping
+    takes the peak of these frames, or `peak`: the peak of the batch they are a part of (batch_peak). Out of @model, a
+    `peak` above TONE_ABOVE is the peak of the plate the frames came from, read in `dst`: the frames go through linear
+    Rec.709, where that tone mapping is undone (undo_tone), and come back at the plate's levels. Without it, or at a peak
+    of 1.0, they are decoded as they are."""
+    return convert_with_peak(frames, name, src, dst, peak)[0]
+
+
+def convert_with_peak(frames, name: str, src: str, dst: str, peak: float | None = None) -> tuple[np.ndarray | list[np.ndarray], float]:
+    """convert's frames, in one array, and the peak of its tone mapping: into @model, `peak` or the peak of these frames, read on the way
+    in with no second pass; out of @model, the `peak` whose tone mapping is undone; 1.0 when there is none. Colour Space
+    (OCIO) gives it as its second output, so the nodes after it take the plate's peak as a number. It is the float
+    batch_peak reads: the same way into linear Rec.709 (_route), the same frames."""
     frames = list(frames)
     if src == dst or not frames:
-        return frames
-    cfg = config(name)
-    lin = find(cfg, FAMILIAR["linear"])
-
-    def where(n):  # (the config's name, whether the values are the model space decoded to linear light)
-        if n == LINEAR:
-            return (lin, False) if lin else (model_space(cfg), True)
-        return real(cfg, n), False
-    (rs, s_dec), (rd, d_dec) = where(src), where(dst)
-    if s_dec:
-        frames = _each(_rgb(encode), frames)
-    if dst == MODEL and src != MODEL:
-        return _into_model(_ocio(name, rs, lin, frames) if lin else _each(_rgb(decode), _ocio(name, rs, model_space(cfg), frames)))
-    out = _ocio(name, rs, rd, frames)
-    return _each(_rgb(decode), out) if d_dec else out
+        return frames, 1.0
+    if src == MODEL and peak is not None and peak > TONE_ABOVE:
+        return _fill(_from_model(name, dst, peak), frames), peak
+    one, tone = _route(name, src, dst)
+    out = _fill(one, frames)
+    if not tone:
+        return out, 1.0
+    if peak is None:
+        peak = max(1.0, max(map(_brightest, out), default=1.0))
+    return _into_model(out, peak), peak
 
 
 # ---------- The viewer's shader ----------
@@ -235,7 +335,7 @@ def _gpu(proc, function: str, prefix: str) -> dict:
     tables += [{"sampler": t.samplerName, "kind": "3d", "size": t.edgeLen, "channels": 3, "nearest": near(t), "data": data(t)}
                for t in desc.get3DTextures()]
     if len(list(desc.getUniforms())):
-        raise ValueError("This transform has dynamic properties, which the viewer does not set")
+        raise ValueError("View not supported: its transform has dynamic properties. Choose another view.")
     return {"text": desc.getShaderText(), "function": function, "tables": tables}
 
 
@@ -257,12 +357,12 @@ def shader(name: str, space: str, display: str, view: str, look: str = "") -> di
     cfg = config(name)
     src = real(cfg, space)
     if display not in cfg.getDisplays() or view not in cfg.getViews(display):
-        raise ValueError(f"The OCIO config has no view {view!r} on display {display!r}")
+        raise ValueError(f"View not in the OCIO config: {view!r} on display {display!r}. Choose one of the display's views.")
     lin = OCIO.ROLE_SCENE_LINEAR
     out = OCIO.DisplayViewTransform(src=lin, display=display, view=view)
     if look:
         if cfg.getLook(look) is None:
-            raise ValueError(f"The OCIO config has no look named {look!r}")
+            raise ValueError(f"Look not in the OCIO config: {look!r}. Choose one of its looks.")
         out = OCIO.GroupTransform([OCIO.LookTransform(src=lin, dst=lin, looks=look), out])
     return {"in": _gpu(cfg.getProcessor(OCIO.ColorSpaceTransform(src=src, dst=lin)), "ocioIn", "ocio_in_"),
             "out": _gpu(cfg.getProcessor(out), "ocioOut", "ocio_out_"),

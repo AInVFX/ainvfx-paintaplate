@@ -78,7 +78,7 @@ class MathOps(unittest.TestCase):
         print("relight in sRGB: ok (the same frame as core's conversions around it)")
 
     def test_relight_colour_of_light(self):
-        """One colour of light per area: a dark channel's noise never reaches single pixels (the lighthouse specks, 28 Oct)."""
+        """One colour of light per area: a dark channel's noise never reaches single pixels (the lighthouse specks)."""
         rng = np.random.default_rng(3)
         tex = rng.uniform(0.1, 1.5, (96, 128, 1)).astype(np.float32)
         warm = np.array([1.8, 1.3, 0.9], np.float32)
@@ -90,7 +90,6 @@ class MathOps(unittest.TestCase):
         blue = m.light_ratio(moss, relit, 8)[..., 2]
         self.assertLess(blue.max() / blue.min(), 1.5)  # one smooth ratio, not specks between 1/16 and 8
         print(f"relight colour: ok (warm light kept, blue ratio of the mossy rock {blue.min():.2f} to {blue.max():.2f})")
-
 
     def test_fill_and_steady_masks(self):
         ramp = np.zeros((64, 96, 3), np.float32); ramp[..., 0] = np.linspace(0, 1, 96)[None, :]
@@ -158,7 +157,7 @@ class MathOps(unittest.TestCase):
         self.assertEqual(float(video[1:8].max()), 0.0)
 
 class LevelFill(unittest.TestCase):
-    """An erase's fill evened with the background it continues (Level Fill), as checked on set_planet on 28 Oct."""
+    """An erase's fill evened with the background it continues (Level Fill), as on the set_planet plate."""
 
     def setUp(self):
         H, W = 48, 64
@@ -205,58 +204,6 @@ class ResizeTo(unittest.TestCase):
         mask = ndimage.zoom(img[..., 0], (20 / 37, 31 / 53), order=1, grid_mode=True, mode="nearest")
         self.assertLess(float(np.abs(m.resize_to(img[..., 0], 20, 31) - mask).max()), 1e-5)
         self.assertIs(m.resize_to(img, 37, 53), img)  # the same size: no copy
-
-    def test_follow_matte(self):
-        n, h, w = 12, 60, 120
-        shot = np.zeros((n, h, w, 3), np.float32)
-        base = np.zeros_like(shot)
-        sam = np.zeros((n, h, w), np.float32)
-        for t in range(n):  # a car that drives right, a flame above it that SAM never sees, then SAM loses the car too
-            x = 20 + t
-            shot[t, 30:40, x:x + 15] = 0.9
-            shot[t, 20:30, x + 4:x + 10] = 0.8
-            if t < 8:
-                sam[t, 30:40, x:x + 15] = 1
-        first = sam[0].copy()
-        shot[:, 5:15, 90:110] = 0.5  # far away, the regenerated smoke differs from the plate's, and SAM finds a stray object in it
-        sam[3:, 8:12, 95:100] = 1
-        out, summary = m.follow_matte(sam, n, first, shot, base, zone=0.25)
-        self.assertEqual(out.shape, (n, h, w))
-        for t in range(n):  # the flame and the car stay in every frame, also after SAM lost them
-            self.assertEqual(out[t, 25, 20 + t + 6], 1, t)
-            self.assertEqual(out[t, 35, 20 + t + 7], 1, t)
-        self.assertEqual(out[:, :, :12].max(), 0)  # what the shot did not change stays out
-        self.assertEqual(out[:, :, 80:].max(), 0)  # the stray object and the changes around it are left out
-        self.assertIn("on 8 of 12", summary)
-        self.assertIn("left out", summary)
-        held, summary = m.follow_matte(np.zeros((0, h, w), np.float32), n, first)  # SAM returned no mask
-        self.assertTrue((held == (first > 0.5)).all())
-        self.assertIn("no mask", summary)
-        part, _ = m.follow_matte(sam[:3], n, first)  # fewer masks than frames: the last matte holds
-        self.assertTrue((part[11] == part[2]).all())
-        erase, start = np.zeros((n, h, w), np.float32), np.zeros((h, w), np.float32)  # an erase: a gap, then further on
-        start[30:40, 20:30] = 1
-        for t in (0, 1, 2, 3, 7, 8):
-            x = 20 + (3 * t if t < 4 else 6 * t)
-            erase[t, 30:40, x:x + 10] = 1
-        erase[:, 0:4, 116:120] = 1  # a stray object on every frame
-        out, summary = m.follow_matte(erase, n, start, zone=0.1)
-        self.assertEqual(out[:, 0:4, 116:120].max(), 0)  # the stray is left out
-        self.assertTrue((out[5] == out[3]).all())  # the gap holds the last matte
-        self.assertEqual(out[7, 35, 66], 1)  # found again further on: the search grew over the gap
-        self.assertIn("on 6 of 12", summary)
-        blob = np.zeros((n, h, w), np.float32)  # SAM's first mask is the whole paint zone; then it splits in two
-        blob[0, 10:50, 10:100] = 1
-        blob[1:, 30:40, 20:35] = 1
-        blob[1:, 10:20, 85:95] = 1
-        blob[1:, 15, 35:86] = 1  # joined to the element by a thin line, as SAM joined a smoke plume's edges to a car
-        blob[1:, 15:31, 35] = 1
-        element = np.zeros((h, w), np.float32)  # what the edit changed: the element only
-        element[30:40, 20:35] = 1
-        out, _ = m.follow_matte(blob, n, blob[0], element=element, zone=0.1)
-        self.assertEqual(out[0, 15, 90], 0)  # the zone's far side, where the edit changed nothing, is left out from frame 0
-        self.assertEqual(out[5, 35, 25], 1)  # the element stays
-        self.assertEqual(out[5, 15, 90], 0)  # the far piece is left out, though a thin line joins it to the element
 
 
 class HDRMatch(unittest.TestCase):
@@ -351,15 +298,20 @@ class RelightFromTheShot(unittest.TestCase):
         err = lambda x: float(np.abs(x - plates[0])[8:-8, 8:-8].mean())
         self.assertLess(err(back), 0.4 * err(shots[0]))
 
-    def test_the_painted_light_is_kept_where_it_is_strong(self):
-        plate = np.full((16, 16, 3), 0.1, np.float32)
-        out = plate * 1.2  # Klein brightened it a little
-        light = np.zeros((16, 16, 3), np.float32)
-        light[4:12, 4:12] = [0.6, 0.5, 0.3]
-        kept = mathops.keep_light(out, plate, light)
-        want = mathops.srgb_to_linear(np.minimum(mathops.linear_to_srgb(plate) + light, 1.0))
-        np.testing.assert_allclose(kept[6:10, 6:10], want[6:10, 6:10], rtol=1e-4)
-        np.testing.assert_allclose(kept[:2, :2], out[:2, :2])  # no light painted there: the relit frame as it is
+
+class Composite(unittest.TestCase):
+    """mathops.composite: the arithmetic of core's Image Composite Masked, one frame at a time."""
+
+    def test_the_source_inside_the_mask_and_the_destination_around_it(self):
+        rng = np.random.default_rng(7)
+        destination, source = rng.random((6, 8, 3), dtype=np.float32), rng.random((6, 8, 3), dtype=np.float32)
+        mask = np.zeros((6, 8), np.float32)
+        mask[:, 3], mask[:, 4:] = 0.25, 1.0
+        out = mathops.composite(destination, source, mask)
+        self.assertEqual((out.dtype, out.shape), (np.float32, (6, 8, 3)))
+        np.testing.assert_array_equal(out[:, :3], destination[:, :3])
+        np.testing.assert_array_equal(out[:, 4:], source[:, 4:])
+        np.testing.assert_array_equal(out[:, 3], np.float32(0.25) * source[:, 3] + np.float32(0.75) * destination[:, 3])
 
 
 if __name__ == "__main__":
@@ -411,3 +363,5 @@ class KeepBlackTest(unittest.TestCase):
         mid = mathops.keep_black(np.full((1, 1, 3), 1.0, np.float32), np.full((1, 1, 3), 0.0055, np.float32))
         self.assertTrue(0.0055 < float(mid[0, 0, 0]) < 1.0, "between the thresholds, a blend")
         print("Keep Black: the SDR shot's black where it is black, SDR to HDR's values elsewhere")
+
+

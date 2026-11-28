@@ -2,9 +2,9 @@
 // opens in ComfyUI and keeps working there. Laid out for a person who takes it over: numbered sections in the order they
 // run, each opening with a README note. Pure functions over workflows parsed by logic.mjs, tested in Node.
 
-import { fillWorkflow, stageOne } from "./logic.mjs";
+import { fillWorkflow, nameRequest, sharedMatte, stageOne, XQ } from "./logic.mjs";
 
-const LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]); // the nodes a link can stand in for
+const LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]); // the input loaders: a link can stand in for one, and none is a model
 const EDIT_OUT = ["result", "patch", "relit"]; // an edit's saved images: inside one scene, links carry them
 const OUTPUTS = new Set(["SaveImage", "PreviewImage", "SaveVideo", "PreviewAny", "PaintAPlate_SavePlate", "PaintAPlate_SaveFrames"]); // never shared
 
@@ -27,8 +27,10 @@ export function instantiate(wf, tag, values, links = {}, { plate = "plate", drop
     if (gone.has(nid)) continue;
     const inputs = Object.fromEntries(Object.entries(node.inputs).map(([k, v]) =>
       [k, Array.isArray(v) ? swap.get(`${v[0]}:${v[1]}`) ?? [id(v[0]), v[1]] : v]));
-    const slots = [...new Set(Object.values(node._meta?.slots ?? {}))].filter((s) => !(s in links)); // the values the page sets here
-    nodes[id(nid)] = { class_type: node.class_type, inputs, _meta: { title: `${tag}: ${node._meta?.title ?? node.class_type}`, ...(slots.length ? { slots } : {}) } };
+    const mine = Object.entries(node._meta?.slots ?? {}).filter(([, s]) => !(s in links)); // the values the page sets here: [input, slot]
+    const slots = [...new Set(mine.map(([, s]) => s))];
+    nodes[id(nid)] = { class_type: node.class_type, inputs,
+      _meta: { title: `${tag}: ${node._meta?.title ?? node.class_type}`, ...(slots.length ? { slots, set: mine.map(([k]) => k) } : {}) } };
   }
   const saved = {};
   for (const [name, nid] of Object.entries(w.outputs)) {
@@ -40,7 +42,7 @@ export function instantiate(wf, tag, values, links = {}, { plate = "plate", drop
 
 // One prompt from the parts, identical nodes shared: each model loads once, the plate decodes once. `onShare(kept, gone)`
 // hears of each node folded into an identical one.
-export function merge(parts, onShare = () => {}) {
+function merge(parts, onShare = () => {}) {
   const prompt = Object.assign({}, ...parts);
   for (let shared = true; shared;) {
     shared = false;
@@ -58,15 +60,15 @@ export function merge(parts, onShare = () => {}) {
 
 // ---------- The graph laid out for a person ----------
 // ComfyUI places the nodes of an API workflow itself, so the ids and the titles carry the structure. Each section takes a
-// hundred of ids (the plate 200, the first edit 400) and opens with a README note: core Primitive String Multiline, which
+// hundred ids (the plate 200, the first edit 400) and opens with a README note: core Primitive String Multiline, which
 // no node reads, so it never runs. Every title starts with its section; the values the page set show in brackets. Model
-// loaders go in MODELS, whichever step first used them, as one loader serves every step.
-const INPUT_LOADERS = new Set(["LoadImage", "LoadImageMask", "PaintAPlate_LoadPlate"]);
-const isModel = (n) => /Loader/.test(n.class_type) && !INPUT_LOADERS.has(n.class_type);
+// loaders go in MODELS, whichever step first used them, as one loader serves every step. The page saves this graph in the
+// editor's own format (editorGraph, below), where each README becomes the note of its section's group.
+const isModel = (n) => /Loader/.test(n.class_type) && !LOADERS.has(n.class_type);
 const modelName = (n) => n.inputs.unet_name ?? n.inputs.ckpt_name ?? n.inputs.clip_name ?? n.inputs.vae_name ?? n.inputs.lora_name ??
   n.inputs.model_name ?? n.inputs.text_encoder ?? "";
 
-export function organise(prompt, where, sections) { // sections: [key, name, README text], in the order they run
+function organise(prompt, where, sections) { // sections: [key, name, README text], in the order they run
   const index = new Map(sections.map(([key], i) => [key, i])), members = sections.map(() => []);
   for (const [id, n] of Object.entries(prompt)) members[index.get(isModel(n) ? "models" : where[id]?.sec) ?? index.get("input")].push(id);
   const ids = new Map(), placed = [];
@@ -83,19 +85,29 @@ export function organise(prompt, where, sections) { // sections: [key, name, REA
     const n = prompt[id], label = isModel(n) ? [n.class_type, modelName(n)].filter(Boolean).join(" · ") : where[id]?.label ?? n._meta.title;
     const inputs = Object.fromEntries(Object.entries(n.inputs).map(([k, v]) => [k, Array.isArray(v) ? [ids.get(v[0]), v[1]] : v]));
     out[ids.get(id)] = { class_type: n.class_type, inputs,
-      _meta: { title: `${item} · ${label}${n._meta.slots ? ` [${n._meta.slots.join(", ")}]` : ""}` } };
+      _meta: { title: `${item} · ${label}${n._meta.slots ? ` [${n._meta.slots.join(", ")}]` : ""}`, ...(n._meta.set ? { set: n._meta.set } : {}) } }; // set: the inputs the page set, for the editor's notes
   }
   return out;
 }
 
-const TOOLS = { erase: "Erase", paint: "Paint", light: "Light" };
+// A graph's place among the scene's graphs (logic.graphRows), for its README: `list` holds each graph in the order they run,
+// as { file, what, path }: its file in the zip, then what it writes for the graph after it, and where. The first graph has
+// no « First run », the last no « Then run ».
+export function orderText(list, at) {
+  const before = list[at - 1], after = list[at + 1];
+  return [before && `First run ${before.file}. It writes ${before.what}, ${before.path}, which this graph reads.`,
+    after && `Then run ${after.file}. It reads ${list[at].what}, which this graph writes.`].filter(Boolean).join(" ");
+}
+
+const TOOLS = { erase: "Clean", paint: "Paint", light: "Light" };
 const by = ([w, h]) => `${w} x ${h}`;
 const quoted = (words) => (words ? ` "${words.length > 40 ? `${words.slice(0, 39)}…` : words}"` : "");
 
 // The scene as one prompt. Each edit brings its mask and, for paint and light, its strokes as images already in ComfyUI's
 // input folder, its caption, seed and the settings of its two Klein passes. The passes chain as the page layers them; the
 // erases alone make the erase pass's first frame; the render runs at full size, as the export does: the erase pass in two stages.
-export function sceneGraph(WF, { plate, edits, render, about = {} }) {
+// `chain`: the scene's graphs and this one's place among them (orderText); a graph before this one makes its plate.
+export function sceneGraph(WF, { plate, edits, render, about = {}, chain = { list: [], at: 0 } }) {
   const parts = [], where = {};
   let sec = "input";
   const add = (inst, stage = "") => { // an instance of a workflow, in the section at work, its step named after the workflow's node
@@ -108,6 +120,10 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
   const scale = (id, image, [width, height]) => node(id, "ImageScale", { image, upscale_method: "lanczos", width, height, crop: "disabled" });
   const scaleMask = (id, mask, size) => node(id, "ImageToMask", { image: scale(`${id}, image`, node(`${id}, as image`, "MaskToImage", { mask }), size), channel: "red" });
   const over = (id, destination, source, mask) => node(id, "ImageCompositeMasked", { destination, source, x: 0, y: 0, resize_source: false, mask });
+  // An image the page uploaded, read by its name in the input folder with Load Plate (its alpha the second output). Core's image
+  // loaders keep the name in a list, which ComfyUI's editor (frontend 1.59) checks against the input folder as it was when the
+  // editor opened, so a file uploaded after that would read as missing.
+  const picture = (id, name) => node(id, "PaintAPlate_LoadPlate", { path: name, max_frames: 1, pad_8n1: false });
   const union = (id, masks, size) => scaleMask(id, masks.slice(1).reduce((a, m, i) =>
     node(`${id} ${i + 2}`, "MaskComposite", { destination: a, source: m, x: 0, y: 0, operation: "add" }), masks[0]), size);
   const common = { path: plate.path, config: plate.config, color_space: plate.cs, max_frames: plate.frames }, out = (s) => `${render.prefix}/${s}`, drop = ["frames"];
@@ -118,24 +134,21 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
   const erased = [], painted = [];
   edits.forEach((e, k) => {
     sec = `edit${k + 1}`;
-    const t = `edit ${k + 1}`, mask = node(`${t} mask`, "LoadImageMask", { image: e.mask, channel: "red" });
-    const ref = e.layer ? over(`${t} reference`, frame, node(`${t} strokes`, "LoadImage", { image: e.layer }),
-      node(`${t} strokes alpha`, "InvertMask", { mask: [`${t} strokes`, 1] })) : frame;
+    const t = `edit ${k + 1}`, mask = node(`${t} mask`, "ImageToMask", { image: picture(`${t} mask file`, e.mask), channel: "red" });
+    const ref = e.layer ? over(`${t} reference`, frame, picture(`${t} strokes`, e.layer), [`${t} strokes`, 1]) : frame;
     const qBase = scale(`${t} base at 768`, frame, plate.prev), qRef = e.layer ? scale(`${t} reference at 768`, ref, plate.prev) : qBase;
-    const plan = e.plan ? node(`${t} light plan`, "LoadImage", { image: e.plan }) : null; // a relight's second reference
     const quick = add(instantiate(WF.edit, `${t} quick`, { caption: e.caption, seed: e.seed, ...e.quick },
-      { base: qBase, reference: qRef, start: e.tool === "light" ? qBase : qRef, mask: scaleMask(`${t} mask at 768`, mask, plate.prev),
-        ...(plan ? { plan: scale(`${t} light plan at 768`, plan, plate.prev) } : {}) }, { drop: EDIT_OUT }),
+      { base: qBase, reference: qRef, start: e.tool === "light" ? qBase : qRef, mask: scaleMask(`${t} mask at 768`, mask, plate.prev) }, { drop: EDIT_OUT }),
       `quick pass at ${by(plate.prev)} · `);
     const start = scale(`${t} start`, quick.result, plate.work);
     const full = add(instantiate(WF.edit, `${t} full`, { caption: e.caption, seed: e.seed, ...e.full, relight: e.tool === "light" ? 1 : 0,
-      ...(e.shade ? { shade: e.shade } : {}), level: e.tool === "erase" },
-      { base: frame, reference: e.tool === "erase" || e.tool === "light" ? start : ref, start, mask, ...(plan ? { plan } : {}) }, { drop: EDIT_OUT }),
+      level: e.tool === "erase" },
+      { base: frame, reference: e.tool === "erase" || e.tool === "light" ? start : ref, start, mask }, { drop: EDIT_OUT }),
       `full size at ${by(plate.work)} · `);
     frame = e.tool === "light" ? full.relit : full.result;
     if (e.tool === "light") return;
     const patch = node(`${t} patch`, "SplitImageWithAlpha", { image: full.patch }), alpha = node(`${t} patch alpha`, "InvertMask", { mask: [`${t} patch`, 1] });
-    if (e.tool === "erase") { erasedFrame = over(`${t} on the erased frame`, erasedFrame, patch, alpha); erased.push(mask); }
+    if (e.tool === "erase") { erasedFrame = over(`${t} on the cleaned frame`, erasedFrame, patch, alpha); erased.push(mask); }
     else painted.push(alpha);
   });
 
@@ -143,52 +156,64 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
   const low = stageOne(plate.work);
   if (erased.length) {
     sec = "eraseTrack";
-    erasedMatte = add(instantiate(WF.matte, "erase tracking", { ...common, width: plate.trackErase[0], height: plate.trackErase[1],
-      prefix: out("matte_a/m") }, { mask: union("erased area", erased, plate.trackErase) }, { drop })).frames;
+    const zone = union("area to clean", erased, plate.trackErase); // SAM 3.1 follows the zone on the plate, and finds on it what it keeps
+    erasedMatte = add(instantiate(WF.matte, "object tracking", { ...common, width: plate.trackErase[0], height: plate.trackErase[1],
+      prefix: out("matte_a/m"), base_color_space: plate.cs, removed_request: nameRequest("erase", erased.map((e) => e.prompt)) },
+      { mask: zone, prompt: zone, base: ["plate", 0] }, { drop })).frames;
     // the erase pass in Lightricks' two stages, as the page renders it: half the working size, then 2 steps at full size
     const values = { ...common, seed: render.seed, prompt: render.erasePrompt ?? "" };
     sec = "erasePass";
-    const half = add(instantiate(WF.clean, "erase pass at half size", { ...values, width: low[0], height: low[1], prefix: out("clean_half/f"),
+    const half = add(instantiate(WF.clean, "clean plate pass at half size", { ...values, width: low[0], height: low[1], prefix: out("clean_half/f"),
       video_prefix: out("clean_half") }, { hole: erasedMatte, hero: erasedFrame }, { drop }), `stage 1 at ${by(low)} · `).frames;
-    made = add(instantiate(WF.cleanup, "erase pass", { ...values, width: plate.work[0], height: plate.work[1], prefix: out("clean/f"),
+    made = add(instantiate(WF.cleanup, "clean plate pass", { ...values, width: plate.work[0], height: plate.work[1], prefix: out("clean/f"),
       video_prefix: out("clean") }, { hole: erasedMatte, hero: erasedFrame, low: half }, { drop }), `stage 2 at ${by(plate.work)} · `).frames;
   }
-  const clean = !!made;
+  const clean = !!made, cleaned = made; // a paint's matte compares the shot with the plate it was made over
   sec = "shot";
   if (edits.some((e) => e.tool !== "erase")) made = add(instantiate(WF.shot, "shot", { ...common, ...(made ? { color_space: "@model" } : {}),
     width: plate.work[0], height: plate.work[1], seed: render.seed, prompt: render.prompt, prefix: out("shot/f"), video_prefix: out("raw") },
     { hero: frame, ...(made ? { path: made } : {}) }, { drop })).frames;
   sec = "paintTrack";
-  if (painted.length) paintMatte = add(instantiate(WF.matte, "paint tracking", { ...common, color_space: "@model", width: plate.track[0],
-    height: plate.track[1], prefix: out("matte_b/m") }, { path: made, mask: union("painted area", painted, plate.track) }, { drop })).frames;
+  if (painted.length) { // the painted area stands in for the element, which the page reads from the edit's pixels
+    const area = union("painted area", painted, plate.track);
+    paintMatte = add(instantiate(WF.matte, "paint tracking", { ...common, color_space: "@model", width: plate.track[0],
+      height: plate.track[1], prefix: out("matte_b/m"), base_color_space: clean ? "@model" : plate.cs,
+      name_request: nameRequest("paint", edits.filter((e) => e.tool === "paint").map((e) => e.words)), // as the page asks it (app.track)
+      strategy: sharedMatte(edits.filter((e) => e.tool === "paint")) },
+      { path: made, mask: area, prompt: area, seed: area, base: clean ? cleaned : ["plate", 0] },
+      { drop })).frames;
+  }
   const relight = edits.some((e) => e.tool === "light"), a = erasedMatte ?? paintMatte, fps = plate.fps ?? 24;
   sec = "hdr";
   const hdr = render.hdr && made ? add(instantiate(WF.hdr, "SDR to HDR", { config: plate.config, max_frames: plate.frames, fps: Math.round(fps),
     cond_fps: Math.min(30, fps), prefix: out("hdr/f") }, { path: made }, { drop: ["hdr"] })).hdr : null;
   sec = "output";
   add(instantiate(WF.export, "export", { ...common, relight, keep_untouched: !relight, grow: render.grow, feather: render.feather,
-    hdr_grow: render.grow + render.feather, prefix: out("export"), matte_prefix: out("matte/matte") },
+    hdr_grow: render.grow + render.feather, prefix: out("export"), layer_prefix: relight ? "" : out("layer"), // the layer: Finish's graph reads it
+    matte_prefix: out("matte/matte"), paint_matte: paintMatte ? "paint" : "" }, // paint_matte: a painted object keeps its colours
     { shot: made, ...(hdr ? { hdr } : {}), ...(a ? { matte_a: a, matte_b: paintMatte ?? erasedMatte } : {}) }));
   const files = `output/${render.prefix}`, n = edits.length, painting = edits.filter((e) => e.tool === "paint").length;
+  const images = edits.flatMap((e) => [e.mask, e.layer].filter(Boolean)); // what the graph reads from the input folder
   const sections = [
     ["readme", "How this graph works", [`AInVFX Paint a plate${about.version ? ` ${about.version}` : ""}: the scene of ${about.name ?? plate.path}, as one ComfyUI workflow.`,
+      orderText(chain.list, chain.at),
       [`It makes ${n} edit${n === 1 ? "" : "s"} on frame 0, then renders them through the whole shot at full size, as Paint a plate's Export does:`,
         ...edits.map((e, k) => `- Edit ${k + 1}: ${TOOLS[e.tool]}${quoted(e.words)}, seed ${e.seed}.`)].join("\n"),
-      `To run it, press Run. It reads the plate, ${plate.path}, from ComfyUI's input folder, and each edit's mask and strokes from input/paintaplate/up, where Paint a plate put them when it saved this graph. It writes the result in the plate's own format to ${files}/export, and its matte to ${files}/matte.`,
+      `To run it, press Run. These files must be in ComfyUI's input folder, where Paint a plate put them when it saved this graph: ${chain.at ? "" : `the plate, ${plate.path}, and `}${images.join(", ")}. On another machine, copy the input folder of Export's zip into ComfyUI's input folder${chain.at ? "" : ", and the plate to the same path"}. The images sit at the top of that folder, because ComfyUI's image loaders list only the files there. If ComfyUI was already open when Paint a plate saved this graph, choose Edit > Refresh Node Definitions in ComfyUI first: it reads those lists again. The model files are the ones MODELS loads. It writes the result as ${render.format} to ${files}/export, ${relight ? "" : `its layer to ${files}/layer, `}and its matte to ${files}/matte.`,
       "To read it: each section takes a hundred node ids and opens with a README note like this one, and every node title starts with its section. Brackets list the values Paint a plate set on a node. Model loaders sit in MODELS, shared by every step.",
-      "To change an edit: in its section, change the node marked [caption] or [seed], then Run. The edits after it, and the render, follow."].join("\n\n")],
-    ["input", "INPUT", `The plate. Load Plate reads ${plate.path}${plate.frames ? `, ${plate.frames} frames` : ""}${plate.fps ? ` at ${plate.fps} fps` : ""}. Color Space turns it from ${plate.cs} into the sRGB the models work in. Frame 0, scaled to ${by(plate.work)}, is the frame the edits paint on.\n\nOut: the plate, every frame, and frame 0.`],
+      "To change an edit: in its section, change the node marked [caption], its « Text prompt », or [seed], then Run. The edits after it, and the render, follow."].filter(Boolean).join("\n\n")],
+    ["input", "INPUT", `The plate. Load Plate reads ${plate.path}${plate.frames ? `, ${plate.frames} frames` : ""}${plate.fps ? ` at ${plate.fps} fps` : ""}. Colour Space turns it from ${plate.cs} into the sRGB the models work in. Frame 0, scaled to ${by(plate.work)}, is the frame the edits paint on.\n\nOut: the plate, every frame, and frame 0.`],
     ["models", "MODELS", "The models, each loaded once and shared by every step that uses it: FLUX 3 Image Klein, its text encoder and VAE for the edits; LTX 2.5, Gemma, its VAEs and IC-LoRAs for the passes; SAM 3.1 for the tracking."],
     ...edits.map((e, k) => [`edit${k + 1}`, `EDIT ${k + 1} · ${TOOLS[e.tool]}${quoted(e.words)}`, [
-      `${TOOLS[e.tool]}${quoted(e.words)}, seed ${e.seed}. Klein makes a quick pass at ${by(plate.prev)} in ${e.quick?.steps ?? "its"} steps, then the full size at ${by(plate.work)} in ${e.full?.steps ?? "its"} steps from it. Its caption is the node marked [caption].`,
-      `In: ${k ? `the frame EDIT ${k} made` : "frame 0"}, its mask (${e.mask})${e.layer ? ` and its strokes (${e.layer})` : ""}, from input/paintaplate/up.`,
-      `Out: ${{ erase: "the frame without the object, for the next edit, and the patch the erase pass starts from.", paint: "the frame with the addition, for the next edit, and the area PAINT TRACKING follows.", light: "the relit frame, for the next edit and the shot." }[e.tool]}`].join("\n\n")]),
-    ["eraseTrack", "ERASE TRACKING", `SAM 3.1 follows the erased area${erased.length > 1 ? "s" : ""} through the plate at ${by(plate.trackErase)}, and Follow Matte keeps the matte on the object.\n\nIn: the plate and the erase masks. Out: the erase matte, every frame.`],
-    ["erasePass", "ERASE PASS", `Lightricks' in-outpainting IC-LoRA on LTX 2.5 regenerates the erased area on every frame, in two stages: ${by(low)}, then 2 steps at ${by(plate.work)} from it. The prompt describes the scene as it stays, with the erased objects never named.\n\nIn: the plate, the erase matte and frame 0 with every erase. Out: the clean plate, every frame.`],
+      `${TOOLS[e.tool]}${quoted(e.words)}, seed ${e.seed}. Klein makes a quick pass at ${by(plate.prev)} in ${e.quick?.steps ?? "its"} steps, then the full size at ${by(plate.work)} in ${e.full?.steps ?? "its"} steps from it. Its « Text prompt » is the node marked [caption].`,
+      `In: ${k ? `the frame EDIT ${k} made` : "frame 0"}, its mask (${e.mask})${e.layer ? `, its strokes (${e.layer})` : ""}, from ComfyUI's input folder.`,
+      `Out: ${{ erase: "the frame without the object, for the next edit, and the patch the clean plate pass starts from.", paint: "the frame with the addition, for the next edit, and the area PAINT TRACKING follows.", light: "the relit frame, for the next edit and the shot." }[e.tool]}`].join("\n\n")]),
+    ["eraseTrack", "OBJECT TRACKING", `SAM 3.1 follows the area${erased.length > 1 ? "s" : ""} to clean through the plate at ${by(plate.trackErase)}, asked several questions: Klein's prompt upsampler names what the Clean removes, and SAM Words keeps the words SAM searches for. Follow Matte judges SAM's answers frame by frame, and the clean matte comes from them.\n\nIn: the plate and the masks of the Clean edits. Out: the clean matte, every frame.`],
+    ["erasePass", "CLEAN PLATE PASS", `Lightricks' in-outpainting IC-LoRA on LTX 2.5 regenerates the area to clean on every frame, in two stages: ${by(low)}, then 2 steps at ${by(plate.work)} from it. The prompt describes the scene as it stays, with the removed objects never named.\n\nIn: the plate, the clean matte and frame 0 with every Clean edit. Out: the clean plate, every frame.`],
     ["shot", "SHOT", `LTX 2.5 with WepeNerd's Ripple IC-LoRA carries the edited frame 0 through the shot, over ${clean ? "the clean plate" : "the plate"}, seed ${render.seed}. Its prompt is the node marked [prompt].\n\nIn: the edited frame 0 and ${clean ? "the clean plate" : "the plate"}. Out: the shot, every frame.`],
-    ["paintTrack", "PAINT TRACKING", `SAM 3.1 follows the painted area${painting > 1 ? "s" : ""} through the shot at ${by(plate.track)}, and Follow Matte adds what the shot changed near it.\n\nIn: the shot and the painted areas. Out: the paint matte, every frame.`],
-    ["hdr", "SDR TO HDR", "Lightricks' SDR-to-HDR IC-LoRA turns the shot into scene-linear values for an EXR plate.\n\nIn: the shot. Out: the HDR shot, every frame."],
-    ["output", "OUTPUT", `Fit to Plate puts the shot over the plate inside the mattes, grown by ${render.grow} px and feathered by ${render.feather} px, and matches its colour at their edge${relight ? "; Relight Transfer carries the new light over the plate" : ""}. Save Plate writes the result to ${files}/export in the plate's own format${relight ? "" : ", every pixel outside the mattes the plate's own"}, and the matte to ${files}/matte.\n\nIn: the plate, the shot and the mattes. Out: the files.`],
+    ["paintTrack", "PAINT TRACKING", `SAM 3.1 follows the painted area${painting > 1 ? "s" : ""} through the shot at ${by(plate.track)}, asked several questions: Klein's prompt upsampler names the painted object, and SAM Words keeps the words SAM searches for. Follow Matte judges SAM's answers by how much the shot changed, and the paint matte comes from them. Its strategy is the one under the paint's row, « Matte strategy »: ${sharedMatte(edits.filter((e) => e.tool === "paint"))}.\n\nIn: the shot and the painted areas. Out: the paint matte, every frame.`],
+    ["hdr", "SDR TO HDR", `Lightricks' SDR-to-HDR IC-LoRA turns the shot into scene-linear values.\n\nIn: the shot. Out: the HDR shot, every frame.`],
+    ["output", "OUTPUT", `Fit to Plate puts the shot over the plate inside the mattes, grown by ${render.grow} px and feathered by ${render.feather} px, and matches its colour at their edge${relight ? "; Relight Transfer carries the new light over the plate" : ""}. Save Plate writes the result to ${files}/export as ${render.format}${relight ? "" : `, every pixel outside the mattes the plate's own, and the layer to ${files}/layer`}, and the matte to ${files}/matte.\n\nIn: the plate, the shot and the mattes. Out: the files.`],
   ];
   const shared = (kept, gone) => { // one node serving both passes of an edit, or both stages of the erase pass, says so
     const [sa, ...ra] = (where[kept]?.label ?? "").split(" · "), [, ...rb] = (where[gone]?.label ?? "").split(" · ");
@@ -196,4 +221,292 @@ export function sceneGraph(WF, { plate, edits, render, about = {} }) {
       where[kept].label = `${sa.startsWith("stage") ? "both stages" : "both passes"} · ${ra.join(" · ")}`;
   };
   return organise(merge(parts, shared), where, sections);
+}
+
+// A fluid shot as one ComfyUI workflow, as Paint a plate's Generate makes it: its keyframes painted on black become the
+// control video, and LTX 2.5 with ainvfx-fluid makes the shot as ProRes 4444 XQ. Finish's steps are Finish's graph's.
+export function fluidGraph(WF, { plate, fluid, about = {}, chain = { list: [], at: 0 } }) {
+  const parts = [], where = {}, out = (s) => `${fluid.prefix}/${s}`, fps = plate.fps ?? 24;
+  const add = (inst, sec) => {
+    for (const [id, n] of Object.entries(inst.nodes)) {
+      const label = n._meta.title.slice(n._meta.title.indexOf(": ") + 2);
+      where[id] = { sec: /^Plate( in the model space)?$/.test(label) ? "input" : sec, label }; // the blank plate opens INPUT
+    }
+    parts.push(inst.nodes);
+    return inst.saved;
+  };
+  const made = instantiate(WF.fluid, "fluid shot", { path: plate.path, config: plate.config, color_space: "@model", max_frames: plate.frames,
+    keys: JSON.stringify(fluid.keys), prompt: fluid.prompt, seed: fluid.seed, prefix: out("plate"), video_prefix: out("preview"), control_prefix: out("control/c"), first_prefix: out("first") });
+  add(made, "fluid");
+  const n = fluid.keys.length, images = fluid.keys.map((k) => k.image), files = `output/${fluid.prefix}`;
+  const sections = [
+    ["readme", "How this graph works", [`AInVFX Paint a plate${about.version ? ` ${about.version}` : ""}: the fluid shot of ${about.name ?? plate.path}, as one ComfyUI workflow.`,
+      orderText(chain.list, chain.at),
+      `It paints ${n} keyframe${n === 1 ? "" : "s"} on black, at frame${n === 1 ? "" : "s"} ${fluid.keys.map((k) => k.frame).join(", ")}, into a control video. LTX 2.5 with ainvfx-fluid then makes the fluid shot, ${by(plate.size)}, ${plate.frames} frames at ${fps} fps, seed ${fluid.seed}, as Paint a plate's Generate does.`,
+      `To run it, press Run. These files must be where Paint a plate put them when it saved this graph: the blank plate, ${plate.path}, and, in ComfyUI's input folder, ${images.join(", ")}. On another machine, copy the input folder of Export's zip into ComfyUI's input folder.`,
+      "To change the fluid: in FLUID SHOT, change the node marked [prompt] or [seed], then Run."].filter(Boolean).join("\n\n")],
+    ["input", "INPUT", `The blank plate. Load Plate reads ${plate.path}, ${plate.frames} frames at ${fps} fps: black frames of ${by(plate.size)}, which set the shot's size, length and rate.`],
+    ["models", "MODELS", `The models, each loaded once and shared by every step that uses it: LTX 2.5, Gemma and its VAEs, with AInVFX's ainvfx-fluid IC-LoRA.`],
+    ["fluid", "FLUID SHOT", [`Keyframe Video paints the keyframes on black at their frames: the control video. LTX 2.5 with AInVFX's ainvfx-fluid IC-LoRA turns it into the fluid, seed ${fluid.seed}. Its prompt is the node marked [prompt].`,
+      `In: the blank plate, and the keyframes (${images.join(", ")}) from ComfyUI's input folder.`,
+      `Out: the fluid shot as ${XQ}, its first frame, its preview movie and the control video, in ${files}.`].join("\n\n")],
+  ];
+  return organise(merge(parts), where, sections);
+}
+
+// ---------- Finish's graph ----------
+// Finish's steps as one ComfyUI workflow: each job they posted (app.finishRun), in the order they ran, with its workflow and
+// its values; only the paths move under the graphs' folder (graphPath). The jobs pass files to each other as the page's do: a
+// job saves its frames, and the next job reads them. ComfyUI runs the branches of one prompt in an order of its own, so each
+// file a job reads comes through an order gate (gate) that waits for the images the job before it saved.
+const READERS = { PaintAPlate_LoadPlate: "path", PaintAPlate_JoinWindows: "folder" }; // the nodes that read files, by the input that names them
+const SAVES = new Set(["PaintAPlate_SaveFrames", "PaintAPlate_SavePlate", "PaintAPlate_SaveMovie"]);
+const LETTERS = "abcdefghijklmnopqrstuvwxyz"; // Math Expression's values: a to z
+
+// A path of the page's folders, under the graphs' folder `folder`: a render's folder (paintaplate/<plate>/v<N>) becomes the
+// graphs' folder itself, so a job reads the files the graphs before it write there, and a Finish folder that a plate's renders
+// share (logic.finishFolder: paintaplate/<plate>/<pass>/<hash>) becomes <folder>/<pass>/<hash>. Any other value stays.
+export const graphPath = (value, folder) => (typeof value !== "string" ? value
+  : value.replace(/^(output:)?paintaplate\/[^/]+\/(?:v\d+|((?:hdr|upscale)\/[0-9a-f]{8}))(?=\/|$)/, (_, out, shared) => `${out ?? ""}${folder}${shared ? `/${shared}` : ""}`));
+
+// The order gate, as the course files make it (build_pack.py, the order gate of STB 11.3): `value` goes into both inputs of
+// core's If/Else Switch, whose switch is Math Expression « min(a, b, …) > 0 » over Get Image Size's batch size on each of
+// `images`. The switch hands the value on once those images exist. Each is the image a save receives: ComfyUI runs a ready
+// output node before any other node (comfy_execution/graph.py, ux_friendly_pick_node), so the saves have written their
+// files when the gate opens.
+function gate(tag, value, images) {
+  const id = (n) => `${tag}: ${n}`, nodes = { [id("path")]: { class_type: "PrimitiveString", inputs: { value }, _meta: { title: id("path") } } };
+  images.forEach((image, i) => (nodes[id(`saved ${LETTERS[i]}`)] = { class_type: "GetImageSize", inputs: { image }, _meta: { title: id(`saved ${LETTERS[i]}`) } }));
+  const names = images.map((_, i) => LETTERS[i]);
+  nodes[id("saved")] = { class_type: "ComfyMathExpression", _meta: { title: id("saved") }, inputs: { expression: names.length > 1 ? `min(${names.join(", ")}) > 0` : "a > 0",
+    ...Object.fromEntries(names.map((n) => [`values.${n}`, [id(`saved ${n}`), 2]])) } };
+  nodes[id("gate")] = { class_type: "ComfySwitchNode", inputs: { switch: [id("saved"), 2], on_false: [id("path"), 0], on_true: [id("path"), 0] }, _meta: { title: id("gate") } };
+  return { nodes, out: [id("gate"), 0] };
+}
+
+// `jobs`: [{ step, label, name, values }], each a job as the page posted it, in the order they ran; `folder`: the graphs'
+// folder; `chain`: the scene's graphs and this one's place among them (orderText).
+export function finishGraph(WF, { jobs, folder, about = {}, chain = { list: [], at: 0 } }) {
+  const parts = [], where = {}, steps = [];
+  let saved = []; // the images the job before saved: the next job's files wait for them
+  jobs.forEach((job, k) => {
+    const tag = `job ${k + 1}`, values = Object.fromEntries(Object.entries(job.values).map(([key, v]) => [key, graphPath(v, folder)]));
+    const { nodes } = instantiate(WF[job.name], tag, values);
+    if (!steps.some((s) => s.step === job.step)) steps.push({ step: job.step, label: job.label, jobs: [] });
+    steps.find((s) => s.step === job.step).jobs.push(job.name);
+    const mark = (id, label) => (where[id] = { sec: job.step, label });
+    for (const [id, n] of Object.entries(nodes)) {
+      mark(id, `${tag} · ${n._meta.title.slice(n._meta.title.indexOf(": ") + 2)}`);
+      const input = READERS[n.class_type];
+      if (!input || !saved.length || typeof n.inputs[input] !== "string") continue;
+      const g = gate(`${id} · order`, n.inputs[input], saved);
+      for (const [gid, gn] of Object.entries(g.nodes)) { parts.push({ [gid]: gn }); mark(gid, `${tag} · order gate · ${gn._meta.title.split(" · order: ")[1]}`); }
+      n.inputs[input] = g.out;
+    }
+    parts.push(nodes);
+    saved = Object.values(nodes).filter((n) => SAVES.has(n.class_type) && Array.isArray(n.inputs.images)).map((n) => n.inputs.images);
+  });
+  const by = (name) => ({ hdr: "Lightricks' SDR-to-HDR IC-LoRA makes its element again in scene-linear values, written as half-float EXR frames.",
+    hdr_comp: "Composite Frames makes the composite again from the plate and the layer in HDR, inside the export's matte.",
+    upscale: "SeedVR2 7B upscales one window of frames.", upscale_export: "Join Windows joins the windows, and Save Plate writes the part." })[name];
+  const sections = [
+    ["readme", "How this graph works", [`AInVFX Paint a plate${about.version ? ` ${about.version}` : ""}: Finish's steps of ${about.name ?? "the scene"}, as one ComfyUI workflow.`,
+      orderText(chain.list, chain.at),
+      `It runs each job of Finish's steps as Paint a plate ran it, in the same order and with the same values: ${steps.map((s) => s.label).join(", then ")}. Only the paths differ: the files are in output/${folder}.`,
+      "Each job saves its frames, and the next job reads them. An order gate in front of each file a job reads makes ComfyUI run the jobs in that order: core's If/Else Switch hands on the path once Get Image Size has read the images that the job before saved.",
+      "To run it, press Run. The model files are the ones MODELS loads."].filter(Boolean).join("\n\n")],
+    ["models", "MODELS", "The models, each loaded once and shared by every job that uses it."],
+    ...steps.map((s) => [s.step, s.label.toUpperCase(), `${s.label}: ${s.jobs.length} job${s.jobs.length === 1 ? "" : "s"}. ${[...new Set(s.jobs)].map(by).join(" ")}`]),
+  ];
+  return organise(merge(parts), where, sections);
+}
+
+// ---------- The scene in the editor's own format ----------
+// An API workflow has no positions: opened in ComfyUI's editor, every node lies on the others. editorGraph gives the same
+// graph as the editor saves it (version 0.4): one group per section in the order they run; the section's README as a
+// Markdown note at the head of its group, with the values the page set; its nodes in columns from left to right, a node
+// always to the right of the nodes of its section that feed it; the links drawn; the titles kept. Run from the editor, it
+// posts the nodes of the API graph, value for value: the notes are not nodes of a prompt.
+// `info` is what /object_info says about each node class. It tells a node's widgets from its links and gives their order:
+// the editor keeps a node's widget values by position.
+const MULTILINE = "PrimitiveStringMultiline", NOTE = "MarkdownNote"; // core String (Multiline): a README in the page's graph
+const PRIMITIVE = new Set(["INT", "FLOAT", "STRING", "BOOLEAN"]);
+// px on the editor's canvas. A node's title bar sits above its position; a saved size that is too small makes the editor
+// grow the node over its neighbours, so the rows are counted generously. The editor draws a node at least as wide as its
+// title (ComfyUI 0.44.2, frontend 1.57.6: about 40 px plus 6.6 px a character), so the width follows the title, uncapped
+const BOX = { title: 30, slot: 20, widget: 24, text: 110, node: 320, note: 460, gapX: 60, gapY: 40, pad: 40, groupTitle: 40, groupGap: 80, rowGap: 80 };
+// A section longer than ROW columns continues on a new row, and each of its rows opens with a station: one Reroute per value
+// from outside the row that two or more of the row's inputs take; a value taken once links straight. The editor's Reroute
+// is a node of its own, 75 x 26 px with no title bar, and the editor leaves it out of the prompt it queues
+const ROW = 8, REROUTE = [75, 26];
+
+const inputsOf = (spec) => ["required", "optional"].flatMap((part) =>
+  (spec.input_order?.[part] ?? Object.keys(spec.input?.[part] ?? {})).map((name) => [name, spec.input[part][name], part]));
+const kind = (type) => (Array.isArray(type) ? "COMBO" : String(type).split(",")[0]); // a combo given as its choices; of several types, the first is the widget's
+const isWidget = ([type, opts = {}]) => !opts.forceInput && (kind(type) === "COMBO" || type === "COMFY_DYNAMICCOMBO_V3" || PRIMITIVE.has(kind(type)));
+const firstValue = ([type, opts = {}]) => opts.default ?? (Array.isArray(type) ? type[0] : opts.options?.[0]) ?? { INT: 0, FLOAT: 0, BOOLEAN: false, STRING: "" }[kind(type)] ?? null;
+
+// A node's widgets, in the order the editor keeps their values: its widget inputs in /object_info's order, the required ones
+// first. Three rules of the editor add a value: a seed keeps a « control after generate » widget after it; a node with an
+// image upload keeps its upload button after its required inputs; a combo that brings inputs of its own (a V3 dynamic
+// combo) keeps them after it, named `combo.input`. Each: { name, value (when the graph gives none), text (multiline) };
+// a widget the editor adds has no name.
+export function widgetsOf(spec, inputs = {}) {
+  const list = inputsOf(spec), out = [];
+  const upload = list.some(([, [, opts = {}], part]) => part === "required" && opts.image_upload);
+  const lastRequired = list.findLastIndex(([, , part]) => part === "required");
+  list.forEach(([name, [type, opts = {}]], i) => {
+    if (isWidget([type, opts])) {
+      out.push({ name, value: firstValue([type, opts]), text: !!opts.multiline, type: kind(type) });
+      if (kind(type) === "INT" && (opts.control_after_generate ?? (name === "seed" || name === "noise_seed"))) out.push({ value: "fixed" });
+      for (const [key, v] of Object.entries(inputs)) if (key.startsWith(`${name}.`) && !Array.isArray(v)) out.push({ name: key, value: v });
+    }
+    if (upload && i === lastRequired) out.push({ value: "image" });
+  });
+  return out;
+}
+
+export function editorGraph(page, info) {
+  const prompt = structuredClone(page), ids = Object.keys(prompt).sort((a, b) => a - b); // the page's graph, then the editor's own nodes
+  const spec = (id) => info[prompt[id].class_type] ?? (() => { throw new Error(`ComfyUI does not know the node ${prompt[id].class_type}`); })();
+  const sections = []; // { note, name, members }, in the order they run: a README note opens each
+  for (const id of ids) {
+    const n = prompt[id];
+    if (n.class_type === MULTILINE && n._meta.title.startsWith("README · ")) sections.push({ note: id, name: n._meta.title.slice(9), members: [] });
+    else if (sections.length) sections.at(-1).members.push(id);
+    else throw new Error("The graph does not open with a README note");
+  }
+
+  // A widget that declares dynamicPrompts takes its text from a String (Multiline) node of the editor's graph, placed before
+  // it in its section. When the editor queues, it rewrites such a widget's own text ({a|b} keeps one option, a block's braces
+  // and every // or /* */ comment go) and sends a linked text as it is
+  let next = Math.max(...ids.map(Number));
+  for (const sec of sections) for (const id of [...sec.members]) {
+    const n = prompt[id];
+    for (const [name, [, opts = {}]] of inputsOf(spec(id))) {
+      if (!opts.dynamicPrompts || typeof n.inputs[name] !== "string") continue;
+      const text = String(++next);
+      prompt[text] = { class_type: MULTILINE, inputs: { value: n.inputs[name] }, _meta: { title: `${n._meta.title.replace(/ \[[^\]]*\]$/, "")} · ${name}` } };
+      n.inputs[name] = [text, 0];
+      sec.members.splice(sec.members.indexOf(id), 0, text);
+      ids.push(text);
+    }
+  }
+
+  // each node's sockets and widgets, and the links between them
+  const links = [], fed = new Map(), made = new Map(); // fed: "id:slot" of an output -> the ids of its links
+  const outType = (id, slot) => { const t = spec(id).output?.[slot]; return t && !String(t).startsWith("COMFY_") ? t : "*"; };
+  for (const sec of sections) for (const id of sec.members) {
+    const n = prompt[id], list = inputsOf(spec(id)), widgets = widgetsOf(spec(id), n.inputs), known = new Set(list.map(([name]) => name));
+    for (const key of Object.keys(n.inputs)) if (!known.has(key.split(".")[0])) throw new Error(`${n._meta.title}: ${n.class_type} has no input ${key}`);
+    const sockets = [];
+    for (const [name, [type, opts = {}]] of list) {
+      if (isWidget([type, opts])) continue;
+      const grown = Object.keys(n.inputs).filter((k) => k.startsWith(`${name}.`)); // an input that grows: images.image0, images.image1
+      for (const k of grown.length ? grown : [name]) sockets.push({ name: k, type });
+    }
+    for (const w of widgets) if (w.name !== undefined && Array.isArray(n.inputs[w.name])) sockets.push({ name: w.name, type: w.type ?? "*", widget: { name: w.name } }); // a widget that a link feeds
+    for (const [key, v] of Object.entries(n.inputs)) if (Array.isArray(v) && !sockets.some((s) => s.name === key)) sockets.push({ name: key, type: "*" });
+    const inputs = sockets.map((s, slot) => {
+      const v = n.inputs[s.name];
+      if (v !== undefined && !Array.isArray(v)) throw new Error(`${n._meta.title}: ${s.name} takes a link in the editor, and the graph gives it a value`);
+      const type = v ? outType(v[0], v[1]) : null, open = Array.isArray(s.type) || s.type === "*" || String(s.type).startsWith("COMFY_");
+      if (v) {
+        links.push([links.length + 1, Number(v[0]), v[1], Number(id), slot, type]);
+        fed.set(`${v[0]}:${v[1]}`, [...(fed.get(`${v[0]}:${v[1]}`) ?? []), links.length]);
+      }
+      return { name: s.name, type: open ? type ?? "*" : s.type, ...(s.widget ? { widget: s.widget } : {}), link: v ? links.length : null };
+    });
+    const values = widgets.map((w) => (w.name !== undefined && n.inputs[w.name] !== undefined && !Array.isArray(n.inputs[w.name]) ? n.inputs[w.name] : w.value));
+    made.set(id, { inputs, values, tall: widgets.filter((w) => w.text).length });
+  }
+
+  // sizes, then places: the sections from top to bottom, each a group; in a group the note, then one column per step, in rows
+  const size = new Map(), at = new Map(), groups = [], notes = new Map(), reroutes = new Map();
+  for (const [id, m] of made) {
+    const rows = Math.max(m.inputs.length, spec(id).output?.length ?? 0);
+    size.set(id, [Math.max(BOX.node, Math.round(40 + 7.2 * prompt[id]._meta.title.length)),
+      16 + rows * BOX.slot + m.values.length * BOX.widget + m.tall * BOX.text]);
+  }
+  const short = (v) => (typeof v === "string" ? `"${v.length > 80 ? `${v.slice(0, 79)}…` : v}"`.replace(/\s+/g, " ") : String(v));
+  let top = 0;
+  sections.forEach((sec, i) => {
+    const within = new Set(sec.members), level = new Map();
+    const depth = (id) => { // how many nodes of the section lie between this node and the section's first ones
+      if (!level.has(id)) {
+        level.set(id, 0); // a prompt holds no loop
+        level.set(id, 1 + Math.max(-1, ...Object.values(prompt[id].inputs).filter((v) => Array.isArray(v) && within.has(String(v[0]))).map((v) => depth(String(v[0])))));
+      }
+      return level.get(id);
+    };
+    // then each node moves right, to the column before its first consumer in the section: a value is made where it is used
+    for (const id of sec.members) depth(id);
+    const users = new Map(sec.members.map((id) => [id, []]));
+    for (const id of sec.members) for (const v of Object.values(prompt[id].inputs)) if (Array.isArray(v) && within.has(String(v[0]))) users.get(String(v[0])).push(id);
+    for (const id of [...sec.members].sort((p, q) => level.get(q) - level.get(p))) if (users.get(id).length) level.set(id, Math.max(level.get(id), Math.min(...users.get(id).map((u) => level.get(u))) - 1));
+    const columns = [];
+    for (const id of sec.members) (columns[level.get(id)] ??= []).push(id);
+    const set = sec.members.filter((id) => page[id]).flatMap((id) => (page[id]._meta.set ?? []).filter((k) => page[id].inputs[k] !== undefined && !Array.isArray(page[id].inputs[k]))
+      .map((k) => `- ${page[id]._meta.title.replace(`${sec.name} · `, "").replace(/ \[[^\]]*\]$/, "")}: ${k} ${short(page[id].inputs[k])}`));
+    const text = `${prompt[sec.note].inputs.value}${set.length ? `\n\n**Values the page set**\n\n${set.join("\n")}` : ""}`;
+    const lines = text.split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 58)), 0);
+    const y0 = top + BOX.groupTitle + BOX.pad + BOX.title, noteH = Math.max(160, 60 + 22 * lines);
+    notes.set(sec.note, { text, pos: [BOX.pad, y0], size: [BOX.note, noteH] });
+    const x0 = BOX.pad + BOX.note + BOX.gapX, several = columns.length > ROW;
+    let right = x0, bottom = y0 + noteH, rowTop = y0;
+    for (let r = 0; r * ROW < columns.length; r++) { // each row right of the note, below the row before
+      const row = columns.slice(r * ROW, (r + 1) * ROW), inRow = new Set(row.flat()), station = new Map(); // "id:slot" -> Reroute
+      let x = x0, rowBottom = rowTop;
+      const outside = (input) => { const link = input.link ? links[input.link - 1] : null; return link && !inRow.has(String(link[1])) ? link : null; };
+      const shared = new Map(); // "id:slot" of a value from outside the row -> how many of the row's inputs take it
+      for (const id of several ? row.flat() : []) for (const link of made.get(id).inputs.map(outside).filter(Boolean)) shared.set(`${link[1]}:${link[2]}`, (shared.get(`${link[1]}:${link[2]}`) ?? 0) + 1);
+      for (const id of several ? row.flat() : []) for (const input of made.get(id).inputs) {
+        const link = outside(input), key = link && `${link[1]}:${link[2]}`;
+        if (!link || shared.get(key) < 2) continue;
+        if (!station.has(key)) {
+          const via = String(++next), y = rowTop + station.size * (REROUTE[1] + BOX.gapY + BOX.title);
+          links.push([links.length + 1, link[1], link[2], Number(via), 0, link[5]]);
+          fed.set(key, [...fed.get(key), links.length]);
+          reroutes.set(via, { pos: [x0, y], type: link[5], link: links.length, out: [] });
+          station.set(key, via);
+          ids.push(via);
+          rowBottom = Math.max(rowBottom, y + REROUTE[1]);
+        }
+        const via = station.get(key);
+        fed.set(key, fed.get(key).filter((l) => l !== link[0]));
+        [link[1], link[2]] = [Number(via), 0];
+        reroutes.get(via).out.push(link[0]);
+      }
+      if (station.size) x += REROUTE[0] + BOX.gapX;
+      for (const column of row) {
+        let y = rowTop, wide = 0;
+        for (const id of column) {
+          at.set(id, [x, y]);
+          rowBottom = Math.max(rowBottom, y + size.get(id)[1]);
+          y += size.get(id)[1] + BOX.gapY + BOX.title;
+          wide = Math.max(wide, size.get(id)[0]);
+        }
+        x += wide + BOX.gapX;
+      }
+      right = Math.max(right, x);
+      bottom = Math.max(bottom, rowBottom);
+      rowTop = rowBottom + BOX.title + BOX.rowGap;
+    }
+    groups.push({ id: i + 1, title: i ? sec.name : "README", bounding: [0, top, right - BOX.gapX + BOX.pad, bottom + BOX.pad - top], color: "#3f789e", font_size: 24, flags: {} });
+    top = bottom + BOX.pad + BOX.groupGap;
+  });
+
+  const nodes = ids.map((id, order) => {
+    const n = prompt[id], note = notes.get(id), via = reroutes.get(id);
+    if (via) return { id: Number(id), type: "Reroute", pos: via.pos, size: [...REROUTE], flags: {}, order, mode: 0, inputs: [{ name: "", type: "*", link: via.link }],
+      outputs: [{ name: "", type: via.type, links: via.out, slot_index: 0 }], properties: { showOutputText: false, horizontal: false } };
+    if (note) return { id: Number(id), type: NOTE, pos: note.pos, size: note.size, flags: {}, order, mode: 0, inputs: [], outputs: [],
+      title: n._meta.title, properties: {}, widgets_values: [note.text], color: "#432", bgcolor: "#653" };
+    const m = made.get(id), s = spec(id);
+    return { id: Number(id), type: n.class_type, pos: at.get(id), size: size.get(id), flags: {}, order, mode: 0, inputs: m.inputs,
+      outputs: (s.output ?? []).map((t, slot) => ({ name: s.output_name?.[slot] ?? t, type: outType(id, slot), links: fed.get(`${id}:${slot}`) ?? null, slot_index: slot })),
+      title: n._meta.title, properties: { "Node name for S&R": n.class_type }, ...(m.values.length ? { widgets_values: m.values } : {}) };
+  });
+  const api = Object.fromEntries(ids.filter((id) => page[id] && !notes.has(id)).map((id) => [id, structuredClone(page[id])])); // what graphToPrompt must give back (tests/graph_live.py)
+  return { last_node_id: Math.max(...ids.map(Number)), last_link_id: links.length, nodes, links, groups, config: {}, extra: { paintaplate: { prompt: api } }, version: 0.4 };
 }

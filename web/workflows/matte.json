@@ -77,36 +77,29 @@
   }
  },
  "6": {
-  "class_type": "SAM3_VideoTrack",
+  "class_type": "LoadImageMask",
   "inputs": {
-   "images": [
-    "3",
-    0
-   ],
-   "model": [
-    "4",
-    0
-   ],
-   "initial_mask": [
-    "5",
-    0
-   ],
-   "detection_threshold": 0.5,
-   "max_objects": 4,
-   "detect_interval": 1
+   "image": "",
+   "channel": "red"
   },
   "_meta": {
-   "progress": true
+   "title": "SAM's prompt on the first frame",
+   "slots": {
+    "image": "prompt"
+   }
   }
  },
  "7": {
-  "class_type": "SAM3_TrackToMask",
+  "class_type": "LoadImageMask",
   "inputs": {
-   "track_data": [
-    "6",
-    0
-   ],
-   "object_indices": ""
+   "image": "",
+   "channel": "red"
+  },
+  "_meta": {
+   "title": "Where the edit changed the first frame",
+   "slots": {
+    "image": "seed"
+   }
   }
  },
  "8": {
@@ -162,23 +155,371 @@
   }
  },
  "11": {
-  "class_type": "LoadImageMask",
+  "class_type": "CLIPLoader",
   "inputs": {
-   "image": "",
-   "channel": "red"
+   "clip_name": "qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors",
+   "type": "flux3",
+   "device": "default"
   },
   "_meta": {
-   "title": "Where the edit changed the first frame",
    "slots": {
-    "image": "seed"
+    "clip_name": "upsampler"
    }
   }
  },
  "12": {
+  "class_type": "PrimitiveString",
+  "inputs": {
+   "value": "You name things in images for a segmentation model. Answer with the words only, in lowercase."
+  },
+  "_meta": {
+   "title": "Naming"
+  }
+ },
+ "13": {
+  "class_type": "ImageFromBatch",
+  "inputs": {
+   "image": [
+    "3",
+    0
+   ],
+   "batch_index": 0,
+   "length": 1
+  }
+ },
+ "14": {
+  "class_type": "TextGenerate",
+  "inputs": {
+   "clip": [
+    "11",
+    0
+   ],
+   "prompt": "",
+   "image": [
+    "13",
+    0
+   ],
+   "max_length": 64,
+   "sampling_mode": "off",
+   "thinking": false,
+   "use_default_template": true,
+   "mtp": "auto",
+   "system_prompt": [
+    "12",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "The edit's object, named",
+   "slots": {
+    "prompt": "name_request"
+   }
+  }
+ },
+ "15": {
+  "class_type": "PaintAPlate_SamWords",
+  "inputs": {
+   "text": [
+    "14",
+    0
+   ],
+   "kind": "thing"
+  }
+ },
+ "16": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": [
+    "15",
+    0
+   ],
+   "clip": [
+    "4",
+    1
+   ]
+  }
+ },
+ "17": {
+  "class_type": "ImageFromBatch",
+  "inputs": {
+   "image": [
+    "3",
+    0
+   ],
+   "batch_index": 0,
+   "length": 1
+  }
+ },
+ "18": {
+  "class_type": "TextGenerate",
+  "inputs": {
+   "clip": [
+    "11",
+    0
+   ],
+   "prompt": "",
+   "image": [
+    "17",
+    0
+   ],
+   "max_length": 64,
+   "sampling_mode": "off",
+   "thinking": false,
+   "use_default_template": true,
+   "mtp": "auto",
+   "system_prompt": [
+    "12",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "The removed thing, named",
+   "slots": {
+    "prompt": "removed_request"
+   }
+  }
+ },
+ "19": {
+  "class_type": "PaintAPlate_SamWords",
+  "inputs": {
+   "text": [
+    "18",
+    0
+   ],
+   "kind": "thing"
+  }
+ },
+ "20": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": [
+    "19",
+    0
+   ],
+   "clip": [
+    "4",
+    1
+   ]
+  }
+ },
+ "21": {
+  "class_type": "ImageFromBatch",
+  "inputs": {
+   "image": [
+    "10",
+    0
+   ],
+   "batch_index": 0,
+   "length": 1
+  }
+ },
+ "22": {
+  "class_type": "TextGenerate",
+  "inputs": {
+   "clip": [
+    "11",
+    0
+   ],
+   "prompt": "List the people, animals and vehicles in this image, each in one or two words, separated by commas. If there are none, answer: none.",
+   "image": [
+    "21",
+    0
+   ],
+   "max_length": 64,
+   "sampling_mode": "off",
+   "thinking": false,
+   "use_default_template": true,
+   "mtp": "auto",
+   "system_prompt": [
+    "12",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "What the plate keeps, named"
+  }
+ },
+ "23": {
+  "class_type": "PaintAPlate_SamWords",
+  "inputs": {
+   "text": [
+    "22",
+    0
+   ],
+   "kind": "kept"
+  }
+ },
+ "24": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": [
+    "23",
+    0
+   ],
+   "clip": [
+    "4",
+    1
+   ]
+  }
+ },
+ "25": {
+  "class_type": "SAM3_VideoTrack",
+  "inputs": {
+   "images": [
+    "3",
+    0
+   ],
+   "model": [
+    "4",
+    0
+   ],
+   "detection_threshold": 0.5,
+   "max_objects": 4,
+   "detect_interval": 1,
+   "initial_mask": [
+    "6",
+    0
+   ],
+   "conditioning": [
+    "16",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "SAM 3.1: the prompt mask and the name",
+   "progress": true,
+   "slots": {
+    "conditioning": "follow_named"
+   }
+  }
+ },
+ "26": {
+  "class_type": "SAM3_VideoTrack",
+  "inputs": {
+   "images": [
+    "3",
+    0
+   ],
+   "model": [
+    "4",
+    0
+   ],
+   "detection_threshold": 0.5,
+   "max_objects": 4,
+   "detect_interval": 1,
+   "conditioning": [
+    "16",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "SAM 3.1: the name"
+  }
+ },
+ "27": {
+  "class_type": "SAM3_VideoTrack",
+  "inputs": {
+   "images": [
+    "3",
+    0
+   ],
+   "model": [
+    "4",
+    0
+   ],
+   "detection_threshold": 0.5,
+   "max_objects": 4,
+   "detect_interval": 1,
+   "conditioning": [
+    "20",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "SAM 3.1: the removed thing's name"
+  }
+ },
+ "28": {
+  "class_type": "SAM3_VideoTrack",
+  "inputs": {
+   "images": [
+    "10",
+    0
+   ],
+   "model": [
+    "4",
+    0
+   ],
+   "detection_threshold": 0.5,
+   "max_objects": 4,
+   "detect_interval": 1,
+   "initial_mask": [
+    "7",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "SAM 3.1: the plate from the element"
+  }
+ },
+ "29": {
+  "class_type": "SAM3_VideoTrack",
+  "inputs": {
+   "images": [
+    "10",
+    0
+   ],
+   "model": [
+    "4",
+    0
+   ],
+   "detection_threshold": 0.5,
+   "max_objects": 4,
+   "detect_interval": 1,
+   "conditioning": [
+    "24",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "SAM 3.1: what the plate keeps"
+  }
+ },
+ "30": {
+  "class_type": "SAM3_TrackToMask",
+  "inputs": {
+   "track_data": [
+    "25",
+    0
+   ],
+   "object_indices": ""
+  }
+ },
+ "31": {
+  "class_type": "SAM3_TrackToMask",
+  "inputs": {
+   "track_data": [
+    "26",
+    0
+   ],
+   "object_indices": ""
+  }
+ },
+ "32": {
+  "class_type": "SAM3_TrackToMask",
+  "inputs": {
+   "track_data": [
+    "28",
+    0
+   ],
+   "object_indices": ""
+  }
+ },
+ "33": {
   "class_type": "PaintAPlate_FollowMatte",
   "inputs": {
    "masks": [
-    "7",
+    "30",
     0
    ],
    "first": [
@@ -194,35 +535,59 @@
     0
    ],
    "element": [
-    "11",
+    "7",
+    0
+   ],
+   "word_masks": [
+    "31",
+    0
+   ],
+   "named": [
+    "27",
+    0
+   ],
+   "plate_masks": [
+    "32",
+    0
+   ],
+   "kept": [
+    "29",
     0
    ],
    "zone": 0.0625,
-   "threshold": 0.1
+   "threshold": 0.1,
+   "first_frame": 1,
+   "strategy": "Auto"
   },
   "_meta": {
    "slots": {
     "zone": "zone",
     "threshold": "threshold",
+    "first_frame": "first_frame",
+    "strategy": "strategy",
+    "word_masks": "follow_named",
+    "named": "follow_removed",
+    "element": "follow_element",
+    "plate_masks": "follow_element",
     "base": "follow_base",
-    "element": "follow_element"
+    "kept": "follow_base"
    }
   }
  },
- "13": {
+ "34": {
   "class_type": "MaskToImage",
   "inputs": {
    "mask": [
-    "12",
+    "33",
     0
    ]
   }
  },
- "14": {
+ "35": {
   "class_type": "PaintAPlate_SaveFrames",
   "inputs": {
    "images": [
-    "13",
+    "34",
     0
    ],
    "filename_prefix": "paintaplate/plate/matte/m"
@@ -235,13 +600,13 @@
    "output": "frames"
   }
  },
- "15": {
+ "36": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
    "width": 0,
    "height": 0,
    "images": [
-    "13",
+    "34",
     0
    ],
    "fps": [
@@ -262,11 +627,11 @@
    "output": "movie"
   }
  },
- "16": {
+ "37": {
   "class_type": "PreviewAny",
   "inputs": {
    "source": [
-    "12",
+    "33",
     1
    ]
   },

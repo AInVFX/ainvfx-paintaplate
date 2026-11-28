@@ -16,33 +16,40 @@
   }
  },
  "2": {
-  "class_type": "PaintAPlate_ColorSpace",
+  "class_type": "ImageFromBatch",
   "inputs": {
    "image": [
     "1",
     0
    ],
-   "config": "ocio://studio-config-latest",
-   "source": "@model",
-   "destination": "@model"
+   "batch_index": 0,
+   "length": 1
   },
   "_meta": {
-   "title": "Plate in the model space",
-   "slots": {
-    "config": "config",
-    "source": "color_space"
-   }
+   "title": "First frame of the plate"
   }
  },
  "3": {
-  "class_type": "ImageFromBatch",
+  "class_type": "PaintAPlate_ColorSpace",
   "inputs": {
    "image": [
     "2",
     0
    ],
-   "batch_index": 0,
-   "length": 1
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "@model",
+   "peak_of": [
+    "1",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "First frame in the model space",
+   "slots": {
+    "config": "config",
+    "source": "color_space"
+   }
   }
  },
  "4": {
@@ -74,77 +81,36 @@
   }
  },
  "6": {
-  "class_type": "ImageFromBatch",
-  "inputs": {
-   "image": [
-    "1",
-    0
-   ],
-   "batch_index": 0,
-   "length": [
-    "1",
-    4
-   ]
-  },
-  "_meta": {
-   "title": "Real frames (no padding)"
-  }
- },
- "7": {
-  "class_type": "PaintAPlate_ColorSpace",
-  "inputs": {
-   "image": [
-    "6",
-    0
-   ],
-   "config": "ocio://studio-config-latest",
-   "source": "@model",
-   "destination": "@model"
-  },
-  "_meta": {
-   "title": "Proxy values",
-   "slots": {
-    "config": "config",
-    "source": "color_space",
-    "destination": "proxy_space"
-   }
-  }
- },
- "8": {
-  "class_type": "ImageScaleToMaxDimension",
-  "inputs": {
-   "image": [
-    "7",
-    0
-   ],
-   "upscale_method": "area",
-   "largest_size": 960
-  },
-  "_meta": {
-   "slots": {
-    "largest_size": "proxy_size"
-   }
-  }
- },
- "9": {
   "class_type": "PaintAPlate_SaveMovie",
   "inputs": {
-   "width": 0,
-   "height": 0,
-   "filename_prefix": "paintaplate/plate/proxy",
    "images": [
-    "8",
+    "1",
     0
+   ],
+   "frames": [
+    "1",
+    4
    ],
    "fps": [
     "1",
     3
    ],
-   "crf": 12
+   "crf": 12,
+   "config": "ocio://studio-config-latest",
+   "source": "@model",
+   "destination": "@model",
+   "largest_size": 960,
+   "width": 0,
+   "height": 0,
+   "filename_prefix": "paintaplate/plate/proxy"
   },
   "_meta": {
    "title": "Playback proxy",
    "slots": {
+    "config": "config",
+    "source": "color_space",
+    "destination": "proxy_space",
+    "largest_size": "proxy_size",
     "width": "movie_width",
     "height": "movie_height",
     "filename_prefix": "video_prefix"
@@ -152,7 +118,7 @@
    "output": "proxy"
   }
  },
- "10": {
+ "7": {
   "class_type": "PreviewAny",
   "inputs": {
    "source": [

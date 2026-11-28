@@ -43,6 +43,7 @@ class Page(unittest.TestCase):
                     self.assertRegex(source, rf"export (const|function|class|async function) {sym}\b", f"{name}: {sym} from {target}")
 
     def test_workflows_loaded_by_the_page_exist(self):
+        """The page loads every workflow the builder writes."""
         names = re.findall(r'"(\w+)"', re.search(r"const WORKFLOWS = \[([^\]]+)\]", read("app.mjs")).group(1))
         self.assertEqual(sorted(names), sorted(build_workflows.NAMES))
 
